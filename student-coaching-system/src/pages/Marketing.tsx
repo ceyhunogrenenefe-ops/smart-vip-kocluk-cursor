@@ -27,7 +27,12 @@ import {
   Send,
   Menu,
   X,
-  Globe
+  Globe,
+  Facebook,
+  Twitter,
+  Instagram,
+  Linkedin,
+  Youtube
 } from 'lucide-react';
 
 // Accordion Item Component
