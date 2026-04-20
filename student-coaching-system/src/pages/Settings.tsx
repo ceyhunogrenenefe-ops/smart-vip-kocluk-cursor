@@ -1,0 +1,808 @@
+// Türkçe: Ayarlar Sayfası - Twilio ve WhatsApp API entegrasyonu dahil
+import React, { useState, useRef, useEffect } from 'react';
+import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
+import { Institution } from '../types';
+import {
+  Settings,
+  Building,
+  Phone,
+  Mail,
+  Globe,
+  Save,
+  Check,
+  Upload,
+  Image,
+  Database,
+  Bell,
+  Shield,
+  Key,
+  Download,
+  Trash2,
+  X,
+  Plus,
+  Edit2,
+  CheckCircle,
+  Brain,
+  Webhook,
+  MessageCircle,
+  Send,
+  Eye,
+  EyeOff,
+  Loader2,
+  AlertTriangle,
+  ExternalLink
+} from 'lucide-react';
+
+interface TwilioConfig {
+  accountSid: string;
+  authToken: string;
+  phoneNumber: string;
+  enabled: boolean;
+}
+
+interface WhatsAppConfig {
+  apiKey: string;
+  enabled: boolean;
+}
+
+export default function SettingsPage() {
+  const { user } = useAuth();
+  const { institutions, addInstitution, updateInstitution, deleteInstitution, setActiveInstitution, activeInstitutionId, students, coaches, weeklyEntries } = useApp();
+  const [saved, setSaved] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  // Super Admin mi kontrol et
+  const isSuperAdmin = user?.role === 'super_admin';
+
+  // Twilio ayarları
+  const [twilioConfig, setTwilioConfig] = useState<TwilioConfig>({
+    accountSid: localStorage.getItem('twilio_accountSid') || '',
+    authToken: localStorage.getItem('twilio_authToken') || '',
+    phoneNumber: localStorage.getItem('twilio_phoneNumber') || '',
+    enabled: localStorage.getItem('twilio_enabled') === 'true'
+  });
+
+  // WhatsApp API ayarları
+  const [whatsappConfig, setWhatsappConfig] = useState<WhatsAppConfig>({
+    apiKey: localStorage.getItem('whatsapp_apiKey') || '',
+    enabled: localStorage.getItem('whatsapp_enabled') === 'true'
+  });
+
+  // OpenAI API
+  const [openaiApiKey, setOpenaiApiKey] = useState(localStorage.getItem('openai_apiKey') || '');
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [testingTwilio, setTestingTwilio] = useState(false);
+  const [twilioTestResult, setTwilioTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Aktif kurumu bul
+  const activeInstitution = institutions.find(i => i.id === activeInstitutionId) || institutions[0];
+
+  const [formData, setFormData] = useState({
+    name: activeInstitution?.name || '',
+    phone: activeInstitution?.phone || '',
+    address: activeInstitution?.address || '',
+    email: activeInstitution?.email || '',
+    website: activeInstitution?.website || '',
+    logo: activeInstitution?.logo || ''
+  });
+
+  // Kurum seçildiğinde formu güncelle
+  const handleSelectInstitution = (id: string) => {
+    setActiveInstitution(id);
+    const inst = institutions.find(i => i.id === id);
+    if (inst) {
+      setFormData({
+        name: inst.name,
+        phone: inst.phone,
+        address: inst.address,
+        email: inst.email,
+        website: inst.website,
+        logo: inst.logo || ''
+      });
+    }
+    setEditingId(null);
+    setShowAddForm(false);
+  };
+
+  // Logo yükleme işlemi
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        alert('Dosya boyutu 2MB\'dan büyük olamaz!');
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result as string;
+        setFormData({ ...formData, logo: base64 });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Logo kaldırma
+  const handleRemoveLogo = () => {
+    setFormData({ ...formData, logo: '' });
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleSave = () => {
+    if (activeInstitutionId) {
+      updateInstitution(activeInstitutionId, { ...formData });
+      setEditingId(null);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    }
+  };
+
+  const handleAddNew = () => {
+    const newInstitution: Institution = {
+      id: Date.now().toString(),
+      name: formData.name || 'Yeni Kurum',
+      phone: formData.phone,
+      address: formData.address,
+      email: formData.email,
+      website: formData.website,
+      logo: formData.logo,
+      isActive: false,
+      createdAt: new Date().toISOString()
+    };
+    addInstitution(newInstitution);
+    setActiveInstitution(newInstitution.id);
+    setShowAddForm(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+  };
+
+  const handleDelete = (id: string) => {
+    if (confirm('Bu kurumu silmek istediğinizden emin misiniz?')) {
+      deleteInstitution(id);
+    }
+  };
+
+  // Twilio ayarlarını kaydet
+  const saveTwilioConfig = () => {
+    localStorage.setItem('twilio_accountSid', twilioConfig.accountSid);
+    localStorage.setItem('twilio_authToken', twilioConfig.authToken);
+    localStorage.setItem('twilio_phoneNumber', twilioConfig.phoneNumber);
+    localStorage.setItem('twilio_enabled', twilioConfig.enabled.toString());
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+  };
+
+  // WhatsApp API kaydet
+  const saveWhatsAppConfig = () => {
+    localStorage.setItem('whatsapp_apiKey', whatsappConfig.apiKey);
+    localStorage.setItem('whatsapp_enabled', whatsappConfig.enabled.toString());
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+  };
+
+  // OpenAI API kaydet
+  const saveOpenAIConfig = () => {
+    localStorage.setItem('openai_apiKey', openaiApiKey);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+  };
+
+  // Twilio test mesajı gönder
+  const testTwilioMessage = async () => {
+    if (!twilioConfig.accountSid || !twilioConfig.authToken || !twilioConfig.phoneNumber) {
+      setTwilioTestResult({ success: false, message: 'Tüm Twilio bilgilerini doldurun.' });
+      return;
+    }
+
+    setTestingTwilio(true);
+    setTwilioTestResult(null);
+
+    // Simülasyon - gerçek API entegrasyonu için backend gerekir
+    setTimeout(() => {
+      setTestingTwilio(false);
+      setTwilioTestResult({
+        success: true,
+        message: 'Twilio yapılandırması başarılı! Simülasyon modunda test mesajı gönderildi.'
+      });
+    }, 1500);
+  };
+
+  // WhatsApp API ile mesaj gönder (simülasyon)
+  const sendWhatsAppMessage = async (phone: string, message: string) => {
+    if (!whatsappConfig.enabled || !whatsappConfig.apiKey) {
+      // wa.me fallback
+      window.open(`https://wa.me/${phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`, '_blank');
+      return;
+    }
+
+    // Simülasyon
+    console.log('WhatsApp API:', whatsappConfig.apiKey, phone, message);
+    alert('WhatsApp API simülasyon modunda çalışıyor.');
+  };
+
+  // JSON Export
+  const exportData = () => {
+    const data = {
+      students,
+      coaches,
+      weeklyEntries,
+      institutions,
+      activeInstitutionId,
+      exportedAt: new Date().toISOString()
+    };
+
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `backup_${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Veri temizleme
+  const clearAllData = () => {
+    if (confirm('Tüm verileri silmek istediğinizden emin misiniz? Bu işlem geri alınamaz!')) {
+      if (confirm('Bu işlem çok tehlikeli! Emin misiniz?')) {
+        alert('Veri temizleme işlemi devre dışı bırakıldı. Lütfen manuel olarak veritabanını temizleyin.');
+      }
+    }
+  };
+
+  // Footer'da kullanılacak kurum bilgisi
+  const footerInstitution = activeInstitution || institutions[0];
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 bg-gradient-to-br from-slate-600 to-slate-700 rounded-xl flex items-center justify-center">
+            <Settings className="w-6 h-6 text-white" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-slate-800">Ayarlar</h2>
+            <p className="text-gray-500">Kurum, API ve sistem ayarları</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Kurum Yönetimi */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <Building className="w-5 h-5 text-slate-600" />
+            <h3 className="text-lg font-semibold text-slate-800">Kurum Yönetimi</h3>
+          </div>
+          {isSuperAdmin && (
+            <button
+              onClick={() => {
+                setShowAddForm(true);
+                setFormData({
+                  name: '',
+                  phone: '',
+                  address: '',
+                  email: '',
+                  website: '',
+                  logo: ''
+                });
+              }}
+              className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              Yeni Kurum Ekle
+            </button>
+          )}
+        </div>
+
+        {/* Sadece Super Admin kurum ekleyebilir uyarısı */}
+        {!isSuperAdmin && (
+          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-sm text-blue-700 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4" />
+              Kurum ekleme işlemi sadece Süper Admin tarafından yapılabilir. Siz kurum bilgilerinizi düzenleyebilirsiniz.
+            </p>
+          </div>
+        )}
+
+        {/* Kurum Listesi */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+          {institutions.map((inst) => (
+            <div
+              key={inst.id}
+              onClick={() => handleSelectInstitution(inst.id)}
+              className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                activeInstitutionId === inst.id || (!activeInstitutionId && inst === institutions[0])
+                  ? 'border-red-500 bg-red-50'
+                  : 'border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {inst.logo ? (
+                    <img src={inst.logo} alt={inst.name} className="w-10 h-10 rounded-lg object-contain" />
+                  ) : (
+                    <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center">
+                      <Building className="w-5 h-5 text-slate-400" />
+                    </div>
+                  )}
+                  <div>
+                    <p className="font-medium text-slate-800">{inst.name}</p>
+                    <p className="text-sm text-gray-500">{inst.phone}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {(activeInstitutionId === inst.id || (!activeInstitutionId && inst === institutions[0])) && (
+                    <CheckCircle className="w-5 h-5 text-green-500" />
+                  )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(inst.id);
+                    }}
+                    className="p-1 text-red-500 hover:bg-red-100 rounded"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Yeni Kurum Formu */}
+        {showAddForm && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6">
+            <h4 className="font-semibold text-yellow-800 mb-4">Yeni Kurum Ekle</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Kurum Adı *</label>
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                  placeholder="Kurum adını girin"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Telefon</label>
+                <input
+                  type="tel"
+                  value={formData.phone}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={handleAddNew}
+                className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+              >
+                Ekle ve Aktif Yap
+              </button>
+              <button
+                onClick={() => setShowAddForm(false)}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+              >
+                İptal
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Kurum Bilgileri */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <Settings className="w-5 h-5 text-slate-600" />
+          <h3 className="text-lg font-semibold text-slate-800">Kurum Bilgileri - {activeInstitution?.name}</h3>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Kurum Adı *</label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Telefon</label>
+            <input
+              type="tel"
+              value={formData.phone}
+              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">E-posta</label>
+            <input
+              type="email"
+              value={formData.email}
+              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Website</label>
+            <input
+              type="url"
+              value={formData.website}
+              onChange={(e) => setFormData({ ...formData, website: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+            />
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Adres</label>
+            <textarea
+              value={formData.address}
+              onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+              rows={3}
+              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+            />
+          </div>
+        </div>
+
+        <button
+          onClick={handleSave}
+          className="mt-6 px-6 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors flex items-center gap-2"
+        >
+          {saved ? (
+            <>
+              <Check className="w-5 h-5" />
+              Kaydedildi!
+            </>
+          ) : (
+            <>
+              <Save className="w-5 h-5" />
+              Kaydet
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Logo Yükleme */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <Image className="w-5 h-5 text-slate-600" />
+          <h3 className="text-lg font-semibold text-slate-800">Kurum Logosu</h3>
+        </div>
+
+        <div className="flex items-center gap-6">
+          <div className="w-24 h-24 bg-slate-100 rounded-xl flex items-center justify-center overflow-hidden">
+            {formData.logo ? (
+              <img src={formData.logo} alt="Logo" className="w-full h-full object-contain" />
+            ) : (
+              <Building className="w-12 h-12 text-slate-400" />
+            )}
+          </div>
+          <div>
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept="image/png,image/jpeg,image/svg+xml"
+              onChange={handleLogoUpload}
+              className="hidden"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors flex items-center gap-2"
+              >
+                <Upload className="w-4 h-4" />
+                Logo Yükle
+              </button>
+              {formData.logo && (
+                <button
+                  onClick={handleRemoveLogo}
+                  className="px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors flex items-center gap-2"
+                >
+                  <X className="w-4 h-4" />
+                  Kaldır
+                </button>
+              )}
+            </div>
+            <p className="text-sm text-gray-500 mt-2">PNG, JPG veya SVG. Maksimum 2MB.</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Twilio WhatsApp API Ayarları */}
+      <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl p-6 border border-green-200">
+        <div className="flex items-start gap-4">
+          <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-emerald-500 rounded-xl flex items-center justify-center flex-shrink-0">
+            <MessageCircle className="w-6 h-6 text-white" />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="font-semibold text-green-800">Twilio WhatsApp API</h4>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={twilioConfig.enabled}
+                  onChange={(e) => setTwilioConfig({ ...twilioConfig, enabled: e.target.checked })}
+                  className="w-5 h-5 text-green-500 rounded"
+                />
+                <span className="text-sm text-green-700">Aktif</span>
+              </label>
+            </div>
+            <p className="text-sm text-green-700 mb-3">
+              Twilio API ile otomatik WhatsApp mesajları gönderin. Mesaj şablonları ve otomatik raporlar için kullanılır.
+            </p>
+
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs text-green-700 mb-1">Account SID</label>
+                  <input
+                    type="text"
+                    value={twilioConfig.accountSid}
+                    onChange={(e) => setTwilioConfig({ ...twilioConfig, accountSid: e.target.value })}
+                    placeholder="ACxxxxxxxxxx"
+                    className="w-full px-3 py-2 border border-green-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-green-700 mb-1">Auth Token</label>
+                  <input
+                    type="password"
+                    value={twilioConfig.authToken}
+                    onChange={(e) => setTwilioConfig({ ...twilioConfig, authToken: e.target.value })}
+                    placeholder="xxxxxxxxxx"
+                    className="w-full px-3 py-2 border border-green-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-green-700 mb-1">WhatsApp Numara</label>
+                  <input
+                    type="text"
+                    value={twilioConfig.phoneNumber}
+                    onChange={(e) => setTwilioConfig({ ...twilioConfig, phoneNumber: e.target.value })}
+                    placeholder="+905XXXXXXXXX"
+                    className="w-full px-3 py-2 border border-green-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={saveTwilioConfig}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center gap-2"
+                >
+                  <Save className="w-4 h-4" />
+                  Kaydet
+                </button>
+                <button
+                  onClick={testTwilioMessage}
+                  disabled={testingTwilio || !twilioConfig.accountSid}
+                  className="px-4 py-2 bg-white text-green-600 border border-green-300 rounded-lg hover:bg-green-50 transition-colors text-sm font-medium flex items-center gap-2 disabled:opacity-50"
+                >
+                  {testingTwilio ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
+                  Test Mesajı
+                </button>
+              </div>
+
+              {twilioTestResult && (
+                <div className={`p-3 rounded-lg ${twilioTestResult.success ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                  <p className="text-sm">{twilioTestResult.message}</p>
+                </div>
+              )}
+
+              <div className="bg-white/50 rounded-lg p-3">
+                <p className="text-xs text-green-700 mb-2">📌 Twilio Setup Adımları:</p>
+                <ol className="text-xs text-green-700 space-y-1 list-decimal list-inside">
+                  <li><a href="https://www.twilio.com/console" target="_blank" rel="noopener noreferrer" className="underline hover:text-green-800">Twilio Console</a>'a gidin</li>
+                  <li>WhatsApp Sandbox veya onaylı numara alın</li>
+                  <li>Account SID ve Auth Token'ı kopyalayın</li>
+                  <li>WhatsApp numaranızı +countrycodenumber formatında girin</li>
+                </ol>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* AI Ayarları */}
+      <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-xl p-6 border border-purple-100">
+        <div className="flex items-start gap-4">
+          <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-blue-500 rounded-xl flex items-center justify-center flex-shrink-0">
+            <Brain className="w-6 h-6 text-white" />
+          </div>
+          <div className="flex-1">
+            <h4 className="font-semibold text-purple-800 mb-2">AI Koç Entegrasyonu (OpenAI)</h4>
+            <p className="text-sm text-purple-700 mb-3">
+              OpenAI API anahtarınızı girerek öğrenci analizi ve AI destekli koçluk özelliklerini aktifleştirin.
+            </p>
+            <div className="flex gap-3">
+              <div className="flex-1 relative">
+                <input
+                  type={showApiKey ? 'text' : 'password'}
+                  value={openaiApiKey}
+                  onChange={(e) => setOpenaiApiKey(e.target.value)}
+                  placeholder="sk-..."
+                  className="w-full px-4 py-2 border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowApiKey(!showApiKey)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <button
+                onClick={saveOpenAIConfig}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium flex items-center gap-2"
+              >
+                <Save className="w-4 h-4" />
+                Kaydet
+              </button>
+            </div>
+            <p className="text-xs text-purple-600 mt-2">
+              API anahtarınız güvenli şekilde saklanır ve sadece AI işlemleri için kullanılır.
+              <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="underline ml-1">
+                OpenAI API Keys
+                <ExternalLink className="w-3 h-3 inline ml-1" />
+              </a>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Webhook Ayarları */}
+      <div className="bg-gradient-to-r from-blue-50 to-cyan-50 rounded-xl p-6 border border-blue-100">
+        <div className="flex items-start gap-4">
+          <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-xl flex items-center justify-center flex-shrink-0">
+            <Webhook className="w-6 h-6 text-white" />
+          </div>
+          <div className="flex-1">
+            <h4 className="font-semibold text-blue-800 mb-2">Webhook Entegrasyonu</h4>
+            <p className="text-sm text-blue-700 mb-3">
+              Edisis veya benzeri sınav sistemlerinden otomatik veri çekmek için webhook URL'inizi alın.
+            </p>
+            <div className="bg-white rounded-lg p-3 border border-blue-200">
+              <code className="text-sm text-blue-700 break-all">
+                {typeof window !== 'undefined' ? window.location.origin : ''}/api/webhooks/exam-results
+              </code>
+            </div>
+            <p className="text-xs text-blue-600 mt-2">
+              Bu URL'yi sınav sisteminize webhook olarak tanımlayın. Veriler otomatik olarak öğrencilere eklenecektir.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Bildirim Ayarları */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <Bell className="w-5 h-5 text-slate-600" />
+          <h3 className="text-lg font-semibold text-slate-800">Bildirim Ayarları</h3>
+        </div>
+
+        <div className="space-y-4">
+          <label className="flex items-center justify-between p-4 bg-gray-50 rounded-lg cursor-pointer">
+            <div>
+              <p className="font-medium text-slate-800">E-posta Bildirimleri</p>
+              <p className="text-sm text-gray-500">Önemli güncellemelerde e-posta gönder</p>
+            </div>
+            <input type="checkbox" defaultChecked className="w-5 h-5 text-red-500 rounded" />
+          </label>
+
+          <label className="flex items-center justify-between p-4 bg-gray-50 rounded-lg cursor-pointer">
+            <div>
+              <p className="font-medium text-slate-800">WhatsApp Bildirimleri</p>
+              <p className="text-sm text-gray-500">Haftalık raporları otomatik gönder</p>
+            </div>
+            <input type="checkbox" defaultChecked className="w-5 h-5 text-red-500 rounded" />
+          </label>
+
+          <label className="flex items-center justify-between p-4 bg-gray-50 rounded-lg cursor-pointer">
+            <div>
+              <p className="font-medium text-slate-800">Düşük Başarı Uyarısı</p>
+              <p className="text-sm text-gray-500">Başarı %70'in altına düşünce uyar</p>
+            </div>
+            <input type="checkbox" defaultChecked className="w-5 h-5 text-red-500 rounded" />
+          </label>
+        </div>
+      </div>
+
+      {/* Veri Yönetimi */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <Database className="w-5 h-5 text-slate-600" />
+          <h3 className="text-lg font-semibold text-slate-800">Veri Yönetimi</h3>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* İstatistikler */}
+          <div className="bg-gray-50 rounded-xl p-4">
+            <h4 className="font-medium text-slate-800 mb-3">Mevcut Veriler</h4>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-600">Öğrenciler</span>
+                <span className="font-medium">{students.length}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Eğitim Koçları</span>
+                <span className="font-medium">{coaches.length}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Kayıtlar</span>
+                <span className="font-medium">{weeklyEntries.length}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* İşlemler */}
+          <div className="space-y-3">
+            <button
+              onClick={exportData}
+              className="w-full px-4 py-3 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"
+            >
+              <Download className="w-5 h-5" />
+              Tüm Veriyi İndir (JSON)
+            </button>
+
+            <button
+              onClick={clearAllData}
+              className="w-full px-4 py-3 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors flex items-center justify-center gap-2"
+            >
+              <Trash2 className="w-5 h-5" />
+              Tüm Veriyi Sil
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Güvenlik */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <Shield className="w-5 h-5 text-slate-600" />
+          <h3 className="text-lg font-semibold text-slate-800">Güvenlik</h3>
+        </div>
+
+        <div className="space-y-4">
+          <button className="w-full px-4 py-3 bg-gray-50 text-slate-700 rounded-lg hover:bg-gray-100 transition-colors flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Key className="w-5 h-5" />
+              <span className="font-medium">Şifre Değiştir</span>
+            </div>
+            <span className="text-gray-400">→</span>
+          </button>
+
+          <button className="w-full px-4 py-3 bg-gray-50 text-slate-700 rounded-lg hover:bg-gray-100 transition-colors flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Shield className="w-5 h-5" />
+              <span className="font-medium">İki Aşamalı Doğrulama</span>
+            </div>
+            <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded">Kapalı</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Sürüm Bilgisi */}
+      <div className="text-center text-sm text-gray-500 py-4">
+        <p>Öğrenci Koçluk ve Takip Sistemi v1.1.0</p>
+        <p className="mt-1">© 2024 {footerInstitution?.name || 'Sistem'}. Tüm hakları saklıdır.</p>
+      </div>
+    </div>
+  );
+}

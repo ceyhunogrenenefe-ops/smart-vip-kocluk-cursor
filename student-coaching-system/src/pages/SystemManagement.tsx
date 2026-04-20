@@ -1,0 +1,498 @@
+// Türkçe: Sistem Yönetimi Sayfası - Super Admin İçin
+import React, { useState } from 'react';
+import { useAuth, SystemUser } from '../context/AuthContext';
+import { useOrganization } from '../context/OrganizationContext';
+import { useApp } from '../context/AppContext';
+import {
+  Settings,
+  Users,
+  Building2,
+  Database,
+  CreditCard,
+  Key,
+  Shield,
+  Check,
+  X,
+  Search,
+  Plus,
+  Edit2,
+  Trash2,
+  Eye,
+  EyeOff,
+  AlertTriangle,
+  Lock,
+  Globe,
+  Server,
+  Activity
+} from 'lucide-react';
+
+// PayTR yapılandırması
+interface PayTRConfig {
+  merchantId: string;
+  merchantKey: string;
+  merchantSalt: string;
+  enabled: boolean;
+}
+
+export default function SystemManagement() {
+  const { user, getAllUsers, createUser, updateUser, deleteUser } = useAuth();
+  const { organizations, updateOrganization, addOrganization } = useOrganization();
+  const { students, coaches } = useApp();
+
+  const [activeTab, setActiveTab] = useState<'users' | 'organizations' | 'payments' | 'system'>('users');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [showAddOrg, setShowAddOrg] = useState(false);
+
+  // PayTR Ayarları
+  const [paytrConfig, setPaytrConfig] = useState<PayTRConfig>({
+    merchantId: localStorage.getItem('paytr_merchantId') || '',
+    merchantKey: localStorage.getItem('paytr_merchantKey') || '',
+    merchantSalt: localStorage.getItem('paytr_merchantSalt') || '',
+    enabled: localStorage.getItem('paytr_enabled') === 'true'
+  });
+
+  // Sistem ayarları
+  const [systemSettings, setSystemSettings] = useState({
+    maintenanceMode: localStorage.getItem('system_maintenance') === 'true',
+    registrationEnabled: localStorage.getItem('system_registration') !== 'false',
+    whatsappEnabled: localStorage.getItem('system_whatsapp') === 'true',
+    emailNotifications: localStorage.getItem('system_email') !== 'false',
+    apiAccess: localStorage.getItem('system_api') === 'true'
+  });
+
+  const [showSecrets, setShowSecrets] = useState({
+    merchantKey: false,
+    merchantSalt: false
+  });
+
+  // Kullanıcılar
+  const allUsers = getAllUsers();
+  const filteredUsers = allUsers.filter(u =>
+    u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    u.email.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  // PayTR ayarlarını kaydet
+  const savePayTRConfig = () => {
+    localStorage.setItem('paytr_merchantId', paytrConfig.merchantId);
+    localStorage.setItem('paytr_merchantKey', paytrConfig.merchantKey);
+    localStorage.setItem('paytr_merchantSalt', paytrConfig.merchantSalt);
+    localStorage.setItem('paytr_enabled', paytrConfig.enabled.toString());
+    alert('PayTR ayarları kaydedildi!');
+  };
+
+  // Sistem ayarlarını kaydet
+  const saveSystemSettings = () => {
+    Object.entries(systemSettings).forEach(([key, value]) => {
+      localStorage.setItem(`system_${key}`, value.toString());
+    });
+    alert('Sistem ayarları kaydedildi!');
+  };
+
+  const tabs = [
+    { id: 'users' as const, label: 'Kullanıcılar', icon: Users, count: allUsers.length },
+    { id: 'organizations' as const, label: 'Kurumlar', icon: Building2, count: organizations.length },
+    { id: 'payments' as const, label: 'Ödeme Sistemleri', icon: CreditCard, count: 0 },
+    { id: 'system' as const, label: 'Sistem Ayarları', icon: Server, count: 0 }
+  ];
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-purple-600 to-indigo-600 rounded-xl shadow-lg p-6 text-white">
+        <div className="flex items-center gap-4">
+          <div className="w-14 h-14 bg-white/20 rounded-xl flex items-center justify-center">
+            <Settings className="w-8 h-8" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold">Sistem Yönetimi</h2>
+            <p className="text-purple-100">Tüm sistem ayarlarını buradan yönetin</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="flex border-b border-gray-100 overflow-x-auto">
+          {tabs.map(tab => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-2 px-6 py-4 text-sm font-medium whitespace-nowrap transition-colors ${
+                  activeTab === tab.id
+                    ? 'text-purple-600 border-b-2 border-purple-600 bg-purple-50'
+                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <Icon className="w-4 h-4" />
+                {tab.label}
+                {tab.count > 0 && (
+                  <span className={`px-2 py-0.5 rounded-full text-xs ${
+                    activeTab === tab.id ? 'bg-purple-100 text-purple-600' : 'bg-gray-100 text-gray-500'
+                  }`}>
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="p-6">
+          {/* KULLANICILAR */}
+          {activeTab === 'users' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="relative flex-1 max-w-md">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Kullanıcı ara..."
+                    className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+                <button
+                  onClick={() => setShowAddUser(true)}
+                  className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  Kullanıcı Ekle
+                </button>
+              </div>
+
+              {/* Kullanıcı Listesi */}
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Kullanıcı</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rol</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">E-posta</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Durum</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">İşlemler</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredUsers.map(u => (
+                      <tr key={u.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
+                              <span className="text-sm font-medium text-purple-600">
+                                {u.name.charAt(0).toUpperCase()}
+                              </span>
+                            </div>
+                            <span className="font-medium text-slate-800">{u.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            u.role === 'super_admin' ? 'bg-amber-100 text-amber-700' :
+                            u.role === 'admin' ? 'bg-red-100 text-red-700' :
+                            u.role === 'coach' ? 'bg-blue-100 text-blue-700' :
+                            'bg-green-100 text-green-700'
+                          }`}>
+                            {u.role === 'super_admin' ? 'Süper Admin' :
+                             u.role === 'admin' ? 'Yönetici' :
+                             u.role === 'coach' ? 'Koç' : 'Öğrenci'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600">{u.email}</td>
+                        <td className="px-4 py-3">
+                          {u.isActive === false ? (
+                            <span className="text-red-500 text-sm">Pasif</span>
+                          ) : (
+                            <span className="text-green-500 text-sm">Aktif</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-2">
+                            <button className="p-1 text-blue-500 hover:bg-blue-50 rounded">
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button className="p-1 text-red-500 hover:bg-red-50 rounded">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* KURUMLAR */}
+          {activeTab === 'organizations' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-slate-800">Kurumlar ({organizations.length})</h3>
+                <button
+                  onClick={() => setShowAddOrg(true)}
+                  className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  Kurum Ekle
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {organizations.map(org => (
+                  <div key={org.id} className="bg-gray-50 rounded-xl p-4">
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        {org.logo ? (
+                          <img src={org.logo} alt={org.name} className="w-10 h-10 rounded-lg object-contain" />
+                        ) : (
+                          <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                            <Building2 className="w-5 h-5 text-purple-600" />
+                          </div>
+                        )}
+                        <div>
+                          <p className="font-medium text-slate-800">{org.name}</p>
+                          <p className="text-sm text-gray-500">{org.email}</p>
+                        </div>
+                      </div>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        org.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                      }`}>
+                        {org.isActive ? 'Aktif' : 'Pasif'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm text-gray-500">
+                      <span>{org.stats.totalStudents} öğrenci</span>
+                      <span>{org.stats.totalCoaches} koç</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ÖDEME SİSTEMLERİ */}
+          {activeTab === 'payments' && (
+            <div className="space-y-6">
+              <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl p-6 border border-green-200">
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-emerald-500 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <CreditCard className="w-6 h-6 text-white" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="font-bold text-green-800 text-lg">PayTR Ödeme Entegrasyonu</h4>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={paytrConfig.enabled}
+                          onChange={(e) => setPaytrConfig({ ...paytrConfig, enabled: e.target.checked })}
+                          className="w-5 h-5 text-green-500 rounded"
+                        />
+                        <span className="text-sm text-green-700 font-medium">Aktif</span>
+                      </label>
+                    </div>
+                    <p className="text-sm text-green-700 mb-4">
+                      PayTR ile kredi kartı ödemelerini aktive edin. Türkiye'nin en güvenilir ödeme altyapısı.
+                    </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-xs text-green-700 mb-1">Merchant ID</label>
+                        <input
+                          type="text"
+                          value={paytrConfig.merchantId}
+                          onChange={(e) => setPaytrConfig({ ...paytrConfig, merchantId: e.target.value })}
+                          placeholder="000000000"
+                          className="w-full px-3 py-2 border border-green-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-green-700 mb-1">Merchant Key</label>
+                        <div className="relative">
+                          <input
+                            type={showSecrets.merchantKey ? 'text' : 'password'}
+                            value={paytrConfig.merchantKey}
+                            onChange={(e) => setPaytrConfig({ ...paytrConfig, merchantKey: e.target.value })}
+                            placeholder="xxxxxxxx"
+                            className="w-full px-3 py-2 pr-10 border border-green-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowSecrets({ ...showSecrets, merchantKey: !showSecrets.merchantKey })}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+                          >
+                            {showSecrets.merchantKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-green-700 mb-1">Merchant Salt</label>
+                        <div className="relative">
+                          <input
+                            type={showSecrets.merchantSalt ? 'text' : 'password'}
+                            value={paytrConfig.merchantSalt}
+                            onChange={(e) => setPaytrConfig({ ...paytrConfig, merchantSalt: e.target.value })}
+                            placeholder="xxxxxxxx"
+                            className="w-full px-3 py-2 pr-10 border border-green-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowSecrets({ ...showSecrets, merchantSalt: !showSecrets.merchantSalt })}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+                          >
+                            {showSecrets.merchantSalt ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3 mt-4">
+                      <button
+                        onClick={savePayTRConfig}
+                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center gap-2"
+                      >
+                        <Check className="w-4 h-4" />
+                        Kaydet
+                      </button>
+                      <a
+                        href="https://www.paytr.com"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-4 py-2 bg-white text-green-600 border border-green-300 rounded-lg hover:bg-green-50 transition-colors text-sm font-medium flex items-center gap-2"
+                      >
+                        <Globe className="w-4 h-4" />
+                        PayTR Dashboard
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Ödeme Durumu */}
+              <div className="bg-white rounded-xl border border-gray-200 p-6">
+                <h4 className="font-semibold text-slate-800 mb-4">Ödeme Durumu</h4>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-gray-50 rounded-lg p-4 text-center">
+                    <p className="text-2xl font-bold text-green-600">12</p>
+                    <p className="text-sm text-gray-500">Aktif Abonelik</p>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-4 text-center">
+                    <p className="text-2xl font-bold text-blue-600">3</p>
+                    <p className="text-sm text-gray-500">Deneme Kullanıcı</p>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-4 text-center">
+                    <p className="text-2xl font-bold text-purple-600">₺8,450</p>
+                    <p className="text-sm text-gray-500">Bu Ay Gelir</p>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-4 text-center">
+                    <p className="text-2xl font-bold text-amber-600">1</p>
+                    <p className="text-sm text-gray-500">Ödeme Bekliyor</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* SİSTEM AYARLARI */}
+          {activeTab === 'system' && (
+            <div className="space-y-6">
+              <div className="bg-white rounded-xl border border-gray-200 p-6">
+                <h4 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
+                  <Server className="w-5 h-5" />
+                  Genel Sistem Ayarları
+                </h4>
+                <div className="space-y-4">
+                  <label className="flex items-center justify-between p-4 bg-gray-50 rounded-lg cursor-pointer">
+                    <div className="flex items-center gap-3">
+                      <Activity className="w-5 h-5 text-amber-500" />
+                      <div>
+                        <p className="font-medium text-slate-800">Bakım Modu</p>
+                        <p className="text-sm text-gray-500">Sistemi bakıma alır, kullanıcılar giriş yapamaz</p>
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={systemSettings.maintenanceMode}
+                      onChange={(e) => setSystemSettings({ ...systemSettings, maintenanceMode: e.target.checked })}
+                      className="w-5 h-5 text-red-500 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-4 bg-gray-50 rounded-lg cursor-pointer">
+                    <div className="flex items-center gap-3">
+                      <Users className="w-5 h-5 text-green-500" />
+                      <div>
+                        <p className="font-medium text-slate-800">Kayıt İzinli</p>
+                        <p className="text-sm text-gray-500">Yeni kullanıcıların kayıt olmasına izin ver</p>
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={systemSettings.registrationEnabled}
+                      onChange={(e) => setSystemSettings({ ...systemSettings, registrationEnabled: e.target.checked })}
+                      className="w-5 h-5 text-red-500 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-4 bg-gray-50 rounded-lg cursor-pointer">
+                    <div className="flex items-center gap-3">
+                      <Lock className="w-5 h-5 text-purple-500" />
+                      <div>
+                        <p className="font-medium text-slate-800">API Erişimi</p>
+                        <p className="text-sm text-gray-500">Harici uygulamaların API'ye erişmesine izin ver</p>
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={systemSettings.apiAccess}
+                      onChange={(e) => setSystemSettings({ ...systemSettings, apiAccess: e.target.checked })}
+                      className="w-5 h-5 text-red-500 rounded"
+                    />
+                  </label>
+                </div>
+                <button
+                  onClick={saveSystemSettings}
+                  className="mt-4 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors text-sm font-medium flex items-center gap-2"
+                >
+                  <Check className="w-4 h-4" />
+                  Ayarları Kaydet
+                </button>
+              </div>
+
+              {/* Sistem Bilgileri */}
+              <div className="bg-white rounded-xl border border-gray-200 p-6">
+                <h4 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
+                  <Database className="w-5 h-5" />
+                  Sistem Bilgileri
+                </h4>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <p className="text-gray-500">Toplam Kullanıcı</p>
+                    <p className="text-xl font-bold text-slate-800">{allUsers.length}</p>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <p className="text-gray-500">Toplam Kurum</p>
+                    <p className="text-xl font-bold text-slate-800">{organizations.length}</p>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <p className="text-gray-500">Toplam Öğrenci</p>
+                    <p className="text-xl font-bold text-slate-800">{students.length}</p>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <p className="text-gray-500">Toplam Koç</p>
+                    <p className="text-xl font-bold text-slate-800">{coaches.length}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
