@@ -150,7 +150,13 @@ export default function Tracking() {
       return YKS_SUBJECTS[classLevel];
     }
 
-    // Normal sınıflar için tüm dersleri göster
+    // Sayısal sınıf (3–12): sadece bu sınıf için tanımlı konu havuzu olan dersler
+    if (typeof classLevel === 'number') {
+      return Object.keys(topicPool).filter(
+        subject => (topicPool[subject][classLevel] || []).length > 0
+      );
+    }
+
     return Object.keys(topicPool);
   }, [selectedStudent]);
 
