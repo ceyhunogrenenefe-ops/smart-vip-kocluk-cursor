@@ -37,7 +37,7 @@ export default function CoachDashboard() {
   const { user } = useAuth();
   const {
     students, weeklyEntries, getStudentStats, coaches, getReadingStats,
-    writtenExamScores, writtenExamSubjects, getWrittenExamStats
+    writtenExamScores, getWrittenExamStats
   } = useApp();
 
   // Koçun kayıtlı öğrencileri

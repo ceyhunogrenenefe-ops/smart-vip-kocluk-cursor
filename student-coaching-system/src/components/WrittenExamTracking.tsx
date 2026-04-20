@@ -45,6 +45,10 @@ export default function WrittenExamTracking() {
     students,
     writtenExamScores,
     writtenExamSubjects,
+    getWrittenExamSubjectsForStudent,
+    addWrittenExamSubjectForStudent,
+    removeWrittenExamSubjectForStudent,
+    writtenExamSubjectsByStudent,
     addWrittenExamScore,
     updateWrittenExamScore,
     deleteWrittenExamScore,
@@ -80,12 +84,19 @@ export default function WrittenExamTracking() {
   // Seçili öğrenci
   const selectedStudent = students.find(s => s.id === selectedStudentId);
 
+  const subjectsForStudent = useMemo(
+    () => (selectedStudentId ? getWrittenExamSubjectsForStudent(selectedStudentId) : []),
+    [selectedStudentId, getWrittenExamSubjectsForStudent, writtenExamSubjects, writtenExamSubjectsByStudent]
+  );
+
+  const [newSubjectName, setNewSubjectName] = useState('');
+
   // Öğrencinin sınav notları
   const studentScores = selectedStudentId ? writtenExamScores.filter(s => s.studentId === selectedStudentId) : [];
 
   // Derslere göre gruplandırılmış notlar - Tablo için
   const subjectScores = useMemo(() => {
-    const subjects = selectedStudentId ? writtenExamSubjects : [];
+    const subjects = selectedStudentId ? subjectsForStudent : [];
     const data: Record<string, {
       s1e1: { score: number | null; id?: string; date?: string };
       s1e2: { score: number | null; id?: string; date?: string };
@@ -122,7 +133,7 @@ export default function WrittenExamTracking() {
     });
 
     return data;
-  }, [studentScores, writtenExamSubjects, selectedStudentId]);
+  }, [studentScores, subjectsForStudent, selectedStudentId]);
 
   // Ortalama hesapla
   const calculateSemesterAvg = (s1: number | null, s2: number | null): number | null => {
@@ -277,6 +288,75 @@ export default function WrittenExamTracking() {
         </div>
       </div>
 
+      {/* Öğrenciye özel yazılı ders listesi */}
+      {selectedStudentId && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <h3 className="text-lg font-semibold text-slate-800 mb-2 flex items-center gap-2">
+            <Edit3 className="w-5 h-5 text-purple-600" />
+            Yazılı ders listesi (bu öğrenci)
+          </h3>
+          <p className="text-sm text-gray-500 mb-4">
+            Her öğrencinin tabloda göreceği dersler farklı olabilir. Ders ekleyin veya kaldırın; koç ve öğrenci bu listeyi
+            buradan düzenleyebilir.
+          </p>
+          <div className="flex flex-wrap gap-2 mb-4">
+            {subjectsForStudent.map(subj => (
+              <span
+                key={subj}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-purple-50 text-purple-900 text-sm border border-purple-100"
+              >
+                {subj}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (confirm(`"${subj}" dersini listeden kaldırmak istiyor musunuz?`)) {
+                      removeWrittenExamSubjectForStudent(selectedStudentId, subj);
+                    }
+                  }}
+                  className="p-0.5 rounded hover:bg-purple-200 text-purple-700"
+                  aria-label="Kaldır"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </span>
+            ))}
+            {subjectsForStudent.length === 0 && (
+              <span className="text-sm text-gray-400">Henüz ders yok — aşağıdan ekleyin.</span>
+            )}
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              type="text"
+              value={newSubjectName}
+              onChange={e => setNewSubjectName(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  if (newSubjectName.trim()) {
+                    addWrittenExamSubjectForStudent(selectedStudentId, newSubjectName);
+                    setNewSubjectName('');
+                  }
+                }
+              }}
+              placeholder="Örn: Beden Eğitimi"
+              className="flex-1 px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                if (newSubjectName.trim()) {
+                  addWrittenExamSubjectForStudent(selectedStudentId, newSubjectName);
+                  setNewSubjectName('');
+                }
+              }}
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium"
+            >
+              Ders ekle
+            </button>
+          </div>
+        </div>
+      )}
+
       {selectedStudentId && stats && (
         <>
           {/* Genel İstatistikler */}
@@ -312,7 +392,7 @@ export default function WrittenExamTracking() {
               <button
                 onClick={() => {
                   setNewScore({
-                    subject: writtenExamSubjects[0] || '',
+                    subject: subjectsForStudent[0] || '',
                     semester: 1,
                     examType: '1. Yazılı',
                     score: '',
@@ -365,7 +445,7 @@ export default function WrittenExamTracking() {
                   </tr>
                 </thead>
                 <tbody>
-                  {writtenExamSubjects.map((subject) => {
+                  {subjectsForStudent.map((subject) => {
                     const data = subjectScores[subject] || {
                       s1e1: { score: null },
                       s1e2: { score: null },
@@ -455,7 +535,7 @@ export default function WrittenExamTracking() {
                     );
                   })}
 
-                  {writtenExamSubjects.length === 0 && (
+                  {subjectsForStudent.length === 0 && (
                     <tr>
                       <td colSpan={8} className="py-12 text-center text-gray-500">
                         Henüz ders eklenmemiş. Yeni not ekleyerek ders ekleyebilirsiniz.
@@ -521,7 +601,7 @@ export default function WrittenExamTracking() {
                   className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                 >
                   <option value="">Ders Seçin</option>
-                  {writtenExamSubjects.map(subj => (
+                  {subjectsForStudent.map(subj => (
                     <option key={subj} value={subj}>{subj}</option>
                   ))}
                 </select>

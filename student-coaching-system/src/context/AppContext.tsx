@@ -38,8 +38,18 @@ const STORAGE_KEYS = {
   books: 'coaching_books',
   readingLogs: 'coaching_reading_logs',
   writtenExamScores: 'coaching_written_exam_scores',
-  writtenExamSubjects: 'coaching_written_exam_subjects'
+  writtenExamSubjects: 'coaching_written_exam_subjects',
+  writtenExamSubjectsByStudent: 'coaching_written_exam_subjects_by_student'
 };
+
+const DEFAULT_WRITTEN_EXAM_SUBJECTS = [
+  'Türkçe',
+  'Matematik',
+  'Fen Bilimleri',
+  'Sosyal Bilgiler',
+  'İngilizce',
+  'Din Kültürü'
+];
 
 const mergeTopicPools = (base: TopicPool, overrides: TopicPool): TopicPool => {
   const merged: TopicPool = { ...base };
@@ -222,9 +232,14 @@ interface AppState {
   updateWrittenExamScore: (id: string, score: Partial<WrittenExamScore>) => void;
   deleteWrittenExamScore: (id: string) => void;
   getStudentWrittenExamScores: (studentId: string) => WrittenExamScore[];
+  /** Varsayılan yazılı ders şablonu (yeni öğrenci listesi) */
   writtenExamSubjects: string[];
   addWrittenExamSubject: (subject: string) => void;
   removeWrittenExamSubject: (subject: string) => void;
+  getWrittenExamSubjectsForStudent: (studentId: string) => string[];
+  addWrittenExamSubjectForStudent: (studentId: string, subject: string) => void;
+  removeWrittenExamSubjectForStudent: (studentId: string, subject: string) => void;
+  writtenExamSubjectsByStudent: Record<string, string[]>;
   getSubjectScores: (studentId: string, subject: string) => WrittenExamScore[];
   calculateSemesterAverage: (studentId: string, subject: string, semester: 1 | 2) => number;
   calculateYearlyAverage: (studentId: string, subject: string) => number;
@@ -1536,8 +1551,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Yazılı sınav dersleri state (admin ekleyebilir/sileyebilir) - localStorage'da tutulabilir
   const [writtenExamSubjects, setWrittenExamSubjects] = useState<string[]>(() =>
-    loadFromStorage(STORAGE_KEYS.writtenExamSubjects, ['Türkçe', 'Matematik', 'Fen Bilimleri', 'Sosyal Bilgiler', 'İngilizce', 'Din Kültürü'])
+    loadFromStorage(STORAGE_KEYS.writtenExamSubjects, DEFAULT_WRITTEN_EXAM_SUBJECTS)
   );
+
+  const [writtenExamSubjectsByStudent, setWrittenExamSubjectsByStudent] = useState<
+    Record<string, string[]>
+  >(() => loadFromStorage<Record<string, string[]>>(STORAGE_KEYS.writtenExamSubjectsByStudent, {}));
 
   // Yazılı sınav verisini localStorage'a kaydet
   useEffect(() => {
@@ -1547,6 +1566,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     saveToStorage(STORAGE_KEYS.writtenExamSubjects, writtenExamSubjects);
   }, [writtenExamSubjects]);
+
+  useEffect(() => {
+    saveToStorage(STORAGE_KEYS.writtenExamSubjectsByStudent, writtenExamSubjectsByStudent);
+  }, [writtenExamSubjectsByStudent]);
 
   // Yazılı not ekle - Supabase database
   const addWrittenExamScore = async (score: WrittenExamScore) => {
@@ -1757,16 +1780,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   };
 
-  // Ders ekle (admin için)
+  // Varsayılan şablon dersleri (genel liste)
   const addWrittenExamSubject = (subject: string) => {
-    if (!writtenExamSubjects.includes(subject)) {
-      setWrittenExamSubjects(prev => [...prev, subject]);
-    }
+    const t = subject.trim();
+    if (!t || writtenExamSubjects.includes(t)) return;
+    setWrittenExamSubjects(prev => [...prev, t]);
   };
 
-  // Ders sil (admin için)
   const removeWrittenExamSubject = (subject: string) => {
     setWrittenExamSubjects(prev => prev.filter(s => s !== subject));
+  };
+
+  const getWrittenExamSubjectsForStudent = (studentId: string): string[] => {
+    const custom = writtenExamSubjectsByStudent[studentId];
+    if (Array.isArray(custom) && custom.length > 0) {
+      return [...new Set(custom.map(s => s.trim()).filter(Boolean))];
+    }
+    return [...writtenExamSubjects];
+  };
+
+  const addWrittenExamSubjectForStudent = (studentId: string, subject: string) => {
+    const t = subject.trim();
+    if (!t) return;
+    const cur = getWrittenExamSubjectsForStudent(studentId);
+    if (cur.includes(t)) return;
+    setWrittenExamSubjectsByStudent(prev => ({
+      ...prev,
+      [studentId]: [...cur, t]
+    }));
+  };
+
+  const removeWrittenExamSubjectForStudent = (studentId: string, subject: string) => {
+    const cur = getWrittenExamSubjectsForStudent(studentId);
+    setWrittenExamSubjectsByStudent(prev => ({
+      ...prev,
+      [studentId]: cur.filter(s => s !== subject)
+    }));
   };
 
   // AI yazılı yorumları
@@ -1906,6 +1955,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       writtenExamSubjects,
       addWrittenExamSubject,
       removeWrittenExamSubject,
+      getWrittenExamSubjectsForStudent,
+      addWrittenExamSubjectForStudent,
+      removeWrittenExamSubjectForStudent,
+      writtenExamSubjectsByStudent,
       getSubjectScores,
       calculateSemesterAverage,
       calculateYearlyAverage,

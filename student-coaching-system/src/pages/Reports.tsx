@@ -96,7 +96,7 @@ interface AICoachComment {
 export default function Reports() {
   const {
     students, weeklyEntries, getStudentStats, institution, topicProgress, getStudentTopicProgress,
-    writtenExamScores, writtenExamSubjects, getWrittenExamStats
+    writtenExamScores, getWrittenExamSubjectsForStudent, writtenExamSubjectsByStudent, getWrittenExamStats
   } = useApp();
   const { user } = useAuth();
 
@@ -120,7 +120,7 @@ export default function Reports() {
 
   // Yazılı notları (ders bazlı)
   const writtenScoresBySubject = selectedStudentId
-    ? writtenExamSubjects.map(subject => {
+    ? getWrittenExamSubjectsForStudent(selectedStudentId).map(subject => {
         const scores = writtenExamScores.filter(s => s.studentId === selectedStudentId && s.subject === subject);
         const sem1Scores = scores.filter(s => new Date(s.date).getMonth() <= 5);
         const sem2Scores = scores.filter(s => new Date(s.date).getMonth() > 5);

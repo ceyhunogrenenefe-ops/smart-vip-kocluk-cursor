@@ -45,7 +45,9 @@ export default function StudentDashboard() {
   const { user } = useAuth();
   const {
     weeklyEntries, getStudentStats, institution, addWeeklyEntry, students,
-    getReadingStats, books, writtenExamScores, writtenExamSubjects,
+    getReadingStats, books, writtenExamScores,
+    getWrittenExamSubjectsForStudent,
+    writtenExamSubjectsByStudent,
     calculateSemesterAverage, calculateYearlyAverage, getWrittenExamStats,
     readingLogs
   } = useApp();
@@ -124,14 +126,14 @@ export default function StudentDashboard() {
   // Öğrencinin yazılı notları (ders bazlı)
   const myWrittenScores = useMemo(() => {
     if (!user?.studentId) return [];
-    const scores = writtenExamScores.filter(s => s.studentId === user.studentId);
-    return writtenExamSubjects.map(subject => ({
+    const subs = getWrittenExamSubjectsForStudent(user.studentId);
+    return subs.map(subject => ({
       subject,
       sem1Avg: calculateSemesterAverage(user.studentId, subject, 1),
       sem2Avg: calculateSemesterAverage(user.studentId, subject, 2),
       yearAvg: calculateYearlyAverage(user.studentId, subject)
     })).filter(s => s.sem1Avg > 0 || s.sem2Avg > 0);
-  }, [user, writtenExamScores, writtenExamSubjects, calculateSemesterAverage, calculateYearlyAverage]);
+  }, [user, writtenExamScores, getWrittenExamSubjectsForStudent, writtenExamSubjectsByStudent, calculateSemesterAverage, calculateYearlyAverage]);
 
   // Öğrencinin sınıfı
   const myClassLevel = useMemo(() => {

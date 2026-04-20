@@ -42,7 +42,7 @@ import {
 export default function Analytics() {
   const {
     students, weeklyEntries, getStudentStats, coaches, getReadingStats,
-    writtenExamScores, writtenExamSubjects, getWrittenExamStats
+    writtenExamScores, getWrittenExamSubjectsForStudent, writtenExamSubjectsByStudent, getWrittenExamStats
   } = useApp();
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [timeRange, setTimeRange] = useState<'week' | 'month' | 'all'>('week');
@@ -71,7 +71,8 @@ export default function Analytics() {
   const writtenScoresBySubject = useMemo(() => {
     if (!selectedStudentId) return [];
     const scores = writtenExamScores.filter(s => s.studentId === selectedStudentId);
-    return writtenExamSubjects.map(subject => {
+    const subs = getWrittenExamSubjectsForStudent(selectedStudentId);
+    return subs.map(subject => {
       const subjectScores = scores.filter(s => s.subject === subject);
       const sem1Scores = subjectScores.filter(s => new Date(s.date).getMonth() <= 5);
       const sem2Scores = subjectScores.filter(s => new Date(s.date).getMonth() > 5);
@@ -86,7 +87,7 @@ export default function Analytics() {
         : sem1Avg > 0 ? sem1Avg : sem2Avg;
       return { subject, sem1Avg, sem2Avg, yearAvg };
     }).filter(s => s.sem1Avg > 0 || s.sem2Avg > 0);
-  }, [selectedStudentId, writtenExamScores, writtenExamSubjects]);
+  }, [selectedStudentId, writtenExamScores, getWrittenExamSubjectsForStudent, writtenExamSubjectsByStudent]);
 
   // Ders bazlı başarı analizi
   const subjectAnalysis = useMemo(() => {
