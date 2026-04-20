@@ -26,20 +26,23 @@ export default function Login() {
     setError('');
     setSuccess('');
     setLoading(true);
+    try {
+      const result = await login(email, password);
 
-    const result = await login(email, password);
-
-    if (result.success) {
-      setSuccess(result.message);
-      // Kısa bir gecikme ile yönlendir
-      setTimeout(() => {
-        navigate('/');
-      }, 500);
-    } else {
-      setError(result.message);
+      if (result.success) {
+        setSuccess(result.message);
+        // Kısa bir gecikme ile yönlendir
+        setTimeout(() => {
+          navigate('/');
+        }, 500);
+      } else {
+        setError(result.message);
+      }
+    } catch (err) {
+      setError('Giriş sırasında beklenmeyen bir hata oluştu. Lütfen tekrar deneyin.');
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   return (

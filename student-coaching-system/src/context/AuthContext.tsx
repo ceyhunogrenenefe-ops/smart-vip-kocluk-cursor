@@ -40,6 +40,24 @@ const DEMO_USERS = [
   { email: 'ogrenci@smartvip.com', password: 'ogrenci123', name: 'Öğrenci', role: 'student' as const },
 ];
 
+const AUTH_TIMEOUT_MS = 12000;
+
+const withTimeout = async <T,>(promise: Promise<T>, timeoutMs = AUTH_TIMEOUT_MS): Promise<T> => {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('AUTH_TIMEOUT')), timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<SystemUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -73,11 +91,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Supabase ile giriş
     try {
-      const { data: dbUser, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('email', normalizedEmail)
-        .single();
+      const { data: dbUser, error } = await withTimeout(
+        supabase
+          .from('users')
+          .select('*')
+          .eq('email', normalizedEmail)
+          .single()
+      );
 
       if (error || !dbUser) {
         return { success: false, message: 'E-posta veya şifre hatalı!' };
@@ -95,18 +115,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       let coachId: string | undefined;
 
       if (dbUser.role === 'student') {
-        const { data: studentRow } = await supabase
-          .from('students')
-          .select('id')
-          .eq('email', normalizedEmail)
-          .maybeSingle();
+        const { data: studentRow } = await withTimeout(
+          supabase
+            .from('students')
+            .select('id')
+            .eq('email', normalizedEmail)
+            .maybeSingle()
+        );
         studentId = studentRow?.id;
       } else if (dbUser.role === 'coach') {
-        const { data: coachRow } = await supabase
-          .from('coaches')
-          .select('id')
-          .eq('email', normalizedEmail)
-          .maybeSingle();
+        const { data: coachRow } = await withTimeout(
+          supabase
+            .from('coaches')
+            .select('id')
+            .eq('email', normalizedEmail)
+            .maybeSingle()
+        );
         coachId = coachRow?.id;
       }
 
@@ -130,6 +154,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(userData);
       return { success: true, message: 'Giriş başarılı!' };
     } catch (e) {
+      if (e instanceof Error && e.message === 'AUTH_TIMEOUT') {
+        return { success: false, message: 'Giriş isteği zaman aşımına uğradı. Lütfen tekrar deneyin.' };
+      }
       // Hata olursa demo moda düş
       if (!USE_DEMO_MODE) {
         return { success: false, message: 'Giriş sırasında bir hata oluştu. Lütfen tekrar deneyin.' };
