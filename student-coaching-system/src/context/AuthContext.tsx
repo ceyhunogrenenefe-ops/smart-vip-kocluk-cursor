@@ -2,8 +2,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 
-// Demo mod - sadece veritabanı erişimi başarısız olursa fallback
-const USE_DEMO_MODE = false;
+// Demo mod - girişin her zaman çalışması için aktif
+const USE_DEMO_MODE = true;
 
 // Kullanıcı arayüzü
 export interface SystemUser {
@@ -39,6 +39,29 @@ const DEMO_USERS = [
   { email: 'ogretmen@smartvip.com', password: 'ogretmen123', name: 'Öğretmen Koç', role: 'coach' as const },
   { email: 'ogrenci@smartvip.com', password: 'ogrenci123', name: 'Öğrenci', role: 'student' as const },
 ];
+
+const TRIAL_USERS_STORAGE_KEY = 'coaching_trial_users';
+
+type TrialUser = {
+  id: string;
+  name: string;
+  email: string;
+  password: string;
+  role: 'admin' | 'coach' | 'student';
+  phone?: string;
+  createdAt: string;
+};
+
+const getTrialUsersFromStorage = (): TrialUser[] => {
+  try {
+    const raw = localStorage.getItem(TRIAL_USERS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
 
 const AUTH_TIMEOUT_MS = 12000;
 
@@ -88,6 +111,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Giriş yap
   const login = async (email: string, password: string): Promise<{ success: boolean; message: string }> => {
     const normalizedEmail = email.toLowerCase().trim();
+
+    // 1) Demo kullanıcılar - her zaman hızlı fallback
+    const demoUser = DEMO_USERS.find(
+      u => u.email.toLowerCase() === normalizedEmail && u.password === password
+    );
+    if (demoUser) {
+      const userData: SystemUser = {
+        id: `demo-${demoUser.role}`,
+        name: demoUser.name,
+        email: demoUser.email,
+        role: demoUser.role,
+        isActive: true,
+        createdAt: new Date().toISOString()
+      };
+      localStorage.setItem('coaching_user', JSON.stringify(userData));
+      setUser(userData);
+      return { success: true, message: 'Giriş başarılı!' };
+    }
+
+    // 2) Ücretsiz deneme ile oluşturulan local hesaplar
+    const trialUser = getTrialUsersFromStorage().find(
+      u => u.email.toLowerCase() === normalizedEmail && u.password === password
+    );
+    if (trialUser) {
+      const userData: SystemUser = {
+        id: trialUser.id,
+        name: trialUser.name,
+        email: trialUser.email,
+        role: trialUser.role,
+        phone: trialUser.phone,
+        isActive: true,
+        package: 'trial',
+        createdAt: trialUser.createdAt
+      };
+      localStorage.setItem('coaching_user', JSON.stringify(userData));
+      setUser(userData);
+      return { success: true, message: 'Giriş başarılı!' };
+    }
 
     // Supabase ile giriş
     try {
@@ -155,30 +216,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: true, message: 'Giriş başarılı!' };
     } catch (e) {
       if (e instanceof Error && e.message === 'AUTH_TIMEOUT') {
+        if (USE_DEMO_MODE) {
+          return { success: false, message: 'Sunucuya ulaşılamadı. Demo/deneme hesabı ile giriş yapabilirsiniz.' };
+        }
         return { success: false, message: 'Giriş isteği zaman aşımına uğradı. Lütfen tekrar deneyin.' };
       }
       // Hata olursa demo moda düş
       if (!USE_DEMO_MODE) {
         return { success: false, message: 'Giriş sırasında bir hata oluştu. Lütfen tekrar deneyin.' };
       }
-      const foundUser = DEMO_USERS.find(
-        u => u.email.toLowerCase() === normalizedEmail && u.password === password
-      );
-
-      if (foundUser) {
-        const userData: SystemUser = {
-          id: `demo-${foundUser.role}`,
-          name: foundUser.name,
-          email: foundUser.email,
-          role: foundUser.role,
-          isActive: true,
-          createdAt: new Date().toISOString()
-        };
-        localStorage.setItem('coaching_user', JSON.stringify(userData));
-        setUser(userData);
-        return { success: true, message: 'Giriş başarılı!' };
-      }
-      return { success: false, message: 'E-posta veya şifre hatalı!' };
+      return { success: false, message: 'Sunucu hatası. Demo/deneme hesabı ile tekrar deneyin.' };
     }
   };
 

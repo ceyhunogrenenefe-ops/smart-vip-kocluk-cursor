@@ -162,13 +162,13 @@ export default function Login() {
             {/* Info */}
             <div className="text-center text-sm text-gray-600 pt-2 space-y-2">
               <p>
-                Hesabınız yok mu? Yöneticinize başvurun.
+                Hesabınız yok mu? Ücretsiz deneme hesabı oluşturabilirsiniz.
               </p>
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                <p className="text-amber-700 text-xs flex items-center gap-2">
+                <Link to="/register" className="text-amber-700 text-xs inline-flex items-center gap-2 hover:text-amber-800">
                   <AlertTriangle className="w-4 h-4" />
-                  Kendi kendinize kayıt olma devre dışı bırakılmıştır.
-                </p>
+                  30 gün ücretsiz deneme hesabı oluştur
+                </Link>
               </div>
             </div>
           </form>
