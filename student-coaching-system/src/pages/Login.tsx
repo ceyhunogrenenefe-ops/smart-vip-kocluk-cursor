@@ -173,14 +173,12 @@ export default function Login() {
 
         {/* Footer */}
         <div className="mt-6 text-center">
-          <a
-            href="/marketing"
-            target="_blank"
-            rel="noopener noreferrer"
+          <Link
+            to="/marketing"
             className="inline-flex items-center gap-2 text-red-500 hover:text-red-600 font-medium text-sm transition-colors"
           >
             Kurumsal Sayfayı Görüntüle
-          </a>
+          </Link>
         </div>
         <p className="text-center text-slate-400 text-sm mt-4">
           © 2024 Smart VIP Koçluk Sistemi
