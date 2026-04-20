@@ -182,16 +182,16 @@ function App() {
 
             {/* Super Admin Paneli */}
             <Route path="/super-admin" element={
-              <ProtectedRoute allowedRoles={['admin']}>
+              <ProtectedRoute allowedRoles={['super_admin', 'admin']}>
                 <Layout>
                   <AdminPanel />
                 </Layout>
               </ProtectedRoute>
             } />
 
-            {/* Kullanıcı Yönetimi - Sadece Super Admin */}
+            {/* Kullanıcı Yönetimi */}
             <Route path="/user-management" element={
-              <ProtectedRoute allowedRoles={['super_admin']}>
+              <ProtectedRoute allowedRoles={['super_admin', 'admin']}>
                 <Layout>
                   <UserManagement />
                 </Layout>
@@ -203,9 +203,8 @@ function App() {
               <Subscription />
             } />
 
-            {/* Sistem Yönetimi - Sadece Super Admin */}
             <Route path="/system-management" element={
-              <ProtectedRoute allowedRoles={['super_admin']}>
+              <ProtectedRoute allowedRoles={['super_admin', 'admin']}>
                 <Layout>
                   <SystemManagement />
                 </Layout>

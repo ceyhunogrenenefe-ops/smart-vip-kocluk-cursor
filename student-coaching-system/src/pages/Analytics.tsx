@@ -1,6 +1,7 @@
 // Türkçe: Analiz Paneli Sayfası
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
+import { formatClassLevelLabel } from '../types';
 import {
   BarChart3,
   TrendingUp,
@@ -256,7 +257,7 @@ export default function Analytics() {
               </div>
               <div>
                 <h3 className="text-xl font-bold">{selectedStudent.name}</h3>
-                <p className="text-blue-200">{selectedStudent.classLevel}. Sınıf</p>
+                <p className="text-blue-200">{formatClassLevelLabel(selectedStudent.classLevel)}</p>
               </div>
             </div>
             <div className="text-right">
@@ -680,7 +681,7 @@ export default function Analytics() {
                       </span>
                     </td>
                     <td className="px-4 py-3 font-medium text-gray-800">{student.name}</td>
-                    <td className="px-4 py-3 text-gray-600">{student.classLevel}. Sınıf</td>
+                    <td className="px-4 py-3 text-gray-600">{formatClassLevelLabel(student.classLevel)}</td>
                     <td className="px-4 py-3 text-center font-bold text-slate-800">%{student.stats.successRate}</td>
                     <td className="px-4 py-3 text-center text-gray-600">{student.stats.totalSolved}</td>
                     <td className="px-4 py-3 text-center text-gray-600">{student.stats.totalTarget}</td>

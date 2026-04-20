@@ -4,6 +4,7 @@ import { Student, Coach, WeeklyEntry, User, UserRole, TopicPool, TopicProgress, 
 import { db } from '../lib/database';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
+import { topicPool as defaultTopicPool } from '../data/mockData';
 
 // LocalStorage anahtarları
 const STORAGE_KEYS = {
@@ -20,6 +21,17 @@ const STORAGE_KEYS = {
   readingLogs: 'coaching_reading_logs',
   writtenExamScores: 'coaching_written_exam_scores',
   writtenExamSubjects: 'coaching_written_exam_subjects'
+};
+
+const mergeTopicPools = (base: TopicPool, overrides: TopicPool): TopicPool => {
+  const merged: TopicPool = { ...base };
+  Object.entries(overrides).forEach(([subject, levels]) => {
+    merged[subject] = {
+      ...(base[subject] || {}),
+      ...(levels || {})
+    };
+  });
+  return merged;
 };
 
 // LocalStorage'dan veri yükle
@@ -93,8 +105,8 @@ interface AppState {
   activeInstitutionId: string | null;
 
   // Konu Havuzu
-  getTopics: (subject: string, classLevel: number) => string[];
-  addTopic: (subject: string, classLevel: number, topic: string) => void;
+  getTopics: (subject: string, classLevel: number | string) => string[];
+  addTopic: (subject: string, classLevel: number | string, topic: string) => void;
   getTopicsByClass: (classLevel: number | string) => {
     regular: Record<string, string[]>;
     tytSubjects: Record<string, string[]>;
@@ -205,10 +217,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Aktif kurum
   const institution = institutions.find(i => i.id === activeInstitutionId) || institutions[0] || createDefaultInstitution();
 
-  // Topic pool - YKS dahil tüm konular (localStorage'da saklanabilir)
-  const [customTopics, setCustomTopics] = useState<TopicPool>(() =>
-    loadFromStorage(STORAGE_KEYS.customTopics, {})
-  );
+  // Topic pool - varsayılan mockData + kullanıcı ekleri (localStorage)
+  const [customTopics, setCustomTopics] = useState<TopicPool>(() => {
+    const stored = loadFromStorage<TopicPool>(STORAGE_KEYS.customTopics, {});
+    return mergeTopicPools(defaultTopicPool, stored);
+  });
   const [topicProgress, setTopicProgress] = useState<TopicProgress[]>([]);
 
   // Deneme Sınavları
@@ -256,7 +269,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           name: c.name,
           email: c.email,
           phone: c.phone || undefined,
-          specialties: c.specialties || [],
+          subjects: c.specialties || [],
           studentIds: c.student_ids || [],
           createdAt: c.created_at
         }));
@@ -895,16 +908,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTopicProgress(prev => prev.filter(p => p.studentId !== studentId));
   };
 
-  const addTopic = (subject: string, classLevel: number, topic: string) => {
+  const addTopic = (subject: string, classLevel: number | string, topic: string) => {
     setCustomTopics(prev => {
       const updated = { ...prev };
       if (!updated[subject]) {
         updated[subject] = { [classLevel]: [] };
       } else if (!updated[subject][classLevel]) {
-        updated[subject][classLevel] = [];
+        updated[subject] = { ...updated[subject], [classLevel]: [] };
       }
       if (!updated[subject][classLevel].includes(topic)) {
-        updated[subject][classLevel].push(topic);
+        updated[subject][classLevel] = [...updated[subject][classLevel], topic];
       }
       return updated;
     });

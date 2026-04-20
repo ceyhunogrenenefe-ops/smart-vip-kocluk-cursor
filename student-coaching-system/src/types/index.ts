@@ -3,8 +3,21 @@
 // Kullanıcı Rolleri - Eğitim Koçu sistemi
 export type UserRole = 'super_admin' | 'admin' | 'coach' | 'student';
 
-// Sınıf seviyeleri - İlkokul 3-4 + Ortaokul 5-6-7 ve LGS sınıfları
-export type ClassLevel = 3 | 4 | 5 | 6 | 7 | 'LGS';
+// Sınıf seviyeleri: ilkokul, ortaokul, lise ve YKS puan türleri
+export type ClassLevel =
+  | 3
+  | 4
+  | 5
+  | 6
+  | 7
+  | 9
+  | 10
+  | 11
+  | 12
+  | 'LGS'
+  | 'YKS-Sayısal'
+  | 'YKS-Eşit Ağırlık'
+  | 'YKS-Sözel';
 
 // Plan Türleri
 export type OrganizationPlan = 'starter' | 'professional' | 'enterprise';
@@ -81,6 +94,8 @@ export interface Student {
   phone: string;
   parentPhone: string;
   classLevel: ClassLevel;
+  school?: string;
+  parentName?: string;
   coachId?: string; // Koç ID'si
   groupName?: string;
   institutionId?: string;
@@ -217,7 +232,7 @@ export interface ChartData {
   }[];
 }
 
-// Yardımcı fonksiyonlar
+// Yardımcı: öğrenci formları ve filtreler
 export const CLASS_LEVELS: { value: ClassLevel; label: string }[] = [
   { value: 3, label: '3. Sınıf' },
   { value: 4, label: '4. Sınıf' },
@@ -225,6 +240,38 @@ export const CLASS_LEVELS: { value: ClassLevel; label: string }[] = [
   { value: 6, label: '6. Sınıf' },
   { value: 7, label: '7. Sınıf' },
   { value: 'LGS', label: 'LGS (8. Sınıf)' },
+  { value: 9, label: '9. Sınıf' },
+  { value: 10, label: '10. Sınıf' },
+  { value: 11, label: '11. Sınıf' },
+  { value: 12, label: '12. Sınıf' },
+  { value: 'YKS-Sayısal', label: 'YKS Sayısal' },
+  { value: 'YKS-Eşit Ağırlık', label: 'YKS Eşit Ağırlık' },
+  { value: 'YKS-Sözel', label: 'YKS Sözel' },
+];
+
+/** HTML select dönüşü → ClassLevel */
+export function parseClassLevelFromForm(value: string): ClassLevel {
+  if (value === 'LGS') return 'LGS';
+  if (value.startsWith('YKS-')) return value as ClassLevel;
+  const n = parseInt(value, 10);
+  return n as ClassLevel;
+}
+
+export function formatClassLevelLabel(level: ClassLevel | string | number | undefined | null): string {
+  if (level === undefined || level === null) return '—';
+  const found = CLASS_LEVELS.find(l => l.value === level);
+  if (found) return found.label;
+  return String(level);
+}
+
+/** Konu Havuzu sayfası: tüm sınıf / YKS seçenekleri (sıralı) */
+export const TOPIC_CLASS_OPTIONS: { value: string; label: string }[] = [
+  ...([3, 4, 5, 6, 7] as const).map(n => ({ value: String(n), label: `${n}. Sınıf` })),
+  { value: 'LGS', label: 'LGS (8. Sınıf)' },
+  ...([9, 10, 11, 12] as const).map(n => ({ value: String(n), label: `${n}. Sınıf` })),
+  { value: 'YKS-Sayısal', label: 'YKS Sayısal' },
+  { value: 'YKS-Eşit Ağırlık', label: 'YKS Eşit Ağırlık' },
+  { value: 'YKS-Sözel', label: 'YKS Sözel' },
 ];
 
 // ============ KİTAP OKUMA TAKİBİ ============

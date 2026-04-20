@@ -27,7 +27,7 @@ import {
   GraduationCap,
   Briefcase
 } from 'lucide-react';
-import { UserRole } from '../types';
+import { UserRole, ClassLevel } from '../types';
 
 // Paket bilgileri
 const PACKAGES = {
@@ -39,6 +39,7 @@ const PACKAGES = {
 
 // Rol bilgileri
 const ROLES: { value: UserRole; label: string; color: string }[] = [
+  { value: 'super_admin', label: 'Süper Admin', color: 'bg-amber-100 text-amber-800' },
   { value: 'admin', label: 'Yönetici', color: 'bg-red-100 text-red-700' },
   { value: 'coach', label: 'Koç', color: 'bg-blue-100 text-blue-700' },
   { value: 'student', label: 'Öğrenci', color: 'bg-green-100 text-green-700' }
@@ -49,9 +50,8 @@ export default function UserManagement() {
   const { user: currentUser } = useAuth();
   const { addStudent, addCoach, students, coaches } = useApp();
 
-  // Yetki kontrolü - sadece super_admin erişebilir
   useEffect(() => {
-    if (!currentUser || currentUser.role !== 'super_admin') {
+    if (!currentUser || (currentUser.role !== 'super_admin' && currentUser.role !== 'admin')) {
       navigate('/');
     }
   }, [currentUser, navigate]);
@@ -84,10 +84,9 @@ export default function UserManagement() {
 
   const [showPassword, setShowPassword] = useState(false);
 
-  // Kullanıcıları yükle
   useEffect(() => {
     setUsers(getAllUsers());
-  }, [getAllUsers]);
+  }, []);
 
   // Filtrelenmiş kullanıcılar
   const filteredUsers = users.filter(user => {
@@ -242,11 +241,10 @@ export default function UserManagement() {
               id: newUserId,
               name: formData.name,
               email: formData.email,
-              phone: formData.phone,
-              classLevel: '9',
-              school: '',
-              parentName: '',
-              parentPhone: formData.phone,
+              password: formData.password || undefined,
+              phone: formData.phone || '',
+              parentPhone: formData.phone || '',
+              classLevel: 9 as ClassLevel,
               coachId: undefined,
               createdAt: new Date().toISOString()
             });
@@ -255,8 +253,8 @@ export default function UserManagement() {
               id: newUserId,
               name: formData.name,
               email: formData.email,
-              phone: formData.phone,
-              specialties: [],
+              phone: formData.phone || '',
+              subjects: [],
               studentIds: [],
               createdAt: new Date().toISOString()
             });
@@ -435,13 +433,13 @@ export default function UserManagement() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${ROLES.find(r => r.value === user.role)?.color}`}>
-                        {ROLES.find(r => r.value === user.role)?.label}
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${ROLES.find(r => r.value === user.role)?.color || 'bg-gray-100 text-gray-700'}`}>
+                        {ROLES.find(r => r.value === user.role)?.label || user.role}
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${PACKAGES[user.package || 'trial'].color}`}>
-                        {PACKAGES[user.package || 'trial'].name}
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${PACKAGES[(user.package || 'trial') as keyof typeof PACKAGES].color}`}>
+                        {PACKAGES[(user.package || 'trial') as keyof typeof PACKAGES].name}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">
@@ -464,7 +462,7 @@ export default function UserManagement() {
                         >
                           <Edit className="w-4 h-4" />
                         </button>
-                        {user.id !== 'admin-1' && (
+                        {!user.id.startsWith('demo-seed-') && (
                           <button
                             onClick={() => handleDelete(user.id)}
                             className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -590,7 +588,7 @@ export default function UserManagement() {
                   onChange={(e) => setFormData({ ...formData, role: e.target.value as UserRole })}
                   className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                 >
-                  {ROLES.map(role => (
+                  {(modalMode === 'add' ? ROLES.filter(r => r.value !== 'super_admin') : ROLES).map(role => (
                     <option key={role.value} value={role.value}>{role.label}</option>
                   ))}
                 </select>

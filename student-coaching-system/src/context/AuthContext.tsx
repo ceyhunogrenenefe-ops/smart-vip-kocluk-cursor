@@ -1,5 +1,5 @@
 // Türkçe: Yetkilendirme Context'i - Supabase Entegrasyonlu
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 
 // Demo mod - girişin her zaman çalışması için aktif
@@ -28,6 +28,11 @@ interface AuthContextType {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; message: string }>;
   logout: () => void;
+  getAllUsers: () => SystemUser[];
+  getUserById: (id: string) => SystemUser | undefined;
+  createUser: (data: Record<string, unknown>) => Promise<{ success: boolean; message: string; userId?: string }>;
+  updateUser: (id: string, data: Record<string, unknown>) => Promise<{ success: boolean; message: string }>;
+  deleteUser: (id: string) => Promise<{ success: boolean; message: string }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -41,6 +46,9 @@ const DEMO_USERS = [
 ];
 
 const TRIAL_USERS_STORAGE_KEY = 'coaching_trial_users';
+const MANAGED_USERS_STORAGE_KEY = 'coaching_managed_users';
+
+type ManagedUserRecord = SystemUser & { password?: string };
 
 type TrialUser = {
   id: string;
@@ -62,6 +70,32 @@ const getTrialUsersFromStorage = (): TrialUser[] => {
     return [];
   }
 };
+
+const readManagedUsers = (): ManagedUserRecord[] => {
+  try {
+    const raw = localStorage.getItem(MANAGED_USERS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeManagedUsers = (list: ManagedUserRecord[]) => {
+  localStorage.setItem(MANAGED_USERS_STORAGE_KEY, JSON.stringify(list));
+};
+
+const demoUsersAsSystemUsers = (): SystemUser[] =>
+  DEMO_USERS.map((d, i) => ({
+    id: `demo-seed-${i}-${d.role}`,
+    name: d.name,
+    email: d.email,
+    role: d.role,
+    isActive: true,
+    package: 'enterprise',
+    createdAt: new Date().toISOString()
+  }));
 
 const AUTH_TIMEOUT_MS = 12000;
 
@@ -145,6 +179,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         package: 'trial',
         createdAt: trialUser.createdAt
       };
+      localStorage.setItem('coaching_user', JSON.stringify(userData));
+      setUser(userData);
+      return { success: true, message: 'Giriş başarılı!' };
+    }
+
+    // 3) Kullanıcı yönetiminden oluşturulan yerel hesaplar
+    const managed = readManagedUsers().find(
+      u => u.email.toLowerCase() === normalizedEmail && u.password === password
+    );
+    if (managed) {
+      const { password: _pw, ...pub } = managed;
+      const userData: SystemUser = { ...pub };
       localStorage.setItem('coaching_user', JSON.stringify(userData));
       setUser(userData);
       return { success: true, message: 'Giriş başarılı!' };
@@ -235,14 +281,115 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
+  const getAllUsers = useCallback((): SystemUser[] => {
+    const demos = demoUsersAsSystemUsers();
+    const demoEmails = new Set(demos.map(u => u.email.toLowerCase()));
+    const managed = readManagedUsers().map(({ password: _p, ...rest }) => rest as SystemUser);
+    return [...demos, ...managed.filter(u => !demoEmails.has(u.email.toLowerCase()))];
+  }, []);
+
+  const getUserById = useCallback(
+    (id: string): SystemUser | undefined => getAllUsers().find(u => u.id === id),
+    [getAllUsers]
+  );
+
+  const createUser = useCallback(
+    async (data: Record<string, unknown>): Promise<{ success: boolean; message: string; userId?: string }> => {
+      const email = String(data.email || '')
+        .trim()
+        .toLowerCase();
+      if (!email) return { success: false, message: 'E-posta gerekli.' };
+
+      if (getAllUsers().some(u => u.email.toLowerCase() === email)) {
+        return { success: false, message: 'Bu e-posta zaten kayıtlı.' };
+      }
+
+      const id = `mu-${Date.now()}`;
+      const pwd = typeof data.password === 'string' && data.password.length >= 6 ? data.password : `Sk${Date.now().toString().slice(-6)}!`;
+
+      let role = (data.role as SystemUser['role']) || 'student';
+      if (role === 'super_admin') role = 'admin';
+
+      const rec: ManagedUserRecord = {
+        id,
+        name: String(data.name || '').trim() || 'Kullanıcı',
+        email,
+        phone: typeof data.phone === 'string' ? data.phone : undefined,
+        role,
+        package: (data.package as SystemUser['package']) || 'trial',
+        startDate: typeof data.startDate === 'string' ? data.startDate : undefined,
+        endDate: typeof data.endDate === 'string' ? data.endDate : undefined,
+        isActive: data.isActive !== false,
+        createdAt: new Date().toISOString(),
+        password: pwd
+      };
+
+      writeManagedUsers([...readManagedUsers(), rec]);
+      return { success: true, message: 'Kullanıcı oluşturuldu.', userId: id };
+    },
+    [getAllUsers]
+  );
+
+  const updateUser = useCallback(
+    async (id: string, data: Record<string, unknown>): Promise<{ success: boolean; message: string }> => {
+      if (id.startsWith('demo-seed-')) {
+        return { success: false, message: 'Demo hesapları düzenlenemez.' };
+      }
+      const list = readManagedUsers();
+      const ix = list.findIndex(u => u.id === id);
+      if (ix === -1) return { success: false, message: 'Kullanıcı bulunamadı.' };
+
+      const cur = list[ix];
+      const next: ManagedUserRecord = {
+        ...cur,
+        name: typeof data.name === 'string' ? data.name : cur.name,
+        email: typeof data.email === 'string' ? data.email.trim().toLowerCase() : cur.email,
+        phone: typeof data.phone === 'string' ? data.phone : cur.phone,
+        role: (data.role as SystemUser['role']) || cur.role,
+        package: (data.package as SystemUser['package']) || cur.package,
+        startDate: typeof data.startDate === 'string' ? data.startDate : cur.startDate,
+        endDate: typeof data.endDate === 'string' ? data.endDate : cur.endDate,
+        isActive: typeof data.isActive === 'boolean' ? data.isActive : cur.isActive
+      };
+      if (typeof data.password === 'string' && data.password.length >= 6) {
+        next.password = data.password;
+      }
+
+      const nextList = [...list];
+      nextList[ix] = next;
+      writeManagedUsers(nextList);
+      return { success: true, message: 'Güncellendi.' };
+    },
+    []
+  );
+
+  const deleteUser = useCallback(async (id: string): Promise<{ success: boolean; message: string }> => {
+    if (id.startsWith('demo-seed-')) {
+      return { success: false, message: 'Demo hesapları silinemez.' };
+    }
+    const list = readManagedUsers().filter(u => u.id !== id);
+    if (list.length === readManagedUsers().length) {
+      return { success: false, message: 'Kullanıcı bulunamadı.' };
+    }
+    writeManagedUsers(list);
+    return { success: true, message: 'Silindi.' };
+  }, []);
+
   return (
-    <AuthContext.Provider value={{
-      user,
-      isAuthenticated: !!user,
-      isLoading,
-      login,
-      logout
-    }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        isAuthenticated: !!user,
+        isLoading,
+        login,
+        logout,
+        getAllUsers,
+        getUserById,
+        createUser,
+        updateUser,
+        deleteUser
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

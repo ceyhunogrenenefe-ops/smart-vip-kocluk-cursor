@@ -1,6 +1,7 @@
 // Türkçe: Yazılı Takip Modülü - Tablo Görünümü
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
+import { formatClassLevelLabel } from '../types';
 import { useAuth } from '../context/AuthContext';
 import {
   FileText,
@@ -269,7 +270,7 @@ export default function WrittenExamTracking() {
             <option value="">{user?.role === 'student' ? 'Öğrenci seçin...' : 'Öğrenci seçin...'}</option>
             {availableStudents.map(student => (
               <option key={student.id} value={student.id}>
-                {student.name} - {student.classLevel}. Sınıf
+                {student.name} — {formatClassLevelLabel(student.classLevel)}
               </option>
             ))}
           </select>

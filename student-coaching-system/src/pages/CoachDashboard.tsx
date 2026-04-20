@@ -2,6 +2,7 @@
 import React, { useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
+import { formatClassLevelLabel } from '../types';
 import {
   Users,
   TrendingUp,
@@ -405,7 +406,7 @@ export default function CoachDashboard() {
                       </div>
                       <div>
                         <p className="font-medium text-slate-800">{student.name}</p>
-                        <p className="text-sm text-gray-500">{student.classLevel}. Sınıf</p>
+                        <p className="text-sm text-gray-500">{formatClassLevelLabel(student.classLevel)}</p>
                       </div>
                     </div>
                     <span className={`px-3 py-1 rounded-lg text-sm font-medium ${getSuccessColor(stats?.successRate || 0)}`}>
@@ -441,7 +442,7 @@ export default function CoachDashboard() {
                       </div>
                       <div>
                         <p className="font-medium text-slate-800">{student.name}</p>
-                        <p className="text-sm text-gray-500">{student.classLevel}. Sınıf</p>
+                        <p className="text-sm text-gray-500">{formatClassLevelLabel(student.classLevel)}</p>
                       </div>
                     </div>
                     <span className={`px-3 py-1 rounded-lg text-sm font-medium ${getSuccessColor(stats?.successRate || 0)}`}>
@@ -531,7 +532,7 @@ export default function CoachDashboard() {
                         <span className="text-sm font-medium text-gray-800">{student.name}</span>
                       </div>
                     </td>
-                    <td className="px-4 py-2 text-sm text-gray-600">{student.classLevel}. Sınıf</td>
+                    <td className="px-4 py-2 text-sm text-gray-600">{formatClassLevelLabel(student.classLevel)}</td>
                     <td className="px-4 py-2 text-sm text-center text-gray-600">{stats?.totalTarget || 0}</td>
                     <td className="px-4 py-2 text-sm text-center text-gray-600">{stats?.totalSolved || 0}</td>
                     <td className="px-4 py-2 text-sm text-center text-green-600 font-medium">{stats?.totalCorrect || 0}</td>

@@ -19,6 +19,7 @@ import {
   MessageCircle
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
+import { CLASS_LEVELS, formatClassLevelLabel } from '../types';
 
 export default function Dashboard() {
   const { students, coaches, weeklyEntries, getStudentStats, institution } = useApp();
@@ -100,9 +101,9 @@ export default function Dashboard() {
     .slice(0, 5);
 
   // Sınıf bazlı dağılım
-  const classDistribution = [9, 10, 11, 12].map(level => ({
-    sınıf: `${level}. Sınıf`,
-    öğrenci: students.filter(s => s.classLevel === level).length,
+  const classDistribution = CLASS_LEVELS.map(({ value, label }) => ({
+    sınıf: label,
+    öğrenci: students.filter(s => s.classLevel === value).length,
   }));
 
   const statCards = [
@@ -390,7 +391,7 @@ export default function Dashboard() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-slate-800 truncate">{student.name}</p>
-                  <p className="text-xs text-gray-500">{student.classLevel}. Sınıf</p>
+                  <p className="text-xs text-gray-500">{formatClassLevelLabel(student.classLevel)}</p>
                 </div>
               </div>
               <div className="flex items-center justify-between">

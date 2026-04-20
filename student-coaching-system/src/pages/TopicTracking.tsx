@@ -1,7 +1,7 @@
 // Türkçe: Konu Takibi Sayfası - Öğrencinin hangi konuları bitirdiğini gösterir
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { CLASS_LEVELS } from '../types';
+import { formatClassLevelLabel } from '../types';
 import {
   BookOpen,
   CheckCircle,
@@ -213,7 +213,7 @@ export default function TopicTracking() {
       const yksType = YKS_TYPES[studentClassLevel as keyof typeof YKS_TYPES];
       return yksType ? yksType.label : studentClassLevel;
     }
-    return CLASS_LEVELS.find(l => l.value === studentClassLevel)?.label || String(studentClassLevel);
+    return formatClassLevelLabel(studentClassLevel);
   };
 
   return (
@@ -252,7 +252,7 @@ export default function TopicTracking() {
               <option value="">Öğrenci Seçin</option>
               {students.map((student) => (
                 <option key={student.id} value={student.id}>
-                  {student.name} - {CLASS_LEVELS.find(l => l.value === student.classLevel)?.label || student.classLevel}
+                  {student.name} - {formatClassLevelLabel(student.classLevel)}
                 </option>
               ))}
             </select>

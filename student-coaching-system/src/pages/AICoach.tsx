@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
+import { formatClassLevelLabel } from '../types';
 import {
   Brain,
   MessageSquare,
@@ -465,7 +466,7 @@ ${examStats?.latestTYT ? `• Son TYT: ${examStats.latestTYT} net` : ''}
             >
               <option value="">Öğrenci Seçin</option>
               {students.map(s => (
-                <option key={s.id} value={s.id}>{s.name} - {s.classLevel}. Sınıf</option>
+                <option key={s.id} value={s.id}>{s.name} — {formatClassLevelLabel(s.classLevel)}</option>
               ))}
             </select>
 

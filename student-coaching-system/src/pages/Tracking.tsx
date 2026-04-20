@@ -1,7 +1,7 @@
 // Türkçe: Haftalık Takip Sayfası
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { WeeklyEntry, Book } from '../types';
+import { WeeklyEntry, Book, formatClassLevelLabel } from '../types';
 import { topicPool } from '../data/mockData';
 import {
   Calendar,
@@ -150,6 +150,13 @@ export default function Tracking() {
       return YKS_SUBJECTS[classLevel];
     }
 
+    // LGS: konu havuzu 'LGS' anahtarında
+    if (classLevel === 'LGS') {
+      return Object.keys(topicPool).filter(
+        subject => (topicPool[subject]['LGS'] || []).length > 0
+      );
+    }
+
     // Sayısal sınıf (3–12): sadece bu sınıf için tanımlı konu havuzu olan dersler
     if (typeof classLevel === 'number') {
       return Object.keys(topicPool).filter(
@@ -168,11 +175,13 @@ export default function Tracking() {
 
     // YKS sınıfları için - konuyu doğrudan derse göre al
     if (typeof classLevel === 'string' && classLevel.startsWith('YKS-')) {
-      // TYT ve AYT konularını doğrudan subject key'inde ara
       return topicPool[formData.subject]?.[classLevel] || [];
     }
 
-    // Normal sınıflar (9, 10, 11, 12)
+    if (classLevel === 'LGS') {
+      return getTopics(formData.subject, 'LGS');
+    }
+
     if (typeof classLevel === 'number') {
       return getTopics(formData.subject, classLevel);
     }
@@ -355,7 +364,7 @@ export default function Tracking() {
               <option value="">Öğrenci Seçin</option>
               {students.map((student) => (
                 <option key={student.id} value={student.id}>
-                  {student.name} - {student.classLevel}
+                  {student.name} — {formatClassLevelLabel(student.classLevel)}
                 </option>
               ))}
             </select>

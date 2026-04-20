@@ -1,7 +1,8 @@
 // Türkçe: Konu Havuzu Sayfası
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { topicPool } from '../data/mockData';
+import { parseClassLevelFromForm, TOPIC_CLASS_OPTIONS } from '../types';
 import {
   BookOpen,
   Plus,
@@ -16,20 +17,27 @@ import {
 export default function Topics() {
   const { addTopic } = useApp();
   const [selectedSubject, setSelectedSubject] = useState<string>('');
-  const [selectedClass, setSelectedClass] = useState<number>(12);
+  const [selectedClassKey, setSelectedClassKey] = useState('12');
   const [showAddModal, setShowAddModal] = useState(false);
   const [newTopic, setNewTopic] = useState('');
 
   const subjects = Object.keys(topicPool);
-  const classes = [9, 10, 11, 12];
+
+  const resolvedClass = useMemo(
+    () => parseClassLevelFromForm(selectedClassKey),
+    [selectedClassKey]
+  );
 
   const currentTopics = selectedSubject && topicPool[selectedSubject]
-    ? topicPool[selectedSubject][selectedClass] || []
+    ? topicPool[selectedSubject][resolvedClass] || []
     : [];
+
+  const classLabel =
+    TOPIC_CLASS_OPTIONS.find(o => o.value === selectedClassKey)?.label || selectedClassKey;
 
   const handleAddTopic = () => {
     if (newTopic.trim() && selectedSubject) {
-      addTopic(selectedSubject, selectedClass, newTopic.trim());
+      addTopic(selectedSubject, resolvedClass, newTopic.trim());
       setNewTopic('');
       setShowAddModal(false);
     }
@@ -41,7 +49,7 @@ export default function Topics() {
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Konu Havuzu</h2>
-          <p className="text-gray-500">9-12. sınıf tüm ders konuları</p>
+          <p className="text-gray-500">İlkokul, ortaokul, lise ve YKS konu havuzları</p>
         </div>
         <button
           onClick={() => setShowAddModal(true)}
@@ -76,13 +84,13 @@ export default function Topics() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Sınıf</label>
             <select
-              value={selectedClass}
-              onChange={(e) => setSelectedClass(parseInt(e.target.value))}
+              value={selectedClassKey}
+              onChange={(e) => setSelectedClassKey(e.target.value)}
               className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
             >
-              {classes.map((cls) => (
-                <option key={cls} value={cls}>
-                  {cls}. Sınıf
+              {TOPIC_CLASS_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
                 </option>
               ))}
             </select>
@@ -93,7 +101,7 @@ export default function Topics() {
             <div className="bg-slate-50 rounded-lg px-4 py-3 flex-1">
               <p className="text-sm text-gray-500">Toplam Konu</p>
               <p className="text-2xl font-bold text-slate-800">
-                {selectedSubject ? currentTopics.length : subjects.length * 4}
+                {selectedSubject ? currentTopics.length : '—'}
               </p>
             </div>
           </div>
@@ -105,7 +113,7 @@ export default function Topics() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="p-4 border-b border-gray-100 bg-slate-50">
             <h3 className="font-semibold text-slate-800">
-              {selectedSubject} - {selectedClass}. Sınıf Konuları
+              {selectedSubject} — {classLabel}
             </h3>
           </div>
           <div className="p-4">
@@ -158,37 +166,39 @@ export default function Topics() {
       {/* Tüm Konular Grid */}
       {selectedSubject && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[9, 10, 11, 12].map((cls) => (
-            <div
-              key={cls}
-              onClick={() => setSelectedClass(cls)}
-              className={`bg-white rounded-xl shadow-sm border p-4 cursor-pointer transition-all ${
-                selectedClass === cls
-                  ? 'border-red-500 ring-2 ring-red-100'
-                  : 'border-gray-100 hover:shadow-md'
-              }`}
-            >
-              <h4 className="font-semibold text-slate-800 mb-2">{cls}. Sınıf</h4>
-              <p className="text-sm text-gray-500">
-                {topicPool[selectedSubject]?.[cls]?.length || 0} konu
-              </p>
-              <div className="mt-2 flex flex-wrap gap-1">
-                {(topicPool[selectedSubject]?.[cls] || []).slice(0, 3).map((topic, i) => (
-                  <span
-                    key={i}
-                    className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded"
-                  >
-                    {topic}
-                  </span>
-                ))}
-                {(topicPool[selectedSubject]?.[cls]?.length || 0) > 3 && (
-                  <span className="px-2 py-0.5 text-gray-500 text-xs">
-                    +{topicPool[selectedSubject][cls].length - 3} more
-                  </span>
-                )}
+          {TOPIC_CLASS_OPTIONS.map((opt) => {
+            const cls = parseClassLevelFromForm(opt.value);
+            const list = topicPool[selectedSubject]?.[cls] || [];
+            return (
+              <div
+                key={opt.value}
+                onClick={() => setSelectedClassKey(opt.value)}
+                className={`bg-white rounded-xl shadow-sm border p-4 cursor-pointer transition-all ${
+                  selectedClassKey === opt.value
+                    ? 'border-red-500 ring-2 ring-red-100'
+                    : 'border-gray-100 hover:shadow-md'
+                }`}
+              >
+                <h4 className="font-semibold text-slate-800 mb-2">{opt.label}</h4>
+                <p className="text-sm text-gray-500">{list.length} konu</p>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {list.slice(0, 3).map((topic, i) => (
+                    <span
+                      key={i}
+                      className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded"
+                    >
+                      {topic}
+                    </span>
+                  ))}
+                  {list.length > 3 && (
+                    <span className="px-2 py-0.5 text-gray-500 text-xs">
+                      +{list.length - 3} daha
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -231,13 +241,13 @@ export default function Topics() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Sınıf *</label>
                 <select
-                  value={selectedClass}
-                  onChange={(e) => setSelectedClass(parseInt(e.target.value))}
+                  value={selectedClassKey}
+                  onChange={(e) => setSelectedClassKey(e.target.value)}
                   className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                 >
-                  {classes.map((cls) => (
-                    <option key={cls} value={cls}>
-                      {cls}. Sınıf
+                  {TOPIC_CLASS_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
                     </option>
                   ))}
                 </select>

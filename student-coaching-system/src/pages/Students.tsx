@@ -1,7 +1,7 @@
 // Türkçe: Öğrenci Yönetimi Sayfası
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Student, ClassLevel, CLASS_LEVELS } from '../types';
+import { Student, ClassLevel, CLASS_LEVELS, parseClassLevelFromForm, formatClassLevelLabel } from '../types';
 import {
   GraduationCap,
   Search,
@@ -43,7 +43,7 @@ export default function Students() {
     password: '',
     phone: '',
     parentPhone: '',
-    classLevel: '12' as unknown as ClassLevel,
+    classLevel: 9 as ClassLevel,
     coachId: '',
     groupName: '',
     institutionId: ''
@@ -59,7 +59,7 @@ export default function Students() {
       password: '',
       phone: '',
       parentPhone: '',
-      classLevel: 12 as unknown as ClassLevel,
+      classLevel: 9 as ClassLevel,
       coachId: '',
       groupName: '',
       institutionId: ''
@@ -172,13 +172,17 @@ export default function Students() {
           {/* Sınıf Filtresi */}
           <div className="relative">
             <select
-              value={filterClass}
-              onChange={(e) => setFilterClass(e.target.value === 'all' ? 'all' : e.target.value as ClassLevel)}
+              value={filterClass === 'all' ? 'all' : String(filterClass)}
+              onChange={(e) =>
+                setFilterClass(e.target.value === 'all' ? 'all' : parseClassLevelFromForm(e.target.value))
+              }
               className="appearance-none px-4 py-2 pr-10 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent bg-white"
             >
               <option value="all">Tüm Sınıflar</option>
               {CLASS_LEVELS.map((level) => (
-                <option key={level.value} value={level.value}>{level.label}</option>
+                <option key={String(level.value)} value={String(level.value)}>
+                  {level.label}
+                </option>
               ))}
             </select>
             <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
@@ -203,7 +207,7 @@ export default function Students() {
                   </div>
                   <div>
                     <h3 className="font-semibold text-slate-800">{student.name}</h3>
-                    <p className="text-sm text-gray-500">{CLASS_LEVELS.find(l => l.value === student.classLevel)?.label || student.classLevel}</p>
+                    <p className="text-sm text-gray-500">{formatClassLevelLabel(student.classLevel)}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
@@ -386,12 +390,16 @@ export default function Students() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Sınıf *</label>
                   <select
                     required
-                    value={formData.classLevel}
-                    onChange={(e) => setFormData({ ...formData, classLevel: e.target.value as unknown as ClassLevel })}
+                    value={String(formData.classLevel)}
+                    onChange={(e) =>
+                      setFormData({ ...formData, classLevel: parseClassLevelFromForm(e.target.value) })
+                    }
                     className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                   >
                     {CLASS_LEVELS.map((level) => (
-                      <option key={level.value} value={level.value}>{level.label}</option>
+                      <option key={String(level.value)} value={String(level.value)}>
+                        {level.label}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -512,7 +520,7 @@ export default function Students() {
                   </div>
                   <div>
                     <h3 className="text-xl font-bold text-slate-800">{selectedStudent.name}</h3>
-                    <p className="text-gray-500">{CLASS_LEVELS.find(l => l.value === selectedStudent.classLevel)?.label || selectedStudent.classLevel}</p>
+                    <p className="text-gray-500">{formatClassLevelLabel(selectedStudent.classLevel)}</p>
                   </div>
                 </div>
                 <button

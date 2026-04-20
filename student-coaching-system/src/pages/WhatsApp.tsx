@@ -29,6 +29,7 @@ import {
   Book,
   Brain
 } from 'lucide-react';
+import { formatClassLevelLabel } from '../types';
 
 export default function WhatsApp() {
   const { user } = useAuth();
@@ -270,7 +271,7 @@ export default function WhatsApp() {
           <option value="">Öğrenci Seçin</option>
           {students.map(student => (
             <option key={student.id} value={student.id}>
-              {student.name} - {student.classLevel}. Sınıf
+              {student.name} — {formatClassLevelLabel(student.classLevel)}
             </option>
           ))}
         </select>

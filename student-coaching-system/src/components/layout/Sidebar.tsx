@@ -77,6 +77,8 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
           { path: '/ai-coach', icon: Brain, label: 'AI Koç' },
           { path: '/webhooks', icon: Webhook, label: 'Webhook Ayarları' },
           { path: '/whatsapp', icon: MessageCircle, label: 'WhatsApp Rapor' },
+          { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
+          { path: '/system-management', icon: Server, label: 'Sistem Yönetimi' },
           { path: '/settings', icon: Settings, label: 'Ayarlar' },
         ];
       case 'coach':
