@@ -1,6 +1,24 @@
 // Türkçe: Uygulama genel durum yönetimi - Supabase Gerçek Veritabanı ile
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { Student, Coach, WeeklyEntry, User, UserRole, TopicPool, TopicProgress, Institution, ExamResult, AICoachSuggestion, Book, ReadingLog, ReadingStats, WrittenExamScore, WrittenExamStats, WrittenExamComment } from '../types';
+import {
+  Student,
+  Coach,
+  WeeklyEntry,
+  User,
+  UserRole,
+  TopicPool,
+  TopicProgress,
+  Institution,
+  ExamResult,
+  AICoachSuggestion,
+  Book,
+  ReadingLog,
+  ReadingStats,
+  WrittenExamScore,
+  WrittenExamStats,
+  WrittenExamComment,
+  ClassLevel
+} from '../types';
 import { db } from '../lib/database';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
@@ -32,6 +50,31 @@ const mergeTopicPools = (base: TopicPool, overrides: TopicPool): TopicPool => {
     };
   });
   return merged;
+};
+
+/** DB listesi ile localStorage birleştir — aynı e-posta için DB öncelikli */
+const mergeStudentsByEmail = (fromDb: Student[], fromLocal: Student[]): Student[] => {
+  const emails = new Set(fromDb.map(s => s.email.toLowerCase()));
+  const out = [...fromDb];
+  for (const s of fromLocal) {
+    if (!emails.has(s.email.toLowerCase())) {
+      out.push(s);
+      emails.add(s.email.toLowerCase());
+    }
+  }
+  return out;
+};
+
+const mergeCoachesByEmail = (fromDb: Coach[], fromLocal: Coach[]): Coach[] => {
+  const emails = new Set(fromDb.map(c => c.email.toLowerCase()));
+  const out = [...fromDb];
+  for (const c of fromLocal) {
+    if (!emails.has(c.email.toLowerCase())) {
+      out.push(c);
+      emails.add(c.email.toLowerCase());
+    }
+  }
+  return out;
 };
 
 // LocalStorage'dan veri yükle
@@ -196,9 +239,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userRole, setUserRole] = useState<UserRole>('admin');
 
-  // Veritabanından yükle - mock data yok, gerçek Supabase verisi
-  const [students, setStudents] = useState<Student[]>([]);
-  const [coaches, setCoaches] = useState<Coach[]>([]);
+  // Veritabanından yükle; ilk boyutta localStorage ile hızlı gösterim (Supabase sonradan birleşir)
+  const [students, setStudents] = useState<Student[]>(() =>
+    loadFromStorage<Student[]>(STORAGE_KEYS.students, [])
+  );
+  const [coaches, setCoaches] = useState<Coach[]>(() =>
+    loadFromStorage<Coach[]>(STORAGE_KEYS.coaches, [])
+  );
   const [weeklyEntries, setWeeklyEntries] = useState<WeeklyEntry[]>([]);
 
   // Kurumlar için state
@@ -252,7 +299,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           name: s.name,
           email: s.email,
           phone: s.phone || undefined,
-          classLevel: s.class_level,
+          classLevel: s.class_level as ClassLevel,
           school: s.school || undefined,
           parentName: s.parent_name || undefined,
           parentPhone: s.parent_phone || undefined,
@@ -260,7 +307,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           institutionId: s.institution_id || undefined,
           createdAt: s.created_at
         }));
-        setStudents(loadedStudents);
+        const localStudents = loadFromStorage<Student[]>(STORAGE_KEYS.students, []);
+        setStudents(mergeStudentsByEmail(loadedStudents, localStudents));
 
         // Load coaches from Supabase
         const dbCoaches = await db.getCoaches(activeInstitutionId || undefined);
@@ -273,7 +321,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           studentIds: c.student_ids || [],
           createdAt: c.created_at
         }));
-        setCoaches(loadedCoaches);
+        const localCoaches = loadFromStorage<Coach[]>(STORAGE_KEYS.coaches, []);
+        setCoaches(mergeCoachesByEmail(loadedCoaches, localCoaches));
 
         // Load weekly entries from Supabase
         const dbEntries = await db.getWeeklyEntries(undefined, activeInstitutionId || undefined);
@@ -349,6 +398,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         console.log('Veritabanından veriler başarıyla yüklendi');
       } catch (error) {
         console.error('Veritabanı yükleme hatası:', error);
+        setStudents(loadFromStorage<Student[]>(STORAGE_KEYS.students, []));
+        setCoaches(loadFromStorage<Coach[]>(STORAGE_KEYS.coaches, []));
+        setWeeklyEntries(loadFromStorage<WeeklyEntry[]>(STORAGE_KEYS.weeklyEntries, []));
       }
     };
 
@@ -402,26 +454,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Öğrenci işlemleri - Supabase database
   const addStudent = async (student: Student) => {
-    const resolvedInstitutionId = student.institutionId || activeInstitutionId || institution?.id || null;
+    const resolvedInstitutionId =
+      student.institutionId ||
+      activeInstitutionId ||
+      institution?.id ||
+      loadFromStorage<string | null>(STORAGE_KEYS.activeInstitutionId, null) ||
+      institutions[0]?.id ||
+      null;
+    const preferredRowId = student.id?.trim() ? student.id.trim() : undefined;
     try {
-      const created = await db.createStudent({
-        name: student.name,
-        email: student.email,
-        phone: student.phone,
-        class_level: student.classLevel,
-        school: student.school,
-        parent_name: student.parentName,
-        parent_phone: student.parentPhone,
-        coach_id: student.coachId || null,
-        institution_id: resolvedInstitutionId
-      });
+      const created = await db.createStudent(
+        {
+          name: student.name,
+          email: student.email,
+          phone: student.phone,
+          class_level: String(student.classLevel),
+          school: student.school ?? null,
+          parent_name: student.parentName ?? null,
+          parent_phone: student.parentPhone ?? null,
+          coach_id: student.coachId || null,
+          institution_id: resolvedInstitutionId
+        },
+        preferredRowId
+      );
       // Convert to Student type and add to state
       const newStudent: Student = {
         id: created.id,
         name: created.name,
         email: created.email,
         phone: created.phone || undefined,
-        classLevel: created.class_level,
+        classLevel: created.class_level as ClassLevel,
         school: created.school || undefined,
         parentName: created.parent_name || undefined,
         parentPhone: created.parent_phone || undefined,
@@ -481,7 +543,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         name: updatedStudent.name,
         email: updatedStudent.email,
         phone: updatedStudent.phone,
-        class_level: updatedStudent.classLevel,
+        class_level:
+          updatedStudent.classLevel !== undefined ? String(updatedStudent.classLevel) : undefined,
         school: updatedStudent.school,
         parent_name: updatedStudent.parentName,
         parent_phone: updatedStudent.parentPhone,
@@ -525,16 +588,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Eğitim Koçu işlemleri - Supabase database
   const addCoach = async (coach: Coach) => {
-    const resolvedInstitutionId = coach.institutionId || activeInstitutionId || institution?.id || null;
+    const resolvedInstitutionId =
+      coach.institutionId ||
+      activeInstitutionId ||
+      institution?.id ||
+      loadFromStorage<string | null>(STORAGE_KEYS.activeInstitutionId, null) ||
+      institutions[0]?.id ||
+      null;
+    const preferredRowId = coach.id?.trim() ? coach.id.trim() : undefined;
     try {
-      const created = await db.createCoach({
-        name: coach.name,
-        email: coach.email,
-        phone: coach.phone,
-        specialties: coach.subjects || [],
-        student_ids: coach.studentIds || [],
-        institution_id: resolvedInstitutionId
-      });
+      const created = await db.createCoach(
+        {
+          name: coach.name,
+          email: coach.email,
+          phone: coach.phone,
+          specialties: coach.subjects || [],
+          student_ids: coach.studentIds || [],
+          institution_id: resolvedInstitutionId
+        },
+        preferredRowId
+      );
       // Convert to Coach type and add to state
       const newCoach: Coach = {
         id: created.id,

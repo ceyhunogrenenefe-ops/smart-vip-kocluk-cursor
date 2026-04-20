@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 
 export default function Coaches() {
-  const { coaches, students, addCoach, updateCoach, deleteCoach } = useApp();
+  const { coaches, students, addCoach, updateCoach, deleteCoach, institution, activeInstitutionId } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingCoach, setEditingCoach] = useState<Coach | null>(null);
@@ -92,7 +92,7 @@ export default function Coaches() {
         password: autoPassword,
         phone: formData.phone,
         subjects: formData.subjects,
-        institutionId: formData.institutionId || undefined,
+        institutionId: formData.institutionId || activeInstitutionId || institution?.id || undefined,
         studentIds: [],
         createdAt: new Date().toISOString()
       };

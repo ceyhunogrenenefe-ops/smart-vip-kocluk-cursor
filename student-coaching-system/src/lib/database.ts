@@ -13,6 +13,9 @@ type ExamResultRow = Database['public']['Tables']['exam_results']['Row'];
 type TopicRow = Database['public']['Tables']['topics']['Row'];
 type TopicProgressRow = Database['public']['Tables']['topic_progress']['Row'];
 
+const LOOKS_LIKE_UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 // Veritabanı Servisi
 class DatabaseService {
   // ========== KULLANICILAR ==========
@@ -120,10 +123,24 @@ class DatabaseService {
     let query = supabase.from('students').select('*').order('created_at', { ascending: false });
 
     if (institutionId) {
-      query = query.eq('institution_id', institutionId);
+      if (LOOKS_LIKE_UUID.test(institutionId)) {
+        query = query.or(`institution_id.eq.${institutionId},institution_id.is.null`);
+      } else {
+        query = query.eq('institution_id', institutionId);
+      }
     }
 
-    const { data, error } = await query;
+    let { data, error } = await query;
+
+    if (error && institutionId && LOOKS_LIKE_UUID.test(institutionId)) {
+      const r2 = await supabase
+        .from('students')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .eq('institution_id', institutionId);
+      data = r2.data;
+      error = r2.error;
+    }
 
     if (error) {
       console.error('Öğrencileri getirme hatası:', error);
@@ -132,9 +149,14 @@ class DatabaseService {
     return data || [];
   }
 
-  // Öğrenci oluştur
-  async createStudent(student: Omit<StudentRow, 'id' | 'created_at' | 'updated_at'>): Promise<StudentRow> {
-    const id = `student-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  // Öğrenci oluştur (preferredId: kullanıcı yönetimi / yerel kimlik ile eşleşme için)
+  async createStudent(
+    student: Omit<StudentRow, 'id' | 'created_at' | 'updated_at'>,
+    preferredId?: string
+  ): Promise<StudentRow> {
+    const id =
+      (preferredId && String(preferredId).trim()) ||
+      `student-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const now = new Date().toISOString();
 
     const { data, error } = await supabase
@@ -188,10 +210,24 @@ class DatabaseService {
     let query = supabase.from('coaches').select('*').order('created_at', { ascending: false });
 
     if (institutionId) {
-      query = query.eq('institution_id', institutionId);
+      if (LOOKS_LIKE_UUID.test(institutionId)) {
+        query = query.or(`institution_id.eq.${institutionId},institution_id.is.null`);
+      } else {
+        query = query.eq('institution_id', institutionId);
+      }
     }
 
-    const { data, error } = await query;
+    let { data, error } = await query;
+
+    if (error && institutionId && LOOKS_LIKE_UUID.test(institutionId)) {
+      const r2 = await supabase
+        .from('coaches')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .eq('institution_id', institutionId);
+      data = r2.data;
+      error = r2.error;
+    }
 
     if (error) {
       console.error('Koçları getirme hatası:', error);
@@ -201,8 +237,13 @@ class DatabaseService {
   }
 
   // Koç oluştur
-  async createCoach(coach: Omit<CoachRow, 'id' | 'created_at' | 'updated_at'>): Promise<CoachRow> {
-    const id = `coach-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  async createCoach(
+    coach: Omit<CoachRow, 'id' | 'created_at' | 'updated_at'>,
+    preferredId?: string
+  ): Promise<CoachRow> {
+    const id =
+      (preferredId && String(preferredId).trim()) ||
+      `coach-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const now = new Date().toISOString();
 
     const { data, error } = await supabase

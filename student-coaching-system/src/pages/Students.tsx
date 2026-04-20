@@ -20,7 +20,16 @@ import {
 } from 'lucide-react';
 
 export default function Students() {
-  const { students, coaches, addStudent, updateStudent, deleteStudent, getStudentStats } = useApp();
+  const {
+    students,
+    coaches,
+    addStudent,
+    updateStudent,
+    deleteStudent,
+    getStudentStats,
+    institution,
+    activeInstitutionId
+  } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterClass, setFilterClass] = useState<ClassLevel | 'all'>('all');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -95,7 +104,7 @@ export default function Students() {
         classLevel: formData.classLevel,
         coachId: formData.coachId || undefined,
         groupName: formData.groupName || undefined,
-        institutionId: formData.institutionId || undefined,
+        institutionId: formData.institutionId || activeInstitutionId || institution?.id || undefined,
         createdAt: new Date().toISOString()
       };
       addStudent(newStudent);

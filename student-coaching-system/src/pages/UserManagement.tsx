@@ -48,7 +48,8 @@ const ROLES: { value: UserRole; label: string; color: string }[] = [
 export default function UserManagement() {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
-  const { addStudent, addCoach, students, coaches } = useApp();
+  const { addStudent, addCoach, students, coaches, institution, activeInstitutionId, deleteStudent, deleteCoach } =
+    useApp();
 
   useEffect(() => {
     if (!currentUser || (currentUser.role !== 'super_admin' && currentUser.role !== 'admin')) {
@@ -234,29 +235,39 @@ export default function UserManagement() {
           setMessage({ type: 'success', text: `${formData.role === 'student' ? 'Öğrenci' : formData.role === 'coach' ? 'Koç' : 'Admin'} başarıyla oluşturuldu!` });
           setUsers(getAllUsers());
 
-          // AppContext'e de ekle (senkronizasyon için) - AuthContext'ten gelen userId'yi kullan
+          const instId = activeInstitutionId || institution?.id;
           const newUserId = result.userId || `user-${Date.now()}`;
-          if (formData.role === 'student') {
-            addStudent({
-              id: newUserId,
-              name: formData.name,
-              email: formData.email,
-              password: formData.password || undefined,
-              phone: formData.phone || '',
-              parentPhone: formData.phone || '',
-              classLevel: 9 as ClassLevel,
-              coachId: undefined,
-              createdAt: new Date().toISOString()
-            });
-          } else if (formData.role === 'coach') {
-            addCoach({
-              id: newUserId,
-              name: formData.name,
-              email: formData.email,
-              phone: formData.phone || '',
-              subjects: [],
-              studentIds: [],
-              createdAt: new Date().toISOString()
+          try {
+            if (formData.role === 'student') {
+              await addStudent({
+                id: newUserId,
+                name: formData.name,
+                email: formData.email,
+                password: formData.password || undefined,
+                phone: formData.phone || '',
+                parentPhone: formData.phone || '',
+                classLevel: 9 as ClassLevel,
+                coachId: undefined,
+                institutionId: instId || undefined,
+                createdAt: new Date().toISOString()
+              });
+            } else if (formData.role === 'coach') {
+              await addCoach({
+                id: newUserId,
+                name: formData.name,
+                email: formData.email,
+                phone: formData.phone || '',
+                subjects: [],
+                studentIds: [],
+                institutionId: instId || undefined,
+                createdAt: new Date().toISOString()
+              });
+            }
+          } catch (syncErr) {
+            console.error('Öğrenci/koç listesi senkron hatası:', syncErr);
+            setMessage({
+              type: 'error',
+              text: 'Kullanıcı oluşturuldu ancak öğrenci/koç listesine eklenirken sorun oluştu. Öğrenci/Koç sayfasından tekrar deneyin.'
             });
           }
 
@@ -284,7 +295,15 @@ export default function UserManagement() {
   const handleDelete = async (userId: string) => {
     if (!confirm('Bu kullanıcıyı silmek istediğinizden emin misiniz?')) return;
 
+    const target = getUserById(userId);
     const result = await deleteUser(userId);
+    if (result.success && target?.email) {
+      const em = target.email.toLowerCase();
+      const st = students.find(s => s.email.toLowerCase() === em);
+      const ch = coaches.find(c => c.email.toLowerCase() === em);
+      if (st) await deleteStudent(st.id);
+      if (ch) await deleteCoach(ch.id);
+    }
     setMessage({ type: result.success ? 'success' : 'error', text: result.message });
     setUsers(getAllUsers());
   };
