@@ -2,6 +2,8 @@
 import React, { useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
+import { resolveStudentRecordId } from '../lib/coachResolve';
+import type { WrittenExamScore } from '../types';
 import { topicPool } from '../data/mockData';
 import {
   GraduationCap,
@@ -38,109 +40,116 @@ import {
   LineChart,
   Line
 } from 'recharts';
+import StudentLiveLessonsPanel from '../components/liveLessons/StudentLiveLessonsPanel';
 
 type TabType = 'daily' | 'exams' | 'analytics' | 'written' | 'books';
 
 export default function StudentDashboard() {
-  const { user } = useAuth();
+  const { user, effectiveUser, linkedStudent, linkedStudentError, linkedStudentLoading } = useAuth();
   const {
-    weeklyEntries, getStudentStats, institution, addWeeklyEntry, students,
-    getReadingStats, books, writtenExamScores,
+    weeklyEntries,
+    getStudentStats,
+    institution,
+    addWeeklyEntry,
+    students,
+    getReadingStats,
+    books,
+    writtenExamScores,
     getWrittenExamSubjectsForStudent,
+    addWrittenExamSubjectForStudent,
+    addWrittenExamScore,
+    getStudentWrittenExamScores,
     writtenExamSubjectsByStudent,
-    calculateSemesterAverage, calculateYearlyAverage, getWrittenExamStats,
-    readingLogs
+    calculateSemesterAverage,
+    calculateYearlyAverage,
+    getWrittenExamStats,
+    readingLogs,
+    examResults
   } = useApp();
+
+  /**
+   * Canonical: API my-student (gerçek öğrenci oturumu).
+   * Taklit (süper admin → öğrenci): JWT hâlâ admin; effectiveUser rolü + studentId / e-posta ile çözülür.
+   */
+  const resolvedStudentId = useMemo(
+    () =>
+      linkedStudent?.id ||
+      resolveStudentRecordId(
+        effectiveUser?.role,
+        effectiveUser?.studentId,
+        effectiveUser?.email,
+        students
+      ) ||
+      undefined,
+    [linkedStudent?.id, effectiveUser?.role, effectiveUser?.studentId, effectiveUser?.email, students]
+  );
 
   // Tab state
   const [activeTab, setActiveTab] = useState<TabType>('daily');
 
-  // Öğrencinin deneme sınavı sonuçları (mock)
-  const examResults = useMemo(() => {
-    return [
-      {
-        id: '1',
-        studentId: user?.studentId || '',
-        examType: 'TYT',
-        examDate: '2024-03-15',
-        totalNet: 28.5,
-        subjects: [
-          { name: 'Türkçe', net: 8.75, correct: 9, wrong: 0, blank: 1 },
-          { name: 'Matematik', net: 7.25, correct: 8, wrong: 1, blank: 1 },
-          { name: 'Sosyal', net: 6.0, correct: 6, wrong: 2, blank: 2 },
-          { name: 'Fen', net: 6.5, correct: 7, wrong: 1, blank: 2 }
-        ]
-      },
-      {
-        id: '2',
-        studentId: user?.studentId || '',
-        examType: 'TYT',
-        examDate: '2024-03-08',
-        totalNet: 25.0,
-        subjects: [
-          { name: 'Türkçe', net: 7.0, correct: 7, wrong: 2, blank: 1 },
-          { name: 'Matematik', net: 6.5, correct: 7, wrong: 2, blank: 1 },
-          { name: 'Sosyal', net: 5.5, correct: 6, wrong: 3, blank: 1 },
-          { name: 'Fen', net: 6.0, correct: 6, wrong: 2, blank: 2 }
-        ]
-      }
-    ];
-  }, [user]);
+  const myExamResults = useMemo(() => {
+    const sid = resolvedStudentId;
+    if (!sid) return [];
+    return examResults
+      .filter((e) => e.studentId === sid)
+      .slice()
+      .sort((a, b) => new Date(b.examDate).getTime() - new Date(a.examDate).getTime());
+  }, [examResults, resolvedStudentId]);
 
   // Öğrencinin kendi kayıtları
   const myEntries = useMemo(() => {
-    if (!user?.studentId) return [];
-    return weeklyEntries.filter(e => e.studentId === user.studentId);
-  }, [user, weeklyEntries]);
+    if (!resolvedStudentId) return [];
+    return weeklyEntries.filter(e => e.studentId === resolvedStudentId);
+  }, [resolvedStudentId, weeklyEntries]);
 
   // Öğrencinin istatistikleri
   const myStats = useMemo(() => {
-    if (!user?.studentId) return null;
-    return getStudentStats(user.studentId);
-  }, [user, getStudentStats]);
+    if (!resolvedStudentId) return null;
+    return getStudentStats(resolvedStudentId);
+  }, [resolvedStudentId, getStudentStats]);
 
   // Öğrencinin okuma istatistikleri
   const myReadingStats = useMemo(() => {
-    if (!user?.studentId) return null;
-    return getReadingStats(user.studentId);
-  }, [user, weeklyEntries, getReadingStats]);
+    if (!resolvedStudentId) return null;
+    return getReadingStats(resolvedStudentId);
+  }, [resolvedStudentId, weeklyEntries, getReadingStats]);
 
   // Öğrencinin kitapları
   const myBooks = useMemo(() => {
-    if (!user?.studentId) return [];
-    return books.filter(b => b.studentId === user.studentId);
-  }, [user, books]);
+    if (!resolvedStudentId) return [];
+    return books.filter(b => b.studentId === resolvedStudentId);
+  }, [resolvedStudentId, books]);
 
   // Öğrencinin okuma kayıtları
   const studentReadingLogs = useMemo(() => {
-    if (!user?.studentId) return [];
-    return readingLogs.filter(l => l.studentId === user.studentId);
-  }, [user, readingLogs]);
+    if (!resolvedStudentId) return [];
+    return readingLogs.filter(l => l.studentId === resolvedStudentId);
+  }, [resolvedStudentId, readingLogs]);
 
   // Öğrencinin yazılı takip istatistikleri
   const myWrittenExamStats = useMemo(() => {
-    if (!user?.studentId) return null;
-    return getWrittenExamStats(user.studentId);
-  }, [user, writtenExamScores, getWrittenExamStats]);
+    if (!resolvedStudentId) return null;
+    return getWrittenExamStats(resolvedStudentId);
+  }, [resolvedStudentId, writtenExamScores, getWrittenExamStats]);
 
   // Öğrencinin yazılı notları (ders bazlı)
   const myWrittenScores = useMemo(() => {
-    if (!user?.studentId) return [];
-    const subs = getWrittenExamSubjectsForStudent(user.studentId);
+    if (!resolvedStudentId) return [];
+    const subs = getWrittenExamSubjectsForStudent(resolvedStudentId);
     return subs.map(subject => ({
       subject,
-      sem1Avg: calculateSemesterAverage(user.studentId, subject, 1),
-      sem2Avg: calculateSemesterAverage(user.studentId, subject, 2),
-      yearAvg: calculateYearlyAverage(user.studentId, subject)
+      sem1Avg: calculateSemesterAverage(resolvedStudentId, subject, 1),
+      sem2Avg: calculateSemesterAverage(resolvedStudentId, subject, 2),
+      yearAvg: calculateYearlyAverage(resolvedStudentId, subject)
     })).filter(s => s.sem1Avg > 0 || s.sem2Avg > 0);
-  }, [user, writtenExamScores, getWrittenExamSubjectsForStudent, writtenExamSubjectsByStudent, calculateSemesterAverage, calculateYearlyAverage]);
+  }, [resolvedStudentId, writtenExamScores, getWrittenExamSubjectsForStudent, writtenExamSubjectsByStudent, calculateSemesterAverage, calculateYearlyAverage]);
 
   // Öğrencinin sınıfı
   const myClassLevel = useMemo(() => {
-    if (!user?.studentId) return 9;
-    const student = students.find(s => s.id === user.studentId);
+    if (!resolvedStudentId) return 9;
+    const student = students.find(s => s.id === resolvedStudentId);
     return student?.classLevel || 9;
-  }, [user, students]);
+  }, [resolvedStudentId, students]);
 
   // Ders bazlı başarı
   const subjectStats = useMemo(() => {
@@ -202,9 +211,31 @@ export default function StudentDashboard() {
     pagesRead: 0
   });
   const [formError, setFormError] = useState('');
+  const [writtenFormError, setWrittenFormError] = useState('');
+  const [writtenForm, setWrittenForm] = useState({
+    subject: '',
+    newSubjectHint: '',
+    semester: 1 as 1 | 2,
+    examType: '1. Yazılı' as '1. Yazılı' | '2. Yazılı' | 'Final',
+    score: '',
+    date: new Date().toISOString().split('T')[0],
+    notes: ''
+  });
 
   // Ders ve konu seçenekleri - Her ders için sadece o derse ait konular
   const subjects = Object.keys(topicPool);
+
+  const writtenSubjectOptions = useMemo(() => {
+    if (!resolvedStudentId) return [] as string[];
+    return getWrittenExamSubjectsForStudent(resolvedStudentId);
+  }, [getWrittenExamSubjectsForStudent, resolvedStudentId, writtenExamSubjectsByStudent]);
+
+  const myWrittenRowList = useMemo(() => {
+    if (!resolvedStudentId) return [] as WrittenExamScore[];
+    return getStudentWrittenExamScores(resolvedStudentId)
+      .slice()
+      .sort((a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime());
+  }, [getStudentWrittenExamScores, resolvedStudentId, writtenExamScores]);
 
   // Ders seçildiğinde sadece o derse ait konuları getir
   const availableTopics = useMemo(() => {
@@ -244,6 +275,15 @@ export default function StudentDashboard() {
     e.preventDefault();
     setFormError('');
 
+    const sid = resolvedStudentId;
+    if (!sid) {
+      setFormError(
+        linkedStudentError ||
+          'Hesabınız bir öğrenci kartına bağlı değil. Yöneticinize veya koçunuza başvurun.'
+      );
+      return;
+    }
+
     if (!formData.subject) {
       setFormError('Lütfen ders seçiniz.');
       return;
@@ -265,7 +305,7 @@ export default function StudentDashboard() {
 
     const newEntry = {
       id: Date.now().toString(),
-      studentId: user!.studentId!,
+      studentId: sid,
       date: formData.date,
       subject: formData.subject,
       topic: formData.topic,
@@ -294,10 +334,70 @@ export default function StudentDashboard() {
 
   const netCount = formData.correctAnswers - (formData.wrongAnswers * 0.25);
 
+  const submitWrittenExam = (e: React.FormEvent) => {
+    e.preventDefault();
+    setWrittenFormError('');
+    const sid = resolvedStudentId;
+    if (!sid) {
+      setWrittenFormError(
+        linkedStudentError ||
+          'Hesabınız bir öğrenci kartına bağlı değil. Yöneticinize veya koçunuza başvurun.'
+      );
+      return;
+    }
+    let subject = writtenForm.subject.trim();
+    if (!subject && writtenForm.newSubjectHint.trim()) {
+      subject = writtenForm.newSubjectHint.trim();
+      addWrittenExamSubjectForStudent(sid, subject);
+    }
+    if (!subject) {
+      setWrittenFormError('Ders seçin veya yeni ders adı yazın.');
+      return;
+    }
+    const scoreNum = parseInt(writtenForm.score, 10);
+    if (Number.isNaN(scoreNum) || scoreNum < 0 || scoreNum > 100) {
+      setWrittenFormError('Not 0–100 arasında olmalıdır.');
+      return;
+    }
+    const examNum: 1 | 2 | 3 =
+      writtenForm.examType === 'Final' ? 3 : writtenForm.examType === '1. Yazılı' ? 1 : 2;
+    addWrittenExamScore({
+      id: `we-student-${Date.now()}`,
+      studentId: sid,
+      subject,
+      semester: writtenForm.semester,
+      examType: writtenForm.examType,
+      examNumber: examNum,
+      score: scoreNum,
+      date: writtenForm.date,
+      notes: writtenForm.notes.trim() || undefined,
+      createdAt: new Date().toISOString()
+    });
+    setWrittenForm({
+      subject: '',
+      newSubjectHint: '',
+      semester: writtenForm.semester,
+      examType: '1. Yazılı',
+      score: '',
+      date: new Date().toISOString().split('T')[0],
+      notes: ''
+    });
+  };
+
   if (!user) return null;
 
   return (
     <div className="space-y-6">
+      {user.role === 'student' && linkedStudentLoading && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          Öğrenci kartınız yükleniyor…
+        </div>
+      )}
+      {user.role === 'student' && linkedStudentError && !linkedStudent && !linkedStudentLoading && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          {linkedStudentError}
+        </div>
+      )}
       {/* Hoşgeldin */}
       <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-2xl p-6 text-white">
         <div className="flex items-center justify-between">
@@ -317,6 +417,8 @@ export default function StudentDashboard() {
         </div>
       </div>
 
+      <StudentLiveLessonsPanel />
+
       {/* 📚 Kitap Okuma Durumum */}
       {myReadingStats && myReadingStats.totalMinutes > 0 && (
         <div className="bg-gradient-to-r from-green-600 to-emerald-600 rounded-2xl p-6 text-white">
@@ -328,9 +430,9 @@ export default function StudentDashboard() {
             <div className="bg-white/10 rounded-xl p-4">
               <div className="flex items-center gap-2 mb-1">
                 <Timer className="w-4 h-4 text-green-200" />
-                <span className="text-sm text-green-100">Toplam Okuma</span>
+                <span className="text-sm text-green-100">Toplam Sayfa</span>
               </div>
-              <p className="text-2xl font-bold">{Math.round(myReadingStats.totalMinutes / 60)} saat</p>
+              <p className="text-2xl font-bold">{myReadingStats.totalMinutes} sayfa</p>
             </div>
             <div className="bg-white/10 rounded-xl p-4">
               <div className="flex items-center gap-2 mb-1">
@@ -342,9 +444,9 @@ export default function StudentDashboard() {
             <div className="bg-white/10 rounded-xl p-4">
               <div className="flex items-center gap-2 mb-1">
                 <BookOpen className="w-4 h-4 text-blue-200" />
-                <span className="text-sm text-green-100">Günlük Ort.</span>
+                <span className="text-sm text-green-100">Günlük Ort. (30 gün)</span>
               </div>
-              <p className="text-2xl font-bold">{myReadingStats.averageDailyMinutes} dk</p>
+              <p className="text-2xl font-bold">{myReadingStats.averageDailyMinutes} sayfa/gün</p>
             </div>
             <div className="bg-white/10 rounded-xl p-4">
               <div className="flex items-center gap-2 mb-1">
@@ -698,19 +800,21 @@ export default function StudentDashboard() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="bg-blue-50 rounded-xl p-4 text-center">
                   <ClipboardList className="w-8 h-8 text-blue-600 mx-auto mb-2" />
-                  <p className="text-3xl font-bold text-blue-600">{examResults.length}</p>
+                  <p className="text-3xl font-bold text-blue-600">{myExamResults.length}</p>
                   <p className="text-sm text-gray-500">Toplam Deneme</p>
                 </div>
                 <div className="bg-green-50 rounded-xl p-4 text-center">
                   <TrendingUp className="w-8 h-8 text-green-600 mx-auto mb-2" />
-                  <p className="text-3xl font-bold text-green-600">{examResults[0]?.totalNet || 0}</p>
+                  <p className="text-3xl font-bold text-green-600">{myExamResults[0]?.totalNet ?? 0}</p>
                   <p className="text-sm text-gray-500">Son Net</p>
                 </div>
                 <div className="bg-purple-50 rounded-xl p-4 text-center">
                   <Award className="w-8 h-8 text-purple-600 mx-auto mb-2" />
                   <p className="text-3xl font-bold text-purple-600">
-                    {examResults.length > 0
-                      ? Math.round(examResults.reduce((sum, r) => sum + r.totalNet, 0) / examResults.length * 10) / 10
+                    {myExamResults.length > 0
+                      ? Math.round(
+                          (myExamResults.reduce((sum, r) => sum + r.totalNet, 0) / myExamResults.length) * 10
+                        ) / 10
                       : 0}
                   </p>
                   <p className="text-sm text-gray-500">Ortalama</p>
@@ -718,21 +822,21 @@ export default function StudentDashboard() {
                 <div className="bg-orange-50 rounded-xl p-4 text-center">
                   <Target className="w-8 h-8 text-orange-600 mx-auto mb-2" />
                   <p className="text-3xl font-bold text-orange-600">
-                    {Math.max(...examResults.map(r => r.totalNet), 0)}
+                    {myExamResults.length ? Math.max(...myExamResults.map((r) => r.totalNet)) : 0}
                   </p>
                   <p className="text-sm text-gray-500">En İyi</p>
                 </div>
               </div>
 
               <div className="space-y-4">
-                {examResults.length === 0 ? (
+                {myExamResults.length === 0 ? (
                   <div className="text-center py-12 bg-gray-50 rounded-xl">
                     <ClipboardList className="w-12 h-12 text-gray-300 mx-auto mb-4" />
                     <p className="text-gray-500">Henüz deneme sınavı sonucu bulunmuyor.</p>
                   </div>
                 ) : (
-                  examResults.map((result, idx) => {
-                    const prevResult = examResults[idx + 1];
+                  myExamResults.map((result, idx) => {
+                    const prevResult = myExamResults[idx + 1];
                     const netChange = prevResult ? result.totalNet - prevResult.totalNet : 0;
 
                     return (
@@ -740,11 +844,15 @@ export default function StudentDashboard() {
                         <div className="flex items-start justify-between mb-4">
                           <div>
                             <div className="flex items-center gap-2 mb-2">
-                              <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                result.examType === 'TYT' ? 'bg-blue-100 text-blue-700' :
-                                result.examType === 'AYT' ? 'bg-purple-100 text-purple-700' :
-                                'bg-green-100 text-green-700'
-                              }`}>
+                              <span
+                                className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                  result.examType === 'TYT'
+                                    ? 'bg-blue-100 text-blue-700'
+                                    : result.examType === 'AYT'
+                                      ? 'bg-purple-100 text-purple-700'
+                                      : 'bg-green-100 text-green-700'
+                                }`}
+                              >
                                 {result.examType}
                               </span>
                               <span className="text-sm text-gray-500 flex items-center gap-1">
@@ -794,7 +902,7 @@ export default function StudentDashboard() {
 
               <div className="flex justify-end gap-3">
                 <a
-                  href={`https://wa.me/?text=${encodeURIComponent(`📊 *Deneme Sınavı Sonuçlarım*\n\nSonuç: ${examResults[0]?.totalNet || 0} net\nTür: ${examResults[0]?.examType || 'N/A'}\n\n📅 Tarih: ${new Date(examResults[0]?.examDate || '').toLocaleDateString('tr-TR')}`)}`}
+                  href={`https://wa.me/?text=${encodeURIComponent(`📊 *Deneme Sınavı Sonuçlarım*\n\nSonuç: ${myExamResults[0]?.totalNet ?? 0} net\nTür: ${myExamResults[0]?.examType ?? '—'}\n\n📅 Tarih: ${myExamResults[0]?.examDate ? new Date(myExamResults[0].examDate).toLocaleDateString('tr-TR') : '—'}`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
@@ -977,6 +1085,151 @@ export default function StudentDashboard() {
                 </div>
               </div>
 
+              {/* Öğrenci yazılı girişi */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                <h3 className="text-md font-semibold text-slate-800 mb-3 flex items-center gap-2">
+                  <Plus className="w-5 h-5 text-blue-600" />
+                  Yazılı notu ekle
+                </h3>
+                {!resolvedStudentId ? (
+                  <p className="text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-lg p-3">
+                    Öğrenci kartınız kullanıcı e‑postanızla eşleşmiyorsa yazılı ekleyemezsiniz; koçunuzdan
+                    güncellenmesini isteyin veya çıkış yapıp yeniden giriş yapın.
+                  </p>
+                ) : (
+                  <form onSubmit={submitWrittenExam} className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Ders (liste)</label>
+                        <select
+                          value={writtenForm.subject}
+                          onChange={(e) => setWrittenForm((p) => ({ ...p, subject: e.target.value }))}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg"
+                        >
+                          <option value="">Seç veya altta yeni yaz</option>
+                          {writtenSubjectOptions.map((s) => (
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Yeni ders adı (opsiyonel)
+                        </label>
+                        <input
+                          type="text"
+                          value={writtenForm.newSubjectHint}
+                          onChange={(e) =>
+                            setWrittenForm((p) => ({ ...p, newSubjectHint: e.target.value }))
+                          }
+                          placeholder="Listede yoksa buraya yazın"
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Dönem</label>
+                        <select
+                          value={writtenForm.semester}
+                          onChange={(e) =>
+                            setWrittenForm((p) => ({
+                              ...p,
+                              semester: Number(e.target.value) === 2 ? 2 : 1
+                            }))
+                          }
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                        >
+                          <option value={1}>1. dönem</option>
+                          <option value={2}>2. dönem</option>
+                        </select>
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Sınav</label>
+                        <select
+                          value={writtenForm.examType}
+                          onChange={(e) =>
+                            setWrittenForm((p) => ({
+                              ...p,
+                              examType: e.target.value as '1. Yazılı' | '2. Yazılı' | 'Final'
+                            }))
+                          }
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                        >
+                          <option value="1. Yazılı">1. yazılı</option>
+                          <option value="2. Yazılı">2. yazılı</option>
+                          <option value="Final">Final</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Not (0–100)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={writtenForm.score}
+                          onChange={(e) => setWrittenForm((p) => ({ ...p, score: e.target.value }))}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Tarih</label>
+                        <input
+                          type="date"
+                          value={writtenForm.date}
+                          max={new Date().toISOString().split('T')[0]}
+                          onChange={(e) => setWrittenForm((p) => ({ ...p, date: e.target.value }))}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Açıklama (opsiyonel)</label>
+                        <input
+                          type="text"
+                          value={writtenForm.notes}
+                          onChange={(e) => setWrittenForm((p) => ({ ...p, notes: e.target.value }))}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                          placeholder="Opsiyonel"
+                        />
+                      </div>
+                    </div>
+                    {writtenFormError ? (
+                      <p className="text-sm text-red-600 flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                        {writtenFormError}
+                      </p>
+                    ) : null}
+                    <button
+                      type="submit"
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
+                    >
+                      <Save className="w-4 h-4" />
+                      Kaydet
+                    </button>
+                  </form>
+                )}
+              </div>
+
+              {resolvedStudentId && myWrittenRowList.length > 0 ? (
+                <div className="bg-slate-50 rounded-xl border border-slate-100 p-4">
+                  <h4 className="text-sm font-semibold text-slate-700 mb-2">Kayıtlı yazılılarım</h4>
+                  <ul className="space-y-1 text-sm text-slate-600 max-h-40 overflow-y-auto">
+                    {myWrittenRowList.slice(0, 12).map((w) => (
+                      <li key={w.id} className="flex justify-between gap-2 border-b border-slate-100 pb-1">
+                        <span>
+                          {w.subject} · {w.semester}. dönem · {w.examType}
+                        </span>
+                        <span className="font-semibold text-slate-800">{w.score}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
               {/* Ders Bazlı Yazılı Notları */}
               {myWrittenScores.length > 0 ? (
                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
@@ -1077,9 +1330,9 @@ export default function StudentDashboard() {
                     <div className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl shadow-sm p-4 text-white">
                       <div className="flex items-center gap-2 mb-2">
                         <Clock className="w-5 h-5" />
-                        <span className="text-sm opacity-80">Toplam Saat</span>
+                        <span className="text-sm opacity-80">Toplam Sayfa</span>
                       </div>
-                      <p className="text-2xl font-bold">{Math.round(myReadingStats.totalMinutes / 60)} saat</p>
+                      <p className="text-2xl font-bold">{myReadingStats.totalMinutes} sayfa</p>
                     </div>
                     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
                       <div className="flex items-center gap-2 mb-2">
@@ -1091,9 +1344,9 @@ export default function StudentDashboard() {
                     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
                       <div className="flex items-center gap-2 mb-2">
                         <TrendingUp className="w-5 h-5 text-blue-500" />
-                        <span className="text-sm text-gray-500">Günlük Ort.</span>
+                        <span className="text-sm text-gray-500">Günlük Ort. (30 gün)</span>
                       </div>
-                      <p className="text-2xl font-bold text-slate-800">{myReadingStats.averageDailyMinutes} dk</p>
+                      <p className="text-2xl font-bold text-slate-800">{myReadingStats.averageDailyMinutes} sayfa/gün</p>
                     </div>
                     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
                       <div className="flex items-center gap-2 mb-2">

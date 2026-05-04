@@ -1,13 +1,17 @@
 // Türkçe: Analiz Paneli Sayfası
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import { formatClassLevelLabel } from '../types';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 import {
   BarChart3,
   TrendingUp,
   Target,
   Award,
   Clock,
+  ClipboardList,
   BookOpen,
   Users,
   ChevronDown,
@@ -17,7 +21,9 @@ import {
   BookMarked,
   Flame,
   Timer,
-  FileText
+  FileText,
+  MessageCircle,
+  Download
 } from 'lucide-react';
 import {
   BarChart,
@@ -40,20 +46,114 @@ import {
 } from 'recharts';
 
 export default function Analytics() {
+  const { effectiveUser } = useAuth();
   const {
-    students, weeklyEntries, getStudentStats, coaches, getReadingStats,
-    writtenExamScores, getWrittenExamSubjectsForStudent, writtenExamSubjectsByStudent, getWrittenExamStats
+    students, weeklyEntries, topicProgress, getStudentStats, coaches, getReadingStats,
+    writtenExamScores, getWrittenExamSubjectsForStudent, writtenExamSubjectsByStudent, getWrittenExamStats,
+    getStudentExamResults
   } = useApp();
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
-  const [timeRange, setTimeRange] = useState<'week' | 'month' | 'all'>('week');
+  const [timeRange, setTimeRange] = useState<'7d' | '15d' | '30d' | 'all'>('7d');
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const reportRef = useRef<HTMLDivElement | null>(null);
 
   const selectedStudent = students.find(s => s.id === selectedStudentId);
+  const rangeDays = timeRange === '7d' ? 7 : timeRange === '15d' ? 15 : timeRange === '30d' ? 30 : null;
+
+  const applyRangeFilter = (entries: typeof weeklyEntries, range: '7d' | '15d' | '30d' | 'all') => {
+    const days = range === '7d' ? 7 : range === '15d' ? 15 : range === '30d' ? 30 : null;
+    if (!days) return entries;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - (days - 1));
+    cutoff.setHours(0, 0, 0, 0);
+    return entries.filter((entry) => new Date(entry.date) >= cutoff);
+  };
+
+  const scopedEntries = useMemo(() => {
+    const base = selectedStudentId
+      ? weeklyEntries.filter((entry) => entry.studentId === selectedStudentId)
+      : weeklyEntries;
+    return applyRangeFilter(base, timeRange);
+  }, [selectedStudentId, weeklyEntries, timeRange]);
+
+  const filterByTimeRange = <T,>(
+    items: T[],
+    getDate: (item: T) => string
+  ): T[] => {
+    if (timeRange === 'all') return items;
+    const days = timeRange === '7d' ? 7 : timeRange === '15d' ? 15 : timeRange === '30d' ? 30 : null;
+    if (!days) return items;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - (days - 1));
+    cutoff.setHours(0, 0, 0, 0);
+    return items.filter((it) => {
+      const t = new Date(getDate(it)).getTime();
+      if (Number.isNaN(t)) return false;
+      return t >= cutoff.getTime();
+    });
+  };
+
+  const scopedExamResults = useMemo(() => {
+    if (!selectedStudentId) return [];
+    const base = getStudentExamResults(selectedStudentId);
+    return filterByTimeRange(base, (e) => e.examDate);
+  }, [selectedStudentId, timeRange, getStudentExamResults]);
+
+  const scopedWrittenScores = useMemo(() => {
+    if (!selectedStudentId) return [];
+    const base = writtenExamScores.filter((s) => s.studentId === selectedStudentId);
+    return filterByTimeRange(base, (s) => s.date);
+  }, [selectedStudentId, timeRange, writtenExamScores]);
+
+  const scopedCompletedTopics = useMemo(() => {
+    if (!selectedStudentId) return [];
+    const base = topicProgress.filter((t) => t.studentId === selectedStudentId);
+    return filterByTimeRange(base, (t) => t.completedAt).sort(
+      (a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime()
+    );
+  }, [selectedStudentId, timeRange, topicProgress]);
+
+  const latestExam = scopedExamResults[0] || null;
+  const latestExamWeakSubjects = useMemo(() => {
+    if (!latestExam) return [];
+    return latestExam.subjects
+      .slice()
+      .sort((a, b) => a.net - b.net)
+      .slice(0, 3);
+  }, [latestExam]);
+
+  const examTrend = useMemo(() => {
+    if (scopedExamResults.length < 2) return 0;
+    return scopedExamResults[0].totalNet - scopedExamResults[1].totalNet;
+  }, [scopedExamResults]);
+
+  const recentExamResults = useMemo(() => {
+    return scopedExamResults.slice(0, 6);
+  }, [scopedExamResults]);
+
+  const recentWrittenScores = useMemo(() => {
+    const sorted = scopedWrittenScores
+      .slice()
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return sorted.slice(0, 12);
+  }, [scopedWrittenScores]);
+
+  const computeStatsFromEntries = (entries: typeof weeklyEntries) => {
+    const totalTarget = entries.reduce((sum, e) => sum + e.targetQuestions, 0);
+    const totalSolved = entries.reduce((sum, e) => sum + e.solvedQuestions, 0);
+    const totalCorrect = entries.reduce((sum, e) => sum + e.correctAnswers, 0);
+    const totalWrong = entries.reduce((sum, e) => sum + e.wrongAnswers, 0);
+    const totalBlank = entries.reduce((sum, e) => sum + e.blankAnswers, 0);
+    const realizationRate = totalTarget > 0 ? Math.round((totalSolved / totalTarget) * 100) : 0;
+    const successRate = totalSolved > 0 ? Math.round((totalCorrect / totalSolved) * 100) : 0;
+    return { totalTarget, totalSolved, totalCorrect, totalWrong, totalBlank, realizationRate, successRate };
+  };
 
   // Öğrenci istatistikleri
   const studentStats = useMemo(() => {
     if (!selectedStudentId) return null;
-    return getStudentStats(selectedStudentId);
-  }, [selectedStudentId, weeklyEntries]);
+    return computeStatsFromEntries(scopedEntries);
+  }, [selectedStudentId, scopedEntries]);
 
   // Okuma istatistikleri
   const readingStats = useMemo(() => {
@@ -91,11 +191,7 @@ export default function Analytics() {
 
   // Ders bazlı başarı analizi
   const subjectAnalysis = useMemo(() => {
-    const entries = selectedStudentId
-      ? weeklyEntries.filter(e => e.studentId === selectedStudentId)
-      : weeklyEntries;
-
-    const subjectStats = entries.reduce((acc, entry) => {
+    const subjectStats = scopedEntries.reduce((acc, entry) => {
       if (!acc[entry.subject]) {
         acc[entry.subject] = {
           correct: 0,
@@ -125,10 +221,38 @@ export default function Analytics() {
       boş: stats.blank,
       entry: stats.entries
     })).sort((a, b) => b.başarı - a.başarı);
-  }, [selectedStudentId, weeklyEntries]);
+  }, [scopedEntries]);
 
   // En zayıf dersler
   const weakSubjects = subjectAnalysis.slice(-3);
+
+  const yosAnalytics = useMemo(() => {
+    if (!selectedStudent || selectedStudent.classLevel !== 'YOS') return null;
+    const byKey = {
+      matematik: { solved: 0, correct: 0 },
+      geometri: { solved: 0, correct: 0 },
+      iq: { solved: 0, correct: 0 }
+    };
+    scopedEntries.forEach((e) => {
+      const s = `${e.subject} ${e.topic}`.toLowerCase();
+      if (s.includes('matematik')) {
+        byKey.matematik.solved += e.solvedQuestions;
+        byKey.matematik.correct += e.correctAnswers;
+      } else if (s.includes('geometri')) {
+        byKey.geometri.solved += e.solvedQuestions;
+        byKey.geometri.correct += e.correctAnswers;
+      } else if (s.includes('iq') || s.includes('zeka') || s.includes('mantik') || s.includes('mantık')) {
+        byKey.iq.solved += e.solvedQuestions;
+        byKey.iq.correct += e.correctAnswers;
+      }
+    });
+    const toRate = (x: { solved: number; correct: number }) => (x.solved > 0 ? Math.round((x.correct / x.solved) * 100) : 0);
+    return {
+      matematik: toRate(byKey.matematik),
+      geometri: toRate(byKey.geometri),
+      iq: toRate(byKey.iq)
+    };
+  }, [selectedStudent, scopedEntries]);
 
   // Radar chart verisi
   const radarData = subjectAnalysis.map(s => ({
@@ -142,23 +266,24 @@ export default function Analytics() {
     return students
       .map(student => ({
         ...student,
-        stats: getStudentStats(student.id)
+        stats: computeStatsFromEntries(
+          applyRangeFilter(weeklyEntries.filter((entry) => entry.studentId === student.id), timeRange)
+        )
       }))
       .filter(s => s.stats.totalSolved > 0)
       .sort((a, b) => b.stats.successRate - a.stats.successRate);
-  }, [students, weeklyEntries]);
+  }, [students, weeklyEntries, timeRange]);
 
   // Haftalık trend
-  const last7Days = Array.from({ length: 7 }, (_, i) => {
+  const trendDayCount = rangeDays ?? 30;
+  const trendDays = Array.from({ length: trendDayCount }, (_, i) => {
     const date = new Date();
-    date.setDate(date.getDate() - (6 - i));
+    date.setDate(date.getDate() - (trendDayCount - 1 - i));
     return date.toISOString().split('T')[0];
   });
 
-  const dailyTrend = last7Days.map(date => {
-    const dayEntries = selectedStudentId
-      ? weeklyEntries.filter(e => e.studentId === selectedStudentId && e.date === date)
-      : weeklyEntries.filter(e => e.date === date);
+  const dailyTrend = trendDays.map(date => {
+    const dayEntries = scopedEntries.filter(e => e.date === date);
 
     return {
       tarih: new Date(date).toLocaleDateString('tr-TR', { weekday: 'short', day: 'numeric' }),
@@ -175,10 +300,8 @@ export default function Analytics() {
   });
 
   // Okuma günlük trend
-  const dailyReadingTrend = last7Days.map(date => {
-    const dayEntries = selectedStudentId
-      ? weeklyEntries.filter(e => e.studentId === selectedStudentId && e.date === date && e.readingMinutes && e.readingMinutes > 0)
-      : weeklyEntries.filter(e => e.date === date && e.readingMinutes && e.readingMinutes > 0);
+  const dailyReadingTrend = trendDays.map(date => {
+    const dayEntries = scopedEntries.filter(e => e.date === date && e.readingMinutes && e.readingMinutes > 0);
 
     return {
       tarih: new Date(date).toLocaleDateString('tr-TR', { weekday: 'short', day: 'numeric' }),
@@ -186,8 +309,116 @@ export default function Analytics() {
     };
   });
 
-  // Toplam okuma süresi (tüm öğrenciler)
-  const totalReadingMinutes = weeklyEntries.reduce((sum, e) => sum + (e.readingMinutes || 0), 0);
+  // Toplam okuma (sayfa; coach görünümünde scoped öğrenciler)
+  const totalReadingPages = scopedEntries.reduce((sum, e) => sum + (e.readingMinutes || 0), 0);
+
+  const rangeLabel = timeRange === '7d' ? '7 Gün' : timeRange === '15d' ? '15 Gün' : timeRange === '30d' ? '1 Ay' : 'Tüm Veri';
+
+  const shareRanges: { key: '7d' | '15d' | '30d' | 'all'; label: string }[] = [
+    { key: '7d', label: '7 Gün' },
+    { key: '15d', label: '15 Gün' },
+    { key: '30d', label: '1 Ay' },
+    { key: 'all', label: 'Tüm Veri' }
+  ];
+
+  const shareWithParent = (range: '7d' | '15d' | '30d' | 'all') => {
+    if (!selectedStudent) return;
+    const parentPhone = (selectedStudent.parentPhone || '').replace(/\D/g, '');
+    if (!parentPhone) {
+      alert('Bu öğrenci için veli telefonu tanımlı değil.');
+      return;
+    }
+
+    const studentEntries = applyRangeFilter(
+      weeklyEntries.filter((entry) => entry.studentId === selectedStudent.id),
+      range
+    );
+    const s = computeStatsFromEntries(studentEntries);
+    const periodLabel = range === '7d' ? 'Son 7 Gün' : range === '15d' ? 'Son 15 Gün' : range === '30d' ? 'Son 1 Ay' : 'Tüm Veri';
+    const text =
+      `Merhaba, ${selectedStudent.name} icin ${periodLabel} analiz ozetini paylasiyorum.%0A` +
+      `Toplam hedef: ${s.totalTarget}%0A` +
+      `Toplam cozulen: ${s.totalSolved}%0A` +
+      `Dogru: ${s.totalCorrect} | Yanlis: ${s.totalWrong} | Bos: ${s.totalBlank}%0A` +
+      `Gerceklesme: %${s.realizationRate} | Basari: %${s.successRate}`;
+
+    window.open(`https://wa.me/${parentPhone}?text=${text}`, '_blank');
+  };
+
+  const generateAnalyticsPdf = async () => {
+    if (!reportRef.current) return;
+    if (!selectedStudentId) {
+      alert('Lutfen once ogrenci secin, sonra PDF olusturun.');
+      return;
+    }
+
+    setIsGeneratingPdf(true);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const canvas = await html2canvas(reportRef.current, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff'
+      });
+
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const marginX = 8;
+      const topY = 20;
+      const bottomY = 10;
+      const contentWidth = pageWidth - marginX * 2;
+      const printableHeight = pageHeight - topY - bottomY;
+      const pxPerMm = canvas.width / contentWidth;
+      const pageHeightPx = Math.floor(printableHeight * pxPerMm);
+
+      const studentName = (selectedStudent?.name || 'Tum_Ogrenciler').replace(/\s+/g, '_');
+      const datePart = new Date().toISOString().split('T')[0];
+
+      let renderedHeight = 0;
+      let pageIndex = 0;
+      while (renderedHeight < canvas.height) {
+        const sliceHeight = Math.min(pageHeightPx, canvas.height - renderedHeight);
+        const pageCanvas = document.createElement('canvas');
+        pageCanvas.width = canvas.width;
+        pageCanvas.height = sliceHeight;
+        const ctx = pageCanvas.getContext('2d');
+        if (!ctx) break;
+        ctx.drawImage(
+          canvas,
+          0,
+          renderedHeight,
+          canvas.width,
+          sliceHeight,
+          0,
+          0,
+          canvas.width,
+          sliceHeight
+        );
+
+        if (pageIndex > 0) pdf.addPage();
+        const sliceHeightMm = sliceHeight / pxPerMm;
+        pdf.addImage(pageCanvas.toDataURL('image/png'), 'PNG', marginX, pageIndex === 0 ? topY : 8, contentWidth, sliceHeightMm);
+
+        renderedHeight += sliceHeight;
+        pageIndex += 1;
+      }
+
+      for (let i = 1; i <= pdf.getNumberOfPages(); i += 1) {
+        pdf.setPage(i);
+        pdf.setFontSize(8);
+        pdf.text(`${i}/${pdf.getNumberOfPages()}`, pageWidth - 15, pageHeight - 4);
+      }
+
+      pdf.save(`Koc_Analiz_${studentName}_${datePart}.pdf`);
+    } catch (error) {
+      console.error('Analiz PDF olusturma hatasi:', error);
+      alert('PDF olusturulurken bir hata olustu.');
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
 
   // Hedef vs Gerçekleşen
   const targetVsActual = subjectAnalysis.map(s => ({
@@ -238,16 +469,50 @@ export default function Analytics() {
 
           <select
             value={timeRange}
-            onChange={(e) => setTimeRange(e.target.value as 'week' | 'month' | 'all')}
+            onChange={(e) => setTimeRange(e.target.value as '7d' | '15d' | '30d' | 'all')}
             className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
           >
-            <option value="week">Son 7 Gün</option>
-            <option value="month">Son 30 Gün</option>
+            <option value="7d">Son 7 Gün</option>
+            <option value="15d">Son 15 Gün</option>
+            <option value="30d">Son 30 Gün</option>
             <option value="all">Tüm Zamanlar</option>
           </select>
+          {effectiveUser?.role === 'coach' && (
+            <button
+              onClick={generateAnalyticsPdf}
+              disabled={isGeneratingPdf}
+              className="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+            >
+              <Download className="w-4 h-4" />
+              {isGeneratingPdf ? 'PDF Hazirlaniyor...' : 'PDF Indir'}
+            </button>
+          )}
         </div>
       </div>
 
+      {effectiveUser?.role === 'coach' && selectedStudent && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <p className="text-sm text-gray-600">
+              Veli ile analiz paylaşımı ({selectedStudent.name})
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {shareRanges.map((item) => (
+                <button
+                  key={item.key}
+                  onClick={() => shareWithParent(item.key)}
+                  className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm inline-flex items-center gap-2"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div ref={reportRef} className="space-y-6">
       {/* Seçili Öğrenci Özeti */}
       {selectedStudent && studentStats && (
         <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-2xl p-6 text-white">
@@ -274,19 +539,19 @@ export default function Analytics() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
           <div className="flex items-center gap-2 mb-2">
             <Target className="w-5 h-5 text-blue-600" />
-            <span className="text-sm text-gray-500">Toplam Hedef</span>
+            <span className="text-sm text-gray-500">Toplam Hedef ({rangeLabel})</span>
           </div>
           <p className="text-2xl font-bold text-slate-800">
-            {weeklyEntries.reduce((sum, e) => sum + e.targetQuestions, 0)}
+            {scopedEntries.reduce((sum, e) => sum + e.targetQuestions, 0)}
           </p>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
           <div className="flex items-center gap-2 mb-2">
             <BarChart3 className="w-5 h-5 text-green-600" />
-            <span className="text-sm text-gray-500">Toplam Çözülen</span>
+            <span className="text-sm text-gray-500">Toplam Çözülen ({rangeLabel})</span>
           </div>
           <p className="text-2xl font-bold text-slate-800">
-            {weeklyEntries.reduce((sum, e) => sum + e.solvedQuestions, 0)}
+            {scopedEntries.reduce((sum, e) => sum + e.solvedQuestions, 0)}
           </p>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
@@ -295,10 +560,10 @@ export default function Analytics() {
             <span className="text-sm text-gray-500">Gerçekleşme %</span>
           </div>
           <p className="text-2xl font-bold text-slate-800">
-            %{weeklyEntries.reduce((sum, e) => sum + e.targetQuestions, 0) > 0
+            %{scopedEntries.reduce((sum, e) => sum + e.targetQuestions, 0) > 0
               ? Math.round(
-                  (weeklyEntries.reduce((sum, e) => sum + e.solvedQuestions, 0) /
-                    weeklyEntries.reduce((sum, e) => sum + e.targetQuestions, 0)) * 100
+                  (scopedEntries.reduce((sum, e) => sum + e.solvedQuestions, 0) /
+                    scopedEntries.reduce((sum, e) => sum + e.targetQuestions, 0)) * 100
                 )
               : 0}
           </p>
@@ -309,7 +574,7 @@ export default function Analytics() {
             <span className="text-sm text-gray-500">Toplam Doğru</span>
           </div>
           <p className="text-2xl font-bold text-green-600">
-            {weeklyEntries.reduce((sum, e) => sum + e.correctAnswers, 0)}
+            {scopedEntries.reduce((sum, e) => sum + e.correctAnswers, 0)}
           </p>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
@@ -318,7 +583,7 @@ export default function Analytics() {
             <span className="text-sm text-gray-500">Toplam Yanlış</span>
           </div>
           <p className="text-2xl font-bold text-red-600">
-            {weeklyEntries.reduce((sum, e) => sum + e.wrongAnswers, 0)}
+            {scopedEntries.reduce((sum, e) => sum + e.wrongAnswers, 0)}
           </p>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
@@ -327,13 +592,42 @@ export default function Analytics() {
             <span className="text-sm text-gray-500">Toplam Boş</span>
           </div>
           <p className="text-2xl font-bold text-gray-600">
-            {weeklyEntries.reduce((sum, e) => sum + e.blankAnswers, 0)}
+            {scopedEntries.reduce((sum, e) => sum + e.blankAnswers, 0)}
           </p>
         </div>
       </div>
 
+      {/* ✅ Haftalik Bitirilen Konular */}
+      {selectedStudent && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-base font-semibold text-slate-800">
+              {rangeLabel} Bitirilen Konular
+            </h3>
+            <span className="text-sm text-gray-500">
+              {scopedCompletedTopics.length} konu
+            </span>
+          </div>
+          {scopedCompletedTopics.length === 0 ? (
+            <p className="text-sm text-gray-500">Bu aralıkta tamamlanan konu yok.</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {scopedCompletedTopics.slice(0, 20).map((item, idx) => (
+                <div key={`${item.subject}-${item.topic}-${idx}`} className="bg-emerald-50 border border-emerald-100 rounded-lg p-2">
+                  <p className="text-sm font-medium text-emerald-800">{item.subject}</p>
+                  <p className="text-sm text-slate-700">{item.topic}</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {new Date(item.completedAt).toLocaleDateString('tr-TR')}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 📚 Kitap Okuma İstatistikleri */}
-      {totalReadingMinutes > 0 && (
+      {totalReadingPages > 0 && (
         <div className="bg-gradient-to-r from-green-600 to-emerald-600 rounded-2xl p-6 text-white">
           <div className="flex items-center gap-3 mb-4">
             <BookMarked className="w-6 h-6" />
@@ -345,7 +639,7 @@ export default function Analytics() {
                 <Timer className="w-4 h-4 text-green-200" />
                 <span className="text-sm text-green-100">Toplam Okuma</span>
               </div>
-              <p className="text-2xl font-bold">{Math.round(totalReadingMinutes / 60)} saat</p>
+              <p className="text-2xl font-bold">{totalReadingPages} sayfa</p>
             </div>
             {selectedStudent && readingStats && (
               <>
@@ -359,9 +653,9 @@ export default function Analytics() {
                 <div className="bg-white/10 rounded-xl p-4">
                   <div className="flex items-center gap-2 mb-1">
                     <BookOpen className="w-4 h-4 text-blue-200" />
-                    <span className="text-sm text-green-100">Günlük Ort.</span>
+                    <span className="text-sm text-green-100">Günlük Ort. (30 gün)</span>
                   </div>
-                  <p className="text-2xl font-bold">{readingStats.averageDailyMinutes} dk</p>
+                  <p className="text-2xl font-bold">{readingStats.averageDailyMinutes} sayfa/gün</p>
                 </div>
                 <div className="bg-white/10 rounded-xl p-4">
                   <div className="flex items-center gap-2 mb-1">
@@ -488,6 +782,118 @@ export default function Analytics() {
         </div>
       )}
 
+      {/* Deneme Sınav Sonuçları */}
+      {selectedStudentId && recentExamResults.length > 0 && (
+        <div className="bg-gradient-to-r from-slate-900 to-indigo-700 rounded-2xl p-6 text-white">
+          <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
+            <div className="flex items-center gap-3">
+              <ClipboardList className="w-6 h-6" />
+              <h3 className="text-lg font-bold">📋 Deneme Sınav Sonuçları</h3>
+            </div>
+            <div className="text-sm text-indigo-100">
+              Trend: {examTrend >= 0 ? '+' : ''}{examTrend} net
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="text-xs text-indigo-100/90">
+                  <th className="text-left pb-2">Tarih</th>
+                  <th className="text-left pb-2">Sınav Türü</th>
+                  <th className="text-right pb-2">Toplam Net</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentExamResults.map((exam) => (
+                  <tr key={exam.id} className="border-t border-white/10">
+                    <td className="py-2 text-sm">{new Date(exam.examDate).toLocaleDateString('tr-TR')}</td>
+                    <td className="py-2 text-sm">{exam.examType}</td>
+                    <td className="py-2 text-sm text-right font-semibold">
+                      {exam.totalNet} net
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {latestExamWeakSubjects.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {latestExamWeakSubjects.map((s) => (
+                <span key={s.name} className="px-3 py-1 bg-white/10 rounded-full text-xs text-white">
+                  {s.name}: {s.net} net
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {yosAnalytics && (
+        <div className="bg-gradient-to-r from-indigo-600 to-violet-700 rounded-2xl p-6 text-white">
+          <h3 className="text-lg font-bold mb-4">YÖS Özel Analiz</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-white/10 rounded-xl p-4">
+              <p className="text-indigo-100 text-sm">Matematik Başarı</p>
+              <p className="text-3xl font-bold">%{yosAnalytics.matematik}</p>
+            </div>
+            <div className="bg-white/10 rounded-xl p-4">
+              <p className="text-indigo-100 text-sm">Geometri Başarı</p>
+              <p className="text-3xl font-bold">%{yosAnalytics.geometri}</p>
+            </div>
+            <div className="bg-white/10 rounded-xl p-4">
+              <p className="text-indigo-100 text-sm">IQ Başarı</p>
+              <p className="text-3xl font-bold">%{yosAnalytics.iq}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Yazılı Sonuçları */}
+      {selectedStudentId && recentWrittenScores.length > 0 && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
+            <div className="flex items-center gap-3">
+              <FileText className="w-6 h-6 text-blue-600" />
+              <h3 className="text-lg font-bold text-slate-800">📝 Yazılı Sonuçları</h3>
+            </div>
+            <div className="text-sm text-gray-500">
+              Son {recentWrittenScores.length} kayıt
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="text-xs text-gray-500 uppercase">
+                  <th className="text-left pb-2">Tarih</th>
+                  <th className="text-left pb-2">Ders</th>
+                  <th className="text-left pb-2">Dönem</th>
+                  <th className="text-left pb-2">Yazılı</th>
+                  <th className="text-right pb-2">Puan</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentWrittenScores.map((row) => (
+                  <tr key={`${row.id}-${row.subject}`} className="border-t border-gray-100">
+                    <td className="py-2 text-sm text-gray-700">
+                      {new Date(row.date).toLocaleDateString('tr-TR')}
+                    </td>
+                    <td className="py-2 text-sm text-gray-800">{row.subject}</td>
+                    <td className="py-2 text-sm text-gray-600">D{row.semester}</td>
+                    <td className="py-2 text-sm text-gray-600">{row.examType}</td>
+                    <td className="py-2 text-sm text-right font-semibold text-slate-800">
+                      {row.score}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Grafikler */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Ders Bazlı Başarı */}
@@ -600,11 +1006,11 @@ export default function Analytics() {
         </div>
 
         {/* 📚 Okuma Trendi */}
-        {totalReadingMinutes > 0 && (
+        {totalReadingPages > 0 && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
             <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
               <BookMarked className="w-5 h-5 text-green-600" />
-              Son 7 Gün Okuma Trendi
+              Son 7 Gun Okuma Trendi
             </h3>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
@@ -614,9 +1020,9 @@ export default function Analytics() {
                   <YAxis tick={{ fontSize: 11 }} />
                   <Tooltip
                     contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                    formatter={(value: number) => [`${value} dk`, 'Okuma']}
+                    formatter={(value: number) => [`${value} sayfa`, 'Okuma']}
                   />
-                  <Bar dataKey="okuma" fill="#22C55E" radius={[4, 4, 0, 0]} name="Okuma (dk)" />
+                  <Bar dataKey="okuma" fill="#22C55E" radius={[4, 4, 0, 0]} name="Okuma (sayfa)" />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -703,6 +1109,7 @@ export default function Analytics() {
             </div>
           )}
         </div>
+      </div>
       </div>
     </div>
   );

@@ -32,16 +32,24 @@ import Marketing from './pages/Marketing';
 import UserManagement from './pages/UserManagement';
 import Subscription from './pages/Subscription';
 import SystemManagement from './pages/SystemManagement';
+import SupabaseConfigBanner from './components/SupabaseConfigBanner';
+import ReportsV2 from './pages/ReportsV2';
+import CoachWhatsAppSettings from './pages/CoachWhatsAppSettings';
+import MessageTemplates from './pages/MessageTemplates';
+import Meetings from './pages/Meetings';
+import LiveLessons from './pages/LiveLessons';
+import { rolesForProtectedRoute } from './config/rolePermissions';
 
 // Yönlendirme bileşeni
 function HomeRedirect() {
-  const { user } = useAuth();
+  const { effectiveUser } = useAuth();
 
-  if (!user) return <Navigate to="/login" replace />;
+  if (!effectiveUser) return <Navigate to="/login" replace />;
 
-  switch (user.role) {
+  switch (effectiveUser.role) {
     case 'super_admin':
     case 'admin':
+    case 'teacher':
       return <Navigate to="/dashboard" replace />;
     case 'coach':
       return <Navigate to="/coach-dashboard" replace />;
@@ -54,6 +62,8 @@ function HomeRedirect() {
 
 function App() {
   return (
+    <>
+    <SupabaseConfigBanner />
     <AuthProvider>
       <OrganizationProvider>
         <AppProvider>
@@ -73,98 +83,105 @@ function App() {
 
             {/* Admin Rotaları - Super Admin ve Admin */}
             <Route path="/dashboard" element={
-              <ProtectedRoute allowedRoles={['super_admin', 'admin']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/dashboard')}>
                 <Layout>
                   <Dashboard />
                 </Layout>
               </ProtectedRoute>
             } />
             <Route path="/students" element={
-              <ProtectedRoute allowedRoles={['super_admin', 'admin']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/students')}>
                 <Layout>
                   <Students />
                 </Layout>
               </ProtectedRoute>
             } />
             <Route path="/coaches" element={
-              <ProtectedRoute allowedRoles={['super_admin', 'admin']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/coaches')}>
                 <Layout>
                   <Coaches />
                 </Layout>
               </ProtectedRoute>
             } />
             <Route path="/topics" element={
-              <ProtectedRoute allowedRoles={['super_admin', 'admin']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/topics')}>
                 <Layout>
                   <Topics />
                 </Layout>
               </ProtectedRoute>
             } />
             <Route path="/topic-tracking" element={
-              <ProtectedRoute allowedRoles={['super_admin', 'admin', 'coach']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/topic-tracking')}>
                 <Layout>
                   <TopicTracking />
                 </Layout>
               </ProtectedRoute>
             } />
             <Route path="/exam-tracking" element={
-              <ProtectedRoute allowedRoles={['super_admin', 'admin', 'coach']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/exam-tracking')}>
                 <Layout>
                   <ExamTracking />
                 </Layout>
               </ProtectedRoute>
             } />
             <Route path="/book-tracking" element={
-              <ProtectedRoute allowedRoles={['super_admin', 'admin', 'coach']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/book-tracking')}>
                 <Layout>
                   <BookTracking />
                 </Layout>
               </ProtectedRoute>
             } />
             <Route path="/written-exam" element={
-              <ProtectedRoute allowedRoles={['super_admin', 'admin', 'coach']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/written-exam')}>
                 <Layout>
                   <WrittenExamTracking />
                 </Layout>
               </ProtectedRoute>
             } />
             <Route path="/pdf-import" element={
-              <ProtectedRoute allowedRoles={['super_admin', 'admin', 'coach']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/pdf-import')}>
                 <Layout>
                   <PDFImport />
                 </Layout>
               </ProtectedRoute>
             } />
             <Route path="/analytics" element={
-              <ProtectedRoute allowedRoles={['super_admin', 'admin', 'coach']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/analytics')}>
                 <Layout>
                   <Analytics />
                 </Layout>
               </ProtectedRoute>
             } />
             <Route path="/ai-coach" element={
-              <ProtectedRoute allowedRoles={['super_admin', 'admin', 'coach']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/ai-coach')}>
                 <Layout>
                   <AICoach />
                 </Layout>
               </ProtectedRoute>
             } />
+            <Route path="/reports" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/reports')}>
+                <Layout>
+                  <ReportsV2 />
+                </Layout>
+              </ProtectedRoute>
+            } />
             <Route path="/whatsapp" element={
-              <ProtectedRoute allowedRoles={['super_admin', 'admin']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/whatsapp')}>
                 <Layout>
                   <WhatsApp />
                 </Layout>
               </ProtectedRoute>
             } />
             <Route path="/webhooks" element={
-              <ProtectedRoute allowedRoles={['super_admin', 'admin']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/webhooks')}>
                 <Layout>
                   <Webhooks />
                 </Layout>
               </ProtectedRoute>
             } />
             <Route path="/settings" element={
-              <ProtectedRoute allowedRoles={['super_admin', 'admin']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/settings')}>
                 <Layout>
                   <Settings />
                 </Layout>
@@ -173,7 +190,7 @@ function App() {
 
             {/* Takip Sayfası - Super Admin, Admin ve Koç için */}
             <Route path="/tracking" element={
-              <ProtectedRoute allowedRoles={['super_admin', 'admin', 'coach']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/tracking')}>
                 <Layout>
                   <Tracking />
                 </Layout>
@@ -182,7 +199,7 @@ function App() {
 
             {/* Super Admin Paneli */}
             <Route path="/super-admin" element={
-              <ProtectedRoute allowedRoles={['super_admin', 'admin']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/super-admin')}>
                 <Layout>
                   <AdminPanel />
                 </Layout>
@@ -191,7 +208,7 @@ function App() {
 
             {/* Kullanıcı Yönetimi */}
             <Route path="/user-management" element={
-              <ProtectedRoute allowedRoles={['super_admin', 'admin']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/user-management')}>
                 <Layout>
                   <UserManagement />
                 </Layout>
@@ -204,16 +221,24 @@ function App() {
             } />
 
             <Route path="/system-management" element={
-              <ProtectedRoute allowedRoles={['super_admin', 'admin']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/system-management')}>
                 <Layout>
                   <SystemManagement />
                 </Layout>
               </ProtectedRoute>
             } />
 
+            <Route path="/message-templates" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/message-templates')}>
+                <Layout>
+                  <MessageTemplates />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
             {/* Öğrenci Dashboard - Sadece Öğrenciler için */}
             <Route path="/student-dashboard" element={
-              <ProtectedRoute allowedRoles={['student']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/student-dashboard')}>
                 <Layout>
                   <StudentDashboard />
                 </Layout>
@@ -222,7 +247,7 @@ function App() {
 
             {/* Öğrenci Raporları - Sadece Öğrenciler için */}
             <Route path="/student-reports" element={
-              <ProtectedRoute allowedRoles={['student']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/student-reports')}>
                 <Layout>
                   <StudentReports />
                 </Layout>
@@ -231,7 +256,7 @@ function App() {
 
             {/* Öğrenci Analitikleri - Sadece Öğrenciler için */}
             <Route path="/student-analytics" element={
-              <ProtectedRoute allowedRoles={['student']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/student-analytics')}>
                 <Layout>
                   <StudentDashboard />
                 </Layout>
@@ -240,7 +265,7 @@ function App() {
 
             {/* Koç Dashboard - Sadece Koçlar için */}
             <Route path="/coach-dashboard" element={
-              <ProtectedRoute allowedRoles={['coach']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/coach-dashboard')}>
                 <Layout>
                   <CoachDashboard />
                 </Layout>
@@ -249,9 +274,40 @@ function App() {
 
             {/* Koç Deneme Raporları - Sadece Koçlar için */}
             <Route path="/coach-reports" element={
-              <ProtectedRoute allowedRoles={['coach']}>
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/coach-reports')}>
                 <Layout>
                   <CoachReports />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            <Route path="/coach-whatsapp-settings" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/coach-whatsapp-settings')}>
+                <Layout>
+                  <CoachWhatsAppSettings />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/meetings" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/meetings')}>
+                <Layout>
+                  <Meetings />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/live-lessons" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/live-lessons')}>
+                <Layout>
+                  <LiveLessons />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/student-meetings" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/student-meetings')}>
+                <Layout>
+                  <Meetings />
                 </Layout>
               </ProtectedRoute>
             } />
@@ -263,6 +319,7 @@ function App() {
         </AppProvider>
       </OrganizationProvider>
     </AuthProvider>
+    </>
   );
 }
 

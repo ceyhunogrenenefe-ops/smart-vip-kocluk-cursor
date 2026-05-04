@@ -1,8 +1,12 @@
 // Türkçe: Sistem Yönetimi Sayfası - Super Admin İçin
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth, SystemUser } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useApp } from '../context/AppContext';
+import { db } from '../lib/database';
+import { isSupabaseReady } from '../lib/supabase';
+import { getAuthToken } from '../lib/session';
+import { userRowToSystemUser } from '../lib/userRowToSystemUser';
 import {
   Settings,
   Users,
@@ -34,10 +38,63 @@ interface PayTRConfig {
   enabled: boolean;
 }
 
+function roleBadgeClasses(role: SystemUser['role']) {
+  switch (role) {
+    case 'super_admin':
+      return 'bg-amber-100 text-amber-700';
+    case 'admin':
+      return 'bg-red-100 text-red-700';
+    case 'coach':
+      return 'bg-blue-100 text-blue-700';
+    case 'teacher':
+      return 'bg-violet-100 text-violet-800';
+    case 'student':
+      return 'bg-green-100 text-green-700';
+    default:
+      return 'bg-slate-100 text-slate-700';
+  }
+}
+
+function roleLabelTr(role: SystemUser['role']) {
+  switch (role) {
+    case 'super_admin':
+      return 'Süper Admin';
+    case 'admin':
+      return 'Yönetici';
+    case 'coach':
+      return 'Koç';
+    case 'teacher':
+      return 'Öğretmen';
+    case 'student':
+      return 'Öğrenci';
+    default:
+      return role;
+  }
+}
+
 export default function SystemManagement() {
   const { user, getAllUsers, createUser, updateUser, deleteUser } = useAuth();
   const { organizations, updateOrganization, addOrganization } = useOrganization();
   const { students, coaches } = useApp();
+
+  const [apiManagedUsers, setApiManagedUsers] = useState<SystemUser[] | null>(null);
+
+  const refreshUserDirectory = useCallback(async () => {
+    if (getAuthToken() && isSupabaseReady) {
+      try {
+        const rows = await db.getUsers();
+        setApiManagedUsers(rows.map((r) => userRowToSystemUser(r, { coaches, students })));
+      } catch {
+        setApiManagedUsers(null);
+      }
+      return;
+    }
+    setApiManagedUsers(null);
+  }, [coaches, students]);
+
+  useEffect(() => {
+    void refreshUserDirectory();
+  }, [refreshUserDirectory]);
 
   const [activeTab, setActiveTab] = useState<'users' | 'organizations' | 'payments' | 'system'>('users');
   const [searchTerm, setSearchTerm] = useState('');
@@ -66,8 +123,8 @@ export default function SystemManagement() {
     merchantSalt: false
   });
 
-  // Kullanıcılar
-  const allUsers = getAllUsers();
+  // Kullanıcılar: oturum + Supabase varsa API (`users` tablosu), yoksa yerel demo + managed liste
+  const allUsers = apiManagedUsers ?? getAllUsers();
   const filteredUsers = allUsers.filter(u =>
     u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     u.email.toLowerCase().includes(searchTerm.toLowerCase())
@@ -191,15 +248,10 @@ export default function SystemManagement() {
                           </div>
                         </td>
                         <td className="px-4 py-3">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            u.role === 'super_admin' ? 'bg-amber-100 text-amber-700' :
-                            u.role === 'admin' ? 'bg-red-100 text-red-700' :
-                            u.role === 'coach' ? 'bg-blue-100 text-blue-700' :
-                            'bg-green-100 text-green-700'
-                          }`}>
-                            {u.role === 'super_admin' ? 'Süper Admin' :
-                             u.role === 'admin' ? 'Yönetici' :
-                             u.role === 'coach' ? 'Koç' : 'Öğrenci'}
+                          <span
+                            className={`px-2 py-1 rounded-full text-xs font-medium ${roleBadgeClasses(u.role)}`}
+                          >
+                            {roleLabelTr(u.role)}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-600">{u.email}</td>

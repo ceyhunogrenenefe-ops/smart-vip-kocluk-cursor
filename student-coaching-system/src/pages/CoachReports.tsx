@@ -1,6 +1,5 @@
 // Türkçe: Eğitim Koçu Raporları Sayfası - Öğrenci deneme takibi ve raporlama
 import React, { useState, useMemo, useRef } from 'react';
-import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import {
   FileText,
@@ -71,8 +70,7 @@ interface ExamResult {
 type TabType = 'overview' | 'exams' | 'reports' | 'send';
 
 export default function CoachReports() {
-  const { user } = useAuth();
-  const { students, coaches, weeklyEntries, getStudentStats } = useApp();
+  const { students, weeklyEntries, getStudentStats } = useApp();
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [selectedStudent, setSelectedStudent] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -80,13 +78,8 @@ export default function CoachReports() {
   const [reportType, setReportType] = useState<'student' | 'all'>('student');
   const reportRef = useRef<HTMLDivElement>(null);
 
-  // Koçun öğrencileri
-  const myStudents = useMemo(() => {
-    if (!user?.coachId) return [];
-    const coach = coaches.find(c => c.id === user.coachId);
-    if (!coach) return [];
-    return students.filter(s => coach.studentIds.includes(s.id));
-  }, [user, coaches, students]);
+  // AppContext zaten role göre öğrencileri süzer; coachId eksik olsa da liste doğru gelir
+  const myStudents = students;
 
   // Mock deneme sonuçları
   const [examResults] = useState<ExamResult[]>([

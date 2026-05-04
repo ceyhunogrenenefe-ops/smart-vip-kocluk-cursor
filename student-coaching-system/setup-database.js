@@ -3,8 +3,16 @@
 
 const { createClient } = require('@supabase/supabase-js');
 
-const supabaseUrl = 'https://urkedrzdvbhdwvrcrnjf.supabase.co';
-const supabaseKey = 'sb_publishable_IlZSNwwuZtD_N1cpiddcjQ_e7EzHm_h';
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  console.error(
+    'Eksik ortam değişkeni: SUPABASE_URL (veya VITE_SUPABASE_URL) ve SUPABASE_ANON_KEY (veya VITE_SUPABASE_ANON_KEY) gerekir.\n' +
+      'Supabase → Project Settings → API → Project URL ve anon (public) key değerlerini .env veya shell ortamında verin.'
+  );
+  process.exit(1);
+}
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 

@@ -1,7 +1,7 @@
 // Türkçe: Uygulama genelinde kullanılan tipler
 
 // Kullanıcı Rolleri - Eğitim Koçu sistemi
-export type UserRole = 'super_admin' | 'admin' | 'coach' | 'student';
+export type UserRole = 'super_admin' | 'admin' | 'coach' | 'teacher' | 'student';
 
 // Sınıf seviyeleri: ilkokul, ortaokul, lise ve YKS puan türleri
 export type ClassLevel =
@@ -15,9 +15,12 @@ export type ClassLevel =
   | 11
   | 12
   | 'LGS'
+  | 'YOS'
   | 'YKS-Sayısal'
   | 'YKS-Eşit Ağırlık'
   | 'YKS-Sözel';
+
+export type ProgramName = 'ilkokul' | 'lgs' | 'tyt' | 'ayt' | 'yos';
 
 // Plan Türleri
 export type OrganizationPlan = 'starter' | 'professional' | 'enterprise';
@@ -97,8 +100,14 @@ export interface Student {
   school?: string;
   parentName?: string;
   coachId?: string; // Koç ID'si
+  programId?: string;
+  programName?: ProgramName;
   groupName?: string;
   institutionId?: string;
+  /** Supabase Auth kullanıcısı (auth.users.id) — kalıcı bağlantı */
+  authUserId?: string;
+  /** Platform kullanıcısı (public.users.id) — özel JWT oturumu */
+  platformUserId?: string;
   createdAt: string;
 }
 
@@ -140,7 +149,7 @@ export interface WeeklyEntry {
   coachComment?: string;
   createdAt: string;
   // Kitap Okuma Alanları (Opsiyonel)
-  readingMinutes?: number; // O gün okunan süre (dakika)
+  readingMinutes?: number; // Haftalık takipte okunan sayfa (DB alanı `reading_minutes`; legacy isim)
   bookId?: string; // Okunan kitap ID
   bookTitle?: string; // Kitap adı (quick reference)
 }
@@ -189,13 +198,38 @@ export interface ExamSubjectResult {
 export interface ExamResult {
   id: string;
   studentId: string;
-  examType: 'TYT' | 'AYT' | '3' | '4' | '5' | '6' | '7' | 'LGS';
+  examType: '3' | '4' | '5' | '6' | '7' | 'LGS' | 'YOS' | 'TYT' | 'YKS-EA' | 'YKS-SAY' | 'AYT';
   examDate: string;
   source: 'webhook' | 'manual' | 'pdf';
   totalNet: number;
   subjects: ExamSubjectResult[];
   notes?: string;
   createdAt: string;
+}
+
+/** Sunucu `POST /api/ai-chat` ile `op: 'analyze_exam'` yanıt gövdesi (özet alanlar) */
+export interface AiExamAnalysisSummary {
+  subjects: Array<{ name: string; correct: number; wrong: number; blank?: number; net: number }>;
+  total_net: number;
+  estimated_score_model: number;
+  percentile_model: number;
+  exam_type_model: 'TYT' | 'LGS' | 'YOS';
+  yos_buckets?: { matematik: number; geometri: number; iq: number } | null;
+  psychology: Array<{ title: string; text: string }>;
+  general_situation: string;
+  trajectory: {
+    headline: string;
+    extrapolated_net_2more: number;
+    extrapolated_approx_score: number;
+    caveat: string;
+  } | null;
+  strengths: string[];
+  weaknesses: string[];
+  recommendations: string;
+  year_2025_comparison?: string | null;
+  year_2024_comparison?: string | null;
+  year_2023_comparison?: string | null;
+  narrative_summary?: string | null;
 }
 
 // AI Koç Önerisi
@@ -240,6 +274,7 @@ export const CLASS_LEVELS: { value: ClassLevel; label: string }[] = [
   { value: 6, label: '6. Sınıf' },
   { value: 7, label: '7. Sınıf' },
   { value: 'LGS', label: 'LGS (8. Sınıf)' },
+  { value: 'YOS', label: 'YÖS' },
   { value: 9, label: '9. Sınıf' },
   { value: 10, label: '10. Sınıf' },
   { value: 11, label: '11. Sınıf' },
@@ -252,6 +287,7 @@ export const CLASS_LEVELS: { value: ClassLevel; label: string }[] = [
 /** HTML select dönüşü → ClassLevel */
 export function parseClassLevelFromForm(value: string): ClassLevel {
   if (value === 'LGS') return 'LGS';
+  if (value === 'YOS') return 'YOS';
   if (value.startsWith('YKS-')) return value as ClassLevel;
   const n = parseInt(value, 10);
   return n as ClassLevel;
@@ -268,11 +304,32 @@ export function formatClassLevelLabel(level: ClassLevel | string | number | unde
 export const TOPIC_CLASS_OPTIONS: { value: string; label: string }[] = [
   ...([3, 4, 5, 6, 7] as const).map(n => ({ value: String(n), label: `${n}. Sınıf` })),
   { value: 'LGS', label: 'LGS (8. Sınıf)' },
+  { value: 'YOS', label: 'YÖS' },
   ...([9, 10, 11, 12] as const).map(n => ({ value: String(n), label: `${n}. Sınıf` })),
   { value: 'YKS-Sayısal', label: 'YKS Sayısal' },
   { value: 'YKS-Eşit Ağırlık', label: 'YKS Eşit Ağırlık' },
   { value: 'YKS-Sözel', label: 'YKS Sözel' },
 ];
+
+export const PROGRAM_OPTIONS: { value: ProgramName; label: string }[] = [
+  { value: 'ilkokul', label: 'İlkokul-Ortaokul' },
+  { value: 'lgs', label: 'LGS' },
+  { value: 'tyt', label: 'TYT' },
+  { value: 'ayt', label: 'AYT' },
+  { value: 'yos', label: 'YÖS' }
+];
+
+export const inferProgramName = (classLevel: ClassLevel | string | number | undefined): ProgramName => {
+  if (classLevel === 'YOS') return 'yos';
+  if (classLevel === 'LGS') return 'lgs';
+  if (String(classLevel).startsWith('YKS-')) return 'ayt';
+  const n = Number(classLevel);
+  if (!Number.isNaN(n)) {
+    if (n <= 7) return 'ilkokul';
+    if (n >= 9 && n <= 12) return 'tyt';
+  }
+  return 'ilkokul';
+};
 
 // ============ KİTAP OKUMA TAKİBİ ============
 
@@ -304,7 +361,7 @@ export interface ReadingLog {
   createdAt: string;
 }
 
-// Okuma İstatistikleri
+// Okuma İstatistikleri (totalMinutes / averageDailyMinutes = sayfa; legacy alan adları)
 export interface ReadingStats {
   totalMinutes: number;
   totalBooks: number;
@@ -425,4 +482,85 @@ export interface WrittenExamCoachComment {
   comment: string;
   teacherName: string;
   createdAt: string;
+}
+
+export type MeetingStatus = 'planned' | 'completed' | 'missed';
+
+export type TeacherLessonPlatform = 'bbb' | 'zoom' | 'meet' | 'other';
+export type TeacherLessonStatus = 'scheduled' | 'completed' | 'cancelled';
+
+/** Canlı ders (Zoom / Meet / BBB / diğer) — API `lesson_date` alanını `date` olarak döner */
+export interface TeacherLesson {
+  id: string;
+  institution_id?: string | null;
+  teacher_id: string;
+  student_id: string;
+  title: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  meeting_link: string;
+  platform: TeacherLessonPlatform;
+  status: TeacherLessonStatus;
+  created_at?: string;
+  /** Plan süresi (dk); paket kotası birimi bu süreye göre hesaplanır */
+  duration_minutes?: number;
+  /** Tekrarlayan seri (aynı ID = aynı şablon) */
+  series_id?: string | null;
+}
+
+/** GET /api/teacher-lessons?op=summary — tamamlanan canlı derslerden öğretmen×öğrenci toplam süre */
+export interface TeacherStudentLessonSummaryRow {
+  teacher_id: string;
+  student_id: string;
+  teacher_name: string;
+  student_name: string;
+  total_minutes: number;
+  total_hours: number;
+  completed_lesson_count: number;
+}
+
+/** Öğrenci–öğretmen canlı ders kotası (API zenginleştirmesi: kullanılan/kalan) */
+export interface StudentTeacherLessonQuota {
+  id: string;
+  institution_id?: string | null;
+  student_id: string;
+  teacher_id: string;
+  /** Paket üst sınırı (ders birimi); süreye göre 1 saatte birden fazla birim düşebilir */
+  credits_total: number | null;
+  created_at?: string;
+  updated_at?: string;
+  units_used?: number;
+  /** @deprecated kullanılan birim ile aynı (geri uyumluluk) */
+  lessons_used?: number;
+  remaining?: number | null;
+  unlimited?: boolean;
+  exhausted?: boolean;
+}
+
+/** REST yanıtı: ilişki embed (Supabase join) ile gelen görüşme satırı */
+export interface CoachingMeetingRecord {
+  id: string;
+  institution_id?: string | null;
+  coach_id: string;
+  student_id: string;
+  coach_user_id: string;
+  start_time: string;
+  end_time: string;
+  meet_link: string;
+  /** İsteğe bağlı ek katılım bağlantısı (Meet’e ek) */
+  link_zoom?: string | null;
+  link_bbb?: string | null;
+  google_calendar_event_id?: string | null;
+  status: MeetingStatus;
+  notes?: string | null;
+  attended?: boolean | null;
+  ai_summary?: string | null;
+  whatsapp_created_sent?: boolean;
+  whatsapp_reminder_sent?: boolean;
+  created_at?: string;
+  updated_at?: string;
+  students?: Pick<Student, 'name' | 'email' | 'phone'> | null;
+  coaches?: Pick<Coach, 'name' | 'email'> | null;
+  series_id?: string | null;
 }

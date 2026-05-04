@@ -14,10 +14,10 @@ export default function Login() {
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Zaten giriş yapmışsa yönlendir
+  // Zaten oturum varsa veya giriş başarılı olduktan sonra tek seferlik yönlendirme (çift navigate / throttling önlenir)
   useEffect(() => {
     if (user) {
-      navigate('/');
+      navigate('/', { replace: true });
     }
   }, [user, navigate]);
 
@@ -31,10 +31,7 @@ export default function Login() {
 
       if (result.success) {
         setSuccess(result.message);
-        // Kısa bir gecikme ile yönlendir
-        setTimeout(() => {
-          navigate('/');
-        }, 500);
+        // Yönlendirme: user set edilince yukarıdaki useEffect navigate('/', { replace: true }) yapar — burada tekrarlamayın.
       } else {
         setError(result.message);
       }

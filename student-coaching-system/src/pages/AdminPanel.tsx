@@ -1,6 +1,9 @@
 // Türkçe: Super Admin Paneli - Tüm Kurumları Yönetme
-import React, { useState } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useOrganization, PLAN_LIMITS } from '../context/OrganizationContext';
+import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
+import { apiFetch, getAuthToken } from '../lib/session';
 import { Organization, OrganizationPlan } from '../types';
 import {
   Building2,
@@ -20,8 +23,19 @@ import {
   MoreVertical,
   Calendar,
   Mail,
-  Phone
+  Phone,
+  MessageCircle,
+  Send,
+  Loader2
 } from 'lucide-react';
+
+interface TwilioServerStatus {
+  configured: boolean;
+  account_sid_suffix: string | null;
+  has_auth_token: boolean;
+  whatsapp_from_masked: string | null;
+  sandbox_likely?: boolean;
+}
 
 // Plan renkleri
 const planColors: Record<OrganizationPlan, string> = {
@@ -31,12 +45,66 @@ const planColors: Record<OrganizationPlan, string> = {
 };
 
 export default function AdminPanel() {
+  const { user, getAllUsers, impersonate, canImpersonate } = useAuth();
   const { organizations, updateOrganization } = useOrganization();
+  const navigate = useNavigate();
+  const canWhatsAppTest = user?.role === 'super_admin' || user?.role === 'admin';
   const [searchTerm, setSearchTerm] = useState('');
   const [filterPlan, setFilterPlan] = useState<OrganizationPlan | 'all'>('all');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all');
   const [selectedOrg, setSelectedOrg] = useState<Organization | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
+
+  const [waPhone, setWaPhone] = useState('');
+  const [waMessage, setWaMessage] = useState('Yönetim paneli: Twilio WhatsApp test.');
+  const [waSending, setWaSending] = useState(false);
+  const [waResult, setWaResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [twilioStatus, setTwilioStatus] = useState<TwilioServerStatus | null>(null);
+
+  const refreshTwilio = useCallback(async () => {
+    if (!canWhatsAppTest || !getAuthToken()) return;
+    try {
+      const res = await apiFetch('/api/twilio');
+      const payload = (await res.json().catch(() => ({}))) as { data?: TwilioServerStatus };
+      if (res.ok && payload?.data) setTwilioStatus(payload.data);
+      else setTwilioStatus(null);
+    } catch {
+      setTwilioStatus(null);
+    }
+  }, [canWhatsAppTest]);
+
+  useEffect(() => {
+    void refreshTwilio();
+  }, [refreshTwilio]);
+
+  const sendWhatsAppTest = async () => {
+    const p = waPhone.trim();
+    if (!p || p.replace(/\D/g, '').length < 10) {
+      setWaResult({ ok: false, text: 'Geçerli bir telefon girin (05… veya +90…).' });
+      return;
+    }
+    const m = waMessage.trim();
+    if (!m) {
+      setWaResult({ ok: false, text: 'Mesaj boş olamaz.' });
+      return;
+    }
+    setWaSending(true);
+    setWaResult(null);
+    try {
+      const res = await apiFetch('/api/whatsapp/send', {
+        method: 'POST',
+        body: JSON.stringify({ phone: p, message: m })
+      });
+      const payload = (await res.json().catch(() => ({}))) as { ok?: boolean; sid?: string; error?: string };
+      if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+      setWaResult({ ok: true, text: payload.sid ? `Gönderildi. SID: ${payload.sid}` : 'Gönderildi.' });
+      void refreshTwilio();
+    } catch (e) {
+      setWaResult({ ok: false, text: e instanceof Error ? e.message : 'Hata' });
+    } finally {
+      setWaSending(false);
+    }
+  };
 
   // Filtreleme
   const filteredOrgs = organizations.filter(org => {
@@ -68,6 +136,16 @@ export default function AdminPanel() {
   // Aktif/Pasif değiştir
   const toggleActive = (org: Organization) => {
     updateOrganization(org.id, { isActive: !org.isActive });
+  };
+
+  const quickUsers = getAllUsers().slice(0, 12);
+
+  const handleViewPanel = (userId: string, role: string) => {
+    const result = impersonate(userId);
+    if (!result.success) return;
+    if (role === 'coach') navigate('/coach-dashboard');
+    else if (role === 'student') navigate('/student-dashboard');
+    else navigate('/dashboard');
   };
 
   return (
@@ -135,6 +213,88 @@ export default function AdminPanel() {
           <p className="text-2xl font-bold text-blue-600">{stats.professionalCount}</p>
         </div>
       </div>
+
+      <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="font-semibold text-indigo-900">Canlı ders entegrasyonu</p>
+          <p className="text-sm text-indigo-700">
+            Tüm öğretmenlere ait canlı dersleri görüntüleyin; öğretmen ve platform filtresi kullanın
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => navigate('/live-lessons')}
+          className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
+        >
+          Panele git
+        </button>
+      </div>
+
+      {canWhatsAppTest && (
+        <div className="bg-white rounded-xl shadow-sm border border-green-200 p-6">
+          <div className="flex items-start gap-3 mb-4">
+            <div className="w-10 h-10 bg-green-500 rounded-lg flex items-center justify-center flex-shrink-0">
+              <MessageCircle className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-slate-800">WhatsApp test (Twilio)</h3>
+              <p className="text-sm text-slate-600 mt-1">
+                Tekil mesaj gönderir; kayıt <code className="text-xs bg-slate-100 px-1 rounded">message_logs</code> içine
+                yazılır. Anahtarlar sunucu ortamında (
+                <code className="text-xs">TWILIO_*</code>, <code className="text-xs">APP_BASE_URL</code>).
+              </p>
+              {twilioStatus?.sandbox_likely && (
+                <p className="mt-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  Twilio <strong>sandbox</strong> kullanımda görünüyor: mesajlar yalnızca sandbox’a kayıtlı numaralara
+                  gider.
+                </p>
+              )}
+              {twilioStatus && !twilioStatus.configured && (
+                <p className="mt-2 text-sm text-red-700">Twilio ortam değişkenleri eksik veya okunamadı.</p>
+              )}
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Telefon</label>
+              <input
+                type="tel"
+                value={waPhone}
+                onChange={(e) => setWaPhone(e.target.value)}
+                placeholder="+905551112233 veya 05551112233"
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+              />
+            </div>
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={() => void sendWhatsAppTest()}
+                disabled={waSending || !twilioStatus?.configured}
+                className="w-full md:w-auto px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {waSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                Gönder
+              </button>
+            </div>
+          </div>
+          <div className="mt-3">
+            <label className="block text-xs font-medium text-slate-600 mb-1">Mesaj</label>
+            <textarea
+              value={waMessage}
+              onChange={(e) => setWaMessage(e.target.value)}
+              rows={3}
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+            />
+          </div>
+          {waResult && (
+            <div
+              className={`mt-3 p-3 rounded-lg text-sm ${waResult.ok ? 'bg-green-50 text-green-900' : 'bg-red-50 text-red-800'}`}
+            >
+              {waResult.text}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Filtreler */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
@@ -364,6 +524,27 @@ export default function AdminPanel() {
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h3 className="text-lg font-semibold text-slate-800 mb-4">Quick Access Panel</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {quickUsers.map((u) => (
+            <div key={u.id} className="flex items-center justify-between rounded-lg border border-gray-100 px-3 py-2">
+              <div>
+                <p className="text-sm font-medium text-slate-800">{u.name}</p>
+                <p className="text-xs text-gray-500">{u.email} • {u.role}</p>
+              </div>
+              <button
+                onClick={() => handleViewPanel(u.id, u.role)}
+                disabled={!canImpersonate(u)}
+                className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-gray-300"
+              >
+                View Panel
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

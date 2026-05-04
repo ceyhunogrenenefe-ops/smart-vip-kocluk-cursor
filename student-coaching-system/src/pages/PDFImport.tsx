@@ -1,6 +1,7 @@
 // Türkçe: PDF Import Sayfası - Deneme sınavı sonuçlarını PDF'den aktarma
 import React, { useState, useCallback, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
+import { mergeYosMatematikGenelSubjects } from '../lib/mergeYosExamSubjects';
 import {
   FileUp,
   Upload,
@@ -65,7 +66,7 @@ interface ParsedExamResult {
   examDate: string;
   booklet: string;
   className: string;
-  examType: 'TYT' | 'AYT' | '9' | '10' | '11' | '12';
+  examType: '3' | '4' | '5' | '6' | '7' | 'LGS' | 'YOS' | 'TYT' | 'YKS-EA' | 'YKS-SAY' | 'AYT';
   subjects: {
     name: string;
     questions: number;
@@ -213,15 +214,39 @@ export default function PDFImport() {
     const classMatch = normalizedText.match(/(?:S[iı]n[iı]f|Sinif|Class)[^\d]*(\d+)/i);
 
     // Sınav tipini belirle
-    const examType: 'TYT' | 'AYT' | '9' | '10' | '11' | '12' =
-      normalizedText.includes('TYT') ? 'TYT' :
-      normalizedText.includes('AYT') ? 'AYT' : '12';
+    const examType: '3' | '4' | '5' | '6' | '7' | 'LGS' | 'YOS' | 'TYT' | 'YKS-EA' | 'YKS-SAY' | 'AYT' =
+      normalizedText.includes('LGS')
+        ? (normalizedText.match(/Sinif[^\d]*(3|4|5|6|7)/i)?.[1] as '3' | '4' | '5' | '6' | '7') || 'LGS'
+        : normalizedText.includes('YOS') || normalizedText.includes('YÖS')
+          ? 'YOS'
+        : normalizedText.includes('TYT')
+          ? 'TYT'
+          : normalizedText.includes('AYT') && (normalizedText.includes('EDEBIYAT') || normalizedText.includes('EA'))
+            ? 'YKS-EA'
+            : normalizedText.includes('AYT') || normalizedText.includes('SAY')
+              ? 'YKS-SAY'
+              : 'TYT';
 
     // Ders analizini çıkar - çoklu regex deseni
     const subjectMatches: ParsedExamResult['subjects'] = [];
 
     // Her ders için farklı pattern dene
     const subjectPatterns = [
+      // YÖS - Sayısal Yetenek / IQ
+      { name: 'YÖS IQ', patterns: [
+        /Y[ÖO]S[\s\-]*SAYISAL[\s\-]*YETENEK[\s\S]*?(\d+)[\s\S]*?(\d+)[\s\S]*?(\d+)(?:[\s\S]*?(\d+))?[\s\S]*?(-?\d+[.,]?\d*)/i,
+        /(?:^|\s)IQ[\s\S]*?(\d+)[\s\S]*?(\d+)[\s\S]*?(\d+)(?:[\s\S]*?(\d+))?[\s\S]*?(-?\d+[.,]?\d*)/i
+      ]},
+      // YÖS - Temel Matematik
+      { name: 'YÖS MATEMATİK', patterns: [
+        /Y[ÖO]S[\s\-]*TEMEL[\s\-]*MATEMAT[İI]K[\s\S]*?(\d+)[\s\S]*?(\d+)[\s\S]*?(\d+)(?:[\s\S]*?(\d+))?[\s\S]*?(-?\d+[.,]?\d*)/i,
+        /Y[ÖO]S[\s\-]*TEMEL[\s\-]*MATEMET[İI]K[\s\S]*?(\d+)[\s\S]*?(\d+)[\s\S]*?(\d+)(?:[\s\S]*?(\d+))?[\s\S]*?(-?\d+[.,]?\d*)/i,
+        /MATEMAT[İI]K[\s\S]*?(\d+)[\s\S]*?(\d+)[\s\S]*?(\d+)(?:[\s\S]*?(\d+))?[\s\S]*?(-?\d+[.,]?\d*)/i
+      ]},
+      // YÖS - Geometri
+      { name: 'YÖS GEOMETRİ', patterns: [
+        /GEOMETR[İI][\s\S]*?(\d+)[\s\S]*?(\d+)[\s\S]*?(\d+)(?:[\s\S]*?(\d+))?[\s\S]*?(-?\d+[.,]?\d*)/i
+      ]},
       // TYT-TÜRKÇE / TÜRKÇE
       { name: 'TYT-TÜRKÇE', patterns: [
         /TYT\s*[–-]?\s*TÜRK[TÇ]E[\s\S]*?(\d+)[\s\S]*?(\d+)[\s\S]*?(\d+)[\s\S]*?(\d+)[\s\S]*?(-?\d+[.,]?\d*)/i,
@@ -294,6 +319,7 @@ export default function PDFImport() {
         const match = normalizedText.match(regex);
         if (match) {
           const net = parseFloat(match[5].replace(',', '.')) || 0;
+          const blankValue = match[4] ? (parseInt(match[4]) || 0) : Math.max((parseInt(match[1]) || 0) - (parseInt(match[2]) || 0) - (parseInt(match[3]) || 0), 0);
           // Sadece pozitif net değerlerini al (0 veya geçerli net)
           if (net >= 0 || match[5].includes('-')) {
             subjectMatches.push({
@@ -301,7 +327,7 @@ export default function PDFImport() {
               questions: parseInt(match[1]) || 0,
               correct: parseInt(match[2]) || 0,
               wrong: parseInt(match[3]) || 0,
-              blank: parseInt(match[4]) || 0,
+              blank: blankValue,
               net: Math.abs(net),
               avg: 0
             });
@@ -312,6 +338,16 @@ export default function PDFImport() {
         }
       }
     });
+
+    const yosNetFromCounts = (c: number, w: number) => {
+      const pen =
+        examType === '3' || examType === '4' || examType === '5' || examType === '6' || examType === '7' || examType === 'LGS'
+          ? 1 / 3
+          : 1 / 4;
+      return Math.round((c - w * pen) * 100) / 100;
+    };
+    const mergedSubjectRows =
+      examType === 'YOS' ? mergeYosMatematikGenelSubjects(examType, subjectMatches, yosNetFromCounts) : subjectMatches;
 
     // TOPLAM satırını bul
     const totalMatch = normalizedText.match(/TOPLAM[\s\S]*?(\d+)[\s\S]*?(\d+)[\s\S]*?(\d+)[\s\S]*?(\d+)[\s\S]*?(-?\d+[.,]?\d*)/i);
@@ -347,7 +383,7 @@ export default function PDFImport() {
       totalNet = Math.abs(parseFloat(totalMatch[5].replace(',', '.')) || 0);
     } else {
       // Derslerden hesapla
-      totalNet = subjectMatches.reduce((sum, s) => sum + (s.net || 0), 0);
+      totalNet = mergedSubjectRows.reduce((sum, s) => sum + (s.net || 0), 0);
     }
 
     console.log('Total net calculated:', totalNet);
@@ -360,11 +396,11 @@ export default function PDFImport() {
       booklet: bookletMatch ? bookletMatch[1] : '-',
       className: classMatch ? classMatch[1] : '-',
       examType,
-      subjects: subjectMatches,
-      totalQuestions: totalMatch ? parseInt(totalMatch[1]) || 0 : subjectMatches.reduce((sum, s) => sum + s.questions, 0),
-      totalCorrect: totalMatch ? parseInt(totalMatch[2]) || 0 : subjectMatches.reduce((sum, s) => sum + s.correct, 0),
-      totalWrong: totalMatch ? parseInt(totalMatch[3]) || 0 : subjectMatches.reduce((sum, s) => sum + s.wrong, 0),
-      totalBlank: totalMatch ? parseInt(totalMatch[4]) || 0 : subjectMatches.reduce((sum, s) => sum + s.blank, 0),
+      subjects: mergedSubjectRows,
+      totalQuestions: totalMatch ? parseInt(totalMatch[1]) || 0 : mergedSubjectRows.reduce((sum, s) => sum + s.questions, 0),
+      totalCorrect: totalMatch ? parseInt(totalMatch[2]) || 0 : mergedSubjectRows.reduce((sum, s) => sum + s.correct, 0),
+      totalWrong: totalMatch ? parseInt(totalMatch[3]) || 0 : mergedSubjectRows.reduce((sum, s) => sum + s.wrong, 0),
+      totalBlank: totalMatch ? parseInt(totalMatch[4]) || 0 : mergedSubjectRows.reduce((sum, s) => sum + s.blank, 0),
       totalNet: totalNet,
       scores
     };
@@ -505,7 +541,7 @@ export default function PDFImport() {
               PDF'nizde öğrenci adı, ders bilgileri (TYT-Türkçe, TYT-Matematik vb.) ve net hesaplamaları bulunmalıdır.
             </p>
             <div className="mt-2 text-sm text-blue-700">
-              <strong>Desteklenen Sınav Türleri:</strong> TYT, AYT, 9-12. Sınıf
+              <strong>Desteklenen Sınav Türleri:</strong> 3-7, LGS, YÖS, TYT, YKS Eşit Ağırlık, YKS Sayısal
             </div>
           </div>
         </div>

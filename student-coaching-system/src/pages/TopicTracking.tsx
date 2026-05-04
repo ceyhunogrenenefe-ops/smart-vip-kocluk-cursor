@@ -27,6 +27,7 @@ export default function TopicTracking() {
     getTopicsByClass,
     getCompletedTopicsBySubject,
     markTopicCompleted,
+    unmarkTopicCompleted,
     resetTopicProgress,
     getStudentTopicProgress
   } = useApp();
@@ -45,6 +46,8 @@ export default function TopicTracking() {
   // YKS öğrencisi mi kontrol et
   const isYKSStudent = topicsData.isYKS;
   const isRegularStudent = !topicsData.isYKS;
+  const isLgsStudent = studentClassLevel === 'LGS';
+  const isYosStudent = studentClassLevel === 'YOS';
 
   // Seçili öğrencinin tamamlanmış konuları
   const completedTopics = selectedStudentId
@@ -113,6 +116,11 @@ export default function TopicTracking() {
           filtered[subject] = topicsData.regular[subject];
         }
       });
+    }
+
+    // LGS öğrencilerinde Almanca gösterme
+    if (isLgsStudent && filtered['Almanca']) {
+      delete filtered['Almanca'];
     }
 
     return filtered;
@@ -204,6 +212,7 @@ export default function TopicTracking() {
       }
       return [];
     }
+    if (isLgsStudent && subject === 'Almanca') return [];
     return filteredRegularTopics?.[subject] || [];
   };
 
@@ -224,10 +233,10 @@ export default function TopicTracking() {
           <h2 className="text-2xl font-bold text-slate-800">Konu Takibi</h2>
           <p className="text-gray-500">Öğrencilerin konu tamamlama durumlarını takip edin</p>
         </div>
-        {isYKSStudent && (
+        {(isYKSStudent || isYosStudent) && (
           <div className="bg-gradient-to-r from-blue-500 to-purple-500 text-white px-4 py-2 rounded-lg flex items-center gap-2">
             <Layers className="w-5 h-5" />
-            <span className="font-medium">{getClassLabel()} Öğrencisi</span>
+            <span className="font-medium">{isYosStudent ? 'YÖS Öğrencisi' : `${getClassLabel()} Öğrencisi`}</span>
           </div>
         )}
       </div>
@@ -493,7 +502,9 @@ export default function TopicTracking() {
                             >
                               <button
                                 onClick={() => {
-                                  if (!isCompleted) {
+                                  if (isCompleted) {
+                                    unmarkTopicCompleted(selectedStudentId, subject, topic);
+                                  } else {
                                     markTopicCompleted(selectedStudentId, subject, topic);
                                   }
                                 }}
@@ -579,7 +590,9 @@ export default function TopicTracking() {
                             >
                               <button
                                 onClick={() => {
-                                  if (!isCompleted) {
+                                  if (isCompleted) {
+                                    unmarkTopicCompleted(selectedStudentId, subject, topic);
+                                  } else {
                                     markTopicCompleted(selectedStudentId, subject, topic);
                                   }
                                 }}
@@ -657,7 +670,9 @@ export default function TopicTracking() {
                             >
                               <button
                                 onClick={() => {
-                                  if (!isCompleted) {
+                                  if (isCompleted) {
+                                    unmarkTopicCompleted(selectedStudentId, subject, topic);
+                                  } else {
                                     markTopicCompleted(selectedStudentId, subject, topic);
                                   }
                                 }}

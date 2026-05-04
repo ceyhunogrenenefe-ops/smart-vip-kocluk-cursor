@@ -27,5 +27,12 @@ dist-ssr
 # Vercel
 .vercel
 
+# Yerel sırlar (Vercel push script çıktısı — commit etmeyin)
+.local-deploy-secrets.txt
+.env.production
+.env.vercel
+.env.local
+*.zip
+
 # Kaynak Excel (konular mockData + database/*.json ile uygulamada)
 *.xlsx

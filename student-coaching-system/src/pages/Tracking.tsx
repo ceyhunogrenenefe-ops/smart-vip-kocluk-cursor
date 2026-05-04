@@ -3,6 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { WeeklyEntry, Book, formatClassLevelLabel } from '../types';
 import { topicPool } from '../data/mockData';
+import { yosTopicPool } from '../data/yosTopicPool';
 import {
   Calendar,
   Plus,
@@ -76,6 +77,7 @@ const YKS_SUBJECTS: Record<string, string[]> = {
 
 // TYT alt konuları
 const TYT_SUBJECTS = ['TYT TÜRKÇE', 'TYT MATEMATİK', 'TYT GEOMETRİ', 'TYT FİZİK', 'TYT KİMYA', 'TYT BİYOLOJİ', 'TYT TARİH', 'TYT COĞRAFYA', 'TYT FELSEFE', 'TYT DİN KÜLTÜRÜ'];
+const YOS_SUBJECTS = ['YÖS MATEMATİK', 'YÖS GEOMETRİ', 'YÖS IQ'];
 
 // Konu eşleştirmesi - topicPool'dan doğru konuları almak için
 const SUBJECT_TOPIC_MAP: Record<string, string> = {
@@ -108,6 +110,17 @@ const SUBJECT_TOPIC_MAP: Record<string, string> = {
 };
 
 export default function Tracking() {
+  const mergedTopicPool = useMemo(() => {
+    const next = { ...topicPool } as Record<string, Record<string, string[]>>;
+    Object.entries(yosTopicPool).forEach(([subject, levels]) => {
+      next[subject] = {
+        ...(next[subject] || {}),
+        ...(levels as Record<string, string[]>)
+      };
+    });
+    return next;
+  }, []);
+
   const {
     students,
     weeklyEntries,
@@ -132,6 +145,17 @@ export default function Tracking() {
   const [calYearMonth, setCalYearMonth] = useState({ y: now.getFullYear(), m: now.getMonth() + 1 });
   const [dayModalDate, setDayModalDate] = useState<string | null>(null);
   const [aiFilling, setAiFilling] = useState(false);
+
+  const normalizeClassLevelForTopics = (level: string | number | undefined) => {
+    if (typeof level === 'number') return level;
+    if (typeof level === 'string') {
+      const trimmed = level.trim();
+      if (trimmed === 'LGS' || trimmed.startsWith('YKS-')) return trimmed;
+      const asNumber = Number(trimmed);
+      if (!Number.isNaN(asNumber)) return asNumber;
+    }
+    return level;
+  };
 
   // Seçili öğrencinin kayıtlarını al
   const getStudentEntriesLocal = (studentId: string): WeeklyEntry[] => {
@@ -164,43 +188,56 @@ export default function Tracking() {
   const subjects = useMemo(() => {
     if (!selectedStudent) return Object.keys(topicPool);
 
-    const classLevel = selectedStudent.classLevel;
+    const classLevel = normalizeClassLevelForTopics(selectedStudent.classLevel);
 
     // YKS sınıfları için sadece ilgili dersleri göster
+    if (classLevel === 'YOS') {
+      return YOS_SUBJECTS;
+    }
     if (typeof classLevel === 'string' && YKS_SUBJECTS[classLevel]) {
       return YKS_SUBJECTS[classLevel];
     }
 
     // LGS: konu havuzu 'LGS' anahtarında
     if (classLevel === 'LGS') {
-      return Object.keys(topicPool).filter(
-        subject => (topicPool[subject]['LGS'] || []).length > 0
+      return Object.keys(mergedTopicPool).filter(
+        subject => (mergedTopicPool[subject]['LGS'] || []).length > 0
+      );
+    }
+
+    if (typeof classLevel === 'string') {
+      return Object.keys(mergedTopicPool).filter(
+        subject => (mergedTopicPool[subject][classLevel] || []).length > 0
       );
     }
 
     // Sayısal sınıf (3–12): sadece bu sınıf için tanımlı konu havuzu olan dersler
     if (typeof classLevel === 'number') {
-      return Object.keys(topicPool).filter(
-        subject => (topicPool[subject][classLevel] || []).length > 0
+      return Object.keys(mergedTopicPool).filter(
+        subject => (mergedTopicPool[subject][classLevel] || []).length > 0
       );
     }
 
-    return Object.keys(topicPool);
+    return Object.keys(mergedTopicPool);
   }, [selectedStudent]);
 
   // Konuları al - Ders seçimine göre sadece o derse ait konuları göster
   const getTopicsForStudent = () => {
     if (!selectedStudent || !formData.subject) return [];
 
-    const classLevel = selectedStudent.classLevel;
+    const classLevel = normalizeClassLevelForTopics(selectedStudent.classLevel);
 
     // YKS sınıfları için - konuyu doğrudan derse göre al
     if (typeof classLevel === 'string' && classLevel.startsWith('YKS-')) {
-      return topicPool[formData.subject]?.[classLevel] || [];
+      return mergedTopicPool[formData.subject]?.[classLevel] || [];
     }
 
     if (classLevel === 'LGS') {
       return getTopics(formData.subject, 'LGS');
+    }
+
+    if (classLevel === 'YOS') {
+      return getTopics(formData.subject, 'YOS');
     }
 
     if (typeof classLevel === 'number') {
@@ -495,7 +532,7 @@ export default function Tracking() {
                 {weekStats.totalReadingMinutes > 0 && (
                   <div>
                     <p className="text-2xl font-bold text-green-600">{weekStats.totalReadingMinutes}</p>
-                    <p className="text-xs text-gray-500">Okuma dk</p>
+                    <p className="text-xs text-gray-500">Okunan sayfa</p>
                   </div>
                 )}
               </div>
@@ -675,7 +712,7 @@ export default function Tracking() {
                           {entry.readingMinutes ? (
                             <div className="flex items-center justify-center gap-1 text-green-600">
                               <Clock className="w-4 h-4" />
-                              <span className="text-sm font-medium">{entry.readingMinutes} dk</span>
+                              <span className="text-sm font-medium">{entry.readingMinutes} sayfa</span>
                               {entry.bookTitle && (
                                 <BookMarked className="w-3 h-3" title={entry.bookTitle} />
                               )}
@@ -993,11 +1030,11 @@ export default function Tracking() {
                   </h4>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Okuma Süresi */}
+                  {/* Okunan Sayfa */}
                   <div>
                     <label className="block text-sm font-medium text-green-700 mb-1">
                       <Clock className="w-4 h-4 inline mr-1" />
-                      Okuma Süresi (dakika)
+                      Okunan Sayfa
                     </label>
                     <input
                       type="number"
@@ -1084,7 +1121,7 @@ export default function Tracking() {
                 {formData.readingMinutes > 0 && (
                   <div className="mt-3 p-3 bg-white rounded-lg border border-green-200">
                     <p className="text-sm text-green-700">
-                      <strong>{formData.readingMinutes} dakika</strong> okuma kaydedilecek.
+                      <strong>{formData.readingMinutes} sayfa</strong> okuma kaydedilecek.
                       {formData.bookId && studentBooks.find(b => b.id === formData.bookId) && (
                         <span> • <strong>{studentBooks.find(b => b.id === formData.bookId)?.title}</strong> kitabı</span>
                       )}

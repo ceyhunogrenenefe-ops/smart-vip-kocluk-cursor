@@ -1,6 +1,7 @@
 // Türkçe: Deneme Sınavları Takip Sayfası - AI Koç entegrasyonu
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
+import { mergeYosMatematikGenelSubjects } from '../lib/mergeYosExamSubjects';
 import {
   ClipboardList,
   Plus,
@@ -67,7 +68,7 @@ const loadPdfJs = async () => {
 interface ExamResult {
   id: string;
   studentId: string;
-  examType: 'TYT' | 'AYT' | '9' | '10' | '11' | '12';
+  examType: '3' | '4' | '5' | '6' | '7' | 'LGS' | 'YOS' | 'TYT' | 'YKS-EA' | 'YKS-SAY' | 'AYT';
   examDate: string;
   source: 'webhook' | 'manual';
   totalNet: number;
@@ -81,6 +82,103 @@ interface ExamResult {
   notes?: string;
   createdAt: string;
 }
+
+type ExamType = ExamResult['examType'];
+
+const EXAM_TYPE_OPTIONS: ExamType[] = ['3', '4', '5', '6', '7', 'LGS', 'YOS', 'TYT', 'YKS-EA', 'YKS-SAY'];
+
+const SUBJECT_TEMPLATES: Record<ExamType, string[]> = {
+  '3': ['Türkçe', 'Matematik', 'Hayat Bilgisi', 'İngilizce', 'Fen Bilimleri'],
+  '4': ['Türkçe', 'Matematik', 'Sosyal Bilgiler', 'İngilizce', 'Fen Bilimleri'],
+  '5': ['LGS-Türkçe', 'LGS-Sosyal Bilimler', 'LGS-Din Kültürü', 'LGS-İngilizce', 'LGS-Matematik', 'LGS-Fen Bilimleri'],
+  '6': ['LGS-Türkçe', 'LGS-Sosyal Bilimler', 'LGS-Din Kültürü', 'LGS-İngilizce', 'LGS-Matematik', 'LGS-Fen Bilimleri'],
+  '7': ['LGS-Türkçe', 'LGS-Sosyal Bilimler', 'LGS-Din Kültürü', 'LGS-İngilizce', 'LGS-Matematik', 'LGS-Fen Bilimleri'],
+  LGS: ['LGS-Türkçe', 'LGS-İnkılap Tarihi', 'LGS-Din Kültürü', 'LGS-İngilizce', 'LGS-Matematik', 'LGS-Fen Bilimleri'],
+  YOS: ['YÖS Matematik Genel', 'YÖS IQ'],
+  TYT: [
+    'TYT-Türkçe',
+    'TYT-Sosyal Bilimler',
+    'Tarih',
+    'Coğrafya',
+    'Felsefe',
+    'Din Kültürü',
+    'TYT-Matematik',
+    'TYT-Fen Bilimleri',
+    'Fizik',
+    'Kimya',
+    'Biyoloji',
+  ],
+  'YKS-EA': ['AYT-Edebiyat-Sosyal', 'AYT-Matematik'],
+  'YKS-SAY': ['AYT-Matematik', 'AYT-Fen Bilimleri', 'Fizik', 'Kimya', 'Biyoloji'],
+  AYT: ['AYT-Matematik', 'AYT-Fen Bilimleri'],
+};
+
+const normalizeText = (v: string) =>
+  v
+    .replace(/İ/g, 'I')
+    .replace(/ı/g, 'i')
+    .replace(/Ğ/g, 'G')
+    .replace(/ğ/g, 'g')
+    .replace(/Ü/g, 'U')
+    .replace(/ü/g, 'u')
+    .replace(/Ş/g, 'S')
+    .replace(/ş/g, 's')
+    .replace(/Ö/g, 'O')
+    .replace(/ö/g, 'o')
+    .replace(/Ç/g, 'C')
+    .replace(/ç/g, 'c');
+
+const getWrongPenalty = (examType?: ExamType) =>
+  examType === '3' || examType === '4' || examType === '5' || examType === '6' || examType === '7' || examType === 'LGS'
+    ? 1 / 3
+    : 1 / 4;
+
+const netFromCounts = (correct: number, wrong: number, examType?: ExamType) =>
+  Math.round((correct - wrong * getWrongPenalty(examType)) * 100) / 100;
+
+const hasStrongParsedData = (parsed: any) =>
+  Boolean(parsed?.studentName && parsed?.subjects?.length && parsed?.totalNet > 0);
+
+const normalizeSubjectName = (name: string) => {
+  const n = normalizeText(name).replace(/\s+/g, ' ').trim();
+  if (/\bMatematik\s+Genel\b/i.test(name)) return 'YÖS Matematik Genel';
+  if (n.includes('LGS-DIN KULTURU')) return 'LGS-DIN KULTURU VE AHLAK BILGISI';
+  if (n === 'DIN KULTURU') return 'LGS-DIN KULTURU VE AHLAK BILGISI';
+  if (n.includes('YOS-SAYISAL YETENEK') || n === 'IQ') return 'YÖS IQ';
+  if (n.includes('YOS-TEMEL MATEMATIK') || n.includes('YOS-TEMEL MATEMETIK')) return 'YÖS MATEMATİK';
+  if (n === 'MATEMATIK') return 'YÖS MATEMATİK';
+  if (n === 'GEOMETRI') return 'YÖS GEOMETRİ';
+  return n;
+};
+
+const AUX_SUBJECTS_EXCLUDED_FROM_TOTAL = new Set([
+  'TARIH',
+  'COGRAFYA',
+  'FELSEFE',
+  'DIN KULTURU',
+  'FIZIK',
+  'KIMYA',
+  'BIYOLOJI',
+]);
+
+const shouldExcludeFromTotalNet = (subjectName: string) =>
+  AUX_SUBJECTS_EXCLUDED_FROM_TOTAL.has(normalizeText(subjectName));
+
+const calculateTotalNetFromSubjects = (subjects: Array<{ name: string; net: number }>) =>
+  Math.round(
+    subjects.reduce((sum, s) => sum + (shouldExcludeFromTotalNet(s.name) ? 0 : Number(s.net || 0)), 0) * 100
+  ) / 100;
+
+const createDraftResult = (label: string) => ({
+  studentName: label || 'Bilinmeyen Ogrenci',
+  examDate: new Date().toISOString().split('T')[0],
+  examType: 'TYT' as ExamType,
+  subjects: [],
+  totalNet: 0,
+  extractionMethod: 'draft',
+  parseError: 'Otomatik parse basarisiz. Koc manuel duzenleyebilir.',
+  rawText: '',
+});
 
 export default function ExamTracking() {
   const { students, examResults, addExamResult, deleteExamResult } = useApp();
@@ -100,16 +198,29 @@ export default function ExamTracking() {
   const [selectedPdfResults, setSelectedPdfResults] = useState<string[]>([]);
   const [pdfStudentMap, setPdfStudentMap] = useState<Record<number, string>>({});
 
+  const buildTemplateSubjects = useCallback((examType: ExamType) => {
+    const names = SUBJECT_TEMPLATES[examType] || [];
+    return names.map((name) => ({ name, net: 0, correct: 0, wrong: 0, blank: 0 }));
+  }, []);
+
+  const isStudentCompatibleWithExam = useCallback((studentId: string, examType: ExamType) => {
+    const st = students.find((s) => s.id === studentId);
+    if (!st) return false;
+    const lvl = st.classLevel;
+    if (examType === '3' || examType === '4' || examType === '5' || examType === '6' || examType === '7') {
+      return String(lvl) === examType;
+    }
+    if (examType === 'LGS') return String(lvl) === 'LGS' || String(lvl) === '8';
+    if (examType === 'YOS') return String(lvl) === 'YOS';
+    if (examType === 'TYT') return ['9', '10', '11', '12', 'YKS-Sayısal', 'YKS-Eşit Ağırlık', 'YKS-Sözel'].includes(String(lvl));
+    if (examType === 'YKS-EA') return String(lvl) === 'YKS-Eşit Ağırlık' || String(lvl) === '12';
+    if (examType === 'YKS-SAY' || examType === 'AYT') return String(lvl) === 'YKS-Sayısal' || String(lvl) === '12';
+    return true;
+  }, [students]);
+
   // PDF Metin Ayrıştırma - TYT/AYT formatına uygun
   const parsePdfText = (text: string): any => {
-    // Türkçe karakter normalizasyonu
-    const normalized = text
-      .replace(/İ/g, 'I').replace(/ı/g, 'i')
-      .replace(/Ğ/g, 'G').replace(/ğ/g, 'g')
-      .replace(/Ü/g, 'U').replace(/ü/g, 'u')
-      .replace(/Ş/g, 'S').replace(/ş/g, 's')
-      .replace(/Ö/g, 'O').replace(/ö/g, 'o')
-      .replace(/Ç/g, 'C').replace(/ç/g, 'c');
+    const normalized = normalizeText(text);
 
     // Öğrenci adı çıkarma
     let studentName = '';
@@ -146,81 +257,97 @@ export default function ExamTracking() {
       }
     }
 
-    // Sınav türü belirleme
-    let examType = 'TYT';
-    if (/AYT|SAY|EA/i.test(normalized)) {
-      examType = 'AYT';
-    } else if (/TYT|TEMEL|YKS/i.test(normalized)) {
+    // Sınav türü belirleme (yeni sınıf/grup yapısı)
+    let examType: ExamType = 'TYT';
+    if (/LGS|LGS-/i.test(normalized)) {
+      const classMatch = normalized.match(/SINIF[^\d]*(\d+)/i);
+      const cls = classMatch?.[1];
+      if (cls === '3' || cls === '4' || cls === '5' || cls === '6' || cls === '7') {
+        examType = cls;
+      } else {
+        examType = 'LGS';
+      }
+    } else if (/YOS|YÖS/i.test(normalized)) {
+      examType = 'YOS';
+    } else if (/TYT/i.test(normalized)) {
       examType = 'TYT';
+    } else if (/AYT/i.test(normalized) && /EDEBIYAT|EA/i.test(normalized)) {
+      examType = 'YKS-EA';
+    } else if (/AYT/i.test(normalized) && /FIZIK|KIMYA|BIYOLOJI|SAY/i.test(normalized)) {
+      examType = 'YKS-SAY';
+    } else if (/SAY/i.test(normalized)) {
+      examType = 'YKS-SAY';
+    } else if (/EA/i.test(normalized)) {
+      examType = 'YKS-EA';
     }
 
-    // Ders sonuçlarını çıkarma - Geliştirilmiş regex
-    const subjects: { name: string; correct: number; wrong: number; blank: number; net: number }[] = [];
+    let subjects: { name: string; questions?: number; correct: number; wrong: number; blank: number; net: number }[] = [];
+    const compact = normalized.replace(/\s+/g, ' ').trim();
+    let declaredTotals: { questions: number; correct: number; wrong: number; blank: number; net: number } | null = null;
 
-    // TYT Dersleri için kalıplar
-    const tytSubjects = [
-      { name: 'Turkce', patterns: [/TURKCE[:\s]*D\s*(\d+)\s*Y\s*(\d+)\s*B\s*(\d+)/i, /TURKCE[:\s]*(\d+)\/(\d+)\/(\d+)/] },
-      { name: 'Matematik', patterns: [/MATEMATIK[:\s]*D\s*(\d+)\s*Y\s*(\d+)\s*B\s*(\d+)/i, /MAT[:\s]*(\d+)\/(\d+)\/(\d+)/] },
-      { name: 'Sosyal', patterns: [/SOSYAL[:\s]*D\s*(\d+)\s*Y\s*(\d+)\s*B\s*(\d+)/i, /TARIH[:\s]*(\d+)\/(\d+)\/(\d+)/] },
-      { name: 'Fen', patterns: [/FEN[:\s]*D\s*(\d+)\s*Y\s*(\d+)\s*B\s*(\d+)/i, /BIYOLOJI[:\s]*(\d+)\/(\d+)\/(\d+)/] },
-    ];
+    const totalRow = compact.match(/TOPLAM\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+([\-]?\d+[.,]?\d*)/i);
+    if (totalRow) {
+      declaredTotals = {
+        questions: parseInt(totalRow[1], 10) || 0,
+        correct: parseInt(totalRow[2], 10) || 0,
+        wrong: parseInt(totalRow[3], 10) || 0,
+        blank: parseInt(totalRow[4], 10) || 0,
+        net: parseFloat(totalRow[5].replace(',', '.')) || 0,
+      };
+    }
 
-    // AYT Dersleri için kalıplar
-    const aytSubjects = [
-      { name: 'Matematik', patterns: [/MATEMATIK[:\s]*D\s*(\d+)\s*Y\s*(\d+)\s*B\s*(\d+)/i, /MAT[:\s]*(\d+)\/(\d+)\/(\d+)/] },
-      { name: 'Fizik', patterns: [/FIZIK[:\s]*D\s*(\d+)\s*Y\s*(\d+)\s*B\s*(\d+)/i, /FIZ[:\s]*(\d+)\/(\d+)\/(\d+)/] },
-      { name: 'Kimya', patterns: [/KIMYA[:\s]*D\s*(\d+)\s*Y\s*(\d+)\s*B\s*(\d+)/i, /KIM[:\s]*(\d+)\/(\d+)\/(\d+)/] },
-      { name: 'Biyoloji', patterns: [/BIYOLOJI[:\s]*D\s*(\d+)\s*Y\s*(\d+)\s*B\s*(\d+)/i, /BIY[:\s]*(\d+)\/(\d+)\/(\d+)/] },
-    ];
+    // Global ders satırı yakalama: LGS/TYT/AYT ve alt kırılımlar
+    const subjectRegex =
+      /(LGS-[A-Z ÇĞİÖŞÜ]+(?: VE AHLAK BILGISI)?|TYT-[A-Z ÇĞİÖŞÜ]+|AYT-[A-Z ÇĞİÖŞÜ]+|YOS-[A-Z ÇĞİÖŞÜ]+|MATEMATIK|GEOMETRI|IQ|INKILAP TARIHI|SOSYAL BILIMLER(?:I)?|DIN KULTURU(?: VE AHLAK BILGISI)?|INGILIZCE|TARIH|COGRAFYA|FELSEFE|FIZIK|KIMYA|BIYOLOJI|EDEBIYAT)\s+(\d+)\s+(\d+)\s+(\d+)(?:\s+(\d+))?\s+([\-]?\d+[.,]?\d*)/gi;
+    for (const match of compact.matchAll(subjectRegex)) {
+      const subjectName = normalizeSubjectName(String(match[1] || '').trim());
+      const questionCount = parseInt(String(match[2] || '0'), 10) || 0;
+      const correct = parseInt(String(match[3] || '0'), 10) || 0;
+      const wrong = parseInt(String(match[4] || '0'), 10) || 0;
+      // Bazı PDF'lerde boş sütunu düşüyor; bu durumda doğru+yanlıştan hesapla
+      const parsedBlank = parseInt(String(match[5] || '0'), 10) || 0;
+      const blank = match[5] ? parsedBlank : Math.max(questionCount - correct - wrong, 0);
+      if (!questionCount) continue;
+      subjects.push({
+        name: subjectName,
+        questions: questionCount,
+        correct,
+        wrong,
+        blank,
+        net: netFromCounts(correct, wrong, examType),
+      });
+    }
 
-    const subjectsToCheck = examType === 'AYT' ? aytSubjects : tytSubjects;
-
-    for (const subject of subjectsToCheck) {
-      for (const pattern of subject.patterns) {
-        const match = normalized.match(pattern);
-        if (match) {
-          const correct = parseInt(match[1]) || 0;
-          const wrong = parseInt(match[2]) || 0;
-          const blank = parseInt(match[3]) || 0;
-          // Net hesaplama: Doğru - (Yanlış * 0.25)
-          const net = correct - (wrong * 0.25);
-          subjects.push({ name: subject.name, correct, wrong, blank, net });
-          break;
+    // LGS özel fallback: Din Kültürü gibi kaçan dersleri tekil desenle tamamla
+    if (examType === 'LGS' || examType === '5' || examType === '6' || examType === '7') {
+      const hasDin = subjects.some((s) => normalizeSubjectName(s.name).includes('LGS-DIN KULTURU VE AHLAK BILGISI'));
+      if (!hasDin) {
+        const dinMatch = compact.match(/LGS-DIN KULTURU(?: VE AHLAK BILGISI)?\s+(\d+)\s+(\d+)\s+(\d+)(?:\s+(\d+))?\s+([\-]?\d+[.,]?\d*)/i);
+        if (dinMatch) {
+          const questionCount = parseInt(dinMatch[1], 10) || 0;
+          const correct = parseInt(dinMatch[2], 10) || 0;
+          const wrong = parseInt(dinMatch[3], 10) || 0;
+          const blank = dinMatch[4] ? (parseInt(dinMatch[4], 10) || 0) : Math.max(questionCount - correct - wrong, 0);
+          subjects.push({
+            name: 'LGS-DIN KULTURU VE AHLAK BILGISI',
+            questions: questionCount,
+            correct,
+            wrong,
+            blank,
+            net: netFromCounts(correct, wrong, examType),
+          });
         }
       }
     }
 
-    // Eğer belirli kalıplarla bulamadıysak, genel sayısal blokları dene
-    if (subjects.length === 0) {
-      // Sayısal blokları bul (D:Doğru Y:Yanlış B:Boş formatı)
-      const numberBlocks = normalized.match(/([A-ZİĞÜŞÖÇ\s]+?)[:\s]*(\d+)[\/\s]+(\d+)[\/\s]+(\d+)/g);
-      if (numberBlocks) {
-        for (const block of numberBlocks) {
-          const blockMatch = block.match(/([A-ZİĞÜŞÖÇ\s]+?)[:\s]*(\d+)[\/\s]+(\d+)[\/\s]+(\d+)/);
-          if (blockMatch) {
-            const name = blockMatch[1].trim();
-            const correct = parseInt(blockMatch[2]) || 0;
-            const wrong = parseInt(blockMatch[3]) || 0;
-            const blank = parseInt(blockMatch[4]) || 0;
-            const net = correct - (wrong * 0.25);
-
-            // Ders adını normalize et
-            let normalizedName = name;
-            if (/turk|dil/i.test(name)) normalizedName = 'Turkce';
-            else if (/mat|geo|analiz/i.test(name)) normalizedName = 'Matematik';
-            else if (/sos|tari|psik|felsef|cog/i.test(name)) normalizedName = 'Sosyal';
-            else if (/fen|fiz|kim|biy/i.test(name)) normalizedName = 'Fen';
-
-            if (correct > 0 || wrong > 0 || blank > 0) {
-              subjects.push({ name: normalizedName, correct, wrong, blank, net });
-            }
-          }
-        }
-      }
+    if (examType === 'YOS' && subjects.length > 0) {
+      subjects = mergeYosMatematikGenelSubjects(examType, subjects, (c, w) =>
+        netFromCounts(c, w, examType)
+      );
     }
 
     // Toplam net hesaplama
-    const totalNet = subjects.reduce((sum, s) => sum + s.net, 0);
+    const totalNet = calculateTotalNetFromSubjects(subjects as Array<{ name: string; net: number }>);
 
     return {
       studentName,
@@ -228,25 +355,121 @@ export default function ExamTracking() {
       examType,
       subjects,
       totalNet,
+      declaredTotals,
       rawText: text.substring(0, 1000)
     };
   };
 
-  // PDF Dosyasını İşle
+  // PDF/Gorsel Dosyasını İşle
   const processPdfFile = async (file: File): Promise<any> => {
+    // Fotoğraf yükleme: doğrudan OCR
+    if (file.type.startsWith('image/')) {
+      try {
+        const tesseract = await import('tesseract.js');
+        const imgDataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        const ocr = await tesseract.recognize(imgDataUrl, 'tur+eng');
+        const parsed = parsePdfText(ocr.data.text || '');
+        if (hasStrongParsedData(parsed)) {
+          return {
+            ...parsed,
+            extractionMethod: 'ocr-image',
+            ocrConfidence: typeof ocr.data?.confidence === 'number' ? Math.round(ocr.data.confidence) : null,
+            rawText: String(ocr.data.text || '').substring(0, 3000),
+          };
+        }
+        return {
+          ...createDraftResult(file.name),
+          extractionMethod: 'ocr-image',
+          ocrConfidence: typeof ocr.data?.confidence === 'number' ? Math.round(ocr.data.confidence) : null,
+          rawText: String(ocr.data.text || '').substring(0, 3000),
+        };
+      } catch {
+        return createDraftResult(file.name);
+      }
+    }
+
     const pdfjsLib = await loadPdfJs();
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
     let fullText = '';
+    const pageCanvases: HTMLCanvasElement[] = [];
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const textContent = await page.getTextContent();
       const pageText = textContent.items.map((item: any) => item.str).join(' ');
       fullText += pageText + '\n';
+
+      // OCR fallback için sayfa raster çıktısı da hazırla
+      const viewport = page.getViewport({ scale: 1.2 });
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      if (context) {
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await page.render({ canvasContext: context, viewport }).promise;
+        pageCanvases.push(canvas);
+      }
     }
 
-    return parsePdfText(fullText);
+    const parsed = parsePdfText(fullText);
+    if (hasStrongParsedData(parsed)) {
+      return {
+        ...parsed,
+        extractionMethod: 'text',
+        rawText: fullText.substring(0, 3000),
+      };
+    }
+
+    // Hibrit fallback: OCR ile tekrar oku
+    try {
+      const tesseract = await import('tesseract.js');
+      let ocrText = '';
+      let confidenceTotal = 0;
+      let confidenceCount = 0;
+      for (const canvas of pageCanvases) {
+        const ocr = await tesseract.recognize(canvas, 'tur+eng');
+        ocrText += `${ocr.data.text || ''}\n`;
+        if (typeof ocr.data?.confidence === 'number') {
+          confidenceTotal += ocr.data.confidence;
+          confidenceCount++;
+        }
+      }
+      const ocrParsed = parsePdfText(ocrText);
+      const ocrConfidence = confidenceCount > 0 ? Math.round(confidenceTotal / confidenceCount) : null;
+      if (!hasStrongParsedData(ocrParsed)) {
+        return {
+          ...createDraftResult(file.name),
+          extractionMethod: 'ocr',
+          ocrConfidence,
+          rawText: (ocrText || fullText).substring(0, 3000),
+        };
+      }
+      return {
+        ...ocrParsed,
+        extractionMethod: 'ocr',
+        ocrConfidence,
+        rawText: (ocrText || fullText).substring(0, 3000),
+      };
+    } catch {
+      if (hasStrongParsedData(parsed)) {
+        return {
+          ...parsed,
+          extractionMethod: 'text',
+          rawText: fullText.substring(0, 3000),
+        };
+      }
+      return {
+        ...createDraftResult(file.name),
+        extractionMethod: 'draft',
+        rawText: fullText.substring(0, 3000),
+      };
+    }
   };
 
   // PDF Dosya Seçimi
@@ -255,7 +478,6 @@ export default function ExamTracking() {
     if (files) {
       const newFiles = Array.from(files);
       setUploadedFiles(prev => [...prev, ...newFiles]);
-      setPdfErrors(prev => [...prev, ...new Array(newFiles.length).fill('')]);
     }
     e.target.value = '';
   };
@@ -287,8 +509,8 @@ export default function ExamTracking() {
         results[i] = result;
         errors[i] = '';
       } catch (err) {
-        errors[i] = `Dosya işlenemedi: ${uploadedFiles[i].name}`;
-        results[i] = null;
+        errors[i] = `Otomatik parse basarisiz: ${uploadedFiles[i].name} (manuel duzenleme acik)`;
+        results[i] = createDraftResult(uploadedFiles[i].name);
       }
     }
 
@@ -298,7 +520,7 @@ export default function ExamTracking() {
 
     // İşlenen sonuçları seçili yap
     const selectedIndices = results
-      .map((r, i) => r ? String(i) : null)
+      .map((r, i) => (r ? String(i) : null))
       .filter(Boolean);
     setSelectedPdfResults(selectedIndices as string[]);
   };
@@ -318,14 +540,29 @@ export default function ExamTracking() {
     for (const { index, studentId } of selectedStudents) {
       const result = pdfParsedResults[index];
       if (result) {
+        const currentExamType = (result.examType || 'TYT') as ExamType;
+        const effectiveSubjects =
+          (result.subjects && result.subjects.length > 0)
+            ? result.subjects.map((s: any) => ({
+                ...s,
+                net: netFromCounts(Number(s.correct || 0), Number(s.wrong || 0), currentExamType),
+              }))
+            : buildTemplateSubjects(currentExamType);
+        const recalculatedTotal = calculateTotalNetFromSubjects(
+          effectiveSubjects.map((s: any) => ({
+            name: s.name,
+            net: Number(s.net || netFromCounts(Number(s.correct || 0), Number(s.wrong || 0), currentExamType)),
+          }))
+        );
         const newExam = {
           id: `pdf-${Date.now()}-${index}`,
           studentId,
-          examType: result.examType || 'TYT',
+          examType: currentExamType,
           examDate: result.examDate || new Date().toISOString().split('T')[0],
-          source: 'manual' as const,
-          totalNet: result.totalNet || 0,
-          subjects: result.subjects || [],
+          source: 'pdf' as const,
+          totalNet: recalculatedTotal,
+          subjects: effectiveSubjects,
+          notes: result.parseError ? `Parse Notu: ${result.parseError}` : undefined,
           createdAt: new Date().toISOString()
         };
         addExamResult(newExam);
@@ -352,6 +589,113 @@ export default function ExamTracking() {
     );
   };
 
+  const updatePdfResultMeta = (index: number, key: 'studentName' | 'examDate' | 'examType', value: string) => {
+    setPdfParsedResults((prev) =>
+      prev.map((r, i) => {
+        if (i !== index || !r) return r;
+        return { ...r, [key]: value };
+      })
+    );
+  };
+
+  const updatePdfSubject = (resultIndex: number, subjectIndex: number, key: 'name' | 'questions' | 'correct' | 'wrong' | 'blank', value: string) => {
+    setPdfParsedResults((prev) =>
+      prev.map((r, i) => {
+        if (i !== resultIndex || !r) return r;
+        const subjects = [...(r.subjects || [])];
+        const subject = { ...subjects[subjectIndex] };
+        if (key === 'name') {
+          subject.name = value;
+        } else {
+          subject[key] = Number(value) || 0;
+          if (key === 'questions') {
+            subject.blank = Math.max((subject.questions || 0) - (subject.correct || 0) - (subject.wrong || 0), 0);
+          }
+          subject.net = netFromCounts(subject.correct || 0, subject.wrong || 0, r.examType as ExamType);
+        }
+        subjects[subjectIndex] = subject;
+        const totalNet = calculateTotalNetFromSubjects(
+          subjects.map((s: any) => ({ name: s.name, net: Number(s.net || 0) }))
+        );
+        return { ...r, subjects, totalNet };
+      })
+    );
+  };
+
+  const validatePdfResult = (result: any) => {
+    const issues: string[] = [];
+    const agg = { questions: 0, correct: 0, wrong: 0, blank: 0, net: 0 };
+    for (const s of result.subjects || []) {
+      const q = Number(s.questions || 0);
+      const c = Number(s.correct || 0);
+      const w = Number(s.wrong || 0);
+      const b = Number(s.blank || 0);
+      const n = Number(s.net || 0);
+      agg.questions += q;
+      agg.correct += c;
+      agg.wrong += w;
+      agg.blank += b;
+      agg.net += n;
+      if (q > 0 && c + w + b !== q) {
+        issues.push(`${s.name}: soru toplamı (${c + w + b}) ≠ ${q}`);
+      }
+      const expectedNet = netFromCounts(c, w, result.examType as ExamType);
+      if (Math.abs(expectedNet - n) > 0.01) {
+        issues.push(`${s.name}: net hatalı (${n} → ${expectedNet})`);
+      }
+    }
+
+    const declared = result.declaredTotals;
+    if (declared) {
+      if (declared.questions && agg.questions !== declared.questions) {
+        issues.push(`TOPLAM soru uyuşmuyor (${agg.questions}/${declared.questions})`);
+      }
+      if (declared.correct && agg.correct !== declared.correct) {
+        issues.push(`TOPLAM doğru uyuşmuyor (${agg.correct}/${declared.correct})`);
+      }
+      if (declared.wrong && agg.wrong !== declared.wrong) {
+        issues.push(`TOPLAM yanlış uyuşmuyor (${agg.wrong}/${declared.wrong})`);
+      }
+      if (declared.blank && agg.blank !== declared.blank) {
+        issues.push(`TOPLAM boş uyuşmuyor (${agg.blank}/${declared.blank})`);
+      }
+      if (Math.abs((declared.net || 0) - agg.net) > 0.51) {
+        issues.push(`TOPLAM net farkı yüksek (${agg.net.toFixed(2)}/${declared.net})`);
+      }
+    }
+    return { issues, agg };
+  };
+
+  const copyRawPayload = async (result: any) => {
+    const payload = JSON.stringify(result, null, 2);
+    await navigator.clipboard.writeText(payload);
+    alert('Ham veri panoya kopyalandi.');
+  };
+
+  const addPdfSubject = (resultIndex: number) => {
+    setPdfParsedResults((prev) =>
+      prev.map((r, i) => {
+        if (i !== resultIndex || !r) return r;
+        const subjects = [...(r.subjects || []), { name: '', questions: 0, correct: 0, wrong: 0, blank: 0, net: 0 }];
+        return { ...r, subjects };
+      })
+    );
+  };
+
+  const removePdfSubject = (resultIndex: number, subjectIndex: number) => {
+    setPdfParsedResults((prev) =>
+      prev.map((r, i) => {
+        if (i !== resultIndex || !r) return r;
+        const subjects = [...(r.subjects || [])];
+        subjects.splice(subjectIndex, 1);
+        const totalNet = calculateTotalNetFromSubjects(
+          subjects.map((s: any) => ({ name: s.name, net: Number(s.net || 0) }))
+        );
+        return { ...r, subjects, totalNet };
+      })
+    );
+  };
+
   // PDF İçe Aktarma Modalını Kapat
   const closePdfImport = () => {
     setShowPdfImport(false);
@@ -361,6 +705,8 @@ export default function ExamTracking() {
     setSelectedPdfResults([]);
     setPdfStudentMap({});
   };
+
+  const hasPdfErrors = pdfErrors.some(Boolean);
 
   // Varsayılan mock veriler
   const defaultExamResults: ExamResult[] = [
@@ -437,12 +783,9 @@ export default function ExamTracking() {
 
   const [newExam, setNewExam] = useState<Partial<ExamResult>>({
     studentId: '',
-    examType: 'TYT',
+    examType: 'TYT' as ExamType,
     examDate: new Date().toISOString().split('T')[0],
-    subjects: [
-      { name: 'Türkçe', net: 0, correct: 0, wrong: 0, blank: 0 },
-      { name: 'Matematik', net: 0, correct: 0, wrong: 0, blank: 0 }
-    ]
+    subjects: SUBJECT_TEMPLATES.TYT.map((name) => ({ name, net: 0, correct: 0, wrong: 0, blank: 0 }))
   });
 
   // Filtreleme
@@ -487,7 +830,8 @@ export default function ExamTracking() {
   // Toplam istatistikler
   const getTotalStats = () => {
     const tytResults = allExamResults.filter(r => r.examType === 'TYT');
-    const aytResults = allExamResults.filter(r => r.examType === 'AYT');
+    const aytResults = allExamResults.filter(r => r.examType === 'AYT' || r.examType === 'YKS-EA' || r.examType === 'YKS-SAY');
+    const yosResults = allExamResults.filter(r => r.examType === 'YOS');
 
     return {
       totalExams: allExamResults.length,
@@ -496,6 +840,9 @@ export default function ExamTracking() {
         : 0,
       aytAvg: aytResults.length > 0
         ? Math.round(aytResults.reduce((sum, r) => sum + r.totalNet, 0) / aytResults.length * 10) / 10
+        : 0,
+      yosAvg: yosResults.length > 0
+        ? Math.round(yosResults.reduce((sum, r) => sum + r.totalNet, 0) / yosResults.length * 10) / 10
         : 0,
       webhookCount: allExamResults.filter(r => r.source === 'webhook').length,
       manualCount: allExamResults.filter(r => r.source === 'manual').length,
@@ -510,12 +857,14 @@ export default function ExamTracking() {
       return;
     }
 
-    const totalNet = (newExam.subjects || []).reduce((sum, s) => sum + (s.net || 0), 0);
+    const totalNet = calculateTotalNetFromSubjects(
+      (newExam.subjects || []).map((s) => ({ name: s.name, net: Number(s.net || 0) }))
+    );
 
     const exam: ExamResult = {
       id: Date.now().toString(),
       studentId: newExam.studentId,
-      examType: newExam.examType as 'TYT' | 'AYT' | '9' | '10' | '11' | '12',
+      examType: newExam.examType as ExamType,
       examDate: newExam.examDate,
       source: 'manual',
       totalNet,
@@ -527,12 +876,9 @@ export default function ExamTracking() {
     setShowAddForm(false);
     setNewExam({
       studentId: '',
-      examType: 'TYT',
+      examType: 'TYT' as ExamType,
       examDate: new Date().toISOString().split('T')[0],
-      subjects: [
-        { name: 'Türkçe', net: 0, correct: 0, wrong: 0, blank: 0 },
-        { name: 'Matematik', net: 0, correct: 0, wrong: 0, blank: 0 }
-      ]
+      subjects: buildTemplateSubjects('TYT')
     });
   };
 
@@ -561,7 +907,7 @@ export default function ExamTracking() {
           </div>
           <div>
             <h2 className="text-2xl font-bold">Deneme Sınavları</h2>
-            <p className="text-orange-100">TYT, AYT ve sınıf denemelerinin takibi</p>
+            <p className="text-orange-100">TYT, AYT, YÖS ve sınıf denemelerinin takibi</p>
           </div>
           <div className="ml-auto flex items-center gap-2">
             <span className="px-3 py-1 bg-white/20 rounded-full text-sm">
@@ -572,7 +918,7 @@ export default function ExamTracking() {
       </div>
 
       {/* Toplam İstatistikler */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
           <div className="flex items-center gap-2 text-gray-500 mb-2">
             <ClipboardList className="w-4 h-4" />
@@ -593,6 +939,13 @@ export default function ExamTracking() {
             <span className="text-sm">AYT Ort.</span>
           </div>
           <p className="text-2xl font-bold text-purple-600">{totalStats.aytAvg} net</p>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+          <div className="flex items-center gap-2 text-indigo-500 mb-2">
+            <BarChart3 className="w-4 h-4" />
+            <span className="text-sm">YÖS Ort.</span>
+          </div>
+          <p className="text-2xl font-bold text-indigo-600">{totalStats.yosAvg} net</p>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
           <div className="flex items-center gap-2 text-green-500 mb-2">
@@ -650,7 +1003,7 @@ export default function ExamTracking() {
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">Sınav Türü</label>
               <div className="flex flex-wrap gap-2">
-                {['all', 'TYT', 'AYT', '9', '10', '11'].map(type => (
+                {(['all', ...EXAM_TYPE_OPTIONS] as const).map(type => (
                   <button
                     key={type}
                     onClick={() => setExamTypeFilter(type)}
@@ -660,7 +1013,7 @@ export default function ExamTracking() {
                         : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                     }`}
                   >
-                    {type === 'all' ? 'Tümü' : type + '. Sınıf'}
+                    {type === 'all' ? 'Tümü' : type}
                   </button>
                 ))}
               </div>
@@ -897,7 +1250,9 @@ export default function ExamTracking() {
                     className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                   >
                     <option value="">Seçin</option>
-                    {students.map(s => (
+                    {students
+                      .filter((s) => !newExam.examType || isStudentCompatibleWithExam(s.id, newExam.examType as ExamType))
+                      .map(s => (
                       <option key={s.id} value={s.id}>{s.name}</option>
                     ))}
                   </select>
@@ -906,14 +1261,19 @@ export default function ExamTracking() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Sınav Türü *</label>
                   <select
                     value={newExam.examType}
-                    onChange={(e) => setNewExam({ ...newExam, examType: e.target.value as any })}
+                    onChange={(e) => {
+                      const nextType = e.target.value as ExamType;
+                      setNewExam({
+                        ...newExam,
+                        examType: nextType,
+                        subjects: buildTemplateSubjects(nextType)
+                      });
+                    }}
                     className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                   >
-                    <option value="TYT">TYT</option>
-                    <option value="AYT">AYT</option>
-                    <option value="9">9. Sınıf</option>
-                    <option value="10">10. Sınıf</option>
-                    <option value="11">11. Sınıf</option>
+                    {EXAM_TYPE_OPTIONS.map((type) => (
+                      <option key={type} value={type}>{type}</option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -933,7 +1293,7 @@ export default function ExamTracking() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Ders Sonuçları</label>
                 <div className="space-y-3">
                   {(newExam.subjects || []).map((subject, i) => (
-                    <div key={i} className="grid grid-cols-5 gap-2 items-center">
+                    <div key={i} className="grid grid-cols-7 gap-2 items-center">
                       <input
                         type="text"
                         value={subject.name}
@@ -947,11 +1307,24 @@ export default function ExamTracking() {
                       />
                       <input
                         type="number"
+                        value={(subject as any).questions ?? 0}
+                        onChange={(e) => {
+                          const newSubjects = [...(newExam.subjects || [])] as any[];
+                          newSubjects[i] = { ...newSubjects[i], questions: parseInt(e.target.value) || 0 };
+                          newSubjects[i].blank = Math.max((newSubjects[i].questions || 0) - (newSubjects[i].correct || 0) - (newSubjects[i].wrong || 0), 0);
+                          newSubjects[i].net = netFromCounts(newSubjects[i].correct, newSubjects[i].wrong, newExam.examType as ExamType);
+                          setNewExam({ ...newExam, subjects: newSubjects });
+                        }}
+                        placeholder="Soru"
+                        className="px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      />
+                      <input
+                        type="number"
                         value={subject.correct}
                         onChange={(e) => {
                           const newSubjects = [...(newExam.subjects || [])];
                           newSubjects[i] = { ...newSubjects[i], correct: parseInt(e.target.value) || 0 };
-                          newSubjects[i].net = newSubjects[i].correct - (newSubjects[i].wrong * 0.25);
+                          newSubjects[i].net = netFromCounts(newSubjects[i].correct, newSubjects[i].wrong, newExam.examType as ExamType);
                           setNewExam({ ...newExam, subjects: newSubjects });
                         }}
                         placeholder="Doğru"
@@ -963,7 +1336,7 @@ export default function ExamTracking() {
                         onChange={(e) => {
                           const newSubjects = [...(newExam.subjects || [])];
                           newSubjects[i] = { ...newSubjects[i], wrong: parseInt(e.target.value) || 0 };
-                          newSubjects[i].net = newSubjects[i].correct - (newSubjects[i].wrong * 0.25);
+                          newSubjects[i].net = netFromCounts(newSubjects[i].correct, newSubjects[i].wrong, newExam.examType as ExamType);
                           setNewExam({ ...newExam, subjects: newSubjects });
                         }}
                         placeholder="Yanlış"
@@ -983,13 +1356,25 @@ export default function ExamTracking() {
                       <span className="text-center font-semibold text-green-600">
                         {subject.net?.toFixed(2) || '0.00'}
                       </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const newSubjects = [...(newExam.subjects || [])];
+                          newSubjects.splice(i, 1);
+                          setNewExam({ ...newExam, subjects: newSubjects });
+                        }}
+                        className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
+                        title="Dersi sil"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   ))}
                 </div>
                 <button
                   onClick={() => setNewExam({
                     ...newExam,
-                    subjects: [...(newExam.subjects || []), { name: '', net: 0, correct: 0, wrong: 0, blank: 0 }]
+                    subjects: [...(newExam.subjects || []), { name: '', questions: 0, net: 0, correct: 0, wrong: 0, blank: 0 }]
                   })}
                   className="mt-2 px-3 py-1 text-sm text-orange-600 hover:bg-orange-50 rounded-lg flex items-center gap-1"
                 >
@@ -1046,7 +1431,7 @@ export default function ExamTracking() {
                 <input
                   type="file"
                   id="pdf-upload"
-                  accept=".pdf"
+                  accept=".pdf,image/*"
                   multiple
                   onChange={handlePdfFileSelect}
                   className="hidden"
@@ -1055,7 +1440,7 @@ export default function ExamTracking() {
                   <Upload className="w-12 h-12 text-gray-400 mx-auto mb-3" />
                   <p className="text-gray-600 font-medium">PDF dosyası yüklemek için tıklayın</p>
                   <p className="text-sm text-gray-400 mt-1">veya dosyaları buraya sürükleyin</p>
-                  <p className="text-xs text-gray-400 mt-2">Desteklenen format: PDF</p>
+                  <p className="text-xs text-gray-400 mt-2">Desteklenen format: PDF, JPG, PNG, WEBP</p>
                 </label>
               </div>
 
@@ -1102,7 +1487,7 @@ export default function ExamTracking() {
                     </div>
                   )}
 
-                  {!pdfLoading && pdfParsedResults.length === 0 && pdfErrors.length === 0 && uploadedFiles.length > 0 && (
+                  {!pdfLoading && pdfParsedResults.length === 0 && !hasPdfErrors && uploadedFiles.length > 0 && (
                     <button
                       onClick={processAllPdfs}
                       className="w-full px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center justify-center gap-2"
@@ -1115,16 +1500,14 @@ export default function ExamTracking() {
               )}
 
               {/* Hatalar */}
-              {pdfErrors.length > 0 && (
+              {hasPdfErrors && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-4">
                   <div className="flex items-center gap-2 text-red-700 font-medium mb-2">
                     <AlertTriangle className="w-5 h-5" />
                     İşlenemeyen Dosyalar
                   </div>
                   <ul className="text-sm text-red-600 space-y-1">
-                    {pdfErrors.map((error, index) => (
-                      <li key={index}>{error}</li>
-                    ))}
+                    {pdfErrors.map((error, index) => (error ? <li key={index}>{error}</li> : null))}
                   </ul>
                 </div>
               )}
@@ -1177,21 +1560,46 @@ export default function ExamTracking() {
                                 className="w-5 h-5 text-green-600 rounded border-gray-300 focus:ring-green-500"
                               />
                               <div>
-                                <h5 className="font-semibold text-slate-800">
-                                  {result.studentName || 'Öğrenci Adı Bulunamadı'}
-                                </h5>
+                                <input
+                                  value={result.studentName || ''}
+                                  onChange={(e) => updatePdfResultMeta(index, 'studentName', e.target.value)}
+                                  placeholder="Öğrenci adı"
+                                  className="font-semibold text-slate-800 bg-white border border-gray-200 rounded px-2 py-1"
+                                />
                                 <div className="flex items-center gap-4 text-sm text-gray-500">
-                                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                    result.examType === 'TYT' ? 'bg-blue-100 text-blue-700' :
-                                    result.examType === 'AYT' ? 'bg-purple-100 text-purple-700' :
-                                    'bg-green-100 text-green-700'
-                                  }`}>
-                                    {result.examType}
-                                  </span>
+                                  <select
+                                    value={result.examType || 'TYT'}
+                                    onChange={(e) => updatePdfResultMeta(index, 'examType', e.target.value)}
+                                    className="px-2 py-1 rounded text-xs font-medium border border-gray-200 bg-white"
+                                  >
+                                    {EXAM_TYPE_OPTIONS.map((type) => (
+                                      <option key={type} value={type}>{type}</option>
+                                    ))}
+                                  </select>
                                   <span className="flex items-center gap-1">
                                     <Calendar className="w-3 h-3" />
-                                    {result.examDate || 'Tarih Bulunamadı'}
+                                    <input
+                                      type="date"
+                                      value={result.examDate || ''}
+                                      onChange={(e) => updatePdfResultMeta(index, 'examDate', e.target.value)}
+                                      className="border border-gray-200 rounded px-2 py-1 bg-white"
+                                    />
                                   </span>
+                                  <span className="px-2 py-0.5 rounded text-xs bg-indigo-100 text-indigo-700">
+                                    {result.extractionMethod === 'ocr' ? 'OCR fallback' : 'Text parser'}
+                                  </span>
+                                  {result.extractionMethod === 'ocr' && typeof result.ocrConfidence === 'number' && (
+                                    <span className={`px-2 py-0.5 rounded text-xs ${
+                                      result.ocrConfidence < 70 ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'
+                                    }`}>
+                                      OCR güven: %{result.ocrConfidence}
+                                    </span>
+                                  )}
+                                  {result.parseError && (
+                                    <span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">
+                                      Taslak kayit: manuel duzenleme gerekli
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                             </div>
@@ -1204,26 +1612,85 @@ export default function ExamTracking() {
                         </div>
 
                         {/* Ders Sonuçları */}
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
-                          {result.subjects?.slice(0, 8).map((subject: any, subIndex: number) => (
-                            <div key={subIndex} className="bg-white rounded-lg p-2 text-sm">
-                              <div className="flex justify-between items-center">
-                                <span className="text-gray-600 font-medium truncate">{subject.name}</span>
-                                <span className={`font-semibold ${
+                        <div className="space-y-2 mb-3">
+                          {result.subjects?.map((subject: any, subIndex: number) => (
+                            <div key={subIndex} className="bg-white rounded-lg p-2 text-sm grid grid-cols-8 gap-2 items-center">
+                              <input
+                                value={subject.name || ''}
+                                onChange={(e) => updatePdfSubject(index, subIndex, 'name', e.target.value)}
+                                className="col-span-2 border border-gray-200 rounded px-2 py-1"
+                              />
+                              <input
+                                type="number"
+                                value={subject.questions ?? 0}
+                                onChange={(e) => updatePdfSubject(index, subIndex, 'questions', e.target.value)}
+                                className="border border-gray-200 rounded px-2 py-1"
+                                placeholder="Soru"
+                              />
+                              <input
+                                type="number"
+                                value={subject.correct ?? 0}
+                                onChange={(e) => updatePdfSubject(index, subIndex, 'correct', e.target.value)}
+                                className="border border-gray-200 rounded px-2 py-1"
+                                placeholder="D"
+                              />
+                              <input
+                                type="number"
+                                value={subject.wrong ?? 0}
+                                onChange={(e) => updatePdfSubject(index, subIndex, 'wrong', e.target.value)}
+                                className="border border-gray-200 rounded px-2 py-1"
+                                placeholder="Y"
+                              />
+                              <input
+                                type="number"
+                                value={subject.blank ?? 0}
+                                onChange={(e) => updatePdfSubject(index, subIndex, 'blank', e.target.value)}
+                                className="border border-gray-200 rounded px-2 py-1"
+                                placeholder="B"
+                              />
+                              <span className={`font-semibold text-right ${
                                   subject.net >= 8 ? 'text-green-600' :
                                   subject.net >= 5 ? 'text-yellow-600' : 'text-red-600'
                                 }`}>
                                   {subject.net?.toFixed(2) || '0.00'}
                                 </span>
-                              </div>
-                              <div className="text-xs text-gray-400 flex gap-2 mt-1">
-                                <span className="text-green-600">✓{subject.correct || 0}</span>
-                                <span className="text-red-600">✗{subject.wrong || 0}</span>
-                                <span>—{subject.blank || 0}</span>
-                              </div>
+                              <button
+                                type="button"
+                                onClick={() => removePdfSubject(index, subIndex)}
+                                className="p-1 text-red-500 hover:bg-red-50 rounded"
+                                title="Dersi sil"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
                             </div>
                           ))}
                         </div>
+                        <button
+                          onClick={() => addPdfSubject(index)}
+                          className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 mb-2"
+                        >
+                          Eksik Ders Ekle
+                        </button>
+                        {(() => {
+                          const v = validatePdfResult(result);
+                          return (
+                            <>
+                              <div className="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded p-2 mb-2">
+                                Hesaplanan Toplam: Soru {v.agg.questions} | D {v.agg.correct} | Y {v.agg.wrong} | B {v.agg.blank} | Net {v.agg.net.toFixed(2)}
+                                {result.declaredTotals && (
+                                  <span>
+                                    {' '}| PDF TOPLAM: Soru {result.declaredTotals.questions} | D {result.declaredTotals.correct} | Y {result.declaredTotals.wrong} | B {result.declaredTotals.blank} | Net {result.declaredTotals.net}
+                                  </span>
+                                )}
+                              </div>
+                              {!!v.issues.length && (
+                          <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mb-2">
+                                  {v.issues.join(', ')}
+                          </div>
+                              )}
+                            </>
+                          );
+                        })()}
 
                         {/* Öğrenci Eşleştirme */}
                         <div className="border-t pt-3 mt-3">
@@ -1236,9 +1703,11 @@ export default function ExamTracking() {
                             className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                           >
                             <option value="">Öğrenci Seçin...</option>
-                            {students.map(s => (
-                              <option key={s.id} value={s.id}>{s.name}</option>
-                            ))}
+                            {students
+                              .filter((s) => isStudentCompatibleWithExam(s.id, (result.examType || 'TYT') as ExamType))
+                              .map(s => (
+                                <option key={s.id} value={s.id}>{s.name}</option>
+                              ))}
                           </select>
                         </div>
 
@@ -1248,8 +1717,14 @@ export default function ExamTracking() {
                             <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600">
                               Ham veriyi görüntüle
                             </summary>
+                            <button
+                              onClick={() => copyRawPayload(result)}
+                              className="mt-2 text-xs px-2 py-1 bg-slate-100 rounded hover:bg-slate-200"
+                            >
+                              Ham JSON Kopyala
+                            </button>
                             <pre className="mt-2 p-2 bg-gray-100 rounded text-xs text-gray-600 overflow-x-auto max-h-40">
-                              {result.rawText?.substring(0, 500)}...
+                              {JSON.stringify(result, null, 2)}
                             </pre>
                           </details>
                         )}

@@ -1,5 +1,5 @@
 // Türkçe: Ayarlar Sayfası - Twilio ve WhatsApp API entegrasyonu dahil
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { Institution } from '../types';
@@ -33,12 +33,15 @@ import {
   AlertTriangle,
   ExternalLink
 } from 'lucide-react';
+import { apiFetch, getAuthToken } from '../lib/session';
 
-interface TwilioConfig {
-  accountSid: string;
-  authToken: string;
-  phoneNumber: string;
-  enabled: boolean;
+/** GET /api/twilio yanıtı — sırlar içermez */
+interface TwilioServerStatus {
+  configured: boolean;
+  account_sid_suffix: string | null;
+  has_auth_token: boolean;
+  whatsapp_from_masked: string | null;
+  sandbox_likely?: boolean;
 }
 
 interface WhatsAppConfig {
@@ -56,14 +59,13 @@ export default function SettingsPage() {
 
   // Super Admin mi kontrol et
   const isSuperAdmin = user?.role === 'super_admin';
+  const canManageTwilio = user?.role === 'super_admin' || user?.role === 'admin';
 
-  // Twilio ayarları
-  const [twilioConfig, setTwilioConfig] = useState<TwilioConfig>({
-    accountSid: localStorage.getItem('twilio_accountSid') || '',
-    authToken: localStorage.getItem('twilio_authToken') || '',
-    phoneNumber: localStorage.getItem('twilio_phoneNumber') || '',
-    enabled: localStorage.getItem('twilio_enabled') === 'true'
-  });
+  /** Twilio yalnızca Vercel sunucu ortam değişkenleriyle — GET /api/twilio */
+  const [twilioServerStatus, setTwilioServerStatus] = useState<TwilioServerStatus | null>(null);
+  const [twilioStatusLoading, setTwilioStatusLoading] = useState(false);
+  const [twilioTestPhone, setTwilioTestPhone] = useState('');
+  const [twilioTestMessage, setTwilioTestMessage] = useState('Smart Koçluk: Twilio WhatsApp test mesajı.');
 
   // WhatsApp API ayarları
   const [whatsappConfig, setWhatsappConfig] = useState<WhatsAppConfig>({
@@ -76,6 +78,25 @@ export default function SettingsPage() {
   const [showApiKey, setShowApiKey] = useState(false);
   const [testingTwilio, setTestingTwilio] = useState(false);
   const [twilioTestResult, setTwilioTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const refreshTwilioStatus = useCallback(async () => {
+    if (!canManageTwilio || !getAuthToken()) return;
+    setTwilioStatusLoading(true);
+    try {
+      const res = await apiFetch('/api/twilio');
+      const payload = (await res.json().catch(() => ({}))) as { data?: TwilioServerStatus };
+      if (res.ok && payload?.data) setTwilioServerStatus(payload.data);
+      else setTwilioServerStatus(null);
+    } catch {
+      setTwilioServerStatus(null);
+    } finally {
+      setTwilioStatusLoading(false);
+    }
+  }, [canManageTwilio]);
+
+  useEffect(() => {
+    void refreshTwilioStatus();
+  }, [refreshTwilioStatus]);
 
   // Aktif kurumu bul
   const activeInstitution = institutions.find(i => i.id === activeInstitutionId) || institutions[0];
@@ -167,16 +188,6 @@ export default function SettingsPage() {
     }
   };
 
-  // Twilio ayarlarını kaydet
-  const saveTwilioConfig = () => {
-    localStorage.setItem('twilio_accountSid', twilioConfig.accountSid);
-    localStorage.setItem('twilio_authToken', twilioConfig.authToken);
-    localStorage.setItem('twilio_phoneNumber', twilioConfig.phoneNumber);
-    localStorage.setItem('twilio_enabled', twilioConfig.enabled.toString());
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
-  };
-
   // WhatsApp API kaydet
   const saveWhatsAppConfig = () => {
     localStorage.setItem('whatsapp_apiKey', whatsappConfig.apiKey);
@@ -192,24 +203,46 @@ export default function SettingsPage() {
     setTimeout(() => setSaved(false), 3000);
   };
 
-  // Twilio test mesajı gönder
+  /** Twilio test — Vercel env; admin/süper admin `/api/whatsapp/send` (log + Twilio) */
   const testTwilioMessage = async () => {
-    if (!twilioConfig.accountSid || !twilioConfig.authToken || !twilioConfig.phoneNumber) {
-      setTwilioTestResult({ success: false, message: 'Tüm Twilio bilgilerini doldurun.' });
+    const trimmed = twilioTestPhone.trim();
+    const digits = trimmed.replace(/\D/g, '');
+    if (!digits || digits.length < 10) {
+      setTwilioTestResult({
+        success: false,
+        message: 'Alıcı telefonu girin (örn. 0555… veya +90555…). Sandbox’ta yalnızca kayıtlı numaralar.'
+      });
       return;
     }
-
+    const msg = twilioTestMessage.trim();
+    if (!msg) {
+      setTwilioTestResult({ success: false, message: 'Mesaj metni boş olamaz.' });
+      return;
+    }
     setTestingTwilio(true);
     setTwilioTestResult(null);
-
-    // Simülasyon - gerçek API entegrasyonu için backend gerekir
-    setTimeout(() => {
-      setTestingTwilio(false);
+    try {
+      const res = await apiFetch('/api/whatsapp/send', {
+        method: 'POST',
+        body: JSON.stringify({ phone: trimmed, message: msg })
+      });
+      const payload = (await res.json().catch(() => ({}))) as { ok?: boolean; sid?: string; error?: string };
+      if (!res.ok) {
+        throw new Error(payload.error || `HTTP ${res.status}`);
+      }
       setTwilioTestResult({
         success: true,
-        message: 'Twilio yapılandırması başarılı! Simülasyon modunda test mesajı gönderildi.'
+        message: `Mesaj gönderildi.${payload.sid ? ` SID: ${payload.sid}` : ''}`
       });
-    }, 1500);
+      void refreshTwilioStatus();
+    } catch (e) {
+      setTwilioTestResult({
+        success: false,
+        message: e instanceof Error ? e.message : 'Gönderilemedi.'
+      });
+    } finally {
+      setTestingTwilio(false);
+    }
   };
 
   // WhatsApp API ile mesaj gönder (simülasyon)
@@ -521,104 +554,194 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Twilio WhatsApp API Ayarları */}
-      <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl p-6 border border-green-200">
-        <div className="flex items-start gap-4">
-          <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-emerald-500 rounded-xl flex items-center justify-center flex-shrink-0">
-            <MessageCircle className="w-6 h-6 text-white" />
-          </div>
-          <div className="flex-1">
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="font-semibold text-green-800">Twilio WhatsApp API</h4>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={twilioConfig.enabled}
-                  onChange={(e) => setTwilioConfig({ ...twilioConfig, enabled: e.target.checked })}
-                  className="w-5 h-5 text-green-500 rounded"
-                />
-                <span className="text-sm text-green-700">Aktif</span>
-              </label>
+      {/* Twilio WhatsApp — yalnızca Vercel sunucu ortamı (görüşme bildirimleri vb.) */}
+      {canManageTwilio && (
+        <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl p-6 border border-green-200">
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-emerald-500 rounded-xl flex items-center justify-center flex-shrink-0">
+              <MessageCircle className="w-6 h-6 text-white" />
             </div>
-            <p className="text-sm text-green-700 mb-3">
-              Twilio API ile otomatik WhatsApp mesajları gönderin. Mesaj şablonları ve otomatik raporlar için kullanılır.
-            </p>
-
-            <div className="space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs text-green-700 mb-1">Account SID</label>
-                  <input
-                    type="text"
-                    value={twilioConfig.accountSid}
-                    onChange={(e) => setTwilioConfig({ ...twilioConfig, accountSid: e.target.value })}
-                    placeholder="ACxxxxxxxxxx"
-                    className="w-full px-3 py-2 border border-green-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-green-700 mb-1">Auth Token</label>
-                  <input
-                    type="password"
-                    value={twilioConfig.authToken}
-                    onChange={(e) => setTwilioConfig({ ...twilioConfig, authToken: e.target.value })}
-                    placeholder="xxxxxxxxxx"
-                    className="w-full px-3 py-2 border border-green-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-green-700 mb-1">WhatsApp Numara</label>
-                  <input
-                    type="text"
-                    value={twilioConfig.phoneNumber}
-                    onChange={(e) => setTwilioConfig({ ...twilioConfig, phoneNumber: e.target.value })}
-                    placeholder="+905XXXXXXXXX"
-                    className="w-full px-3 py-2 border border-green-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-2">
+            <div className="flex-1 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="font-semibold text-green-800">Twilio WhatsApp (sunucu)</h4>
                 <button
-                  onClick={saveTwilioConfig}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center gap-2"
+                  type="button"
+                  onClick={() => void refreshTwilioStatus()}
+                  className="text-xs px-2 py-1 rounded border border-green-300 text-green-800 hover:bg-green-100"
                 >
-                  <Save className="w-4 h-4" />
-                  Kaydet
+                  Durumu yenile
                 </button>
-                <button
-                  onClick={testTwilioMessage}
-                  disabled={testingTwilio || !twilioConfig.accountSid}
-                  className="px-4 py-2 bg-white text-green-600 border border-green-300 rounded-lg hover:bg-green-50 transition-colors text-sm font-medium flex items-center gap-2 disabled:opacity-50"
-                >
-                  {testingTwilio ? (
+              </div>
+              <p className="text-sm text-green-800">
+                Anahtarlar tarayıcıya yazılmaz; yalnızca{' '}
+                <strong>Vercel → Project → Settings → Environment Variables</strong> içinde tanımlıdır. Görüşme
+                oluşturma ve cron hatırlatmaları bu değişkenlerle WhatsApp gönderir.
+              </p>
+              <div className="rounded-lg bg-white/70 border border-green-100 p-3 text-sm text-green-900">
+                {twilioStatusLoading ? (
+                  <p className="flex items-center gap-2 text-green-700">
                     <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Send className="w-4 h-4" />
-                  )}
-                  Test Mesajı
-                </button>
+                    Sunucu yapılandırması kontrol ediliyor…
+                  </p>
+                ) : twilioServerStatus?.configured ? (
+                  <ul className="space-y-1">
+                    <li>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-900">
+                        Aktif
+                      </span>{' '}
+                      Twilio ortamı tamam.
+                    </li>
+                    {twilioServerStatus.sandbox_likely && (
+                      <li className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-amber-950">
+                        <strong>Sandbox:</strong> WhatsApp mesajları yalnızca Twilio sandbox’a katılmış numaralara
+                        gider. Üretim numarası ve onaylı şablon kullanın.
+                      </li>
+                    )}
+                    {twilioServerStatus.account_sid_suffix && (
+                      <li>
+                        Account SID (sonu): …{twilioServerStatus.account_sid_suffix}
+                      </li>
+                    )}
+                    {twilioServerStatus.whatsapp_from_masked && (
+                      <li>Gönderen (maskeli): {twilioServerStatus.whatsapp_from_masked}</li>
+                    )}
+                  </ul>
+                ) : (
+                  <p className="text-amber-900">
+                    Eksik veya okunamadı. Vercel’de şunları ekleyin (Production + redeploy):{' '}
+                    <code className="rounded bg-amber-100 px-1 text-xs">TWILIO_ACCOUNT_SID</code>,{' '}
+                    <code className="rounded bg-amber-100 px-1 text-xs">TWILIO_AUTH_TOKEN</code>,{' '}
+                    <code className="rounded bg-amber-100 px-1 text-xs">TWILIO_WHATSAPP_FROM</code>{' '}
+                    (örn. <code className="text-xs">whatsapp:+14155238886</code>).
+                  </p>
+                )}
               </div>
-
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
+                  <div>
+                    <label className="block text-xs text-green-700 mb-1">Test alıcısı (+90 / 05…)</label>
+                    <input
+                      type="tel"
+                      value={twilioTestPhone}
+                      onChange={(e) => setTwilioTestPhone(e.target.value)}
+                      placeholder="+905551112233 veya 05551112233"
+                      className="w-full px-3 py-2 border border-green-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void testTwilioMessage()}
+                    disabled={testingTwilio || !twilioServerStatus?.configured}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-50 min-h-[42px]"
+                  >
+                    {testingTwilio ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4" />
+                    )}
+                    Test WhatsApp gönder
+                  </button>
+                </div>
+                <div>
+                  <label className="block text-xs text-green-700 mb-1">Mesaj</label>
+                  <textarea
+                    value={twilioTestMessage}
+                    onChange={(e) => setTwilioTestMessage(e.target.value)}
+                    rows={2}
+                    className="w-full px-3 py-2 border border-green-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
+                  />
+                </div>
+              </div>
               {twilioTestResult && (
-                <div className={`p-3 rounded-lg ${twilioTestResult.success ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                <div
+                  className={`p-3 rounded-lg ${twilioTestResult.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}
+                >
                   <p className="text-sm">{twilioTestResult.message}</p>
                 </div>
               )}
-
-              <div className="bg-white/50 rounded-lg p-3">
-                <p className="text-xs text-green-700 mb-2">📌 Twilio Setup Adımları:</p>
-                <ol className="text-xs text-green-700 space-y-1 list-decimal list-inside">
-                  <li><a href="https://www.twilio.com/console" target="_blank" rel="noopener noreferrer" className="underline hover:text-green-800">Twilio Console</a>'a gidin</li>
-                  <li>WhatsApp Sandbox veya onaylı numara alın</li>
-                  <li>Account SID ve Auth Token'ı kopyalayın</li>
-                  <li>WhatsApp numaranızı +countrycodenumber formatında girin</li>
+              <div className="bg-white/50 rounded-lg p-3 text-xs text-green-800 space-y-1">
+                <p className="font-medium">Kurulum özeti</p>
+                <ol className="list-decimal list-inside space-y-0.5">
+                  <li>
+                    <a
+                      href="https://www.twilio.com/console"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline hover:text-green-950"
+                    >
+                      Twilio Console
+                    </a>{' '}
+                    → SID / token / WhatsApp gönderen numara
+                  </li>
+                  <li>Değişkenleri Vercel’e kaydedin; <strong>Redeploy</strong> gerekebilir.</li>
+                  <li>Sandbox’ta alıcı numarası önce sandbox kodu ile kayıtlı olmalıdır.</li>
                 </ol>
               </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* Otomatik WhatsApp cron özeti (Twilio + Vercel) */}
+      {canManageTwilio && (
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl p-6 border border-amber-200">
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl flex items-center justify-center flex-shrink-0">
+              <Bell className="w-6 h-6 text-white" />
+            </div>
+            <div className="flex-1 space-y-2 text-sm text-amber-950">
+              <h4 className="font-semibold text-amber-900">Otomatik WhatsApp — cron özeti</h4>
+              <p className="rounded-md border border-amber-300 bg-amber-100/80 px-2 py-1.5 text-amber-950">
+                <strong>Cron (Vercel her zaman UTC):</strong> canlı ders{' '}
+                <code className="rounded bg-white/90 px-1">/api/cron/lesson-reminders</code> —{' '}
+                <code className="rounded bg-white/90 px-1">*/5 * * * *</code>; günlük rapor{' '}
+                <code className="rounded bg-white/90 px-1">/api/cron/daily-report-reminders</code> —{' '}
+                <code className="rounded bg-white/90 px-1">0 19 * * *</code> UTC = her gün saat{' '}
+                <strong>22:00 İstanbul</strong> (TR sabit UTC+3).{' '}
+                <span className="text-amber-900">
+                  UTC için <code className="rounded bg-white/80 px-1">0 22 * * *</code> kullanmayın; İstanbul’da 01:00 tetiklenir.
+                </span>{' '}
+                Uçlar Bearer ile de tetiklenebilir; üretimde handler yine İstanbul 22 filtresi uygular.
+              </p>
+              <div className="rounded-lg bg-white/80 border border-amber-100 p-3 font-mono text-xs space-y-1 break-all">
+                <p className="text-amber-800 font-sans text-[11px] font-medium">Örnek uçlar (deploy sonrası):</p>
+                <p>
+                  <span className="text-amber-700">meeting-reminders:</span>{' '}
+                  {typeof window !== 'undefined' ? `${window.location.origin}/api/cron/meeting-reminders` : '/api/cron/meeting-reminders'}
+                </p>
+                <p>
+                  <span className="text-amber-700">coach-whatsapp-auto:</span>{' '}
+                  {typeof window !== 'undefined' ? `${window.location.origin}/api/cron/coach-whatsapp-auto` : '/api/cron/coach-whatsapp-auto'}
+                </p>
+                <p>
+                  <span className="text-amber-700">lesson-reminders:</span>{' '}
+                  {typeof window !== 'undefined' ? `${window.location.origin}/api/cron/lesson-reminders` : '/api/cron/lesson-reminders'}
+                </p>
+                <p>
+                  <span className="text-amber-700">daily-report-reminders:</span>{' '}
+                  {typeof window !== 'undefined' ? `${window.location.origin}/api/cron/daily-report-reminders` : '/api/cron/daily-report-reminders'}
+                </p>
+                <p className="text-amber-800 pt-2 font-sans text-[11px]">
+                  Vercel dışından tetiklerken:{' '}
+                  <code className="bg-amber-100 px-1 rounded">Authorization: Bearer &lt;MEETING_CRON_SECRET veya CRON_SECRET&gt;</code>
+                </p>
+              </div>
+              <ul className="list-disc list-inside space-y-1 text-xs text-amber-900">
+                <li>
+                  Günlük çalışma raporu hatırlatması: <code className="bg-amber-100 px-1 rounded">daily-report-reminders</code> +{' '}
+                  <code className="bg-amber-100 px-1 rounded">2026-05-03/05-14 WhatsApp SQL</code>.
+                </li>
+                <li>
+                  Koç şablonu: <code className="bg-amber-100 px-1 rounded">2026-coach-whatsapp-auto-schedule.sql</code>
+                </li>
+                <li>
+                  Görüşme modülü: <code className="bg-amber-100 px-1 rounded">2026-05-01-meetings-integration.sql</code>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* AI Ayarları */}
       <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-xl p-6 border border-purple-100">

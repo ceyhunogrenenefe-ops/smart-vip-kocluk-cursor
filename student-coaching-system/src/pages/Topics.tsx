@@ -2,6 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { topicPool } from '../data/mockData';
+import { yosTopicPool } from '../data/yosTopicPool';
 import { parseClassLevelFromForm, TOPIC_CLASS_OPTIONS } from '../types';
 import {
   BookOpen,
@@ -21,15 +22,26 @@ export default function Topics() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newTopic, setNewTopic] = useState('');
 
-  const subjects = Object.keys(topicPool);
+  const mergedTopicPool = useMemo(() => {
+    const next = { ...topicPool } as Record<string, Record<string, string[]>>;
+    Object.entries(yosTopicPool).forEach(([subject, levels]) => {
+      next[subject] = {
+        ...(next[subject] || {}),
+        ...(levels as Record<string, string[]>)
+      };
+    });
+    return next;
+  }, []);
+
+  const subjects = Object.keys(mergedTopicPool);
 
   const resolvedClass = useMemo(
     () => parseClassLevelFromForm(selectedClassKey),
     [selectedClassKey]
   );
 
-  const currentTopics = selectedSubject && topicPool[selectedSubject]
-    ? topicPool[selectedSubject][resolvedClass] || []
+  const currentTopics = selectedSubject && mergedTopicPool[selectedSubject]
+    ? mergedTopicPool[selectedSubject][resolvedClass] || []
     : [];
 
   const classLabel =
@@ -156,7 +168,7 @@ export default function Topics() {
                 <h3 className="font-semibold text-slate-800">{subject}</h3>
               </div>
               <p className="text-sm text-gray-500">
-                {Object.values(topicPool[subject]).flat().length} konu
+                {Object.values(mergedTopicPool[subject]).flat().length} konu
               </p>
             </div>
           ))}
@@ -168,7 +180,7 @@ export default function Topics() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {TOPIC_CLASS_OPTIONS.map((opt) => {
             const cls = parseClassLevelFromForm(opt.value);
-            const list = topicPool[selectedSubject]?.[cls] || [];
+            const list = mergedTopicPool[selectedSubject]?.[cls] || [];
             return (
               <div
                 key={opt.value}

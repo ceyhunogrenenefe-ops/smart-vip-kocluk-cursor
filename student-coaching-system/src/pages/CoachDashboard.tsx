@@ -1,5 +1,6 @@
 // Türkçe: Eğitim Koçu Dashboard Sayfası - Sadece atanan öğrencileri gösterir
 import React, { useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { formatClassLevelLabel } from '../types';
@@ -19,7 +20,8 @@ import {
   BookMarked,
   Flame,
   Timer,
-  FileText
+  FileText,
+  UserPlus
 } from 'lucide-react';
 import {
   BarChart,
@@ -34,7 +36,8 @@ import {
 } from 'recharts';
 
 export default function CoachDashboard() {
-  const { user } = useAuth();
+  const navigate = useNavigate();
+  const { user, effectiveUser } = useAuth();
   const {
     students, weeklyEntries, getStudentStats, coaches, getReadingStats,
     writtenExamScores, getWrittenExamStats
@@ -42,11 +45,10 @@ export default function CoachDashboard() {
 
   // Koçun kayıtlı öğrencileri
   const myStudents = useMemo(() => {
-    if (!user?.coachId) return [];
-    const coach = coaches.find(c => c.id === user.coachId);
-    if (!coach) return [];
-    return students.filter(s => coach.studentIds.includes(s.id));
-  }, [user, coaches, students]);
+    if (effectiveUser?.role !== 'coach') return [];
+    // AppContext coach rolünde zaten öğrencileri scope ediyor; burada doğrudan listeyi kullan.
+    return students;
+  }, [effectiveUser, students]);
 
   // Koçun öğrenci ID'leri
   const myStudentIds = useMemo(() => myStudents.map(s => s.id), [myStudents]);
@@ -200,6 +202,23 @@ export default function CoachDashboard() {
           <div className="text-right">
             <p className="text-4xl font-bold">{myStudents.length}</p>
             <p className="text-purple-200">Öğrenci Sayınız</p>
+            <div className="mt-3 flex flex-col sm:flex-row gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => navigate('/students?add=1')}
+                className="px-3 py-1.5 rounded-lg bg-white text-purple-700 text-sm font-medium hover:bg-purple-50 flex items-center justify-center gap-1.5"
+              >
+                <UserPlus className="w-4 h-4" />
+                Öğrenci ekle
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/coach-whatsapp-settings')}
+                className="px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-sm"
+              >
+                WhatsApp merkezine git
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -266,9 +285,9 @@ export default function CoachDashboard() {
             <div className="bg-white/10 rounded-xl p-4">
               <div className="flex items-center gap-2 mb-1">
                 <Timer className="w-4 h-4 text-green-200" />
-                <span className="text-sm text-green-100">Toplam Okuma</span>
+                <span className="text-sm text-green-100">Toplam Sayfa</span>
               </div>
-              <p className="text-2xl font-bold">{Math.round(totalReadingMinutes / 60)} saat</p>
+              <p className="text-2xl font-bold">{totalReadingMinutes} sayfa</p>
             </div>
             <div className="bg-white/10 rounded-xl p-4">
               <div className="flex items-center gap-2 mb-1">
@@ -280,9 +299,9 @@ export default function CoachDashboard() {
             <div className="bg-white/10 rounded-xl p-4">
               <div className="flex items-center gap-2 mb-1">
                 <BookMarked className="w-4 h-4 text-yellow-200" />
-                <span className="text-sm text-green-100">Ort. Öğrenci</span>
+                <span className="text-sm text-green-100">Öğrenci başına ort.</span>
               </div>
-              <p className="text-2xl font-bold">{Math.round(totalReadingMinutes / 60 / myStudents.length)} saat</p>
+              <p className="text-2xl font-bold">{myStudents.length ? Math.round(totalReadingMinutes / myStudents.length) : 0} sayfa</p>
             </div>
             <div className="bg-white/10 rounded-xl p-4">
               <div className="flex items-center gap-2 mb-1">
@@ -306,7 +325,7 @@ export default function CoachDashboard() {
                       </span>
                       <span className="text-white">{student.name}</span>
                     </div>
-                    <span className="text-green-200 font-medium">{Math.round(student.totalReadingMinutes / 60)} saat</span>
+                    <span className="text-green-200 font-medium">{student.totalReadingMinutes} sayfa</span>
                   </div>
                 ))}
               </div>

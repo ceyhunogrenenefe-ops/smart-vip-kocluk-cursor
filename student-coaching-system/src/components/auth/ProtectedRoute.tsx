@@ -5,20 +5,20 @@ import { useAuth } from '../../context/AuthContext';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
-  allowedRoles?: ('admin' | 'coach' | 'student')[];
+  allowedRoles?: ('super_admin' | 'admin' | 'coach' | 'teacher' | 'student')[];
 }
 
 export default function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
-  const { user, isAuthenticated } = useAuth();
+  const { effectiveUser, isAuthenticated } = useAuth();
   const location = useLocation();
 
   // Giriş yapılmamışsa login sayfasına yönlendir
-  if (!isAuthenticated || !user) {
+  if (!isAuthenticated || !effectiveUser) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
   // Rol kontrolü
-  if (allowedRoles && !allowedRoles.includes(user.role)) {
+  if (allowedRoles && !allowedRoles.includes(effectiveUser.role)) {
     // Yetkisiz erişim - ana sayfaya yönlendir
     return <Navigate to="/" replace />;
   }

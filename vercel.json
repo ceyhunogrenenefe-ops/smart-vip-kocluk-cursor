@@ -1,0 +1,92 @@
+{
+
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+
+  "functions": {
+
+    "api/wa-gateway.js": {
+
+      "maxDuration": 120
+
+    }
+
+  },
+
+  "installCommand": "npm install && cd student-coaching-system && npm install",
+
+  "buildCommand": "cd student-coaching-system && npm run build",
+
+  "outputDirectory": "student-coaching-system/dist",
+
+  "framework": null,
+
+  "crons": [
+    {
+      "path": "/api/cron/meeting-reminders",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/coach-whatsapp-auto",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/teacher-lessons",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/lesson-reminders",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/daily-report-reminders",
+      "schedule": "0 19 * * *"
+    }
+  ],
+
+  "rewrites": [
+
+    {
+
+      "source": "/api/whatsapp-gateway/(.*)",
+
+      "destination": "/api/wa-gateway?tail=$1"
+
+    },
+
+    {
+
+      "source": "/api/google/(.*)",
+
+      "destination": "/api/deep-api?path=google/$1"
+
+    },
+
+    {
+
+      "source": "/api/cron/(.*)",
+
+      "destination": "/api/deep-api?path=cron/$1"
+
+    },
+
+    {
+
+      "source": "/",
+
+      "destination": "/index.html"
+
+    },
+
+    {
+
+      "source": "/((?!api/).+)",
+
+      "destination": "/index.html"
+
+    }
+
+  ]
+
+}
+
+

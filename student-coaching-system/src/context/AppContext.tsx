@@ -17,12 +17,15 @@ import {
   WrittenExamScore,
   WrittenExamStats,
   WrittenExamComment,
-  ClassLevel
+  ClassLevel,
+  inferProgramName
 } from '../types';
 import { db } from '../lib/database';
-import { supabase } from '../lib/supabase';
+import { resolveCoachRecordId, resolveStudentRecordId } from '../lib/coachResolve';
+import { isSupabaseReady, supabase, supabaseBaseUrl, verifySupabaseReachable } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 import { topicPool as defaultTopicPool } from '../data/mockData';
+import { yosTopicPool } from '../data/yosTopicPool';
 
 // LocalStorage anahtarları
 const STORAGE_KEYS = {
@@ -54,10 +57,13 @@ const DEFAULT_WRITTEN_EXAM_SUBJECTS = [
 const mergeTopicPools = (base: TopicPool, overrides: TopicPool): TopicPool => {
   const merged: TopicPool = { ...base };
   Object.entries(overrides).forEach(([subject, levels]) => {
-    merged[subject] = {
-      ...(base[subject] || {}),
-      ...(levels || {})
-    };
+    const baseLevels = (base[subject] || {}) as Record<string, string[]>;
+    const nextLevels = { ...baseLevels };
+    Object.entries(levels || {}).forEach(([levelKey, incoming]) => {
+      const current = nextLevels[levelKey] || [];
+      nextLevels[levelKey] = Array.from(new Set([...(current || []), ...((incoming as string[]) || [])]));
+    });
+    merged[subject] = nextLevels;
   });
   return merged;
 };
@@ -85,6 +91,17 @@ const mergeCoachesByEmail = (fromDb: Coach[], fromLocal: Coach[]): Coach[] => {
     }
   }
   return out;
+};
+
+const normalizeClassLevel = (raw: unknown): ClassLevel => {
+  if (typeof raw === 'number') return raw as ClassLevel;
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (trimmed === 'LGS' || trimmed === 'YOS' || trimmed.startsWith('YKS-')) return trimmed as ClassLevel;
+    const parsed = Number(trimmed);
+    if (!Number.isNaN(parsed)) return parsed as ClassLevel;
+  }
+  return raw as ClassLevel;
 };
 
 // LocalStorage'dan veri yükle
@@ -131,8 +148,8 @@ interface AppState {
 
   // Öğrenciler
   students: Student[];
-  addStudent: (student: Student) => void;
-  updateStudent: (id: string, student: Partial<Student>) => void;
+  addStudent: (student: Student) => Promise<{ student: Student; persisted: boolean }>;
+  updateStudent: (id: string, student: Partial<Student>) => Promise<void>;
   deleteStudent: (id: string) => void;
 
   // Eğitim Koçları
@@ -170,6 +187,7 @@ interface AppState {
   // Konu Takibi
   topicProgress: TopicProgress[];
   markTopicCompleted: (studentId: string, subject: string, topic: string, entryId?: string) => void;
+  unmarkTopicCompleted: (studentId: string, subject: string, topic: string) => void;
   getStudentTopicProgress: (studentId: string) => TopicProgress[];
   getCompletedTopicsBySubject: (studentId: string, subject: string) => TopicProgress[];
   resetTopicProgress: (studentId: string) => void;
@@ -251,6 +269,7 @@ interface AppState {
 const AppContext = createContext<AppState | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  const { effectiveUser, linkedStudent } = useAuth();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userRole, setUserRole] = useState<UserRole>('admin');
 
@@ -282,9 +301,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Topic pool - varsayılan mockData + kullanıcı ekleri (localStorage)
   const [customTopics, setCustomTopics] = useState<TopicPool>(() => {
     const stored = loadFromStorage<TopicPool>(STORAGE_KEYS.customTopics, {});
-    return mergeTopicPools(defaultTopicPool, stored);
+    return mergeTopicPools(mergeTopicPools(defaultTopicPool, yosTopicPool), stored);
   });
-  const [topicProgress, setTopicProgress] = useState<TopicProgress[]>([]);
+  const [topicProgress, setTopicProgress] = useState<TopicProgress[]>(() =>
+    loadFromStorage<TopicProgress[]>(STORAGE_KEYS.topicProgress, [])
+  );
 
   // Deneme Sınavları
   const [examResults, setExamResults] = useState<ExamResult[]>(() =>
@@ -300,33 +321,68 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [books, setBooks] = useState<Book[]>([]);
   const [readingLogs, setReadingLogs] = useState<ReadingLog[]>([]);
 
+  const ensureSupabaseReady = async (): Promise<void> => {
+    if (!isSupabaseReady) {
+      throw new Error(
+        'Supabase yapılandırması eksik/geçersiz. Vercel’de VITE_SUPABASE_* veya SUPABASE_URL + SUPABASE_ANON_KEY (anon) tanımlı mı, Production + Redeploy yapıldı mı kontrol edin.'
+      );
+    }
+    const reachable = await verifySupabaseReachable();
+    if (!reachable) {
+      throw new Error(
+        `Supabase erişilemedi (${supabaseBaseUrl}). URL, anon key, RLS policy ve tablo kurulumunu kontrol edin.`
+      );
+    }
+  };
+
   // Supabase'den veri yükle (başlangıçta)
   useEffect(() => {
+    if (!isSupabaseReady) {
+      console.error(
+        '[AppContext] Supabase yapılandırması eksik/geçersiz. Fallback kapalı olduğu için uygulama DB olmadan çalışmaz.'
+      );
+      setStudents([]);
+      setCoaches([]);
+      setWeeklyEntries([]);
+      setBooks([]);
+      setReadingLogs([]);
+      setWrittenExamScores([]);
+      return;
+    }
+
     const loadDataFromDatabase = async () => {
       try {
+        await ensureSupabaseReady();
+
         // Initialize database first
         await db.initializeDatabase();
 
+        // Öğrenci oturumunda kurum filtresi istemci tarafında yanlış eşleşebilir (eski admin seçimi);
+        // API zaten rol bazlı döndürür — burada filtre uygulama.
+        const isStudentRole = effectiveUser?.role === 'student';
+        const institutionScope = isStudentRole ? undefined : activeInstitutionId || undefined;
+
         // Load students from Supabase
-        const dbStudents = await db.getStudents(activeInstitutionId || undefined);
+        const dbStudents = await db.getStudents(institutionScope);
         const loadedStudents: Student[] = dbStudents.map(s => ({
           id: s.id,
           name: s.name,
           email: s.email,
           phone: s.phone || undefined,
-          classLevel: s.class_level as ClassLevel,
+          classLevel: normalizeClassLevel(s.class_level),
           school: s.school || undefined,
           parentName: s.parent_name || undefined,
           parentPhone: s.parent_phone || undefined,
           coachId: s.coach_id || undefined,
           institutionId: s.institution_id || undefined,
+          programId: s.program_id || undefined,
+          programName: inferProgramName(s.class_level),
           createdAt: s.created_at
         }));
-        const localStudents = loadFromStorage<Student[]>(STORAGE_KEYS.students, []);
-        setStudents(mergeStudentsByEmail(loadedStudents, localStudents));
+        setStudents(loadedStudents);
 
-        // Load coaches from Supabase
-        const dbCoaches = await db.getCoaches(activeInstitutionId || undefined);
+        // Load coaches from Supabase (institution_id zorunlu — aksi halde admin scopedCoaches hepsini eler)
+        const dbCoaches = await db.getCoaches(institutionScope);
         const loadedCoaches: Coach[] = dbCoaches.map(c => ({
           id: c.id,
           name: c.name,
@@ -334,13 +390,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
           phone: c.phone || undefined,
           subjects: c.specialties || [],
           studentIds: c.student_ids || [],
+          institutionId: c.institution_id || undefined,
           createdAt: c.created_at
         }));
-        const localCoaches = loadFromStorage<Coach[]>(STORAGE_KEYS.coaches, []);
+        const legacyInstitutionId =
+          activeInstitutionId || institutions[0]?.id || createDefaultInstitution().id;
+        const localCoaches = loadFromStorage<Coach[]>(STORAGE_KEYS.coaches, []).map(c => ({
+          ...c,
+          subjects: Array.isArray(c.subjects) ? c.subjects : [],
+          studentIds: Array.isArray(c.studentIds) ? c.studentIds : [],
+          institutionId: c.institutionId || legacyInstitutionId
+        }));
         setCoaches(mergeCoachesByEmail(loadedCoaches, localCoaches));
 
         // Load weekly entries from Supabase
-        const dbEntries = await db.getWeeklyEntries(undefined, activeInstitutionId || undefined);
+        const dbEntries = await db.getWeeklyEntries(undefined, institutionScope);
         const loadedEntries: WeeklyEntry[] = dbEntries.map(e => ({
           id: e.id,
           studentId: e.student_id,
@@ -353,6 +417,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           wrongAnswers: e.wrong,
           blankAnswers: e.blank,
           coachComment: e.notes || undefined,
+          readingMinutes: e.reading_minutes || undefined,
+          bookId: e.book_id || undefined,
+          bookTitle: e.book_title || undefined,
           createdAt: e.created_at
         }));
         setWeeklyEntries(loadedEntries);
@@ -413,14 +480,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
         console.log('Veritabanından veriler başarıyla yüklendi');
       } catch (error) {
         console.error('Veritabanı yükleme hatası:', error);
-        setStudents(loadFromStorage<Student[]>(STORAGE_KEYS.students, []));
-        setCoaches(loadFromStorage<Coach[]>(STORAGE_KEYS.coaches, []));
-        setWeeklyEntries(loadFromStorage<WeeklyEntry[]>(STORAGE_KEYS.weeklyEntries, []));
+        setStudents([]);
+        setCoaches([]);
+        setWeeklyEntries([]);
+        setBooks([]);
+        setReadingLogs([]);
+        setWrittenExamScores([]);
       }
     };
 
     loadDataFromDatabase();
-  }, [activeInstitutionId]); // Re-load when institution changes
+  }, [activeInstitutionId, effectiveUser?.role, effectiveUser?.id]); // Rol/kullanıcı değişince (giriş) yeniden yükle
 
   // Veriler değiştiğinde localStorage'a kaydet
   useEffect(() => {
@@ -477,6 +547,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       institutions[0]?.id ||
       null;
     const preferredRowId = student.id?.trim() ? student.id.trim() : undefined;
+    await ensureSupabaseReady();
+
     try {
       const created = await db.createStudent(
         {
@@ -488,31 +560,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
           parent_name: student.parentName ?? null,
           parent_phone: student.parentPhone ?? null,
           coach_id: student.coachId || null,
-          institution_id: resolvedInstitutionId
+          institution_id: resolvedInstitutionId,
+          program_id: student.programId || inferProgramName(student.classLevel)
         },
-        preferredRowId
+        preferredRowId,
+        {
+          sync_supabase_auth: true,
+          auth_password: student.password?.trim() || ''
+        }
       );
       // Convert to Student type and add to state
       const newStudent: Student = {
         id: created.id,
         name: created.name,
         email: created.email,
+        password: student.password,
         phone: created.phone || undefined,
-        classLevel: created.class_level as ClassLevel,
+        classLevel: normalizeClassLevel(created.class_level),
         school: created.school || undefined,
         parentName: created.parent_name || undefined,
         parentPhone: created.parent_phone || undefined,
         coachId: created.coach_id || undefined,
         institutionId: created.institution_id || undefined,
+        programId: created.program_id || undefined,
+        programName: inferProgramName(created.class_level),
         createdAt: created.created_at
       };
       setStudents(prev => [...prev, newStudent]);
 
-      // Öğrenci giriş yapabilsin diye users tablosunda da karşılığı olmalı
+      // Öğrenci giriş yapabilsin diye users tablosunda da karşılığı olmalı; students.user_id ile bağla
       try {
         const existingUser = await db.getUserByEmail(student.email);
         const passwordToSave = student.password || '123456';
 
+        let platformUserId: string;
         if (existingUser) {
           await db.updateUser(existingUser.id, {
             name: student.name,
@@ -522,8 +603,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
             institution_id: resolvedInstitutionId,
             is_active: true
           });
+          platformUserId = existingUser.id;
         } else {
-          await db.createUser({
+          const createdUser = await db.createUser({
             email: student.email.toLowerCase().trim(),
             name: student.name,
             phone: student.phone || null,
@@ -535,36 +617,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
             start_date: new Date().toISOString(),
             end_date: null
           });
+          platformUserId = createdUser.id;
+        }
+        try {
+          await db.updateStudent(created.id, {
+            platform_user_id: platformUserId
+          } as Parameters<(typeof db)['updateStudent']>[1]);
+        } catch (linkErr) {
+          console.warn('students.platform_user_id bağlantısı atlanıyor:', linkErr);
         }
       } catch (userSyncError) {
         console.error('Öğrenci kullanıcı hesabı senkronizasyon hatası:', userSyncError);
       }
+      return { student: newStudent, persisted: true };
     } catch (error) {
       console.error('Öğrenci ekleme hatası:', error);
-      // Fallback: add locally anyway with generated ID
-      const newStudent: Student = {
-        ...student,
-        id: student.id || `student-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        institutionId: resolvedInstitutionId || undefined,
-        createdAt: new Date().toISOString()
-      };
-      setStudents(prev => [...prev, newStudent]);
+      throw error;
     }
   };
 
   const updateStudent = async (id: string, updatedStudent: Partial<Student>) => {
+    const prevRow = students.find(s => s.id === id);
+    const lookupEmail = (prevRow?.email || '').toLowerCase().trim();
+
     try {
-      await db.updateStudent(id, {
-        name: updatedStudent.name,
-        email: updatedStudent.email,
-        phone: updatedStudent.phone,
-        class_level:
-          updatedStudent.classLevel !== undefined ? String(updatedStudent.classLevel) : undefined,
-        school: updatedStudent.school,
-        parent_name: updatedStudent.parentName,
-        parent_phone: updatedStudent.parentPhone,
-        coach_id: updatedStudent.coachId || null
-      });
+      const patch: Record<string, unknown> = {};
+      if (updatedStudent.name !== undefined) patch.name = updatedStudent.name;
+      if (updatedStudent.email !== undefined) patch.email = updatedStudent.email;
+      if (updatedStudent.phone !== undefined) patch.phone = updatedStudent.phone;
+      if (updatedStudent.classLevel !== undefined)
+        patch.class_level = String(updatedStudent.classLevel);
+      if (updatedStudent.school !== undefined) patch.school = updatedStudent.school;
+      if (updatedStudent.parentName !== undefined) patch.parent_name = updatedStudent.parentName;
+      if (updatedStudent.parentPhone !== undefined) patch.parent_phone = updatedStudent.parentPhone;
+      // coachId gönderilmediğinde coach_id sıfırlanmasın (|| null her zaman PATCH'e null yazardı).
+      if ('coachId' in updatedStudent) patch.coach_id = updatedStudent.coachId || null;
+      if (updatedStudent.programId !== undefined) patch.program_id = updatedStudent.programId;
+      await db.updateStudent(id, patch as Parameters<(typeof db)['updateStudent']>[1]);
     } catch (error) {
       console.error('Öğrenci güncelleme hatası:', error);
     }
@@ -573,16 +662,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     // Öğrenci kullanıcı hesabını da güncelle
     try {
-      const targetEmail = updatedStudent.email || students.find(s => s.id === id)?.email;
-      if (targetEmail) {
-        const existingUser = await db.getUserByEmail(targetEmail);
-        if (existingUser) {
-          await db.updateUser(existingUser.id, {
-            name: updatedStudent.name,
-            phone: updatedStudent.phone || null,
-            password_hash: updatedStudent.password || existingUser.password_hash,
-            institution_id: updatedStudent.institutionId || existingUser.institution_id
-          });
+      const pw =
+        typeof updatedStudent.password === 'string' &&
+        updatedStudent.password.length >= 6
+          ? updatedStudent.password
+          : undefined;
+      const existingUser =
+        lookupEmail ? await db.getUserByEmail(lookupEmail) : null;
+      const nextMail =
+        (updatedStudent.email !== undefined ? updatedStudent.email : prevRow?.email) ||
+        '';
+
+      if (existingUser || (nextMail && pw)) {
+        const u = existingUser || (await db.getUserByEmail(nextMail.toLowerCase().trim()));
+        if (u) {
+          const userPatch: Record<string, unknown> = {
+            name: updatedStudent.name ?? u.name,
+            phone:
+              updatedStudent.phone !== undefined
+                ? updatedStudent.phone || null
+                : u.phone ?? null,
+            institution_id: updatedStudent.institutionId ?? u.institution_id
+          };
+          if (pw) userPatch.password_hash = pw;
+          if (
+            typeof updatedStudent.email === 'string' &&
+            updatedStudent.email.trim().toLowerCase() !== u.email.trim().toLowerCase()
+          ) {
+            userPatch.email = updatedStudent.email.trim().toLowerCase();
+          }
+          await db.updateUser(u.id, userPatch as Parameters<(typeof db)['updateUser']>[1]);
         }
       }
     } catch (userSyncError) {
@@ -611,6 +720,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       institutions[0]?.id ||
       null;
     const preferredRowId = coach.id?.trim() ? coach.id.trim() : undefined;
+    await ensureSupabaseReady();
+
     try {
       const created = await db.createCoach(
         {
@@ -634,7 +745,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
         studentIds: created.student_ids || [],
         createdAt: created.created_at
       };
-      setCoaches(prev => [...prev, newCoach]);
+      setCoaches((prev) => {
+        const byId = prev.findIndex((c) => c.id === newCoach.id);
+        if (byId !== -1) {
+          const next = [...prev];
+          next[byId] = newCoach;
+          return next;
+        }
+        const byEmail = prev.findIndex(
+          (c) => c.email.toLowerCase().trim() === newCoach.email.toLowerCase().trim()
+        );
+        if (byEmail !== -1) {
+          const next = [...prev];
+          next[byEmail] = newCoach;
+          return next;
+        }
+        return [...prev, newCoach];
+      });
 
       // Koç giriş yapabilsin diye users tablosunda da karşılığı olmalı
       try {
@@ -669,14 +796,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     } catch (error) {
       console.error('Koç ekleme hatası:', error);
-      // Fallback
-      const newCoach: Coach = {
-        ...coach,
-        id: coach.id || `coach-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        institutionId: resolvedInstitutionId || undefined,
-        createdAt: new Date().toISOString()
-      };
-      setCoaches(prev => [...prev, newCoach]);
+      throw error;
     }
   };
 
@@ -763,6 +883,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         wrong: entry.wrongAnswers,
         blank: entry.blankAnswers,
         notes: entry.coachComment || null,
+        reading_minutes: entry.readingMinutes || null,
+        book_id: entry.bookId || null,
+        book_title: entry.bookTitle || null,
         institution_id: resolvedInstitutionId
       });
       // Convert and add to state
@@ -778,6 +901,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         wrongAnswers: created.wrong,
         blankAnswers: created.blank,
         coachComment: created.notes || undefined,
+        readingMinutes: created.reading_minutes || undefined,
+        bookId: created.book_id || undefined,
+        bookTitle: created.book_title || undefined,
         createdAt: created.created_at
       };
       setWeeklyEntries(prev => [...prev, newEntry]);
@@ -803,7 +929,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         correct: updatedEntry.correctAnswers,
         wrong: updatedEntry.wrongAnswers,
         blank: updatedEntry.blankAnswers,
-        notes: updatedEntry.coachComment
+        notes: updatedEntry.coachComment,
+        reading_minutes: updatedEntry.readingMinutes,
+        book_id: updatedEntry.bookId,
+        book_title: updatedEntry.bookTitle
       });
     } catch (error) {
       console.error('Haftalık kayıt güncelleme hatası:', error);
@@ -982,6 +1111,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         entryId
       }];
     });
+  };
+
+  const unmarkTopicCompleted = (studentId: string, subject: string, topic: string) => {
+    setTopicProgress(prev =>
+      prev.filter(p => !(p.studentId === studentId && p.subject === subject && p.topic === topic))
+    );
   };
 
   const getStudentTopicProgress = (studentId: string): TopicProgress[] => {
@@ -1255,16 +1390,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateBook = async (id: string, updatedBook: Partial<Book>) => {
     try {
-      await supabase
-        .from('book_readings')
-        .update({
-          book_title: updatedBook.title,
-          author: updatedBook.author,
-          pages_read: updatedBook.pagesRead,
-          end_date: updatedBook.endDate,
-          notes: updatedBook.notes
-        })
-        .eq('id', id);
+      await db.updateBookReading(id, {
+        book_title: updatedBook.title,
+        author: updatedBook.author,
+        pages_read: updatedBook.pagesRead,
+        end_date: updatedBook.endDate,
+        notes: updatedBook.notes
+      });
     } catch (error) {
       console.error('Kitap güncelleme hatası:', error);
     }
@@ -1273,7 +1405,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const deleteBook = async (id: string) => {
     try {
-      await supabase.from('book_readings').delete().eq('id', id);
+      await db.deleteBookReading(id);
     } catch (error) {
       console.error('Kitap silme hatası:', error);
     }
@@ -1305,34 +1437,66 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   };
 
-  // Kitaba harcanan toplam süre
+  /** Bir okuma kaydındaki sayfa miktarı (legacy: `minutesRead` / DB `reading_minutes` artık sayfa olarak kullanılıyor). */
+  const readingPagesFromLog = (l: ReadingLog): number => {
+    const n = l.pagesRead ?? l.minutesRead ?? 0;
+    return typeof n === 'number' && !Number.isNaN(n) ? Math.max(0, n) : 0;
+  };
+
+  // Haftalık takip + manuel log birleşik okuma verisi
+  const getUnifiedReadingLogs = (studentId: string) => {
+    const directLogs = getStudentReadingLogs(studentId);
+    const weeklyReadingLogs: ReadingLog[] = weeklyEntries
+      .filter(e => e.studentId === studentId && (e.readingMinutes || 0) > 0)
+      .map(e => ({
+        id: `weekly-${e.id}`,
+        studentId,
+        bookId: e.bookId,
+        date: e.date,
+        minutesRead: e.readingMinutes || 0,
+        // Haftalık Takip'te bu alan artık "okunan sayfa" olarak kullanılıyor.
+        pagesRead: e.readingMinutes || 0,
+        notes: e.bookTitle ? `Haftalik Kayit: ${e.bookTitle}` : 'Haftalik Kayit',
+        createdAt: e.createdAt
+      }));
+
+    return [...directLogs, ...weeklyReadingLogs].sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+    );
+  };
+
+  // Kitaba ait toplam okunan sayfa (legacy alan adları)
   const getBookReadingTime = (bookId: string) => {
-    return readingLogs
+    const fromLogs = readingLogs
       .filter(l => l.bookId === bookId)
-      .reduce((sum, l) => sum + l.minutesRead, 0);
+      .reduce((sum, l) => sum + readingPagesFromLog(l), 0);
+    const fromWeekly = weeklyEntries
+      .filter(e => e.bookId === bookId && (e.readingMinutes || 0) > 0)
+      .reduce((sum, e) => sum + (e.readingMinutes || 0), 0);
+    return fromLogs + fromWeekly;
   };
 
   // Okuma istatistikleri
   const getReadingStats = (studentId: string): ReadingStats => {
-    const studentLogs = getStudentReadingLogs(studentId);
+    const studentLogs = getUnifiedReadingLogs(studentId);
     const studentBooks = getStudentBooks(studentId);
     const completedBooks = studentBooks.filter(b => b.status === 'completed');
 
-    const totalMinutes = studentLogs.reduce((sum, l) => sum + l.minutesRead, 0);
+    const totalMinutes = studentLogs.reduce((sum, l) => sum + readingPagesFromLog(l), 0);
 
-    // Ortalama günlük okuma (son 30 gün)
+    // Ortalama günlük sayfa (son 30 güne yayılır; aktif gün sayısı değil, sabit 30)
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const recentLogs = studentLogs.filter(l => new Date(l.date) >= thirtyDaysAgo);
     const averageDailyMinutes = recentLogs.length > 0
-      ? Math.round(recentLogs.reduce((sum, l) => sum + l.minutesRead, 0) / 30)
+      ? Math.round(recentLogs.reduce((sum, l) => sum + readingPagesFromLog(l), 0) / 30)
       : 0;
 
     // En çok okunan kitap
     const bookMinutes: Record<string, number> = {};
     studentLogs.forEach(log => {
       if (log.bookId) {
-        bookMinutes[log.bookId] = (bookMinutes[log.bookId] || 0) + log.minutesRead;
+        bookMinutes[log.bookId] = (bookMinutes[log.bookId] || 0) + readingPagesFromLog(log);
       }
     });
     let mostReadBook: string | undefined;
@@ -1360,7 +1524,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Mevcut okuma serisi (ardışık gün sayısı)
   const getCurrentStreak = (studentId: string) => {
-    const studentLogs = getStudentReadingLogs(studentId);
+    const studentLogs = getUnifiedReadingLogs(studentId);
     if (studentLogs.length === 0) return 0;
 
     // Benzersiz tarihleri al
@@ -1395,7 +1559,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // En uzun okuma serisi
   const getLongestStreak = (studentId: string) => {
-    const studentLogs = getStudentReadingLogs(studentId);
+    const studentLogs = getUnifiedReadingLogs(studentId);
     if (studentLogs.length === 0) return 0;
 
     const uniqueDates = [...new Set(studentLogs.map(l => l.date))].sort();
@@ -1422,7 +1586,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Isı haritası verisi (belirli ay için)
   const getReadingHeatmap = (studentId: string, year: number, month: number) => {
-    const studentLogs = getStudentReadingLogs(studentId);
+    const studentLogs = getUnifiedReadingLogs(studentId);
     const heatmap: Record<string, number> = {};
 
     studentLogs
@@ -1432,7 +1596,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       })
       .forEach(l => {
         const day = l.date.split('-')[2];
-        heatmap[day] = (heatmap[day] || 0) + l.minutesRead;
+        heatmap[day] = (heatmap[day] || 0) + readingPagesFromLog(l);
       });
 
     return heatmap;
@@ -1446,8 +1610,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // Seri kırıldı uyarısı
     if (stats.readingStreak === 0) {
       const logs = getStudentReadingLogs(studentId);
-      if (logs.length > 0) {
-        const lastReadDate = new Date(logs[0].date);
+      const unifiedLogs = getUnifiedReadingLogs(studentId);
+      if (unifiedLogs.length > 0) {
+        const lastReadDate = new Date(unifiedLogs[0].date);
         const today = new Date();
         const daysSince = Math.floor((today.getTime() - lastReadDate.getTime()) / (1000 * 60 * 60 * 24));
         if (daysSince > 1) {
@@ -1466,21 +1631,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     }
 
-    // Düşük okuma uyarısı
-    if (stats.averageDailyMinutes < 20 && stats.totalMinutes > 0) {
+    // Düşük okuma uyarısı (ortalama günlük sayfa, son 30 gün)
+    if (stats.averageDailyMinutes < 15 && stats.totalMinutes > 0) {
       comments.push({
         type: 'improvement',
-        title: 'Okuma Süresi Arttırılabilir',
-        description: `Günlük ortalama ${stats.averageDailyMinutes} dakika okuma yapıyorsun. Hedefin günde en az 30 dakika olmalı.`
+        title: 'Okuma Miktarı Arttırılabilir',
+        description: `Günlük ortalama ${stats.averageDailyMinutes} sayfa okuyorsun. Hedefin günde en az 20 sayfa olabilir.`
       });
     }
 
     // Yüksek performans
-    if (stats.averageDailyMinutes >= 45) {
+    if (stats.averageDailyMinutes >= 35) {
       comments.push({
         type: 'success',
         title: 'Mükemmel Okuma Alışkanlığı!',
-        description: `Günde ortalama ${stats.averageDailyMinutes} dakika okuyorsun. Bu harika bir performans!`
+        description: `Günde ortalama ${stats.averageDailyMinutes} sayfa okuyorsun. Bu harika bir performans!`
       });
     }
 
@@ -1503,9 +1668,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     { id: 'ten-books', name: 'Süper Okuyucu', icon: '🏆', description: '10 kitap bitir', requirement: { type: 'books' as const, value: 10 } },
     { id: 'streak-7', name: 'Haftalık Seri', icon: '🔥', description: '7 gün üst üste oku', requirement: { type: 'streak' as const, value: 7 } },
     { id: 'streak-30', name: 'Aylık Seri', icon: '⭐', description: '30 gün üst üste oku', requirement: { type: 'streak' as const, value: 30 } },
-    { id: 'minutes-100', name: '100 Dakika', icon: '⏱️', description: '100 dakika oku', requirement: { type: 'minutes' as const, value: 100 } },
-    { id: 'minutes-500', name: '500 Dakika', icon: '⏰', description: '500 dakika oku', requirement: { type: 'minutes' as const, value: 500 } },
-    { id: 'minutes-1000', name: '1000 Dakika', icon: '🎯', description: '1000 dakika oku', requirement: { type: 'minutes' as const, value: 1000 } },
+    { id: 'minutes-100', name: '100 Sayfa', icon: '⏱️', description: '100 sayfa oku', requirement: { type: 'minutes' as const, value: 100 } },
+    { id: 'minutes-500', name: '500 Sayfa', icon: '⏰', description: '500 sayfa oku', requirement: { type: 'minutes' as const, value: 500 } },
+    { id: 'minutes-1000', name: '1000 Sayfa', icon: '🎯', description: '1000 sayfa oku', requirement: { type: 'minutes' as const, value: 1000 } },
   ];
 
   const getReadingBadges = (studentId: string) => {
@@ -1546,6 +1711,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Seçili öğrenci state
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
 
+  /** Öğrenci rolü (veya taklit): tek kart — API linkedStudent veya effectiveUser.studentId */
+  useEffect(() => {
+    if (effectiveUser?.role !== 'student') return;
+    const sid = linkedStudent?.id ?? effectiveUser?.studentId ?? null;
+    setSelectedStudentId(sid);
+  }, [effectiveUser?.role, effectiveUser?.studentId, linkedStudent?.id]);
+
   // Yazılı sınav notları state - Gerçek database'den yüklenecek
   const [writtenExamScores, setWrittenExamScores] = useState<WrittenExamScore[]>([]);
 
@@ -1581,14 +1753,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (existing) {
         // Update existing
-        await supabase
-          .from('written_exams')
-          .update({
-            score: score.score,
-            date: score.date,
-            notes: score.notes
-          })
-          .eq('id', existing.id);
+        await db.updateWrittenExam(existing.id, {
+          score: score.score,
+          date: score.date,
+          notes: score.notes
+        });
         setWrittenExamScores(prev => prev.map(s => s.id === existing.id ? score : s));
       } else {
         // Create new
@@ -1638,14 +1807,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Yazılı not güncelle
   const updateWrittenExamScore = async (id: string, score: Partial<WrittenExamScore>) => {
     try {
-      await supabase
-        .from('written_exams')
-        .update({
-          score: score.score,
-          date: score.date,
-          notes: score.notes
-        })
-        .eq('id', id);
+      await db.updateWrittenExam(id, {
+        score: score.score,
+        date: score.date,
+        notes: score.notes
+      });
     } catch (error) {
       console.error('Yazılı not güncelleme hatası:', error);
     }
@@ -1655,7 +1821,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Yazılı not sil
   const deleteWrittenExamScore = async (id: string) => {
     try {
-      await supabase.from('written_exams').delete().eq('id', id);
+      await db.deleteWrittenExam(id);
     } catch (error) {
       console.error('Yazılı not silme hatası:', error);
     }
@@ -1879,26 +2045,107 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return comments;
   };
 
+  const scopedStudents = React.useMemo(() => {
+    if (!effectiveUser) return [];
+    if (effectiveUser.role === 'super_admin') return students;
+    if (effectiveUser.role === 'admin' || effectiveUser.role === 'teacher') {
+      return students.filter(s => s.institutionId === effectiveUser.institutionId);
+    }
+    if (effectiveUser.role === 'coach') {
+      const cid = resolveCoachRecordId(
+        effectiveUser.role,
+        effectiveUser.coachId,
+        effectiveUser.email,
+        coaches
+      );
+      if (!cid) return [];
+      return students.filter((s) => s.coachId === cid);
+    }
+    if (effectiveUser.role === 'student') {
+      const sid = resolveStudentRecordId(
+        effectiveUser.role,
+        effectiveUser.studentId,
+        effectiveUser.email,
+        students
+      );
+      if (!sid) return [];
+      return students.filter((s) => s.id === sid);
+    }
+    return [];
+  }, [students, effectiveUser, coaches]);
+
+  const scopedCoaches = React.useMemo(() => {
+    if (!effectiveUser) return [];
+    if (effectiveUser.role === 'super_admin') return coaches;
+    if (effectiveUser.role === 'admin') {
+      const iid = effectiveUser.institutionId;
+      if (!iid) return coaches;
+      // Eski içe aktarımlar: institution_id boş koçlar kurum filtresinde kaybolmasın
+      return coaches.filter(c => !c.institutionId || c.institutionId === iid);
+    }
+    if (effectiveUser.role === 'coach') {
+      const cid = resolveCoachRecordId(
+        effectiveUser.role,
+        effectiveUser.coachId,
+        effectiveUser.email,
+        coaches
+      );
+      if (!cid) return [];
+      return coaches.filter(c => c.id === cid);
+    }
+    return [];
+  }, [coaches, effectiveUser]);
+
+  const scopedWeeklyEntries = React.useMemo(() => {
+    if (!effectiveUser) return [];
+    if (effectiveUser.role === 'super_admin') return weeklyEntries;
+    if (effectiveUser.role === 'admin' || effectiveUser.role === 'teacher') {
+      const allowedStudentIds = new Set(scopedStudents.map(s => s.id));
+      return weeklyEntries.filter(e => allowedStudentIds.has(e.studentId));
+    }
+    if (effectiveUser.role === 'coach') {
+      const allowedStudentIds = new Set(scopedStudents.map(s => s.id));
+      return weeklyEntries.filter(e => allowedStudentIds.has(e.studentId));
+    }
+    if (effectiveUser.role === 'student') {
+      const sid = resolveStudentRecordId(
+        effectiveUser.role,
+        effectiveUser.studentId,
+        effectiveUser.email,
+        students
+      );
+      if (!sid) return [];
+      return weeklyEntries.filter((e) => e.studentId === sid);
+    }
+    return [];
+  }, [weeklyEntries, effectiveUser, scopedStudents, students]);
+
+  const scopedInstitutions = React.useMemo(() => {
+    if (!effectiveUser) return [];
+    if (effectiveUser.role === 'super_admin') return institutions;
+    return institutions.filter(i => i.id === effectiveUser.institutionId);
+  }, [institutions, effectiveUser]);
+
   return (
     <AppContext.Provider value={{
       currentUser,
       setCurrentUser,
       userRole,
       setUserRole,
-      students,
+      students: scopedStudents,
       addStudent,
       updateStudent,
       deleteStudent,
-      coaches,
+      coaches: scopedCoaches,
       addCoach,
       updateCoach,
       deleteCoach,
-      weeklyEntries,
+      weeklyEntries: scopedWeeklyEntries,
       addWeeklyEntry,
       updateWeeklyEntry,
       deleteWeeklyEntry,
       getStudentEntries,
-      institutions,
+      institutions: scopedInstitutions,
       addInstitution,
       updateInstitution,
       deleteInstitution,
@@ -1910,6 +2157,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       getTopicsByClass,
       topicProgress,
       markTopicCompleted,
+      unmarkTopicCompleted,
       getStudentTopicProgress,
       getCompletedTopicsBySubject,
       resetTopicProgress,

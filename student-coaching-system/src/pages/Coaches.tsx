@@ -1,7 +1,11 @@
 // Türkçe: Eğitim Koçu Yönetimi Sayfası
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import { Coach } from '../types';
+import { db } from '../lib/database';
+import { isSupabaseReady } from '../lib/supabase';
+import { getAuthToken } from '../lib/session';
 import {
   Users,
   Search,
@@ -19,10 +23,18 @@ import {
 } from 'lucide-react';
 
 export default function Coaches() {
+  const { effectiveUser } = useAuth();
+  const canSetCoachQuota =
+    effectiveUser?.role === 'super_admin' || effectiveUser?.role === 'admin';
+
   const { coaches, students, addCoach, updateCoach, deleteCoach, institution, activeInstitutionId } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingCoach, setEditingCoach] = useState<Coach | null>(null);
+  const [coachQuotaById, setCoachQuotaById] = useState<
+    Record<string, { max: number | null; assigned: number }>
+  >({});
+  const [quotaInputs, setQuotaInputs] = useState<Record<string, string>>({});
 
   // Filtrelenmiş koçlar
   const filteredCoaches = coaches.filter(coach =>
@@ -140,6 +152,34 @@ export default function Coaches() {
     return students.filter(s => s.coachId === coachId).length;
   };
 
+  useEffect(() => {
+    if (!canSetCoachQuota || !getAuthToken() || !isSupabaseReady || coaches.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const nextQuota: Record<string, { max: number | null; assigned: number }> = {};
+      const nextInputs: Record<string, string> = {};
+      for (const c of coaches) {
+        try {
+          const d = await db.getCoachQuota(c.id);
+          nextQuota[c.id] = { max: d.max_students, assigned: d.assigned_students };
+          nextInputs[c.id] =
+            d.max_students != null && d.max_students >= 0 ? String(d.max_students) : '';
+        } catch {
+          const assigned = getStudentCount(c.id);
+          nextQuota[c.id] = { max: null, assigned };
+          nextInputs[c.id] = '';
+        }
+      }
+      if (!cancelled) {
+        setCoachQuotaById(nextQuota);
+        setQuotaInputs(prev => ({ ...nextInputs, ...prev }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [canSetCoachQuota, coaches, students]);
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -234,6 +274,62 @@ export default function Coaches() {
                 {coach.email || 'Belirtilmemiş'}
               </div>
             </div>
+
+            {canSetCoachQuota && (
+              <div className="mt-3 pt-3 border-t border-dashed border-gray-200 space-y-2">
+                <p className="text-xs font-semibold text-slate-700">Bu koça atanabilir öğrenci sınırı</p>
+                <p className="text-xs text-gray-600">
+                  Mevcut:{' '}
+                  <span className="font-medium">
+                    {coachQuotaById[coach.id]?.assigned ?? getStudentCount(coach.id)}
+                  </span>
+                  {coachQuotaById[coach.id]?.max != null && coachQuotaById[coach.id]!.max! >= 0 && (
+                    <>
+                      {' '}
+                      / <span className="font-medium">{coachQuotaById[coach.id]!.max}</span>
+                    </>
+                  )}
+                  {coachQuotaById[coach.id]?.max == null && (
+                    <span className="text-gray-400"> (üst kapasite tanımlanmamış)</span>
+                  )}
+                </p>
+                <div className="flex gap-2 items-center">
+                  <input
+                    type="number"
+                    min={0}
+                    className="flex-1 min-w-0 px-2 py-1.5 border border-gray-200 rounded-lg text-sm"
+                    placeholder="Max öğrenci sayısı"
+                    value={quotaInputs[coach.id] ?? ''}
+                    onChange={e =>
+                      setQuotaInputs(p => ({
+                        ...p,
+                        [coach.id]: e.target.value
+                      }))
+                    }
+                  />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const raw = quotaInputs[coach.id];
+                      const n = Math.floor(Number(raw === '' || raw == null ? '0' : raw));
+                      try {
+                        await db.patchCoachStudentQuota(coach.id, Number.isFinite(n) && n >= 0 ? n : 0);
+                        const d = await db.getCoachQuota(coach.id);
+                        setCoachQuotaById(p => ({
+                          ...p,
+                          [coach.id]: { max: d.max_students, assigned: d.assigned_students }
+                        }));
+                      } catch (e) {
+                        alert(e instanceof Error ? e.message : 'Kota kaydedilemedi');
+                      }
+                    }}
+                    className="shrink-0 px-3 py-1.5 bg-slate-800 text-white text-xs rounded-lg hover:bg-slate-900"
+                  >
+                    Kaydet
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>

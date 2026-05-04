@@ -2,6 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
+import { resolveCoachRecordId } from '../lib/coachResolve';
 import { Book, ReadingLog } from '../types';
 import {
   BookOpen,
@@ -58,9 +59,10 @@ ChartJS.register(
 const MONTHS_TR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
 
 export default function BookTracking() {
-  const { user } = useAuth();
+  const { effectiveUser } = useAuth();
   const {
     students,
+    coaches,
     weeklyEntries,
     books,
     readingLogs,
@@ -120,8 +122,9 @@ export default function BookTracking() {
       studentId: entry.studentId,
       bookId: entry.bookId,
       date: entry.date,
+      // Haftalık Takip'te kaydedilen değer sayfa sayısıdır.
       minutesRead: entry.readingMinutes || 0,
-      pagesRead: undefined,
+      pagesRead: entry.readingMinutes || 0,
       notes: undefined,
       source: 'weekly' as const,
       bookTitle: entry.bookTitle,
@@ -131,6 +134,8 @@ export default function BookTracking() {
     // Standalone okuma logları
     const standaloneReading = studentLogs.map(log => ({
       ...log,
+      // Sayfa boş bırakıldıysa mevcut değerle uyumlu kalsın.
+      pagesRead: log.pagesRead ?? log.minutesRead,
       source: 'log' as const
     }));
 
@@ -140,10 +145,17 @@ export default function BookTracking() {
     );
   }, [studentWeeklyEntries, studentLogs]);
 
-  // Koçun öğrencileri
-  const coachStudents = user?.role === 'coach' && user?.coachId
-    ? students.filter(s => s.coachId === user.coachId)
-    : students;
+  // Koçun öğrencileri (taklit oturumunda effectiveUser koç olmalı)
+  const resolvedCoachId = resolveCoachRecordId(
+    effectiveUser?.role,
+    effectiveUser?.coachId,
+    effectiveUser?.email,
+    coaches
+  );
+  const coachStudents =
+    effectiveUser?.role === 'coach' && resolvedCoachId
+      ? students.filter((s) => s.coachId === resolvedCoachId)
+      : students;
 
   // Yeni kitap ekle
   const handleAddBook = () => {
@@ -210,40 +222,40 @@ export default function BookTracking() {
       const date = new Date();
       date.setDate(date.getDate() - i);
       const dateStr = date.toISOString().split('T')[0];
-      const dayLogs = studentLogs.filter(l => l.date === dateStr);
-      const totalMinutes = dayLogs.reduce((sum, l) => sum + l.minutesRead, 0);
+      const dayLogs = hybridReadingLogs.filter(l => l.date === dateStr);
+      const totalPages = dayLogs.reduce((sum, l) => sum + (l.pagesRead ?? l.minutesRead), 0);
       last7Days.push({
         date: date.toLocaleDateString('tr-TR', { weekday: 'short' }),
-        minutes: totalMinutes
+        pages: totalPages
       });
     }
 
     return {
       labels: last7Days.map(d => d.date),
       datasets: [{
-        label: 'Okuma Süresi (dk)',
-        data: last7Days.map(d => d.minutes),
+        label: 'Okunan Sayfa',
+        data: last7Days.map(d => d.pages),
         borderColor: 'rgb(34, 197, 94)',
         backgroundColor: 'rgba(34, 197, 94, 0.1)',
         fill: true,
         tension: 0.4
       }]
     };
-  }, [selectedStudentId, studentLogs]);
+  }, [selectedStudentId, hybridReadingLogs]);
 
   const barChartData = useMemo(() => {
     if (!selectedStudentId || studentBooks.length === 0) return null;
 
     const bookStats = studentBooks.slice(0, 5).map(book => ({
       title: book.title.length > 20 ? book.title.substring(0, 20) + '...' : book.title,
-      minutes: getBookReadingTime(book.id)
+      pages: getBookReadingTime(book.id)
     }));
 
     return {
       labels: bookStats.map(b => b.title),
       datasets: [{
-        label: 'Okuma Süresi (dk)',
-        data: bookStats.map(b => b.minutes),
+        label: 'Okunan Sayfa',
+        data: bookStats.map(b => b.pages),
         backgroundColor: [
           'rgba(59, 130, 246, 0.8)',
           'rgba(34, 197, 94, 0.8)',
@@ -312,7 +324,7 @@ export default function BookTracking() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-gray-500">Toplam Okuma</p>
-                  <p className="text-2xl font-bold text-slate-800">{Math.round(stats.totalMinutes / 60)} saat</p>
+                  <p className="text-2xl font-bold text-slate-800">{stats.totalMinutes} sayfa</p>
                 </div>
                 <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
                   <Clock className="w-6 h-6 text-blue-600" />
@@ -348,7 +360,7 @@ export default function BookTracking() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-gray-500">Günlük Ortalama</p>
-                  <p className="text-2xl font-bold text-slate-800">{stats.averageDailyMinutes} dk</p>
+                  <p className="text-2xl font-bold text-slate-800">{stats.averageDailyMinutes} sayfa</p>
                 </div>
                 <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center">
                   <TrendingUp className="w-6 h-6 text-purple-600" />
@@ -418,7 +430,7 @@ export default function BookTracking() {
                     responsive: true,
                     plugins: { legend: { display: false } },
                     scales: {
-                      y: { beginAtZero: true, title: { display: true, text: 'Dakika' } }
+                      y: { beginAtZero: true, title: { display: true, text: 'Sayfa' } }
                     }
                   }}
                 />
@@ -426,7 +438,7 @@ export default function BookTracking() {
             </div>
 
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-              <h3 className="text-lg font-semibold text-slate-800 mb-4">Kitap Bazlı Okuma Süresi</h3>
+              <h3 className="text-lg font-semibold text-slate-800 mb-4">Kitap Bazlı Okunan Sayfa</h3>
               {barChartData && (
                 <Bar
                   data={barChartData}
@@ -434,7 +446,7 @@ export default function BookTracking() {
                     responsive: true,
                     plugins: { legend: { display: false } },
                     scales: {
-                      y: { beginAtZero: true, title: { display: true, text: 'Dakika' } }
+                      y: { beginAtZero: true, title: { display: true, text: 'Sayfa' } }
                     }
                   }}
                 />
@@ -492,12 +504,12 @@ export default function BookTracking() {
               {/* Gün hücreleri */}
               {Array.from({ length: new Date(selectedYear, selectedMonth + 1, 0).getDate() }).map((_, idx) => {
                 const day = (idx + 1).toString().padStart(2, '0');
-                const minutes = heatmapData[day] || 0;
+                const pages = heatmapData[day] || 0;
                 return (
                   <div
                     key={day}
-                    className={`aspect-square rounded-lg flex items-center justify-center text-xs font-medium cursor-pointer hover:ring-2 hover:ring-green-400 transition-all ${getHeatmapColor(minutes)}`}
-                    title={`${day} ${MONTHS_TR[selectedMonth]}: ${minutes} dakika`}
+                    className={`aspect-square rounded-lg flex items-center justify-center text-xs font-medium cursor-pointer hover:ring-2 hover:ring-green-400 transition-all ${getHeatmapColor(pages)}`}
+                    title={`${day} ${MONTHS_TR[selectedMonth]}: ${pages} sayfa`}
                   >
                     {idx + 1}
                   </div>
@@ -507,7 +519,7 @@ export default function BookTracking() {
 
             {/* Isı haritası açıklaması */}
             <div className="flex items-center justify-end gap-2 mt-4 text-xs text-gray-500">
-              <span>0 dk</span>
+              <span>0 sayfa</span>
               <div className="flex gap-1">
                 <div className="w-4 h-4 bg-gray-100 rounded" />
                 <div className="w-4 h-4 bg-green-200 rounded" />
@@ -516,7 +528,7 @@ export default function BookTracking() {
                 <div className="w-4 h-4 bg-green-500 rounded" />
                 <div className="w-4 h-4 bg-green-600 rounded" />
               </div>
-              <span>60+ dk</span>
+              <span>60+ sayfa</span>
             </div>
           </div>
 
@@ -612,7 +624,7 @@ export default function BookTracking() {
                       <td className="py-3 px-4 text-sm text-gray-600">{book.author}</td>
                       <td className="py-3 px-4 text-sm text-gray-500">{book.startDate}</td>
                       <td className="py-3 px-4 text-sm text-gray-500">{book.endDate || '-'}</td>
-                      <td className="py-3 px-4 text-sm text-gray-500">{getBookReadingTime(book.id)} dk</td>
+                      <td className="py-3 px-4 text-sm text-gray-500">{getBookReadingTime(book.id)} sayfa</td>
                       <td className="py-3 px-4">
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                           book.status === 'completed' ? 'bg-green-100 text-green-700' :
@@ -682,7 +694,7 @@ export default function BookTracking() {
                   />
                   <input
                     type="number"
-                    placeholder="Okuma Süresi (dk) *"
+                    placeholder="Okunan Sayfa *"
                     value={newLog.minutesRead}
                     onChange={(e) => setNewLog({ ...newLog, minutesRead: e.target.value })}
                     className="px-3 py-2 border border-green-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
@@ -754,7 +766,7 @@ export default function BookTracking() {
                         <Clock className="w-5 h-5 text-white" />
                       </div>
                       <div>
-                        <p className="font-medium text-slate-800">{log.minutesRead} dakika</p>
+                        <p className="font-medium text-slate-800">{log.pagesRead ?? log.minutesRead} sayfa</p>
                         <p className="text-sm text-gray-500">
                           {new Date(log.date).toLocaleDateString('tr-TR')} • {displayTitle}
                         </p>
