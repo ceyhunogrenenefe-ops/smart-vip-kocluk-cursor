@@ -9,6 +9,7 @@ import { lessonUnitsFromDurationMinutes } from '../api/_lib/lesson-duration-unit
 import { isTeacherLessonsRelationMissingError } from '../api/_lib/is-teacher-lessons-missing.js';
 import { statusAndBodyFromSupabaseError } from '../api/_lib/supabase-error-response.js';
 import { resolveStudentRowForUser } from '../api/_lib/resolve-student-id.js';
+import { isStudentAllowedForTeacherGroupLessons } from '../api/_lib/teacher-class-scope.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
 
@@ -93,11 +94,33 @@ function mapRowToApi(row) {
   return { ...rest, date: lesson_date };
 }
 
-function canPlanLessonForStudent(actor, student) {
+async function hasTeacherConflict({ teacherId, lessonDate, startTime, endTime, excludeId = null }) {
+  let q = supabaseAdmin
+    .from('teacher_lessons')
+    .select('id,start_time,end_time,status')
+    .eq('teacher_id', teacherId)
+    .eq('lesson_date', lessonDate)
+    .in('status', ['scheduled', 'completed']);
+  if (excludeId) q = q.neq('id', excludeId);
+  const { data, error } = await q;
+  if (error) throw error;
+  const incomingStart = String(startTime || '').slice(0, 8);
+  const incomingEnd = String(endTime || '').slice(0, 8);
+  return (data || []).some((r) => {
+    const s = String(r.start_time || '').slice(0, 8);
+    const e = String(r.end_time || '').slice(0, 8);
+    return incomingStart < e && incomingEnd > s;
+  });
+}
+
+async function canPlanLessonForStudent(actor, student) {
   if (!student) return false;
   if (actor.role === 'super_admin') return true;
   if (actor.role === 'admin') return hasInstitutionAccess(actor, student.institution_id);
-  if (actor.role === 'teacher') return hasInstitutionAccess(actor, student.institution_id);
+  if (actor.role === 'teacher') {
+    if (!hasInstitutionAccess(actor, student.institution_id)) return false;
+    return isStudentAllowedForTeacherGroupLessons(actor.sub, student.id);
+  }
   if (actor.role === 'coach') return Boolean(actor.coach_id && student.coach_id === actor.coach_id);
   return false;
 }
@@ -119,11 +142,6 @@ async function handleList(req, res) {
       typeof req.query?.student_id === 'string' && req.query.student_id.trim()
         ? req.query.student_id.trim()
         : null;
-    const platformFilter =
-      typeof req.query?.platform === 'string' && ['bbb', 'zoom', 'meet', 'other'].includes(req.query.platform)
-        ? req.query.platform
-        : null;
-
     const fromQ =
       typeof req.query?.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.from.trim())
         ? req.query.from.trim()
@@ -131,6 +149,10 @@ async function handleList(req, res) {
     const toQ =
       typeof req.query?.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.to.trim())
         ? req.query.to.trim()
+        : null;
+    const platformFilter =
+      typeof req.query?.platform === 'string' && ['bbb', 'zoom', 'meet', 'other'].includes(req.query.platform)
+        ? req.query.platform
         : null;
 
     const teacherLessonsBaseSelect = () => {
@@ -274,6 +296,14 @@ async function handleSummary(req, res) {
       typeof req.query?.student_id === 'string' && req.query.student_id.trim()
         ? req.query.student_id.trim()
         : null;
+    const fromQ =
+      typeof req.query?.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.from.trim())
+        ? req.query.from.trim()
+        : null;
+    const toQ =
+      typeof req.query?.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.to.trim())
+        ? req.query.to.trim()
+        : null;
 
     let q = supabaseAdmin
       .from('teacher_lessons')
@@ -286,6 +316,8 @@ async function handleSummary(req, res) {
     }
     if (teacherFilter) q = q.eq('teacher_id', teacherFilter);
     if (studentFilter) q = q.eq('student_id', studentFilter);
+    if (fromQ) q = q.gte('lesson_date', fromQ);
+    if (toQ) q = q.lte('lesson_date', toQ);
 
     const { data, error } = await q;
     if (error) {
@@ -386,7 +418,7 @@ async function handleCreate(req, res) {
     if (stErr) throw stErr;
     if (!student) return jsonError(res, 404, 'Öğrenci bulunamadı.');
 
-    if (!canPlanLessonForStudent(actor, student)) {
+    if (!(await canPlanLessonForStudent(actor, student))) {
       return jsonError(res, 403, 'Bu öğrenci için ders planlayamazsınız.');
     }
 
@@ -425,6 +457,15 @@ async function handleCreate(req, res) {
     if ('error' in win) return jsonError(res, 400, win.error);
 
     const institutionId = student.institution_id || actor.institution_id || null;
+    const conflict = await hasTeacherConflict({
+      teacherId,
+      lessonDate: win.lesson_date,
+      startTime: win.start_time,
+      endTime: win.end_time
+    });
+    if (conflict) {
+      return jsonError(res, 409, 'Aynı öğretmen aynı saatte canlı özel ders alamaz.', { code: 'teacher_time_conflict' });
+    }
 
     const insertPayload = {
       institution_id: institutionId,
@@ -481,7 +522,11 @@ async function handleCreateLessonSeries(req, res) {
     }
 
     const body = req.body || {};
-    const intervalDays = Number(body.interval_days || body.intervalDays);
+    const dayOfWeekRaw = body.day_of_week != null ? Number(body.day_of_week) : null;
+    let intervalDays = Number(body.interval_days || body.intervalDays || 7);
+    if (dayOfWeekRaw != null && Number.isInteger(dayOfWeekRaw) && dayOfWeekRaw >= 1 && dayOfWeekRaw <= 7) {
+      intervalDays = 7;
+    }
     const recurrenceUntil = String(body.recurrence_until || body.recurrence_until_date || '')
       .trim()
       .slice(0, 10);
@@ -518,7 +563,7 @@ async function handleCreateLessonSeries(req, res) {
       .maybeSingle();
     if (stErr) throw stErr;
     if (!student) return jsonError(res, 404, 'Öğrenci bulunamadı.');
-    if (!canPlanLessonForStudent(actor, student)) {
+    if (!(await canPlanLessonForStudent(actor, student))) {
       return jsonError(res, 403, 'Bu öğrenci için ders planlayamazsınız.');
     }
 
@@ -549,6 +594,14 @@ async function handleCreateLessonSeries(req, res) {
 
     const dates = [];
     let cur = lessonDate;
+    if (dayOfWeekRaw != null && Number.isInteger(dayOfWeekRaw) && dayOfWeekRaw >= 1 && dayOfWeekRaw <= 7) {
+      const base = new Date(`${lessonDate}T12:00:00`);
+      const jsDay = base.getDay() === 0 ? 7 : base.getDay();
+      const diff = (dayOfWeekRaw - jsDay + 7) % 7;
+      const aligned = new Date(base);
+      aligned.setDate(aligned.getDate() + diff);
+      cur = aligned.toISOString().slice(0, 10);
+    }
     const maxN = 100;
     while (cur <= recurrenceUntil && dates.length < maxN) {
       dates.push(cur);
@@ -611,6 +664,19 @@ async function handleCreateLessonSeries(req, res) {
       if ('error' in win) {
         await supabaseAdmin.from('teacher_lesson_series').delete().eq('id', seriesId);
         return jsonError(res, 400, win.error);
+      }
+      const conflict = await hasTeacherConflict({
+        teacherId,
+        lessonDate: win.lesson_date,
+        startTime: win.start_time,
+        endTime: win.end_time
+      });
+      if (conflict) {
+        await supabaseAdmin.from('teacher_lesson_series').delete().eq('id', seriesId);
+        return jsonError(res, 409, 'Seri oluşturulamadı: öğretmen takviminde saat çakışması var.', {
+          code: 'teacher_time_conflict',
+          details: { lesson_date: win.lesson_date, start_time: win.start_time, end_time: win.end_time }
+        });
       }
       payloads.push({
         institution_id: institutionId,
@@ -806,6 +872,16 @@ async function handlePatch(req, res) {
       patch.start_time = win.start_time;
       patch.end_time = win.end_time;
       patch.duration_minutes = win.duration_minutes;
+      const conflict = await hasTeacherConflict({
+        teacherId: row.teacher_id,
+        lessonDate: win.lesson_date,
+        startTime: win.start_time,
+        endTime: win.end_time,
+        excludeId: id
+      });
+      if (conflict) {
+        return jsonError(res, 409, 'Aynı öğretmen aynı saatte canlı özel ders alamaz.', { code: 'teacher_time_conflict' });
+      }
 
       const { data: quotaRowT, error: qeT } = await supabaseAdmin
         .from('student_teacher_lesson_quota')

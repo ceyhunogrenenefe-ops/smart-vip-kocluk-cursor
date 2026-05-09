@@ -1,9 +1,8 @@
 // Türkçe: Haftalık Takip Sayfası
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { WeeklyEntry, Book, formatClassLevelLabel } from '../types';
+import { WeeklyEntry, Book } from '../types';
 import { topicPool } from '../data/mockData';
-import { yosTopicPool } from '../data/yosTopicPool';
 import {
   Calendar,
   Plus,
@@ -19,12 +18,8 @@ import {
   Save,
   Clock,
   BookMarked,
-  PlusCircle,
-  ChevronLeft,
-  ChevronRight,
-  Sparkles
+  PlusCircle
 } from 'lucide-react';
-import { summarizeTrackingGaps, generateAiWeeklyDrafts } from '../utils/trackingCalendarAi';
 
 // YKS sınıfları için uygun dersleri tanımla - mockData topicPool ile uyumlu
 const YKS_SUBJECTS: Record<string, string[]> = {
@@ -77,7 +72,6 @@ const YKS_SUBJECTS: Record<string, string[]> = {
 
 // TYT alt konuları
 const TYT_SUBJECTS = ['TYT TÜRKÇE', 'TYT MATEMATİK', 'TYT GEOMETRİ', 'TYT FİZİK', 'TYT KİMYA', 'TYT BİYOLOJİ', 'TYT TARİH', 'TYT COĞRAFYA', 'TYT FELSEFE', 'TYT DİN KÜLTÜRÜ'];
-const YOS_SUBJECTS = ['YÖS MATEMATİK', 'YÖS GEOMETRİ', 'YÖS IQ'];
 
 // Konu eşleştirmesi - topicPool'dan doğru konuları almak için
 const SUBJECT_TOPIC_MAP: Record<string, string> = {
@@ -110,52 +104,13 @@ const SUBJECT_TOPIC_MAP: Record<string, string> = {
 };
 
 export default function Tracking() {
-  const mergedTopicPool = useMemo(() => {
-    const next = { ...topicPool } as Record<string, Record<string, string[]>>;
-    Object.entries(yosTopicPool).forEach(([subject, levels]) => {
-      next[subject] = {
-        ...(next[subject] || {}),
-        ...(levels as Record<string, string[]>)
-      };
-    });
-    return next;
-  }, []);
-
-  const {
-    students,
-    weeklyEntries,
-    addWeeklyEntry,
-    updateWeeklyEntry,
-    deleteWeeklyEntry,
-    getStudentStats,
-    getTopics,
-    markTopicCompleted,
-    books,
-    addBook,
-    getStudentBooks
-  } = useApp();
+  const { students, weeklyEntries, addWeeklyEntry, updateWeeklyEntry, deleteWeeklyEntry, getStudentStats, getTopics, markTopicCompleted, books, addBook, getStudentBooks } = useApp();
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [showForm, setShowForm] = useState(false);
   const [editingEntry, setEditingEntry] = useState<WeeklyEntry | null>(null);
   const [showQuickBookAdd, setShowQuickBookAdd] = useState(false);
   const [newBookData, setNewBookData] = useState({ title: '', author: '' });
-
-  const now = new Date();
-  const [calYearMonth, setCalYearMonth] = useState({ y: now.getFullYear(), m: now.getMonth() + 1 });
-  const [dayModalDate, setDayModalDate] = useState<string | null>(null);
-  const [aiFilling, setAiFilling] = useState(false);
-
-  const normalizeClassLevelForTopics = (level: string | number | undefined) => {
-    if (typeof level === 'number') return level;
-    if (typeof level === 'string') {
-      const trimmed = level.trim();
-      if (trimmed === 'LGS' || trimmed.startsWith('YKS-')) return trimmed;
-      const asNumber = Number(trimmed);
-      if (!Number.isNaN(asNumber)) return asNumber;
-    }
-    return level;
-  };
 
   // Seçili öğrencinin kayıtlarını al
   const getStudentEntriesLocal = (studentId: string): WeeklyEntry[] => {
@@ -188,58 +143,30 @@ export default function Tracking() {
   const subjects = useMemo(() => {
     if (!selectedStudent) return Object.keys(topicPool);
 
-    const classLevel = normalizeClassLevelForTopics(selectedStudent.classLevel);
+    const classLevel = selectedStudent.classLevel;
 
     // YKS sınıfları için sadece ilgili dersleri göster
-    if (classLevel === 'YOS') {
-      return YOS_SUBJECTS;
-    }
     if (typeof classLevel === 'string' && YKS_SUBJECTS[classLevel]) {
       return YKS_SUBJECTS[classLevel];
     }
 
-    // LGS: konu havuzu 'LGS' anahtarında
-    if (classLevel === 'LGS') {
-      return Object.keys(mergedTopicPool).filter(
-        subject => (mergedTopicPool[subject]['LGS'] || []).length > 0
-      );
-    }
-
-    if (typeof classLevel === 'string') {
-      return Object.keys(mergedTopicPool).filter(
-        subject => (mergedTopicPool[subject][classLevel] || []).length > 0
-      );
-    }
-
-    // Sayısal sınıf (3–12): sadece bu sınıf için tanımlı konu havuzu olan dersler
-    if (typeof classLevel === 'number') {
-      return Object.keys(mergedTopicPool).filter(
-        subject => (mergedTopicPool[subject][classLevel] || []).length > 0
-      );
-    }
-
-    return Object.keys(mergedTopicPool);
+    // Normal sınıflar için tüm dersleri göster
+    return Object.keys(topicPool);
   }, [selectedStudent]);
 
   // Konuları al - Ders seçimine göre sadece o derse ait konuları göster
   const getTopicsForStudent = () => {
     if (!selectedStudent || !formData.subject) return [];
 
-    const classLevel = normalizeClassLevelForTopics(selectedStudent.classLevel);
+    const classLevel = selectedStudent.classLevel;
 
     // YKS sınıfları için - konuyu doğrudan derse göre al
     if (typeof classLevel === 'string' && classLevel.startsWith('YKS-')) {
-      return mergedTopicPool[formData.subject]?.[classLevel] || [];
+      // TYT ve AYT konularını doğrudan subject key'inde ara
+      return topicPool[formData.subject]?.[classLevel] || [];
     }
 
-    if (classLevel === 'LGS') {
-      return getTopics(formData.subject, 'LGS');
-    }
-
-    if (classLevel === 'YOS') {
-      return getTopics(formData.subject, 'YOS');
-    }
-
+    // Normal sınıflar (9, 10, 11, 12)
     if (typeof classLevel === 'number') {
       return getTopics(formData.subject, classLevel);
     }
@@ -347,7 +274,6 @@ export default function Tracking() {
   };
 
   const handleEdit = (entry: WeeklyEntry) => {
-    setSelectedDate(entry.date.split('T')[0]);
     setFormData({
       subject: entry.subject,
       topic: entry.topic,
@@ -381,79 +307,6 @@ export default function Tracking() {
   const weekStats = selectedStudentId && selectedStudent
     ? getStudentStats(selectedStudentId)
     : null;
-
-  const gapBullets = useMemo(() => {
-    if (!selectedStudentId || !selectedStudent) return [];
-    return summarizeTrackingGaps(
-      getStudentEntriesLocal(selectedStudentId),
-      subjects,
-      selectedStudent.name
-    );
-  }, [selectedStudentId, selectedStudent, weeklyEntries, subjects]);
-
-  const entriesCountByDate = useMemo(() => {
-    const m: Record<string, number> = {};
-    if (!selectedStudentId) return m;
-    getStudentEntriesLocal(selectedStudentId).forEach(e => {
-      const k = e.date.split('T')[0];
-      m[k] = (m[k] || 0) + 1;
-    });
-    return m;
-  }, [selectedStudentId, weeklyEntries]);
-
-  const calendarCells = useMemo(() => {
-    const { y, m } = calYearMonth;
-    const first = new Date(y, m - 1, 1);
-    const last = new Date(y, m, 0);
-    const startPad = (first.getDay() + 6) % 7;
-    const daysInMonth = last.getDate();
-    const cells: ({ day: number; iso: string } | null)[] = [];
-    for (let i = 0; i < startPad; i++) cells.push(null);
-    for (let d = 1; d <= daysInMonth; d++) {
-      const iso = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      cells.push({ day: d, iso });
-    }
-    return cells;
-  }, [calYearMonth]);
-
-  const dayModalEntries = useMemo(() => {
-    if (!selectedStudentId || !dayModalDate) return [];
-    return getStudentEntriesLocal(selectedStudentId).filter(
-      e => e.date.split('T')[0] === dayModalDate
-    );
-  }, [selectedStudentId, dayModalDate, weeklyEntries]);
-
-  const handleAiFillCalendar = async () => {
-    if (!selectedStudent || !selectedStudentId) return;
-    if (subjects.length === 0) {
-      alert('Bu öğrenci için ders listesi boş.');
-      return;
-    }
-    const drafts = generateAiWeeklyDrafts(
-      selectedStudentId,
-      selectedStudent,
-      calYearMonth.y,
-      calYearMonth.m,
-      weeklyEntries,
-      subjects,
-      getTopics
-    );
-    if (drafts.length === 0) {
-      alert('Bu ayda eklenecek boş hafta içi gün kalmadı.');
-      return;
-    }
-    if (!confirm(`${drafts.length} adet AI taslak kayıt eklenecek. İstediğiniz gibi düzenleyebilirsiniz. Devam?`)) {
-      return;
-    }
-    setAiFilling(true);
-    try {
-      for (const d of drafts) {
-        await addWeeklyEntry(d);
-      }
-    } finally {
-      setAiFilling(false);
-    }
-  };
 
   return (
     <div className="space-y-6">
@@ -496,7 +349,7 @@ export default function Tracking() {
               <option value="">Öğrenci Seçin</option>
               {students.map((student) => (
                 <option key={student.id} value={student.id}>
-                  {student.name} — {formatClassLevelLabel(student.classLevel)}
+                  {student.name} - {student.classLevel}
                 </option>
               ))}
             </select>
@@ -532,7 +385,7 @@ export default function Tracking() {
                 {weekStats.totalReadingMinutes > 0 && (
                   <div>
                     <p className="text-2xl font-bold text-green-600">{weekStats.totalReadingMinutes}</p>
-                    <p className="text-xs text-gray-500">Okunan sayfa</p>
+                    <p className="text-xs text-gray-500">Okuma dk</p>
                   </div>
                 )}
               </div>
@@ -540,115 +393,6 @@ export default function Tracking() {
           )}
         </div>
       </div>
-
-      {selectedStudentId && selectedStudent && (
-        <>
-          <div className="bg-amber-50 border border-amber-100 rounded-xl p-5">
-            <h3 className="text-sm font-semibold text-amber-900 mb-2 flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4" />
-              Eksiklik / öneri özeti (son kayıtlara göre)
-            </h3>
-            <ul className="list-disc list-inside text-sm text-amber-900/90 space-y-1 mb-4">
-              {gapBullets.map((b, i) => (
-                <li key={i}>{b}</li>
-              ))}
-            </ul>
-            <button
-              type="button"
-              disabled={aiFilling || subjects.length === 0}
-              onClick={handleAiFillCalendar}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
-            >
-              <Sparkles className="w-4 h-4" />
-              {aiFilling ? 'Ekleniyor...' : 'Seçili ay için AI taslakları takvime ekle'}
-            </button>
-            <p className="text-xs text-amber-800/80 mt-2">
-              Boş hafta içi günlere, zayıf olduğu tahmin edilen derslerden başlayarak taslak kayıt eklenir; tabloda veya
-              güne tıklayarak düzenleyebilirsiniz.
-            </p>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
-              <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
-                <Calendar className="w-5 h-5 text-red-500" />
-                Takvim — güne tıklayın
-              </h3>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setCalYearMonth(p => {
-                      if (p.m <= 1) return { y: p.y - 1, m: 12 };
-                      return { y: p.y, m: p.m - 1 };
-                    })
-                  }
-                  className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50"
-                  aria-label="Önceki ay"
-                >
-                  <ChevronLeft className="w-5 h-5" />
-                </button>
-                <span className="text-sm font-medium text-slate-700 min-w-[140px] text-center">
-                  {new Date(calYearMonth.y, calYearMonth.m - 1, 1).toLocaleDateString('tr-TR', {
-                    month: 'long',
-                    year: 'numeric'
-                  })}
-                </span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setCalYearMonth(p => {
-                      if (p.m >= 12) return { y: p.y + 1, m: 1 };
-                      return { y: p.y, m: p.m + 1 };
-                    })
-                  }
-                  className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50"
-                  aria-label="Sonraki ay"
-                >
-                  <ChevronRight className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-            <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-gray-500 mb-2">
-              {['Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct', 'Pa'].map(d => (
-                <div key={d} className="py-1">
-                  {d}
-                </div>
-              ))}
-            </div>
-            <div className="grid grid-cols-7 gap-1">
-              {calendarCells.map((cell, idx) =>
-                cell ? (
-                  <button
-                    key={cell.iso}
-                    type="button"
-                    onClick={() => {
-                      setSelectedDate(cell.iso);
-                      setDayModalDate(cell.iso);
-                    }}
-                    className={`min-h-[72px] rounded-lg border p-1 text-left transition-colors ${
-                      selectedDate === cell.iso
-                        ? 'border-red-500 bg-red-50 ring-2 ring-red-100'
-                        : 'border-gray-100 hover:border-red-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    <span className="text-sm font-semibold text-slate-800">{cell.day}</span>
-                    {entriesCountByDate[cell.iso] ? (
-                      <span className="mt-1 block text-[10px] text-white bg-red-500 rounded px-1 py-0.5 w-fit">
-                        {entriesCountByDate[cell.iso]} kayıt
-                      </span>
-                    ) : (
-                      <span className="mt-1 block text-[10px] text-gray-400">—</span>
-                    )}
-                  </button>
-                ) : (
-                  <div key={`pad-${idx}`} className="min-h-[72px]" />
-                )
-              )}
-            </div>
-          </div>
-        </>
-      )}
 
       {/* Kayıt Tablosu */}
       {selectedStudentId ? (
@@ -712,7 +456,7 @@ export default function Tracking() {
                           {entry.readingMinutes ? (
                             <div className="flex items-center justify-center gap-1 text-green-600">
                               <Clock className="w-4 h-4" />
-                              <span className="text-sm font-medium">{entry.readingMinutes} sayfa</span>
+                              <span className="text-sm font-medium">{entry.readingMinutes} dk</span>
                               {entry.bookTitle && (
                                 <BookMarked className="w-3 h-3" title={entry.bookTitle} />
                               )}
@@ -764,81 +508,6 @@ export default function Tracking() {
           <GraduationCap className="w-16 h-16 text-gray-300 mx-auto mb-4" />
           <h3 className="text-lg font-semibold text-slate-800 mb-2">Öğrenci Seçin</h3>
           <p className="text-gray-500">Takip etmek istediğiniz öğrenciyi seçin.</p>
-        </div>
-      )}
-
-      {/* Güne tıklanınca — o günün kayıtları */}
-      {dayModalDate && selectedStudent && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto shadow-xl">
-            <div className="flex items-center justify-between p-5 border-b border-gray-100">
-              <div>
-                <h3 className="text-lg font-bold text-slate-800">
-                  {new Date(dayModalDate + 'T12:00:00').toLocaleDateString('tr-TR', {
-                    weekday: 'long',
-                    day: 'numeric',
-                    month: 'long',
-                    year: 'numeric'
-                  })}
-                </h3>
-                <p className="text-sm text-gray-500">{selectedStudent.name}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setDayModalDate(null)}
-                className="p-2 hover:bg-gray-100 rounded-lg"
-                aria-label="Kapat"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-5 space-y-3">
-              {dayModalEntries.length === 0 ? (
-                <p className="text-sm text-gray-500">Bu gün için henüz kayıt yok.</p>
-              ) : (
-                <ul className="space-y-2">
-                  {dayModalEntries.map(en => (
-                    <li
-                      key={en.id}
-                      className="flex items-start justify-between gap-2 p-3 rounded-lg bg-slate-50 border border-gray-100"
-                    >
-                      <div>
-                        <p className="font-medium text-slate-800 text-sm">
-                          {en.subject} — {en.topic}
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          Çözülen {en.solvedQuestions} · D {en.correctAnswers} Y {en.wrongAnswers} B {en.blankAnswers}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          handleEdit(en);
-                          setDayModalDate(null);
-                        }}
-                        className="text-xs text-red-600 hover:underline shrink-0"
-                      >
-                        Düzenle
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedDate(dayModalDate);
-                  resetForm();
-                  setEditingEntry(null);
-                  setShowForm(true);
-                  setDayModalDate(null);
-                }}
-                className="w-full py-2.5 bg-red-500 text-white rounded-lg text-sm font-medium hover:bg-red-600"
-              >
-                Bu güne yeni kayıt ekle
-              </button>
-            </div>
-          </div>
         </div>
       )}
 
@@ -1030,11 +699,11 @@ export default function Tracking() {
                   </h4>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Okunan Sayfa */}
+                  {/* Okuma Süresi */}
                   <div>
                     <label className="block text-sm font-medium text-green-700 mb-1">
                       <Clock className="w-4 h-4 inline mr-1" />
-                      Okunan Sayfa
+                      Okuma Süresi (dakika)
                     </label>
                     <input
                       type="number"
@@ -1121,7 +790,7 @@ export default function Tracking() {
                 {formData.readingMinutes > 0 && (
                   <div className="mt-3 p-3 bg-white rounded-lg border border-green-200">
                     <p className="text-sm text-green-700">
-                      <strong>{formData.readingMinutes} sayfa</strong> okuma kaydedilecek.
+                      <strong>{formData.readingMinutes} dakika</strong> okuma kaydedilecek.
                       {formData.bookId && studentBooks.find(b => b.id === formData.bookId) && (
                         <span> • <strong>{studentBooks.find(b => b.id === formData.bookId)?.title}</strong> kitabı</span>
                       )}

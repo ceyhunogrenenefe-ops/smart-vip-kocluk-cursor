@@ -35,13 +35,15 @@ import {
 } from 'lucide-react';
 import { apiFetch, getAuthToken } from '../lib/session';
 
-/** GET /api/twilio yanıtı — sırlar içermez */
-interface TwilioServerStatus {
+/** GET /api/meta/whatsapp yanıtı — sırlar içermez */
+interface MetaWhatsAppServerStatus {
   configured: boolean;
-  account_sid_suffix: string | null;
-  has_auth_token: boolean;
-  whatsapp_from_masked: string | null;
-  sandbox_likely?: boolean;
+  provider?: string;
+  graph_api_version?: string;
+  phone_number_id_suffix?: string | null;
+  waba_id_suffix?: string | null;
+  has_token?: boolean;
+  hint?: string | null;
 }
 
 interface WhatsAppConfig {
@@ -61,11 +63,11 @@ export default function SettingsPage() {
   const isSuperAdmin = user?.role === 'super_admin';
   const canManageTwilio = user?.role === 'super_admin' || user?.role === 'admin';
 
-  /** Twilio yalnızca Vercel sunucu ortam değişkenleriyle — GET /api/twilio */
-  const [twilioServerStatus, setTwilioServerStatus] = useState<TwilioServerStatus | null>(null);
-  const [twilioStatusLoading, setTwilioStatusLoading] = useState(false);
-  const [twilioTestPhone, setTwilioTestPhone] = useState('');
-  const [twilioTestMessage, setTwilioTestMessage] = useState('Smart Koçluk: Twilio WhatsApp test mesajı.');
+  /** Meta WhatsApp Cloud API — GET /api/meta/whatsapp */
+  const [metaWaServerStatus, setMetaWaServerStatus] = useState<MetaWhatsAppServerStatus | null>(null);
+  const [metaWaStatusLoading, setMetaWaStatusLoading] = useState(false);
+  const [metaWaTestPhone, setMetaWaTestPhone] = useState('');
+  const [metaWaTestMessage, setMetaWaTestMessage] = useState('Smart Koçluk: Meta WhatsApp test mesajı.');
 
   // WhatsApp API ayarları
   const [whatsappConfig, setWhatsappConfig] = useState<WhatsAppConfig>({
@@ -76,27 +78,27 @@ export default function SettingsPage() {
   // OpenAI API
   const [openaiApiKey, setOpenaiApiKey] = useState(localStorage.getItem('openai_apiKey') || '');
   const [showApiKey, setShowApiKey] = useState(false);
-  const [testingTwilio, setTestingTwilio] = useState(false);
-  const [twilioTestResult, setTwilioTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [testingMetaWa, setTestingMetaWa] = useState(false);
+  const [metaWaTestResult, setMetaWaTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
-  const refreshTwilioStatus = useCallback(async () => {
+  const refreshMetaWaStatus = useCallback(async () => {
     if (!canManageTwilio || !getAuthToken()) return;
-    setTwilioStatusLoading(true);
+    setMetaWaStatusLoading(true);
     try {
-      const res = await apiFetch('/api/twilio');
-      const payload = (await res.json().catch(() => ({}))) as { data?: TwilioServerStatus };
-      if (res.ok && payload?.data) setTwilioServerStatus(payload.data);
-      else setTwilioServerStatus(null);
+      const res = await apiFetch('/api/meta/whatsapp');
+      const payload = (await res.json().catch(() => ({}))) as { data?: MetaWhatsAppServerStatus };
+      if (res.ok && payload?.data) setMetaWaServerStatus(payload.data);
+      else setMetaWaServerStatus(null);
     } catch {
-      setTwilioServerStatus(null);
+      setMetaWaServerStatus(null);
     } finally {
-      setTwilioStatusLoading(false);
+      setMetaWaStatusLoading(false);
     }
   }, [canManageTwilio]);
 
   useEffect(() => {
-    void refreshTwilioStatus();
-  }, [refreshTwilioStatus]);
+    void refreshMetaWaStatus();
+  }, [refreshMetaWaStatus]);
 
   // Aktif kurumu bul
   const activeInstitution = institutions.find(i => i.id === activeInstitutionId) || institutions[0];
@@ -163,7 +165,7 @@ export default function SettingsPage() {
     }
   };
 
-  const handleAddNew = () => {
+  const handleAddNew = async () => {
     const newInstitution: Institution = {
       id: Date.now().toString(),
       name: formData.name || 'Yeni Kurum',
@@ -175,11 +177,15 @@ export default function SettingsPage() {
       isActive: false,
       createdAt: new Date().toISOString()
     };
-    addInstitution(newInstitution);
-    setActiveInstitution(newInstitution.id);
-    setShowAddForm(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+    const created = await addInstitution(newInstitution, { plan: 'professional' });
+    if (created?.id) {
+      setActiveInstitution(created.id);
+      setShowAddForm(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } else {
+      alert('Kurum oluşturulamadı. Oturum ve API erişimini kontrol edin.');
+    }
   };
 
   const handleDelete = (id: string) => {
@@ -203,24 +209,24 @@ export default function SettingsPage() {
     setTimeout(() => setSaved(false), 3000);
   };
 
-  /** Twilio test — Vercel env; admin/süper admin `/api/whatsapp/send` (log + Twilio) */
-  const testTwilioMessage = async () => {
-    const trimmed = twilioTestPhone.trim();
+  /** Meta test — admin/süper admin `/api/whatsapp/send` (log + Meta) */
+  const testMetaWaMessage = async () => {
+    const trimmed = metaWaTestPhone.trim();
     const digits = trimmed.replace(/\D/g, '');
     if (!digits || digits.length < 10) {
-      setTwilioTestResult({
+      setMetaWaTestResult({
         success: false,
-        message: 'Alıcı telefonu girin (örn. 0555… veya +90555…). Sandbox’ta yalnızca kayıtlı numaralar.'
+        message: 'Alıcı telefonu girin (örn. 0555… veya +90555…).'
       });
       return;
     }
-    const msg = twilioTestMessage.trim();
+    const msg = metaWaTestMessage.trim();
     if (!msg) {
-      setTwilioTestResult({ success: false, message: 'Mesaj metni boş olamaz.' });
+      setMetaWaTestResult({ success: false, message: 'Mesaj metni boş olamaz.' });
       return;
     }
-    setTestingTwilio(true);
-    setTwilioTestResult(null);
+    setTestingMetaWa(true);
+    setMetaWaTestResult(null);
     try {
       const res = await apiFetch('/api/whatsapp/send', {
         method: 'POST',
@@ -230,18 +236,18 @@ export default function SettingsPage() {
       if (!res.ok) {
         throw new Error(payload.error || `HTTP ${res.status}`);
       }
-      setTwilioTestResult({
+      setMetaWaTestResult({
         success: true,
-        message: `Mesaj gönderildi.${payload.sid ? ` SID: ${payload.sid}` : ''}`
+        message: `Mesaj gönderildi.${payload.sid ? ` ID: ${payload.sid}` : ''}`
       });
-      void refreshTwilioStatus();
+      void refreshMetaWaStatus();
     } catch (e) {
-      setTwilioTestResult({
+      setMetaWaTestResult({
         success: false,
         message: e instanceof Error ? e.message : 'Gönderilemedi.'
       });
     } finally {
-      setTestingTwilio(false);
+      setTestingMetaWa(false);
     }
   };
 
@@ -554,7 +560,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Twilio WhatsApp — yalnızca Vercel sunucu ortamı (görüşme bildirimleri vb.) */}
+      {/* Meta WhatsApp Cloud API — sunucu ortamı */}
       {canManageTwilio && (
         <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl p-6 border border-green-200">
           <div className="flex items-start gap-4">
@@ -563,10 +569,10 @@ export default function SettingsPage() {
             </div>
             <div className="flex-1 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h4 className="font-semibold text-green-800">Twilio WhatsApp (sunucu)</h4>
+                <h4 className="font-semibold text-green-800">Meta WhatsApp (sunucu)</h4>
                 <button
                   type="button"
-                  onClick={() => void refreshTwilioStatus()}
+                  onClick={() => void refreshMetaWaStatus()}
                   className="text-xs px-2 py-1 rounded border border-green-300 text-green-800 hover:bg-green-100"
                 >
                   Durumu yenile
@@ -574,45 +580,49 @@ export default function SettingsPage() {
               </div>
               <p className="text-sm text-green-800">
                 Anahtarlar tarayıcıya yazılmaz; yalnızca{' '}
-                <strong>Vercel → Project → Settings → Environment Variables</strong> içinde tanımlıdır. Görüşme
-                oluşturma ve cron hatırlatmaları bu değişkenlerle WhatsApp gönderir.
+                <strong>Vercel → Project → Settings → Environment Variables</strong> içinde tanımlıdır. Otomasyonlar Meta
+                şablon mesajı ile gider.
               </p>
               <div className="rounded-lg bg-white/70 border border-green-100 p-3 text-sm text-green-900">
-                {twilioStatusLoading ? (
+                {metaWaStatusLoading ? (
                   <p className="flex items-center gap-2 text-green-700">
                     <Loader2 className="w-4 h-4 animate-spin" />
                     Sunucu yapılandırması kontrol ediliyor…
                   </p>
-                ) : twilioServerStatus?.configured ? (
+                ) : metaWaServerStatus?.configured ? (
                   <ul className="space-y-1">
                     <li>
                       <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-900">
                         Aktif
                       </span>{' '}
-                      Twilio ortamı tamam.
+                      Meta WhatsApp ortamı tamam.
                     </li>
-                    {twilioServerStatus.sandbox_likely && (
-                      <li className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-amber-950">
-                        <strong>Sandbox:</strong> WhatsApp mesajları yalnızca Twilio sandbox’a katılmış numaralara
-                        gider. Üretim numarası ve onaylı şablon kullanın.
-                      </li>
-                    )}
-                    {twilioServerStatus.account_sid_suffix && (
-                      <li>
-                        Account SID (sonu): …{twilioServerStatus.account_sid_suffix}
-                      </li>
-                    )}
-                    {twilioServerStatus.whatsapp_from_masked && (
-                      <li>Gönderen (maskeli): {twilioServerStatus.whatsapp_from_masked}</li>
+                    <li className="rounded-md border border-slate-200 bg-white/80 px-2 py-1 text-slate-900">
+                      <strong>Graph API:</strong>{' '}
+                      {metaWaServerStatus.graph_api_version || '—'}
+                      {metaWaServerStatus.phone_number_id_suffix && (
+                        <>
+                          {' '}
+                          · <strong>Phone number id (sonu):</strong> …{metaWaServerStatus.phone_number_id_suffix}
+                        </>
+                      )}
+                      {metaWaServerStatus.waba_id_suffix && (
+                        <>
+                          {' '}
+                          · <strong>WABA (sonu):</strong> …{metaWaServerStatus.waba_id_suffix}
+                        </>
+                      )}
+                    </li>
+                    {metaWaServerStatus.hint && (
+                      <li className="text-xs text-slate-700">{metaWaServerStatus.hint}</li>
                     )}
                   </ul>
                 ) : (
                   <p className="text-amber-900">
                     Eksik veya okunamadı. Vercel’de şunları ekleyin (Production + redeploy):{' '}
-                    <code className="rounded bg-amber-100 px-1 text-xs">TWILIO_ACCOUNT_SID</code>,{' '}
-                    <code className="rounded bg-amber-100 px-1 text-xs">TWILIO_AUTH_TOKEN</code>,{' '}
-                    <code className="rounded bg-amber-100 px-1 text-xs">TWILIO_WHATSAPP_FROM</code>{' '}
-                    (örn. <code className="text-xs">whatsapp:+14155238886</code>).
+                    <code className="rounded bg-amber-100 px-1 text-xs">META_WHATSAPP_TOKEN</code>,{' '}
+                    <code className="rounded bg-amber-100 px-1 text-xs">META_PHONE_NUMBER_ID</code>,{' '}
+                    <code className="rounded bg-amber-100 px-1 text-xs">META_WABA_ID</code>.
                   </p>
                 )}
               </div>
@@ -622,19 +632,19 @@ export default function SettingsPage() {
                     <label className="block text-xs text-green-700 mb-1">Test alıcısı (+90 / 05…)</label>
                     <input
                       type="tel"
-                      value={twilioTestPhone}
-                      onChange={(e) => setTwilioTestPhone(e.target.value)}
+                      value={metaWaTestPhone}
+                      onChange={(e) => setMetaWaTestPhone(e.target.value)}
                       placeholder="+905551112233 veya 05551112233"
                       className="w-full px-3 py-2 border border-green-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
                     />
                   </div>
                   <button
                     type="button"
-                    onClick={() => void testTwilioMessage()}
-                    disabled={testingTwilio || !twilioServerStatus?.configured}
+                    onClick={() => void testMetaWaMessage()}
+                    disabled={testingMetaWa || !metaWaServerStatus?.configured}
                     className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-50 min-h-[42px]"
                   >
-                    {testingTwilio ? (
+                    {testingMetaWa ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
                     ) : (
                       <Send className="w-4 h-4" />
@@ -645,18 +655,18 @@ export default function SettingsPage() {
                 <div>
                   <label className="block text-xs text-green-700 mb-1">Mesaj</label>
                   <textarea
-                    value={twilioTestMessage}
-                    onChange={(e) => setTwilioTestMessage(e.target.value)}
+                    value={metaWaTestMessage}
+                    onChange={(e) => setMetaWaTestMessage(e.target.value)}
                     rows={2}
                     className="w-full px-3 py-2 border border-green-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
                   />
                 </div>
               </div>
-              {twilioTestResult && (
+              {metaWaTestResult && (
                 <div
-                  className={`p-3 rounded-lg ${twilioTestResult.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}
+                  className={`p-3 rounded-lg ${metaWaTestResult.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}
                 >
-                  <p className="text-sm">{twilioTestResult.message}</p>
+                  <p className="text-sm">{metaWaTestResult.message}</p>
                 </div>
               )}
               <div className="bg-white/50 rounded-lg p-3 text-xs text-green-800 space-y-1">
@@ -664,17 +674,17 @@ export default function SettingsPage() {
                 <ol className="list-decimal list-inside space-y-0.5">
                   <li>
                     <a
-                      href="https://www.twilio.com/console"
+                      href="https://developers.facebook.com/docs/whatsapp/cloud-api"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="underline hover:text-green-950"
                     >
-                      Twilio Console
+                      Meta WhatsApp Cloud API
                     </a>{' '}
-                    → SID / token / WhatsApp gönderen numara
+                    — kalıcı token, telefon numarası kimliği ve WABA
                   </li>
                   <li>Değişkenleri Vercel’e kaydedin; <strong>Redeploy</strong> gerekebilir.</li>
-                  <li>Sandbox’ta alıcı numarası önce sandbox kodu ile kayıtlı olmalıdır.</li>
+                  <li>Şablon mesajları için Business Manager’da onaylı şablon ve WA şablonları ekranında eşleştirme yapın.</li>
                 </ol>
               </div>
             </div>
@@ -682,7 +692,7 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Otomatik WhatsApp cron özeti (Twilio + Vercel) */}
+      {/* Otomatik WhatsApp cron özeti (Meta + Vercel) */}
       {canManageTwilio && (
         <div className="bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl p-6 border border-amber-200">
           <div className="flex items-start gap-4">
@@ -692,7 +702,7 @@ export default function SettingsPage() {
             <div className="flex-1 space-y-2 text-sm text-amber-950">
               <h4 className="font-semibold text-amber-900">Otomatik WhatsApp — cron özeti</h4>
               <p className="rounded-md border border-amber-300 bg-amber-100/80 px-2 py-1.5 text-amber-950">
-                <strong>Cron (Vercel her zaman UTC):</strong> canlı ders{' '}
+                <strong>Cron (Vercel her zaman UTC):</strong> canlı özel ders{' '}
                 <code className="rounded bg-white/90 px-1">/api/cron/lesson-reminders</code> —{' '}
                 <code className="rounded bg-white/90 px-1">*/5 * * * *</code>; günlük rapor{' '}
                 <code className="rounded bg-white/90 px-1">/api/cron/daily-report-reminders</code> —{' '}

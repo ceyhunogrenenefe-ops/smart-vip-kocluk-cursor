@@ -1,5 +1,5 @@
 import { supabaseAdmin } from './supabase-admin.js';
-import { sendMeetingWhatsApp } from './whatsapp-twilio.js';
+import { sendAutomatedWhatsApp } from './whatsapp-outbound.js';
 
 const CHANNEL = 'whatsapp';
 
@@ -42,7 +42,15 @@ export async function deliverWhatsAppWithLog({ meetingId, kind, recipientE164, b
   const nextAttempt = (row?.attempt_count || 0) + 1;
 
   try {
-    const { sid } = await sendMeetingWhatsApp(recipientE164, body);
+    const sent = await sendAutomatedWhatsApp({
+      phone: recipientE164,
+      templateType: 'meeting_notification',
+      vars: { body }
+    });
+    if (!sent.ok) {
+      throw new Error(sent.error || 'whatsapp_template_failed');
+    }
+    const sid = sent.sid || null;
     await supabaseAdmin
       .from('meeting_notification_log')
       .update({

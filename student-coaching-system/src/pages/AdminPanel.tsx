@@ -29,12 +29,14 @@ import {
   Loader2
 } from 'lucide-react';
 
-interface TwilioServerStatus {
+interface MetaWhatsAppServerStatus {
   configured: boolean;
-  account_sid_suffix: string | null;
-  has_auth_token: boolean;
-  whatsapp_from_masked: string | null;
-  sandbox_likely?: boolean;
+  provider?: string;
+  graph_api_version?: string;
+  phone_number_id_suffix?: string | null;
+  waba_id_suffix?: string | null;
+  has_token?: boolean;
+  hint?: string | null;
 }
 
 // Plan renkleri
@@ -56,26 +58,89 @@ export default function AdminPanel() {
   const [showEditModal, setShowEditModal] = useState(false);
 
   const [waPhone, setWaPhone] = useState('');
-  const [waMessage, setWaMessage] = useState('Yönetim paneli: Twilio WhatsApp test.');
+  const [waMessage, setWaMessage] = useState('Yönetim paneli: Meta WhatsApp test.');
   const [waSending, setWaSending] = useState(false);
   const [waResult, setWaResult] = useState<{ ok: boolean; text: string } | null>(null);
-  const [twilioStatus, setTwilioStatus] = useState<TwilioServerStatus | null>(null);
+  const [tplOptions, setTplOptions] = useState<{ type: string; name: string }[]>([]);
+  const [ttType, setTtType] = useState('');
+  const [ttPhone, setTtPhone] = useState('');
+  const [ttVars, setTtVars] = useState('{}');
+  const [ttBusy, setTtBusy] = useState(false);
+  const [ttMsg, setTtMsg] = useState<string | null>(null);
+  const [metaWaStatus, setMetaWaStatus] = useState<MetaWhatsAppServerStatus | null>(null);
+  const [globalCounts, setGlobalCounts] = useState({
+    students: 0,
+    teachers: 0,
+    coaches: 0,
+    classes: 0
+  });
 
-  const refreshTwilio = useCallback(async () => {
+  const refreshMetaWa = useCallback(async () => {
     if (!canWhatsAppTest || !getAuthToken()) return;
     try {
-      const res = await apiFetch('/api/twilio');
-      const payload = (await res.json().catch(() => ({}))) as { data?: TwilioServerStatus };
-      if (res.ok && payload?.data) setTwilioStatus(payload.data);
-      else setTwilioStatus(null);
+      const res = await apiFetch('/api/meta/whatsapp');
+      const payload = (await res.json().catch(() => ({}))) as { data?: MetaWhatsAppServerStatus };
+      if (res.ok && payload?.data) setMetaWaStatus(payload.data);
+      else setMetaWaStatus(null);
     } catch {
-      setTwilioStatus(null);
+      setMetaWaStatus(null);
     }
   }, [canWhatsAppTest]);
 
   useEffect(() => {
-    void refreshTwilio();
-  }, [refreshTwilio]);
+    void refreshMetaWa();
+  }, [refreshMetaWa]);
+
+  useEffect(() => {
+    if (!canWhatsAppTest || !getAuthToken()) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await apiFetch('/api/message-templates');
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || cancelled) return;
+        const list = (j.templates || []) as { type: string; name: string }[];
+        const opts = list.map((x) => ({ type: x.type, name: x.name }));
+        setTplOptions(opts);
+        setTtType((prev) => prev || opts[0]?.type || '');
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [canWhatsAppTest]);
+
+  useEffect(() => {
+    if (!getAuthToken()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [uRes, cRes] = await Promise.all([
+          apiFetch('/api/users'),
+          apiFetch('/api/class-live-lessons?scope=classes')
+        ]);
+        const [uJson, cJson] = await Promise.all([uRes.json().catch(() => ({})), cRes.json().catch(() => ({}))]);
+        const users = Array.isArray(uJson.data) ? uJson.data : [];
+        const classes = Array.isArray(cJson.data) ? cJson.data : [];
+        const next = {
+          students: users.filter((u: { role?: string }) => u.role === 'student').length,
+          teachers: users.filter((u: { role?: string }) => u.role === 'teacher').length,
+          coaches: users.filter((u: { role?: string }) => u.role === 'coach').length,
+          classes: classes.length
+        };
+        if (!cancelled) setGlobalCounts(next);
+      } catch {
+        if (!cancelled) {
+          setGlobalCounts({ students: 0, teachers: 0, coaches: 0, classes: 0 });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const sendWhatsAppTest = async () => {
     const p = waPhone.trim();
@@ -98,11 +163,66 @@ export default function AdminPanel() {
       const payload = (await res.json().catch(() => ({}))) as { ok?: boolean; sid?: string; error?: string };
       if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
       setWaResult({ ok: true, text: payload.sid ? `Gönderildi. SID: ${payload.sid}` : 'Gönderildi.' });
-      void refreshTwilio();
+      void refreshMetaWa();
     } catch (e) {
       setWaResult({ ok: false, text: e instanceof Error ? e.message : 'Hata' });
     } finally {
       setWaSending(false);
+    }
+  };
+
+  const sendTemplateTest = async () => {
+    const p = ttPhone.trim();
+    if (!p || p.replace(/\D/g, '').length < 10) {
+      setTtMsg('Şablon testi: geçerli telefon girin.');
+      return;
+    }
+    if (!ttType) {
+      setTtMsg('Şablon tipi seçin.');
+      return;
+    }
+    let variables: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse(ttVars || '{}') as unknown;
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('shape');
+      variables = parsed as Record<string, unknown>;
+    } catch {
+      setTtMsg('Değişkenler geçerli JSON nesne olmalı.');
+      return;
+    }
+    setTtBusy(true);
+    setTtMsg(null);
+    try {
+      const res = await apiFetch('/api/whatsapp/template-test', {
+        method: 'POST',
+        body: JSON.stringify({
+          template_type: ttType,
+          phone: p,
+          variables: Object.fromEntries(
+            Object.entries(variables).map(([k, v]) => [k, v == null ? '' : String(v)])
+          )
+        })
+      });
+      const payload = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        sid?: string;
+        meta_template_name?: string | null;
+        channel?: string;
+      };
+      if (!res.ok || !payload.ok) {
+        setTtMsg(payload.error || `HTTP ${res.status}`);
+        return;
+      }
+      const tn = payload.meta_template_name ? ` şablon:${payload.meta_template_name}` : '';
+      setTtMsg(
+        `Şablon gönderildi (${payload.channel || '?'})${tn}${payload.sid ? ` · id …${payload.sid.slice(-8)}` : ''}`
+      );
+      void refreshMetaWa();
+    } catch (e) {
+      setTtMsg(e instanceof Error ? e.message : 'Hata');
+    } finally {
+      setTtBusy(false);
     }
   };
 
@@ -164,13 +284,34 @@ export default function AdminPanel() {
       </div>
 
       {/* İstatistikler */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
           <div className="flex items-center gap-2 text-purple-500 mb-2">
             <Building2 className="w-4 h-4" />
             <span className="text-sm">Toplam Kurum</span>
           </div>
           <p className="text-2xl font-bold text-slate-800">{stats.totalOrgs}</p>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+          <div className="flex items-center gap-2 text-indigo-500 mb-2">
+            <Users className="w-4 h-4" />
+            <span className="text-sm">Toplam Öğretmen</span>
+          </div>
+          <p className="text-2xl font-bold text-slate-800">{globalCounts.teachers}</p>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+          <div className="flex items-center gap-2 text-sky-500 mb-2">
+            <Users className="w-4 h-4" />
+            <span className="text-sm">Toplam Koç</span>
+          </div>
+          <p className="text-2xl font-bold text-slate-800">{globalCounts.coaches}</p>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+          <div className="flex items-center gap-2 text-emerald-500 mb-2">
+            <Building2 className="w-4 h-4" />
+            <span className="text-sm">Toplam Sınıf</span>
+          </div>
+          <p className="text-2xl font-bold text-slate-800">{globalCounts.classes}</p>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
@@ -216,9 +357,9 @@ export default function AdminPanel() {
 
       <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="font-semibold text-indigo-900">Canlı ders entegrasyonu</p>
+          <p className="font-semibold text-indigo-900">Canlı özel ders entegrasyonu</p>
           <p className="text-sm text-indigo-700">
-            Tüm öğretmenlere ait canlı dersleri görüntüleyin; öğretmen ve platform filtresi kullanın
+            Tüm öğretmenlere ait canlı özel dersleri görüntüleyin; öğretmen ve platform filtresi kullanın
           </p>
         </div>
         <button
@@ -237,20 +378,35 @@ export default function AdminPanel() {
               <MessageCircle className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h3 className="font-semibold text-slate-800">WhatsApp test (Twilio)</h3>
+              <h3 className="font-semibold text-slate-800">WhatsApp test (Meta Cloud API)</h3>
               <p className="text-sm text-slate-600 mt-1">
-                Tekil mesaj gönderir; kayıt <code className="text-xs bg-slate-100 px-1 rounded">message_logs</code> içine
-                yazılır. Anahtarlar sunucu ortamında (
-                <code className="text-xs">TWILIO_*</code>, <code className="text-xs">APP_BASE_URL</code>).
+                Serbest metin gönderir (çoğu durumda alıcıyla son 24 saatte oturum gerekir); kayıt{' '}
+                <code className="text-xs bg-slate-100 px-1 rounded">message_logs</code> içine yazılır. Sunucuda{' '}
+                <code className="text-xs">META_WHATSAPP_TOKEN</code>, <code className="text-xs">META_PHONE_NUMBER_ID</code>{' '}
+                gerekir.
               </p>
-              {twilioStatus?.sandbox_likely && (
-                <p className="mt-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                  Twilio <strong>sandbox</strong> kullanımda görünüyor: mesajlar yalnızca sandbox’a kayıtlı numaralara
-                  gider.
+              {metaWaStatus && (
+                <p className="mt-2 text-xs text-slate-600">
+                  Graph: <strong>{metaWaStatus.graph_api_version || '—'}</strong>
+                  {metaWaStatus.phone_number_id_suffix && (
+                    <>
+                      {' '}
+                      · Telefon kimliği (sonu): …{metaWaStatus.phone_number_id_suffix}
+                    </>
+                  )}
+                  {metaWaStatus.waba_id_suffix && (
+                    <>
+                      {' '}
+                      · WABA (sonu): …{metaWaStatus.waba_id_suffix}
+                    </>
+                  )}
                 </p>
               )}
-              {twilioStatus && !twilioStatus.configured && (
-                <p className="mt-2 text-sm text-red-700">Twilio ortam değişkenleri eksik veya okunamadı.</p>
+              {metaWaStatus?.hint && (
+                <p className="mt-2 text-xs text-slate-600">{metaWaStatus.hint}</p>
+              )}
+              {metaWaStatus && !metaWaStatus.configured && (
+                <p className="mt-2 text-sm text-red-700">META_* WhatsApp ortam değişkenleri eksik veya okunamadı.</p>
               )}
             </div>
           </div>
@@ -269,7 +425,7 @@ export default function AdminPanel() {
               <button
                 type="button"
                 onClick={() => void sendWhatsAppTest()}
-                disabled={waSending || !twilioStatus?.configured}
+                disabled={waSending || !metaWaStatus?.configured}
                 className="w-full md:w-auto px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {waSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
@@ -293,6 +449,81 @@ export default function AdminPanel() {
               {waResult.text}
             </div>
           )}
+          <div className="mt-4 pt-4 border-t border-green-100 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => navigate('/message-templates')}
+              className="px-4 py-2 rounded-lg border border-green-300 text-green-900 text-sm font-medium hover:bg-green-50"
+            >
+              WhatsApp şablonları &amp; Meta şablon adları
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/settings')}
+              className="px-4 py-2 rounded-lg border border-slate-200 text-slate-700 text-sm hover:bg-slate-50"
+            >
+              Meta ortam özeti (Ayarlar)
+            </button>
+          </div>
+
+          <div className="mt-6 pt-6 border-t border-green-100 space-y-3">
+            <h4 className="text-sm font-semibold text-slate-800">Template Test Gönder</h4>
+            <p className="text-xs text-slate-600">
+              Her <code className="text-xs bg-slate-100 px-1 rounded">type</code> için{' '}
+              <code className="text-xs bg-slate-100 px-1">message_templates.meta_template_name</code> ve bağlı gövde
+              parametreleri kullanılır; eksik değişkenlerde API hata döner.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Şablon (type)</label>
+                <select
+                  value={ttType}
+                  onChange={(e) => setTtType(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                >
+                  {tplOptions.map((o) => (
+                    <option key={o.type} value={o.type}>
+                      {o.name} ({o.type})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Alıcı telefon</label>
+                <input
+                  type="tel"
+                  value={ttPhone}
+                  onChange={(e) => setTtPhone(e.target.value)}
+                  placeholder="+90555…"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Değişkenler (JSON)</label>
+              <textarea
+                value={ttVars}
+                onChange={(e) => setTtVars(e.target.value)}
+                rows={4}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono"
+                spellCheck={false}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => void sendTemplateTest()}
+              disabled={ttBusy || !metaWaStatus?.configured}
+              className="px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-medium hover:bg-emerald-800 disabled:opacity-50 flex items-center gap-2"
+            >
+              {ttBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              Template test gönder
+            </button>
+            {ttMsg && (
+              <p className={`text-sm ${ttMsg.includes('gönderildi') || ttMsg.includes('Şablon') ? 'text-green-800' : 'text-red-700'}`}>
+                {ttMsg}
+              </p>
+            )}
+          </div>
         </div>
       )}
 

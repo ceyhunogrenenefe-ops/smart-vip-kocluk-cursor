@@ -24,6 +24,7 @@ import { db } from '../lib/database';
 import { resolveCoachRecordId, resolveStudentRecordId } from '../lib/coachResolve';
 import { isSupabaseReady, supabase, supabaseBaseUrl, verifySupabaseReachable } from '../lib/supabase';
 import { useAuth } from './AuthContext';
+import { userRoleTags } from '../config/rolePermissions';
 import { topicPool as defaultTopicPool } from '../data/mockData';
 import { yosTopicPool } from '../data/yosTopicPool';
 
@@ -167,7 +168,10 @@ interface AppState {
 
   // Kurum Bilgileri (Çoklu Kurum Desteği)
   institutions: Institution[];
-  addInstitution: (institution: Institution) => void;
+  addInstitution: (
+    institution: Institution,
+    opts?: { plan?: 'starter' | 'professional' | 'enterprise' }
+  ) => Promise<Institution | null>;
   updateInstitution: (id: string, info: Partial<Institution>) => void;
   deleteInstitution: (id: string) => void;
   setActiveInstitution: (id: string) => void;
@@ -369,6 +373,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           name: s.name,
           email: s.email,
           phone: s.phone || undefined,
+          birthDate: s.birth_date || undefined,
           classLevel: normalizeClassLevel(s.class_level),
           school: s.school || undefined,
           parentName: s.parent_name || undefined,
@@ -555,6 +560,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           name: student.name,
           email: student.email,
           phone: student.phone,
+          birth_date: student.birthDate ?? null,
           class_level: String(student.classLevel),
           school: student.school ?? null,
           parent_name: student.parentName ?? null,
@@ -576,6 +582,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         email: created.email,
         password: student.password,
         phone: created.phone || undefined,
+        birthDate: created.birth_date || undefined,
         classLevel: normalizeClassLevel(created.class_level),
         school: created.school || undefined,
         parentName: created.parent_name || undefined,
@@ -645,6 +652,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (updatedStudent.name !== undefined) patch.name = updatedStudent.name;
       if (updatedStudent.email !== undefined) patch.email = updatedStudent.email;
       if (updatedStudent.phone !== undefined) patch.phone = updatedStudent.phone;
+      if (updatedStudent.birthDate !== undefined) patch.birth_date = updatedStudent.birthDate;
       if (updatedStudent.classLevel !== undefined)
         patch.class_level = String(updatedStudent.classLevel);
       if (updatedStudent.school !== undefined) patch.school = updatedStudent.school;
@@ -652,6 +660,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (updatedStudent.parentPhone !== undefined) patch.parent_phone = updatedStudent.parentPhone;
       // coachId gönderilmediğinde coach_id sıfırlanmasın (|| null her zaman PATCH'e null yazardı).
       if ('coachId' in updatedStudent) patch.coach_id = updatedStudent.coachId || null;
+      if ('institutionId' in updatedStudent)
+        patch.institution_id = updatedStudent.institutionId || null;
       if (updatedStudent.programId !== undefined) patch.program_id = updatedStudent.programId;
       await db.updateStudent(id, patch as Parameters<(typeof db)['updateStudent']>[1]);
     } catch (error) {
@@ -954,7 +964,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   // Kurum işlemleri - Supabase database
-  const addInstitution = async (newInstitution: Institution) => {
+  const addInstitution = async (
+    newInstitution: Institution,
+    opts?: { plan?: 'starter' | 'professional' | 'enterprise' }
+  ): Promise<Institution | null> => {
     try {
       const created = await db.createInstitution({
         name: newInstitution.name,
@@ -963,10 +976,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         address: newInstitution.address,
         website: newInstitution.website,
         logo: newInstitution.logo,
-        plan: 'professional',
+        plan: opts?.plan ?? 'professional',
         is_active: newInstitution.isActive
       });
-      // Convert and add to state
       const newInst: Institution = {
         id: created.id,
         name: created.name,
@@ -978,11 +990,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
         isActive: created.is_active,
         createdAt: created.created_at
       };
-      setInstitutions(prev => [...prev, newInst]);
+      setInstitutions(prev => {
+        if (prev.some((i) => i.id === newInst.id)) {
+          return prev.map((i) => (i.id === newInst.id ? newInst : i));
+        }
+        return [...prev, newInst];
+      });
+      return newInst;
     } catch (error) {
       console.error('Kurum ekleme hatası:', error);
-      // Fallback
-      setInstitutions(prev => [...prev, newInstitution]);
+      return null;
     }
   };
 
@@ -2047,21 +2064,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const scopedStudents = React.useMemo(() => {
     if (!effectiveUser) return [];
-    if (effectiveUser.role === 'super_admin') return students;
-    if (effectiveUser.role === 'admin' || effectiveUser.role === 'teacher') {
-      return students.filter(s => s.institutionId === effectiveUser.institutionId);
+    const tags = userRoleTags(effectiveUser);
+    if (tags.includes('super_admin')) return students;
+    if (tags.includes('admin')) {
+      return students.filter((s) => s.institutionId === effectiveUser.institutionId);
     }
-    if (effectiveUser.role === 'coach') {
-      const cid = resolveCoachRecordId(
-        effectiveUser.role,
-        effectiveUser.coachId,
-        effectiveUser.email,
-        coaches
-      );
-      if (!cid) return [];
-      return students.filter((s) => s.coachId === cid);
-    }
-    if (effectiveUser.role === 'student') {
+    if (tags.includes('student')) {
       const sid = resolveStudentRecordId(
         effectiveUser.role,
         effectiveUser.studentId,
@@ -2071,19 +2079,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!sid) return [];
       return students.filter((s) => s.id === sid);
     }
-    return [];
+    /** Öğretmen / koç listesi GET /students ile sunucuda süzülmüş listedir (tekilleştirmeyin) */
+    return students;
   }, [students, effectiveUser, coaches]);
 
   const scopedCoaches = React.useMemo(() => {
     if (!effectiveUser) return [];
-    if (effectiveUser.role === 'super_admin') return coaches;
-    if (effectiveUser.role === 'admin') {
+    const tags = userRoleTags(effectiveUser);
+    if (tags.includes('super_admin')) return coaches;
+    if (tags.includes('admin')) {
       const iid = effectiveUser.institutionId;
       if (!iid) return coaches;
       // Eski içe aktarımlar: institution_id boş koçlar kurum filtresinde kaybolmasın
-      return coaches.filter(c => !c.institutionId || c.institutionId === iid);
+      return coaches.filter((c) => !c.institutionId || c.institutionId === iid);
     }
-    if (effectiveUser.role === 'coach') {
+    if (tags.includes('coach')) {
       const cid = resolveCoachRecordId(
         effectiveUser.role,
         effectiveUser.coachId,
@@ -2091,23 +2101,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
         coaches
       );
       if (!cid) return [];
-      return coaches.filter(c => c.id === cid);
+      return coaches.filter((c) => c.id === cid);
     }
     return [];
   }, [coaches, effectiveUser]);
 
   const scopedWeeklyEntries = React.useMemo(() => {
     if (!effectiveUser) return [];
-    if (effectiveUser.role === 'super_admin') return weeklyEntries;
-    if (effectiveUser.role === 'admin' || effectiveUser.role === 'teacher') {
-      const allowedStudentIds = new Set(scopedStudents.map(s => s.id));
-      return weeklyEntries.filter(e => allowedStudentIds.has(e.studentId));
+    const tags = userRoleTags(effectiveUser);
+    if (tags.includes('super_admin')) return weeklyEntries;
+    if (tags.includes('admin') || tags.includes('teacher')) {
+      const allowedStudentIds = new Set(scopedStudents.map((s) => s.id));
+      return weeklyEntries.filter((e) => allowedStudentIds.has(e.studentId));
     }
-    if (effectiveUser.role === 'coach') {
-      const allowedStudentIds = new Set(scopedStudents.map(s => s.id));
-      return weeklyEntries.filter(e => allowedStudentIds.has(e.studentId));
+    if (tags.includes('coach')) {
+      const allowedStudentIds = new Set(scopedStudents.map((s) => s.id));
+      return weeklyEntries.filter((e) => allowedStudentIds.has(e.studentId));
     }
-    if (effectiveUser.role === 'student') {
+    if (tags.includes('student')) {
       const sid = resolveStudentRecordId(
         effectiveUser.role,
         effectiveUser.studentId,

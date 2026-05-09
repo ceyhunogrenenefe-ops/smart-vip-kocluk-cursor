@@ -131,6 +131,7 @@ export interface Database {
           name: string;
           phone: string | null;
           role: 'super_admin' | 'admin' | 'coach' | 'teacher' | 'student';
+          roles?: ('super_admin' | 'admin' | 'coach' | 'teacher' | 'student')[] | null;
           password_hash: string;
           institution_id: string | null;
           created_by: string | null;
@@ -154,6 +155,7 @@ export interface Database {
           name: string;
           email: string;
           phone: string | null;
+          birth_date: string | null;
           class_level: string;
           school: string | null;
           parent_name: string | null;

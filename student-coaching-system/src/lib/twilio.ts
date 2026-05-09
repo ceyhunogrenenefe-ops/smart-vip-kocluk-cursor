@@ -13,7 +13,10 @@ export function normalizePhone(phone: string): string {
   return digits.startsWith('+') ? digits : `+${digits}`;
 }
 
-export async function sendWhatsAppMessage(params: { to: string; body: string }): Promise<{ ok: boolean; sid?: string; error?: string }> {
+export async function sendWhatsAppMessage(params: {
+  to: string;
+  body: string;
+}): Promise<{ ok: boolean; sid?: string; error?: string }> {
   const res = await apiFetch('/api/whatsapp/send', {
     method: 'POST',
     body: JSON.stringify({ phone: params.to, message: params.body })
@@ -28,7 +31,7 @@ export async function sendWhatsAppMessage(params: { to: string; body: string }):
 /** Otomasyon logları sunucuda `message_logs` tablosundadır; burada yalnızca isim tutarlılığı. */
 export function logMessage(_row: Record<string, unknown>): void {
   if (import.meta.env.DEV) {
-    console.warn('[twilio] logMessage istemcide çağrıldı; gerçek kayıt API/cron üzerinden yapılır.');
+    console.warn('[whatsapp] logMessage istemcide çağrıldı; gerçek kayıt API/cron üzerinden yapılır.');
   }
 }
 

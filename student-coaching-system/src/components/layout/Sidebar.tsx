@@ -23,11 +23,24 @@ import {
   UserCog,
   CreditCard,
   Server,
-  Settings2,
   Video,
   Radio,
   MessageSquareText
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { userRoleTags } from '../../config/rolePermissions';
+
+type SideMenuItem = { path: string; icon: LucideIcon; label: string };
+
+function mergeSideMenus(groups: SideMenuItem[][]): SideMenuItem[] {
+  const map = new Map<string, SideMenuItem>();
+  for (const group of groups) {
+    for (const item of group) {
+      if (!map.has(item.path)) map.set(item.path, item);
+    }
+  }
+  return [...map.values()];
+}
 
 interface SidebarProps {
   isOpen: boolean;
@@ -40,93 +53,108 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   const { effectiveUser } = useAuth();
   const { institution } = useApp();
 
-  /** Menü, App’te izin verilen rotaların alt kümesidir; roller için tek kaynak: `config/rolePermissions`. */
-  const getMenuItems = () => {
-    switch (effectiveUser?.role) {
-      case 'super_admin':
-        return [
-          { path: '/dashboard', icon: LayoutDashboard, label: 'Ana Panel' },
-          { path: '/live-lessons', icon: Radio, label: 'Canlı dersler' },
-          { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
-          { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
-          { path: '/coaches', icon: Users, label: 'Eğitim Koçları' },
-          { path: '/tracking', icon: Calendar, label: 'Haftalık Takip' },
-          { path: '/book-tracking', icon: BookMarked, label: 'Kitap Takibi' },
-          { path: '/exam-tracking', icon: ClipboardList, label: 'Sınav Takibi (Denemelerim)' },
-          { path: '/reports', icon: FileCheck, label: 'Raporlar' },
-          { path: '/ai-coach', icon: Brain, label: 'Yapay Zeka Koçu' },
-          { path: '/whatsapp', icon: MessageCircle, label: 'WhatsApp Panel' },
-          { path: '/message-templates', icon: MessageSquareText, label: 'WA şablonları' },
-          { path: '/topics', icon: BookOpen, label: 'Konu Havuzu' },
-          { path: '/topic-tracking', icon: CheckSquare, label: 'Konu Takibi' },
-          { path: '/written-exam', icon: FileCheck, label: 'Yazılı Takip' },
-          { path: '/pdf-import', icon: Upload, label: 'PDF İçe Aktar' },
-          { path: '/analytics', icon: BarChart3, label: 'Analiz Paneli' },
-          { path: '/webhooks', icon: Webhook, label: 'Webhook Ayarları' },
-          { path: '/subscription', icon: CreditCard, label: 'Abonelik' },
-          { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
-          { path: '/system-management', icon: Server, label: 'Sistem Yönetimi' },
-          { path: '/settings', icon: Settings, label: 'Ayarlar' },
-        ];
-      case 'teacher':
-        return [
-          { path: '/dashboard', icon: LayoutDashboard, label: 'Ana Panel' },
-          { path: '/live-lessons', icon: Radio, label: 'Canlı dersler' },
-          { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
-          { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
-          { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
-          { path: '/settings', icon: Settings, label: 'Ayarlar' }
-        ];
-      case 'admin':
-        return [
-          { path: '/dashboard', icon: LayoutDashboard, label: 'Ana Panel' },
-          { path: '/live-lessons', icon: Radio, label: 'Canlı dersler' },
-          { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
-          { path: '/coaches', icon: Users, label: 'Eğitim Koçları' },
-          { path: '/tracking', icon: Calendar, label: 'Haftalık Takip' },
-          { path: '/book-tracking', icon: BookMarked, label: 'Kitap Takibi' },
-          { path: '/exam-tracking', icon: ClipboardList, label: 'Sınav Takibi (Denemelerim)' },
-          { path: '/reports', icon: FileCheck, label: 'Raporlar' },
-          { path: '/ai-coach', icon: Brain, label: 'Yapay Zeka Koçu' },
-          { path: '/whatsapp', icon: MessageCircle, label: 'WhatsApp Panel' },
-          { path: '/message-templates', icon: MessageSquareText, label: 'WA şablonları' },
-          { path: '/topics', icon: BookOpen, label: 'Konu Havuzu' },
-          { path: '/topic-tracking', icon: CheckSquare, label: 'Konu Takibi' },
-          { path: '/written-exam', icon: FileCheck, label: 'Yazılı Takip' },
-          { path: '/pdf-import', icon: Upload, label: 'PDF İçe Aktar' },
-          { path: '/analytics', icon: BarChart3, label: 'Analiz Paneli' },
-          { path: '/webhooks', icon: Webhook, label: 'Webhook Ayarları' },
-          { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
-          { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
-          { path: '/system-management', icon: Server, label: 'Sistem Yönetimi' },
-          { path: '/settings', icon: Settings, label: 'Ayarlar' },
-        ];
-      case 'coach':
-        return [
-          { path: '/coach-dashboard', icon: LayoutDashboard, label: 'Koç Paneli' },
-          { path: '/live-lessons', icon: Radio, label: 'Canlı dersler' },
-          { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
-          { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
-          { path: '/tracking', icon: Calendar, label: 'Haftalık Takip' },
-          { path: '/book-tracking', icon: BookMarked, label: 'Kitap Takibi' },
-          { path: '/exam-tracking', icon: ClipboardList, label: 'Sınav Takibi (Denemelerim)' },
-          { path: '/topic-tracking', icon: CheckSquare, label: 'Konu Takibi' },
-          { path: '/analytics', icon: BarChart3, label: 'Analiz Paneli' },
-          { path: '/ai-coach', icon: Brain, label: 'Yapay Zeka Koçu' },
-          { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
-          { path: '/webhooks', icon: Webhook, label: 'Webhook Ayarlari' },
-          { path: '/written-exam', icon: FileCheck, label: 'Yazılı Takip' },
-        ];
-      case 'student':
-        return [
-          { path: '/student-dashboard', icon: LayoutDashboard, label: 'Öğrenci Paneli' },
-          { path: '/student-meetings', icon: Video, label: 'Görüşmelerim' },
-          { path: '/student-reports', icon: BookMarked, label: 'Benim Raporlarım' },
-          { path: '/student-analytics', icon: BarChart3, label: 'Analizlerim' },
-        ];
-      default:
-        return [];
+  /** Çoklu rol: koç + öğretmen menüleri birleştirilir (aynı path tek kez). */
+  const getMenuItems = (): SideMenuItem[] => {
+    const tags = userRoleTags(effectiveUser);
+    if (tags.includes('super_admin')) {
+      return [
+        { path: '/dashboard', icon: LayoutDashboard, label: 'Ana Panel' },
+        { path: '/live-lessons', icon: Radio, label: 'Canlı özel dersler' },
+        { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
+        { path: '/super-admin', icon: Server, label: 'Kurum Yönetimi' },
+        { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
+        { path: '/message-templates', icon: MessageSquareText, label: 'WA şablonları' },
+        { path: '/subscription', icon: CreditCard, label: 'Abonelik / Paketler' },
+        { path: '/topics', icon: BookOpen, label: 'Konu Havuzu' },
+        { path: '/system-management', icon: Server, label: 'Sistem Yönetimi' }
+      ];
     }
+    const isStudentOnlyNav =
+      tags.includes('student') &&
+      !tags.some((t) => ['super_admin', 'admin', 'coach', 'teacher'].includes(t));
+    if (isStudentOnlyNav) {
+      return [
+        { path: '/student-dashboard', icon: LayoutDashboard, label: 'Öğrenci Paneli' },
+        { path: '/class-schedule', icon: Calendar, label: 'Canlı derslerim' },
+        { path: '/student-meetings', icon: Video, label: 'Görüşmelerim' },
+        { path: '/student-reports', icon: BookMarked, label: 'Benim Raporlarım' },
+        { path: '/student-analytics', icon: BarChart3, label: 'Analizlerim' }
+      ];
+    }
+
+    const MENU_ADMIN: SideMenuItem[] = [
+      { path: '/dashboard', icon: LayoutDashboard, label: 'Ana Panel' },
+      { path: '/live-lessons', icon: Radio, label: 'Canlı özel dersler' },
+      { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
+      { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
+      { path: '/teachers', icon: GraduationCap, label: 'Öğretmenler' },
+      { path: '/coaches', icon: Users, label: 'Eğitim Koçları' },
+      { path: '/tracking', icon: Calendar, label: 'Haftalık Takip' },
+      { path: '/book-tracking', icon: BookMarked, label: 'Kitap Takibi' },
+      { path: '/exam-tracking', icon: ClipboardList, label: 'Sınav Takibi (Denemelerim)' },
+      { path: '/reports', icon: FileCheck, label: 'Raporlar' },
+      { path: '/ai-coach', icon: Brain, label: 'AI KOÇ' },
+      { path: '/whatsapp', icon: MessageCircle, label: 'WhatsApp Panel' },
+      { path: '/message-templates', icon: MessageSquareText, label: 'WA şablonları' },
+      { path: '/topics', icon: BookOpen, label: 'Konu Havuzu' },
+      { path: '/topic-tracking', icon: CheckSquare, label: 'Konu Takibi' },
+      { path: '/written-exam', icon: FileCheck, label: 'Yazılı Takip' },
+      { path: '/pdf-import', icon: Upload, label: 'PDF İçe Aktar' },
+      { path: '/analytics', icon: BarChart3, label: 'Analiz Paneli' },
+      { path: '/webhooks', icon: Webhook, label: 'Webhook Ayarları' },
+      { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
+      { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
+      { path: '/system-management', icon: Server, label: 'Sistem Yönetimi' },
+      { path: '/settings', icon: Settings, label: 'Ayarlar' }
+    ];
+
+    const MENU_TEACHER: SideMenuItem[] = [
+      { path: '/teacher-panel', icon: LayoutDashboard, label: 'Öğretmen Paneli' },
+      { path: '/live-lessons', icon: Radio, label: 'Canlı özel dersler' },
+      { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
+      { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
+      { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
+      { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
+      { path: '/settings', icon: Settings, label: 'Ayarlar' }
+    ];
+
+    const MENU_COACH: SideMenuItem[] = [
+      { path: '/coach-dashboard', icon: LayoutDashboard, label: 'Koç Paneli' },
+      { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
+      { path: '/live-lessons', icon: Radio, label: 'Canlı özel dersler' },
+      { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
+      { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
+      { path: '/teachers', icon: GraduationCap, label: 'Öğretmenler' },
+      { path: '/tracking', icon: Calendar, label: 'Haftalık Takip' },
+      { path: '/book-tracking', icon: BookMarked, label: 'Kitap Takibi' },
+      { path: '/exam-tracking', icon: ClipboardList, label: 'Sınav Takibi (Denemelerim)' },
+      { path: '/topic-tracking', icon: CheckSquare, label: 'Konu Takibi' },
+      { path: '/analytics', icon: BarChart3, label: 'Analiz Paneli' },
+      { path: '/ai-coach', icon: Brain, label: 'AI KOÇ' },
+      { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
+      { path: '/webhooks', icon: Webhook, label: 'Webhook Ayarlari' },
+      { path: '/written-exam', icon: FileCheck, label: 'Yazılı Takip' }
+    ];
+
+    const chunks: SideMenuItem[][] = [];
+    if (tags.includes('admin')) chunks.push(MENU_ADMIN);
+    if (tags.includes('coach')) chunks.push(MENU_COACH);
+    if (tags.includes('teacher')) chunks.push(MENU_TEACHER);
+
+    if (chunks.length === 0) return [];
+
+    let merged = mergeSideMenus(chunks);
+    if (tags.includes('coach') && tags.includes('teacher') && !tags.includes('admin')) {
+      const coachDash = merged.find((m) => m.path === '/coach-dashboard');
+      const teachPanel = merged.find((m) => m.path === '/teacher-panel');
+      if (coachDash && teachPanel) {
+        const rest = merged.filter(
+          (m) => m.path !== '/coach-dashboard' && m.path !== '/teacher-panel'
+        );
+        merged = [coachDash, teachPanel, ...rest];
+      }
+    }
+    return merged;
   };
 
   const menuItems = getMenuItems();

@@ -24,13 +24,33 @@ import {
   CheckCircle,
   RefreshCw,
   UserCheck,
-  Briefcase
+  Briefcase,
+  Download
 } from 'lucide-react';
 import { UserRole, ClassLevel, Coach, Student } from '../types';
+import { userRoleTags } from '../config/rolePermissions';
 import { db, QuotaSnapshot } from '../lib/database';
 import { isSupabaseReady } from '../lib/supabase';
 import { getAuthToken } from '../lib/session';
 import { userRowToSystemUser, type UserRow } from '../lib/userRowToSystemUser';
+import {
+  downloadUserImportTemplateXlsx,
+  importedRolesKindConflict,
+  normalizeImportedFullNameKey,
+  normalizeRolesFromApiUser,
+  parseUserImportGrid,
+  readUserImportFileAsGrid,
+  USER_IMPORT_TEMPLATE_HEADERS
+} from '../lib/userBulkImport';
+
+const toClassLevel = (raw: string): ClassLevel => {
+  const v = String(raw || '').trim();
+  if (!v) return 9;
+  if (v === 'LGS' || v === 'YOS' || v.startsWith('YKS-')) return v as ClassLevel;
+  const n = Number(v);
+  if (!Number.isNaN(n)) return n as ClassLevel;
+  return 9;
+};
 
 /** `users` satırı yok; yalnızca `coaches` tablosunda olan profiller (liste + düzenlemede hesap açma) */
 const COACH_PROFILE_ONLY_PREFIX = '__coach_profile__:';
@@ -85,7 +105,9 @@ export default function UserManagement() {
   const { user: currentUser, effectiveUser, impersonate, canImpersonate } = useAuth();
   const {
     addStudent,
+    updateStudent,
     addCoach,
+    updateCoach,
     students,
     coaches,
     institution,
@@ -106,6 +128,8 @@ export default function UserManagement() {
 
   // State
   const [users, setUsers] = useState<SystemUser[]>([]);
+  /** Çoklu rol (ör. öğretmen+koç) eşlemesi için ham API kullanıcı satırları */
+  const [rawUserRows, setRawUserRows] = useState<UserRow[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterRole, setFilterRole] = useState<UserRole | 'all'>('all');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'expired' | 'inactive'>('all');
@@ -115,6 +139,7 @@ export default function UserManagement() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [quota, setQuota] = useState<QuotaSnapshot | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
 
   const selectableRoles = useMemo(() => {
     const r = effectiveUser?.role;
@@ -130,6 +155,7 @@ export default function UserManagement() {
     if (getAuthToken() && isSupabaseReady) {
       try {
         const rows = await db.getUsers();
+        setRawUserRows(rows as UserRow[]);
         const fromApi = rows.map((row) => userRowToSystemUser(row, { coaches, students }));
         const stubs = coachProfilesWithoutLoginUser(coaches, rows as UserRow[]);
         const seen = new Set(fromApi.map((u) => u.email.toLowerCase().trim()));
@@ -150,6 +176,7 @@ export default function UserManagement() {
       }
     }
     setUsers(getAllUsers());
+    setRawUserRows([]);
   }, [getAllUsers, coaches, students]);
 
   useEffect(() => {
@@ -219,12 +246,22 @@ export default function UserManagement() {
 
   // Form state
   const [formData, setFormData] = useState({
-    name: '',
+    firstName: '',
+    lastName: '',
     email: '',
     phone: '',
+    birthDate: '',
+    classLevel: '9',
+    branch: '',
+    parentName: '',
+    parentPhone: '',
     password: '',
     role: 'student' as UserRole,
+    /** Personel için: öğretmen + koç birlikte */
+    alsoCoach: false,
+    alsoTeacher: false,
     assignCoachId: '',
+    studentInstitutionId: '' as string,
     bootstrap_max_students: '50',
     bootstrap_max_coaches: '10',
     bootstrap_package_label: 'professional',
@@ -244,9 +281,10 @@ export default function UserManagement() {
       return false;
     }
 
-    // Rol filtresi
-    if (filterRole !== 'all' && user.role !== filterRole) {
-      return false;
+    // Rol filtresi (çoklu rol: örneğin öğretmen+koç kullanıcıda `roles` dizisi)
+    if (filterRole !== 'all') {
+      const tags = user.roles?.length ? user.roles : [user.role];
+      if (!tags.includes(filterRole)) return false;
     }
 
     // Durum filtresi
@@ -267,6 +305,12 @@ export default function UserManagement() {
 
     return true;
   });
+
+  const coachesForStudentForm = useMemo(() => {
+    const inst = String(formData.studentInstitutionId || '').trim();
+    if (!inst) return coaches;
+    return coaches.filter((c) => !c.institutionId || c.institutionId === inst);
+  }, [coaches, formData.studentInstitutionId]);
 
   // Gün sayısını hesapla
   const getDaysLeft = (endDate?: string) => {
@@ -303,14 +347,35 @@ export default function UserManagement() {
     setMessage(null);
 
     if (mode === 'edit' && user) {
-      const fullUser = getUserById(user.id);
+      const em = user.email.toLowerCase().trim();
+      const rt = userRoleTags(user as SystemUser);
+      const studentMatch =
+        rt.includes('student') || user.role === 'student'
+          ? students.find((s) => s.email.toLowerCase().trim() === em)
+          : undefined;
+      const instDraft =
+        studentMatch?.institutionId ||
+        user.institutionId ||
+        institution?.id ||
+        activeInstitutionId ||
+        effectiveUser?.institutionId ||
+        '';
       setFormData({
-        name: fullUser?.name || user.name,
-        email: fullUser?.email || user.email,
-        phone: fullUser?.phone || user.phone || '',
+        firstName: user.name.split(' ').slice(0, -1).join(' ') || user.name,
+        lastName: user.name.split(' ').slice(-1).join(' '),
+        email: user.email,
+        phone: user.phone || '',
+        birthDate: studentMatch?.birthDate || '',
+        classLevel: studentMatch?.classLevel != null ? String(studentMatch.classLevel) : '9',
+        branch: studentMatch?.school || '',
+        parentName: studentMatch?.parentName || '',
+        parentPhone: studentMatch?.parentPhone || '',
         password: '',
         role: user.role,
-        assignCoachId: '',
+        alsoCoach: rt.includes('coach'),
+        alsoTeacher: rt.includes('teacher'),
+        assignCoachId: studentMatch?.coachId ? String(studentMatch.coachId) : '',
+        studentInstitutionId: instDraft ? String(instDraft) : '',
         bootstrap_max_students: '50',
         bootstrap_max_coaches: '10',
         bootstrap_package_label: 'professional',
@@ -326,12 +391,25 @@ export default function UserManagement() {
       endDate.setDate(endDate.getDate() + days);
 
       setFormData({
-        name: '',
+        firstName: '',
+        lastName: '',
         email: '',
         phone: '',
+        birthDate: '',
+        classLevel: '9',
+        branch: '',
+        parentName: '',
+        parentPhone: '',
         password: '',
         role: 'student',
+        alsoCoach: false,
+        alsoTeacher: false,
         assignCoachId: '',
+        studentInstitutionId:
+          institution?.id ||
+          activeInstitutionId ||
+          effectiveUser?.institutionId ||
+          '',
         bootstrap_max_students: '50',
         bootstrap_max_coaches: '10',
         bootstrap_package_label: 'professional',
@@ -366,6 +444,7 @@ export default function UserManagement() {
     setMessage(null);
 
     try {
+      const fullName = `${formData.firstName} ${formData.lastName}`.trim();
       if (modalMode === 'edit' && selectedUser) {
         /** Koç DB'de var, `users` yok — ilk kayıtta giriş hesabı oluştur */
         if (selectedUser.id.startsWith(COACH_PROFILE_ONLY_PREFIX) && getAuthToken()) {
@@ -386,7 +465,7 @@ export default function UserManagement() {
           try {
             await db.createUser({
               email: formData.email.toLowerCase().trim(),
-              name: formData.name.trim(),
+              name: fullName,
               phone: formData.phone?.trim() || null,
               role: 'coach',
               password_hash: pwd,
@@ -410,19 +489,50 @@ export default function UserManagement() {
           return;
         }
 
+        const staffRoles =
+          formData.role !== 'student' &&
+          formData.role !== 'admin' &&
+          (effectiveUser?.role === 'admin' || effectiveUser?.role === 'super_admin')
+            ? (() => {
+                if (formData.role === 'teacher') {
+                  const r: UserRole[] = ['teacher'];
+                  if (formData.alsoCoach) r.push('coach');
+                  return { roles: r, primary: 'teacher' as UserRole };
+                }
+                if (formData.role === 'coach') {
+                  const r: UserRole[] = ['coach'];
+                  if (formData.alsoTeacher) r.push('teacher');
+                  return { roles: r, primary: 'coach' as UserRole };
+                }
+                return null;
+              })()
+            : null;
+
         const patch: Record<string, unknown> = {
-          name: formData.name,
+          name: fullName,
           email: formData.email,
           phone: formData.phone,
-          role: formData.role,
+          role: staffRoles ? staffRoles.primary : formData.role,
           package: formData.package,
-          startDate: new Date(formData.startDate).toISOString(),
-          endDate: formData.endDate ? new Date(formData.endDate).toISOString() : undefined,
-          isActive: formData.isActive
+          start_date: new Date(formData.startDate).toISOString(),
+          end_date: formData.endDate ? new Date(formData.endDate).toISOString() : undefined,
+          is_active: formData.isActive
         };
+        if (staffRoles) {
+          patch.roles = staffRoles.roles;
+        }
         if (formData.password.trim().length >= 6) patch.password = formData.password;
-
-        const result = await updateUser(selectedUser.id, patch);
+        let result: { success: boolean; message: string } = { success: false, message: 'Güncellenemedi.' };
+        if (getAuthToken() && isSupabaseReady) {
+          try {
+            await db.updateUser(selectedUser.id, patch as Partial<UserRow>);
+            result = { success: true, message: 'Güncellendi.' };
+          } catch (e) {
+            result = { success: false, message: e instanceof Error ? e.message : 'Güncellenemedi.' };
+          }
+        } else {
+          result = await updateUser(selectedUser.id, patch);
+        }
         let quotaNote = '';
         if (
           result.success &&
@@ -446,6 +556,46 @@ export default function UserManagement() {
           text: result.message + quotaNote
         });
         if (result.success) {
+          const tags = userRoleTags(selectedUser as SystemUser);
+          if (tags.includes('student')) {
+            const em = selectedUser.email.toLowerCase().trim();
+            const st = students.find((s) => s.email.toLowerCase().trim() === em);
+            if (st) {
+              await updateStudent(st.id, {
+                birthDate: formData.birthDate || undefined,
+                classLevel: toClassLevel(formData.classLevel),
+                school: formData.branch.trim() || undefined,
+                parentName: formData.parentName.trim() || undefined,
+                parentPhone: formData.parentPhone.trim() || undefined,
+                coachId: formData.assignCoachId.trim() || undefined,
+                institutionId: formData.studentInstitutionId.trim() || undefined
+              });
+            }
+          }
+          if (staffRoles?.roles.includes('coach')) {
+            const emLower = formData.email.toLowerCase().trim();
+            const hasCoach = coaches.some((c) => c.email.toLowerCase().trim() === emLower);
+            if (!hasCoach) {
+              try {
+                await addCoach({
+                  id: selectedUser.id,
+                  name: fullName,
+                  email: formData.email,
+                  phone: formData.phone || '',
+                  subjects: [],
+                  studentIds: [],
+                  institutionId:
+                    selectedUser.institutionId ||
+                    activeInstitutionId ||
+                    institution?.id ||
+                    undefined,
+                  createdAt: new Date().toISOString()
+                });
+              } catch (e) {
+                console.error('Koç profili eklenemedi:', e);
+              }
+            }
+          }
           await refreshUsers();
           setShowModal(false);
         }
@@ -490,16 +640,51 @@ export default function UserManagement() {
                 ? 'Öğretmen'
                 : 'Admin';
 
+        const staffRolesNew =
+          formData.role !== 'student' &&
+          formData.role !== 'admin' &&
+          (effectiveUser?.role === 'admin' || effectiveUser?.role === 'super_admin')
+            ? (() => {
+                if (formData.role === 'teacher') {
+                  const r: UserRole[] = ['teacher'];
+                  if (formData.alsoCoach) r.push('coach');
+                  return { roles: r, primary: 'teacher' as UserRow['role'] };
+                }
+                if (formData.role === 'coach') {
+                  const r: UserRole[] = ['coach'];
+                  if (formData.alsoTeacher) r.push('teacher');
+                  return { roles: r, primary: 'coach' as UserRow['role'] };
+                }
+                return null;
+              })()
+            : null;
+
+        const resolvedStudentInstitution =
+          formData.role === 'student' &&
+          (effectiveUser?.role === 'super_admin' || effectiveUser?.role === 'admin') &&
+          String(formData.studentInstitutionId || '').trim()
+            ? String(formData.studentInstitutionId).trim()
+            : (resolvedInstitution ?? null);
+
+        const studentInstForAdd =
+          (resolvedStudentInstitution ?? null) ||
+          resolvedInstitution ||
+          instFallback ||
+          effectiveUser?.institutionId;
+
         if (getAuthToken() && isSupabaseReady) {
           try {
             const row = await db.createUser(
               {
                 email: formData.email.toLowerCase().trim(),
-                name: formData.name.trim(),
+                name: fullName,
                 phone: formData.phone?.trim() || null,
-                role: formData.role as UserRow['role'],
+                role: (staffRolesNew?.primary || formData.role) as UserRow['role'],
+                roles: staffRolesNew?.roles ?? undefined,
                 password_hash: pwdPlain,
-                institution_id: (resolvedInstitution ?? null) as string | null,
+                institution_id: (formData.role === 'student'
+                  ? resolvedStudentInstitution
+                  : (resolvedInstitution ?? null)) as string | null,
                 is_active: formData.isActive !== false,
                 package: formData.package,
                 start_date: new Date(formData.startDate).toISOString(),
@@ -526,20 +711,23 @@ export default function UserManagement() {
               if (formData.role === 'student') {
                 await addStudent({
                   id: newUserId,
-                  name: formData.name,
+                  name: fullName,
                   email: formData.email,
                   password: formData.password || undefined,
                   phone: formData.phone || '',
-                  parentPhone: formData.phone || '',
-                  classLevel: 9 as ClassLevel,
+                  birthDate: formData.birthDate || undefined,
+                  parentName: formData.parentName.trim() || undefined,
+                  parentPhone: formData.parentPhone.trim() || '',
+                  classLevel: toClassLevel(formData.classLevel),
+                  school: formData.branch.trim() || undefined,
                   coachId: formData.assignCoachId || undefined,
-                  institutionId: instId || undefined,
+                  institutionId: studentInstForAdd || undefined,
                   createdAt: new Date().toISOString()
                 });
-              } else if (formData.role === 'coach') {
+              } else if (formData.role === 'coach' || (staffRolesNew?.roles || []).includes('coach')) {
                 await addCoach({
                   id: newUserId,
-                  name: formData.name,
+                  name: fullName,
                   email: formData.email,
                   phone: formData.phone || '',
                   subjects: [],
@@ -559,8 +747,14 @@ export default function UserManagement() {
             setTimeout(() => {
               setShowModal(false);
               if (formData.role === 'student') navigate('/students');
-              else if (formData.role === 'coach') navigate('/coaches');
-              else if (formData.role === 'teacher') navigate('/dashboard');
+              else if (
+                formData.role === 'coach' &&
+                !(staffRolesNew?.roles || []).includes('teacher')
+              ) {
+                navigate('/coaches');
+              } else {
+                navigate('/dashboard');
+              }
             }, 1500);
           } catch (err) {
             setMessage({
@@ -570,7 +764,7 @@ export default function UserManagement() {
           }
         } else {
           const createPayload: Record<string, unknown> = {
-            name: formData.name,
+            name: fullName,
             email: formData.email,
             phone: formData.phone,
             password: formData.password,
@@ -603,20 +797,23 @@ export default function UserManagement() {
               if (formData.role === 'student') {
                 await addStudent({
                   id: newUserId,
-                  name: formData.name,
+                  name: fullName,
                   email: formData.email,
                   password: formData.password || undefined,
                   phone: formData.phone || '',
-                  parentPhone: formData.phone || '',
-                  classLevel: 9 as ClassLevel,
+                  birthDate: formData.birthDate || undefined,
+                  parentName: formData.parentName.trim() || undefined,
+                  parentPhone: formData.parentPhone.trim() || '',
+                  classLevel: toClassLevel(formData.classLevel),
+                  school: formData.branch.trim() || undefined,
                   coachId: formData.assignCoachId || undefined,
-                  institutionId: instId || undefined,
+                  institutionId: studentInstForAdd || instId || undefined,
                   createdAt: new Date().toISOString()
                 });
-              } else if (formData.role === 'coach') {
+              } else if (formData.role === 'coach' || (staffRolesNew?.roles || []).includes('coach')) {
                 await addCoach({
                   id: newUserId,
-                  name: formData.name,
+                  name: fullName,
                   email: formData.email,
                   phone: formData.phone || '',
                   subjects: [],
@@ -635,11 +832,13 @@ export default function UserManagement() {
 
             setTimeout(() => {
               setShowModal(false);
-              if (formData.role === 'student') {
-                navigate('/students');
-              } else if (formData.role === 'coach') {
+              if (formData.role === 'student') navigate('/students');
+              else if (
+                formData.role === 'coach' &&
+                !(staffRolesNew?.roles || []).includes('teacher')
+              ) {
                 navigate('/coaches');
-              } else if (formData.role === 'teacher') {
+              } else {
                 navigate('/dashboard');
               }
             }, 1500);
@@ -676,11 +875,36 @@ export default function UserManagement() {
     if (!confirm('Bu kullanıcıyı silmek istediğinizden emin misiniz?')) return;
 
     const target = users.find((u) => u.id === userId) || getUserById(userId);
+
+    if (getAuthToken() && isSupabaseReady) {
+      const em = (target?.email || '').toLowerCase().trim();
+      const tags = target ? userRoleTags(target as SystemUser) : [];
+      try {
+        if (tags.includes('student')) {
+          const sid = target.studentId || students.find((s) => s.email.toLowerCase().trim() === em)?.id;
+          if (sid) await deleteStudent(sid);
+        }
+        if (tags.includes('coach')) {
+          const cid = target.coachId || coaches.find((c) => c.email.toLowerCase().trim() === em)?.id;
+          if (cid) await deleteCoach(cid);
+        }
+        await db.deleteUser(userId);
+        setMessage({ type: 'success', text: 'Kullanıcı silindi.' });
+      } catch (e) {
+        setMessage({
+          type: 'error',
+          text: e instanceof Error ? e.message : 'Silme sırasında hata oluştu.'
+        });
+      }
+      void refreshUsers();
+      return;
+    }
+
     const result = await deleteUser(userId);
     if (result.success && target?.email) {
-      const em = target.email.toLowerCase();
-      const st = students.find(s => s.email.toLowerCase() === em);
-      const ch = coaches.find(c => c.email.toLowerCase() === em);
+      const lower = target.email.toLowerCase();
+      const st = students.find((s) => s.email.toLowerCase() === lower);
+      const ch = coaches.find((c) => c.email.toLowerCase() === lower);
       if (st) await deleteStudent(st.id);
       if (ch) await deleteCoach(ch.id);
     }
@@ -703,7 +927,7 @@ export default function UserManagement() {
     total: users.length,
     admins: users.filter(u => u.role === 'admin').length,
     coaches: users.filter(u => u.role === 'coach').length,
-    teachers: users.filter(u => u.role === 'teacher').length,
+    teachers: users.filter(u => u.role === 'teacher' || (u.roles || []).includes('teacher')).length,
     students: users.filter(u => u.role === 'student').length,
     active: users.filter(u => {
       const daysLeft = getDaysLeft(u.endDate);
@@ -713,6 +937,515 @@ export default function UserManagement() {
       const daysLeft = getDaysLeft(u.endDate);
       return daysLeft !== null && daysLeft <= 0;
     }).length
+  };
+
+  const importAllowedRoles = useMemo((): UserRole[] => {
+    const r = effectiveUser?.role;
+    if (r === 'teacher') return ['student'];
+    if (r === 'admin' || r === 'super_admin') return ['student', 'teacher', 'coach'];
+    return [];
+  }, [effectiveUser?.role]);
+
+  const handleBulkUserImport = async (file: File | null) => {
+    if (!file) return;
+    if (!(effectiveUser?.role === 'admin' || effectiveUser?.role === 'super_admin' || effectiveUser?.role === 'teacher')) {
+      setMessage({ type: 'error', text: 'Dosya ile içe aktarma yalnızca yönetici veya öğretmen için açıktır.' });
+      return;
+    }
+    setImportBusy(true);
+    const rowErrors: string[] = [];
+    try {
+      let grid: unknown[][];
+      try {
+        grid = await readUserImportFileAsGrid(file);
+      } catch {
+        setMessage({ type: 'error', text: 'Dosya okunamadı. .xlsx veya .csv kullanın.' });
+        return;
+      }
+      const { rows: parsed, headerError, invalidComboRows } = parseUserImportGrid(grid);
+      if (headerError) {
+        setMessage({ type: 'error', text: headerError });
+        return;
+      }
+      if (invalidComboRows.length) {
+        const tail = invalidComboRows
+          .slice(0, 5)
+          .map((x) => `Satır ${x.rowNumber}: ${x.message}`)
+          .join(' ');
+        setMessage({
+          type: 'error',
+          text: `Geçersiz rol birleşimi: ${tail}${invalidComboRows.length > 5 ? ' …' : ''}`
+        });
+        return;
+      }
+      if (parsed.length === 0) {
+        setMessage({ type: 'error', text: 'İçe aktarılacak geçerli satır bulunamadı.' });
+        return;
+      }
+
+      const instFallback = activeInstitutionId || institution?.id;
+      let resolvedInstitutionBase =
+        effectiveUser?.role === 'teacher'
+          ? effectiveUser.institutionId
+          : instFallback || effectiveUser?.institutionId;
+      if (
+        resolvedInstitutionBase &&
+        institutions.length > 0 &&
+        !institutions.some((i) => i.id === resolvedInstitutionBase)
+      ) {
+        resolvedInstitutionBase = undefined;
+      }
+
+      let updated = 0;
+      let created = 0;
+      let fail = 0;
+
+      const matchesInstitution = (
+        rowInst: string | null | undefined,
+        scope: string | null
+      ): boolean =>
+        !scope ||
+        rowInst === scope ||
+        rowInst === null ||
+        rowInst === undefined;
+
+      for (const pr of parsed) {
+        const disallowed = pr.roles.filter((r) => !importAllowedRoles.includes(r));
+        if (disallowed.length) {
+          fail += 1;
+          rowErrors.push(`Satır ${pr.rowNumber}: Bu roller için yetkiniz yok: ${disallowed.join(', ')}.`);
+          continue;
+        }
+        const pwd = pr.password.trim();
+        const pwd2 = (pr.passwordConfirm || '').trim();
+        if (pwd.length < 6) {
+          fail += 1;
+          rowErrors.push(`Satır ${pr.rowNumber}: Şifre en az 6 karakter olmalıdır.`);
+          continue;
+        }
+        if (pwd2 && pwd !== pwd2) {
+          fail += 1;
+          rowErrors.push(`Satır ${pr.rowNumber}: Şifre ile şifre tekrarı eşleşmiyor.`);
+          continue;
+        }
+
+        const instId = (resolvedInstitutionBase ?? null) as string | null;
+        const emailLower = pr.email.toLowerCase().trim();
+        const nameKey = normalizeImportedFullNameKey(pr.fullName.trim());
+
+        let nameMatchStudent: Student | undefined;
+        let nameMatchCoach: Coach | undefined;
+
+        const syncProfileCreate = async (newUserId: string) => {
+          if (pr.roles.includes('student')) {
+            await addStudent({
+              id: newUserId,
+              name: pr.fullName.trim(),
+              email: pr.email.trim(),
+              password: pwd,
+              phone: pr.phone.trim() || '',
+              birthDate: pr.birthDate || undefined,
+              parentName: pr.parentName.trim() || undefined,
+              parentPhone: pr.parentPhone.trim() || '',
+              classLevel: toClassLevel(pr.classLevel),
+              school: pr.branch.trim() || undefined,
+              institutionId: instId || undefined,
+              createdAt: new Date().toISOString()
+            });
+          }
+          if (pr.roles.includes('coach')) {
+            await addCoach({
+              id: newUserId,
+              name: pr.fullName.trim(),
+              email: pr.email.trim(),
+              phone: pr.phone.trim() || '',
+              subjects: [],
+              studentIds: [],
+              institutionId: instId || undefined,
+              createdAt: new Date().toISOString()
+            });
+          }
+        };
+
+        const upsertProfilesForExistingUser = async (existing: {
+          id: string;
+          email?: string | null;
+        }) => {
+          if (pr.roles.includes('student')) {
+            const stMail = String(existing.email || '').toLowerCase().trim();
+            const st =
+              students.find((s) => s.email.toLowerCase().trim() === stMail) ||
+              students.find((s) => String(s.platformUserId || '') === String(existing.id)) ||
+              students.find((s) => s.id === existing.id) ||
+              nameMatchStudent;
+            if (st) {
+              await updateStudent(st.id, {
+                name: pr.fullName.trim(),
+                email: pr.email.trim(),
+                password: pwd,
+                phone: pr.phone.trim() || '',
+                birthDate: pr.birthDate || undefined,
+                parentName: pr.parentName.trim() || undefined,
+                parentPhone: pr.parentPhone.trim() || '',
+                classLevel: toClassLevel(pr.classLevel),
+                school: pr.branch.trim() || undefined,
+                institutionId: instId || undefined
+              });
+            } else {
+              await addStudent({
+                id: existing.id,
+                name: pr.fullName.trim(),
+                email: pr.email.trim(),
+                password: pwd,
+                phone: pr.phone.trim() || '',
+                birthDate: pr.birthDate || undefined,
+                parentName: pr.parentName.trim() || undefined,
+                parentPhone: pr.parentPhone.trim() || '',
+                classLevel: toClassLevel(pr.classLevel),
+                school: pr.branch.trim() || undefined,
+                institutionId: instId || undefined,
+                createdAt: new Date().toISOString()
+              });
+            }
+          }
+          if (pr.roles.includes('coach')) {
+            const chEm = String(existing.email || '').toLowerCase().trim();
+            const ch =
+              coaches.find((c) => c.email.toLowerCase().trim() === chEm) ||
+              nameMatchCoach ||
+              coaches.find((c) => String(c.id) === String(existing.id));
+            if (ch) {
+              await updateCoach(ch.id, {
+                name: pr.fullName.trim(),
+                email: pr.email.trim(),
+                phone: pr.phone.trim() || ''
+              });
+            } else {
+              await addCoach({
+                id: existing.id,
+                name: pr.fullName.trim(),
+                email: pr.email.trim(),
+                phone: pr.phone.trim() || '',
+                subjects: [],
+                studentIds: [],
+                institutionId: instId || undefined,
+                createdAt: new Date().toISOString()
+              });
+            }
+          }
+        };
+
+        try {
+          if (getAuthToken() && isSupabaseReady) {
+            let existing: UserRow | null = null;
+            try {
+              existing = await db.getUserByEmail(emailLower);
+            } catch {
+              existing = null;
+            }
+
+            if (!existing && pr.roles.includes('student')) {
+              const cand = students.filter(
+                (st) =>
+                  normalizeImportedFullNameKey(st.name) === nameKey &&
+                  matchesInstitution(st.institutionId, instId)
+              );
+              if (cand.length > 1) {
+                fail += 1;
+                rowErrors.push(
+                  `Satır ${pr.rowNumber}: Aynı ada soyada kurumda birden fazla öğrenci var; tekilleştirmek için e-postayı dosyada doğru kullanın.`
+                );
+                continue;
+              }
+              nameMatchStudent = cand[0];
+              if (nameMatchStudent) {
+                try {
+                  existing = await db.getUserByEmail(
+                    String(nameMatchStudent.email || '').toLowerCase().trim()
+                  );
+                } catch {
+                  existing = null;
+                }
+              }
+            }
+
+            if (!existing && pr.roles.includes('coach')) {
+              const cand = coaches.filter(
+                (c) =>
+                  normalizeImportedFullNameKey(c.name) === nameKey &&
+                  matchesInstitution(c.institutionId, instId)
+              );
+              if (cand.length > 1) {
+                fail += 1;
+                rowErrors.push(
+                  `Satır ${pr.rowNumber}: Aynı ada soyada birden fazla koç var; e-posta ile eşleştirin.`
+                );
+                continue;
+              }
+              nameMatchCoach = cand[0];
+              if (nameMatchCoach) {
+                try {
+                  existing = await db.getUserByEmail(String(nameMatchCoach.email || '').toLowerCase().trim());
+                } catch {
+                  existing = null;
+                }
+              }
+            }
+
+            if (!existing && pr.roles.includes('teacher')) {
+              const cand = rawUserRows
+                .filter((rw) => normalizeRolesFromApiUser(rw).includes('teacher'))
+                .map((rw) => userRowToSystemUser(rw, { coaches, students }))
+                .filter(
+                  (u) =>
+                    !u.id.startsWith(COACH_PROFILE_ONLY_PREFIX) &&
+                    normalizeImportedFullNameKey(u.name) === nameKey &&
+                    matchesInstitution(u.institutionId, instId)
+                );
+              if (cand.length > 1) {
+                fail += 1;
+                rowErrors.push(
+                  `Satır ${pr.rowNumber}: Aynı ada soyada birden fazla öğretmen var; e-posta ile eşleştirin.`
+                );
+                continue;
+              }
+              const tRow = cand[0];
+              if (tRow) {
+                try {
+                  existing = await db.getUserByEmail(String(tRow.email || '').toLowerCase().trim());
+                } catch {
+                  existing = null;
+                }
+              }
+            }
+
+            if (existing) {
+              const existingRoles = normalizeRolesFromApiUser(existing);
+              if (importedRolesKindConflict(existingRoles, pr.roles)) {
+                fail += 1;
+                rowErrors.push(
+                  `Satır ${pr.rowNumber}: Mevcut kullanıcı rolleri (${existingRoles.join(
+                    ', '
+                  )}) ile dosyadaki roller (${pr.roles.join(', ')}) uyumsuz (öğrenci ile personeli karıştırmayın).`
+                );
+                continue;
+              }
+              const primaryRole = pr.roles[0] as UserRow['role'];
+              await db.updateUser(existing.id, {
+                name: pr.fullName.trim(),
+                email: emailLower,
+                phone: pr.phone.trim() || null,
+                password_hash: pwd,
+                roles: pr.roles,
+                role: primaryRole
+              } as Partial<UserRow>);
+              await upsertProfilesForExistingUser({ id: existing.id, email: emailLower });
+              updated += 1;
+              continue;
+            }
+
+            const row = await db.createUser({
+              email: emailLower,
+              name: pr.fullName.trim(),
+              phone: pr.phone.trim() || null,
+              role: pr.roles[0] as UserRow['role'],
+              roles: pr.roles,
+              password_hash: pwd,
+              institution_id: instId,
+              is_active: true,
+              package: 'trial',
+              start_date: new Date().toISOString(),
+              end_date: null,
+              created_by: null
+            });
+            try {
+              if (pr.roles.includes('student') || pr.roles.includes('coach')) {
+                await syncProfileCreate(row.id);
+              }
+            } catch (syncErr) {
+              fail += 1;
+              rowErrors.push(
+                `Satır ${pr.rowNumber}: Kullanıcı oluşturuldu ancak profil senkronu başarısız: ${
+                  syncErr instanceof Error ? syncErr.message : 'bilinmeyen'
+                }`
+              );
+              continue;
+            }
+            created += 1;
+          } else {
+            let existingLocal =
+              getAllUsers().find((u) => u.email.toLowerCase().trim() === emailLower) || null;
+
+            if (!existingLocal && pr.roles.includes('student')) {
+              const cand = students.filter(
+                (st) =>
+                  normalizeImportedFullNameKey(st.name) === nameKey &&
+                  matchesInstitution(st.institutionId, instId)
+              );
+              if (cand.length > 1) {
+                fail += 1;
+                rowErrors.push(
+                  `Satır ${pr.rowNumber}: Aynı ada soyada birden fazla öğrenci var; e-posta kullanın.`
+                );
+                continue;
+              }
+              nameMatchStudent = cand[0];
+              if (nameMatchStudent)
+                existingLocal =
+                  getAllUsers().find(
+                    (u) =>
+                      u.email.toLowerCase().trim() ===
+                      String(nameMatchStudent!.email || '').toLowerCase().trim()
+                  ) || null;
+            }
+
+            if (!existingLocal && pr.roles.includes('coach')) {
+              const cand = coaches.filter(
+                (c) =>
+                  normalizeImportedFullNameKey(c.name) === nameKey &&
+                  matchesInstitution(c.institutionId, instId)
+              );
+              if (cand.length > 1) {
+                fail += 1;
+                rowErrors.push(
+                  `Satır ${pr.rowNumber}: Aynı ada soyada birden fazla koç var; e-posta kullanın.`
+                );
+                continue;
+              }
+              nameMatchCoach = cand[0];
+              if (nameMatchCoach)
+                existingLocal =
+                  getAllUsers().find(
+                    (u) =>
+                      u.email.toLowerCase().trim() ===
+                      String(nameMatchCoach!.email || '').toLowerCase().trim()
+                  ) || null;
+            }
+
+            if (!existingLocal && pr.roles.includes('teacher')) {
+              const cand = rawUserRows.length
+                ? rawUserRows
+                    .filter((rw) => normalizeRolesFromApiUser(rw).includes('teacher'))
+                    .map((rw) => userRowToSystemUser(rw, { coaches, students }))
+                    .filter(
+                      (u) =>
+                        !u.id.startsWith(COACH_PROFILE_ONLY_PREFIX) &&
+                        normalizeImportedFullNameKey(u.name) === nameKey &&
+                        matchesInstitution(u.institutionId, instId)
+                    )
+                : users.filter(
+                    (u) =>
+                      !u.id.startsWith(COACH_PROFILE_ONLY_PREFIX) &&
+                      (u.role === 'teacher' || (u.roles || []).includes('teacher')) &&
+                      normalizeImportedFullNameKey(u.name) === nameKey &&
+                      matchesInstitution(u.institutionId, instId)
+                  );
+              if (cand.length > 1) {
+                fail += 1;
+                rowErrors.push(
+                  `Satır ${pr.rowNumber}: Aynı ada soyada birden fazla öğretmen var; e-posta kullanın.`
+                );
+                continue;
+              }
+              const tRw = cand[0];
+              if (tRw) existingLocal = getAllUsers().find((u) => u.id === tRw.id) || null;
+            }
+
+            if (existingLocal) {
+              const existingLocalRoles =
+                existingLocal.roles?.length ? existingLocal.roles : [existingLocal.role];
+              if (importedRolesKindConflict(existingLocalRoles, pr.roles)) {
+                fail += 1;
+                rowErrors.push(
+                  `Satır ${pr.rowNumber}: Yerel kayıt rolleri (${existingLocalRoles.join(
+                    ', '
+                  )}) ile dosya (${pr.roles.join(', ')}) uyumsuz.`
+                );
+                continue;
+              }
+              const ur = await updateUser(existingLocal.id, {
+                name: pr.fullName.trim(),
+                email: pr.email.trim(),
+                phone: pr.phone.trim(),
+                password: pwd,
+                role: pr.roles[0],
+                roles: pr.roles
+              });
+              if (!ur.success) {
+                fail += 1;
+                rowErrors.push(`Satır ${pr.rowNumber}: ${ur.message}`);
+                continue;
+              }
+              await upsertProfilesForExistingUser({
+                id: existingLocal.id,
+                email: emailLower
+              });
+              updated += 1;
+              continue;
+            }
+
+            const result = await createUser({
+              name: pr.fullName.trim(),
+              email: pr.email.trim(),
+              phone: pr.phone.trim(),
+              password: pwd,
+              role: pr.roles[0],
+              roles: pr.roles,
+              package: 'trial',
+              startDate: new Date().toISOString(),
+              isActive: true,
+              institutionId: instId || undefined,
+              institution_id: instId || undefined
+            });
+            if (!result.success) {
+              fail += 1;
+              rowErrors.push(`Satır ${pr.rowNumber}: ${result.message}`);
+              continue;
+            }
+            const newUserId = result.userId || '';
+            if (!newUserId) {
+              fail += 1;
+              rowErrors.push(`Satır ${pr.rowNumber}: Kullanıcı kimliği alınamadı.`);
+              continue;
+            }
+            try {
+              if (pr.roles.includes('student') || pr.roles.includes('coach')) {
+                await syncProfileCreate(newUserId);
+              }
+            } catch (syncErr) {
+              fail += 1;
+              rowErrors.push(
+                `Satır ${pr.rowNumber}: Kullanıcı oluşturuldu ancak profil senkronu başarısız: ${
+                  syncErr instanceof Error ? syncErr.message : 'bilinmeyen'
+                }`
+              );
+              continue;
+            }
+            created += 1;
+          }
+        } catch (e) {
+          fail += 1;
+          rowErrors.push(
+            `Satır ${pr.rowNumber}: ${e instanceof Error ? e.message : 'Kayıt oluşturulamadı.'}`
+          );
+        }
+      }
+
+      await refreshUsers();
+      const errTail =
+        rowErrors.length > 0
+          ? ' ' +
+            rowErrors.slice(0, 8).join(' ') +
+            (rowErrors.length > 8 ? ` (+${rowErrors.length - 8} satır daha)` : '')
+          : '';
+      const ok = updated + created;
+      setMessage({
+        type: ok > 0 ? 'success' : 'error',
+        text: `İçe aktarma bitti. Güncellenen: ${updated}, Yeni: ${created}, Hatalı: ${fail}.${errTail}`
+      });
+    } finally {
+      setImportBusy(false);
+    }
   };
 
   return (
@@ -733,6 +1466,38 @@ export default function UserManagement() {
           <UserPlus className="w-5 h-5" />
           Yeni Kullanıcı
         </button>
+      </div>
+      <div className="bg-white rounded-xl border border-gray-100 p-4 flex flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="text-sm font-medium text-slate-700">Excel / CSV ile kullanıcı ekle</label>
+          <button
+            type="button"
+            onClick={() => downloadUserImportTemplateXlsx()}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          >
+            <Download className="h-4 w-4" />
+            Örnek Excel indir
+          </button>
+          <input
+            type="file"
+            accept=".xlsx,.xls,.csv,.txt"
+            disabled={importBusy}
+            onChange={(e) => void handleBulkUserImport(e.target.files?.[0] || null)}
+            className="text-sm"
+          />
+        </div>
+        <p className="text-xs text-slate-500">
+          Önerilen başlık sırası: {USER_IMPORT_TEMPLATE_HEADERS.join(' · ')}. Başlıklar Türkçe veya İngilizce
+          eşlenir; veli telefonu ile öğrenci telefonu farklı sütunlarda olmalıdır. GSM numaraları Excelde sayı olsa bile
+          okunur (gerekirse başa 0 eklenir). Sınıf ve şube iki sütunda olabileceği gibi tek hücrede{' '}
+          <span className="font-mono">11-A</span>, <span className="font-mono">11 / B</span> veya{' '}
+          <span className="font-mono">12C</span> biçiminde de olabilir. Aynı e-posta ile tekrar yüklerseniz veya
+          kurumda yalnızca bir kişiyle eşleşen aynı ad-soyad bulunursa kayıt güncellenir (yeni satır açılmaz). Rol
+          için: öğrenci, öğretmen
+          {effectiveUser?.role === 'admin' || effectiveUser?.role === 'super_admin' ? ', koç' : ''}; birden fazla rol için
+          virgül, noktalı virgül veya <span className="font-mono">ve</span> ile ayırın (örn. öğretmen, koç). Şifre tekrarı
+          doluysa birinciyle aynı olmalıdır.
+        </p>
       </div>
 
       {/* Stats */}
@@ -859,8 +1624,16 @@ export default function UserManagement() {
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Kullanıcı</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Rol</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Adı</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Soyadı</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">E-mail adresi</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Telefon numarası</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Doğum tarihi</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Sınıfı</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Şubesi</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Rolü</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Veli adı</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Veli telefon numarası</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Paket</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Başlangıç</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Bitiş</th>
@@ -871,15 +1644,26 @@ export default function UserManagement() {
             <tbody className="divide-y divide-gray-100">
               {filteredUsers.map(user => {
                 const subStatus = getSubscriptionStatus(user);
-                const daysLeft = getDaysLeft(user.endDate);
+                const em = user.email.toLowerCase().trim();
+                const studentMatch =
+                  user.role === 'student' ? students.find((s) => s.email.toLowerCase().trim() === em) : undefined;
 
                 return (
                   <tr key={user.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3">
-                      <div>
-                        <div className="font-medium text-gray-800">{user.name}</div>
-                        <div className="text-sm text-gray-500">{user.email}</div>
-                      </div>
+                    <td className="px-4 py-3 font-medium text-gray-800">{user.name.split(' ').slice(0, -1).join(' ') || user.name}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{user.name.split(' ').slice(-1).join(' ')}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{user.email}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{user.phone || '—'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      {user.role === 'student' && studentMatch?.birthDate
+                        ? new Date(studentMatch.birthDate).toLocaleDateString('tr-TR')
+                        : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      {user.role === 'student' ? String(studentMatch?.classLevel ?? '—') : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      {user.role === 'student' ? studentMatch?.school || '—' : '—'}
                     </td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${ROLES.find(r => r.value === user.role)?.color || 'bg-gray-100 text-gray-700'}`}>
@@ -888,6 +1672,12 @@ export default function UserManagement() {
                           <span className="ml-1 font-normal text-amber-700">· giriş yok</span>
                         ) : null}
                       </span>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      {user.role === 'student' ? studentMatch?.parentName || '—' : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      {user.role === 'student' ? studentMatch?.parentPhone || '—' : '—'}
                     </td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${PACKAGES[(user.package || 'trial') as keyof typeof PACKAGES].color}`}>
@@ -976,20 +1766,32 @@ export default function UserManagement() {
                   <strong>şifre</strong> (en az 6 karakter) girip kaydedin — hesap oluşturulur.
                 </div>
               ) : null}
-              {/* Name */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  <UserCog className="w-4 h-4 inline mr-1" />
-                  Ad Soyad *
-                </label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  required
-                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-                  placeholder="Adınız Soyadınız"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <UserCog className="w-4 h-4 inline mr-1" />
+                    Adı *
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.firstName}
+                    onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                    required
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                    placeholder="Ad"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Soyadı *</label>
+                  <input
+                    type="text"
+                    value={formData.lastName}
+                    onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+                    required
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                    placeholder="Soyad"
+                  />
+                </div>
               </div>
 
               {/* Email */}
@@ -1022,6 +1824,65 @@ export default function UserManagement() {
                   placeholder="0500 000 00 00"
                 />
               </div>
+
+              {formData.role === 'student' && (
+                <>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Doğum tarihi</label>
+                      <input
+                        type="date"
+                        value={formData.birthDate}
+                        onChange={(e) => setFormData({ ...formData, birthDate: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Sınıfı</label>
+                      <input
+                        type="text"
+                        value={formData.classLevel}
+                        onChange={(e) => setFormData({ ...formData, classLevel: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                        placeholder="9, 10, 11..."
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Şubesi</label>
+                      <input
+                        type="text"
+                        value={formData.branch}
+                        onChange={(e) => setFormData({ ...formData, branch: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                        placeholder="A"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Veli adı</label>
+                      <input
+                        type="text"
+                        value={formData.parentName}
+                        onChange={(e) => setFormData({ ...formData, parentName: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                        placeholder="Veli adı"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Veli telefon numarası</label>
+                      <input
+                        type="tel"
+                        value={formData.parentPhone}
+                        onChange={(e) => setFormData({ ...formData, parentPhone: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                        placeholder="05xx xxx xx xx"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
 
               {/* Password */}
               <div>
@@ -1070,6 +1931,37 @@ export default function UserManagement() {
                   ))}
                 </select>
               </div>
+
+              {(effectiveUser?.role === 'admin' || effectiveUser?.role === 'super_admin') &&
+                (formData.role === 'teacher' || formData.role === 'coach') && (
+                  <div className="rounded-lg border border-violet-100 bg-violet-50/80 p-3 space-y-2">
+                    <p className="text-xs text-violet-900 font-medium">
+                      Ek roller (aynı kişide öğretmen ve koç birlikte)
+                    </p>
+                    {formData.role === 'teacher' && (
+                      <label className="flex items-center gap-2 text-sm text-gray-800 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={formData.alsoCoach}
+                          onChange={(e) => setFormData({ ...formData, alsoCoach: e.target.checked })}
+                          className="rounded border-gray-300"
+                        />
+                        Koç rolü de ver
+                      </label>
+                    )}
+                    {formData.role === 'coach' && (
+                      <label className="flex items-center gap-2 text-sm text-gray-800 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={formData.alsoTeacher}
+                          onChange={(e) => setFormData({ ...formData, alsoTeacher: e.target.checked })}
+                          className="rounded border-gray-300"
+                        />
+                        Öğretmen rolü de ver
+                      </label>
+                    )}
+                  </div>
+                )}
 
               {modalMode === 'edit' &&
                 formData.role === 'admin' &&
@@ -1170,28 +2062,60 @@ export default function UserManagement() {
                   </div>
                 )}
 
-              {modalMode === 'add' && formData.role === 'student' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    <Briefcase className="w-4 h-4 inline mr-1" />
-                    Öğretmen/Koç {effectiveUser?.role === 'teacher' ? '*' : ''}
-                  </label>
-                  <select
-                    value={formData.assignCoachId}
-                    onChange={(e) => setFormData({ ...formData, assignCoachId: e.target.value })}
-                    required={effectiveUser?.role === 'teacher'}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-                  >
-                    <option value="">Koç seçin</option>
-                    {coaches.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Öğretmen hesapları için koç seçimi zorunludur (kurum içi kota).
-                  </p>
+              {(modalMode === 'add' || modalMode === 'edit') && formData.role === 'student' && (
+                <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/90 p-4">
+                  {effectiveUser?.role === 'super_admin' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Kurum</label>
+                      <select
+                        value={formData.studentInstitutionId}
+                        onChange={(e) => setFormData({ ...formData, studentInstitutionId: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                      >
+                        <option value="">Kurum seçin</option>
+                        {institutions.map((i) => (
+                          <option key={i.id} value={i.id}>
+                            {i.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  {(effectiveUser?.role === 'admin' || effectiveUser?.role === 'teacher') &&
+                    !(effectiveUser?.role === 'super_admin') && (
+                      <p className="text-xs text-gray-600">
+                        Kurum:{' '}
+                        <span className="font-medium">
+                          {(formData.studentInstitutionId &&
+                            institutions.find((i) => i.id === formData.studentInstitutionId)?.name) ||
+                            institution?.name ||
+                            '—'}
+                        </span>
+                      </p>
+                    )}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <Briefcase className="w-4 h-4 inline mr-1" />
+                      Atanan koç {effectiveUser?.role === 'teacher' && modalMode === 'add' ? '*' : ''}
+                    </label>
+                    <select
+                      value={formData.assignCoachId}
+                      onChange={(e) => setFormData({ ...formData, assignCoachId: e.target.value })}
+                      required={effectiveUser?.role === 'teacher' && modalMode === 'add'}
+                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                    >
+                      <option value="">Koç seçin</option>
+                      {coachesForStudentForm.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Süper admin kurum seçince koç listesi o kuruma göre süzülür. Öğretmen ile yeni öğrenci
+                      eklerken koç seçimi zorunludur (kurum içi kota).
+                    </p>
+                  </div>
                 </div>
               )}
 

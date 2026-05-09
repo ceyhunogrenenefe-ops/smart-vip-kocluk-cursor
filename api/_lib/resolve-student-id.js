@@ -14,6 +14,13 @@ export async function resolveStudentRowForUser({ userId, email, institutionId })
         .eq('user_id', userId)
         .maybeSingle();
       if (byUserFk?.id) return byUserFk;
+
+      const { data: byPlatform } = await supabaseAdmin
+        .from('students')
+        .select('id')
+        .eq('platform_user_id', userId)
+        .maybeSingle();
+      if (byPlatform?.id) return byPlatform;
     }
 
     if (normalizedEmail) {

@@ -1,5 +1,7 @@
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
+import { fetchAllMetaMessageTemplates, findMetaTemplateStatus } from '../api/_lib/meta-templates-sync.js';
+import { buildTemplatePreview } from '../api/_lib/whatsapp-outbound.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -15,6 +17,14 @@ function parseBody(req) {
 }
 
 function normalizeVariables(v) {
+  if (!Array.isArray(v)) return null;
+  const out = v.map((x) => String(x || '').trim()).filter(Boolean);
+  if (out.length > 40) return null;
+  return out;
+}
+
+function normalizeBindings(v) {
+  if (v === undefined || v === null) return undefined;
   if (!Array.isArray(v)) return null;
   const out = v.map((x) => String(x || '').trim()).filter(Boolean);
   if (out.length > 40) return null;
@@ -65,6 +75,21 @@ export default async function handler(req, res) {
       if (vars === null) return res.status(400).json({ error: 'invalid_variables', hint: 'variables: string dizisi, en fazla 40 öğe.' });
       patch.variables = vars;
     }
+    if (body.twilio_variable_bindings !== undefined) {
+      const b = normalizeBindings(body.twilio_variable_bindings);
+      if (b === null) return res.status(400).json({ error: 'invalid_twilio_variable_bindings' });
+      if (b !== undefined) patch.twilio_variable_bindings = b;
+    }
+    if (body.meta_template_name !== undefined) {
+      patch.meta_template_name =
+        body.meta_template_name === null ? null : String(body.meta_template_name || '').trim() || null;
+    }
+    if (body.meta_template_language !== undefined) {
+      patch.meta_template_language =
+        body.meta_template_language === null
+          ? null
+          : String(body.meta_template_language || '').trim() || 'tr';
+    }
 
     if (Object.keys(patch).length <= 1) {
       return res.status(400).json({ error: 'nothing_to_update' });
@@ -78,6 +103,102 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: 'template_not_found' });
     }
     return res.status(200).json({ template: data });
+  }
+
+  if (req.method === 'POST') {
+    const body = parseBody(req);
+    const action = String(body.action || '').trim();
+
+    if (action === 'sync_meta_templates') {
+      const list = await fetchAllMetaMessageTemplates();
+      if (!list.ok) {
+        return res.status(400).json({ ok: false, error: list.error || 'sync_failed' });
+      }
+
+      const { data: rows, error: qErr } = await supabaseAdmin
+        .from('message_templates')
+        .select('id,meta_template_name,meta_template_language')
+        .not('meta_template_name', 'is', null);
+      if (qErr) return res.status(500).json({ error: qErr.message });
+
+      const results = [];
+      for (const row of rows || []) {
+        const name = String(row.meta_template_name || '').trim();
+        if (!name) continue;
+        const lang = String(row.meta_template_language || 'tr').trim() || 'tr';
+        const status = findMetaTemplateStatus(list.templates, name, lang);
+        await supabaseAdmin
+          .from('message_templates')
+          .update({
+            whatsapp_template_status: status || 'unknown',
+            whatsapp_template_synced_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', row.id);
+        results.push({
+          id: row.id,
+          meta_template_name: name,
+          status: status || 'unknown'
+        });
+      }
+      return res.status(200).json({ ok: true, synced: results.length, results });
+    }
+
+    if (action === 'preview_template') {
+      const templateType = String(body.template_type || '').trim();
+      if (!templateType) return res.status(400).json({ error: 'template_type_required' });
+      const vars =
+        body.variables && typeof body.variables === 'object' && !Array.isArray(body.variables)
+          ? body.variables
+          : {};
+      const strVars = {};
+      for (const [k, v] of Object.entries(vars)) {
+        strVars[String(k)] = v == null ? '' : String(v);
+      }
+      const { data: row, error: rowErr } = await supabaseAdmin
+        .from('message_templates')
+        .select('*')
+        .eq('type', templateType)
+        .maybeSingle();
+      if (rowErr) return res.status(500).json({ error: rowErr.message });
+      if (!row) return res.status(404).json({ error: 'template_not_found' });
+      const preview = buildTemplatePreview(row, strVars);
+      return res.status(200).json({ preview, template_type: templateType });
+    }
+
+    if (action === 'sync_meta_template') {
+      const id = typeof body.id === 'string' ? body.id.trim() : '';
+      if (!id) return res.status(400).json({ error: 'id_required' });
+      const list = await fetchAllMetaMessageTemplates();
+      if (!list.ok) {
+        return res.status(400).json({ ok: false, error: list.error || 'sync_failed' });
+      }
+      const { data: row, error: oneErr } = await supabaseAdmin
+        .from('message_templates')
+        .select('id,meta_template_name,meta_template_language')
+        .eq('id', id)
+        .maybeSingle();
+      if (oneErr) return res.status(500).json({ error: oneErr.message });
+      const name = String(row?.meta_template_name || '').trim();
+      if (!name) return res.status(400).json({ error: 'meta_template_name_missing' });
+      const lang = String(row?.meta_template_language || 'tr').trim() || 'tr';
+      const status = findMetaTemplateStatus(list.templates, name, lang);
+      await supabaseAdmin
+        .from('message_templates')
+        .update({
+          whatsapp_template_status: status || 'unknown',
+          whatsapp_template_synced_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', row.id);
+      return res.status(200).json({
+        ok: true,
+        template_id: row.id,
+        status: status || 'unknown'
+      });
+    }
+
+    return res.status(400).json({ error: 'unknown_action' });
   }
 
   return res.status(405).json({ error: 'Method not allowed' });

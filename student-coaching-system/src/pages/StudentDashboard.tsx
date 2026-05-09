@@ -40,8 +40,6 @@ import {
   LineChart,
   Line
 } from 'recharts';
-import StudentLiveLessonsPanel from '../components/liveLessons/StudentLiveLessonsPanel';
-
 type TabType = 'daily' | 'exams' | 'analytics' | 'written' | 'books';
 
 export default function StudentDashboard() {
@@ -416,8 +414,6 @@ export default function StudentDashboard() {
           </div>
         </div>
       </div>
-
-      <StudentLiveLessonsPanel />
 
       {/* 📚 Kitap Okuma Durumum */}
       {myReadingStats && myReadingStats.totalMinutes > 0 && (

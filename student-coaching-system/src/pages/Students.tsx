@@ -825,7 +825,7 @@ export default function Students() {
               )}
 
               <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 mt-2">
-                <h4 className="text-sm font-semibold text-slate-800 mb-1">Canlı ders paketi (öğretmen başına)</h4>
+                <h4 className="text-sm font-semibold text-slate-800 mb-1">Canlı özel ders paketi (öğretmen başına)</h4>
                 <p className="text-xs text-slate-500 mb-3">
                   Kota <strong>ders birimi</strong> cinsindendir; yalnızca <strong>tamamlanan</strong> (Ders yapıldı) derslerin süresine
                   göre düşer (örn. 1–45 dk → 1 birim). Boş = sınırsız. Tablolar:{' '}

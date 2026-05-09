@@ -2,8 +2,9 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { authorizeVercelOrCronSecret } from '../api/_lib/cron-auth.js';
 import { getIstanbulDateString, addCalendarDaysYmd } from '../api/_lib/istanbul-time.js';
 import { wallTimeToUtcMs } from '../api/_lib/teacher-lesson-start-ms.js';
-import { renderMessageTemplate } from '../api/_lib/template-engine.js';
-import { sendWhatsAppMessage, normalizePhoneToE164 } from '../api/_lib/whatsapp-twilio.js';
+import { normalizePhoneToE164 } from '../api/_lib/phone-whatsapp.js';
+import { metaWhatsAppConfigured } from '../api/_lib/meta-whatsapp.js';
+import { sendAutomatedWhatsApp } from '../api/_lib/whatsapp-outbound.js';
 import { getStudentPhones, classifyLessonReminderRecipients } from '../api/_lib/meetings-resolve.js';
 import { alreadySentLessonReminder } from '../api/_lib/message-log.js';
 
@@ -17,10 +18,7 @@ export default async function handler(req, res) {
   const auth = authorizeVercelOrCronSecret(req);
   if (!auth.ok) return res.status(401).json({ error: 'Unauthorized cron' });
 
-  const twilioReady =
-    Boolean(process.env.TWILIO_ACCOUNT_SID) &&
-    Boolean(process.env.TWILIO_AUTH_TOKEN) &&
-    Boolean(process.env.TWILIO_WHATSAPP_FROM);
+  const metaReady = metaWhatsAppConfigured();
 
   const log = [];
   const nowMs = Date.now();
@@ -28,18 +26,15 @@ export default async function handler(req, res) {
   const tomorrow = addCalendarDaysYmd(today, 1);
 
   try {
-    const { data: templates, error: tErr } = await supabaseAdmin
-      .from('message_templates')
-      .select('type, content')
-      .in('type', ['lesson_reminder', 'lesson_reminder_parent']);
-    if (tErr) throw tErr;
-    const byType = Object.fromEntries((templates || []).map((r) => [r.type, r.content]));
-    if (!byType.lesson_reminder) {
+    const { data: lrRow } = await supabaseAdmin.from('message_templates').select('type').eq('type', 'lesson_reminder').maybeSingle();
+    if (!lrRow) {
       return res.status(200).json({ ok: true, skipped: 'no_lesson_reminder_template', log });
     }
-    if (!byType.lesson_reminder_parent) {
-      byType.lesson_reminder_parent = byType.lesson_reminder;
-    }
+    const { data: lrParentRow } = await supabaseAdmin
+      .from('message_templates')
+      .select('type')
+      .eq('type', 'lesson_reminder_parent')
+      .maybeSingle();
 
     const { data: lessons, error: lErr } = await supabaseAdmin
       .from('teacher_lessons')
@@ -112,33 +107,44 @@ export default async function handler(req, res) {
           /* devam */
         }
 
-        if (!twilioReady) {
-          log.push({ lesson_id: lesson.id, note: 'missing_twilio_env' });
+        if (!metaReady) {
+          log.push({ lesson_id: lesson.id, note: 'missing_meta_whatsapp_env' });
           break;
         }
 
-        const tmpl =
-          role === 'parent' ? byType.lesson_reminder_parent || byType.lesson_reminder : byType.lesson_reminder;
-        const body = renderMessageTemplate(tmpl, baseVars);
+        const templateType =
+          role === 'parent' && lrParentRow?.type ? 'lesson_reminder_parent' : 'lesson_reminder';
 
         try {
-          await sendWhatsAppMessage(e164, body);
+          const sent = await sendAutomatedWhatsApp({
+            phone: e164,
+            templateType,
+            vars: baseVars
+          });
+          const preview = sent.bodyPreview || '';
           const { error: insErr } = await supabaseAdmin.from('message_logs').insert({
             student_id: lesson.student_id,
             kind: 'lesson_reminder',
             related_id: lesson.id,
-            message: body,
-            status: 'sent',
+            message: preview,
+            status: sent.ok ? 'sent' : 'failed',
             log_date: today,
-            error: null,
-            phone: e164
+            error: sent.ok ? null : sent.error || null,
+            phone: e164,
+            twilio_sid: null,
+            twilio_error_code: sent.errorCode || null,
+            twilio_content_sid: null,
+            meta_message_id: sent.sid || null,
+            meta_template_name: sent.meta_template_name || null
           });
           if (insErr?.code === '23505') {
             log.push({ lesson_id: lesson.id, phone: e164, note: 'duplicate_race' });
           } else if (insErr) {
             log.push({ lesson_id: lesson.id, phone: e164, error: insErr.message });
-          } else {
+          } else if (sent.ok) {
             log.push({ lesson_id: lesson.id, phone: e164, ok: true });
+          } else {
+            log.push({ lesson_id: lesson.id, phone: e164, error: sent.error, twilio_error_code: sent.errorCode });
           }
         } catch (e) {
           const errMsg = e instanceof Error ? e.message : String(e);
@@ -147,11 +153,16 @@ export default async function handler(req, res) {
               student_id: lesson.student_id,
               kind: 'lesson_reminder',
               related_id: lesson.id,
-              message: body,
+              message: '',
               status: 'failed',
               log_date: today,
               error: errMsg,
-              phone: e164
+              phone: e164,
+              twilio_sid: null,
+              twilio_error_code: null,
+              twilio_content_sid: null,
+              meta_message_id: null,
+              meta_template_name: null
             });
           } catch {
             /* log insert başarısız */

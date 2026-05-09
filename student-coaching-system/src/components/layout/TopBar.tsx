@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { userRoleTags } from '../../config/rolePermissions';
 import { useApp } from '../../context/AppContext';
 import { Menu, Bell, User, ChevronDown, LogOut, Undo2 } from 'lucide-react';
 
@@ -31,6 +32,7 @@ export default function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
       '/coach-whatsapp-settings': 'WhatsApp merkezi',
       '/settings': 'Ayarlar',
       '/student-dashboard': 'Öğrenci Paneli',
+      '/class-schedule': 'Canlı derslerim',
       '/teacher-dashboard': 'Öğretmen Paneli',
       '/user-management': 'Kullanıcı Yönetimi',
       '/login': 'Giriş'
@@ -73,7 +75,7 @@ export default function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
       <div className="flex items-center gap-4">
         {isImpersonating && user && effectiveUser && (
           <div className="hidden md:flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
-            <span>{`[${effectiveUser.role}] olarak görüntüleniyor`}</span>
+            <span>{`[${userRoleTags(effectiveUser).map((r) => roleLabels[r] ?? r).join(', ')}] olarak görüntüleniyor`}</span>
             <button
               onClick={stopImpersonation}
               className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 font-medium hover:bg-amber-200"
@@ -102,7 +104,9 @@ export default function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
               </div>
               <div className="hidden md:block text-left">
                 <p className="text-sm font-medium text-slate-700">{effectiveUser?.name || user.name}</p>
-                <p className="text-xs text-gray-500">{roleLabels[effectiveUser?.role || user.role]}</p>
+                <p className="text-xs text-gray-500">
+                  {userRoleTags(effectiveUser ?? { role: user.role }).map((r) => roleLabels[r] ?? r).join(' · ')}
+                </p>
               </div>
               <ChevronDown className="w-4 h-4 text-gray-400" />
             </button>

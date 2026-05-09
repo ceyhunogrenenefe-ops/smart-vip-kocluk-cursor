@@ -15,23 +15,25 @@ import type { UserRole } from '../types';
 export const ROUTE_ALLOWED_ROLES = {
   '/dashboard': ['super_admin', 'admin', 'teacher'],
   '/students': ['super_admin', 'admin', 'coach', 'teacher'],
+  '/teachers': ['super_admin', 'admin', 'coach'],
   '/coaches': ['super_admin', 'admin'],
   '/topics': ['super_admin', 'admin'],
-  '/topic-tracking': ['super_admin', 'admin', 'coach'],
-  '/exam-tracking': ['super_admin', 'admin', 'coach'],
-  '/book-tracking': ['super_admin', 'admin', 'coach'],
-  '/written-exam': ['super_admin', 'admin', 'coach'],
-  '/pdf-import': ['super_admin', 'admin', 'coach'],
-  '/analytics': ['super_admin', 'admin', 'coach'],
-  '/ai-coach': ['super_admin', 'admin', 'coach'],
-  '/reports': ['super_admin', 'admin'],
-  '/whatsapp': ['super_admin', 'admin'],
-  '/message-templates': ['super_admin', 'admin'],
+  '/topic-tracking': ['admin', 'coach'],
+  '/exam-tracking': ['admin', 'coach'],
+  '/book-tracking': ['admin', 'coach'],
+  '/written-exam': ['admin', 'coach'],
+  '/pdf-import': ['admin', 'coach'],
+  '/analytics': ['admin', 'coach'],
+  '/ai-coach': ['admin', 'coach'],
+  '/reports': ['admin'],
+  '/whatsapp': ['admin'],
+  '/message-templates': ['admin', 'super_admin'],
   '/webhooks': ['super_admin', 'admin', 'coach'],
-  '/settings': ['super_admin', 'admin', 'teacher'],
-  '/tracking': ['super_admin', 'admin', 'coach'],
+  '/settings': ['admin', 'teacher'],
+  '/tracking': ['admin', 'coach'],
   '/super-admin': ['super_admin', 'admin'],
   '/user-management': ['super_admin', 'admin', 'teacher'],
+  '/subscription': ['super_admin', 'admin'],
   '/system-management': ['super_admin', 'admin'],
   '/student-dashboard': ['student'],
   '/student-reports': ['student'],
@@ -41,11 +43,33 @@ export const ROUTE_ALLOWED_ROLES = {
   '/coach-reports': ['coach'],
   '/coach-whatsapp-settings': ['coach', 'teacher'],
   '/meetings': ['super_admin', 'admin', 'coach'],
-  '/live-lessons': ['super_admin', 'admin', 'teacher', 'coach']
+  '/live-lessons': ['super_admin', 'admin', 'teacher', 'coach'],
+  '/teacher-panel': ['teacher'],
+  '/class-live-lessons': ['super_admin', 'admin', 'coach', 'teacher'],
+  '/class-schedule': ['student']
 } as const satisfies Record<string, readonly UserRole[]>;
 
 export type ProtectedAppPath = keyof typeof ROUTE_ALLOWED_ROLES;
 
 export function rolesForProtectedRoute(path: ProtectedAppPath): UserRole[] {
   return [...ROUTE_ALLOWED_ROLES[path]];
+}
+
+/** JWT / kullanıcı satırı `roles[]` ile birincil `role` tekilleştirilir */
+export type UserWithRoleTags = { role: UserRole; roles?: UserRole[] };
+
+export function userRoleTags(user: UserWithRoleTags | null | undefined): UserRole[] {
+  if (!user) return [];
+  const from = Array.isArray(user.roles) && user.roles.length ? user.roles : [];
+  const set = new Set<UserRole>([...from, user.role]);
+  return [...set];
+}
+
+export function userHasAnyRole(
+  user: UserWithRoleTags | null | undefined,
+  allowed: readonly UserRole[]
+): boolean {
+  if (!allowed.length) return true;
+  const tags = userRoleTags(user);
+  return tags.some((t) => (allowed as readonly UserRole[]).includes(t));
 }

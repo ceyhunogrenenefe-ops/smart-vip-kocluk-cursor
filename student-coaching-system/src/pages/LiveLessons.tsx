@@ -29,6 +29,13 @@ type StaffUser = {
   role: string;
 };
 
+const todayIso = () => new Date().toISOString().slice(0, 10);
+const monthStartIso = () => {
+  const d = new Date();
+  d.setDate(1);
+  return d.toISOString().slice(0, 10);
+};
+
 export default function LiveLessons() {
   const { effectiveUser } = useAuth();
   const { students } = useApp();
@@ -48,6 +55,8 @@ export default function LiveLessons() {
   const [filterPlatform, setFilterPlatform] = useState<string>('');
   const [summaryRows, setSummaryRows] = useState<TeacherStudentLessonSummaryRow[]>([]);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryFrom, setSummaryFrom] = useState(monthStartIso());
+  const [summaryTo, setSummaryTo] = useState(todayIso());
 
   const [formOpen, setFormOpen] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
@@ -147,6 +156,8 @@ export default function LiveLessons() {
       const qs = new URLSearchParams({ op: 'summary' });
       if (filterTeacherId.trim()) qs.set('teacher_id', filterTeacherId.trim());
       if (filterStudentId.trim()) qs.set('student_id', filterStudentId.trim());
+      if (summaryFrom.trim()) qs.set('from', summaryFrom.trim());
+      if (summaryTo.trim()) qs.set('to', summaryTo.trim());
       const res = await apiFetch(`/api/teacher-lessons?${qs.toString()}`);
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -159,7 +170,7 @@ export default function LiveLessons() {
     } finally {
       setSummaryLoading(false);
     }
-  }, [showAdminFilters, filterTeacherId, filterStudentId]);
+  }, [showAdminFilters, filterTeacherId, filterStudentId, summaryFrom, summaryTo]);
 
   useEffect(() => {
     void loadLessons();
@@ -457,7 +468,7 @@ export default function LiveLessons() {
               <Radio className="w-7 h-7" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold">Canlı ders entegrasyonu</h1>
+              <h1 className="text-2xl font-bold">Canlı özel ders entegrasyonu</h1>
               <p className="text-indigo-100 text-sm mt-0.5">
                 Zoom, Google Meet ve BigBlueButton bağlantılarıyla özel ders planlayın
               </p>
@@ -469,7 +480,7 @@ export default function LiveLessons() {
             className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white text-indigo-700 font-semibold hover:bg-indigo-50"
           >
             <Plus className="w-5 h-5" />
-            Yeni ders
+            Yeni canlı özel ders
           </button>
         </div>
       </div>
@@ -517,6 +528,24 @@ export default function LiveLessons() {
             </select>
           </label>
           <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-500">Özet başlangıç</span>
+            <input
+              type="date"
+              value={summaryFrom}
+              onChange={(e) => setSummaryFrom(e.target.value)}
+              className="border border-slate-200 rounded-lg px-3 py-2"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-500">Özet bitiş</span>
+            <input
+              type="date"
+              value={summaryTo}
+              onChange={(e) => setSummaryTo(e.target.value)}
+              className="border border-slate-200 rounded-lg px-3 py-2"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
             <span className="text-slate-500">Platform</span>
             <select
               value={filterPlatform}
@@ -550,7 +579,7 @@ export default function LiveLessons() {
             <div>
               <h2 className="text-sm font-semibold text-slate-800">Ders saati özeti (tamamlanan)</h2>
               <p className="text-xs text-slate-500">
-                Yukarıdaki öğretmen ve öğrenci filtrelerine göre, her öğretmen–öğrenci çifti için kayıtlı{' '}
+                Yukarıdaki tarih, öğretmen ve öğrenci filtrelerine göre, her öğretmen–öğrenci çifti için kayıtlı{' '}
                 <strong>tamamlanan</strong> derslerin toplam süresi. Faturalama ve kontrol için kullanın.
               </p>
             </div>
@@ -600,7 +629,7 @@ export default function LiveLessons() {
           onSubmit={handleCreate}
           className="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm"
         >
-          <h2 className="text-lg font-semibold text-slate-800">Yeni canlı ders</h2>
+          <h2 className="text-lg font-semibold text-slate-800">Yeni canlı özel ders</h2>
           {showTeacherPicker && (
             <label className="block text-sm">
               <span className="text-slate-600">Öğretmen (platform kullanıcısı)</span>
@@ -754,35 +783,51 @@ export default function LiveLessons() {
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex items-center gap-2 font-medium text-slate-800 mb-3">
           <CalendarIcon className="w-5 h-5 text-indigo-600" />
-          Bu haftanın dersleri
+          Haftalık canlı özel ders takvimi
         </div>
         <p className="text-xs text-slate-500 mb-3">
-          Koç/öğretmen yalnız kendi derslerini ve atanmış öğrenci derslerini görür. Liste aşağıda tekrarlar özetlenir.
+          Pazartesi-Pazar ve 10:00-00:00 aralığında grid görünümü. Koç/öğretmen yalnız kendi canlı özel derslerini görür.
         </p>
-        <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 lg:grid-cols-7">
-          {weeklyLessonBuckets.map((slot) => (
-            <div
-              key={slot.key}
-              className="min-h-[100px] rounded-lg border border-slate-100 bg-slate-50/80 p-2"
-            >
-              <div className="text-xs font-semibold text-slate-600 mb-1">{slot.label}</div>
-              <div className="space-y-1">
-                {slot.items.map((lesson) => (
-                  <div
-                    key={lesson.id}
-                    className="text-[10px] bg-white rounded border border-slate-100 px-1 py-0.5 leading-tight"
-                  >
-                    <div className="font-medium text-slate-800 truncate">
-                      {lesson.start_time?.slice(0, 5)} {studentName(lesson.student_id)}
-                    </div>
-                    {lesson.title ? (
-                      <div className="text-slate-500 truncate">{lesson.title}</div>
-                    ) : null}
-                  </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[900px] text-xs border border-slate-100 rounded-lg overflow-hidden">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="px-2 py-2 text-left text-slate-500 font-medium w-20">Saat</th>
+                {weeklyLessonBuckets.map((slot) => (
+                  <th key={slot.key} className="px-2 py-2 text-left text-slate-600 font-medium">
+                    {slot.label}
+                  </th>
                 ))}
-              </div>
-            </div>
-          ))}
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: 15 }, (_, i) => 10 + i).map((hour) => {
+                const label = `${String(hour).padStart(2, '0')}:00`;
+                return (
+                  <tr key={hour} className="border-t border-slate-100">
+                    <td className="px-2 py-2 text-slate-500 bg-slate-50/50">{label}</td>
+                    {weeklyLessonBuckets.map((slot) => {
+                      const hourItems = slot.items.filter((x) => Number(String(x.start_time || '00:00').slice(0, 2)) === hour);
+                      return (
+                        <td key={`${slot.key}-${hour}`} className="px-2 py-2 align-top min-h-[52px]">
+                          <div className="space-y-1">
+                            {hourItems.map((lesson) => (
+                              <div key={lesson.id} className="rounded border border-indigo-100 bg-indigo-50 px-2 py-1">
+                                <div className="font-medium text-indigo-800">
+                                  {lesson.start_time?.slice(0, 5)} {studentName(lesson.student_id)}
+                                </div>
+                                <div className="text-slate-600 truncate">{lesson.title}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -897,7 +942,7 @@ export default function LiveLessons() {
           Tekrarlayan seriler tek satırda toplanır; ayrıntı için açın. Takvim yukarıda haftalıktır.
         </p>
         {lessons.length === 0 && !loading && (
-          <p className="text-slate-500 text-sm">Henüz planlanmış canlı ders yok.</p>
+          <p className="text-slate-500 text-sm">Henüz planlanmış canlı özel ders yok.</p>
         )}
         <div className="space-y-3">
           {lessonListGroups.groups.map((g) => (

@@ -1,5 +1,9 @@
 import { supabaseAdmin } from './supabase-admin.js';
-import { sendMeetingWhatsApp } from './whatsapp-twilio.js';
+import {
+  metaWhatsAppConfigured,
+  sendMetaTemplateMessage,
+  parseMetaSendError
+} from './meta-whatsapp.js';
 import { getStudentPhones } from './meetings-resolve.js';
 import {
   getIstanbulDateString,
@@ -11,12 +15,8 @@ import { renderCoachScheduleTemplate } from './coach-whatsapp-schedule-render.js
 
 const KIND = 'coach_auto_template';
 
-function twilioReady() {
-  return Boolean(
-    process.env.TWILIO_ACCOUNT_SID?.trim() &&
-      process.env.TWILIO_AUTH_TOKEN?.trim() &&
-      process.env.TWILIO_WHATSAPP_FROM?.trim()
-  );
+function coachAutomationTemplateConfigured() {
+  return Boolean(process.env.META_COACH_AUTOMATION_TEMPLATE_NAME?.trim());
 }
 
 function istanbulDayDelta(fromIsoDate, toIsoDate) {
@@ -108,9 +108,20 @@ export async function runCoachWhatsappAutoCron(opts = {}) {
     opts.istanbulMinute != null ? opts.istanbulMinute : getIstanbulMinute();
   const todayTr = opts.todayTr ?? getIstanbulDateString();
 
-  if (!twilioReady()) {
-    return { ok: false, skipped: true, reason: 'missing_twilio_env' };
+  if (!metaWhatsAppConfigured()) {
+    return { ok: false, skipped: true, reason: 'missing_meta_whatsapp_env' };
   }
+  if (!coachAutomationTemplateConfigured()) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: 'missing_META_COACH_AUTOMATION_TEMPLATE_NAME',
+      hint: 'Koç otomasyonu için Meta’da tek gövde değişkenli şablon oluşturun ve META_COACH_AUTOMATION_TEMPLATE_NAME (+ isteğe META_COACH_AUTOMATION_TEMPLATE_LANGUAGE) ortam değişkenini ayarlayın.'
+    };
+  }
+
+  const coachTpl = String(process.env.META_COACH_AUTOMATION_TEMPLATE_NAME || '').trim();
+  const coachLang = String(process.env.META_COACH_AUTOMATION_TEMPLATE_LANGUAGE || 'tr').trim() || 'tr';
 
   const { data: schedules, error: schErr } = await supabaseAdmin
     .from('coach_whatsapp_schedules')
@@ -185,7 +196,19 @@ export async function runCoachWhatsappAutoCron(opts = {}) {
           date: todayTr
         }).trim();
 
-        const { sid } = await sendMeetingWhatsApp(phones[0], body);
+        let sid = null;
+        try {
+          const r = await sendMetaTemplateMessage({
+            toE164: phones[0],
+            templateName: coachTpl,
+            languageCode: coachLang,
+            bodyParameterTexts: [body]
+          });
+          sid = r.messageId || null;
+        } catch (err) {
+          const parsed = parseMetaSendError(err);
+          throw new Error(parsed.message || String(err));
+        }
 
         await persistSuccessLog({
           scheduleId: schedule.id,

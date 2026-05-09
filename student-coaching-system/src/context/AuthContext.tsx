@@ -14,6 +14,8 @@ export interface SystemUser {
   email: string;
   phone?: string;
   role: 'super_admin' | 'admin' | 'coach' | 'teacher' | 'student';
+  /** Sunucuda `users.roles`; arayüzde çoklu yetki için (ör. öğretmen + koç) */
+  roles?: ('super_admin' | 'admin' | 'coach' | 'teacher' | 'student')[];
   studentId?: string;
   coachId?: string;
   institutionId?: string;
@@ -92,8 +94,9 @@ const getTrialUsersFromStorage = (): TrialUser[] => {
 
 /** Deneme (trial) hesapları yalnızca koç paneline erişir — rolü koça sabitler */
 export function applyTrialAccountCoachOnly(u: SystemUser): SystemUser {
-  const isTrial = u.id?.startsWith('trial-') || u.package === 'trial';
+  const isTrial = u.id?.startsWith('trial-');
   if (!isTrial) return u;
+  if (u.role === 'admin' || u.role === 'super_admin' || u.role === 'teacher') return u;
   if (u.role === 'student') return { ...u, package: u.package || 'trial' };
   return { ...u, role: 'coach', package: u.package || 'trial' };
 }

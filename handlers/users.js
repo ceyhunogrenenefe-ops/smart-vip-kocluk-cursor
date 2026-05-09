@@ -1,9 +1,18 @@
 import { requireAuth, hasInstitutionAccess } from '../api/_lib/auth.js';
+import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
+import { getTeacherGroupClassStudentScope } from '../api/_lib/teacher-class-scope.js';
+import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import { normalizeUuidOrGenerate } from '../api/_lib/uuid.js';
 
 const USER_ROLES = ['super_admin', 'admin', 'coach', 'teacher', 'student'];
+const normalizeRoles = (raw, fallbackRole = 'student') => {
+  const arr = Array.isArray(raw) ? raw : [];
+  const cleaned = arr.map((x) => String(x || '').trim()).filter((x) => USER_ROLES.includes(x));
+  if (!cleaned.length) return [fallbackRole];
+  return [...new Set(cleaned)];
+};
 
 async function coachAssignedStudentEmails(coachId) {
   if (!coachId) return [];
@@ -14,24 +23,39 @@ async function coachAssignedStudentEmails(coachId) {
     .filter(Boolean);
 }
 
-const actorCanSeeUserRowSync = (actor, row) => {
-  if (!row) return false;
-  if (actor.role === 'super_admin') return true;
-  if (actor.role === 'admin')
-    return hasInstitutionAccess(actor, row.institution_id) && row.role !== 'super_admin';
-  if (actor.role === 'teacher')
-    return row.role === 'student' && hasInstitutionAccess(actor, row.institution_id);
-  return false;
-};
+async function teacherScopeStudentEmails(teacherSub) {
+  const { ids } = await getTeacherGroupClassStudentScope(teacherSub);
+  if (!ids.length) return new Set();
+  const { data, error } = await supabaseAdmin.from('students').select('email').in('id', ids);
+  if (error) throw error;
+  return new Set((data || []).map((r) => String(r.email || '').toLowerCase().trim()).filter(Boolean));
+}
 
 async function actorCanSeeUserRow(actor, row) {
-  const base = actorCanSeeUserRowSync(actor, row);
-  if (base) return true;
+  if (!row) return false;
+  if (actor.role === 'super_admin') return true;
+  const rowEmail = String(row.email || '').toLowerCase().trim();
+
+  if (actor.role === 'admin')
+    return hasInstitutionAccess(actor, row.institution_id) && row.role !== 'super_admin';
+
+  if (actor.role === 'teacher') {
+    if (row.role !== 'student' || !hasInstitutionAccess(actor, row.institution_id)) return false;
+    const tel = await teacherScopeStudentEmails(actor.sub);
+    return tel.has(rowEmail);
+  }
+
   if (actor.role === 'coach' && row?.role === 'student' && actor.coach_id && row.institution_id) {
     const okInst = actor.institution_id && row.institution_id === actor.institution_id;
     if (!okInst) return false;
-    const emails = await coachAssignedStudentEmails(actor.coach_id);
-    return emails.includes(String(row.email || '').toLowerCase().trim());
+    const assignedEmails = await coachAssignedStudentEmails(actor.coach_id);
+    if (assignedEmails.includes(rowEmail)) return true;
+    const dbRoles = await normalizedUserRolesFromDb(actor.sub);
+    if (dbRoles.includes('teacher')) {
+      const tel = await teacherScopeStudentEmails(actor.sub);
+      return tel.has(rowEmail);
+    }
+    return false;
   }
   return false;
 }
@@ -69,7 +93,8 @@ async function resolveCreatedByFk(actor) {
 
 export default async function handler(req, res) {
   try {
-    const actor = requireAuth(req);
+    let actor = requireAuth(req);
+    actor = await enrichStudentActor(actor);
 
     if (req.method === 'GET') {
       if (!(actor.role === 'super_admin' || actor.role === 'admin' || actor.role === 'teacher' || actor.role === 'coach')) {
@@ -77,12 +102,15 @@ export default async function handler(req, res) {
       }
       const email = req.query.email ? String(req.query.email).toLowerCase().trim() : null;
 
-      // Koç: çok öğrencide .in('email', yüzlerce adres) PostgREST URL sınırına takılıp 500 üretir —
-      // kurum içi öğrenci kullanıcılarını çekip atanmış e-postaya göre JS'de süzülür.
       if (actor.role === 'coach') {
         if (!actor.coach_id || !actor.institution_id) return res.status(200).json({ data: [] });
         const assignedEmails = await coachAssignedStudentEmails(actor.coach_id);
         const emailSet = new Set(assignedEmails);
+        const dbRoles = await normalizedUserRolesFromDb(actor.sub);
+        if (dbRoles.includes('teacher')) {
+          const tel = await teacherScopeStudentEmails(actor.sub);
+          tel.forEach((e) => emailSet.add(e));
+        }
         if (email && !emailSet.has(email)) return res.status(200).json({ data: [] });
 
         let q = supabaseAdmin
@@ -97,7 +125,26 @@ export default async function handler(req, res) {
         const rows = coachUsers || [];
         const filtered = email
           ? rows
-          : rows.filter((u) => emailSet.has(String(u.email || '').toLowerCase().trim()));
+          : rows.filter((u) =>
+              emailSet.has(String(u.email || '').toLowerCase().trim()));
+        return res.status(200).json({ data: filtered });
+      }
+
+      if (actor.role === 'teacher') {
+        if (!actor.institution_id) return res.status(200).json({ data: [] });
+        const tel = await teacherScopeStudentEmails(actor.sub);
+        if (email && !tel.has(email)) return res.status(200).json({ data: [] });
+        let q = supabaseAdmin
+          .from('users')
+          .select('*')
+          .eq('institution_id', actor.institution_id)
+          .eq('role', 'student')
+          .order('created_at', { ascending: false });
+        if (email) q = q.eq('email', email);
+        const { data, error } = await q;
+        if (error) throw error;
+        const filtered = (data || []).filter((u) =>
+          tel.has(String(u.email || '').toLowerCase().trim()));
         return res.status(200).json({ data: filtered });
       }
 
@@ -105,10 +152,6 @@ export default async function handler(req, res) {
       if (actor.role === 'admin') {
         if (!actor.institution_id) return res.status(200).json({ data: [] });
         query = query.eq('institution_id', actor.institution_id);
-      }
-      if (actor.role === 'teacher') {
-        if (!actor.institution_id) return res.status(200).json({ data: [] });
-        query = query.eq('institution_id', actor.institution_id).eq('role', 'student');
       }
       if (email) query = query.eq('email', email);
       const { data, error } = await query;
@@ -127,10 +170,13 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: 'forbidden' });
       }
 
-      const newRole = String(body.role || '');
-      if (!actorMayAssignRole(actor, newRole)) {
-        return res.status(403).json({ error: 'role_forbidden' });
+      const requestedRoles = normalizeRoles(body.roles, String(body.role || 'student'));
+      for (const r of requestedRoles) {
+        if (!actorMayAssignRole(actor, r)) {
+          return res.status(403).json({ error: 'role_forbidden' });
+        }
       }
+      const newRole = requestedRoles[0];
 
       let institutionId = normalizeInstitutionId(
         actor.role === 'teacher' || actor.role === 'coach'
@@ -211,6 +257,7 @@ export default async function handler(req, res) {
         name: rest.name,
         phone: rest.phone ?? null,
         role: newRole,
+        roles: requestedRoles,
         password_hash: passwordPlain,
         institution_id: institutionId,
         is_active: rest.is_active !== false,
@@ -267,10 +314,16 @@ export default async function handler(req, res) {
       ) {
         return res.status(403).json({ error: 'role_forbidden' });
       }
+      if (raw.roles !== undefined) {
+        const normalized = normalizeRoles(raw.roles, String(existing.role || 'student'));
+        if (!normalized.every((r) => actorMayAssignRole(actor, r))) {
+          return res.status(403).json({ error: 'role_forbidden' });
+        }
+      }
 
       const teacherAllowed = ['name', 'phone', 'email', 'password_hash', 'is_active', 'package', 'start_date', 'end_date'];
       const coachStudentAllowed = ['name', 'phone', 'email', 'password_hash', 'is_active', 'package', 'start_date', 'end_date'];
-      const adminPlus = [...teacherAllowed, 'role', 'institution_id'];
+      const adminPlus = [...teacherAllowed, 'role', 'roles', 'institution_id'];
       const keys =
         actor.role === 'teacher'
           ? teacherAllowed
@@ -280,6 +333,10 @@ export default async function handler(req, res) {
       const body = {};
       for (const k of keys) {
         if (Object.prototype.hasOwnProperty.call(raw, k)) body[k] = raw[k];
+      }
+      if (Object.prototype.hasOwnProperty.call(raw, 'roles')) {
+        body.roles = normalizeRoles(raw.roles, String(raw.role || existing.role || 'student'));
+        body.role = body.roles[0];
       }
 
       if (actor.role === 'admin' && body.institution_id !== undefined) {
@@ -299,8 +356,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'DELETE') {
-      if (actor.role === 'teacher') return res.status(403).json({ error: 'forbidden' });
-      if (!(actor.role === 'super_admin' || actor.role === 'admin')) {
+      if (!(actor.role === 'super_admin' || actor.role === 'admin' || actor.role === 'teacher')) {
         return res.status(403).json({ error: 'forbidden' });
       }
 
@@ -309,6 +365,9 @@ export default async function handler(req, res) {
 
       const { data: existing } = await supabaseAdmin.from('users').select('*').eq('id', id).maybeSingle();
       if (!existing || !(await actorCanSeeUserRow(actor, existing))) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      if (actor.role === 'teacher' && String(existing.role || '') !== 'student') {
         return res.status(403).json({ error: 'forbidden' });
       }
 

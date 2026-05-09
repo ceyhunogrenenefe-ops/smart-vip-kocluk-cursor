@@ -4,21 +4,77 @@ import { getSupabaseAdmin, supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { normalizeUuidOrGenerate } from '../api/_lib/uuid.js';
 import { rebuildCoachStudentIdsFromFk } from '../api/_lib/sync-coach-students.js';
 import { enforceStudentInsertQuotas, enforceCoachStudentQuota, QuotaError } from '../api/_lib/quota-enforce.js';
+import { getTeacherGroupClassStudentScope } from '../api/_lib/teacher-class-scope.js';
+import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 
-const assertStudentVisibility = (actor, student) => {
-  if (actor.role === 'super_admin') return true;
-  if (actor.role === 'admin') return hasInstitutionAccess(actor, student.institution_id);
-  if (actor.role === 'teacher') return hasInstitutionAccess(actor, student.institution_id);
-  if (actor.role === 'coach') return Boolean(actor.coach_id && student.coach_id === actor.coach_id);
-  if (actor.role === 'student') {
+const normActorRole = (r) => String(r || '').trim().toLowerCase();
+
+async function actorRoleSet(actor) {
+  const rs = await normalizedUserRolesFromDb(actor.sub);
+  const set = new Set(rs.map(normActorRole));
+  if (!set.size) set.add(normActorRole(actor.role));
+  return set;
+}
+
+/** Öğretmen + koç aynı hesapta: birleşik görünürlük */
+async function assertStudentVisibilityResolved(actor, student) {
+  const rs = await actorRoleSet(actor);
+
+  if (rs.has('super_admin')) return true;
+  if (rs.has('admin') && hasInstitutionAccess(actor, student.institution_id)) return true;
+
+  if (rs.has('student')) {
     if (actor.student_id && student.id === actor.student_id) return true;
     if (actor.sub && student.platform_user_id && String(student.platform_user_id) === String(actor.sub))
       return true;
     if (actor.sub && student.user_id && String(student.user_id) === String(actor.sub)) return true;
-    return false;
   }
-  return false;
-};
+
+  let ok = false;
+  const instOk = actor.institution_id ? String(student.institution_id || '') === String(actor.institution_id) : true;
+
+  if (rs.has('teacher') && instOk && actor.institution_id) {
+    const { ids } = await getTeacherGroupClassStudentScope(actor.sub);
+    if (ids.includes(String(student.id || '').trim())) ok = true;
+  }
+
+  if (rs.has('coach') && actor.coach_id && String(student.coach_id || '') === String(actor.coach_id)) ok = true;
+
+  return ok;
+}
+
+async function listStudentsMergedCoachTeacher(actor, roleSet) {
+  const rowsMap = new Map();
+  const inst = actor.institution_id || null;
+
+  if (roleSet.has('teacher') && inst) {
+    const { ids } = await getTeacherGroupClassStudentScope(actor.sub);
+    if (ids.length) {
+      const { data, error } = await supabaseAdmin
+        .from('students')
+        .select('*')
+        .in('id', ids)
+        .eq('institution_id', inst)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      (data || []).forEach((row) => rowsMap.set(row.id, row));
+    }
+  }
+
+  if (roleSet.has('coach') && actor.coach_id) {
+    const { data, error } = await supabaseAdmin
+      .from('students')
+      .select('*')
+      .eq('coach_id', actor.coach_id)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    (data || []).forEach((row) => rowsMap.set(row.id, row));
+  }
+
+  return [...rowsMap.values()].sort(
+    (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+  );
+}
 
 export default async function handler(req, res) {
   try {
@@ -26,13 +82,29 @@ export default async function handler(req, res) {
     actor = await enrichStudentActor(actor);
 
     if (req.method === 'GET') {
-      let query = supabaseAdmin.from('students').select('*').order('created_at', { ascending: false });
-      if (actor.role === 'admin' || actor.role === 'teacher') query = query.eq('institution_id', actor.institution_id);
-      if (actor.role === 'coach') {
-        if (!actor.coach_id) return res.status(200).json({ data: [] });
-        query = query.eq('coach_id', actor.coach_id);
+      const rs = await actorRoleSet(actor);
+
+      if (rs.has('super_admin')) {
+        const { data, error } = await supabaseAdmin
+          .from('students')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (error) throw error;
+        return res.status(200).json({ data: data || [] });
       }
-      if (actor.role === 'student') {
+
+      if (rs.has('admin')) {
+        if (!actor.institution_id) return res.status(403).json({ error: 'institution_missing' });
+        const { data, error } = await supabaseAdmin
+          .from('students')
+          .select('*')
+          .eq('institution_id', actor.institution_id)
+          .order('created_at', { ascending: false });
+        if (error) throw error;
+        return res.status(200).json({ data: data || [] });
+      }
+
+      if (rs.has('student')) {
         if (!actor.student_id) {
           const { data: linkOnly } = await supabaseAdmin
             .from('students')
@@ -42,11 +114,17 @@ export default async function handler(req, res) {
           if (linkOnly) return res.status(200).json({ data: [linkOnly] });
           return res.status(200).json({ data: [] });
         }
-        query = query.eq('id', actor.student_id);
+        const { data, error } = await supabaseAdmin.from('students').select('*').eq('id', actor.student_id);
+        if (error) throw error;
+        return res.status(200).json({ data: data || [] });
       }
-      const { data, error } = await query;
-      if (error) throw error;
-      return res.status(200).json({ data: data || [] });
+
+      if (rs.has('teacher') || rs.has('coach')) {
+        const merged = await listStudentsMergedCoachTeacher(actor, rs);
+        return res.status(200).json({ data: merged });
+      }
+
+      return res.status(200).json({ data: [] });
     }
 
     if (req.method === 'POST') {
@@ -100,6 +178,7 @@ export default async function handler(req, res) {
         name: body.name,
         email: body.email,
         phone: body.phone ?? null,
+        birth_date: body.birth_date ?? null,
         class_level: body.class_level,
         school: body.school ?? null,
         parent_name: body.parent_name ?? null,
@@ -156,7 +235,8 @@ export default async function handler(req, res) {
     if (req.method === 'PATCH') {
       const id = String(req.query.id || '');
       const { data: existing } = await supabaseAdmin.from('students').select('*').eq('id', id).single();
-      if (!existing || !assertStudentVisibility(actor, existing)) return res.status(403).json({ error: 'forbidden' });
+      if (!existing || !(await assertStudentVisibilityResolved(actor, existing)))
+        return res.status(403).json({ error: 'forbidden' });
 
       const body = req.body || {};
       const patchBody = { ...body };
@@ -206,7 +286,8 @@ export default async function handler(req, res) {
 
       const id = String(req.query.id || '');
       const { data: existing } = await supabaseAdmin.from('students').select('*').eq('id', id).single();
-      if (!existing || !assertStudentVisibility(actor, existing)) return res.status(403).json({ error: 'forbidden' });
+      if (!existing || !(await assertStudentVisibilityResolved(actor, existing)))
+        return res.status(403).json({ error: 'forbidden' });
       const prevCoachDel = existing.coach_id || null;
       const { error } = await supabaseAdmin.from('students').delete().eq('id', id);
       if (error) throw error;

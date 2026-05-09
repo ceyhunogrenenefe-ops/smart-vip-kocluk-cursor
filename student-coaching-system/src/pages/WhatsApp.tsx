@@ -1,69 +1,37 @@
 // Türkçe: WhatsApp Entegrasyonu - Haftalık Rapor Formatı ile Gelişmiş Raporlama
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import {
   MessageCircle,
+  Send,
   Phone,
   CheckCircle,
+  AlertTriangle,
   Copy,
   ExternalLink,
   Download,
   FileText,
   Users,
+  ChevronRight,
+  Loader2,
   Check,
   X,
+  Settings,
   BarChart3,
   BookOpen,
   FileCheck,
   Target,
   Calendar,
+  TrendingUp,
+  TrendingDown,
+  Minus,
   Book,
-  Brain,
-  QrCode,
-  Sparkles,
-  ListChecks
+  Brain
 } from 'lucide-react';
-import { formatClassLevelLabel } from '../types';
-import { analyzeWhatsAppPaste, fillTemplate } from '../utils/whatsappChatInsights';
-import {
-  saveDailySignal,
-  saveWhatsAppLog,
-  getStudentWhatsAppLogs,
-  buildBehaviorScores,
-  getStudentDailySignals
-} from '../lib/aiDataStore';
-
-const WA_PROFILE_STORAGE = 'coaching_whatsapp_wa_profile';
-
-type WaProfile = { coachPhone: string; qrDataUrl: string | null };
-
-const DAILY_MESSAGE_TEMPLATES: { id: string; label: string; body: string }[] = [
-  {
-    id: 'gunluk-gorev',
-    label: 'Günlük görev hatırlatması',
-    body:
-      'Merhaba 👋 {ad} ({sinif}) için bugünkü görev: {gorev}. Sorularınız için yazabilirsiniz. — {kurum}'
-  },
-  {
-    id: 'haftalik-ozet',
-    label: 'Haftalık mini özet',
-    body:
-      'Merhaba, {ad} ile ilgili bu hafta odak: {gorev}. Hafta sonu kısa bir değerlendirme yapalım. — {kurum}'
-  },
-  {
-    id: 'motivasyon',
-    label: 'Motivasyon / takip',
-    body: 'Merhaba {ad}, {gorev} konusunda takipteyiz. Bir adım daha 🎯 — {kurum}'
-  },
-  {
-    id: 'veli-bilgi',
-    label: 'Veli bilgilendirme',
-    body:
-      'Sayın veli, {ad} ({sinif}) için planlanan çalışma: {gorev}. Tarih: {tarih}. — {kurum}'
-  }
-];
 
 export default function WhatsApp() {
+  const { user } = useAuth();
   const {
     students,
     getStudentStats,
@@ -78,6 +46,7 @@ export default function WhatsApp() {
   } = useApp();
 
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
+  const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Seçilebilir modüller
@@ -94,55 +63,6 @@ export default function WhatsApp() {
   const [coachComment, setCoachComment] = useState('');
   const [monthlyComment, setMonthlyComment] = useState('');
 
-  const [coachPhoneDraft, setCoachPhoneDraft] = useState('');
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
-  const [chatPaste, setChatPaste] = useState('');
-  const [templateId, setTemplateId] = useState(DAILY_MESSAGE_TEMPLATES[0].id);
-  const [taskForTemplate, setTaskForTemplate] = useState('');
-  const [signalMode, setSignalMode] = useState<'student' | 'parent'>('student');
-  const [signalForm, setSignalForm] = useState({
-    questionsSolved: 0,
-    pagesRead: 0,
-    focusLevel: 60,
-    disciplineLevel: 60,
-    motivationLevel: 60,
-    engagementLevel: 60,
-    notes: ''
-  });
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(WA_PROFILE_STORAGE);
-      if (raw) {
-        const p = JSON.parse(raw) as WaProfile;
-        setCoachPhoneDraft(p.coachPhone || '');
-        setQrDataUrl(p.qrDataUrl || null);
-      }
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  const saveWaProfile = () => {
-    const p: WaProfile = { coachPhone: coachPhoneDraft.trim(), qrDataUrl };
-    localStorage.setItem(WA_PROFILE_STORAGE, JSON.stringify(p));
-    setSendResult({ success: true, message: 'WhatsApp bağlantı ayarları kaydedildi.' });
-    setTimeout(() => setSendResult(null), 3000);
-  };
-
-  const selectedTemplateBody =
-    DAILY_MESSAGE_TEMPLATES.find(t => t.id === templateId)?.body ?? '';
-
-  const onQrFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !file.type.startsWith('image/')) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') setQrDataUrl(reader.result);
-    };
-    reader.readAsDataURL(file);
-  };
-
   // Seçili modül değiştiğinde
   const toggleModule = (module: keyof typeof selectedModules) => {
     setSelectedModules(prev => ({ ...prev, [module]: !prev[module] }));
@@ -150,17 +70,6 @@ export default function WhatsApp() {
 
   // Seçili öğrenci
   const selectedStudent = students.find(s => s.id === selectedStudentId);
-  const messageLogs = selectedStudent
-    ? getStudentWhatsAppLogs(institution.id, selectedStudent.id).slice(0, 20)
-    : [];
-  const behaviorScores = selectedStudent
-    ? buildBehaviorScores(getStudentDailySignals(institution.id, selectedStudent.id).slice(0, 7))
-    : { motivationScore: 0, disciplineScore: 0, engagementScore: 0, dailyScore: 0 };
-
-  const chatInsight = useMemo(
-    () => analyzeWhatsAppPaste(chatPaste, selectedStudent?.name),
-    [chatPaste, selectedStudent?.name]
-  );
 
   // Öğrenci istatistikleri
   const stats = selectedStudentId ? getStudentStats(selectedStudentId) : null;
@@ -174,57 +83,6 @@ export default function WhatsApp() {
   // Telefon numarasını formatla
   const formatPhone = (phone: string) => {
     return phone.replace(/\D/g, '');
-  };
-
-  const buildDailyMessage = () => {
-    if (!selectedStudent) return '';
-    return fillTemplate(selectedTemplateBody, {
-      ad: selectedStudent.name,
-      sinif: formatClassLevelLabel(selectedStudent.classLevel),
-      gorev: taskForTemplate.trim() || '(görev belirtin)',
-      kurum: institution.name,
-      tarih: new Date().toLocaleDateString('tr-TR')
-    });
-  };
-
-  const openDailyTemplateWhatsApp = () => {
-    if (!selectedStudent) {
-      setSendResult({ success: false, message: 'Önce öğrenci seçin.' });
-      return;
-    }
-    const targetPhone = formatPhone(selectedStudent.parentPhone || selectedStudent.phone || '');
-    if (!targetPhone) {
-      setSendResult({
-        success: false,
-        message: 'Öğrenci veya veli telefonu yok. Öğrenci kartına numara ekleyin veya aşağıda koç hattınızı kaydedin.'
-      });
-      return;
-    }
-    const msg = encodeURIComponent(buildDailyMessage());
-    saveWhatsAppLog({
-      institutionId: institution.id,
-      studentId: selectedStudent.id,
-      direction: 'outgoing',
-      audience: selectedStudent.parentPhone ? 'parent' : 'student',
-      content: buildDailyMessage()
-    });
-    window.open(`https://wa.me/${targetPhone}?text=${msg}`, '_blank');
-  };
-
-  const saveSignal = () => {
-    if (!selectedStudent) {
-      setSendResult({ success: false, message: 'Önce öğrenci seçin.' });
-      return;
-    }
-    saveDailySignal({
-      institutionId: institution.id,
-      studentId: selectedStudent.id,
-      source: signalMode,
-      date: new Date().toISOString().split('T')[0],
-      ...signalForm
-    });
-    setSendResult({ success: true, message: 'Daily Signal kaydedildi.' });
-    setTimeout(() => setSendResult(null), 2500);
   };
 
   // Modül seçili mi kontrol et
@@ -361,13 +219,6 @@ export default function WhatsApp() {
   // WhatsApp ile gönder
   const sendViaWhatsApp = () => {
     if (!selectedStudent) return;
-    saveWhatsAppLog({
-      institutionId: institution.id,
-      studentId: selectedStudent.id,
-      direction: 'outgoing',
-      audience: selectedStudent.parentPhone ? 'parent' : 'student',
-      content: generateMessage()
-    });
     window.open(getWhatsAppLink(), '_blank');
   };
 
@@ -405,57 +256,6 @@ export default function WhatsApp() {
         </div>
       </div>
 
-      {/* Koç WhatsApp — numara + QR (yerel kayıt) */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-        <h3 className="text-lg font-semibold text-slate-800 mb-2 flex items-center gap-2">
-          <QrCode className="w-5 h-5 text-green-600" />
-          WhatsApp bağlantınız
-        </h3>
-        <p className="text-sm text-gray-500 mb-4">
-          İş veya koç hattınızın numarasını kaydedin; isteğe bağlı QR görseli yükleyin. Veriler yalnızca bu cihazda
-          saklanır. Otomatik mesaj çekmek için resmi WhatsApp Business API gerekir.
-        </p>
-        <div className="grid md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Numara (ülke kodu ile, örn. 905551234567)
-            </label>
-            <input
-              type="tel"
-              value={coachPhoneDraft}
-              onChange={e => setCoachPhoneDraft(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-200 rounded-lg"
-              placeholder="905XXXXXXXXX"
-            />
-            {coachPhoneDraft && (
-              <a
-                href={`https://wa.me/${formatPhone(coachPhoneDraft)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm text-green-600 mt-2 inline-flex items-center gap-1"
-              >
-                <ExternalLink className="w-4 h-4" />
-                wa.me ile aç
-              </a>
-            )}
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">QR kod görseli</label>
-            <input type="file" accept="image/*" onChange={onQrFile} className="text-sm w-full" />
-            {qrDataUrl && (
-              <img src={qrDataUrl} alt="WhatsApp QR" className="mt-3 max-w-[180px] rounded-lg border border-gray-100" />
-            )}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={saveWaProfile}
-          className="mt-4 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
-        >
-          Bağlantıyı kaydet
-        </button>
-      </div>
-
       {/* Öğrenci Seçimi */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h3 className="text-lg font-semibold text-slate-800 mb-4">Öğrenci Seç</h3>
@@ -470,265 +270,11 @@ export default function WhatsApp() {
           <option value="">Öğrenci Seçin</option>
           {students.map(student => (
             <option key={student.id} value={student.id}>
-              {student.name} — {formatClassLevelLabel(student.classLevel)}
+              {student.name} - {student.classLevel}. Sınıf
             </option>
           ))}
         </select>
       </div>
-
-      {/* Günlük şablon + görev */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-        <h3 className="text-lg font-semibold text-slate-800 mb-2 flex items-center gap-2">
-          <ListChecks className="w-5 h-5 text-emerald-600" />
-          Günlük mesaj şablonları
-        </h3>
-        <p className="text-sm text-gray-500 mb-4">
-          Şablon seçin, görevi yazın; veli numarasına WhatsApp ile gönderilir (öğrenci seçili olmalı).
-        </p>
-        <div className="grid md:grid-cols-2 gap-4 mb-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Şablon</label>
-            <select
-              value={templateId}
-              onChange={e => setTemplateId(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-200 rounded-lg"
-            >
-              {DAILY_MESSAGE_TEMPLATES.map(t => (
-                <option key={t.id} value={t.id}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Bugünkü görev / odak</label>
-            <input
-              type="text"
-              value={taskForTemplate}
-              onChange={e => setTaskForTemplate(e.target.value)}
-              placeholder="Örn: Matematik 20 soru, fen özeti oku..."
-              className="w-full px-4 py-2 border border-gray-200 rounded-lg"
-            />
-          </div>
-        </div>
-        {selectedStudent && (
-          <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-700 whitespace-pre-wrap mb-3">
-            {buildDailyMessage()}
-          </div>
-        )}
-        <button
-          type="button"
-          onClick={openDailyTemplateWhatsApp}
-          className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm flex items-center gap-2"
-        >
-          <MessageCircle className="w-4 h-4" />
-          Şablonu WhatsApp ile gönder
-        </button>
-      </div>
-
-      {/* Günlük Sinyaller (Düdük Sistemi) */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-        <h3 className="text-lg font-semibold text-slate-800 mb-2">Günlük Sinyaller</h3>
-        <p className="text-sm text-gray-500 mb-4">
-          Student + parent geri bildirimlerini skora cevirir.
-        </p>
-        <div className="grid md:grid-cols-2 gap-4">
-          <select
-            value={signalMode}
-            onChange={e => setSignalMode(e.target.value as 'student' | 'parent')}
-            className="px-4 py-2 border border-gray-200 rounded-lg"
-          >
-            <option value="student">Öğrenci Sinyali</option>
-            <option value="parent">Veli Sinyali</option>
-          </select>
-          <input
-            type="number"
-            min={0}
-            value={signalForm.questionsSolved}
-            onChange={e => setSignalForm(prev => ({ ...prev, questionsSolved: Number(e.target.value) || 0 }))}
-            placeholder="Çözülen soru"
-            className="px-4 py-2 border border-gray-200 rounded-lg"
-          />
-          <input
-            type="number"
-            min={0}
-            value={signalForm.pagesRead}
-            onChange={e => setSignalForm(prev => ({ ...prev, pagesRead: Number(e.target.value) || 0 }))}
-            placeholder="Okunan sayfa"
-            className="px-4 py-2 border border-gray-200 rounded-lg"
-          />
-          <input
-            type="number"
-            min={0}
-            max={100}
-            value={signalForm.focusLevel}
-            onChange={e => setSignalForm(prev => ({ ...prev, focusLevel: Number(e.target.value) || 0 }))}
-            placeholder="Odak"
-            className="px-4 py-2 border border-gray-200 rounded-lg"
-          />
-          <input
-            type="number"
-            min={0}
-            max={100}
-            value={signalForm.disciplineLevel}
-            onChange={e => setSignalForm(prev => ({ ...prev, disciplineLevel: Number(e.target.value) || 0 }))}
-            placeholder="Disiplin"
-            className="px-4 py-2 border border-gray-200 rounded-lg"
-          />
-          <input
-            type="number"
-            min={0}
-            max={100}
-            value={signalForm.motivationLevel}
-            onChange={e => setSignalForm(prev => ({ ...prev, motivationLevel: Number(e.target.value) || 0 }))}
-            placeholder="Motivasyon"
-            className="px-4 py-2 border border-gray-200 rounded-lg"
-          />
-          <input
-            type="number"
-            min={0}
-            max={100}
-            value={signalForm.engagementLevel}
-            onChange={e => setSignalForm(prev => ({ ...prev, engagementLevel: Number(e.target.value) || 0 }))}
-            placeholder="Etkileşim"
-            className="px-4 py-2 border border-gray-200 rounded-lg"
-          />
-        </div>
-        <textarea
-          value={signalForm.notes}
-          onChange={e => setSignalForm(prev => ({ ...prev, notes: e.target.value }))}
-          placeholder="Notlar"
-          className="mt-3 w-full px-4 py-2 border border-gray-200 rounded-lg"
-        />
-        <div className="mt-3 flex items-center justify-between">
-          <div className="text-xs text-gray-600">
-            Motivasyon {behaviorScores.motivationScore} - Disiplin {behaviorScores.disciplineScore} - Günlük {behaviorScores.dailyScore}
-          </div>
-          <button onClick={saveSignal} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm">
-            Sinyali Kaydet
-          </button>
-        </div>
-      </div>
-
-      {/* Sohbet yapıştır — yerel analiz */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-        <h3 className="text-lg font-semibold text-slate-800 mb-2 flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-violet-600" />
-          Sohbetten özet (ödev / görüşme)
-        </h3>
-        <p className="text-sm text-gray-500 mb-3">
-          WhatsApp konuşmasını kopyalayıp yapıştırın; anahtar kelimelerle ödev ve görüşme satırları ayıklanır. Tam otomatik
-          arşiv için WhatsApp Business API entegrasyonu gerekir.
-        </p>
-        <textarea
-          value={chatPaste}
-          onChange={e => setChatPaste(e.target.value)}
-          placeholder="Sohbet metnini buraya yapıştırın..."
-          className="w-full px-4 py-3 border border-gray-200 rounded-lg min-h-[120px] text-sm"
-        />
-        {chatPaste.trim().length > 0 && (
-          <div className="mt-4 space-y-3">
-            <div>
-              <p className="text-sm font-medium text-slate-700 mb-1">Özet</p>
-              <ul className="list-disc list-inside text-sm text-gray-600">
-                {chatInsight.summaryBullets.map((b, i) => (
-                  <li key={i}>{b}</li>
-                ))}
-              </ul>
-            </div>
-            {chatInsight.homeworkLines.length > 0 && (
-              <div>
-                <p className="text-sm font-medium text-slate-700 mb-1">Ödev / görev satırları</p>
-                <ul className="text-sm text-gray-600 space-y-1">
-                  {chatInsight.homeworkLines.slice(0, 12).map((line, i) => (
-                    <li key={i} className="bg-amber-50 rounded px-2 py-1">
-                      {line}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {chatInsight.meetingLines.length > 0 && (
-              <div>
-                <p className="text-sm font-medium text-slate-700 mb-1">Görüşme / plan</p>
-                <ul className="text-sm text-gray-600 space-y-1">
-                  {chatInsight.meetingLines.slice(0, 12).map((line, i) => (
-                    <li key={i} className="bg-blue-50 rounded px-2 py-1">
-                      {line}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {chatInsight.taskSuggestions.length > 0 && (
-              <div>
-                <p className="text-sm font-medium text-slate-700 mb-1">Önerilen takip görevleri</p>
-                <ul className="list-disc list-inside text-sm text-gray-600">
-                  {chatInsight.taskSuggestions.map((t, i) => (
-                    <li key={i}>{t}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            <button
-              type="button"
-              onClick={() => {
-                const block = [
-                  `*Sohbet özeti* (${selectedStudent?.name || 'öğrenci'})`,
-                  '',
-                  ...chatInsight.summaryBullets,
-                  '',
-                  'Ödev satırları:',
-                  ...chatInsight.homeworkLines.slice(0, 8).map(l => `• ${l}`),
-                  '',
-                  'Görüşme:',
-                  ...chatInsight.meetingLines.slice(0, 8).map(l => `• ${l}`)
-                ].join('\n');
-                navigator.clipboard.writeText(block);
-                if (selectedStudent) {
-                  saveWhatsAppLog({
-                    institutionId: institution.id,
-                    studentId: selectedStudent.id,
-                    direction: 'incoming',
-                    audience: 'student',
-                    content: block
-                  });
-                }
-                setSendResult({ success: true, message: 'Özet panoya kopyalandı.' });
-                setTimeout(() => setSendResult(null), 3000);
-              }}
-              className="text-sm px-3 py-1.5 bg-violet-100 text-violet-800 rounded-lg hover:bg-violet-200"
-            >
-              Özeti panoya kopyala
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Chat Panel */}
-      {selectedStudent && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-          <h3 className="text-lg font-semibold text-slate-800 mb-3">WhatsApp Chat Panel</h3>
-          <div className="grid md:grid-cols-2 gap-4">
-            <div>
-              <p className="text-sm font-medium text-slate-700 mb-2">Öğrenci mesajları</p>
-              <div className="max-h-44 overflow-y-auto space-y-2">
-                {messageLogs.filter(l => l.audience === 'student').map(log => (
-                  <div key={log.id} className="text-xs bg-gray-50 rounded p-2">{log.content}</div>
-                ))}
-              </div>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-slate-700 mb-2">Veli mesajları</p>
-              <div className="max-h-44 overflow-y-auto space-y-2">
-                {messageLogs.filter(l => l.audience === 'parent').map(log => (
-                  <div key={log.id} className="text-xs bg-gray-50 rounded p-2">{log.content}</div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Modül Seçimi */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">

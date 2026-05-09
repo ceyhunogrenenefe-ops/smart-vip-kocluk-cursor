@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { getStudentPhones } from '../api/_lib/meetings-resolve.js';
 import { deliverWhatsAppWithLog } from '../api/_lib/meeting-notify.js';
+import { metaWhatsAppConfigured } from '../api/_lib/meta-whatsapp.js';
 
 const MAX_REMINDER_ATTEMPTS = 5;
 
@@ -33,8 +34,7 @@ export default async function handler(req, res) {
   const log = [];
 
   try {
-    const twilioReady =
-      process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM;
+    const metaReady = metaWhatsAppConfigured();
     const nowMs = Date.now();
 
     const { data: upcoming, error: upErr } = await supabaseAdmin
@@ -55,8 +55,8 @@ export default async function handler(req, res) {
       const { data: student } = await supabaseAdmin.from('students').select('*').eq('id', m.student_id).maybeSingle();
       if (!student) continue;
       const phones = await getStudentPhones(student);
-      if (!phones.length || !twilioReady) {
-        log.push({ id: m.id, note: twilioReady ? 'no_phone' : 'missing_twilio_env' });
+      if (!phones.length || !metaReady) {
+        log.push({ id: m.id, note: metaReady ? 'no_phone' : 'missing_meta_whatsapp_env' });
         continue;
       }
 

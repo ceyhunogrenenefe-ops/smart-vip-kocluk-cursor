@@ -5,6 +5,7 @@ import { resolveStudentRowForUser } from '../api/_lib/resolve-student-id.js';
 import { coachRowToPlatformUserId, getStudentPhones } from '../api/_lib/meetings-resolve.js';
 import { createMeetCalendarEvent } from '../api/_lib/google-calendar-meet.js';
 import { deliverWhatsAppWithLog } from '../api/_lib/meeting-notify.js';
+import { metaWhatsAppConfigured } from '../api/_lib/meta-whatsapp.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
 
@@ -313,9 +314,8 @@ async function handleCreate(req, res) {
     if (linkBbb && linkBbb !== meetLinkResult) notifyBodyCreated += `\nBBB: ${linkBbb}`;
     let whatsappNote = '';
 
-    const twilioReady =
-      process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM;
-    if (twilioReady && phones.length > 0) {
+    const waReady = metaWhatsAppConfigured();
+    if (waReady && phones.length > 0) {
       try {
         const r = await deliverWhatsAppWithLog({
           meetingId: meeting.id,
@@ -334,7 +334,7 @@ async function handleCreate(req, res) {
 
     return res.status(200).json({
       data: meeting,
-      whatsapp: whatsappNote || (phones.length ? 'missing_twilio_env' : 'no_student_phone'),
+      whatsapp: whatsappNote || (phones.length ? 'missing_meta_whatsapp_env' : 'no_student_phone'),
       calendar: googleEventId ? { ok: true } : { skipped: true }
     });
   } catch (e) {
@@ -585,9 +585,8 @@ async function handleCreateSeries(req, res) {
     if (firstId) {
       const phones = await getStudentPhones(student);
       const notifyBodyCreated = `Görüşmeniz planlandı (tekrarlayan seri): ${meetLinkResult}`;
-      const twilioReady =
-        process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM;
-      if (twilioReady && phones.length > 0) {
+      const waReady = metaWhatsAppConfigured();
+      if (waReady && phones.length > 0) {
         try {
           const r = await deliverWhatsAppWithLog({
             meetingId: firstId,

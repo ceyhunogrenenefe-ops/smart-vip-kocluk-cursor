@@ -1,5 +1,5 @@
 import { supabaseAdmin } from './supabase-admin.js';
-import { normalizePhoneToE164 } from './whatsapp-twilio.js';
+import { normalizePhoneToE164 } from './phone-whatsapp.js';
 import { getIstanbulDateString } from './istanbul-time.js';
 
 /**

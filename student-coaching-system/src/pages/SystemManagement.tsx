@@ -74,8 +74,8 @@ function roleLabelTr(role: SystemUser['role']) {
 
 export default function SystemManagement() {
   const { user, getAllUsers, createUser, updateUser, deleteUser } = useAuth();
-  const { organizations, updateOrganization, addOrganization } = useOrganization();
-  const { students, coaches } = useApp();
+  const { organizations, createOrganization } = useOrganization();
+  const { students, coaches, institutions: appInstitutions, addInstitution } = useApp();
 
   const [apiManagedUsers, setApiManagedUsers] = useState<SystemUser[] | null>(null);
 
@@ -100,6 +100,23 @@ export default function SystemManagement() {
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddUser, setShowAddUser] = useState(false);
   const [showAddOrg, setShowAddOrg] = useState(false);
+  const [savingUser, setSavingUser] = useState(false);
+  const [savingOrg, setSavingOrg] = useState(false);
+  const [newUserForm, setNewUserForm] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    institutionId: '',
+    role: 'admin' as SystemUser['role'],
+    password: ''
+  });
+  const [newOrgForm, setNewOrgForm] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    address: '',
+    plan: 'starter' as 'starter' | 'professional' | 'enterprise'
+  });
 
   // PayTR Ayarları
   const [paytrConfig, setPaytrConfig] = useState<PayTRConfig>({
@@ -122,6 +139,15 @@ export default function SystemManagement() {
     merchantKey: false,
     merchantSalt: false
   });
+
+  const tenantRoles: SystemUser['role'][] = ['admin', 'coach', 'teacher', 'student'];
+
+  const dbInstitutionIdSet = new Set(appInstitutions.map((i) => i.id));
+
+  /** Kurum kartları: veritabanı + yalnızca yerelde kalan kurumlar */
+  const mergedOrgCount =
+    appInstitutions.length +
+    organizations.filter((o) => !dbInstitutionIdSet.has(o.id)).length;
 
   // Kullanıcılar: oturum + Supabase varsa API (`users` tablosu), yoksa yerel demo + managed liste
   const allUsers = apiManagedUsers ?? getAllUsers();
@@ -149,10 +175,153 @@ export default function SystemManagement() {
 
   const tabs = [
     { id: 'users' as const, label: 'Kullanıcılar', icon: Users, count: allUsers.length },
-    { id: 'organizations' as const, label: 'Kurumlar', icon: Building2, count: organizations.length },
+    { id: 'organizations' as const, label: 'Kurumlar', icon: Building2, count: mergedOrgCount },
     { id: 'payments' as const, label: 'Ödeme Sistemleri', icon: CreditCard, count: 0 },
     { id: 'system' as const, label: 'Sistem Ayarları', icon: Server, count: 0 }
   ];
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUserForm.name.trim() || !newUserForm.email.trim() || !newUserForm.password.trim()) {
+      alert('Ad, e-posta ve şifre zorunludur.');
+      return;
+    }
+    if (newUserForm.password.trim().length < 6) {
+      alert('Şifre en az 6 karakter olmalıdır.');
+      return;
+    }
+
+    const needsInstitution =
+      getAuthToken() && isSupabaseReady && tenantRoles.includes(newUserForm.role);
+
+    if (needsInstitution) {
+      if (!appInstitutions.length) {
+        alert('Önce Kurumlar sekmesinden veritabanına bir kurum ekleyin.');
+        return;
+      }
+      if (!newUserForm.institutionId.trim()) {
+        alert('Bu rol için kurum seçmelisiniz.');
+        return;
+      }
+    }
+
+    setSavingUser(true);
+    try {
+      if (getAuthToken() && isSupabaseReady) {
+        await db.createUser({
+          email: newUserForm.email.trim().toLowerCase(),
+          name: newUserForm.name.trim(),
+          phone: newUserForm.phone.trim() || null,
+          role: newUserForm.role,
+          password_hash: newUserForm.password,
+          institution_id: needsInstitution ? newUserForm.institutionId.trim() : null,
+          is_active: true,
+          package: 'trial',
+          start_date: new Date().toISOString(),
+          end_date: null,
+          created_by: null
+        });
+        setShowAddUser(false);
+        setNewUserForm({
+          name: '',
+          email: '',
+          phone: '',
+          institutionId: '',
+          role: 'admin',
+          password: ''
+        });
+        await refreshUserDirectory();
+        alert('Kullanıcı oluşturuldu.');
+      } else {
+        const result = await createUser({
+          name: newUserForm.name.trim(),
+          email: newUserForm.email.trim().toLowerCase(),
+          phone: newUserForm.phone.trim(),
+          role: newUserForm.role,
+          password: newUserForm.password
+        });
+        if (!result.success) {
+          alert(result.message || 'Kullanıcı oluşturulamadı.');
+          return;
+        }
+        setShowAddUser(false);
+        setNewUserForm({
+          name: '',
+          email: '',
+          phone: '',
+          institutionId: '',
+          role: 'admin',
+          password: ''
+        });
+        await refreshUserDirectory();
+        alert('Kullanıcı oluşturuldu (yerel liste). Tam senkron için giriş ve Supabase gerekir.');
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Kullanıcı oluşturulamadı.');
+    } finally {
+      setSavingUser(false);
+    }
+  };
+
+  const handleCreateOrganization = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newOrgForm.name.trim() || !newOrgForm.email.trim() || !newOrgForm.phone.trim()) {
+      alert('Kurum adı, e-posta ve telefon zorunludur.');
+      return;
+    }
+    setSavingOrg(true);
+    try {
+      if (getAuthToken() && isSupabaseReady) {
+        const created = await addInstitution(
+          {
+            id: '',
+            name: newOrgForm.name.trim(),
+            email: newOrgForm.email.trim().toLowerCase(),
+            phone: newOrgForm.phone.trim(),
+            address: newOrgForm.address.trim(),
+            website: '',
+            logo: '',
+            isActive: true,
+            createdAt: new Date().toISOString()
+          },
+          { plan: newOrgForm.plan }
+        );
+        if (!created?.id) {
+          alert('Kurum veritabanına eklenemedi. Oturum veya yetkileri kontrol edin.');
+          return;
+        }
+        await createOrganization(
+          {
+            name: newOrgForm.name.trim(),
+            email: newOrgForm.email.trim().toLowerCase(),
+            phone: newOrgForm.phone.trim(),
+            address: newOrgForm.address.trim(),
+            plan: newOrgForm.plan
+          },
+          { reuseInstitutionId: created.id, setAsActive: false }
+        );
+      } else {
+        await createOrganization({
+          name: newOrgForm.name.trim(),
+          email: newOrgForm.email.trim().toLowerCase(),
+          phone: newOrgForm.phone.trim(),
+          address: newOrgForm.address.trim(),
+          plan: newOrgForm.plan
+        });
+      }
+      setShowAddOrg(false);
+      setNewOrgForm({ name: '', email: '', phone: '', address: '', plan: 'starter' });
+      alert(
+        getAuthToken() && isSupabaseReady
+          ? 'Kurum veritabanına ve yerel liste kaydedildi. Bu kuruma yönetici atamak için kullanıcı eklerken aynı kurumu seçin.'
+          : 'Kurum yalnızca yerel kaydedildi. Veritabanı senkronu için giriş yapın.'
+      );
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Kurum oluşturulamadı.');
+    } finally {
+      setSavingOrg(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -222,6 +391,82 @@ export default function SystemManagement() {
                 </button>
               </div>
 
+              {showAddUser && (
+                <form onSubmit={handleCreateUser} className="bg-purple-50 border border-purple-100 rounded-xl p-4">
+                  <h4 className="font-semibold text-slate-800 mb-3">Yeni kullanıcı</h4>
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <input
+                      type="text"
+                      placeholder="Ad Soyad"
+                      value={newUserForm.name}
+                      onChange={(e) => setNewUserForm((p) => ({ ...p, name: e.target.value }))}
+                      className="px-3 py-2 border border-gray-200 rounded-lg"
+                    />
+                    <input
+                      type="email"
+                      placeholder="E-posta"
+                      value={newUserForm.email}
+                      onChange={(e) => setNewUserForm((p) => ({ ...p, email: e.target.value }))}
+                      className="px-3 py-2 border border-gray-200 rounded-lg"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Telefon"
+                      value={newUserForm.phone}
+                      onChange={(e) => setNewUserForm((p) => ({ ...p, phone: e.target.value }))}
+                      className="px-3 py-2 border border-gray-200 rounded-lg"
+                    />
+                    <select
+                      value={newUserForm.role}
+                      onChange={(e) => setNewUserForm((p) => ({ ...p, role: e.target.value as SystemUser['role'] }))}
+                      className="px-3 py-2 border border-gray-200 rounded-lg"
+                    >
+                      <option value="admin">Yönetici</option>
+                      <option value="coach">Koç</option>
+                      <option value="teacher">Öğretmen</option>
+                      <option value="student">Öğrenci</option>
+                    </select>
+                    {getAuthToken() && isSupabaseReady && tenantRoles.includes(newUserForm.role) ? (
+                      <select
+                        value={newUserForm.institutionId}
+                        onChange={(e) => setNewUserForm((p) => ({ ...p, institutionId: e.target.value }))}
+                        className="px-3 py-2 border border-gray-200 rounded-lg md:col-span-2"
+                      >
+                        <option value="">Kurum seçin (zorunlu)</option>
+                        {appInstitutions.map((inst) => (
+                          <option key={inst.id} value={inst.id}>
+                            {inst.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : null}
+                    <input
+                      type="password"
+                      placeholder="Şifre"
+                      value={newUserForm.password}
+                      onChange={(e) => setNewUserForm((p) => ({ ...p, password: e.target.value }))}
+                      className="px-3 py-2 border border-gray-200 rounded-lg md:col-span-2"
+                    />
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      type="submit"
+                      disabled={savingUser}
+                      className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-60"
+                    >
+                      {savingUser ? 'Kaydediliyor...' : 'Kullanıcıyı Kaydet'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddUser(false)}
+                      className="px-4 py-2 border border-gray-200 rounded-lg"
+                    >
+                      Vazgeç
+                    </button>
+                  </div>
+                </form>
+              )}
+
               {/* Kullanıcı Listesi */}
               <div className="overflow-x-auto">
                 <table className="w-full">
@@ -284,7 +529,7 @@ export default function SystemManagement() {
           {activeTab === 'organizations' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-slate-800">Kurumlar ({organizations.length})</h3>
+                <h3 className="text-lg font-semibold text-slate-800">Kurumlar ({mergedOrgCount})</h3>
                 <button
                   onClick={() => setShowAddOrg(true)}
                   className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors flex items-center gap-2"
@@ -294,8 +539,96 @@ export default function SystemManagement() {
                 </button>
               </div>
 
+              {showAddOrg && (
+                <form onSubmit={handleCreateOrganization} className="bg-emerald-50 border border-emerald-100 rounded-xl p-4">
+                  <h4 className="font-semibold text-slate-800 mb-3">Yeni kurum</h4>
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <input
+                      type="text"
+                      placeholder="Kurum adı"
+                      value={newOrgForm.name}
+                      onChange={(e) => setNewOrgForm((p) => ({ ...p, name: e.target.value }))}
+                      className="px-3 py-2 border border-gray-200 rounded-lg"
+                    />
+                    <input
+                      type="email"
+                      placeholder="Kurum e-postası"
+                      value={newOrgForm.email}
+                      onChange={(e) => setNewOrgForm((p) => ({ ...p, email: e.target.value }))}
+                      className="px-3 py-2 border border-gray-200 rounded-lg"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Telefon"
+                      value={newOrgForm.phone}
+                      onChange={(e) => setNewOrgForm((p) => ({ ...p, phone: e.target.value }))}
+                      className="px-3 py-2 border border-gray-200 rounded-lg"
+                    />
+                    <select
+                      value={newOrgForm.plan}
+                      onChange={(e) =>
+                        setNewOrgForm((p) => ({ ...p, plan: e.target.value as 'starter' | 'professional' | 'enterprise' }))
+                      }
+                      className="px-3 py-2 border border-gray-200 rounded-lg"
+                    >
+                      <option value="starter">Starter</option>
+                      <option value="professional">Professional</option>
+                      <option value="enterprise">Enterprise</option>
+                    </select>
+                    <input
+                      type="text"
+                      placeholder="Adres (opsiyonel)"
+                      value={newOrgForm.address}
+                      onChange={(e) => setNewOrgForm((p) => ({ ...p, address: e.target.value }))}
+                      className="px-3 py-2 border border-gray-200 rounded-lg md:col-span-2"
+                    />
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      type="submit"
+                      disabled={savingOrg}
+                      className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-60"
+                    >
+                      {savingOrg ? 'Kaydediliyor...' : 'Kurumu Kaydet'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddOrg(false)}
+                      className="px-4 py-2 border border-gray-200 rounded-lg"
+                    >
+                      Vazgeç
+                    </button>
+                  </div>
+                </form>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {organizations.map(org => (
+                {appInstitutions.map(inst => (
+                  <div key={inst.id} className="bg-gray-50 rounded-xl p-4 border border-emerald-100">
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
+                          <Building2 className="w-5 h-5 text-emerald-700" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-slate-800">{inst.name}</p>
+                          <p className="text-sm text-gray-500">{inst.email}</p>
+                        </div>
+                      </div>
+                      <span
+                        className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          inst.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                        }`}
+                      >
+                        {inst.isActive ? 'Aktif' : 'Pasif'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-emerald-700 font-medium">Veritabanı</p>
+                  </div>
+                ))}
+                {organizations
+                  .filter((org) => !dbInstitutionIdSet.has(org.id))
+                  .map(org => (
                   <div key={org.id} className="bg-gray-50 rounded-xl p-4">
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-3">
@@ -321,6 +654,7 @@ export default function SystemManagement() {
                       <span>{org.stats.totalStudents} öğrenci</span>
                       <span>{org.stats.totalCoaches} koç</span>
                     </div>
+                    <p className="text-xs text-slate-500 mt-1">Yalnızca yerel</p>
                   </div>
                 ))}
               </div>
@@ -529,7 +863,7 @@ export default function SystemManagement() {
                   </div>
                   <div className="bg-gray-50 rounded-lg p-3">
                     <p className="text-gray-500">Toplam Kurum</p>
-                    <p className="text-xl font-bold text-slate-800">{organizations.length}</p>
+                    <p className="text-xl font-bold text-slate-800">{mergedOrgCount}</p>
                   </div>
                   <div className="bg-gray-50 rounded-lg p-3">
                     <p className="text-gray-500">Toplam Öğrenci</p>

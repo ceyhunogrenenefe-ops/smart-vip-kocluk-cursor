@@ -2,11 +2,18 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { Organization, OrganizationPlan } from '../types';
 
+export type CreateOrganizationOptions = {
+  /** Supabase institutions.id ile aynı olmalı (Kullanıcı Yönetimi institution_id eşlemesi için) */
+  reuseInstitutionId?: string;
+  /** Yeni kayıttan sonra bu kurumu aktif seçili yapma (süper admin toplu eklemede false) */
+  setAsActive?: boolean;
+};
+
 interface OrganizationContextType {
   organization: Organization | null;
   setOrganization: (org: Organization | null) => void;
   organizations: Organization[];
-  createOrganization: (data: CreateOrgData) => Promise<Organization>;
+  createOrganization: (data: CreateOrgData, options?: CreateOrganizationOptions) => Promise<Organization>;
   updateOrganization: (id: string, data: Partial<Organization>) => void;
   getOrganizationBySlug: (slug: string) => Organization | null;
   isLoading: boolean;
@@ -83,9 +90,14 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
   };
 
   // Yeni kurum oluştur
-  const createOrganization = async (data: CreateOrgData): Promise<Organization> => {
+  const createOrganization = async (
+    data: CreateOrgData,
+    options?: CreateOrganizationOptions
+  ): Promise<Organization> => {
+    const reuseId = options?.reuseInstitutionId?.trim();
+    const setAsActive = options?.setAsActive !== false;
     const newOrg: Organization = {
-      id: `org-${Date.now()}`,
+      id: reuseId || `org-${Date.now()}`,
       name: data.name,
       slug: data.slug || generateSlug(data.name),
       email: data.email,
@@ -112,12 +124,15 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() // 30 gün deneme
     };
 
-    const updated = [...organizations, newOrg];
+    const updated =
+      reuseId && organizations.some((o) => o.id === reuseId)
+        ? organizations.map((o) => (o.id === reuseId ? { ...newOrg, slug: o.slug } : o))
+        : [...organizations, newOrg];
     saveOrganizations(updated);
-    setOrganization(newOrg);
-
-    // Aktif kurumu localStorage'a kaydet
-    localStorage.setItem('coaching_active_organization', JSON.stringify(newOrg));
+    if (setAsActive) {
+      setOrganization(newOrg);
+      localStorage.setItem('coaching_active_organization', JSON.stringify(newOrg));
+    }
 
     return newOrg;
   };

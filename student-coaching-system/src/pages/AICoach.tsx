@@ -2,20 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
-import { ExamResult, formatClassLevelLabel, AiExamAnalysisSummary } from '../types';
-import { apiFetch } from '../lib/session';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  Legend
-} from 'recharts';
+import { formatClassLevelLabel } from '../types';
 import {
   Brain,
   MessageSquare,
@@ -41,7 +28,6 @@ import {
   ChevronDown,
   ChevronUp
 } from 'lucide-react';
-import { getStudentDailySignals, buildBehaviorScores } from '../lib/aiDataStore';
 
 interface AIMessage {
   id: string;
@@ -50,12 +36,22 @@ interface AIMessage {
   timestamp: Date;
 }
 
-/** AYT/YKS sınavları TYT skor modeli ile yaklaşımlanır (4 yanlış=1 net) */
-function toModelExamType(examType: string): 'TYT' | 'LGS' | 'YOS' {
-  const u = String(examType || '').toUpperCase();
-  if (u === 'LGS' || u === '3' || u === '4' || u === '5' || u === '6' || u === '7') return 'LGS';
-  if (u === 'YOS') return 'YOS';
-  return 'TYT';
+interface ExamResult {
+  id: string;
+  studentId: string;
+  examType: 'TYT' | 'AYT' | '9' | '10' | '11' | '12';
+  examDate: string;
+  source: 'webhook' | 'manual' | 'pdf';
+  totalNet: number;
+  subjects: {
+    name: string;
+    net: number;
+    correct: number;
+    wrong: number;
+    blank: number;
+  }[];
+  notes?: string;
+  createdAt: string;
 }
 
 export default function AICoach() {
@@ -67,13 +63,6 @@ export default function AICoach() {
   const [isLoading, setIsLoading] = useState(false);
   const [showExamData, setShowExamData] = useState(false);
   const [analysisExpanded, setAnalysisExpanded] = useState<string | null>(null);
-  const [numericExpanded, setNumericExpanded] = useState(true);
-  const [pickedExamId, setPickedExamId] = useState<string>('');
-  const [numericReport, setNumericReport] = useState<AiExamAnalysisSummary | null>(null);
-  const [analyzeLoading, setAnalyzeLoading] = useState(false);
-  const [analyzeError, setAnalyzeError] = useState<string | null>(null);
-  const [lastSaveNote, setLastSaveNote] = useState<string | null>(null);
-  const [analysisHistoryRows, setAnalysisHistoryRows] = useState<Array<Record<string, unknown>>>([]);
 
   // AppContext'ten gelen examResults veya localStorage'dan yedek
   const [localExamResults, setLocalExamResults] = useState<ExamResult[]>([]);
@@ -104,63 +93,10 @@ export default function AICoach() {
       .sort((a, b) => new Date(b.examDate).getTime() - new Date(a.examDate).getTime());
   }, [examResults, selectedStudent]);
 
-  useEffect(() => {
-    if (!selectedStudent) {
-      setPickedExamId('');
-      setNumericReport(null);
-      setAnalysisHistoryRows([]);
-      return;
-    }
-    if (studentExamResults.length === 0) {
-      setPickedExamId('');
-      return;
-    }
-    const stillThere = pickedExamId && studentExamResults.some((e) => e.id === pickedExamId);
-    if (!pickedExamId || !stillThere) setPickedExamId(studentExamResults[0].id);
-  }, [selectedStudent, studentExamResults, pickedExamId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      if (!selectedStudent) return;
-      try {
-        const res = await apiFetch(`/api/ai-chat?student_id=${encodeURIComponent(selectedStudent)}`);
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok || cancelled) return;
-        setAnalysisHistoryRows(Array.isArray(j.data) ? j.data : []);
-      } catch {
-        if (!cancelled) setAnalysisHistoryRows([]);
-      }
-    }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedStudent, numericReport]);
-
-  const weeklyTrendPoints = useMemo(() => {
-    if (!studentEntries.length) return [];
-    return [...studentEntries]
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-      .slice(-14)
-      .map((e, i) => ({
-        n: i + 1,
-        cozum: e.solvedQuestions ?? 0,
-        basari:
-          e.solvedQuestions && e.solvedQuestions > 0
-            ? Math.round(((e.correctAnswers ?? 0) / e.solvedQuestions) * 100)
-            : 0
-      }));
-  }, [studentEntries, selectedStudent]);
-
   // Öğrencinin öğretmenini bul
   const studentTeacher = useMemo(() => {
     if (!student) return null;
-    if (student.coachId) {
-      const byCoach = coaches.find((c) => c.id === student.coachId);
-      if (byCoach) return byCoach;
-    }
-    return coaches.find((t) => t.studentIds.includes(student.id)) ?? null;
+    return coaches.find(t => t.studentIds.includes(student.id));
   }, [student, coaches]);
 
   // Haftalık istatistikler
@@ -174,9 +110,7 @@ export default function AICoach() {
     if (studentExamResults.length === 0) return null;
 
     const tytResults = studentExamResults.filter(r => r.examType === 'TYT');
-    const aytResults = studentExamResults.filter(
-      (r) => r.examType === 'AYT' || r.examType === 'YKS-EA' || r.examType === 'YKS-SAY'
-    );
+    const aytResults = studentExamResults.filter(r => r.examType === 'AYT');
 
     return {
       totalExams: studentExamResults.length,
@@ -196,67 +130,6 @@ export default function AICoach() {
       aytTrend: aytResults.length >= 2 ? aytResults[0].totalNet - aytResults[1].totalNet : 0
     };
   }, [studentExamResults]);
-
-  const weeklyBehavior = useMemo(() => {
-    if (!student) return null;
-    const signals = getStudentDailySignals(student.institutionId || 'default', student.id).slice(0, 7);
-    return buildBehaviorScores(signals);
-  }, [student]);
-
-  const runNumericExamAnalysis = async () => {
-    if (!selectedStudent || !student) return;
-    const exam = studentExamResults.find((e) => e.id === pickedExamId);
-    if (!exam?.subjects?.length) {
-      setAnalyzeError('Seçili denemede ders verisi yok.');
-      return;
-    }
-    setAnalyzeLoading(true);
-    setAnalyzeError(null);
-    setLastSaveNote(null);
-    try {
-      const modelType = toModelExamType(exam.examType);
-      const examHistory = studentExamResults
-        .filter((e) => toModelExamType(e.examType) === modelType)
-        .map((e) => ({ date: e.examDate, totalNet: e.totalNet }));
-
-      const res = await apiFetch('/api/ai-chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          op: 'analyze_exam',
-          student_id: selectedStudent,
-          exam_id: exam.id,
-          exam_type: exam.examType,
-          institution_id: student.institutionId || null,
-          subjects: exam.subjects.map((s) => ({
-            name: s.name,
-            correct: s.correct,
-            wrong: s.wrong,
-            blank: s.blank
-          })),
-          exam_history: examHistory
-        })
-      });
-      const j = (await res.json()) as {
-        analysis?: AiExamAnalysisSummary;
-        saveError?: string | null;
-        savedRow?: { id?: string } | null;
-      };
-      if (!res.ok) throw new Error((j as { error?: string }).error || 'Analiz başarısız');
-      if (j.analysis) setNumericReport(j.analysis);
-      setLastSaveNote(
-        j.savedRow
-          ? `Analiz kaydedildi (id: ${String(j.savedRow?.id || '').slice(0, 8)}…).`
-          : j.saveError
-            ? `Veritabanı kaydı atlandı: ${j.saveError}`
-            : null
-      );
-    } catch (e) {
-      setAnalyzeError(e instanceof Error ? e.message : 'Hata');
-    } finally {
-      setAnalyzeLoading(false);
-    }
-  };
 
   // Kapsamlı öğrenci analizi yap
   const analyzeStudent = async (studentId: string) => {
@@ -457,56 +330,97 @@ ${studentTeacher ? `\n👨‍🏫 **Öğretmen Koç:** ${studentTeacher.name}` :
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
-    try {
-      const studentContext = student
-        ? [
-            `Öğrenci: ${student.name}`,
-            `Sınıf: ${formatClassLevelLabel(student.classLevel)}`,
-            `Kayıt Sayısı: ${studentEntries.length}`,
-            `Deneme Sayısı: ${studentExamResults.length}`,
-            `Haftalık Başarı: %${weeklyStats?.successRate || 0}`,
-            `Gerçekleşme: %${weeklyStats?.realizationRate || 0}`,
-            examStats?.latestTYT ? `Son TYT: ${examStats.latestTYT} net` : '',
-            examStats?.latestAYT ? `Son AYT: ${examStats.latestAYT} net` : ''
-          ]
-            .filter(Boolean)
-            .join('\n')
-        : 'Öğrenci seçilmedi';
 
-      const apiRes = await apiFetch('/api/ai-chat', {
-        method: 'POST',
-        body: JSON.stringify({
-          prompt: userMessage.content,
-          studentContext
-        })
-      });
+    // Simüle edilmiş AI yanıtı
+    setTimeout(() => {
+      const studentData = student ? `
+Öğrenci: ${student.name}
+Sınıf: ${student.classLevel}
+Kayıt Sayısı: ${studentEntries.length}
+Deneme Sayısı: ${studentExamResults.length}
+Son Haftalık Başarı: %${weeklyStats?.successRate || 0}
+${examStats?.latestTYT ? `Son TYT: ${examStats.latestTYT} net` : ''}
+      ` : 'Öğrenci seçilmedi';
 
-      const payload = await apiRes.json();
-      if (!apiRes.ok) {
-        throw new Error(payload?.error || 'AI servisine ulaşılamadı.');
+      let responseContent = '';
+
+      if (input.toLowerCase().includes('plan') || input.toLowerCase().includes('çalışma')) {
+        const ws = weeklyStats;
+        const weakestSubject = ws && ws.successRate < 70 ? 'Matematik' : 'Genel Tekrar';
+        responseContent = `📋 **Haftalık Çalışma Planı Önerisi**
+
+${student?.name} için önerilen haftalık çalışma planı:
+
+**Pazartesi:** ${weakestSubject} - 30 soru
+**Salı:** ${studentExamResults.length > 0 ? 'TYT Deneme' : 'Türkçe - 25 soru'}
+**Çarşamba:** Fizik - 20 soru
+**Perşembe:** Genel tekrar - 25 soru
+**Cuma:** Haftalık tekrar - 30 soru
+**Cumartesi:** Deneme sınavı
+**Pazar:** Dinlenme + Analiz
+
+*Not: Bu plan öğrencinin mevcut performansına göre oluşturulmuştur.*`;
+      } else if (input.toLowerCase().includes('zayıf') || input.toLowerCase().includes('eksik')) {
+        const ws = weeklyStats;
+        const zayifKonu = ws && ws.successRate < 70 ? 'Matematik ve Fen' : 'Henüz belirlenmedi';
+        responseContent = `🔴 **Zayıf Konu Analizi**
+
+${student?.name} için tespit edilen zayıf noktalar:
+
+• ${zayifKonu}
+
+**Öneri:** Bu konulara haftalık çalışma süresinin %40'ı ayrılmalı.`;
+      } else if (input.toLowerCase().includes('motivasyon') || input.toLowerCase().includes('öneri')) {
+        responseContent = `💪 **Motivasyon ve Öneriler**
+
+${student?.name}, şu ana kadar harika bir ilerleme kaydediyorsun!
+
+${weeklyStats?.successRate >= 70
+  ? '✅ Başarı oranın iyi seviyede. Hedeflerini korumaya devam et!'
+  : '📈 Başarı oranını artırmak için düzenli tekrar çok önemli.'}
+
+${examStats?.latestTYT
+  ? `${examStats.latestTYT >= 25 ? '🎯 TYT netlerin hedefe yakın, devam!' : '💪 Her deneme ile netlerin artıyor.'}`
+  : ''}
+
+**Günlük alışkanlıklar:**
+• Her gün en az 1 saat düzenli çalışma
+• Yanlış yapılan soruları not et ve tekrar et
+• Haftalık 1 deneme sınavı
+• Yeterli uyku (7-8 saat)
+
+Başarılar! 🔥`;
+      } else {
+        responseContent = `🤖 **AI Koç Yanıtı**
+
+"${input}" hakkında sorduğunuz soru üzerine:
+
+${studentData}
+
+**Kısa Değerlendirme:**
+• Haftalık başarı: %${weeklyStats?.successRate || 0}
+• Gerçekleşme: %${weeklyStats?.realizationRate || 0}
+${examStats?.latestTYT ? `• Son TYT: ${examStats.latestTYT} net` : ''}
+
+**Önerilerim:**
+1. Düzenli tekrar yapın
+2. Zayıf konulara daha fazla zaman ayırın
+3. Haftalık hedeflerinizi takip edin
+4. Deneme sınavlarını analiz edin
+
+*Not: Bu yanıt simüle edilmiştir. Gerçek AI analizi için Ayarlar sayfasından OpenAI API anahtarı girin.*`;
       }
 
       const response: AIMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: payload.content || 'Yanit alinamadi.',
+        content: responseContent,
         timestamp: new Date()
       };
+
       setMessages(prev => [...prev, response]);
-    } catch (error) {
-      const response: AIMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content:
-          `AI yaniti alinirken hata olustu: ${
-            error instanceof Error ? error.message : 'Bilinmeyen hata'
-          }`,
-        timestamp: new Date()
-      };
-      setMessages(prev => [...prev, response]);
-    } finally {
       setIsLoading(false);
-    }
+    }, 1500);
   };
 
   // WhatsApp ile paylaş
@@ -618,21 +532,6 @@ ${studentTeacher ? `\n👨‍🏫 **Öğretmen Koç:** ${studentTeacher.name}` :
               >
                 <BookOpen className="w-4 h-4" />
                 Çalışma Planı Oluştur
-              </button>
-              <button
-                onClick={() => {
-                  if (!selectedStudent) return;
-                  const scoreInfo = weeklyBehavior
-                    ? `Motivasyon ${weeklyBehavior.motivationScore}, disiplin ${weeklyBehavior.disciplineScore}, etkileşim ${weeklyBehavior.engagementScore}`
-                    : 'Davranış sinyali yok';
-                  setInput(`Generate AI Study Plan: ${scoreInfo}. Zayıf derslere odaklı haftalık topic ve soru hedefi yaz.`);
-                  sendMessage();
-                }}
-                disabled={!selectedStudent}
-                className="w-full px-4 py-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors flex items-center gap-2 disabled:opacity-50"
-              >
-                <Sparkles className="w-4 h-4" />
-                Generate AI Study Plan
               </button>
               <button
                 onClick={() => {
@@ -767,250 +666,6 @@ ${studentTeacher ? `\n👨‍🏫 **Öğretmen Koç:** ${studentTeacher.name}` :
             </div>
           )}
 
-          {selectedStudent && (
-            <div className="bg-white rounded-xl shadow-sm border border-indigo-100 overflow-hidden">
-              <button
-                type="button"
-                className="w-full p-4 bg-gradient-to-r from-indigo-50 to-blue-50 flex justify-between items-center text-left"
-                onClick={() => setNumericExpanded((v) => !v)}
-              >
-                <div className="flex items-center gap-3">
-                  <BarChart3 className="w-6 h-6 text-indigo-600" />
-                  <div>
-                    <h3 className="font-semibold text-slate-800">Sayısal sınav analizi</h3>
-                    <p className="text-xs text-gray-600">
-                      Net = doğru − (yanlış÷4); TYT yaklaşık puan bandı ve yüzdelik dilim (model tahmini).
-                    </p>
-                  </div>
-                </div>
-                {numericExpanded ? (
-                  <ChevronUp className="w-5 h-5 text-gray-400" />
-                ) : (
-                  <ChevronDown className="w-5 h-5 text-gray-400" />
-                )}
-              </button>
-
-              {numericExpanded && (
-                <div className="p-4 space-y-4 border-t border-indigo-100">
-                  {studentExamResults.length === 0 ? (
-                    <p className="text-sm text-gray-500">
-                      Önce öğrenciye ait bir deneme sonucu girin (Sınav Takibi).
-                    </p>
-                  ) : (
-                    <>
-                      <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
-                        <div className="flex-1">
-                          <label className="text-xs text-gray-600 block mb-1">Deneme seç</label>
-                          <select
-                            value={pickedExamId}
-                            onChange={(e) => setPickedExamId(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
-                          >
-                            {studentExamResults.map((e) => (
-                              <option key={e.id} value={e.id}>
-                                {new Date(e.examDate).toLocaleDateString('tr-TR')} — {e.examType} — {e.totalNet} net
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => runNumericExamAnalysis()}
-                          disabled={analyzeLoading}
-                          className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2"
-                        >
-                          {analyzeLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <TrendingUp className="w-4 h-4" />}
-                          Analizi hesapla
-                        </button>
-                      </div>
-                      {analyzeError && (
-                        <p className="text-sm text-red-600">{analyzeError}</p>
-                      )}
-                      {lastSaveNote && (
-                        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1">
-                          {lastSaveNote}
-                        </p>
-                      )}
-
-                      {numericReport && (
-                        <div className="space-y-4">
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                            <div className="rounded-lg border border-gray-100 p-3 bg-slate-50">
-                              <p className="text-xs text-gray-500">Toplam net (yeniden hesap)</p>
-                              <p className="text-2xl font-bold text-slate-800">{numericReport.total_net}</p>
-                              <p className="text-xs text-gray-500 mt-1">Model tipi: {numericReport.exam_type_model}</p>
-                            </div>
-                            <div className="rounded-lg border border-gray-100 p-3 bg-emerald-50">
-                              <p className="text-xs text-gray-600">
-                                Tahmini yerleştirmeye yakın ölçek (ham)
-                              </p>
-                              <p className="text-2xl font-bold text-emerald-700">
-                                {numericReport.estimated_score_model.toFixed(0)}
-                              </p>
-                              <p className="text-xs text-gray-500 mt-1">
-                                {numericReport.exam_type_model === 'LGS'
-                                  ? 'LGS yaklaşık puan (∼500)'
-                                  : 'TYT ile aynı eğriden yaklaşık puan'}
-                              </p>
-                            </div>
-                            <div className="rounded-lg border border-gray-100 p-3 bg-violet-50">
-                              <p className="text-xs text-gray-600">Yüzdelik dilim tahmini</p>
-                              <p className="text-2xl font-bold text-violet-700">
-                                %{numericReport.percentile_model.toFixed(2)}
-                              </p>
-                              <p className="text-xs text-gray-500 mt-1">Küçük % = sıralama açısından daha iyi (model).</p>
-                            </div>
-                          </div>
-
-                          <div className="rounded-lg border border-gray-100 p-3 bg-white">
-                            <p className="text-sm font-medium text-gray-700 mb-1">Genel başarı</p>
-                            <p className="text-sm text-gray-600">{numericReport.general_situation}</p>
-                          </div>
-
-                          <div className="grid md:grid-cols-2 gap-3">
-                            <div className="rounded-lg border border-green-100 p-3 bg-green-50/50">
-                              <p className="text-sm font-medium text-green-800 mb-1">Güçlü dersler</p>
-                              <ul className="text-sm text-gray-700 list-disc ml-5">
-                                {numericReport.strengths.length
-                                  ? numericReport.strengths.map((x) => <li key={x}>{x}</li>)
-                                  : <li>Kayıtlı güç yok.</li>}
-                              </ul>
-                            </div>
-                            <div className="rounded-lg border border-red-100 p-3 bg-red-50/50">
-                              <p className="text-sm font-medium text-red-800 mb-1">Zayıf dersler</p>
-                              <ul className="text-sm text-gray-700 list-disc ml-5">
-                                {numericReport.weaknesses.length
-                                  ? numericReport.weaknesses.map((x) => <li key={x}>{x}</li>)
-                                  : <li>Hedef gerektiren belirgin zayıflık yok.</li>}
-                              </ul>
-                            </div>
-                          </div>
-
-                          {numericReport.yos_buckets && (
-                            <div className="rounded-lg border border-gray-100 p-3">
-                              <p className="text-sm font-medium text-gray-700 mb-2">YÖS alan bazlı net dağılımı</p>
-                              <div className="grid grid-cols-3 gap-2 text-center text-sm">
-                                <div className="p-2 rounded bg-blue-50">
-                                  Matematik: <strong>{numericReport.yos_buckets.matematik}</strong>
-                                </div>
-                                <div className="p-2 rounded bg-orange-50">
-                                  Geometri: <strong>{numericReport.yos_buckets.geometri}</strong>
-                                </div>
-                                <div className="p-2 rounded bg-purple-50">
-                                  IQ: <strong>{numericReport.yos_buckets.iq}</strong>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          <div className="rounded-lg border border-gray-100 p-3 bg-gray-50">
-                            <p className="text-sm font-medium text-gray-700 mb-2">Dikkat · işlem · zaman · görsel</p>
-                            <ul className="space-y-2 text-sm">
-                              {numericReport.psychology?.map((p) => (
-                                <li key={p.title}>
-                                  <strong className="text-indigo-800">{p.title}:</strong>{' '}
-                                  <span className="text-gray-700">{p.text}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-
-                          {numericReport.exam_type_model === 'TYT' &&
-                            (numericReport.year_2025_comparison ||
-                              numericReport.year_2024_comparison ||
-                              numericReport.year_2023_comparison) && (
-                              <div className="rounded-lg border border-gray-100 p-3 space-y-2">
-                                <p className="text-sm font-medium text-gray-800">Yıllara göre kıyas (model)</p>
-                                {numericReport.year_2025_comparison && (
-                                  <p className="text-xs text-gray-700">{numericReport.year_2025_comparison}</p>
-                                )}
-                                {numericReport.year_2024_comparison && (
-                                  <p className="text-xs text-gray-700">{numericReport.year_2024_comparison}</p>
-                                )}
-                                {numericReport.year_2023_comparison && (
-                                  <p className="text-xs text-gray-700">{numericReport.year_2023_comparison}</p>
-                                )}
-                              </div>
-                            )}
-
-                          <div className="h-56 w-full">
-                            <p className="text-sm font-medium text-gray-700 mb-2">Ders bazlı net (grafik)</p>
-                            <ResponsiveContainer width="100%" height="100%">
-                              <BarChart
-                                data={numericReport.subjects.map((s) => ({
-                                  ders: s.name.length > 14 ? `${s.name.slice(0, 13)}…` : s.name,
-                                  net: s.net
-                                }))}
-                                margin={{ top: 4, right: 8, left: -18, bottom: 0 }}
-                              >
-                                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                                <XAxis dataKey="ders" tick={{ fontSize: 11 }} angle={-20} height={54} interval={0} />
-                                <YAxis tick={{ fontSize: 11 }} />
-                                <Tooltip formatter={(v) => [`${Number(v).toFixed(2)} net`, 'Net']} />
-                                <Bar dataKey="net" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                              </BarChart>
-                            </ResponsiveContainer>
-                          </div>
-
-                          {numericReport.trajectory && (
-                            <div className="rounded-lg border border-indigo-200 p-3 bg-indigo-50/60">
-                              <p className="text-sm font-medium text-indigo-900 mb-1">Hız ile devam tahmini</p>
-                              <p className="text-sm text-gray-700">{numericReport.trajectory.headline}</p>
-                              <p className="text-sm text-indigo-800 mt-1">
-                                ~{numericReport.trajectory.extrapolated_net_2more} net • ~{numericReport.trajectory.extrapolated_approx_score}{' '}
-                                puan (modele göre yaklaşık)
-                              </p>
-                              <p className="text-xs text-gray-600 mt-1">{numericReport.trajectory.caveat}</p>
-                            </div>
-                          )}
-
-                          {weeklyTrendPoints.length > 0 && (
-                            <div className="h-52 w-full">
-                              <p className="text-sm font-medium text-gray-700 mb-2">Haftalık kayıt trendi (son kayıtlar)</p>
-                              <ResponsiveContainer width="100%" height="100%">
-                                <LineChart data={weeklyTrendPoints} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
-                                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                                  <XAxis dataKey="n" tick={{ fontSize: 11 }} />
-                                  <YAxis yAxisId="left" tick={{ fontSize: 11 }} />
-                                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} />
-                                  <Tooltip />
-                                  <Legend />
-                                  <Line yAxisId="left" type="monotone" dataKey="cozum" stroke="#059669" name="Çözülen soru" dot={false} />
-                                  <Line yAxisId="right" type="monotone" dataKey="basari" stroke="#9333ea" name="Başarı %" dot={false} />
-                                </LineChart>
-                              </ResponsiveContainer>
-                            </div>
-                          )}
-
-                          <div className="rounded-lg border border-gray-100 p-3 whitespace-pre-wrap text-sm bg-white">
-                            <p className="font-medium text-gray-800 mb-2">Öneriler (mat. model çıktısı)</p>
-                            {numericReport.recommendations}
-                          </div>
-
-                          {numericReport.narrative_summary && (
-                            <div className="rounded-lg border border-purple-100 p-3 bg-purple-50/40 text-sm">
-                              <p className="font-medium text-purple-900 mb-1">AI kısa yorum</p>
-                              <p className="text-gray-800 whitespace-pre-wrap">{numericReport.narrative_summary}</p>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {analysisHistoryRows.length > 0 && (
-                        <p className="text-xs text-gray-500 pt-2 border-t border-gray-100">
-                          Veritabanında bu öğrenci için {analysisHistoryRows.length} sayısal analiz kaydı var.
-                          {analysisHistoryRows[0]?.created_at
-                            ? ` Son: ${new Date(String(analysisHistoryRows[0].created_at)).toLocaleString('tr-TR')}.`
-                            : ''}
-                        </p>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Chat */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             {/* Chat Header */}
@@ -1137,13 +792,13 @@ ${studentTeacher ? `\n👨‍🏫 **Öğretmen Koç:** ${studentTeacher.name}` :
         </div>
       </div>
 
-      {/* API Bilgi Notu */}
+      {/* API Uyarısı */}
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
         <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
         <div>
-          <h4 className="font-semibold text-amber-800">Önemli: sayısal modeller yaklaşıktır</h4>
+          <h4 className="font-semibold text-amber-800">OpenAI API Entegrasyonu</h4>
           <p className="text-sm text-amber-700 mt-1">
-            Puan ve yüzdelik dilimler platform içi matematiksel model ile üretilir; ÖSYM sonuçlarının yerini tutmaz. OpenAI kullanılıyorsa yalnızca kısa serbest özet yazılır — netler sunucuda hesaplanır.
+            Bu sayfa şu anda simülasyon modunda çalışıyor. Gerçek AI analizi için Ayarlar sayfasından OpenAI API anahtarınızı girin.
           </p>
           <a
             href="/settings"

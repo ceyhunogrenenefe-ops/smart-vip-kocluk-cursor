@@ -1,5 +1,5 @@
 import { supabaseAdmin } from './supabase-admin.js';
-import { normalizePhoneToE164 } from './whatsapp-twilio.js';
+import { normalizePhoneToE164 } from './phone-whatsapp.js';
 
 export async function coachRowToPlatformUserId(coachId) {
   const { data: coach, error } = await supabaseAdmin.from('coaches').select('email').eq('id', coachId).maybeSingle();

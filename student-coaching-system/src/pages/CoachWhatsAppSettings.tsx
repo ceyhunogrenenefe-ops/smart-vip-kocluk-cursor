@@ -47,11 +47,13 @@ function resolveWhatsAppGatewayBase(): string {
 
 type GatewayStatus = 'idle' | 'connecting' | 'qr_ready' | 'connected' | 'logged_out' | 'reconnecting';
 
-interface TwilioServerStatus {
+interface MetaWhatsAppServerStatus {
   configured: boolean;
-  account_sid_suffix: string | null;
-  has_auth_token: boolean;
-  whatsapp_from_masked: string | null;
+  graph_api_version?: string;
+  phone_number_id_suffix?: string | null;
+  waba_id_suffix?: string | null;
+  has_token?: boolean;
+  hint?: string | null;
 }
 
 interface WaScheduleDTO {
@@ -81,8 +83,8 @@ export default function CoachWhatsAppSettings() {
   const gatewayUrl = resolveWhatsAppGatewayBase();
   const gatewayKey = (import.meta.env.VITE_WHATSAPP_GATEWAY_KEY || '').trim();
 
-  const [twilioStatus, setTwilioStatus] = useState<TwilioServerStatus | null>(null);
-  const [twilioLoading, setTwilioLoading] = useState(true);
+  const [metaWaStatus, setMetaWaStatus] = useState<MetaWhatsAppServerStatus | null>(null);
+  const [metaWaLoading, setMetaWaLoading] = useState(true);
 
   const [waScheduleLoading, setWaScheduleLoading] = useState(false);
   const [waScheduleSaving, setWaScheduleSaving] = useState(false);
@@ -112,27 +114,27 @@ export default function CoachWhatsAppSettings() {
   const canUseGateway = Boolean(gatewayUrl && coachId && hasServerJwt);
   const needsJwtForGateway = Boolean(gatewayUrl && coachId && !hasServerJwt);
 
-  const refreshTwilio = useCallback(async () => {
+  const refreshMetaWa = useCallback(async () => {
     if (!getAuthToken()) {
-      setTwilioLoading(false);
+      setMetaWaLoading(false);
       return;
     }
-    setTwilioLoading(true);
+    setMetaWaLoading(true);
     try {
-      const res = await apiFetch('/api/twilio');
-      const payload = (await res.json().catch(() => ({}))) as { data?: TwilioServerStatus };
-      if (res.ok && payload?.data) setTwilioStatus(payload.data);
-      else setTwilioStatus(null);
+      const res = await apiFetch('/api/meta/whatsapp');
+      const payload = (await res.json().catch(() => ({}))) as { data?: MetaWhatsAppServerStatus };
+      if (res.ok && payload?.data) setMetaWaStatus(payload.data);
+      else setMetaWaStatus(null);
     } catch {
-      setTwilioStatus(null);
+      setMetaWaStatus(null);
     } finally {
-      setTwilioLoading(false);
+      setMetaWaLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void refreshTwilio();
-  }, [refreshTwilio]);
+    void refreshMetaWa();
+  }, [refreshMetaWa]);
 
   const loadWaSchedule = useCallback(async () => {
     if (!getAuthToken()) {
@@ -209,7 +211,7 @@ export default function CoachWhatsAppSettings() {
       }
       if (payload.data) setWaDraft(payload.data);
       setRestartCampaignOnSave(false);
-      setWaScheduleMsg('Plan kaydedildi. Gönderimler Twilio ile sunucudan yapılır (öğrenci telefonları kayıtlı olmalı).');
+      setWaScheduleMsg('Plan kaydedildi. Gönderimler Meta WhatsApp (kurumsal hat) ile sunucudan yapılır (öğrenci telefonları kayıtlı olmalı).');
     } catch {
       setWaScheduleMsg('Kayıt başarısız.');
     } finally {
@@ -441,15 +443,15 @@ export default function CoachWhatsAppSettings() {
       if (isConnected && canUseGateway) {
         await sendGatewayMessage(target, message);
         setTemplateNotice('Mesaj bağlı WhatsApp oturumundan gönderildi.');
-      } else if (twilioStatus?.configured && hasServerJwt) {
+      } else if (metaWaStatus?.configured && hasServerJwt) {
         try {
-          const res = await apiFetch('/api/twilio', {
+          const res = await apiFetch('/api/meta/whatsapp', {
             method: 'POST',
             body: JSON.stringify({ to: target, message })
           });
           const payload = (await res.json().catch(() => ({}))) as { error?: string; hint?: string };
           if (res.ok) {
-            setTemplateNotice('Mesaj kurumsal hat (Twilio) üzerinden gönderildi.');
+            setTemplateNotice('Mesaj kurumsal hat (Meta WhatsApp) üzerinden gönderildi.');
           } else {
             const { opened, url } = openWaFallback(target, message);
             setTemplateWaUrl(url);
@@ -457,12 +459,12 @@ export default function CoachWhatsAppSettings() {
             if (payload?.error === 'forbidden' || res.status === 403) {
               setTemplateNotice(
                 opened
-                  ? `Twilio reddetti (403).${hintTail} wa.me yeni sekmede açıldı.`
-                  : `Twilio reddetti (403).${hintTail}\nBağlantı: ${url}`
+                  ? `Sunucu reddetti (403).${hintTail} wa.me yeni sekmede açıldı.`
+                  : `Sunucu reddetti (403).${hintTail}\nBağlantı: ${url}`
               );
             } else {
               setTemplateNotice(
-                `Twilio (${res.status}): ${payload?.error || res.statusText || 'bilinmeyen'}${hintTail} — wa.me ${opened ? 'açıldı' : `açılmadı\n${url}`}`
+                `Sunucu (${res.status}): ${payload?.error || res.statusText || 'bilinmeyen'}${hintTail} — wa.me ${opened ? 'açıldı' : `açılmadı\n${url}`}`
               );
             }
           }
@@ -471,8 +473,8 @@ export default function CoachWhatsAppSettings() {
           setTemplateWaUrl(url);
           setTemplateNotice(
             opened
-              ? 'Twilio’a ulaşılamadı; wa.me için yeni sekme açıldı.'
-              : `Twilio isteği atılamadı. Engel varsa bağlantıyı kopyalayın:\n${url}`
+              ? 'Kurumsal hatta ulaşılamadı; wa.me için yeni sekme açıldı.'
+              : `Kurumsal hat isteği atılamadı. Engel varsa bağlantıyı kopyalayın:\n${url}`
           );
         }
       } else {
@@ -514,18 +516,18 @@ export default function CoachWhatsAppSettings() {
       if (isConnected && canUseGateway) {
         await sendGatewayMessage(target, message);
         setStatusMessage('Test mesajı bağlı oturumdan gönderildi.');
-      } else if (twilioStatus?.configured && hasServerJwt) {
-        const res = await apiFetch('/api/twilio', {
+      } else if (metaWaStatus?.configured && hasServerJwt) {
+        const res = await apiFetch('/api/meta/whatsapp', {
           method: 'POST',
           body: JSON.stringify({ to: target, message })
         });
         const payload = (await res.json().catch(() => ({}))) as { error?: string; hint?: string };
         if (res.ok) {
-          setStatusMessage('Test mesajı Twilio (kurumsal hat) üzerinden gönderildi.');
+          setStatusMessage('Test mesajı Meta WhatsApp (kurumsal hat) üzerinden gönderildi.');
         } else {
           const { opened, url } = openWaFallback(target, message);
           setStatusMessage(
-            `Twilio (${res.status}): ${payload?.error || res.statusText || 'hata'}${payload?.hint ? ` — ${payload.hint}` : ''}. wa.me: ${opened ? 'sekme açıldı' : url}`
+            `Sunucu (${res.status}): ${payload?.error || res.statusText || 'hata'}${payload?.hint ? ` — ${payload.hint}` : ''}. wa.me: ${opened ? 'sekme açıldı' : url}`
           );
         }
       } else {
@@ -551,42 +553,42 @@ export default function CoachWhatsAppSettings() {
             <p className="text-sm font-medium uppercase tracking-wider text-emerald-200/90">Koç · Mesajlaşma</p>
             <h1 className="mt-1 text-2xl font-bold md:text-3xl">WhatsApp merkezi</h1>
             <p className="mt-2 max-w-xl text-sm text-emerald-100/95">
-              <strong className="text-white">Twilio</strong> ile kurumsal otomatik mesajlar sunucudan gider; isteğe bağlı{' '}
+              <strong className="text-white">Meta WhatsApp</strong> ile kurumsal otomatik mesajlar sunucudan gider; isteğe bağlı{' '}
               <strong className="text-white">QR gateway</strong> ile kendi WhatsApp hattınızdan anlık mesaj atabilirsiniz.
               İkisi birbirini tamamlar.
             </p>
           </div>
           <button
             type="button"
-            onClick={() => void refreshTwilio()}
+            onClick={() => void refreshMetaWa()}
             className="shrink-0 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium backdrop-blur hover:bg-white/20"
           >
-            Twilio durumunu yenile
+            Meta durumunu yenile
           </button>
         </div>
       </div>
 
-      {/* 1 — Kurumsal Twilio */}
+      {/* 1 — Kurumsal Meta WhatsApp */}
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-wrap items-center gap-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-emerald-50/40 px-6 py-4">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-md">
             <Building2 className="h-6 w-6" />
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-semibold text-slate-900">Kurumsal WhatsApp (Twilio)</h2>
+            <h2 className="text-lg font-semibold text-slate-900">Kurumsal WhatsApp (Meta)</h2>
             <p className="text-sm text-slate-600">
-              Kurumsal hat açıksa aşağıdaki hızlı şablonlar ve test mesajı <strong>Twilio</strong> üzerinden sunucudan gider
+              Kurumsal hat açıksa aşağıdaki hızlı şablonlar ve test mesajı <strong>Meta Cloud API</strong> üzerinden sunucudan gider
               (JWT ile oturum gerekli). Anahtarlar Vercel&apos;de tanımlıdır; koç olarak gönderim yapabilirsiniz.
             </p>
           </div>
         </div>
         <div className="p-6">
-          {twilioLoading ? (
+          {metaWaLoading ? (
             <p className="flex items-center gap-2 text-slate-600">
               <Loader2 className="h-5 w-5 animate-spin text-emerald-600" />
-              Twilio yapılandırması kontrol ediliyor…
+              Meta yapılandırması kontrol ediliyor…
             </p>
-          ) : twilioStatus?.configured ? (
+          ) : metaWaStatus?.configured ? (
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div className="flex items-start gap-3">
                 <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-900">
@@ -597,36 +599,39 @@ export default function CoachWhatsAppSettings() {
                     <Zap className="h-4 w-4 shrink-0 text-amber-500" />
                     Planlı görüşme ve sistem mesajları WhatsApp ile iletilebilir.
                   </li>
-                  {twilioStatus.account_sid_suffix && (
-                    <li className="text-slate-500">Hesap (sonu): …{twilioStatus.account_sid_suffix}</li>
+                  {metaWaStatus.graph_api_version && (
+                    <li className="text-slate-500">Graph API: {metaWaStatus.graph_api_version}</li>
                   )}
-                  {twilioStatus.whatsapp_from_masked && (
-                    <li>Gönderen (maskeli): {twilioStatus.whatsapp_from_masked}</li>
+                  {metaWaStatus.phone_number_id_suffix && (
+                    <li className="text-slate-500">Telefon kimliği (sonu): …{metaWaStatus.phone_number_id_suffix}</li>
+                  )}
+                  {metaWaStatus.waba_id_suffix && (
+                    <li className="text-slate-500">WABA (sonu): …{metaWaStatus.waba_id_suffix}</li>
                   )}
                 </ul>
               </div>
             </div>
           ) : (
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-              <p className="font-medium">Twilio henüz tam yapılandırılmamış veya okunamadı.</p>
+              <p className="font-medium">Meta WhatsApp henüz tam yapılandırılmamış veya okunamadı.</p>
               <p className="mt-1 text-amber-900/90">
-                Yöneticinizin Vercel&apos;de <code className="rounded bg-amber-100 px-1 text-xs">TWILIO_*</code>{' '}
-                değişkenlerini kaydetmesi gerekir. Bu koşul sağlanana kadar otomatik kurumsal WhatsApp gönderilemez;
-                aşağıdaki kişisel gateway veya wa.me yedeğini kullanabilirsiniz.
+                Yöneticinizin Vercel&apos;de <code className="rounded bg-amber-100 px-1 text-xs">META_WHATSAPP_TOKEN</code>,{' '}
+                <code className="rounded bg-amber-100 px-1 text-xs">META_PHONE_NUMBER_ID</code> değişkenlerini kaydetmesi gerekir.
+                Bu koşul sağlanana kadar otomatik kurumsal WhatsApp gönderilemez; aşağıdaki kişisel gateway veya wa.me yedeğini kullanabilirsiniz.
             </p>
             </div>
           )}
         </div>
       </section>
 
-      {/* Otomatik Twilio zamanlayıcı */}
+      {/* Otomatik Meta zamanlayıcı */}
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-wrap items-center gap-4 border-b border-slate-100 bg-gradient-to-r from-emerald-50 to-teal-50/60 px-6 py-4">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-teal-600 text-white shadow-md">
             <Clock className="h-6 w-6" />
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-semibold text-slate-900">Otomatik mesaj (Twilio)</h2>
+            <h2 className="text-lg font-semibold text-slate-900">Otomatik mesaj (Meta şablon)</h2>
             <p className="text-sm text-slate-600">
               Tüm öğrencilerinize aynı şablonla, seçtiğiniz İstanbul saatinde ve <strong>her N günde bir</strong> gönderilir.
               Kampanya süresi (gün) dolduğunda durur; boş bırakırsanız süresiz çalışır. Sunucuda{' '}
@@ -655,9 +660,9 @@ export default function CoachWhatsAppSettings() {
               Otomatik WhatsApp zamanlayıcısı bu yüzden sunucuda reddedilir. Yöneticiniz e-postayı coaches tablosuyla eşleştirmeli.
             </div>
           )}
-          {!twilioLoading && !twilioStatus?.configured && (
+          {!metaWaLoading && !metaWaStatus?.configured && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-              Twilio yapılandırılmadan otomatik mesaj gönderilemez; ayarları yine de kaydedebilirsiniz.
+              Meta şablonu ve ortam yapılandırılmadan otomatik mesaj gönderilemez; ayarları yine de kaydedebilirsiniz.
             </div>
           )}
           {waScheduleLoading ? (

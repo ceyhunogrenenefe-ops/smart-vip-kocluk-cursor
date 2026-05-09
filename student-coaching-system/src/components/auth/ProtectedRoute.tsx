@@ -2,6 +2,7 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { userHasAnyRole } from '../../config/rolePermissions';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -18,7 +19,7 @@ export default function ProtectedRoute({ children, allowedRoles }: ProtectedRout
   }
 
   // Rol kontrolü
-  if (allowedRoles && !allowedRoles.includes(effectiveUser.role)) {
+  if (allowedRoles && !userHasAnyRole(effectiveUser, allowedRoles)) {
     // Yetkisiz erişim - ana sayfaya yönlendir
     return <Navigate to="/" replace />;
   }

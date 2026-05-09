@@ -95,6 +95,7 @@ export interface Student {
   email: string;
   password?: string; // Şifre (kullanıcı girişi için)
   phone: string;
+  birthDate?: string;
   parentPhone: string;
   classLevel: ClassLevel;
   school?: string;

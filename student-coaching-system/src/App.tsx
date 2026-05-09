@@ -10,6 +10,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Students from './pages/Students';
+import Teachers from './pages/Teachers';
 import Coaches from './pages/Coaches';
 import Tracking from './pages/Tracking';
 import Topics from './pages/Topics';
@@ -38,26 +39,29 @@ import CoachWhatsAppSettings from './pages/CoachWhatsAppSettings';
 import MessageTemplates from './pages/MessageTemplates';
 import Meetings from './pages/Meetings';
 import LiveLessons from './pages/LiveLessons';
-import { rolesForProtectedRoute } from './config/rolePermissions';
+import ClassLiveLessons from './pages/ClassLiveLessons';
+import TeacherPanel from './pages/TeacherPanel';
+import { rolesForProtectedRoute, userRoleTags } from './config/rolePermissions';
 
 // Yönlendirme bileşeni
 function HomeRedirect() {
   const { effectiveUser } = useAuth();
 
   if (!effectiveUser) return <Navigate to="/login" replace />;
+  const tags = userRoleTags(effectiveUser);
 
-  switch (effectiveUser.role) {
-    case 'super_admin':
-    case 'admin':
-    case 'teacher':
-      return <Navigate to="/dashboard" replace />;
-    case 'coach':
-      return <Navigate to="/coach-dashboard" replace />;
-    case 'student':
-      return <Navigate to="/student-dashboard" replace />;
-    default:
-      return <Navigate to="/login" replace />;
+  if (tags.includes('super_admin') || tags.includes('admin')) {
+    return <Navigate to="/dashboard" replace />;
   }
+  /** Yalnız öğretmen (koç değil) → klasik ana panel */
+  if (tags.includes('teacher') && !tags.includes('coach')) {
+    return <Navigate to="/dashboard" replace />;
+  }
+  /** Koç (aynı anda öğretmen olsa da) varsayılan giriş: koç paneli */
+  if (tags.includes('coach')) return <Navigate to="/coach-dashboard" replace />;
+  if (tags.includes('student')) return <Navigate to="/student-dashboard" replace />;
+
+  return <Navigate to="/login" replace />;
 }
 
 function App() {
@@ -93,6 +97,13 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/students')}>
                 <Layout>
                   <Students />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            <Route path="/teachers" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/teachers')}>
+                <Layout>
+                  <Teachers />
                 </Layout>
               </ProtectedRoute>
             } />
@@ -217,7 +228,11 @@ function App() {
 
             {/* Abonelik/Ödeme Sayfası */}
             <Route path="/subscription" element={
-              <Subscription />
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/subscription')}>
+                <Layout>
+                  <Subscription />
+                </Layout>
+              </ProtectedRoute>
             } />
 
             <Route path="/system-management" element={
@@ -300,6 +315,30 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/live-lessons')}>
                 <Layout>
                   <LiveLessons />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/teacher-panel" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/teacher-panel')}>
+                <Layout>
+                  <TeacherPanel />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/class-live-lessons" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/class-live-lessons')}>
+                <Layout>
+                  <ClassLiveLessons />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/class-schedule" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/class-schedule')}>
+                <Layout>
+                  <ClassLiveLessons />
                 </Layout>
               </ProtectedRoute>
             } />

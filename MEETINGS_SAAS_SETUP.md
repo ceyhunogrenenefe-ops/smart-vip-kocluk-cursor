@@ -1,6 +1,6 @@
 # Online Coaching Meeting System — kurulum
 
-Bu belge, projeye eklenen **Google Meet (Calendar API)** + **Supabase** + **Vercel serverless** + **Twilio WhatsApp** görüşme modülünü canlıya almak için özet adımları içerir.
+Bu belge, projeye eklenen **Google Meet (Calendar API)** + **Supabase** + **Vercel serverless** + **Meta WhatsApp Cloud API** görüşme modülünü canlıya almak için özet adımları içerir.
 
 ## 1) Supabase SQL
 
@@ -41,9 +41,10 @@ Koçun platformdaki kullanıcı e-postası ile `coaches.email` **aynı** olmalı
 | `INTEGRATIONS_GOOGLE_NO_USER_FK` | Vercel | Opsiyonel `1`: SQL ile `integrations_google_user_id_fkey` kaldırıldıktan sonra demo JWT veya users’ta olmayan `sub` ile Google bağlantısı denemelerinde sunucunun users kontrolünü atlar. **Üretimde çoğu kurulumda boş bırakın** (FK + gerçek kullanıcı). |
 | `FRONTEND_APP_URL` | Vercel | Örn. `https://app.example.com` — OAuth sonrası yönlendirme. Yerelde `http://localhost:5173` veya hangi port ise. |
 | `MEETING_TOKEN_ENCRYPTION_KEY` | Vercel | **Önerilir:** uzun güçlü parola ya da hex 64+ üzerinden türetilen anahtar; Google refresh/access belirtecini DB’de şifler. Yoksa uyarıyla düz metin saklanır. |
-| `TWILIO_ACCOUNT_SID` | Vercel | Twilio konsolundan |
-| `TWILIO_AUTH_TOKEN` | Vercel | Twilio konsolundan |
-| `TWILIO_WHATSAPP_FROM` | Vercel | Örn. `whatsapp:+14155238886` (sandbox) veya onaylı üretim numarası. |
+| `META_WHATSAPP_TOKEN` | Vercel | Meta Graph kalıcı erişim belirteci |
+| `META_PHONE_NUMBER_ID` | Vercel | WhatsApp Cloud API telefon numarası kimliği |
+| `META_WABA_ID` | Vercel | Şablon senkronu için WhatsApp Business Account kimliği |
+| `META_GRAPH_API_VERSION` | Vercel | Opsiyonel; varsayılan `v21.0` |
 | `MEETING_CRON_SECRET` | Vercel | Cron endpoint’inin `Authorization: Bearer <aynı sırr>` ile tetiklanması için; projede doğrulanır (Vercel ek başlığı varsa bazı doğrulamalar gevşekleşmez). Cron isteği Vercel’den geldiğinde `x-vercel-cron` doğrulanır. |
 
 Tarayıcı (Vite) için mevcut gibi:
@@ -64,8 +65,8 @@ Tarayıcı (Vite) için mevcut gibi:
 
 Not: Bu uçların birleştirilmesinin nedeni Vercel Hobby’daki **en fazla 12 serverless fonksiyon** sınırıdır.
 | GET/POST | `/api/cron/meeting-reminders` | Yaklaşan görüşmeler için 10 dk WhatsApp (+ başarısız kayıtlar için sınırlı yeniden deneme). |
-| GET | `/api/twilio` | (super_admin / admin) Twilio ortamı özet — sırlar döndürülmez. |
-| POST | `/api/twilio` | (aynı roller) Test WhatsApp — body `{ "to": "90555...", "message": "..." }`; yalnızca Vercel `TWILIO_*` kullanır. |
+| GET | `/api/meta/whatsapp` | (super_admin / admin / koç / öğretmen) Meta ortamı özet — sırlar döndürülmez. |
+| POST | `/api/meta/whatsapp` | Serbest metin test — body `{ "to": "90555...", "message": "..." }`; `META_WHATSAPP_TOKEN` + `META_PHONE_NUMBER_ID` gerekir. |
 | GET/POST | `/api/cron/daily-tracking-reminders` | Günlük takipte bugün için çözülen soru toplamı 0 olan öğrencilere WhatsApp (İstanbul saati + env). |
 
 ### Günlük soru hatırlatması (cron)
