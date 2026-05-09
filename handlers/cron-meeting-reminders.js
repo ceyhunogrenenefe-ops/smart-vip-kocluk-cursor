@@ -2,6 +2,7 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { getStudentPhones } from '../api/_lib/meetings-resolve.js';
 import { deliverWhatsAppWithLog } from '../api/_lib/meeting-notify.js';
 import { metaWhatsAppConfigured } from '../api/_lib/meta-whatsapp.js';
+import { recordCronRun } from '../api/_lib/cron-run-log.js';
 
 const MAX_REMINDER_ATTEMPTS = 5;
 
@@ -123,9 +124,28 @@ export default async function handler(req, res) {
       } catch {}
     }
 
+    let sentOk = 0;
+    let failed = 0;
+    for (const row of log) {
+      const w = row.whatsapp ?? row.r;
+      if (w && typeof w === 'object') {
+        if (w.ok && !w.skipped) sentOk += 1;
+        else failed += 1;
+      } else if (row.error || row.retry) {
+        failed += 1;
+      }
+    }
+    await recordCronRun({
+      jobKey: 'meeting_reminders',
+      ok: true,
+      messagesSent: sentOk,
+      messagesFailed: failed,
+      detail: { entries: log.length }
+    });
     return res.status(200).json({ ok: true, processed: log.length, log });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    await recordCronRun({ jobKey: 'meeting_reminders', ok: false, detail: { error: msg } });
     return res.status(500).json({ ok: false, error: msg, log });
   }
 }

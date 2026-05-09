@@ -7,6 +7,7 @@ import { metaWhatsAppConfigured } from '../api/_lib/meta-whatsapp.js';
 import { sendAutomatedWhatsApp } from '../api/_lib/whatsapp-outbound.js';
 import { getStudentPhones, classifyLessonReminderRecipients } from '../api/_lib/meetings-resolve.js';
 import { alreadySentLessonReminder } from '../api/_lib/message-log.js';
+import { recordCronRun } from '../api/_lib/cron-run-log.js';
 
 /** Ders başlangıcına kalan süre: (0, 10] dakika (10 dk veya daha az) */
 const MAX_LEAD_MS = 10 * 60 * 1000;
@@ -28,6 +29,7 @@ export default async function handler(req, res) {
   try {
     const { data: lrRow } = await supabaseAdmin.from('message_templates').select('type').eq('type', 'lesson_reminder').maybeSingle();
     if (!lrRow) {
+      await recordCronRun({ jobKey: 'lesson_reminders', ok: true, skipped: 'no_lesson_reminder_template' });
       return res.status(200).json({ ok: true, skipped: 'no_lesson_reminder_template', log });
     }
     const { data: lrParentRow } = await supabaseAdmin
@@ -172,9 +174,19 @@ export default async function handler(req, res) {
       }
     }
 
+    const sent = log.filter((x) => x && x.ok === true).length;
+    const failed = log.filter((x) => x && x.error).length;
+    await recordCronRun({
+      jobKey: 'lesson_reminders',
+      ok: true,
+      messagesSent: sent,
+      messagesFailed: failed,
+      detail: { meta_ready: metaReady, entries: log.length }
+    });
     return res.status(200).json({ ok: true, processed: log.length, log });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    await recordCronRun({ jobKey: 'lesson_reminders', ok: false, detail: { error: msg } });
     return res.status(500).json({
       ok: false,
       error: msg,

@@ -5,14 +5,15 @@ import { renderMessageTemplate } from '../api/_lib/template-engine.js';
 import { sendAutomatedWhatsApp } from '../api/_lib/whatsapp-outbound.js';
 import { metaWhatsAppConfigured } from '../api/_lib/meta-whatsapp.js';
 import { getStudentPhoneForReport } from '../api/_lib/meetings-resolve.js';
+import { recordCronRun } from '../api/_lib/cron-run-log.js';
 
 /**
  * Rapor = bugün (İstanbul) `weekly_entries` satırı olan öğrenci (dolduranlar hariç).
  *
  * Zaman sözleşmesi: `api/_lib/vercel-cron-contract.js` → `CRON_DAILY_REPORT_REMINDERS_UTC` (vercel.json ile aynı string).
- * Vercel tetiklemesi UTC’tir; üretimde İstanbul 22:00 için cron **19:00 UTC** olmalıdır.
+ * Vercel tetiklemesi UTC’tir; üretimde İstanbul 23:00 için cron **20:00 UTC** olmalıdır.
  *
- * `auth.source === 'vercel'`: yalnızca İstanbul saati 22 iken gönder (yanlış cron saatinden koruma).
+ * `auth.source === 'vercel'`: yalnızca İstanbul saati 23 iken gönder (yanlış cron saatinden koruma).
  * Bearer ile manuel tetikleme: her saat mümkün (saat filtresi atlanır — geliştirici/test).
  */
 export default async function handler(req, res) {
@@ -28,16 +29,23 @@ export default async function handler(req, res) {
   const today = getIstanbulDateString();
   const hourIst = getIstanbulHour();
 
-  if (auth.source === 'vercel' && hourIst !== 22) {
+  if (auth.source === 'vercel' && hourIst !== 23) {
+    await recordCronRun({
+      jobKey: 'daily_report_reminder',
+      ok: true,
+      skipped: 'report_reminder_only_istanbul_hour_23',
+      detail: { istanbul_hour: hourIst }
+    });
     return res.status(200).json({
       ok: true,
-      skipped: 'report_reminder_only_istanbul_hour_22',
+      skipped: 'report_reminder_only_istanbul_hour_23',
       istanbul_hour: hourIst,
       log
     });
   }
 
   if (!metaReady) {
+    await recordCronRun({ jobKey: 'daily_report_reminder', ok: true, skipped: 'missing_meta_whatsapp_env' });
     return res.status(200).json({ ok: true, skipped: 'missing_meta_whatsapp_env', log: [] });
   }
 
@@ -49,6 +57,7 @@ export default async function handler(req, res) {
       .maybeSingle();
     if (tErr) throw tErr;
     if (!template?.content) {
+      await recordCronRun({ jobKey: 'daily_report_reminder', ok: true, skipped: 'no_report_reminder_template' });
       return res.status(200).json({ ok: true, skipped: 'no_report_reminder_template', log });
     }
 
@@ -142,9 +151,19 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({ ok: true, processed: log.filter((x) => x.ok).length, log });
+    const sent = log.filter((x) => x && x.ok === true).length;
+    const failed = log.filter((x) => x && x.error).length;
+    await recordCronRun({
+      jobKey: 'daily_report_reminder',
+      ok: true,
+      messagesSent: sent,
+      messagesFailed: failed,
+      detail: { processed: log.length }
+    });
+    return res.status(200).json({ ok: true, processed: sent, log });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    await recordCronRun({ jobKey: 'daily_report_reminder', ok: false, detail: { error: msg } });
     return res.status(500).json({
       ok: false,
       error: msg,
