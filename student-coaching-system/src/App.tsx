@@ -41,6 +41,7 @@ import Meetings from './pages/Meetings';
 import LiveLessons from './pages/LiveLessons';
 import ClassLiveLessons from './pages/ClassLiveLessons';
 import TeacherPanel from './pages/TeacherPanel';
+import WeeklyPlannerPage from './pages/WeeklyPlannerPage';
 import { rolesForProtectedRoute, userRoleTags } from './config/rolePermissions';
 
 // Yönlendirme bileşeni
@@ -204,6 +205,14 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/tracking')}>
                 <Layout>
                   <Tracking />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/weekly-planner" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/weekly-planner')}>
+                <Layout>
+                  <WeeklyPlannerPage />
                 </Layout>
               </ProtectedRoute>
             } />

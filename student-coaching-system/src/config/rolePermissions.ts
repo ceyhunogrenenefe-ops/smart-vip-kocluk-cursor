@@ -31,6 +31,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/webhooks': ['super_admin', 'admin', 'coach'],
   '/settings': ['admin', 'teacher'],
   '/tracking': ['admin', 'coach'],
+  '/weekly-planner': ['super_admin', 'admin', 'coach', 'student'],
   '/super-admin': ['super_admin', 'admin'],
   '/user-management': ['super_admin', 'admin', 'teacher'],
   '/subscription': ['super_admin', 'admin'],

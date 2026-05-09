@@ -17,6 +17,7 @@ import {
   Zap
 } from 'lucide-react';
 import { apiFetch, getAuthToken } from '../lib/session';
+import WhatsAppMerkeziPanel from '../components/whatsapp/WhatsAppMerkeziPanel';
 
 const formatPhone = (value: string) => value.replace(/\D/g, '');
 
@@ -567,6 +568,8 @@ export default function CoachWhatsAppSettings() {
           </button>
         </div>
       </div>
+
+      <WhatsAppMerkeziPanel />
 
       {/* 1 — Kurumsal Meta WhatsApp */}
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">

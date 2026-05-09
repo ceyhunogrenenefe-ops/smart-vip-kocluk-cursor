@@ -59,6 +59,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     if (tags.includes('super_admin')) {
       return [
         { path: '/dashboard', icon: LayoutDashboard, label: 'Ana Panel' },
+        { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
         { path: '/live-lessons', icon: Radio, label: 'Canlı özel dersler' },
         { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
         { path: '/super-admin', icon: Server, label: 'Kurum Yönetimi' },
@@ -75,6 +76,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     if (isStudentOnlyNav) {
       return [
         { path: '/student-dashboard', icon: LayoutDashboard, label: 'Öğrenci Paneli' },
+        { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
         { path: '/class-schedule', icon: Calendar, label: 'Canlı derslerim' },
         { path: '/student-meetings', icon: Video, label: 'Görüşmelerim' },
         { path: '/student-reports', icon: BookMarked, label: 'Benim Raporlarım' },
@@ -90,6 +92,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
       { path: '/teachers', icon: GraduationCap, label: 'Öğretmenler' },
       { path: '/coaches', icon: Users, label: 'Eğitim Koçları' },
       { path: '/tracking', icon: Calendar, label: 'Haftalık Takip' },
+      { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
       { path: '/book-tracking', icon: BookMarked, label: 'Kitap Takibi' },
       { path: '/exam-tracking', icon: ClipboardList, label: 'Sınav Takibi (Denemelerim)' },
       { path: '/reports', icon: FileCheck, label: 'Raporlar' },
@@ -126,6 +129,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
       { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
       { path: '/teachers', icon: GraduationCap, label: 'Öğretmenler' },
       { path: '/tracking', icon: Calendar, label: 'Haftalık Takip' },
+      { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
       { path: '/book-tracking', icon: BookMarked, label: 'Kitap Takibi' },
       { path: '/exam-tracking', icon: ClipboardList, label: 'Sınav Takibi (Denemelerim)' },
       { path: '/topic-tracking', icon: CheckSquare, label: 'Konu Takibi' },
