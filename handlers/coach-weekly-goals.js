@@ -35,6 +35,14 @@ function clampGoalDatesToWeek(weekStart, goalStartRaw, goalEndRaw) {
   return { goalStart: gs, goalEnd: ge };
 }
 
+/** İki YYYY-MM-DD arasındaki tam gün farkı (İstanbul öğlen) */
+function ymdCalendarDayDiff(fromYmd, toYmd) {
+  const a = new Date(`${normalizeWeekStart(fromYmd)}T12:00:00+03:00`).getTime();
+  const b = new Date(`${normalizeWeekStart(toYmd)}T12:00:00+03:00`).getTime();
+  if (Number.isNaN(a) || Number.isNaN(b)) return 0;
+  return Math.round((b - a) / 86400000);
+}
+
 const fetchStudentMinimal = async (studentId) => {
   const { data, error } = await supabaseAdmin
     .from('students')
@@ -180,9 +188,27 @@ export default async function handler(req, res) {
       delete patch.id;
       delete patch.student_id;
       delete patch.created_at;
+      delete patch.weekStartDate;
 
       const ws = normalizeWeekStart(existing.week_start_date);
-      if (ws && (patch.goal_start_date != null || patch.goal_end_date != null)) {
+      const newWsRequested =
+        patch.week_start_date != null ? normalizeWeekStart(patch.week_start_date) : null;
+
+      let plannerShiftDays = 0;
+
+      if (newWsRequested && ws && newWsRequested !== ws) {
+        plannerShiftDays = ymdCalendarDayDiff(ws, newWsRequested);
+        const d = plannerShiftDays;
+        let gs = normalizeWeekStart(existing.goal_start_date) || ws;
+        let ge = normalizeWeekStart(existing.goal_end_date);
+        if (!ge) ge = ymdMin(addCalendarDaysYmd(gs, 6), addCalendarDaysYmd(ws, 6));
+        gs = addCalendarDaysYmd(gs, d);
+        ge = addCalendarDaysYmd(ge, d);
+        patch.week_start_date = newWsRequested;
+        const c = clampGoalDatesToWeek(newWsRequested, gs, ge);
+        patch.goal_start_date = c.goalStart;
+        patch.goal_end_date = c.goalEnd;
+      } else if (ws && (patch.goal_start_date != null || patch.goal_end_date != null)) {
         const nextGs =
           patch.goal_start_date != null
             ? patch.goal_start_date
@@ -201,6 +227,28 @@ export default async function handler(req, res) {
         .select()
         .single();
       if (error) throw error;
+
+      if (plannerShiftDays !== 0) {
+        const oldWeekEnd = addCalendarDaysYmd(ws, 6);
+        const { data: planRows, error: peErr } = await supabaseAdmin
+          .from('weekly_planner_entries')
+          .select('id,planner_date')
+          .eq('student_id', existing.student_id)
+          .eq('coach_goal_id', id)
+          .gte('planner_date', ws)
+          .lte('planner_date', oldWeekEnd);
+        if (!peErr && Array.isArray(planRows) && planRows.length) {
+          const nowIso = new Date().toISOString();
+          for (const row of planRows) {
+            const nd = addCalendarDaysYmd(row.planner_date, plannerShiftDays);
+            await supabaseAdmin
+              .from('weekly_planner_entries')
+              .update({ planner_date: nd, updated_at: nowIso })
+              .eq('id', row.id);
+          }
+        }
+      }
+
       return res.status(200).json({ data });
     }
 

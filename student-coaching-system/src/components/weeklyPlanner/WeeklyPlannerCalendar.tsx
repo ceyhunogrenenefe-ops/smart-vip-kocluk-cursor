@@ -34,6 +34,7 @@ import {
 } from '../../lib/weeklyPlannerApi';
 import { WeeklyPlannerStudyModal } from './WeeklyPlannerStudyModal';
 import { subjectPlannerStyle } from './subjectPlannerStyle';
+import { cn } from '../../lib/utils';
 
 export { subjectPlannerStyle };
 
@@ -125,6 +126,8 @@ export function WeeklyPlannerCalendar({
   const [goalDateEditStart, setGoalDateEditStart] = useState('');
   const [goalDateEditEnd, setGoalDateEditEnd] = useState('');
   const [goalDateSaving, setGoalDateSaving] = useState(false);
+  /** Hedef kartını önceki/sonraki hafta şeridine sürüklerken vurgu */
+  const [weekDropHighlight, setWeekDropHighlight] = useState<-1 | 0 | 1>(0);
 
   const reload = useCallback(async () => {
     if (!studentId) return;
@@ -463,6 +466,55 @@ export function WeeklyPlannerCalendar({
     }
   };
 
+  const shiftWeekStartStr = useCallback((ws: string, deltaWeeks: number) => {
+    return format(addDays(parseISO(ws), 7 * deltaWeeks), 'yyyy-MM-dd');
+  }, []);
+
+  const moveGoalToAdjacentWeek = useCallback(
+    async (goalId: string, deltaWeeks: -1 | 1) => {
+      if (!canManageGoals) return;
+      const newWs = shiftWeekStartStr(weekStartStr, deltaWeeks);
+      try {
+        await patchCoachWeeklyGoal(goalId, { week_start_date: newWs });
+        setAnchor(parseISO(`${newWs}T12:00:00`));
+        // reload, güncellenmiş weekStartStr ile useEffect içinde tetiklenir
+      } catch (e) {
+        alert(e instanceof Error ? e.message : 'Hedef haftaya taşınamadı');
+      }
+    },
+    [canManageGoals, weekStartStr, shiftWeekStartStr]
+  );
+
+  const onWeekGoalDragOver = useCallback(
+    (e: React.DragEvent, zone: -1 | 1) => {
+      if (!canManageGoals) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      setWeekDropHighlight(zone);
+    },
+    [canManageGoals]
+  );
+
+  const onWeekGoalDragLeave = useCallback((e: React.DragEvent) => {
+    const rel = e.relatedTarget as Node | null;
+    if (rel && e.currentTarget.contains(rel)) return;
+    setWeekDropHighlight(0);
+  }, []);
+
+  const onWeekGoalDrop = useCallback(
+    async (e: React.DragEvent, delta: -1 | 1) => {
+      e.preventDefault();
+      setWeekDropHighlight(0);
+      if (!canManageGoals) return;
+      const raw = e.dataTransfer.getData('text/plain');
+      if (!raw.startsWith('goal:')) return;
+      const gid = raw.slice('goal:'.length).trim();
+      if (!gid) return;
+      await moveGoalToAdjacentWeek(gid, delta);
+    },
+    [canManageGoals, moveGoalToAdjacentWeek]
+  );
+
   const cellEntries = (date: string, hour: number) =>
     entries.filter((e) => e.planner_date === date && hourFromTime(e.start_time) === hour);
 
@@ -489,28 +541,64 @@ export function WeeklyPlannerCalendar({
             {format(parseISO(weekEndStr), 'd MMMM yyyy', { locale: tr })}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setAnchor((a) => addDays(a, -7))}
-            className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50"
-          >
-            <ChevronLeft className="w-5 h-5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setAnchor(new Date())}
-            className="px-3 py-2 text-sm rounded-lg border border-slate-200 hover:bg-slate-50"
-          >
-            Bu hafta
-          </button>
-          <button
-            type="button"
-            onClick={() => setAnchor((a) => addDays(a, 7))}
-            className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50"
-          >
-            <ChevronRight className="w-5 h-5" />
-          </button>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {canManageGoals ? (
+            <div
+              role="region"
+              aria-label="Hedefi önceki haftaya taşı"
+              onDragOver={(e) => onWeekGoalDragOver(e, -1)}
+              onDragLeave={onWeekGoalDragLeave}
+              onDrop={(e) => void onWeekGoalDrop(e, -1)}
+              className={cn(
+                'flex min-h-[40px] min-w-[7.5rem] select-none items-center justify-center rounded-lg border border-dashed px-2 py-1.5 text-center text-[10px] font-semibold leading-tight transition-colors sm:min-w-[8.5rem] sm:text-[11px]',
+                weekDropHighlight === -1
+                  ? 'border-amber-500 bg-amber-100 text-amber-950 shadow-inner'
+                  : 'border-slate-200 text-slate-500 hover:border-amber-300 hover:bg-amber-50/60'
+              )}
+            >
+              ← Önceki haftaya bırak
+            </div>
+          ) : null}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setAnchor((a) => addDays(a, -7))}
+              className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setAnchor(new Date())}
+              className="px-3 py-2 text-sm rounded-lg border border-slate-200 hover:bg-slate-50"
+            >
+              Bu hafta
+            </button>
+            <button
+              type="button"
+              onClick={() => setAnchor((a) => addDays(a, 7))}
+              className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50"
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          </div>
+          {canManageGoals ? (
+            <div
+              role="region"
+              aria-label="Hedefi sonraki haftaya taşı"
+              onDragOver={(e) => onWeekGoalDragOver(e, 1)}
+              onDragLeave={onWeekGoalDragLeave}
+              onDrop={(e) => void onWeekGoalDrop(e, 1)}
+              className={cn(
+                'flex min-h-[40px] min-w-[7.5rem] select-none items-center justify-center rounded-lg border border-dashed px-2 py-1.5 text-center text-[10px] font-semibold leading-tight transition-colors sm:min-w-[8.5rem] sm:text-[11px]',
+                weekDropHighlight === 1
+                  ? 'border-amber-500 bg-amber-100 text-amber-950 shadow-inner'
+                  : 'border-slate-200 text-slate-500 hover:border-amber-300 hover:bg-amber-50/60'
+              )}
+            >
+              Sonraki haftaya bırak →
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -762,8 +850,9 @@ export function WeeklyPlannerCalendar({
           <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm p-4 shadow-sm">
             <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-1">Koç hedefleri</h4>
             <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3">
-              Kartı takvim hücresine sürükleyerek plana yerleştirin · Tarih aralığını karttaki kalemle
-              değiştirin (bu hafta içinde kalır) · İsterseniz kalan kotayı günlere bölün
+              Kartı takvim hücresine sürükleyerek plana yerleştirin · Üstteki &quot;Önceki / Sonraki haftaya
+              bırak&quot; alanına bırakarak hedefi (ve bu hedefe bağlı plan bloklarını) o haftaya taşıyın ·
+              Tarih aralığını karttaki kalemle düzenleyin · Kalan kotayı günlere bölebilirsiniz
             </p>
             {goalAggregates.length === 0 ? (
               <p className="text-xs text-slate-500">

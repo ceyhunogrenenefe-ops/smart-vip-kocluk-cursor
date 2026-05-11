@@ -87,6 +87,8 @@ export async function patchCoachWeeklyGoal(
     quantity_unit: string;
     goal_start_date: string;
     goal_end_date: string;
+    /** Pazartesi hafta başı — değişince hedef tarihleri ve plan blokları aynı gün kaymasıyla taşınır */
+    week_start_date: string;
   }>
 ): Promise<CoachWeeklyGoalRow> {
   const res = await apiFetch(`/api/coach-weekly-goals?id=${encodeURIComponent(id)}`, {
