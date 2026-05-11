@@ -17,6 +17,8 @@ export function suggestHoursAndFeeFromSinif(sinifRaw: string): { hours: number; 
   return { hours: 6, fee: 25000 };
 }
 
+export type SozlesmeTuruKey = 'kullanici_sozlesmesi' | 'satis_sozlesmesi' | 'diger';
+
 export interface ParentSignClassPresetRow {
   id: string;
   institution_id: string;
@@ -25,6 +27,9 @@ export interface ParentSignClassPresetRow {
   haftalik_ders_saati: number;
   ucret: number;
   taksit_sayisi: number;
+  sozlesme_turu?: SozlesmeTuruKey | string;
+  sozlesme_ozel_baslik?: string;
+  sablon_ek_detay?: string;
   created_at: string;
   updated_at: string;
 }
@@ -60,6 +65,39 @@ export interface ParentSignContractRow {
   created_at: string;
   updated_at: string;
   sign_url?: string;
+  sozlesme_turu?: string;
+  sozlesme_basligi?: string;
+  preset_id?: string | null;
+  sablon_ek_detay_snapshot?: string;
+  student_id?: string | null;
+  ogrenci_user_id?: string | null;
+}
+
+/** Öğrenci kartı — veli formunda otomatik doldurma */
+export interface StudentFillRow {
+  id: string;
+  name: string;
+  parent_name: string | null;
+  parent_phone: string | null;
+  phone: string | null;
+  class_level: string | number | null;
+  user_id: string | null;
+}
+
+/** Kurumdaki users satırı — rol(ler) öğrenci */
+export interface UserStudentFillRow {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+}
+
+export function splitAdSoyad(full: string): { ad: string; soyad: string } {
+  const t = String(full || '').trim();
+  if (!t) return { ad: '', soyad: '' };
+  const i = t.indexOf(' ');
+  if (i === -1) return { ad: t, soyad: '' };
+  return { ad: t.slice(0, i).trim(), soyad: t.slice(i + 1).trim() };
 }
 
 const JSON_HDR = { 'Content-Type': 'application/json' };
@@ -84,6 +122,21 @@ export async function listParentSignContracts(): Promise<ParentSignContractRow[]
   return Array.isArray((j as { data?: unknown }).data) ? (j as { data: ParentSignContractRow[] }).data : [];
 }
 
+export async function listParentSignFillCandidates(institutionId: string): Promise<{
+  students: StudentFillRow[];
+  user_students: UserStudentFillRow[];
+}> {
+  const q = `?fill_students=1&institution_id=${encodeURIComponent(institutionId)}`;
+  const res = await apiFetch(`/api/parent-sign-contracts${q}`);
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((j as { error?: string }).error || `API ${res.status}`);
+  const inner = (j as { data?: { students?: StudentFillRow[]; user_students?: UserStudentFillRow[] } }).data;
+  return {
+    students: Array.isArray(inner?.students) ? inner.students : [],
+    user_students: Array.isArray(inner?.user_students) ? inner.user_students : []
+  };
+}
+
 export async function listParentSignClassPresets(institutionId: string): Promise<ParentSignClassPresetRow[]> {
   const q = institutionId ? `?institution_id=${encodeURIComponent(institutionId)}` : '';
   const res = await apiFetch(`/api/parent-sign-class-presets${q}`);
@@ -99,6 +152,9 @@ export async function createParentSignClassPreset(body: {
   haftalik_ders_saati: number;
   ucret: number;
   taksit_sayisi: number;
+  sozlesme_turu?: SozlesmeTuruKey | string;
+  sozlesme_ozel_baslik?: string;
+  sablon_ek_detay?: string;
 }): Promise<ParentSignClassPresetRow> {
   const res = await apiFetch('/api/parent-sign-class-presets', {
     method: 'POST',
@@ -117,6 +173,9 @@ export async function updateParentSignClassPreset(body: {
   haftalik_ders_saati: number;
   ucret: number;
   taksit_sayisi: number;
+  sozlesme_turu?: SozlesmeTuruKey | string;
+  sozlesme_ozel_baslik?: string;
+  sablon_ek_detay?: string;
 }): Promise<ParentSignClassPresetRow> {
   const res = await apiFetch('/api/parent-sign-class-presets', {
     method: 'PATCH',
@@ -149,6 +208,12 @@ export async function createParentSignContract(body: {
   haftalik_ders_saati?: number;
   ucret?: number;
   taksit_sayisi?: number;
+  preset_id?: string;
+  student_id?: string;
+  ogrenci_user_id?: string;
+  sozlesme_turu?: SozlesmeTuruKey | string;
+  sozlesme_basligi?: string;
+  sablon_ek_detay_snapshot?: string;
 }): Promise<ParentSignContractRow> {
   const res = await apiFetch('/api/parent-sign-contracts', { method: 'POST', headers: JSON_HDR, body: JSON.stringify(body) });
   const j = await res.json().catch(() => ({}));

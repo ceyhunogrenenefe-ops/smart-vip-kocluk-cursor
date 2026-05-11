@@ -5,9 +5,33 @@ import {
   buildParentContractHtml,
   contractNumber,
   institutionCodeFromRow,
+  normalizeSozlesmeTuru,
   randomToken,
+  resolveSozlesmeBasligi,
+  splitAdSoyad,
   suggestHoursAndFeeFromSinif
 } from '../api/_lib/parent-sign-defaults.js';
+
+function pickFirstNonEmpty(...vals) {
+  for (const v of vals) {
+    const t = String(v ?? '').trim();
+    if (t) return t;
+  }
+  return '';
+}
+
+function userRowIsStudentLike(row) {
+  if (!row) return false;
+  const r = String(row.role || '')
+    .toLowerCase()
+    .trim();
+  if (r === 'super_admin' || r === 'admin') return false;
+  if (r === 'student') return true;
+  const arr = Array.isArray(row.roles) ? row.roles : [];
+  return arr.some((x) => String(x || '')
+    .toLowerCase()
+    .trim() === 'student');
+}
 
 function parseBody(req) {
   const b = req.body;
@@ -143,6 +167,44 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === 'GET') {
+      if (String(req.query.fill_students || '') === '1') {
+        let instId =
+          role === 'super_admin' ? String(req.query.institution_id || '').trim() : String(actor.institution_id || '').trim();
+        if (!instId) {
+          if (role === 'super_admin') return res.status(400).json({ error: 'institution_id_query_required' });
+          return res.status(400).json({ error: 'institution_required' });
+        }
+        if ((role === 'admin' || role === 'coach') && !hasInstitutionAccess(actor, instId)) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        const { data: studs, error: sErr } = await supabaseAdmin
+          .from('students')
+          .select('id,name,parent_name,parent_phone,phone,class_level,user_id,institution_id')
+          .eq('institution_id', instId)
+          .order('created_at', { ascending: false })
+          .limit(400);
+        if (sErr) throw sErr;
+
+        const { data: ufetch, error: uErr } = await supabaseAdmin
+          .from('users')
+          .select('id,name,phone,email,role,roles,institution_id')
+          .eq('institution_id', instId)
+          .order('name', { ascending: true })
+          .limit(400);
+        if (uErr) throw uErr;
+        const user_students = (ufetch || [])
+          .filter(userRowIsStudentLike)
+          .map((u) => ({
+            id: String(u.id || ''),
+            name: String(u.name || '').trim() || '(İsimsiz)',
+            phone: u.phone != null ? String(u.phone) : null,
+            email: u.email != null ? String(u.email) : null
+          }))
+          .filter((u) => u.id);
+
+        return res.status(200).json({ data: { students: studs || [], user_students } });
+      }
+
       let q = supabaseAdmin.from('parent_sign_contracts').select('*').order('created_at', { ascending: false }).limit(200);
       if (role === 'admin' && actor.institution_id) {
         q = q.eq('institution_id', actor.institution_id);
@@ -173,14 +235,66 @@ export default async function handler(req, res) {
         if (!hasInstitutionAccess(actor, institutionId)) return res.status(403).json({ error: 'forbidden' });
       }
 
-      const ogrenci_ad = String(body.ogrenci_ad || '').trim();
-      const ogrenci_soyad = String(body.ogrenci_soyad || '').trim();
-      const veli_ad = String(body.veli_ad || '').trim();
-      const veli_soyad = String(body.veli_soyad || '').trim();
-      const telefon = String(body.telefon || '').trim();
+      const presetId = String(body.preset_id || '').trim();
+      const studentId = String(body.student_id || '').trim();
+      const ogrenciUserIdRaw = String(body.ogrenci_user_id || '').trim();
+      let presetRow = null;
+      if (presetId) {
+        const { data: pr, error: pe } = await supabaseAdmin
+          .from('parent_sign_class_presets')
+          .select('*')
+          .eq('id', presetId)
+          .maybeSingle();
+        if (pe) throw pe;
+        if (pr && String(pr.institution_id) === institutionId) presetRow = pr;
+      }
+
+      let studentRow = null;
+      if (studentId) {
+        const { data: sr, error: se } = await supabaseAdmin.from('students').select('*').eq('id', studentId).maybeSingle();
+        if (se) throw se;
+        if (!sr || String(sr.institution_id) !== institutionId) {
+          return res.status(400).json({ error: 'student_not_found' });
+        }
+        studentRow = sr;
+      }
+
+      let userRow = null;
+      let ogrenciUserId = '';
+      if (!studentId && ogrenciUserIdRaw) {
+        const { data: ur, error: ue } = await supabaseAdmin.from('users').select('*').eq('id', ogrenciUserIdRaw).maybeSingle();
+        if (ue) throw ue;
+        if (!ur || String(ur.institution_id) !== institutionId) {
+          return res.status(400).json({ error: 'user_not_found' });
+        }
+        if (!userRowIsStudentLike(ur)) {
+          return res.status(400).json({ error: 'user_not_student' });
+        }
+        userRow = ur;
+        ogrenciUserId = ogrenciUserIdRaw;
+      } else if (studentId && ogrenciUserIdRaw) {
+        // Öğrenci kartı öncelikli; ikisi birden gönderilirse kullanıcı id yok sayılır
+        ogrenciUserId = '';
+      }
+
+      const stParts = studentRow ? splitAdSoyad(studentRow.name) : { ad: '', soyad: '' };
+      const uParts = userRow ? splitAdSoyad(userRow.name) : { ad: '', soyad: '' };
+      const velParts = studentRow ? splitAdSoyad(studentRow.parent_name || '') : { ad: '', soyad: '' };
+
+      const ogrenci_ad = pickFirstNonEmpty(body.ogrenci_ad, stParts.ad, uParts.ad);
+      const ogrenci_soyad = pickFirstNonEmpty(body.ogrenci_soyad, stParts.soyad, uParts.soyad);
+      const veli_ad = pickFirstNonEmpty(body.veli_ad, velParts.ad);
+      const veli_soyad = pickFirstNonEmpty(body.veli_soyad, velParts.soyad);
+      const telefon = pickFirstNonEmpty(body.telefon, studentRow?.parent_phone, studentRow?.phone, userRow?.phone);
       const adres = String(body.adres || '').trim();
-      const sinif = String(body.sinif || '').trim();
-      const program_adi = String(body.program_adi || '').trim();
+      const sinif = pickFirstNonEmpty(
+        body.sinif,
+        studentRow && studentRow.class_level != null && studentRow.class_level !== ''
+          ? String(studentRow.class_level)
+          : '',
+        presetRow?.sinif
+      );
+      const program_adi = pickFirstNonEmpty(body.program_adi, presetRow?.program_adi);
       const bas = String(body.baslangic_tarihi || '').trim().slice(0, 10);
       const bit = String(body.bitis_tarihi || '').trim().slice(0, 10);
       if (!ogrenci_ad || !ogrenci_soyad || !veli_ad || !veli_soyad || !telefon || !sinif || !program_adi || !bas || !bit) {
@@ -194,7 +308,49 @@ export default async function handler(req, res) {
         .maybeSingle();
       if (iErr) throw iErr;
 
-      const { hours, fee } = suggestHoursAndFeeFromSinif(sinif);
+      const sozlesme_turu = normalizeSozlesmeTuru(pickFirstNonEmpty(body.sozlesme_turu, presetRow?.sozlesme_turu));
+      const sozlesme_ozel = presetRow ? String(presetRow.sozlesme_ozel_baslik || '') : '';
+      const sozlesme_basligi = resolveSozlesmeBasligi(sozlesme_turu, sozlesme_ozel, body.sozlesme_basligi);
+
+      let sablon_ek_detay_snapshot = '';
+      if (presetRow) sablon_ek_detay_snapshot = String(presetRow.sablon_ek_detay || '').trim();
+      const extraOnly = String(body.sablon_ek_detay_snapshot || '').trim();
+      if (extraOnly) {
+        sablon_ek_detay_snapshot = sablon_ek_detay_snapshot ? `${sablon_ek_detay_snapshot}\n\n${extraOnly}` : extraOnly;
+      }
+
+      const suggested = suggestHoursAndFeeFromSinif(sinif);
+      const hoursRaw = body.haftalik_ders_saati;
+      const feeRaw = body.ucret;
+      const taksitRaw = body.taksit_sayisi;
+      let hoursParsed =
+        hoursRaw !== undefined && hoursRaw !== null && String(hoursRaw).trim() !== '' ? Number(hoursRaw) : NaN;
+      let feeParsed =
+        feeRaw !== undefined && feeRaw !== null && String(feeRaw).trim() !== '' ? Number(feeRaw) : NaN;
+      const taksitParsed =
+        taksitRaw !== undefined && taksitRaw !== null && String(taksitRaw).trim() !== '' ? Number(taksitRaw) : NaN;
+
+      if (!Number.isFinite(hoursParsed) && presetRow != null) {
+        hoursParsed = Number(presetRow.haftalik_ders_saati);
+      }
+      if (!Number.isFinite(feeParsed) && presetRow != null) {
+        feeParsed = Number(presetRow.ucret);
+      }
+
+      const hours = Number.isFinite(hoursParsed)
+        ? Math.min(40, Math.max(0, hoursParsed))
+        : suggested.hours;
+      const fee = Number.isFinite(feeParsed)
+        ? Math.min(999999999, Math.max(0, feeParsed))
+        : suggested.fee;
+      let taksit_sayisi = Number.isFinite(taksitParsed)
+        ? Math.min(48, Math.max(1, Math.round(taksitParsed)))
+        : 1;
+      if (!Number.isFinite(taksitParsed) && presetRow != null) {
+        const pt = Math.round(Number(presetRow.taksit_sayisi));
+        if (Number.isFinite(pt)) taksit_sayisi = Math.min(48, Math.max(1, pt));
+      }
+
       const kurum_kodu = institutionCodeFromRow(inst || { id: institutionId });
       const cnum = contractNumber(kurum_kodu);
       const verifyToken = randomToken(20);
@@ -215,10 +371,13 @@ export default async function handler(req, res) {
         bitis_tarihi: bit,
         haftalik_ders_saati: hours,
         ucret: fee,
+        taksit_sayisi,
         kurum_kodu,
         contract_number: cnum,
         kurum_adi: inst?.name || '',
-        verify_url: verifyUrl || '#'
+        verify_url: verifyUrl || '#',
+        document_title: sozlesme_basligi,
+        extra_detail_plain: sablon_ek_detay_snapshot
       });
 
       const row = {
@@ -236,12 +395,19 @@ export default async function handler(req, res) {
         bitis_tarihi: bit,
         haftalik_ders_saati: hours,
         ucret: fee,
+        taksit_sayisi,
         kurum_kodu,
         contract_number: cnum,
         verify_token: verifyToken,
         signing_token: signingToken,
         status: 'draft',
         merged_html,
+        sozlesme_turu,
+        sozlesme_basligi,
+        preset_id: presetRow ? presetId : null,
+        sablon_ek_detay_snapshot,
+        student_id: studentRow ? studentId : null,
+        ogrenci_user_id: ogrenciUserId || null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };

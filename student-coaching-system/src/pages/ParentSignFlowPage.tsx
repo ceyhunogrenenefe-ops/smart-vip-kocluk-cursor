@@ -7,11 +7,16 @@ import {
   listInstitutionsForPicker,
   listParentSignClassPresets,
   listParentSignContracts,
+  listParentSignFillCandidates,
+  splitAdSoyad,
   suggestHoursAndFeeFromSinif,
   updateParentSignClassPreset,
   type InstitutionPickRow,
   type ParentSignClassPresetRow,
-  type ParentSignContractRow
+  type ParentSignContractRow,
+  type SozlesmeTuruKey,
+  type StudentFillRow,
+  type UserStudentFillRow
 } from '../lib/parentSignApi';
 import {
   Copy,
@@ -39,6 +44,12 @@ function uniquePrograms(presets: ParentSignClassPresetRow[]): string[] {
     if (n) s.add(n);
   }
   return [...s].sort((a, b) => a.localeCompare(b, 'tr'));
+}
+
+function turKisaEtiket(t?: string) {
+  if (t === 'kullanici_sozlesmesi') return 'Kullanıcı';
+  if (t === 'diger') return 'Diğer';
+  return 'Satış';
 }
 
 export default function ParentSignFlowPage() {
@@ -80,7 +91,19 @@ export default function ParentSignFlowPage() {
   const [presetSaat, setPresetSaat] = useState<number>(8);
   const [presetUcret, setPresetUcret] = useState<number>(42000);
   const [presetTaksit, setPresetTaksit] = useState<number>(10);
+  const [presetSozlesmeTuru, setPresetSozlesmeTuru] = useState<SozlesmeTuruKey>('satis_sozlesmesi');
+  const [presetOzelBaslik, setPresetOzelBaslik] = useState('');
+  const [presetEkDetay, setPresetEkDetay] = useState('');
   const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
+
+  const [fillStudents, setFillStudents] = useState<StudentFillRow[]>([]);
+  const [fillUserStudents, setFillUserStudents] = useState<UserStudentFillRow[]>([]);
+  const [loadingFillStudents, setLoadingFillStudents] = useState(false);
+  /** '' | s:studentRowId | u:userId */
+  const [fillPick, setFillPick] = useState('');
+  const [sozlesmeTuru, setSozlesmeTuru] = useState<SozlesmeTuruKey>('satis_sozlesmesi');
+  const [sozlesmeBasligiOverride, setSozlesmeBasligiOverride] = useState('');
+  const [contractEkSatirlar, setContractEkSatirlar] = useState('');
 
   const programs = useMemo(() => uniquePrograms(presets), [presets]);
 
@@ -119,6 +142,33 @@ export default function ParentSignFlowPage() {
     void loadPresets();
   }, [loadPresets]);
 
+  const loadFillStudents = useCallback(async () => {
+    if (!effectiveInstitutionId) {
+      setFillStudents([]);
+      setFillUserStudents([]);
+      return;
+    }
+    setLoadingFillStudents(true);
+    try {
+      const pack = await listParentSignFillCandidates(effectiveInstitutionId);
+      setFillStudents(pack.students);
+      setFillUserStudents(pack.user_students);
+    } catch {
+      setFillStudents([]);
+      setFillUserStudents([]);
+    } finally {
+      setLoadingFillStudents(false);
+    }
+  }, [effectiveInstitutionId]);
+
+  useEffect(() => {
+    void loadFillStudents();
+  }, [loadFillStudents]);
+
+  useEffect(() => {
+    setFillPick('');
+  }, [effectiveInstitutionId]);
+
   useEffect(() => {
     if (!isSuper) {
       setInstitutionOptions([]);
@@ -149,6 +199,9 @@ export default function ParentSignFlowPage() {
     setHaftalikDersSaati(Number(p.haftalik_ders_saati) || 0);
     setUcret(Number(p.ucret) || 0);
     setTaksitSayisi(Math.max(1, Math.min(48, Math.round(Number(p.taksit_sayisi) || 1))));
+    const tur = (p.sozlesme_turu || 'satis_sozlesmesi') as SozlesmeTuruKey;
+    setSozlesmeTuru(['kullanici_sozlesmesi', 'satis_sozlesmesi', 'diger'].includes(tur) ? tur : 'satis_sozlesmesi');
+    setSozlesmeBasligiOverride('');
   };
 
   const applySuggestFromSinif = () => {
@@ -184,6 +237,12 @@ export default function ParentSignFlowPage() {
         haftalik_ders_saati: haftalikDersSaati,
         ucret,
         taksit_sayisi: taksitSayisi,
+        sozlesme_turu: sozlesmeTuru,
+        ...(sozlesmeBasligiOverride.trim() ? { sozlesme_basligi: sozlesmeBasligiOverride.trim() } : {}),
+        ...(contractEkSatirlar.trim() ? { sablon_ek_detay_snapshot: contractEkSatirlar.trim() } : {}),
+        ...(selectedPresetId.trim() ? { preset_id: selectedPresetId.trim() } : {}),
+        ...(fillPick.startsWith('s:') ? { student_id: fillPick.slice(2) } : {}),
+        ...(fillPick.startsWith('u:') ? { ogrenci_user_id: fillPick.slice(2) } : {}),
         ...(isSuper && institutionId.trim() ? { institution_id: institutionId.trim() } : {})
       };
       const created = await createParentSignContract(body);
@@ -214,7 +273,10 @@ export default function ParentSignFlowPage() {
         program_adi: progT,
         haftalik_ders_saati: presetSaat,
         ucret: presetUcret,
-        taksit_sayisi: Math.max(1, Math.min(48, Math.round(presetTaksit)))
+        taksit_sayisi: Math.max(1, Math.min(48, Math.round(presetTaksit))),
+        sozlesme_turu: presetSozlesmeTuru,
+        sozlesme_ozel_baslik: presetOzelBaslik.trim(),
+        sablon_ek_detay: presetEkDetay.trim()
       };
       if (editingPresetId) {
         await updateParentSignClassPreset({ id: editingPresetId, ...base });
@@ -232,6 +294,9 @@ export default function ParentSignFlowPage() {
       setPresetSaat(8);
       setPresetUcret(42000);
       setPresetTaksit(10);
+      setPresetSozlesmeTuru('satis_sozlesmesi');
+      setPresetOzelBaslik('');
+      setPresetEkDetay('');
       void loadPresets();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Şablon kaydedilemedi');
@@ -245,6 +310,10 @@ export default function ParentSignFlowPage() {
     setPresetSaat(Number(p.haftalik_ders_saati) || 0);
     setPresetUcret(Number(p.ucret) || 0);
     setPresetTaksit(Math.max(1, Math.min(48, Math.round(Number(p.taksit_sayisi) || 1))));
+    const tur = (p.sozlesme_turu || 'satis_sozlesmesi') as SozlesmeTuruKey;
+    setPresetSozlesmeTuru(['kullanici_sozlesmesi', 'satis_sozlesmesi', 'diger'].includes(tur) ? tur : 'satis_sozlesmesi');
+    setPresetOzelBaslik(String(p.sozlesme_ozel_baslik || ''));
+    setPresetEkDetay(String(p.sablon_ek_detay || ''));
   };
 
   const cancelEditPreset = () => {
@@ -254,6 +323,9 @@ export default function ParentSignFlowPage() {
     setPresetSaat(8);
     setPresetUcret(42000);
     setPresetTaksit(10);
+    setPresetSozlesmeTuru('satis_sozlesmesi');
+    setPresetOzelBaslik('');
+    setPresetEkDetay('');
   };
 
   const removePreset = async (id: string) => {
@@ -286,7 +358,9 @@ export default function ParentSignFlowPage() {
             Bu ekranın adı: <strong className="text-slate-800 dark:text-slate-200">Veli onayı &amp; e-imza</strong> (menüde
             genelde <strong className="text-slate-800 dark:text-slate-200">/veli-onay</strong> rotası). Sınıf şablonlarını
             aşağıdaki <em>Sınıf &amp; sözleşme şablonları</em> kutusunda tablonun altındaki formdan ekleyip düzenlersiniz;
-            yeni veli kaydında üstteki şablondan seçim yapılır.
+            yeni veli kaydında üstteki şablondan seçim yapılır. Şablonda <strong>sözleşme türü</strong> (satış / kullanıcı /
+            diğer) ve <strong>ek metin</strong> tanımlanır; kayıtta kurumdaki <strong>öğrenci kartı</strong>ndan otomatik
+            doldurma yapılabilir ve sözleşme satırında saklanır.
           </p>
           <p className="text-xs text-slate-500 dark:text-slate-500 mt-2 max-w-2xl border-l-2 border-blue-200 pl-3">
             <strong>Kurum</strong> seçimi yalnızca süper yönetici için görünür; liste veritabanındaki kayıtlardan gelir.
@@ -364,6 +438,7 @@ export default function ParentSignFlowPage() {
                     <tr className="bg-slate-50 dark:bg-slate-800/80 text-left text-xs text-slate-500 uppercase tracking-wide">
                       <th className="px-3 py-2 font-semibold">Sınıf</th>
                       <th className="px-3 py-2 font-semibold">Program</th>
+                      <th className="px-3 py-2 font-semibold w-20">Tür</th>
                       <th className="px-3 py-2 font-semibold">Saat</th>
                       <th className="px-3 py-2 font-semibold">Ücret</th>
                       <th className="px-3 py-2 font-semibold">Taksit</th>
@@ -373,7 +448,7 @@ export default function ParentSignFlowPage() {
                   <tbody>
                     {presets.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-3 py-6 text-center text-slate-500">
+                        <td colSpan={7} className="px-3 py-6 text-center text-slate-500">
                           Henüz şablon yok. Aşağıdan ekleyin.
                         </td>
                       </tr>
@@ -382,6 +457,7 @@ export default function ParentSignFlowPage() {
                         <tr key={p.id} className="border-t border-slate-100 dark:border-slate-700">
                           <td className="px-3 py-2 font-medium text-slate-800 dark:text-slate-100">{p.sinif}</td>
                           <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{p.program_adi}</td>
+                          <td className="px-3 py-2 text-xs text-slate-600">{turKisaEtiket(p.sozlesme_turu)}</td>
                           <td className="px-3 py-2">{p.haftalik_ders_saati}</td>
                           <td className="px-3 py-2">{p.ucret} TL</td>
                           <td className="px-3 py-2">{p.taksit_sayisi}</td>
@@ -463,6 +539,37 @@ export default function ParentSignFlowPage() {
                     onChange={(e) => setPresetTaksit(Number(e.target.value))}
                   />
                 </div>
+                <div>
+                  <label className="text-xs text-slate-500">Sözleşme türü</label>
+                  <select
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                    value={presetSozlesmeTuru}
+                    onChange={(e) => setPresetSozlesmeTuru(e.target.value as SozlesmeTuruKey)}
+                  >
+                    <option value="satis_sozlesmesi">Satış sözleşmesi</option>
+                    <option value="kullanici_sozlesmesi">Kullanıcı / üyelik sözleşmesi</option>
+                    <option value="diger">Diğer (özel başlık)</option>
+                  </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="text-xs text-slate-500">Özel belge başlığı (yalnızca &quot;Diğer&quot; veya başlığı ezmek için)</label>
+                  <input
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                    value={presetOzelBaslik}
+                    onChange={(e) => setPresetOzelBaslik(e.target.value)}
+                    placeholder="ör. Mesafeli eğitim hizmeti sözleşmesi"
+                  />
+                </div>
+                <div className="sm:col-span-3">
+                  <label className="text-xs text-slate-500">Ek şartlar / ayrıntı metni (düz metin, satırlar paragraf olur)</label>
+                  <textarea
+                    rows={5}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600 font-mono"
+                    value={presetEkDetay}
+                    onChange={(e) => setPresetEkDetay(e.target.value)}
+                    placeholder="İade koşulları, fesih, kampanya notu…"
+                  />
+                </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
@@ -503,12 +610,115 @@ export default function ParentSignFlowPage() {
                   <option value="">— Seçin —</option>
                   {presets.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.sinif} — {p.program_adi} · {p.haftalik_ders_saati} sa · {p.ucret} TL · {p.taksit_sayisi} taksit
+                      [{turKisaEtiket(p.sozlesme_turu)}] {p.sinif} — {p.program_adi} · {p.haftalik_ders_saati} sa ·{' '}
+                      {p.ucret} TL · {p.taksit_sayisi} taksit
                     </option>
                   ))}
                 </select>
               </div>
             ) : null}
+
+            <div className="sm:col-span-2">
+              <label className="text-xs text-slate-500">Öğrenci / kullanıcıdan doldur</label>
+              {loadingFillStudents ? (
+                <Loader2 className="mt-2 w-5 h-5 animate-spin text-blue-600" />
+              ) : (
+                <select
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                  value={fillPick}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setFillPick(v);
+                    if (!v) return;
+                    if (v.startsWith('s:')) {
+                      const id = v.slice(2);
+                      const s = fillStudents.find((x) => x.id === id);
+                      if (!s) return;
+                      const o = splitAdSoyad(s.name);
+                      const pv = splitAdSoyad(s.parent_name || '');
+                      setOgrenciAd(o.ad);
+                      setOgrenciSoyad(o.soyad);
+                      setVeliAd(pv.ad);
+                      setVeliSoyad(pv.soyad);
+                      setTelefon(String(s.parent_phone || s.phone || '').trim());
+                      setSinif(s.class_level != null && s.class_level !== '' ? String(s.class_level) : '');
+                      return;
+                    }
+                    if (v.startsWith('u:')) {
+                      const id = v.slice(2);
+                      const u = fillUserStudents.find((x) => x.id === id);
+                      if (!u) return;
+                      const o = splitAdSoyad(u.name);
+                      setOgrenciAd(o.ad);
+                      setOgrenciSoyad(o.soyad);
+                      setTelefon(String(u.phone || '').trim());
+                      setVeliAd('');
+                      setVeliSoyad('');
+                      setSinif('');
+                    }
+                  }}
+                >
+                  <option value="">— Elle girin veya listeden seçin —</option>
+                  {fillStudents.length > 0 ? (
+                    <optgroup label="Öğrenci kartı (students)">
+                      {fillStudents.map((s) => (
+                        <option key={`s:${s.id}`} value={`s:${s.id}`}>
+                          {s.name}
+                          {s.class_level != null && s.class_level !== '' ? ` (${s.class_level})` : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                  {fillUserStudents.length > 0 ? (
+                    <optgroup label="Platform öğrenci (users)">
+                      {fillUserStudents.map((u) => (
+                        <option key={`u:${u.id}`} value={`u:${u.id}`}>
+                          {u.name}
+                          {u.email ? ` · ${u.email}` : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                </select>
+              )}
+              <p className="mt-1 text-[11px] text-slate-500">
+                Kart seçilirse veli alanları da dolar ve <code className="rounded bg-slate-100 px-0.5 dark:bg-slate-800">student_id</code> kaydedilir.
+                Yalnızca <strong>users</strong> hesabı seçilirse öğrenci adı ve telefon gelir; veli bilgisini elle girin — kayıtta{' '}
+                <code className="rounded bg-slate-100 px-0.5 dark:bg-slate-800">ogrenci_user_id</code> saklanır.
+              </p>
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-500">Bu kayıt için sözleşme türü</label>
+              <select
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                value={sozlesmeTuru}
+                onChange={(e) => setSozlesmeTuru(e.target.value as SozlesmeTuruKey)}
+              >
+                <option value="satis_sozlesmesi">Satış sözleşmesi</option>
+                <option value="kullanici_sozlesmesi">Kullanıcı / üyelik sözleşmesi</option>
+                <option value="diger">Diğer</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500">Belge başlığı (isteğe bağlı)</label>
+              <input
+                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                value={sozlesmeBasligiOverride}
+                onChange={(e) => setSozlesmeBasligiOverride(e.target.value)}
+                placeholder="Boşsa türe göre otomatik"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="text-xs text-slate-500">Bu kayda özel ek satırlar (şablondakine eklenir)</label>
+              <textarea
+                rows={3}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                value={contractEkSatirlar}
+                onChange={(e) => setContractEkSatirlar(e.target.value)}
+                placeholder="Tek seferlik not; şablondaki ek metnin altına eklenir."
+              />
+            </div>
 
             <div>
               <label className="text-xs text-slate-500">Öğrenci adı</label>
@@ -708,8 +918,21 @@ export default function ParentSignFlowPage() {
                     </p>
                     <p className="text-xs font-mono text-slate-600 mt-1">{r.contract_number}</p>
                     <p className="text-xs text-slate-500 mt-1">
+                      {r.sozlesme_basligi ? (
+                        <span className="font-medium text-slate-700 dark:text-slate-300">{r.sozlesme_basligi} · </span>
+                      ) : null}
                       {r.program_adi ? `${r.program_adi} · ` : ''}Sınıf: {r.sinif} · {r.haftalik_ders_saati} sa/hafta ·{' '}
                       {r.ucret} TL · {r.taksit_sayisi ?? 1} taksit · Kod: {r.kurum_kodu}
+                      {r.student_id ? (
+                        <span className="block mt-0.5 text-[11px] font-mono text-slate-500">
+                          Öğrenci kartı: {r.student_id.slice(0, 8)}…
+                        </span>
+                      ) : null}
+                      {r.ogrenci_user_id ? (
+                        <span className="block mt-0.5 text-[11px] font-mono text-slate-500">
+                          Kullanıcı (users): {r.ogrenci_user_id.slice(0, 8)}…
+                        </span>
+                      ) : null}
                     </p>
                   </div>
                   <div className="flex flex-col items-end gap-1">
