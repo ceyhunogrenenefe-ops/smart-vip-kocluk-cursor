@@ -43,8 +43,8 @@ export function SidebarNavGroup({ id, label, icon: Icon, items, pathname, collap
             className={cn(
               'flex w-full min-h-[44px] items-center justify-center rounded-xl p-2.5 transition-all duration-200 ease-out touch-manipulation',
               routeIn
-                ? 'bg-blue-500/15 text-blue-100 ring-1 ring-blue-400/35 shadow-[0_0_20px_-8px_rgba(59,130,246,0.5)]'
-                : 'text-slate-400 hover:bg-white/[0.07] hover:text-white'
+                ? 'bg-blue-500/25 text-white ring-1 ring-blue-300/45 shadow-[0_0_18px_-6px_rgba(59,130,246,0.4)]'
+                : 'text-slate-300 hover:bg-white/10 hover:text-white'
             )}
           >
             <Icon className="h-[18px] w-[18px]" strokeWidth={1.75} />
@@ -55,9 +55,9 @@ export function SidebarNavGroup({ id, label, icon: Icon, items, pathname, collap
             side="right"
             align="start"
             sideOffset={10}
-            className="z-[70] min-w-[13.5rem] overflow-hidden rounded-xl border border-white/10 bg-slate-950/98 p-1.5 shadow-2xl shadow-black/40 backdrop-blur-xl"
+            className="z-[70] min-w-[13.5rem] overflow-hidden rounded-xl border border-slate-500/30 bg-slate-800/98 p-1.5 shadow-xl shadow-slate-900/30 backdrop-blur-xl"
           >
-            <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+            <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
               {label}
             </div>
             {items.map((it) => {
@@ -69,7 +69,7 @@ export function SidebarNavGroup({ id, label, icon: Icon, items, pathname, collap
                   onSelect={() => onNavigate(it.path)}
                   className={cn(
                     'flex cursor-pointer select-none items-center gap-2 rounded-lg px-2 py-2 text-[13px] outline-none transition-colors',
-                    active ? 'bg-blue-500/15 text-blue-100' : 'text-slate-200 hover:bg-white/[0.06]'
+                    active ? 'bg-blue-500/20 text-white' : 'text-slate-200 hover:bg-white/10'
                   )}
                 >
                   <SubIcon className="h-4 w-4 shrink-0 opacity-80" strokeWidth={1.75} />
@@ -97,14 +97,14 @@ export function SidebarNavGroup({ id, label, icon: Icon, items, pathname, collap
           type="button"
           className={cn(
             'flex w-full min-h-[44px] items-center gap-2 rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold transition-all duration-200 ease-out touch-manipulation',
-            mergedOpen ? 'bg-white/[0.04] text-white' : 'text-slate-300 hover:bg-white/[0.06] hover:text-white'
+            mergedOpen ? 'bg-slate-600/40 text-white shadow-inner' : 'text-slate-100/90 hover:bg-white/10 hover:text-white'
           )}
         >
-          <Icon className="h-[18px] w-[18px] shrink-0 text-slate-400" strokeWidth={1.75} />
+          <Icon className="h-[18px] w-[18px] shrink-0 text-slate-300" strokeWidth={1.75} />
           <span className="min-w-0 flex-1 truncate">{label}</span>
           <ChevronDown
             className={cn(
-              'h-4 w-4 shrink-0 text-slate-500 transition-transform duration-300 ease-out',
+              'h-4 w-4 shrink-0 text-slate-400 transition-transform duration-300 ease-out',
               mergedOpen && 'rotate-180'
             )}
           />
@@ -123,8 +123,8 @@ export function SidebarNavGroup({ id, label, icon: Icon, items, pathname, collap
                   className={cn(
                     'group flex w-full min-h-[40px] items-center gap-2 rounded-lg py-2 pl-5 pr-3 text-left text-[13px] font-medium transition-all duration-200 ease-out touch-manipulation',
                     active
-                      ? 'bg-blue-500/[0.14] text-white shadow-[0_0_20px_-10px_rgba(59,130,246,0.55)] ring-1 ring-blue-400/25'
-                      : 'text-slate-400 hover:bg-white/[0.05] hover:text-slate-100'
+                      ? 'bg-blue-500/20 text-white shadow-[0_0_18px_-8px_rgba(59,130,246,0.4)] ring-1 ring-blue-300/35'
+                      : 'text-slate-200/90 hover:bg-white/10 hover:text-white'
                   )}
                 >
                   <span className="h-1 w-1 shrink-0 rounded-full bg-current opacity-35 group-hover:opacity-60" />

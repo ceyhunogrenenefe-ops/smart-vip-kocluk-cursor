@@ -92,8 +92,8 @@ export default function Sidebar({
     <aside
       className={cn(
         'fixed left-0 top-0 z-50 flex min-h-0 h-screen max-h-[100dvh] flex-col overflow-hidden',
-        'border-r border-white/[0.06] bg-gradient-to-b from-slate-950 via-slate-950 to-slate-900 text-white',
-        'shadow-[4px_0_32px_-12px_rgba(0,0,0,0.55)] transition-[width,transform] duration-300 ease-out',
+        'border-r border-slate-500/25 bg-gradient-to-b from-slate-700 via-slate-800 to-slate-800 text-white',
+        'shadow-[4px_0_28px_-14px_rgba(15,23,42,0.35)] transition-[width,transform] duration-300 ease-out',
         mobileOpen ? 'max-lg:translate-x-0' : 'max-lg:-translate-x-full',
         'max-lg:w-[min(19rem,calc(100vw-1.25rem))]',
         desktopWide ? 'lg:w-64' : 'lg:w-[72px]'
@@ -102,7 +102,7 @@ export default function Sidebar({
       {/* Logo */}
       <div
         className={cn(
-          'flex h-14 flex-shrink-0 items-center border-b border-white/[0.06] px-3 transition-all duration-300',
+          'flex h-14 flex-shrink-0 items-center border-b border-slate-500/20 px-3 transition-all duration-300',
           railCollapsed && isLg && 'lg:justify-center lg:px-2'
         )}
       >
@@ -110,17 +110,17 @@ export default function Sidebar({
           <img
             src={institution.logo}
             alt=""
-            className="h-9 w-9 shrink-0 rounded-lg bg-white/95 object-contain p-0.5 ring-1 ring-white/10"
+            className="h-9 w-9 shrink-0 rounded-lg bg-white object-contain p-0.5 ring-1 ring-slate-600/30 shadow-sm"
           />
         ) : (
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-600 to-indigo-700 shadow-lg shadow-blue-900/30">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 shadow-md shadow-slate-900/25 ring-1 ring-white/15">
             <TrendingUp className="h-5 w-5 text-white" strokeWidth={2} />
           </div>
         )}
         {(!railCollapsed || !isLg) && (
           <div className="ml-2.5 min-w-0 flex-1 max-lg:block lg:block">
             <p className="truncate text-sm font-semibold tracking-tight text-white">{institution.name}</p>
-            <p className="truncate text-[10px] font-medium uppercase tracking-wider text-slate-500">Smart Coach</p>
+            <p className="truncate text-[10px] font-medium uppercase tracking-wider text-slate-400/90">Smart Coach</p>
           </div>
         )}
       </div>
@@ -144,7 +144,7 @@ export default function Sidebar({
 
         {hasLessonOrAcademic ? (
           <>
-            <div className="my-2 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+            <div className="my-2 h-px bg-gradient-to-r from-transparent via-slate-500/30 to-transparent" />
             <SidebarNavGroup
               id="lessons"
               label="Ders & Görüşmeler"
@@ -168,19 +168,19 @@ export default function Sidebar({
 
         {nav.rest.length > 0 ? (
           <>
-            <div className="my-2 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+            <div className="my-2 h-px bg-gradient-to-r from-transparent via-slate-500/30 to-transparent" />
             <div className="flex flex-col gap-0.5">{nav.rest.map(renderRestLink)}</div>
           </>
         ) : null}
       </nav>
 
       {/* Desktop: geniş / dar */}
-      <div className="hidden flex-shrink-0 border-t border-white/[0.06] p-2 lg:block">
+      <div className="hidden flex-shrink-0 border-t border-slate-500/20 p-2 lg:block">
         <button
           type="button"
           onClick={() => persistWide(!desktopWide)}
           title={desktopWide ? 'Menüyü daralt' : 'Menüyü genişlet'}
-          className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-slate-400 transition-all duration-200 hover:bg-white/[0.06] hover:text-white"
+          className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-slate-300 transition-all duration-200 hover:bg-white/10 hover:text-white"
         >
           {desktopWide ? (
             <ChevronLeft className="h-5 w-5" strokeWidth={1.75} />
