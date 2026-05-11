@@ -12,26 +12,20 @@ function ymdCmp(a, b) {
   return x.localeCompare(y);
 }
 
-function ymdMin(a, b) {
-  return ymdCmp(a, b) <= 0 ? normalizeWeekStart(a) : normalizeWeekStart(b);
-}
-
 /**
- * Koç hedefi her zaman tek bir Pazartesi–Pazar haftasına sıkıştırılır.
- * Bitiş boşsa: min(başlangıç+6 gün, haftanın pazarı) — Cumartesi+6'nın sonraki haftaya taşması engellenir.
+ * Koç hedef tarih aralığını doğrular: boş bitiş → tek gün (başlangıç);
+ * başlangıç/bitiş ters ise yer değiştirir. Hafta sınırına sıkıştırma yok.
  */
-function clampGoalDatesToWeek(weekStart, goalStartRaw, goalEndRaw) {
-  const weekSunday = addCalendarDaysYmd(weekStart, 6);
-  let gs = normalizeWeekStart(goalStartRaw) || weekStart;
+function normalizeGoalDateRange(goalStartRaw, goalEndRaw, fallbackStart) {
+  const fb = normalizeWeekStart(fallbackStart) || normalizeWeekStart(goalStartRaw);
+  let gs = normalizeWeekStart(goalStartRaw) || fb;
   let ge = normalizeWeekStart(goalEndRaw);
-  if (!ge) {
-    ge = ymdMin(addCalendarDaysYmd(gs, 6), weekSunday);
+  if (!ge) ge = gs;
+  if (ymdCmp(gs, ge) > 0) {
+    const t = gs;
+    gs = ge;
+    ge = t;
   }
-  if (ymdCmp(gs, weekStart) < 0) gs = weekStart;
-  if (ymdCmp(gs, weekSunday) > 0) gs = weekSunday;
-  if (ymdCmp(ge, weekStart) < 0) ge = weekStart;
-  if (ymdCmp(ge, weekSunday) > 0) ge = weekSunday;
-  if (ymdCmp(gs, ge) > 0) ge = gs;
   return { goalStart: gs, goalEnd: ge };
 }
 
@@ -91,28 +85,28 @@ export default async function handler(req, res) {
       const gate = await assertCanReadStudentGoals(actor, studentRaw);
       if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
 
-      const { data: legacy, error: e1 } = await supabaseAdmin
+      const { data: overlap, error: e1 } = await supabaseAdmin
         .from('coach_weekly_goals')
         .select('*')
         .eq('student_id', studentRaw)
-        .eq('week_start_date', weekStart)
-        .order('created_at', { ascending: true });
-      if (e1) throw e1;
-
-      const { data: ranged, error: e2 } = await supabaseAdmin
-        .from('coach_weekly_goals')
-        .select('*')
-        .eq('student_id', studentRaw)
-        .eq('week_start_date', weekStart)
         .not('goal_start_date', 'is', null)
         .not('goal_end_date', 'is', null)
         .lte('goal_start_date', weekEnd)
         .gte('goal_end_date', weekStart)
         .order('created_at', { ascending: true });
+      if (e1) throw e1;
+
+      const { data: legacyOpen, error: e2 } = await supabaseAdmin
+        .from('coach_weekly_goals')
+        .select('*')
+        .eq('student_id', studentRaw)
+        .eq('week_start_date', weekStart)
+        .or('goal_start_date.is.null,goal_end_date.is.null')
+        .order('created_at', { ascending: true });
       if (e2) throw e2;
 
       const map = new Map();
-      for (const r of [...(legacy || []), ...(ranged || [])]) map.set(r.id, r);
+      for (const r of [...(overlap || []), ...(legacyOpen || [])]) map.set(r.id, r);
       return res.status(200).json({ data: [...map.values()].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))) });
     }
 
@@ -125,9 +119,9 @@ export default async function handler(req, res) {
       let goalStart = normalizeWeekStart(body.goal_start_date || body.goalStartDate);
       let goalEnd = normalizeWeekStart(body.goal_end_date || body.goalEndDate);
       if (!goalStart) goalStart = weekStart;
-      const clamped = clampGoalDatesToWeek(weekStart, goalStart, goalEnd);
-      goalStart = clamped.goalStart;
-      goalEnd = clamped.goalEnd;
+      const norm = normalizeGoalDateRange(goalStart, goalEnd, weekStart);
+      goalStart = norm.goalStart;
+      goalEnd = norm.goalEnd;
 
       const gate = await assertCoachOrAdminGoalsWrite(actor, sid);
       if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
@@ -201,11 +195,11 @@ export default async function handler(req, res) {
         const d = plannerShiftDays;
         let gs = normalizeWeekStart(existing.goal_start_date) || ws;
         let ge = normalizeWeekStart(existing.goal_end_date);
-        if (!ge) ge = ymdMin(addCalendarDaysYmd(gs, 6), addCalendarDaysYmd(ws, 6));
+        if (!ge) ge = addCalendarDaysYmd(ws, 6);
         gs = addCalendarDaysYmd(gs, d);
         ge = addCalendarDaysYmd(ge, d);
         patch.week_start_date = newWsRequested;
-        const c = clampGoalDatesToWeek(newWsRequested, gs, ge);
+        const c = normalizeGoalDateRange(gs, ge, newWsRequested);
         patch.goal_start_date = c.goalStart;
         patch.goal_end_date = c.goalEnd;
       } else if (ws && (patch.goal_start_date != null || patch.goal_end_date != null)) {
@@ -215,7 +209,7 @@ export default async function handler(req, res) {
             : existing.goal_start_date || existing.week_start_date;
         const nextGe =
           patch.goal_end_date != null ? patch.goal_end_date : existing.goal_end_date;
-        const c = clampGoalDatesToWeek(ws, nextGs, nextGe);
+        const c = normalizeGoalDateRange(nextGs, nextGe, ws);
         patch.goal_start_date = c.goalStart;
         patch.goal_end_date = c.goalEnd;
       }
@@ -229,14 +223,11 @@ export default async function handler(req, res) {
       if (error) throw error;
 
       if (plannerShiftDays !== 0) {
-        const oldWeekEnd = addCalendarDaysYmd(ws, 6);
         const { data: planRows, error: peErr } = await supabaseAdmin
           .from('weekly_planner_entries')
           .select('id,planner_date')
           .eq('student_id', existing.student_id)
-          .eq('coach_goal_id', id)
-          .gte('planner_date', ws)
-          .lte('planner_date', oldWeekEnd);
+          .eq('coach_goal_id', id);
         if (!peErr && Array.isArray(planRows) && planRows.length) {
           const nowIso = new Date().toISOString();
           for (const row of planRows) {

@@ -64,6 +64,27 @@ function formatGoalRangeLabel(startYmd: string, endYmd: string) {
   }
 }
 
+/** Takvim / kota için: hedefin etkin başlangıç–bitiş (tarih yoksa kayıtlı haftanın Pzt–Paz aralığı) */
+function goalEffectiveSpan(goal: CoachWeeklyGoalRow, weekFallbackStart: string, weekFallbackEnd: string) {
+  const ws = (goal.week_start_date || weekFallbackStart).slice(0, 10);
+  let start = (goal.goal_start_date || ws).slice(0, 10);
+  const rawEnd = goal.goal_end_date != null ? String(goal.goal_end_date).trim() : '';
+  let end = rawEnd.slice(0, 10);
+  if (!end) {
+    try {
+      end = format(addDays(parseISO(`${ws}T12:00:00`), 6), 'yyyy-MM-dd');
+    } catch {
+      end = weekFallbackEnd;
+    }
+  }
+  if (start > end) {
+    const t = start;
+    start = end;
+    end = t;
+  }
+  return { start, end };
+}
+
 function slotMinutes(start: string, end: string) {
   const [sh, sm] = start.split(':').map((x) => parseInt(x, 10));
   const [eh, em] = end.split(':').map((x) => parseInt(x, 10));
@@ -134,10 +155,15 @@ export function WeeklyPlannerCalendar({
     setLoading(true);
     setErr('');
     try {
-      const [g, e] = await Promise.all([
-        fetchCoachWeeklyGoals(studentId, weekStartStr),
-        fetchWeeklyPlannerEntries(studentId, weekStartStr, weekEndStr),
-      ]);
+      const g = await fetchCoachWeeklyGoals(studentId, weekStartStr);
+      let entryFrom = weekStartStr;
+      let entryTo = weekEndStr;
+      for (const goal of g) {
+        const { start, end } = goalEffectiveSpan(goal, weekStartStr, weekEndStr);
+        if (start < entryFrom) entryFrom = start;
+        if (end > entryTo) entryTo = end;
+      }
+      const e = await fetchWeeklyPlannerEntries(studentId, entryFrom, entryTo);
       setGoals(g);
       setEntries(e);
     } catch (e) {
@@ -168,11 +194,9 @@ export function WeeklyPlannerCalendar({
 
   const goalAggregates = useMemo(() => {
     return goals.map((g) => {
+      const { start: gStart, end: gEnd } = goalEffectiveSpan(g, weekStartStr, weekEndStr);
       const rel = entries.filter(
-        (e) =>
-          e.coach_goal_id === g.id &&
-          e.planner_date >= weekStartStr &&
-          e.planner_date <= weekEndStr
+        (e) => e.coach_goal_id === g.id && e.planner_date >= gStart && e.planner_date <= gEnd
       );
       const plannedSum = rel.reduce((s, e) => s + Number(e.planned_quantity || 0), 0);
       const completedSum = rel.reduce((s, e) => s + Number(e.completed_quantity || 0), 0);
@@ -182,6 +206,17 @@ export function WeeklyPlannerCalendar({
       return { goal: g, plannedSum, completedSum, target, remaining, over };
     });
   }, [goals, entries, weekStartStr, weekEndStr]);
+
+  const goalsByDayDate = useMemo(() => {
+    const out: Record<string, CoachWeeklyGoalRow[]> = {};
+    for (const d of dayDates) {
+      out[d] = goals.filter((g) => {
+        const { start, end } = goalEffectiveSpan(g, weekStartStr, weekEndStr);
+        return d >= start && d <= end;
+      });
+    }
+    return out;
+  }, [goals, dayDates, weekStartStr, weekEndStr]);
 
   const weekStats = useMemo(() => {
     let planned = 0;
@@ -243,6 +278,13 @@ export function WeeklyPlannerCalendar({
       const goalId = payload.slice('goal:'.length).trim();
       const g = goals.find((x) => x.id === goalId);
       if (!g) return;
+      const { start: spanS, end: spanE } = goalEffectiveSpan(g, weekStartStr, weekEndStr);
+      if (date < spanS || date > spanE) {
+        alert(
+          `Bu hedef yalnızca ${spanS} – ${spanE} aralığındaki günlere yerleştirilebilir. Tarih aralığını karttaki kalemle güncelleyebilirsiniz.`
+        );
+        return;
+      }
       const agg = goalAggregates.find((a) => a.goal.id === goalId);
       const remaining = Math.max(0, agg?.remaining ?? 0);
       const chunk = Math.min(remaining, 50);
@@ -293,14 +335,20 @@ export function WeeklyPlannerCalendar({
     const parts = 4;
     const base = Math.floor(remaining / parts);
     let extra = remaining % parts;
-    const dayIx = [6, 1, 3, 4];
+    const { start: gS, end: gE } = goalEffectiveSpan(goal, weekStartStr, weekEndStr);
+    const allowedIx = dayDates
+      .map((d, i) => ({ d, i }))
+      .filter(({ d }) => d >= gS && d <= gE)
+      .map((x) => x.i);
+    const pool = allowedIx.length ? allowedIx : [0, 1, 2, 3, 4, 5, 6];
+    const pickTemplate = [0, 1, 2, 3].map((k) => pool[Math.min(pool.length - 1, Math.floor((k * (pool.length - 1)) / 3))]);
     const hour = 19;
     try {
       for (let i = 0; i < parts; i++) {
         const q = base + (extra > 0 ? 1 : 0);
         if (extra > 0) extra -= 1;
         if (q <= 0) continue;
-        const date = dayDates[dayIx[i]];
+        const date = dayDates[pickTemplate[i] ?? pool[0]];
         await createWeeklyPlannerEntry({
           student_id: studentId,
           planner_date: date,
@@ -400,6 +448,8 @@ export function WeeklyPlannerCalendar({
       return;
     }
     try {
+      const gs = newGoalStart.trim() || weekStartStr;
+      const ge = newGoalEnd.trim() || gs;
       await createCoachWeeklyGoal({
         student_id: studentId,
         subject,
@@ -407,8 +457,8 @@ export function WeeklyPlannerCalendar({
         target_quantity: Math.max(0, newGoalQty),
         week_start_date: weekStartStr,
         quantity_unit: newGoalUnit.trim() || 'soru',
-        goal_start_date: newGoalStart.trim() || weekStartStr,
-        goal_end_date: newGoalEnd.trim() || weekEndStr,
+        goal_start_date: gs,
+        goal_end_date: ge,
       });
       setNewGoalSubject('');
       setNewGoalTitle('');
@@ -453,9 +503,11 @@ export function WeeklyPlannerCalendar({
     if (!goalDateEditId || !canManageGoals) return;
     setGoalDateSaving(true);
     try {
+      const gs = goalDateEditStart.trim() || weekStartStr;
+      const ge = goalDateEditEnd.trim() || gs;
       await patchCoachWeeklyGoal(goalDateEditId, {
-        goal_start_date: goalDateEditStart.trim() || weekStartStr,
-        goal_end_date: goalDateEditEnd.trim() || weekEndStr,
+        goal_start_date: gs,
+        goal_end_date: ge,
       });
       cancelGoalDateEdit();
       await reload();
@@ -642,9 +694,9 @@ export function WeeklyPlannerCalendar({
         <div className="rounded-xl border border-dashed border-amber-200 bg-amber-50/50 p-4 space-y-3">
           <p className="text-sm font-medium text-amber-900">Koç — bu hafta için hedef ekle</p>
           <p className="text-xs text-amber-800/90 leading-relaxed max-w-2xl">
-            Başlangıç ve bitiş tarihleri <strong>bu haftanın Pazartesi–Pazar aralığında</strong> kalır; bitiş
-            boş bırakılırsa en fazla haftanın son gününe kadar uzatılır (ör. yalnızca Cumartesi seçtiğinizde
-            hedef bir sonraki haftaya taşınmaz).
+            Başlangıç ve bitişi istediğiniz takvim günleri olarak seçebilirsiniz (ör. Cumartesi–gelecek hafta
+            Cuma). Takvimde üst şeritte hangi günlerin bu hedefe dahil olduğu işaretlenir; plan bloklarını
+            yalnızca bu aralıktaki günlere sürükleyebilirsiniz.
           </p>
           <div className="flex flex-wrap gap-2 items-end">
             <div>
@@ -691,8 +743,6 @@ export function WeeklyPlannerCalendar({
               <label className="text-xs text-slate-600 block mb-1">Başlangıç</label>
               <input
                 type="date"
-                min={weekStartStr}
-                max={weekEndStr}
                 value={newGoalStart}
                 onChange={(e) => {
                   const v = e.target.value;
@@ -706,8 +756,6 @@ export function WeeklyPlannerCalendar({
               <label className="text-xs text-slate-600 block mb-1">Bitiş</label>
               <input
                 type="date"
-                min={weekStartStr}
-                max={weekEndStr}
                 value={newGoalEnd}
                 onChange={(e) => {
                   const v = e.target.value;
@@ -762,6 +810,36 @@ export function WeeklyPlannerCalendar({
                     </span>
                   </div>
                 ))}
+
+                <div className="border-r border-b border-slate-200 bg-amber-50/40 dark:bg-amber-950/20 px-1 py-0.5 text-[9px] text-amber-900/80 dark:text-amber-200/90 leading-tight">
+                  Hedef süresi
+                </div>
+                {dayDates.map((date) => {
+                  const dayGoals = goalsByDayDate[date] ?? [];
+                  return (
+                    <div
+                      key={`goal-span-${date}`}
+                      className="border-b border-slate-200 bg-amber-50/30 dark:bg-amber-950/15 px-0.5 py-0.5 min-h-[28px] flex flex-col gap-0.5"
+                    >
+                      {dayGoals.slice(0, 3).map((g) => {
+                        const st = subjectPlannerStyle(g.subject, g.quantity_unit);
+                        const sp = goalEffectiveSpan(g, weekStartStr, weekEndStr);
+                        return (
+                          <div
+                            key={g.id}
+                            title={`${g.title} (${sp.start} → ${sp.end})`}
+                            className={`truncate rounded px-0.5 text-[9px] font-medium leading-tight ${st.chip}`}
+                          >
+                            {g.subject}
+                          </div>
+                        );
+                      })}
+                      {dayGoals.length > 3 ? (
+                        <span className="text-[8px] text-amber-800/80 dark:text-amber-300/80">+{dayGoals.length - 3}</span>
+                      ) : null}
+                    </div>
+                  );
+                })}
 
                 {HOURS.map((hour) => (
                   <React.Fragment key={hour}>
@@ -850,9 +928,10 @@ export function WeeklyPlannerCalendar({
           <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm p-4 shadow-sm">
             <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-1">Koç hedefleri</h4>
             <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3">
-              Kartı takvim hücresine sürükleyerek plana yerleştirin · Üstteki &quot;Önceki / Sonraki haftaya
-              bırak&quot; alanına bırakarak hedefi (ve bu hedefe bağlı plan bloklarını) o haftaya taşıyın ·
-              Tarih aralığını karttaki kalemle düzenleyin · Kalan kotayı günlere bölebilirsiniz
+              Kartı takvim hücresine sürükleyerek plana yerleştirin (yalnızca hedefin başlangıç–bitiş
+              günleri) · Üstteki &quot;Önceki / Sonraki haftaya bırak&quot; ile hedefi ve plan bloklarını
+              kaydırın · Tarih aralığını karttaki kalemle istediğiniz günler olarak düzenleyin · Kalan kotayı
+              hedef süresindeki günlere bölebilirsiniz
             </p>
             {goalAggregates.length === 0 ? (
               <p className="text-xs text-slate-500">
@@ -864,8 +943,7 @@ export function WeeklyPlannerCalendar({
               <ul className="space-y-3 text-xs">
                 {goalAggregates.map(({ goal, plannedSum, target, remaining, over }) => {
                   const pct = target > 0 ? Math.min(100, Math.round((plannedSum / target) * 100)) : 0;
-                  const start = goal.goal_start_date || goal.week_start_date;
-                  const end = goal.goal_end_date || weekEndStr;
+                  const { start, end } = goalEffectiveSpan(goal, weekStartStr, weekEndStr);
                   return (
                     <li
                       key={goal.id}
@@ -941,8 +1019,7 @@ export function WeeklyPlannerCalendar({
                         {canManageGoals && goalDateEditId === goal.id ? (
                           <div className="mt-2 space-y-2 rounded-lg border border-amber-200 bg-amber-50/80 p-2 dark:border-amber-900/50 dark:bg-amber-950/30">
                             <p className="text-[10px] text-amber-900 dark:text-amber-200/90">
-                              Sadece bu haftanın ({weekStartStr} – {weekEndStr}) içinde kalır; kayıtta sunucu
-                              yine sıkıştırır.
+                              İstediğiniz takvim günlerini seçin; bitiş boşsa başlangıç günü kullanılır.
                             </p>
                             <div className="flex flex-wrap gap-2 items-end">
                               <div>
@@ -951,8 +1028,6 @@ export function WeeklyPlannerCalendar({
                                 </label>
                                 <input
                                   type="date"
-                                  min={weekStartStr}
-                                  max={weekEndStr}
                                   value={goalDateEditStart}
                                   onChange={(e) => {
                                     const v = e.target.value;
@@ -968,8 +1043,6 @@ export function WeeklyPlannerCalendar({
                                 </label>
                                 <input
                                   type="date"
-                                  min={weekStartStr}
-                                  max={weekEndStr}
                                   value={goalDateEditEnd}
                                   onChange={(e) => {
                                     const v = e.target.value;
