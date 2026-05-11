@@ -49,8 +49,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/teacher-panel': ['teacher'],
   '/class-live-lessons': ['super_admin', 'admin', 'coach', 'teacher'],
   '/class-schedule': ['student'],
-  '/pdf-contract-hub': ['super_admin', 'admin', 'coach'],
-  '/student-contracts': ['student']
+  '/veli-onay': ['super_admin', 'admin', 'coach']
 } as const satisfies Record<string, readonly UserRole[]>;
 
 export type ProtectedAppPath = keyof typeof ROUTE_ALLOWED_ROLES;

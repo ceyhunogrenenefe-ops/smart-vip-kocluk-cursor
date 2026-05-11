@@ -39,9 +39,5 @@ export const routeLoaders = {
   'student-teacher-lesson-quota': () => import('../handlers/student-teacher-lesson-quota.js'),
   'class-live-lessons': () => import('../handlers/class-live-lessons.js'),
   'academic-center-links': () => import('../handlers/academic-center-links.js'),
-  'document-templates': () => import('../handlers/document-templates.js'),
-  'program-packages': () => import('../handlers/program-packages.js'),
-  'contract-documents': () => import('../handlers/contract-documents.js'),
-  'contract-signatures': () => import('../handlers/contract-signatures.js'),
-  'contract-automation-rules': () => import('../handlers/contract-automation-rules.js')
+  'parent-sign-contracts': () => import('../handlers/parent-sign-contracts.js')
 };

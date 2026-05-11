@@ -186,14 +186,10 @@ export default async function handler(req, res) {
         parent_phone: body.parent_phone ?? null,
         coach_id: resolvedCoachId,
         program_id: body.program_id ?? null,
-        program_package_id: body.program_package_id ?? null,
         institution_id: institutionId,
         created_at: body.created_at || new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
-      if (!['super_admin', 'admin'].includes(actor.role)) {
-        delete payload.program_package_id;
-      }
       let { data, error } = await supabaseAdmin.from('students').insert(payload).select().single();
       if (error) throw error;
 
@@ -245,9 +241,6 @@ export default async function handler(req, res) {
 
       const body = req.body || {};
       const patchBody = { ...body };
-      if (patchBody.program_package_id !== undefined && !['super_admin', 'admin'].includes(actor.role)) {
-        delete patchBody.program_package_id;
-      }
       if (actor.role === 'coach') {
         delete patchBody.coach_id;
       }

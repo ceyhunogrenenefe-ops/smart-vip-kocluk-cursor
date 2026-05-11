@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { fetchSigningPayload, submitSignature } from '../lib/contractSystemApi';
+import { fetchVeliImzaPayload, submitVeliImza } from '../lib/parentSignApi';
 import { CheckCircle2, FileText, Loader2 } from 'lucide-react';
 
-export default function SignContractPage() {
+export default function VeliImzaPage() {
   const { token } = useParams();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
@@ -12,7 +12,8 @@ export default function SignContractPage() {
   const [signed, setSigned] = useState(false);
   const [busy, setBusy] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [accepted, setAccepted] = useState(false);
+  const [kvkk, setKvkk] = useState(false);
+  const [soz, setSoz] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -24,7 +25,7 @@ export default function SignContractPage() {
         return;
       }
       try {
-        const d = await fetchSigningPayload(token);
+        const d = await fetchVeliImzaPayload(token);
         if (cancelled) return;
         setHtml(d.merged_html);
         setContractNo(d.contract_number);
@@ -46,13 +47,13 @@ export default function SignContractPage() {
     const r = c.parentElement?.getBoundingClientRect();
     if (!r) return;
     c.width = Math.floor(r.width);
-    c.height = 160;
+    c.height = 180;
     const ctx = c.getContext('2d');
     if (!ctx) return;
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, c.width, c.height);
-    ctx.strokeStyle = '#1e3a8a';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#1e40af';
+    ctx.lineWidth = 2.5;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
   }, []);
@@ -95,7 +96,11 @@ export default function SignContractPage() {
   };
 
   const submit = async () => {
-    if (!token || !accepted || signed) return;
+    if (!token || signed) return;
+    if (!kvkk || !soz) {
+      setErr('Lütfen yukarıdaki onay kutularını işaretleyin.');
+      return;
+    }
     const c = canvasRef.current;
     if (!c) return;
     const png = c.toDataURL('image/png');
@@ -106,7 +111,12 @@ export default function SignContractPage() {
     setSaving(true);
     setErr(null);
     try {
-      await submitSignature({ signing_token: token, signature_png_base64: png, accepted_terms: true });
+      await submitVeliImza({
+        signing_token: token,
+        signature_png_base64: png,
+        kvkk_ok: true,
+        contract_ok: true
+      });
       setSigned(true);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Kaydedilemedi');
@@ -116,13 +126,13 @@ export default function SignContractPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-950 via-slate-900 to-slate-950 text-white px-4 py-10">
-      <div className="max-w-3xl mx-auto">
+    <div className="min-h-screen bg-gradient-to-b from-slate-900 via-blue-950 to-slate-950 text-white px-4 py-8">
+      <div className="max-w-lg mx-auto">
         <div className="flex items-center gap-2 mb-6">
           <FileText className="w-8 h-8 text-red-400" />
           <div>
             <p className="text-xs uppercase tracking-widest text-blue-300">Smart Koçluk</p>
-            <h1 className="text-xl font-bold">Dijital sözleşme imzası</h1>
+            <h1 className="text-xl font-bold leading-tight">Veli onayı ve e-imza</h1>
             {contractNo ? <p className="text-sm text-slate-300 font-mono mt-1">{contractNo}</p> : null}
           </div>
         </div>
@@ -135,49 +145,75 @@ export default function SignContractPage() {
           <div className="rounded-xl border border-red-500/40 bg-red-950/40 p-4 text-red-200">{err}</div>
         ) : (
           <>
-            <div className="rounded-2xl border border-white/10 bg-white text-slate-900 shadow-2xl overflow-hidden mb-6">
-              <div className="max-h-[50vh] overflow-y-auto p-4 text-sm" dangerouslySetInnerHTML={{ __html: html }} />
+            <div className="rounded-2xl border border-white/10 bg-white text-slate-900 shadow-2xl overflow-hidden mb-5 max-h-[42vh] overflow-y-auto">
+              <div className="p-4 text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: html }} />
             </div>
 
             {signed ? (
-              <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/40 p-4 flex items-center gap-2 text-emerald-100">
-                <CheckCircle2 className="w-6 h-6" />
-                İmza kaydedildi. Teşekkür ederiz.
+              <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/50 p-4 flex items-center gap-2 text-emerald-100 text-sm">
+                <CheckCircle2 className="w-6 h-6 shrink-0" />
+                Kaydınız alındı. Kurum tarafında imzalı olarak görünecektir. Teşekkür ederiz.
               </div>
             ) : (
-              <div className="rounded-2xl border border-white/10 bg-slate-900/60 p-4 space-y-4">
-                <p className="text-sm text-slate-200">Aşağıdaki kutuda imzanızı çizin (parmak veya fare).</p>
-                <div className="w-full rounded-xl border border-white/20 overflow-hidden bg-white">
-                  <canvas
-                    ref={canvasRef}
-                    className="w-full touch-none cursor-crosshair block"
-                    onMouseDown={startDraw}
-                    onMouseMove={draw}
-                    onMouseUp={endDraw}
-                    onMouseLeave={endDraw}
-                    onTouchStart={(e) => {
-                      e.preventDefault();
-                      startDraw(e);
-                    }}
-                    onTouchMove={(e) => {
-                      e.preventDefault();
-                      draw(e);
-                    }}
-                    onTouchEnd={endDraw}
+              <div className="rounded-2xl border border-white/15 bg-slate-900/70 p-4 space-y-4 backdrop-blur-sm">
+                <p className="text-sm font-semibold text-white border-b border-white/10 pb-2">Onaylar</p>
+                <label className="flex items-start gap-3 text-sm text-slate-100 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={kvkk}
+                    onChange={(e) => setKvkk(e.target.checked)}
+                    className="mt-1 h-4 w-4 rounded border-slate-400"
                   />
-                </div>
-                <label className="flex items-start gap-2 text-sm text-slate-200">
-                  <input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} className="mt-1" />
-                  Metni okudum, onaylıyorum ve elektronik imzamın hukuki sonuç doğuracağını kabul ediyorum.
+                  <span>
+                    <strong>6698 sayılı KVKK</strong> ve kişisel verilerin işlenmesine ilişkin bilgilendirme metnini
+                    okudum, anladım ve onaylıyorum.
+                  </span>
                 </label>
+                <label className="flex items-start gap-3 text-sm text-slate-100 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={soz}
+                    onChange={(e) => setSoz(e.target.checked)}
+                    className="mt-1 h-4 w-4 rounded border-slate-400"
+                  />
+                  <span>
+                    Yukarıdaki özet ve <strong>kayıt koşullarını / sözleşme hükümlerini</strong> okudum; veli sıfatıyla
+                    kabul ve beyan ediyorum.
+                  </span>
+                </label>
+
+                <div>
+                  <p className="text-sm font-semibold text-white mb-2">E-imza (parmak veya fare ile çizin)</p>
+                  <div className="w-full rounded-xl border-2 border-dashed border-blue-400/50 overflow-hidden bg-white">
+                    <canvas
+                      ref={canvasRef}
+                      className="w-full touch-none cursor-crosshair block h-[180px]"
+                      onMouseDown={startDraw}
+                      onMouseMove={draw}
+                      onMouseUp={endDraw}
+                      onMouseLeave={endDraw}
+                      onTouchStart={(e) => {
+                        e.preventDefault();
+                        startDraw(e);
+                      }}
+                      onTouchMove={(e) => {
+                        e.preventDefault();
+                        draw(e);
+                      }}
+                      onTouchEnd={endDraw}
+                    />
+                  </div>
+                </div>
+
                 {err ? <p className="text-sm text-red-300">{err}</p> : null}
+
                 <button
                   type="button"
-                  disabled={saving || !accepted}
+                  disabled={saving || !kvkk || !soz}
                   onClick={() => void submit()}
-                  className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-red-600 py-3 font-semibold disabled:opacity-40"
+                  className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-red-600 py-3.5 text-base font-bold text-white shadow-lg disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  {saving ? 'Kaydediliyor…' : 'İmzayı gönder'}
+                  {saving ? 'Kaydediliyor…' : 'Kaydet'}
                 </button>
               </div>
             )}

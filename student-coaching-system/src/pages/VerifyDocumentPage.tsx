@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { verifyDocumentPublic } from '../lib/contractSystemApi';
+import { verifyParentDocumentPublic } from '../lib/parentSignApi';
 import { ShieldCheck, ShieldAlert, Loader2 } from 'lucide-react';
 
 export default function VerifyDocumentPage() {
   const [params] = useSearchParams();
   const t = params.get('t') || '';
   const [loading, setLoading] = useState(true);
-  const [result, setResult] = useState<Awaited<ReturnType<typeof verifyDocumentPublic>> | null>(null);
+  const [result, setResult] = useState<Awaited<ReturnType<typeof verifyParentDocumentPublic>> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -17,7 +17,7 @@ export default function VerifyDocumentPage() {
         setLoading(false);
         return;
       }
-      const r = await verifyDocumentPublic(t);
+      const r = await verifyParentDocumentPublic(t);
       if (!cancelled) {
         setResult(r);
         setLoading(false);
@@ -55,6 +55,11 @@ export default function VerifyDocumentPage() {
             {result.institution_name ? (
               <p>
                 <span className="text-slate-500">Kurum:</span> {result.institution_name}
+              </p>
+            ) : null}
+            {result.student_label ? (
+              <p>
+                <span className="text-slate-500">Öğrenci:</span> {result.student_label}
               </p>
             ) : null}
             {result.signed_at ? (

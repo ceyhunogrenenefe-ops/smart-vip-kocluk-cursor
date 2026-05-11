@@ -1,3 +1,4 @@
+-- [İSTEĞE BAĞLI / ESKİ] PDF şablon tabloları — uygulama artık parent_sign_contracts akışını kullanır.
 -- PDF Şablon & Sözleşme altyapısı (Supabase SQL Editor)
 -- Storage: Supabase Dashboard → Storage → bucket `generated-contracts` (private) oluşturun; RLS politikalarını kuruma göre ayarlayın.
 
