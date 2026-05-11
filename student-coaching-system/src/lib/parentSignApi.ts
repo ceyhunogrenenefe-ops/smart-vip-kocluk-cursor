@@ -19,14 +19,21 @@ export function suggestHoursAndFeeFromSinif(sinifRaw: string): { hours: number; 
 
 export type SozlesmeTuruKey = 'kullanici_sozlesmesi' | 'satis_sozlesmesi' | 'diger';
 
+/** Şablon / sözleşme ders satırı */
+export interface DersSatiri {
+  ders_adi: string;
+  haftalik_saat: number;
+}
+
 export interface ParentSignClassPresetRow {
   id: string;
   institution_id: string;
   sinif: string;
   program_adi: string;
   haftalik_ders_saati: number;
-  ucret: number;
-  taksit_sayisi: number;
+  ucret?: number;
+  taksit_sayisi?: number;
+  ders_satirlari?: DersSatiri[] | unknown;
   sozlesme_turu?: SozlesmeTuruKey | string;
   sozlesme_ozel_baslik?: string;
   sablon_ek_detay?: string;
@@ -71,6 +78,38 @@ export interface ParentSignContractRow {
   sablon_ek_detay_snapshot?: string;
   student_id?: string | null;
   ogrenci_user_id?: string | null;
+  ders_programi_snapshot?: DersSatiri[] | unknown;
+}
+
+export function sumDersSatirlari(rows: { haftalik_saat: number }[]): number {
+  return rows.reduce((s, r) => s + (Number.isFinite(Number(r.haftalik_saat)) ? Number(r.haftalik_saat) : 0), 0);
+}
+
+export function parseDersSatirlariFromPreset(p: ParentSignClassPresetRow): DersSatiri[] {
+  const raw = p.ders_satirlari;
+  let arr: unknown[] = [];
+  if (Array.isArray(raw)) arr = raw;
+  else if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const x = JSON.parse(raw) as unknown;
+      arr = Array.isArray(x) ? x : [];
+    } catch {
+      arr = [];
+    }
+  }
+  const out: DersSatiri[] = [];
+  for (const x of arr) {
+    if (!x || typeof x !== 'object') continue;
+    const o = x as Record<string, unknown>;
+    const name = String(o.ders_adi ?? o.name ?? '').trim();
+    const h = Number(o.haftalik_saat ?? o.saat ?? 0);
+    if (!name || !Number.isFinite(h) || h <= 0) continue;
+    out.push({ ders_adi: name.slice(0, 120), haftalik_saat: Math.min(40, Math.max(0.25, h)) });
+  }
+  if (out.length) return out;
+  const fallback = Number(p.haftalik_ders_saati);
+  if (Number.isFinite(fallback) && fallback > 0) return [{ ders_adi: 'Genel', haftalik_saat: fallback }];
+  return [{ ders_adi: '', haftalik_saat: 2 }];
 }
 
 /** Öğrenci kartı — veli formunda otomatik doldurma */
@@ -149,9 +188,7 @@ export async function createParentSignClassPreset(body: {
   institution_id?: string;
   sinif: string;
   program_adi: string;
-  haftalik_ders_saati: number;
-  ucret: number;
-  taksit_sayisi: number;
+  ders_satirlari: DersSatiri[];
   sozlesme_turu?: SozlesmeTuruKey | string;
   sozlesme_ozel_baslik?: string;
   sablon_ek_detay?: string;
@@ -170,9 +207,7 @@ export async function updateParentSignClassPreset(body: {
   id: string;
   sinif: string;
   program_adi: string;
-  haftalik_ders_saati: number;
-  ucret: number;
-  taksit_sayisi: number;
+  ders_satirlari: DersSatiri[];
   sozlesme_turu?: SozlesmeTuruKey | string;
   sozlesme_ozel_baslik?: string;
   sablon_ek_detay?: string;
@@ -214,11 +249,18 @@ export async function createParentSignContract(body: {
   sozlesme_turu?: SozlesmeTuruKey | string;
   sozlesme_basligi?: string;
   sablon_ek_detay_snapshot?: string;
+  ders_satirlari?: DersSatiri[];
 }): Promise<ParentSignContractRow> {
   const res = await apiFetch('/api/parent-sign-contracts', { method: 'POST', headers: JSON_HDR, body: JSON.stringify(body) });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((j as { error?: string }).error || `API ${res.status}`);
   return (j as { data: ParentSignContractRow }).data;
+}
+
+export async function deleteParentSignContract(id: string): Promise<void> {
+  const res = await apiFetch(`/api/parent-sign-contracts?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((j as { error?: string }).error || `API ${res.status}`);
 }
 
 export async function fetchVeliImzaPayload(token: string) {

@@ -4,13 +4,17 @@ import {
   createParentSignClassPreset,
   createParentSignContract,
   deleteParentSignClassPreset,
+  deleteParentSignContract,
   listInstitutionsForPicker,
   listParentSignClassPresets,
   listParentSignContracts,
   listParentSignFillCandidates,
+  parseDersSatirlariFromPreset,
   splitAdSoyad,
   suggestHoursAndFeeFromSinif,
+  sumDersSatirlari,
   updateParentSignClassPreset,
+  type DersSatiri,
   type InstitutionPickRow,
   type ParentSignClassPresetRow,
   type ParentSignContractRow,
@@ -52,6 +56,21 @@ function turKisaEtiket(t?: string) {
   return 'Satış';
 }
 
+function presetDersOzeti(p: ParentSignClassPresetRow): string {
+  const rows = parseDersSatirlariFromPreset(p).filter((r) => r.ders_adi.trim());
+  if (!rows.length) return '';
+  return rows.map((r) => `${r.ders_adi} ${r.haftalik_saat}s`).join(', ');
+}
+
+function validDersRows(rows: DersSatiri[]): DersSatiri[] {
+  return rows
+    .map((r) => ({
+      ders_adi: String(r.ders_adi || '').trim().slice(0, 120),
+      haftalik_saat: Math.min(40, Math.max(0.25, Number(r.haftalik_saat) || 0))
+    }))
+    .filter((r) => r.ders_adi.length > 0 && r.haftalik_saat > 0);
+}
+
 export default function ParentSignFlowPage() {
   const { effectiveUser } = useAuth();
   const isSuper = effectiveUser?.role === 'super_admin';
@@ -88,9 +107,7 @@ export default function ParentSignFlowPage() {
 
   const [presetSinif, setPresetSinif] = useState('');
   const [presetProgram, setPresetProgram] = useState('');
-  const [presetSaat, setPresetSaat] = useState<number>(8);
-  const [presetUcret, setPresetUcret] = useState<number>(42000);
-  const [presetTaksit, setPresetTaksit] = useState<number>(10);
+  const [presetDersler, setPresetDersler] = useState<DersSatiri[]>([{ ders_adi: '', haftalik_saat: 2 }]);
   const [presetSozlesmeTuru, setPresetSozlesmeTuru] = useState<SozlesmeTuruKey>('satis_sozlesmesi');
   const [presetOzelBaslik, setPresetOzelBaslik] = useState('');
   const [presetEkDetay, setPresetEkDetay] = useState('');
@@ -104,6 +121,8 @@ export default function ParentSignFlowPage() {
   const [sozlesmeTuru, setSozlesmeTuru] = useState<SozlesmeTuruKey>('satis_sozlesmesi');
   const [sozlesmeBasligiOverride, setSozlesmeBasligiOverride] = useState('');
   const [contractEkSatirlar, setContractEkSatirlar] = useState('');
+  /** Veli kaydı: şablondan kopyalanır veya elle düzenlenir; doluysa APIye gönderilir */
+  const [contractDersler, setContractDersler] = useState<DersSatiri[]>([]);
 
   const programs = useMemo(() => uniquePrograms(presets), [presets]);
 
@@ -170,6 +189,11 @@ export default function ParentSignFlowPage() {
   }, [effectiveInstitutionId]);
 
   useEffect(() => {
+    const vd = validDersRows(contractDersler);
+    if (vd.length) setHaftalikDersSaati(sumDersSatirlari(vd));
+  }, [contractDersler]);
+
+  useEffect(() => {
     if (!isSuper) {
       setInstitutionOptions([]);
       return;
@@ -196,9 +220,10 @@ export default function ParentSignFlowPage() {
     setProgramSource('list');
     setProgramSelectValue(p.program_adi);
     setProgramCustom('');
-    setHaftalikDersSaati(Number(p.haftalik_ders_saati) || 0);
-    setUcret(Number(p.ucret) || 0);
-    setTaksitSayisi(Math.max(1, Math.min(48, Math.round(Number(p.taksit_sayisi) || 1))));
+    const rows = parseDersSatirlariFromPreset(p);
+    setContractDersler(rows.map((r) => ({ ...r })));
+    const vd = validDersRows(rows);
+    setHaftalikDersSaati(vd.length ? sumDersSatirlari(vd) : Number(p.haftalik_ders_saati) || 0);
     const tur = (p.sozlesme_turu || 'satis_sozlesmesi') as SozlesmeTuruKey;
     setSozlesmeTuru(['kullanici_sozlesmesi', 'satis_sozlesmesi', 'diger'].includes(tur) ? tur : 'satis_sozlesmesi');
     setSozlesmeBasligiOverride('');
@@ -223,6 +248,8 @@ export default function ParentSignFlowPage() {
       return;
     }
     try {
+      const vd = validDersRows(contractDersler);
+      const haftalikOut = vd.length ? sumDersSatirlari(vd) : haftalikDersSaati;
       const body = {
         ogrenci_ad: ogrenciAd.trim(),
         ogrenci_soyad: ogrenciSoyad.trim(),
@@ -234,10 +261,11 @@ export default function ParentSignFlowPage() {
         program_adi,
         baslangic_tarihi: baslangic,
         bitis_tarihi: bitis,
-        haftalik_ders_saati: haftalikDersSaati,
+        haftalik_ders_saati: haftalikOut,
         ucret,
         taksit_sayisi: taksitSayisi,
         sozlesme_turu: sozlesmeTuru,
+        ...(vd.length ? { ders_satirlari: vd } : {}),
         ...(sozlesmeBasligiOverride.trim() ? { sozlesme_basligi: sozlesmeBasligiOverride.trim() } : {}),
         ...(contractEkSatirlar.trim() ? { sablon_ek_detay_snapshot: contractEkSatirlar.trim() } : {}),
         ...(selectedPresetId.trim() ? { preset_id: selectedPresetId.trim() } : {}),
@@ -267,13 +295,16 @@ export default function ParentSignFlowPage() {
       setMsg('Şablon için sınıf ve program adı zorunlu.');
       return;
     }
+    const dersOk = validDersRows(presetDersler);
+    if (!dersOk.length) {
+      setMsg('En az bir ders satırı girin (ders adı ve haftalık saat > 0).');
+      return;
+    }
     try {
       const base = {
         sinif: sinifT,
         program_adi: progT,
-        haftalik_ders_saati: presetSaat,
-        ucret: presetUcret,
-        taksit_sayisi: Math.max(1, Math.min(48, Math.round(presetTaksit))),
+        ders_satirlari: dersOk,
         sozlesme_turu: presetSozlesmeTuru,
         sozlesme_ozel_baslik: presetOzelBaslik.trim(),
         sablon_ek_detay: presetEkDetay.trim()
@@ -291,9 +322,7 @@ export default function ParentSignFlowPage() {
       setEditingPresetId(null);
       setPresetSinif('');
       setPresetProgram('');
-      setPresetSaat(8);
-      setPresetUcret(42000);
-      setPresetTaksit(10);
+      setPresetDersler([{ ders_adi: '', haftalik_saat: 2 }]);
       setPresetSozlesmeTuru('satis_sozlesmesi');
       setPresetOzelBaslik('');
       setPresetEkDetay('');
@@ -307,9 +336,7 @@ export default function ParentSignFlowPage() {
     setEditingPresetId(p.id);
     setPresetSinif(p.sinif);
     setPresetProgram(p.program_adi);
-    setPresetSaat(Number(p.haftalik_ders_saati) || 0);
-    setPresetUcret(Number(p.ucret) || 0);
-    setPresetTaksit(Math.max(1, Math.min(48, Math.round(Number(p.taksit_sayisi) || 1))));
+    setPresetDersler(parseDersSatirlariFromPreset(p));
     const tur = (p.sozlesme_turu || 'satis_sozlesmesi') as SozlesmeTuruKey;
     setPresetSozlesmeTuru(['kullanici_sozlesmesi', 'satis_sozlesmesi', 'diger'].includes(tur) ? tur : 'satis_sozlesmesi');
     setPresetOzelBaslik(String(p.sozlesme_ozel_baslik || ''));
@@ -320,12 +347,21 @@ export default function ParentSignFlowPage() {
     setEditingPresetId(null);
     setPresetSinif('');
     setPresetProgram('');
-    setPresetSaat(8);
-    setPresetUcret(42000);
-    setPresetTaksit(10);
+    setPresetDersler([{ ders_adi: '', haftalik_saat: 2 }]);
     setPresetSozlesmeTuru('satis_sozlesmesi');
     setPresetOzelBaslik('');
     setPresetEkDetay('');
+  };
+
+  const removeContractRow = async (id: string) => {
+    if (!window.confirm('Bu sözleşme kaydını silmek istediğinize emin misiniz?')) return;
+    setMsg(null);
+    try {
+      await deleteParentSignContract(id);
+      void load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Silinemedi');
+    }
   };
 
   const removePreset = async (id: string) => {
@@ -413,9 +449,8 @@ export default function ParentSignFlowPage() {
             Sınıf &amp; sözleşme şablonları
           </h2>
           <p className="text-xs text-slate-500 mb-4">
-            Şablonları <strong>bu sayfada</strong> oluşturursunuz: tablo boşsa alttaki sınıf / program / saat / ücret /
-            taksit alanlarını doldurup <strong>Şablon ekle</strong>ye basın. Her satır bir sınıf–program satırıdır; veli
-            kaydı bölümünde &quot;Şablon uygula&quot; ile tek tıkta dolar.
+            Şablonda <strong>sınıf, program</strong> ve <strong>ders bazlı haftalık saat</strong> tanımlayın (satır ekleyip
+            çıkarabilirsiniz). Ücret ve taksit şablonda yok; veli kaydı oluştururken girilir.
           </p>
           {!isSuper && effectiveInstitutionId ? (
             <p className="text-xs text-emerald-800 dark:text-emerald-200/90 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 rounded-lg px-3 py-2 mb-3">
@@ -439,16 +474,15 @@ export default function ParentSignFlowPage() {
                       <th className="px-3 py-2 font-semibold">Sınıf</th>
                       <th className="px-3 py-2 font-semibold">Program</th>
                       <th className="px-3 py-2 font-semibold w-20">Tür</th>
-                      <th className="px-3 py-2 font-semibold">Saat</th>
-                      <th className="px-3 py-2 font-semibold">Ücret</th>
-                      <th className="px-3 py-2 font-semibold">Taksit</th>
+                      <th className="px-3 py-2 font-semibold w-16">Toplam saat</th>
+                      <th className="px-3 py-2 font-semibold min-w-[140px]">Dersler</th>
                       <th className="px-3 py-2 w-24" />
                     </tr>
                   </thead>
                   <tbody>
                     {presets.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="px-3 py-6 text-center text-slate-500">
+                        <td colSpan={6} className="px-3 py-6 text-center text-slate-500">
                           Henüz şablon yok. Aşağıdan ekleyin.
                         </td>
                       </tr>
@@ -458,9 +492,10 @@ export default function ParentSignFlowPage() {
                           <td className="px-3 py-2 font-medium text-slate-800 dark:text-slate-100">{p.sinif}</td>
                           <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{p.program_adi}</td>
                           <td className="px-3 py-2 text-xs text-slate-600">{turKisaEtiket(p.sozlesme_turu)}</td>
-                          <td className="px-3 py-2">{p.haftalik_ders_saati}</td>
-                          <td className="px-3 py-2">{p.ucret} TL</td>
-                          <td className="px-3 py-2">{p.taksit_sayisi}</td>
+                          <td className="px-3 py-2 font-medium">{p.haftalik_ders_saati}</td>
+                          <td className="px-3 py-2 text-xs text-slate-600 max-w-[220px] truncate" title={presetDersOzeti(p)}>
+                            {presetDersOzeti(p) || '—'}
+                          </td>
                           <td className="px-3 py-2">
                             <div className="flex gap-1 justify-end">
                               <button
@@ -507,37 +542,64 @@ export default function ParentSignFlowPage() {
                     placeholder="ör. LGS Hazırlık Paketi"
                   />
                 </div>
-                <div>
-                  <label className="text-xs text-slate-500">Haftalık saat</label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={40}
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                    value={presetSaat}
-                    onChange={(e) => setPresetSaat(Number(e.target.value))}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500">Ücret (TL)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                    value={presetUcret}
-                    onChange={(e) => setPresetUcret(Number(e.target.value))}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500">Taksit sayısı</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={48}
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                    value={presetTaksit}
-                    onChange={(e) => setPresetTaksit(Number(e.target.value))}
-                  />
+                <div className="sm:col-span-3">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <label className="text-xs text-slate-500 font-semibold">Haftalık dersler (ders adı + saat)</label>
+                    <button
+                      type="button"
+                      className="text-xs font-semibold text-blue-700 hover:underline inline-flex items-center gap-1"
+                      onClick={() => setPresetDersler((prev) => [...prev, { ders_adi: '', haftalik_saat: 2 }])}
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Satır ekle
+                    </button>
+                  </div>
+                  <div className="space-y-2 rounded-lg border border-slate-200 p-3 dark:border-slate-600">
+                    {presetDersler.map((row, idx) => (
+                      <div key={idx} className="flex flex-wrap gap-2 items-end">
+                        <div className="flex-1 min-w-[120px]">
+                          <label className="text-[10px] text-slate-400">Ders</label>
+                          <input
+                            className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm dark:bg-slate-950 dark:border-slate-600"
+                            value={row.ders_adi}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setPresetDersler((prev) => prev.map((r, i) => (i === idx ? { ...r, ders_adi: v } : r)));
+                            }}
+                            placeholder="ör. Matematik"
+                          />
+                        </div>
+                        <div className="w-24">
+                          <label className="text-[10px] text-slate-400">Saat/hafta</label>
+                          <input
+                            type="number"
+                            min={0.25}
+                            step={0.5}
+                            max={40}
+                            className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm dark:bg-slate-950 dark:border-slate-600"
+                            value={row.haftalik_saat}
+                            onChange={(e) => {
+                              const v = Number(e.target.value);
+                              setPresetDersler((prev) =>
+                                prev.map((r, i) => (i === idx ? { ...r, haftalik_saat: v } : r))
+                              );
+                            }}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          disabled={presetDersler.length <= 1}
+                          className="mb-0.5 p-2 rounded-lg text-red-600 hover:bg-red-50 disabled:opacity-30 dark:hover:bg-red-950/30"
+                          title="Satırı sil"
+                          onClick={() => setPresetDersler((prev) => prev.filter((_, i) => i !== idx))}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Toplam: <strong>{sumDersSatirlari(validDersRows(presetDersler))}</strong> saat/hafta (geçerli satırların toplamı)
+                  </p>
                 </div>
                 <div>
                   <label className="text-xs text-slate-500">Sözleşme türü</label>
@@ -610,8 +672,7 @@ export default function ParentSignFlowPage() {
                   <option value="">— Seçin —</option>
                   {presets.map((p) => (
                     <option key={p.id} value={p.id}>
-                      [{turKisaEtiket(p.sozlesme_turu)}] {p.sinif} — {p.program_adi} · {p.haftalik_ders_saati} sa ·{' '}
-                      {p.ucret} TL · {p.taksit_sayisi} taksit
+                      [{turKisaEtiket(p.sozlesme_turu)}] {p.sinif} — {p.program_adi} · {p.haftalik_ders_saati} sa/hafta
                     </option>
                   ))}
                 </select>
@@ -834,16 +895,87 @@ export default function ParentSignFlowPage() {
               )}
             </div>
 
+            <div className="sm:col-span-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-4 dark:border-slate-600 dark:bg-slate-800/30">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <label className="text-xs text-slate-600 dark:text-slate-300 font-semibold">
+                  Veli kaydı — haftalık ders dağılımı (isteğe bağlı)
+                </label>
+                <button
+                  type="button"
+                  className="text-xs font-semibold text-blue-700 hover:underline inline-flex items-center gap-1"
+                  onClick={() =>
+                    setContractDersler((prev) =>
+                      prev.length ? [...prev, { ders_adi: '', haftalik_saat: 2 }] : [{ ders_adi: '', haftalik_saat: 2 }]
+                    )
+                  }
+                >
+                  <Plus className="w-3.5 h-3.5" /> Ders satırı ekle
+                </button>
+              </div>
+              {contractDersler.length === 0 ? (
+                <p className="text-xs text-slate-500">
+                  Boş bırakırsanız şablondaki ders listesi kullanılır. Kendi listenizi yazmak için &quot;Ders satırı ekle&quot;ye
+                  basın.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {contractDersler.map((row, idx) => (
+                    <div key={idx} className="flex flex-wrap gap-2 items-end">
+                      <div className="flex-1 min-w-[120px]">
+                        <input
+                          className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm dark:bg-slate-950 dark:border-slate-600"
+                          value={row.ders_adi}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setContractDersler((prev) => prev.map((r, i) => (i === idx ? { ...r, ders_adi: v } : r)));
+                          }}
+                          placeholder="Ders adı"
+                        />
+                      </div>
+                      <div className="w-24">
+                        <input
+                          type="number"
+                          min={0.25}
+                          step={0.5}
+                          max={40}
+                          className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm dark:bg-slate-950 dark:border-slate-600"
+                          value={row.haftalik_saat}
+                          onChange={(e) => {
+                            const v = Number(e.target.value);
+                            setContractDersler((prev) =>
+                              prev.map((r, i) => (i === idx ? { ...r, haftalik_saat: v } : r))
+                            );
+                          }}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        className="p-2 rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                        onClick={() => setContractDersler((prev) => prev.filter((_, i) => i !== idx))}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                  <p className="text-[11px] text-slate-500">
+                    Bu liste doluysa belgede bu satırlar kullanılır ve toplam saat buna göre ayarlanır (
+                    {sumDersSatirlari(validDersRows(contractDersler)) || '—'} saat).
+                  </p>
+                </div>
+              )}
+            </div>
+
             <div>
-              <label className="text-xs text-slate-500">Haftalık ders saati</label>
+              <label className="text-xs text-slate-500">Haftalık ders saati (toplam)</label>
               <input
                 type="number"
                 min={0}
-                max={40}
+                max={80}
                 className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
                 value={haftalikDersSaati}
                 onChange={(e) => setHaftalikDersSaati(Number(e.target.value))}
               />
+              <p className="mt-0.5 text-[10px] text-slate-400">Ders listesi dolduğunda kayıtta otomatik güncellenir.</p>
             </div>
             <div>
               <label className="text-xs text-slate-500">Ücret (TL)</label>
@@ -960,6 +1092,13 @@ export default function ParentSignFlowPage() {
                     >
                       <Link2 className="w-3.5 h-3.5" /> Önizle
                     </a>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 hover:underline"
+                      onClick={() => void removeContractRow(r.id)}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> Sil
+                    </button>
                   </div>
                 </div>
               </li>

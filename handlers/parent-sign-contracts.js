@@ -5,11 +5,13 @@ import {
   buildParentContractHtml,
   contractNumber,
   institutionCodeFromRow,
+  normalizeDersSatirlari,
   normalizeSozlesmeTuru,
   randomToken,
   resolveSozlesmeBasligi,
   splitAdSoyad,
-  suggestHoursAndFeeFromSinif
+  suggestHoursAndFeeFromSinif,
+  sumDersHours
 } from '../api/_lib/parent-sign-defaults.js';
 
 function pickFirstNonEmpty(...vals) {
@@ -226,6 +228,24 @@ export default async function handler(req, res) {
       return res.status(200).json({ data: data || [] });
     }
 
+    if (req.method === 'DELETE') {
+      const id = String(req.query.id || '').trim();
+      if (!id) return res.status(400).json({ error: 'id_required' });
+      const { data: existing, error: fe } = await supabaseAdmin
+        .from('parent_sign_contracts')
+        .select('id,institution_id')
+        .eq('id', id)
+        .maybeSingle();
+      if (fe) throw fe;
+      if (!existing) return res.status(404).json({ error: 'not_found' });
+      if (role !== 'super_admin' && !hasInstitutionAccess(actor, existing.institution_id)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const { error: de } = await supabaseAdmin.from('parent_sign_contracts').delete().eq('id', id);
+      if (de) throw de;
+      return res.status(200).json({ ok: true });
+    }
+
     if (req.method === 'POST') {
       const body = parseBody(req);
       const institutionId =
@@ -320,6 +340,11 @@ export default async function handler(req, res) {
       }
 
       const suggested = suggestHoursAndFeeFromSinif(sinif);
+      let dersSnapshot = normalizeDersSatirlari(body.ders_satirlari);
+      if (!dersSnapshot.length && presetRow) {
+        dersSnapshot = normalizeDersSatirlari(presetRow.ders_satirlari);
+      }
+
       const hoursRaw = body.haftalik_ders_saati;
       const feeRaw = body.ucret;
       const taksitRaw = body.taksit_sayisi;
@@ -330,26 +355,20 @@ export default async function handler(req, res) {
       const taksitParsed =
         taksitRaw !== undefined && taksitRaw !== null && String(taksitRaw).trim() !== '' ? Number(taksitRaw) : NaN;
 
-      if (!Number.isFinite(hoursParsed) && presetRow != null) {
-        hoursParsed = Number(presetRow.haftalik_ders_saati);
-      }
-      if (!Number.isFinite(feeParsed) && presetRow != null) {
-        feeParsed = Number(presetRow.ucret);
+      if (!Number.isFinite(hoursParsed)) {
+        if (dersSnapshot.length) hoursParsed = sumDersHours(dersSnapshot);
+        else if (presetRow != null) hoursParsed = Number(presetRow.haftalik_ders_saati);
       }
 
       const hours = Number.isFinite(hoursParsed)
-        ? Math.min(40, Math.max(0, hoursParsed))
+        ? Math.min(80, Math.max(0, hoursParsed))
         : suggested.hours;
       const fee = Number.isFinite(feeParsed)
         ? Math.min(999999999, Math.max(0, feeParsed))
         : suggested.fee;
-      let taksit_sayisi = Number.isFinite(taksitParsed)
+      const taksit_sayisi = Number.isFinite(taksitParsed)
         ? Math.min(48, Math.max(1, Math.round(taksitParsed)))
         : 1;
-      if (!Number.isFinite(taksitParsed) && presetRow != null) {
-        const pt = Math.round(Number(presetRow.taksit_sayisi));
-        if (Number.isFinite(pt)) taksit_sayisi = Math.min(48, Math.max(1, pt));
-      }
 
       const kurum_kodu = institutionCodeFromRow(inst || { id: institutionId });
       const cnum = contractNumber(kurum_kodu);
@@ -377,7 +396,8 @@ export default async function handler(req, res) {
         kurum_adi: inst?.name || '',
         verify_url: verifyUrl || '#',
         document_title: sozlesme_basligi,
-        extra_detail_plain: sablon_ek_detay_snapshot
+        extra_detail_plain: sablon_ek_detay_snapshot,
+        ders_satirlari: dersSnapshot
       });
 
       const row = {
@@ -408,12 +428,21 @@ export default async function handler(req, res) {
         sablon_ek_detay_snapshot,
         student_id: studentRow ? studentId : null,
         ogrenci_user_id: ogrenciUserId || null,
+        ders_programi_snapshot: dersSnapshot,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
 
       const { data: created, error: insErr } = await supabaseAdmin.from('parent_sign_contracts').insert(row).select().single();
-      if (insErr) throw insErr;
+      if (insErr) {
+        console.error('[parent-sign-contracts insert]', insErr);
+        return res.status(500).json({
+          error: errorMessage(insErr),
+          hint: String(insErr.message || '').includes('ders_programi')
+            ? '2026-05-15-parent-sign-preset-ders-programi.sql çalıştırın.'
+            : undefined
+        });
+      }
       const signPath = `/veli-imza/${encodeURIComponent(signingToken)}`;
       const signUrl = base ? `${base}${signPath}` : signPath;
       return res.status(200).json({ data: { ...created, sign_url: signUrl } });
