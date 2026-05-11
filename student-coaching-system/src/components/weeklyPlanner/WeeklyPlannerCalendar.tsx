@@ -388,6 +388,8 @@ export function WeeklyPlannerCalendar({
       setNewGoalSubject('');
       setNewGoalTitle('');
       setNewGoalQty(100);
+      setNewGoalStart(weekStartStr);
+      setNewGoalEnd(weekEndStr);
       await reload();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Hedef eklenemedi');
@@ -495,6 +497,11 @@ export function WeeklyPlannerCalendar({
       {canManageGoals && (
         <div className="rounded-xl border border-dashed border-amber-200 bg-amber-50/50 p-4 space-y-3">
           <p className="text-sm font-medium text-amber-900">Koç — bu hafta için hedef ekle</p>
+          <p className="text-xs text-amber-800/90 leading-relaxed max-w-2xl">
+            Başlangıç ve bitiş tarihleri <strong>bu haftanın Pazartesi–Pazar aralığında</strong> kalır; bitiş
+            boş bırakılırsa en fazla haftanın son gününe kadar uzatılır (ör. yalnızca Cumartesi seçtiğinizde
+            hedef bir sonraki haftaya taşınmaz).
+          </p>
           <div className="flex flex-wrap gap-2 items-end">
             <div>
               <label className="text-xs text-slate-600 block mb-1">Ders</label>
@@ -540,8 +547,14 @@ export function WeeklyPlannerCalendar({
               <label className="text-xs text-slate-600 block mb-1">Başlangıç</label>
               <input
                 type="date"
+                min={weekStartStr}
+                max={weekEndStr}
                 value={newGoalStart}
-                onChange={(e) => setNewGoalStart(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setNewGoalStart(v);
+                  if (v && newGoalEnd && newGoalEnd < v) setNewGoalEnd(v);
+                }}
                 className="px-3 py-2 border rounded-lg text-sm w-[148px]"
               />
             </div>
@@ -549,8 +562,17 @@ export function WeeklyPlannerCalendar({
               <label className="text-xs text-slate-600 block mb-1">Bitiş</label>
               <input
                 type="date"
+                min={weekStartStr}
+                max={weekEndStr}
                 value={newGoalEnd}
-                onChange={(e) => setNewGoalEnd(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v && newGoalStart && v < newGoalStart) {
+                    setNewGoalEnd(newGoalStart);
+                  } else {
+                    setNewGoalEnd(v);
+                  }
+                }}
                 className="px-3 py-2 border rounded-lg text-sm w-[148px]"
               />
             </div>

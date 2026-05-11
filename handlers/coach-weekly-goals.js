@@ -5,6 +5,36 @@ import { addCalendarDaysYmd } from '../api/_lib/istanbul-time.js';
 
 const normalizeWeekStart = (v) => String(v || '').trim().slice(0, 10);
 
+function ymdCmp(a, b) {
+  const x = normalizeWeekStart(a);
+  const y = normalizeWeekStart(b);
+  if (!x || !y) return 0;
+  return x.localeCompare(y);
+}
+
+function ymdMin(a, b) {
+  return ymdCmp(a, b) <= 0 ? normalizeWeekStart(a) : normalizeWeekStart(b);
+}
+
+/**
+ * Koç hedefi her zaman tek bir Pazartesi–Pazar haftasına sıkıştırılır.
+ * Bitiş boşsa: min(başlangıç+6 gün, haftanın pazarı) — Cumartesi+6'nın sonraki haftaya taşması engellenir.
+ */
+function clampGoalDatesToWeek(weekStart, goalStartRaw, goalEndRaw) {
+  const weekSunday = addCalendarDaysYmd(weekStart, 6);
+  let gs = normalizeWeekStart(goalStartRaw) || weekStart;
+  let ge = normalizeWeekStart(goalEndRaw);
+  if (!ge) {
+    ge = ymdMin(addCalendarDaysYmd(gs, 6), weekSunday);
+  }
+  if (ymdCmp(gs, weekStart) < 0) gs = weekStart;
+  if (ymdCmp(gs, weekSunday) > 0) gs = weekSunday;
+  if (ymdCmp(ge, weekStart) < 0) ge = weekStart;
+  if (ymdCmp(ge, weekSunday) > 0) ge = weekSunday;
+  if (ymdCmp(gs, ge) > 0) ge = gs;
+  return { goalStart: gs, goalEnd: ge };
+}
+
 const fetchStudentMinimal = async (studentId) => {
   const { data, error } = await supabaseAdmin
     .from('students')
@@ -65,6 +95,7 @@ export default async function handler(req, res) {
         .from('coach_weekly_goals')
         .select('*')
         .eq('student_id', studentRaw)
+        .eq('week_start_date', weekStart)
         .not('goal_start_date', 'is', null)
         .not('goal_end_date', 'is', null)
         .lte('goal_start_date', weekEnd)
@@ -86,7 +117,9 @@ export default async function handler(req, res) {
       let goalStart = normalizeWeekStart(body.goal_start_date || body.goalStartDate);
       let goalEnd = normalizeWeekStart(body.goal_end_date || body.goalEndDate);
       if (!goalStart) goalStart = weekStart;
-      if (!goalEnd) goalEnd = addCalendarDaysYmd(goalStart, 6);
+      const clamped = clampGoalDatesToWeek(weekStart, goalStart, goalEnd);
+      goalStart = clamped.goalStart;
+      goalEnd = clamped.goalEnd;
 
       const gate = await assertCoachOrAdminGoalsWrite(actor, sid);
       if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
@@ -147,6 +180,19 @@ export default async function handler(req, res) {
       delete patch.id;
       delete patch.student_id;
       delete patch.created_at;
+
+      const ws = normalizeWeekStart(existing.week_start_date);
+      if (ws && (patch.goal_start_date != null || patch.goal_end_date != null)) {
+        const nextGs =
+          patch.goal_start_date != null
+            ? patch.goal_start_date
+            : existing.goal_start_date || existing.week_start_date;
+        const nextGe =
+          patch.goal_end_date != null ? patch.goal_end_date : existing.goal_end_date;
+        const c = clampGoalDatesToWeek(ws, nextGs, nextGe);
+        patch.goal_start_date = c.goalStart;
+        patch.goal_end_date = c.goalEnd;
+      }
 
       const { data, error } = await supabaseAdmin
         .from('coach_weekly_goals')
