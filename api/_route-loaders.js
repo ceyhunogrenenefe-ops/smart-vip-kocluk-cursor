@@ -39,5 +39,7 @@ export const routeLoaders = {
   'student-teacher-lesson-quota': () => import('../handlers/student-teacher-lesson-quota.js'),
   'class-live-lessons': () => import('../handlers/class-live-lessons.js'),
   'academic-center-links': () => import('../handlers/academic-center-links.js'),
-  'parent-sign-contracts': () => import('../handlers/parent-sign-contracts.js')
+  'parent-sign-contracts': () => import('../handlers/parent-sign-contracts.js'),
+  'parent-sign-class-presets': () => import('../handlers/parent-sign-class-presets.js'),
+  'institutions-list': () => import('../handlers/institutions-list.js')
 };
