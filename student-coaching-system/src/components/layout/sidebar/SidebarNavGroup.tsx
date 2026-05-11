@@ -55,7 +55,7 @@ export function SidebarNavGroup({ id, label, icon: Icon, items, pathname, collap
             side="right"
             align="start"
             sideOffset={10}
-            className="z-[70] min-w-[13.5rem] overflow-hidden rounded-xl border border-slate-400/25 bg-slate-900/98 p-1.5 shadow-xl shadow-black/35 backdrop-blur-xl"
+            className="z-[200] min-w-[13.5rem] overflow-hidden rounded-xl border border-slate-500/40 bg-slate-900 p-1.5 shadow-2xl shadow-black/40 backdrop-blur-xl"
           >
             <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
               {label}
@@ -111,7 +111,8 @@ export function SidebarNavGroup({ id, label, icon: Icon, items, pathname, collap
         </button>
       </Collapsible.Trigger>
       <Collapsible.Content className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
-        <ul className="space-y-0.5 pb-1 pt-0.5">
+        <div className="mx-0.5 rounded-xl bg-slate-950/45 py-1 ring-1 ring-white/[0.06]">
+        <ul className="space-y-0.5 px-0.5 pb-1 pt-0.5">
           {items.map((it) => {
             const active = pathname === it.path || pathname.startsWith(`${it.path}/`);
             const SubIcon = it.icon;
@@ -135,6 +136,7 @@ export function SidebarNavGroup({ id, label, icon: Icon, items, pathname, collap
             );
           })}
         </ul>
+        </div>
       </Collapsible.Content>
     </Collapsible.Root>
   );

@@ -4,9 +4,16 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { userRoleTags } from '../../config/rolePermissions';
 import { useApp } from '../../context/AppContext';
+import { cn } from '../../lib/utils';
 import { Menu, Bell, User, ChevronDown, LogOut, Undo2 } from 'lucide-react';
 
-export default function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
+type TopBarProps = {
+  onMenuClick: () => void;
+  /** Mobil menü açıkken ana kolon scrim altında; stacking için işaret */
+  drawerOpen?: boolean;
+};
+
+export default function TopBar({ onMenuClick, drawerOpen = false }: TopBarProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, effectiveUser, isImpersonating, stopImpersonation, logout } = useAuth();
@@ -55,7 +62,12 @@ export default function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
   };
 
   return (
-    <header className="sticky top-0 z-30 flex min-h-14 shrink-0 items-center justify-between gap-2 border-b border-gray-200 bg-white/95 px-3 py-2 shadow-sm backdrop-blur-sm supports-[backdrop-filter]:bg-white/80 sm:gap-4 sm:px-5 sm:py-0 lg:min-h-16 lg:px-6 pt-safe">
+    <header
+      className={cn(
+        'sticky top-0 z-30 flex min-h-14 shrink-0 items-center justify-between gap-2 border-b border-gray-200 bg-white px-3 py-2 shadow-sm backdrop-blur-md supports-[backdrop-filter]:bg-white/92 sm:gap-4 sm:px-5 sm:py-0 lg:min-h-16 lg:px-6 pt-safe',
+        drawerOpen && 'max-lg:z-0 max-lg:shadow-none'
+      )}
+    >
       {/* Left Side */}
       <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-4">
         <button

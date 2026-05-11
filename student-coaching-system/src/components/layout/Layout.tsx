@@ -30,16 +30,42 @@ export default function Layout({ children }: LayoutProps) {
     return () => mq.removeEventListener('change', onChange);
   }, []);
 
+  useEffect(() => {
+    if (!mobileDrawerOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [mobileDrawerOpen]);
+
   const toggleMobileDrawer = useCallback(() => {
     setMobileDrawerOpen((o) => !o);
   }, []);
 
   return (
     <div className="min-h-screen min-h-[100dvh] bg-slate-50">
+      {/*
+        Z-index: ana kolon altta (beyaz TopBar drawer altında kalmalı).
+        Scrim → drawer sırası; böylece beyaz üzerine binme olmaz.
+      */}
+      <div
+        className={cn(
+          'relative z-0 flex min-w-0 flex-1 flex-col transition-[margin] duration-300 ease-out',
+          desktopWide ? 'lg:ml-64' : 'lg:ml-[72px]'
+        )}
+      >
+        <TopBar drawerOpen={mobileDrawerOpen} onMenuClick={toggleMobileDrawer} />
+
+        <main className="max-w-[100vw] flex-1 px-3 py-4 pb-safe sm:px-5 sm:py-6 lg:px-6 lg:py-6">
+          {children}
+        </main>
+      </div>
+
       {mobileDrawerOpen ? (
         <button
           type="button"
-          className="fixed inset-0 z-40 bg-slate-950/50 backdrop-blur-[2px] transition-opacity duration-300 lg:hidden"
+          className="fixed inset-0 z-[100] bg-slate-950/55 backdrop-blur-sm transition-opacity duration-300 lg:hidden"
           aria-label="Menüyü kapat"
           onClick={() => setMobileDrawerOpen(false)}
         />
@@ -51,19 +77,6 @@ export default function Layout({ children }: LayoutProps) {
         desktopWide={desktopWide}
         onDesktopWideChange={setDesktopWide}
       />
-
-      <div
-        className={cn(
-          'min-w-0 flex flex-col transition-[margin] duration-300 ease-out',
-          desktopWide ? 'lg:ml-64' : 'lg:ml-[72px]'
-        )}
-      >
-        <TopBar onMenuClick={toggleMobileDrawer} />
-
-        <main className="max-w-[100vw] flex-1 px-3 py-4 pb-safe sm:px-5 sm:py-6 lg:px-6 lg:py-6">
-          {children}
-        </main>
-      </div>
     </div>
   );
 }

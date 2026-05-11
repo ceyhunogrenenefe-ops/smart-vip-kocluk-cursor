@@ -92,20 +92,21 @@ export default function Sidebar({
   return (
     <aside
       className={cn(
-        'fixed left-0 top-0 z-50 flex min-h-0 h-screen max-h-[100dvh] flex-col overflow-hidden',
+        'fixed left-0 top-0 z-[110] flex min-h-0 h-screen max-h-[100dvh] flex-col overflow-hidden',
         'border-r border-slate-400/25 text-white',
         'bg-gradient-to-b from-slate-800 via-slate-800 to-slate-950',
         '[box-shadow:inset_1px_0_0_0_rgba(255,255,255,0.045)]',
         'shadow-[4px_0_32px_-12px_rgba(15,23,42,0.45)] transition-[width,transform] duration-300 ease-out',
+        'max-lg:border-r-2 max-lg:border-slate-700/60 max-lg:rounded-r-3xl max-lg:shadow-[12px_0_48px_-8px_rgba(0,0,0,0.55)]',
         mobileOpen ? 'max-lg:translate-x-0' : 'max-lg:-translate-x-full',
-        'max-lg:w-[min(19rem,calc(100vw-1.25rem))]',
+        'max-lg:w-[min(19.5rem,calc(100vw-1rem))]',
         desktopWide ? 'lg:w-64' : 'lg:w-[72px]'
       )}
     >
       {/* Logo */}
       <div
         className={cn(
-          'flex h-14 flex-shrink-0 items-center border-b border-slate-500/30 px-3 transition-all duration-300',
+          'flex h-14 flex-shrink-0 items-center border-b border-slate-500/40 bg-slate-950/35 px-3 backdrop-blur-md transition-all duration-300 max-lg:bg-slate-950/55 max-lg:border-slate-600/50',
           railCollapsed && isLg && 'lg:justify-center lg:px-2'
         )}
       >
@@ -113,7 +114,7 @@ export default function Sidebar({
           <img
             src={institution.logo}
             alt=""
-            className="h-9 w-9 shrink-0 rounded-lg bg-white object-contain p-0.5 ring-1 ring-slate-600/30 shadow-sm"
+            className="h-9 w-9 shrink-0 rounded-lg bg-slate-100 object-contain p-0.5 ring-2 ring-slate-600/40 shadow-md"
           />
         ) : (
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 shadow-md shadow-slate-900/25 ring-1 ring-white/15">
