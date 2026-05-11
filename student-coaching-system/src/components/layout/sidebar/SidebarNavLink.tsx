@@ -29,13 +29,13 @@ export function SidebarNavLink({
         indent && 'ml-2 border-l border-slate-500/35 pl-4',
         active
           ? 'bg-blue-500/20 text-white shadow-[0_0_24px_-8px_rgba(59,130,246,0.45)] ring-1 ring-blue-300/40'
-          : 'text-slate-100/90 hover:bg-white/10 hover:text-white hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08)]'
+          : 'text-white/90 hover:bg-white/12 hover:text-white hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1)]'
       )}
     >
       <Icon
         className={cn(
           'h-[18px] w-[18px] shrink-0 transition-transform duration-200 ease-out',
-          active ? 'text-blue-100' : 'text-slate-300 group-hover:scale-[1.04] group-hover:text-white'
+          active ? 'text-blue-100' : 'text-slate-200 group-hover:scale-[1.04] group-hover:text-white'
         )}
         strokeWidth={1.75}
       />

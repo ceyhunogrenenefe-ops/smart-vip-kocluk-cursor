@@ -51,6 +51,10 @@ const ACADEMIC_PATHS = new Set([
   '/written-exam'
 ]);
 
+/** Süper admin / admin: kurum, kullanıcı ve sistem yönetimi tek accordion altında */
+const ORG_SYSTEM_PATHS = new Set(['/super-admin', '/user-management', '/system-management']);
+const ORG_SYSTEM_ORDER = ['/super-admin', '/user-management', '/system-management'] as const;
+
 const LESSON_LABELS: Record<string, string> = {
   '/class-live-lessons': 'Canlı Grup Dersleri',
   '/live-lessons': 'Canlı Özel Dersler',
@@ -193,12 +197,13 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
   return merged;
 }
 
-export type NavGroupKind = 'lessons' | 'academic';
+export type NavGroupKind = 'lessons' | 'academic' | 'org';
 
 export type StructuredNav = {
   panels: FlatNavItem[];
   lessons: FlatNavItem[];
   academic: FlatNavItem[];
+  orgSystem: FlatNavItem[];
   rest: FlatNavItem[];
 };
 
@@ -207,6 +212,7 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
   const panels: FlatNavItem[] = [];
   const lessons: FlatNavItem[] = [];
   const academic: FlatNavItem[] = [];
+  const orgSystem: FlatNavItem[] = [];
   const rest: FlatNavItem[] = [];
 
   for (const it of flat) {
@@ -232,10 +238,20 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
       });
       continue;
     }
+    if (ORG_SYSTEM_PATHS.has(it.path)) {
+      orgSystem.push(it);
+      continue;
+    }
     rest.push(it);
   }
 
-  return { panels, lessons, academic, rest };
+  const orgRank = (p: string) => {
+    const i = (ORG_SYSTEM_ORDER as readonly string[]).indexOf(p);
+    return i === -1 ? 99 : i;
+  };
+  orgSystem.sort((a, b) => orgRank(a.path) - orgRank(b.path));
+
+  return { panels, lessons, academic, orgSystem, rest };
 }
 
 export function pathnameMatchesGroup(pathname: string, _kind: NavGroupKind, items: FlatNavItem[]): boolean {

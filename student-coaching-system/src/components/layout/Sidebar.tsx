@@ -1,7 +1,7 @@
 // Türkçe: Sol navigasyon — SaaS tarzı koyu tema, accordion gruplar, daraltılabilir rail
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { BarChart3, ChevronLeft, ChevronRight, TrendingUp, Video } from 'lucide-react';
+import { BarChart3, Building2, ChevronLeft, ChevronRight, TrendingUp, Video } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { userRoleTags } from '../../config/rolePermissions';
@@ -37,7 +37,8 @@ export default function Sidebar({
   const tags = userRoleTags(effectiveUser);
   const flat = useMemo(() => getFlatMenuForRoles(tags), [tags]);
   const nav = useMemo(() => structureNavFromFlat(flat), [flat]);
-  const hasLessonOrAcademic = nav.lessons.length > 0 || nav.academic.length > 0;
+  const hasGroupedSection =
+    nav.lessons.length > 0 || nav.academic.length > 0 || nav.orgSystem.length > 0;
 
   const [isLg, setIsLg] = useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(min-width: 1024px)').matches : true
@@ -92,8 +93,10 @@ export default function Sidebar({
     <aside
       className={cn(
         'fixed left-0 top-0 z-50 flex min-h-0 h-screen max-h-[100dvh] flex-col overflow-hidden',
-        'border-r border-slate-500/25 bg-gradient-to-b from-slate-700 via-slate-800 to-slate-800 text-white',
-        'shadow-[4px_0_28px_-14px_rgba(15,23,42,0.35)] transition-[width,transform] duration-300 ease-out',
+        'border-r border-slate-400/25 text-white',
+        'bg-gradient-to-b from-slate-800 via-slate-800 to-slate-950',
+        '[box-shadow:inset_1px_0_0_0_rgba(255,255,255,0.045)]',
+        'shadow-[4px_0_32px_-12px_rgba(15,23,42,0.45)] transition-[width,transform] duration-300 ease-out',
         mobileOpen ? 'max-lg:translate-x-0' : 'max-lg:-translate-x-full',
         'max-lg:w-[min(19rem,calc(100vw-1.25rem))]',
         desktopWide ? 'lg:w-64' : 'lg:w-[72px]'
@@ -102,7 +105,7 @@ export default function Sidebar({
       {/* Logo */}
       <div
         className={cn(
-          'flex h-14 flex-shrink-0 items-center border-b border-slate-500/20 px-3 transition-all duration-300',
+          'flex h-14 flex-shrink-0 items-center border-b border-slate-500/30 px-3 transition-all duration-300',
           railCollapsed && isLg && 'lg:justify-center lg:px-2'
         )}
       >
@@ -120,7 +123,7 @@ export default function Sidebar({
         {(!railCollapsed || !isLg) && (
           <div className="ml-2.5 min-w-0 flex-1 max-lg:block lg:block">
             <p className="truncate text-sm font-semibold tracking-tight text-white">{institution.name}</p>
-            <p className="truncate text-[10px] font-medium uppercase tracking-wider text-slate-400/90">Smart Coach</p>
+            <p className="truncate text-[10px] font-medium uppercase tracking-wider text-slate-300/90">Smart Coach</p>
           </div>
         )}
       </div>
@@ -142,9 +145,9 @@ export default function Sidebar({
           );
         })}
 
-        {hasLessonOrAcademic ? (
+        {hasGroupedSection ? (
           <>
-            <div className="my-2 h-px bg-gradient-to-r from-transparent via-slate-500/30 to-transparent" />
+            <div className="my-2 h-px bg-gradient-to-r from-transparent via-slate-400/35 to-transparent" />
             <SidebarNavGroup
               id="lessons"
               label="Ders & Görüşmeler"
@@ -163,19 +166,28 @@ export default function Sidebar({
               collapsed={railCollapsed}
               onNavigate={go}
             />
+            <SidebarNavGroup
+              id="org"
+              label="Kurum & Sistem"
+              icon={Building2}
+              items={nav.orgSystem}
+              pathname={location.pathname}
+              collapsed={railCollapsed}
+              onNavigate={go}
+            />
           </>
         ) : null}
 
         {nav.rest.length > 0 ? (
           <>
-            <div className="my-2 h-px bg-gradient-to-r from-transparent via-slate-500/30 to-transparent" />
+            <div className="my-2 h-px bg-gradient-to-r from-transparent via-slate-400/35 to-transparent" />
             <div className="flex flex-col gap-0.5">{nav.rest.map(renderRestLink)}</div>
           </>
         ) : null}
       </nav>
 
       {/* Desktop: geniş / dar */}
-      <div className="hidden flex-shrink-0 border-t border-slate-500/20 p-2 lg:block">
+      <div className="hidden flex-shrink-0 border-t border-slate-500/30 p-2 lg:block">
         <button
           type="button"
           onClick={() => persistWide(!desktopWide)}
