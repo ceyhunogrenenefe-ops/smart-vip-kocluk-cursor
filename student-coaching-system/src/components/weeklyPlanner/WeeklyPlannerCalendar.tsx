@@ -10,6 +10,8 @@ import {
   AlertTriangle,
   GripVertical,
   BookOpen,
+  CalendarRange,
+  Pencil,
 } from 'lucide-react';
 import {
   BarChart,
@@ -27,6 +29,7 @@ import {
   deleteWeeklyPlannerEntry,
   fetchCoachWeeklyGoals,
   fetchWeeklyPlannerEntries,
+  patchCoachWeeklyGoal,
   patchWeeklyPlannerEntry,
 } from '../../lib/weeklyPlannerApi';
 import { WeeklyPlannerStudyModal } from './WeeklyPlannerStudyModal';
@@ -44,6 +47,20 @@ function padHour(h: number) {
 function hourFromTime(t: string) {
   const h = parseInt(String(t || '').split(':')[0], 10);
   return Number.isNaN(h) ? null : h;
+}
+
+/** Hedef kartında gösterilecek okunaklı aralık (ör. tek gün Cumartesi veya 6–8 Şubat) */
+function formatGoalRangeLabel(startYmd: string, endYmd: string) {
+  try {
+    const s = parseISO(startYmd);
+    const e = parseISO(endYmd);
+    if (startYmd === endYmd) {
+      return format(s, 'd MMMM yyyy, EEEE', { locale: tr });
+    }
+    return `${format(s, 'd MMM', { locale: tr })} – ${format(e, 'd MMM yyyy', { locale: tr })}`;
+  } catch {
+    return `${startYmd} → ${endYmd}`;
+  }
 }
 
 function slotMinutes(start: string, end: string) {
@@ -103,6 +120,11 @@ export function WeeklyPlannerCalendar({
   const [formTitle, setFormTitle] = useState('');
   const [formSubject, setFormSubject] = useState('');
   const [formPlannedQty, setFormPlannedQty] = useState(10);
+
+  const [goalDateEditId, setGoalDateEditId] = useState<string | null>(null);
+  const [goalDateEditStart, setGoalDateEditStart] = useState('');
+  const [goalDateEditEnd, setGoalDateEditEnd] = useState('');
+  const [goalDateSaving, setGoalDateSaving] = useState(false);
 
   const reload = useCallback(async () => {
     if (!studentId) return;
@@ -401,9 +423,43 @@ export function WeeklyPlannerCalendar({
     if (!confirm('Hedef kartını silmek istiyor musunuz?')) return;
     try {
       await deleteCoachWeeklyGoal(id);
+      if (goalDateEditId === id) {
+        setGoalDateEditId(null);
+        setGoalDateEditStart('');
+        setGoalDateEditEnd('');
+      }
       await reload();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Silinemedi');
+    }
+  };
+
+  const openGoalDateEdit = (goal: CoachWeeklyGoalRow) => {
+    setGoalDateEditId(goal.id);
+    setGoalDateEditStart((goal.goal_start_date || weekStartStr).trim());
+    setGoalDateEditEnd((goal.goal_end_date || weekEndStr).trim());
+  };
+
+  const cancelGoalDateEdit = () => {
+    setGoalDateEditId(null);
+    setGoalDateEditStart('');
+    setGoalDateEditEnd('');
+  };
+
+  const saveGoalDateEdit = async () => {
+    if (!goalDateEditId || !canManageGoals) return;
+    setGoalDateSaving(true);
+    try {
+      await patchCoachWeeklyGoal(goalDateEditId, {
+        goal_start_date: goalDateEditStart.trim() || weekStartStr,
+        goal_end_date: goalDateEditEnd.trim() || weekEndStr,
+      });
+      cancelGoalDateEdit();
+      await reload();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Tarihler güncellenemedi');
+    } finally {
+      setGoalDateSaving(false);
     }
   };
 
@@ -706,7 +762,8 @@ export function WeeklyPlannerCalendar({
           <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm p-4 shadow-sm">
             <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-1">Koç hedefleri</h4>
             <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3">
-              Kartı takvime sürükleyin · İsteğe bağlı otomatik günlere böl
+              Kartı takvim hücresine sürükleyerek plana yerleştirin · Tarih aralığını karttaki kalemle
+              değiştirin (bu hafta içinde kalır) · İsterseniz kalan kotayı günlere bölün
             </p>
             {goalAggregates.length === 0 ? (
               <p className="text-xs text-slate-500">
@@ -743,14 +800,26 @@ export function WeeklyPlannerCalendar({
                           </span>
                         </div>
                         {canManageGoals ? (
-                          <button
-                            type="button"
-                            onClick={() => void removeGoal(goal.id)}
-                            className="text-red-500 hover:text-red-700 p-1 flex-shrink-0"
-                            title="Hedefi sil"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="flex items-center gap-0.5 flex-shrink-0">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                goalDateEditId === goal.id ? cancelGoalDateEdit() : openGoalDateEdit(goal)
+                              }
+                              className="text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
+                              title="Hedef tarih aralığını düzenle"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void removeGoal(goal.id)}
+                              className="text-red-500 hover:text-red-700 p-1"
+                              title="Hedefi sil"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         ) : null}
                       </div>
                       <div className="mt-2 h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
@@ -766,9 +835,82 @@ export function WeeklyPlannerCalendar({
                         <div className="font-medium text-slate-800 dark:text-slate-100">
                           Kalan kota: {over ? `0 (aşım ${plannedSum - target})` : remaining}
                         </div>
-                        <div className="text-[11px] text-slate-500">
-                          {start} → {end}
+                        <div className="mt-1.5 flex items-start gap-1.5 rounded-lg border border-slate-200/80 bg-slate-50/90 px-2 py-1.5 dark:border-slate-600 dark:bg-slate-800/80">
+                          <CalendarRange className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400 mt-0.5 shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                              Hedef süresi
+                            </p>
+                            <p className="text-[12px] font-medium text-slate-800 dark:text-slate-100 leading-snug">
+                              {formatGoalRangeLabel(start, end)}
+                            </p>
+                            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 font-mono">
+                              {start} — {end}
+                            </p>
+                          </div>
                         </div>
+                        {canManageGoals && goalDateEditId === goal.id ? (
+                          <div className="mt-2 space-y-2 rounded-lg border border-amber-200 bg-amber-50/80 p-2 dark:border-amber-900/50 dark:bg-amber-950/30">
+                            <p className="text-[10px] text-amber-900 dark:text-amber-200/90">
+                              Sadece bu haftanın ({weekStartStr} – {weekEndStr}) içinde kalır; kayıtta sunucu
+                              yine sıkıştırır.
+                            </p>
+                            <div className="flex flex-wrap gap-2 items-end">
+                              <div>
+                                <label className="text-[10px] text-slate-600 dark:text-slate-400 block mb-0.5">
+                                  Başlangıç
+                                </label>
+                                <input
+                                  type="date"
+                                  min={weekStartStr}
+                                  max={weekEndStr}
+                                  value={goalDateEditStart}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    setGoalDateEditStart(v);
+                                    if (v && goalDateEditEnd && goalDateEditEnd < v) setGoalDateEditEnd(v);
+                                  }}
+                                  className="px-2 py-1 border rounded text-[11px] w-[132px] dark:bg-slate-900 dark:border-slate-600"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] text-slate-600 dark:text-slate-400 block mb-0.5">
+                                  Bitiş
+                                </label>
+                                <input
+                                  type="date"
+                                  min={weekStartStr}
+                                  max={weekEndStr}
+                                  value={goalDateEditEnd}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    if (v && goalDateEditStart && v < goalDateEditStart) {
+                                      setGoalDateEditEnd(goalDateEditStart);
+                                    } else setGoalDateEditEnd(v);
+                                  }}
+                                  className="px-2 py-1 border rounded text-[11px] w-[132px] dark:bg-slate-900 dark:border-slate-600"
+                                />
+                              </div>
+                            </div>
+                            <div className="flex gap-2 justify-end">
+                              <button
+                                type="button"
+                                onClick={cancelGoalDateEdit}
+                                className="text-[11px] px-2 py-1 rounded border border-slate-200 dark:border-slate-600 hover:bg-white dark:hover:bg-slate-800"
+                              >
+                                İptal
+                              </button>
+                              <button
+                                type="button"
+                                disabled={goalDateSaving}
+                                onClick={() => void saveGoalDateEdit()}
+                                className="text-[11px] px-2 py-1 rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+                              >
+                                {goalDateSaving ? 'Kaydediliyor…' : 'Kaydet'}
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
                         {over ? (
                           <div className="text-amber-700 dark:text-amber-400 flex items-center gap-1 mt-1">
                             <AlertTriangle className="w-3 h-3" />

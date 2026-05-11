@@ -78,6 +78,26 @@ export async function deleteCoachWeeklyGoal(id: string): Promise<void> {
   if (!res.ok) throw new Error((payload as { error?: string })?.error || `API (${res.status})`);
 }
 
+export async function patchCoachWeeklyGoal(
+  id: string,
+  patch: Partial<{
+    subject: string;
+    title: string;
+    target_quantity: number;
+    quantity_unit: string;
+    goal_start_date: string;
+    goal_end_date: string;
+  }>
+): Promise<CoachWeeklyGoalRow> {
+  const res = await apiFetch(`/api/coach-weekly-goals?id=${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((payload as { error?: string })?.error || `API (${res.status})`);
+  return unwrap<CoachWeeklyGoalRow>(payload);
+}
+
 export async function fetchWeeklyPlannerEntries(
   studentId: string,
   from: string,
