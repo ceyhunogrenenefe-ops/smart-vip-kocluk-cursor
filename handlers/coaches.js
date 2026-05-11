@@ -1,5 +1,6 @@
 import { requireAuth, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
+import { getTeacherGroupClassStudentScope } from '../api/_lib/teacher-class-scope.js';
 import { applyStudentIdsToCoachFk, rebuildCoachStudentIdsFromFk } from '../api/_lib/sync-coach-students.js';
 import { enforceOrganizationCoachQuota, QuotaError, getInstitutionAdminUserId } from '../api/_lib/quota-enforce.js';
 import { normalizeUuidOrGenerate, isUuid } from '../api/_lib/uuid.js';
@@ -68,9 +69,23 @@ export default async function handler(req, res) {
 
     if (req.method === 'GET') {
       let query = supabaseAdmin.from('coaches').select('*').order('created_at', { ascending: false });
-      if (actor.role === 'admin' || actor.role === 'teacher') {
+      if (actor.role === 'admin') {
         if (!actor.institution_id) return res.status(200).json({ data: [] });
         query = query.eq('institution_id', actor.institution_id);
+      }
+      if (actor.role === 'teacher') {
+        if (!actor.institution_id) return res.status(200).json({ data: [] });
+        const { ids: studentIds } = await getTeacherGroupClassStudentScope(actor.sub);
+        if (!studentIds.length) return res.status(200).json({ data: [] });
+        const { data: studs, error: se } = await supabaseAdmin
+          .from('students')
+          .select('coach_id')
+          .in('id', studentIds)
+          .eq('institution_id', actor.institution_id);
+        if (se) throw se;
+        const coachIds = [...new Set((studs || []).map((s) => s.coach_id).filter(Boolean))];
+        if (!coachIds.length) return res.status(200).json({ data: [] });
+        query = query.eq('institution_id', actor.institution_id).in('id', coachIds);
       }
       if (actor.role === 'coach') query = query.eq('id', actor.coach_id);
       if (actor.role === 'student') return res.status(403).json({ error: 'forbidden' });

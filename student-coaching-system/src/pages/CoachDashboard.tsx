@@ -34,6 +34,7 @@ import {
   LineChart,
   Line
 } from 'recharts';
+import { StudyInsightWidgets } from '../components/analytics/StudyInsightWidgets';
 
 export default function CoachDashboard() {
   const navigate = useNavigate();
@@ -254,6 +255,17 @@ export default function CoachDashboard() {
           <p className="text-2xl font-bold text-slate-800">%{generalStats.successRate}</p>
         </div>
       </div>
+
+      {myStudents.length > 0 ? (
+        <StudyInsightWidgets
+          entries={myEntries}
+          windowDays={30}
+          chartDays={14}
+          title="Haftalık plan & günlük kayıt özeti"
+          subtitle="Son 30 gün · Tüm öğrencilerinizin senkron kayıtları"
+          variant="coach"
+        />
+      ) : null}
 
       {/* Detaylı İstatistikler */}
       <div className="grid grid-cols-3 gap-4">

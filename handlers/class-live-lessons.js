@@ -7,6 +7,8 @@ import { metaWhatsAppConfigured } from '../api/_lib/meta-whatsapp.js';
 import { sendAutomatedWhatsApp } from '../api/_lib/whatsapp-outbound.js';
 import { syncClassSessionsScheduledToCompleted } from '../api/_lib/class-sessions-sync.js';
 import { resolveStudentRowForUser } from '../api/_lib/resolve-student-id.js';
+import { buildAttendanceReport, getVisibleStudentIdSet } from '../api/_lib/attendance-report-query.js';
+import { sendMetaTextMessage } from '../api/_lib/meta-whatsapp.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -30,6 +32,12 @@ function normalizeRole(role) {
 function isAdminRole(role) {
   const r = normalizeRole(role);
   return r === 'admin' || r === 'super_admin' || r === 'coach';
+}
+
+/** Sınıf listesinde kurum geneli: yalnızca yöneticiler (koç / öğretmen sınıfları sınırlı) */
+function seesAllInstitutionClasses(role) {
+  const r = normalizeRole(role);
+  return r === 'admin' || r === 'super_admin';
 }
 
 function isTeacherRole(role) {
@@ -157,13 +165,36 @@ function mapClassesInsertError(error) {
 
 async function getManagedClassIds(actor) {
   const role = normalizeRole(actor.role);
-  if (isAdminRole(role)) return null; // all (kurum filtresi GET içinde)
+
+  if (role === 'admin' || role === 'super_admin') {
+    return null;
+  }
+
+  /** Koç: yalnızca kendi öğrencilerinin kayıtlı olduğu sınıflar */
+  if (role === 'coach') {
+    const cid = actor.coach_id ? String(actor.coach_id).trim() : '';
+    if (!cid) return [];
+    const { data: studs, error: se } = await supabaseAdmin
+      .from('students')
+      .select('id')
+      .eq('coach_id', cid);
+    if (se) throw se;
+    const studentIds = [...new Set((studs || []).map((s) => String(s.id).trim()).filter(Boolean))];
+    if (!studentIds.length) return [];
+    const { data: cs, error: ce } = await supabaseAdmin
+      .from('class_students')
+      .select('class_id')
+      .in('student_id', studentIds);
+    if (ce) throw ce;
+    return [...new Set((cs || []).map((r) => r.class_id).filter(Boolean))];
+  }
+
   if (isTeacherRole(actor.role)) {
     const { data } = await supabaseAdmin
       .from('class_teachers')
       .select('class_id')
       .eq('teacher_id', actor.sub);
-    return (data || []).map((r) => r.class_id);
+    return (data || []).map((r) => r.class_id).filter(Boolean);
   }
   if (role === 'student') {
     let sid = actor.student_id ? String(actor.student_id).trim() : '';
@@ -258,6 +289,41 @@ async function sendAbsentNotice({ session, className, studentId }) {
   return sent.ok ? { ok: true } : { ok: false, note: sent.error || 'whatsapp_failed' };
 }
 
+async function attendanceAutoWaEnabled(institutionId) {
+  const iid = institutionId != null && institutionId !== '' ? String(institutionId).trim() : '';
+  if (!iid) return true;
+  const { data, error } = await supabaseAdmin
+    .from('attendance_institution_prefs')
+    .select('auto_whatsapp_absent')
+    .eq('institution_id', iid)
+    .maybeSingle();
+  if (error || !data) return true;
+  return data.auto_whatsapp_absent !== false;
+}
+
+function normalizeAttendanceStatus(raw) {
+  const v = String(raw || '').trim().toLowerCase();
+  if (v === 'present' || v === 'absent' || v === 'late') return v;
+  return 'absent';
+}
+
+function buildAttendanceNotifyText(preset, custom, vars) {
+  const c = String(custom || '').trim();
+  if (c) return renderMessageTemplate(c, vars || {});
+  const student = vars.student_name || 'Öğrenci';
+  const subj = vars.subject || 'Ders';
+  const time = vars.lesson_time || '';
+  const teacher = vars.teacher_name || 'Öğretmen';
+  const date = vars.lesson_date || '';
+  if (preset === 'next_time') {
+    return `${student} için ${date} tarihli ${subj} dersine (${time}) zamanında katılım rica olunur. Öğretmen: ${teacher}`;
+  }
+  if (preset === 'missing_record') {
+    return `${student} — ${date} ${subj} (${time}) için eksik ders kaydı / devamsızlık oluşmuştur. Öğretmen: ${teacher}`;
+  }
+  return `${student} bugün (${date}) ${subj} dersine (${time}) katılım sağlamamıştır. Öğretmen: ${teacher}`;
+}
+
 export default async function handler(req, res) {
   let actor;
   try {
@@ -279,8 +345,8 @@ export default async function handler(req, res) {
     if (scope === 'classes') {
       const allowedClassIds = await getManagedClassIds(actor);
       let q = supabaseAdmin.from('classes').select('*').order('created_at', { ascending: false });
-      if (!isAdminRole(role)) {
-        if (!allowedClassIds?.length) return res.status(200).json({ data: [] });
+      if (!seesAllInstitutionClasses(role)) {
+        if (!allowedClassIds || !allowedClassIds.length) return res.status(200).json({ data: [] });
         q = q.in('id', allowedClassIds);
       } else if (institutionId) {
         q = q.eq('institution_id', institutionId);
@@ -333,8 +399,8 @@ export default async function handler(req, res) {
       if (from) q = q.gte('lesson_date', from);
       if (to) q = q.lte('lesson_date', to);
 
-      if (!isAdminRole(role)) {
-        if (!allowedClassIds?.length) return res.status(200).json({ data: [] });
+      if (!seesAllInstitutionClasses(role)) {
+        if (!allowedClassIds || !allowedClassIds.length) return res.status(200).json({ data: [] });
         q = q.in('class_id', allowedClassIds);
       } else if (institutionId) {
         q = q.eq('institution_id', institutionId);
@@ -429,8 +495,8 @@ export default async function handler(req, res) {
         .order('day_of_week', { ascending: true })
         .order('start_time', { ascending: true });
       if (classId) q = q.eq('class_id', classId);
-      if (!isAdminRole(role)) {
-        if (!allowedClassIds?.length) return res.status(200).json({ data: [] });
+      if (!seesAllInstitutionClasses(role)) {
+        if (!allowedClassIds || !allowedClassIds.length) return res.status(200).json({ data: [] });
         q = q.in('class_id', allowedClassIds);
       } else if (institutionId) {
         q = q.eq('institution_id', institutionId);
@@ -450,8 +516,10 @@ export default async function handler(req, res) {
         .maybeSingle();
       if (!session) return res.status(404).json({ error: 'session_not_found' });
       const allowedClassIds = await getManagedClassIds(actor);
-      if (!isAdminRole(role) && !allowedClassIds.includes(session.class_id)) {
-        return res.status(403).json({ error: 'forbidden' });
+      if (!seesAllInstitutionClasses(role)) {
+        if (!allowedClassIds || !allowedClassIds.includes(session.class_id)) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
       }
       const { data, error } = await supabaseAdmin
         .from('class_session_attendance')
@@ -460,11 +528,149 @@ export default async function handler(req, res) {
       if (error) return res.status(500).json({ error: error.message });
       return res.status(200).json({ data: data || [] });
     }
+
+    if (scope === 'attendance-prefs') {
+      if (role !== 'admin' && role !== 'super_admin') {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      let iid = institutionId ? String(institutionId).trim() : '';
+      if (role === 'super_admin') {
+        const scoped = String(req.query.institution_id || '').trim();
+        if (scoped) iid = scoped;
+      }
+      if (!iid) {
+        return res.status(200).json({ data: { auto_whatsapp_absent: true, institution_id: null } });
+      }
+      const { data, error } = await supabaseAdmin
+        .from('attendance_institution_prefs')
+        .select('auto_whatsapp_absent')
+        .eq('institution_id', iid)
+        .maybeSingle();
+      if (error && !String(error.message || '').toLowerCase().includes('relation') && !String(error.message || '').includes('does not exist')) {
+        return res.status(500).json({ error: error.message });
+      }
+      return res.status(200).json({
+        data: {
+          institution_id: iid,
+          auto_whatsapp_absent: data ? data.auto_whatsapp_absent !== false : true
+        }
+      });
+    }
+
+    if (scope === 'attendance-report') {
+      const rep = await buildAttendanceReport({
+        supabaseAdmin,
+        getManagedClassIds,
+        seesAllInstitutionClasses,
+        normalizeRole,
+        institutionId,
+        actor,
+        role,
+        query: req.query
+      });
+      if (rep.error) return res.status(rep.error.status).json(rep.error.body);
+      return res.status(200).json(rep);
+    }
   }
 
   if (req.method === 'POST') {
     const op = String(req.query.op || '').trim();
     const body = parseBody(req);
+
+    if (op === 'set-attendance-prefs') {
+      if (role !== 'admin' && role !== 'super_admin') {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      let iid = institutionId ? String(institutionId).trim() : '';
+      if (role === 'super_admin') {
+        iid = String(body.institution_id || req.query.institution_id || '').trim();
+      }
+      if (!iid) return res.status(400).json({ error: 'institution_id_required' });
+      const auto = Object.prototype.hasOwnProperty.call(body, 'auto_whatsapp_absent')
+        ? Boolean(body.auto_whatsapp_absent)
+        : true;
+      const { error: pe } = await supabaseAdmin.from('attendance_institution_prefs').upsert(
+        {
+          institution_id: iid,
+          auto_whatsapp_absent: Boolean(auto),
+          updated_at: new Date().toISOString()
+        },
+        { onConflict: 'institution_id' }
+      );
+      if (pe && !String(pe.message || '').toLowerCase().includes('relation') && !String(pe.message || '').includes('does not exist')) {
+        return res.status(500).json({ error: pe.message });
+      }
+      return res.status(200).json({ ok: true, data: { institution_id: iid, auto_whatsapp_absent: Boolean(auto) } });
+    }
+
+    if (op === 'bulk-attendance-notify') {
+      const allowed = ['teacher', 'coach', 'admin', 'super_admin'];
+      if (!allowed.includes(role)) return res.status(403).json({ error: 'forbidden' });
+      const targets = Array.isArray(body.targets) ? body.targets : [];
+      if (!targets.length) return res.status(400).json({ error: 'targets_required' });
+      const preset = String(body.message_preset || 'absent_standard').trim();
+      const custom = String(body.custom_message || '').trim();
+      const ctx = body.session_context && typeof body.session_context === 'object' ? body.session_context : {};
+      const visible = await getVisibleStudentIdSet(supabaseAdmin, normalizeRole, actor, institutionId);
+      const varsBase = {
+        student_name: String(ctx.student_name || '{{student_name}}'),
+        subject: String(ctx.subject || ''),
+        lesson_time: String(ctx.lesson_time || ''),
+        teacher_name: String(ctx.teacher_name || ''),
+        lesson_date: String(ctx.lesson_date || ''),
+        class_name: String(ctx.class_name || '')
+      };
+      const results = [];
+      for (const t of targets) {
+        const sid = String(t.student_id || '').trim();
+        if (!sid) continue;
+        if (visible && !visible.has(sid)) {
+          results.push({ student_id: sid, ok: false, error: 'forbidden_student' });
+          continue;
+        }
+        const { data: stu } = await supabaseAdmin
+          .from('students')
+          .select('id,name,phone,parent_phone')
+          .eq('id', sid)
+          .maybeSingle();
+        if (!stu) {
+          results.push({ student_id: sid, ok: false, error: 'student_not_found' });
+          continue;
+        }
+        const channels = String(t.channels || 'parent').trim().toLowerCase();
+        const vars = {
+          ...varsBase,
+          student_name: stu.name || varsBase.student_name
+        };
+        const text = buildAttendanceNotifyText(preset, custom, vars);
+        const sendOne = async (phoneRaw) => {
+          const e164 = normalizePhoneToE164(phoneRaw);
+          if (!e164) return { ok: false, error: 'invalid_phone' };
+          try {
+            await sendMetaTextMessage({ toE164: e164, text });
+            return { ok: true };
+          } catch (e) {
+            return { ok: false, error: e instanceof Error ? e.message : 'send_failed' };
+          }
+        };
+        const rowResult = { student_id: sid, channels: [], parts: [] };
+        if (channels === 'student' || channels === 'both') {
+          const r = await sendOne(stu.phone);
+          rowResult.parts.push({ to: 'student', ...r });
+        }
+        if (channels === 'parent' || channels === 'both') {
+          const r = await sendOne(stu.parent_phone);
+          rowResult.parts.push({ to: 'parent', ...r });
+        }
+        if (channels !== 'student' && channels !== 'parent' && channels !== 'both') {
+          const r = await sendOne(stu.parent_phone);
+          rowResult.parts.push({ to: 'parent', ...r });
+        }
+        rowResult.ok = rowResult.parts.some((p) => p.ok);
+        results.push(rowResult);
+      }
+      return res.status(200).json({ ok: true, results });
+    }
 
     if (op === 'create-class') {
       if (!isAdminRole(role)) return res.status(403).json({ error: 'forbidden' });
@@ -650,7 +856,7 @@ export default async function handler(req, res) {
         .map((r) => ({
           session_id: sessionId,
           student_id: String(r.student_id || '').trim(),
-          status: String(r.status || '').trim() === 'present' ? 'present' : 'absent',
+          status: normalizeAttendanceStatus(r.status),
           marked_by: actor.sub,
           marked_at: new Date().toISOString()
         }))
@@ -662,16 +868,19 @@ export default async function handler(req, res) {
       if (error) return res.status(500).json({ error: error.message });
 
       const className = details.class?.name || 'Sınıf';
+      const instKey = session.institution_id != null ? String(session.institution_id).trim() : '';
+      const allowAutoWa = await attendanceAutoWaEnabled(instKey);
       for (const row of prepared) {
         if (row.status !== 'absent') continue;
         if (priorStatusByStudent.get(row.student_id) === 'absent') continue;
+        if (!allowAutoWa) continue;
         try {
           await sendAbsentNotice({ session, className, studentId: row.student_id });
         } catch {
           // best effort
         }
       }
-      return res.status(200).json({ ok: true });
+      return res.status(200).json({ ok: true, suggest_notify: prepared.some((r) => r.status === 'absent') });
     }
 
     if (op === 'set-homework') {

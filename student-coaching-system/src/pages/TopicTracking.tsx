@@ -153,7 +153,7 @@ export default function TopicTracking() {
   // Ders bazında istatistikler
   const getSubjectStats = (subject: string) => {
     let topics: string[] = [];
-    let completed = completedTopics.filter(p => p.subject === subject).length;
+    const completed = completedTopics.filter(p => p.subject === subject).length;
 
     if (isYKSStudent) {
       // TYT veya AYT konularını al

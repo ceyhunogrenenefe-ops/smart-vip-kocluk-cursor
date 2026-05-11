@@ -42,6 +42,7 @@ import LiveLessons from './pages/LiveLessons';
 import ClassLiveLessons from './pages/ClassLiveLessons';
 import TeacherPanel from './pages/TeacherPanel';
 import WeeklyPlannerPage from './pages/WeeklyPlannerPage';
+import AcademicCenter from './pages/AcademicCenter';
 import { rolesForProtectedRoute, userRoleTags } from './config/rolePermissions';
 
 // Yönlendirme bileşeni
@@ -213,6 +214,14 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/weekly-planner')}>
                 <Layout>
                   <WeeklyPlannerPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/academic-center" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/academic-center')}>
+                <Layout>
+                  <AcademicCenter />
                 </Layout>
               </ProtectedRoute>
             } />

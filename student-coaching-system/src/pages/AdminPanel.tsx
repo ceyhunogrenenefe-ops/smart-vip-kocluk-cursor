@@ -26,8 +26,15 @@ import {
   Phone,
   MessageCircle,
   Send,
-  Loader2
+  Loader2,
+  Sparkles
 } from 'lucide-react';
+import {
+  defaultAcademicCenterLinks,
+  fetchAcademicCenterLinksFromServer,
+  saveAcademicCenterLinksToServer,
+  type AcademicCenterLinks
+} from '../lib/academicCenterLinks';
 
 interface MetaWhatsAppServerStatus {
   configured: boolean;
@@ -75,6 +82,12 @@ export default function AdminPanel() {
     classes: 0
   });
 
+  const [academicLinks, setAcademicLinks] = useState<AcademicCenterLinks>(() => ({
+    ...defaultAcademicCenterLinks
+  }));
+  const [academicLinksMsg, setAcademicLinksMsg] = useState<string | null>(null);
+  const [academicLinksBusy, setAcademicLinksBusy] = useState(false);
+
   const refreshMetaWa = useCallback(async () => {
     if (!canWhatsAppTest || !getAuthToken()) return;
     try {
@@ -111,6 +124,22 @@ export default function AdminPanel() {
       cancelled = true;
     };
   }, [canWhatsAppTest]);
+
+  useEffect(() => {
+    if (!getAuthToken()) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const data = await fetchAcademicCenterLinksFromServer();
+        if (!cancelled) setAcademicLinks(data);
+      } catch {
+        if (!cancelled) setAcademicLinks({ ...defaultAcademicCenterLinks });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!getAuthToken()) return;
@@ -168,6 +197,24 @@ export default function AdminPanel() {
       setWaResult({ ok: false, text: e instanceof Error ? e.message : 'Hata' });
     } finally {
       setWaSending(false);
+    }
+  };
+
+  const saveAcademicLinks = async () => {
+    setAcademicLinksBusy(true);
+    setAcademicLinksMsg(null);
+    try {
+      const saved = await saveAcademicCenterLinksToServer(academicLinks);
+      setAcademicLinks(saved);
+      setAcademicLinksMsg('Akademik Merkez linkleri kaydedildi.');
+    } catch (e) {
+      setAcademicLinksMsg(
+        e instanceof Error && e.message
+          ? e.message
+          : 'Kaydetme başarısız. SQL migration veya SUPABASE_SERVICE_ROLE_KEY ortamını kontrol edin.'
+      );
+    } finally {
+      setAcademicLinksBusy(false);
     }
   };
 
@@ -260,8 +307,8 @@ export default function AdminPanel() {
 
   const quickUsers = getAllUsers().slice(0, 12);
 
-  const handleViewPanel = (userId: string, role: string) => {
-    const result = impersonate(userId);
+  const handleViewPanel = async (userId: string, role: string) => {
+    const result = await impersonate(userId);
     if (!result.success) return;
     if (role === 'coach') navigate('/coach-dashboard');
     else if (role === 'student') navigate('/student-dashboard');
@@ -370,6 +417,131 @@ export default function AdminPanel() {
           Panele git
         </button>
       </div>
+
+      {canWhatsAppTest && (
+        <div className="bg-white rounded-xl shadow-sm border border-violet-200 p-6">
+          <div className="flex items-start gap-3 mb-4">
+            <div className="w-10 h-10 bg-violet-600 rounded-lg flex items-center justify-center flex-shrink-0">
+              <Sparkles className="w-5 h-5 text-white" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h3 className="font-semibold text-slate-800">Akademik Merkez linkleri</h3>
+              <p className="text-sm text-slate-600 mt-1">
+                Etüt sınıfları, deneme / sanal optik ve soru havuzu adresleri. Kayıt için{' '}
+                <code className="text-xs bg-slate-100 px-1 rounded">platform_academic_center_links</code> tablosu ve
+                sunucuda service role anahtarı gerekir (
+                <code className="text-xs">sql/2026-05-07-academic-center-links.sql</code>).
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-sm">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Etüt sınıfları</p>
+              {(
+                [
+                  ['class56', '5–6. sınıf'],
+                  ['class78', '7–8. sınıf'],
+                  ['class911', '9–10–11'],
+                  ['yks', 'YKS']
+                ] as const
+              ).map(([key, label]) => (
+                <label key={key} className="block">
+                  <span className="text-xs text-slate-600">{label}</span>
+                  <input
+                    type="url"
+                    value={academicLinks.studyClasses[key]}
+                    onChange={(e) =>
+                      setAcademicLinks((prev) => ({
+                        ...prev,
+                        studyClasses: { ...prev.studyClasses, [key]: e.target.value }
+                      }))
+                    }
+                    className="mt-0.5 w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm"
+                  />
+                </label>
+              ))}
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Deneme / optik</p>
+              <label className="block">
+                <span className="text-xs text-slate-600">Deneme giriş</span>
+                <input
+                  type="url"
+                  value={academicLinks.exams.exam}
+                  onChange={(e) =>
+                    setAcademicLinks((prev) => ({
+                      ...prev,
+                      exams: { ...prev.exams, exam: e.target.value }
+                    }))
+                  }
+                  className="mt-0.5 w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs text-slate-600">Sanal optik</span>
+                <input
+                  type="url"
+                  value={academicLinks.exams.optic}
+                  onChange={(e) =>
+                    setAcademicLinks((prev) => ({
+                      ...prev,
+                      exams: { ...prev.exams, optic: e.target.value }
+                    }))
+                  }
+                  className="mt-0.5 w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm"
+                />
+              </label>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide pt-2">Soru havuzları</p>
+              <label className="block">
+                <span className="text-xs text-slate-600">Havuz 1</span>
+                <input
+                  type="url"
+                  value={academicLinks.questionPools.pool1}
+                  onChange={(e) =>
+                    setAcademicLinks((prev) => ({
+                      ...prev,
+                      questionPools: { ...prev.questionPools, pool1: e.target.value }
+                    }))
+                  }
+                  className="mt-0.5 w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs text-slate-600">Havuz 2</span>
+                <input
+                  type="url"
+                  value={academicLinks.questionPools.pool2}
+                  onChange={(e) =>
+                    setAcademicLinks((prev) => ({
+                      ...prev,
+                      questionPools: { ...prev.questionPools, pool2: e.target.value }
+                    }))
+                  }
+                  className="mt-0.5 w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm"
+                />
+              </label>
+            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void saveAcademicLinks()}
+              disabled={academicLinksBusy}
+              className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 disabled:opacity-60 inline-flex items-center gap-2"
+            >
+              {academicLinksBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              Linkleri kaydet
+            </button>
+            {academicLinksMsg && (
+              <p
+                className={`text-sm ${academicLinksMsg.includes('kaydedildi') ? 'text-green-700' : 'text-red-700'}`}
+              >
+                {academicLinksMsg}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {canWhatsAppTest && (
         <div className="bg-white rounded-xl shadow-sm border border-green-200 p-6">

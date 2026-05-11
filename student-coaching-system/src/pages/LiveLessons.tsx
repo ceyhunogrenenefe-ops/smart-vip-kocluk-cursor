@@ -5,7 +5,9 @@ import { apiFetch } from '../lib/session';
 import { detectPlatform } from '../lib/detectMeetingPlatform';
 import type { TeacherLesson, TeacherStudentLessonSummaryRow, UserRole } from '../types';
 import LiveLessonCard from '../components/liveLessons/LiveLessonCard';
-import { Radio, Plus, Loader2, Filter, Clock, Pencil, Calendar as CalendarIcon } from 'lucide-react';
+import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShell';
+import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
+import { Radio, Plus, Loader2, Filter, Clock, Pencil, Move, GripVertical, Trash2 } from 'lucide-react';
 
 function startOfWeek(d: Date): Date {
   const x = new Date(d);
@@ -20,6 +22,18 @@ function addDays(d: Date, n: number): Date {
   const out = new Date(d);
   out.setDate(out.getDate() + n);
   return out;
+}
+
+function lessonTimeRange(lesson: TeacherLesson): string {
+  const raw = String(lesson.start_time || '09:00:00');
+  const st = raw.length >= 5 ? raw.slice(0, 5) : '09:00';
+  const dm = Number(lesson.duration_minutes ?? 60);
+  const [h, m] = st.split(':').map((x) => Number(x || 0));
+  const startM = (Number.isFinite(h) ? h : 9) * 60 + (Number.isFinite(m) ? m : 0);
+  const endM = startM + (Number.isFinite(dm) ? dm : 60);
+  const eh = Math.floor(endM / 60) % 24;
+  const em = endM % 60;
+  return `${st}–${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
 }
 
 type StaffUser = {
@@ -57,6 +71,9 @@ export default function LiveLessons() {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryFrom, setSummaryFrom] = useState(monthStartIso());
   const [summaryTo, setSummaryTo] = useState(todayIso());
+
+  /** Haftalık takvim — görüntülenen hafta (Pzt başlangıcı) */
+  const [calendarWeekAnchor, setCalendarWeekAnchor] = useState(() => new Date());
 
   const [formOpen, setFormOpen] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
@@ -261,7 +278,7 @@ export default function LiveLessons() {
   }, [lessons]);
 
   const weeklyLessonBuckets = useMemo(() => {
-    const weekStart = startOfWeek(new Date());
+    const weekStart = startOfWeek(calendarWeekAnchor);
     const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
     const key = (d: Date) => d.toISOString().slice(0, 10);
     const bucket: Record<string, TeacherLesson[]> = {};
@@ -276,7 +293,15 @@ export default function LiveLessons() {
       key: key(d),
       items: (bucket[key(d)] || []).slice().sort((a, b) => a.start_time.localeCompare(b.start_time))
     }));
-  }, [lessons]);
+  }, [lessons, calendarWeekAnchor]);
+
+  const liveCalendarWeekRangeLabel = useMemo(() => {
+    const ws = startOfWeek(calendarWeekAnchor);
+    const we = addDays(ws, 6);
+    const fmt = (d: Date) =>
+      d.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    return `${fmt(ws)} – ${fmt(we)}`;
+  }, [calendarWeekAnchor]);
 
   const deleteLessonSeries = async (seriesId: string) => {
     if (!window.confirm('Bu tekrarlayan ders serisindeki tüm planlı oturumlar silinsin mi?')) return;
@@ -780,45 +805,149 @@ export default function LiveLessons() {
         <div className="rounded-lg bg-red-50 text-red-800 px-4 py-3 text-sm border border-red-100">{error}</div>
       )}
 
-      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex items-center gap-2 font-medium text-slate-800 mb-3">
-          <CalendarIcon className="w-5 h-5 text-indigo-600" />
-          Haftalık canlı özel ders takvimi
-        </div>
-        <p className="text-xs text-slate-500 mb-3">
-          Pazartesi-Pazar ve 10:00-00:00 aralığında grid görünümü. Koç/öğretmen yalnız kendi canlı özel derslerini görür.
-        </p>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px] text-xs border border-slate-100 rounded-lg overflow-hidden">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="px-2 py-2 text-left text-slate-500 font-medium w-20">Saat</th>
-                {weeklyLessonBuckets.map((slot) => (
-                  <th key={slot.key} className="px-2 py-2 text-left text-slate-600 font-medium">
-                    {slot.label}
-                  </th>
-                ))}
+      <WeeklyLiveGridShell
+        title="Haftalık canlı özel ders takvimi"
+        subtitle="Pazartesi–Pazar, 10:00–24:00 ızgarası. Koç ve öğretmen yalnızca yetkili oldukları öğrenci oturumlarını görür."
+        weekRangeLabel={liveCalendarWeekRangeLabel}
+        loading={loading}
+        onPrevWeek={() => setCalendarWeekAnchor((d) => addDays(d, -7))}
+        onNextWeek={() => setCalendarWeekAnchor((d) => addDays(d, 7))}
+        onThisWeek={() => setCalendarWeekAnchor(new Date())}
+        legend={
+          <>
+            <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/40 bg-emerald-500/15 px-3 py-1.5 text-[11px] font-semibold text-emerald-50 backdrop-blur-sm">
+              <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/60" />
+              Planlı özel ders
+            </span>
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white backdrop-blur-sm">
+              <Move className="h-3.5 w-3.5 text-sky-300" aria-hidden />
+              Alttaki listeden düzenle
+            </span>
+          </>
+        }
+        hint="Kartlardan Katıl, Düzenle veya Sil; zaman ve bağlantı düzenlemesi için «Düzenle» ile formu açın."
+      >
+        <div className="overflow-x-auto p-2 sm:p-3">
+          <table className="w-full min-w-[900px] border-collapse text-xs">
+            <thead>
+              <tr className="border-b border-slate-200 bg-white">
+                <th className="w-14 min-w-[3.5rem] bg-slate-100 px-2 py-3 text-left text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                  Saat
+                </th>
+                {weeklyLessonBuckets.map((slot) => {
+                  const isToday = slot.key === todayIso();
+                  const headDate = new Date(`${slot.key}T12:00:00`);
+                  const dow = headDate.toLocaleDateString('tr-TR', { weekday: 'short' });
+                  const dmy = headDate.toLocaleDateString('tr-TR', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric'
+                  });
+                  return (
+                    <th
+                      key={slot.key}
+                      className={`px-2 py-3 text-left align-bottom ${
+                        isToday
+                          ? 'border-x border-t border-amber-300/90 bg-gradient-to-b from-amber-100 to-amber-50/90 shadow-[inset_0_2px_0_0_rgba(251,191,36,0.65)]'
+                          : 'border-t border-slate-100 bg-slate-50/90'
+                      }`}
+                    >
+                      <div className={`text-[11px] font-bold capitalize ${isToday ? 'text-amber-950' : 'text-slate-700'}`}>
+                        {dow}
+                      </div>
+                      <div
+                        className={`mt-0.5 text-[10px] font-semibold tabular-nums ${isToday ? 'text-amber-900/85' : 'text-slate-500'}`}
+                      >
+                        {dmy}
+                      </div>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
-            <tbody>
+            <tbody className="bg-white">
               {Array.from({ length: 15 }, (_, i) => 10 + i).map((hour) => {
                 const label = `${String(hour).padStart(2, '0')}:00`;
                 return (
-                  <tr key={hour} className="border-t border-slate-100">
-                    <td className="px-2 py-2 text-slate-500 bg-slate-50/50">{label}</td>
+                  <tr key={hour} className="border-t border-slate-100/90 transition-colors hover:bg-slate-50/50">
+                    <td className="bg-slate-50 px-2 py-2 text-right font-mono text-[11px] font-semibold tabular-nums text-slate-600">
+                      {label}
+                    </td>
                     {weeklyLessonBuckets.map((slot) => {
-                      const hourItems = slot.items.filter((x) => Number(String(x.start_time || '00:00').slice(0, 2)) === hour);
+                      const hourItems = slot.items.filter(
+                        (x) => Number(String(x.start_time || '00:00').slice(0, 2)) === hour
+                      );
+                      const colToday = slot.key === todayIso();
                       return (
-                        <td key={`${slot.key}-${hour}`} className="px-2 py-2 align-top min-h-[52px]">
-                          <div className="space-y-1">
-                            {hourItems.map((lesson) => (
-                              <div key={lesson.id} className="rounded border border-indigo-100 bg-indigo-50 px-2 py-1">
-                                <div className="font-medium text-indigo-800">
-                                  {lesson.start_time?.slice(0, 5)} {studentName(lesson.student_id)}
+                        <td
+                          key={`${slot.key}-${hour}`}
+                          className={`align-top p-1.5 min-h-[52px] ${colToday ? 'bg-amber-50/55' : ''}`}
+                        >
+                          <div className="flex flex-col gap-1.5">
+                            {hourItems.map((lesson) => {
+                              const accent = liveSubjectAccent(lesson.title);
+                              const canJoin = lesson.status === 'scheduled' && Boolean(lesson.meeting_link?.trim());
+                              return (
+                                <div
+                                  key={lesson.id}
+                                  className={`rounded-xl border border-y border-r border-slate-200/80 px-2 py-2 shadow-md ${accent.leftBar} ${accent.bg} ${accent.glow}`}
+                                >
+                                  <div className="flex gap-1.5">
+                                    <GripVertical
+                                      className="mt-0.5 h-4 w-4 shrink-0 text-slate-400"
+                                      aria-hidden
+                                    />
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        <p className={`text-[12px] font-bold leading-snug ${accent.title}`}>
+                                          {lesson.title}
+                                        </p>
+                                        {lesson.status === 'scheduled' ? (
+                                          <span className="rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-emerald-800 ring-1 ring-emerald-400/40">
+                                            Planlı
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                      <p className="mt-0.5 text-[11px] font-medium text-slate-700">
+                                        {studentName(lesson.student_id)}
+                                      </p>
+                                      <p className="text-[10px] tabular-nums text-slate-500">{lessonTimeRange(lesson)}</p>
+                                    </div>
+                                  </div>
+                                  <div className="mt-2 flex flex-wrap gap-1">
+                                    {canJoin ? (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          window.open(lesson.meeting_link, '_blank', 'noopener,noreferrer')
+                                        }
+                                        className="rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-2 py-1 text-[10px] font-semibold text-white shadow-sm hover:brightness-110"
+                                      >
+                                        Katıl
+                                      </button>
+                                    ) : null}
+                                    <button
+                                      type="button"
+                                      onClick={() => openEdit(lesson)}
+                                      className="inline-flex items-center gap-1 rounded-lg border border-indigo-300 bg-white px-2 py-1 text-[10px] font-semibold text-indigo-700 shadow-sm hover:bg-indigo-50"
+                                    >
+                                      <Pencil className="h-3 w-3" />
+                                      Düzenle
+                                    </button>
+                                    {lesson.status === 'scheduled' ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => void deleteLesson(lesson.id)}
+                                        className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-50"
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                        Sil
+                                      </button>
+                                    ) : null}
+                                  </div>
                                 </div>
-                                <div className="text-slate-600 truncate">{lesson.title}</div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </td>
                       );
@@ -829,7 +958,7 @@ export default function LiveLessons() {
             </tbody>
           </table>
         </div>
-      </div>
+      </WeeklyLiveGridShell>
 
       {editingLesson && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">

@@ -29,6 +29,7 @@ import {
   Server,
   Activity
 } from 'lucide-react';
+import CronSummarySection from '../components/system/CronSummarySection';
 
 // PayTR yapılandırması
 interface PayTRConfig {
@@ -787,6 +788,8 @@ export default function SystemManagement() {
           {/* SİSTEM AYARLARI */}
           {activeTab === 'system' && (
             <div className="space-y-6">
+              <CronSummarySection />
+
               <div className="bg-white rounded-xl border border-gray-200 p-6">
                 <h4 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
                   <Server className="w-5 h-5" />

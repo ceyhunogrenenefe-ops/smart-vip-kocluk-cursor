@@ -1,6 +1,6 @@
 /**
  * Vercel + Vite: çoğu projede bu dosya **tek segment** `/api/foo` için çalışır.
- * `/api/google/...`, `/api/cron/...` → `vercel.json` + `deep-api.js`
+ * `/api/google/...`, `/api/cron/...`, `/api/meta/...`, `/api/whatsapp/...` → `vercel.json` + `deep-api.js`
  * `/api/whatsapp-gateway/...` → `vercel.json` + `wa-gateway.js`
  */
 

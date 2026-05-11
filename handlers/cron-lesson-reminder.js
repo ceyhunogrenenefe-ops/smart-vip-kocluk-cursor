@@ -30,13 +30,26 @@ export default async function handler(req, res) {
     const { data: lrRow } = await supabaseAdmin.from('message_templates').select('type').eq('type', 'lesson_reminder').maybeSingle();
     if (!lrRow) {
       await recordCronRun({ jobKey: 'lesson_reminders', ok: true, skipped: 'no_lesson_reminder_template' });
+      await recordCronRun({
+        jobKey: 'lesson_reminder_parent',
+        ok: true,
+        skipped: 'blocked_no_lesson_reminder_template'
+      });
       return res.status(200).json({ ok: true, skipped: 'no_lesson_reminder_template', log });
     }
     const { data: lrParentRow } = await supabaseAdmin
       .from('message_templates')
-      .select('type')
+      .select('*')
       .eq('type', 'lesson_reminder_parent')
       .maybeSingle();
+
+    const parentVeliCronReady =
+      Boolean(lrParentRow?.content) &&
+      Boolean(String(lrParentRow?.meta_template_name || '').trim()) &&
+      lrParentRow?.is_active !== false;
+
+    let parentSentOk = 0;
+    let parentSentFail = 0;
 
     const { data: lessons, error: lErr } = await supabaseAdmin
       .from('teacher_lessons')
@@ -82,9 +95,13 @@ export default async function handler(req, res) {
 
       const lessonLink = lesson.meeting_link || process.env.APP_BASE_URL || '';
 
+      const classLabel =
+        String(student.class_level || student.class_label || student.group_name || '').trim() || 'Sınıf';
+
       const baseVars = {
         student_name: student.name || 'Öğrenci',
         studentName: student.name || 'Öğrenci',
+        class_label: classLabel,
         lesson_name: lesson.title || 'Ders',
         lessonTime: timeLabel,
         time: timeLabel,
@@ -114,8 +131,20 @@ export default async function handler(req, res) {
           break;
         }
 
-        const templateType =
-          role === 'parent' && lrParentRow?.type ? 'lesson_reminder_parent' : 'lesson_reminder';
+        let templateType = 'lesson_reminder';
+        let logKind = 'lesson_reminder';
+        if (role === 'parent') {
+          if (!parentVeliCronReady) {
+            log.push({
+              lesson_id: lesson.id,
+              phone: e164,
+              note: 'lesson_reminder_parent_skipped_meta_or_inactive'
+            });
+            continue;
+          }
+          templateType = 'lesson_reminder_parent';
+          logKind = 'lesson_reminder_parent';
+        }
 
         try {
           const sent = await sendAutomatedWhatsApp({
@@ -126,7 +155,7 @@ export default async function handler(req, res) {
           const preview = sent.bodyPreview || '';
           const { error: insErr } = await supabaseAdmin.from('message_logs').insert({
             student_id: lesson.student_id,
-            kind: 'lesson_reminder',
+            kind: logKind,
             related_id: lesson.id,
             message: preview,
             status: sent.ok ? 'sent' : 'failed',
@@ -145,15 +174,18 @@ export default async function handler(req, res) {
             log.push({ lesson_id: lesson.id, phone: e164, error: insErr.message });
           } else if (sent.ok) {
             log.push({ lesson_id: lesson.id, phone: e164, ok: true });
+            if (templateType === 'lesson_reminder_parent') parentSentOk += 1;
           } else {
             log.push({ lesson_id: lesson.id, phone: e164, error: sent.error, twilio_error_code: sent.errorCode });
+            if (templateType === 'lesson_reminder_parent') parentSentFail += 1;
           }
         } catch (e) {
           const errMsg = e instanceof Error ? e.message : String(e);
+          if (logKind === 'lesson_reminder_parent') parentSentFail += 1;
           try {
             await supabaseAdmin.from('message_logs').insert({
               student_id: lesson.student_id,
-              kind: 'lesson_reminder',
+              kind: logKind,
               related_id: lesson.id,
               message: '',
               status: 'failed',
@@ -176,6 +208,13 @@ export default async function handler(req, res) {
 
     const sent = log.filter((x) => x && x.ok === true).length;
     const failed = log.filter((x) => x && x.error).length;
+
+    let parentSkipped = null;
+    if (!metaReady) parentSkipped = 'missing_meta_whatsapp_env';
+    else if (!parentVeliCronReady && parentSentOk === 0 && parentSentFail === 0) {
+      parentSkipped = 'parent_template_meta_missing_or_inactive';
+    }
+
     await recordCronRun({
       jobKey: 'lesson_reminders',
       ok: true,
@@ -183,10 +222,19 @@ export default async function handler(req, res) {
       messagesFailed: failed,
       detail: { meta_ready: metaReady, entries: log.length }
     });
+    await recordCronRun({
+      jobKey: 'lesson_reminder_parent',
+      ok: true,
+      skipped: parentSkipped,
+      messagesSent: parentSentOk,
+      messagesFailed: parentSentFail,
+      detail: { parent_template_ready: parentVeliCronReady, meta_ready: metaReady }
+    });
     return res.status(200).json({ ok: true, processed: log.length, log });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await recordCronRun({ jobKey: 'lesson_reminders', ok: false, detail: { error: msg } });
+    await recordCronRun({ jobKey: 'lesson_reminder_parent', ok: false, detail: { error: msg } });
     return res.status(500).json({
       ok: false,
       error: msg,

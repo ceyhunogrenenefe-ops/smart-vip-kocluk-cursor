@@ -241,8 +241,8 @@ export default function ExamTracking() {
     // Sınav tarihi çıkarma
     let examDate = '';
     const datePatterns = [
-      /(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/,
-      /(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/,
+      /(\d{1,2})[./-](\d{1,2})[./-](\d{4})/,
+      /(\d{4})[./-](\d{1,2})[./-](\d{1,2})/,
       /(\d{1,2})\s+(OCAK|SUBAT|MART|NISAN|MAYIS|HAZIRAN|TEMMUZ|AGUSTOS|EYLUL|EKIM|KASIM|ARALIK)\s+(\d{4})/i,
     ];
     for (const pattern of datePatterns) {
@@ -285,7 +285,7 @@ export default function ExamTracking() {
     const compact = normalized.replace(/\s+/g, ' ').trim();
     let declaredTotals: { questions: number; correct: number; wrong: number; blank: number; net: number } | null = null;
 
-    const totalRow = compact.match(/TOPLAM\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+([\-]?\d+[.,]?\d*)/i);
+    const totalRow = compact.match(/TOPLAM\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(-?\d+[.,]?\d*)/i);
     if (totalRow) {
       declaredTotals = {
         questions: parseInt(totalRow[1], 10) || 0,
@@ -298,7 +298,7 @@ export default function ExamTracking() {
 
     // Global ders satırı yakalama: LGS/TYT/AYT ve alt kırılımlar
     const subjectRegex =
-      /(LGS-[A-Z ÇĞİÖŞÜ]+(?: VE AHLAK BILGISI)?|TYT-[A-Z ÇĞİÖŞÜ]+|AYT-[A-Z ÇĞİÖŞÜ]+|YOS-[A-Z ÇĞİÖŞÜ]+|MATEMATIK|GEOMETRI|IQ|INKILAP TARIHI|SOSYAL BILIMLER(?:I)?|DIN KULTURU(?: VE AHLAK BILGISI)?|INGILIZCE|TARIH|COGRAFYA|FELSEFE|FIZIK|KIMYA|BIYOLOJI|EDEBIYAT)\s+(\d+)\s+(\d+)\s+(\d+)(?:\s+(\d+))?\s+([\-]?\d+[.,]?\d*)/gi;
+      /(LGS-[A-Z ÇĞİÖŞÜ]+(?: VE AHLAK BILGISI)?|TYT-[A-Z ÇĞİÖŞÜ]+|AYT-[A-Z ÇĞİÖŞÜ]+|YOS-[A-Z ÇĞİÖŞÜ]+|MATEMATIK|GEOMETRI|IQ|INKILAP TARIHI|SOSYAL BILIMLER(?:I)?|DIN KULTURU(?: VE AHLAK BILGISI)?|INGILIZCE|TARIH|COGRAFYA|FELSEFE|FIZIK|KIMYA|BIYOLOJI|EDEBIYAT)\s+(\d+)\s+(\d+)\s+(\d+)(?:\s+(\d+))?\s+(-?\d+[.,]?\d*)/gi;
     for (const match of compact.matchAll(subjectRegex)) {
       const subjectName = normalizeSubjectName(String(match[1] || '').trim());
       const questionCount = parseInt(String(match[2] || '0'), 10) || 0;
@@ -322,7 +322,7 @@ export default function ExamTracking() {
     if (examType === 'LGS' || examType === '5' || examType === '6' || examType === '7') {
       const hasDin = subjects.some((s) => normalizeSubjectName(s.name).includes('LGS-DIN KULTURU VE AHLAK BILGISI'));
       if (!hasDin) {
-        const dinMatch = compact.match(/LGS-DIN KULTURU(?: VE AHLAK BILGISI)?\s+(\d+)\s+(\d+)\s+(\d+)(?:\s+(\d+))?\s+([\-]?\d+[.,]?\d*)/i);
+        const dinMatch = compact.match(/LGS-DIN KULTURU(?: VE AHLAK BILGISI)?\s+(\d+)\s+(\d+)\s+(\d+)(?:\s+(\d+))?\s+(-?\d+[.,]?\d*)/i);
         if (dinMatch) {
           const questionCount = parseInt(dinMatch[1], 10) || 0;
           const correct = parseInt(dinMatch[2], 10) || 0;

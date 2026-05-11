@@ -34,7 +34,9 @@ export const routeLoaders = {
   'cron/class-homework-notify': () => import('../handlers/cron-class-homework-notify.js'),
   'cron/report-check': () => import('../handlers/cron-report-check.js'),
   'cron/daily-report-reminders': () => import('../handlers/cron-report-check.js'),
+  'cron/study-evening-reminder': () => import('../handlers/cron-study-evening-reminder.js'),
   'teacher-lessons': () => import('../handlers/teacher-lessons.js'),
   'student-teacher-lesson-quota': () => import('../handlers/student-teacher-lesson-quota.js'),
-  'class-live-lessons': () => import('../handlers/class-live-lessons.js')
+  'class-live-lessons': () => import('../handlers/class-live-lessons.js'),
+  'academic-center-links': () => import('../handlers/academic-center-links.js')
 };

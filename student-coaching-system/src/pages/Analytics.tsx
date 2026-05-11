@@ -44,6 +44,7 @@ import {
   PolarRadiusAxis,
   Radar
 } from 'recharts';
+import { StudyInsightWidgets } from '../components/analytics/StudyInsightWidgets';
 
 export default function Analytics() {
   const { effectiveUser } = useAuth();
@@ -533,6 +534,20 @@ export default function Analytics() {
           </div>
         </div>
       )}
+
+      <StudyInsightWidgets
+        entries={scopedEntries}
+        preFiltered
+        windowDays={rangeDays ?? 365}
+        chartDays={Math.min(14, trendDayCount)}
+        title={
+          selectedStudent
+            ? `${selectedStudent.name} · haftalık plan senkron analizi`
+            : 'Haftalık plan senkron analizi (filtreli veri)'
+        }
+        subtitle={`${rangeLabel} · Ekran süresi, kitap sayfası, ders bazlı doğruluk`}
+        variant="analytics"
+      />
 
       {/* Genel İstatistikler */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">

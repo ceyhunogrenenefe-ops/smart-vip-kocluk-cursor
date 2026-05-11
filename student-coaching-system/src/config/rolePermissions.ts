@@ -5,7 +5,7 @@ import type { UserRole } from '../types';
  *
  * - super_admin: Tüm kurumlar + yönetici oluşturma (admin_limits bootstrap) + tam API/UI.
  * - admin: institution_id kapsamı — kullanıcı/koç/öğrenci, kota ayarı (PATCH /api/quota), raporlar, WhatsApp, sistem sayfaları.
- * - coach: Yalnızca coach_id ile eşleşen öğrenciler; haftalık/kitap/yazılı/AI vb.; görüşme oluşturma.
+ * - coach: Yalnızca coach_id ile eşleşen öğrenciler; haftalık/kitap/yazılı/AI vb.; görüşme oluşturma; Ayarlar (yoklama raporu dahil).
  * - teacher: Kurum içi — users’ta yalnızca student; öğrenci POST (koç zorunlu); kullanıcı silme yok; coaches salt okuma.
  *   Haftalık/kitap/yazılı API’de yalnızca GET (kurum filtresi); PATCH/POST yok. Görüşme oluşturma yok.
  * - student: Yalnızca kendi student_id verisi.
@@ -24,16 +24,17 @@ export const ROUTE_ALLOWED_ROLES = {
   '/written-exam': ['admin', 'coach'],
   '/pdf-import': ['admin', 'coach'],
   '/analytics': ['admin', 'coach'],
-  '/ai-coach': ['admin', 'coach'],
+  '/ai-coach': ['super_admin', 'admin', 'coach'],
   '/reports': ['admin'],
   '/whatsapp': ['admin'],
   '/message-templates': ['admin', 'super_admin'],
   '/webhooks': ['super_admin', 'admin', 'coach'],
-  '/settings': ['admin', 'teacher'],
+  '/settings': ['super_admin', 'admin', 'teacher', 'coach'],
   '/tracking': ['admin', 'coach'],
   '/weekly-planner': ['super_admin', 'admin', 'coach', 'student'],
+  '/academic-center': ['super_admin', 'admin', 'coach', 'student', 'teacher'],
   '/super-admin': ['super_admin', 'admin'],
-  '/user-management': ['super_admin', 'admin', 'teacher'],
+  '/user-management': ['super_admin', 'admin'],
   '/subscription': ['super_admin', 'admin'],
   '/system-management': ['super_admin', 'admin'],
   '/student-dashboard': ['student'],
@@ -42,7 +43,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/student-meetings': ['student'],
   '/coach-dashboard': ['coach'],
   '/coach-reports': ['coach'],
-  '/coach-whatsapp-settings': ['coach', 'teacher'],
+  '/coach-whatsapp-settings': ['super_admin', 'admin', 'coach', 'teacher'],
   '/meetings': ['super_admin', 'admin', 'coach'],
   '/live-lessons': ['super_admin', 'admin', 'teacher', 'coach'],
   '/teacher-panel': ['teacher'],

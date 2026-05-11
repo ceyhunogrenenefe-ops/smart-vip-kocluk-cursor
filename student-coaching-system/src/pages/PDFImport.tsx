@@ -134,49 +134,39 @@ export default function PDFImport() {
 
   // PDF içeriğini parse et (PDF.js ile)
   const parsePDF = async (file: File): Promise<ParsedExamResult> => {
-    return new Promise(async (resolve, reject) => {
-      try {
-        // PDF.js'i yükle
-        const pdfjs = await loadPdfJs();
-
-        const reader = new FileReader();
-
-        reader.onload = async (e) => {
-          try {
-            const arrayBuffer = e.target?.result as ArrayBuffer;
-
-            // PDF.js ile PDF'i yükle
-            const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
-            let fullText = '';
-
-            // Tüm sayfalardan metni çıkar
-            for (let i = 1; i <= pdf.numPages; i++) {
-              const page = await pdf.getPage(i);
-              const textContent = await page.getTextContent();
-              const pageText = textContent.items
-                .map((item: any) => item.str)
-                .join(' ');
-              fullText += pageText + '\n';
-            }
-
-            console.log('PDF Metni uzunluğu:', fullText.length);
-            console.log('PDF Metni önizleme:', fullText.substring(0, 300));
-
-            // PDF metnine göre parsing
-            const result = parseExamText(fullText);
-            resolve(result);
-          } catch (error) {
-            console.error('PDF Parse Hatası:', error);
-            reject(new Error(`Parse hatası: ${file.name} - ${error}`));
-          }
-        };
-
-        reader.onerror = () => reject(new Error(`Okuma hatası: ${file.name}`));
-        reader.readAsArrayBuffer(file);
-      } catch (error) {
-        reject(new Error(`PDF.js yüklenemedi: ${error}`));
-      }
+    const pdfjs = await loadPdfJs();
+    const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const buf = e.target?.result;
+        if (buf instanceof ArrayBuffer) resolve(buf);
+        else reject(new Error(`Okuma hatası: ${file.name}`));
+      };
+      reader.onerror = () => reject(new Error(`Okuma hatası: ${file.name}`));
+      reader.readAsArrayBuffer(file);
     });
+
+    const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+    let fullText = '';
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items
+        .map((item: any) => item.str)
+        .join(' ');
+      fullText += pageText + '\n';
+    }
+
+    console.log('PDF Metni uzunluğu:', fullText.length);
+    console.log('PDF Metni önizleme:', fullText.substring(0, 300));
+
+    try {
+      return parseExamText(fullText);
+    } catch (error) {
+      console.error('PDF Parse Hatası:', error);
+      throw new Error(`Parse hatası: ${file.name} - ${error}`);
+    }
   };
 
   // Metin tabanlı PDF parsing (örnek PDF formatına göre)
@@ -207,8 +197,8 @@ export default function PDFImport() {
 
     const examNameMatch = normalizedText.match(/(?:S[iı]nav\s*Ad[iı]|Sinav Adi|Exam)[^\w]*(\w+)/i);
 
-    const dateMatch = normalizedText.match(/(?:Tarih|Date)[^\d]*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})/i)
-      || normalizedText.match(/(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{4})/);
+    const dateMatch = normalizedText.match(/(?:Tarih|Date)[^\d]*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})/i)
+      || normalizedText.match(/(\d{1,2}[./-]\d{1,2}[./-]\d{4})/);
 
     const bookletMatch = normalizedText.match(/(?:Kitap[cç]ik|Kitapcik|Booklet)[^\w]*([A-Z])/i);
     const classMatch = normalizedText.match(/(?:S[iı]n[iı]f|Sinif|Class)[^\d]*(\d+)/i);
@@ -234,13 +224,13 @@ export default function PDFImport() {
     const subjectPatterns = [
       // YÖS - Sayısal Yetenek / IQ
       { name: 'YÖS IQ', patterns: [
-        /Y[ÖO]S[\s\-]*SAYISAL[\s\-]*YETENEK[\s\S]*?(\d+)[\s\S]*?(\d+)[\s\S]*?(\d+)(?:[\s\S]*?(\d+))?[\s\S]*?(-?\d+[.,]?\d*)/i,
+        /Y[ÖO]S[\s-]*SAYISAL[\s-]*YETENEK[\s\S]*?(\d+)[\s\S]*?(\d+)[\s\S]*?(\d+)(?:[\s\S]*?(\d+))?[\s\S]*?(-?\d+[.,]?\d*)/i,
         /(?:^|\s)IQ[\s\S]*?(\d+)[\s\S]*?(\d+)[\s\S]*?(\d+)(?:[\s\S]*?(\d+))?[\s\S]*?(-?\d+[.,]?\d*)/i
       ]},
       // YÖS - Temel Matematik
       { name: 'YÖS MATEMATİK', patterns: [
-        /Y[ÖO]S[\s\-]*TEMEL[\s\-]*MATEMAT[İI]K[\s\S]*?(\d+)[\s\S]*?(\d+)[\s\S]*?(\d+)(?:[\s\S]*?(\d+))?[\s\S]*?(-?\d+[.,]?\d*)/i,
-        /Y[ÖO]S[\s\-]*TEMEL[\s\-]*MATEMET[İI]K[\s\S]*?(\d+)[\s\S]*?(\d+)[\s\S]*?(\d+)(?:[\s\S]*?(\d+))?[\s\S]*?(-?\d+[.,]?\d*)/i,
+        /Y[ÖO]S[\s-]*TEMEL[\s-]*MATEMAT[İI]K[\s\S]*?(\d+)[\s\S]*?(\d+)[\s\S]*?(\d+)(?:[\s\S]*?(\d+))?[\s\S]*?(-?\d+[.,]?\d*)/i,
+        /Y[ÖO]S[\s-]*TEMEL[\s-]*MATEMET[İI]K[\s\S]*?(\d+)[\s\S]*?(\d+)[\s\S]*?(\d+)(?:[\s\S]*?(\d+))?[\s\S]*?(-?\d+[.,]?\d*)/i,
         /MATEMAT[İI]K[\s\S]*?(\d+)[\s\S]*?(\d+)[\s\S]*?(\d+)(?:[\s\S]*?(\d+))?[\s\S]*?(-?\d+[.,]?\d*)/i
       ]},
       // YÖS - Geometri

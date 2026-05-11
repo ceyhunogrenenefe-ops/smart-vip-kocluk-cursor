@@ -31,9 +31,12 @@ import {
   EyeOff,
   Loader2,
   AlertTriangle,
-  ExternalLink
+  ExternalLink,
+  ClipboardList
 } from 'lucide-react';
 import { apiFetch, getAuthToken } from '../lib/session';
+import { AttendanceReportHub } from '../components/attendance/AttendanceReportHub';
+import { userHasAnyRole } from '../config/rolePermissions';
 
 /** GET /api/meta/whatsapp yanıtı — sırlar içermez */
 interface MetaWhatsAppServerStatus {
@@ -58,9 +61,11 @@ export default function SettingsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [settingsTab, setSettingsTab] = useState<'general' | 'attendance'>('general');
 
   // Super Admin mi kontrol et
   const isSuperAdmin = user?.role === 'super_admin';
+  const showAttendanceTab = userHasAnyRole(user, ['super_admin', 'admin', 'coach', 'teacher']);
   const canManageTwilio = user?.role === 'super_admin' || user?.role === 'admin';
 
   /** Meta WhatsApp Cloud API — GET /api/meta/whatsapp */
@@ -75,8 +80,12 @@ export default function SettingsPage() {
     enabled: localStorage.getItem('whatsapp_enabled') === 'true'
   });
 
-  // OpenAI API
+  // OpenAI API (tarayıcı BYOK + isteğe bağlı model; sunucuda OPENAI_API_KEY varsa öncelik orada)
   const [openaiApiKey, setOpenaiApiKey] = useState(localStorage.getItem('openai_apiKey') || '');
+  const [openaiModel, setOpenaiModel] = useState(() => localStorage.getItem('openai_model') || 'gpt-4o-mini');
+  const [openaiServerConfigured, setOpenaiServerConfigured] = useState<boolean | null>(null);
+  const [openaiTestLoading, setOpenaiTestLoading] = useState(false);
+  const [openaiTestMsg, setOpenaiTestMsg] = useState<string | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
   const [testingMetaWa, setTestingMetaWa] = useState(false);
   const [metaWaTestResult, setMetaWaTestResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -99,6 +108,22 @@ export default function SettingsPage() {
   useEffect(() => {
     void refreshMetaWaStatus();
   }, [refreshMetaWaStatus]);
+
+  const refreshOpenAiServerStatus = useCallback(async () => {
+    if (!getAuthToken()) return;
+    try {
+      const res = await apiFetch('/api/ai-chat?scope=openai-status');
+      const j = (await res.json().catch(() => ({}))) as { data?: { server_configured?: boolean } };
+      if (res.ok && j?.data) setOpenaiServerConfigured(Boolean(j.data.server_configured));
+      else setOpenaiServerConfigured(false);
+    } catch {
+      setOpenaiServerConfigured(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshOpenAiServerStatus();
+  }, [refreshOpenAiServerStatus]);
 
   // Aktif kurumu bul
   const activeInstitution = institutions.find(i => i.id === activeInstitutionId) || institutions[0];
@@ -202,11 +227,49 @@ export default function SettingsPage() {
     setTimeout(() => setSaved(false), 3000);
   };
 
-  // OpenAI API kaydet
+  // OpenAI API kaydet (anahtar + model — tarayıcıda)
   const saveOpenAIConfig = () => {
     localStorage.setItem('openai_apiKey', openaiApiKey);
+    localStorage.setItem('openai_model', (openaiModel || 'gpt-4o-mini').trim());
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
+  };
+
+  const clearOpenAiBrowserKey = () => {
+    localStorage.removeItem('openai_apiKey');
+    setOpenaiApiKey('');
+    setOpenaiTestMsg('Tarayıcıdaki API anahtarı silindi.');
+    setTimeout(() => setOpenaiTestMsg(null), 4000);
+  };
+
+  const testOpenAiConnection = async () => {
+    if (!getAuthToken()) {
+      setOpenaiTestMsg('Oturum açmanız gerekir.');
+      return;
+    }
+    setOpenaiTestLoading(true);
+    setOpenaiTestMsg(null);
+    try {
+      const res = await apiFetch('/api/ai-chat', {
+        method: 'POST',
+        body: JSON.stringify({
+          prompt: 'Yalnızca şu kelimeyi yaz: tamam',
+          studentContext: 'Bağlantı testi',
+          openai_api_key: openaiApiKey.trim() || undefined,
+          model: (openaiModel || 'gpt-4o-mini').trim()
+        })
+      });
+      const j = (await res.json().catch(() => ({}))) as { content?: string; error?: string };
+      if (!res.ok) {
+        throw new Error(j.error || `HTTP ${res.status}`);
+      }
+      setOpenaiTestMsg(j.content ? `Yanıt: ${String(j.content).slice(0, 120)}` : 'Bağlantı başarılı.');
+      void refreshOpenAiServerStatus();
+    } catch (e) {
+      setOpenaiTestMsg(e instanceof Error ? e.message : 'Test başarısız');
+    } finally {
+      setOpenaiTestLoading(false);
+    }
   };
 
   /** Meta test — admin/süper admin `/api/whatsapp/send` (log + Meta) */
@@ -311,6 +374,38 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      {showAttendanceTab && (
+        <div className="flex flex-wrap gap-2 rounded-xl border border-gray-100 bg-white p-2 shadow-sm">
+          <button
+            type="button"
+            onClick={() => setSettingsTab('general')}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              settingsTab === 'general'
+                ? 'bg-slate-800 text-white shadow'
+                : 'text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            Genel ayarlar
+          </button>
+          <button
+            type="button"
+            onClick={() => setSettingsTab('attendance')}
+            className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              settingsTab === 'attendance'
+                ? 'bg-slate-800 text-white shadow'
+                : 'text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <ClipboardList className="h-4 w-4" />
+            Yoklama raporu
+          </button>
+        </div>
+      )}
+
+      {settingsTab === 'attendance' && showAttendanceTab ? (
+        <AttendanceReportHub institutions={institutions} activeInstitutionId={activeInstitutionId} />
+      ) : (
+      <>
       {/* Kurum Yönetimi */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <div className="flex items-center justify-between mb-6">
@@ -759,18 +854,28 @@ export default function SettingsPage() {
           <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-blue-500 rounded-xl flex items-center justify-center flex-shrink-0">
             <Brain className="w-6 h-6 text-white" />
           </div>
-          <div className="flex-1">
-            <h4 className="font-semibold text-purple-800 mb-2">AI Koç Entegrasyonu (OpenAI)</h4>
-            <p className="text-sm text-purple-700 mb-3">
-              OpenAI API anahtarınızı girerek öğrenci analizi ve AI destekli koçluk özelliklerini aktifleştirin.
+          <div className="flex-1 space-y-3">
+            <h4 className="font-semibold text-purple-800">AI Koç Entegrasyonu (OpenAI)</h4>
+            <p className="text-sm text-purple-700">
+              Öncelik: sunucu ortamındaki <code className="text-xs bg-white/70 px-1 rounded">OPENAI_API_KEY</code>.
+              Tanımlı değilse aşağıdaki anahtar (tarayıcıda saklanır) istekle birlikte kullanılır.
             </p>
-            <div className="flex gap-3">
-              <div className="flex-1 relative">
+            <p className="text-xs text-purple-800/90 rounded-lg bg-white/60 border border-purple-100 px-3 py-2">
+              Sunucu anahtarı:{' '}
+              {openaiServerConfigured === null
+                ? 'Kontrol ediliyor…'
+                : openaiServerConfigured
+                  ? 'Tanımlı (Vercel / API sunucusu ortam değişkeni).'
+                  : 'Görünmüyor — BYOK için aşağıya anahtar girebilir veya ortam değişkenini ekleyebilirsiniz.'}
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex-1 relative min-w-0">
                 <input
                   type={showApiKey ? 'text' : 'password'}
                   value={openaiApiKey}
                   onChange={(e) => setOpenaiApiKey(e.target.value)}
-                  placeholder="sk-..."
+                  placeholder="Tarayıcı için sk-... (isteğe bağlı BYOK)"
+                  autoComplete="off"
                   className="w-full px-4 py-2 border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                 />
                 <button
@@ -781,16 +886,56 @@ export default function SettingsPage() {
                   {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+              <label className="text-sm sm:w-44 flex flex-col gap-1">
+                <span className="text-xs text-purple-700">Model</span>
+                <select
+                  value={openaiModel}
+                  onChange={(e) => setOpenaiModel(e.target.value)}
+                  className="px-3 py-2 border border-purple-200 rounded-lg text-sm bg-white"
+                >
+                  <option value="gpt-4o-mini">gpt-4o-mini</option>
+                  <option value="gpt-4o">gpt-4o</option>
+                  <option value="gpt-4-turbo">gpt-4-turbo</option>
+                  <option value="gpt-4">gpt-4</option>
+                  <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+                  <option value="o1-mini">o1-mini</option>
+                  <option value="o1-preview">o1-preview</option>
+                </select>
+              </label>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
               <button
+                type="button"
                 onClick={saveOpenAIConfig}
-                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium flex items-center gap-2"
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium inline-flex items-center gap-2"
               >
                 <Save className="w-4 h-4" />
                 Kaydet
               </button>
+              <button
+                type="button"
+                onClick={() => void testOpenAiConnection()}
+                disabled={openaiTestLoading}
+                className="px-4 py-2 border border-purple-300 text-purple-800 rounded-lg hover:bg-purple-100/80 text-sm font-medium inline-flex items-center gap-2 disabled:opacity-50"
+              >
+                {openaiTestLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                Bağlantıyı test et
+              </button>
+              <button
+                type="button"
+                onClick={clearOpenAiBrowserKey}
+                className="px-4 py-2 text-sm text-red-700 border border-red-200 rounded-lg hover:bg-red-50"
+              >
+                Tarayıcı anahtarını sil
+              </button>
             </div>
-            <p className="text-xs text-purple-600 mt-2">
-              API anahtarınız güvenli şekilde saklanır ve sadece AI işlemleri için kullanılır.
+            {openaiTestMsg ? (
+              <p className="text-xs text-slate-700 bg-white/80 border border-purple-100 rounded-lg px-3 py-2">
+                {openaiTestMsg}
+              </p>
+            ) : null}
+            <p className="text-xs text-purple-600">
+              BYOK anahtarı yalnızca bu tarayıcıda saklanır; üretimde tercihen sunucu ortamı kullanın.
               <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="underline ml-1">
                 OpenAI API Keys
                 <ExternalLink className="w-3 h-3 inline ml-1" />
@@ -936,6 +1081,8 @@ export default function SettingsPage() {
         <p>Öğrenci Koçluk ve Takip Sistemi v1.1.0</p>
         <p className="mt-1">© 2024 {footerInstitution?.name || 'Sistem'}. Tüm hakları saklıdır.</p>
       </div>
+    </>
+      )}
     </div>
   );
 }

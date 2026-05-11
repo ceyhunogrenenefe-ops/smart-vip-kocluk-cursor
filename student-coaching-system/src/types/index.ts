@@ -151,6 +151,10 @@ export interface WeeklyEntry {
   createdAt: string;
   // Kitap Okuma Alanları (Opsiyonel)
   readingMinutes?: number; // Haftalık takipte okunan sayfa (DB alanı `reading_minutes`; legacy isim)
+  /** `pages_read` sütunu (tercih edilen) */
+  pagesRead?: number;
+  /** Telefon/tablet ekran süresi (dakika) */
+  screenTimeMinutes?: number;
   bookId?: string; // Okunan kitap ID
   bookTitle?: string; // Kitap adı (quick reference)
 }

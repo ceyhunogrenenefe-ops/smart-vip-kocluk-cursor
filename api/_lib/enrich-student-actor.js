@@ -60,8 +60,11 @@ export async function enrichStudentActor(actor) {
     return { ...actor, student_id: resolved.id };
   }
 
-  /** Koç/öğretmen: JWT’deki coach_id eski veya boş kalabiliyor; her istekte DB’den tazele (auth-login ile aynı kural). */
-  if (actor.role === 'coach' || actor.role === 'teacher') {
+  /**
+   * Koç ve öğretmen: JWT'de coach_id boşsa coaches tablosundan e-posta/id ile tamamla (auth-login ile uyumlu).
+   * Öğretmen+koç hesaplarında JWT bazen coach_id taşımıyor; coach-whatsapp-schedule vb. 403 vermesin.
+   */
+  if ((actor.role === 'coach' || actor.role === 'teacher') && !actor.coach_id) {
     const cid = await resolveCoachIdByUserSub(actor.sub);
     if (cid) return { ...actor, coach_id: cid };
   }

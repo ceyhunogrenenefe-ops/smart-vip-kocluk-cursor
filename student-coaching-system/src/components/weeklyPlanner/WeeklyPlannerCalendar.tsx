@@ -29,29 +29,13 @@ import {
   fetchWeeklyPlannerEntries,
   patchWeeklyPlannerEntry,
 } from '../../lib/weeklyPlannerApi';
+import { WeeklyPlannerStudyModal } from './WeeklyPlannerStudyModal';
+import { subjectPlannerStyle } from './subjectPlannerStyle';
+
+export { subjectPlannerStyle };
 
 const HOURS = Array.from({ length: 16 }, (_, i) => i + 8); // 08–23
 const DAY_LABELS = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
-
-export function subjectPlannerStyle(subject: string, quantityUnit?: string) {
-  const s = `${subject} ${quantityUnit || ''}`.toLowerCase();
-  if (/kitap|okuma/.test(s)) {
-    return { bar: 'bg-amber-200 border-amber-500 text-amber-950', chip: 'bg-amber-100 border-amber-400' };
-  }
-  if (/matematik|mat\./.test(s)) {
-    return { bar: 'bg-sky-200 border-sky-600 text-sky-950', chip: 'bg-sky-100 border-sky-500' };
-  }
-  if (/fizik/.test(s)) {
-    return { bar: 'bg-violet-200 border-violet-600 text-violet-950', chip: 'bg-violet-100 border-violet-500' };
-  }
-  if (/kimya/.test(s)) {
-    return { bar: 'bg-emerald-200 border-emerald-600 text-emerald-950', chip: 'bg-emerald-100 border-emerald-600' };
-  }
-  if (/biyoloji|bio/.test(s)) {
-    return { bar: 'bg-orange-200 border-orange-600 text-orange-950', chip: 'bg-orange-100 border-orange-500' };
-  }
-  return { bar: 'bg-slate-200 border-slate-500 text-slate-900', chip: 'bg-slate-100 border-slate-400' };
-}
 
 function padHour(h: number) {
   return `${String(h).padStart(2, '0')}:00`;
@@ -77,6 +61,8 @@ interface WeeklyPlannerCalendarProps {
   studentName?: string;
   canEditPlan: boolean;
   canManageGoals: boolean;
+  /** Öğrenci kendi planında: blok tıklanınca günlük çalışma kaydı modalı */
+  studentStudyLogUi?: boolean;
 }
 
 export function WeeklyPlannerCalendar({
@@ -84,6 +70,7 @@ export function WeeklyPlannerCalendar({
   studentName,
   canEditPlan,
   canManageGoals,
+  studentStudyLogUi = false,
 }: WeeklyPlannerCalendarProps) {
   const [anchor, setAnchor] = useState(() => new Date());
   const weekStartStr = useMemo(
@@ -103,11 +90,14 @@ export function WeeklyPlannerCalendar({
   const [modalMode, setModalMode] = useState<ModalMode>('idle');
   const [slotContext, setSlotContext] = useState<{ date: string; hour: number } | null>(null);
   const [activeEntry, setActiveEntry] = useState<WeeklyPlannerEntryRow | null>(null);
+  const [studyModalEntry, setStudyModalEntry] = useState<WeeklyPlannerEntryRow | null>(null);
 
   const [newGoalSubject, setNewGoalSubject] = useState('');
   const [newGoalTitle, setNewGoalTitle] = useState('');
   const [newGoalQty, setNewGoalQty] = useState(100);
   const [newGoalUnit, setNewGoalUnit] = useState('soru');
+  const [newGoalStart, setNewGoalStart] = useState('');
+  const [newGoalEnd, setNewGoalEnd] = useState('');
 
   const [formGoalId, setFormGoalId] = useState<string | null>(null);
   const [formTitle, setFormTitle] = useState('');
@@ -135,6 +125,11 @@ export function WeeklyPlannerCalendar({
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    setNewGoalStart(weekStartStr);
+    setNewGoalEnd(weekEndStr);
+  }, [weekStartStr, weekEndStr]);
 
   useEffect(() => {
     const id = window.setInterval(() => void reload(), 8000);
@@ -214,12 +209,44 @@ export function WeeklyPlannerCalendar({
     setActiveEntry(null);
   };
 
-  const handleDropOnCell = async (entryId: string, date: string, hour: number) => {
+  const handleDropOnCell = async (payload: string, date: string, hour: number) => {
     if (!canEditPlan) return;
     const nextStart = padHour(hour);
     const nextEnd = padHour(Math.min(hour + 1, 23));
+
+    if (payload.startsWith('goal:')) {
+      const goalId = payload.slice('goal:'.length).trim();
+      const g = goals.find((x) => x.id === goalId);
+      if (!g) return;
+      const agg = goalAggregates.find((a) => a.goal.id === goalId);
+      const remaining = Math.max(0, agg?.remaining ?? 0);
+      const chunk = Math.min(remaining, 50);
+      if (chunk <= 0) {
+        alert('Bu hedef için planlanabilir kota kalmadı.');
+        return;
+      }
+      try {
+        await createWeeklyPlannerEntry({
+          student_id: studentId,
+          planner_date: date,
+          start_time: nextStart,
+          end_time: nextEnd,
+          title: g.title,
+          subject: g.subject,
+          planned_quantity: chunk,
+          coach_goal_id: goalId,
+          status: 'planned',
+          completed_quantity: 0,
+        });
+        await reload();
+      } catch (e) {
+        alert(e instanceof Error ? e.message : 'Yerleştirilemedi (çakışma olabilir)');
+      }
+      return;
+    }
+
     try {
-      await patchWeeklyPlannerEntry(entryId, {
+      await patchWeeklyPlannerEntry(payload, {
         planner_date: date,
         start_time: nextStart,
         end_time: nextEnd,
@@ -227,6 +254,44 @@ export function WeeklyPlannerCalendar({
       await reload();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Taşınamadı (çakışma olabilir)');
+    }
+  };
+
+  const splitGoalAcrossPresetDays = async (goal: CoachWeeklyGoalRow) => {
+    if (!canEditPlan) return;
+    const agg = goalAggregates.find((a) => a.goal.id === goal.id);
+    const remaining = agg?.remaining ?? 0;
+    if (remaining <= 0) {
+      alert('Bölünecek kota kalmadı.');
+      return;
+    }
+    const parts = 4;
+    const base = Math.floor(remaining / parts);
+    let extra = remaining % parts;
+    const dayIx = [6, 1, 3, 4];
+    const hour = 19;
+    try {
+      for (let i = 0; i < parts; i++) {
+        const q = base + (extra > 0 ? 1 : 0);
+        if (extra > 0) extra -= 1;
+        if (q <= 0) continue;
+        const date = dayDates[dayIx[i]];
+        await createWeeklyPlannerEntry({
+          student_id: studentId,
+          planner_date: date,
+          start_time: padHour(hour),
+          end_time: padHour(Math.min(hour + 1, 23)),
+          title: goal.title,
+          subject: goal.subject,
+          planned_quantity: q,
+          coach_goal_id: goal.id,
+          status: 'planned',
+          completed_quantity: 0,
+        });
+      }
+      await reload();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Bölünemedi');
     }
   };
 
@@ -317,6 +382,8 @@ export function WeeklyPlannerCalendar({
         target_quantity: Math.max(0, newGoalQty),
         week_start_date: weekStartStr,
         quantity_unit: newGoalUnit.trim() || 'soru',
+        goal_start_date: newGoalStart.trim() || weekStartStr,
+        goal_end_date: newGoalEnd.trim() || weekEndStr,
       });
       setNewGoalSubject('');
       setNewGoalTitle('');
@@ -469,6 +536,24 @@ export function WeeklyPlannerCalendar({
                 <option value="tekrar">tekrar</option>
               </select>
             </div>
+            <div>
+              <label className="text-xs text-slate-600 block mb-1">Başlangıç</label>
+              <input
+                type="date"
+                value={newGoalStart}
+                onChange={(e) => setNewGoalStart(e.target.value)}
+                className="px-3 py-2 border rounded-lg text-sm w-[148px]"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-slate-600 block mb-1">Bitiş</label>
+              <input
+                type="date"
+                value={newGoalEnd}
+                onChange={(e) => setNewGoalEnd(e.target.value)}
+                className="px-3 py-2 border rounded-lg text-sm w-[148px]"
+              />
+            </div>
             <button
               type="button"
               onClick={() => void addCoachGoal()}
@@ -481,11 +566,17 @@ export function WeeklyPlannerCalendar({
         </div>
       )}
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_280px]">
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_300px]">
         {/* Takvim */}
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between px-3 py-2 border-b bg-slate-50 text-xs text-slate-600">
-            <span>{loading ? 'Yükleniyor…' : 'Google Takvim tarzı ızgaraya sürükleyerek taşıyın'}</span>
+        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm overflow-hidden transition-colors">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-slate-50 to-white dark:from-slate-900 dark:to-slate-900 text-xs text-slate-600 dark:text-slate-400">
+            <span>
+              {loading
+                ? 'Yükleniyor…'
+                : studentStudyLogUi
+                  ? 'Bloklara tıklayı günlük kayıt gir · hedef kartını sürükleyerek yerleştir'
+                  : 'Öğrenci blokları sürükleyerek taşıyabilir'}
+            </span>
           </div>
           <div className="overflow-x-auto">
             <div className="min-w-[720px]">
@@ -557,7 +648,12 @@ export function WeeklyPlannerCalendar({
                                 }}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  if (canEditPlan) openEdit(en);
+                                  if (!canEditPlan) return;
+                                  if (studentStudyLogUi) {
+                                    setStudyModalEntry(en);
+                                  } else {
+                                    openEdit(en);
+                                  }
                                 }}
                                 className={`text-[10px] leading-tight rounded px-1 py-0.5 mb-0.5 border ${st.chip} ${borderCls} ${canEditPlan ? 'cursor-grab' : ''}`}
                               >
@@ -585,8 +681,11 @@ export function WeeklyPlannerCalendar({
 
         {/* Hedef özet */}
         <div className="space-y-3">
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h4 className="text-sm font-semibold text-slate-800 mb-3">Hedef vs plan</h4>
+          <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm p-4 shadow-sm">
+            <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-1">Koç hedefleri</h4>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3">
+              Kartı takvime sürükleyin · İsteğe bağlı otomatik günlere böl
+            </p>
             {goalAggregates.length === 0 ? (
               <p className="text-xs text-slate-500">
                 {canManageGoals
@@ -595,39 +694,95 @@ export function WeeklyPlannerCalendar({
               </p>
             ) : (
               <ul className="space-y-3 text-xs">
-                {goalAggregates.map(({ goal, plannedSum, target, remaining, over }) => (
-                  <li key={goal.id} className="rounded-lg border border-slate-100 p-2 bg-slate-50/80">
-                    <div className="flex justify-between gap-2">
-                      <span className="font-medium text-slate-800 truncate">{goal.title}</span>
-                      {canManageGoals ? (
+                {goalAggregates.map(({ goal, plannedSum, target, remaining, over }) => {
+                  const pct = target > 0 ? Math.min(100, Math.round((plannedSum / target) * 100)) : 0;
+                  const start = goal.goal_start_date || goal.week_start_date;
+                  const end = goal.goal_end_date || weekEndStr;
+                  return (
+                    <li
+                      key={goal.id}
+                      draggable={canEditPlan}
+                      onDragStart={(e) => {
+                        if (!canEditPlan) return;
+                        e.dataTransfer.setData('text/plain', `goal:${goal.id}`);
+                        e.dataTransfer.effectAllowed = 'copy';
+                      }}
+                      className={`rounded-xl border border-slate-100 dark:border-slate-700 p-3 bg-gradient-to-br from-white to-slate-50 dark:from-slate-900 dark:to-slate-950 shadow-sm ${
+                        canEditPlan ? 'cursor-grab active:cursor-grabbing' : ''
+                      }`}
+                    >
+                      <div className="flex justify-between gap-2 items-start">
+                        <div className="min-w-0">
+                          <p className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">
+                            {goal.subject}
+                          </p>
+                          <span className="font-semibold text-slate-800 dark:text-slate-100 leading-snug block truncate">
+                            {goal.title}
+                          </span>
+                        </div>
+                        {canManageGoals ? (
+                          <button
+                            type="button"
+                            onClick={() => void removeGoal(goal.id)}
+                            className="text-red-500 hover:text-red-700 p-1 flex-shrink-0"
+                            title="Hedefi sil"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        ) : null}
+                      </div>
+                      <div className="mt-2 h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-red-400 to-orange-400 transition-all duration-300"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <div className="mt-2 text-slate-600 dark:text-slate-300 space-y-0.5">
+                        <div>
+                          {target} {goal.quantity_unit} · Planlanan {plannedSum}
+                        </div>
+                        <div className="font-medium text-slate-800 dark:text-slate-100">
+                          Kalan kota: {over ? `0 (aşım ${plannedSum - target})` : remaining}
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          {start} → {end}
+                        </div>
+                        {over ? (
+                          <div className="text-amber-700 dark:text-amber-400 flex items-center gap-1 mt-1">
+                            <AlertTriangle className="w-3 h-3" />
+                            Plan toplamı hedefi aştı
+                          </div>
+                        ) : null}
+                      </div>
+                      {canEditPlan && remaining > 0 ? (
                         <button
                           type="button"
-                          onClick={() => void removeGoal(goal.id)}
-                          className="text-red-500 hover:text-red-700 p-1"
-                          title="Hedefi sil"
+                          onClick={() => void splitGoalAcrossPresetDays(goal)}
+                          className="mt-2 w-full text-[11px] py-1.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          Kalanı günlere böl (ör. Pz-Sa-Pe-Cu)
                         </button>
                       ) : null}
-                    </div>
-                    <div className="mt-1 text-slate-600 space-y-0.5">
-                      <div>Hedef: {target} {goal.quantity_unit}</div>
-                      <div>Planlanan: {plannedSum}</div>
-                      <div>Kalan kota: {over ? `0 (aşım ${plannedSum - target})` : remaining}</div>
-                      {over ? (
-                        <div className="text-amber-700 flex items-center gap-1 mt-1">
-                          <AlertTriangle className="w-3 h-3" />
-                          Bu hedef için plan toplamı hedefi aştı.
-                        </div>
-                      ) : null}
-                    </div>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
         </div>
       </div>
+
+      {studyModalEntry ? (
+        <WeeklyPlannerStudyModal
+          plannerEntry={studyModalEntry}
+          onClose={() => setStudyModalEntry(null)}
+          onSaved={() => void reload()}
+          onEditPlanner={(en) => {
+            setStudyModalEntry(null);
+            openEdit(en);
+          }}
+        />
+      ) : null}
 
       {/* Modal */}
       {(modalMode === 'create' || modalMode === 'edit') && slotContext && (

@@ -104,8 +104,21 @@ function getCoachId(req) {
   return String(req.params.coachId || '').trim();
 }
 
+/**
+ * WhatsApp s.whatsapp.net JID: ülke kodu olmadan 05… veya 10 haneli 5… gönderilirse mesaj gitmez / hata verir.
+ * TR cep: 0555… → 90555…, 555… (10 hane) → 90555…
+ */
+function normalizeDigitsForWhatsApp(phone) {
+  let d = String(phone || '').replace(/\D/g, '');
+  if (!d) return '';
+  if (d.startsWith('90') && d.length >= 12) return d;
+  if (d.startsWith('0') && d.length === 11) return `90${d.slice(1)}`;
+  if (d.length === 10 && d.startsWith('5')) return `90${d}`;
+  return d;
+}
+
 function ensurePhoneJid(phone) {
-  const onlyDigits = String(phone || '').replace(/\D/g, '');
+  const onlyDigits = normalizeDigitsForWhatsApp(phone);
   if (!onlyDigits) return null;
   return `${onlyDigits}@s.whatsapp.net`;
 }

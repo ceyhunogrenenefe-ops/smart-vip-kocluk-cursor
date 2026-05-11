@@ -83,10 +83,23 @@ export default async function handler(req, res) {
     const topic = String(b.topic ?? '').trim();
     const subject = String(b.subject ?? planner.subject ?? '').trim() || 'Genel';
     const target = Number(b.target_questions ?? b.targetQuestions ?? planner.planned_quantity ?? 0);
-    const solved = Number(b.solved_questions ?? b.solvedQuestions ?? 0);
     const correct = Number(b.correct ?? b.correctAnswers ?? 0);
     const wrong = Number(b.wrong ?? b.wrongAnswers ?? 0);
     const blank = Number(b.blank ?? b.blankAnswers ?? 0);
+    const sumParts = correct + wrong + blank;
+    const solved = Number(
+      b.solved_questions != null || b.solvedQuestions != null ? b.solved_questions ?? b.solvedQuestions : sumParts
+    );
+    const pagesRead =
+      b.pages_read != null || b.pagesRead != null
+        ? Number(b.pages_read ?? b.pagesRead)
+        : b.reading_minutes != null || b.readingMinutes != null
+          ? Number(b.reading_minutes ?? b.readingMinutes)
+          : null;
+    const screenTimeMin =
+      b.screen_time_minutes != null || b.screenTimeMinutes != null
+        ? Number(b.screen_time_minutes ?? b.screenTimeMinutes)
+        : null;
 
     if (!(target > 0 || solved > 0)) {
       return res.status(400).json({ error: 'target_or_solved_required' });
@@ -109,8 +122,15 @@ export default async function handler(req, res) {
       blank: Number.isFinite(blank) && blank >= 0 ? blank : 0,
       notes: b.notes != null ? String(b.notes).slice(0, 2000) : b.coachComment != null ? String(b.coachComment).slice(0, 2000) : null,
       reading_minutes:
-        b.reading_minutes != null || b.readingMinutes != null
-          ? Number(b.reading_minutes ?? b.readingMinutes)
+        pagesRead != null && Number.isFinite(pagesRead)
+          ? Math.round(pagesRead)
+          : b.reading_minutes != null || b.readingMinutes != null
+            ? Number(b.reading_minutes ?? b.readingMinutes)
+            : null,
+      pages_read: pagesRead != null && Number.isFinite(pagesRead) ? Math.round(pagesRead) : null,
+      screen_time_minutes:
+        screenTimeMin != null && Number.isFinite(screenTimeMin) && screenTimeMin >= 0
+          ? Math.round(screenTimeMin)
           : null,
       book_id: b.book_id ?? b.bookId ?? null,
       book_title: b.book_title != null ? String(b.book_title).slice(0, 500) : b.bookTitle != null ? String(b.bookTitle).slice(0, 500) : null,

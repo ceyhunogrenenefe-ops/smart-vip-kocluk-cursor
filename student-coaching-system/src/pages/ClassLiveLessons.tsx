@@ -4,8 +4,11 @@ import { useApp } from '../context/AppContext';
 import { apiFetch } from '../lib/session';
 import { resolveStudentRecordId } from '../lib/coachResolve';
 import StudentLiveLessonsPanel from '../components/liveLessons/StudentLiveLessonsPanel';
+import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShell';
+import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
 import { turkishFold } from '../lib/userBulkImport';
 import type { Student } from '../types';
+import { GripVertical, KeyRound, Pencil, Trash2 } from 'lucide-react';
 
 type ClassRow = {
   id: string;
@@ -199,10 +202,27 @@ export default function ClassLiveLessons() {
 
   const [attendanceSession, setAttendanceSession] = useState<SessionRow | null>(null);
   const [attendanceDraft, setAttendanceDraft] = useState<
-    { student_id: string; status: 'present' | 'absent' }[]
+    { student_id: string; status: 'present' | 'absent' | 'late' }[]
   >([]);
   const [attendanceModalLoading, setAttendanceModalLoading] = useState(false);
   const [attendanceSaving, setAttendanceSaving] = useState(false);
+
+  const [editingSession, setEditingSession] = useState<SessionRow | null>(null);
+  const [editingSlotRow, setEditingSlotRow] = useState<SlotRow | null>(null);
+  const [sessionEditBusy, setSessionEditBusy] = useState(false);
+  const [slotEditBusy, setSlotEditBusy] = useState(false);
+  const [esSubject, setEsSubject] = useState('');
+  const [esDate, setEsDate] = useState('');
+  const [esStart, setEsStart] = useState('');
+  const [esEnd, setEsEnd] = useState('');
+  const [esLink, setEsLink] = useState('');
+  const [esHomework, setEsHomework] = useState('');
+  const [slDay, setSlDay] = useState(1);
+  const [slSubject, setSlSubject] = useState('');
+  const [slStart, setSlStart] = useState('');
+  const [slEnd, setSlEnd] = useState('');
+  const [slLink, setSlLink] = useState('');
+  const [slHomework, setSlHomework] = useState('');
 
   const [scheduleKind, setScheduleKind] = useState<'sessions' | 'template'>('sessions');
   const [lessonStartDate, setLessonStartDate] = useState(() => isoFromLocalDate(new Date()));
@@ -445,10 +465,13 @@ export default function ClassLiveLessons() {
       const clsRow = classes.find((c) => c.id === s.class_id);
       const ids = Array.isArray(clsRow?.student_ids) ? clsRow!.student_ids.map(String).filter(Boolean) : [];
       setAttendanceDraft(
-        ids.map((id) => ({
-          student_id: id,
-          status: map.get(id) === 'absent' ? ('absent' as const) : ('present' as const)
-        }))
+        ids.map((id) => {
+          const st = map.get(id);
+          let status: 'present' | 'absent' | 'late' = 'present';
+          if (st === 'absent') status = 'absent';
+          else if (st === 'late') status = 'late';
+          return { student_id: id, status };
+        })
       );
     } catch {
       setAttendanceDraft([]);
@@ -537,6 +560,92 @@ export default function ClassLiveLessons() {
     await loadWeekSessions();
   };
 
+  const openEditSession = (s: SessionRow) => {
+    setEditingSession(s);
+    setEsSubject(s.subject);
+    setEsDate(s.lesson_date);
+    setEsStart(String(s.start_time || '').slice(0, 5));
+    setEsEnd(String(s.end_time || '').slice(0, 5));
+    setEsLink(s.meeting_link || '');
+    setEsHomework(s.homework || '');
+    setError(null);
+  };
+
+  const saveSessionEdit = async () => {
+    if (!editingSession) return;
+    setSessionEditBusy(true);
+    setError(null);
+    try {
+      const res = await apiFetch('/api/class-live-lessons', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          id: editingSession.id,
+          subject: esSubject.trim(),
+          lesson_date: esDate,
+          start_time: esStart.length === 5 ? `${esStart}:00` : esStart,
+          end_time: esEnd.length === 5 ? `${esEnd}:00` : esEnd,
+          meeting_link: esLink.trim(),
+          homework: esHomework.trim() || null
+        })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(String(j.error || 'Oturum güncellenemedi'));
+        return;
+      }
+      setEditingSession(null);
+      await loadWeekSessions();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Hata');
+    } finally {
+      setSessionEditBusy(false);
+    }
+  };
+
+  const openEditSlot = (s: SlotRow) => {
+    setEditingSlotRow(s);
+    setSlDay(s.day_of_week);
+    setSlSubject(s.subject);
+    setSlStart(String(s.start_time || '').slice(0, 5));
+    setSlEnd(String(s.end_time || '').slice(0, 5));
+    setSlLink(s.meeting_link || '');
+    setSlHomework(s.homework || '');
+    setError(null);
+  };
+
+  const saveSlotEdit = async () => {
+    if (!editingSlotRow) return;
+    setSlotEditBusy(true);
+    setError(null);
+    try {
+      const res = await apiFetch('/api/class-live-lessons', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          kind: 'slot',
+          id: editingSlotRow.id,
+          day_of_week: slDay,
+          subject: slSubject.trim(),
+          start_time: slStart.length === 5 ? `${slStart}:00` : slStart,
+          end_time: slEnd.length === 5 ? `${slEnd}:00` : slEnd,
+          meeting_link: slLink.trim(),
+          homework: slHomework.trim() || null
+        })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(String(j.error || 'Şablon güncellenemedi'));
+        return;
+      }
+      setEditingSlotRow(null);
+      await loadAll();
+      await loadWeekSessions();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Hata');
+    } finally {
+      setSlotEditBusy(false);
+    }
+  };
+
   const loadPaymentSummary = useCallback(async () => {
     if (!canViewPaymentSummary) return;
     setSummaryLoading(true);
@@ -600,6 +709,32 @@ export default function ClassLiveLessons() {
         <StudentLiveLessonsPanel />
       ) : (
         <>
+      <div className="rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-4 shadow-sm">
+        <div className="flex flex-wrap items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-800">
+            <KeyRound className="h-5 w-5" aria-hidden />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-amber-950">Canlı derse giriş — hatırlatma</p>
+            <p className="mt-2 text-sm leading-relaxed text-amber-950/90">
+              Canlı grup veya etüt oturumuna bağlanırken{' '}
+              <span className="rounded-md bg-white/80 px-1.5 py-0.5 font-mono font-semibold text-amber-950 shadow-sm">
+                Name
+              </span>{' '}
+              alanına <strong>kendi adınızı</strong>,{' '}
+              <span className="rounded-md bg-white/80 px-1.5 py-0.5 font-mono font-semibold text-amber-950 shadow-sm">
+                Access Code
+              </span>{' '}
+              alanına{' '}
+              <span className="rounded-md bg-amber-200/80 px-2 py-0.5 font-mono font-bold tracking-wide text-amber-950">
+                123456
+              </span>{' '}
+              yazmayı unutmayın.
+            </p>
+          </div>
+        </div>
+      </div>
+
       <div className="bg-white rounded-xl border border-slate-200 p-4">
         <h1 className="text-xl font-bold text-slate-800">
           {isStudentView ? 'Canlı derslerim' : 'Canlı Grup Dersi Yönetimi'}
@@ -966,60 +1101,64 @@ export default function ClassLiveLessons() {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-slate-200 p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-          <div>
-            <h2 className="font-semibold text-slate-800">
-              {isStudentView ? 'Bu haftanın canlı dersleri' : 'Haftalık takvim'}
-            </h2>
-            <p className="text-sm text-indigo-700 font-medium tabular-nums">{weekRangeLabel}</p>
-            <p className="text-xs text-slate-500">Yeşil: tarihli oturum · Kesik çerçeve: yalnızca şablonda</p>
-          </div>
-          <div className="flex flex-wrap gap-1">
-            <button
-              type="button"
-              onClick={() => setCalendarWeekMondayIso((prev) => addDaysIso(prev, -7))}
-              className="px-3 py-1.5 text-sm rounded border border-slate-200 hover:bg-slate-50"
-            >
-              ‹ Önceki hafta
-            </button>
-            <button
-              type="button"
-              onClick={() => setCalendarWeekMondayIso(mondayIsoContaining())}
-              className="px-3 py-1.5 text-sm rounded border border-emerald-200 bg-emerald-50 text-emerald-900"
-            >
-              Bu hafta
-            </button>
-            <button
-              type="button"
-              onClick={() => setCalendarWeekMondayIso((prev) => addDaysIso(prev, 7))}
-              className="px-3 py-1.5 text-sm rounded border border-slate-200 hover:bg-slate-50"
-            >
-              Sonraki hafta ›
-            </button>
-          </div>
-        </div>
-        {calendarLoading && <div className="text-xs text-slate-500 mb-2">Oturumlar yükleniyor...</div>}
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[920px] text-xs border border-slate-100 rounded">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="px-2 py-2 text-left text-slate-500 w-20">Saat</th>
+      <WeeklyLiveGridShell
+        title={isStudentView ? 'Bu haftanın canlı grup dersleri' : 'Haftalık grup ders takvimi'}
+        subtitle="Tarihli oturumlar ve haftalık şablon üzerinden tek ekranda planlayın."
+        weekRangeLabel={weekRangeLabel}
+        loading={calendarLoading}
+        onPrevWeek={() => setCalendarWeekMondayIso((prev) => addDaysIso(prev, -7))}
+        onNextWeek={() => setCalendarWeekMondayIso((prev) => addDaysIso(prev, 7))}
+        onThisWeek={() => setCalendarWeekMondayIso(mondayIsoContaining())}
+        legend={
+          <>
+            <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/40 bg-emerald-500/15 px-3 py-1.5 text-[11px] font-semibold text-emerald-50 shadow-sm backdrop-blur-sm">
+              <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/60" />
+              Tarihli oturum
+            </span>
+            <span className="inline-flex items-center gap-2 rounded-full border border-indigo-300/40 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white backdrop-blur-sm">
+              <span className="h-2 w-2 rounded-full border border-dashed border-indigo-200 bg-indigo-400/40" />
+              Haftalık şablon
+            </span>
+          </>
+        }
+        hint="Yeşil kartlar gerçek oturumdur (Katıl / Yoklama). Kesik çizgili kartlar yalnızca şablondur; oturum oluşunca aynı slotta şablon gizlenir."
+      >
+        <div className="overflow-x-auto p-2 sm:p-3">
+          <table className="w-full min-w-[920px] border-collapse text-xs">
+            <thead>
+              <tr className="border-b border-slate-200 bg-white">
+                <th className="w-14 min-w-[3.5rem] bg-slate-100 px-2 py-3 text-left text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                  Saat
+                </th>
                 {DAY_LABELS.map((d, i) => {
                   const iso = weekColumnDates[i];
+                  const isToday = iso === todayIso();
                   return (
-                    <th key={d} className="px-2 py-2 text-left text-slate-600">
-                      <div>{d}</div>
-                      <div className="text-[10px] font-normal text-slate-500 tabular-nums">{formatDdMmYyyyDots(iso)}</div>
+                    <th
+                      key={d}
+                      className={`px-2 py-3 text-left align-bottom ${
+                        isToday
+                          ? 'border-x border-t border-amber-300/90 bg-gradient-to-b from-amber-100 to-amber-50/90 shadow-[inset_0_2px_0_0_rgba(251,191,36,0.65)]'
+                          : 'border-t border-slate-100 bg-slate-50/90'
+                      }`}
+                    >
+                      <div className={`text-[11px] font-bold ${isToday ? 'text-amber-950' : 'text-slate-700'}`}>{d}</div>
+                      <div
+                        className={`mt-0.5 text-[10px] font-medium tabular-nums ${isToday ? 'text-amber-800/90' : 'text-slate-500'}`}
+                      >
+                        {formatDdMmYyyyDots(iso)}
+                      </div>
                     </th>
                   );
                 })}
               </tr>
             </thead>
-            <tbody>
-              {Array.from({ length: 13 }, (_, i) => 10 + i).map((hour) => (
-                <tr key={hour} className="border-t border-slate-100">
-                  <td className="px-2 py-2 bg-slate-50/70 text-slate-500">{String(hour).padStart(2, '0')}:00</td>
+            <tbody className="bg-white">
+              {Array.from({ length: 15 }, (_, i) => 10 + i).map((hour) => (
+                <tr key={hour} className="border-t border-slate-100/90 transition-colors hover:bg-slate-50/40">
+                  <td className="bg-slate-50 px-2 py-2 text-right font-mono text-[11px] font-semibold tabular-nums text-slate-600">
+                    {String(hour).padStart(2, '0')}:00
+                  </td>
                   {weekColumnDates.map((colIso) => {
                     const sessionsHere = weekSessions.filter(
                       (s) =>
@@ -1034,74 +1173,132 @@ export default function ClassLiveLessons() {
                       if (blockedSlotTeacherHours.has(`${s.teacher_id}|${hour}`)) return false;
                       return true;
                     });
+                    const colToday = colIso === todayIso();
                     return (
-                      <td key={`${colIso}-${hour}`} className="px-2 py-2 align-top min-h-[48px] bg-white">
-                        <div className="space-y-1">
+                      <td
+                        key={`${colIso}-${hour}`}
+                        className={`align-top p-1.5 min-h-[52px] ${colToday ? 'bg-amber-50/55' : ''}`}
+                      >
+                        <div className="flex flex-col gap-1.5">
                           {sessionsHere.map((s) => {
                             const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
+                            const accent = liveSubjectAccent(s.subject);
                             const st =
                               s.status === 'completed'
-                                ? 'bg-slate-100 border-slate-200'
+                                ? 'opacity-90 ring-slate-300/60'
                                 : s.status === 'cancelled'
-                                  ? 'bg-red-50 border-red-100'
-                                  : 'bg-emerald-50 border-emerald-200';
+                                  ? 'opacity-75 ring-red-200'
+                                  : 'ring-emerald-300/50 shadow-md';
+                            const canJoin = s.status === 'scheduled' && Boolean(s.meeting_link?.trim());
                             return (
-                              <div key={s.id} className={`rounded border px-2 py-1 ${st}`}>
-                                <p className="font-semibold text-slate-900">{s.subject}</p>
-                                <p className="text-slate-600">{teacher?.name || s.teacher_id} · {String(s.start_time).slice(0, 5)}</p>
-                                <p className="text-[10px] text-slate-500 capitalize">{s.status}</p>
-                                <div className="mt-1 flex flex-wrap gap-1">
-                                  {s.status === 'scheduled' && (
+                              <div
+                                key={s.id}
+                                className={`rounded-xl border border-y border-r border-slate-200/75 px-2 py-2 shadow-sm ${accent.leftBar} ${accent.bg} ${accent.glow} ${st}`}
+                              >
+                                <div className="flex gap-1.5">
+                                  <GripVertical className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      <p className={`text-[13px] font-bold leading-tight ${accent.title}`}>{s.subject}</p>
+                                      {s.status === 'scheduled' ? (
+                                        <span className="rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-emerald-800 ring-1 ring-emerald-400/40">
+                                          Planlı
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    <p className="mt-0.5 text-[11px] font-medium text-slate-800">
+                                      {teacher?.name || s.teacher_id}
+                                    </p>
+                                    <p className="text-[10px] tabular-nums text-slate-600">
+                                      {String(s.start_time).slice(0, 5)}–{String(s.end_time).slice(0, 5)}
+                                    </p>
+                                    <p className="text-[10px] font-medium capitalize text-slate-400">{s.status}</p>
+                                  </div>
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-1">
+                                  {canJoin ? (
                                     <button
                                       type="button"
                                       onClick={() => window.open(s.meeting_link, '_blank', 'noopener,noreferrer')}
-                                      className="px-2 py-0.5 rounded bg-blue-600 text-white"
+                                      className="rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-2 py-1 text-[10px] font-semibold text-white shadow-sm hover:brightness-110"
                                     >
                                       Katıl
                                     </button>
-                                  )}
-                                  {canMarkAttendance && (
+                                  ) : null}
+                                  {canMarkAttendance && s.status === 'scheduled' ? (
                                     <button
                                       type="button"
-                                      className="px-2 py-0.5 rounded bg-amber-600 text-white"
+                                      className="rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 px-2 py-1 text-[10px] font-semibold text-white shadow-sm hover:brightness-110"
                                       onClick={() => void openAttendanceForSession(s)}
                                     >
                                       Yoklama
                                     </button>
-                                  )}
-                                  {canManageSlots && (
+                                  ) : null}
+                                  {canManageSlots ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => openEditSession(s)}
+                                      className="inline-flex items-center gap-1 rounded-lg border border-indigo-300 bg-white px-2 py-1 text-[10px] font-semibold text-indigo-700 shadow-sm hover:bg-indigo-50"
+                                    >
+                                      <Pencil className="h-3 w-3" />
+                                      Düzenle
+                                    </button>
+                                  ) : null}
+                                  {canManageSlots ? (
                                     <button
                                       type="button"
                                       onClick={() => void deleteSessionRow(s.id)}
-                                      className="px-2 py-0.5 rounded border border-red-200 text-red-700"
+                                      className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-50"
                                     >
+                                      <Trash2 className="h-3 w-3" />
                                       Sil
                                     </button>
-                                  )}
+                                  ) : null}
                                 </div>
                               </div>
                             );
                           })}
                           {templatesHere.map((s) => {
                             const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
+                            const accent = liveSubjectAccent(s.subject);
                             return (
-                              <div key={s.id} className="rounded border border-dashed border-indigo-200 bg-indigo-50/50 px-2 py-1">
-                                <p className="font-medium text-indigo-900">{s.subject}</p>
-                                <p className="text-[10px] text-indigo-600">Şablon</p>
-                                <p className="text-slate-600">{teacher?.name || s.teacher_id} - {String(s.start_time).slice(0, 5)}</p>
-                                <div className="mt-1 flex gap-1">
+                              <div
+                                key={s.id}
+                                className="rounded-xl border border-dashed border-indigo-300/80 border-l-[4px] border-l-indigo-400 bg-gradient-to-br from-indigo-50/95 to-white px-2.5 py-2 shadow-sm ring-1 ring-indigo-100/80"
+                              >
+                                <p className={`text-[12px] font-bold ${accent.title}`}>{s.subject}</p>
+                                <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-600">Şablon</p>
+                                <p className="text-[11px] text-slate-600">
+                                  {teacher?.name || s.teacher_id} · {String(s.start_time).slice(0, 5)}
+                                </p>
+                                <div className="mt-1.5 flex flex-wrap gap-1">
                                   <button
                                     type="button"
                                     onClick={() => window.open(s.meeting_link, '_blank', 'noopener,noreferrer')}
-                                    className="px-2 py-0.5 rounded bg-blue-500 text-white"
+                                    className="rounded-lg bg-indigo-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-indigo-700"
                                   >
                                     Link
                                   </button>
-                                  {canManageSlots && (
-                                    <button type="button" onClick={() => void deleteSlot(s.id)} className="px-2 py-0.5 rounded border border-red-200 text-red-700">
+                                  {canManageSlots ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => openEditSlot(s)}
+                                      className="inline-flex items-center gap-1 rounded-lg border border-indigo-300 bg-white px-2 py-1 text-[10px] font-semibold text-indigo-700 shadow-sm hover:bg-indigo-50"
+                                    >
+                                      <Pencil className="h-3 w-3" />
+                                      Düzenle
+                                    </button>
+                                  ) : null}
+                                  {canManageSlots ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => void deleteSlot(s.id)}
+                                      className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-50"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
                                       Sil
                                     </button>
-                                  )}
+                                  ) : null}
                                 </div>
                               </div>
                             );
@@ -1115,7 +1312,202 @@ export default function ClassLiveLessons() {
             </tbody>
           </table>
         </div>
-      </div>
+      </WeeklyLiveGridShell>
+
+      {editingSession && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4">
+          <div
+            role="dialog"
+            aria-modal
+            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-xl space-y-4"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
+                <Pencil className="h-5 w-5 text-indigo-600" />
+                Oturumu düzenle
+              </h3>
+              <button
+                type="button"
+                className="text-sm text-slate-500 hover:text-slate-800"
+                onClick={() => setEditingSession(null)}
+              >
+                Kapat
+              </button>
+            </div>
+            <label className="block text-sm">
+              <span className="text-slate-600">Ders</span>
+              <input
+                value={esSubject}
+                onChange={(e) => setEsSubject(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="text-slate-600">Tarih</span>
+              <input
+                type="date"
+                value={esDate}
+                onChange={(e) => setEsDate(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+              />
+            </label>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="block text-sm">
+                <span className="text-slate-600">Başlangıç</span>
+                <input
+                  type="time"
+                  value={esStart}
+                  onChange={(e) => setEsStart(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="text-slate-600">Bitiş</span>
+                <input
+                  type="time"
+                  value={esEnd}
+                  onChange={(e) => setEsEnd(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+                />
+              </label>
+            </div>
+            <label className="block text-sm">
+              <span className="text-slate-600">Toplantı bağlantısı</span>
+              <input
+                value={esLink}
+                onChange={(e) => setEsLink(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="text-slate-600">Ödev (isteğe bağlı)</span>
+              <textarea
+                value={esHomework}
+                onChange={(e) => setEsHomework(e.target.value)}
+                rows={2}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              />
+            </label>
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <button
+                type="button"
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700"
+                onClick={() => setEditingSession(null)}
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                disabled={sessionEditBusy}
+                onClick={() => void saveSessionEdit()}
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+              >
+                {sessionEditBusy ? 'Kaydediliyor…' : 'Kaydet'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingSlotRow && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4">
+          <div
+            role="dialog"
+            aria-modal
+            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-xl space-y-4"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
+                <Pencil className="h-5 w-5 text-indigo-600" />
+                Haftalık şablonu düzenle
+              </h3>
+              <button
+                type="button"
+                className="text-sm text-slate-500 hover:text-slate-800"
+                onClick={() => setEditingSlotRow(null)}
+              >
+                Kapat
+              </button>
+            </div>
+            <label className="block text-sm">
+              <span className="text-slate-600">Gün</span>
+              <select
+                value={slDay}
+                onChange={(e) => setSlDay(Number(e.target.value))}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+              >
+                {[1, 2, 3, 4, 5, 6, 7].map((d) => (
+                  <option key={d} value={d}>
+                    {DAY_LABELS[d - 1]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-sm">
+              <span className="text-slate-600">Ders</span>
+              <input
+                value={slSubject}
+                onChange={(e) => setSlSubject(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+              />
+            </label>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="block text-sm">
+                <span className="text-slate-600">Başlangıç</span>
+                <input
+                  type="time"
+                  value={slStart}
+                  onChange={(e) => setSlStart(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="text-slate-600">Bitiş</span>
+                <input
+                  type="time"
+                  value={slEnd}
+                  onChange={(e) => setSlEnd(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+                />
+              </label>
+            </div>
+            <label className="block text-sm">
+              <span className="text-slate-600">Bağlantı</span>
+              <input
+                value={slLink}
+                onChange={(e) => setSlLink(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="text-slate-600">Ödev (isteğe bağlı)</span>
+              <textarea
+                value={slHomework}
+                onChange={(e) => setSlHomework(e.target.value)}
+                rows={2}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              />
+            </label>
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <button
+                type="button"
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700"
+                onClick={() => setEditingSlotRow(null)}
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                disabled={slotEditBusy}
+                onClick={() => void saveSlotEdit()}
+                className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-60"
+              >
+                {slotEditBusy ? 'Kaydediliyor…' : 'Kaydet'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {attendanceSession && (
         <div
@@ -1161,7 +1553,9 @@ export default function ClassLiveLessons() {
                       <select
                         value={row.status}
                         onChange={(e) => {
-                          const v = e.target.value === 'absent' ? 'absent' : 'present';
+                          const raw = e.target.value;
+                          const v =
+                            raw === 'absent' ? ('absent' as const) : raw === 'late' ? ('late' as const) : ('present' as const);
                           setAttendanceDraft((prev) =>
                             prev.map((r, i) => (i === idx ? { ...r, status: v } : r))
                           );
@@ -1169,6 +1563,7 @@ export default function ClassLiveLessons() {
                         className="border border-slate-200 rounded px-2 py-1 text-xs"
                       >
                         <option value="present">Katıldı</option>
+                        <option value="late">Geç katıldı</option>
                         <option value="absent">Katılmadı</option>
                       </select>
                     </div>

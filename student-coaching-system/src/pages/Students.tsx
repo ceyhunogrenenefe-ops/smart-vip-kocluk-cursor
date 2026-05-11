@@ -1,6 +1,6 @@
 // Türkçe: Öğrenci Yönetimi Sayfası
 import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -36,6 +36,8 @@ import {
 export default function Students() {
   const { effectiveUser } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
   const {
     students,
     coaches,
@@ -160,6 +162,16 @@ export default function Students() {
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams, canEditStudents]);
 
+  /** Kullanıcı yönetiminden "profil" ile gelindiğinde öğrenci kartını aç */
+  useEffect(() => {
+    const focusId = (location.state as { focusStudentId?: string } | null)?.focusStudentId;
+    if (!focusId) return;
+    const st = students.find((s) => s.id === focusId);
+    if (!st) return;
+    setSelectedStudent(st);
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: {} });
+  }, [students, location.state, location.pathname, location.search, navigate]);
+
   const resetForm = () => {
     setFormData({
       name: '',
@@ -212,8 +224,15 @@ export default function Students() {
       if (editingStudent) {
         setSaving(true);
         await updateStudent(editingStudent.id, {
-          ...formData,
+          name: formData.name.trim(),
+          email: normalizedEmail,
+          phone: formData.phone.trim(),
+          parentPhone: formData.parentPhone.trim(),
+          classLevel: formData.classLevel,
+          coachId: formData.coachId.trim() || undefined,
+          institutionId: formData.institutionId.trim() || undefined,
           programId: formData.programName,
+          groupName: formData.groupName.trim() || undefined,
           ...(formData.password.trim().length >= 6 ? { password: formData.password.trim() } : {})
         });
         setEditingStudent(null);
@@ -302,9 +321,11 @@ export default function Students() {
   };
 
   const getTeacherName = (coachId?: string) => {
-    if (!coachId) return 'Atanmadı';
-    const teacher = coaches.find(t => t.id === coachId);
-    return teacher ? teacher.name : 'Bilinmiyor';
+    if (!coachId?.trim()) return 'Atanmadı';
+    const id = coachId.trim();
+    const teacher = coaches.find((t) => t.id === id);
+    if (teacher) return teacher.name;
+    return `Koç (${id.slice(0, 8)}…)`;
   };
 
   const platformUserLabel = (userId: string) =>
@@ -438,6 +459,7 @@ export default function Students() {
           return (
             <div
               key={student.id}
+              id={`student-card-${student.id}`}
               className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-shadow"
             >
               {/* Header */}
@@ -672,7 +694,7 @@ export default function Students() {
                 {/* Öğretmen */}
                 {effectiveUser?.role === 'coach' ? (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Öğretmen/Koç</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Koç</label>
                     <input
                       type="text"
                       value={
@@ -693,20 +715,37 @@ export default function Students() {
                   </div>
                 ) : (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Öğretmen/Koç</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Koç {editingStudent ? '' : '*'}
+                    </label>
                     <select
                       value={formData.coachId}
                       onChange={(e) => setFormData({ ...formData, coachId: e.target.value })}
                       required={!editingStudent}
                       className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                     >
-                      <option value="">Öğretmen Seçin</option>
+                      <option value="">{editingStudent ? 'Koç seçin veya kaldırın' : 'Koç seçin'}</option>
+                      {(() => {
+                        const ids = new Set(coaches.map((c) => c.id));
+                        const orphan =
+                          formData.coachId.trim() && !ids.has(formData.coachId.trim())
+                            ? formData.coachId.trim()
+                            : '';
+                        return orphan ? (
+                          <option value={orphan}>
+                            Mevcut atanmış koç (liste dışı ID · {orphan.slice(0, 8)}…)
+                          </option>
+                        ) : null;
+                      })()}
                       {coaches.map((teacher) => (
                         <option key={teacher.id} value={teacher.id}>
                           {teacher.name}
                         </option>
                       ))}
                     </select>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Seçili koç: <span className="font-medium text-slate-700">{getTeacherName(formData.coachId)}</span>
+                    </p>
                   </div>
                 )}
 

@@ -93,17 +93,6 @@ export default async function handler(req, res) {
         return res.status(200).json({ data: data || [] });
       }
 
-      if (rs.has('admin')) {
-        if (!actor.institution_id) return res.status(403).json({ error: 'institution_missing' });
-        const { data, error } = await supabaseAdmin
-          .from('students')
-          .select('*')
-          .eq('institution_id', actor.institution_id)
-          .order('created_at', { ascending: false });
-        if (error) throw error;
-        return res.status(200).json({ data: data || [] });
-      }
-
       if (rs.has('student')) {
         if (!actor.student_id) {
           const { data: linkOnly } = await supabaseAdmin
@@ -119,9 +108,21 @@ export default async function handler(req, res) {
         return res.status(200).json({ data: data || [] });
       }
 
+      /** Öğretmen/koç: kurumdaki tüm liste değil — sınıf veya koç ataması (admin ile birlikte de önce dar kapsam) */
       if (rs.has('teacher') || rs.has('coach')) {
         const merged = await listStudentsMergedCoachTeacher(actor, rs);
         return res.status(200).json({ data: merged });
+      }
+
+      if (rs.has('admin')) {
+        if (!actor.institution_id) return res.status(403).json({ error: 'institution_missing' });
+        const { data, error } = await supabaseAdmin
+          .from('students')
+          .select('*')
+          .eq('institution_id', actor.institution_id)
+          .order('created_at', { ascending: false });
+        if (error) throw error;
+        return res.status(200).json({ data: data || [] });
       }
 
       return res.status(200).json({ data: [] });

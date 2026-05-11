@@ -5,16 +5,110 @@ import { getIstanbulDateString } from '../api/_lib/istanbul-time.js';
 import { normalizePhoneToE164 } from '../api/_lib/phone-whatsapp.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import { getTeacherGroupClassStudentScope } from '../api/_lib/teacher-class-scope.js';
+import { getTemplateBindingKeys } from '../api/_lib/whatsapp-outbound.js';
 
-/** Panel + dokümantasyon — `cron_run_log.job_key` ile aynı */
+/** Panel — `cron_run_log.job_key`; ek kayıtlar otomatik birleştirilir */
+export const TEMPLATE_TYPE_TO_CRON_JOB_KEY = {
+  lesson_reminder: 'lesson_reminders',
+  lesson_reminder_parent: 'lesson_reminder_parent',
+  report_reminder: 'daily_report_reminder',
+  class_lesson_reminder: 'class_lesson_reminders',
+  class_homework_notice: 'class_homework_notify',
+  meeting_notification: 'meeting_reminders'
+};
+
 export const KNOWN_CRON_JOBS = [
   { key: 'class_lesson_reminders', label: 'Grup dersi hatırlatma (10 dk)', expectEveryMinutes: 5 },
   { key: 'daily_report_reminder', label: 'Günlük rapor hatırlatması', expectEveryMinutes: 24 * 60 },
-  { key: 'lesson_reminders', label: 'Birebir ders hatırlatma', expectEveryMinutes: 5 },
+  { key: 'lesson_reminders', label: 'Birebir ders hatırlatma — öğrenci', expectEveryMinutes: 5 },
+  { key: 'lesson_reminder_parent', label: 'Veli ders hatırlatma (Meta)', expectEveryMinutes: 5 },
   { key: 'meeting_reminders', label: 'Görüşme 10 dk hatırlatma', expectEveryMinutes: 5 },
   { key: 'class_homework_notify', label: 'Grup ödev bildirimi', expectEveryMinutes: 10 },
-  { key: 'coach_followup', label: 'Koç otomasyon (Meta şablon)', expectEveryMinutes: 15 }
+  { key: 'coach_followup', label: 'Koç otomasyon (Meta şablon)', expectEveryMinutes: 15 },
+  { key: 'study_evening_reminder', label: 'Akşam çalışma hatırlatması', expectEveryMinutes: 24 * 60 },
+  { key: 'absent_student_notification', label: 'Devamsızlık bildirimi', expectEveryMinutes: 24 * 60 }
 ];
+
+function templateTypesForCronJobKey(jobKey) {
+  const k = String(jobKey || '').trim();
+  const types = new Set([k]);
+  for (const [tplType, jk] of Object.entries(TEMPLATE_TYPE_TO_CRON_JOB_KEY)) {
+    if (jk === k) types.add(tplType);
+  }
+  return [...types];
+}
+
+function cronLabelForJobKey(jobKey, tplRows) {
+  for (const tp of templateTypesForCronJobKey(jobKey)) {
+    const t = (tplRows || []).find((x) => String(x.type || '') === tp);
+    if (t?.name) return `${String(t.name).trim()} (${jobKey})`;
+  }
+  const nice = String(jobKey).replace(/_/g, ' ');
+  return nice ? nice.charAt(0).toUpperCase() + nice.slice(1) : jobKey;
+}
+
+function expectMinutesFromCronDetail(lastRow) {
+  const d = lastRow?.detail;
+  if (d && typeof d === 'object' && typeof d.expect_every_minutes === 'number' && d.expect_every_minutes > 0) {
+    return d.expect_every_minutes;
+  }
+  return null;
+}
+
+function buildCronStatusDefinitions(latestByJob, tplRows) {
+  const rows = [];
+  const seen = new Set();
+  for (const def of KNOWN_CRON_JOBS) {
+    seen.add(def.key);
+    rows.push({ ...def });
+  }
+  const extraKeys = [...latestByJob.keys()].filter((k) => !seen.has(k)).sort();
+  for (const key of extraKeys) {
+    seen.add(key);
+    const last = latestByJob.get(key);
+    rows.push({
+      key,
+      label: cronLabelForJobKey(key, tplRows),
+      expectEveryMinutes: expectMinutesFromCronDetail(last) ?? 60,
+      discovered_from_logs: true
+    });
+  }
+  const pending = [];
+  for (const t of tplRows || []) {
+    if (t.is_active === false) continue;
+    if (!String(t.meta_template_name || '').trim()) continue;
+    const typ = String(t.type || '').trim();
+    if (!typ) continue;
+    const jobKey = TEMPLATE_TYPE_TO_CRON_JOB_KEY[typ] || typ;
+    if (seen.has(jobKey)) continue;
+    seen.add(jobKey);
+    pending.push({
+      key: jobKey,
+      label: `${String(t.name || typ).trim()} — ilk cron kaydı bekleniyor`,
+      expectEveryMinutes: 60,
+      awaiting_first_run: true
+    });
+  }
+  pending.sort((a, b) => a.key.localeCompare(b.key));
+  return [...rows, ...pending];
+}
+
+function cronVisualState(def, last, nowMs) {
+  const ranAt = last?.ran_at ? new Date(last.ran_at).getTime() : 0;
+  const ageMin = ranAt ? (nowMs - ranAt) / 60000 : null;
+  if (def.awaiting_first_run) return { state: 'pending', age_minutes: null };
+  if (!last) return { state: 'stale', age_minutes: null };
+  if (last.ok === false && !last.skipped) return { state: 'error', age_minutes: ageMin };
+  const expectMin = def.expectEveryMinutes || 60;
+  const frequent = expectMin <= 30;
+  if (frequent && ageMin != null && ageMin > 60) {
+    return { state: 'idle_1h', age_minutes: ageMin };
+  }
+  if (ageMin != null && ageMin > expectMin * 2.5) {
+    return { state: 'stale', age_minutes: ageMin };
+  }
+  return { state: 'ok', age_minutes: ageMin };
+}
 
 function kindForTemplateType(type) {
   const t = String(type || '').trim();
@@ -77,6 +171,8 @@ function templateTelemetry(tpl, logsForStats) {
   if (!isActive) badge = 'inactive';
   else if (metaMissing) badge = 'meta_missing';
   else if (fail > ok && total > 2) badge = 'unhealthy';
+  const bindingKeys = getTemplateBindingKeys(tpl);
+  const varsArr = Array.isArray(tpl.variables) ? tpl.variables.map((x) => String(x || '').trim()).filter(Boolean) : [];
   return {
     id: tpl.id,
     name: tpl.name,
@@ -91,7 +187,10 @@ function templateTelemetry(tpl, logsForStats) {
     failed_count: fail,
     last_sent_at: lastSent,
     badge,
-    meta_missing: metaMissing
+    meta_missing: metaMissing,
+    /** Test gönderimi: Meta {{1}}… sırası — twilio_variable_bindings öncelikli */
+    binding_keys: bindingKeys,
+    variables: varsArr
   };
 }
 
@@ -184,7 +283,7 @@ export default async function handler(req, res) {
     const studentById = new Map(students.map((s) => [s.id, s]));
 
     let coachById = new Map();
-    if (mode === 'admin' && students.length) {
+    if (students.length) {
       const coachIds = [...new Set(students.map((s) => s.coach_id).filter(Boolean))];
       if (coachIds.length) {
         const { data: coaches } = await supabaseAdmin.from('coaches').select('id,name').in('id', coachIds);
@@ -206,7 +305,7 @@ export default async function handler(req, res) {
         'id,student_id,kind,related_id,message,status,sent_at,log_date,error,phone,meta_template_name,twilio_error_code'
       )
       .order('sent_at', { ascending: false })
-      .limit(mode === 'admin' ? 800 : 400);
+      .limit(mode === 'admin' ? 500 : 250);
 
     if (mode === 'scoped') {
       if (scopedStudentIds?.length) logQuery = logQuery.in('student_id', scopedStudentIds);
@@ -231,6 +330,7 @@ export default async function handler(req, res) {
       if (l.status === 'sent') sentToday += 1;
       else if (l.status === 'failed') failedToday += 1;
     }
+    let pendingMessagesToday = 0;
     if (sinceParam === '') {
       const cQ = supabaseAdmin
         .from('message_logs')
@@ -242,26 +342,39 @@ export default async function handler(req, res) {
         .select('id', { count: 'exact', head: true })
         .eq('log_date', today)
         .eq('status', 'failed');
+      const pQ = supabaseAdmin
+        .from('message_logs')
+        .select('id', { count: 'exact', head: true })
+        .eq('log_date', today)
+        .eq('status', 'pending');
       if (mode === 'scoped' && scopedStudentIds?.length) {
         cQ.in('student_id', scopedStudentIds);
         fQ.in('student_id', scopedStudentIds);
+        pQ.in('student_id', scopedStudentIds);
       } else if (mode === 'admin' && !isSuper && institutionId) {
         const ids = students.map((s) => s.id);
         if (ids.length) {
           cQ.in('student_id', ids);
           fQ.in('student_id', ids);
+          pQ.in('student_id', ids);
         }
       }
-      const [{ count: sc }, { count: fc }] = await Promise.all([cQ, fQ]);
+      const [{ count: sc }, { count: fc }, { count: pc }] = await Promise.all([cQ, fQ, pQ]);
       sentToday = sc ?? sentToday;
       failedToday = fc ?? failedToday;
+      pendingMessagesToday = pc ?? 0;
     }
+
+    const { data: tplRows } = await supabaseAdmin
+      .from('message_templates')
+      .select('*')
+      .order('type', { ascending: true });
 
     const { data: cronRows } = await supabaseAdmin
       .from('cron_run_log')
       .select('job_key,ran_at,ok,skipped,messages_sent,messages_failed,detail')
       .order('ran_at', { ascending: false })
-      .limit(400);
+      .limit(1200);
 
     const latestByJob = new Map();
     for (const row of cronRows || []) {
@@ -269,31 +382,50 @@ export default async function handler(req, res) {
       if (!latestByJob.has(k)) latestByJob.set(k, row);
     }
 
-    const now = Date.now();
-    const cron_status = KNOWN_CRON_JOBS.map((def) => {
-      const last = latestByJob.get(def.key);
-      const ranAt = last?.ran_at ? new Date(last.ran_at).getTime() : 0;
-      const ageMin = ranAt ? (now - ranAt) / 60000 : null;
-      let state = 'unknown';
-      if (!last) state = 'stale';
-      else if (last.ok === false && !last.skipped) state = 'error';
-      else if (ageMin != null && ageMin > def.expectEveryMinutes * 2.5) state = 'stale';
-      else state = 'ok';
+    const { data: cronFailRows } = await supabaseAdmin
+      .from('cron_run_log')
+      .select('job_key,ran_at,ok,skipped,detail,messages_failed')
+      .eq('ok', false)
+      .order('ran_at', { ascending: false })
+      .limit(20);
+
+    const cron_recent_errors = (cronFailRows || []).map((r) => {
+      const d = r.detail && typeof r.detail === 'object' ? r.detail : {};
+      const err =
+        typeof d.error === 'string'
+          ? d.error
+          : d.error != null
+            ? JSON.stringify(d.error)
+            : null;
       return {
-        ...def,
+        job_key: r.job_key,
+        at: r.ran_at,
+        skipped: r.skipped || null,
+        messages_failed: r.messages_failed ?? 0,
+        error: err || (r.skipped ? String(r.skipped) : 'cron_failed')
+      };
+    });
+
+    const nowMs = Date.now();
+    const cronDefs = buildCronStatusDefinitions(latestByJob, tplRows || []);
+    const cron_status = cronDefs.map((def) => {
+      const last = latestByJob.get(def.key);
+      const vis = cronVisualState(def, last, nowMs);
+      return {
+        key: def.key,
+        label: def.label,
+        expectEveryMinutes: def.expectEveryMinutes,
+        awaiting_first_run: Boolean(def.awaiting_first_run),
+        discovered_from_logs: Boolean(def.discovered_from_logs),
         last_run_at: last?.ran_at || null,
         last_ok: last ? last.ok : null,
         last_skipped: last?.skipped || null,
         messages_sent: last?.messages_sent ?? 0,
         messages_failed: last?.messages_failed ?? 0,
-        state
+        age_minutes: vis.age_minutes,
+        state: vis.state
       };
     });
-
-    const { data: tplRows } = await supabaseAdmin
-      .from('message_templates')
-      .select('*')
-      .order('type', { ascending: true });
 
     const statsPool =
       sinceParam === ''
@@ -319,13 +451,16 @@ export default async function handler(req, res) {
     const upcoming = new Date(istNow.getTime() + 36 * 60 * 60 * 1000);
     const upcomingIso = upcoming.toISOString().slice(0, 10);
     let pendingSessions = 0;
-    if (mode === 'admin' && institutionId) {
-      const { data: cls } = await supabaseAdmin.from('classes').select('id').eq('institution_id', institutionId);
+    if (mode === 'admin') {
+      let clsq = supabaseAdmin.from('classes').select('id');
+      if (!isSuper && institutionId) clsq = clsq.eq('institution_id', institutionId);
+      const { data: cls } = await clsq.limit(8000);
       const cids = (cls || []).map((c) => c.id);
       if (cids.length) {
         const { count } = await supabaseAdmin
           .from('class_sessions')
           .select('id', { count: 'exact', head: true })
+          .in('class_id', cids)
           .eq('status', 'scheduled')
           .eq('reminder_sent', false)
           .lte('lesson_date', upcomingIso);
@@ -348,7 +483,7 @@ export default async function handler(req, res) {
       };
     });
 
-    const logs_enriched = (logs || []).slice(0, mode === 'admin' ? 200 : 120).map((l) => {
+    const logs_enriched = (logs || []).slice(0, mode === 'admin' ? 400 : 200).map((l) => {
       const st = l.student_id ? studentById.get(l.student_id) : null;
       const coachName =
         st?.coach_id && coachById.size ? coachById.get(st.coach_id) || null : null;
@@ -380,6 +515,18 @@ export default async function handler(req, res) {
             l.status === 'sent' &&
             normalizePhoneToE164(l.phone) === normalizePhoneToE164(s.phone)
         );
+        const lessonReminderStudent = stLogs.some(
+          (l) =>
+            l.status === 'sent' &&
+            l.kind === 'lesson_reminder' &&
+            normalizePhoneToE164(l.phone) === normalizePhoneToE164(s.phone)
+        );
+        const lessonReminderParent = stLogs.some(
+          (l) =>
+            l.status === 'sent' &&
+            l.kind === 'lesson_reminder_parent' &&
+            normalizePhoneToE164(l.phone) === normalizePhoneToE164(s.parent_phone)
+        );
         coach_student_summary.push({
           id: s.id,
           name: s.name,
@@ -389,23 +536,28 @@ export default async function handler(req, res) {
           failed_last_7d: failedN,
           last_week_any_whatsapp_sent: anySent,
           student_line_sent: studentSent,
-          parent_line_sent: parentSent
+          parent_line_sent: parentSent,
+          lesson_reminder_student_7d: lessonReminderStudent,
+          lesson_reminder_parent_7d: lessonReminderParent
         });
       }
     }
 
     return res.status(200).json({
+      server_time: new Date().toISOString(),
       mode,
       today_istanbul: today,
-      known_crons: KNOWN_CRON_JOBS,
+      known_crons: cronDefs.map((d) => ({ key: d.key, label: d.label, expectEveryMinutes: d.expectEveryMinutes })),
       summary: {
         sent_today: sentToday,
         failed_today: failedToday,
+        pending_messages_today: pendingMessagesToday,
         pending_estimate: pendingSessions,
         students_missing_phone: missingPhone,
         active_templates_count
       },
       cron_status,
+      cron_recent_errors,
       templates: templates_detailed,
       logs: logs_enriched,
       live_events,

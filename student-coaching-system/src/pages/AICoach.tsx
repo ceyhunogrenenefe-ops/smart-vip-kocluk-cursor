@@ -1,7 +1,11 @@
 // Türkçe: AI Koç Sayfası - OpenAI destekli öğrenci analizi ve deneme sınavı takibi
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
+import { apiFetch, getAuthToken } from '../lib/session';
+import { userHasAnyRole } from '../config/rolePermissions';
+import type { ClassAttendanceReportRow } from '../components/liveLessons/ClassAttendanceReportSection';
 import { formatClassLevelLabel } from '../types';
 import {
   Brain,
@@ -56,8 +60,14 @@ interface ExamResult {
 
 export default function AICoach() {
   const { user } = useAuth();
+  /** Sunucu OPENAI_API_KEY veya tarayıcı BYOK */
+  const [openaiMode, setOpenaiMode] = useState<'unknown' | 'live' | 'limited'>('unknown');
   const { students, weeklyEntries, getStudentStats, coaches, examResults: contextExamResults } = useApp();
-  const [selectedStudent, setSelectedStudent] = useState<string>('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const classAttendanceSeedRef = useRef<string | null>(null);
+  const [selectedStudent, setSelectedStudent] = useState<string>(() =>
+    (searchParams.get('student') || '').trim()
+  );
   const [messages, setMessages] = useState<AIMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -77,6 +87,115 @@ export default function AICoach() {
         setLocalExamResults([]);
       }
     }
+  }, []);
+
+  useEffect(() => {
+    const sid = (searchParams.get('student') || '').trim();
+    if (sid) setSelectedStudent(sid);
+  }, [searchParams]);
+
+  /** Yoklama raporundan gelen bağlantı: özet mesajı sohbete eklenir */
+  useEffect(() => {
+    if (searchParams.get('classAttendance') !== '1') return;
+    const sid = (searchParams.get('student') || '').trim();
+    const from = (searchParams.get('from') || '').trim().slice(0, 10);
+    const to = (searchParams.get('to') || '').trim().slice(0, 10);
+    if (!sid || !getAuthToken()) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return;
+
+    const gate = `${sid}|${from}|${to}`;
+    if (classAttendanceSeedRef.current === gate) return;
+    classAttendanceSeedRef.current = gate;
+
+    void (async () => {
+      try {
+        const q = new URLSearchParams({ scope: 'attendance-report', from, to });
+        const res = await apiFetch(`/api/class-live-lessons?${q.toString()}`);
+        const j = (await res.json().catch(() => ({}))) as {
+          data?: { rows: ClassAttendanceReportRow[] };
+          error?: string;
+        };
+        const rows = (j.data?.rows || []).filter((r) => r.student_id === sid);
+        const stu = students.find((s) => s.id === sid);
+        const displayName = stu?.name || rows[0]?.student_name || 'Öğrenci';
+
+        let body: string;
+        if (!res.ok) {
+          body = `Grup dersi yoklama verisi alınamadı: ${String(j.error || res.status)}`;
+        } else if (!rows.length) {
+          body = `**${displayName}** için ${from} – ${to} aralığında kayıtlı grup dersi yoklaması bulunamadı.\n\nÖğrenci bu tarihlerde işaretlenmiş bir yoklamada yer almıyor olabilir veya aralığı genişletmeyi deneyin.`;
+        } else {
+          const presentN = rows.filter((r) => r.status === 'present').length;
+          const absentN = rows.filter((r) => r.status === 'absent').length;
+          const lines = rows
+            .slice()
+            .sort((a, b) => `${a.lesson_date}`.localeCompare(`${b.lesson_date}`))
+            .map(
+              (r) =>
+                `• ${r.lesson_date} ${String(r.start_time).slice(0, 5)} · ${r.class_name} · ${r.subject}: **${
+                  r.status === 'present' ? 'Geldi' : 'Gelmedi'
+                }**`
+            )
+            .join('\n');
+          body = `**Grup dersi yoklaması (${from} – ${to})**\nÖğrenci: **${displayName}**\n\nÖzet: ${presentN} geldi, ${absentN} gelmedi (toplam ${rows.length} kayıt).\n\nDetay:\n${lines}\n\n_Bu özet Canlı Grup Dersi yoklamasından aktarıldı. Aşağıdan tam analiz veya soru sorabilirsiniz._`;
+        }
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `att-seed-${Date.now()}`,
+            role: 'assistant',
+            content: body,
+            timestamp: new Date()
+          }
+        ]);
+        setShowExamData(false);
+      } catch (e) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `att-seed-err-${Date.now()}`,
+            role: 'assistant',
+            content: `Yoklama verisi yüklenirken hata: ${e instanceof Error ? e.message : 'bilinmeyen'}`,
+            timestamp: new Date()
+          }
+        ]);
+      } finally {
+        setSearchParams(
+          (prev) => {
+            const n = new URLSearchParams(prev);
+            n.delete('classAttendance');
+            n.delete('from');
+            n.delete('to');
+            return n;
+          },
+          { replace: true }
+        );
+      }
+    })();
+  }, [searchParams, setSearchParams, students]);
+
+  useEffect(() => {
+    if (!getAuthToken()) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await apiFetch('/api/ai-chat?scope=openai-status');
+        const j = (await r.json().catch(() => ({}))) as { data?: { server_configured?: boolean } };
+        if (cancelled) return;
+        const srv = j?.data?.server_configured === true;
+        const loc = Boolean(
+          (typeof localStorage !== 'undefined' && localStorage.getItem('openai_apiKey') || '').trim()
+        );
+        if (srv || loc) setOpenaiMode('live');
+        else setOpenaiMode('limited');
+      } catch {
+        if (!cancelled) setOpenaiMode('limited');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // AppContext veya localStorage'dan gelen verileri birleştir
@@ -316,111 +435,88 @@ ${studentTeacher ? `\n👨‍🏫 **Öğretmen Koç:** ${studentTeacher.name}` :
     setIsLoading(false);
   };
 
-  // AI'ya mesaj gönder
+  // AI'ya mesaj gönder (OpenAI: sunucu OPENAI_API_KEY veya Ayarlarda BYOK)
   const sendMessage = async () => {
-    if (!input.trim()) return;
+    const userText = input.trim();
+    if (!userText) return;
 
     const userMessage: AIMessage = {
       id: Date.now().toString(),
       role: 'user',
-      content: input,
+      content: userText,
       timestamp: new Date()
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    setMessages((prev) => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
 
-    // Simüle edilmiş AI yanıtı
-    setTimeout(() => {
-      const studentData = student ? `
-Öğrenci: ${student.name}
-Sınıf: ${student.classLevel}
-Kayıt Sayısı: ${studentEntries.length}
-Deneme Sayısı: ${studentExamResults.length}
-Son Haftalık Başarı: %${weeklyStats?.successRate || 0}
-${examStats?.latestTYT ? `Son TYT: ${examStats.latestTYT} net` : ''}
-      ` : 'Öğrenci seçilmedi';
+    const studentContext = student
+      ? [
+          `Öğrenci: ${student.name}`,
+          `Sınıf: ${formatClassLevelLabel(student.classLevel)}`,
+          `Haftalık kayıt sayısı: ${studentEntries.length}`,
+          `Deneme sınavı sayısı: ${studentExamResults.length}`,
+          weeklyStats
+            ? `Haftalık başarı %: ${weeklyStats.successRate}, gerçekleşme %: ${weeklyStats.realizationRate}`
+            : '',
+          examStats?.latestTYT ? `Son TYT net (yaklaşık): ${examStats.latestTYT}` : ''
+        ]
+          .filter(Boolean)
+          .join('\n')
+      : 'Öğrenci seçilmedi';
 
-      let responseContent = '';
+    const lsKey =
+      typeof localStorage !== 'undefined' ? (localStorage.getItem('openai_apiKey') || '').trim() : '';
+    const model =
+      (typeof localStorage !== 'undefined' && (localStorage.getItem('openai_model') || '').trim()) ||
+      'gpt-4o-mini';
 
-      if (input.toLowerCase().includes('plan') || input.toLowerCase().includes('çalışma')) {
-        const ws = weeklyStats;
-        const weakestSubject = ws && ws.successRate < 70 ? 'Matematik' : 'Genel Tekrar';
-        responseContent = `📋 **Haftalık Çalışma Planı Önerisi**
-
-${student?.name} için önerilen haftalık çalışma planı:
-
-**Pazartesi:** ${weakestSubject} - 30 soru
-**Salı:** ${studentExamResults.length > 0 ? 'TYT Deneme' : 'Türkçe - 25 soru'}
-**Çarşamba:** Fizik - 20 soru
-**Perşembe:** Genel tekrar - 25 soru
-**Cuma:** Haftalık tekrar - 30 soru
-**Cumartesi:** Deneme sınavı
-**Pazar:** Dinlenme + Analiz
-
-*Not: Bu plan öğrencinin mevcut performansına göre oluşturulmuştur.*`;
-      } else if (input.toLowerCase().includes('zayıf') || input.toLowerCase().includes('eksik')) {
-        const ws = weeklyStats;
-        const zayifKonu = ws && ws.successRate < 70 ? 'Matematik ve Fen' : 'Henüz belirlenmedi';
-        responseContent = `🔴 **Zayıf Konu Analizi**
-
-${student?.name} için tespit edilen zayıf noktalar:
-
-• ${zayifKonu}
-
-**Öneri:** Bu konulara haftalık çalışma süresinin %40'ı ayrılmalı.`;
-      } else if (input.toLowerCase().includes('motivasyon') || input.toLowerCase().includes('öneri')) {
-        responseContent = `💪 **Motivasyon ve Öneriler**
-
-${student?.name}, şu ana kadar harika bir ilerleme kaydediyorsun!
-
-${weeklyStats?.successRate >= 70
-  ? '✅ Başarı oranın iyi seviyede. Hedeflerini korumaya devam et!'
-  : '📈 Başarı oranını artırmak için düzenli tekrar çok önemli.'}
-
-${examStats?.latestTYT
-  ? `${examStats.latestTYT >= 25 ? '🎯 TYT netlerin hedefe yakın, devam!' : '💪 Her deneme ile netlerin artıyor.'}`
-  : ''}
-
-**Günlük alışkanlıklar:**
-• Her gün en az 1 saat düzenli çalışma
-• Yanlış yapılan soruları not et ve tekrar et
-• Haftalık 1 deneme sınavı
-• Yeterli uyku (7-8 saat)
-
-Başarılar! 🔥`;
+    try {
+      const res = await apiFetch('/api/ai-chat', {
+        method: 'POST',
+        body: JSON.stringify({
+          prompt: userText,
+          studentContext,
+          openai_api_key: lsKey || undefined,
+          model
+        })
+      });
+      const j = (await res.json().catch(() => ({}))) as { content?: string; error?: string; meta?: { reason?: string } };
+      let responseContent: string;
+      if (!res.ok) {
+        responseContent = `**İstek başarısız**\n\n${j.error || `HTTP ${res.status}`}\n\nSunucuda OPENAI_API_KEY tanımlı mı veya Ayarlar’da tarayıcı anahtarı kayıtlı mı kontrol edin.`;
       } else {
-        responseContent = `🤖 **AI Koç Yanıtı**
-
-"${input}" hakkında sorduğunuz soru üzerine:
-
-${studentData}
-
-**Kısa Değerlendirme:**
-• Haftalık başarı: %${weeklyStats?.successRate || 0}
-• Gerçekleşme: %${weeklyStats?.realizationRate || 0}
-${examStats?.latestTYT ? `• Son TYT: ${examStats.latestTYT} net` : ''}
-
-**Önerilerim:**
-1. Düzenli tekrar yapın
-2. Zayıf konulara daha fazla zaman ayırın
-3. Haftalık hedeflerinizi takip edin
-4. Deneme sınavlarını analiz edin
-
-*Not: Bu yanıt simüle edilmiştir. Gerçek AI analizi için Ayarlar sayfasından OpenAI API anahtarı girin.*`;
+        responseContent = j.content || 'Yanıt alınamadı.';
+        if (j.meta?.reason === 'no_api_key') {
+          setOpenaiMode('limited');
+        } else {
+          setOpenaiMode('live');
+        }
       }
 
-      const response: AIMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: responseContent,
-        timestamp: new Date()
-      };
-
-      setMessages(prev => [...prev, response]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: responseContent,
+          timestamp: new Date()
+        }
+      ]);
+    } catch (e) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: `**Bağlantı hatası**\n\n${e instanceof Error ? e.message : 'Bilinmeyen hata'}`,
+          timestamp: new Date()
+        }
+      ]);
+    } finally {
       setIsLoading(false);
-    }, 1500);
+    }
   };
 
   // WhatsApp ile paylaş
@@ -774,7 +870,12 @@ ${examStats?.latestTYT ? `• Son TYT: ${examStats.latestTYT} net` : ''}
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      void sendMessage();
+                    }
+                  }}
                   placeholder={selectedStudent ? "AI Koç'a sorun..." : "Önce öğrenci seçin"}
                   disabled={!selectedStudent || isLoading}
                   className="flex-1 px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50"
@@ -792,23 +893,53 @@ ${examStats?.latestTYT ? `• Son TYT: ${examStats.latestTYT} net` : ''}
         </div>
       </div>
 
-      {/* API Uyarısı */}
-      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
-        <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-        <div>
-          <h4 className="font-semibold text-amber-800">OpenAI API Entegrasyonu</h4>
-          <p className="text-sm text-amber-700 mt-1">
-            Bu sayfa şu anda simülasyon modunda çalışıyor. Gerçek AI analizi için Ayarlar sayfasından OpenAI API anahtarınızı girin.
-          </p>
-          <a
-            href="/settings"
-            className="inline-flex items-center gap-1 mt-2 text-sm text-amber-800 underline hover:text-amber-900"
-          >
-            <Settings className="w-4 h-4" />
-            Ayarlar sayfasına git
-          </a>
+      {/* API durumu */}
+      {openaiMode === 'live' ? (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-start gap-3">
+          <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <h4 className="font-semibold text-emerald-900">OpenAI hazır</h4>
+            <p className="text-sm text-emerald-800 mt-1">
+              Sohbet mesajları sunucu veya tarayıcıda tanımlı anahtar ile gönderilir. Modeli Ayarlar sayfasından
+              seçebilirsiniz.
+            </p>
+            {userHasAnyRole(user, ['super_admin', 'admin', 'teacher']) ? (
+              <a
+                href="/settings"
+                className="inline-flex items-center gap-1 mt-2 text-sm text-emerald-900 underline hover:text-emerald-950"
+              >
+                <Settings className="w-4 h-4" />
+                API ve model ayarları
+              </a>
+            ) : null}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <h4 className="font-semibold text-amber-800">OpenAI anahtarı gerekli</h4>
+            <p className="text-sm text-amber-700 mt-1">
+              Sunucuda <code className="text-xs bg-amber-100 px-1 rounded">OPENAI_API_KEY</code> yoksa ve tarayıcıda
+              BYOK anahtarı da yoksa sohbet sınırlı yanıt döner. Yönetici: Vercel ortam değişkeni veya Ayarlar’dan
+              tarayıcı anahtarı.
+            </p>
+            {userHasAnyRole(user, ['super_admin', 'admin', 'teacher']) ? (
+              <a
+                href="/settings"
+                className="inline-flex items-center gap-1 mt-2 text-sm text-amber-800 underline hover:text-amber-900"
+              >
+                <Settings className="w-4 h-4" />
+                Ayarlar sayfasına git
+              </a>
+            ) : (
+              <p className="text-sm text-amber-800 mt-2">
+                Koç olarak kullanım için kurumunuzun API sunucusunda OPENAI_API_KEY tanımlanması gerekir.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

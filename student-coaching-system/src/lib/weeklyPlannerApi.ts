@@ -9,6 +9,10 @@ export interface CoachWeeklyGoalRow {
   title: string;
   target_quantity: number;
   week_start_date: string;
+  /** Koç görüşme başlangıcı (YYYY-MM-DD) */
+  goal_start_date?: string | null;
+  /** Hedef bitiş (YYYY-MM-DD) */
+  goal_end_date?: string | null;
   quantity_unit: string;
   created_at: string;
   updated_at: string;
@@ -19,6 +23,8 @@ export interface WeeklyPlannerEntryRow {
   student_id: string;
   institution_id: string | null;
   coach_goal_id: string | null;
+  /** Bağlı günlük kayıt (weekly_entries.id) */
+  weekly_entry_id?: string | null;
   subject: string;
   title: string;
   planned_quantity: number;
@@ -53,6 +59,8 @@ export async function createCoachWeeklyGoal(body: {
   title: string;
   target_quantity: number;
   week_start_date: string;
+  goal_start_date?: string;
+  goal_end_date?: string;
   quantity_unit?: string;
 }): Promise<CoachWeeklyGoalRow> {
   const res = await apiFetch('/api/coach-weekly-goals', {
@@ -132,4 +140,35 @@ export async function deleteWeeklyPlannerEntry(id: string): Promise<void> {
   const res = await apiFetch(`/api/weekly-planner-entries?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
   const payload = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((payload as { error?: string })?.error || `API (${res.status})`);
+}
+
+/** Takvim bloğuna bağlı günlük çalışma kaydı (weekly_entries) güncelleme */
+export async function patchWeeklyEntryApi(id: string, patch: Record<string, unknown>): Promise<unknown> {
+  const res = await apiFetch(`/api/weekly-entries?id=${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((payload as { error?: string })?.error || `API (${res.status})`);
+  return unwrap(payload);
+}
+
+/**
+ * Planner bloğu için ilk günlük kayıt: weekly_entries oluşturur ve bloğu bağlar.
+ */
+export async function submitPlannerDailyLog(
+  plannerEntryId: string,
+  body: Record<string, unknown>
+): Promise<{ weekly_entry: unknown; planner_entry: WeeklyPlannerEntryRow }> {
+  const res = await apiFetch(
+    `/api/planner-daily-log?planner_entry_id=${encodeURIComponent(plannerEntryId)}`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }
+  );
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((payload as { error?: string })?.error || `API (${res.status})`);
+  const data = unwrap<{ weekly_entry: unknown; planner_entry: WeeklyPlannerEntryRow }>(payload);
+  return data;
 }

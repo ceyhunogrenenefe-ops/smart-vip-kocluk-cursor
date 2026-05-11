@@ -38,8 +38,8 @@ export function participatesInYosMatematikGenelMerge(name: string): boolean {
   const hasYos =
     u.includes('YÖS') ||
     u.includes('YOS') ||
-    /YOS[\s\-]/i.test(n) ||
-    /YÖS[\s\-]/u.test(n);
+    /YOS[\s-]/i.test(n) ||
+    /YÖS[\s-]/u.test(n);
 
   const isMath = u.includes('MATEMATİK') || u.includes('MATEMATIK') || /TEMEL\s+MATEMAT/i.test(u);
   const isGeo = u.includes('GEOMETRİ') || u.includes('GEOMETRI') || u.includes('GEOMET');

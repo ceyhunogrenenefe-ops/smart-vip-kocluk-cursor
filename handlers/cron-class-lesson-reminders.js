@@ -229,13 +229,10 @@ export default async function handler(req, res) {
             error: sent.ok ? undefined : sent.error,
             log_code: lc
           });
-
-          if (sent.ok) {
-            await supabaseAdmin.from('class_sessions').update({ reminder_sent: true }).eq('id', s.id);
-          }
         }
       }
 
+      /** Yalnızca tüm hedef gönderimler başarılıysa oturumu işaretle (kısmi başarıda reminder_sent true olmasın). */
       if (anyOutboundAttempt && allOutboundOk) {
         await supabaseAdmin.from('class_sessions').update({ reminder_sent: true }).eq('id', s.id);
       }

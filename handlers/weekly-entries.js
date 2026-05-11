@@ -1,6 +1,8 @@
 import { requireAuth, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
+import { getTeacherGroupClassStudentScope } from '../api/_lib/teacher-class-scope.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
+import { syncWeeklyEntryPlannerRow } from '../api/_lib/sync-weekly-entry-planner.js';
 
 const canAccessEntry = async (actor, entry) => {
   if (actor.role === 'super_admin') return true;
@@ -27,8 +29,14 @@ export default async function handler(req, res) {
         return res.status(200).json({ data: [] });
       }
       let query = supabaseAdmin.from('weekly_entries').select('*').order('date', { ascending: false });
-      if (actor.role === 'admin' || actor.role === 'teacher') {
+      if (actor.role === 'admin') {
         query = query.eq('institution_id', actor.institution_id);
+      }
+      if (actor.role === 'teacher') {
+        if (!actor.institution_id) return res.status(200).json({ data: [] });
+        const { ids } = await getTeacherGroupClassStudentScope(actor.sub);
+        if (!ids.length) return res.status(200).json({ data: [] });
+        query = query.eq('institution_id', actor.institution_id).in('student_id', ids);
       }
       if (actor.role === 'student') query = query.eq('student_id', actor.student_id);
       if (actor.role === 'coach') {
@@ -80,6 +88,8 @@ export default async function handler(req, res) {
           blank: body.blank,
           notes: body.notes ?? null,
           reading_minutes: body.reading_minutes ?? null,
+          pages_read: body.pages_read ?? body.pagesRead ?? null,
+          screen_time_minutes: body.screen_time_minutes ?? body.screenTimeMinutes ?? null,
           book_id: body.book_id ?? null,
           book_title: body.book_title ?? null,
           institution_id: institutionId,
@@ -140,6 +150,11 @@ export default async function handler(req, res) {
         .select()
         .single();
       if (error) throw error;
+      try {
+        if (data) await syncWeeklyEntryPlannerRow(data);
+      } catch (se) {
+        console.error('[weekly-entries] syncWeeklyEntryPlannerRow', se);
+      }
       return res.status(200).json({ data });
     }
 

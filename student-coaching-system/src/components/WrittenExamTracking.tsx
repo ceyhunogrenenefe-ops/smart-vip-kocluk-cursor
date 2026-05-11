@@ -309,8 +309,8 @@ export default function WrittenExamTracking() {
                 <button
                   type="button"
                   onClick={() => {
-                    if (confirm(`"${subj}" dersini listeden kaldırmak istiyor musunuz?`)) {
-                      removeWrittenExamSubjectForStudent(selectedStudentId, subj);
+                    if (confirm(`"${subj}" dersini listeden kaldırmak istiyor musunuz? Bu derse ait yazılı notları da silinecek.`)) {
+                      void removeWrittenExamSubjectForStudent(selectedStudentId, subj);
                     }
                   }}
                   className="p-0.5 rounded hover:bg-purple-200 text-purple-700"

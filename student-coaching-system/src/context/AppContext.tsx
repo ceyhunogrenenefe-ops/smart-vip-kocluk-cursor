@@ -23,6 +23,9 @@ import {
 import { db } from '../lib/database';
 import { resolveCoachRecordId, resolveStudentRecordId } from '../lib/coachResolve';
 import { isSupabaseReady, supabase, supabaseBaseUrl, verifySupabaseReachable } from '../lib/supabase';
+import type { Database } from '../lib/supabase';
+
+type ApiStudentRow = Database['public']['Tables']['students']['Row'];
 import { useAuth } from './AuthContext';
 import { userRoleTags } from '../config/rolePermissions';
 import { topicPool as defaultTopicPool } from '../data/mockData';
@@ -104,6 +107,27 @@ const normalizeClassLevel = (raw: unknown): ClassLevel => {
   }
   return raw as ClassLevel;
 };
+
+/** API satırını öğrenci kartına çevirir — PATCH sonrası tek doğruluk kaynağı */
+function studentRowToStudent(s: ApiStudentRow): Student {
+  return {
+    id: s.id,
+    name: s.name,
+    email: s.email,
+    platformUserId: s.platform_user_id || undefined,
+    phone: s.phone || undefined,
+    birthDate: s.birth_date || undefined,
+    classLevel: normalizeClassLevel(s.class_level),
+    school: s.school || undefined,
+    parentName: s.parent_name || undefined,
+    parentPhone: s.parent_phone || undefined,
+    coachId: s.coach_id || undefined,
+    institutionId: s.institution_id || undefined,
+    programId: s.program_id || undefined,
+    programName: inferProgramName(s.class_level),
+    createdAt: s.created_at
+  };
+}
 
 // LocalStorage'dan veri yükle
 const loadFromStorage = <T,>(key: string, defaultValue: T): T => {
@@ -260,7 +284,7 @@ interface AppState {
   removeWrittenExamSubject: (subject: string) => void;
   getWrittenExamSubjectsForStudent: (studentId: string) => string[];
   addWrittenExamSubjectForStudent: (studentId: string, subject: string) => void;
-  removeWrittenExamSubjectForStudent: (studentId: string, subject: string) => void;
+  removeWrittenExamSubjectForStudent: (studentId: string, subject: string) => Promise<void>;
   writtenExamSubjectsByStudent: Record<string, string[]>;
   getSubjectScores: (studentId: string, subject: string) => WrittenExamScore[];
   calculateSemesterAverage: (studentId: string, subject: string, semester: 1 | 2) => number;
@@ -363,27 +387,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         // Öğrenci oturumunda kurum filtresi istemci tarafında yanlış eşleşebilir (eski admin seçimi);
         // API zaten rol bazlı döndürür — burada filtre uygulama.
+        // Süper admin: seçili kurum filtresini yalnızca öğrenci listesine uygulama — başka kurum
+        // öğrencisi users ile eşleşmez ve Kullanıcı Yönetimi PATCH students yapmaz.
+        // Koçlar / haftalık kayıtlar: seçili kurum filtresi (performans ve önceki davranış).
         const isStudentRole = effectiveUser?.role === 'student';
+        const isSuperAdmin = effectiveUser?.role === 'super_admin';
+        const studentInstitutionScope =
+          isStudentRole || isSuperAdmin ? undefined : activeInstitutionId || undefined;
         const institutionScope = isStudentRole ? undefined : activeInstitutionId || undefined;
 
         // Load students from Supabase
-        const dbStudents = await db.getStudents(institutionScope);
-        const loadedStudents: Student[] = dbStudents.map(s => ({
-          id: s.id,
-          name: s.name,
-          email: s.email,
-          phone: s.phone || undefined,
-          birthDate: s.birth_date || undefined,
-          classLevel: normalizeClassLevel(s.class_level),
-          school: s.school || undefined,
-          parentName: s.parent_name || undefined,
-          parentPhone: s.parent_phone || undefined,
-          coachId: s.coach_id || undefined,
-          institutionId: s.institution_id || undefined,
-          programId: s.program_id || undefined,
-          programName: inferProgramName(s.class_level),
-          createdAt: s.created_at
-        }));
+        const dbStudents = await db.getStudents(studentInstitutionScope);
+        const loadedStudents: Student[] = dbStudents.map(studentRowToStudent);
         setStudents(loadedStudents);
 
         // Load coaches from Supabase (institution_id zorunlu — aksi halde admin scopedCoaches hepsini eler)
@@ -423,6 +438,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           blankAnswers: e.blank,
           coachComment: e.notes || undefined,
           readingMinutes: e.reading_minutes || undefined,
+          pagesRead: (e as { pages_read?: number }).pages_read ?? undefined,
+          screenTimeMinutes: (e as { screen_time_minutes?: number }).screen_time_minutes ?? undefined,
           bookId: e.book_id || undefined,
           bookTitle: e.book_title || undefined,
           createdAt: e.created_at
@@ -647,28 +664,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const prevRow = students.find(s => s.id === id);
     const lookupEmail = (prevRow?.email || '').toLowerCase().trim();
 
+    const patch: Record<string, unknown> = {};
+    if (updatedStudent.name !== undefined) patch.name = updatedStudent.name;
+    if (updatedStudent.email !== undefined) patch.email = updatedStudent.email;
+    if (updatedStudent.phone !== undefined) patch.phone = updatedStudent.phone;
+    if (updatedStudent.birthDate !== undefined) patch.birth_date = updatedStudent.birthDate;
+    if (updatedStudent.classLevel !== undefined)
+      patch.class_level = String(updatedStudent.classLevel);
+    if (updatedStudent.school !== undefined) patch.school = updatedStudent.school;
+    if (updatedStudent.parentName !== undefined) patch.parent_name = updatedStudent.parentName;
+    if (updatedStudent.parentPhone !== undefined) patch.parent_phone = updatedStudent.parentPhone;
+    // coachId gönderilmediğinde coach_id sıfırlanmasın (|| null her zaman PATCH'e null yazardı).
+    if ('coachId' in updatedStudent) patch.coach_id = updatedStudent.coachId || null;
+    if ('institutionId' in updatedStudent)
+      patch.institution_id = updatedStudent.institutionId || null;
+    if (updatedStudent.programId !== undefined) patch.program_id = updatedStudent.programId;
+
+    let saved: ApiStudentRow;
     try {
-      const patch: Record<string, unknown> = {};
-      if (updatedStudent.name !== undefined) patch.name = updatedStudent.name;
-      if (updatedStudent.email !== undefined) patch.email = updatedStudent.email;
-      if (updatedStudent.phone !== undefined) patch.phone = updatedStudent.phone;
-      if (updatedStudent.birthDate !== undefined) patch.birth_date = updatedStudent.birthDate;
-      if (updatedStudent.classLevel !== undefined)
-        patch.class_level = String(updatedStudent.classLevel);
-      if (updatedStudent.school !== undefined) patch.school = updatedStudent.school;
-      if (updatedStudent.parentName !== undefined) patch.parent_name = updatedStudent.parentName;
-      if (updatedStudent.parentPhone !== undefined) patch.parent_phone = updatedStudent.parentPhone;
-      // coachId gönderilmediğinde coach_id sıfırlanmasın (|| null her zaman PATCH'e null yazardı).
-      if ('coachId' in updatedStudent) patch.coach_id = updatedStudent.coachId || null;
-      if ('institutionId' in updatedStudent)
-        patch.institution_id = updatedStudent.institutionId || null;
-      if (updatedStudent.programId !== undefined) patch.program_id = updatedStudent.programId;
-      await db.updateStudent(id, patch as Parameters<(typeof db)['updateStudent']>[1]);
+      saved = await db.updateStudent(id, patch as Parameters<(typeof db)['updateStudent']>[1]);
     } catch (error) {
       console.error('Öğrenci güncelleme hatası:', error);
+      throw error;
     }
-    // Update local state
-    setStudents(prev => prev.map(s => s.id === id ? { ...s, ...updatedStudent } : s));
+
+    const normalized = studentRowToStudent(saved);
+    setStudents(prev =>
+      prev.map(s => {
+        if (s.id !== id) return s;
+        return {
+          ...normalized,
+          groupName: s.groupName,
+          password: updatedStudent.password !== undefined ? updatedStudent.password : s.password
+        };
+      })
+    );
 
     // Öğrenci kullanıcı hesabını da güncelle
     try {
@@ -894,6 +924,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         blank: entry.blankAnswers,
         notes: entry.coachComment || null,
         reading_minutes: entry.readingMinutes || null,
+        pages_read: entry.pagesRead ?? null,
+        screen_time_minutes: entry.screenTimeMinutes ?? null,
         book_id: entry.bookId || null,
         book_title: entry.bookTitle || null,
         institution_id: resolvedInstitutionId
@@ -912,6 +944,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         blankAnswers: created.blank,
         coachComment: created.notes || undefined,
         readingMinutes: created.reading_minutes || undefined,
+        pagesRead: (created as { pages_read?: number }).pages_read ?? entry.pagesRead,
+        screenTimeMinutes: (created as { screen_time_minutes?: number }).screen_time_minutes ?? entry.screenTimeMinutes,
         bookId: created.book_id || undefined,
         bookTitle: created.book_title || undefined,
         createdAt: created.created_at
@@ -941,6 +975,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         blank: updatedEntry.blankAnswers,
         notes: updatedEntry.coachComment,
         reading_minutes: updatedEntry.readingMinutes,
+        pages_read: updatedEntry.pagesRead,
+        screen_time_minutes: updatedEntry.screenTimeMinutes,
         book_id: updatedEntry.bookId,
         book_title: updatedEntry.bookTitle
       });
@@ -1707,10 +1743,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         case 'minutes':
           earned = stats.totalMinutes >= badge.requirement.value;
           break;
-        case 'days':
+        case 'days': {
           const uniqueDays = new Set(readingLogs.filter(l => l.studentId === studentId).map(l => l.date)).size;
           earned = uniqueDays >= badge.requirement.value;
           break;
+        }
       }
 
       return {
@@ -1975,11 +2012,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const getWrittenExamSubjectsForStudent = (studentId: string): string[] => {
-    const custom = writtenExamSubjectsByStudent[studentId];
-    if (Array.isArray(custom) && custom.length > 0) {
-      return [...new Set(custom.map(s => s.trim()).filter(Boolean))];
+    /** Anahtar yoksa genel şablon; `[]` ise bilinçli boş liste (varsayılanlara düşme). */
+    if (!Object.prototype.hasOwnProperty.call(writtenExamSubjectsByStudent, studentId)) {
+      return [...writtenExamSubjects];
     }
-    return [...writtenExamSubjects];
+    const custom = writtenExamSubjectsByStudent[studentId];
+    const arr = Array.isArray(custom) ? custom : [];
+    return [...new Set(arr.map(s => String(s).trim()).filter(Boolean))];
   };
 
   const addWrittenExamSubjectForStudent = (studentId: string, subject: string) => {
@@ -1993,12 +2032,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }));
   };
 
-  const removeWrittenExamSubjectForStudent = (studentId: string, subject: string) => {
+  const removeWrittenExamSubjectForStudent = async (studentId: string, subject: string) => {
+    const trimmed = subject.trim();
+    if (!trimmed) return;
     const cur = getWrittenExamSubjectsForStudent(studentId);
     setWrittenExamSubjectsByStudent(prev => ({
       ...prev,
-      [studentId]: cur.filter(s => s !== subject)
+      [studentId]: cur.filter(s => s !== trimmed)
     }));
+    const ids = writtenExamScores
+      .filter(s => s.studentId === studentId && String(s.subject).trim() === trimmed)
+      .map(s => s.id);
+    for (const id of ids) {
+      await deleteWrittenExamScore(id);
+    }
   };
 
   // AI yazılı yorumları
@@ -2066,9 +2113,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!effectiveUser) return [];
     const tags = userRoleTags(effectiveUser);
     if (tags.includes('super_admin')) return students;
-    if (tags.includes('admin')) {
-      return students.filter((s) => s.institutionId === effectiveUser.institutionId);
-    }
     if (tags.includes('student')) {
       const sid = resolveStudentRecordId(
         effectiveUser.role,
@@ -2077,9 +2121,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
         students
       );
       if (!sid) return [];
-      return students.filter((s) => s.id === sid);
+      const matched = students.filter((s) => s.id === sid);
+      if (matched.length > 0) return matched;
+      return [
+        {
+          id: sid,
+          name: effectiveUser.name?.trim() || 'Öğrenci',
+          email: String(effectiveUser.email || 'student@placeholder.local').trim().toLowerCase(),
+          phone: '',
+          parentPhone: '',
+          classLevel: 9,
+          institutionId: effectiveUser.institutionId,
+          createdAt: new Date().toISOString(),
+        },
+      ];
     }
-    /** Öğretmen / koç listesi GET /students ile sunucuda süzülmüş listedir (tekilleştirmeyin) */
+    /** Koç: salt kurum admin listesinden önce — admin+koç birlikte olsa dar liste */
+    if (tags.includes('coach')) {
+      const cid = resolveCoachRecordId(
+        effectiveUser.role,
+        effectiveUser.coachId,
+        effectiveUser.email,
+        coaches
+      );
+      if (!cid) return [];
+      return students.filter((s) => String(s.coachId || '') === String(cid));
+    }
+    /** Öğretmen: API dar liste döner; admin+öğretmen birlikte kurum geneli gösterme */
+    if (tags.includes('teacher')) {
+      return students;
+    }
+    if (tags.includes('admin')) {
+      return students.filter((s) => s.institutionId === effectiveUser.institutionId);
+    }
     return students;
   }, [students, effectiveUser, coaches]);
 
@@ -2103,8 +2177,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!cid) return [];
       return coaches.filter((c) => c.id === cid);
     }
+    if (tags.includes('teacher')) {
+      const coachIds = new Set(scopedStudents.map((s) => s.coachId).filter(Boolean));
+      if (!coachIds.size) return [];
+      return coaches.filter((c) => coachIds.has(c.id));
+    }
     return [];
-  }, [coaches, effectiveUser]);
+  }, [coaches, effectiveUser, scopedStudents]);
 
   const scopedWeeklyEntries = React.useMemo(() => {
     if (!effectiveUser) return [];

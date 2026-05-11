@@ -39,6 +39,34 @@ export default async function handler(req, res) {
     }
     actor = await enrichStudentActor(actor);
 
+    /** WhatsApp ayarları sayfası admin menüsünde de var; zamanlayıcı tablosu koç kimliği gerektirir. */
+    if (actor.role === 'super_admin' || actor.role === 'admin') {
+      if (req.method === 'GET') {
+        return res.status(200).json({
+          data: {
+            coach_id: '',
+            is_active: false,
+            message_template: DEFAULT_TEMPLATE,
+            send_hour_tr: 9,
+            send_minute_tr: 0,
+            weekdays_only: false,
+            interval_days: 1,
+            campaign_days: null,
+            campaign_started_at: null,
+            prefer_parent_phone: false
+          },
+          hint:
+            'Yönetici görünümü: otomatik koç WhatsApp zamanlayıcısını kaydetmek için koç veya öğretmen hesabıyla giriş yapın (coaches kaydı ve e-posta eşlemesi gerekir).'
+        });
+      }
+      return res.status(403).json({
+        error: 'admin_schedule_readonly',
+        code: 'admin_schedule_readonly',
+        hint:
+          'Yönetici hesabıyla otomatik koç zamanlayıcısı kaydedilemez. Bu planı kaydetmek için koç veya öğretmen hesabıyla giriş yapın.'
+      });
+    }
+
     if (actor.role !== 'coach' && actor.role !== 'teacher') {
       return res.status(403).json({
         error: 'coach_only',

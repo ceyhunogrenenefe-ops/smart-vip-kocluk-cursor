@@ -37,7 +37,9 @@ interface AuthContextType {
   isImpersonating: boolean;
   stopImpersonation: () => void;
   /** `string` = yerel/demo id; `SystemUser` = Kullanıcı Yönetimi’nden doğrudan satır (Supabase). */
-  impersonate: (targetOrId: SystemUser | string) => { success: boolean; message?: string };
+  impersonate: (
+    targetOrId: SystemUser | string
+  ) => Promise<{ success: boolean; message?: string }>;
   canImpersonate: (target: SystemUser) => boolean;
   isAuthenticated: boolean;
   isLoading: boolean;
@@ -68,6 +70,19 @@ const DEMO_USERS = [
 
 const TRIAL_USERS_STORAGE_KEY = 'coaching_trial_users';
 const MANAGED_USERS_STORAGE_KEY = 'coaching_managed_users';
+/** Taklit: gerçek oturum `coaching_user`; hedef profil burada */
+const IMPERSONATION_STORAGE_KEY = 'coaching_impersonation';
+
+export function canImpersonateRoles(
+  actorRole: SystemUser['role'],
+  targetRole: SystemUser['role']
+): boolean {
+  if (actorRole === 'super_admin') return targetRole !== 'super_admin';
+  if (actorRole === 'admin')
+    return targetRole === 'coach' || targetRole === 'teacher' || targetRole === 'student';
+  if (actorRole === 'coach') return targetRole === 'student';
+  return false;
+}
 
 type ManagedUserRecord = SystemUser & { password?: string };
 
@@ -215,7 +230,13 @@ async function syncServerAuthToken(
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<SystemUser | null>(null);
+  const [impersonationTarget, setImpersonationTarget] = useState<SystemUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  const effectiveUser = impersonationTarget
+    ? applyTrialAccountCoachOnly(impersonationTarget)
+    : user;
+  const isImpersonating = impersonationTarget !== null;
 
   // Sayfa yüklendiğinde oturum kontrolü
   useEffect(() => {
@@ -232,6 +253,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (JSON.stringify(parsed) !== JSON.stringify(normalized)) {
               localStorage.setItem('coaching_user', JSON.stringify(normalized));
             }
+
+            const rawImp = localStorage.getItem(IMPERSONATION_STORAGE_KEY);
+            if (rawImp) {
+              try {
+                const imp = JSON.parse(rawImp) as SystemUser;
+                if (
+                  imp?.email &&
+                  imp?.role &&
+                  canImpersonateRoles(normalized.role, imp.role)
+                ) {
+                  setImpersonationTarget(applyTrialAccountCoachOnly(imp));
+                } else {
+                  localStorage.removeItem(IMPERSONATION_STORAGE_KEY);
+                }
+              } catch {
+                localStorage.removeItem(IMPERSONATION_STORAGE_KEY);
+              }
+            }
           }
         }
       } catch (e) {
@@ -246,6 +285,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Giriş yap
   const login = async (email: string, password: string): Promise<{ success: boolean; message: string }> => {
+    setImpersonationTarget(null);
+    localStorage.removeItem(IMPERSONATION_STORAGE_KEY);
+
     const normalizedEmail = email.toLowerCase().trim();
 
     // 1) Demo kullanıcılar - her zaman hızlı fallback
@@ -411,19 +453,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Çıkış yap
   const logout = () => {
     localStorage.removeItem('coaching_user');
+    localStorage.removeItem(IMPERSONATION_STORAGE_KEY);
     clearAuthToken();
     setUser(null);
-  };
-
-  const canImpersonateRoles = (
-    actorRole: SystemUser['role'],
-    targetRole: SystemUser['role']
-  ): boolean => {
-    if (actorRole === 'super_admin') return targetRole !== 'super_admin';
-    if (actorRole === 'admin')
-      return targetRole === 'coach' || targetRole === 'teacher' || targetRole === 'student';
-    if (actorRole === 'coach') return targetRole === 'student';
-    return false;
+    setImpersonationTarget(null);
   };
 
   const enrichRoleLinks = async (u: SystemUser): Promise<SystemUser> => {
@@ -589,8 +622,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           hydratedTarget = target;
         }
         const hydrated = applyTrialAccountCoachOnly(hydratedTarget);
-        localStorage.setItem('coaching_user', JSON.stringify(hydrated));
-        setUser(hydrated);
+        setImpersonationTarget(hydrated);
+        localStorage.setItem(IMPERSONATION_STORAGE_KEY, JSON.stringify(hydrated));
         return { success: true, message: `${hydrated.name} hesabına geçiş yapıldı.` };
       } catch (e) {
         return {
@@ -623,7 +656,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const impersonate = useCallback(
-    (targetOrId: SystemUser | string): { success: boolean; message?: string } => {
+    async (
+      targetOrId: SystemUser | string
+    ): Promise<{ success: boolean; message?: string }> => {
       const target =
         typeof targetOrId === 'object' && targetOrId !== null && 'email' in targetOrId
           ? targetOrId
@@ -631,14 +666,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!target?.email?.trim()) {
         return { success: false, message: 'Kullanıcı bulunamadı.' };
       }
-      void loginAsEmail(target.email.trim(), target.role);
-      return { success: true, message: `${target.name} hesabına geçiş başlatıldı.` };
+      return loginAsEmail(target.email.trim(), target.role);
     },
     [getUserById, loginAsEmail]
   );
 
   const stopImpersonation = useCallback(() => {
-    /* İleride: coaching_acting_as ile geri dönüş */
+    setImpersonationTarget(null);
+    localStorage.removeItem(IMPERSONATION_STORAGE_KEY);
   }, []);
 
   const createUser = useCallback(
@@ -743,11 +778,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider
       value={{
         user,
-        effectiveUser: user,
+        effectiveUser,
         linkedStudent: null,
         linkedStudentError: null,
         linkedStudentLoading: false,
-        isImpersonating: false,
+        isImpersonating,
         stopImpersonation,
         impersonate,
         canImpersonate,

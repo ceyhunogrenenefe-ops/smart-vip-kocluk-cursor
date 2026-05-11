@@ -23,16 +23,23 @@ import {
   EyeOff,
   CheckCircle,
   RefreshCw,
-  UserCheck,
+  Loader2,
   Briefcase,
-  Download
+  Download,
+  ChevronDown,
+  LogIn
 } from 'lucide-react';
 import { UserRole, ClassLevel, Coach, Student } from '../types';
 import { userRoleTags } from '../config/rolePermissions';
 import { db, QuotaSnapshot } from '../lib/database';
 import { isSupabaseReady } from '../lib/supabase';
 import { getAuthToken } from '../lib/session';
-import { userRowToSystemUser, type UserRow } from '../lib/userRowToSystemUser';
+import {
+  userRowToSystemUser,
+  findStudentForPlatformUser,
+  type StudentPlatformLink,
+  type UserRow
+} from '../lib/userRowToSystemUser';
 import {
   downloadUserImportTemplateXlsx,
   importedRolesKindConflict,
@@ -83,26 +90,53 @@ const coachProfilesWithoutLoginUser = (coachList: Coach[], userRows: UserRow[]):
     }));
 };
 
-// Paket bilgileri
+// Paket bilgileri (Kurumsal turuncu, Deneme mor — referans tablo)
 const PACKAGES = {
-  trial: { name: 'Deneme', color: 'bg-purple-100 text-purple-700', days: 7 },
-  starter: { name: 'Başlangıç', color: 'bg-blue-100 text-blue-700', days: 30 },
-  professional: { name: 'Profesyonel', color: 'bg-green-100 text-green-700', days: 365 },
-  enterprise: { name: 'Kurumsal', color: 'bg-amber-100 text-amber-700', days: 365 }
+  trial: { name: 'Deneme', color: 'bg-purple-100 text-purple-800 border border-purple-200/80', days: 7 },
+  starter: { name: 'Başlangıç', color: 'bg-blue-100 text-blue-800 border border-blue-200/80', days: 30 },
+  professional: { name: 'Profesyonel', color: 'bg-emerald-100 text-emerald-800 border border-emerald-200/80', days: 365 },
+  enterprise: { name: 'Kurumsal', color: 'bg-orange-100 text-orange-900 border border-orange-200/80', days: 365 }
 };
 
-// Rol bilgileri
+// Rol bilgileri (Öğrenci yeşil, Öğretmen mor, Koç mavi)
 const ROLES: { value: UserRole; label: string; color: string }[] = [
-  { value: 'super_admin', label: 'Süper Admin', color: 'bg-amber-100 text-amber-800' },
-  { value: 'admin', label: 'Yönetici', color: 'bg-red-100 text-red-700' },
-  { value: 'coach', label: 'Koç', color: 'bg-blue-100 text-blue-700' },
-  { value: 'teacher', label: 'Öğretmen', color: 'bg-violet-100 text-violet-800' },
-  { value: 'student', label: 'Öğrenci', color: 'bg-green-100 text-green-700' }
+  { value: 'super_admin', label: 'Süper Admin', color: 'bg-amber-100 text-amber-800 border border-amber-200/80' },
+  { value: 'admin', label: 'Yönetici', color: 'bg-red-100 text-red-800 border border-red-200/80' },
+  { value: 'coach', label: 'Koç', color: 'bg-blue-100 text-blue-800 border border-blue-200/80' },
+  { value: 'teacher', label: 'Öğretmen', color: 'bg-violet-100 text-violet-900 border border-violet-200/80' },
+  { value: 'student', label: 'Öğrenci', color: 'bg-green-100 text-green-900 border border-green-200/80' }
 ];
+
+const ROLE_BADGE_ORDER: UserRole[] = ['super_admin', 'admin', 'teacher', 'coach', 'student'];
+
+function roleBadgeForUser(user: SystemUser): { label: string; className: string } {
+  const tags = userRoleTags(user as { role: UserRole; roles?: UserRole[] });
+  const sorted = [...tags].sort(
+    (a, b) => ROLE_BADGE_ORDER.indexOf(a) - ROLE_BADGE_ORDER.indexOf(b)
+  );
+  const labels = sorted.map((t) => ROLES.find((r) => r.value === t)?.label || t);
+  const label =
+    labels.join(' · ') +
+    (user.id.startsWith(COACH_PROFILE_ONLY_PREFIX) ? ' · giriş yok' : '');
+  const primary =
+    sorted.find((t) => ['teacher', 'coach', 'student', 'admin'].includes(t)) || sorted[0] || user.role;
+  const cls =
+    ROLES.find((r) => r.value === primary)?.color || 'bg-gray-100 text-gray-800 border border-gray-200';
+  return { label, className: cls };
+}
 
 export default function UserManagement() {
   const navigate = useNavigate();
-  const { user: currentUser, effectiveUser, impersonate, canImpersonate } = useAuth();
+  const {
+    user: currentUser,
+    loginAsEmail,
+    canImpersonate,
+    getAllUsers,
+    createUser,
+    updateUser,
+    deleteUser,
+    getUserById
+  } = useAuth();
   const {
     addStudent,
     updateStudent,
@@ -118,13 +152,11 @@ export default function UserManagement() {
   } = useApp();
 
   useEffect(() => {
-    const r = effectiveUser?.role || currentUser?.role;
+    const r = currentUser?.role;
     if (!r || !['super_admin', 'admin', 'teacher'].includes(r)) {
       navigate('/');
     }
-  }, [currentUser, effectiveUser, navigate]);
-
-  const { getAllUsers, createUser, updateUser, deleteUser, getUserById } = useAuth();
+  }, [currentUser, navigate]);
 
   // State
   const [users, setUsers] = useState<SystemUser[]>([]);
@@ -140,16 +172,50 @@ export default function UserManagement() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [quota, setQuota] = useState<QuotaSnapshot | null>(null);
   const [importBusy, setImportBusy] = useState(false);
+  /** Satır içi koç ataması PATCH sırasında */
+  const [coachAssignBusy, setCoachAssignBusy] = useState<string | null>(null);
+  const [loginAsBusyId, setLoginAsBusyId] = useState<string | null>(null);
+
+  const handleLoginAsUser = async (row: SystemUser) => {
+    if (
+      row.email.toLowerCase().trim() === currentUser?.email?.toLowerCase().trim()
+    ) {
+      setMessage({ type: 'error', text: 'Zaten bu hesapla oturum açmış durumdasınız.' });
+      return;
+    }
+    if (!canImpersonate(row)) {
+      setMessage({ type: 'error', text: 'Bu hesaba geçiş yetkiniz yok.' });
+      return;
+    }
+    setLoginAsBusyId(row.id);
+    setMessage(null);
+    try {
+      const r = await loginAsEmail(row.email, row.role);
+      if (!r.success) {
+        setMessage({ type: 'error', text: r.message });
+        return;
+      }
+      setMessage({ type: 'success', text: r.message });
+      const role = row.role;
+      if (role === 'coach') navigate('/coach-dashboard');
+      else if (role === 'student') navigate('/student-dashboard');
+      else if (role === 'teacher') navigate('/teacher-panel');
+      else if (role === 'admin') navigate('/dashboard');
+      else navigate('/dashboard');
+    } finally {
+      setLoginAsBusyId(null);
+    }
+  };
 
   const selectableRoles = useMemo(() => {
-    const r = effectiveUser?.role;
+    const r = currentUser?.role;
     if (!r) return ROLES.filter((x) => x.value !== 'super_admin');
     if (r === 'teacher') return ROLES.filter((x) => x.value === 'student');
     if (r === 'admin')
       return ROLES.filter((x) => ['coach', 'teacher', 'student'].includes(x.value));
     if (r === 'super_admin') return ROLES.filter((x) => x.value !== 'super_admin');
     return ROLES.filter((x) => x.value !== 'super_admin');
-  }, [effectiveUser]);
+  }, [currentUser]);
 
   const refreshUsers = useCallback(async () => {
     if (getAuthToken() && isSupabaseReady) {
@@ -189,7 +255,7 @@ export default function UserManagement() {
       modalMode !== 'edit' ||
       !selectedUser ||
       selectedUser.role !== 'admin' ||
-      effectiveUser?.role !== 'super_admin' ||
+      currentUser?.role !== 'super_admin' ||
       !getAuthToken()
     ) {
       return;
@@ -217,17 +283,17 @@ export default function UserManagement() {
     modalMode,
     selectedUser?.id,
     selectedUser?.role,
-    effectiveUser?.role
+    currentUser?.role
   ]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!getAuthToken() || !isSupabaseReady || !effectiveUser) return;
+      if (!getAuthToken() || !isSupabaseReady || !currentUser) return;
       const inst =
-        effectiveUser.role === 'super_admin'
+        currentUser.role === 'super_admin'
           ? activeInstitutionId || institution?.id || undefined
-          : effectiveUser.institutionId || activeInstitutionId || institution?.id || undefined;
+          : currentUser.institutionId || activeInstitutionId || institution?.id || undefined;
       if (!inst) {
         if (!cancelled) setQuota(null);
         return;
@@ -242,7 +308,7 @@ export default function UserManagement() {
     return () => {
       cancelled = true;
     };
-  }, [effectiveUser, activeInstitutionId, institution?.id]);
+  }, [currentUser, activeInstitutionId, institution?.id]);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -275,9 +341,15 @@ export default function UserManagement() {
 
   // Filtrelenmiş kullanıcılar
   const filteredUsers = users.filter(user => {
-    // Arama
-    if (searchTerm && !user.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
-        !user.email.toLowerCase().includes(searchTerm.toLowerCase())) {
+    const q = searchTerm.toLowerCase().trim();
+    const phoneMatch = (user.phone || '').replace(/\s/g, '').toLowerCase();
+    const qDigits = q.replace(/\D/g, '');
+    if (
+      searchTerm &&
+      !user.name.toLowerCase().includes(q) &&
+      !user.email.toLowerCase().includes(q) &&
+      !(user.phone && (phoneMatch.includes(q.replace(/\s/g, '')) || (qDigits.length >= 4 && phoneMatch.includes(qDigits))))
+    ) {
       return false;
     }
 
@@ -321,23 +393,89 @@ export default function UserManagement() {
     return Math.ceil(diff / (1000 * 60 * 60 * 24));
   };
 
-  // Abonelik durumunu al
+  // Abonelik durumu (Süresiz açık mavi, N gün kaldı açık yeşil rozet)
   const getSubscriptionStatus = (user: SystemUser) => {
     if (user.isActive === false) {
-      return { status: 'Pasif', color: 'text-gray-500', bg: 'bg-gray-100' };
+      return {
+        status: 'Pasif',
+        className: 'bg-slate-100 text-slate-600 border border-slate-200'
+      };
     }
 
     const daysLeft = getDaysLeft(user.endDate);
     if (daysLeft === null) {
-      return { status: 'Süresiz', color: 'text-blue-500', bg: 'bg-blue-100' };
+      return {
+        status: 'Süresiz',
+        className: 'bg-sky-100 text-sky-900 border border-sky-200/90'
+      };
     }
     if (daysLeft <= 0) {
-      return { status: 'Süresi Dolmuş', color: 'text-red-500', bg: 'bg-red-100' };
+      return {
+        status: 'Süresi dolmuş',
+        className: 'bg-red-100 text-red-800 border border-red-200/80'
+      };
     }
-    if (daysLeft <= 7) {
-      return { status: `${daysLeft} gün kaldı`, color: 'text-amber-500', bg: 'bg-amber-100' };
+    return {
+      status: `${daysLeft} gün kaldı`,
+      className: 'bg-emerald-100 text-emerald-900 border border-emerald-200/90'
+    };
+  };
+
+  const coachesForStudentRow = useCallback(
+    (studentInstitutionId: string | undefined) => {
+      if (!studentInstitutionId) return coaches;
+      return coaches.filter((c) => !c.institutionId || c.institutionId === studentInstitutionId);
+    },
+    [coaches]
+  );
+
+  /** Bellekteki listede yoksa API’den tam liste ile eşle (kurum filtresi / gecikmiş state). */
+  const resolveStudentLinkForUser = useCallback(
+    async (user: Pick<SystemUser, 'id' | 'email' | 'studentId'>): Promise<StudentPlatformLink | null> => {
+      const opts = {
+        platformUserId: user.id,
+        email: user.email,
+        studentId: user.studentId
+      };
+      let link = findStudentForPlatformUser(opts, students);
+      if (link) return link;
+      if (!getAuthToken() || !isSupabaseReady) return null;
+      try {
+        const rows = await db.getStudents(undefined);
+        link = findStudentForPlatformUser(
+          opts,
+          rows.map((r) => ({
+            id: r.id,
+            email: r.email,
+            platformUserId: r.platform_user_id ?? undefined
+          }))
+        );
+        return link ?? null;
+      } catch {
+        return null;
+      }
+    },
+    [students]
+  );
+
+  const handleInlineCoachChange = async (user: SystemUser, coachId: string) => {
+    const tags = userRoleTags(user as SystemUser);
+    if (!tags.includes('student')) return;
+    const st = await resolveStudentLinkForUser(user);
+    if (!st) return;
+    setCoachAssignBusy(user.id);
+    setMessage(null);
+    try {
+      await updateStudent(st.id, { coachId: coachId.trim() || undefined });
+      await refreshUsers();
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Koç atanamadı.'
+      });
+    } finally {
+      setCoachAssignBusy(null);
     }
-    return { status: `${daysLeft} gün kaldı`, color: 'text-green-500', bg: 'bg-green-100' };
   };
 
   // Modal aç
@@ -347,18 +485,24 @@ export default function UserManagement() {
     setMessage(null);
 
     if (mode === 'edit' && user) {
-      const em = user.email.toLowerCase().trim();
       const rt = userRoleTags(user as SystemUser);
       const studentMatch =
         rt.includes('student') || user.role === 'student'
-          ? students.find((s) => s.email.toLowerCase().trim() === em)
+          ? findStudentForPlatformUser(
+              {
+                platformUserId: user.id,
+                email: user.email,
+                studentId: user.studentId
+              },
+              students
+            )
           : undefined;
       const instDraft =
         studentMatch?.institutionId ||
         user.institutionId ||
         institution?.id ||
         activeInstitutionId ||
-        effectiveUser?.institutionId ||
+        currentUser?.institutionId ||
         '';
       setFormData({
         firstName: user.name.split(' ').slice(0, -1).join(' ') || user.name,
@@ -408,7 +552,7 @@ export default function UserManagement() {
         studentInstitutionId:
           institution?.id ||
           activeInstitutionId ||
-          effectiveUser?.institutionId ||
+          currentUser?.institutionId ||
           '',
         bootstrap_max_students: '50',
         bootstrap_max_coaches: '10',
@@ -460,7 +604,7 @@ export default function UserManagement() {
             coachRow?.institutionId ||
             activeInstitutionId ||
             institution?.id ||
-            effectiveUser?.institutionId ||
+            currentUser?.institutionId ||
             null;
           try {
             await db.createUser({
@@ -492,7 +636,7 @@ export default function UserManagement() {
         const staffRoles =
           formData.role !== 'student' &&
           formData.role !== 'admin' &&
-          (effectiveUser?.role === 'admin' || effectiveUser?.role === 'super_admin')
+          (currentUser?.role === 'admin' || currentUser?.role === 'super_admin')
             ? (() => {
                 if (formData.role === 'teacher') {
                   const r: UserRole[] = ['teacher'];
@@ -536,7 +680,7 @@ export default function UserManagement() {
         let quotaNote = '';
         if (
           result.success &&
-          effectiveUser?.role === 'super_admin' &&
+          currentUser?.role === 'super_admin' &&
           selectedUser.role === 'admin'
         ) {
           try {
@@ -551,27 +695,43 @@ export default function UserManagement() {
               (qe instanceof Error ? qe.message : 'bilinmeyen hata');
           }
         }
-        setMessage({
-          type: result.success ? 'success' : 'error',
-          text: result.message + quotaNote
-        });
+        let studentCardNote = '';
         if (result.success) {
           const tags = userRoleTags(selectedUser as SystemUser);
           if (tags.includes('student')) {
-            const em = selectedUser.email.toLowerCase().trim();
-            const st = students.find((s) => s.email.toLowerCase().trim() === em);
+            const st = await resolveStudentLinkForUser(selectedUser);
             if (st) {
-              await updateStudent(st.id, {
-                birthDate: formData.birthDate || undefined,
-                classLevel: toClassLevel(formData.classLevel),
-                school: formData.branch.trim() || undefined,
-                parentName: formData.parentName.trim() || undefined,
-                parentPhone: formData.parentPhone.trim() || undefined,
-                coachId: formData.assignCoachId.trim() || undefined,
-                institutionId: formData.studentInstitutionId.trim() || undefined
-              });
+              try {
+                await updateStudent(st.id, {
+                  birthDate: formData.birthDate || undefined,
+                  classLevel: toClassLevel(formData.classLevel),
+                  school: formData.branch.trim() || undefined,
+                  parentName: formData.parentName.trim() || undefined,
+                  parentPhone: formData.parentPhone.trim() || undefined,
+                  coachId: formData.assignCoachId.trim() || undefined,
+                  institutionId: formData.studentInstitutionId.trim() || undefined
+                });
+              } catch (se) {
+                studentCardNote =
+                  ' Öğrenci kartı alanları kaydedilemedi: ' +
+                  (se instanceof Error ? se.message : 'bilinmeyen hata');
+              }
+            } else {
+              studentCardNote =
+                ' Öğrenci kartı güncellenemedi: kullanıcıyla eşleşen öğrenci kaydı bulunamadı (e-posta veya platform bağlantısı).';
             }
           }
+        }
+        setMessage({
+          type:
+            !result.success
+              ? 'error'
+              : studentCardNote.startsWith(' Öğrenci kartı alanları kaydedilemedi')
+                ? 'error'
+                : 'success',
+          text: result.message + quotaNote + (result.success ? studentCardNote : '')
+        });
+        if (result.success) {
           if (staffRoles?.roles.includes('coach')) {
             const emLower = formData.email.toLowerCase().trim();
             const hasCoach = coaches.some((c) => c.email.toLowerCase().trim() === emLower);
@@ -602,7 +762,7 @@ export default function UserManagement() {
       } else {
         if (
           formData.role === 'student' &&
-          effectiveUser?.role === 'teacher' &&
+          currentUser?.role === 'teacher' &&
           !String(formData.assignCoachId || '').trim()
         ) {
           setMessage({ type: 'error', text: 'Öğrenci oluşturmak için bir koç seçmelisiniz.' });
@@ -612,9 +772,9 @@ export default function UserManagement() {
 
         const instFallback = activeInstitutionId || institution?.id;
         let resolvedInstitution =
-          effectiveUser?.role === 'teacher'
-            ? effectiveUser.institutionId
-            : instFallback || effectiveUser?.institutionId;
+          currentUser?.role === 'teacher'
+            ? currentUser.institutionId
+            : instFallback || currentUser?.institutionId;
         /** Yerelde sahte/uyumsuz kurum id’si göndermeyi önle (Postgres FK 23503) */
         if (
           resolvedInstitution &&
@@ -643,7 +803,7 @@ export default function UserManagement() {
         const staffRolesNew =
           formData.role !== 'student' &&
           formData.role !== 'admin' &&
-          (effectiveUser?.role === 'admin' || effectiveUser?.role === 'super_admin')
+          (currentUser?.role === 'admin' || currentUser?.role === 'super_admin')
             ? (() => {
                 if (formData.role === 'teacher') {
                   const r: UserRole[] = ['teacher'];
@@ -661,7 +821,7 @@ export default function UserManagement() {
 
         const resolvedStudentInstitution =
           formData.role === 'student' &&
-          (effectiveUser?.role === 'super_admin' || effectiveUser?.role === 'admin') &&
+          (currentUser?.role === 'super_admin' || currentUser?.role === 'admin') &&
           String(formData.studentInstitutionId || '').trim()
             ? String(formData.studentInstitutionId).trim()
             : (resolvedInstitution ?? null);
@@ -670,7 +830,7 @@ export default function UserManagement() {
           (resolvedStudentInstitution ?? null) ||
           resolvedInstitution ||
           instFallback ||
-          effectiveUser?.institutionId;
+          currentUser?.institutionId;
 
         if (getAuthToken() && isSupabaseReady) {
           try {
@@ -691,7 +851,7 @@ export default function UserManagement() {
                 end_date: formData.endDate ? new Date(formData.endDate).toISOString() : null,
                 created_by: null
               },
-              effectiveUser?.role === 'super_admin' && formData.role === 'admin'
+              currentUser?.role === 'super_admin' && formData.role === 'admin'
                 ? {
                     bootstrap: {
                       bootstrap_max_students: Number(formData.bootstrap_max_students) || 50,
@@ -705,7 +865,7 @@ export default function UserManagement() {
             setMessage({ type: 'success', text: `${label} başarıyla oluşturuldu!` });
             await refreshUsers();
 
-            const instId = resolvedInstitution || instFallback || effectiveUser?.institutionId;
+            const instId = resolvedInstitution || instFallback || currentUser?.institutionId;
             const newUserId = row.id;
             try {
               if (formData.role === 'student') {
@@ -777,7 +937,7 @@ export default function UserManagement() {
             institution_id: resolvedInstitution || undefined
           };
 
-          if (effectiveUser?.role === 'super_admin' && formData.role === 'admin') {
+          if (currentUser?.role === 'super_admin' && formData.role === 'admin') {
             createPayload.bootstrap_max_students =
               Number(formData.bootstrap_max_students) || undefined;
             createPayload.bootstrap_max_coaches = Number(formData.bootstrap_max_coaches) || undefined;
@@ -791,7 +951,7 @@ export default function UserManagement() {
             setMessage({ type: 'success', text: `${label} başarıyla oluşturuldu!` });
             await refreshUsers();
 
-            const instId = resolvedInstitution || instFallback || effectiveUser?.institutionId;
+            const instId = resolvedInstitution || instFallback || currentUser?.institutionId;
             const newUserId = result.userId || `user-${Date.now()}`;
             try {
               if (formData.role === 'student') {
@@ -880,9 +1040,9 @@ export default function UserManagement() {
       const em = (target?.email || '').toLowerCase().trim();
       const tags = target ? userRoleTags(target as SystemUser) : [];
       try {
-        if (tags.includes('student')) {
-          const sid = target.studentId || students.find((s) => s.email.toLowerCase().trim() === em)?.id;
-          if (sid) await deleteStudent(sid);
+        if (tags.includes('student') && target) {
+          const st = await resolveStudentLinkForUser(target);
+          if (st?.id) await deleteStudent(st.id);
         }
         if (tags.includes('coach')) {
           const cid = target.coachId || coaches.find((c) => c.email.toLowerCase().trim() === em)?.id;
@@ -912,16 +1072,6 @@ export default function UserManagement() {
     void refreshUsers();
   };
 
-  const handleLoginAs = (target: SystemUser) => {
-    const result = impersonate(target);
-    setMessage({ type: result.success ? 'success' : 'error', text: result.message });
-    if (!result.success) return;
-    if (target.role === 'admin' || target.role === 'super_admin') navigate('/dashboard');
-    else if (target.role === 'teacher') navigate('/dashboard');
-    else if (target.role === 'coach') navigate('/coach-dashboard');
-    else navigate('/student-dashboard');
-  };
-
   // İstatistikler
   const stats = {
     total: users.length,
@@ -940,15 +1090,15 @@ export default function UserManagement() {
   };
 
   const importAllowedRoles = useMemo((): UserRole[] => {
-    const r = effectiveUser?.role;
+    const r = currentUser?.role;
     if (r === 'teacher') return ['student'];
     if (r === 'admin' || r === 'super_admin') return ['student', 'teacher', 'coach'];
     return [];
-  }, [effectiveUser?.role]);
+  }, [currentUser?.role]);
 
   const handleBulkUserImport = async (file: File | null) => {
     if (!file) return;
-    if (!(effectiveUser?.role === 'admin' || effectiveUser?.role === 'super_admin' || effectiveUser?.role === 'teacher')) {
+    if (!(currentUser?.role === 'admin' || currentUser?.role === 'super_admin' || currentUser?.role === 'teacher')) {
       setMessage({ type: 'error', text: 'Dosya ile içe aktarma yalnızca yönetici veya öğretmen için açıktır.' });
       return;
     }
@@ -985,9 +1135,9 @@ export default function UserManagement() {
 
       const instFallback = activeInstitutionId || institution?.id;
       let resolvedInstitutionBase =
-        effectiveUser?.role === 'teacher'
-          ? effectiveUser.institutionId
-          : instFallback || effectiveUser?.institutionId;
+        currentUser?.role === 'teacher'
+          ? currentUser.institutionId
+          : instFallback || currentUser?.institutionId;
       if (
         resolvedInstitutionBase &&
         institutions.length > 0 &&
@@ -1494,7 +1644,7 @@ export default function UserManagement() {
           <span className="font-mono">12C</span> biçiminde de olabilir. Aynı e-posta ile tekrar yüklerseniz veya
           kurumda yalnızca bir kişiyle eşleşen aynı ad-soyad bulunursa kayıt güncellenir (yeni satır açılmaz). Rol
           için: öğrenci, öğretmen
-          {effectiveUser?.role === 'admin' || effectiveUser?.role === 'super_admin' ? ', koç' : ''}; birden fazla rol için
+          {currentUser?.role === 'admin' || currentUser?.role === 'super_admin' ? ', koç' : ''}; birden fazla rol için
           virgül, noktalı virgül veya <span className="font-mono">ve</span> ile ayırın (örn. öğretmen, koç). Şifre tekrarı
           doluysa birinciyle aynı olmalıdır.
         </p>
@@ -1618,110 +1768,159 @@ export default function UserManagement() {
         </div>
       )}
 
-      {/* Users Table */}
+      {/* Users Table — referans sütun düzeni */}
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50">
+          <table className="w-full min-w-[1100px] table-fixed">
+            <thead className="bg-gray-50/90 border-b border-gray-100">
               <tr>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Adı</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Soyadı</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">E-mail adresi</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Telefon numarası</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Doğum tarihi</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Sınıfı</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Şubesi</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Rolü</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Veli adı</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Veli telefon numarası</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Paket</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Başlangıç</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Bitiş</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Durum</th>
-                <th className="px-4 py-3 text-right text-sm font-semibold text-gray-600">İşlemler</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[9%]">Adı</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[9%]">Soyadı</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[14%]">E-mail adresi</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[11%]">Telefon numarası</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[5%]">Sınıfı</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[5%]">Şubesi</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[13%]">Koçu</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[9%]">Rolü</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[8%]">Veli adı</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[10%]">Veli telefon numarası</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[8%]">Paket</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[10%]">
+                  Durum / Kaç gün kaldı
+                </th>
+                <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 w-[10%]">İşlemler</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filteredUsers.map(user => {
                 const subStatus = getSubscriptionStatus(user);
                 const em = user.email.toLowerCase().trim();
+                const tags = userRoleTags(user as SystemUser);
                 const studentMatch =
-                  user.role === 'student' ? students.find((s) => s.email.toLowerCase().trim() === em) : undefined;
+                  tags.includes('student')
+                    ? students.find((s) => s.email.toLowerCase().trim() === em)
+                    : undefined;
+                const roleBadge = roleBadgeForUser(user);
+                const firstName =
+                  user.name.split(' ').slice(0, -1).join(' ') || user.name;
+                const lastName = user.name.split(' ').slice(-1).join(' ');
+                const coachOptions = coachesForStudentRow(studentMatch?.institutionId);
+                const coachOptIds = new Set(coachOptions.map((c) => c.id));
+                const orphanCoachId =
+                  studentMatch?.coachId &&
+                  !coachOptIds.has(String(studentMatch.coachId))
+                    ? String(studentMatch.coachId)
+                    : '';
 
                 return (
-                  <tr key={user.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-medium text-gray-800">{user.name.split(' ').slice(0, -1).join(' ') || user.name}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{user.name.split(' ').slice(-1).join(' ')}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{user.email}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{user.phone || '—'}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {user.role === 'student' && studentMatch?.birthDate
-                        ? new Date(studentMatch.birthDate).toLocaleDateString('tr-TR')
-                        : '—'}
+                  <tr key={user.id} className="hover:bg-slate-50/80">
+                    <td className="px-3 py-3 text-sm font-semibold text-slate-900 uppercase tracking-tight truncate" title={firstName}>
+                      {firstName}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {user.role === 'student' ? String(studentMatch?.classLevel ?? '—') : '—'}
+                    <td className="px-3 py-3 text-sm text-slate-800 uppercase truncate" title={lastName}>
+                      {lastName}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {user.role === 'student' ? studentMatch?.school || '—' : '—'}
+                    <td className="px-3 py-3 text-sm text-gray-600 truncate" title={user.email}>
+                      {user.email}
                     </td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${ROLES.find(r => r.value === user.role)?.color || 'bg-gray-100 text-gray-700'}`}>
-                        {ROLES.find(r => r.value === user.role)?.label || user.role}
-                        {user.id.startsWith(COACH_PROFILE_ONLY_PREFIX) ? (
-                          <span className="ml-1 font-normal text-amber-700">· giriş yok</span>
-                        ) : null}
+                    <td className="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">{user.phone || '—'}</td>
+                    <td className="px-3 py-3 text-sm text-gray-600 tabular-nums">
+                      {studentMatch ? String(studentMatch.classLevel ?? '—') : '—'}
+                    </td>
+                    <td className="px-3 py-3 text-sm text-gray-600 uppercase">
+                      {studentMatch?.school?.trim() ? studentMatch.school : '—'}
+                    </td>
+                    <td className="px-3 py-3 align-middle">
+                      {studentMatch ? (
+                        <div className="relative min-w-[10rem] max-w-[14rem]">
+                          <select
+                            value={studentMatch.coachId || ''}
+                            disabled={coachAssignBusy === user.id}
+                            onChange={(e) => void handleInlineCoachChange(user, e.target.value)}
+                            className="w-full appearance-none rounded-lg border border-slate-200 bg-white py-1.5 pl-2 pr-8 text-xs font-medium text-slate-800 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-60"
+                          >
+                            <option value="">—</option>
+                            {orphanCoachId ? (
+                              <option value={orphanCoachId}>
+                                Mevcut koç (liste dışı · {orphanCoachId.slice(0, 8)}…)
+                              </option>
+                            ) : null}
+                            {coachOptions.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        </div>
+                      ) : (
+                        <span className="text-sm text-gray-400">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-3">
+                      <span
+                        className={`inline-flex max-w-full items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${roleBadge.className}`}
+                      >
+                        <span className="truncate">{roleBadge.label}</span>
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {user.role === 'student' ? studentMatch?.parentName || '—' : '—'}
+                    <td className="px-3 py-3 text-sm text-gray-600 truncate" title={studentMatch?.parentName || ''}>
+                      {studentMatch?.parentName?.trim() ? studentMatch.parentName : '—'}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {user.role === 'student' ? studentMatch?.parentPhone || '—' : '—'}
+                    <td className="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">
+                      {studentMatch?.parentPhone?.trim() ? studentMatch.parentPhone : '—'}
                     </td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${PACKAGES[(user.package || 'trial') as keyof typeof PACKAGES].color}`}>
+                    <td className="px-3 py-3">
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${PACKAGES[(user.package || 'trial') as keyof typeof PACKAGES].color}`}
+                      >
                         {PACKAGES[(user.package || 'trial') as keyof typeof PACKAGES].name}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {user.startDate ? new Date(user.startDate).toLocaleDateString('tr-TR') : '-'}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {user.endDate ? new Date(user.endDate).toLocaleDateString('tr-TR') : 'Süresiz'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${subStatus.bg} ${subStatus.color}`}>
+                    <td className="px-3 py-3">
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${subStatus.className}`}
+                      >
                         {subStatus.status}
                       </span>
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => openModal('edit', user)}
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="Düzenle"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        {effectiveUser?.role && (effectiveUser.role === 'super_admin' || effectiveUser.role === 'admin') && canImpersonate(user) && (
+                    <td className="px-3 py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        {(currentUser?.role === 'super_admin' || currentUser?.role === 'admin') &&
+                        canImpersonate(user) &&
+                        !user.id.startsWith('demo-seed-') ? (
                           <button
-                            onClick={() => handleLoginAs(user)}
-                            className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                            title="Login As"
+                            type="button"
+                            onClick={() => void handleLoginAsUser(user)}
+                            disabled={loginAsBusyId === user.id}
+                            className="rounded-lg p-2 text-violet-600 transition-colors hover:bg-violet-50 disabled:opacity-50"
+                            title="Bu hesaba gir (görüntüle)"
                           >
-                            <UserCheck className="w-4 h-4" />
+                            {loginAsBusyId === user.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <LogIn className="h-4 w-4" />
+                            )}
                           </button>
-                        )}
-                        {!user.id.startsWith('demo-seed-') && effectiveUser?.role !== 'teacher' && (
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => openModal('edit', user)}
+                          className="rounded-lg p-2 text-blue-600 transition-colors hover:bg-blue-50"
+                          title="Profil / düzenle"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </button>
+                        {!user.id.startsWith('demo-seed-') && currentUser?.role !== 'teacher' ? (
                           <button
-                            onClick={() => handleDelete(user.id)}
-                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            type="button"
+                            onClick={() => void handleDelete(user.id)}
+                            className="rounded-lg p-2 text-blue-600 transition-colors hover:bg-blue-50"
                             title="Sil"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Trash2 className="h-4 w-4" />
                           </button>
-                        )}
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -1932,7 +2131,7 @@ export default function UserManagement() {
                 </select>
               </div>
 
-              {(effectiveUser?.role === 'admin' || effectiveUser?.role === 'super_admin') &&
+              {(currentUser?.role === 'admin' || currentUser?.role === 'super_admin') &&
                 (formData.role === 'teacher' || formData.role === 'coach') && (
                   <div className="rounded-lg border border-violet-100 bg-violet-50/80 p-3 space-y-2">
                     <p className="text-xs text-violet-900 font-medium">
@@ -1965,7 +2164,7 @@ export default function UserManagement() {
 
               {modalMode === 'edit' &&
                 formData.role === 'admin' &&
-                effectiveUser?.role === 'super_admin' && (
+                currentUser?.role === 'super_admin' && (
                   <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-4">
                     <p className="text-sm font-medium text-amber-900">
                       Bu yöneticinin kurum kotası (öğrenci / koç)
@@ -2016,7 +2215,7 @@ export default function UserManagement() {
 
               {modalMode === 'add' &&
                 formData.role === 'admin' &&
-                effectiveUser?.role === 'super_admin' && (
+                currentUser?.role === 'super_admin' && (
                   <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-4">
                     <p className="text-sm font-medium text-amber-900">
                       Yeni yönetici için kurum kota başlangıcı
@@ -2064,7 +2263,7 @@ export default function UserManagement() {
 
               {(modalMode === 'add' || modalMode === 'edit') && formData.role === 'student' && (
                 <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/90 p-4">
-                  {effectiveUser?.role === 'super_admin' && (
+                  {currentUser?.role === 'super_admin' && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Kurum</label>
                       <select
@@ -2081,8 +2280,8 @@ export default function UserManagement() {
                       </select>
                     </div>
                   )}
-                  {(effectiveUser?.role === 'admin' || effectiveUser?.role === 'teacher') &&
-                    !(effectiveUser?.role === 'super_admin') && (
+                  {(currentUser?.role === 'admin' || currentUser?.role === 'teacher') &&
+                    !(currentUser?.role === 'super_admin') && (
                       <p className="text-xs text-gray-600">
                         Kurum:{' '}
                         <span className="font-medium">
@@ -2096,12 +2295,12 @@ export default function UserManagement() {
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       <Briefcase className="w-4 h-4 inline mr-1" />
-                      Atanan koç {effectiveUser?.role === 'teacher' && modalMode === 'add' ? '*' : ''}
+                      Atanan koç {currentUser?.role === 'teacher' && modalMode === 'add' ? '*' : ''}
                     </label>
                     <select
                       value={formData.assignCoachId}
                       onChange={(e) => setFormData({ ...formData, assignCoachId: e.target.value })}
-                      required={effectiveUser?.role === 'teacher' && modalMode === 'add'}
+                      required={currentUser?.role === 'teacher' && modalMode === 'add'}
                       className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                     >
                       <option value="">Koç seçin</option>

@@ -55,49 +55,61 @@ export default function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
   };
 
   return (
-    <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 shadow-sm">
+    <header className="sticky top-0 z-30 flex min-h-14 shrink-0 items-center justify-between gap-2 border-b border-gray-200 bg-white/95 px-3 py-2 shadow-sm backdrop-blur-sm supports-[backdrop-filter]:bg-white/80 sm:gap-4 sm:px-5 sm:py-0 lg:min-h-16 lg:px-6 pt-safe">
       {/* Left Side */}
-      <div className="flex items-center gap-4">
+      <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-4">
         <button
+          type="button"
           onClick={onMenuClick}
-          className="lg:hidden p-2 rounded-lg hover:bg-gray-100"
+          className="touch-manipulation rounded-lg p-2.5 hover:bg-gray-100 active:bg-gray-200 lg:hidden min-h-[44px] min-w-[44px] flex items-center justify-center"
+          aria-label="Menüyü aç veya kapat"
         >
-          <Menu className="w-5 h-5 text-gray-600" />
+          <Menu className="h-5 w-5 shrink-0 text-gray-600" />
         </button>
 
-        <div>
-          <h1 className="text-xl font-bold text-slate-800">{getPageTitle()}</h1>
-          <p className="text-sm text-gray-500">{institution.name}</p>
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-base font-bold leading-tight text-slate-800 sm:text-lg lg:text-xl">
+            {getPageTitle()}
+          </h1>
+          <p className="truncate text-xs text-gray-500 sm:text-sm">{institution.name}</p>
         </div>
       </div>
 
       {/* Right Side */}
-      <div className="flex items-center gap-4">
+      <div className="flex shrink-0 items-center gap-1 sm:gap-3 lg:gap-4">
         {isImpersonating && user && effectiveUser && (
           <div className="hidden md:flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
-            <span>{`[${userRoleTags(effectiveUser).map((r) => roleLabels[r] ?? r).join(', ')}] olarak görüntüleniyor`}</span>
+            <span className="max-w-[220px] truncate" title={effectiveUser?.email}>
+              <strong>{effectiveUser?.name}</strong> olarak görüntüleniyor
+            </span>
             <button
+              type="button"
               onClick={stopImpersonation}
               className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 font-medium hover:bg-amber-200"
             >
               <Undo2 className="h-3.5 w-3.5" />
-              Süper Admin'e Dön
+              Kendi hesabıma dön
             </button>
           </div>
         )}
 
         {/* Bildirimler */}
-        <button className="relative p-2 rounded-lg hover:bg-gray-100 transition-colors">
-          <Bell className="w-5 h-5 text-gray-600" />
-          <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+        <button
+          type="button"
+          className="relative touch-manipulation rounded-lg p-2.5 transition-colors hover:bg-gray-100 min-h-[44px] min-w-[44px] flex items-center justify-center"
+          aria-label="Bildirimler"
+        >
+          <Bell className="h-5 w-5 text-gray-600" />
+          <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />
         </button>
 
         {/* Kullanıcı Menüsü */}
         {user && (
           <div className="relative">
             <button
+              type="button"
               onClick={() => setShowUserMenu(!showUserMenu)}
-              className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors"
+              className="flex touch-manipulation items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-gray-100 sm:gap-3 sm:px-3 sm:py-2 min-h-[44px]"
             >
               <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
                 {user.name.charAt(0)}
@@ -113,7 +125,7 @@ export default function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
 
             {/* Dropdown */}
             {showUserMenu && (
-              <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-lg border border-gray-100 py-2 z-50">
+              <div className="absolute right-0 z-50 mt-2 max-h-[min(70vh,22rem)] w-[min(calc(100vw-1.5rem),14rem)] overflow-y-auto rounded-xl border border-gray-100 bg-white py-2 shadow-lg sm:w-56">
                 <div className="px-4 py-2 border-b border-gray-100">
                   <p className="text-sm font-medium text-slate-700">{effectiveUser?.name || user.name}</p>
                   <p className="text-xs text-gray-500">{effectiveUser?.email || user.email}</p>
@@ -128,7 +140,7 @@ export default function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
                     className="w-full flex items-center gap-3 px-4 py-2 text-sm text-amber-700 hover:bg-amber-50"
                   >
                     <Undo2 className="w-4 h-4" />
-                    Süper Admin'e Dön
+                    Kendi hesabıma dön
                   </button>
                 )}
 

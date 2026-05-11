@@ -1,6 +1,7 @@
 import { requireAuth, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
+import { addCalendarDaysYmd } from '../api/_lib/istanbul-time.js';
 
 const normalizeWeekStart = (v) => String(v || '').trim().slice(0, 10);
 
@@ -45,21 +46,35 @@ export default async function handler(req, res) {
       const studentRaw =
         actor.role === 'student' ? String(actor.student_id || '') : String(req.query.student_id || '').trim();
       const weekStart = normalizeWeekStart(req.query.week_start || '');
+      const weekEnd = normalizeWeekStart(req.query.week_end || '') || addCalendarDaysYmd(weekStart, 6);
       if (!studentRaw) return res.status(400).json({ error: 'student_id_required' });
       if (!weekStart) return res.status(400).json({ error: 'week_start_required' });
 
       const gate = await assertCanReadStudentGoals(actor, studentRaw);
       if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
 
-      let q = supabaseAdmin
+      const { data: legacy, error: e1 } = await supabaseAdmin
         .from('coach_weekly_goals')
         .select('*')
         .eq('student_id', studentRaw)
         .eq('week_start_date', weekStart)
         .order('created_at', { ascending: true });
-      const { data, error } = await q;
-      if (error) throw error;
-      return res.status(200).json({ data: data || [] });
+      if (e1) throw e1;
+
+      const { data: ranged, error: e2 } = await supabaseAdmin
+        .from('coach_weekly_goals')
+        .select('*')
+        .eq('student_id', studentRaw)
+        .not('goal_start_date', 'is', null)
+        .not('goal_end_date', 'is', null)
+        .lte('goal_start_date', weekEnd)
+        .gte('goal_end_date', weekStart)
+        .order('created_at', { ascending: true });
+      if (e2) throw e2;
+
+      const map = new Map();
+      for (const r of [...(legacy || []), ...(ranged || [])]) map.set(r.id, r);
+      return res.status(200).json({ data: [...map.values()].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))) });
     }
 
     if (req.method === 'POST') {
@@ -68,6 +83,10 @@ export default async function handler(req, res) {
       if (!sid) return res.status(400).json({ error: 'student_id_required' });
       const weekStart = normalizeWeekStart(body.week_start_date || body.weekStartDate);
       if (!weekStart) return res.status(400).json({ error: 'week_start_required' });
+      let goalStart = normalizeWeekStart(body.goal_start_date || body.goalStartDate);
+      let goalEnd = normalizeWeekStart(body.goal_end_date || body.goalEndDate);
+      if (!goalStart) goalStart = weekStart;
+      if (!goalEnd) goalEnd = addCalendarDaysYmd(goalStart, 6);
 
       const gate = await assertCoachOrAdminGoalsWrite(actor, sid);
       if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
@@ -97,6 +116,8 @@ export default async function handler(req, res) {
         title,
         target_quantity: Number.isFinite(targetQty) && targetQty >= 0 ? targetQty : 0,
         week_start_date: weekStart,
+        goal_start_date: goalStart,
+        goal_end_date: goalEnd,
         quantity_unit: quantityUnit || 'soru',
         created_at: now,
         updated_at: now,

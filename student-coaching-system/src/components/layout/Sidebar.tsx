@@ -1,213 +1,194 @@
-// Türkçe: Yan menü bileşeni - Compact tasarım, tek sütun hizalı
-import React from 'react';
+// Türkçe: Sol navigasyon — SaaS tarzı koyu tema, accordion gruplar, daraltılabilir rail
+import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { BarChart3, ChevronLeft, ChevronRight, TrendingUp, Video } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
-import {
-  LayoutDashboard,
-  Users,
-  GraduationCap,
-  BarChart3,
-  Settings,
-  BookOpen,
-  MessageCircle,
-  TrendingUp,
-  Calendar,
-  CheckSquare,
-  Brain,
-  ClipboardList,
-  Webhook,
-  Upload,
-  BookMarked,
-  FileCheck,
-  UserCog,
-  CreditCard,
-  Server,
-  Video,
-  Radio,
-  MessageSquareText
-} from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
 import { userRoleTags } from '../../config/rolePermissions';
+import { cn } from '../../lib/utils';
+import {
+  getFlatMenuForRoles,
+  structureNavFromFlat,
+  type FlatNavItem
+} from './sidebar/navModel';
+import { SidebarNavLink } from './sidebar/SidebarNavLink';
+import { SidebarNavGroup } from './sidebar/SidebarNavGroup';
 
-type SideMenuItem = { path: string; icon: LucideIcon; label: string };
+export const SIDEBAR_DESKTOP_WIDE_KEY = 'sidebar-desktop-wide';
 
-function mergeSideMenus(groups: SideMenuItem[][]): SideMenuItem[] {
-  const map = new Map<string, SideMenuItem>();
-  for (const group of groups) {
-    for (const item of group) {
-      if (!map.has(item.path)) map.set(item.path, item);
-    }
-  }
-  return [...map.values()];
-}
+export type SidebarProps = {
+  mobileOpen: boolean;
+  onMobileOpenChange: (open: boolean) => void;
+  desktopWide: boolean;
+  onDesktopWideChange: (wide: boolean) => void;
+};
 
-interface SidebarProps {
-  isOpen: boolean;
-  setIsOpen: (open: boolean) => void;
-}
-
-export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
+export default function Sidebar({
+  mobileOpen,
+  onMobileOpenChange,
+  desktopWide,
+  onDesktopWideChange
+}: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { effectiveUser } = useAuth();
   const { institution } = useApp();
 
-  /** Çoklu rol: koç + öğretmen menüleri birleştirilir (aynı path tek kez). */
-  const getMenuItems = (): SideMenuItem[] => {
-    const tags = userRoleTags(effectiveUser);
-    if (tags.includes('super_admin')) {
-      return [
-        { path: '/dashboard', icon: LayoutDashboard, label: 'Ana Panel' },
-        { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
-        { path: '/live-lessons', icon: Radio, label: 'Canlı özel dersler' },
-        { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
-        { path: '/super-admin', icon: Server, label: 'Kurum Yönetimi' },
-        { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
-        { path: '/message-templates', icon: MessageSquareText, label: 'WA şablonları' },
-        { path: '/subscription', icon: CreditCard, label: 'Abonelik / Paketler' },
-        { path: '/topics', icon: BookOpen, label: 'Konu Havuzu' },
-        { path: '/system-management', icon: Server, label: 'Sistem Yönetimi' }
-      ];
+  const tags = userRoleTags(effectiveUser);
+  const flat = useMemo(() => getFlatMenuForRoles(tags), [tags]);
+  const nav = useMemo(() => structureNavFromFlat(flat), [flat]);
+  const hasLessonOrAcademic = nav.lessons.length > 0 || nav.academic.length > 0;
+
+  const [isLg, setIsLg] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(min-width: 1024px)').matches : true
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const fn = () => setIsLg(mq.matches);
+    fn();
+    mq.addEventListener('change', fn);
+    return () => mq.removeEventListener('change', fn);
+  }, []);
+
+  /** Mobil çekmecede her zaman etiketler; dar rail yalnızca lg+ */
+  const railCollapsed = !desktopWide && isLg;
+
+  const afterNavigate = () => {
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches) {
+      onMobileOpenChange(false);
     }
-    const isStudentOnlyNav =
-      tags.includes('student') &&
-      !tags.some((t) => ['super_admin', 'admin', 'coach', 'teacher'].includes(t));
-    if (isStudentOnlyNav) {
-      return [
-        { path: '/student-dashboard', icon: LayoutDashboard, label: 'Öğrenci Paneli' },
-        { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
-        { path: '/class-schedule', icon: Calendar, label: 'Canlı derslerim' },
-        { path: '/student-meetings', icon: Video, label: 'Görüşmelerim' },
-        { path: '/student-reports', icon: BookMarked, label: 'Benim Raporlarım' },
-        { path: '/student-analytics', icon: BarChart3, label: 'Analizlerim' }
-      ];
-    }
-
-    const MENU_ADMIN: SideMenuItem[] = [
-      { path: '/dashboard', icon: LayoutDashboard, label: 'Ana Panel' },
-      { path: '/live-lessons', icon: Radio, label: 'Canlı özel dersler' },
-      { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
-      { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
-      { path: '/teachers', icon: GraduationCap, label: 'Öğretmenler' },
-      { path: '/coaches', icon: Users, label: 'Eğitim Koçları' },
-      { path: '/tracking', icon: Calendar, label: 'Haftalık Takip' },
-      { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
-      { path: '/book-tracking', icon: BookMarked, label: 'Kitap Takibi' },
-      { path: '/exam-tracking', icon: ClipboardList, label: 'Sınav Takibi (Denemelerim)' },
-      { path: '/reports', icon: FileCheck, label: 'Raporlar' },
-      { path: '/ai-coach', icon: Brain, label: 'AI KOÇ' },
-      { path: '/whatsapp', icon: MessageCircle, label: 'WhatsApp Panel' },
-      { path: '/message-templates', icon: MessageSquareText, label: 'WA şablonları' },
-      { path: '/topics', icon: BookOpen, label: 'Konu Havuzu' },
-      { path: '/topic-tracking', icon: CheckSquare, label: 'Konu Takibi' },
-      { path: '/written-exam', icon: FileCheck, label: 'Yazılı Takip' },
-      { path: '/pdf-import', icon: Upload, label: 'PDF İçe Aktar' },
-      { path: '/analytics', icon: BarChart3, label: 'Analiz Paneli' },
-      { path: '/webhooks', icon: Webhook, label: 'Webhook Ayarları' },
-      { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
-      { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
-      { path: '/system-management', icon: Server, label: 'Sistem Yönetimi' },
-      { path: '/settings', icon: Settings, label: 'Ayarlar' }
-    ];
-
-    const MENU_TEACHER: SideMenuItem[] = [
-      { path: '/teacher-panel', icon: LayoutDashboard, label: 'Öğretmen Paneli' },
-      { path: '/live-lessons', icon: Radio, label: 'Canlı özel dersler' },
-      { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
-      { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
-      { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
-      { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
-      { path: '/settings', icon: Settings, label: 'Ayarlar' }
-    ];
-
-    const MENU_COACH: SideMenuItem[] = [
-      { path: '/coach-dashboard', icon: LayoutDashboard, label: 'Koç Paneli' },
-      { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
-      { path: '/live-lessons', icon: Radio, label: 'Canlı özel dersler' },
-      { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
-      { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
-      { path: '/teachers', icon: GraduationCap, label: 'Öğretmenler' },
-      { path: '/tracking', icon: Calendar, label: 'Haftalık Takip' },
-      { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
-      { path: '/book-tracking', icon: BookMarked, label: 'Kitap Takibi' },
-      { path: '/exam-tracking', icon: ClipboardList, label: 'Sınav Takibi (Denemelerim)' },
-      { path: '/topic-tracking', icon: CheckSquare, label: 'Konu Takibi' },
-      { path: '/analytics', icon: BarChart3, label: 'Analiz Paneli' },
-      { path: '/ai-coach', icon: Brain, label: 'AI KOÇ' },
-      { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
-      { path: '/webhooks', icon: Webhook, label: 'Webhook Ayarlari' },
-      { path: '/written-exam', icon: FileCheck, label: 'Yazılı Takip' }
-    ];
-
-    const chunks: SideMenuItem[][] = [];
-    if (tags.includes('admin')) chunks.push(MENU_ADMIN);
-    if (tags.includes('coach')) chunks.push(MENU_COACH);
-    if (tags.includes('teacher')) chunks.push(MENU_TEACHER);
-
-    if (chunks.length === 0) return [];
-
-    let merged = mergeSideMenus(chunks);
-    if (tags.includes('coach') && tags.includes('teacher') && !tags.includes('admin')) {
-      const coachDash = merged.find((m) => m.path === '/coach-dashboard');
-      const teachPanel = merged.find((m) => m.path === '/teacher-panel');
-      if (coachDash && teachPanel) {
-        const rest = merged.filter(
-          (m) => m.path !== '/coach-dashboard' && m.path !== '/teacher-panel'
-        );
-        merged = [coachDash, teachPanel, ...rest];
-      }
-    }
-    return merged;
   };
 
-  const menuItems = getMenuItems();
+  const go = (path: string) => {
+    navigate(path);
+    afterNavigate();
+  };
+
+  const persistWide = (wide: boolean) => {
+    onDesktopWideChange(wide);
+    try {
+      localStorage.setItem(SIDEBAR_DESKTOP_WIDE_KEY, wide ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const renderRestLink = (item: FlatNavItem) => {
+    const active =
+      location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
+    return (
+      <SidebarNavLink
+        key={item.path}
+        label={item.label}
+        icon={item.icon}
+        active={active}
+        collapsed={railCollapsed}
+        onNavigate={() => go(item.path)}
+      />
+    );
+  };
 
   return (
     <aside
-      className={`fixed left-0 top-0 h-screen bg-gradient-to-b from-slate-900 to-slate-800 text-white z-50 transition-all duration-300 flex flex-col ${
-        isOpen ? 'w-56' : 'w-16'
-      }`}
+      className={cn(
+        'fixed left-0 top-0 z-50 flex min-h-0 h-screen max-h-[100dvh] flex-col overflow-hidden',
+        'border-r border-white/[0.06] bg-gradient-to-b from-slate-950 via-slate-950 to-slate-900 text-white',
+        'shadow-[4px_0_32px_-12px_rgba(0,0,0,0.55)] transition-[width,transform] duration-300 ease-out',
+        mobileOpen ? 'max-lg:translate-x-0' : 'max-lg:-translate-x-full',
+        'max-lg:w-[min(19rem,calc(100vw-1.25rem))]',
+        desktopWide ? 'lg:w-64' : 'lg:w-[72px]'
+      )}
     >
-      {/* Logo Area - Compact */}
-      <div className="h-14 flex items-center justify-center border-b border-slate-700 flex-shrink-0">
+      {/* Logo */}
+      <div
+        className={cn(
+          'flex h-14 flex-shrink-0 items-center border-b border-white/[0.06] px-3 transition-all duration-300',
+          railCollapsed && isLg && 'lg:justify-center lg:px-2'
+        )}
+      >
         {institution.logo ? (
-          <img src={institution.logo} alt={institution.name} className="w-8 h-8 rounded-lg object-contain bg-white p-0.5" />
+          <img
+            src={institution.logo}
+            alt=""
+            className="h-9 w-9 shrink-0 rounded-lg bg-white/95 object-contain p-0.5 ring-1 ring-white/10"
+          />
         ) : (
-          <div className="w-8 h-8 bg-gradient-to-br from-red-500 to-red-600 rounded-lg flex items-center justify-center">
-            <TrendingUp className="w-5 h-5 text-white" />
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-600 to-indigo-700 shadow-lg shadow-blue-900/30">
+            <TrendingUp className="h-5 w-5 text-white" strokeWidth={2} />
           </div>
         )}
-        {isOpen && (
-          <span className="ml-2 font-bold text-sm whitespace-nowrap overflow-hidden text-ellipsis">{institution.name}</span>
+        {(!railCollapsed || !isLg) && (
+          <div className="ml-2.5 min-w-0 flex-1 max-lg:block lg:block">
+            <p className="truncate text-sm font-semibold tracking-tight text-white">{institution.name}</p>
+            <p className="truncate text-[10px] font-medium uppercase tracking-wider text-slate-500">Smart Coach</p>
+          </div>
         )}
       </div>
 
-      {/* Menu Items - Scrollable, tek sütun hizalı */}
-      <nav className="flex-1 overflow-y-auto py-2 px-1">
-        {menuItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = location.pathname === item.path;
-
+      <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden px-2 py-3">
+        {/* Panel */}
+        {nav.panels.map((p) => {
+          const active =
+            location.pathname === p.path || location.pathname.startsWith(`${p.path}/`);
           return (
-            <button
-              key={item.path}
-              onClick={() => navigate(item.path)}
-              title={!isOpen ? item.label : undefined}
-              className={`w-full flex items-center gap-2 px-2 py-2.5 rounded-lg mb-0.5 transition-all duration-200 ${
-                isActive
-                  ? 'bg-red-500 text-white shadow-lg shadow-red-500/30'
-                  : 'text-slate-300 hover:bg-slate-700 hover:text-white'
-              }`}
-            >
-              <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-white' : ''}`} />
-              {isOpen && (
-                <span className="text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis">{item.label}</span>
-              )}
-            </button>
+            <SidebarNavLink
+              key={p.path}
+              label={p.label}
+              icon={p.icon}
+              active={active}
+              collapsed={railCollapsed}
+              onNavigate={() => go(p.path)}
+            />
           );
         })}
+
+        {hasLessonOrAcademic ? (
+          <>
+            <div className="my-2 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+            <SidebarNavGroup
+              id="lessons"
+              label="Ders & Görüşmeler"
+              icon={Video}
+              items={nav.lessons}
+              pathname={location.pathname}
+              collapsed={railCollapsed}
+              onNavigate={go}
+            />
+            <SidebarNavGroup
+              id="academic"
+              label="Akademik Takip"
+              icon={BarChart3}
+              items={nav.academic}
+              pathname={location.pathname}
+              collapsed={railCollapsed}
+              onNavigate={go}
+            />
+          </>
+        ) : null}
+
+        {nav.rest.length > 0 ? (
+          <>
+            <div className="my-2 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+            <div className="flex flex-col gap-0.5">{nav.rest.map(renderRestLink)}</div>
+          </>
+        ) : null}
       </nav>
+
+      {/* Desktop: geniş / dar */}
+      <div className="hidden flex-shrink-0 border-t border-white/[0.06] p-2 lg:block">
+        <button
+          type="button"
+          onClick={() => persistWide(!desktopWide)}
+          title={desktopWide ? 'Menüyü daralt' : 'Menüyü genişlet'}
+          className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-slate-400 transition-all duration-200 hover:bg-white/[0.06] hover:text-white"
+        >
+          {desktopWide ? (
+            <ChevronLeft className="h-5 w-5" strokeWidth={1.75} />
+          ) : (
+            <ChevronRight className="h-5 w-5" strokeWidth={1.75} />
+          )}
+        </button>
+      </div>
     </aside>
   );
 }
