@@ -22,7 +22,8 @@ import {
   Radio,
   MessageSquareText,
   Sparkles,
-  Video
+  Video,
+  FileText
 } from 'lucide-react';
 import type { UserRole } from '../../../types';
 
@@ -52,8 +53,8 @@ const ACADEMIC_PATHS = new Set([
 ]);
 
 /** Süper admin / admin: kurum, kullanıcı ve sistem yönetimi tek accordion altında */
-const ORG_SYSTEM_PATHS = new Set(['/super-admin', '/user-management', '/system-management']);
-const ORG_SYSTEM_ORDER = ['/super-admin', '/user-management', '/system-management'] as const;
+const ORG_SYSTEM_PATHS = new Set(['/super-admin', '/user-management', '/system-management', '/pdf-contract-hub']);
+const ORG_SYSTEM_ORDER = ['/super-admin', '/user-management', '/system-management', '/pdf-contract-hub'] as const;
 
 const LESSON_LABELS: Record<string, string> = {
   '/class-live-lessons': 'Canlı Grup Dersleri',
@@ -97,6 +98,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/subscription', icon: CreditCard, label: 'Abonelik / Paketler' },
       { path: '/topics', icon: BookOpen, label: 'Konu Havuzu' },
       { path: '/system-management', icon: Server, label: 'Sistem Yönetimi' },
+      { path: '/pdf-contract-hub', icon: FileText, label: 'PDF Şablon Merkezi' },
       { path: '/ai-coach', icon: Brain, label: 'AI KOÇ' },
       { path: '/settings', icon: Settings, label: 'Ayarlar' }
     ];
@@ -113,7 +115,8 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/class-schedule', icon: Calendar, label: 'Canlı derslerim' },
       { path: '/student-meetings', icon: Video, label: 'Görüşmelerim' },
       { path: '/student-reports', icon: BookMarked, label: 'Benim Raporlarım' },
-      { path: '/student-analytics', icon: BarChart3, label: 'Analizlerim' }
+      { path: '/student-analytics', icon: BarChart3, label: 'Analizlerim' },
+      { path: '/student-contracts', icon: FileText, label: 'Sözleşmelerim' }
     ];
   }
 
@@ -142,6 +145,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
     { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
     { path: '/system-management', icon: Server, label: 'Sistem Yönetimi' },
+    { path: '/pdf-contract-hub', icon: FileText, label: 'PDF Şablon Merkezi' },
     { path: '/settings', icon: Settings, label: 'Ayarlar' }
   ];
 
@@ -173,6 +177,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
     { path: '/webhooks', icon: Webhook, label: 'Webhook Ayarlari' },
     { path: '/written-exam', icon: FileCheck, label: 'Yazılı Takip' },
+    { path: '/pdf-contract-hub', icon: FileText, label: 'PDF Şablon Merkezi' },
     { path: '/settings', icon: Settings, label: 'Ayarlar' }
   ];
 

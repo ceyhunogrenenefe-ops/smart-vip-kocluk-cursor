@@ -43,6 +43,10 @@ import ClassLiveLessons from './pages/ClassLiveLessons';
 import TeacherPanel from './pages/TeacherPanel';
 import WeeklyPlannerPage from './pages/WeeklyPlannerPage';
 import AcademicCenter from './pages/AcademicCenter';
+import PdfContractHub from './pages/PdfContractHub';
+import SignContractPage from './pages/SignContractPage';
+import VerifyDocumentPage from './pages/VerifyDocumentPage';
+import StudentContractsPage from './pages/StudentContractsPage';
 import { rolesForProtectedRoute, userRoleTags } from './config/rolePermissions';
 
 // Yönlendirme bileşeni
@@ -365,6 +369,25 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/student-meetings')}>
                 <Layout>
                   <Meetings />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/sign-contract/:token" element={<SignContractPage />} />
+            <Route path="/verify-document" element={<VerifyDocumentPage />} />
+
+            <Route path="/pdf-contract-hub" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/pdf-contract-hub')}>
+                <Layout>
+                  <PdfContractHub />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/student-contracts" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/student-contracts')}>
+                <Layout>
+                  <StudentContractsPage />
                 </Layout>
               </ProtectedRoute>
             } />
