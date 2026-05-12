@@ -8,7 +8,11 @@ import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShe
 import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
 import { turkishFold } from '../lib/userBulkImport';
 import type { Student } from '../types';
-import { GripVertical, KeyRound, Pencil, PlayCircle, Trash2 } from 'lucide-react';
+import { GripVertical, KeyRound, Pencil, PlayCircle, Trash2, FileDown } from 'lucide-react';
+import {
+  WEEKDAY_SHORT_MON_FIRST,
+  downloadLiveWeekGridPdf
+} from '../lib/pdfLiveWeekGrid';
 
 type ClassRow = {
   id: string;
@@ -1103,7 +1107,7 @@ export default function ClassLiveLessons() {
 
       <WeeklyLiveGridShell
         title={isStudentView ? 'Bu haftanın canlı grup dersleri' : 'Haftalık grup ders takvimi'}
-        subtitle="Tarihli oturumlar ve haftalık şablon üzerinden tek ekranda planlayın."
+        subtitle="Sütunlar Pazartesi → Pazar (yerel hafta). Tarihli oturumlar ve haftalık şablon üzerinden tek ekranda planlayın."
         weekRangeLabel={weekRangeLabel}
         loading={calendarLoading}
         onPrevWeek={() => setCalendarWeekMondayIso((prev) => addDaysIso(prev, -7))}
@@ -1121,8 +1125,68 @@ export default function ClassLiveLessons() {
             </span>
           </>
         }
-        hint="Yeşil kartlar gerçek oturumdur (planlı: Katıl; tamamlanınca kayıt linki varsa Kaydı izle). Kesik çizgili kartlar şablondur."
+        hint="Yeşil kartlar gerçek oturumdur (planlı: Katıl; tamamlanınca kayıt linki varsa Kaydı izle). Kesik çizgili kartlar şablondur. PDF haftalık tablo ile veli/öğrenciye paylaşın."
       >
+        <div className="flex flex-wrap items-center justify-end gap-2 border-b border-slate-100 bg-slate-50/80 px-2 py-2 sm:px-3">
+          <button
+            type="button"
+            disabled={!selectedClassId}
+            onClick={() => {
+              if (!selectedClassId || weekColumnDates.length !== 7) return;
+              const columns = weekColumnDates.map((iso, i) => ({
+                iso,
+                headLine: WEEKDAY_SHORT_MON_FIRST[i],
+                subLine: formatDdMmYyyyDots(iso)
+              }));
+              const rows = Array.from({ length: 15 }, (_, idx) => {
+                const hour = 10 + idx;
+                const hourLabel = `${String(hour).padStart(2, '0')}:00`;
+                const cells = weekColumnDates.map((colIso) => {
+                  const sessionsHere = weekSessions.filter(
+                    (s) =>
+                      s.class_id === selectedClassId &&
+                      s.lesson_date === colIso &&
+                      Number(String(s.start_time).slice(0, 2)) === hour
+                  );
+                  const blockedSlotTeacherHours = new Set(sessionsHere.map((s) => `${s.teacher_id}|${hour}`));
+                  const templatesHere = classSlots.filter((s) => {
+                    if (s.day_of_week !== dowSlotFromIso(colIso)) return false;
+                    if (Number(String(s.start_time).slice(0, 2)) !== hour) return false;
+                    if (blockedSlotTeacherHours.has(`${s.teacher_id}|${hour}`)) return false;
+                    return true;
+                  });
+                  const parts: string[] = [];
+                  for (const s of sessionsHere) {
+                    const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
+                    parts.push(`[Oturum] ${s.subject} — ${teacher?.name || 'Öğretmen'} (${String(s.start_time).slice(0, 5)})`);
+                  }
+                  for (const t of templatesHere) {
+                    const teacher = teacherCandidates.find((tc) => tc.id === t.teacher_id);
+                    parts.push(`[Şablon] ${t.subject} — ${teacher?.name || 'Öğretmen'}`);
+                  }
+                  return parts.length ? parts.join('\n') : '—';
+                });
+                return { hourLabel, cells };
+              });
+              downloadLiveWeekGridPdf({
+                filename: `grup-canli-ders-takvim-${weekColumnDates[0]}_${weekColumnDates[6]}.pdf`,
+                title: `Haftalık grup ders tablosu — ${selectedClass?.name || 'Sınıf'}`,
+                extraLines: [
+                  weekRangeLabel,
+                  'Sütun sırası: Pazartesi → Pazar. [Oturum] gerçek tarihli ders, [Şablon] haftalık çerçevedir.'
+                ],
+                footerNote:
+                  'Bu PDF’yi veli ve öğrenciyle e-posta veya WhatsApp üzerinden paylaşabilirsiniz.',
+                columns,
+                rows
+              });
+            }}
+            className="inline-flex items-center gap-2 rounded-lg border border-emerald-600/50 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 shadow-sm hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileDown className="h-3.5 w-3.5" />
+            PDF haftalık tablo (veli/öğrenci)
+          </button>
+        </div>
         <div className="overflow-x-auto p-2 sm:p-3">
           <table className="w-full min-w-[920px] border-collapse text-xs">
             <thead>

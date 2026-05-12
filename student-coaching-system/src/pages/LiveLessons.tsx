@@ -9,6 +9,11 @@ import LiveLessonCard from '../components/liveLessons/LiveLessonCard';
 import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShell';
 import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
 import { Radio, Plus, Loader2, Filter, Clock, Pencil, Move, GripVertical, Trash2, FileDown } from 'lucide-react';
+import {
+  WEEKDAY_SHORT_MON_FIRST,
+  downloadLiveWeekGridPdf,
+  formatDdMmYyyyDots as formatDdMmYyyyDotsGrid
+} from '../lib/pdfLiveWeekGrid';
 
 function startOfWeek(d: Date): Date {
   const x = new Date(d);
@@ -344,8 +349,8 @@ export default function LiveLessons() {
       const k = l.date;
       if (bucket[k]) bucket[k].push(l);
     }
-    return days.map((d) => ({
-      label: d.toLocaleDateString('tr-TR', { weekday: 'short', day: 'numeric', month: 'short' }),
+    return days.map((d, i) => ({
+      shortDow: WEEKDAY_SHORT_MON_FIRST[i],
       key: key(d),
       items: (bucket[key(d)] || []).slice().sort((a, b) => a.start_time.localeCompare(b.start_time))
     }));
@@ -717,7 +722,52 @@ export default function LiveLessons() {
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700"
           >
             <FileDown className="w-4 h-4" />
-            PDF indir
+            PDF liste
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (weeklyLessonBuckets.length !== 7) return;
+              const columns = weeklyLessonBuckets.map((b, i) => ({
+                iso: b.key,
+                headLine: WEEKDAY_SHORT_MON_FIRST[i],
+                subLine: formatDdMmYyyyDotsGrid(b.key)
+              }));
+              const rows = Array.from({ length: 15 }, (_, idx) => {
+                const hour = 10 + idx;
+                const hourLabel = `${String(hour).padStart(2, '0')}:00`;
+                const cells = weeklyLessonBuckets.map((bucket) => {
+                  const items = bucket.items.filter(
+                    (x) => Number(String(x.start_time || '00:00').slice(0, 2)) === hour
+                  );
+                  if (items.length === 0) return '—';
+                  return items
+                    .map((l) => `${l.title} — ${studentName(l.student_id)} (${lessonTimeRange(l)})`)
+                    .join('\n');
+                });
+                return { hourLabel, cells };
+              });
+              const stu =
+                filterStudentId.trim() &&
+                studentsForFilter.find((s) => s.id === filterStudentId.trim());
+              downloadLiveWeekGridPdf({
+                filename: `canli-ozel-ders-takvim-${weeklyLessonBuckets[0].key}_${weeklyLessonBuckets[6].key}.pdf`,
+                title: 'Canlı özel ders — haftalık tablo (Pazartesi → Pazar)',
+                extraLines: [
+                  `Hafta: ${liveCalendarWeekRangeLabel}`,
+                  stu ? `Öğrenci filtresi: ${stu.name}` : 'Tüm yetkili öğrenciler (filtre yoksa)',
+                  'Sütun sırası her zaman Pazartesi ile başlar, Pazar ile biter.'
+                ],
+                footerNote:
+                  'Bu PDF’yi veli ve öğrenciyle e-posta veya WhatsApp üzerinden paylaşabilirsiniz.',
+                columns,
+                rows
+              });
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border-2 border-emerald-500/80 bg-white text-emerald-800 text-sm font-semibold hover:bg-emerald-50"
+          >
+            <FileDown className="w-4 h-4" />
+            PDF haftalık tablo
           </button>
         </div>
       )}
@@ -990,14 +1040,7 @@ export default function LiveLessons() {
                 </th>
                 {weeklyLessonBuckets.map((slot) => {
                   const isToday = slot.key === todayLocalIso();
-                  const [yy, mm, dd] = slot.key.split('-').map(Number);
-                  const headDate = new Date(yy, (mm || 1) - 1, dd || 1, 12, 0, 0, 0);
-                  const dow = headDate.toLocaleDateString('tr-TR', { weekday: 'short' });
-                  const dmy = headDate.toLocaleDateString('tr-TR', {
-                    day: '2-digit',
-                    month: '2-digit',
-                    year: 'numeric'
-                  });
+                  const dmy = formatDdMmYyyyDotsGrid(slot.key);
                   return (
                     <th
                       key={slot.key}
@@ -1007,8 +1050,8 @@ export default function LiveLessons() {
                           : 'border-t border-slate-100 bg-slate-50/90'
                       }`}
                     >
-                      <div className={`text-[11px] font-bold capitalize ${isToday ? 'text-amber-950' : 'text-slate-700'}`}>
-                        {dow}
+                      <div className={`text-[11px] font-bold ${isToday ? 'text-amber-950' : 'text-slate-700'}`}>
+                        {slot.shortDow}
                       </div>
                       <div
                         className={`mt-0.5 text-[10px] font-semibold tabular-nums ${isToday ? 'text-amber-900/85' : 'text-slate-500'}`}
