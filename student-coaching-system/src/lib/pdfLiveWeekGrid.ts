@@ -1,3 +1,4 @@
+import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 
 /** Haftalık takvim sütunları: her zaman Pazartesi → Pazar (0 = Pzt). */
@@ -99,6 +100,132 @@ export function downloadLiveWeekGridPdf(opts: {
     doc.setFontSize(7);
     doc.setTextColor(80, 80, 90);
     doc.text(footerNote, margin, Math.min(y, doc.internal.pageSize.getHeight() - margin));
+    doc.setTextColor(0, 0, 0);
+  }
+
+  doc.save(filename);
+}
+
+/**
+ * 1. sayfa: takvim tablosunun ekran görüntüsü (html2canvas).
+ * Sonraki sayfa(lar): metin ders listesi — veli/öğrenci paylaşımı için uygundur.
+ */
+export async function downloadCalendarPdfWithSnapshot(opts: {
+  calendarElement: HTMLElement;
+  filename: string;
+  titleLine: string;
+  subtitleLines?: string[];
+  listHeading: string;
+  lessonLines: string[];
+  footerNote?: string;
+}): Promise<void> {
+  const {
+    calendarElement,
+    filename,
+    titleLine,
+    subtitleLines = [],
+    listHeading,
+    lessonLines,
+    footerNote
+  } = opts;
+
+  if (typeof document !== 'undefined' && document.fonts?.ready) {
+    try {
+      await document.fonts.ready;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const canvas = await html2canvas(calendarElement, {
+    scale: Math.min(2, typeof window !== 'undefined' ? window.devicePixelRatio || 2 : 2),
+    useCORS: true,
+    allowTaint: false,
+    backgroundColor: '#ffffff',
+    logging: false,
+    width: calendarElement.scrollWidth,
+    height: calendarElement.scrollHeight,
+    windowWidth: calendarElement.scrollWidth,
+    windowHeight: calendarElement.scrollHeight,
+    onclone: (clonedDoc) => {
+      clonedDoc.querySelectorAll('.calendar-pdf-hide-ui').forEach((el) => {
+        (el as HTMLElement).style.setProperty('display', 'none', 'important');
+      });
+    }
+  });
+
+  const imgData = canvas.toDataURL('image/png', 0.92);
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 10;
+  let y = margin;
+
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.text(titleLine, margin, y);
+  y += 6;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(55, 55, 65);
+  for (const line of subtitleLines) {
+    doc.text(line, margin, y);
+    y += 4;
+  }
+  doc.setTextColor(0, 0, 0);
+  y += 2;
+
+  const availW = pageW - 2 * margin;
+  const availH = pageH - y - margin;
+  const cw = canvas.width;
+  const ch = canvas.height;
+  let imgWmm = availW;
+  let imgHmm = (ch / cw) * imgWmm;
+  if (imgHmm > availH) {
+    imgHmm = availH;
+    imgWmm = (cw / ch) * imgHmm;
+  }
+  doc.addImage(imgData, 'PNG', margin, y, imgWmm, imgHmm);
+
+  doc.addPage();
+  y = margin;
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.text(listHeading, margin, y);
+  y += 7;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  const textMaxW = pageW - 2 * margin;
+  for (const raw of lessonLines) {
+    const wrapped = doc.splitTextToSize(raw, textMaxW);
+    for (const line of wrapped) {
+      if (y > pageH - margin) {
+        doc.addPage();
+        y = margin;
+      }
+      doc.text(line, margin, y);
+      y += 4;
+    }
+    y += 0.5;
+  }
+
+  if (footerNote) {
+    if (y > pageH - margin - 10) {
+      doc.addPage();
+      y = margin;
+    } else {
+      y += 5;
+    }
+    doc.setFontSize(7.5);
+    doc.setTextColor(90, 90, 100);
+    for (const ln of doc.splitTextToSize(footerNote, textMaxW)) {
+      if (y > pageH - margin) {
+        doc.addPage();
+        y = margin;
+      }
+      doc.text(ln, margin, y);
+      y += 4;
+    }
     doc.setTextColor(0, 0, 0);
   }
 

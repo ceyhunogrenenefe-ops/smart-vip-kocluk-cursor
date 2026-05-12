@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { jsPDF } from 'jspdf';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
@@ -11,7 +11,7 @@ import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
 import { Radio, Plus, Loader2, Filter, Clock, Pencil, Move, GripVertical, Trash2, FileDown } from 'lucide-react';
 import {
   WEEKDAY_SHORT_MON_FIRST,
-  downloadLiveWeekGridPdf,
+  downloadCalendarPdfWithSnapshot,
   formatDdMmYyyyDots as formatDdMmYyyyDotsGrid
 } from '../lib/pdfLiveWeekGrid';
 
@@ -125,6 +125,8 @@ export default function LiveLessons() {
 
   const [editingLesson, setEditingLesson] = useState<TeacherLesson | null>(null);
   const [editBusy, setEditBusy] = useState(false);
+  const [pdfSnapBusy, setPdfSnapBusy] = useState(false);
+  const liveCalendarPdfRef = useRef<HTMLDivElement>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editDateStr, setEditDateStr] = useState('');
   const [editStart, setEditStart] = useState('09:00');
@@ -726,48 +728,67 @@ export default function LiveLessons() {
           </button>
           <button
             type="button"
+            disabled={pdfSnapBusy}
             onClick={() => {
-              if (weeklyLessonBuckets.length !== 7) return;
-              const columns = weeklyLessonBuckets.map((b, i) => ({
-                iso: b.key,
-                headLine: WEEKDAY_SHORT_MON_FIRST[i],
-                subLine: formatDdMmYyyyDotsGrid(b.key)
-              }));
-              const rows = Array.from({ length: 15 }, (_, idx) => {
-                const hour = 10 + idx;
-                const hourLabel = `${String(hour).padStart(2, '0')}:00`;
-                const cells = weeklyLessonBuckets.map((bucket) => {
-                  const items = bucket.items.filter(
-                    (x) => Number(String(x.start_time || '00:00').slice(0, 2)) === hour
-                  );
-                  if (items.length === 0) return '—';
-                  return items
-                    .map((l) => `${l.title} — ${studentName(l.student_id)} (${lessonTimeRange(l)})`)
-                    .join('\n');
-                });
-                return { hourLabel, cells };
-              });
-              const stu =
-                filterStudentId.trim() &&
-                studentsForFilter.find((s) => s.id === filterStudentId.trim());
-              downloadLiveWeekGridPdf({
-                filename: `canli-ozel-ders-takvim-${weeklyLessonBuckets[0].key}_${weeklyLessonBuckets[6].key}.pdf`,
-                title: 'Canlı özel ders — haftalık tablo (Pazartesi → Pazar)',
-                extraLines: [
-                  `Hafta: ${liveCalendarWeekRangeLabel}`,
-                  stu ? `Öğrenci filtresi: ${stu.name}` : 'Tüm yetkili öğrenciler (filtre yoksa)',
-                  'Sütun sırası her zaman Pazartesi ile başlar, Pazar ile biter.'
-                ],
-                footerNote:
-                  'Bu PDF’yi veli ve öğrenciyle e-posta veya WhatsApp üzerinden paylaşabilirsiniz.',
-                columns,
-                rows
-              });
+              void (async () => {
+                const el = liveCalendarPdfRef.current;
+                if (!el || weeklyLessonBuckets.length !== 7) return;
+                setPdfSnapBusy(true);
+                try {
+                  const weekIsoSet = new Set(weeklyLessonBuckets.map((b) => b.key));
+                  const staffMap = new Map(mergedStaff.map((u) => [u.id, u.name]));
+                  const lessonLines = [...lessons]
+                    .filter(
+                      (l) =>
+                        l.status !== 'cancelled' &&
+                        weekIsoSet.has(String(l.date || '').slice(0, 10))
+                    )
+                    .sort(
+                      (a, b) =>
+                        String(a.date).localeCompare(String(b.date)) ||
+                        a.start_time.localeCompare(b.start_time)
+                    )
+                    .map((l) => {
+                      const tn = staffMap.get(l.teacher_id) || l.teacher_id.slice(0, 8);
+                      const st =
+                        l.status === 'scheduled'
+                          ? 'Planlı'
+                          : l.status === 'completed'
+                            ? 'Tamamlandı'
+                            : l.status;
+                      return `${l.date} ${lessonTimeRange(l)} | ${studentName(l.student_id)} | ${l.title} | ${tn} | ${st}`;
+                    });
+                  const stu =
+                    filterStudentId.trim() &&
+                    studentsForFilter.find((s) => s.id === filterStudentId.trim());
+                  await downloadCalendarPdfWithSnapshot({
+                    calendarElement: el,
+                    filename: `canli-ozel-ders-takvim-${weeklyLessonBuckets[0].key}_${weeklyLessonBuckets[6].key}.pdf`,
+                    titleLine: 'Canlı özel ders — haftalık takvim',
+                    subtitleLines: [
+                      `Hafta: ${liveCalendarWeekRangeLabel}`,
+                      stu ? `Öğrenci filtresi: ${stu.name}` : 'Tüm yetkili öğrenciler (filtreye göre)',
+                      '1. sayfa: ekrandaki takvim görüntüsü. Sonrası: bu haftanın ders satırları.'
+                    ],
+                    listHeading: 'Ders listesi (bu hafta, metin)',
+                    lessonLines:
+                      lessonLines.length > 0
+                        ? lessonLines
+                        : ['Bu hafta görünen aralıkta planlı ders yok (takvim boş olabilir).'],
+                    footerNote:
+                      'Veli ve öğrenciyle paylaşabilirsiniz. Bağlantılar için uygulamadaki «Katıl» düğmesini kullanın.'
+                  });
+                } catch (e) {
+                  window.alert(e instanceof Error ? e.message : 'PDF oluşturulamadı');
+                } finally {
+                  setPdfSnapBusy(false);
+                }
+              })();
             }}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border-2 border-emerald-500/80 bg-white text-emerald-800 text-sm font-semibold hover:bg-emerald-50"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border-2 border-emerald-500/80 bg-white text-emerald-800 text-sm font-semibold hover:bg-emerald-50 disabled:cursor-wait disabled:opacity-70"
           >
-            <FileDown className="w-4 h-4" />
-            PDF haftalık tablo
+            {pdfSnapBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
+            PDF görüntü + ders listesi
           </button>
         </div>
       )}
@@ -1029,9 +1050,9 @@ export default function LiveLessons() {
             </span>
           </>
         }
-        hint="Kartlardan Katıl, Düzenle veya Sil; zaman ve bağlantı düzenlemesi için «Düzenle» ile formu açın."
+        hint="Kartlardan Katıl, Düzenle veya Sil; zaman ve bağlantı düzenlemesi için «Düzenle» ile formu açın. «PDF görüntü + ders listesi» önce takvim görüntüsü, sonraki sayfada bu haftanın derslerini metin yazar."
       >
-        <div className="overflow-x-auto p-2 sm:p-3">
+        <div ref={liveCalendarPdfRef} className="overflow-x-auto p-2 sm:p-3">
           <table className="w-full min-w-[900px] border-collapse text-xs">
             <thead>
               <tr className="border-b border-slate-200 bg-white">
@@ -1112,7 +1133,7 @@ export default function LiveLessons() {
                                       <p className="text-[10px] tabular-nums text-slate-500">{lessonTimeRange(lesson)}</p>
                                     </div>
                                   </div>
-                                  <div className="mt-2 flex flex-wrap gap-1">
+                                  <div className="mt-2 flex flex-wrap gap-1 calendar-pdf-hide-ui">
                                     {canJoin ? (
                                       <button
                                         type="button"

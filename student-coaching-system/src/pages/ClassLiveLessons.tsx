@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { apiFetch } from '../lib/session';
@@ -8,11 +8,8 @@ import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShe
 import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
 import { turkishFold } from '../lib/userBulkImport';
 import type { Student } from '../types';
-import { GripVertical, KeyRound, Pencil, PlayCircle, Trash2, FileDown } from 'lucide-react';
-import {
-  WEEKDAY_SHORT_MON_FIRST,
-  downloadLiveWeekGridPdf
-} from '../lib/pdfLiveWeekGrid';
+import { GripVertical, KeyRound, Loader2, Pencil, PlayCircle, Trash2, FileDown } from 'lucide-react';
+import { downloadCalendarPdfWithSnapshot } from '../lib/pdfLiveWeekGrid';
 
 type ClassRow = {
   id: string;
@@ -201,6 +198,8 @@ export default function ClassLiveLessons() {
   const [calendarWeekMondayIso, setCalendarWeekMondayIso] = useState(() => mondayIsoContaining());
   const [weekSessions, setWeekSessions] = useState<SessionRow[]>([]);
   const [calendarLoading, setCalendarLoading] = useState(false);
+  const classCalendarPdfRef = useRef<HTMLDivElement>(null);
+  const [classPdfSnapBusy, setClassPdfSnapBusy] = useState(false);
 
   const canMarkAttendance = canManageSlots && !isStudentView && Boolean(selectedClassId);
 
@@ -1125,69 +1124,79 @@ export default function ClassLiveLessons() {
             </span>
           </>
         }
-        hint="Yeşil kartlar gerçek oturumdur (planlı: Katıl; tamamlanınca kayıt linki varsa Kaydı izle). Kesik çizgili kartlar şablondur. PDF haftalık tablo ile veli/öğrenciye paylaşın."
+        hint="Yeşil kartlar gerçek oturumdur (planlı: Katıl; tamamlanınca kayıt linki varsa Kaydı izle). Kesik çizgili kartlar şablondur. «PDF görüntü + ders listesi» önce takvim görüntüsü, sonra metin listesi üretir."
       >
         <div className="flex flex-wrap items-center justify-end gap-2 border-b border-slate-100 bg-slate-50/80 px-2 py-2 sm:px-3">
           <button
             type="button"
-            disabled={!selectedClassId}
+            disabled={!selectedClassId || classPdfSnapBusy}
             onClick={() => {
-              if (!selectedClassId || weekColumnDates.length !== 7) return;
-              const columns = weekColumnDates.map((iso, i) => ({
-                iso,
-                headLine: WEEKDAY_SHORT_MON_FIRST[i],
-                subLine: formatDdMmYyyyDots(iso)
-              }));
-              const rows = Array.from({ length: 15 }, (_, idx) => {
-                const hour = 10 + idx;
-                const hourLabel = `${String(hour).padStart(2, '0')}:00`;
-                const cells = weekColumnDates.map((colIso) => {
-                  const sessionsHere = weekSessions.filter(
-                    (s) =>
-                      s.class_id === selectedClassId &&
-                      s.lesson_date === colIso &&
-                      Number(String(s.start_time).slice(0, 2)) === hour
-                  );
-                  const blockedSlotTeacherHours = new Set(sessionsHere.map((s) => `${s.teacher_id}|${hour}`));
-                  const templatesHere = classSlots.filter((s) => {
-                    if (s.day_of_week !== dowSlotFromIso(colIso)) return false;
-                    if (Number(String(s.start_time).slice(0, 2)) !== hour) return false;
-                    if (blockedSlotTeacherHours.has(`${s.teacher_id}|${hour}`)) return false;
-                    return true;
+              void (async () => {
+                const el = classCalendarPdfRef.current;
+                if (!selectedClassId || !el || weekColumnDates.length !== 7) return;
+                setClassPdfSnapBusy(true);
+                try {
+                  const dateSet = new Set(weekColumnDates);
+                  const sessionLines = weekSessions
+                    .filter((s) => s.class_id === selectedClassId && dateSet.has(s.lesson_date))
+                    .sort(
+                      (a, b) =>
+                        a.lesson_date.localeCompare(b.lesson_date) ||
+                        String(a.start_time).localeCompare(String(b.start_time))
+                    )
+                    .map((s) => {
+                      const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
+                      return `${s.lesson_date} ${String(s.start_time).slice(0, 5)}–${String(s.end_time).slice(0, 5)} | ${s.subject} | ${teacher?.name || s.teacher_id} | ${s.status}`;
+                    });
+                  const templateLines = classSlots
+                    .filter((s) => s.class_id === selectedClassId)
+                    .sort(
+                      (a, b) =>
+                        a.day_of_week - b.day_of_week ||
+                        String(a.start_time).localeCompare(String(b.start_time))
+                    )
+                    .map((s) => {
+                      const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
+                      return `[Şablon] ${DAY_LABELS[s.day_of_week - 1]} ${String(s.start_time).slice(0, 5)} | ${s.subject} | ${teacher?.name || s.teacher_id}`;
+                    });
+                  const lessonLines: string[] = [
+                    `— Bu haftanın tarihli oturumları (${sessionLines.length}) —`,
+                    ...(sessionLines.length ? sessionLines : ['(Bu hafta için oturum yok)']),
+                    '',
+                    `— Haftalık şablon satırları (${templateLines.length}) —`,
+                    ...(templateLines.length ? templateLines : ['(Şablon yok)'])
+                  ];
+                  await downloadCalendarPdfWithSnapshot({
+                    calendarElement: el,
+                    filename: `grup-canli-ders-takvim-${weekColumnDates[0]}_${weekColumnDates[6]}.pdf`,
+                    titleLine: `Grup canlı ders takvimi — ${selectedClass?.name || 'Sınıf'}`,
+                    subtitleLines: [
+                      weekRangeLabel,
+                      '1. sayfa: ekrandaki takvim görüntüsü. Sonrası: oturum ve şablon listesi (metin).'
+                    ],
+                    listHeading: 'Ders / oturum listesi (metin)',
+                    lessonLines,
+                    footerNote:
+                      'Veli ve öğrenciyle paylaşabilirsiniz. Canlı derse katılım için uygulamadaki bağlantıları kullanın.'
                   });
-                  const parts: string[] = [];
-                  for (const s of sessionsHere) {
-                    const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
-                    parts.push(`[Oturum] ${s.subject} — ${teacher?.name || 'Öğretmen'} (${String(s.start_time).slice(0, 5)})`);
-                  }
-                  for (const t of templatesHere) {
-                    const teacher = teacherCandidates.find((tc) => tc.id === t.teacher_id);
-                    parts.push(`[Şablon] ${t.subject} — ${teacher?.name || 'Öğretmen'}`);
-                  }
-                  return parts.length ? parts.join('\n') : '—';
-                });
-                return { hourLabel, cells };
-              });
-              downloadLiveWeekGridPdf({
-                filename: `grup-canli-ders-takvim-${weekColumnDates[0]}_${weekColumnDates[6]}.pdf`,
-                title: `Haftalık grup ders tablosu — ${selectedClass?.name || 'Sınıf'}`,
-                extraLines: [
-                  weekRangeLabel,
-                  'Sütun sırası: Pazartesi → Pazar. [Oturum] gerçek tarihli ders, [Şablon] haftalık çerçevedir.'
-                ],
-                footerNote:
-                  'Bu PDF’yi veli ve öğrenciyle e-posta veya WhatsApp üzerinden paylaşabilirsiniz.',
-                columns,
-                rows
-              });
+                } catch (e) {
+                  window.alert(e instanceof Error ? e.message : 'PDF oluşturulamadı');
+                } finally {
+                  setClassPdfSnapBusy(false);
+                }
+              })();
             }}
-            className="inline-flex items-center gap-2 rounded-lg border border-emerald-600/50 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 shadow-sm hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-lg border border-emerald-600/50 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 shadow-sm hover:bg-emerald-50 disabled:cursor-wait disabled:opacity-50"
           >
-            <FileDown className="h-3.5 w-3.5" />
-            PDF haftalık tablo (veli/öğrenci)
+            {classPdfSnapBusy ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <FileDown className="h-3.5 w-3.5" />
+            )}
+            PDF görüntü + ders listesi
           </button>
         </div>
-        <div className="overflow-x-auto p-2 sm:p-3">
+        <div ref={classCalendarPdfRef} className="overflow-x-auto p-2 sm:p-3">
           <table className="w-full min-w-[920px] border-collapse text-xs">
             <thead>
               <tr className="border-b border-slate-200 bg-white">
@@ -1282,7 +1291,7 @@ export default function ClassLiveLessons() {
                                     <p className="text-[10px] font-medium capitalize text-slate-400">{s.status}</p>
                                   </div>
                                 </div>
-                                <div className="mt-2 flex flex-wrap gap-1">
+                                <div className="mt-2 flex flex-wrap gap-1 calendar-pdf-hide-ui">
                                   {canJoin ? (
                                     <button
                                       type="button"
@@ -1349,7 +1358,7 @@ export default function ClassLiveLessons() {
                                 <p className="text-[11px] text-slate-600">
                                   {teacher?.name || s.teacher_id} · {String(s.start_time).slice(0, 5)}
                                 </p>
-                                <div className="mt-1.5 flex flex-wrap gap-1">
+                                <div className="mt-1.5 flex flex-wrap gap-1 calendar-pdf-hide-ui">
                                   <button
                                     type="button"
                                     onClick={() => window.open(s.meeting_link, '_blank', 'noopener,noreferrer')}
