@@ -601,6 +601,7 @@ export default function UserManagement() {
           const cid = selectedUser.id.slice(COACH_PROFILE_ONLY_PREFIX.length);
           const coachRow = coaches.find((c) => c.id === cid);
           const instId =
+            (currentUser?.role === 'super_admin' && String(formData.studentInstitutionId || '').trim()) ||
             coachRow?.institutionId ||
             activeInstitutionId ||
             institution?.id ||
@@ -665,6 +666,10 @@ export default function UserManagement() {
         if (staffRoles) {
           patch.roles = staffRoles.roles;
         }
+        if (currentUser?.role === 'super_admin') {
+          const v = String(formData.studentInstitutionId || '').trim();
+          patch.institution_id = v.length ? v : null;
+        }
         if (formData.password.trim().length >= 6) patch.password = formData.password;
         let result: { success: boolean; message: string } = { success: false, message: 'Güncellenemedi.' };
         if (getAuthToken() && isSupabaseReady) {
@@ -721,6 +726,21 @@ export default function UserManagement() {
                 ' Öğrenci kartı güncellenemedi: kullanıcıyla eşleşen öğrenci kaydı bulunamadı (e-posta veya platform bağlantısı).';
             }
           }
+          if (currentUser?.role === 'super_admin') {
+            const instV = String(formData.studentInstitutionId || '').trim() || undefined;
+            const emLower = formData.email.toLowerCase().trim();
+            const ch = coaches.find((c) => c.email.toLowerCase().trim() === emLower);
+            if (ch && (tags.includes('coach') || (staffRoles?.roles || []).includes('coach'))) {
+              try {
+                await updateCoach(ch.id, { institutionId: instV });
+              } catch (ce) {
+                studentCardNote +=
+                  (studentCardNote ? ' ' : '') +
+                  'Koç kurumu güncellenemedi: ' +
+                  (ce instanceof Error ? ce.message : 'bilinmeyen hata');
+              }
+            }
+          }
         }
         setMessage({
           type:
@@ -745,6 +765,8 @@ export default function UserManagement() {
                   subjects: [],
                   studentIds: [],
                   institutionId:
+                    (currentUser?.role === 'super_admin' &&
+                      String(formData.studentInstitutionId || '').trim()) ||
                     selectedUser.institutionId ||
                     activeInstitutionId ||
                     institution?.id ||
@@ -819,12 +841,20 @@ export default function UserManagement() {
               })()
             : null;
 
+        const superAdminChosenInst =
+          currentUser?.role === 'super_admin' ? String(formData.studentInstitutionId || '').trim() : '';
+
         const resolvedStudentInstitution =
           formData.role === 'student' &&
           (currentUser?.role === 'super_admin' || currentUser?.role === 'admin') &&
           String(formData.studentInstitutionId || '').trim()
             ? String(formData.studentInstitutionId).trim()
             : (resolvedInstitution ?? null);
+
+        const institutionIdForNewUser =
+          formData.role === 'student'
+            ? (resolvedStudentInstitution ?? null)
+            : superAdminChosenInst || (resolvedInstitution ?? null);
 
         const studentInstForAdd =
           (resolvedStudentInstitution ?? null) ||
@@ -842,9 +872,7 @@ export default function UserManagement() {
                 role: (staffRolesNew?.primary || formData.role) as UserRow['role'],
                 roles: staffRolesNew?.roles ?? undefined,
                 password_hash: pwdPlain,
-                institution_id: (formData.role === 'student'
-                  ? resolvedStudentInstitution
-                  : (resolvedInstitution ?? null)) as string | null,
+                institution_id: institutionIdForNewUser as string | null,
                 is_active: formData.isActive !== false,
                 package: formData.package,
                 start_date: new Date(formData.startDate).toISOString(),
@@ -865,7 +893,8 @@ export default function UserManagement() {
             setMessage({ type: 'success', text: `${label} başarıyla oluşturuldu!` });
             await refreshUsers();
 
-            const instId = resolvedInstitution || instFallback || currentUser?.institutionId;
+            const instId =
+              institutionIdForNewUser || resolvedInstitution || instFallback || currentUser?.institutionId;
             const newUserId = row.id;
             try {
               if (formData.role === 'student') {
@@ -933,8 +962,8 @@ export default function UserManagement() {
             startDate: new Date(formData.startDate).toISOString(),
             endDate: formData.endDate ? new Date(formData.endDate).toISOString() : undefined,
             isActive: formData.isActive,
-            institutionId: resolvedInstitution || undefined,
-            institution_id: resolvedInstitution || undefined
+            institutionId: institutionIdForNewUser || resolvedInstitution || undefined,
+            institution_id: institutionIdForNewUser || resolvedInstitution || undefined
           };
 
           if (currentUser?.role === 'super_admin' && formData.role === 'admin') {
@@ -951,7 +980,8 @@ export default function UserManagement() {
             setMessage({ type: 'success', text: `${label} başarıyla oluşturuldu!` });
             await refreshUsers();
 
-            const instId = resolvedInstitution || instFallback || currentUser?.institutionId;
+            const instId =
+              institutionIdForNewUser || resolvedInstitution || instFallback || currentUser?.institutionId;
             const newUserId = result.userId || `user-${Date.now()}`;
             try {
               if (formData.role === 'student') {
@@ -2130,6 +2160,32 @@ export default function UserManagement() {
                   ))}
                 </select>
               </div>
+
+              {currentUser?.role === 'super_admin' &&
+                (modalMode === 'add' || modalMode === 'edit') &&
+                formData.role !== 'student' && (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50/90 p-4 space-y-2">
+                    <label className="block text-sm font-medium text-gray-700">Kullanıcının kurumu</label>
+                    <select
+                      value={formData.studentInstitutionId}
+                      onChange={(e) =>
+                        setFormData({ ...formData, studentInstitutionId: e.target.value })
+                      }
+                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                    >
+                      <option value="">— Kurumsuz</option>
+                      {institutions.map((i) => (
+                        <option key={i.id} value={i.id}>
+                          {i.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-500">
+                      Bu seçim kullanıcı kaydındaki kurum alanını günceller. Koç rolünde eşleşen koç kartının kurumu da
+                      buna göre ayarlanır.
+                    </p>
+                  </div>
+                )}
 
               {(currentUser?.role === 'admin' || currentUser?.role === 'super_admin') &&
                 (formData.role === 'teacher' || formData.role === 'coach') && (
