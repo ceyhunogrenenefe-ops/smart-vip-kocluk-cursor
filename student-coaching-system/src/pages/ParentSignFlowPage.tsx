@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useApp } from '../context/AppContext';
 import {
   createParentSignClassPreset,
   createParentSignContract,
@@ -73,6 +74,7 @@ function validDersRows(rows: DersSatiri[]): DersSatiri[] {
 
 export default function ParentSignFlowPage() {
   const { effectiveUser } = useAuth();
+  const { activeInstitutionId, institution } = useApp();
   const isSuper = effectiveUser?.role === 'super_admin';
   const [rows, setRows] = useState<ParentSignContractRow[]>([]);
   const [presets, setPresets] = useState<ParentSignClassPresetRow[]>([]);
@@ -84,9 +86,21 @@ export default function ParentSignFlowPage() {
   const [institutionOptions, setInstitutionOptions] = useState<InstitutionPickRow[]>([]);
   const [loadingInstitutions, setLoadingInstitutions] = useState(false);
   const effectiveInstitutionId = useMemo(() => {
-    if (isSuper) return institutionId.trim();
-    return String(effectiveUser?.institution_id || '').trim();
-  }, [isSuper, institutionId, effectiveUser?.institution_id]);
+    if (isSuper) {
+      const fromPicker = institutionId.trim();
+      if (fromPicker) return fromPicker;
+      return String(activeInstitutionId || '').trim();
+    }
+    return String(activeInstitutionId || effectiveUser?.institution_id || '').trim();
+  }, [isSuper, institutionId, activeInstitutionId, effectiveUser?.institution_id]);
+
+  const headerKurumAdi = useMemo(() => {
+    if (isSuper && institutionId.trim()) {
+      const row = institutionOptions.find((o) => o.id === institutionId.trim());
+      if (row?.name) return row.name;
+    }
+    return institution?.name?.trim() || '';
+  }, [isSuper, institutionId, institutionOptions, institution?.name]);
 
   const [ogrenciAd, setOgrenciAd] = useState('');
   const [ogrenciSoyad, setOgrenciSoyad] = useState('');
@@ -215,6 +229,14 @@ export default function ParentSignFlowPage() {
     };
   }, [isSuper]);
 
+  /** Süper yönetici: üst çubuktaki aktif kurum, sayfadaki kurum seçimi boşken otomatik dolar */
+  useEffect(() => {
+    if (!isSuper || !activeInstitutionId) return;
+    if (institutionId.trim()) return;
+    if (!institutionOptions.some((o) => o.id === activeInstitutionId)) return;
+    setInstitutionId(activeInstitutionId);
+  }, [isSuper, activeInstitutionId, institutionId, institutionOptions]);
+
   const applyPresetToForm = (p: ParentSignClassPresetRow) => {
     setSinif(p.sinif);
     setProgramSource('list');
@@ -242,6 +264,14 @@ export default function ParentSignFlowPage() {
 
   const submit = async () => {
     setMsg(null);
+    if (!effectiveInstitutionId) {
+      setMsg(
+        isSuper
+          ? 'Kurum seçin: Ayarlar’daki aktif kurumu değiştirin veya aşağıdan kurum seçin.'
+          : 'Aktif kurum bulunamadı. Ayarlar’dan kurum seçin veya hesabınıza kurum atanmasını isteyin.'
+      );
+      return;
+    }
     const program_adi = resolvedProgramAdi();
     if (!program_adi) {
       setMsg('Program adı seçin veya yazın.');
@@ -271,7 +301,7 @@ export default function ParentSignFlowPage() {
         ...(selectedPresetId.trim() ? { preset_id: selectedPresetId.trim() } : {}),
         ...(fillPick.startsWith('s:') ? { student_id: fillPick.slice(2) } : {}),
         ...(fillPick.startsWith('u:') ? { ogrenci_user_id: fillPick.slice(2) } : {}),
-        ...(isSuper && institutionId.trim() ? { institution_id: institutionId.trim() } : {})
+        institution_id: effectiveInstitutionId
       };
       const created = await createParentSignContract(body);
       const url = created.sign_url || '';
@@ -286,7 +316,11 @@ export default function ParentSignFlowPage() {
   const savePreset = async () => {
     setMsg(null);
     if (!effectiveInstitutionId) {
-      setMsg(isSuper ? 'Şablon kaydetmek için üstte kurum seçin.' : 'Kurum bilgisi eksik.');
+      setMsg(
+        isSuper
+          ? 'Şablon kaydetmek için kurum gerekli: Ayarlar’dan aktif kurum seçin veya üstteki kurum listesinden seçin.'
+          : 'Kurum bilgisi eksik. Ayarlar’dan aktif kurum seçin.'
+      );
       return;
     }
     const sinifT = presetSinif.trim();
@@ -315,7 +349,7 @@ export default function ParentSignFlowPage() {
       } else {
         await createParentSignClassPreset({
           ...base,
-          ...(isSuper ? { institution_id: effectiveInstitutionId } : {})
+          ...(effectiveInstitutionId ? { institution_id: effectiveInstitutionId } : {})
         });
         setMsg('Şablon eklendi.');
       }
@@ -385,7 +419,9 @@ export default function ParentSignFlowPage() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/50 dark:from-slate-950 dark:via-slate-900 pb-16">
       <div className="border-b border-slate-200 bg-white/90 dark:bg-slate-900/90 backdrop-blur">
         <div className="max-w-4xl mx-auto px-4 py-6">
-          <p className="text-xs font-bold uppercase tracking-widest text-red-600">Smart Koçluk</p>
+          <p className="text-xs font-bold uppercase tracking-widest text-red-600">
+            {headerKurumAdi || 'Kurum'}
+          </p>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2 mt-1">
             <FileSignature className="w-8 h-8 text-blue-700" />
             Veli onayı & e-imza
@@ -399,8 +435,9 @@ export default function ParentSignFlowPage() {
             doldurma yapılabilir ve sözleşme satırında saklanır.
           </p>
           <p className="text-xs text-slate-500 dark:text-slate-500 mt-2 max-w-2xl border-l-2 border-blue-200 pl-3">
-            <strong>Kurum</strong> seçimi yalnızca süper yönetici için görünür; liste veritabanındaki kayıtlardan gelir.
-            Koç / admin kullanıcılarında kurum hesaba zaten bağlıdır, ek seçim gerekmez.
+            <strong>Kurum</strong> süper yöneticide bu sayfadaki liste veya <strong>Ayarlar → aktif kurum</strong> ile
+            belirlenir; koç ve yöneticide üst çubuktaki <strong>aktif kurum</strong> kullanılır. Şablonlar ve yeni veli
+            kaydı seçilen kuruma yazılır (mevcut şablon satırları değişmez).
           </p>
         </div>
       </div>
@@ -414,9 +451,10 @@ export default function ParentSignFlowPage() {
 
         {isSuper ? (
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-            <label className="text-sm font-semibold text-slate-800 dark:text-slate-100">Kurum</label>
+            <label className="text-sm font-semibold text-slate-800 dark:text-slate-100">Kurum (süper yönetici)</label>
             <p className="text-xs text-slate-500 mt-0.5 mb-2">
-              Veli kayıtları ve sözleşme şablonları seçtiğiniz kuruma yazılır.
+              Veli kayıtları ve şablonlar bu seçime veya Ayarlar’daki aktif kuruma göre yüklenir. Boş bırakırsanız aktif
+              kurum kullanılır.
             </p>
             {loadingInstitutions ? (
               <Loader2 className="w-5 h-5 animate-spin text-blue-600 mt-2" />

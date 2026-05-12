@@ -22,6 +22,28 @@ function pickFirstNonEmpty(...vals) {
   return '';
 }
 
+/** Yazma: gövdedeki institution_id öncelikli; admin/koçta JWT kurumu veya erişilebilir kurum. */
+function resolveWriteInstitutionId(actor, bodyInstitutionId) {
+  const role = String(actor.role || '');
+  const bodyId = String(bodyInstitutionId || '').trim();
+  const actorId = String(actor.institution_id || '').trim();
+  if (role === 'super_admin') {
+    return bodyId || actorId;
+  }
+  if (bodyId && hasInstitutionAccess(actor, bodyId)) return bodyId;
+  return actorId;
+}
+
+/** Okuma (query): admin/koç üst çubuktan gelen institution_id ile şablon/öğrenci listesi. */
+function resolveReadInstitutionId(actor, queryInstitutionId) {
+  const role = String(actor.role || '');
+  const q = String(queryInstitutionId || '').trim();
+  const actorId = String(actor.institution_id || '').trim();
+  if (role === 'super_admin') return q;
+  if (q && hasInstitutionAccess(actor, q)) return q;
+  return actorId;
+}
+
 function userRowIsStudentLike(row) {
   if (!row) return false;
   const r = String(row.role || '')
@@ -93,18 +115,24 @@ export default async function handler(req, res) {
     try {
       const { data: row, error } = await supabaseAdmin
         .from('parent_sign_contracts')
-        .select('id,merged_html,contract_number,status,signed_at')
+        .select('id,merged_html,contract_number,status,signed_at,institution_id')
         .eq('signing_token', signingToken)
         .maybeSingle();
       if (error) throw error;
       if (!row) return res.status(404).json({ error: 'not_found' });
+      let institution_name = '';
+      if (row.institution_id) {
+        const { data: inst } = await supabaseAdmin.from('institutions').select('name').eq('id', row.institution_id).maybeSingle();
+        institution_name = inst?.name || '';
+      }
       return res.status(200).json({
         data: {
           document_id: row.id,
           merged_html: row.merged_html,
           contract_number: row.contract_number,
           already_signed: row.status === 'signed',
-          signed_at: row.signed_at
+          signed_at: row.signed_at,
+          institution_name
         }
       });
     } catch (e) {
@@ -170,8 +198,7 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       if (String(req.query.fill_students || '') === '1') {
-        let instId =
-          role === 'super_admin' ? String(req.query.institution_id || '').trim() : String(actor.institution_id || '').trim();
+        let instId = resolveReadInstitutionId(actor, req.query.institution_id);
         if (!instId) {
           if (role === 'super_admin') return res.status(400).json({ error: 'institution_id_query_required' });
           return res.status(400).json({ error: 'institution_required' });
@@ -248,8 +275,7 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST') {
       const body = parseBody(req);
-      const institutionId =
-        role === 'super_admin' ? String(body.institution_id || '').trim() : String(actor.institution_id || '').trim();
+      const institutionId = resolveWriteInstitutionId(actor, body.institution_id);
       if (!institutionId) return res.status(400).json({ error: 'institution_required' });
       if (role === 'admin' || role === 'coach') {
         if (!hasInstitutionAccess(actor, institutionId)) return res.status(403).json({ error: 'forbidden' });

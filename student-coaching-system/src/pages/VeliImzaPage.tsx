@@ -15,6 +15,7 @@ export default function VeliImzaPage() {
   const [kvkk, setKvkk] = useState(false);
   const [soz, setSoz] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [institutionName, setInstitutionName] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -30,6 +31,7 @@ export default function VeliImzaPage() {
         setHtml(d.merged_html);
         setContractNo(d.contract_number);
         setSigned(d.already_signed);
+        setInstitutionName(String(d.institution_name || '').trim());
       } catch (e) {
         setErr(e instanceof Error ? e.message : 'Yüklenemedi');
       } finally {
@@ -131,7 +133,9 @@ export default function VeliImzaPage() {
         <div className="flex items-center gap-2 mb-6">
           <FileText className="w-8 h-8 text-red-400" />
           <div>
-            <p className="text-xs uppercase tracking-widest text-blue-300">Smart Koçluk</p>
+            <p className="text-xs uppercase tracking-widest text-blue-300">
+              {institutionName || 'Kurum'}
+            </p>
             <h1 className="text-xl font-bold leading-tight">Veli onayı ve e-imza</h1>
             {contractNo ? <p className="text-sm text-slate-300 font-mono mt-1">{contractNo}</p> : null}
           </div>

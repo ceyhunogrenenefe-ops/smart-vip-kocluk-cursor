@@ -267,7 +267,16 @@ export async function fetchVeliImzaPayload(token: string) {
   const res = await fetch(`/api/parent-sign-contracts?signing_token=${encodeURIComponent(token)}`);
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((j as { error?: string }).error || `API ${res.status}`);
-  return (j as { data: { document_id: string; merged_html: string; contract_number: string; already_signed: boolean; signed_at?: string | null } }).data;
+  return (j as {
+    data: {
+      document_id: string;
+      merged_html: string;
+      contract_number: string;
+      already_signed: boolean;
+      signed_at?: string | null;
+      institution_name?: string;
+    };
+  }).data;
 }
 
 export async function submitVeliImza(payload: {

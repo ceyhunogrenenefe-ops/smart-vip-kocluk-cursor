@@ -16,6 +16,24 @@ function parseBody(req) {
   return {};
 }
 
+function resolveWriteInstitutionId(actor, bodyInstitutionId) {
+  const role = String(actor.role || '');
+  const bodyId = String(bodyInstitutionId || '').trim();
+  const actorId = String(actor.institution_id || '').trim();
+  if (role === 'super_admin') return bodyId || actorId;
+  if (bodyId && hasInstitutionAccess(actor, bodyId)) return bodyId;
+  return actorId;
+}
+
+function resolveReadInstitutionId(actor, queryInstitutionId) {
+  const role = String(actor.role || '');
+  const q = String(queryInstitutionId || '').trim();
+  const actorId = String(actor.institution_id || '').trim();
+  if (role === 'super_admin') return q;
+  if (q && hasInstitutionAccess(actor, q)) return q;
+  return actorId;
+}
+
 function clampNum(n, min, max, fallback) {
   const v = Number(n);
   if (!Number.isFinite(v)) return fallback;
@@ -36,8 +54,7 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === 'GET') {
-      let institutionId =
-        role === 'super_admin' ? String(req.query.institution_id || '').trim() : String(actor.institution_id || '').trim();
+      const institutionId = resolveReadInstitutionId(actor, req.query.institution_id);
       if (!institutionId) {
         if (role === 'super_admin') return res.status(400).json({ error: 'institution_id_query_required' });
         return res.status(400).json({ error: 'institution_required' });
@@ -67,8 +84,7 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST') {
       const body = parseBody(req);
-      const institutionId =
-        role === 'super_admin' ? String(body.institution_id || '').trim() : String(actor.institution_id || '').trim();
+      const institutionId = resolveWriteInstitutionId(actor, body.institution_id);
       if (!institutionId) return res.status(400).json({ error: 'institution_required' });
       if (role === 'admin' || role === 'coach') {
         if (!hasInstitutionAccess(actor, institutionId)) return res.status(403).json({ error: 'forbidden' });
