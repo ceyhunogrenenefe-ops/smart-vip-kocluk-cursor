@@ -3,6 +3,8 @@
  * Özel ders (teacher_lessons) yoklama tablosu olmadığı için lesson_type=private i boş döner.
  */
 
+import { isUuid } from './uuid.js';
+
 export async function getVisibleStudentIdSet(supabaseAdmin, normalizeRole, actor, institutionId) {
   const role = normalizeRole(actor.role);
   if (role === 'super_admin') return null;
@@ -142,6 +144,18 @@ export async function buildAttendanceReport({
   const lessonType = (qstr(query, 'lesson_type') || 'all').toLowerCase();
   const wantStats = qstr(query, 'stats') === '1';
   const scopedInst = qstr(query, 'institution_id');
+
+  if (normalizeRole(actor.role) === 'super_admin' && scopedInst && !isUuid(scopedInst)) {
+    return {
+      error: {
+        status: 400,
+        body: {
+          error: 'invalid_institution_uuid',
+          hint: 'class_sessions.institution_id UUID bekliyor; eski inst-... id geçersiz. Üst çubuktan veritabanındaki bir kurumu seçin.'
+        }
+      }
+    };
+  }
 
   const allowedClassIds = await getManagedClassIds(actor);
   let sessQ = supabaseAdmin

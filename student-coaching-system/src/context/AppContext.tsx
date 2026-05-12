@@ -405,14 +405,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
             createdAt: i.created_at
           }));
           setInstitutions(loadedInstitutions);
-          if (!activeInstitutionId && loadedInstitutions.length > 0) {
-            setActiveInstitutionId(loadedInstitutions[0].id);
-          }
+        }
+
+        const knownIds = new Set(loadedInstitutions.map((i) => i.id));
+        const firstId = loadedInstitutions[0]?.id;
+        const resolvedActiveId =
+          activeInstitutionId && knownIds.has(activeInstitutionId)
+            ? activeInstitutionId
+            : firstId;
+        // Eski `inst-...` yerel ID veya silinmiş kurum: DB'deki geçerli kuruma düşür (uuid API hatalarını önler)
+        if (loadedInstitutions.length > 0 && (!activeInstitutionId || !knownIds.has(activeInstitutionId))) {
+          setActiveInstitutionId(resolvedActiveId || firstId);
         }
 
         const institutionScope = isStudentRole
           ? undefined
-          : activeInstitutionId || loadedInstitutions[0]?.id || undefined;
+          : resolvedActiveId || firstId || undefined;
 
         const dbStudents = await db.getStudents(institutionScope);
         const loadedStudents: Student[] = dbStudents.map(studentRowToStudent);

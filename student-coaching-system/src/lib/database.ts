@@ -37,6 +37,19 @@ type TopicProgressRow = Database['public']['Tables']['topic_progress']['Row'];
 const LOOKS_LIKE_UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+/** Postgres `institutions.id` ve canlı ders şemasındaki `institution_id` (uuid) ile uyumlu */
+function newInstitutionUuid(): string {
+  const c = globalThis.crypto;
+  if (c && typeof c.randomUUID === 'function') {
+    return c.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
+    const r = (Math.random() * 16) | 0;
+    const v = ch === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 // Veritabanı Servisi
 class DatabaseService {
   /** Sunucu { data } veya doğrudan dizi/obje döndürebilir; hatalı yanlış rewrite (SPA 405/200) güvenliği */
@@ -346,7 +359,7 @@ class DatabaseService {
 
   // Kurum oluştur
   async createInstitution(institution: Omit<InstitutionRow, 'id' | 'created_at' | 'updated_at'>): Promise<InstitutionRow> {
-    const id = `inst-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const id = newInstitutionUuid();
     const now = new Date().toISOString();
 
     const { data, error } = await supabase

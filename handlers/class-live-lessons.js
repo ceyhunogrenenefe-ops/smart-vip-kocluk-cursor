@@ -9,6 +9,7 @@ import { syncClassSessionsScheduledToCompleted } from '../api/_lib/class-session
 import { resolveStudentRowForUser } from '../api/_lib/resolve-student-id.js';
 import { buildAttendanceReport, getVisibleStudentIdSet } from '../api/_lib/attendance-report-query.js';
 import { sendMetaTextMessage } from '../api/_lib/meta-whatsapp.js';
+import { isUuid } from '../api/_lib/uuid.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -429,6 +430,12 @@ export default async function handler(req, res) {
       if (role === 'admin' && institutionId) q = q.eq('institution_id', institutionId);
       if (role === 'super_admin' && institutionId) {
         const scoped = String(req.query.institution_id || '').trim();
+        if (scoped && !isUuid(scoped)) {
+          return res.status(400).json({
+            error: 'invalid_institution_uuid',
+            hint: 'Kurum kimliği UUID olmalı (class_sessions). Üst çubuktan geçerli bir kurum seçin veya yeni kurum oluşturun.'
+          });
+        }
         if (scoped) q = q.eq('institution_id', scoped);
       }
       const { data, error } = await q;
