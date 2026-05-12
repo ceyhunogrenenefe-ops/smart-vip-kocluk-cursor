@@ -13,7 +13,7 @@
  * Handler yine de `getIstanbulHour() === 23` ile filtreler (Bearer ile saat dışı testte yanlış gönderimi önler).
  *
  * --- Canlı ders hatırlatma (handlers/cron-lesson-reminder.js) ---
- * `*/5 * * * *` UTC; en fazla 5 dk gecikmeli pencereler (son 10 dk içinde gönderim).
+ * `*/5 * * * *` UTC; pencere üst sınırı `LESSON_REMINDER_MAX_LEAD_MINUTES` (varsayılan 45 dk, en fazla 1440).
  */
 
 /** vercel.json → crons → daily-report-reminders ile aynı olmalı */

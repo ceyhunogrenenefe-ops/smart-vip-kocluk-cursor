@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { jsPDF } from 'jspdf';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { apiFetch } from '../lib/session';
@@ -7,7 +8,7 @@ import type { TeacherLesson, TeacherStudentLessonSummaryRow, UserRole } from '..
 import LiveLessonCard from '../components/liveLessons/LiveLessonCard';
 import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShell';
 import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
-import { Radio, Plus, Loader2, Filter, Clock, Pencil, Move, GripVertical, Trash2 } from 'lucide-react';
+import { Radio, Plus, Loader2, Filter, Clock, Pencil, Move, GripVertical, Trash2, FileDown } from 'lucide-react';
 
 function startOfWeek(d: Date): Date {
   const x = new Date(d);
@@ -22,6 +23,35 @@ function addDays(d: Date, n: number): Date {
   const out = new Date(d);
   out.setDate(out.getDate() + n);
   return out;
+}
+
+/** Yerel takvim günü YYYY-AA-GG (UTC toISOString sütun kaymasını önler — Pzt…Paz doğru hizalanır). */
+function isoFromLocalDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function todayLocalIso(): string {
+  return isoFromLocalDate(new Date());
+}
+
+function monthStartLocalIso(): string {
+  const d = new Date();
+  return isoFromLocalDate(new Date(d.getFullYear(), d.getMonth(), 1));
+}
+
+function defaultListFromIso(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 90);
+  return isoFromLocalDate(d);
+}
+
+function defaultListToIso(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 180);
+  return isoFromLocalDate(d);
 }
 
 function lessonTimeRange(lesson: TeacherLesson): string {
@@ -43,13 +73,6 @@ type StaffUser = {
   role: string;
 };
 
-const todayIso = () => new Date().toISOString().slice(0, 10);
-const monthStartIso = () => {
-  const d = new Date();
-  d.setDate(1);
-  return d.toISOString().slice(0, 10);
-};
-
 export default function LiveLessons() {
   const { effectiveUser } = useAuth();
   const { students } = useApp();
@@ -69,8 +92,12 @@ export default function LiveLessons() {
   const [filterPlatform, setFilterPlatform] = useState<string>('');
   const [summaryRows, setSummaryRows] = useState<TeacherStudentLessonSummaryRow[]>([]);
   const [summaryLoading, setSummaryLoading] = useState(false);
-  const [summaryFrom, setSummaryFrom] = useState(monthStartIso());
-  const [summaryTo, setSummaryTo] = useState(todayIso());
+  const [summaryFrom, setSummaryFrom] = useState(monthStartLocalIso);
+  const [summaryTo, setSummaryTo] = useState(todayLocalIso);
+
+  /** API listesi: koç / öğretmen / yönetici seçilen aralıktaki dersleri çeker */
+  const [listRangeFrom, setListRangeFrom] = useState(defaultListFromIso);
+  const [listRangeTo, setListRangeTo] = useState(defaultListToIso);
 
   /** Haftalık takvim — görüntülenen hafta (Pzt başlangıcı) */
   const [calendarWeekAnchor, setCalendarWeekAnchor] = useState(() => new Date());
@@ -79,7 +106,7 @@ export default function LiveLessons() {
   const [createBusy, setCreateBusy] = useState(false);
   const [studentId, setStudentId] = useState('');
   const [title, setTitle] = useState('');
-  const [dateStr, setDateStr] = useState(() => new Date().toISOString().slice(0, 10));
+  const [dateStr, setDateStr] = useState(() => todayLocalIso());
   const [startTime, setStartTime] = useState('09:00');
   const [durationMin, setDurationMin] = useState(60);
   const [meetingLink, setMeetingLink] = useState('');
@@ -101,13 +128,22 @@ export default function LiveLessons() {
 
   const canManage =
     role === 'super_admin' || role === 'admin' || role === 'teacher' || role === 'coach';
-  const showAdminFilters = role === 'super_admin' || role === 'admin';
+  const showAdminExtras = role === 'super_admin' || role === 'admin';
   const showTeacherPicker = role === 'super_admin' || role === 'admin';
+  /** Liste / PDF / öğrenci filtresi: tüm yetkili roller */
+  const showScopeFilters = canManage;
 
   const sortedStudents = useMemo(
     () => [...students].sort((a, b) => a.name.localeCompare(b.name, 'tr')),
     [students]
   );
+
+  const studentsForFilter = useMemo(() => {
+    if (role === 'coach' && effectiveUser?.coachId) {
+      return sortedStudents.filter((s) => s.coachId === effectiveUser.coachId);
+    }
+    return sortedStudents;
+  }, [sortedStudents, role, effectiveUser?.coachId]);
 
   useEffect(() => {
     const id = window.setInterval(() => setUiTick((t) => t + 1), 30_000);
@@ -128,14 +164,25 @@ export default function LiveLessons() {
       if (filterPlatform && ['bbb', 'zoom', 'meet', 'other'].includes(filterPlatform)) {
         qs.set('platform', filterPlatform);
       }
-      if (showAdminFilters && filterTeacherId.trim()) {
+      if (showTeacherPicker && filterTeacherId.trim()) {
         qs.set('teacher_id', filterTeacherId.trim());
       }
-      if (showAdminFilters && filterStudentId.trim()) {
+      if (showScopeFilters && filterStudentId.trim()) {
         qs.set('student_id', filterStudentId.trim());
       }
-      const from = addDays(startOfWeek(new Date()), -7).toISOString().slice(0, 10);
-      const to = addDays(new Date(), 180).toISOString().slice(0, 10);
+      let from =
+        listRangeFrom.trim() && /^\d{4}-\d{2}-\d{2}$/.test(listRangeFrom.trim())
+          ? listRangeFrom.trim()
+          : defaultListFromIso();
+      let to =
+        listRangeTo.trim() && /^\d{4}-\d{2}-\d{2}$/.test(listRangeTo.trim())
+          ? listRangeTo.trim()
+          : defaultListToIso();
+      if (from > to) {
+        const swap = from;
+        from = to;
+        to = swap;
+      }
       qs.set('from', from);
       qs.set('to', to);
       const url = `/api/teacher-lessons${qs.toString() ? `?${qs.toString()}` : ''}`;
@@ -164,10 +211,19 @@ export default function LiveLessons() {
     } finally {
       setLoading(false);
     }
-  }, [canManage, filterPlatform, filterTeacherId, filterStudentId, showAdminFilters]);
+  }, [
+    canManage,
+    filterPlatform,
+    filterTeacherId,
+    filterStudentId,
+    showScopeFilters,
+    showTeacherPicker,
+    listRangeFrom,
+    listRangeTo
+  ]);
 
   const loadSummary = useCallback(async () => {
-    if (!showAdminFilters) return;
+    if (!showAdminExtras) return;
     setSummaryLoading(true);
     try {
       const qs = new URLSearchParams({ op: 'summary' });
@@ -187,19 +243,19 @@ export default function LiveLessons() {
     } finally {
       setSummaryLoading(false);
     }
-  }, [showAdminFilters, filterTeacherId, filterStudentId, summaryFrom, summaryTo]);
+  }, [showAdminExtras, filterTeacherId, filterStudentId, summaryFrom, summaryTo]);
 
   useEffect(() => {
     void loadLessons();
   }, [loadLessons]);
 
   useEffect(() => {
-    if (!showAdminFilters) {
+    if (!showAdminExtras) {
       setSummaryRows([]);
       return;
     }
     void loadSummary();
-  }, [showAdminFilters, loadSummary]);
+  }, [showAdminExtras, loadSummary]);
 
   const mergedStaff = useMemo(() => {
     const m = new Map<string, StaffUser>();
@@ -280,7 +336,7 @@ export default function LiveLessons() {
   const weeklyLessonBuckets = useMemo(() => {
     const weekStart = startOfWeek(calendarWeekAnchor);
     const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-    const key = (d: Date) => d.toISOString().slice(0, 10);
+    const key = (d: Date) => isoFromLocalDate(d);
     const bucket: Record<string, TeacherLesson[]> = {};
     for (const d of days) bucket[key(d)] = [];
     for (const l of lessons) {
@@ -317,7 +373,7 @@ export default function LiveLessons() {
         return;
       }
       await loadLessons();
-      if (showAdminFilters) void loadSummary();
+      if (showAdminExtras) void loadSummary();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -401,7 +457,7 @@ export default function LiveLessons() {
         return;
       }
       await loadLessons();
-      if (showAdminFilters) void loadSummary();
+      if (showAdminExtras) void loadSummary();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Hata');
     }
@@ -445,7 +501,7 @@ export default function LiveLessons() {
       }
       setEditingLesson(null);
       await loadLessons();
-      if (showAdminFilters) void loadSummary();
+      if (showAdminExtras) void loadSummary();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -467,7 +523,7 @@ export default function LiveLessons() {
       }
       setEditingLesson((cur) => (cur?.id === id ? null : cur));
       await loadLessons();
-      if (showAdminFilters) void loadSummary();
+      if (showAdminExtras) void loadSummary();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -516,27 +572,29 @@ export default function LiveLessons() {
         </div>
       )}
 
-      {showAdminFilters && (
+      {showScopeFilters && (
         <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap gap-4 items-end">
           <div className="flex items-center gap-2 text-slate-600">
             <Filter className="w-4 h-4" />
-            <span className="text-sm font-medium">Filtreler</span>
+            <span className="text-sm font-medium">Liste ve takvim</span>
           </div>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-slate-500">Öğretmen / kullanıcı</span>
-            <select
-              value={filterTeacherId}
-              onChange={(e) => setFilterTeacherId(e.target.value)}
-              className="border border-slate-200 rounded-lg px-3 py-2 min-w-[200px]"
-            >
-              <option value="">Tümü</option>
-              {mergedStaff.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name} ({u.role}) — {u.email || u.id.slice(0, 8)}
-                </option>
-              ))}
-            </select>
-          </label>
+          {showTeacherPicker ? (
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-slate-500">Öğretmen / koç kullanıcı</span>
+              <select
+                value={filterTeacherId}
+                onChange={(e) => setFilterTeacherId(e.target.value)}
+                className="border border-slate-200 rounded-lg px-3 py-2 min-w-[200px]"
+              >
+                <option value="">Tümü</option>
+                {mergedStaff.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} ({u.role}) — {u.email || u.id.slice(0, 8)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-slate-500">Öğrenci</span>
             <select
@@ -545,7 +603,7 @@ export default function LiveLessons() {
               className="border border-slate-200 rounded-lg px-3 py-2 min-w-[200px]"
             >
               <option value="">Tümü</option>
-              {sortedStudents.map((s) => (
+              {studentsForFilter.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
                 </option>
@@ -553,20 +611,20 @@ export default function LiveLessons() {
             </select>
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-slate-500">Özet başlangıç</span>
+            <span className="text-slate-500">Liste başlangıç</span>
             <input
               type="date"
-              value={summaryFrom}
-              onChange={(e) => setSummaryFrom(e.target.value)}
+              value={listRangeFrom}
+              onChange={(e) => setListRangeFrom(e.target.value)}
               className="border border-slate-200 rounded-lg px-3 py-2"
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-slate-500">Özet bitiş</span>
+            <span className="text-slate-500">Liste bitiş</span>
             <input
               type="date"
-              value={summaryTo}
-              onChange={(e) => setSummaryTo(e.target.value)}
+              value={listRangeTo}
+              onChange={(e) => setListRangeTo(e.target.value)}
               className="border border-slate-200 rounded-lg px-3 py-2"
             />
           </label>
@@ -587,28 +645,124 @@ export default function LiveLessons() {
           <button
             type="button"
             onClick={() => {
+              const ws = startOfWeek(calendarWeekAnchor);
+              const we = addDays(ws, 6);
+              setListRangeFrom(isoFromLocalDate(ws));
+              setListRangeTo(isoFromLocalDate(we));
+            }}
+            className="px-3 py-2 rounded-lg border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50"
+          >
+            Görünen haftayı aralığa al
+          </button>
+          <button
+            type="button"
+            onClick={() => {
               void loadLessons();
-              void loadSummary();
+              if (showAdminExtras) void loadSummary();
             }}
             className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800"
           >
             Uygula
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              const staffMap = new Map(mergedStaff.map((u) => [u.id, u.name]));
+              const rows = [...lessons]
+                .filter((l) => l.status !== 'cancelled')
+                .sort(
+                  (a, b) =>
+                    String(a.date).localeCompare(String(b.date)) || a.start_time.localeCompare(b.start_time)
+                );
+              const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+              doc.setFontSize(14);
+              doc.text('Canlı özel ders programı', 14, 14);
+              doc.setFontSize(10);
+              doc.text(`Tarih aralığı: ${listRangeFrom} – ${listRangeTo}`, 14, 22);
+              doc.setFontSize(8);
+              let y = 30;
+              const line = (parts: string[]) => {
+                const t = parts.join('  |  ');
+                const wrapped = doc.splitTextToSize(t, 270);
+                for (const w of wrapped) {
+                  if (y > 190) {
+                    doc.addPage();
+                    y = 14;
+                  }
+                  doc.text(w, 14, y);
+                  y += 4;
+                }
+                y += 1;
+              };
+              line(['Tarih', 'Saat', 'Öğrenci', 'Öğretmen', 'Ders', 'Durum', 'Bağlantı']);
+              doc.setFont('helvetica', 'bold');
+              line(['—', '—', '—', '—', '—', '—', '—']);
+              doc.setFont('helvetica', 'normal');
+              for (const l of rows) {
+                line([
+                  l.date,
+                  lessonTimeRange(l),
+                  studentName(l.student_id),
+                  staffMap.get(l.teacher_id) || l.teacher_id.slice(0, 8),
+                  l.title || '',
+                  l.status,
+                  (l.meeting_link || '').slice(0, 80)
+                ]);
+              }
+              if (rows.length === 0) {
+                line(['Bu aralıkta ders yok.']);
+              }
+              doc.save(`canli-ozel-dersler-${listRangeFrom}_${listRangeTo}.pdf`);
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700"
+          >
+            <FileDown className="w-4 h-4" />
+            PDF indir
+          </button>
         </div>
       )}
 
-      {showAdminFilters && (
+      {showAdminExtras && (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-          <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2 bg-slate-50">
-            <Clock className="w-5 h-5 text-indigo-600" />
-            <div>
-              <h2 className="text-sm font-semibold text-slate-800">Ders saati özeti (tamamlanan)</h2>
-              <p className="text-xs text-slate-500">
-                Yukarıdaki tarih, öğretmen ve öğrenci filtrelerine göre, her öğretmen–öğrenci çifti için kayıtlı{' '}
-                <strong>tamamlanan</strong> derslerin toplam süresi. Faturalama ve kontrol için kullanın.
-              </p>
+          <div className="px-4 py-3 border-b border-slate-100 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between bg-slate-50">
+            <div className="flex items-start gap-2">
+              <Clock className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
+              <div>
+                <h2 className="text-sm font-semibold text-slate-800">Ders saati özeti (tamamlanan)</h2>
+                <p className="text-xs text-slate-500">
+                  Üstteki öğretmen ve öğrenci filtreleriyle; aşağıdaki özet tarih aralığında kayıtlı{' '}
+                  <strong>tamamlanan</strong> derslerin toplam süresi. Faturalama ve kontrol için kullanın.
+                </p>
+              </div>
             </div>
-            {summaryLoading && <Loader2 className="w-4 h-4 animate-spin text-slate-400 ml-auto" />}
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="flex flex-col gap-1 text-xs">
+                <span className="text-slate-500">Özet başlangıç</span>
+                <input
+                  type="date"
+                  value={summaryFrom}
+                  onChange={(e) => setSummaryFrom(e.target.value)}
+                  className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm bg-white"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs">
+                <span className="text-slate-500">Özet bitiş</span>
+                <input
+                  type="date"
+                  value={summaryTo}
+                  onChange={(e) => setSummaryTo(e.target.value)}
+                  className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm bg-white"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void loadSummary()}
+                className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700"
+              >
+                Özeti yenile
+              </button>
+            </div>
+            {summaryLoading && <Loader2 className="w-4 h-4 animate-spin text-slate-400 sm:ml-auto" />}
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -807,7 +961,7 @@ export default function LiveLessons() {
 
       <WeeklyLiveGridShell
         title="Haftalık canlı özel ders takvimi"
-        subtitle="Pazartesi–Pazar, 10:00–24:00 ızgarası. Koç ve öğretmen yalnızca yetkili oldukları öğrenci oturumlarını görür."
+        subtitle="Sütunlar Pazartesi–Pazar (yerel tarih). WhatsApp hatırlatması: Meta şablonları lesson_reminder + lesson_reminder_parent; cron her 5 dk, varsayılan dersden en fazla 45 dk önce (LESSON_REMINDER_MAX_LEAD_MINUTES)."
         weekRangeLabel={liveCalendarWeekRangeLabel}
         loading={loading}
         onPrevWeek={() => setCalendarWeekAnchor((d) => addDays(d, -7))}
@@ -835,8 +989,9 @@ export default function LiveLessons() {
                   Saat
                 </th>
                 {weeklyLessonBuckets.map((slot) => {
-                  const isToday = slot.key === todayIso();
-                  const headDate = new Date(`${slot.key}T12:00:00`);
+                  const isToday = slot.key === todayLocalIso();
+                  const [yy, mm, dd] = slot.key.split('-').map(Number);
+                  const headDate = new Date(yy, (mm || 1) - 1, dd || 1, 12, 0, 0, 0);
                   const dow = headDate.toLocaleDateString('tr-TR', { weekday: 'short' });
                   const dmy = headDate.toLocaleDateString('tr-TR', {
                     day: '2-digit',
@@ -877,7 +1032,7 @@ export default function LiveLessons() {
                       const hourItems = slot.items.filter(
                         (x) => Number(String(x.start_time || '00:00').slice(0, 2)) === hour
                       );
-                      const colToday = slot.key === todayIso();
+                      const colToday = slot.key === todayLocalIso();
                       return (
                         <td
                           key={`${slot.key}-${hour}`}

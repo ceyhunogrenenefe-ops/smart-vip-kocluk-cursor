@@ -176,9 +176,15 @@ async function handleList(req, res) {
         .select('id')
         .eq('coach_id', actor.coach_id);
       if (se) throw se;
-      const studentIds = (studs || []).map((s) => s.id).filter(Boolean);
+      let studentIds = (studs || []).map((s) => s.id).filter(Boolean);
       if (studentIds.length === 0) {
         return res.status(200).json({ data: [] });
+      }
+      if (studentFilter) {
+        if (!studentIds.includes(studentFilter)) {
+          return res.status(200).json({ data: [] });
+        }
+        studentIds = [studentFilter];
       }
 
       const merged = [];
@@ -227,6 +233,7 @@ async function handleList(req, res) {
       q = q.eq('student_id', sid);
     } else if (actor.role === 'teacher') {
       q = q.eq('teacher_id', actor.sub);
+      if (studentFilter) q = q.eq('student_id', studentFilter);
     } else if (actor.role === 'admin') {
       if (!actor.institution_id) return jsonError(res, 403, 'institution_missing');
       q = q.eq('institution_id', actor.institution_id);

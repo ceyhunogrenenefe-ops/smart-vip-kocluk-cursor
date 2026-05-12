@@ -13,7 +13,7 @@ export async function alreadySentLessonReminder(lessonId, phoneE164) {
   const { data, error } = await supabaseAdmin
     .from('message_logs')
     .select('id')
-    .eq('kind', 'lesson_reminder')
+    .in('kind', ['lesson_reminder', 'lesson_reminder_parent'])
     .eq('related_id', lessonId)
     .eq('status', 'sent')
     .eq('phone', e164)

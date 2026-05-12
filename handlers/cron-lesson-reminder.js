@@ -9,8 +9,9 @@ import { getStudentPhones, classifyLessonReminderRecipients } from '../api/_lib/
 import { alreadySentLessonReminder } from '../api/_lib/message-log.js';
 import { recordCronRun } from '../api/_lib/cron-run-log.js';
 
-/** Ders başlangıcına kalan süre: (0, 10] dakika (10 dk veya daha az) */
-const MAX_LEAD_MS = 10 * 60 * 1000;
+/** Ders başlangıcına kalan süre üst sınırı (dakika). Cron her 5 dk; varsayılan 45 dk öncesine kadar bir kez gönderilir. */
+const MAX_LEAD_MS =
+  Math.max(5, Math.min(24 * 60, Number(process.env.LESSON_REMINDER_MAX_LEAD_MINUTES || 45) || 45)) * 60 * 1000;
 
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {
