@@ -83,17 +83,31 @@ BEGIN
   UPDATE public.coaches SET institution_id = smart_id
   WHERE institution_id IS NOT NULL AND institution_id NOT IN (smart_id, vip_id);
 
-  UPDATE public.weekly_entries SET institution_id = smart_id
-  WHERE institution_id IS NOT NULL AND institution_id NOT IN (smart_id, vip_id);
-
-  UPDATE public.book_readings SET institution_id = smart_id
-  WHERE institution_id IS NOT NULL AND institution_id NOT IN (smart_id, vip_id);
-
-  UPDATE public.written_exams SET institution_id = smart_id
-  WHERE institution_id IS NOT NULL AND institution_id NOT IN (smart_id, vip_id);
-
-  UPDATE public.exam_results SET institution_id = smart_id
-  WHERE institution_id IS NOT NULL AND institution_id NOT IN (smart_id, vip_id);
+  -- Aşağıdakiler bazı projelerde yok; yoksa atlanır (42P01 önlenir)
+  IF to_regclass('public.weekly_entries') IS NOT NULL THEN
+    EXECUTE format(
+      'UPDATE public.weekly_entries SET institution_id = %L WHERE institution_id IS NOT NULL AND institution_id NOT IN (%L, %L)',
+      smart_id, smart_id, vip_id
+    );
+  END IF;
+  IF to_regclass('public.book_readings') IS NOT NULL THEN
+    EXECUTE format(
+      'UPDATE public.book_readings SET institution_id = %L WHERE institution_id IS NOT NULL AND institution_id NOT IN (%L, %L)',
+      smart_id, smart_id, vip_id
+    );
+  END IF;
+  IF to_regclass('public.written_exams') IS NOT NULL THEN
+    EXECUTE format(
+      'UPDATE public.written_exams SET institution_id = %L WHERE institution_id IS NOT NULL AND institution_id NOT IN (%L, %L)',
+      smart_id, smart_id, vip_id
+    );
+  END IF;
+  IF to_regclass('public.exam_results') IS NOT NULL THEN
+    EXECUTE format(
+      'UPDATE public.exam_results SET institution_id = %L WHERE institution_id IS NOT NULL AND institution_id NOT IN (%L, %L)',
+      smart_id, smart_id, vip_id
+    );
+  END IF;
 
   -- Opsiyonel tablolar (yoksa hata vermemesi için)
   IF to_regclass('public.meetings') IS NOT NULL THEN
