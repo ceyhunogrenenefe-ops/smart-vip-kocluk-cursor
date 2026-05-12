@@ -665,6 +665,25 @@ class DatabaseService {
         });
       }
 
+      const { data: existingVip } = await supabase
+        .from('institutions')
+        .select('id')
+        .eq('name', 'Online VIP Ders ve Koçluk')
+        .maybeSingle();
+
+      if (!existingVip) {
+        await this.createInstitution({
+          name: 'Online VIP Ders ve Koçluk',
+          email: 'info@onlinevipders.com',
+          phone: '',
+          address: 'Türkiye',
+          website: '',
+          logo: null,
+          plan: 'enterprise',
+          is_active: true
+        });
+      }
+
       // Super Admin kontrol et
       const { data: existingUser } = await supabase
         .from('users')
