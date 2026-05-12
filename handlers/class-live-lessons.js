@@ -548,6 +548,12 @@ export default async function handler(req, res) {
       if (!iid) {
         return res.status(200).json({ data: { auto_whatsapp_absent: true, institution_id: null } });
       }
+      if (!isUuid(iid)) {
+        return res.status(400).json({
+          error: 'invalid_institution_uuid',
+          hint: 'Kurum kimliği UUID olmalı. Tarayıcıda eski kurum seçimini temizleyin veya Ayarlar’dan geçerli kurumu seçin.'
+        });
+      }
       const { data, error } = await supabaseAdmin
         .from('attendance_institution_prefs')
         .select('auto_whatsapp_absent')
@@ -593,6 +599,12 @@ export default async function handler(req, res) {
         iid = String(body.institution_id || req.query.institution_id || '').trim();
       }
       if (!iid) return res.status(400).json({ error: 'institution_id_required' });
+      if (!isUuid(iid)) {
+        return res.status(400).json({
+          error: 'invalid_institution_uuid',
+          hint: 'Kurum kimliği UUID olmalı.'
+        });
+      }
       const auto = Object.prototype.hasOwnProperty.call(body, 'auto_whatsapp_absent')
         ? Boolean(body.auto_whatsapp_absent)
         : true;

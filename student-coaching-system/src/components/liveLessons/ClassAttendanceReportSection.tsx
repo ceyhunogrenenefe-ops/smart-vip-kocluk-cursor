@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { apiFetch, getAuthToken } from '../../lib/session';
 import { userHasAnyRole } from '../../config/rolePermissions';
 import { useAuth } from '../../context/AuthContext';
+import { isUuid } from '../../utils/uuid';
 import { ClipboardList, Download, Loader2, RefreshCw, Brain } from 'lucide-react';
 
 export type ClassAttendanceReportRow = {
@@ -55,6 +56,15 @@ export function ClassAttendanceReportSection({ institutionChoices, className = '
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ReportPayload | null>(null);
 
+  useEffect(() => {
+    const v = institutionId.trim();
+    if (!v) return;
+    const choices = institutionChoices || [];
+    if (!isUuid(v) || (choices.length > 0 && !choices.some((c) => c.id === v))) {
+      setInstitutionId('');
+    }
+  }, [institutionChoices, institutionId]);
+
   const load = useCallback(async () => {
     if (!getAuthToken()) return;
     setLoading(true);
@@ -65,7 +75,7 @@ export function ClassAttendanceReportSection({ institutionChoices, className = '
         from: from.trim(),
         to: to.trim()
       });
-      if (showInstitutionFilter && institutionId.trim()) {
+      if (showInstitutionFilter && institutionId.trim() && isUuid(institutionId.trim())) {
         q.set('institution_id', institutionId.trim());
       }
       const res = await apiFetch(`/api/class-live-lessons?${q.toString()}`);

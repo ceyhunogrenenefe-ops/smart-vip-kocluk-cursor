@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch, getAuthToken } from '../../lib/session';
 import { useAuth } from '../../context/AuthContext';
 import { userHasAnyRole } from '../../config/rolePermissions';
+import { isUuid } from '../../utils/uuid';
 import {
   ClipboardList,
   Loader2,
@@ -127,12 +128,28 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
     void loadMeta();
   }, [loadMeta]);
 
+  /** Eski localStorage `inst-...` / geçersiz seçim: API UUID bekliyor */
+  useEffect(() => {
+    const v = instFilter.trim();
+    if (!v) return;
+    if (!isUuid(v)) {
+      setInstFilter(isSuper ? '' : institutions.find((x) => isUuid(x.id))?.id || '');
+      return;
+    }
+    if (institutions.length > 0) {
+      const known = new Set(institutions.map((x) => String(x.id)));
+      if (!known.has(v)) {
+        setInstFilter(isSuper ? '' : institutions.find((x) => isUuid(x.id))?.id || '');
+      }
+    }
+  }, [institutions, instFilter, isSuper]);
+
   const loadPrefs = useCallback(async () => {
     if (!canEditPrefs || !getAuthToken()) return;
     setPrefsLoading(true);
     try {
       const q = new URLSearchParams({ scope: 'attendance-prefs' });
-      if (isSuper && instFilter) q.set('institution_id', instFilter);
+      if (isSuper && instFilter && isUuid(instFilter.trim())) q.set('institution_id', instFilter.trim());
       const res = await apiFetch(`/api/class-live-lessons?${q}`);
       const j = await res.json().catch(() => ({}));
       if (res.ok && j.data) setAutoWa(j.data.auto_whatsapp_absent !== false);
@@ -152,7 +169,7 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
     setPrefsLoading(true);
     try {
       const body: Record<string, unknown> = { auto_whatsapp_absent: next };
-      if (isSuper && instFilter) body.institution_id = instFilter;
+      if (isSuper && instFilter && isUuid(instFilter.trim())) body.institution_id = instFilter.trim();
       const res = await apiFetch('/api/class-live-lessons?op=set-attendance-prefs', {
         method: 'POST',
         body: JSON.stringify(body)
@@ -185,7 +202,7 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
       if (status !== 'all') q.set('status', status);
       q.set('lesson_type', lessonType);
       if (absentToday) q.set('absent_today', '1');
-      if (isSuper && instFilter.trim()) q.set('institution_id', instFilter.trim());
+      if (isSuper && instFilter.trim() && isUuid(instFilter.trim())) q.set('institution_id', instFilter.trim());
 
       const res = await apiFetch(`/api/class-live-lessons?${q}`);
       const j = (await res.json().catch(() => ({}))) as {

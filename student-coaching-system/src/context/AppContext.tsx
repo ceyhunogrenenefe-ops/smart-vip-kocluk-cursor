@@ -1,5 +1,6 @@
 // Türkçe: Uygulama genel durum yönetimi - Supabase Gerçek Veritabanı ile
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { isUuid } from '../utils/uuid';
 import {
   Student,
   Coach,
@@ -313,15 +314,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Kurumlar için state
   const [institutions, setInstitutions] = useState<Institution[]>(() => {
     const stored = loadFromStorage<Institution[]>(STORAGE_KEYS.institutions, []);
-    if (stored.length === 0) {
-      return [createDefaultInstitution()];
-    }
-    return stored;
+    const valid = stored.filter((i) => isUuid(String(i.id || '')));
+    if (valid.length > 0) return valid;
+    if (stored.length === 0) return [createDefaultInstitution()];
+    return [];
   });
 
-  const [activeInstitutionId, setActiveInstitutionId] = useState<string | null>(() =>
-    loadFromStorage<string | null>(STORAGE_KEYS.activeInstitutionId, null)
-  );
+  const [activeInstitutionId, setActiveInstitutionId] = useState<string | null>(() => {
+    const raw = loadFromStorage<string | null>(STORAGE_KEYS.activeInstitutionId, null);
+    return raw && isUuid(raw) ? raw : null;
+  });
 
   // Aktif kurum
   const institution = institutions.find(i => i.id === activeInstitutionId) || institutions[0] || createDefaultInstitution();
@@ -1085,7 +1087,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const setActiveInstitution = (id: string) => {
-    setActiveInstitutionId(id);
+    const v = String(id || '').trim();
+    if (!isUuid(v)) return;
+    setActiveInstitutionId(v);
   };
 
   // Konu havuzu işlemleri
