@@ -830,6 +830,43 @@ async function handlePatch(req, res) {
     }
 
     const patch = {};
+    const rawNewTeacher = body.teacher_id != null ? String(body.teacher_id).trim() : '';
+    if (rawNewTeacher && rawNewTeacher !== String(row.teacher_id || '')) {
+      if (actor.role === 'teacher') {
+        return jsonError(res, 403, 'Öğretmeni değiştirmek için yönetici veya koç hesabı kullanın.');
+      }
+      if (row.status !== 'scheduled') {
+        return jsonError(res, 400, 'Öğretmen yalnızca planlanmış derslerde değiştirilebilir.');
+      }
+      const { data: ntUser, error: ntErr } = await supabaseAdmin
+        .from('users')
+        .select('id, institution_id, role, coach_id')
+        .eq('id', rawNewTeacher)
+        .maybeSingle();
+      if (ntErr) throw ntErr;
+      if (!ntUser) return jsonError(res, 400, 'Seçilen öğretmen bulunamadı.');
+      const ntRole = String(ntUser.role || '');
+      if (!['teacher', 'coach', 'admin', 'super_admin'].includes(ntRole)) {
+        return jsonError(res, 400, 'Bu kullanıcı öğretmen olarak atanamaz.');
+      }
+      const { data: studentForTeacher, error: stTe } = await supabaseAdmin
+        .from('students')
+        .select('*')
+        .eq('id', row.student_id)
+        .maybeSingle();
+      if (stTe) throw stTe;
+      if (!studentForTeacher) return jsonError(res, 400, 'Öğrenci kaydı bulunamadı.');
+      const subActor = {
+        sub: ntUser.id,
+        role: ntRole,
+        institution_id: ntUser.institution_id ?? null,
+        coach_id: ntUser.coach_id ?? null
+      };
+      if (!(await canPlanLessonForStudent(subActor, studentForTeacher))) {
+        return jsonError(res, 400, 'Seçilen kullanıcı bu öğrenciye özel ders atanamaz.');
+      }
+      patch.teacher_id = rawNewTeacher;
+    }
     if (body.status && ['scheduled', 'completed', 'cancelled'].includes(String(body.status))) {
       patch.status = String(body.status);
     }
@@ -879,8 +916,10 @@ async function handlePatch(req, res) {
       patch.start_time = win.start_time;
       patch.end_time = win.end_time;
       patch.duration_minutes = win.duration_minutes;
+      const teacherForConflict =
+        patch.teacher_id !== undefined ? String(patch.teacher_id) : String(row.teacher_id || '');
       const conflict = await hasTeacherConflict({
-        teacherId: row.teacher_id,
+        teacherId: teacherForConflict,
         lessonDate: win.lesson_date,
         startTime: win.start_time,
         endTime: win.end_time,
@@ -890,22 +929,40 @@ async function handlePatch(req, res) {
         return jsonError(res, 409, 'Aynı öğretmen aynı saatte canlı özel ders alamaz.', { code: 'teacher_time_conflict' });
       }
 
+      const teacherForQuota =
+        patch.teacher_id !== undefined ? String(patch.teacher_id) : String(row.teacher_id || '');
       const { data: quotaRowT, error: qeT } = await supabaseAdmin
         .from('student_teacher_lesson_quota')
         .select('credits_total')
         .eq('student_id', row.student_id)
-        .eq('teacher_id', row.teacher_id)
+        .eq('teacher_id', teacherForQuota)
         .maybeSingle();
       if (qeT && !/does not exist|schema cache/i.test(errorMessage(qeT))) throw qeT;
       const quotaCapT = quotaRowT?.credits_total;
       if (quotaCapT != null) {
         const newUnits = lessonUnitsFromDurationMinutes(win.duration_minutes);
-        const usedUnits = await sumLessonUnitsUsed(row.student_id, row.teacher_id);
+        const usedUnits = await sumLessonUnitsUsed(row.student_id, teacherForQuota);
         if (usedUnits + newUnits > quotaCapT) {
           return jsonError(res, 400, 'Bu öğretmen için paket birimi yetersiz (süreye göre).', {
             code: 'lesson_quota_exceeded'
           });
         }
+      }
+    } else if (
+      patch.teacher_id !== undefined &&
+      String(patch.teacher_id) !== String(row.teacher_id || '') &&
+      row.status === 'scheduled'
+    ) {
+      const tId = String(patch.teacher_id);
+      const conflictOnly = await hasTeacherConflict({
+        teacherId: tId,
+        lessonDate: String(row.lesson_date || '').trim(),
+        startTime: String(row.start_time || ''),
+        endTime: String(row.end_time || ''),
+        excludeId: id
+      });
+      if (conflictOnly) {
+        return jsonError(res, 409, 'Aynı öğretmen aynı saatte canlı özel ders alamaz.', { code: 'teacher_time_conflict' });
       }
     }
 
@@ -917,18 +974,20 @@ async function handlePatch(req, res) {
     const gainsSlot = !wasActive && willBeActive;
 
     if (gainsSlot) {
+      const quotaTeacherId =
+        patch.teacher_id !== undefined ? String(patch.teacher_id) : String(row.teacher_id || '');
       const { data: quotaRow, error: qe } = await supabaseAdmin
         .from('student_teacher_lesson_quota')
         .select('credits_total')
         .eq('student_id', row.student_id)
-        .eq('teacher_id', row.teacher_id)
+        .eq('teacher_id', quotaTeacherId)
         .maybeSingle();
       if (qe && !/does not exist|schema cache/i.test(errorMessage(qe))) throw qe;
       const quotaCap = quotaRow?.credits_total;
       if (quotaCap != null) {
         const dm = row.duration_minutes != null ? Number(row.duration_minutes) : 60;
         const needUnits = lessonUnitsFromDurationMinutes(dm);
-        const usedUnits = await sumLessonUnitsUsed(row.student_id, row.teacher_id);
+        const usedUnits = await sumLessonUnitsUsed(row.student_id, quotaTeacherId);
         if (usedUnits + needUnits > quotaCap) {
           return jsonError(res, 400, 'Bu öğretmen için paket birimi yetersiz.', {
             code: 'lesson_quota_exceeded',

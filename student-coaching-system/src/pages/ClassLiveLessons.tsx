@@ -146,7 +146,7 @@ const monthStartIso = () => isoFromLocalDate(new Date(new Date().getFullYear(), 
 
 export default function ClassLiveLessons() {
   const { effectiveUser } = useAuth();
-  const { students } = useApp();
+  const { students, institution } = useApp();
   const safeStudents = Array.isArray(students) ? students : [];
   const role = String(effectiveUser?.role || '');
   const actorUserId = String(effectiveUser?.id || '');
@@ -220,12 +220,14 @@ export default function ClassLiveLessons() {
   const [esEnd, setEsEnd] = useState('');
   const [esLink, setEsLink] = useState('');
   const [esHomework, setEsHomework] = useState('');
+  const [esTeacherId, setEsTeacherId] = useState('');
   const [slDay, setSlDay] = useState(1);
   const [slSubject, setSlSubject] = useState('');
   const [slStart, setSlStart] = useState('');
   const [slEnd, setSlEnd] = useState('');
   const [slLink, setSlLink] = useState('');
   const [slHomework, setSlHomework] = useState('');
+  const [slTeacherId, setSlTeacherId] = useState('');
 
   const [scheduleKind, setScheduleKind] = useState<'sessions' | 'template'>('sessions');
   const [lessonStartDate, setLessonStartDate] = useState(() => isoFromLocalDate(new Date()));
@@ -239,6 +241,20 @@ export default function ClassLiveLessons() {
   );
 
   const selectedClass = useMemo(() => classes.find((c) => c.id === selectedClassId) || null, [classes, selectedClassId]);
+
+  const classTeacherOptions = useMemo(() => {
+    const ids = new Set(selectedClass?.teacher_ids || []);
+    let list = teacherCandidates.filter((t) => ids.has(t.id));
+    const ensure = (tid: string | undefined) => {
+      const t = String(tid || '').trim();
+      if (!t || list.some((x) => x.id === t)) return;
+      const found = teacherCandidates.find((x) => x.id === t);
+      list = [{ id: t, name: found?.name || `${t.slice(0, 8)}…` }, ...list];
+    };
+    ensure(editingSession?.teacher_id);
+    ensure(editingSlotRow?.teacher_id);
+    return list;
+  }, [teacherCandidates, selectedClass?.teacher_ids, editingSession?.teacher_id, editingSlotRow?.teacher_id]);
 
   useEffect(() => {
     setAssignmentBranchDraft(selectedClass?.branch?.trim() ?? '');
@@ -571,6 +587,7 @@ export default function ClassLiveLessons() {
     setEsEnd(String(s.end_time || '').slice(0, 5));
     setEsLink(s.meeting_link || '');
     setEsHomework(s.homework || '');
+    setEsTeacherId(s.teacher_id);
     setError(null);
   };
 
@@ -588,7 +605,10 @@ export default function ClassLiveLessons() {
           start_time: esStart.length === 5 ? `${esStart}:00` : esStart,
           end_time: esEnd.length === 5 ? `${esEnd}:00` : esEnd,
           meeting_link: esLink.trim(),
-          homework: esHomework.trim() || null
+          homework: esHomework.trim() || null,
+          ...(esTeacherId.trim() && esTeacherId.trim() !== editingSession.teacher_id
+            ? { teacher_id: esTeacherId.trim() }
+            : {})
         })
       });
       const j = await res.json().catch(() => ({}));
@@ -613,6 +633,7 @@ export default function ClassLiveLessons() {
     setSlEnd(String(s.end_time || '').slice(0, 5));
     setSlLink(s.meeting_link || '');
     setSlHomework(s.homework || '');
+    setSlTeacherId(s.teacher_id);
     setError(null);
   };
 
@@ -631,7 +652,10 @@ export default function ClassLiveLessons() {
           start_time: slStart.length === 5 ? `${slStart}:00` : slStart,
           end_time: slEnd.length === 5 ? `${slEnd}:00` : slEnd,
           meeting_link: slLink.trim(),
-          homework: slHomework.trim() || null
+          homework: slHomework.trim() || null,
+          ...(slTeacherId.trim() && slTeacherId.trim() !== editingSlotRow.teacher_id
+            ? { teacher_id: slTeacherId.trim() }
+            : {})
         })
       });
       const j = await res.json().catch(() => ({}));
@@ -1177,7 +1201,11 @@ export default function ClassLiveLessons() {
                     listHeading: 'Ders / oturum listesi (metin)',
                     lessonLines,
                     footerNote:
-                      'Veli ve öğrenciyle paylaşabilirsiniz. Canlı derse katılım için uygulamadaki bağlantıları kullanın.'
+                      'Veli ve öğrenciyle paylaşabilirsiniz. Canlı derse katılım için uygulamadaki bağlantıları kullanın.',
+                    branding: {
+                      institutionName: institution?.name || 'Kurum',
+                      logoUrl: institution?.logo?.trim() || null
+                    }
                   });
                 } catch (e) {
                   window.alert(e instanceof Error ? e.message : 'PDF oluşturulamadı');
@@ -1459,6 +1487,23 @@ export default function ClassLiveLessons() {
               </label>
             </div>
             <label className="block text-sm">
+              <span className="text-slate-600">Öğretmen</span>
+              <select
+                value={esTeacherId}
+                onChange={(e) => setEsTeacherId(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+              >
+                {classTeacherOptions.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+              <span className="mt-1 block text-xs text-slate-500">
+                Liste, sınıfa atanmış öğretmenlerden gelir; yeni öğretmen için önce sınıf atamalarını güncelleyin.
+              </span>
+            </label>
+            <label className="block text-sm">
               <span className="text-slate-600">Toplantı veya kayıt bağlantısı</span>
               <span className="block text-xs text-slate-500 mt-0.5 font-normal">
                 Canlı ders için Meet/Zoom/BBB linki; ders bittikten sonra aynı alana kayıt URL’sini yapıştırabilirsiniz — öğrenci «Kaydı izle» ile açar.
@@ -1563,6 +1608,20 @@ export default function ClassLiveLessons() {
                 />
               </label>
             </div>
+            <label className="block text-sm">
+              <span className="text-slate-600">Öğretmen</span>
+              <select
+                value={slTeacherId}
+                onChange={(e) => setSlTeacherId(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+              >
+                {classTeacherOptions.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="block text-sm">
               <span className="text-slate-600">Bağlantı</span>
               <input

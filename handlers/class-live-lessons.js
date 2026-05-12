@@ -1082,6 +1082,41 @@ export default async function handler(req, res) {
     }
     if (body.homework !== undefined) patch.homework = String(body.homework || '').trim() || null;
 
+    if (body.teacher_id !== undefined) {
+      const tid = String(body.teacher_id || '').trim();
+      if (!tid) {
+        return res.status(400).json({ error: 'teacher_id_required', code: 'teacher_id_invalid' });
+      }
+      if (!details.teacher_ids.includes(tid)) {
+        return res.status(400).json({
+          error:
+            'Bu öğretmen sınıfın atanmış öğretmenleri arasında değil. Önce sınıf ayarlarından öğretmeni ekleyin.',
+          code: 'teacher_not_in_class'
+        });
+      }
+      patch.teacher_id = tid;
+    }
+
+    if (!slotMode && (patch.lesson_date || patch.start_time || patch.end_time || patch.teacher_id)) {
+      const teacherIdForCheck = String((patch.teacher_id ?? session.teacher_id) || '');
+      const lessonDate = String((patch.lesson_date ?? session.lesson_date) || '').slice(0, 10);
+      const start = hhmmss(patch.start_time || session.start_time, '09:00:00');
+      const end = hhmmss(patch.end_time || session.end_time, '10:00:00');
+      const clash = await teacherTimeConflictOnDate({
+        teacherId: teacherIdForCheck,
+        lessonDate,
+        start,
+        end,
+        excludeSessionIds: [rowId]
+      });
+      if (!clash.ok) {
+        return res.status(409).json({
+          error: clash.reason || 'Çakışma',
+          code: 'teacher_time_conflict'
+        });
+      }
+    }
+
     if (slotMode && (patch.start_time || patch.end_time || patch.day_of_week || patch.teacher_id)) {
       const teacherId = String((patch.teacher_id || session.teacher_id) || '');
       const dayOfWeek = Number(patch.day_of_week || session.day_of_week);

@@ -80,7 +80,7 @@ type StaffUser = {
 
 export default function LiveLessons() {
   const { effectiveUser } = useAuth();
-  const { students } = useApp();
+  const { students, institution } = useApp();
   const role = (effectiveUser?.role || '') as UserRole;
 
   const [lessons, setLessons] = useState<TeacherLesson[]>([]);
@@ -132,11 +132,16 @@ export default function LiveLessons() {
   const [editStart, setEditStart] = useState('09:00');
   const [editDuration, setEditDuration] = useState(60);
   const [editMeetingLink, setEditMeetingLink] = useState('');
+  const [editTeacherId, setEditTeacherId] = useState('');
 
   const canManage =
     role === 'super_admin' || role === 'admin' || role === 'teacher' || role === 'coach';
   const showAdminExtras = role === 'super_admin' || role === 'admin';
   const showTeacherPicker = role === 'super_admin' || role === 'admin';
+  /** Düzenleme formunda öğretmen seçimi (koç dahil) */
+  const showEditTeacherPicker =
+    role === 'super_admin' || role === 'admin' || role === 'coach';
+  const loadStaffDirectory = showTeacherPicker || role === 'coach';
   /** Liste / PDF / öğrenci filtresi: tüm yetkili roller */
   const showScopeFilters = canManage;
 
@@ -278,8 +283,21 @@ export default function LiveLessons() {
     return [...m.values()].sort((a, b) => a.name.localeCompare(b.name, 'tr'));
   }, [staffUsers, effectiveUser]);
 
+  const editTeacherOptions = useMemo(() => {
+    if (!editingLesson) return mergedStaff;
+    if (mergedStaff.some((u) => u.id === editingLesson.teacher_id)) return mergedStaff;
+    return [
+      {
+        id: editingLesson.teacher_id,
+        name: `Mevcut öğretmen (${editingLesson.teacher_id.slice(0, 8)}…)`,
+        role: 'teacher'
+      },
+      ...mergedStaff
+    ];
+  }, [mergedStaff, editingLesson]);
+
   useEffect(() => {
-    if (!showTeacherPicker) return;
+    if (!loadStaffDirectory) return;
     let cancelled = false;
     (async () => {
       try {
@@ -298,7 +316,7 @@ export default function LiveLessons() {
     return () => {
       cancelled = true;
     };
-  }, [showTeacherPicker]);
+  }, [loadStaffDirectory]);
 
   useEffect(() => {
     if (effectiveUser?.id && showTeacherPicker && !adminTeacherId) {
@@ -478,6 +496,7 @@ export default function LiveLessons() {
     setEditStart(st.length >= 5 ? st.slice(0, 5) : '09:00');
     setEditDuration(lesson.duration_minutes ?? 60);
     setEditMeetingLink(lesson.meeting_link);
+    setEditTeacherId(lesson.teacher_id);
     setError(null);
   };
 
@@ -496,6 +515,13 @@ export default function LiveLessons() {
         body.date = editDateStr;
         body.start_time = editStart.length === 5 ? `${editStart}:00` : editStart;
         body.duration_minutes = editDuration;
+      }
+      if (
+        showEditTeacherPicker &&
+        editTeacherId.trim() &&
+        editTeacherId.trim() !== editingLesson.teacher_id
+      ) {
+        body.teacher_id = editTeacherId.trim();
       }
       const res = await apiFetch('/api/teacher-lessons', {
         method: 'PATCH',
@@ -776,7 +802,11 @@ export default function LiveLessons() {
                         ? lessonLines
                         : ['Bu hafta görünen aralıkta planlı ders yok (takvim boş olabilir).'],
                     footerNote:
-                      'Veli ve öğrenciyle paylaşabilirsiniz. Bağlantılar için uygulamadaki «Katıl» düğmesini kullanın.'
+                      'Veli ve öğrenciyle paylaşabilirsiniz. Bağlantılar için uygulamadaki «Katıl» düğmesini kullanın.',
+                    branding: {
+                      institutionName: institution?.name || 'Kurum',
+                      logoUrl: institution?.logo?.trim() || null
+                    }
                   });
                 } catch (e) {
                   window.alert(e instanceof Error ? e.message : 'PDF oluşturulamadı');
@@ -1206,7 +1236,34 @@ export default function LiveLessons() {
               </p>
             ) : (
               <p className="text-sm text-slate-600">
-                Planlanmış ders: tarih, saat, süre ve bağlantıyı değiştirebilirsiniz.
+                Planlanmış ders: tarih, saat, süre, öğretmen ve bağlantıyı değiştirebilirsiniz.
+              </p>
+            )}
+            {showEditTeacherPicker ? (
+              <label className="block text-sm">
+                <span className="text-slate-600">Öğretmen (platform kullanıcısı)</span>
+                <select
+                  disabled={editingLesson.status !== 'scheduled'}
+                  value={editTeacherId}
+                  onChange={(e) => setEditTeacherId(e.target.value)}
+                  className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 disabled:bg-slate-100"
+                >
+                  {editTeacherOptions.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                      {u.email ? ` (${u.email})` : ''}
+                    </option>
+                  ))}
+                </select>
+                {editingLesson.status !== 'scheduled' ? (
+                  <span className="mt-1 block text-xs text-slate-500">
+                    Tamamlanmış veya iptal derslerde öğretmen değişmez.
+                  </span>
+                ) : null}
+              </label>
+            ) : (
+              <p className="text-xs text-slate-500">
+                Öğretmen: {mergedStaff.find((u) => u.id === editingLesson.teacher_id)?.name || editingLesson.teacher_id}
               </p>
             )}
             <label className="block text-sm">
