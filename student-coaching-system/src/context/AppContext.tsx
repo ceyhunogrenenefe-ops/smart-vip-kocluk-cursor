@@ -154,11 +154,11 @@ const saveToStorage = <T,>(key: string, value: T): void => {
 // Varsayılan kurum
 const createDefaultInstitution = (): Institution => ({
   id: 'default',
-  name: 'SMART VİP KOÇLUK',
+  name: 'Smart Koçluk Sistemi',
   phone: '0212 555 00 00',
-  address: 'Merkez Mahallesi, Atatürk Caddesi No:123, İstanbul',
-  email: 'info@smartvipkocluk.com',
-  website: 'www.smartvipkocluk.com',
+  address: 'Türkiye',
+  email: 'info@smartkocluk.com',
+  website: 'https://smartkocluk.com',
   logo: '',
   isActive: true,
   createdAt: new Date().toISOString()
@@ -385,23 +385,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // Initialize database first
         await db.initializeDatabase();
 
-        // Öğrenci oturumunda kurum filtresi istemci tarafında yanlış eşleşebilir (eski admin seçimi);
-        // API zaten rol bazlı döndürür — burada filtre uygulama.
-        // Süper admin: seçili kurum filtresini yalnızca öğrenci listesine uygulama — başka kurum
-        // öğrencisi users ile eşleşmez ve Kullanıcı Yönetimi PATCH students yapmaz.
-        // Koçlar / haftalık kayıtlar: seçili kurum filtresi (performans ve önceki davranış).
+        // Öğrenci oturumunda kurum filtresi istemci tarafında yanlış eşleşebilir; öğrenci için API rolüne göre daraltır.
+        // Süper admin dahil personel: seçili kurum (üst çubuk) = veri kiracısı; yalnız o kurumun öğrencileri ve ilişkili kayıtlar.
         const isStudentRole = effectiveUser?.role === 'student';
-        const isSuperAdmin = effectiveUser?.role === 'super_admin';
-        const studentInstitutionScope =
-          isStudentRole || isSuperAdmin ? undefined : activeInstitutionId || undefined;
-        const institutionScope = isStudentRole ? undefined : activeInstitutionId || undefined;
 
-        // Load students from Supabase
-        const dbStudents = await db.getStudents(studentInstitutionScope);
+        // Kurumları önce yükle — aktif kurum yoksa ilk kayıt bu yükleme turunun kapsamı olur
+        const dbInstitutions = await db.getInstitutions();
+        let loadedInstitutions: Institution[] = [];
+        if (dbInstitutions.length > 0) {
+          loadedInstitutions = dbInstitutions.map(i => ({
+            id: i.id,
+            name: i.name,
+            email: i.email,
+            phone: i.phone || undefined,
+            address: i.address || undefined,
+            website: i.website || undefined,
+            logo: i.logo || undefined,
+            isActive: i.is_active,
+            createdAt: i.created_at
+          }));
+          setInstitutions(loadedInstitutions);
+          if (!activeInstitutionId && loadedInstitutions.length > 0) {
+            setActiveInstitutionId(loadedInstitutions[0].id);
+          }
+        }
+
+        const institutionScope = isStudentRole
+          ? undefined
+          : activeInstitutionId || loadedInstitutions[0]?.id || undefined;
+
+        const dbStudents = await db.getStudents(institutionScope);
         const loadedStudents: Student[] = dbStudents.map(studentRowToStudent);
         setStudents(loadedStudents);
 
-        // Load coaches from Supabase (institution_id zorunlu — aksi halde admin scopedCoaches hepsini eler)
         const dbCoaches = await db.getCoaches(institutionScope);
         const loadedCoaches: Coach[] = dbCoaches.map(c => ({
           id: c.id,
@@ -414,7 +430,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           createdAt: c.created_at
         }));
         const legacyInstitutionId =
-          activeInstitutionId || institutions[0]?.id || createDefaultInstitution().id;
+          institutionScope || loadedInstitutions[0]?.id || createDefaultInstitution().id;
         const localCoaches = loadFromStorage<Coach[]>(STORAGE_KEYS.coaches, []).map(c => ({
           ...c,
           subjects: Array.isArray(c.subjects) ? c.subjects : [],
@@ -423,7 +439,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }));
         setCoaches(mergeCoachesByEmail(loadedCoaches, localCoaches));
 
-        // Load weekly entries from Supabase
         const dbEntries = await db.getWeeklyEntries(undefined, institutionScope);
         const loadedEntries: WeeklyEntry[] = dbEntries.map(e => ({
           id: e.id,
@@ -446,30 +461,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }));
         setWeeklyEntries(loadedEntries);
 
-        // Load institutions from Supabase
-        const dbInstitutions = await db.getInstitutions();
-        if (dbInstitutions.length > 0) {
-          const loadedInstitutions: Institution[] = dbInstitutions.map(i => ({
-            id: i.id,
-            name: i.name,
-            email: i.email,
-            phone: i.phone || undefined,
-            address: i.address || undefined,
-            website: i.website || undefined,
-            logo: i.logo || undefined,
-            isActive: i.is_active,
-            createdAt: i.created_at
-          }));
-          setInstitutions(loadedInstitutions);
-          // Set active institution if not set
-          if (!activeInstitutionId && loadedInstitutions.length > 0) {
-            setActiveInstitutionId(loadedInstitutions[0].id);
-          }
-        }
+        const studentIdScope = new Set(loadedStudents.map(s => s.id));
+        const restrictRelatedDataByStudents = !isStudentRole && Boolean(institutionScope);
 
-        // Load book readings from Supabase
         const dbBooks = await db.getBookReadings();
-        const loadedBooks: Book[] = dbBooks.map(b => ({
+        const mappedBooks: Book[] = dbBooks.map(b => ({
           id: b.id,
           studentId: b.student_id,
           title: b.book_title,
@@ -482,11 +478,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           institutionId: b.institution_id || undefined,
           createdAt: b.created_at
         }));
+        const loadedBooks = restrictRelatedDataByStudents
+          ? mappedBooks.filter(b => studentIdScope.has(b.studentId))
+          : mappedBooks;
         setBooks(loadedBooks);
 
-        // Load written exams from Supabase
         const dbWrittenExams = await db.getWrittenExams();
-        const loadedWrittenScores: WrittenExamScore[] = dbWrittenExams.map(w => ({
+        const mappedWritten: WrittenExamScore[] = dbWrittenExams.map(w => ({
           id: w.id,
           studentId: w.student_id,
           subject: w.subject,
@@ -497,6 +495,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           notes: w.notes || undefined,
           createdAt: w.created_at
         }));
+        const loadedWrittenScores = restrictRelatedDataByStudents
+          ? mappedWritten.filter(w => studentIdScope.has(w.studentId))
+          : mappedWritten;
         setWrittenExamScores(loadedWrittenScores);
 
         console.log('Veritabanından veriler başarıyla yüklendi');
@@ -2112,7 +2113,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const scopedStudents = React.useMemo(() => {
     if (!effectiveUser) return [];
     const tags = userRoleTags(effectiveUser);
-    if (tags.includes('super_admin')) return students;
+    if (tags.includes('super_admin')) {
+      if (!activeInstitutionId) return students;
+      return students.filter((s) => s.institutionId === activeInstitutionId);
+    }
     if (tags.includes('student')) {
       const sid = resolveStudentRecordId(
         effectiveUser.role,
@@ -2147,20 +2151,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!cid) return [];
       return students.filter((s) => String(s.coachId || '') === String(cid));
     }
-    /** Öğretmen: API dar liste döner; admin+öğretmen birlikte kurum geneli gösterme */
+    /** Öğretmen: kurumu varsa yalnız o kurumun öğrencileri */
     if (tags.includes('teacher')) {
+      const iid = effectiveUser.institutionId;
+      if (iid) return students.filter((s) => s.institutionId === iid);
       return students;
     }
     if (tags.includes('admin')) {
       return students.filter((s) => s.institutionId === effectiveUser.institutionId);
     }
     return students;
-  }, [students, effectiveUser, coaches]);
+  }, [students, effectiveUser, coaches, activeInstitutionId]);
 
   const scopedCoaches = React.useMemo(() => {
     if (!effectiveUser) return [];
     const tags = userRoleTags(effectiveUser);
-    if (tags.includes('super_admin')) return coaches;
+    if (tags.includes('super_admin')) {
+      const iid = activeInstitutionId;
+      if (!iid) return coaches;
+      return coaches.filter((c) => !c.institutionId || c.institutionId === iid);
+    }
     if (tags.includes('admin')) {
       const iid = effectiveUser.institutionId;
       if (!iid) return coaches;
@@ -2183,12 +2193,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return coaches.filter((c) => coachIds.has(c.id));
     }
     return [];
-  }, [coaches, effectiveUser, scopedStudents]);
+  }, [coaches, effectiveUser, scopedStudents, activeInstitutionId]);
 
   const scopedWeeklyEntries = React.useMemo(() => {
     if (!effectiveUser) return [];
     const tags = userRoleTags(effectiveUser);
-    if (tags.includes('super_admin')) return weeklyEntries;
+    if (tags.includes('super_admin')) {
+      const allowed = new Set(students.map((s) => s.id));
+      return weeklyEntries.filter((e) => allowed.has(e.studentId));
+    }
     if (tags.includes('admin') || tags.includes('teacher')) {
       const allowedStudentIds = new Set(scopedStudents.map((s) => s.id));
       return weeklyEntries.filter((e) => allowedStudentIds.has(e.studentId));
@@ -2209,6 +2222,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     return [];
   }, [weeklyEntries, effectiveUser, scopedStudents, students]);
+
+  /** Süper admin: yerel state (konu/deneme/AI/okuma) Supabase ile senkron olmasa bile seçili kurum öğrencileriyle sınırla */
+  const superAdminStudentIdSet = React.useMemo(() => {
+    if (!effectiveUser || !userRoleTags(effectiveUser).includes('super_admin')) return null;
+    return new Set(students.map((s) => s.id));
+  }, [effectiveUser, students]);
+
+  const scopedTopicProgress = React.useMemo(() => {
+    const ids = superAdminStudentIdSet;
+    if (!ids) return topicProgress;
+    return topicProgress.filter((p) => ids.has(p.studentId));
+  }, [topicProgress, superAdminStudentIdSet]);
+
+  const scopedExamResults = React.useMemo(() => {
+    const ids = superAdminStudentIdSet;
+    if (!ids) return examResults;
+    return examResults.filter((r) => ids.has(r.studentId));
+  }, [examResults, superAdminStudentIdSet]);
+
+  const scopedAiSuggestions = React.useMemo(() => {
+    const ids = superAdminStudentIdSet;
+    if (!ids) return aiSuggestions;
+    return aiSuggestions.filter((a) => ids.has(a.studentId));
+  }, [aiSuggestions, superAdminStudentIdSet]);
+
+  const scopedReadingLogs = React.useMemo(() => {
+    const ids = superAdminStudentIdSet;
+    if (!ids) return readingLogs;
+    return readingLogs.filter((l) => ids.has(l.studentId));
+  }, [readingLogs, superAdminStudentIdSet]);
 
   const scopedInstitutions = React.useMemo(() => {
     if (!effectiveUser) return [];
@@ -2245,7 +2288,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       getTopics,
       addTopic,
       getTopicsByClass,
-      topicProgress,
+      topicProgress: scopedTopicProgress,
       markTopicCompleted,
       unmarkTopicCompleted,
       getStudentTopicProgress,
@@ -2254,13 +2297,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       getStudentStats,
       selectedStudentId,
       setSelectedStudentId,
-      examResults,
+      examResults: scopedExamResults,
       addExamResult,
       updateExamResult,
       deleteExamResult,
       getStudentExamResults,
       getLatestExamResult,
-      aiSuggestions,
+      aiSuggestions: scopedAiSuggestions,
       addAISuggestion,
       markSuggestionRead,
       deleteAISuggestion,
@@ -2272,7 +2315,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateBook,
       deleteBook,
       getStudentBooks,
-      readingLogs,
+      readingLogs: scopedReadingLogs,
       addReadingLog,
       updateReadingLog,
       deleteReadingLog,

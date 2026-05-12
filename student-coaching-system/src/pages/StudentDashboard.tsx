@@ -1,5 +1,6 @@
 // Türkçe: Öğrenci Özel Dashboard Sayfası - Günlük Çalışma Kaydı ve Deneme Sınavları ile
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { resolveStudentRecordId } from '../lib/coachResolve';
@@ -13,7 +14,6 @@ import {
   CheckCircle,
   XCircle,
   Clock,
-  BarChart3,
   Calendar,
   Download,
   Plus,
@@ -40,9 +40,25 @@ import {
   LineChart,
   Line
 } from 'recharts';
-type TabType = 'daily' | 'exams' | 'analytics' | 'written' | 'books';
+type TabType = 'daily' | 'exams' | 'written' | 'books';
+
+const TAB_SEGMENT: Record<TabType, string> = {
+  daily: 'gunluk',
+  exams: 'denemeler',
+  written: 'yazili',
+  books: 'kitaplar'
+};
+
+const SEGMENT_TAB: Record<string, TabType> = {
+  gunluk: 'daily',
+  denemeler: 'exams',
+  yazili: 'written',
+  kitaplar: 'books'
+};
 
 export default function StudentDashboard() {
+  const { tabKey } = useParams<{ tabKey?: string }>();
+  const navigate = useNavigate();
   const { user, effectiveUser, linkedStudent, linkedStudentError, linkedStudentLoading } = useAuth();
   const {
     weeklyEntries,
@@ -82,8 +98,23 @@ export default function StudentDashboard() {
     [linkedStudent?.id, effectiveUser?.role, effectiveUser?.studentId, effectiveUser?.email, students]
   );
 
-  // Tab state
+  // Tab state — URL: /student-dashboard/:gunluk | denemeler | yazili | kitaplar (kök /student-dashboard rotası gunluk’a yönlenir)
   const [activeTab, setActiveTab] = useState<TabType>('daily');
+
+  useEffect(() => {
+    const mapped = tabKey ? SEGMENT_TAB[tabKey] : undefined;
+    if (mapped) {
+      setActiveTab(mapped);
+    } else {
+      navigate('/student-dashboard/gunluk', { replace: true });
+    }
+  }, [tabKey, navigate]);
+
+  const goTab = (t: TabType) => {
+    setActiveTab(t);
+    const seg = TAB_SEGMENT[t];
+    navigate(`/student-dashboard/${seg}`);
+  };
 
   const myExamResults = useMemo(() => {
     const sid = resolvedStudentId;
@@ -471,7 +502,7 @@ export default function StudentDashboard() {
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="flex border-b border-gray-100">
           <button
-            onClick={() => setActiveTab('daily')}
+            onClick={() => goTab('daily')}
             className={`flex-1 flex items-center justify-center gap-2 px-4 py-4 text-sm font-medium transition-colors ${
               activeTab === 'daily'
                 ? 'text-blue-600 bg-blue-50 border-b-2 border-blue-600'
@@ -482,7 +513,7 @@ export default function StudentDashboard() {
             Günlük Kayıt
           </button>
           <button
-            onClick={() => setActiveTab('exams')}
+            onClick={() => goTab('exams')}
             className={`flex-1 flex items-center justify-center gap-2 px-4 py-4 text-sm font-medium transition-colors ${
               activeTab === 'exams'
                 ? 'text-blue-600 bg-blue-50 border-b-2 border-blue-600'
@@ -493,18 +524,7 @@ export default function StudentDashboard() {
             Deneme Sınavları
           </button>
           <button
-            onClick={() => setActiveTab('analytics')}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-4 text-sm font-medium transition-colors ${
-              activeTab === 'analytics'
-                ? 'text-blue-600 bg-blue-50 border-b-2 border-blue-600'
-                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-            }`}
-          >
-            <BarChart3 className="w-4 h-4" />
-            Analiz
-          </button>
-          <button
-            onClick={() => setActiveTab('written')}
+            onClick={() => goTab('written')}
             className={`flex-1 flex items-center justify-center gap-2 px-4 py-4 text-sm font-medium transition-colors ${
               activeTab === 'written'
                 ? 'text-blue-600 bg-blue-50 border-b-2 border-blue-600'
@@ -515,7 +535,7 @@ export default function StudentDashboard() {
             Yazılı
           </button>
           <button
-            onClick={() => setActiveTab('books')}
+            onClick={() => goTab('books')}
             className={`flex-1 flex items-center justify-center gap-2 px-4 py-4 text-sm font-medium transition-colors ${
               activeTab === 'books'
                 ? 'text-emerald-600 bg-emerald-50 border-b-2 border-emerald-600'
@@ -913,102 +933,6 @@ export default function StudentDashboard() {
                   <FileText className="w-4 h-4" />
                   Yazdır
                 </button>
-              </div>
-            </div>
-          )}
-
-          {/* Analiz Tab */}
-          {activeTab === 'analytics' && (
-            <div className="space-y-6">
-              {/* İstatistikler */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Target className="w-5 h-5 text-blue-600" />
-                    <span className="text-sm text-gray-500">Toplam Hedef</span>
-                  </div>
-                  <p className="text-2xl font-bold text-slate-800">{myStats?.totalTarget || 0}</p>
-                </div>
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <BarChart3 className="w-5 h-5 text-green-600" />
-                    <span className="text-sm text-gray-500">Çözülen</span>
-                  </div>
-                  <p className="text-2xl font-bold text-slate-800">{myStats?.totalSolved || 0}</p>
-                </div>
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Award className="w-5 h-5 text-purple-600" />
-                    <span className="text-sm text-gray-500">Gerçekleşme</span>
-                  </div>
-                  <p className="text-2xl font-bold text-slate-800">%{myStats?.realizationRate || 0}</p>
-                </div>
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <TrendingUp className="w-5 h-5 text-red-600" />
-                    <span className="text-sm text-gray-500">Başarı</span>
-                  </div>
-                  <p className="text-2xl font-bold text-slate-800">%{myStats?.successRate || 0}</p>
-                </div>
-              </div>
-
-              {/* Detaylı İstatistikler */}
-              <div className="grid grid-cols-3 gap-4">
-                <div className="bg-green-50 rounded-xl p-4 text-center">
-                  <CheckCircle className="w-8 h-8 text-green-600 mx-auto mb-2" />
-                  <p className="text-3xl font-bold text-green-600">{myStats?.totalCorrect || 0}</p>
-                  <p className="text-sm text-gray-500">Doğru</p>
-                </div>
-                <div className="bg-red-50 rounded-xl p-4 text-center">
-                  <XCircle className="w-8 h-8 text-red-600 mx-auto mb-2" />
-                  <p className="text-3xl font-bold text-red-600">{myStats?.totalWrong || 0}</p>
-                  <p className="text-sm text-gray-500">Yanlış</p>
-                </div>
-                <div className="bg-gray-50 rounded-xl p-4 text-center">
-                  <Clock className="w-8 h-8 text-gray-600 mx-auto mb-2" />
-                  <p className="text-3xl font-bold text-gray-600">{myStats?.totalBlank || 0}</p>
-                  <p className="text-sm text-gray-500">Boş</p>
-                </div>
-              </div>
-
-              {/* Grafikler */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                  <h3 className="text-lg font-semibold text-slate-800 mb-4">Ders Bazlı Başarın</h3>
-                  <div className="h-64">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={subjectStats}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                        <XAxis dataKey="subject" tick={{ fontSize: 10 }} />
-                        <YAxis tick={{ fontSize: 10 }} />
-                        <Tooltip />
-                        <Bar dataKey="başarı" fill="#3B82F6" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                  <h3 className="text-lg font-semibold text-slate-800 mb-4">Haftalık Performansın</h3>
-                  <div className="h-64">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={dailyTrend}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                        <XAxis dataKey="tarih" tick={{ fontSize: 10 }} />
-                        <YAxis tick={{ fontSize: 10 }} domain={[0, 100]} />
-                        <Tooltip />
-                        <Line
-                          type="monotone"
-                          dataKey="başarı"
-                          stroke="#10B981"
-                          strokeWidth={2}
-                          dot={{ fill: '#10B981' }}
-                          name="Başarı %"
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
               </div>
             </div>
           )}

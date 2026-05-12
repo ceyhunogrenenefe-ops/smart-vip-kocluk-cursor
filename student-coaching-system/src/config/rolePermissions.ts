@@ -18,7 +18,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/teachers': ['super_admin', 'admin', 'coach'],
   '/coaches': ['super_admin', 'admin'],
   '/topics': ['super_admin', 'admin'],
-  '/topic-tracking': ['admin', 'coach'],
+  '/topic-tracking': ['admin', 'coach', 'student'],
   '/exam-tracking': ['admin', 'coach'],
   '/book-tracking': ['admin', 'coach'],
   '/written-exam': ['admin', 'coach'],

@@ -272,12 +272,17 @@ function App() {
               </ProtectedRoute>
             } />
 
-            {/* Öğrenci Dashboard - Sadece Öğrenciler için */}
-            <Route path="/student-dashboard" element={
+            {/* Öğrenci Dashboard — sekme URL’leri; kök adres günlük sekmeye yönlendirilir */}
+            <Route path="/student-dashboard/:tabKey" element={
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/student-dashboard')}>
                 <Layout>
                   <StudentDashboard />
                 </Layout>
+              </ProtectedRoute>
+            } />
+            <Route path="/student-dashboard" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/student-dashboard')}>
+                <Navigate to="/student-dashboard/gunluk" replace />
               </ProtectedRoute>
             } />
 
@@ -290,11 +295,10 @@ function App() {
               </ProtectedRoute>
             } />
 
-            {/* Öğrenci Analitikleri - Sadece Öğrenciler için */}
             <Route path="/student-analytics" element={
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/student-analytics')}>
                 <Layout>
-                  <StudentDashboard />
+                  <Analytics />
                 </Layout>
               </ProtectedRoute>
             } />

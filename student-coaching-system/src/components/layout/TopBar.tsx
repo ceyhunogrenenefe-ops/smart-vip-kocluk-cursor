@@ -22,6 +22,9 @@ export default function TopBar({ onMenuClick, drawerOpen = false }: TopBarProps)
 
   const getPageTitle = () => {
     const path = location.pathname;
+    if (path.startsWith('/student-dashboard')) return 'Öğrenci Paneli';
+    if (path.startsWith('/student-analytics')) return 'Analizlerim';
+
     const titles: { [key: string]: string } = {
       '/dashboard': 'Ana Panel',
       '/coach-dashboard': 'Koç Paneli',
@@ -38,7 +41,6 @@ export default function TopBar({ onMenuClick, drawerOpen = false }: TopBarProps)
       '/message-templates': 'WhatsApp şablonları',
       '/coach-whatsapp-settings': 'WhatsApp merkezi',
       '/settings': 'Ayarlar',
-      '/student-dashboard': 'Öğrenci Paneli',
       '/class-schedule': 'Canlı derslerim',
       '/teacher-dashboard': 'Öğretmen Paneli',
       '/user-management': 'Kullanıcı Yönetimi',

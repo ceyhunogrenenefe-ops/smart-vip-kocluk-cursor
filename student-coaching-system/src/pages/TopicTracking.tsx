@@ -1,6 +1,9 @@
 // Türkçe: Konu Takibi Sayfası - Öğrencinin hangi konuları bitirdiğini gösterir
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
+import { userRoleTags } from '../config/rolePermissions';
+import { resolveStudentRecordId } from '../lib/coachResolve';
 import { formatClassLevelLabel } from '../types';
 import {
   BookOpen,
@@ -21,6 +24,7 @@ const YKS_TYPES = {
 };
 
 export default function TopicTracking() {
+  const { effectiveUser } = useAuth();
   const {
     students,
     topicProgress,
@@ -32,10 +36,32 @@ export default function TopicTracking() {
     getStudentTopicProgress
   } = useApp();
 
+  const tags = useMemo(() => (effectiveUser ? userRoleTags(effectiveUser) : []), [effectiveUser]);
+  const isStudentOnly =
+    tags.includes('student') &&
+    !tags.some((t) => ['super_admin', 'admin', 'coach', 'teacher'].includes(t));
+
+  const selfStudentId = useMemo(
+    () =>
+      isStudentOnly
+        ? resolveStudentRecordId(
+            effectiveUser?.role,
+            effectiveUser?.studentId,
+            effectiveUser?.email,
+            students
+          )?.trim() || undefined
+        : undefined,
+    [isStudentOnly, effectiveUser?.role, effectiveUser?.studentId, effectiveUser?.email, students]
+  );
+
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [selectedSubject, setSelectedSubject] = useState<string>('all');
   const [selectedSection, setSelectedSection] = useState<'all' | 'tyt' | 'ayt'>('all');
   const [searchTerm, setSearchTerm] = useState<string>('');
+
+  useEffect(() => {
+    if (isStudentOnly && selfStudentId) setSelectedStudentId(selfStudentId);
+  }, [isStudentOnly, selfStudentId]);
 
   const selectedStudent = students.find(s => s.id === selectedStudentId);
 
@@ -231,7 +257,11 @@ export default function TopicTracking() {
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Konu Takibi</h2>
-          <p className="text-gray-500">Öğrencilerin konu tamamlama durumlarını takip edin</p>
+          <p className="text-gray-500">
+            {isStudentOnly
+              ? 'Konuyu bitirdiğinizde işaretleyin; ilerlemeniz kaydedilir.'
+              : 'Öğrencilerin konu tamamlama durumlarını takip edin'}
+          </p>
         </div>
         {(isYKSStudent || isYosStudent) && (
           <div className="bg-gradient-to-r from-blue-500 to-purple-500 text-white px-4 py-2 rounded-lg flex items-center gap-2">
@@ -241,9 +271,10 @@ export default function TopicTracking() {
         )}
       </div>
 
-      {/* Öğrenci Seçimi */}
+      {/* Öğrenci Seçimi (koç / yönetici) */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <div className="flex flex-col md:flex-row gap-4">
+          {!isStudentOnly ? (
           <div className="flex-1">
             <label className="block text-sm font-medium text-gray-700 mb-2">
               <GraduationCap className="w-4 h-4 inline mr-1" />
@@ -266,6 +297,12 @@ export default function TopicTracking() {
               ))}
             </select>
           </div>
+          ) : (
+            <div className="flex-1 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              <span className="font-semibold text-slate-900">{selectedStudent?.name || 'Öğrenci'}</span>
+              <span className="text-slate-500"> · sınıfınıza göre konu havuzu</span>
+            </div>
+          )}
 
           {selectedStudentId && (
             <>
@@ -339,6 +376,7 @@ export default function TopicTracking() {
                   ({getClassLabel()})
                 </span>
               </h3>
+              {!isStudentOnly ? (
               <button
                 onClick={() => {
                   if (confirm('Tüm konu ilerlemesini sıfırlamak istediğinizden emin misiniz?')) {
@@ -350,6 +388,7 @@ export default function TopicTracking() {
                 <RotateCcw className="w-4 h-4" />
                 Sıfırla
               </button>
+              ) : null}
             </div>
 
             {/* Progress Bar */}

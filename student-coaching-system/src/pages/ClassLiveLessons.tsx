@@ -8,7 +8,7 @@ import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShe
 import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
 import { turkishFold } from '../lib/userBulkImport';
 import type { Student } from '../types';
-import { GripVertical, KeyRound, Pencil, Trash2 } from 'lucide-react';
+import { GripVertical, KeyRound, Pencil, PlayCircle, Trash2 } from 'lucide-react';
 
 type ClassRow = {
   id: string;
@@ -1121,7 +1121,7 @@ export default function ClassLiveLessons() {
             </span>
           </>
         }
-        hint="Yeşil kartlar gerçek oturumdur (Katıl / Yoklama). Kesik çizgili kartlar yalnızca şablondur; oturum oluşunca aynı slotta şablon gizlenir."
+        hint="Yeşil kartlar gerçek oturumdur (planlı: Katıl; tamamlanınca kayıt linki varsa Kaydı izle). Kesik çizgili kartlar şablondur."
       >
         <div className="overflow-x-auto p-2 sm:p-3">
           <table className="w-full min-w-[920px] border-collapse text-xs">
@@ -1189,7 +1189,10 @@ export default function ClassLiveLessons() {
                                 : s.status === 'cancelled'
                                   ? 'opacity-75 ring-red-200'
                                   : 'ring-emerald-300/50 shadow-md';
-                            const canJoin = s.status === 'scheduled' && Boolean(s.meeting_link?.trim());
+                            const sessionLink = String(s.meeting_link || '').trim();
+                            const hasSessionLink = Boolean(sessionLink);
+                            const canJoin = s.status === 'scheduled' && hasSessionLink;
+                            const canWatchRecording = s.status === 'completed' && hasSessionLink;
                             return (
                               <div
                                 key={s.id}
@@ -1219,10 +1222,21 @@ export default function ClassLiveLessons() {
                                   {canJoin ? (
                                     <button
                                       type="button"
-                                      onClick={() => window.open(s.meeting_link, '_blank', 'noopener,noreferrer')}
+                                      onClick={() => window.open(sessionLink, '_blank', 'noopener,noreferrer')}
                                       className="rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-2 py-1 text-[10px] font-semibold text-white shadow-sm hover:brightness-110"
                                     >
                                       Katıl
+                                    </button>
+                                  ) : null}
+                                  {canWatchRecording ? (
+                                    <button
+                                      type="button"
+                                      title="Ders kaydı / tekrar izleme bağlantısı"
+                                      onClick={() => window.open(sessionLink, '_blank', 'noopener,noreferrer')}
+                                      className="inline-flex items-center gap-0.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-2 py-1 text-[10px] font-semibold text-white shadow-sm hover:brightness-110"
+                                    >
+                                      <PlayCircle className="h-3 w-3 shrink-0" aria-hidden />
+                                      Kaydı izle
                                     </button>
                                   ) : null}
                                   {canMarkAttendance && s.status === 'scheduled' ? (
@@ -1372,10 +1386,15 @@ export default function ClassLiveLessons() {
               </label>
             </div>
             <label className="block text-sm">
-              <span className="text-slate-600">Toplantı bağlantısı</span>
+              <span className="text-slate-600">Toplantı veya kayıt bağlantısı</span>
+              <span className="block text-xs text-slate-500 mt-0.5 font-normal">
+                Canlı ders için Meet/Zoom/BBB linki; ders bittikten sonra aynı alana kayıt URL’sini yapıştırabilirsiniz — öğrenci «Kaydı izle» ile açar.
+              </span>
               <input
+                type="url"
                 value={esLink}
                 onChange={(e) => setEsLink(e.target.value)}
+                placeholder="https://…"
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
               />
             </label>

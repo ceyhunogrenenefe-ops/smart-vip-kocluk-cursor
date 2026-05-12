@@ -23,11 +23,20 @@ import {
   MessageSquareText,
   Sparkles,
   Video,
-  FileText
+  FileText,
+  NotebookPen
 } from 'lucide-react';
 import type { UserRole } from '../../../types';
 
 export type FlatNavItem = { path: string; label: string; icon: LucideIcon };
+
+/** Öğrenci Paneli — Sidebar’da accordion altında (tek üst başlık) */
+export const STUDENT_PANEL_SUBMENU_ITEMS: FlatNavItem[] = [
+  { path: '/student-dashboard/gunluk', icon: NotebookPen, label: 'Günlük kayıt' },
+  { path: '/student-dashboard/denemeler', icon: ClipboardList, label: 'Deneme sınavları' },
+  { path: '/student-dashboard/yazili', icon: FileCheck, label: 'Yazılılarım' },
+  { path: '/student-dashboard/kitaplar', icon: BookMarked, label: 'Kitaplarım' },
+];
 
 const PANEL_PATHS = new Set([
   '/dashboard',
@@ -108,14 +117,14 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     tags.includes('student') &&
     !tags.some((t) => ['super_admin', 'admin', 'coach', 'teacher'].includes(t));
   if (isStudentOnlyNav) {
+    /** Öğrenci Paneli alt menüsü Sidebar.tsx içinde `STUDENT_PANEL_SUBMENU_ITEMS` ile gösterilir */
     return [
-      { path: '/student-dashboard', icon: LayoutDashboard, label: 'Öğrenci Paneli' },
+      { path: '/topic-tracking', icon: CheckSquare, label: 'Konu takibi' },
+      { path: '/student-analytics', icon: BarChart3, label: 'Analizlerim' },
       { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
       { path: '/academic-center', icon: Sparkles, label: 'Akademik Merkez' },
       { path: '/class-schedule', icon: Calendar, label: 'Canlı derslerim' },
       { path: '/student-meetings', icon: Video, label: 'Görüşmelerim' },
-      { path: '/student-reports', icon: BookMarked, label: 'Benim Raporlarım' },
-      { path: '/student-analytics', icon: BarChart3, label: 'Analizlerim' },
     ];
   }
 
@@ -201,7 +210,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
   return merged;
 }
 
-export type NavGroupKind = 'lessons' | 'academic' | 'org';
+export type NavGroupKind = 'lessons' | 'academic' | 'org' | 'studentPanel';
 
 export type StructuredNav = {
   panels: FlatNavItem[];
@@ -258,6 +267,13 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
   return { panels, lessons, academic, orgSystem, rest };
 }
 
-export function pathnameMatchesGroup(pathname: string, _kind: NavGroupKind, items: FlatNavItem[]): boolean {
+export function pathnameMatchesGroup(pathname: string, kind: NavGroupKind, items: FlatNavItem[]): boolean {
+  if (kind === 'studentPanel') {
+    return (
+      pathname === '/student-dashboard' ||
+      pathname.startsWith('/student-dashboard/') ||
+      items.some((it) => pathname === it.path || pathname.startsWith(`${it.path}/`))
+    );
+  }
   return items.some((it) => pathname === it.path || pathname.startsWith(`${it.path}/`));
 }

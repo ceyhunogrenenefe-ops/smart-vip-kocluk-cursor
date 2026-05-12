@@ -15,13 +15,24 @@ type Props = {
   pathname: string;
   collapsed: boolean;
   onNavigate: (path: string) => void;
+  /** Alt öğe path’leri birbirinin öneki olduğunda (ör. /student-dashboard vs /student-dashboard/gunluk) tam eşleşme kullan */
+  itemMatchExact?: boolean;
 };
 
 function routeInGroup(pathname: string, kind: NavGroupKind, items: FlatNavItem[]) {
   return pathnameMatchesGroup(pathname, kind, items);
 }
 
-export function SidebarNavGroup({ id, label, icon: Icon, items, pathname, collapsed, onNavigate }: Props) {
+export function SidebarNavGroup({
+  id,
+  label,
+  icon: Icon,
+  items,
+  pathname,
+  collapsed,
+  onNavigate,
+  itemMatchExact = false
+}: Props) {
   const routeIn = routeInGroup(pathname, id, items);
   const [userOpen, setUserOpen] = useState(false);
 
@@ -61,7 +72,9 @@ export function SidebarNavGroup({ id, label, icon: Icon, items, pathname, collap
               {label}
             </div>
             {items.map((it) => {
-              const active = pathname === it.path || pathname.startsWith(`${it.path}/`);
+              const active = itemMatchExact
+                ? pathname === it.path
+                : pathname === it.path || pathname.startsWith(`${it.path}/`);
               const SubIcon = it.icon;
               return (
                 <DropdownMenu.Item
@@ -114,7 +127,9 @@ export function SidebarNavGroup({ id, label, icon: Icon, items, pathname, collap
         <div className="mx-0.5 rounded-xl bg-slate-950/45 py-1 ring-1 ring-white/[0.06]">
         <ul className="space-y-0.5 px-0.5 pb-1 pt-0.5">
           {items.map((it) => {
-            const active = pathname === it.path || pathname.startsWith(`${it.path}/`);
+            const active = itemMatchExact
+              ? pathname === it.path
+              : pathname === it.path || pathname.startsWith(`${it.path}/`);
             const SubIcon = it.icon;
             return (
               <li key={it.path}>

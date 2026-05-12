@@ -1,8 +1,10 @@
 // Türkçe: Analiz Paneli Sayfası
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { formatClassLevelLabel } from '../types';
+import { userRoleTags } from '../config/rolePermissions';
+import { eachDayOfInterval, parseISO, differenceInCalendarDays } from 'date-fns';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import {
@@ -46,73 +48,102 @@ import {
 } from 'recharts';
 import { StudyInsightWidgets } from '../components/analytics/StudyInsightWidgets';
 
+function ymd(d: Date): string {
+  return d.toISOString().split('T')[0];
+}
+
+function defaultRangeEnd(): string {
+  return ymd(new Date());
+}
+
+/** Son `daysInclusive` gün (bugün dahil), örn. 7 → bugün + önceki 6 gün */
+function defaultRangeStart(daysInclusive: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - (daysInclusive - 1));
+  return ymd(d);
+}
+
 export default function Analytics() {
   const { effectiveUser } = useAuth();
   const {
-    students, weeklyEntries, topicProgress, getStudentStats, coaches, getReadingStats,
+    students, weeklyEntries, topicProgress, getReadingStats,
     writtenExamScores, getWrittenExamSubjectsForStudent, writtenExamSubjectsByStudent, getWrittenExamStats,
     getStudentExamResults
   } = useApp();
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
-  const [timeRange, setTimeRange] = useState<'7d' | '15d' | '30d' | 'all'>('7d');
+  const [rangeStart, setRangeStart] = useState(() => defaultRangeStart(7));
+  const [rangeEnd, setRangeEnd] = useState(() => defaultRangeEnd());
+  /** Tüm kayıtlar; grafikte tarih ekseni için son 90 gün kullanılır */
+  const [useAllTime, setUseAllTime] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const reportRef = useRef<HTMLDivElement | null>(null);
 
-  const selectedStudent = students.find(s => s.id === selectedStudentId);
-  const rangeDays = timeRange === '7d' ? 7 : timeRange === '15d' ? 15 : timeRange === '30d' ? 30 : null;
+  const tags = useMemo(() => (effectiveUser ? userRoleTags(effectiveUser) : []), [effectiveUser]);
+  const isStudentUi = tags.includes('student');
 
-  const applyRangeFilter = (entries: typeof weeklyEntries, range: '7d' | '15d' | '30d' | 'all') => {
-    const days = range === '7d' ? 7 : range === '15d' ? 15 : range === '30d' ? 30 : null;
-    if (!days) return entries;
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - (days - 1));
-    cutoff.setHours(0, 0, 0, 0);
-    return entries.filter((entry) => new Date(entry.date) >= cutoff);
-  };
+  /** Öğrenci hesabı: tek öğrenci kartı otomatik seçilsin; aksi halde özet/istatistikler boş kalıyor */
+  useEffect(() => {
+    if (!isStudentUi || students.length !== 1) return;
+    const sid = students[0].id;
+    setSelectedStudentId((prev) => prev || sid);
+  }, [isStudentUi, students]);
+
+  const selectedStudent = students.find(s => s.id === selectedStudentId);
+
+  const applyRangeFilter = useCallback(
+    (entries: typeof weeklyEntries) => {
+      if (useAllTime) return entries;
+      const rs = rangeStart.slice(0, 10);
+      const re = rangeEnd.slice(0, 10);
+      return entries.filter((entry) => {
+        const d = entry.date.slice(0, 10);
+        return d >= rs && d <= re;
+      });
+    },
+    [useAllTime, rangeStart, rangeEnd]
+  );
 
   const scopedEntries = useMemo(() => {
     const base = selectedStudentId
       ? weeklyEntries.filter((entry) => entry.studentId === selectedStudentId)
       : weeklyEntries;
-    return applyRangeFilter(base, timeRange);
-  }, [selectedStudentId, weeklyEntries, timeRange]);
+    return applyRangeFilter(base);
+  }, [selectedStudentId, weeklyEntries, applyRangeFilter]);
 
-  const filterByTimeRange = <T,>(
-    items: T[],
-    getDate: (item: T) => string
-  ): T[] => {
-    if (timeRange === 'all') return items;
-    const days = timeRange === '7d' ? 7 : timeRange === '15d' ? 15 : timeRange === '30d' ? 30 : null;
-    if (!days) return items;
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - (days - 1));
-    cutoff.setHours(0, 0, 0, 0);
-    return items.filter((it) => {
-      const t = new Date(getDate(it)).getTime();
-      if (Number.isNaN(t)) return false;
-      return t >= cutoff.getTime();
-    });
-  };
+  const filterByDateRange = useCallback(
+    <T,>(items: T[], getDate: (item: T) => string): T[] => {
+      if (useAllTime) return items;
+      const rs = rangeStart.slice(0, 10);
+      const re = rangeEnd.slice(0, 10);
+      return items.filter((it) => {
+        const raw = getDate(it);
+        const d = String(raw).slice(0, 10);
+        if (!d || d.length < 10) return false;
+        return d >= rs && d <= re;
+      });
+    },
+    [useAllTime, rangeStart, rangeEnd]
+  );
 
   const scopedExamResults = useMemo(() => {
     if (!selectedStudentId) return [];
     const base = getStudentExamResults(selectedStudentId);
-    return filterByTimeRange(base, (e) => e.examDate);
-  }, [selectedStudentId, timeRange, getStudentExamResults]);
+    return filterByDateRange(base, (e) => e.examDate);
+  }, [selectedStudentId, getStudentExamResults, filterByDateRange]);
 
   const scopedWrittenScores = useMemo(() => {
     if (!selectedStudentId) return [];
     const base = writtenExamScores.filter((s) => s.studentId === selectedStudentId);
-    return filterByTimeRange(base, (s) => s.date);
-  }, [selectedStudentId, timeRange, writtenExamScores]);
+    return filterByDateRange(base, (s) => s.date);
+  }, [selectedStudentId, writtenExamScores, filterByDateRange]);
 
   const scopedCompletedTopics = useMemo(() => {
     if (!selectedStudentId) return [];
     const base = topicProgress.filter((t) => t.studentId === selectedStudentId);
-    return filterByTimeRange(base, (t) => t.completedAt).sort(
+    return filterByDateRange(base, (t) => t.completedAt).sort(
       (a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime()
     );
-  }, [selectedStudentId, timeRange, topicProgress]);
+  }, [selectedStudentId, topicProgress, filterByDateRange]);
 
   const latestExam = scopedExamResults[0] || null;
   const latestExamWeakSubjects = useMemo(() => {
@@ -268,22 +299,43 @@ export default function Analytics() {
       .map(student => ({
         ...student,
         stats: computeStatsFromEntries(
-          applyRangeFilter(weeklyEntries.filter((entry) => entry.studentId === student.id), timeRange)
+          applyRangeFilter(weeklyEntries.filter((entry) => entry.studentId === student.id))
         )
       }))
       .filter(s => s.stats.totalSolved > 0)
       .sort((a, b) => b.stats.successRate - a.stats.successRate);
-  }, [students, weeklyEntries, timeRange]);
+  }, [students, weeklyEntries, applyRangeFilter]);
 
-  // Haftalık trend
-  const trendDayCount = rangeDays ?? 30;
-  const trendDays = Array.from({ length: trendDayCount }, (_, i) => {
-    const date = new Date();
-    date.setDate(date.getDate() - (trendDayCount - 1 - i));
-    return date.toISOString().split('T')[0];
-  });
+  const rangeDayCount = useMemo(() => {
+    if (useAllTime) return 365;
+    try {
+      const s = parseISO(`${rangeStart}T12:00:00`);
+      const e = parseISO(`${rangeEnd}T12:00:00`);
+      return Math.max(1, differenceInCalendarDays(e, s) + 1);
+    } catch {
+      return 7;
+    }
+  }, [useAllTime, rangeStart, rangeEnd]);
 
-  const dailyTrend = trendDays.map(date => {
+  /** Günlük grafikler: seçili aralıktaki her gün; "tüm zamanlar"da son 90 gün */
+  const trendDayDates = useMemo(() => {
+    if (useAllTime) {
+      const end = new Date();
+      const start = new Date();
+      start.setDate(start.getDate() - 89);
+      return eachDayOfInterval({ start, end }).map((d) => ymd(d));
+    }
+    try {
+      const start = parseISO(`${rangeStart}T12:00:00`);
+      const end = parseISO(`${rangeEnd}T12:00:00`);
+      if (start > end) return [];
+      return eachDayOfInterval({ start, end }).map((d) => ymd(d));
+    } catch {
+      return [];
+    }
+  }, [useAllTime, rangeStart, rangeEnd]);
+
+  const dailyTrend = trendDayDates.map(date => {
     const dayEntries = scopedEntries.filter(e => e.date === date);
 
     return {
@@ -301,7 +353,7 @@ export default function Analytics() {
   });
 
   // Okuma günlük trend
-  const dailyReadingTrend = trendDays.map(date => {
+  const dailyReadingTrend = trendDayDates.map(date => {
     const dayEntries = scopedEntries.filter(e => e.date === date && e.readingMinutes && e.readingMinutes > 0);
 
     return {
@@ -313,16 +365,20 @@ export default function Analytics() {
   // Toplam okuma (sayfa; coach görünümünde scoped öğrenciler)
   const totalReadingPages = scopedEntries.reduce((sum, e) => sum + (e.readingMinutes || 0), 0);
 
-  const rangeLabel = timeRange === '7d' ? '7 Gün' : timeRange === '15d' ? '15 Gün' : timeRange === '30d' ? '1 Ay' : 'Tüm Veri';
+  const rangeLabel = useMemo(() => {
+    if (useAllTime) return 'Tüm zamanlar';
+    try {
+      const a = parseISO(`${rangeStart}T12:00:00`);
+      const b = parseISO(`${rangeEnd}T12:00:00`);
+      const fa = a.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
+      const fb = b.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric' });
+      return `${fa} – ${fb}`;
+    } catch {
+      return `${rangeStart} – ${rangeEnd}`;
+    }
+  }, [useAllTime, rangeStart, rangeEnd]);
 
-  const shareRanges: { key: '7d' | '15d' | '30d' | 'all'; label: string }[] = [
-    { key: '7d', label: '7 Gün' },
-    { key: '15d', label: '15 Gün' },
-    { key: '30d', label: '1 Ay' },
-    { key: 'all', label: 'Tüm Veri' }
-  ];
-
-  const shareWithParent = (range: '7d' | '15d' | '30d' | 'all') => {
+  const shareWithParent = () => {
     if (!selectedStudent) return;
     const parentPhone = (selectedStudent.parentPhone || '').replace(/\D/g, '');
     if (!parentPhone) {
@@ -331,11 +387,10 @@ export default function Analytics() {
     }
 
     const studentEntries = applyRangeFilter(
-      weeklyEntries.filter((entry) => entry.studentId === selectedStudent.id),
-      range
+      weeklyEntries.filter((entry) => entry.studentId === selectedStudent.id)
     );
     const s = computeStatsFromEntries(studentEntries);
-    const periodLabel = range === '7d' ? 'Son 7 Gün' : range === '15d' ? 'Son 15 Gün' : range === '30d' ? 'Son 1 Ay' : 'Tüm Veri';
+    const periodLabel = useAllTime ? 'Tüm veri' : `Tarih aralığı: ${rangeLabel}`;
     const text =
       `Merhaba, ${selectedStudent.name} icin ${periodLabel} analiz ozetini paylasiyorum.%0A` +
       `Toplam hedef: ${s.totalTarget}%0A` +
@@ -453,12 +508,18 @@ export default function Analytics() {
           <p className="text-gray-500">Haftalık performans ve başarı analizi</p>
         </div>
 
-        {/* Öğrenci ve Zaman Seçimi */}
-        <div className="flex flex-col md:flex-row gap-3">
+        {/* Öğrenci ve tarih aralığı */}
+        <div className="flex flex-col gap-3 w-full md:max-w-none md:flex-1 md:items-end">
+          <div className="flex flex-col sm:flex-row flex-wrap gap-3 items-stretch sm:items-end">
+          {isStudentUi ? (
+            <div className="px-4 py-2 border border-gray-200 rounded-lg bg-slate-50 text-slate-800 text-sm font-medium min-w-[200px]">
+              {students[0]?.name ?? 'Öğrenci'}
+            </div>
+          ) : (
           <select
             value={selectedStudentId}
             onChange={(e) => setSelectedStudentId(e.target.value)}
-            className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+            className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-w-[200px]"
           >
             <option value="">Tüm Öğrenciler</option>
             {students.map((student) => (
@@ -467,18 +528,96 @@ export default function Analytics() {
               </option>
             ))}
           </select>
+          )}
 
-          <select
-            value={timeRange}
-            onChange={(e) => setTimeRange(e.target.value as '7d' | '15d' | '30d' | 'all')}
-            className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-          >
-            <option value="7d">Son 7 Gün</option>
-            <option value="15d">Son 15 Gün</option>
-            <option value="30d">Son 30 Gün</option>
-            <option value="all">Tüm Zamanlar</option>
-          </select>
-          {effectiveUser?.role === 'coach' && (
+          <label className="flex flex-col gap-1 text-xs text-gray-600">
+            Başlangıç
+            <input
+              type="date"
+              value={rangeStart}
+              disabled={useAllTime}
+              onChange={(e) => {
+                const v = e.target.value;
+                setUseAllTime(false);
+                setRangeStart(v);
+                if (rangeEnd && v > rangeEnd) setRangeEnd(v);
+              }}
+              className="px-3 py-2 border border-gray-200 rounded-lg text-sm disabled:opacity-50"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-gray-600">
+            Bitiş
+            <input
+              type="date"
+              value={rangeEnd}
+              disabled={useAllTime}
+              onChange={(e) => {
+                const v = e.target.value;
+                setUseAllTime(false);
+                setRangeEnd(v);
+                if (rangeStart && v < rangeStart) setRangeStart(v);
+              }}
+              className="px-3 py-2 border border-gray-200 rounded-lg text-sm disabled:opacity-50"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none pb-1">
+            <input
+              type="checkbox"
+              checked={useAllTime}
+              onChange={(e) => setUseAllTime(e.target.checked)}
+              className="rounded border-gray-300"
+            />
+            Tüm zamanlar
+          </label>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setUseAllTime(false);
+                setRangeStart(defaultRangeStart(7));
+                setRangeEnd(defaultRangeEnd());
+              }}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 hover:bg-gray-50"
+            >
+              Son 7 gün
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setUseAllTime(false);
+                setRangeStart(defaultRangeStart(15));
+                setRangeEnd(defaultRangeEnd());
+              }}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 hover:bg-gray-50"
+            >
+              Son 15 gün
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setUseAllTime(false);
+                setRangeStart(defaultRangeStart(30));
+                setRangeEnd(defaultRangeEnd());
+              }}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 hover:bg-gray-50"
+            >
+              Son 30 gün
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setUseAllTime(false);
+                const y = new Date().getFullYear();
+                setRangeStart(`${y}-01-01`);
+                setRangeEnd(defaultRangeEnd());
+              }}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 hover:bg-gray-50"
+            >
+              Bu yıl
+            </button>
+          </div>
+          {(effectiveUser?.role === 'coach' || isStudentUi) && (
             <button
               onClick={generateAnalyticsPdf}
               disabled={isGeneratingPdf}
@@ -495,20 +634,16 @@ export default function Analytics() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <p className="text-sm text-gray-600">
-              Veli ile analiz paylaşımı ({selectedStudent.name})
+              Veli ile analiz paylaşımı ({selectedStudent.name}) — seçili aralık: {rangeLabel}
             </p>
-            <div className="flex flex-wrap gap-2">
-              {shareRanges.map((item) => (
-                <button
-                  key={item.key}
-                  onClick={() => shareWithParent(item.key)}
-                  className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm inline-flex items-center gap-2"
-                >
-                  <MessageCircle className="w-4 h-4" />
-                  {item.label}
-                </button>
-              ))}
-            </div>
+            <button
+              type="button"
+              onClick={() => shareWithParent()}
+              className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm inline-flex items-center gap-2"
+            >
+              <MessageCircle className="w-4 h-4" />
+              Veliye WhatsApp gönder
+            </button>
           </div>
         </div>
       )}
@@ -538,8 +673,8 @@ export default function Analytics() {
       <StudyInsightWidgets
         entries={scopedEntries}
         preFiltered
-        windowDays={rangeDays ?? 365}
-        chartDays={Math.min(14, trendDayCount)}
+        windowDays={rangeDayCount}
+        chartDays={Math.min(14, Math.max(1, trendDayDates.length))}
         title={
           selectedStudent
             ? `${selectedStudent.name} · haftalık plan senkron analizi`
@@ -1025,7 +1160,7 @@ export default function Analytics() {
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
             <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
               <BookMarked className="w-5 h-5 text-green-600" />
-              Son 7 Gun Okuma Trendi
+              Okuma trendi ({rangeLabel})
             </h3>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
@@ -1072,7 +1207,8 @@ export default function Analytics() {
         </div>
       )}
 
-      {/* Öğrenci Sıralaması */}
+      {/* Öğrenci Sıralaması (kurum/koç görünümü) */}
+      {!isStudentUi && (
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-slate-800">Öğrenci Başarı Sıralaması</h3>
@@ -1125,6 +1261,7 @@ export default function Analytics() {
           )}
         </div>
       </div>
+      )}
       </div>
     </div>
   );

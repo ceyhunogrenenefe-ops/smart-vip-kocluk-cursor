@@ -1,7 +1,15 @@
 // Türkçe: Sol navigasyon — SaaS tarzı koyu tema, accordion gruplar, daraltılabilir rail
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { BarChart3, Building2, ChevronLeft, ChevronRight, TrendingUp, Video } from 'lucide-react';
+import {
+  BarChart3,
+  Building2,
+  ChevronLeft,
+  ChevronRight,
+  LayoutDashboard,
+  TrendingUp,
+  Video
+} from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { userRoleTags } from '../../config/rolePermissions';
@@ -9,6 +17,7 @@ import { cn } from '../../lib/utils';
 import {
   getFlatMenuForRoles,
   structureNavFromFlat,
+  STUDENT_PANEL_SUBMENU_ITEMS,
   type FlatNavItem
 } from './sidebar/navModel';
 import { SidebarNavLink } from './sidebar/SidebarNavLink';
@@ -37,6 +46,9 @@ export default function Sidebar({
   const tags = userRoleTags(effectiveUser);
   const flat = useMemo(() => getFlatMenuForRoles(tags), [tags]);
   const nav = useMemo(() => structureNavFromFlat(flat), [flat]);
+  const isStudentOnlyNav =
+    tags.includes('student') &&
+    !tags.some((t) => ['super_admin', 'admin', 'coach', 'teacher'].includes(t));
   const hasGroupedSection =
     nav.lessons.length > 0 || nav.academic.length > 0 || nav.orgSystem.length > 0;
 
@@ -130,6 +142,19 @@ export default function Sidebar({
       </div>
 
       <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden px-2 py-3">
+        {isStudentOnlyNav ? (
+          <SidebarNavGroup
+            id="studentPanel"
+            label="Öğrenci Paneli"
+            icon={LayoutDashboard}
+            items={STUDENT_PANEL_SUBMENU_ITEMS}
+            pathname={location.pathname}
+            collapsed={railCollapsed}
+            onNavigate={go}
+            itemMatchExact
+          />
+        ) : null}
+
         {/* Panel */}
         {nav.panels.map((p) => {
           const active =

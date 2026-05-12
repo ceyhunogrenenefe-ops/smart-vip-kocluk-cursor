@@ -35,6 +35,8 @@ import {
 import { WeeklyPlannerStudyModal } from './WeeklyPlannerStudyModal';
 import { subjectPlannerStyle } from './subjectPlannerStyle';
 import { cn } from '../../lib/utils';
+import { useApp } from '../../context/AppContext';
+import { formatClassLevelLabel } from '../../types';
 
 export { subjectPlannerStyle };
 
@@ -111,6 +113,22 @@ export function WeeklyPlannerCalendar({
   canManageGoals,
   studentStudyLogUi = false,
 }: WeeklyPlannerCalendarProps) {
+  const { students, getTopics, getTopicsByClass } = useApp();
+
+  const plannerStudent = useMemo(() => students.find((s) => s.id === studentId), [students, studentId]);
+  const classLevel = plannerStudent?.classLevel;
+
+  /** Öğrenci sınıfına göre konu havuzunda tanımlı dersler */
+  const poolSubjects = useMemo(() => {
+    if (classLevel === undefined || classLevel === null) return [] as string[];
+    const tb = getTopicsByClass(classLevel);
+    if (tb.isYKS) {
+      const list = [...Object.keys(tb.tytSubjects), ...Object.keys(tb.aytSubjects)];
+      return list.sort((a, b) => a.localeCompare(b, 'tr'));
+    }
+    return Object.keys(tb.regular).sort((a, b) => a.localeCompare(b, 'tr'));
+  }, [classLevel, getTopicsByClass]);
+
   const [anchor, setAnchor] = useState(() => new Date());
   const weekStartStr = useMemo(
     () => format(startOfWeek(anchor, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
@@ -138,10 +156,34 @@ export function WeeklyPlannerCalendar({
   const [newGoalStart, setNewGoalStart] = useState('');
   const [newGoalEnd, setNewGoalEnd] = useState('');
 
+  const newGoalTopicOptions = useMemo(() => {
+    if (classLevel === undefined || classLevel === null || !newGoalSubject) return [];
+    return getTopics(newGoalSubject, classLevel);
+  }, [classLevel, newGoalSubject, getTopics]);
+
   const [formGoalId, setFormGoalId] = useState<string | null>(null);
   const [formTitle, setFormTitle] = useState('');
   const [formSubject, setFormSubject] = useState('');
   const [formPlannedQty, setFormPlannedQty] = useState(10);
+
+  const modalTopicOptions = useMemo(() => {
+    if (classLevel === undefined || classLevel === null || !formSubject.trim()) return [];
+    return getTopics(formSubject.trim(), classLevel);
+  }, [classLevel, formSubject, getTopics]);
+
+  /** Havuzda olmayan eski kayıtları düzenlerken seçenek listesinde tut */
+  const modalSubjectOptions = useMemo(() => {
+    const sub = formSubject.trim();
+    if (sub && !poolSubjects.includes(sub)) return [sub, ...poolSubjects];
+    return poolSubjects;
+  }, [poolSubjects, formSubject]);
+
+  const modalTopicSelectOptions = useMemo(() => {
+    const t = formTitle.trim();
+    const raw = modalTopicOptions;
+    if (t && !raw.includes(t)) return [t, ...raw];
+    return raw;
+  }, [modalTopicOptions, formTitle]);
 
   const [goalDateEditId, setGoalDateEditId] = useState<string | null>(null);
   const [goalDateEditStart, setGoalDateEditStart] = useState('');
@@ -176,6 +218,11 @@ export function WeeklyPlannerCalendar({
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    setNewGoalSubject('');
+    setNewGoalTitle('');
+  }, [studentId]);
 
   useEffect(() => {
     setNewGoalStart(weekStartStr);
@@ -373,6 +420,14 @@ export function WeeklyPlannerCalendar({
     const start = padHour(slotContext.hour);
     const end = padHour(Math.min(slotContext.hour + 1, 23));
     const g = goals.find((x) => x.id === formGoalId);
+    if (
+      !formGoalId &&
+      modalTopicSelectOptions.length > 0 &&
+      !formTitle.trim()
+    ) {
+      alert('Konu seçin.');
+      return;
+    }
     const title =
       formTitle.trim() ||
       (g ? `${g.title} (${g.quantity_unit})` : formSubject ? `${formSubject} çalışması` : 'Görev');
@@ -413,6 +468,14 @@ export function WeeklyPlannerCalendar({
 
   const saveEdit = async () => {
     if (!activeEntry) return;
+    if (
+      !formGoalId &&
+      modalTopicSelectOptions.length > 0 &&
+      !formTitle.trim()
+    ) {
+      alert('Konu seçin.');
+      return;
+    }
     try {
       await patchWeeklyPlannerEntry(activeEntry.id, {
         title: formTitle,
@@ -444,7 +507,11 @@ export function WeeklyPlannerCalendar({
     const subject = newGoalSubject.trim();
     const title = newGoalTitle.trim() || subject || 'Hedef';
     if (!subject) {
-      alert('Ders/konu alanı boş.');
+      alert('Ders seçin.');
+      return;
+    }
+    if (newGoalTopicOptions.length > 0 && !newGoalTitle.trim()) {
+      alert('Konu seçin.');
       return;
     }
     try {
@@ -698,24 +765,55 @@ export function WeeklyPlannerCalendar({
             Cuma). Takvimde üst şeritte hangi günlerin bu hedefe dahil olduğu işaretlenir; plan bloklarını
             yalnızca bu aralıktaki günlere sürükleyebilirsiniz.
           </p>
+          {plannerStudent && classLevel !== undefined && classLevel !== null ? (
+            <p className="text-[11px] text-amber-950/80">
+              Öğrenci sınıfı:{' '}
+              <span className="font-semibold">{formatClassLevelLabel(classLevel)}</span> — ders ve konular konu
+              havuzundan gelir.
+            </p>
+          ) : (
+            <p className="text-[11px] text-amber-900">
+              Öğrenci kartı veya sınıf bilgisi bulunamadı; havuz listesi kullanılamıyor.
+            </p>
+          )}
           <div className="flex flex-wrap gap-2 items-end">
             <div>
               <label className="text-xs text-slate-600 block mb-1">Ders</label>
-              <input
+              <select
                 value={newGoalSubject}
-                onChange={(e) => setNewGoalSubject(e.target.value)}
-                placeholder="Örn: Fizik"
-                className="px-3 py-2 border rounded-lg text-sm w-36"
-              />
+                onChange={(e) => {
+                  setNewGoalSubject(e.target.value);
+                  setNewGoalTitle('');
+                }}
+                className="px-3 py-2 border rounded-lg text-sm min-w-[180px] max-w-[260px] bg-white dark:bg-slate-900"
+              >
+                <option value="">Ders seçin</option>
+                {poolSubjects.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
-              <label className="text-xs text-slate-600 block mb-1">Başlık</label>
-              <input
+              <label className="text-xs text-slate-600 block mb-1">Konu</label>
+              <select
                 value={newGoalTitle}
                 onChange={(e) => setNewGoalTitle(e.target.value)}
-                placeholder="TYT soru çözümü"
-                className="px-3 py-2 border rounded-lg text-sm w-44"
-              />
+                disabled={!newGoalSubject || newGoalTopicOptions.length === 0}
+                className="px-3 py-2 border rounded-lg text-sm min-w-[200px] max-w-[280px] bg-white dark:bg-slate-900 disabled:opacity-60"
+              >
+                <option value="">
+                  {newGoalTopicOptions.length === 0 && newGoalSubject
+                    ? 'Bu ders için konu yok'
+                    : 'Konu seçin'}
+                </option>
+                {newGoalTopicOptions.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="text-xs text-slate-600 block mb-1">Miktar</label>
@@ -1161,23 +1259,92 @@ export function WeeklyPlannerCalendar({
                 </div>
               </div>
 
-              <div>
-                <label className="text-xs text-slate-600">Başlık</label>
-                <input
-                  value={formTitle}
-                  onChange={(e) => setFormTitle(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-slate-600">Ders / alan</label>
-                <input
-                  value={formSubject}
-                  onChange={(e) => setFormSubject(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
-                  disabled={Boolean(formGoalId)}
-                />
-              </div>
+              {formGoalId ? (
+                <>
+                  <div>
+                    <label className="text-xs text-slate-600">Ders</label>
+                    <input
+                      value={formSubject}
+                      readOnly
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm bg-slate-50"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-600">Konu</label>
+                    <input
+                      value={formTitle}
+                      readOnly
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm bg-slate-50"
+                    />
+                  </div>
+                </>
+              ) : poolSubjects.length > 0 &&
+                classLevel !== undefined &&
+                classLevel !== null ? (
+                <>
+                  <p className="text-[11px] text-slate-500">
+                    Ders ve konu, öğrencinin sınıfına göre konu havuzundan (
+                    {formatClassLevelLabel(classLevel)}).
+                  </p>
+                  <div>
+                    <label className="text-xs text-slate-600">Ders</label>
+                    <select
+                      value={formSubject}
+                      onChange={(e) => {
+                        setFormSubject(e.target.value);
+                        setFormTitle('');
+                      }}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm bg-white"
+                    >
+                      <option value="">Ders seçin</option>
+                      {modalSubjectOptions.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-600">Konu</label>
+                    <select
+                      value={formTitle}
+                      onChange={(e) => setFormTitle(e.target.value)}
+                      disabled={!formSubject.trim() || modalTopicSelectOptions.length === 0}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm bg-white disabled:opacity-60"
+                    >
+                      <option value="">
+                        {modalTopicSelectOptions.length === 0 && formSubject.trim()
+                          ? 'Bu ders için konu yok'
+                          : 'Konu seçin'}
+                      </option>
+                      {modalTopicSelectOptions.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label className="text-xs text-slate-600">Başlık</label>
+                    <input
+                      value={formTitle}
+                      onChange={(e) => setFormTitle(e.target.value)}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-600">Ders / alan</label>
+                    <input
+                      value={formSubject}
+                      onChange={(e) => setFormSubject(e.target.value)}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
+                    />
+                  </div>
+                </>
+              )}
               <div>
                 <label className="text-xs text-slate-600">Planlanan miktar (soru/sayfa vb.)</label>
                 <input
