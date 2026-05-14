@@ -31,33 +31,63 @@ export default async function handler(req, res) {
     const userEmail = String(urow?.email || '').trim().toLowerCase();
     const inst = actor.institution_id ?? urow?.institution_id ?? null;
 
-    let sid = String(actor.student_id || '').trim();
-    if (!sid) {
-      const resolved = await resolveStudentRowForUser({
+    const runResolve = () =>
+      resolveStudentRowForUser({
         userId: uid,
         email: userEmail || undefined,
         institutionId: inst
       });
-      if (resolved?.id) sid = String(resolved.id).trim();
+
+    const resolved = await runResolve();
+    const resolvedId = resolved?.id ? String(resolved.id).trim() : '';
+    const jwtSid = String(actor.student_id || '').trim();
+
+    /** Önce çözümlenen kart (JWT’deki student_id silinmiş / yanlış id için yedek) */
+    const candidates = [];
+    if (resolvedId) candidates.push(resolvedId);
+    if (jwtSid && jwtSid !== resolvedId) candidates.push(jwtSid);
+
+    const isLinkedToActor = (row) => {
+      const rowUser = row.user_id != null ? String(row.user_id).trim() : '';
+      const rowPlat = row.platform_user_id != null ? String(row.platform_user_id).trim() : '';
+      const rowAuth = row.auth_user_id != null ? String(row.auth_user_id).trim() : '';
+      const rowEmail = String(row.email || '').trim().toLowerCase();
+      const linkedByFk =
+        (rowUser && rowUser === uid) ||
+        (rowPlat && rowPlat === uid) ||
+        (rowAuth && rowAuth === uid);
+      const linkedByEmail =
+        Boolean(userEmail) &&
+        Boolean(rowEmail) &&
+        rowEmail === userEmail &&
+        !rowUser &&
+        !rowPlat &&
+        !rowAuth;
+      return linkedByFk || linkedByEmail;
+    };
+
+    let data = null;
+    let sawRow = false;
+    let sawUnlinked = false;
+    for (const sid of candidates) {
+      const { data: row, error } = await supabaseAdmin.from('students').select('*').eq('id', sid).maybeSingle();
+      if (error) throw error;
+      if (!row) continue;
+      sawRow = true;
+      if (isLinkedToActor(row)) {
+        data = row;
+        break;
+      }
+      sawUnlinked = true;
     }
 
-    if (!sid) {
-      return res.status(404).json({ error: 'student_profile_missing' });
-    }
-
-    const { data, error } = await supabaseAdmin.from('students').select('*').eq('id', sid).maybeSingle();
-    if (error) throw error;
-    if (!data) return res.status(404).json({ error: 'not_found' });
-
-    const rowUser = data.user_id != null ? String(data.user_id).trim() : '';
-    const rowPlat = data.platform_user_id != null ? String(data.platform_user_id).trim() : '';
-    const rowEmail = String(data.email || '').trim().toLowerCase();
-
-    const linkedByFk = (rowUser && rowUser === uid) || (rowPlat && rowPlat === uid);
-    const linkedByEmail =
-      Boolean(userEmail) && Boolean(rowEmail) && rowEmail === userEmail && !rowUser && !rowPlat;
-
-    if (!linkedByFk && !linkedByEmail) {
+    if (!data) {
+      if (!candidates.length) {
+        return res.status(404).json({ error: 'student_profile_missing' });
+      }
+      if (!sawUnlinked && !sawRow) {
+        return res.status(404).json({ error: 'not_found' });
+      }
       return res.status(403).json({ error: 'forbidden' });
     }
 

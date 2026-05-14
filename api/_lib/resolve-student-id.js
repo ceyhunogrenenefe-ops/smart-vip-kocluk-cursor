@@ -21,6 +21,14 @@ export async function resolveStudentRowForUser({ userId, email, institutionId })
         .eq('platform_user_id', userId)
         .maybeSingle();
       if (byPlatform?.id) return byPlatform;
+
+      /** sync_supabase_auth ile doldurulan auth.users.id — JWT sub ile aynı olabiliyor */
+      const rAuth = await supabaseAdmin
+        .from('students')
+        .select('id')
+        .eq('auth_user_id', userId)
+        .maybeSingle();
+      if (!rAuth.error && rAuth.data?.id) return rAuth.data;
     }
 
     if (normalizedEmail) {
