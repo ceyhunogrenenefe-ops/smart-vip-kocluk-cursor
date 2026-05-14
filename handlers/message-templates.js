@@ -90,6 +90,9 @@ export default async function handler(req, res) {
           ? null
           : String(body.meta_template_language || '').trim() || 'tr';
     }
+    if (body.meta_named_body_parameters !== undefined) {
+      patch.meta_named_body_parameters = Boolean(body.meta_named_body_parameters);
+    }
 
     if (Object.keys(patch).length <= 1) {
       return res.status(400).json({ error: 'nothing_to_update' });

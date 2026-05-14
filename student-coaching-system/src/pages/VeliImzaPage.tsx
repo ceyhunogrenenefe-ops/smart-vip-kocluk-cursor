@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { fetchVeliImzaPayload, submitVeliImza } from '../lib/parentSignApi';
-import { CheckCircle2, FileText, Loader2 } from 'lucide-react';
+import { downloadParentSignContractPdf } from '../lib/parentSignPdfDownload';
+import { CheckCircle2, Download, FileText, Loader2 } from 'lucide-react';
 
 export default function VeliImzaPage() {
   const { token } = useParams();
@@ -16,6 +17,8 @@ export default function VeliImzaPage() {
   const [soz, setSoz] = useState(false);
   const [saving, setSaving] = useState(false);
   const [institutionName, setInstitutionName] = useState('');
+  const [signaturePng, setSignaturePng] = useState<string | null>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -30,8 +33,10 @@ export default function VeliImzaPage() {
         if (cancelled) return;
         setHtml(d.merged_html);
         setContractNo(d.contract_number);
-        setSigned(d.already_signed);
+        const done = Boolean(d.already_signed || d.signed_at);
+        setSigned(done);
         setInstitutionName(String(d.institution_name || '').trim());
+        setSignaturePng(d.signature_png_base64 && d.signature_png_base64.length > 80 ? d.signature_png_base64 : null);
       } catch (e) {
         setErr(e instanceof Error ? e.message : 'Yüklenemedi');
       } finally {
@@ -120,10 +125,29 @@ export default function VeliImzaPage() {
         contract_ok: true
       });
       setSigned(true);
+      setSignaturePng(png);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Kaydedilemedi');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const downloadContractPdf = async () => {
+    if (!html) return;
+    setPdfBusy(true);
+    setErr(null);
+    try {
+      await downloadParentSignContractPdf({
+        html,
+        signaturePng: signaturePng,
+        contractNo
+      });
+    } catch (e) {
+      console.error(e);
+      setErr('PDF oluşturulamadı. Tekrar deneyin.');
+    } finally {
+      setPdfBusy(false);
     }
   };
 
@@ -153,10 +177,28 @@ export default function VeliImzaPage() {
               <div className="p-4 text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: html }} />
             </div>
 
+            {!signed ? (
+              <p className="text-xs text-slate-400 mb-3 text-center">
+                Kaydı tamamladığınızda bu sayfada <strong>PDF olarak indir</strong> düğmesi görünür; imzalı sözleşmenizi
+                indirebilirsiniz.
+              </p>
+            ) : null}
+
             {signed ? (
-              <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/50 p-4 flex items-center gap-2 text-emerald-100 text-sm">
-                <CheckCircle2 className="w-6 h-6 shrink-0" />
-                Kaydınız alındı. Kurum tarafında imzalı olarak görünecektir. Teşekkür ederiz.
+              <div className="space-y-3">
+                <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/50 p-4 flex items-center gap-2 text-emerald-100 text-sm">
+                  <CheckCircle2 className="w-6 h-6 shrink-0" />
+                  Kaydınız alındı. Kurum tarafında imzalı olarak görünecektir. Teşekkür ederiz.
+                </div>
+                <button
+                  type="button"
+                  disabled={pdfBusy || !html}
+                  onClick={() => void downloadContractPdf()}
+                  className="w-full rounded-xl bg-emerald-500 py-3.5 text-sm font-bold text-emerald-950 shadow-lg hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2 border border-emerald-300"
+                >
+                  {pdfBusy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
+                  PDF olarak indir
+                </button>
               </div>
             ) : (
               <div className="rounded-2xl border border-white/15 bg-slate-900/70 p-4 space-y-4 backdrop-blur-sm">

@@ -171,6 +171,48 @@ const withTimeout = async <T,>(promise: Promise<T>, timeoutMs = AUTH_TIMEOUT_MS)
   });
 };
 
+/** students.id — önce users.id FK, sonra e-posta+kurum (çift kartta user_id eşleşmesi). */
+async function resolveStudentTableIdForUserLogin(dbUser: {
+  id: string;
+  email: string;
+  institution_id?: string | null;
+}): Promise<string | undefined> {
+  const normalizedEmail = String(dbUser.email || '').toLowerCase().trim();
+  if (!normalizedEmail) return undefined;
+
+  const { data: byUserFk } = await withTimeout(
+    supabase.from('students').select('id').eq('user_id', dbUser.id).maybeSingle()
+  );
+  if (byUserFk?.id) return byUserFk.id;
+
+  const { data: byPlatform } = await withTimeout(
+    supabase.from('students').select('id').eq('platform_user_id', dbUser.id).maybeSingle()
+  );
+  if (byPlatform?.id) return byPlatform.id;
+
+  let q = supabase
+    .from('students')
+    .select('id, user_id, updated_at')
+    .eq('email', normalizedEmail)
+    .order('updated_at', { ascending: false });
+  if (dbUser.institution_id) {
+    q = q.eq('institution_id', dbUser.institution_id);
+  }
+  const { data: rows } = await withTimeout(q);
+  if (rows?.length === 1 && rows[0]?.id) return rows[0].id;
+  if (rows && rows.length > 1) {
+    const linked = rows.find((r) => r.user_id && String(r.user_id) === String(dbUser.id));
+    if (linked?.id) return linked.id;
+    const anyLinked = rows.find((r) => r.user_id);
+    if (anyLinked?.id) return anyLinked.id;
+    if (rows[0]?.id) return rows[0].id;
+  } else if (rows?.[0]?.id) {
+    return rows[0].id;
+  }
+
+  return undefined;
+}
+
 type AuthLoginUserPayload = {
   id: string;
   name: string;
@@ -349,14 +391,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         let coachId: string | undefined;
 
         if (dbUser.role === 'student') {
-          const { data: studentRow } = await withTimeout(
-            supabase
-              .from('students')
-              .select('id')
-              .eq('email', normalizedEmail)
-              .maybeSingle()
-          );
-          studentId = studentRow?.id;
+          studentId = await resolveStudentTableIdForUserLogin({
+            id: dbUser.id,
+            email: dbUser.email,
+            institution_id: dbUser.institution_id
+          });
         } else if (dbUser.role === 'coach' || dbUser.role === 'teacher') {
           let { data: coachRow } = await withTimeout(
             supabase.from('coaches').select('id').eq('email', normalizedEmail).maybeSingle()
@@ -415,14 +454,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       let coachId = pub.coachId;
       try {
         if (managed.role === 'student' && !studentId) {
-          const { data: studentRow } = await withTimeout(
+          const { data: userRow } = await withTimeout(
             supabase
-              .from('students')
-              .select('id')
+              .from('users')
+              .select('id, email, institution_id')
               .eq('email', normalizedEmail)
               .maybeSingle()
           );
-          studentId = studentRow?.id;
+          if (userRow) {
+            studentId = await resolveStudentTableIdForUserLogin({
+              id: userRow.id,
+              email: String(userRow.email || normalizedEmail),
+              institution_id: userRow.institution_id ?? pub.institutionId ?? null
+            });
+          } else {
+            let q = supabase.from('students').select('id').eq('email', normalizedEmail);
+            if (pub.institutionId) q = q.eq('institution_id', pub.institutionId);
+            const { data: sr } = await withTimeout(q.maybeSingle());
+            studentId = sr?.id;
+          }
         } else if ((managed.role === 'coach' || managed.role === 'teacher') && !coachId) {
           let { data: coachRow } = await withTimeout(
             supabase.from('coaches').select('id').eq('email', normalizedEmail).maybeSingle()
@@ -462,10 +512,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const enrichRoleLinks = async (u: SystemUser): Promise<SystemUser> => {
     const email = u.email.toLowerCase().trim();
     if (u.role === 'student') {
-      const { data: studentRow } = await withTimeout(
-        supabase.from('students').select('id').eq('email', email).maybeSingle()
+      const { data: userRow } = await withTimeout(
+        supabase.from('users').select('id, email, institution_id').eq('id', u.id).maybeSingle()
       );
-      return { ...u, studentId: studentRow?.id || u.studentId };
+      if (userRow?.email) {
+        const sid = await resolveStudentTableIdForUserLogin({
+          id: userRow.id,
+          email: String(userRow.email),
+          institution_id: userRow.institution_id
+        });
+        if (sid) return { ...u, studentId: sid };
+      }
+      const sidLoose = await resolveStudentTableIdForUserLogin({
+        id: u.id,
+        email,
+        institution_id: u.institutionId ?? null
+      });
+      if (sidLoose) return { ...u, studentId: sidLoose };
     }
     if (u.role === 'coach') {
       let { data: coachRow } = await withTimeout(

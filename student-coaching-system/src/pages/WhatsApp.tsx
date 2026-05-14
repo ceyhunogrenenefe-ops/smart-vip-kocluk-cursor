@@ -1,6 +1,7 @@
 // Türkçe: WhatsApp Entegrasyonu - Haftalık Rapor Formatı ile Gelişmiş Raporlama
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
+import { formatClassLevelLabel } from '../types';
 import { useAuth } from '../context/AuthContext';
 import {
   MessageCircle,
@@ -270,7 +271,7 @@ export default function WhatsApp() {
           <option value="">Öğrenci Seçin</option>
           {students.map(student => (
             <option key={student.id} value={student.id}>
-              {student.name} - {student.classLevel}. Sınıf
+              {student.name} - {formatClassLevelLabel(student.classLevel)}
             </option>
           ))}
         </select>

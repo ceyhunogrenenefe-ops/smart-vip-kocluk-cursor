@@ -55,6 +55,8 @@ type SlotRow = {
   end_time: string;
   subject: string;
   teacher_id: string;
+  /** API: users tablosundan (öğrenci /api/users kullanmadan gösterim için) */
+  teacher_name?: string;
   meeting_link: string;
   homework?: string | null;
 };
@@ -76,6 +78,7 @@ type SessionRow = {
   end_time: string;
   subject: string;
   teacher_id: string;
+  teacher_name?: string;
   meeting_link: string;
   status: string;
   homework?: string | null;
@@ -349,6 +352,10 @@ export default function ClassLiveLessons() {
   }, [loadAll]);
 
   useEffect(() => {
+    if (isStudentView) {
+      setTeacherOptions([]);
+      return;
+    }
     let cancel = false;
     void (async () => {
       try {
@@ -371,7 +378,7 @@ export default function ClassLiveLessons() {
     return () => {
       cancel = true;
     };
-  }, []);
+  }, [isStudentView]);
 
   const createClass = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -518,8 +525,37 @@ export default function ClassLiveLessons() {
         setError(String(j.error || 'Yoklama kaydedilemedi'));
         return;
       }
-      setError(null);
+      const waRows = Array.isArray(j.absent_whatsapp) ? j.absent_whatsapp : [];
+      const waFailed = waRows.filter(
+        (x: { ok?: boolean; skipped?: string }) => x && x.ok === false && x.skipped !== 'auto_whatsapp_absent_disabled'
+      );
+      const hintWa = (note: string) => {
+        const n = String(note || '').toLowerCase();
+        if (n.includes('template_not_found') || n === 'template_not_found')
+          return 'Supabase’de message_templates.type = class_absent_notice_1 satırı yok veya SQL migration çalışmadı.';
+        if (n.includes('parent_phone_missing')) return 'Öğrenci kartında veli telefonu (E.164) eksik veya geçersiz.';
+        if (n.includes('meta_whatsapp_not_ready')) return 'Vercel’de META_WHATSAPP_TOKEN ve META_PHONE_NUMBER_ID tanımlı değil.';
+        if (n.includes('meta_template_name_required')) return 'Şablonda Meta şablon adı (meta_template_name) boş.';
+        if (n.includes('template_variables_invalid'))
+          return 'Meta şablonundaki değişken sayısı/sırası, paneldeki twilio_variable_bindings ile uyuşmuyor.';
+        if (n.includes('(#100)') || n.includes('invalid parameter'))
+          return 'Meta (#100): dil kodunu (tr / tr_TR) Business ile eşleştirin; panelde "Meta adlandırılmış gövde" açık ve Meta’daki değişken adları sırayla aynı olmalı.';
+        if (n.includes('template') && (n.includes('not exist') || n.includes('does not exist') || n.includes('132001')))
+          return 'Meta Business’ta class_absent_notice_1 şablonu (dil tr) onaylı mı kontrol edin.';
+        return String(note || 'Bilinmeyen hata');
+      };
       closeAttendanceModal();
+      if (waFailed.length) {
+        const parts = waFailed.map((row: { student_id?: string; note?: string }) => {
+          const sid = String(row.student_id || '');
+          const stu = safeStudents.find((x) => x.id === sid);
+          const name = stu?.name || sid.slice(0, 8);
+          return `${name}: ${hintWa(String(row.note || ''))}`;
+        });
+        setError(`Yoklama kaydedildi. Veli WhatsApp gönderilemedi — ${parts.join(' · ')}`);
+      } else {
+        setError(null);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Yoklama hatası');
     } finally {
@@ -1170,7 +1206,7 @@ export default function ClassLiveLessons() {
                     )
                     .map((s) => {
                       const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
-                      return `${s.lesson_date} ${String(s.start_time).slice(0, 5)}–${String(s.end_time).slice(0, 5)} | ${s.subject} | ${teacher?.name || s.teacher_id} | ${s.status}`;
+                      return `${s.lesson_date} ${String(s.start_time).slice(0, 5)}–${String(s.end_time).slice(0, 5)} | ${s.subject} | ${teacher?.name || s.teacher_name || s.teacher_id} | ${s.status}`;
                     });
                   const templateLines = classSlots
                     .filter((s) => s.class_id === selectedClassId)
@@ -1181,7 +1217,7 @@ export default function ClassLiveLessons() {
                     )
                     .map((s) => {
                       const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
-                      return `[Şablon] ${DAY_LABELS[s.day_of_week - 1]} ${String(s.start_time).slice(0, 5)} | ${s.subject} | ${teacher?.name || s.teacher_id}`;
+                      return `[Şablon] ${DAY_LABELS[s.day_of_week - 1]} ${String(s.start_time).slice(0, 5)} | ${s.subject} | ${teacher?.name || s.teacher_name || s.teacher_id}`;
                     });
                   const lessonLines: string[] = [
                     `— Bu haftanın tarihli oturumları (${sessionLines.length}) —`,
@@ -1311,7 +1347,7 @@ export default function ClassLiveLessons() {
                                       ) : null}
                                     </div>
                                     <p className="mt-0.5 text-[11px] font-medium text-slate-800">
-                                      {teacher?.name || s.teacher_id}
+                                      {teacher?.name || s.teacher_name || s.teacher_id}
                                     </p>
                                     <p className="text-[10px] tabular-nums text-slate-600">
                                       {String(s.start_time).slice(0, 5)}–{String(s.end_time).slice(0, 5)}
@@ -1384,7 +1420,7 @@ export default function ClassLiveLessons() {
                                 <p className={`text-[12px] font-bold ${accent.title}`}>{s.subject}</p>
                                 <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-600">Şablon</p>
                                 <p className="text-[11px] text-slate-600">
-                                  {teacher?.name || s.teacher_id} · {String(s.start_time).slice(0, 5)}
+                                  {teacher?.name || s.teacher_name || s.teacher_id} · {String(s.start_time).slice(0, 5)}
                                 </p>
                                 <div className="mt-1.5 flex flex-wrap gap-1 calendar-pdf-hide-ui">
                                   <button

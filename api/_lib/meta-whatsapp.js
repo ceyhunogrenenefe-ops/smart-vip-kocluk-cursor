@@ -18,6 +18,20 @@ export function metaWhatsAppConfigured() {
 }
 
 /**
+ * Graph `template.language.code` — Meta BM’de Türkçe şablon bazen `tr`, bazen `tr_TR`.
+ * Panelde yanlışlıkla "Turkish" yazılmış olabilir.
+ */
+export function normalizeMetaLanguageCode(raw) {
+  let s = String(raw ?? '')
+    .trim()
+    .replace(/-/g, '_');
+  if (!s) return 'tr';
+  const lower = s.toLowerCase();
+  if (lower === 'turkish') return 'tr';
+  return s.slice(0, 32);
+}
+
+/**
  * İstemci / Ayarlar için özet — sırlar döndürülmez.
  */
 export function getMetaWhatsAppEnvStatus() {
@@ -71,24 +85,34 @@ function metaGraphHint(graphErr) {
   if (msg.includes('24 hour') || msg.includes('24-hour') || sc === 2534037) {
     return 'Alıcı için oturum penceresi yok; onaylı şablon kullanın.';
   }
+  if (c === 132001 || (msg.includes('translation') && msg.includes('template'))) {
+    return 'Meta şablon adı + dil kodu eşleşmiyor: BM’deki ad (büyük/küçük harf) ve dil (tr vs tr_TR) message_templates ile aynı olmalı; Twilio kullanılmıyor.';
+  }
   if (msg.includes('template') && msg.includes('not')) {
     return 'Şablon adı/dili Meta’da yok veya henüz onaylanmadı.';
   }
   if (c === 190 || msg.includes('oauth')) {
     return 'META_WHATSAPP_TOKEN süresi dolmuş veya geçersiz olabilir.';
   }
+  if (c === 100 || msg.includes('invalid parameter') || msg.includes('(#100)')) {
+    return 'Şablon dil kodu (tr vs tr_TR), gövde parametre sayısı veya Meta adlandırılmış değişken (parameter_name) uyumsuzluğu olabilir.';
+  }
   return '';
 }
 
 /**
- * Meta şablon gövdesi {{1}}… sırasıyla metin parametreleri.
+ * Meta şablon gövdesi metin parametreleri.
+ * - `bodyParameterNames` verilmezse: sıra ile ({{1}}, {{2}}…) eşleşir.
+ * - Yeni Meta “adlandırılmış” gövde değişkenleri için: her öğe `parameter_name` + `text` gönderilir.
  * @param {string[]} bodyParameterTexts
+ * @param {string[] | null | undefined} bodyParameterNames Meta’daki değişken adları (sıra `bodyParameterTexts` ile aynı)
  */
 export async function sendMetaTemplateMessage({
   toE164,
   templateName,
   languageCode = 'tr',
-  bodyParameterTexts
+  bodyParameterTexts,
+  bodyParameterNames = null
 }) {
   const pid = phoneNumberId();
   const tok = token();
@@ -113,52 +137,86 @@ export async function sendMetaTemplateMessage({
     throw err;
   }
 
-  const lang = String(languageCode || 'tr').trim() || 'tr';
+  let lang = normalizeMetaLanguageCode(languageCode);
   const texts = Array.isArray(bodyParameterTexts) ? bodyParameterTexts : [];
+  const names = Array.isArray(bodyParameterNames) ? bodyParameterNames : null;
+  const useNamed =
+    names != null &&
+    names.length === texts.length &&
+    names.every((n) => String(n || '').trim().length > 0);
 
-  /** @type {Record<string, unknown>} */
-  const payload = {
-    messaging_product: 'whatsapp',
-    recipient_type: 'individual',
-    to,
-    type: 'template',
-    template: {
-      name,
-      language: { code: lang }
-    }
-  };
-
-  if (texts.length > 0) {
-    payload.template.components = [
-      {
-        type: 'body',
-        parameters: texts.map((t) => ({
-          type: 'text',
-          text: String(t ?? '').slice(0, 4096)
-        }))
+  function buildPayload(code) {
+    /** @type {Record<string, unknown>} */
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to,
+      type: 'template',
+      template: {
+        name,
+        language: { code }
       }
-    ];
+    };
+    if (texts.length > 0) {
+      payload.template.components = [
+        {
+          type: 'body',
+          parameters: texts.map((t, i) => {
+            const text = String(t ?? '').slice(0, 4096);
+            if (!useNamed) {
+              return { type: 'text', text };
+            }
+            const parameter_name = String(names[i] || '')
+              .trim()
+              .replace(/^\{\{|\}\}$/g, '')
+              .slice(0, 256);
+            return { type: 'text', parameter_name, text };
+          })
+        }
+      ];
+    }
+    return payload;
   }
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${tok}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(payload)
-  });
+  /** @type {(Error & { status?: number; meta?: unknown }) | null} */
+  let lastErr = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${tok}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(buildPayload(lang))
+    });
 
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const err = new Error(graphUserMessage(json, res.status));
+    const json = await res.json().catch(() => ({}));
+    if (res.ok) {
+      const mid = json?.messages?.[0]?.id || null;
+      return { messageId: mid, raw: json };
+    }
+    const err = /** @type {Error & { status?: number; meta?: unknown }} */ (new Error(graphUserMessage(json, res.status)));
     err.status = res.status;
     err.meta = json;
-    throw err;
+    lastErr = err;
+
+    const graphCode = Number(json?.error?.code);
+    const msg = String(json?.error?.message || '').toLowerCase();
+    const retryTrToTrTr =
+      attempt === 0 &&
+      lang.toLowerCase() === 'tr' &&
+      (graphCode === 100 ||
+        graphCode === 131026 ||
+        graphCode === 132001 ||
+        msg.includes('template') ||
+        msg.includes('translation') ||
+        msg.includes('language') ||
+        msg.includes('does not exist'));
+    if (!retryTrToTrTr) throw err;
+    lang = 'tr_TR';
   }
 
-  const mid = json?.messages?.[0]?.id || null;
-  return { messageId: mid, raw: json };
+  throw lastErr;
 }
 
 /**

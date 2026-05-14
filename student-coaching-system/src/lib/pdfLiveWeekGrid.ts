@@ -104,7 +104,8 @@ async function rasterizeElement(el: HTMLElement, scale = 2): Promise<HTMLCanvasE
       scale,
       useCORS: true,
       allowTaint: false,
-      foreignObjectRendering: true,
+      /** true bazı Chromium sürümlerinde boş PNG/PDF üretebiliyor */
+      foreignObjectRendering: false,
       backgroundColor: '#ffffff',
       logging: false,
       width: el.scrollWidth,
@@ -121,6 +122,59 @@ async function rasterizeElement(el: HTMLElement, scale = 2): Promise<HTMLCanvasE
   } finally {
     el.removeAttribute('data-pdf-font-root');
     unmountOffscreen(el);
+  }
+}
+
+/** Canlı takvimi üst kabuktaki overflow/transform etkisinden ayırıp yakalar */
+async function captureCalendarForPdfSnapshot(calendarElement: HTMLElement, scale: number): Promise<HTMLCanvasElement> {
+  const clone = calendarElement.cloneNode(true) as HTMLElement;
+  const w = Math.max(calendarElement.scrollWidth, calendarElement.offsetWidth, 920);
+  clone.style.boxSizing = 'border-box';
+  clone.style.position = 'fixed';
+  clone.style.left = '-12000px';
+  clone.style.top = '0';
+  clone.style.zIndex = '2147483646';
+  clone.style.width = `${w}px`;
+  clone.style.minWidth = `${w}px`;
+  clone.style.background = '#ffffff';
+  clone.style.overflow = 'visible';
+  clone.classList.add('pdf-capture-root');
+  injectPdfCaptureFontStyles(document);
+  document.body.appendChild(clone);
+  try {
+    await document.fonts?.ready;
+    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+    await new Promise((r) => setTimeout(r, 140));
+    const ch = Math.max(
+      clone.scrollHeight,
+      clone.offsetHeight,
+      calendarElement.scrollHeight,
+      200
+    );
+    return await html2canvas(clone, {
+      scale,
+      useCORS: true,
+      allowTaint: false,
+      foreignObjectRendering: false,
+      backgroundColor: '#ffffff',
+      logging: false,
+      width: w,
+      height: ch,
+      windowWidth: w,
+      windowHeight: ch,
+      onclone: (clonedDoc) => {
+        injectPdfCaptureFontStyles(clonedDoc);
+        clonedDoc.querySelectorAll('.calendar-pdf-hide-ui').forEach((node) => {
+          (node as HTMLElement).style.setProperty('display', 'none', 'important');
+        });
+        const root = clonedDoc.querySelector('.pdf-capture-root') as HTMLElement | null;
+        if (root) {
+          root.style.fontFamily = '"Noto Sans", "Segoe UI", system-ui, sans-serif';
+        }
+      }
+    });
+  } finally {
+    clone.remove();
   }
 }
 
@@ -520,38 +574,8 @@ export async function downloadCalendarPdfWithSnapshot(opts: {
   const headerUsed = addCanvasFitWidth(doc, headerCanvas, margin, y, contentW, headerMaxH);
   y += headerUsed + 5;
 
-  calendarElement.classList.add('pdf-capture-root');
-  injectPdfCaptureFontStyles(document);
-  let calCanvas: HTMLCanvasElement;
-  try {
-    await document.fonts?.ready;
-    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-    await new Promise((r) => setTimeout(r, 120));
-    calCanvas = await html2canvas(calendarElement, {
-      scale: Math.min(2, typeof window !== 'undefined' ? window.devicePixelRatio || 2 : 2),
-      useCORS: true,
-      allowTaint: false,
-      foreignObjectRendering: true,
-      backgroundColor: '#ffffff',
-      logging: false,
-      width: calendarElement.scrollWidth,
-      height: calendarElement.scrollHeight,
-      windowWidth: calendarElement.scrollWidth,
-      windowHeight: calendarElement.scrollHeight,
-      onclone: (clonedDoc) => {
-        injectPdfCaptureFontStyles(clonedDoc);
-        clonedDoc.querySelectorAll('.calendar-pdf-hide-ui').forEach((node) => {
-          (node as HTMLElement).style.setProperty('display', 'none', 'important');
-        });
-        const root = clonedDoc.querySelector('.pdf-capture-root') as HTMLElement | null;
-        if (root) {
-          root.style.fontFamily = '"Noto Sans", "Segoe UI", system-ui, sans-serif';
-        }
-      }
-    });
-  } finally {
-    calendarElement.classList.remove('pdf-capture-root');
-  }
+  const scale = Math.min(2, typeof window !== 'undefined' ? window.devicePixelRatio || 2 : 2);
+  const calCanvas = await captureCalendarForPdfSnapshot(calendarElement, scale);
 
   const roomCal = pageH - margin - y;
   if (roomCal < 35) {

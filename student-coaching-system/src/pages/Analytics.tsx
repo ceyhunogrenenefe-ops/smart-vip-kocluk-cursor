@@ -4,6 +4,7 @@ import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { formatClassLevelLabel } from '../types';
 import { userRoleTags } from '../config/rolePermissions';
+import { resolveStudentRecordId } from '../lib/coachResolve';
 import { eachDayOfInterval, parseISO, differenceInCalendarDays } from 'date-fns';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -81,12 +82,18 @@ export default function Analytics() {
   const tags = useMemo(() => (effectiveUser ? userRoleTags(effectiveUser) : []), [effectiveUser]);
   const isStudentUi = tags.includes('student');
 
-  /** Öğrenci hesabı: tek öğrenci kartı otomatik seçilsin; aksi halde özet/istatistikler boş kalıyor */
+  /** Öğrenci hesabı: JWT studentId / e-posta ile seçim; students.length===1 şartı çok kurumda bozuluyordu */
   useEffect(() => {
-    if (!isStudentUi || students.length !== 1) return;
-    const sid = students[0].id;
-    setSelectedStudentId((prev) => prev || sid);
-  }, [isStudentUi, students]);
+    if (!isStudentUi || !effectiveUser) return;
+    const sid =
+      resolveStudentRecordId(
+        effectiveUser.role,
+        effectiveUser.studentId,
+        effectiveUser.email,
+        students
+      )?.trim() || '';
+    if (sid) setSelectedStudentId((prev) => prev || sid);
+  }, [isStudentUi, effectiveUser, students]);
 
   const selectedStudent = students.find(s => s.id === selectedStudentId);
 

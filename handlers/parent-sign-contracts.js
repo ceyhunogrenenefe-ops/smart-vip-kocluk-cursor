@@ -115,7 +115,7 @@ export default async function handler(req, res) {
     try {
       const { data: row, error } = await supabaseAdmin
         .from('parent_sign_contracts')
-        .select('id,merged_html,contract_number,status,signed_at,institution_id')
+        .select('id,merged_html,contract_number,status,signed_at,institution_id,signature_png_base64')
         .eq('signing_token', signingToken)
         .maybeSingle();
       if (error) throw error;
@@ -125,14 +125,20 @@ export default async function handler(req, res) {
         const { data: inst } = await supabaseAdmin.from('institutions').select('name').eq('id', row.institution_id).maybeSingle();
         institution_name = inst?.name || '';
       }
+      const statusSigned = String(row.status || '').toLowerCase() === 'signed';
+      const hasSignedAt = Boolean(row.signed_at);
+      const alreadySigned = statusSigned || hasSignedAt;
+      const sigRaw = row.signature_png_base64 != null ? String(row.signature_png_base64).trim() : '';
+      const signature_png_base64 = alreadySigned && sigRaw.length > 80 ? sigRaw : null;
       return res.status(200).json({
         data: {
           document_id: row.id,
           merged_html: row.merged_html,
           contract_number: row.contract_number,
-          already_signed: row.status === 'signed',
+          already_signed: alreadySigned,
           signed_at: row.signed_at,
-          institution_name
+          institution_name,
+          signature_png_base64
         }
       });
     } catch (e) {
@@ -151,12 +157,13 @@ export default async function handler(req, res) {
     try {
       const { data: row, error: dErr } = await supabaseAdmin
         .from('parent_sign_contracts')
-        .select('id,status')
+        .select('id,status,signed_at')
         .eq('signing_token', token)
         .maybeSingle();
       if (dErr) throw dErr;
       if (!row) return res.status(404).json({ error: 'not_found' });
-      if (row.status === 'signed') return res.status(200).json({ ok: true, duplicate: true });
+      const done = String(row.status || '').toLowerCase() === 'signed' || Boolean(row.signed_at);
+      if (done) return res.status(200).json({ ok: true, duplicate: true });
 
       const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '')
         .split(',')[0]
@@ -271,6 +278,183 @@ export default async function handler(req, res) {
       const { error: de } = await supabaseAdmin.from('parent_sign_contracts').delete().eq('id', id);
       if (de) throw de;
       return res.status(200).json({ ok: true });
+    }
+
+    if (req.method === 'PATCH') {
+      const body = parseBody(req);
+      const id = String(body.id || '').trim();
+      if (!id) return res.status(400).json({ error: 'id_required' });
+
+      const { data: existing, error: fe } = await supabaseAdmin.from('parent_sign_contracts').select('*').eq('id', id).maybeSingle();
+      if (fe) throw fe;
+      if (!existing) return res.status(404).json({ error: 'not_found' });
+      const existingSigned =
+        String(existing.status || '').toLowerCase() === 'signed' || Boolean(existing.signed_at);
+      if (existingSigned) {
+        return res.status(400).json({ error: 'contract_already_signed' });
+      }
+      if (role !== 'super_admin' && !hasInstitutionAccess(actor, existing.institution_id)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+
+      const institutionId = String(existing.institution_id || '').trim();
+      let presetRow = null;
+      const presetIdExisting = String(existing.preset_id || '').trim();
+      if (presetIdExisting) {
+        const { data: pr, error: pe } = await supabaseAdmin
+          .from('parent_sign_class_presets')
+          .select('*')
+          .eq('id', presetIdExisting)
+          .maybeSingle();
+        if (pe) throw pe;
+        if (pr && String(pr.institution_id) === institutionId) presetRow = pr;
+      }
+
+      const ogrenci_ad = pickFirstNonEmpty(body.ogrenci_ad, existing.ogrenci_ad);
+      const ogrenci_soyad = pickFirstNonEmpty(body.ogrenci_soyad, existing.ogrenci_soyad);
+      const veli_ad = pickFirstNonEmpty(body.veli_ad, existing.veli_ad);
+      const veli_soyad = pickFirstNonEmpty(body.veli_soyad, existing.veli_soyad);
+      const telefon = pickFirstNonEmpty(body.telefon, existing.telefon);
+      const adres = body.adres !== undefined ? String(body.adres || '').trim() : String(existing.adres || '').trim();
+      const sinif = pickFirstNonEmpty(body.sinif, existing.sinif);
+      const program_adi = pickFirstNonEmpty(body.program_adi, existing.program_adi);
+      const bas = String(pickFirstNonEmpty(body.baslangic_tarihi, existing.baslangic_tarihi) || '')
+        .trim()
+        .slice(0, 10);
+      const bit = String(pickFirstNonEmpty(body.bitis_tarihi, existing.bitis_tarihi) || '')
+        .trim()
+        .slice(0, 10);
+      if (!ogrenci_ad || !ogrenci_soyad || !veli_ad || !veli_soyad || !telefon || !sinif || !program_adi || !bas || !bit) {
+        return res.status(400).json({ error: 'fields_required' });
+      }
+
+      const { data: inst, error: iErr } = await supabaseAdmin
+        .from('institutions')
+        .select('id,name')
+        .eq('id', institutionId)
+        .maybeSingle();
+      if (iErr) throw iErr;
+
+      const sozlesme_turu = normalizeSozlesmeTuru(pickFirstNonEmpty(body.sozlesme_turu, existing.sozlesme_turu));
+      const sozlesme_ozel = presetRow ? String(presetRow.sozlesme_ozel_baslik || '') : '';
+      const explicitBaslik = String(body.sozlesme_basligi ?? '').trim();
+      const sozlesme_basligi = explicitBaslik || resolveSozlesmeBasligi(sozlesme_turu, sozlesme_ozel, '');
+
+      const sablon_ek_detay_snapshot =
+        body.sablon_ek_detay_snapshot !== undefined && body.sablon_ek_detay_snapshot !== null
+          ? String(body.sablon_ek_detay_snapshot || '').trim()
+          : String(existing.sablon_ek_detay_snapshot || '').trim();
+
+      let dersSnapshot =
+        body.ders_satirlari !== undefined && body.ders_satirlari !== null
+          ? normalizeDersSatirlari(body.ders_satirlari)
+          : normalizeDersSatirlari(existing.ders_programi_snapshot);
+      if (!dersSnapshot.length && presetRow) {
+        dersSnapshot = normalizeDersSatirlari(presetRow.ders_satirlari);
+      }
+
+      const hoursRaw = body.haftalik_ders_saati;
+      const feeRaw = body.ucret;
+      const taksitRaw = body.taksit_sayisi;
+      let hoursParsed =
+        hoursRaw !== undefined && hoursRaw !== null && String(hoursRaw).trim() !== '' ? Number(hoursRaw) : NaN;
+      let feeParsed =
+        feeRaw !== undefined && feeRaw !== null && String(feeRaw).trim() !== '' ? Number(feeRaw) : NaN;
+      const taksitParsed =
+        taksitRaw !== undefined && taksitRaw !== null && String(taksitRaw).trim() !== '' ? Number(taksitRaw) : NaN;
+
+      if (!Number.isFinite(hoursParsed)) {
+        if (dersSnapshot.length) hoursParsed = sumDersHours(dersSnapshot);
+        else if (presetRow != null) hoursParsed = Number(presetRow.haftalik_ders_saati);
+        else hoursParsed = Number(existing.haftalik_ders_saati);
+      }
+
+      const suggested = suggestHoursAndFeeFromSinif(sinif);
+      const hours = Number.isFinite(hoursParsed)
+        ? Math.min(80, Math.max(0, hoursParsed))
+        : suggested.hours;
+      const fee = Number.isFinite(feeParsed)
+        ? Math.min(999999999, Math.max(0, feeParsed))
+        : Number.isFinite(Number(existing.ucret))
+          ? Number(existing.ucret)
+          : suggested.fee;
+      const taksit_sayisi = Number.isFinite(taksitParsed)
+        ? Math.min(48, Math.max(1, Math.round(taksitParsed)))
+        : Number.isFinite(Number(existing.taksit_sayisi))
+          ? Math.min(48, Math.max(1, Math.round(Number(existing.taksit_sayisi))))
+          : 1;
+
+      const kurum_kodu = institutionCodeFromRow(inst || { id: institutionId });
+      const verifyToken = String(existing.verify_token || '');
+      const base = publicBaseUrl();
+      const verifyUrl = verifyToken && base ? `${base}/verify-document?t=${encodeURIComponent(verifyToken)}` : '#';
+
+      const MAX_MERGED_HTML = 1_500_000;
+      const customMergedRaw =
+        body.custom_merged_html !== undefined && body.custom_merged_html !== null
+          ? String(body.custom_merged_html).trim()
+          : '';
+      let merged_html;
+      if (customMergedRaw.length > 0) {
+        if (customMergedRaw.length < 30) {
+          return res.status(400).json({ error: 'custom_merged_html_too_short' });
+        }
+        merged_html = customMergedRaw.slice(0, MAX_MERGED_HTML);
+      } else {
+        merged_html = buildParentContractHtml({
+          ogrenci_ad,
+          ogrenci_soyad,
+          veli_ad,
+          veli_soyad,
+          telefon,
+          adres,
+          sinif,
+          program_adi,
+          baslangic_tarihi: bas,
+          bitis_tarihi: bit,
+          haftalik_ders_saati: hours,
+          ucret: fee,
+          taksit_sayisi,
+          kurum_kodu,
+          contract_number: String(existing.contract_number || ''),
+          kurum_adi: inst?.name || '',
+          verify_url: verifyUrl || '#',
+          document_title: sozlesme_basligi,
+          extra_detail_plain: sablon_ek_detay_snapshot,
+          ders_satirlari: dersSnapshot
+        });
+      }
+
+      const now = new Date().toISOString();
+      const { data: updated, error: uErr } = await supabaseAdmin
+        .from('parent_sign_contracts')
+        .update({
+          ogrenci_ad,
+          ogrenci_soyad,
+          veli_ad,
+          veli_soyad,
+          telefon,
+          adres,
+          sinif,
+          program_adi,
+          baslangic_tarihi: bas,
+          bitis_tarihi: bit,
+          haftalik_ders_saati: hours,
+          ucret: fee,
+          taksit_sayisi,
+          kurum_kodu,
+          merged_html,
+          sozlesme_turu,
+          sozlesme_basligi,
+          sablon_ek_detay_snapshot,
+          ders_programi_snapshot: dersSnapshot,
+          updated_at: now
+        })
+        .eq('id', id)
+        .select()
+        .single();
+      if (uErr) throw uErr;
+      return res.status(200).json({ data: updated });
     }
 
     if (req.method === 'POST') {

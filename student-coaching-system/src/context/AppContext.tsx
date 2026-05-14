@@ -18,15 +18,20 @@ import {
   WrittenExamScore,
   WrittenExamStats,
   WrittenExamComment,
-  ClassLevel,
   inferProgramName
 } from '../types';
 import { db } from '../lib/database';
+import { getAuthToken } from '../lib/session';
 import { resolveCoachRecordId, resolveStudentRecordId } from '../lib/coachResolve';
 import { isSupabaseReady, supabase, supabaseBaseUrl, verifySupabaseReachable } from '../lib/supabase';
-import type { Database } from '../lib/supabase';
-
-type ApiStudentRow = Database['public']['Tables']['students']['Row'];
+import { studentRowToStudent, type ApiStudentRow } from '../lib/mapStudentRow';
+import {
+  encodeTopicProgressNotes,
+  stableTopicProgressTopicId,
+  topicProgressDedupeKey,
+  topicProgressRowToApp,
+  type TopicProgressDbRow
+} from '../lib/topicProgressSync';
 import { useAuth } from './AuthContext';
 import { userRoleTags } from '../config/rolePermissions';
 import { topicPool as defaultTopicPool } from '../data/mockData';
@@ -97,38 +102,6 @@ const mergeCoachesByEmail = (fromDb: Coach[], fromLocal: Coach[]): Coach[] => {
   }
   return out;
 };
-
-const normalizeClassLevel = (raw: unknown): ClassLevel => {
-  if (typeof raw === 'number') return raw as ClassLevel;
-  if (typeof raw === 'string') {
-    const trimmed = raw.trim();
-    if (trimmed === 'LGS' || trimmed === 'YOS' || trimmed.startsWith('YKS-')) return trimmed as ClassLevel;
-    const parsed = Number(trimmed);
-    if (!Number.isNaN(parsed)) return parsed as ClassLevel;
-  }
-  return raw as ClassLevel;
-};
-
-/** API satırını öğrenci kartına çevirir — PATCH sonrası tek doğruluk kaynağı */
-function studentRowToStudent(s: ApiStudentRow): Student {
-  return {
-    id: s.id,
-    name: s.name,
-    email: s.email,
-    platformUserId: s.platform_user_id || undefined,
-    phone: s.phone || undefined,
-    birthDate: s.birth_date || undefined,
-    classLevel: normalizeClassLevel(s.class_level),
-    school: s.school || undefined,
-    parentName: s.parent_name || undefined,
-    parentPhone: s.parent_phone || undefined,
-    coachId: s.coach_id || undefined,
-    institutionId: s.institution_id || undefined,
-    programId: s.program_id || undefined,
-    programName: inferProgramName(s.class_level),
-    createdAt: s.created_at
-  };
-}
 
 // LocalStorage'dan veri yükle
 const loadFromStorage = <T,>(key: string, defaultValue: T): T => {
@@ -204,9 +177,9 @@ interface AppState {
   activeInstitutionId: string | null;
 
   // Konu Havuzu
-  getTopics: (subject: string, classLevel: number | string) => string[];
-  addTopic: (subject: string, classLevel: number | string, topic: string) => void;
-  getTopicsByClass: (classLevel: number | string) => {
+  getTopics: (subject: string, classLevel: number | string | undefined | null) => string[];
+  addTopic: (subject: string, classLevel: number | string | undefined | null, topic: string) => void;
+  getTopicsByClass: (classLevel: number | string | undefined | null) => {
     regular: Record<string, string[]>;
     tytSubjects: Record<string, string[]>;
     aytSubjects: Record<string, string[]>;
@@ -215,11 +188,11 @@ interface AppState {
 
   // Konu Takibi
   topicProgress: TopicProgress[];
-  markTopicCompleted: (studentId: string, subject: string, topic: string, entryId?: string) => void;
-  unmarkTopicCompleted: (studentId: string, subject: string, topic: string) => void;
+  markTopicCompleted: (studentId: string, subject: string, topic: string, entryId?: string) => Promise<void>;
+  unmarkTopicCompleted: (studentId: string, subject: string, topic: string) => Promise<void>;
   getStudentTopicProgress: (studentId: string) => TopicProgress[];
   getCompletedTopicsBySubject: (studentId: string, subject: string) => TopicProgress[];
-  resetTopicProgress: (studentId: string) => void;
+  resetTopicProgress: (studentId: string) => Promise<void>;
 
   // İstatistikler
   getStudentStats: (studentId: string) => {
@@ -302,13 +275,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userRole, setUserRole] = useState<UserRole>('admin');
 
-  // Veritabanından yükle; ilk boyutta localStorage ile hızlı gösterim (Supabase sonradan birleşir)
-  const [students, setStudents] = useState<Student[]>(() =>
-    loadFromStorage<Student[]>(STORAGE_KEYS.students, [])
-  );
-  const [coaches, setCoaches] = useState<Coach[]>(() =>
-    loadFromStorage<Coach[]>(STORAGE_KEYS.coaches, [])
-  );
+  // Öğrenci/koç listesi: tarayıcılar arası tutarlılık için ilk boyutta localStorage kullanma —
+  // eski `coaching_students` önbelleği yanlış sınıf / hayalet kayıt gösterebiliyordu; kaynak Supabase.
+  const [students, setStudents] = useState<Student[]>(() => []);
+  const [coaches, setCoaches] = useState<Coach[]>(() => []);
+  const studentsRef = React.useRef<Student[]>([]);
+  studentsRef.current = students;
   const [weeklyEntries, setWeeklyEntries] = useState<WeeklyEntry[]>([]);
 
   // Kurumlar için state
@@ -425,8 +397,73 @@ export function AppProvider({ children }: { children: ReactNode }) {
           : resolvedActiveId || firstId || undefined;
 
         const dbStudents = await db.getStudents(institutionScope);
-        const loadedStudents: Student[] = dbStudents.map(studentRowToStudent);
+        let loadedStudents: Student[] = dbStudents.map(studentRowToStudent);
+
+        if (isStudentRole && getAuthToken()) {
+          try {
+            const myRow = await db.getMyStudent();
+            if (myRow) {
+              const st = studentRowToStudent(myRow);
+              const ix = loadedStudents.findIndex((s) => s.id === st.id);
+              if (ix === -1) loadedStudents = [...loadedStudents, st];
+              else {
+                const copy = [...loadedStudents];
+                copy[ix] = { ...copy[ix], ...st };
+                loadedStudents = copy;
+              }
+            }
+          } catch (e) {
+            console.warn('[AppContext] getMyStudent birleştirme atlandı:', e);
+          }
+        }
+
         setStudents(loadedStudents);
+
+        /** Konu takibi: `topic_progress` ile tarayıcılar arası senkron + tek seferlik localStorage migrate */
+        try {
+          if (getAuthToken()) {
+            if (loadedStudents.length === 0) {
+              setTopicProgress([]);
+            } else {
+            const ids = loadedStudents.map((s) => s.id);
+            const rows = await db.getTopicProgressForStudents(ids);
+            const map = new Map<string, TopicProgress>();
+            for (const row of rows) {
+              const app = topicProgressRowToApp(row as unknown as TopicProgressDbRow);
+              if (app) map.set(topicProgressDedupeKey(app.studentId, app.subject, app.topic), app);
+            }
+            const fromLocal = loadFromStorage<TopicProgress[]>(STORAGE_KEYS.topicProgress, []);
+            const localScoped = fromLocal.filter(
+              (p) => ids.includes(p.studentId) && !map.has(topicProgressDedupeKey(p.studentId, p.subject, p.topic))
+            );
+            for (const p of localScoped) {
+              try {
+                const topic_id = await stableTopicProgressTopicId(p.studentId, p.subject, p.topic);
+                const inst = loadedStudents.find((s) => s.id === p.studentId)?.institutionId ?? null;
+                await db.upsertTopicProgress({
+                  student_id: p.studentId,
+                  topic_id,
+                  status: 'completed',
+                  completion_date: p.completedAt,
+                  notes: encodeTopicProgressNotes({
+                    subject: p.subject,
+                    topic: p.topic,
+                    entryId: p.entryId
+                  }),
+                  institution_id: inst
+                });
+                map.set(topicProgressDedupeKey(p.studentId, p.subject, p.topic), p);
+              } catch (migErr) {
+                console.warn('[AppContext] topic_progress yerel satır migrate edilemedi:', migErr);
+              }
+            }
+            setTopicProgress([...map.values()]);
+            }
+          }
+        } catch (tpErr) {
+          console.warn('[AppContext] topic_progress sunucu yüklemesi (yerel önbellek):', tpErr);
+          setTopicProgress(loadFromStorage<TopicProgress[]>(STORAGE_KEYS.topicProgress, []));
+        }
 
         const dbCoaches = await db.getCoaches(institutionScope);
         const loadedCoaches: Coach[] = dbCoaches.map(c => ({
@@ -523,7 +560,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
 
     loadDataFromDatabase();
-  }, [activeInstitutionId, effectiveUser?.role, effectiveUser?.id]); // Rol/kullanıcı değişince (giriş) yeniden yükle
+  }, [activeInstitutionId, effectiveUser?.role, effectiveUser?.id, effectiveUser?.studentId]); // Öğrenci JWT student_id sonradan dolabiliyor
 
   // Veriler değiştiğinde localStorage'a kaydet
   useEffect(() => {
@@ -572,6 +609,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Öğrenci işlemleri - Supabase database
   const addStudent = async (student: Student) => {
+    if (student.classLevel === undefined || student.classLevel === null) {
+      throw new Error('Öğrenci eklemek için sınıf seviyesi seçilmelidir.');
+    }
     const resolvedInstitutionId =
       student.institutionId ||
       activeInstitutionId ||
@@ -605,21 +645,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       );
       // Convert to Student type and add to state
       const newStudent: Student = {
-        id: created.id,
-        name: created.name,
-        email: created.email,
-        password: student.password,
-        phone: created.phone || undefined,
-        birthDate: created.birth_date || undefined,
-        classLevel: normalizeClassLevel(created.class_level),
-        school: created.school || undefined,
-        parentName: created.parent_name || undefined,
-        parentPhone: created.parent_phone || undefined,
-        coachId: created.coach_id || undefined,
-        institutionId: created.institution_id || undefined,
-        programId: created.program_id || undefined,
-        programName: inferProgramName(created.class_level),
-        createdAt: created.created_at
+        ...studentRowToStudent(created),
+        password: student.password
       };
       setStudents(prev => [...prev, newStudent]);
 
@@ -685,10 +712,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (updatedStudent.school !== undefined) patch.school = updatedStudent.school;
     if (updatedStudent.parentName !== undefined) patch.parent_name = updatedStudent.parentName;
     if (updatedStudent.parentPhone !== undefined) patch.parent_phone = updatedStudent.parentPhone;
-    // coachId gönderilmediğinde coach_id sıfırlanmasın (|| null her zaman PATCH'e null yazardı).
-    if ('coachId' in updatedStudent) patch.coach_id = updatedStudent.coachId || null;
-    if ('institutionId' in updatedStudent)
-      patch.institution_id = updatedStudent.institutionId || null;
+    /** `coachId: undefined` ile çağrıda `'coachId' in obj` true olurdu → coach_id null yazılıyordu */
+    if (updatedStudent.coachId !== undefined) patch.coach_id = updatedStudent.coachId ?? null;
+    if (updatedStudent.institutionId !== undefined)
+      patch.institution_id = updatedStudent.institutionId ?? null;
     if (updatedStudent.programId !== undefined) patch.program_id = updatedStudent.programId;
 
     let saved: ApiStudentRow;
@@ -733,7 +760,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
               updatedStudent.phone !== undefined
                 ? updatedStudent.phone || null
                 : u.phone ?? null,
-            institution_id: updatedStudent.institutionId ?? u.institution_id
+            institution_id:
+              updatedStudent.institutionId !== undefined
+                ? updatedStudent.institutionId ?? null
+                : u.institution_id
           };
           if (pw) userPatch.password_hash = pw;
           if (
@@ -1093,7 +1123,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   // Konu havuzu işlemleri
-  const getTopics = (subject: string, classLevel: number | string): string[] => {
+  const getTopics = (subject: string, classLevel: number | string | undefined | null): string[] => {
+    if (classLevel === undefined || classLevel === null) return [];
+    if (typeof classLevel === 'string' && !classLevel.trim()) return [];
     // YKS sınıfları için özel işlem
     if (typeof classLevel === 'string' && classLevel.startsWith('YKS-')) {
       // TYT konuları için (TYT TÜRKÇE, TYT MATEMATİK vb.)
@@ -1112,12 +1144,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Belirli bir sınıfa ait tüm konuları getir
   // YKS öğrencileri için TYT ve AYT olarak ayrı organize eder
-  const getTopicsByClass = (classLevel: number | string): {
+  const getTopicsByClass = (classLevel: number | string | undefined | null): {
     regular: Record<string, string[]>;
     tytSubjects: Record<string, string[]>;
     aytSubjects: Record<string, string[]>;
     isYKS: boolean;
   } => {
+    if (classLevel === undefined || classLevel === null || classLevel === '') {
+      return { regular: {}, tytSubjects: {}, aytSubjects: {}, isYKS: false };
+    }
+    if (typeof classLevel === 'string' && !classLevel.trim()) {
+      return { regular: {}, tytSubjects: {}, aytSubjects: {}, isYKS: false };
+    }
     const result: Record<string, string[]> = {};
     const tytSubjects: Record<string, string[]> = {};
     const aytSubjects: Record<string, string[]> = {};
@@ -1160,28 +1198,57 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return { regular: result, tytSubjects: {}, aytSubjects: {}, isYKS };
   };
 
-  // Konu takibi işlemleri
-  const markTopicCompleted = (studentId: string, subject: string, topic: string, entryId?: string) => {
-    setTopicProgress(prev => {
-      // Aynı konu zaten işaretlenmiş mi kontrol et
-      const exists = prev.some(p =>
-        p.studentId === studentId && p.subject === subject && p.topic === topic
-      );
-      if (exists) return prev;
-
-      return [...prev, {
-        studentId,
-        subject,
-        topic,
-        completedAt: new Date().toISOString(),
-        entryId
-      }];
+  // Konu takibi işlemleri (Supabase topic_progress ile senkron)
+  const markTopicCompleted = async (
+    studentId: string,
+    subject: string,
+    topic: string,
+    entryId?: string
+  ): Promise<void> => {
+    const completedAt = new Date().toISOString();
+    const next: TopicProgress = { studentId, subject, topic, completedAt, entryId };
+    setTopicProgress((prev) => {
+      if (prev.some((p) => p.studentId === studentId && p.subject === subject && p.topic === topic)) {
+        return prev;
+      }
+      return [...prev, next];
     });
+    if (!getAuthToken() || !isSupabaseReady) return;
+    try {
+      const topic_id = await stableTopicProgressTopicId(studentId, subject, topic);
+      const inst = studentsRef.current.find((s) => s.id === studentId)?.institutionId ?? null;
+      await db.upsertTopicProgress({
+        student_id: studentId,
+        topic_id,
+        status: 'completed',
+        completion_date: completedAt,
+        notes: encodeTopicProgressNotes({ subject, topic, entryId }),
+        institution_id: inst
+      });
+    } catch (e) {
+      console.warn('[AppContext] markTopicCompleted sunucu kaydı başarısız:', e);
+      setTopicProgress((prev) =>
+        prev.filter((p) => !(p.studentId === studentId && p.subject === subject && p.topic === topic))
+      );
+    }
   };
 
-  const unmarkTopicCompleted = (studentId: string, subject: string, topic: string) => {
-    setTopicProgress(prev =>
-      prev.filter(p => !(p.studentId === studentId && p.subject === subject && p.topic === topic))
+  const unmarkTopicCompleted = async (
+    studentId: string,
+    subject: string,
+    topic: string
+  ): Promise<void> => {
+    if (getAuthToken() && isSupabaseReady) {
+      try {
+        const topic_id = await stableTopicProgressTopicId(studentId, subject, topic);
+        await db.deleteTopicProgress(studentId, topic_id);
+      } catch (e) {
+        console.warn('[AppContext] unmarkTopicCompleted sunucu silme başarısız:', e);
+        return;
+      }
+    }
+    setTopicProgress((prev) =>
+      prev.filter((p) => !(p.studentId === studentId && p.subject === subject && p.topic === topic))
     );
   };
 
@@ -1193,11 +1260,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return topicProgress.filter(p => p.studentId === studentId && p.subject === subject);
   };
 
-  const resetTopicProgress = (studentId: string) => {
-    setTopicProgress(prev => prev.filter(p => p.studentId !== studentId));
+  const resetTopicProgress = async (studentId: string): Promise<void> => {
+    if (getAuthToken() && isSupabaseReady) {
+      try {
+        await db.deleteTopicProgressForStudent(studentId);
+      } catch (e) {
+        console.warn('[AppContext] resetTopicProgress sunucu silme başarısız:', e);
+        return;
+      }
+    }
+    setTopicProgress((prev) => prev.filter((p) => p.studentId !== studentId));
   };
 
-  const addTopic = (subject: string, classLevel: number | string, topic: string) => {
+  const addTopic = (subject: string, classLevel: number | string | undefined | null, topic: string) => {
+    if (classLevel === undefined || classLevel === null || classLevel === '') return;
+    if (typeof classLevel === 'string' && !classLevel.trim()) return;
     setCustomTopics(prev => {
       const updated = { ...prev };
       if (!updated[subject]) {
@@ -2139,18 +2216,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!sid) return [];
       const matched = students.filter((s) => s.id === sid);
       if (matched.length > 0) return matched;
-      return [
-        {
-          id: sid,
-          name: effectiveUser.name?.trim() || 'Öğrenci',
-          email: String(effectiveUser.email || 'student@placeholder.local').trim().toLowerCase(),
-          phone: '',
-          parentPhone: '',
-          classLevel: 9,
-          institutionId: effectiveUser.institutionId,
-          createdAt: new Date().toISOString(),
-        },
-      ];
+      return [];
     }
     /** Koç: salt kurum admin listesinden önce — admin+koç birlikte olsa dar liste */
     if (tags.includes('coach')) {

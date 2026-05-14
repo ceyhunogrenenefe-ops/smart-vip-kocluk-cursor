@@ -97,7 +97,8 @@ export interface Student {
   phone: string;
   birthDate?: string;
   parentPhone: string;
-  classLevel: ClassLevel;
+  /** DB’de yoksa veya parse edilemezse undefined — asla yanlış varsayılan sınıf uydurma */
+  classLevel?: ClassLevel;
   school?: string;
   parentName?: string;
   coachId?: string; // Koç ID'si
@@ -508,6 +509,8 @@ export interface TeacherLesson {
   platform: TeacherLessonPlatform;
   status: TeacherLessonStatus;
   created_at?: string;
+  /** GET listesinde sunucunun users ile doldurduğu görünen ad */
+  teacher_name?: string | null;
   /** Plan süresi (dk); paket kotası birimi bu süreye göre hesaplanır */
   duration_minutes?: number;
   /** Tekrarlayan seri (aynı ID = aynı şablon) */

@@ -3,7 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { resolveCoachRecordId } from '../lib/coachResolve';
-import { Book, ReadingLog } from '../types';
+import { Book, ReadingLog, formatClassLevelLabel } from '../types';
 import {
   BookOpen,
   Plus,
@@ -310,7 +310,7 @@ export default function BookTracking() {
           <option value="">Öğrenci seçin...</option>
           {coachStudents.map(student => (
             <option key={student.id} value={student.id}>
-              {student.name} - {student.classLevel}
+              {student.name} - {formatClassLevelLabel(student.classLevel)}
             </option>
           ))}
         </select>

@@ -1,7 +1,7 @@
 // Türkçe: Haftalık Takip Sayfası
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { WeeklyEntry, Book } from '../types';
+import { WeeklyEntry, Book, formatClassLevelLabel } from '../types';
 import { topicPool } from '../data/mockData';
 import {
   Calendar,
@@ -104,7 +104,7 @@ const SUBJECT_TOPIC_MAP: Record<string, string> = {
 };
 
 export default function Tracking() {
-  const { students, weeklyEntries, addWeeklyEntry, updateWeeklyEntry, deleteWeeklyEntry, getStudentStats, getTopics, markTopicCompleted, books, addBook, getStudentBooks } = useApp();
+  const { students, weeklyEntries, addWeeklyEntry, updateWeeklyEntry, deleteWeeklyEntry, getStudentStats, getTopics, books, addBook, getStudentBooks } = useApp();
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [showForm, setShowForm] = useState(false);
@@ -349,7 +349,7 @@ export default function Tracking() {
               <option value="">Öğrenci Seçin</option>
               {students.map((student) => (
                 <option key={student.id} value={student.id}>
-                  {student.name} - {student.classLevel}
+                  {student.name} - {formatClassLevelLabel(student.classLevel)}
                 </option>
               ))}
             </select>

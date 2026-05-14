@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   LayoutDashboard,
+  Settings,
   TrendingUp,
   Video
 } from 'lucide-react';
@@ -50,7 +51,10 @@ export default function Sidebar({
     tags.includes('student') &&
     !tags.some((t) => ['super_admin', 'admin', 'coach', 'teacher'].includes(t));
   const hasGroupedSection =
-    nav.lessons.length > 0 || nav.academic.length > 0 || nav.orgSystem.length > 0;
+    nav.lessons.length > 0 ||
+    nav.academic.length > 0 ||
+    nav.orgSystem.length > 0 ||
+    nav.settings.length > 0;
 
   const [isLg, setIsLg] = useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(min-width: 1024px)').matches : true
@@ -201,6 +205,17 @@ export default function Sidebar({
               collapsed={railCollapsed}
               onNavigate={go}
             />
+            {nav.settings.length > 0 ? (
+              <SidebarNavGroup
+                id="settings"
+                label="Ayarlar"
+                icon={Settings}
+                items={nav.settings}
+                pathname={location.pathname}
+                collapsed={railCollapsed}
+                onNavigate={go}
+              />
+            ) : null}
           </>
         ) : null}
 

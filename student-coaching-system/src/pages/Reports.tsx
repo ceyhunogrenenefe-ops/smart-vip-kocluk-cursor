@@ -1,6 +1,7 @@
 // Türkçe: Gelişmiş Raporlar Sayfası - Profesyonel Analiz ve PDF/WhatsApp
 import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
+import { formatClassLevelLabel } from '../types';
 import { useAuth } from '../context/AuthContext';
 import {
   FileText,
@@ -619,7 +620,7 @@ _${institution.name}_`;
                 .filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()))
                 .map((student) => (
                   <option key={student.id} value={student.id}>
-                    {student.name} - {student.classLevel}
+                    {student.name} - {formatClassLevelLabel(student.classLevel)}
                   </option>
                 ))}
             </select>

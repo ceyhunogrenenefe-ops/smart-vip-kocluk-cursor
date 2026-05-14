@@ -173,11 +173,11 @@ export default function StudentDashboard() {
     })).filter(s => s.sem1Avg > 0 || s.sem2Avg > 0);
   }, [resolvedStudentId, writtenExamScores, getWrittenExamSubjectsForStudent, writtenExamSubjectsByStudent, calculateSemesterAverage, calculateYearlyAverage]);
 
-  // Öğrencinin sınıfı
+  // Öğrencinin sınıfı (kartta yoksa undefined — konu havuzu yanlış sınıfa düşmesin)
   const myClassLevel = useMemo(() => {
-    if (!resolvedStudentId) return 9;
+    if (!resolvedStudentId) return undefined;
     const student = students.find(s => s.id === resolvedStudentId);
-    return student?.classLevel || 9;
+    return student?.classLevel;
   }, [resolvedStudentId, students]);
 
   // Ders bazlı başarı
@@ -275,8 +275,11 @@ export default function StudentDashboard() {
       return topicPool[formData.subject]?.[myClassLevel] || [];
     }
 
-    // Normal sınıflar (9, 10, 11, 12)
+    // Normal sınıflar (9, 10, 11, 12) + LGS/YOS metin
     if (typeof myClassLevel === 'number') {
+      return topicPool[formData.subject]?.[myClassLevel] || [];
+    }
+    if (myClassLevel === 'LGS' || myClassLevel === 'YOS') {
       return topicPool[formData.subject]?.[myClassLevel] || [];
     }
 
@@ -571,6 +574,12 @@ export default function StudentDashboard() {
 
                 {showForm ? (
                   <form onSubmit={handleSubmit} className="space-y-4">
+                    {resolvedStudentId && myClassLevel === undefined && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                        Kartınızda sınıf seviyesi tanımlı değil; konu listesi yanlış veri üretmesin diye
+                        boş bırakıldı. Lütfen kurumunuzdan sınıf / program bilginizin güncellenmesini isteyin.
+                      </div>
+                    )}
                     <div className="flex items-center justify-between bg-blue-50 p-3 rounded-lg">
                       <span className="text-sm font-medium text-blue-800">Yeni Kayıt</span>
                       <button

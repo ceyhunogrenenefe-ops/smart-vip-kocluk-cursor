@@ -40,7 +40,7 @@ async function resolveCoachIdByUserSub(sub) {
 export async function enrichStudentActor(actor) {
   if (!actor) return actor;
 
-  if (actor.role === 'student' && !actor.student_id) {
+  if (actor.role === 'student') {
     const sub = actor.sub;
     if (!sub || sub === 'anonymous') return actor;
 
@@ -56,8 +56,13 @@ export async function enrichStudentActor(actor) {
       institutionId: userRow?.institution_id ?? actor.institution_id ?? null
     });
 
-    if (!resolved?.id) return actor;
-    return { ...actor, student_id: resolved.id };
+    /** JWT’deki student_id eski/yanlış olabilir (aynı e-posta başka kurum); her istekte canonical eşleşmeyi zorunlu kıl */
+    if (resolved?.id && resolved.id !== actor.student_id) {
+      return { ...actor, student_id: resolved.id };
+    }
+    if (!actor.student_id && resolved?.id) {
+      return { ...actor, student_id: resolved.id };
+    }
   }
 
   /**

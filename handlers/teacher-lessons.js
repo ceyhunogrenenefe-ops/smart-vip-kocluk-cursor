@@ -94,6 +94,22 @@ function mapRowToApi(row) {
   return { ...rest, date: lesson_date };
 }
 
+async function attachTeacherNamesToLessons(mapped) {
+  const arr = Array.isArray(mapped) ? mapped : [];
+  const ids = [...new Set(arr.map((r) => String(r.teacher_id || '').trim()).filter(Boolean))];
+  if (!ids.length) return arr;
+  const { data: users, error } = await supabaseAdmin.from('users').select('id,name,email').in('id', ids);
+  if (error) return arr;
+  const names = {};
+  for (const u of users || []) {
+    names[String(u.id)] = String(u.name || u.email || u.id || '').trim();
+  }
+  return arr.map((r) => ({
+    ...r,
+    teacher_name: names[String(r.teacher_id || '')] || ''
+  }));
+}
+
 async function hasTeacherConflict({ teacherId, lessonDate, startTime, endTime, excludeId = null }) {
   let q = supabaseAdmin
     .from('teacher_lessons')
@@ -207,7 +223,7 @@ async function handleList(req, res) {
         return String(a.start_time || '').localeCompare(String(b.start_time || ''));
       });
       const mapped = merged.map(mapRowToApi);
-      return res.status(200).json({ data: mapped });
+      return res.status(200).json({ data: await attachTeacherNamesToLessons(mapped) });
     }
 
     let q = teacherLessonsBaseSelect();
@@ -255,7 +271,7 @@ async function handleList(req, res) {
     }
 
     const mapped = (data || []).map(mapRowToApi);
-    return res.status(200).json({ data: mapped });
+    return res.status(200).json({ data: await attachTeacherNamesToLessons(mapped) });
   } catch (e) {
     const msg = errorMessage(e);
     if (isAuthFailureMessage(msg)) return jsonError(res, 401, msg);

@@ -89,7 +89,7 @@ export default function Register() {
             <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6 text-green-800 text-sm flex items-start gap-2">
               <CheckCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
               <div>
-                <p className="font-medium">30 Gün Ücretsiz Deneme</p>
+                <p className="font-medium">14 Gün Ücretsiz Deneme</p>
                 <p>Yönetici hesabınız oluşturulur ve tüm panelleri test edebilirsiniz.</p>
               </div>
             </div>

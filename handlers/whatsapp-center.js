@@ -1,7 +1,7 @@
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
-import { getIstanbulDateString } from '../api/_lib/istanbul-time.js';
+import { getIstanbulDateString, addCalendarDaysYmd } from '../api/_lib/istanbul-time.js';
 import { normalizePhoneToE164 } from '../api/_lib/phone-whatsapp.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import { getTeacherGroupClassStudentScope } from '../api/_lib/teacher-class-scope.js';
@@ -14,7 +14,9 @@ export const TEMPLATE_TYPE_TO_CRON_JOB_KEY = {
   report_reminder: 'daily_report_reminder',
   class_lesson_reminder: 'class_lesson_reminders',
   class_homework_notice: 'class_homework_notify',
-  meeting_notification: 'meeting_reminders'
+  meeting_notification: 'meeting_reminders',
+  /** Grup yoklaması devamsızlık — anlık gönderim mark-attendance; cron yalnızca başarısız yeniden deneme */
+  class_absent_notice_1: 'absent_student_notification'
 };
 
 export const KNOWN_CRON_JOBS = [
@@ -26,7 +28,7 @@ export const KNOWN_CRON_JOBS = [
   { key: 'class_homework_notify', label: 'Grup ödev bildirimi', expectEveryMinutes: 10 },
   { key: 'coach_followup', label: 'Koç otomasyon (Meta şablon)', expectEveryMinutes: 15 },
   { key: 'study_evening_reminder', label: 'Akşam çalışma hatırlatması', expectEveryMinutes: 24 * 60 },
-  { key: 'absent_student_notification', label: 'Devamsızlık bildirimi', expectEveryMinutes: 24 * 60 }
+  { key: 'absent_student_notification', label: 'Devamsızlık bildirimi (anlık + başarısız yeniden deneme)', expectEveryMinutes: 15 },
 ];
 
 function templateTypesForCronJobKey(jobKey) {
@@ -115,6 +117,7 @@ function kindForTemplateType(type) {
   const map = {
     class_lesson_reminder: 'class_lesson_reminder',
     class_homework_notice: 'class_homework_notice',
+    class_absent_notice_1: 'class_absent_notice_1',
     class_absent_notice: 'class_absent_notice',
     lesson_reminder: 'lesson_reminder',
     lesson_reminder_parent: 'lesson_reminder_parent',
@@ -447,9 +450,9 @@ export default async function handler(req, res) {
       (t) => t.is_active !== false && String(t.meta_template_name || '').trim()
     ).length;
 
-    const istNow = new Date();
-    const upcoming = new Date(istNow.getTime() + 36 * 60 * 60 * 1000);
-    const upcomingIso = upcoming.toISOString().slice(0, 10);
+    /** lesson_date İstanbul takvim günü; UTC .toISOString() ile karşılaştırma sınır günü kaydırabiliyordu */
+    const todayIst = getIstanbulDateString();
+    const upcomingIso = addCalendarDaysYmd(todayIst, 2);
     let pendingSessions = 0;
     if (mode === 'admin') {
       let clsq = supabaseAdmin.from('classes').select('id');

@@ -1,8 +1,22 @@
--- Grup dersi devamsızlık — veli WhatsApp şablonu (Meta Cloud API sırası ile uyumlu)
+-- Meta şablon adı: class_absent_notice_1 (message_templates.type ve meta_template_name ile hizalı)
+-- Supabase SQL Editor'da bir kez çalıştırın.
+-- meta_named_body_parameters: Meta Cloud API (#100) için adlandırılmış gövde parametreleri (parameter_name).
 
-ALTER TABLE message_templates ADD COLUMN IF NOT EXISTS channel TEXT;
-ALTER TABLE message_templates ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
 ALTER TABLE message_templates ADD COLUMN IF NOT EXISTS meta_named_body_parameters BOOLEAN;
+
+COMMENT ON COLUMN message_templates.meta_named_body_parameters IS 'Meta Cloud API: true ise gövde parametrelerinde parameter_name gönderilir.';
+
+UPDATE message_logs
+SET kind = 'class_absent_notice_1'
+WHERE kind = 'class_absent_notice';
+
+UPDATE message_templates
+SET
+  type = 'class_absent_notice_1',
+  meta_template_name = 'class_absent_notice_1',
+  meta_named_body_parameters = true,
+  updated_at = NOW()
+WHERE type = 'class_absent_notice';
 
 INSERT INTO message_templates (
   name,
@@ -41,5 +55,9 @@ ON CONFLICT (type) DO UPDATE SET
   meta_template_language = EXCLUDED.meta_template_language,
   meta_named_body_parameters = COALESCE(EXCLUDED.meta_named_body_parameters, message_templates.meta_named_body_parameters),
   updated_at = NOW();
+
+UPDATE message_templates
+SET meta_named_body_parameters = true
+WHERE type = 'class_absent_notice_1' AND (meta_named_body_parameters IS DISTINCT FROM true);
 
 NOTIFY pgrst, 'reload schema';

@@ -164,7 +164,7 @@ export default function Login() {
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
                 <Link to="/register" className="text-amber-700 text-xs inline-flex items-center gap-2 hover:text-amber-800">
                   <AlertTriangle className="w-4 h-4" />
-                  30 gün ücretsiz deneme hesabı oluştur
+                  14 gün ücretsiz deneme hesabı oluştur
                 </Link>
               </div>
             </div>

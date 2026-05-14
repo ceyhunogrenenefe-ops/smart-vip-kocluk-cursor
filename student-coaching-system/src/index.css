@@ -2,6 +2,23 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer components {
+  .pdf-capture-root {
+    font-family: 'Noto Sans', 'Segoe UI', system-ui, sans-serif !important;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 10px 40px rgba(15, 23, 42, 0.12);
+    border: 1px solid #e2e8f0;
+    background: #fff;
+  }
+  .pdf-capture-root th {
+    letter-spacing: 0.02em;
+  }
+  .pdf-capture-root td {
+    vertical-align: top;
+  }
+}
+
 @layer utilities {
   .pb-safe {
     padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));

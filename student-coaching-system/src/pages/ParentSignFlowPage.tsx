@@ -4,6 +4,7 @@ import { useApp } from '../context/AppContext';
 import {
   createParentSignClassPreset,
   createParentSignContract,
+  updateParentSignContract,
   deleteParentSignClassPreset,
   deleteParentSignContract,
   listInstitutionsForPicker,
@@ -23,12 +24,14 @@ import {
   type StudentFillRow,
   type UserStudentFillRow
 } from '../lib/parentSignApi';
+import { downloadParentSignContractPdf } from '../lib/parentSignPdfDownload';
 import {
   Copy,
   Loader2,
   Link2,
   CheckCircle2,
   Clock,
+  Download,
   FileSignature,
   Trash2,
   Pencil,
@@ -70,6 +73,12 @@ function validDersRows(rows: DersSatiri[]): DersSatiri[] {
       haftalik_saat: Math.min(40, Math.max(0.25, Number(r.haftalik_saat) || 0))
     }))
     .filter((r) => r.ders_adi.length > 0 && r.haftalik_saat > 0);
+}
+
+/** Liste / UI: imzalı kabul (status veya signed_at) */
+function parentContractRowSigned(r: ParentSignContractRow): boolean {
+  if (r.signed_at != null && String(r.signed_at).trim() !== '') return true;
+  return String(r.status || '').toLowerCase().trim() === 'signed';
 }
 
 export default function ParentSignFlowPage() {
@@ -137,6 +146,32 @@ export default function ParentSignFlowPage() {
   const [contractEkSatirlar, setContractEkSatirlar] = useState('');
   /** Veli kaydı: şablondan kopyalanır veya elle düzenlenir; doluysa APIye gönderilir */
   const [contractDersler, setContractDersler] = useState<DersSatiri[]>([]);
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editOgrenciAd, setEditOgrenciAd] = useState('');
+  const [editOgrenciSoyad, setEditOgrenciSoyad] = useState('');
+  const [editVeliAd, setEditVeliAd] = useState('');
+  const [editVeliSoyad, setEditVeliSoyad] = useState('');
+  const [editTelefon, setEditTelefon] = useState('');
+  const [editAdres, setEditAdres] = useState('');
+  const [editSinif, setEditSinif] = useState('');
+  const [editProgramAdi, setEditProgramAdi] = useState('');
+  const [editBaslangic, setEditBaslangic] = useState('');
+  const [editBitis, setEditBitis] = useState('');
+  const [editHaftalikDersSaati, setEditHaftalikDersSaati] = useState(6);
+  const [editUcret, setEditUcret] = useState(0);
+  const [editTaksitSayisi, setEditTaksitSayisi] = useState(1);
+  const [editSozlesmeTuru, setEditSozlesmeTuru] = useState<SozlesmeTuruKey>('satis_sozlesmesi');
+  const [editSozlesmeBasligi, setEditSozlesmeBasligi] = useState('');
+  const [editEkSatirlar, setEditEkSatirlar] = useState('');
+  const [editContractDersler, setEditContractDersler] = useState<DersSatiri[]>([]);
+  /** Doğrudan HTML düzenleme (koç/admin/süper admin; yalnız imza öncesi) */
+  const [editCustomHtmlMode, setEditCustomHtmlMode] = useState(false);
+  const [editMergedHtml, setEditMergedHtml] = useState('');
+
+  const [pdfRowId, setPdfRowId] = useState<string | null>(null);
 
   const programs = useMemo(() => uniquePrograms(presets), [presets]);
 
@@ -208,6 +243,12 @@ export default function ParentSignFlowPage() {
   }, [contractDersler]);
 
   useEffect(() => {
+    if (!editOpen) return;
+    const vd = validDersRows(editContractDersler);
+    if (vd.length) setEditHaftalikDersSaati(sumDersSatirlari(vd));
+  }, [editOpen, editContractDersler]);
+
+  useEffect(() => {
     if (!isSuper) {
       setInstitutionOptions([]);
       return;
@@ -255,6 +296,12 @@ export default function ParentSignFlowPage() {
     const { hours, fee } = suggestHoursAndFeeFromSinif(sinif);
     setHaftalikDersSaati(hours);
     setUcret(fee);
+  };
+
+  const applyEditSuggestFromSinif = () => {
+    const { hours, fee } = suggestHoursAndFeeFromSinif(editSinif);
+    setEditHaftalikDersSaati(hours);
+    setEditUcret(fee);
   };
 
   const resolvedProgramAdi = () => {
@@ -413,6 +460,117 @@ export default function ParentSignFlowPage() {
     const path = `/veli-imza/${encodeURIComponent(r.signing_token)}`;
     if (typeof window !== 'undefined' && window.location?.origin) return `${window.location.origin}${path}`;
     return path;
+  };
+
+  const openEditContract = (r: ParentSignContractRow) => {
+    if (parentContractRowSigned(r)) return;
+    setEditId(r.id);
+    setEditOgrenciAd(String(r.ogrenci_ad || ''));
+    setEditOgrenciSoyad(String(r.ogrenci_soyad || ''));
+    setEditVeliAd(String(r.veli_ad || ''));
+    setEditVeliSoyad(String(r.veli_soyad || ''));
+    setEditTelefon(String(r.telefon || ''));
+    setEditAdres(String(r.adres || ''));
+    setEditSinif(String(r.sinif || ''));
+    setEditProgramAdi(String(r.program_adi || ''));
+    setEditBaslangic(String(r.baslangic_tarihi || '').slice(0, 10));
+    setEditBitis(String(r.bitis_tarihi || '').slice(0, 10));
+    setEditHaftalikDersSaati(Number(r.haftalik_ders_saati) || 0);
+    setEditUcret(Number(r.ucret) || 0);
+    setEditTaksitSayisi(Number(r.taksit_sayisi) || 1);
+    const tur = (r.sozlesme_turu || 'satis_sozlesmesi') as SozlesmeTuruKey;
+    setEditSozlesmeTuru(['kullanici_sozlesmesi', 'satis_sozlesmesi', 'diger'].includes(tur) ? tur : 'satis_sozlesmesi');
+    setEditSozlesmeBasligi(String(r.sozlesme_basligi || ''));
+    setEditEkSatirlar(String(r.sablon_ek_detay_snapshot || ''));
+    const parsed = parseDersSatirlariFromPreset({
+      id: '',
+      institution_id: '',
+      sinif: r.sinif,
+      program_adi: r.program_adi,
+      haftalik_ders_saati: r.haftalik_ders_saati,
+      ders_satirlari: r.ders_programi_snapshot,
+      created_at: '',
+      updated_at: ''
+    } as ParentSignClassPresetRow);
+    const ev = validDersRows(parsed);
+    setEditContractDersler(ev.length ? ev.map((x) => ({ ...x })) : []);
+    setEditCustomHtmlMode(false);
+    setEditMergedHtml(String(r.merged_html || ''));
+    setEditOpen(true);
+  };
+
+  const closeEditContract = () => {
+    setEditOpen(false);
+    setEditId(null);
+    setEditSaving(false);
+    setEditCustomHtmlMode(false);
+    setEditMergedHtml('');
+  };
+
+  const saveEditContract = async () => {
+    if (!editId) return;
+    if (editCustomHtmlMode && editMergedHtml.trim().length < 30) {
+      setMsg('Özel HTML modunda sözleşme metni en az 30 karakter olmalıdır.');
+      return;
+    }
+    setEditSaving(true);
+    setMsg(null);
+    try {
+      const vd = validDersRows(editContractDersler);
+      const haftalikOut = vd.length ? sumDersSatirlari(vd) : editHaftalikDersSaati;
+      await updateParentSignContract({
+        id: editId,
+        ogrenci_ad: editOgrenciAd.trim(),
+        ogrenci_soyad: editOgrenciSoyad.trim(),
+        veli_ad: editVeliAd.trim(),
+        veli_soyad: editVeliSoyad.trim(),
+        telefon: editTelefon.trim(),
+        adres: editAdres.trim(),
+        sinif: editSinif.trim(),
+        program_adi: editProgramAdi.trim(),
+        baslangic_tarihi: editBaslangic,
+        bitis_tarihi: editBitis,
+        haftalik_ders_saati: haftalikOut,
+        ucret: editUcret,
+        taksit_sayisi: editTaksitSayisi,
+        sozlesme_turu: editSozlesmeTuru,
+        sozlesme_basligi: editSozlesmeBasligi.trim(),
+        sablon_ek_detay_snapshot: editEkSatirlar.trim(),
+        ders_satirlari: vd,
+        ...(editCustomHtmlMode ? { custom_merged_html: editMergedHtml.trim() } : {})
+      });
+      setMsg(
+        editCustomHtmlMode
+          ? 'Kayıt ve özel sözleşme HTML’i güncellendi; veli linki aynı kaldı.'
+          : 'Kayıt güncellendi; belge şablondan yenilendi; veli linki aynı kaldı.'
+      );
+      closeEditContract();
+      void load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Güncellenemedi');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const downloadListContractPdf = async (r: ParentSignContractRow) => {
+    if (!r.merged_html?.trim()) {
+      setMsg('Bu kayıtta belge HTML bulunamadı; sayfayı yenileyip tekrar deneyin.');
+      return;
+    }
+    setPdfRowId(r.id);
+    setMsg(null);
+    try {
+      await downloadParentSignContractPdf({
+        html: r.merged_html,
+        signaturePng: r.signature_png_base64,
+        contractNo: r.contract_number
+      });
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'PDF oluşturulamadı');
+    } finally {
+      setPdfRowId(null);
+    }
   };
 
   return (
@@ -1105,38 +1263,81 @@ export default function ParentSignFlowPage() {
                       ) : null}
                     </p>
                   </div>
-                  <div className="flex flex-col items-end gap-1">
-                    {r.status === 'signed' ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5 text-xs font-semibold dark:bg-emerald-900/40 dark:text-emerald-200">
+                  <div className="flex flex-col items-stretch gap-2 w-full sm:w-auto sm:min-w-[200px]">
+                    {parentContractRowSigned(r) ? (
+                      <span className="inline-flex items-center justify-center gap-1 rounded-full bg-emerald-100 text-emerald-800 px-2 py-1 text-xs font-semibold dark:bg-emerald-900/40 dark:text-emerald-200">
                         <CheckCircle2 className="w-3.5 h-3.5" /> İmzalı
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-900 px-2 py-0.5 text-xs font-semibold dark:bg-amber-900/30 dark:text-amber-100">
+                      <span className="inline-flex items-center justify-center gap-1 rounded-full bg-amber-100 text-amber-900 px-2 py-1 text-xs font-semibold dark:bg-amber-900/30 dark:text-amber-100">
                         <Clock className="w-3.5 h-3.5" /> Bekliyor
                       </span>
                     )}
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-blue-700 hover:underline"
-                      onClick={() => void navigator.clipboard.writeText(fullLink(r))}
-                    >
-                      <Copy className="w-3.5 h-3.5" /> Linki kopyala
-                    </button>
-                    <a
-                      href={fullLink(r)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900"
-                    >
-                      <Link2 className="w-3.5 h-3.5" /> Önizle
-                    </a>
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 hover:underline"
-                      onClick={() => void removeContractRow(r.id)}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" /> Sil
-                    </button>
+                    <div className="flex flex-wrap gap-2 justify-end">
+                      <button
+                        type="button"
+                        className="inline-flex items-center justify-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-semibold text-blue-800 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-100"
+                        onClick={() => void navigator.clipboard.writeText(fullLink(r))}
+                      >
+                        <Copy className="w-3.5 h-3.5" /> Link
+                      </button>
+                      <a
+                        href={fullLink(r)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                      >
+                        <Link2 className="w-3.5 h-3.5" /> Önizle
+                      </a>
+                      {!parentContractRowSigned(r) ? (
+                        <button
+                          type="button"
+                          className="inline-flex items-center justify-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100"
+                          title="İmzalanmadan önce düzenle"
+                          onClick={() => openEditContract(r)}
+                        >
+                          <Pencil className="w-3.5 h-3.5" /> Düzenle
+                        </button>
+                      ) : null}
+                      {!parentContractRowSigned(r) ? (
+                        <button
+                          type="button"
+                          disabled={pdfRowId === r.id}
+                          title="İmza öncesi güncel metin (imza yok)"
+                          className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                          onClick={() => void downloadListContractPdf(r)}
+                        >
+                          {pdfRowId === r.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Download className="w-3.5 h-3.5" />
+                          )}
+                          PDF (taslak)
+                        </button>
+                      ) : null}
+                      {parentContractRowSigned(r) ? (
+                        <button
+                          type="button"
+                          disabled={pdfRowId === r.id}
+                          className="inline-flex items-center justify-center gap-1 rounded-lg border border-emerald-300 bg-emerald-500 px-2.5 py-1.5 text-xs font-bold text-emerald-950 hover:bg-emerald-400 disabled:opacity-50"
+                          onClick={() => void downloadListContractPdf(r)}
+                        >
+                          {pdfRowId === r.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Download className="w-3.5 h-3.5" />
+                          )}
+                          PDF
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="inline-flex items-center justify-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"
+                        onClick={() => void removeContractRow(r.id)}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> Sil
+                      </button>
+                    </div>
                   </div>
                 </div>
               </li>
@@ -1144,6 +1345,314 @@ export default function ParentSignFlowPage() {
           </ul>
         </section>
       </div>
+
+      {editOpen ? (
+        <div
+          className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/50 px-3 py-8 backdrop-blur-sm"
+          role="presentation"
+          onClick={() => !editSaving && closeEditContract()}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-contract-title"
+            className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-600 dark:bg-slate-900"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-2 mb-4">
+              <h2 id="edit-contract-title" className="text-lg font-semibold text-slate-900 dark:text-white">
+                Kaydı düzenle
+              </h2>
+              <button
+                type="button"
+                disabled={editSaving}
+                className="rounded-lg px-2 py-1 text-sm text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                onClick={() => closeEditContract()}
+              >
+                Kapat
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 mb-4">
+              Veli henüz imzalamadıysa alanları veya aşağıdaki seçenekle <strong>sözleşme HTML metnini</strong> doğrudan
+              düzenleyebilirsiniz. Kaydedince belge güncellenir; <strong>veli linki aynı kalır</strong>.
+            </p>
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/90 p-3 dark:border-amber-900 dark:bg-amber-950/30">
+              <label className="flex items-start gap-2 text-sm text-amber-950 dark:text-amber-100 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 rounded border-amber-400"
+                  checked={editCustomHtmlMode}
+                  onChange={(e) => setEditCustomHtmlMode(e.target.checked)}
+                />
+                <span>
+                  <strong>Sözleşme HTML’ini doğrudan düzenle</strong> — işaretliyken kayıtta gösterilen tam metin
+                  aşağıdaki kutudan kaydedilir; üstteki şablon alanları veri olarak saklanır ancak HTML bu kutudaki
+                  içerik olur. İşareti kaldırırsanız bir sonraki kayıtta metin yine form alanlarından üretilir.
+                </span>
+              </label>
+              {editCustomHtmlMode ? (
+                <div className="mt-3">
+                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                    Sözleşme gövdesi (HTML — veli sayfasında aynen gösterilir)
+                  </label>
+                  <textarea
+                    rows={14}
+                    spellCheck={false}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-xs font-mono leading-relaxed dark:bg-slate-950 dark:border-slate-600 dark:text-slate-100"
+                    value={editMergedHtml}
+                    onChange={(e) => setEditMergedHtml(e.target.value)}
+                    placeholder="<p>…</p>"
+                  />
+                  <p className="mt-1 text-[11px] text-slate-600 dark:text-slate-400">
+                    En az 30 karakter. Güvenilir içerik kullanın; veli linkinde bu HTML işlenir.
+                  </p>
+                </div>
+              ) : null}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 max-h-[min(70vh,720px)] overflow-y-auto pr-1">
+              <div>
+                <label className="text-xs text-slate-500">Sözleşme türü</label>
+                <select
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                  value={editSozlesmeTuru}
+                  onChange={(e) => setEditSozlesmeTuru(e.target.value as SozlesmeTuruKey)}
+                >
+                  <option value="satis_sozlesmesi">Satış sözleşmesi</option>
+                  <option value="kullanici_sozlesmesi">Kullanıcı / üyelik sözleşmesi</option>
+                  <option value="diger">Diğer</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Belge başlığı (boşsa türe göre otomatik)</label>
+                <input
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                  value={editSozlesmeBasligi}
+                  onChange={(e) => setEditSozlesmeBasligi(e.target.value)}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="text-xs text-slate-500">Ek şartlar / ayrıntı (belgede gösterilen tam metin)</label>
+                <textarea
+                  rows={4}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                  value={editEkSatirlar}
+                  onChange={(e) => setEditEkSatirlar(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Öğrenci adı</label>
+                <input
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                  value={editOgrenciAd}
+                  onChange={(e) => setEditOgrenciAd(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Öğrenci soyadı</label>
+                <input
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                  value={editOgrenciSoyad}
+                  onChange={(e) => setEditOgrenciSoyad(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Veli adı</label>
+                <input
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                  value={editVeliAd}
+                  onChange={(e) => setEditVeliAd(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Veli soyadı</label>
+                <input
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                  value={editVeliSoyad}
+                  onChange={(e) => setEditVeliSoyad(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Telefon</label>
+                <input
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                  value={editTelefon}
+                  onChange={(e) => setEditTelefon(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Adres</label>
+                <input
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                  value={editAdres}
+                  onChange={(e) => setEditAdres(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Sınıf</label>
+                <div className="mt-1 flex gap-2">
+                  <input
+                    className="flex-1 rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                    value={editSinif}
+                    onChange={(e) => setEditSinif(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    title="Sınıfa göre saat ve ücret öner"
+                    onClick={applyEditSuggestFromSinif}
+                    className="shrink-0 rounded-lg border border-slate-200 px-2 py-2 text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-800"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+              <div className="sm:col-span-2">
+                <label className="text-xs text-slate-500">Program adı</label>
+                <input
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                  value={editProgramAdi}
+                  onChange={(e) => setEditProgramAdi(e.target.value)}
+                />
+              </div>
+
+              <div className="sm:col-span-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-3 dark:border-slate-600 dark:bg-slate-800/30">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Haftalık ders satırları</span>
+                  <button
+                    type="button"
+                    className="text-xs font-semibold text-blue-700 hover:underline inline-flex items-center gap-1"
+                    onClick={() =>
+                      setEditContractDersler((prev) =>
+                        prev.length ? [...prev, { ders_adi: '', haftalik_saat: 2 }] : [{ ders_adi: '', haftalik_saat: 2 }]
+                      )
+                    }
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Satır ekle
+                  </button>
+                </div>
+                {editContractDersler.length === 0 ? (
+                  <p className="text-xs text-slate-500">
+                    Boşsa kayıtta şablondaki ders listesi kullanılır (varsa). Kendi listenizi yazmak için satır ekleyin.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {editContractDersler.map((row, idx) => (
+                      <div key={idx} className="flex flex-wrap gap-2 items-end">
+                        <div className="flex-1 min-w-[120px]">
+                          <input
+                            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm dark:bg-slate-950 dark:border-slate-600"
+                            value={row.ders_adi}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setEditContractDersler((prev) => prev.map((r, i) => (i === idx ? { ...r, ders_adi: v } : r)));
+                            }}
+                            placeholder="Ders adı"
+                          />
+                        </div>
+                        <div className="w-24">
+                          <input
+                            type="number"
+                            min={0.25}
+                            step={0.5}
+                            max={40}
+                            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm dark:bg-slate-950 dark:border-slate-600"
+                            value={row.haftalik_saat}
+                            onChange={(e) => {
+                              const v = Number(e.target.value);
+                              setEditContractDersler((prev) =>
+                                prev.map((r, i) => (i === idx ? { ...r, haftalik_saat: v } : r))
+                              );
+                            }}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          className="p-2 rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                          onClick={() => setEditContractDersler((prev) => prev.filter((_, i) => i !== idx))}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                    <p className="text-[11px] text-slate-500">
+                      Toplam: {sumDersSatirlari(validDersRows(editContractDersler)) || '—'} saat
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-500">Haftalık ders saati (toplam)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={80}
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                  value={editHaftalikDersSaati}
+                  onChange={(e) => setEditHaftalikDersSaati(Number(e.target.value))}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Ücret (TL)</label>
+                <input
+                  type="number"
+                  min={0}
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                  value={editUcret}
+                  onChange={(e) => setEditUcret(Number(e.target.value))}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Taksit sayısı</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={48}
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                  value={editTaksitSayisi}
+                  onChange={(e) => setEditTaksitSayisi(Number(e.target.value))}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Başlangıç</label>
+                <input
+                  type="date"
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                  value={editBaslangic}
+                  onChange={(e) => setEditBaslangic(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Bitiş</label>
+                <input
+                  type="date"
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                  value={editBitis}
+                  onChange={(e) => setEditBitis(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="mt-5 flex flex-wrap gap-2 justify-end border-t border-slate-100 pt-4 dark:border-slate-700">
+              <button
+                type="button"
+                disabled={editSaving}
+                onClick={() => closeEditContract()}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-slate-600 dark:text-slate-200"
+              >
+                İptal
+              </button>
+              <button
+                type="button"
+                disabled={editSaving}
+                onClick={() => void saveEditContract()}
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-5 py-2 text-sm font-bold text-white hover:bg-blue-600 disabled:opacity-50"
+              >
+                {editSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Pencil className="w-4 h-4" />}
+                Kaydet
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

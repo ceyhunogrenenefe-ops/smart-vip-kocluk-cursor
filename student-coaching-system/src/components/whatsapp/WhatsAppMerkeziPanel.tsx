@@ -354,8 +354,13 @@ export default function WhatsAppMerkeziPanel() {
 
           {summary.pending_estimate > 0 ? (
             <p className="text-sm text-amber-800">
-              🟡 Yaklaşan oturumlarda hatırlatma bekleyen (tahmini):{' '}
-              <strong>{summary.pending_estimate}</strong>
+              🟡 Yaklaşan <strong>grup canlı ders</strong> oturumlarında (<code className="text-xs">class_sessions</code>)
+              hatırlatma henüz gitmemiş (tahmini): <strong>{summary.pending_estimate}</strong>
+              <span className="block mt-1 text-xs text-amber-900/90">
+                Birebir dersler (<code className="text-[10px]">teacher_lessons</code>) bu sayıya dahil değildir; onlar için
+                cron <code className="text-[10px]">lesson-reminders</code> + şablonlar{' '}
+                <code className="text-[10px]">lesson_reminder</code> / <code className="text-[10px]">lesson_reminder_parent</code>.
+              </span>
             </p>
           ) : null}
 
@@ -558,7 +563,13 @@ export default function WhatsAppMerkeziPanel() {
                 const b = badgeLog(r.status);
                 const errShow =
                   r.status === 'failed'
-                    ? r.error_code || (r.error ? String(r.error).split(':')[0].slice(0, 80) : '—')
+                    ? (() => {
+                        const raw = r.error ? String(r.error).replace(/\s+/g, ' ').trim() : '';
+                        const short =
+                          r.error_code ||
+                          (raw ? (raw.length > 140 ? `${raw.slice(0, 140)}…` : raw) : '—');
+                        return short;
+                      })()
                     : '—';
                 return (
                   <tr key={r.id} className="hover:bg-slate-50/60">
@@ -573,7 +584,12 @@ export default function WhatsAppMerkeziPanel() {
                     <td className="px-3 py-2 text-xs text-slate-600">
                       {r.sent_at ? new Date(r.sent_at).toLocaleString('tr-TR') : '—'}
                     </td>
-                    <td className="max-w-[220px] px-3 py-2 font-mono text-xs text-red-800 break-words">{errShow}</td>
+                    <td
+                      className="max-w-[min(420px,45vw)] px-3 py-2 font-mono text-xs text-red-800 break-words"
+                      title={r.status === 'failed' && r.error ? String(r.error) : undefined}
+                    >
+                      {errShow}
+                    </td>
                   </tr>
                 );
               })}

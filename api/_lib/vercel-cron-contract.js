@@ -14,6 +14,9 @@
  *
  * --- Canlı ders hatırlatma (handlers/cron-lesson-reminder.js) ---
  * `*/5 * * * *` UTC; pencere üst sınırı `LESSON_REMINDER_MAX_LEAD_MINUTES` (varsayılan 45 dk, en fazla 1440).
+ *
+ * --- Grup canlı ders hatırlatma (handlers/cron-class-lesson-reminders.js) ---
+ * `*/5 * * * *` UTC; gönderim penceresi `CLASS_LESSON_REMINDER_WINDOW_MINUTES` (varsayılan 12 dk, 5–25 arası clamp).
  */
 
 /** vercel.json → crons → daily-report-reminders ile aynı olmalı */

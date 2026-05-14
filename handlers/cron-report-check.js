@@ -94,10 +94,7 @@ export default async function handler(req, res) {
 
       const tmplVars = {
         student_name: student.name || 'Öğrenci',
-        studentName: student.name || 'Öğrenci',
-        lesson_name: '',
-        time: '',
-        link: ''
+        studentName: student.name || 'Öğrenci'
       };
       const body = renderMessageTemplate(template.content, tmplVars);
 

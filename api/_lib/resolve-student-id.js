@@ -24,20 +24,47 @@ export async function resolveStudentRowForUser({ userId, email, institutionId })
     }
 
     if (normalizedEmail) {
-      let q = supabaseAdmin.from('students').select('id').eq('email', normalizedEmail);
-      if (institutionId) q = q.eq('institution_id', institutionId);
-      const { data: row } = await q.maybeSingle();
-      if (row?.id) return row;
-
-      const { data: rowLoose } = await supabaseAdmin
+      let q = supabaseAdmin
         .from('students')
-        .select('id')
-        .ilike('email', normalizedEmail)
-        .maybeSingle();
-      if (rowLoose?.id) return rowLoose;
+        .select('id, user_id, platform_user_id, updated_at')
+        .eq('email', normalizedEmail)
+        .order('updated_at', { ascending: false });
+      if (institutionId) q = q.eq('institution_id', institutionId);
+      const { data: rows } = await q;
+
+      if (rows?.length === 1 && rows[0]?.id) return { id: rows[0].id };
+
+      if (rows && rows.length > 1) {
+        if (userId) {
+          const byUid = rows.find((r) => r.user_id && String(r.user_id) === String(userId));
+          if (byUid?.id) return { id: byUid.id };
+          const byPlat = rows.find(
+            (r) => r.platform_user_id && String(r.platform_user_id) === String(userId)
+          );
+          if (byPlat?.id) return { id: byPlat.id };
+        }
+        const linked = rows.find((r) => r.user_id);
+        if (linked?.id) return { id: linked.id };
+        if (rows[0]?.id) return { id: rows[0].id };
+      } else if (rows?.[0]?.id) {
+        return { id: rows[0].id };
+      }
+
+      /**
+       * Kurum filtresi verildiyse başka kurumdaki aynı e-postayı dönme.
+       * Kurum yoksa (eski veri): gevşek e-posta ile tek kayıt aranır.
+       */
+      if (!institutionId) {
+        const { data: rowLoose } = await supabaseAdmin
+          .from('students')
+          .select('id')
+          .ilike('email', normalizedEmail)
+          .maybeSingle();
+        if (rowLoose?.id) return rowLoose;
+      }
     }
 
-    if (userId && normalizedEmail) {
+    if (userId && normalizedEmail && !institutionId) {
       const { data: byEmailNoInst } = await supabaseAdmin
         .from('students')
         .select('id')

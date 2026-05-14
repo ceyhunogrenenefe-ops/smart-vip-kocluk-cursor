@@ -102,6 +102,14 @@ export default function LiveLessonCard({
             })}{' '}
             · {lesson.start_time?.slice(0, 5)} – {lesson.end_time?.slice(0, 5)}
           </p>
+          {(lesson.teacher_name?.trim() || lesson.teacher_id) && (
+            <p className="text-sm text-slate-600 mt-0.5">
+              Öğretmen:{' '}
+              <span className="font-medium text-slate-800">
+                {lesson.teacher_name?.trim() || lesson.teacher_id}
+              </span>
+            </p>
+          )}
           {studentName && <p className="text-sm text-slate-500 mt-0.5">Öğrenci: {studentName}</p>}
         </div>
       </div>

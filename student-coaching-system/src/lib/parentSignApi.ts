@@ -257,6 +257,39 @@ export async function createParentSignContract(body: {
   return (j as { data: ParentSignContractRow }).data;
 }
 
+/** İmzalanmadan önce kayıt güncelle; `merged_html` formdan üretilir veya `custom_merged_html` ile doğrudan verilir. */
+export async function updateParentSignContract(body: {
+  id: string;
+  ogrenci_ad: string;
+  ogrenci_soyad: string;
+  veli_ad: string;
+  veli_soyad: string;
+  telefon: string;
+  adres: string;
+  sinif: string;
+  program_adi: string;
+  baslangic_tarihi: string;
+  bitis_tarihi: string;
+  haftalik_ders_saati?: number;
+  ucret?: number;
+  taksit_sayisi?: number;
+  sozlesme_turu?: SozlesmeTuruKey | string;
+  sozlesme_basligi?: string;
+  sablon_ek_detay_snapshot?: string;
+  ders_satirlari?: DersSatiri[];
+  /** Doluysa şablon yerine bu HTML `merged_html` olarak kaydedilir (yalnız imzalanmamış kayıtta). */
+  custom_merged_html?: string;
+}): Promise<ParentSignContractRow> {
+  const res = await apiFetch('/api/parent-sign-contracts', {
+    method: 'PATCH',
+    headers: JSON_HDR,
+    body: JSON.stringify(body)
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((j as { error?: string }).error || `API ${res.status}`);
+  return (j as { data: ParentSignContractRow }).data;
+}
+
 export async function deleteParentSignContract(id: string): Promise<void> {
   const res = await apiFetch(`/api/parent-sign-contracts?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
   const j = await res.json().catch(() => ({}));
@@ -275,6 +308,7 @@ export async function fetchVeliImzaPayload(token: string) {
       already_signed: boolean;
       signed_at?: string | null;
       institution_name?: string;
+      signature_png_base64?: string | null;
     };
   }).data;
 }

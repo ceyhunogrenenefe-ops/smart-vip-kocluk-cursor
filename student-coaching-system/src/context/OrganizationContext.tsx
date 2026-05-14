@@ -121,7 +121,7 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
       },
       isActive: true,
       createdAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() // 30 gün deneme
+      expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString() // 14 gün deneme
     };
 
     const updated =

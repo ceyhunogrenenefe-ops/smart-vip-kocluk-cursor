@@ -27,11 +27,11 @@ const PACKAGES = [
     id: 'trial',
     name: 'Deneme',
     price: 0,
-    period: '7 gün',
+    period: '14 gün',
     color: 'bg-purple-500',
     borderColor: 'border-purple-500',
     features: [
-      '7 gün ücretsiz deneme',
+      '14 gün ücretsiz deneme',
       '10 öğrenci ekleme',
       'Temel analizler',
       'PDF rapor oluşturma',
@@ -574,7 +574,7 @@ export default function Subscription() {
             <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10">
               <h4 className="text-white font-semibold mb-2">Deneme süresi var mı?</h4>
               <p className="text-slate-400 text-sm">
-                Evet, tüm paketlerimiz 7 gün ücretsiz deneme ile başlar. Kredi kartı gerekmez.
+                Evet, tüm paketlerimiz 14 gün ücretsiz deneme ile başlar. Kredi kartı gerekmez.
               </p>
             </div>
             <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10">

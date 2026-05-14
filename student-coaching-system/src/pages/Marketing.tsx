@@ -6,7 +6,6 @@ import {
   Users,
   BarChart3,
   MessageSquare,
-  FileText,
   CheckCircle,
   Star,
   ArrowRight,
@@ -15,9 +14,7 @@ import {
   MapPin,
   Clock,
   Award,
-  Target,
   TrendingUp,
-  Shield,
   Zap,
   Heart,
   ChevronDown,
@@ -27,12 +24,17 @@ import {
   Send,
   Menu,
   X,
-  Globe,
   Facebook,
   Twitter,
   Instagram,
   Linkedin,
-  Youtube
+  Youtube,
+  Video,
+  Calendar,
+  Sparkles,
+  ClipboardList,
+  BookMarked,
+  Brain
 } from 'lucide-react';
 
 // Accordion Item Component
@@ -172,51 +174,57 @@ export default function Marketing() {
     setTimeout(() => setDemoSubmitted(false), 3000);
   };
 
+  /** Koç / yönetici panelindeki modüllerle uyumlu vitrin (sidebar gruplarına göre) */
   const features = [
     {
       icon: Users,
-      title: 'Öğrenci Takip Sistemi',
-      description: 'Her öğrenci için detaylı haftalık takip tabloları, hedef ve gerçekleşen karşılaştırmaları.'
+      title: 'Öğrenci & öğretmen',
+      description:
+        'Öğrenci ve öğretmen listeleri, veli bilgileri; admin, koç ve öğretmen rolleriyle aynı panelden yönetim.'
+    },
+    {
+      icon: Video,
+      title: 'Canlı dersler & görüşmeler',
+      description:
+        'Canlı grup ve özel ders takvimi, katılım; online veli/öğrenci görüşmeleri ve bağlantı yönetimi.'
+    },
+    {
+      icon: Calendar,
+      title: 'Haftalık plan & takip',
+      description: 'Haftalık plan tablosu, hedef–gerçekleşen ve haftalık takip akışı tek akışta.'
+    },
+    {
+      icon: Sparkles,
+      title: 'Akademik Merkez',
+      description:
+        'Kurumunuzun etüt, deneme / sanal optik ve soru havuzu adreslerine tek ekrandan erişim (yönetici tanımlı linkler).'
+    },
+    {
+      icon: ClipboardList,
+      title: 'Sınav & yazılı takibi',
+      description: 'Deneme sınavı sonuçları, yazılılar; PDF içe aktarma ve öğrenci bazlı geçmiş.'
+    },
+    {
+      icon: BookMarked,
+      title: 'Konu & kitap takibi',
+      description: 'Konu havuzu ve konu ilerlemesi; kitap okuma kayıtları ve hedefler.'
     },
     {
       icon: BarChart3,
-      title: 'Gelişmiş Analitik',
-      description: 'Ders bazlı başarı grafikleri, günlük performans takibi ve kapsamlı raporlama.'
-    },
-    {
-      icon: FileText,
-      title: 'PDF Rapor Sistemi',
-      description: 'Profesyonel PDF raporları oluşturun ve velilere anında gönderin.'
+      title: 'Raporlar & analiz',
+      description: 'Raporlar, analiz paneli ve özet metrikler; PDF çıktı ve veli paylaşımına uygun düzen.'
     },
     {
       icon: MessageSquare,
-      title: 'WhatsApp Entegrasyonu',
-      description: 'Raporları tek tıkla WhatsApp üzerinden velilere gönderin.'
+      title: 'WhatsApp (Meta) merkezi',
+      description:
+        'Onaylı şablonlar, ders hatırlatmaları ve bilgilendirme mesajları; kurumsal Meta WhatsApp ile sunucudan gönderim.'
     },
     {
-      icon: GraduationCap,
-      title: 'Konu Havuzu',
-      description: '9-12. sınıf tüm ders konuları, dinamik dropdown sistemi ile.'
-    },
-    {
-      icon: Target,
-      title: 'Akıllı Uyarı Sistemi',
-      description: '%70 altı kırmızı, %70-90 sarı, %90+ yeşil. Otomatik renkli uyarılar.'
-    },
-    {
-      icon: TrendingUp,
-      title: 'Haftalık Analiz',
-      description: 'Toplam hedef, çözülen, gerçekleşme oranı ve başarı yüzdesi.'
-    },
-    {
-      icon: Shield,
-      title: 'Çoklu Rol Desteği',
-      description: 'Admin, Koç ve Öğrenci rolleri ile tam kontrol ve takip.'
-    },
-    {
-      icon: Zap,
-      title: 'Hızlı ve Modern UI',
-      description: 'React tabanlı, mobil uyumlu modern dashboard deneyimi.'
+      icon: Brain,
+      title: 'AI Koç & webhook',
+      description:
+        'Öğrenci verisiyle AI destekli özet ve öneriler; dış sistemlerden otomatik veri için webhook ayarları.'
     }
   ];
 
@@ -247,7 +255,8 @@ export default function Marketing() {
   const faqs = [
     {
       question: 'Sistemi deneyebilir miyim?',
-      answer: 'Evet! 30 gün ücretsiz deneme süresi sunuyoruz. Kayıt olduktan sonra tüm özellikleri sınırsız kullanabilirsiniz.'
+      answer:
+        'Evet! 14 gün ücretsiz deneme sunuyoruz. Kayıt sonrası koç ve yönetici panellerindeki temel modülleri gerçek akışa yakın şekilde deneyebilirsiniz.'
     },
     {
       question: 'Kaç öğrenci ekleyebilirim?',
@@ -255,7 +264,8 @@ export default function Marketing() {
     },
     {
       question: 'WhatsApp entegrasyonu nasıl çalışır?',
-      answer: 'PDF raporlar oluşturulduktan sonra tek tıkla WhatsApp üzerinden veliye gönderebilirsiniz. Twilio API entegrasyonu mevcut.'
+      answer:
+        'Meta Cloud API ile kurumsal WhatsApp hattı üzerinden onaylı şablonlar ve hatırlatmalar sunucudan gider; rapor ve bildirimler veli/öğrenci numaralarına panelden yönetilir.'
     },
     {
       question: 'Veriler güvende mi?',
@@ -346,16 +356,15 @@ export default function Marketing() {
                 <span className="bg-gradient-to-r from-red-400 to-red-500 bg-clip-text text-transparent"> Dijitalleştirin</span>
               </h1>
               <p className="text-xl text-slate-300 mb-8 leading-relaxed">
-                Smart Koçluk Sistemi ile öğrenci takibini %80 daha verimli hale getirin.
-                Profesyonel PDF raporları, WhatsApp entegrasyonu ve kapsamlı analitiklerle
-                veli memnuniyetini artırın.
+                Canlı derslerden haftalık plana, akademik merkezden WhatsApp (Meta) ve AI koça kadar
+                tüm koçluk sürecini tek panelde toplayın. Raporlar, webhook ve sınav takibi ile kurumunuzu dijitalleştirin.
               </p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
                 <Link
                   to="/register"
                   className="bg-gradient-to-r from-red-500 to-red-600 text-white px-8 py-4 rounded-xl font-semibold text-lg hover:from-red-600 hover:to-red-700 transition-all shadow-lg shadow-red-500/30 flex items-center justify-center gap-2"
                 >
-                  30 Gün Ücretsiz Deneyin
+                  14 Gün Ücretsiz Deneyin
                   <ArrowRight className="w-5 h-5" />
                 </Link>
                 <a
@@ -468,8 +477,8 @@ export default function Marketing() {
               İşletmenizi Büyütmek İçin Tasarlanmış
             </h2>
             <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-              Smart Koçluk Sistemi, dershane ve koçluk merkezleri için özel olarak geliştirilmiş
-              kapsamlı bir dijital çözümdür.
+              Aşağıdaki başlıklar, uygulamadaki koç ve yönetici menüsüyle aynı modül ailesini yansıtır:
+              dersler, akademik takip, iletişim ve kurumsal yönetim.
             </p>
           </div>
 
@@ -503,7 +512,7 @@ export default function Marketing() {
               </div>
               <h3 className="text-xl font-bold text-white mb-3">Kayıt Olun</h3>
               <p className="text-slate-300">
-                30 gün ücretsiz deneme için hemen kayıt olun. Kredi kartı gerekmez.
+                14 gün ücretsiz deneme için hemen kayıt olun. Kredi kartı gerekmez.
               </p>
             </div>
             <div className="text-center">
@@ -512,7 +521,7 @@ export default function Marketing() {
               </div>
               <h3 className="text-xl font-bold text-white mb-3">Öğrencilerinizi Ekleyin</h3>
               <p className="text-slate-300">
-                Tek tek veya toplu olarak öğrenci ekleyin. Konu havuzundan dersleri seçin.
+                Öğrenci ve öğretmen kayıtlarını açın; haftalık plan ve konu havuzunu panele tanımlayın.
               </p>
             </div>
             <div className="text-center">
@@ -521,7 +530,7 @@ export default function Marketing() {
               </div>
               <h3 className="text-xl font-bold text-white mb-3">Takip ve Raporlayın</h3>
               <p className="text-slate-300">
-                Haftalık takip yapın, PDF raporlar oluşturun, WhatsApp ile gönderin.
+                Canlı dersleri işleyin, deneme/yazılı girin, rapor ve Meta WhatsApp bildirimlerini gönderin.
               </p>
             </div>
           </div>
@@ -539,7 +548,7 @@ export default function Marketing() {
               İhtiyacınıza Uygun Paketi Seçin
             </h2>
             <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-              Tüm paketlerde 30 gün ücretsiz deneme süresi. Kredi kartı gerekmez.
+              Tüm paketlerde 14 gün ücretsiz deneme. Kredi kartı gerekmez.
             </p>
           </div>
 
@@ -552,7 +561,7 @@ export default function Marketing() {
                 '50 öğrenci kapasitesi',
                 'Temel analitikler',
                 'PDF rapor oluşturma',
-                'WhatsApp entegrasyonu',
+                'WhatsApp (Meta) bildirimleri',
                 'Konu havuzu erişimi',
                 'E-posta desteği'
               ]}
@@ -761,7 +770,7 @@ export default function Marketing() {
             Dershane Koçluğunuzu Dönüştürmeye Hazır mısınız?
           </h2>
           <p className="text-xl text-white/90 mb-8 max-w-2xl mx-auto">
-            30 gün ücretsiz deneyin. Kredi kartı gerekmez. Dakikalar içinde başlayın.
+            14 gün ücretsiz deneyin. Kredi kartı gerekmez. Dakikalar içinde başlayın.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link
@@ -795,7 +804,7 @@ export default function Marketing() {
               </div>
               <p className="text-slate-400 mb-6 leading-relaxed">
                 Dershane ve koçluk merkezleri için geliştirilmiş, modern ve kullanımı kolay
-                öğrenci takip sistemi. PDF raporlar, WhatsApp entegrasyonu ve kapsamlı analitiklerle
+                öğrenci takip sistemi. Canlı dersler, akademik merkez, Meta WhatsApp, raporlar ve AI koç ile
                 işletmenizi büyütün.
               </p>
               <div className="flex gap-4">

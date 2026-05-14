@@ -4,7 +4,7 @@ import { getIstanbulDateString, addCalendarDaysYmd } from '../api/_lib/istanbul-
 import { wallTimeToUtcMs } from '../api/_lib/teacher-lesson-start-ms.js';
 import { normalizePhoneToE164 } from '../api/_lib/phone-whatsapp.js';
 import { metaWhatsAppConfigured } from '../api/_lib/meta-whatsapp.js';
-import { sendAutomatedWhatsApp } from '../api/_lib/whatsapp-outbound.js';
+import { sendAutomatedWhatsApp, resolveMetaTemplateName } from '../api/_lib/whatsapp-outbound.js';
 import { getStudentPhones, classifyLessonReminderRecipients } from '../api/_lib/meetings-resolve.js';
 import { alreadySentLessonReminder } from '../api/_lib/message-log.js';
 import { recordCronRun } from '../api/_lib/cron-run-log.js';
@@ -44,13 +44,17 @@ export default async function handler(req, res) {
       .eq('type', 'lesson_reminder_parent')
       .maybeSingle();
 
+    const parentMetaResolved = lrParentRow
+      ? resolveMetaTemplateName(lrParentRow, 'lesson_reminder_parent')
+      : '';
     const parentVeliCronReady =
       Boolean(lrParentRow?.content) &&
-      Boolean(String(lrParentRow?.meta_template_name || '').trim()) &&
+      Boolean(parentMetaResolved) &&
       lrParentRow?.is_active !== false;
 
     let parentSentOk = 0;
     let parentSentFail = 0;
+    let lessonsInReminderWindow = 0;
 
     const { data: lessons, error: lErr } = await supabaseAdmin
       .from('teacher_lessons')
@@ -73,6 +77,8 @@ export default async function handler(req, res) {
         continue;
       }
 
+      lessonsInReminderWindow += 1;
+
       const { data: student } = await supabaseAdmin.from('students').select('*').eq('id', lesson.student_id).maybeSingle();
       if (!student) {
         log.push({ lesson_id: lesson.id, note: 'no_student' });
@@ -86,6 +92,10 @@ export default async function handler(req, res) {
       }
 
       const recipients = classifyLessonReminderRecipients(student, phones);
+      /** Veli satırı önce — Meta kesintisinde bile veli şansı artsın */
+      const recipientsOrdered = [...recipients].sort(
+        (a, b) => (a.role === 'parent' ? 0 : 1) - (b.role === 'parent' ? 0 : 1)
+      );
 
       const timeLabel = new Intl.DateTimeFormat('tr-TR', {
         timeZone: 'Europe/Istanbul',
@@ -110,7 +120,8 @@ export default async function handler(req, res) {
         link: lessonLink || ''
       };
 
-      for (const { phone, role } of recipients) {
+      for (const { phone, role } of recipientsOrdered) {
+        const isParentRecipient = role === 'parent';
         const e164 = normalizePhoneToE164(phone);
         if (!e164) {
           log.push({ lesson_id: lesson.id, phone: phone, note: 'invalid_phone' });
@@ -135,16 +146,17 @@ export default async function handler(req, res) {
         let templateType = 'lesson_reminder';
         let logKind = 'lesson_reminder';
         if (role === 'parent') {
-          if (!parentVeliCronReady) {
+          if (parentVeliCronReady) {
+            templateType = 'lesson_reminder_parent';
+            logKind = 'lesson_reminder_parent';
+          } else {
+            /** Veli şablonu yok veya Meta adı eksik: öğrenci ile aynı `lesson_reminder` şablonu (Meta’da onaylı) kullanılır */
             log.push({
               lesson_id: lesson.id,
               phone: e164,
-              note: 'lesson_reminder_parent_skipped_meta_or_inactive'
+              note: 'lesson_reminder_parent_fallback_student_template'
             });
-            continue;
           }
-          templateType = 'lesson_reminder_parent';
-          logKind = 'lesson_reminder_parent';
         }
 
         try {
@@ -175,14 +187,14 @@ export default async function handler(req, res) {
             log.push({ lesson_id: lesson.id, phone: e164, error: insErr.message });
           } else if (sent.ok) {
             log.push({ lesson_id: lesson.id, phone: e164, ok: true });
-            if (templateType === 'lesson_reminder_parent') parentSentOk += 1;
+            if (isParentRecipient) parentSentOk += 1;
           } else {
             log.push({ lesson_id: lesson.id, phone: e164, error: sent.error, twilio_error_code: sent.errorCode });
-            if (templateType === 'lesson_reminder_parent') parentSentFail += 1;
+            if (isParentRecipient) parentSentFail += 1;
           }
         } catch (e) {
           const errMsg = e instanceof Error ? e.message : String(e);
-          if (logKind === 'lesson_reminder_parent') parentSentFail += 1;
+          if (isParentRecipient) parentSentFail += 1;
           try {
             await supabaseAdmin.from('message_logs').insert({
               student_id: lesson.student_id,
@@ -221,7 +233,13 @@ export default async function handler(req, res) {
       ok: true,
       messagesSent: sent,
       messagesFailed: failed,
-      detail: { meta_ready: metaReady, entries: log.length }
+      detail: {
+        meta_ready: metaReady,
+        entries: log.length,
+        lessons_total: (lessons || []).length,
+        lessons_in_reminder_window: lessonsInReminderWindow,
+        max_lead_minutes: MAX_LEAD_MS / 60000
+      }
     });
     await recordCronRun({
       jobKey: 'lesson_reminder_parent',
@@ -229,7 +247,14 @@ export default async function handler(req, res) {
       skipped: parentSkipped,
       messagesSent: parentSentOk,
       messagesFailed: parentSentFail,
-      detail: { parent_template_ready: parentVeliCronReady, meta_ready: metaReady }
+      detail: {
+        parent_template_ready: parentVeliCronReady,
+        parent_meta_resolved: parentMetaResolved,
+        meta_ready: metaReady,
+        lessons_total: (lessons || []).length,
+        lessons_in_reminder_window: lessonsInReminderWindow,
+        parent_meta_language: lrParentRow?.meta_template_language ?? null
+      }
     });
     return res.status(200).json({ ok: true, processed: log.length, log });
   } catch (e) {

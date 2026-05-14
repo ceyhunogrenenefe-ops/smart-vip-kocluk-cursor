@@ -107,7 +107,7 @@ values
     '["student_name","class_name","subject","homework"]'::jsonb
   ),
   (
-    'class_absent_notice',
+    'class_absent_notice_1',
     'Devamsızlık bildirimi (veli)',
     'Sayın veli, {{student_name}} {{lesson_date}} tarihinde {{lesson_time}} başlangıçlı {{class_name}} sınıfı {{subject}} grup canlı dersine katılmamıştır (yoklama: gelmedi).',
     '["student_name","class_name","subject","lesson_date","lesson_time"]'::jsonb

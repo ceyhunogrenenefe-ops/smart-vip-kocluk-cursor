@@ -639,6 +639,43 @@ class DatabaseService {
     }
   }
 
+  /** Yüklü öğrenci id listesi için konu ilerlemesi (Konu Takibi senkronu). */
+  async getTopicProgressForStudents(studentIds: string[]): Promise<TopicProgressRow[]> {
+    if (!studentIds.length) return [];
+    const CHUNK = 100;
+    const acc: TopicProgressRow[] = [];
+    for (let i = 0; i < studentIds.length; i += CHUNK) {
+      const chunk = studentIds.slice(i, i + CHUNK);
+      const { data, error } = await supabase.from('topic_progress').select('*').in('student_id', chunk);
+      if (error) {
+        console.error('getTopicProgressForStudents:', error);
+        throw error;
+      }
+      if (data?.length) acc.push(...data);
+    }
+    return acc;
+  }
+
+  async deleteTopicProgress(studentId: string, topicId: string): Promise<void> {
+    const { error } = await supabase
+      .from('topic_progress')
+      .delete()
+      .eq('student_id', studentId)
+      .eq('topic_id', topicId);
+    if (error) {
+      console.error('deleteTopicProgress:', error);
+      throw error;
+    }
+  }
+
+  async deleteTopicProgressForStudent(studentId: string): Promise<void> {
+    const { error } = await supabase.from('topic_progress').delete().eq('student_id', studentId);
+    if (error) {
+      console.error('deleteTopicProgressForStudent:', error);
+      throw error;
+    }
+  }
+
   // ========== BAŞLANGIÇ VERİLERİ ==========
 
   // Veritabanı başlat (tabloları oluştur)

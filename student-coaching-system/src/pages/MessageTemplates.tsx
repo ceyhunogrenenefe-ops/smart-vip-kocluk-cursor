@@ -24,6 +24,8 @@ export interface MessageTemplateRow {
   twilio_variable_bindings?: unknown;
   whatsapp_template_status?: string | null;
   whatsapp_template_synced_at?: string | null;
+  /** Meta API: gövdede parameter_name alanı (yeni şablonlar) */
+  meta_named_body_parameters?: boolean | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -35,6 +37,7 @@ type DraftRow = {
   meta_template_name: string;
   meta_template_language: string;
   twilio_bindings_raw: string;
+  meta_named_body_parameters: boolean;
 };
 
 export interface MessageLogRow {
@@ -114,7 +117,8 @@ function draftFromTemplate(t: MessageTemplateRow): DraftRow {
     variables: variablesToList(t.variables),
     meta_template_name: String(t.meta_template_name || ''),
     meta_template_language: String(t.meta_template_language || 'tr'),
-    twilio_bindings_raw: bindingsToList(t).join(', ')
+    twilio_bindings_raw: bindingsToList(t).join(', '),
+    meta_named_body_parameters: t.meta_named_body_parameters === true
   };
 }
 
@@ -131,7 +135,8 @@ const TYPE_LABELS: Record<string, string> = {
   report_reminder: 'Günlük rapor hatırlatma (cron)',
   class_lesson_reminder: 'Grup dersi hatırlatma (cron)',
   class_homework_notice: 'Grup ödev bildirimi (cron)',
-  class_absent_notice: 'Grup devamsızlık — veli (yoklama)',
+  class_absent_notice_1: 'Grup devamsızlık — veli (yoklama)',
+  class_absent_notice: 'Grup devamsızlık — veli (yoklama, eski type)',
   meeting_reminder: 'Görüşme hatırlatma',
   meeting_notification: 'Toplantı / görüşme bildirimi (WhatsApp)',
   class_lesson_reminder_legacy: 'Grup dersi hatırlatma'
@@ -229,7 +234,8 @@ export default function MessageTemplates() {
           variables: d.variables,
           meta_template_name: d.meta_template_name.trim() || null,
           meta_template_language: d.meta_template_language.trim() || 'tr',
-          twilio_variable_bindings: parseVariableNames(d.twilio_bindings_raw)
+          twilio_variable_bindings: parseVariableNames(d.twilio_bindings_raw),
+          meta_named_body_parameters: d.meta_named_body_parameters
         })
       });
       const j = await res.json().catch(() => ({}));
@@ -357,6 +363,7 @@ export default function MessageTemplates() {
       !variablesEqual(d.variables, variablesToList(t.variables)) ||
       d.meta_template_name.trim() !== String(t.meta_template_name || '').trim() ||
       d.meta_template_language.trim() !== String(t.meta_template_language || 'tr').trim() ||
+      d.meta_named_body_parameters !== (t.meta_named_body_parameters === true) ||
       !bindingsEqualDraft(t, d.twilio_bindings_raw)
     );
   };
@@ -498,10 +505,28 @@ export default function MessageTemplates() {
                         type="text"
                         value={d.meta_template_language}
                         onChange={(e) => updateDraft(t.id, 'meta_template_language', e.target.value)}
-                        placeholder="tr"
+                        placeholder="tr veya tr_TR (Meta’dakiyle aynı)"
                         className="w-full px-3 py-2 rounded-lg border border-indigo-200 text-slate-800 font-mono text-sm"
                       />
                     </div>
+                    <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 rounded border-indigo-300 text-indigo-600"
+                        checked={d.meta_named_body_parameters}
+                        onChange={(e) =>
+                          setDrafts((prev) => {
+                            const cur = prev[t.id];
+                            if (!cur) return prev;
+                            return { ...prev, [t.id]: { ...cur, meta_named_body_parameters: e.target.checked } };
+                          })
+                        }
+                      />
+                      <span>
+                        Meta adlandırılmış gövde değişkenleri (<code className="text-[10px]">parameter_name</code>) —
+                        (#100) Invalid parameter hatasında genelde açık olmalı; eski yalnızca {'{{1}}'} şablonlarında kapatın.
+                      </span>
+                    </label>
                     <div>
                       <label className="block text-xs font-medium text-slate-600 mb-1">
                         Gövde {'{{1}}'}… değişken sırası (Meta ile aynı)

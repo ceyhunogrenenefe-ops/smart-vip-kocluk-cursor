@@ -3,6 +3,54 @@ import { normalizePhoneToE164 } from './phone-whatsapp.js';
 import { getIstanbulDateString } from './istanbul-time.js';
 
 /**
+ * Cron / otomasyon: message_logs satırı (hata yutulur — cron akışı kesilmesin).
+ * @param {{
+ *   studentId: string | null,
+ *   relatedId: string | null,
+ *   kind: string,
+ *   message: string | null,
+ *   status: 'sent' | 'failed' | 'skipped',
+ *   logCode?: string | null,
+ *   error?: string | null,
+ *   phone?: string | null,
+ *   logDate?: string,
+ *   twilio_error_code?: string | null,
+ *   meta_message_id?: string | null,
+ *   meta_template_name?: string | null
+ * }} p
+ */
+export async function insertWhatsAppAutomationLog(p) {
+  const logDate = p.logDate || getIstanbulDateString();
+  const phone = p.phone != null ? normalizePhoneToE164(p.phone) : null;
+  const row = {
+    student_id: p.studentId ?? null,
+    related_id: p.relatedId ?? null,
+    kind: String(p.kind || '').trim() || 'unknown',
+    message: p.message != null ? String(p.message).slice(0, 8000) : null,
+    status: p.status === 'sent' || p.status === 'skipped' ? p.status : 'failed',
+    log_date: logDate,
+    error: p.error != null ? String(p.error).slice(0, 4000) : null,
+    phone: phone || null,
+    twilio_sid: null,
+    twilio_error_code:
+      p.twilio_error_code != null && String(p.twilio_error_code).trim()
+        ? String(p.twilio_error_code).trim()
+        : p.logCode != null && String(p.logCode).trim()
+          ? String(p.logCode).trim()
+          : null,
+    twilio_content_sid: null,
+    meta_message_id: p.meta_message_id != null ? String(p.meta_message_id).trim() : null,
+    meta_template_name: p.meta_template_name != null ? String(p.meta_template_name).trim().slice(0, 512) : null
+  };
+  try {
+    const { error } = await supabaseAdmin.from('message_logs').insert(row);
+    if (error) console.warn('[insertWhatsAppAutomationLog]', error.message);
+  } catch (e) {
+    console.warn('[insertWhatsAppAutomationLog]', e instanceof Error ? e.message : String(e));
+  }
+}
+
+/**
  * Aynı ders + aynı alıcı (E.164) için başarılı hatırlatma gönderilmiş mi?
  * @param {string} lessonId
  * @param {string} phoneE164

@@ -65,8 +65,8 @@ export default function TopicTracking() {
 
   const selectedStudent = students.find(s => s.id === selectedStudentId);
 
-  // Öğrencinin sınıfına göre konuları al
-  const studentClassLevel = selectedStudent?.classLevel || 12;
+  /** Asla varsayılan sınıf uydurma — DB / öğrenci kartı ne diyorsa o (yoksa boş liste + uyarı) */
+  const studentClassLevel = selectedStudent?.classLevel;
   const topicsData = getTopicsByClass(studentClassLevel);
 
   // YKS öğrencisi mi kontrol et
@@ -74,6 +74,9 @@ export default function TopicTracking() {
   const isRegularStudent = !topicsData.isYKS;
   const isLgsStudent = studentClassLevel === 'LGS';
   const isYosStudent = studentClassLevel === 'YOS';
+  const missingClassLevel = Boolean(
+    selectedStudentId && selectedStudent && studentClassLevel === undefined
+  );
 
   // Seçili öğrencinin tamamlanmış konuları
   const completedTopics = selectedStudentId
@@ -364,8 +367,19 @@ export default function TopicTracking() {
         </div>
       </div>
 
+      {missingClassLevel && (
+        <div
+          className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+          role="status"
+        >
+          <strong className="font-semibold">Sınıf bilgisi eksik.</strong>{' '}
+          Bu öğrencinin kartında sınıf seviyesi tanımlı değil; konu havuzu yanlış sınıfa bağlanmasın diye
+          gösterilmiyor. Lütfen öğrenciyi düzenleyip sınıf / program seçin, ardından sayfayı yenileyin.
+        </div>
+      )}
+
       {/* Öğrenci Seçildiğinde Göster */}
-      {selectedStudent && (
+      {selectedStudent && !missingClassLevel && (
         <>
           {/* Genel İstatistikler */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
@@ -380,7 +394,7 @@ export default function TopicTracking() {
               <button
                 onClick={() => {
                   if (confirm('Tüm konu ilerlemesini sıfırlamak istediğinizden emin misiniz?')) {
-                    resetTopicProgress(selectedStudentId);
+                    void resetTopicProgress(selectedStudentId);
                   }
                 }}
                 className="px-3 py-1.5 text-red-600 hover:bg-red-50 rounded-lg flex items-center gap-1 text-sm"
@@ -542,9 +556,9 @@ export default function TopicTracking() {
                               <button
                                 onClick={() => {
                                   if (isCompleted) {
-                                    unmarkTopicCompleted(selectedStudentId, subject, topic);
+                                    void unmarkTopicCompleted(selectedStudentId, subject, topic);
                                   } else {
-                                    markTopicCompleted(selectedStudentId, subject, topic);
+                                    void markTopicCompleted(selectedStudentId, subject, topic);
                                   }
                                 }}
                                 className={`flex-shrink-0 w-5 h-5 rounded border flex items-center justify-center transition-colors ${
@@ -630,9 +644,9 @@ export default function TopicTracking() {
                               <button
                                 onClick={() => {
                                   if (isCompleted) {
-                                    unmarkTopicCompleted(selectedStudentId, subject, topic);
+                                    void unmarkTopicCompleted(selectedStudentId, subject, topic);
                                   } else {
-                                    markTopicCompleted(selectedStudentId, subject, topic);
+                                    void markTopicCompleted(selectedStudentId, subject, topic);
                                   }
                                 }}
                                 className={`flex-shrink-0 w-5 h-5 rounded border flex items-center justify-center transition-colors ${
@@ -710,9 +724,9 @@ export default function TopicTracking() {
                               <button
                                 onClick={() => {
                                   if (isCompleted) {
-                                    unmarkTopicCompleted(selectedStudentId, subject, topic);
+                                    void unmarkTopicCompleted(selectedStudentId, subject, topic);
                                   } else {
-                                    markTopicCompleted(selectedStudentId, subject, topic);
+                                    void markTopicCompleted(selectedStudentId, subject, topic);
                                   }
                                 }}
                                 className={`flex-shrink-0 w-5 h-5 rounded border flex items-center justify-center transition-colors ${

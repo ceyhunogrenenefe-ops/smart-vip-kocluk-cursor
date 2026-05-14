@@ -7,7 +7,11 @@ import { insertWhatsAppAutomationLog } from '../api/_lib/message-log.js';
 import { getIstanbulDateString } from '../api/_lib/istanbul-time.js';
 import { recordCronRun } from '../api/_lib/cron-run-log.js';
 
-const WINDOW_MS = 10 * 60 * 1000;
+const WINDOW_MINUTES = Math.max(
+  5,
+  Math.min(25, Number(process.env.CLASS_LESSON_REMINDER_WINDOW_MINUTES || 12) || 12)
+);
+const WINDOW_MS = WINDOW_MINUTES * 60 * 1000;
 const KIND = 'class_lesson_reminder';
 const TEMPLATE_TYPE = 'class_lesson_reminder';
 
@@ -132,7 +136,7 @@ export default async function handler(req, res) {
         .in('id', studentIds);
 
       let anyOutboundAttempt = false;
-      let allOutboundOk = true;
+      let anySucceeded = false;
 
       for (const st of students || []) {
         const vars = {
@@ -142,9 +146,8 @@ export default async function handler(req, res) {
           lesson_time: String(s.start_time || '').slice(0, 5),
           meeting_link: s.meeting_link || ''
         };
-        const phones = uniqPhones([st.phone, st.parent_phone]);
+        const phones = uniqPhones([st.parent_phone, st.phone]);
         if (!phones.length) {
-          allOutboundOk = false;
           const code = OUTBOUND_LOG_CODE.INVALID_PHONE;
           console.error('[cron-class-lesson-reminders]', code, {
             session_id: s.id,
@@ -194,13 +197,14 @@ export default async function handler(req, res) {
 
           const lc = sent.logCode || (sent.ok ? null : OUTBOUND_LOG_CODE.META_SEND_FAILED);
           if (!sent.ok) {
-            allOutboundOk = false;
             console.error('[cron-class-lesson-reminders]', lc || 'send_failed', {
               session_id: s.id,
               student_id: st.id,
               phone: ph,
               error: sent.error
             });
+          } else {
+            anySucceeded = true;
           }
 
           await insertWhatsAppAutomationLog({
@@ -232,8 +236,8 @@ export default async function handler(req, res) {
         }
       }
 
-      /** Yalnızca tüm hedef gönderimler başarılıysa oturumu işaretle (kısmi başarıda reminder_sent true olmasın). */
-      if (anyOutboundAttempt && allOutboundOk) {
+      /** En az bir numaraya gittiyse tekrar denemeyi kes; aksi halde 10 dk penceresi kaçabilirdi */
+      if (anyOutboundAttempt && anySucceeded) {
         await supabaseAdmin.from('class_sessions').update({ reminder_sent: true }).eq('id', s.id);
       }
     }
@@ -245,7 +249,7 @@ export default async function handler(req, res) {
       ok: true,
       messagesSent: sent,
       messagesFailed: failed,
-      detail: { entries: log.length }
+      detail: { entries: log.length, window_minutes: WINDOW_MINUTES }
     });
     return res.status(200).json({ ok: true, processed: log.length, log });
   } catch (e) {

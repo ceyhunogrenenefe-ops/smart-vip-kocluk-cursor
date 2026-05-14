@@ -33,7 +33,8 @@ WHERE type = 'lesson_reminder';
 
 UPDATE message_templates SET
   content = 'Merhaba {{student_name}}, bugün günlük çalışma raporunu henüz doldurmadın. Lütfen paneline girerek raporunu tamamla.',
-  variables = '["student_name","studentName"]'::jsonb,
+  variables = '["student_name"]'::jsonb,
+  twilio_variable_bindings = '["student_name"]'::jsonb,
   updated_at = NOW()
 WHERE type = 'report_reminder';
 

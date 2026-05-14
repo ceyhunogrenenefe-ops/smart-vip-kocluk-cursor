@@ -58,12 +58,31 @@ const ACADEMIC_PATHS = new Set([
   '/tracking',
   '/book-tracking',
   '/exam-tracking',
-  '/written-exam'
+  '/written-exam',
+  '/topic-tracking',
+  '/academic-center'
 ]);
 
-/** Süper admin / admin: kurum, kullanıcı ve sistem yönetimi tek accordion altında */
-const ORG_SYSTEM_PATHS = new Set(['/super-admin', '/user-management', '/system-management', '/veli-onay']);
-const ORG_SYSTEM_ORDER = ['/super-admin', '/user-management', '/system-management', '/veli-onay'] as const;
+/** Kurum / kullanıcı / sistem + öğrenci & öğretmen listeleri tek accordion altında */
+const ORG_SYSTEM_PATHS = new Set([
+  '/super-admin',
+  '/user-management',
+  '/system-management',
+  '/veli-onay',
+  '/students',
+  '/teachers'
+]);
+const ORG_SYSTEM_ORDER = [
+  '/super-admin',
+  '/user-management',
+  '/system-management',
+  '/veli-onay',
+  '/students',
+  '/teachers'
+] as const;
+
+const SETTINGS_PATHS = new Set(['/settings', '/webhooks']);
+const SETTINGS_ORDER = ['/settings', '/webhooks'] as const;
 
 const LESSON_LABELS: Record<string, string> = {
   '/class-live-lessons': 'Canlı Grup Dersleri',
@@ -78,7 +97,9 @@ const ACADEMIC_LABELS: Record<string, string> = {
   '/tracking': 'Haftalık Takip',
   '/book-tracking': 'Kitap Takibi',
   '/exam-tracking': 'Sınav Takibi',
-  '/written-exam': 'Yazılı Takibi'
+  '/written-exam': 'Yazılı Takibi',
+  '/topic-tracking': 'Konu Takibi',
+  '/academic-center': 'Akademik Merkez'
 };
 
 function mergeSideMenus(groups: FlatNavItem[][]): FlatNavItem[] {
@@ -183,7 +204,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/analytics', icon: BarChart3, label: 'Analiz Paneli' },
     { path: '/ai-coach', icon: Brain, label: 'AI KOÇ' },
     { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
-    { path: '/webhooks', icon: Webhook, label: 'Webhook Ayarlari' },
+    { path: '/webhooks', icon: Webhook, label: 'Webhook Ayarları' },
     { path: '/written-exam', icon: FileCheck, label: 'Yazılı Takip' },
     { path: '/veli-onay', icon: FileText, label: 'Veli onayı & e-imza' },
     { path: '/settings', icon: Settings, label: 'Ayarlar' }
@@ -210,13 +231,14 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
   return merged;
 }
 
-export type NavGroupKind = 'lessons' | 'academic' | 'org' | 'studentPanel';
+export type NavGroupKind = 'lessons' | 'academic' | 'org' | 'settings' | 'studentPanel';
 
 export type StructuredNav = {
   panels: FlatNavItem[];
   lessons: FlatNavItem[];
   academic: FlatNavItem[];
   orgSystem: FlatNavItem[];
+  settings: FlatNavItem[];
   rest: FlatNavItem[];
 };
 
@@ -226,6 +248,7 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
   const lessons: FlatNavItem[] = [];
   const academic: FlatNavItem[] = [];
   const orgSystem: FlatNavItem[] = [];
+  const settings: FlatNavItem[] = [];
   const rest: FlatNavItem[] = [];
 
   for (const it of flat) {
@@ -255,6 +278,10 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
       orgSystem.push(it);
       continue;
     }
+    if (SETTINGS_PATHS.has(it.path)) {
+      settings.push(it);
+      continue;
+    }
     rest.push(it);
   }
 
@@ -264,7 +291,29 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
   };
   orgSystem.sort((a, b) => orgRank(a.path) - orgRank(b.path));
 
-  return { panels, lessons, academic, orgSystem, rest };
+  const settingsRank = (p: string) => {
+    const i = (SETTINGS_ORDER as readonly string[]).indexOf(p);
+    return i === -1 ? 99 : i;
+  };
+  settings.sort((a, b) => settingsRank(a.path) - settingsRank(b.path));
+
+  /** Akademik Takip içinde tutarlı sıra: plan → merkez → takip türleri */
+  const academicOrder = [
+    '/weekly-planner',
+    '/academic-center',
+    '/tracking',
+    '/book-tracking',
+    '/exam-tracking',
+    '/topic-tracking',
+    '/written-exam'
+  ] as const;
+  const acRank = (p: string) => {
+    const i = (academicOrder as readonly string[]).indexOf(p);
+    return i === -1 ? 99 : i;
+  };
+  academic.sort((a, b) => acRank(a.path) - acRank(b.path));
+
+  return { panels, lessons, academic, orgSystem, settings, rest };
 }
 
 export function pathnameMatchesGroup(pathname: string, kind: NavGroupKind, items: FlatNavItem[]): boolean {

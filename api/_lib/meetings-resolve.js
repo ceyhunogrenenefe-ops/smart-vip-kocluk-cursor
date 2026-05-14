@@ -77,15 +77,19 @@ export async function getStudentPhoneForReport(studentRow) {
   return null;
 }
 
-/** Veli / öğrenci şablonu — aynı numarada tek mesaj (öğrenci) */
+/** Veli / öğrenci şablonu — aynı numarada tek mesaj.
+ * Öğrenci + veli aynı E.164 ise tek girdi döner; role `parent` (veli şablonu), yoksa öğrenci önce student olurdu
+ * ve alreadySentLessonReminder veli gönderimini kalıcı olarak engellerdi.
+ */
 export function classifyLessonReminderRecipients(studentRow, orderedPhones) {
   const st = normalizePhoneToE164(studentRow.phone || '');
   const pr = normalizePhoneToE164(studentRow.parent_phone || '');
   return orderedPhones.map((ph) => {
+    if (st && pr && st === pr && ph === st) {
+      return { phone: ph, role: 'parent' };
+    }
     const isOnlyParent = Boolean(pr && ph === pr && !st);
-    const isParentLine = Boolean(
-      pr && ph === pr && st && ph !== st
-    );
+    const isParentLine = Boolean(pr && ph === pr && st && ph !== st);
     return { phone: ph, role: isOnlyParent || isParentLine ? 'parent' : 'student' };
   });
 }

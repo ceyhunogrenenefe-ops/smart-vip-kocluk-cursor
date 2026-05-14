@@ -40,6 +40,7 @@ import {
   type StudentPlatformLink,
   type UserRow
 } from '../lib/userRowToSystemUser';
+import { studentRowToStudent, coachRowToCoach } from '../lib/mapStudentRow';
 import {
   downloadUserImportTemplateXlsx,
   importedRolesKindConflict,
@@ -92,7 +93,7 @@ const coachProfilesWithoutLoginUser = (coachList: Coach[], userRows: UserRow[]):
 
 // Paket bilgileri (Kurumsal turuncu, Deneme mor — referans tablo)
 const PACKAGES = {
-  trial: { name: 'Deneme', color: 'bg-purple-100 text-purple-800 border border-purple-200/80', days: 7 },
+  trial: { name: 'Deneme', color: 'bg-purple-100 text-purple-800 border border-purple-200/80', days: 14 },
   starter: { name: 'Başlangıç', color: 'bg-blue-100 text-blue-800 border border-blue-200/80', days: 30 },
   professional: { name: 'Profesyonel', color: 'bg-emerald-100 text-emerald-800 border border-emerald-200/80', days: 365 },
   enterprise: { name: 'Kurumsal', color: 'bg-orange-100 text-orange-900 border border-orange-200/80', days: 365 }
@@ -222,8 +223,23 @@ export default function UserManagement() {
       try {
         const rows = await db.getUsers();
         setRawUserRows(rows as UserRow[]);
-        const fromApi = rows.map((row) => userRowToSystemUser(row, { coaches, students }));
-        const stubs = coachProfilesWithoutLoginUser(coaches, rows as UserRow[]);
+        const scope =
+          currentUser?.role === 'super_admin'
+            ? undefined
+            : activeInstitutionId || institution?.id || undefined;
+        let joinStudents = students;
+        let joinCoaches = coaches;
+        try {
+          const [stRows, coRows] = await Promise.all([db.getStudents(scope), db.getCoaches(scope)]);
+          joinStudents = stRows.map(studentRowToStudent);
+          joinCoaches = coRows.map(coachRowToCoach);
+        } catch {
+          /* AppContext listesiyle devam */
+        }
+        const fromApi = rows.map((row) =>
+          userRowToSystemUser(row, { coaches: joinCoaches, students: joinStudents })
+        );
+        const stubs = coachProfilesWithoutLoginUser(joinCoaches, rows as UserRow[]);
         const seen = new Set(fromApi.map((u) => u.email.toLowerCase().trim()));
         setUsers([...fromApi, ...stubs.filter((s) => !seen.has(s.email.toLowerCase().trim()))]);
         return;
@@ -243,7 +259,7 @@ export default function UserManagement() {
     }
     setUsers(getAllUsers());
     setRawUserRows([]);
-  }, [getAllUsers, coaches, students]);
+  }, [getAllUsers, coaches, students, currentUser?.role, activeInstitutionId, institution?.id]);
 
   useEffect(() => {
     void refreshUsers();
@@ -1092,9 +1108,15 @@ export default function UserManagement() {
 
     const result = await deleteUser(userId);
     if (result.success && target?.email) {
-      const lower = target.email.toLowerCase();
-      const st = students.find((s) => s.email.toLowerCase() === lower);
-      const ch = coaches.find((c) => c.email.toLowerCase() === lower);
+      const st = findStudentForPlatformUser(
+        {
+          platformUserId: target.id,
+          email: target.email,
+          studentId: target.studentId
+        },
+        students
+      );
+      const ch = coaches.find((c) => c.email.toLowerCase() === target.email.toLowerCase());
       if (st) await deleteStudent(st.id);
       if (ch) await deleteCoach(ch.id);
     }
@@ -1254,10 +1276,14 @@ export default function UserManagement() {
           if (pr.roles.includes('student')) {
             const stMail = String(existing.email || '').toLowerCase().trim();
             const st =
-              students.find((s) => s.email.toLowerCase().trim() === stMail) ||
-              students.find((s) => String(s.platformUserId || '') === String(existing.id)) ||
-              students.find((s) => s.id === existing.id) ||
-              nameMatchStudent;
+              findStudentForPlatformUser(
+                {
+                  platformUserId: existing.id,
+                  email: existing.email || undefined,
+                  studentId: undefined
+                },
+                students
+              ) || nameMatchStudent;
             if (st) {
               await updateStudent(st.id, {
                 name: pr.fullName.trim(),
@@ -1828,7 +1854,14 @@ export default function UserManagement() {
                 const tags = userRoleTags(user as SystemUser);
                 const studentMatch =
                   tags.includes('student')
-                    ? students.find((s) => s.email.toLowerCase().trim() === em)
+                    ? findStudentForPlatformUser(
+                        {
+                          platformUserId: user.id,
+                          email: user.email,
+                          studentId: user.studentId
+                        },
+                        students
+                      )
                     : undefined;
                 const roleBadge = roleBadgeForUser(user);
                 const firstName =

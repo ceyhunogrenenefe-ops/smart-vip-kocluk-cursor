@@ -1,6 +1,7 @@
 // Türkçe: Eğitim Koçu Raporları Sayfası - Öğrenci deneme takibi ve raporlama
 import React, { useState, useMemo, useRef } from 'react';
 import { useApp } from '../context/AppContext';
+import { formatClassLevelLabel } from '../types';
 import {
   FileText,
   Download,
@@ -239,7 +240,7 @@ export default function CoachReports() {
       pdf.setFontSize(14);
       pdf.setTextColor(0, 0, 0);
       pdf.text(`Öğrenci: ${student?.name || 'Bilgi yok'}`, 20, 45);
-      pdf.text(`Sınıf: ${student?.classLevel || 'Bilgi yok'}. Sınıf`, 20, 52);
+      pdf.text(`Sınıf: ${formatClassLevelLabel(student?.classLevel)}`, 20, 52);
     } else {
       pdf.setFontSize(14);
       pdf.setTextColor(0, 0, 0);
@@ -298,7 +299,7 @@ export default function CoachReports() {
 
     if (student) {
       message += `👤 *Öğrenci:* ${student.name}\n`;
-      message += `📚 *Sınıf:* ${student.classLevel}. Sınıf\n\n`;
+      message += `📚 *Sınıf:* ${formatClassLevelLabel(student.classLevel)}\n\n`;
     }
 
     message += `📈 *Sonuçlar:*\n`;
@@ -758,7 +759,7 @@ export default function CoachReports() {
                         </div>
                         <div>
                           <p className="text-sm font-medium text-gray-800">{student.name}</p>
-                          <p className="text-xs text-gray-500">{student.classLevel}. Sınıf</p>
+                          <p className="text-xs text-gray-500">{formatClassLevelLabel(student.classLevel)}</p>
                         </div>
                       </div>
                     </td>

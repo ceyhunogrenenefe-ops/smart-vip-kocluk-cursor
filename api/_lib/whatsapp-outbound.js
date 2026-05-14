@@ -2,7 +2,8 @@ import { renderMessageTemplate } from './template-engine.js';
 import {
   normalizePhoneToE164,
   sendMetaTemplateMessage,
-  parseMetaSendError
+  parseMetaSendError,
+  normalizeMetaLanguageCode
 } from './meta-whatsapp.js';
 import { supabaseAdmin } from './supabase-admin.js';
 
@@ -19,6 +20,15 @@ function normalizeBindingList(templateRow) {
 /** Meta şablon gövdesi {{1}}… sırası — message_templates.twilio_variable_bindings veya variables */
 export function getTemplateBindingKeys(templateRow) {
   return normalizeBindingList(templateRow);
+}
+
+/** Meta BM'de ad boş bırakılmış eski satırlar: `type` veya çağıranın verdiği `templateType` ile aynı ad sık kullanılır. */
+export function resolveMetaTemplateName(templateRow, templateType) {
+  const fromRow = String(templateRow?.meta_template_name || '').trim();
+  if (fromRow) return fromRow;
+  const fromArg = String(templateType || '').trim();
+  if (fromArg) return fromArg;
+  return String(templateRow?.type || '').trim();
 }
 
 /**
@@ -77,8 +87,8 @@ export function buildContentVariablePayload(bindingKeys, vars) {
  * @param {Record<string, string>} vars
  */
 export function buildTemplatePreview(templateRow, vars) {
-  const metaName = String(templateRow?.meta_template_name || '').trim();
-  const lang = String(templateRow?.meta_template_language || 'tr').trim() || 'tr';
+  const metaName = resolveMetaTemplateName(templateRow, String(templateRow?.type || ''));
+  const lang = normalizeMetaLanguageCode(templateRow?.meta_template_language);
   const bindings = getTemplateBindingKeys(templateRow);
   const validation = validateProductionTemplateVariables(bindings, vars);
   const renderedBody = renderMessageTemplate(String(templateRow?.content || ''), vars);
@@ -120,8 +130,8 @@ export async function sendWhatsAppUsingTemplateRow({ phone, templateRow, vars, t
     };
   }
 
-  const metaName = String(templateRow?.meta_template_name || '').trim();
-  const lang = String(templateRow?.meta_template_language || 'tr').trim() || 'tr';
+  const metaName = resolveMetaTemplateName(templateRow, templateType);
+  const lang = normalizeMetaLanguageCode(templateRow?.meta_template_language);
 
   if (!metaName) {
     return {
@@ -161,13 +171,15 @@ export async function sendWhatsAppUsingTemplateRow({ phone, templateRow, vars, t
   }
 
   const bodyParameterTexts = buildTemplateBodyParameters(bindings, vars);
+  const useNamedMetaBody = templateRow?.meta_named_body_parameters === true;
 
   try {
     const r = await sendMetaTemplateMessage({
       toE164: e164,
       templateName: metaName,
       languageCode: lang,
-      bodyParameterTexts
+      bodyParameterTexts,
+      bodyParameterNames: useNamedMetaBody ? bindings : null
     });
     const mid = r.messageId || null;
     return {
@@ -220,3 +232,11 @@ export async function sendAutomatedWhatsApp({ phone, templateType, vars }) {
     templateType
   });
 }
+
+/** Cron log / hata kodu kısaltmaları (message_logs.twilio_error_code veya teşhis) */
+export const OUTBOUND_LOG_CODE = {
+  TEMPLATE_NOT_FOUND: 'template_not_found',
+  META_TEMPLATE_NAME_REQUIRED: 'meta_template_name_required',
+  INVALID_PHONE: 'invalid_phone',
+  META_SEND_FAILED: 'meta_send_failed'
+};
