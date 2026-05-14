@@ -40,23 +40,49 @@ async function resolveCoachIdByUserSub(sub) {
 export async function enrichStudentActor(actor) {
   if (!actor) return actor;
 
-  if (actor.role === 'student') {
-    const sub = actor.sub;
-    if (!sub || sub === 'anonymous') return actor;
+  const sub = actor.sub;
+  if (!sub || sub === 'anonymous') return actor;
 
-    const { data: userRow } = await supabaseAdmin
-      .from('users')
-      .select('email, institution_id')
-      .eq('id', sub)
-      .maybeSingle();
+  /** JWT rolü eksik/yanlış olsa bile `users` satırına göre öğrenciyi tanı (my-student / API 403 önleme) */
+  const { data: userRow } = await supabaseAdmin
+    .from('users')
+    .select('email, institution_id, role')
+    .eq('id', sub)
+    .maybeSingle();
 
+  const dbRole = String(userRow?.role || actor.role || '')
+    .trim()
+    .toLowerCase();
+
+  if (dbRole === 'student') {
     const resolved = await resolveStudentRowForUser({
       userId: sub,
       email: userRow?.email,
       institutionId: userRow?.institution_id ?? actor.institution_id ?? null
     });
 
+    let next = {
+      ...actor,
+      role: 'student',
+      institution_id: userRow?.institution_id ?? actor.institution_id ?? null
+    };
+
     /** JWT’deki student_id eski/yanlış olabilir (aynı e-posta başka kurum); her istekte canonical eşleşmeyi zorunlu kıl */
+    if (resolved?.id && resolved.id !== next.student_id) {
+      next = { ...next, student_id: resolved.id };
+    } else if (!next.student_id && resolved?.id) {
+      next = { ...next, student_id: resolved.id };
+    }
+    return next;
+  }
+
+  /** Eski dal: yalnızca JWT student iken (user satırı okunamadıysa) yedek */
+  if (String(actor.role || '').toLowerCase() === 'student') {
+    const resolved = await resolveStudentRowForUser({
+      userId: sub,
+      email: userRow?.email,
+      institutionId: userRow?.institution_id ?? actor.institution_id ?? null
+    });
     if (resolved?.id && resolved.id !== actor.student_id) {
       return { ...actor, student_id: resolved.id };
     }

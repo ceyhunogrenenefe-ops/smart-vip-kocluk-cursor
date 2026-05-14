@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Student } from '../types';
-import { clearAuthToken, fetchPublicPost, setAuthToken } from '../lib/session';
+import { clearAuthToken, fetchPublicPost, setAuthToken, getAuthToken } from '../lib/session';
 
 // Demo mod - girişin her zaman çalışması için aktif
 const USE_DEMO_MODE = true;
@@ -236,17 +236,21 @@ async function syncServerAuthToken(
   email: string,
   password: string,
   baseUser: SystemUser
-): Promise<SystemUser> {
+): Promise<{ user: SystemUser; tokenStored: boolean }> {
   try {
     const res = await fetchPublicPost('/api/auth-login', { email, password });
-    if (!res.ok) return baseUser;
+    if (!res.ok) return { user: baseUser, tokenStored: false };
     const body = (await res.json().catch(() => ({}))) as {
       token?: string;
       user?: AuthLoginUserPayload;
     };
-    if (body?.token && typeof body.token === 'string') setAuthToken(body.token);
+    let tokenStored = false;
+    if (body?.token && typeof body.token === 'string') {
+      setAuthToken(body.token);
+      tokenStored = true;
+    }
     const u = body?.user;
-    if (!u) return baseUser;
+    if (!u) return { user: baseUser, tokenStored };
 
     const merged = applyTrialAccountCoachOnly({
       ...baseUser,
@@ -264,9 +268,9 @@ async function syncServerAuthToken(
       isActive: u.isActive ?? baseUser.isActive,
       createdAt: u.createdAt ?? baseUser.createdAt
     });
-    return merged;
+    return { user: merged, tokenStored };
   } catch {
-    return baseUser;
+    return { user: baseUser, tokenStored: false };
   }
 }
 
@@ -291,6 +295,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const parsed = JSON.parse(savedUser);
           if (parsed && parsed.id && parsed.email) {
             const normalized = applyTrialAccountCoachOnly(parsed as SystemUser);
+            /** Öğrenci API’leri JWT ister; token yoksa eski oturumu yükleme (my-student 403 / boş analiz) */
+            if (String(normalized.role || '').toLowerCase() === 'student' && !getAuthToken()) {
+              localStorage.removeItem('coaching_user');
+            } else {
             setUser(normalized);
             if (JSON.stringify(parsed) !== JSON.stringify(normalized)) {
               localStorage.setItem('coaching_user', JSON.stringify(normalized));
@@ -312,6 +320,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               } catch {
                 localStorage.removeItem(IMPERSONATION_STORAGE_KEY);
               }
+            }
             }
           }
         }
@@ -345,7 +354,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isActive: true,
         createdAt: new Date().toISOString()
       };
-      const merged = await syncServerAuthToken(demoUser.email, demoUser.password, userData);
+      const { user: merged, tokenStored } = await syncServerAuthToken(demoUser.email, demoUser.password, userData);
+      if (!tokenStored) {
+        return {
+          success: false,
+          message: 'Sunucu oturumu oluşturulamadı (auth-login). Ağ veya API yapılandırmasını kontrol edin.'
+        };
+      }
       localStorage.setItem('coaching_user', JSON.stringify(merged));
       setUser(merged);
       return { success: true, message: 'Giriş başarılı!' };
@@ -424,11 +439,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           createdAt: dbUser.created_at
         });
 
-        const merged = await syncServerAuthToken(
+        const { user: merged, tokenStored } = await syncServerAuthToken(
           String(dbUser.email || normalizedEmail).toLowerCase().trim(),
           password,
           userData
         );
+        if (!tokenStored) {
+          return {
+            success: false,
+            message:
+              'Sunucu oturumu oluşturulamadı (auth-login). Lütfen tekrar deneyin; sorun sürerse yöneticiye bildirin.'
+          };
+        }
         localStorage.setItem('coaching_user', JSON.stringify(merged));
         setUser(merged);
         return { success: true, message: 'Giriş başarılı!' };
@@ -488,7 +510,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         /* yoksay */
       }
       const userData = applyTrialAccountCoachOnly({ ...pub, studentId, coachId });
-      const merged = await syncServerAuthToken(normalizedEmail, password, userData);
+      const { user: merged, tokenStored } = await syncServerAuthToken(normalizedEmail, password, userData);
+      if (!tokenStored) {
+        return {
+          success: false,
+          message:
+            'Sunucu oturumu oluşturulamadı (auth-login). Lütfen tekrar deneyin; sorun sürerse yöneticiye bildirin.'
+        };
+      }
       localStorage.setItem('coaching_user', JSON.stringify(merged));
       setUser(merged);
       return { success: true, message: 'Giriş başarılı!' };

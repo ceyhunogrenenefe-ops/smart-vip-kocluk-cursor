@@ -520,7 +520,7 @@ export default function Analytics() {
           <div className="flex flex-col sm:flex-row flex-wrap gap-3 items-stretch sm:items-end">
           {isStudentUi ? (
             <div className="px-4 py-2 border border-gray-200 rounded-lg bg-slate-50 text-slate-800 text-sm font-medium min-w-[200px]">
-              {students[0]?.name ?? 'Öğrenci'}
+              {selectedStudent?.name ?? effectiveUser?.name ?? students[0]?.name ?? 'Öğrenci'}
             </div>
           ) : (
           <select
@@ -652,6 +652,17 @@ export default function Analytics() {
               Veliye WhatsApp gönder
             </button>
           </div>
+        </div>
+      )}
+
+      {isStudentUi && selectedStudentId && !selectedStudent && (
+        <div
+          className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+          role="status"
+        >
+          <strong className="font-semibold">Profil yüklenemedi.</strong> Analiz kartları, sunucudaki öğrenci
+          kaydınızla eşleşince görünür. Sayfayı yenileyin; düzelmezse çıkış yapıp tekrar giriş yapın (sunucu
+          oturumu / auth-login gerekir).
         </div>
       )}
 

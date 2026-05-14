@@ -1,4 +1,4 @@
-import { requireAuth } from '../api/_lib/auth.js';
+import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 
@@ -11,7 +11,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
   try {
-    let actor = requireAuth(req);
+    let actor = requireAuthenticatedActor(req);
     actor = await enrichStudentActor(actor);
     if (String(actor.role || '').toLowerCase() !== 'student') {
       return res.status(403).json({ error: 'forbidden' });
@@ -26,7 +26,14 @@ export default async function handler(req, res) {
     return res.status(200).json({ data });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    if (msg === 'Missing token' || msg === 'Invalid token') return res.status(401).json({ error: msg });
+    if (
+      msg === 'Missing token' ||
+      msg === 'Invalid token' ||
+      msg === 'Invalid signature' ||
+      msg === 'Token expired'
+    ) {
+      return res.status(401).json({ error: msg });
+    }
     return res.status(500).json({ error: msg });
   }
 }
