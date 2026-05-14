@@ -917,7 +917,7 @@ export default function UserManagement() {
                   id: newUserId,
                   name: fullName,
                   email: formData.email,
-                  password: formData.password || undefined,
+                  password: pwdPlain,
                   phone: formData.phone || '',
                   birthDate: formData.birthDate || undefined,
                   parentName: formData.parentName.trim() || undefined,

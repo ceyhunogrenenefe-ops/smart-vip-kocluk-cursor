@@ -620,8 +620,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       institutions[0]?.id ||
       null;
     const preferredRowId = student.id?.trim() ? student.id.trim() : undefined;
-    await ensureSupabaseReady();
-
+    /** Öğrenci yazımı /api/students ile gider; tarayıcıda VITE_SUPABASE_* olmasını zorunlu kılma */
     try {
       const created = await db.createStudent(
         {
@@ -760,8 +759,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       institutions[0]?.id ||
       null;
     const preferredRowId = coach.id?.trim() ? coach.id.trim() : undefined;
-    await ensureSupabaseReady();
-
     try {
       const created = await db.createCoach(
         {
