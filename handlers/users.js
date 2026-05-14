@@ -1,7 +1,7 @@
 import { requireAuth, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
-import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
+import { getSupabaseAdmin, hasSupabaseServiceRoleKey, supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { getTeacherGroupClassStudentScope } from '../api/_lib/teacher-class-scope.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import { normalizeUuidOrGenerate } from '../api/_lib/uuid.js';
@@ -74,6 +74,40 @@ const createdByForInsert = (actor) => {
   if (!actor?.sub || actor.sub === 'anonymous') return null;
   return actor.sub;
 };
+
+/** Kullanıcı yönetiminden eklenen kayıtların Supabase Dashboard → Authentication’da görünmesi için auth.users */
+async function provisionSupabaseAuthUser({ id, email, passwordPlain, name, role }) {
+  if (!hasSupabaseServiceRoleKey()) {
+    console.warn(
+      '[users POST] SUPABASE_SERVICE_ROLE_KEY tanımlı değil; auth.users oluşturulamıyor. Vercel ortamına service_role ekleyin.'
+    );
+    return;
+  }
+  const pwd = String(passwordPlain || '').trim();
+  if (pwd.length < 6) return;
+  const em = String(email || '')
+    .toLowerCase()
+    .trim();
+  if (!em || !id) return;
+  try {
+    const sb = getSupabaseAdmin();
+    const { data: existing, error: getErr } = await sb.auth.admin.getUserById(String(id));
+    if (!getErr && existing?.user?.id) return;
+
+    const { error: cErr } = await sb.auth.admin.createUser({
+      id: String(id),
+      email: em,
+      password: pwd,
+      email_confirm: true,
+      user_metadata: { name: name || '', app_role: role || '' }
+    });
+    if (cErr) {
+      console.warn('[users POST] auth.admin.createUser:', cErr.message || String(cErr));
+    }
+  } catch (e) {
+    console.warn('[users POST] auth provision:', e instanceof Error ? e.message : e);
+  }
+}
 
 /** Boş string FK hatasına yol açmasın */
 function normalizeInstitutionId(raw) {
@@ -271,6 +305,14 @@ export default async function handler(req, res) {
 
       const { data, error } = await supabaseAdmin.from('users').insert(payload).select().single();
       if (error) throw error;
+
+      await provisionSupabaseAuthUser({
+        id: data.id,
+        email: data.email,
+        passwordPlain,
+        name: data.name,
+        role: data.role
+      });
 
       if (data.role === 'admin' && actor.role === 'super_admin') {
         const ms = Number(bootstrap_max_students);

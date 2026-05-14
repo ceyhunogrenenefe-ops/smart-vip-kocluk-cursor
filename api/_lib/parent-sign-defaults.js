@@ -125,6 +125,65 @@ export function dersProgramTableHtml(rows) {
   return `<div class="dersprog"><h2>Haftalık ders programı</h2><table class="dersmini"><thead><tr><th>Ders</th><th style="text-align:right">Haftalık saat</th></tr></thead><tbody>${body}<tr><td><strong>Toplam</strong></td><td style="text-align:right"><strong>${esc(String(total))} saat</strong></td></tr></tbody></table></div>`;
 }
 
+const KAYIT_FORM_KEYS = ['tc_kimlik', 'dogum_tarihi', 'okul_adi', 'eposta', 'il', 'ilce', 'ogrenci_tel', 'veli_tel'];
+
+/** DB kayit_formu_json → sözleşme tablosunda gösterilecek düz alanlar */
+export function kayitDetayForHtml(j) {
+  if (!j || typeof j !== 'object') return {};
+  const o = {};
+  for (const k of KAYIT_FORM_KEYS) {
+    const v = String(j[k] ?? '').trim();
+    if (v) o[k] = v;
+  }
+  return o;
+}
+
+/** Kayıt formundan gelen ek alanlar (TC, okul, e-posta, il/ilçe, telefonlar) — sözleşme tablosuna eklenir */
+export function kayitFormuTableRowsHtml(detay) {
+  if (!detay || typeof detay !== 'object') return '';
+  const pairs = [
+    ['T.C. Kimlik No', 'tc_kimlik'],
+    ['Doğum tarihi', 'dogum_tarihi'],
+    ['Okul', 'okul_adi'],
+    ['E-posta', 'eposta'],
+    ['İl', 'il'],
+    ['İlçe', 'ilce'],
+    ['Öğrenci telefon', 'ogrenci_tel'],
+    ['Veli telefon', 'veli_tel']
+  ];
+  const rows = [];
+  for (const [label, key] of pairs) {
+    const v = String(detay[key] ?? '').trim();
+    if (v) rows.push(`<tr><td>${esc(label)}</td><td>${esc(v)}</td></tr>`);
+  }
+  if (!rows.length) return '';
+  return `<h2 style="font-size:1rem;color:#1e3a8a;margin:20px 0 8px">Kayıt formu bilgileri</h2><table>${rows.join('')}</table>`;
+}
+
+/** Veli linki açıldığında form henüz doldurulmadıysa gösterilen kısa bilgilendirme (tam sözleşme form sonrası üretilir) */
+export function buildRegistrationPlaceholderHtml(opts) {
+  const { kurum_adi, contract_number, program_adi, sinif, baslangic_tarihi, bitis_tarihi, ucret, taksit_sayisi } = opts;
+  const taksitN = Math.max(1, Math.min(48, Math.round(Number(taksit_sayisi) || 1)));
+  const ucretNum = Number(ucret);
+  const taksitTutar =
+    Number.isFinite(ucretNum) && ucretNum > 0 && taksitN > 0 ? Math.round(ucretNum / taksitN) : null;
+  return `<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<style>body{font-family:system-ui,sans-serif;line-height:1.55;color:#0f172a;max-width:720px;margin:0 auto;padding:20px}h1{font-size:1.15rem;color:#1e3a8a}</style></head><body>
+<h1>Ön kayıt formu</h1>
+<p style="font-size:13px;color:#64748b">Belge no: <strong>${esc(contract_number)}</strong>${kurum_adi ? ` · ${esc(kurum_adi)}` : ''}</p>
+<p>Aşağıdaki ekranda <strong>kayıt bilgilerinizi</strong> (ad, soyad, T.C., doğum tarihi, okul, sınıf, e-posta, il/ilçe, telefonlar) gireceksiniz; KVKK onayından sonra sözleşme metni otomatik oluşturulacak ve imza adımına geçeceksiniz.</p>
+<table style="width:100%;border-collapse:collapse;margin-top:16px;font-size:14px">
+<tr><td style="border:1px solid #e2e8f0;padding:8px;width:38%;background:#f8fafc;font-weight:600">Program</td><td style="border:1px solid #e2e8f0;padding:8px">${esc(program_adi)}</td></tr>
+<tr><td style="border:1px solid #e2e8f0;padding:8px;background:#f8fafc;font-weight:600">Sınıf</td><td style="border:1px solid #e2e8f0;padding:8px">${esc(sinif)}</td></tr>
+<tr><td style="border:1px solid #e2e8f0;padding:8px;background:#f8fafc;font-weight:600">Dönem</td><td style="border:1px solid #e2e8f0;padding:8px">${esc(String(baslangic_tarihi))} – ${esc(String(bitis_tarihi))}</td></tr>
+<tr><td style="border:1px solid #e2e8f0;padding:8px;background:#f8fafc;font-weight:600">Ücret (TL)</td><td style="border:1px solid #e2e8f0;padding:8px">${esc(String(ucret))}</td></tr>
+<tr><td style="border:1px solid #e2e8f0;padding:8px;background:#f8fafc;font-weight:600">Taksit</td><td style="border:1px solid #e2e8f0;padding:8px">${esc(String(taksitN))}${
+    taksitTutar != null ? ` · Yaklaşık ${esc(String(taksitTutar))} TL/taksit` : ''
+  }</td></tr>
+</table>
+</body></html>`;
+}
+
 export function buildParentContractHtml(fields) {
   const {
     ogrenci_ad,
@@ -146,12 +205,14 @@ export function buildParentContractHtml(fields) {
     verify_url,
     document_title,
     extra_detail_plain,
-    ders_satirlari
+    ders_satirlari,
+    kayit_formu_detay
   } = fields;
 
   const h1 = String(document_title || '').trim() || 'Ön kayıt / bilgilendirme özeti';
   const extraBlock = extraDetailHtmlFromPlain(extra_detail_plain || '');
   const dersBlock = dersProgramTableHtml(ders_satirlari);
+  const kayitBlock = kayitFormuTableRowsHtml(kayitDetayForHtml(kayit_formu_detay || {}));
 
   const taksitN = Math.max(1, Math.min(48, Math.round(Number(taksit_sayisi) || 1)));
   const ucretNum = Number(ucret);
@@ -199,6 +260,7 @@ ${
     : ''
 }
 </table>
+${kayitBlock}
 ${dersBlock}
 ${extraBlock}
 <div class="note">

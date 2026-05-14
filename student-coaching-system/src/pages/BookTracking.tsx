@@ -184,7 +184,7 @@ export default function BookTracking() {
   };
 
   // Yeni okuma kaydı ekle
-  const handleAddLog = () => {
+  const handleAddLog = async () => {
     if (!newLog.date || !newLog.minutesRead || !selectedStudentId) return;
 
     const log: ReadingLog = {
@@ -198,7 +198,7 @@ export default function BookTracking() {
       createdAt: new Date().toISOString()
     };
 
-    addReadingLog(log);
+    await addReadingLog(log);
     setNewLog({ date: new Date().toISOString().split('T')[0], minutesRead: '', pagesRead: '', bookId: '', notes: '' });
     setShowAddLog(false);
   };

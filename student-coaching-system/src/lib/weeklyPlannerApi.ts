@@ -44,8 +44,35 @@ function unwrap<T>(payload: unknown): T {
   return payload as T;
 }
 
+function plannerHttpError(res: Response, payload: unknown): Error {
+  const err = (payload as { error?: string })?.error;
+  if (res.status === 409 && err === 'time_conflict') {
+    return new Error(
+      'Bu tarih ve saatte zaten bir plan var. Aynı saate ikinci blok eklenemez; başka bir saat seçin veya mevcut bloğu düzenleyin/taşıyın.'
+    );
+  }
+  return new Error(err || `API (${res.status})`);
+}
+
 export async function fetchCoachWeeklyGoals(studentId: string, weekStart: string): Promise<CoachWeeklyGoalRow[]> {
   const q = `?student_id=${encodeURIComponent(studentId)}&week_start=${encodeURIComponent(weekStart)}`;
+  const res = await apiFetch(`/api/coach-weekly-goals${q}`);
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((payload as { error?: string })?.error || `API (${res.status})`);
+  const data = unwrap<CoachWeeklyGoalRow[]>(payload);
+  return Array.isArray(data) ? data : [];
+}
+
+/** Analiz: seçilen [rangeFrom, rangeTo] ile kesişen tüm koç hedefleri (tarihli + legacy hafta) */
+export async function fetchCoachWeeklyGoalsInRange(
+  studentId: string,
+  rangeFrom: string,
+  rangeTo: string
+): Promise<CoachWeeklyGoalRow[]> {
+  const rf = String(rangeFrom || '').trim().slice(0, 10);
+  const rt = String(rangeTo || '').trim().slice(0, 10);
+  if (!rf || !rt) return [];
+  const q = `?student_id=${encodeURIComponent(studentId)}&range_from=${encodeURIComponent(rf)}&range_to=${encodeURIComponent(rt)}`;
   const res = await apiFetch(`/api/coach-weekly-goals${q}`);
   const payload = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((payload as { error?: string })?.error || `API (${res.status})`);
@@ -131,7 +158,7 @@ export async function createWeeklyPlannerEntry(
     body: JSON.stringify(body),
   });
   const payload = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((payload as { error?: string })?.error || `API (${res.status})`);
+  if (!res.ok) throw plannerHttpError(res, payload);
   return unwrap<WeeklyPlannerEntryRow>(payload);
 }
 
@@ -154,7 +181,7 @@ export async function patchWeeklyPlannerEntry(
     body: JSON.stringify(patch),
   });
   const payload = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((payload as { error?: string })?.error || `API (${res.status})`);
+  if (!res.ok) throw plannerHttpError(res, payload);
   return unwrap<WeeklyPlannerEntryRow>(payload);
 }
 

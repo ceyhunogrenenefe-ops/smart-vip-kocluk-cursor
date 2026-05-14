@@ -1,27 +1,22 @@
-// Türkçe: Ayarlar Sayfası - Twilio ve WhatsApp API entegrasyonu dahil
+// Türkçe: Ayarlar Sayfası — kurum, entegrasyonlar, veri
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
-import { Institution } from '../types';
+import { useOrganization } from '../context/OrganizationContext';
+import { Institution, OrganizationPlan } from '../types';
 import {
   Settings,
   Building,
-  Phone,
-  Mail,
-  Globe,
   Save,
   Check,
   Upload,
   Image,
   Database,
   Bell,
-  Shield,
-  Key,
   Download,
   Trash2,
   X,
   Plus,
-  Edit2,
   CheckCircle,
   Brain,
   Webhook,
@@ -35,6 +30,8 @@ import {
   ClipboardList
 } from 'lucide-react';
 import { apiFetch, getAuthToken } from '../lib/session';
+import { db } from '../lib/database';
+import { createInstitutionAdminUser } from '../lib/provisionInstitutionAdmin';
 import { AttendanceReportHub } from '../components/attendance/AttendanceReportHub';
 import { userHasAnyRole } from '../config/rolePermissions';
 
@@ -49,19 +46,32 @@ interface MetaWhatsAppServerStatus {
   hint?: string | null;
 }
 
-interface WhatsAppConfig {
-  apiKey: string;
-  enabled: boolean;
+/** Telefondaki rakamlar (boşluk/tire atılır) */
+function institutionPhoneDigits(phone: string | undefined | null): string {
+  return String(phone || '').replace(/\D/g, '');
+}
+
+/** Online VIP ana hat — kullanıcı isteği: yalnız bu telefonlu kayıt silinmesin (0 ile veya olmadan). */
+function isPrimaryOnlineVipInstitution(inst: Institution): boolean {
+  const d = institutionPhoneDigits(inst.phone);
+  return d === '08503034014' || d === '8503034014';
 }
 
 export default function SettingsPage() {
   const { user } = useAuth();
+  const { createOrganization } = useOrganization();
   const { institutions, addInstitution, updateInstitution, deleteInstitution, setActiveInstitution, activeInstitutionId, students, coaches, weeklyEntries } = useApp();
   const [saved, setSaved] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [settingsTab, setSettingsTab] = useState<'general' | 'attendance'>('general');
+  const [newInstSale, setNewInstSale] = useState({
+    plan: 'professional' as OrganizationPlan,
+    adminName: '',
+    adminEmail: '',
+    adminPassword: '',
+    adminPhone: ''
+  });
 
   // Super Admin mi kontrol et
   const isSuperAdmin = user?.role === 'super_admin';
@@ -72,13 +82,7 @@ export default function SettingsPage() {
   const [metaWaServerStatus, setMetaWaServerStatus] = useState<MetaWhatsAppServerStatus | null>(null);
   const [metaWaStatusLoading, setMetaWaStatusLoading] = useState(false);
   const [metaWaTestPhone, setMetaWaTestPhone] = useState('');
-  const [metaWaTestMessage, setMetaWaTestMessage] = useState('Smart Koçluk: Meta WhatsApp test mesajı.');
-
-  // WhatsApp API ayarları
-  const [whatsappConfig, setWhatsappConfig] = useState<WhatsAppConfig>({
-    apiKey: localStorage.getItem('whatsapp_apiKey') || '',
-    enabled: localStorage.getItem('whatsapp_enabled') === 'true'
-  });
+  const [metaWaTestMessage, setMetaWaTestMessage] = useState('Meta WhatsApp test mesajı.');
 
   // OpenAI API (tarayıcı BYOK + isteğe bağlı model; sunucuda OPENAI_API_KEY varsa öncelik orada)
   const [openaiApiKey, setOpenaiApiKey] = useState(localStorage.getItem('openai_apiKey') || '');
@@ -89,6 +93,8 @@ export default function SettingsPage() {
   const [showApiKey, setShowApiKey] = useState(false);
   const [testingMetaWa, setTestingMetaWa] = useState(false);
   const [metaWaTestResult, setMetaWaTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [orphanPurgeCount, setOrphanPurgeCount] = useState<number | null>(null);
+  const [orphanPurgeBusy, setOrphanPurgeBusy] = useState(false);
 
   const refreshMetaWaStatus = useCallback(async () => {
     if (!canManageTwilio || !getAuthToken()) return;
@@ -151,7 +157,6 @@ export default function SettingsPage() {
         logo: inst.logo || ''
       });
     }
-    setEditingId(null);
     setShowAddForm(false);
   };
 
@@ -184,47 +189,109 @@ export default function SettingsPage() {
   const handleSave = () => {
     if (activeInstitutionId) {
       updateInstitution(activeInstitutionId, { ...formData });
-      setEditingId(null);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     }
   };
 
   const handleAddNew = async () => {
+    const name = (formData.name || 'Yeni Kurum').trim();
+    const email = formData.email.trim();
+    if (!email) {
+      alert('Kurum e-postası zorunludur.');
+      return;
+    }
+    if (getAuthToken()) {
+      if (!newInstSale.adminName.trim()) {
+        alert('Kurum yöneticisi adı soyadı zorunludur (müşteri teslimi).');
+        return;
+      }
+      if (!newInstSale.adminEmail.trim()) {
+        alert('Yönetici giriş e-postası zorunludur.');
+        return;
+      }
+      if (newInstSale.adminPassword.trim().length < 6) {
+        alert('Yönetici şifresi en az 6 karakter olmalıdır.');
+        return;
+      }
+    }
     const newInstitution: Institution = {
       id: Date.now().toString(),
-      name: formData.name || 'Yeni Kurum',
+      name,
       phone: formData.phone,
       address: formData.address,
-      email: formData.email,
+      email: email.toLowerCase(),
       website: formData.website,
       logo: formData.logo,
       isActive: false,
       createdAt: new Date().toISOString()
     };
-    const created = await addInstitution(newInstitution, { plan: 'professional' });
-    if (created?.id) {
+    const created = await addInstitution(newInstitution, { plan: newInstSale.plan });
+    if (!created?.id) {
+      alert('Kurum oluşturulamadı. Oturum ve API erişimini kontrol edin.');
+      return;
+    }
+    try {
+      await createOrganization(
+        {
+          name,
+          email: email.toLowerCase(),
+          phone: formData.phone || '',
+          address: formData.address || '',
+          plan: newInstSale.plan
+        },
+        { reuseInstitutionId: created.id, setAsActive: true }
+      );
+      if (getAuthToken()) {
+        await createInstitutionAdminUser({
+          institutionId: created.id,
+          adminName: newInstSale.adminName.trim(),
+          adminEmail: newInstSale.adminEmail.trim().toLowerCase(),
+          adminPassword: newInstSale.adminPassword.trim(),
+          adminPhone: newInstSale.adminPhone.trim() || null,
+          plan: newInstSale.plan
+        });
+        alert(
+          `Kurum ve ilk yönetici oluşturuldu. Öğrenci/koç/öğretmen eklenmedi.\n\nMüşteri girişi:\nE-posta: ${newInstSale.adminEmail.trim().toLowerCase()}\nŞifre: kurulumda girdiğiniz değer`
+        );
+      } else {
+        alert('Kurum kaydedildi. Oturum açılmadığı için yönetici hesabı oluşturulmadı; giriş yaptıktan sonra bu kurum için kullanıcı ekleyebilirsiniz.');
+      }
       setActiveInstitution(created.id);
       setShowAddForm(false);
+      setNewInstSale({
+        plan: 'professional',
+        adminName: '',
+        adminEmail: '',
+        adminPassword: '',
+        adminPhone: ''
+      });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
-    } else {
-      alert('Kurum oluşturulamadı. Oturum ve API erişimini kontrol edin.');
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Kurum sonrası kayıt hatası (yönetici oluşturulamadıysa Kullanıcı Yönetimi’nden ekleyin).');
     }
   };
 
   const handleDelete = (id: string) => {
-    if (confirm('Bu kurumu silmek istediğinizden emin misiniz?')) {
-      deleteInstitution(id);
+    const inst = institutions.find((i) => i.id === id);
+    if (inst && isPrimaryOnlineVipInstitution(inst)) {
+      alert(
+        'Bu kurum (Online VIP Dershane / 0850 303 40 14) ana kayıttır ve silinemez. Diğer kurumları silebilirsiniz.'
+      );
+      return;
     }
-  };
-
-  // WhatsApp API kaydet
-  const saveWhatsAppConfig = () => {
-    localStorage.setItem('whatsapp_apiKey', whatsappConfig.apiKey);
-    localStorage.setItem('whatsapp_enabled', whatsappConfig.enabled.toString());
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+    if (!isSuperAdmin) {
+      alert('Kurum silmek için Süper Admin ile oturum açmalısınız.');
+      return;
+    }
+    if (
+      confirm(
+        'Bu kurumu silmek istediğinizden emin misiniz? Bu kuruma bağlı öğrenci/kullanıcı varsa silme reddedilir.'
+      )
+    ) {
+      void deleteInstitution(id);
+    }
   };
 
   // OpenAI API kaydet (anahtar + model — tarayıcıda)
@@ -314,19 +381,6 @@ export default function SettingsPage() {
     }
   };
 
-  // WhatsApp API ile mesaj gönder (simülasyon)
-  const sendWhatsAppMessage = async (phone: string, message: string) => {
-    if (!whatsappConfig.enabled || !whatsappConfig.apiKey) {
-      // wa.me fallback
-      window.open(`https://wa.me/${phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`, '_blank');
-      return;
-    }
-
-    // Simülasyon
-    console.log('WhatsApp API:', whatsappConfig.apiKey, phone, message);
-    alert('WhatsApp API simülasyon modunda çalışıyor.');
-  };
-
   // JSON Export
   const exportData = () => {
     const data = {
@@ -356,6 +410,57 @@ export default function SettingsPage() {
     }
   };
 
+  const handleOrphanInstitutionsPreview = async () => {
+    if (!getAuthToken()) {
+      alert('Önizleme için oturum açmalısınız.');
+      return;
+    }
+    setOrphanPurgeBusy(true);
+    try {
+      const d = await db.institutionsPurgePreview();
+      setOrphanPurgeCount(d.candidate_count);
+      alert(`Silinebilecek yetim kurum sayısı: ${d.candidate_count}`);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Önizleme başarısız');
+    } finally {
+      setOrphanPurgeBusy(false);
+    }
+  };
+
+  const handleOrphanInstitutionsExecute = async () => {
+    if (!getAuthToken()) {
+      alert('Oturum açmalısınız.');
+      return;
+    }
+    if (orphanPurgeCount == null) {
+      alert('Önce "Yetim kurumları say" ile önizleme yapın.');
+      return;
+    }
+    if (orphanPurgeCount === 0) {
+      alert('Silinecek yetim kurum yok.');
+      return;
+    }
+    if (
+      !confirm(
+        `Veritabanından ${orphanPurgeCount} yetim kurumu kalıcı olarak silmek istiyor musunuz?\n\n` +
+          'Yalnızca öğrenci/koç/kullanıcı kaydına bağlı olmayan kurumlar silinir. Online VIP (ad veya 0850 303 40 14) korunur.'
+      )
+    ) {
+      return;
+    }
+    setOrphanPurgeBusy(true);
+    try {
+      const d = await db.institutionsPurgeExecute();
+      alert(`${d.deleted} kurum silindi. Liste yenilenecek.`);
+      setOrphanPurgeCount(null);
+      window.location.reload();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Silme başarısız');
+    } finally {
+      setOrphanPurgeBusy(false);
+    }
+  };
+
   // Footer'da kullanılacak kurum bilgisi
   const footerInstitution = activeInstitution || institutions[0];
 
@@ -369,7 +474,7 @@ export default function SettingsPage() {
           </div>
           <div>
             <h2 className="text-2xl font-bold text-slate-800">Ayarlar</h2>
-            <p className="text-gray-500">Kurum, API ve sistem ayarları</p>
+            <p className="text-gray-500">Kurum ve entegrasyon ayarları</p>
           </div>
         </div>
       </div>
@@ -406,12 +511,12 @@ export default function SettingsPage() {
         <AttendanceReportHub institutions={institutions} activeInstitutionId={activeInstitutionId} />
       ) : (
       <>
-      {/* Kurum Yönetimi */}
+      {/* Kurum: liste + seçili kurum bilgisi + logo (tek kart) */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <Building className="w-5 h-5 text-slate-600" />
-            <h3 className="text-lg font-semibold text-slate-800">Kurum Yönetimi</h3>
+            <h3 className="text-lg font-semibold text-slate-800">Kurum ayarları</h3>
           </div>
           {isSuperAdmin && (
             <button
@@ -425,6 +530,13 @@ export default function SettingsPage() {
                   website: '',
                   logo: ''
                 });
+                setNewInstSale({
+                  plan: 'professional',
+                  adminName: '',
+                  adminEmail: '',
+                  adminPassword: '',
+                  adminPhone: ''
+                });
               }}
               className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors flex items-center gap-2"
             >
@@ -434,17 +546,15 @@ export default function SettingsPage() {
           )}
         </div>
 
-        {/* Sadece Super Admin kurum ekleyebilir uyarısı */}
         {!isSuperAdmin && (
           <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
             <p className="text-sm text-blue-700 flex items-center gap-2">
               <AlertTriangle className="w-4 h-4" />
-              Kurum ekleme işlemi sadece Süper Admin tarafından yapılabilir. Siz kurum bilgilerinizi düzenleyebilirsiniz.
+              Kurum ekleme yalnızca süper yönetici ile yapılabilir. Kendi kurum bilgilerinizi buradan güncelleyebilirsiniz.
             </p>
           </div>
         )}
 
-        {/* Kurum Listesi */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
           {institutions.map((inst) => (
             <div
@@ -467,29 +577,32 @@ export default function SettingsPage() {
                   )}
                   <div>
                     <p className="font-medium text-slate-800">{inst.name}</p>
-                    <p className="text-sm text-gray-500">{inst.phone}</p>
+                    <p className="text-sm text-gray-500">{inst.phone || '—'}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
                   {(activeInstitutionId === inst.id || (!activeInstitutionId && inst === institutions[0])) && (
                     <CheckCircle className="w-5 h-5 text-green-500" />
                   )}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDelete(inst.id);
-                    }}
-                    className="p-1 text-red-500 hover:bg-red-100 rounded"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {isSuperAdmin && !isPrimaryOnlineVipInstitution(inst) && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(inst.id);
+                      }}
+                      className="p-1 text-red-500 hover:bg-red-100 rounded"
+                      type="button"
+                      title="Kurumu sil"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
           ))}
         </div>
 
-        {/* Yeni Kurum Formu */}
         {showAddForm && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6">
             <h4 className="font-semibold text-yellow-800 mb-4">Yeni Kurum Ekle</h4>
@@ -505,6 +618,16 @@ export default function SettingsPage() {
                 />
               </div>
               <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Kurum e-postası *</label>
+                <input
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                  placeholder="kurum@ornek.com"
+                />
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Telefon</label>
                 <input
                   type="tel"
@@ -512,6 +635,76 @@ export default function SettingsPage() {
                   onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Adres</label>
+                <input
+                  type="text"
+                  value={formData.address}
+                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Paket</label>
+                <select
+                  value={newInstSale.plan}
+                  onChange={(e) =>
+                    setNewInstSale((p) => ({
+                      ...p,
+                      plan: e.target.value as OrganizationPlan
+                    }))
+                  }
+                  className="w-full max-w-md px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                >
+                  <option value="starter">Starter</option>
+                  <option value="professional">Professional</option>
+                  <option value="enterprise">Enterprise</option>
+                </select>
+              </div>
+              <div className="md:col-span-2 border-t border-yellow-200 pt-3 mt-1">
+                <p className="text-sm font-medium text-yellow-900 mb-2">İlk kurum yöneticisi (müşteriye vereceğiniz giriş)</p>
+                <p className="text-xs text-yellow-800 mb-3">
+                  Öğrenci, koç veya öğretmen oluşturulmaz; yalnızca bu yönetici hesabı eklenir.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Yönetici adı soyadı *</label>
+                    <input
+                      type="text"
+                      value={newInstSale.adminName}
+                      onChange={(e) => setNewInstSale((p) => ({ ...p, adminName: e.target.value }))}
+                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Yönetici giriş e-postası *</label>
+                    <input
+                      type="email"
+                      value={newInstSale.adminEmail}
+                      onChange={(e) => setNewInstSale((p) => ({ ...p, adminEmail: e.target.value }))}
+                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Yönetici telefon (opsiyonel)</label>
+                    <input
+                      type="tel"
+                      value={newInstSale.adminPhone}
+                      onChange={(e) => setNewInstSale((p) => ({ ...p, adminPhone: e.target.value }))}
+                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">İlk şifre (min 6) *</label>
+                    <input
+                      type="password"
+                      value={newInstSale.adminPassword}
+                      onChange={(e) => setNewInstSale((p) => ({ ...p, adminPassword: e.target.value }))}
+                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
             <div className="flex gap-2 mt-4">
@@ -522,7 +715,17 @@ export default function SettingsPage() {
                 Ekle ve Aktif Yap
               </button>
               <button
-                onClick={() => setShowAddForm(false)}
+                type="button"
+                onClick={() => {
+                  setShowAddForm(false);
+                  setNewInstSale({
+                    plan: 'professional',
+                    adminName: '',
+                    adminEmail: '',
+                    adminPassword: '',
+                    adminPhone: ''
+                  });
+                }}
                 className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
               >
                 İptal
@@ -530,128 +733,161 @@ export default function SettingsPage() {
             </div>
           </div>
         )}
-      </div>
 
-      {/* Kurum Bilgileri */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-        <div className="flex items-center gap-3 mb-6">
-          <Settings className="w-5 h-5 text-slate-600" />
-          <h3 className="text-lg font-semibold text-slate-800">Kurum Bilgileri - {activeInstitution?.name}</h3>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Kurum Adı *</label>
-            <input
-              type="text"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-            />
+        <div className="border-t border-gray-100 pt-6 space-y-6">
+          <div className="flex items-center gap-3">
+            <Settings className="w-5 h-5 text-slate-600" />
+            <h3 className="text-lg font-semibold text-slate-800">Seçili kurum — {activeInstitution?.name || '—'}</h3>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Telefon</label>
-            <input
-              type="tel"
-              value={formData.phone}
-              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">E-posta</label>
-            <input
-              type="email"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Website</label>
-            <input
-              type="url"
-              value={formData.website}
-              onChange={(e) => setFormData({ ...formData, website: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-            />
-          </div>
-
-          <div className="md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Adres</label>
-            <textarea
-              value={formData.address}
-              onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-              rows={3}
-              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-            />
-          </div>
-        </div>
-
-        <button
-          onClick={handleSave}
-          className="mt-6 px-6 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors flex items-center gap-2"
-        >
-          {saved ? (
-            <>
-              <Check className="w-5 h-5" />
-              Kaydedildi!
-            </>
-          ) : (
-            <>
-              <Save className="w-5 h-5" />
-              Kaydet
-            </>
-          )}
-        </button>
-      </div>
-
-      {/* Logo Yükleme */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-        <div className="flex items-center gap-3 mb-6">
-          <Image className="w-5 h-5 text-slate-600" />
-          <h3 className="text-lg font-semibold text-slate-800">Kurum Logosu</h3>
-        </div>
-
-        <div className="flex items-center gap-6">
-          <div className="w-24 h-24 bg-slate-100 rounded-xl flex items-center justify-center overflow-hidden">
-            {formData.logo ? (
-              <img src={formData.logo} alt="Logo" className="w-full h-full object-contain" />
-            ) : (
-              <Building className="w-12 h-12 text-slate-400" />
-            )}
-          </div>
-          <div>
-            <input
-              type="file"
-              ref={fileInputRef}
-              accept="image/png,image/jpeg,image/svg+xml"
-              onChange={handleLogoUpload}
-              className="hidden"
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors flex items-center gap-2"
-              >
-                <Upload className="w-4 h-4" />
-                Logo Yükle
-              </button>
-              {formData.logo && (
-                <button
-                  onClick={handleRemoveLogo}
-                  className="px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors flex items-center gap-2"
-                >
-                  <X className="w-4 h-4" />
-                  Kaldır
-                </button>
-              )}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Kurum Adı *</label>
+              <input
+                type="text"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
             </div>
-            <p className="text-sm text-gray-500 mt-2">PNG, JPG veya SVG. Maksimum 2MB.</p>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Telefon</label>
+              <input
+                type="tel"
+                value={formData.phone}
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">E-posta</label>
+              <input
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Website</label>
+              <input
+                type="url"
+                value={formData.website}
+                onChange={(e) => setFormData({ ...formData, website: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Adres</label>
+              <textarea
+                value={formData.address}
+                onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                rows={3}
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+            </div>
           </div>
+
+          <div>
+            <div className="flex items-center gap-3 mb-4">
+              <Image className="w-5 h-5 text-slate-600" />
+              <h4 className="font-semibold text-slate-800">Kurum logosu</h4>
+            </div>
+            <div className="flex items-center gap-6">
+              <div className="w-24 h-24 bg-slate-100 rounded-xl flex items-center justify-center overflow-hidden">
+                {formData.logo ? (
+                  <img src={formData.logo} alt="Logo" className="w-full h-full object-contain" />
+                ) : (
+                  <Building className="w-12 h-12 text-slate-400" />
+                )}
+              </div>
+              <div>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept="image/png,image/jpeg,image/svg+xml"
+                  onChange={handleLogoUpload}
+                  className="hidden"
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors flex items-center gap-2"
+                  >
+                    <Upload className="w-4 h-4" />
+                    Logo Yükle
+                  </button>
+                  {formData.logo && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveLogo}
+                      className="px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors flex items-center gap-2"
+                    >
+                      <X className="w-4 h-4" />
+                      Kaldır
+                    </button>
+                  )}
+                </div>
+                <p className="text-sm text-gray-500 mt-2">PNG, JPG veya SVG. Maksimum 2MB.</p>
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSave}
+            className="px-6 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors flex items-center gap-2"
+          >
+            {saved ? (
+              <>
+                <Check className="w-5 h-5" />
+                Kaydedildi!
+              </>
+            ) : (
+              <>
+                <Save className="w-5 h-5" />
+                Kaydet
+              </>
+            )}
+          </button>
+
+          {isSuperAdmin && getAuthToken() && (
+            <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50/90 p-4 space-y-3">
+              <p className="text-sm font-semibold text-amber-950">Yetim kurum temizliği (süper yönetici)</p>
+              <p className="text-xs text-amber-900 leading-relaxed">
+                Uygulama açılışında oluşan yinelenen kurumlar için: hiçbir öğrenci, koç veya kullanıcı kaydına bağlı
+                olmayan kurumları veritabanından kaldırır. “Online VIP Ders ve Koçluk” adı veya 0850 303 40 14 ana hattı
+                olan satır silinmez.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={orphanPurgeBusy}
+                  onClick={() => void handleOrphanInstitutionsPreview()}
+                  className="px-3 py-2 text-sm rounded-lg border border-amber-400 text-amber-950 hover:bg-amber-100 disabled:opacity-50 inline-flex items-center gap-2"
+                >
+                  {orphanPurgeBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  Yetim kurumları say
+                </button>
+                <button
+                  type="button"
+                  disabled={orphanPurgeBusy || orphanPurgeCount == null || orphanPurgeCount === 0}
+                  onClick={() => void handleOrphanInstitutionsExecute()}
+                  className="px-3 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  Sayılan yetim kurumları sil
+                </button>
+                {orphanPurgeCount != null && (
+                  <span className="text-xs text-amber-950">Son önizleme: {orphanPurgeCount} kurum</span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -831,18 +1067,10 @@ export default function SettingsPage() {
                   <code className="bg-amber-100 px-1 rounded">Authorization: Bearer &lt;MEETING_CRON_SECRET veya CRON_SECRET&gt;</code>
                 </p>
               </div>
-              <ul className="list-disc list-inside space-y-1 text-xs text-amber-900">
-                <li>
-                  Günlük çalışma raporu hatırlatması: <code className="bg-amber-100 px-1 rounded">daily-report-reminders</code> +{' '}
-                  <code className="bg-amber-100 px-1 rounded">2026-05-03/05-14 WhatsApp SQL</code>.
-                </li>
-                <li>
-                  Koç şablonu: <code className="bg-amber-100 px-1 rounded">2026-coach-whatsapp-auto-schedule.sql</code>
-                </li>
-                <li>
-                  Görüşme modülü: <code className="bg-amber-100 px-1 rounded">2026-05-01-meetings-integration.sql</code>
-                </li>
-              </ul>
+              <p className="text-xs text-amber-900 pt-1">
+                Günlük rapor ve koç otomasyonları için Vercel Cron ve ilgili SQL migration dosyaları repoda{' '}
+                <code className="rounded bg-amber-100 px-1">sql/</code> klasöründedir.
+              </p>
             </div>
           </div>
         </div>
@@ -968,40 +1196,6 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Bildirim Ayarları */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-        <div className="flex items-center gap-3 mb-6">
-          <Bell className="w-5 h-5 text-slate-600" />
-          <h3 className="text-lg font-semibold text-slate-800">Bildirim Ayarları</h3>
-        </div>
-
-        <div className="space-y-4">
-          <label className="flex items-center justify-between p-4 bg-gray-50 rounded-lg cursor-pointer">
-            <div>
-              <p className="font-medium text-slate-800">E-posta Bildirimleri</p>
-              <p className="text-sm text-gray-500">Önemli güncellemelerde e-posta gönder</p>
-            </div>
-            <input type="checkbox" defaultChecked className="w-5 h-5 text-red-500 rounded" />
-          </label>
-
-          <label className="flex items-center justify-between p-4 bg-gray-50 rounded-lg cursor-pointer">
-            <div>
-              <p className="font-medium text-slate-800">WhatsApp Bildirimleri</p>
-              <p className="text-sm text-gray-500">Haftalık raporları otomatik gönder</p>
-            </div>
-            <input type="checkbox" defaultChecked className="w-5 h-5 text-red-500 rounded" />
-          </label>
-
-          <label className="flex items-center justify-between p-4 bg-gray-50 rounded-lg cursor-pointer">
-            <div>
-              <p className="font-medium text-slate-800">Düşük Başarı Uyarısı</p>
-              <p className="text-sm text-gray-500">Başarı %70'in altına düşünce uyar</p>
-            </div>
-            <input type="checkbox" defaultChecked className="w-5 h-5 text-red-500 rounded" />
-          </label>
-        </div>
-      </div>
-
       {/* Veri Yönetimi */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <div className="flex items-center gap-3 mb-6">
@@ -1047,32 +1241,6 @@ export default function SettingsPage() {
               Tüm Veriyi Sil
             </button>
           </div>
-        </div>
-      </div>
-
-      {/* Güvenlik */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-        <div className="flex items-center gap-3 mb-6">
-          <Shield className="w-5 h-5 text-slate-600" />
-          <h3 className="text-lg font-semibold text-slate-800">Güvenlik</h3>
-        </div>
-
-        <div className="space-y-4">
-          <button className="w-full px-4 py-3 bg-gray-50 text-slate-700 rounded-lg hover:bg-gray-100 transition-colors flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Key className="w-5 h-5" />
-              <span className="font-medium">Şifre Değiştir</span>
-            </div>
-            <span className="text-gray-400">→</span>
-          </button>
-
-          <button className="w-full px-4 py-3 bg-gray-50 text-slate-700 rounded-lg hover:bg-gray-100 transition-colors flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Shield className="w-5 h-5" />
-              <span className="font-medium">İki Aşamalı Doğrulama</span>
-            </div>
-            <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded">Kapalı</span>
-          </button>
         </div>
       </div>
 

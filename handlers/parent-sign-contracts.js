@@ -3,8 +3,10 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import {
   buildParentContractHtml,
+  buildRegistrationPlaceholderHtml,
   contractNumber,
   institutionCodeFromRow,
+  kayitDetayForHtml,
   normalizeDersSatirlari,
   normalizeSozlesmeTuru,
   randomToken,
@@ -115,7 +117,9 @@ export default async function handler(req, res) {
     try {
       const { data: row, error } = await supabaseAdmin
         .from('parent_sign_contracts')
-        .select('id,merged_html,contract_number,status,signed_at,institution_id,signature_png_base64')
+        .select(
+          'id,merged_html,contract_number,status,signed_at,institution_id,signature_png_base64,kayit_formu_json,program_adi,sinif,baslangic_tarihi,bitis_tarihi,ucret,taksit_sayisi'
+        )
         .eq('signing_token', signingToken)
         .maybeSingle();
       if (error) throw error;
@@ -130,6 +134,9 @@ export default async function handler(req, res) {
       const alreadySigned = statusSigned || hasSignedAt;
       const sigRaw = row.signature_png_base64 != null ? String(row.signature_png_base64).trim() : '';
       const signature_png_base64 = alreadySigned && sigRaw.length > 80 ? sigRaw : null;
+      const kj = row.kayit_formu_json;
+      const j = kj && typeof kj === 'object' ? kj : {};
+      const needs_student_form = String(j.phase || '') === 'needs_form';
       return res.status(200).json({
         data: {
           document_id: row.id,
@@ -138,7 +145,16 @@ export default async function handler(req, res) {
           already_signed: alreadySigned,
           signed_at: row.signed_at,
           institution_name,
-          signature_png_base64
+          signature_png_base64,
+          needs_student_form,
+          registration_hint: {
+            program_adi: row.program_adi,
+            sinif: row.sinif,
+            baslangic_tarihi: row.baslangic_tarihi,
+            bitis_tarihi: row.bitis_tarihi,
+            ucret: row.ucret,
+            taksit_sayisi: row.taksit_sayisi
+          }
         }
       });
     } catch (e) {
@@ -149,6 +165,144 @@ export default async function handler(req, res) {
   const hasBearer = String(req.headers.authorization || '').trim().startsWith('Bearer ');
   if (req.method === 'POST' && !hasBearer) {
     const body = parseBody(req);
+    const action = String(body.action || '').trim();
+
+    if (action === 'submit_registration_form') {
+      const token = String(body.signing_token || signingToken || '').trim();
+      if (!token) return res.status(400).json({ error: 'signing_token_required' });
+      if (!body.kvkk_form_ok) return res.status(400).json({ error: 'kvkk_form_required' });
+      const T = (k) => String(body[k] ?? '').trim();
+      try {
+        const { data: row, error: dErr } = await supabaseAdmin.from('parent_sign_contracts').select('*').eq('signing_token', token).maybeSingle();
+        if (dErr) throw dErr;
+        if (!row) return res.status(404).json({ error: 'not_found' });
+        const kj = row.kayit_formu_json;
+        const j = kj && typeof kj === 'object' ? kj : {};
+        if (String(j.phase || '') !== 'needs_form') {
+          return res.status(400).json({ error: 'registration_form_not_expected' });
+        }
+        const done = String(row.status || '').toLowerCase() === 'signed' || Boolean(row.signed_at);
+        if (done) return res.status(400).json({ error: 'already_processed' });
+
+        const ogrenci_ad = T('ogrenci_ad');
+        const ogrenci_soyad = T('ogrenci_soyad');
+        const veli_ad = T('veli_ad');
+        const veli_soyad = T('veli_soyad');
+        const tcDigits = T('tc_kimlik').replace(/\D/g, '');
+        const dogum_tarihi = T('dogum_tarihi').slice(0, 10);
+        const okul_adi = T('okul_adi');
+        const eposta = T('eposta');
+        const il = T('il');
+        const ilce = T('ilce');
+        const veli_tel = T('veli_tel').replace(/\D/g, '');
+        const ogrenci_tel = T('ogrenci_tel').replace(/\D/g, '');
+        const sinif_form = T('sinif_form');
+        const program_form = T('program_form');
+        const adres_aciklama = T('adres_aciklama');
+
+        if (!ogrenci_ad || !ogrenci_soyad || !veli_ad || !veli_soyad) {
+          return res.status(400).json({ error: 'names_required' });
+        }
+        if (tcDigits.length !== 11) return res.status(400).json({ error: 'tc_invalid' });
+        if (!dogum_tarihi) return res.status(400).json({ error: 'dogum_required' });
+        if (!okul_adi) return res.status(400).json({ error: 'okul_required' });
+        if (!eposta || !eposta.includes('@')) return res.status(400).json({ error: 'eposta_invalid' });
+        if (!il || !ilce) return res.status(400).json({ error: 'il_ilce_required' });
+        if (veli_tel.length < 10) return res.status(400).json({ error: 'veli_tel_invalid' });
+        if (ogrenci_tel.length < 10) return res.status(400).json({ error: 'ogrenci_tel_invalid' });
+
+        const sinif = pickFirstNonEmpty(sinif_form, row.sinif);
+        const program_adi = pickFirstNonEmpty(program_form, row.program_adi);
+        if (!sinif || !program_adi) return res.status(400).json({ error: 'sinif_program_required' });
+
+        const adresParts = [il, ilce, adres_aciklama].filter(Boolean);
+        const adres = adresParts.join(' · ') || String(row.adres || '');
+
+        const taksitN = Math.max(1, Math.min(48, Math.round(Number(row.taksit_sayisi) || 1)));
+        const ucretNum = Number(row.ucret);
+        const ort =
+          Number.isFinite(ucretNum) && ucretNum > 0 && taksitN > 0 ? Math.round(ucretNum / taksitN) : null;
+        const muhasebe_ozet = `Öğrenci: ${ogrenci_ad} ${ogrenci_soyad} | Program: ${program_adi} | Sınıf: ${sinif} | Toplam ücret: ${row.ucret} TL | Taksit: ${taksitN}${
+          ort != null ? ` | Yaklaşık taksit: ${ort} TL` : ''
+        } | E-posta: ${eposta} | Veli tel: ${veli_tel} | Öğr. tel: ${ogrenci_tel}`;
+
+        const nextJson = {
+          phase: 'ready_to_sign',
+          tc_kimlik: tcDigits,
+          dogum_tarihi,
+          okul_adi,
+          eposta,
+          il,
+          ilce,
+          veli_tel,
+          ogrenci_tel,
+          muhasebe_ozet,
+          form_submitted_at: new Date().toISOString()
+        };
+
+        const { data: inst, error: iErr } = await supabaseAdmin
+          .from('institutions')
+          .select('id,name')
+          .eq('id', row.institution_id)
+          .maybeSingle();
+        if (iErr) throw iErr;
+
+        const kurum_kodu = institutionCodeFromRow(inst || { id: row.institution_id });
+        const verifyToken = String(row.verify_token || '');
+        const base = publicBaseUrl();
+        const verifyUrl = verifyToken && base ? `${base}/verify-document?t=${encodeURIComponent(verifyToken)}` : '#';
+
+        const sozlesme_basligi = String(row.sozlesme_basligi || '').trim() || 'Satış sözleşmesi';
+
+        const merged_html = buildParentContractHtml({
+          ogrenci_ad,
+          ogrenci_soyad,
+          veli_ad,
+          veli_soyad,
+          telefon: veli_tel,
+          adres,
+          sinif,
+          program_adi,
+          baslangic_tarihi: String(row.baslangic_tarihi || '').trim().slice(0, 10),
+          bitis_tarihi: String(row.bitis_tarihi || '').trim().slice(0, 10),
+          haftalik_ders_saati: Number(row.haftalik_ders_saati) || 0,
+          ucret: Number(row.ucret) || 0,
+          taksit_sayisi: taksitN,
+          kurum_kodu,
+          contract_number: String(row.contract_number || ''),
+          kurum_adi: inst?.name || '',
+          verify_url: verifyUrl || '#',
+          document_title: sozlesme_basligi,
+          extra_detail_plain: String(row.sablon_ek_detay_snapshot || ''),
+          ders_satirlari: row.ders_programi_snapshot,
+          kayit_formu_detay: nextJson
+        });
+
+        const now = new Date().toISOString();
+        const { error: uErr } = await supabaseAdmin
+          .from('parent_sign_contracts')
+          .update({
+            ogrenci_ad,
+            ogrenci_soyad,
+            veli_ad,
+            veli_soyad,
+            telefon: veli_tel,
+            adres,
+            sinif,
+            program_adi,
+            kayit_formu_json: nextJson,
+            merged_html,
+            updated_at: now
+          })
+          .eq('id', row.id);
+        if (uErr) throw uErr;
+        return res.status(200).json({ ok: true });
+      } catch (e) {
+        console.error('[parent-sign-contracts registration]', errorMessage(e), e);
+        return res.status(500).json({ error: errorMessage(e) });
+      }
+    }
+
     const token = String(body.signing_token || signingToken || '').trim();
     if (!token) return res.status(400).json({ error: 'signing_token_required' });
     if (!body.kvkk_ok || !body.contract_ok) return res.status(400).json({ error: 'confirmations_required' });
@@ -157,11 +311,16 @@ export default async function handler(req, res) {
     try {
       const { data: row, error: dErr } = await supabaseAdmin
         .from('parent_sign_contracts')
-        .select('id,status,signed_at')
+        .select('id,status,signed_at,kayit_formu_json')
         .eq('signing_token', token)
         .maybeSingle();
       if (dErr) throw dErr;
       if (!row) return res.status(404).json({ error: 'not_found' });
+      const kj = row.kayit_formu_json;
+      const j = kj && typeof kj === 'object' ? kj : {};
+      if (String(j.phase || '') === 'needs_form') {
+        return res.status(400).json({ error: 'registration_form_required_first' });
+      }
       const done = String(row.status || '').toLowerCase() === 'signed' || Boolean(row.signed_at);
       if (done) return res.status(200).json({ ok: true, duplicate: true });
 
@@ -421,7 +580,8 @@ export default async function handler(req, res) {
           verify_url: verifyUrl || '#',
           document_title: sozlesme_basligi,
           extra_detail_plain: sablon_ek_detay_snapshot,
-          ders_satirlari: dersSnapshot
+          ders_satirlari: dersSnapshot,
+          kayit_formu_detay: existing.kayit_formu_json || {}
         });
       }
 
@@ -511,12 +671,14 @@ export default async function handler(req, res) {
       const uParts = userRow ? splitAdSoyad(userRow.name) : { ad: '', soyad: '' };
       const velParts = studentRow ? splitAdSoyad(studentRow.parent_name || '') : { ad: '', soyad: '' };
 
-      const ogrenci_ad = pickFirstNonEmpty(body.ogrenci_ad, stParts.ad, uParts.ad);
-      const ogrenci_soyad = pickFirstNonEmpty(body.ogrenci_soyad, stParts.soyad, uParts.soyad);
-      const veli_ad = pickFirstNonEmpty(body.veli_ad, velParts.ad);
-      const veli_soyad = pickFirstNonEmpty(body.veli_soyad, velParts.soyad);
-      const telefon = pickFirstNonEmpty(body.telefon, studentRow?.parent_phone, studentRow?.phone, userRow?.phone);
-      const adres = String(body.adres || '').trim();
+      const regFormFirst = Boolean(body.registration_student_form);
+
+      let ogrenci_ad = pickFirstNonEmpty(body.ogrenci_ad, stParts.ad, uParts.ad);
+      let ogrenci_soyad = pickFirstNonEmpty(body.ogrenci_soyad, stParts.soyad, uParts.soyad);
+      let veli_ad = pickFirstNonEmpty(body.veli_ad, velParts.ad);
+      let veli_soyad = pickFirstNonEmpty(body.veli_soyad, velParts.soyad);
+      let telefon = pickFirstNonEmpty(body.telefon, studentRow?.parent_phone, studentRow?.phone, userRow?.phone);
+      let adres = String(body.adres || '').trim();
       const sinif = pickFirstNonEmpty(
         body.sinif,
         studentRow && studentRow.class_level != null && studentRow.class_level !== ''
@@ -527,7 +689,20 @@ export default async function handler(req, res) {
       const program_adi = pickFirstNonEmpty(body.program_adi, presetRow?.program_adi);
       const bas = String(body.baslangic_tarihi || '').trim().slice(0, 10);
       const bit = String(body.bitis_tarihi || '').trim().slice(0, 10);
-      if (!ogrenci_ad || !ogrenci_soyad || !veli_ad || !veli_soyad || !telefon || !sinif || !program_adi || !bas || !bit) {
+
+      if (regFormFirst) {
+        if (!String(ogrenci_ad).trim()) ogrenci_ad = 'Kayıt';
+        if (!String(ogrenci_soyad).trim()) ogrenci_soyad = 'formu bekleniyor';
+        if (!String(veli_ad).trim()) veli_ad = 'Veli';
+        if (!String(veli_soyad).trim()) veli_soyad = 'formu bekleniyor';
+        if (!String(telefon).trim()) telefon = '05000000000';
+        if (!adres) adres = 'Kayıt formunda tamamlanacak';
+      }
+
+      if (!sinif || !program_adi || !bas || !bit) {
+        return res.status(400).json({ error: 'fields_required' });
+      }
+      if (!regFormFirst && (!ogrenci_ad || !ogrenci_soyad || !veli_ad || !veli_soyad || !telefon)) {
         return res.status(400).json({ error: 'fields_required' });
       }
 
@@ -587,28 +762,45 @@ export default async function handler(req, res) {
       const base = publicBaseUrl();
       const verifyUrl = base ? `${base}/verify-document?t=${encodeURIComponent(verifyToken)}` : '';
 
-      const merged_html = buildParentContractHtml({
-        ogrenci_ad,
-        ogrenci_soyad,
-        veli_ad,
-        veli_soyad,
-        telefon,
-        adres,
-        sinif,
-        program_adi,
-        baslangic_tarihi: bas,
-        bitis_tarihi: bit,
-        haftalik_ders_saati: hours,
-        ucret: fee,
-        taksit_sayisi,
-        kurum_kodu,
-        contract_number: cnum,
-        kurum_adi: inst?.name || '',
-        verify_url: verifyUrl || '#',
-        document_title: sozlesme_basligi,
-        extra_detail_plain: sablon_ek_detay_snapshot,
-        ders_satirlari: dersSnapshot
-      });
+      let merged_html;
+      let kayit_formu_json = {};
+      if (regFormFirst) {
+        merged_html = buildRegistrationPlaceholderHtml({
+          kurum_adi: inst?.name || '',
+          contract_number: cnum,
+          program_adi,
+          sinif,
+          baslangic_tarihi: bas,
+          bitis_tarihi: bit,
+          ucret: fee,
+          taksit_sayisi
+        });
+        kayit_formu_json = { phase: 'needs_form' };
+      } else {
+        merged_html = buildParentContractHtml({
+          ogrenci_ad,
+          ogrenci_soyad,
+          veli_ad,
+          veli_soyad,
+          telefon,
+          adres,
+          sinif,
+          program_adi,
+          baslangic_tarihi: bas,
+          bitis_tarihi: bit,
+          haftalik_ders_saati: hours,
+          ucret: fee,
+          taksit_sayisi,
+          kurum_kodu,
+          contract_number: cnum,
+          kurum_adi: inst?.name || '',
+          verify_url: verifyUrl || '#',
+          document_title: sozlesme_basligi,
+          extra_detail_plain: sablon_ek_detay_snapshot,
+          ders_satirlari: dersSnapshot,
+          kayit_formu_detay: {}
+        });
+      }
 
       const row = {
         institution_id: institutionId,
@@ -639,6 +831,7 @@ export default async function handler(req, res) {
         student_id: studentRow ? studentId : null,
         ogrenci_user_id: ogrenciUserId || null,
         ders_programi_snapshot: dersSnapshot,
+        kayit_formu_json,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };

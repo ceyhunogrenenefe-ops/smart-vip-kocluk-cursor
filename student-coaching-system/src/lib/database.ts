@@ -1,7 +1,13 @@
 // Türkçe: Veritabanı Servis Katmanı - Supabase Entegrasyonu
 import { supabase, Database } from './supabase';
 import { apiFetch } from './session';
-import type { StudentTeacherLessonQuota } from '../types';
+import type { AICoachSuggestion, ExamResult, ReadingLog, StudentTeacherLessonQuota } from '../types';
+import {
+  aiSuggestionToPayload,
+  examResultFromRow,
+  examResultToUpsertRow,
+  readingLogToUpsertRow
+} from './appSyncMappers';
 
 // Tip tanımları
 type UserRow = Database['public']['Tables']['users']['Row'];
@@ -12,6 +18,8 @@ type WeeklyEntryRow = Database['public']['Tables']['weekly_entries']['Row'];
 type BookReadingRow = Database['public']['Tables']['book_readings']['Row'];
 type WrittenExamRow = Database['public']['Tables']['written_exams']['Row'];
 type ExamResultRow = Database['public']['Tables']['exam_results']['Row'];
+type ReadingLogRow = Database['public']['Tables']['reading_logs']['Row'];
+type AiCoachSuggestionRow = Database['public']['Tables']['ai_coach_suggestions']['Row'];
 
 /** GET /api/quota yanıt gövdesi (data sarmalayıcısı apiJson tarafından çözülür) */
 export interface QuotaSnapshot {
@@ -396,6 +404,37 @@ class DatabaseService {
     return data;
   }
 
+  /** Süper admin: kurum sil (service role — tarayıcı RLS’inden bağımsız) */
+  async deleteInstitution(id: string): Promise<void> {
+    await this.apiJson<{ ok: boolean }>(`/api/institutions?id=${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+  }
+
+  /** Süper admin: users/students/coaches’ta geçmeyen kurum sayısı (önizleme) */
+  async institutionsPurgePreview(): Promise<{
+    dry_run: boolean;
+    candidate_count: number;
+    sample_ids: string[];
+  }> {
+    return this.apiJson('/api/institutions/purge', {
+      method: 'POST',
+      body: JSON.stringify({ dryRun: true })
+    });
+  }
+
+  /** Süper admin: yetim kurumları sil */
+  async institutionsPurgeExecute(): Promise<{
+    dry_run: boolean;
+    deleted: number;
+    deleted_ids_sample?: string[];
+  }> {
+    return this.apiJson('/api/institutions/purge', {
+      method: 'POST',
+      body: JSON.stringify({ execute: true })
+    });
+  }
+
   // ========== HAFTALIK KAYITLAR ==========
 
   // Haftalık kayıtları getir
@@ -490,16 +529,31 @@ class DatabaseService {
 
   // ========== DENEME SINAVLARI ==========
 
-  // Deneme sınav kayıtlarını getir
-  async getExamResults(studentId?: string): Promise<ExamResultRow[]> {
-    let query = supabase.from('exam_results').select('*').order('created_at', { ascending: false });
-
-    if (studentId) {
-      query = query.eq('student_id', studentId);
+  /** Öğrenci id listesi için deneme sonuçları (chunk’lı IN sorgusu). */
+  async getExamResultsForStudents(studentIds: string[]): Promise<ExamResultRow[]> {
+    if (!studentIds.length) return [];
+    const CHUNK = 100;
+    const acc: ExamResultRow[] = [];
+    for (let i = 0; i < studentIds.length; i += CHUNK) {
+      const chunk = studentIds.slice(i, i + CHUNK);
+      const { data, error } = await supabase
+        .from('exam_results')
+        .select('*')
+        .in('student_id', chunk)
+        .order('created_at', { ascending: false });
+      if (error) {
+        console.error('getExamResultsForStudents:', error);
+        throw error;
+      }
+      if (data?.length) acc.push(...data);
     }
+    return acc;
+  }
 
-    const { data, error } = await query;
-
+  // Deneme sınav kayıtlarını getir (tek öğrenci veya tümü)
+  async getExamResults(studentId?: string): Promise<ExamResultRow[]> {
+    if (studentId) return this.getExamResultsForStudents([studentId]);
+    const { data, error } = await supabase.from('exam_results').select('*').order('created_at', { ascending: false });
     if (error) {
       console.error('Deneme sınav kayıtlarını getirme hatası:', error);
       throw error;
@@ -507,27 +561,166 @@ class DatabaseService {
     return data || [];
   }
 
-  // Deneme sınav oluştur
-  async createExamResult(exam: Omit<ExamResultRow, 'id' | 'created_at' | 'updated_at'>): Promise<ExamResultRow> {
-    const id = `result-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  /** Tam `ExamResult` + `app_payload` ile upsert (tarayıcılar arası senkron). */
+  async upsertExamResultFromApp(exam: ExamResult, institutionId: string | null): Promise<ExamResultRow> {
     const now = new Date().toISOString();
-
-    const { data, error } = await supabase
-      .from('exam_results')
-      .insert({
-        ...exam,
-        id,
-        created_at: now,
-        updated_at: now
-      })
-      .select()
-      .single();
-
+    const { data: existing } = await supabase.from('exam_results').select('created_at').eq('id', exam.id).maybeSingle();
+    const createdAt = (existing as { created_at?: string } | null)?.created_at || exam.createdAt || now;
+    const row = {
+      ...examResultToUpsertRow(exam, institutionId),
+      created_at: createdAt
+    };
+    const { data, error } = await supabase.from('exam_results').upsert(row, { onConflict: 'id' }).select().single();
     if (error) {
-      console.error('Deneme sınav oluşturma hatası:', error);
+      console.error('upsertExamResultFromApp:', error);
       throw error;
     }
-    return data;
+    return data as ExamResultRow;
+  }
+
+  async updateExamResultFromApp(id: string, partial: Partial<ExamResult>): Promise<void> {
+    const { data: row, error: qe } = await supabase.from('exam_results').select('*').eq('id', id).maybeSingle();
+    if (qe) throw new Error(qe.message);
+    if (!row) throw new Error('Deneme kaydı bulunamadı');
+    const base = examResultFromRow(row as ExamResultRow);
+    if (!base) throw new Error('Deneme kaydı çözümlenemedi');
+    const next: ExamResult = {
+      ...base,
+      ...partial,
+      id: base.id,
+      studentId: base.studentId,
+      subjects: partial.subjects ?? base.subjects,
+      createdAt: base.createdAt
+    };
+    await this.upsertExamResultFromApp(next, row.institution_id);
+  }
+
+  async deleteExamResultById(id: string): Promise<void> {
+    const { error } = await supabase.from('exam_results').delete().eq('id', id);
+    if (error) throw new Error(error.message);
+  }
+
+  async getReadingLogsForStudents(studentIds: string[]): Promise<ReadingLogRow[]> {
+    if (!studentIds.length) return [];
+    const CHUNK = 100;
+    const acc: ReadingLogRow[] = [];
+    for (let i = 0; i < studentIds.length; i += CHUNK) {
+      const chunk = studentIds.slice(i, i + CHUNK);
+      const { data, error } = await supabase
+        .from('reading_logs')
+        .select('*')
+        .in('student_id', chunk)
+        .order('date', { ascending: false });
+      if (error) {
+        console.error('getReadingLogsForStudents:', error);
+        throw error;
+      }
+      if (data?.length) acc.push(...data);
+    }
+    return acc;
+  }
+
+  async upsertReadingLogFromApp(log: ReadingLog, institutionId: string | null): Promise<ReadingLogRow> {
+    const { data: existing } = await supabase.from('reading_logs').select('created_at').eq('id', log.id).maybeSingle();
+    const createdAt = (existing as { created_at?: string } | null)?.created_at || log.createdAt || new Date().toISOString();
+    const row = { ...readingLogToUpsertRow(log, institutionId), created_at: createdAt };
+    const { data, error } = await supabase.from('reading_logs').upsert(row, { onConflict: 'id' }).select().single();
+    if (error) {
+      console.error('upsertReadingLogFromApp:', error);
+      throw error;
+    }
+    return data as ReadingLogRow;
+  }
+
+  async deleteReadingLogById(id: string): Promise<void> {
+    const { error } = await supabase.from('reading_logs').delete().eq('id', id);
+    if (error) throw new Error(error.message);
+  }
+
+  async getAiCoachSuggestionsForStudents(studentIds: string[]): Promise<AiCoachSuggestionRow[]> {
+    if (!studentIds.length) return [];
+    const CHUNK = 100;
+    const acc: AiCoachSuggestionRow[] = [];
+    for (let i = 0; i < studentIds.length; i += CHUNK) {
+      const chunk = studentIds.slice(i, i + CHUNK);
+      const { data, error } = await supabase
+        .from('ai_coach_suggestions')
+        .select('*')
+        .in('student_id', chunk)
+        .order('created_at', { ascending: false });
+      if (error) {
+        console.error('getAiCoachSuggestionsForStudents:', error);
+        throw error;
+      }
+      if (data?.length) acc.push(...data);
+    }
+    return acc;
+  }
+
+  async upsertAiCoachSuggestion(s: AICoachSuggestion, institutionId: string | null): Promise<void> {
+    const { error } = await supabase.from('ai_coach_suggestions').upsert(
+      {
+        id: s.id,
+        student_id: s.studentId,
+        institution_id: institutionId,
+        payload: aiSuggestionToPayload(s),
+        created_at: s.createdAt
+      },
+      { onConflict: 'id' }
+    );
+    if (error) {
+      console.error('upsertAiCoachSuggestion:', error);
+      throw error;
+    }
+  }
+
+  async updateAiCoachSuggestionPayload(id: string, s: AICoachSuggestion): Promise<void> {
+    const { error } = await supabase
+      .from('ai_coach_suggestions')
+      .update({ payload: aiSuggestionToPayload({ ...s, id }) })
+      .eq('id', id);
+    if (error) throw new Error(error.message);
+  }
+
+  async deleteAiCoachSuggestion(id: string): Promise<void> {
+    const { error } = await supabase.from('ai_coach_suggestions').delete().eq('id', id);
+    if (error) throw new Error(error.message);
+  }
+
+  async getInstitutionWrittenExamPrefs(institutionId: string): Promise<{
+    global_subjects: string[];
+    per_student_subjects: Record<string, string[]>;
+  } | null> {
+    const { data, error } = await supabase
+      .from('institution_written_exam_prefs')
+      .select('*')
+      .eq('institution_id', institutionId)
+      .maybeSingle();
+    if (error || !data) return null;
+    const g = data.global_subjects;
+    const p = data.per_student_subjects;
+    return {
+      global_subjects: Array.isArray(g) ? (g as string[]) : [],
+      per_student_subjects:
+        p && typeof p === 'object' && !Array.isArray(p) ? (p as Record<string, string[]>) : {}
+    };
+  }
+
+  async upsertInstitutionWrittenExamPrefs(
+    institutionId: string,
+    prefs: { global_subjects: string[]; per_student_subjects: Record<string, string[]> }
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    const { error } = await supabase.from('institution_written_exam_prefs').upsert(
+      {
+        institution_id: institutionId,
+        global_subjects: prefs.global_subjects,
+        per_student_subjects: prefs.per_student_subjects,
+        updated_at: now
+      },
+      { onConflict: 'institution_id' }
+    );
+    if (error) throw new Error(error.message);
   }
 
   // ========== KONULAR ==========
@@ -681,15 +874,21 @@ class DatabaseService {
   // Veritabanı başlat (tabloları oluştur)
   async initializeDatabase(): Promise<void> {
     try {
-      // Önce default kurum kontrol et
-      const { data: existingInst } = await supabase
+      /**
+       * Varsayılan kurumları yalnızca tablo tamamen boşken ekle.
+       * İsimle arama (Smart/VIP) kaldırıldı: admin isim değiştirince veya kopya satırlar olunca
+       * her F5’te yeni kurum üretilmesine yol açıyordu.
+       */
+      const { data: anyInst, error: anyInstErr } = await supabase
         .from('institutions')
         .select('id')
-        .eq('name', 'Smart Koçluk Sistemi')
-        .maybeSingle();
-
-      if (!existingInst) {
-        // Default kurum oluştur
+        .limit(1);
+      if (anyInstErr) {
+        console.warn(
+          '[initializeDatabase] Kurum listesi okunamadı, varsayılan kurum oluşturulmayacak:',
+          anyInstErr.message || anyInstErr
+        );
+      } else if (!anyInst?.length) {
         await this.createInstitution({
           name: 'Smart Koçluk Sistemi',
           email: 'info@smartkocluk.com',
@@ -700,15 +899,6 @@ class DatabaseService {
           plan: 'enterprise',
           is_active: true
         });
-      }
-
-      const { data: existingVip } = await supabase
-        .from('institutions')
-        .select('id')
-        .eq('name', 'Online VIP Ders ve Koçluk')
-        .maybeSingle();
-
-      if (!existingVip) {
         await this.createInstitution({
           name: 'Online VIP Ders ve Koçluk',
           email: 'info@onlinevipders.com',
@@ -744,7 +934,9 @@ class DatabaseService {
         });
       }
 
-      console.log('Veritabanı başarıyla başlatıldı');
+      if (import.meta.env.DEV) {
+        console.debug('[db] Veritabanı başarıyla başlatıldı');
+      }
     } catch (error) {
       console.error('Veritabanı başlatma hatası:', error);
     }

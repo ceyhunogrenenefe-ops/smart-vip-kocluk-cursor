@@ -1,4 +1,16 @@
 import type { WeeklyEntry } from '../types';
+import type { CoachWeeklyGoalRow } from './weeklyPlannerApi';
+import {
+  coachSubjectProratedTargetsInRange,
+  totalCoachQuestionTargetsInRange,
+} from './coachGoalAnalytics';
+
+/** Analiz aralığında koç soru hedefleri (oransal toplam/ders) */
+export type CoachInsightRange = {
+  rangeFrom: string;
+  rangeTo: string;
+  goals: CoachWeeklyGoalRow[];
+};
 
 /** Okunan sayfa: önce pages_read (UI), yoksa legacy reading_minutes */
 export function effectivePagesRead(e: WeeklyEntry): number {
@@ -48,18 +60,36 @@ export type StudyInsightSummary = {
   subjectRows: SubjectInsightRow[];
 };
 
-export function computeStudyInsightSummary(entries: WeeklyEntry[]): StudyInsightSummary {
-  const totalTarget = entries.reduce((s, e) => s + e.targetQuestions, 0);
+export function computeStudyInsightSummary(
+  entries: WeeklyEntry[],
+  coachRange?: CoachInsightRange | null
+): StudyInsightSummary {
+  const entryTargetSum = entries.reduce((s, e) => s + e.targetQuestions, 0);
   const totalSolved = entries.reduce((s, e) => s + e.solvedQuestions, 0);
   const totalCorrect = entries.reduce((s, e) => s + e.correctAnswers, 0);
   const totalWrong = entries.reduce((s, e) => s + e.wrongAnswers, 0);
   const totalBlank = entries.reduce((s, e) => s + e.blankAnswers, 0);
+
+  let coachTotal = 0;
+  if (coachRange?.goals?.length && coachRange.rangeFrom && coachRange.rangeTo) {
+    coachTotal = totalCoachQuestionTargetsInRange(
+      coachRange.goals,
+      coachRange.rangeFrom,
+      coachRange.rangeTo
+    );
+  }
+  const totalTarget = coachTotal > 0 ? coachTotal : entryTargetSum;
   const realizationRate = totalTarget > 0 ? Math.round((totalSolved / totalTarget) * 100) : 0;
   const successRate = totalSolved > 0 ? Math.round((totalCorrect / totalSolved) * 100) : 0;
 
   const totalScreenMinutes = entries.reduce((s, e) => s + effectiveScreenMinutes(e), 0);
   const totalPagesRead = entries.reduce((s, e) => s + effectivePagesRead(e), 0);
   const activeDays = new Set(entries.map((e) => String(e.date).slice(0, 10))).size;
+
+  const coachBySub =
+    coachTotal > 0 && coachRange
+      ? coachSubjectProratedTargetsInRange(coachRange.goals, coachRange.rangeFrom, coachRange.rangeTo)
+      : {};
 
   const bySub: Record<string, SubjectInsightRow> = {};
   for (const e of entries) {
@@ -82,11 +112,16 @@ export function computeStudyInsightSummary(entries: WeeklyEntry[]): StudyInsight
     bySub[sub].wrong += e.wrongAnswers;
     bySub[sub].blank += e.blankAnswers;
   }
-  const subjectRows = Object.values(bySub).map((row) => ({
-    ...row,
-    successRate: row.solved > 0 ? Math.round((row.correct / row.solved) * 100) : 0,
-    realizationRate: row.target > 0 ? Math.round((row.solved / row.target) * 100) : 0,
-  }));
+  const subjectRows = Object.values(bySub).map((row) => {
+    const ct = coachBySub[row.subject];
+    const displayTarget = ct > 0 ? ct : row.target;
+    return {
+      ...row,
+      target: displayTarget,
+      successRate: row.solved > 0 ? Math.round((row.correct / row.solved) * 100) : 0,
+      realizationRate: displayTarget > 0 ? Math.round((row.solved / displayTarget) * 100) : 0,
+    };
+  });
   subjectRows.sort((a, b) => b.solved - a.solved);
 
   return {

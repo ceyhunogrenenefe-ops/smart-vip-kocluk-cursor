@@ -463,10 +463,10 @@ export default function PDFImport() {
   };
 
   // Seçili sonuçları sisteme ekle
-  const importSelectedResults = () => {
+  const importSelectedResults = async () => {
     let count = 0;
 
-    studentMatches.forEach(match => {
+    for (const match of studentMatches) {
       if (match.id && match.matchedResult) {
         const examData = {
           id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
@@ -485,10 +485,10 @@ export default function PDFImport() {
           createdAt: new Date().toISOString()
         };
 
-        addExamResult(examData as any);
+        await addExamResult(examData as any);
         count++;
       }
-    });
+    }
 
     setImportedCount(count);
     setUploadedFiles([]);

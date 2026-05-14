@@ -1,4 +1,5 @@
 import { requireAuth, hasInstitutionAccess } from '../api/_lib/auth.js';
+import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { getTeacherGroupClassStudentScope } from '../api/_lib/teacher-class-scope.js';
 import { applyStudentIdsToCoachFk, rebuildCoachStudentIdsFromFk } from '../api/_lib/sync-coach-students.js';
@@ -61,13 +62,31 @@ const assertCoachVisibility = (actor, coach) => {
 
 export default async function handler(req, res) {
   try {
-    const actor = requireAuth(req);
+    let actor = requireAuth(req);
+    actor = await enrichStudentActor(actor);
 
     if (actor.role === 'teacher' && req.method !== 'GET') {
       return res.status(403).json({ error: 'forbidden' });
     }
 
     if (req.method === 'GET') {
+      /** Öğrenci: yalnızca kendi kartındaki `coach_id` (tam liste yok — panel / AppContext yükü için) */
+      if (actor.role === 'student') {
+        const sid = String(actor.student_id || '').trim();
+        if (!sid) return res.status(200).json({ data: [] });
+        const { data: stu, error: stuErr } = await supabaseAdmin
+          .from('students')
+          .select('coach_id')
+          .eq('id', sid)
+          .maybeSingle();
+        if (stuErr) throw stuErr;
+        const cid = stu?.coach_id ? String(stu.coach_id).trim() : '';
+        if (!cid) return res.status(200).json({ data: [] });
+        const { data: one, error: cErr } = await supabaseAdmin.from('coaches').select('*').eq('id', cid).maybeSingle();
+        if (cErr) throw cErr;
+        return res.status(200).json({ data: one ? [one] : [] });
+      }
+
       let query = supabaseAdmin.from('coaches').select('*').order('created_at', { ascending: false });
       if (actor.role === 'admin') {
         if (!actor.institution_id) return res.status(200).json({ data: [] });
@@ -88,7 +107,6 @@ export default async function handler(req, res) {
         query = query.eq('institution_id', actor.institution_id).in('id', coachIds);
       }
       if (actor.role === 'coach') query = query.eq('id', actor.coach_id);
-      if (actor.role === 'student') return res.status(403).json({ error: 'forbidden' });
       const { data, error } = await query;
       if (error) throw error;
       return res.status(200).json({ data: data || [] });

@@ -6,6 +6,9 @@ import { formatClassLevelLabel } from '../types';
 import { userRoleTags } from '../config/rolePermissions';
 import { resolveStudentRecordId } from '../lib/coachResolve';
 import { eachDayOfInterval, parseISO, differenceInCalendarDays } from 'date-fns';
+import { fetchCoachWeeklyGoalsInRange, type CoachWeeklyGoalRow } from '../lib/weeklyPlannerApi';
+import { getAuthToken } from '../lib/session';
+import { coachSubjectProratedTargetsInRange, totalCoachQuestionTargetsInRange } from '../lib/coachGoalAnalytics';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import {
@@ -77,6 +80,8 @@ export default function Analytics() {
   /** Tüm kayıtlar; grafikte tarih ekseni için son 90 gün kullanılır */
   const [useAllTime, setUseAllTime] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  /** Tek öğrenci + tarih aralığı: analiz KPI ve grafiklerde koç hedefi (oransal) */
+  const [coachGoalsForAnalytics, setCoachGoalsForAnalytics] = useState<CoachWeeklyGoalRow[]>([]);
   const reportRef = useRef<HTMLDivElement | null>(null);
 
   const tags = useMemo(() => (effectiveUser ? userRoleTags(effectiveUser) : []), [effectiveUser]);
@@ -94,6 +99,34 @@ export default function Analytics() {
       )?.trim() || '';
     if (sid) setSelectedStudentId((prev) => prev || sid);
   }, [isStudentUi, effectiveUser, students]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedStudentId || useAllTime || !getAuthToken()) {
+      setCoachGoalsForAnalytics([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+    const rf = rangeStart.slice(0, 10);
+    const rt = rangeEnd.slice(0, 10);
+    if (!rf || !rt || rf > rt) {
+      setCoachGoalsForAnalytics([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+    fetchCoachWeeklyGoalsInRange(selectedStudentId, rf, rt)
+      .then((data) => {
+        if (!cancelled) setCoachGoalsForAnalytics(data);
+      })
+      .catch(() => {
+        if (!cancelled) setCoachGoalsForAnalytics([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedStudentId, useAllTime, rangeStart, rangeEnd]);
 
   const selectedStudent = students.find(s => s.id === selectedStudentId);
 
@@ -177,22 +210,47 @@ export default function Analytics() {
     return sorted.slice(0, 12);
   }, [scopedWrittenScores]);
 
-  const computeStatsFromEntries = (entries: typeof weeklyEntries) => {
-    const totalTarget = entries.reduce((sum, e) => sum + e.targetQuestions, 0);
+  const computeStatsFromEntries = (
+    entries: typeof weeklyEntries,
+    coachGoals?: CoachWeeklyGoalRow[],
+    rangeFrom?: string,
+    rangeTo?: string
+  ) => {
+    const entryTarget = entries.reduce((sum, e) => sum + e.targetQuestions, 0);
     const totalSolved = entries.reduce((sum, e) => sum + e.solvedQuestions, 0);
     const totalCorrect = entries.reduce((sum, e) => sum + e.correctAnswers, 0);
     const totalWrong = entries.reduce((sum, e) => sum + e.wrongAnswers, 0);
     const totalBlank = entries.reduce((sum, e) => sum + e.blankAnswers, 0);
+    let totalTarget = entryTarget;
+    if (coachGoals?.length && rangeFrom && rangeTo) {
+      const ct = totalCoachQuestionTargetsInRange(coachGoals, rangeFrom, rangeTo);
+      if (ct > 0) totalTarget = ct;
+    }
     const realizationRate = totalTarget > 0 ? Math.round((totalSolved / totalTarget) * 100) : 0;
     const successRate = totalSolved > 0 ? Math.round((totalCorrect / totalSolved) * 100) : 0;
     return { totalTarget, totalSolved, totalCorrect, totalWrong, totalBlank, realizationRate, successRate };
   };
 
+  const coachRangeYmd = useMemo(() => {
+    if (useAllTime) return null;
+    const rf = rangeStart.slice(0, 10);
+    const rt = rangeEnd.slice(0, 10);
+    if (!rf || !rt || rf > rt) return null;
+    return { rangeFrom: rf, rangeTo: rt };
+  }, [useAllTime, rangeStart, rangeEnd]);
+
   // Öğrenci istatistikleri
   const studentStats = useMemo(() => {
     if (!selectedStudentId) return null;
-    return computeStatsFromEntries(scopedEntries);
-  }, [selectedStudentId, scopedEntries]);
+    const rf = coachRangeYmd?.rangeFrom;
+    const rt = coachRangeYmd?.rangeTo;
+    return computeStatsFromEntries(
+      scopedEntries,
+      coachGoalsForAnalytics,
+      rf ?? undefined,
+      rt ?? undefined
+    );
+  }, [selectedStudentId, scopedEntries, coachGoalsForAnalytics, coachRangeYmd]);
 
   // Okuma istatistikleri
   const readingStats = useMemo(() => {
@@ -230,6 +288,18 @@ export default function Analytics() {
 
   // Ders bazlı başarı analizi
   const subjectAnalysis = useMemo(() => {
+    const coachBySub =
+      selectedStudentId &&
+      !useAllTime &&
+      coachGoalsForAnalytics.length > 0 &&
+      coachRangeYmd
+        ? coachSubjectProratedTargetsInRange(
+            coachGoalsForAnalytics,
+            coachRangeYmd.rangeFrom,
+            coachRangeYmd.rangeTo
+          )
+        : {};
+
     const subjectStats = scopedEntries.reduce((acc, entry) => {
       if (!acc[entry.subject]) {
         acc[entry.subject] = {
@@ -250,17 +320,21 @@ export default function Analytics() {
       return acc;
     }, {} as { [key: string]: any });
 
-    return Object.entries(subjectStats).map(([subject, stats]: [string, any]) => ({
-      subject,
-      başarı: stats.solved > 0 ? Math.round((stats.correct / stats.solved) * 100) : 0,
-      hedef: stats.target,
-      çözülen: stats.solved,
-      doğru: stats.correct,
-      yanlış: stats.wrong,
-      boş: stats.blank,
-      entry: stats.entries
-    })).sort((a, b) => b.başarı - a.başarı);
-  }, [scopedEntries]);
+    return Object.entries(subjectStats).map(([subject, stats]: [string, any]) => {
+      const ct = coachBySub[subject];
+      const hedef = ct > 0 ? ct : stats.target;
+      return {
+        subject,
+        başarı: stats.solved > 0 ? Math.round((stats.correct / stats.solved) * 100) : 0,
+        hedef,
+        çözülen: stats.solved,
+        doğru: stats.correct,
+        yanlış: stats.wrong,
+        boş: stats.blank,
+        entry: stats.entries
+      };
+    }).sort((a, b) => b.başarı - a.başarı);
+  }, [scopedEntries, selectedStudentId, useAllTime, coachGoalsForAnalytics, coachRangeYmd]);
 
   // En zayıf dersler
   const weakSubjects = subjectAnalysis.slice(-3);
@@ -396,7 +470,14 @@ export default function Analytics() {
     const studentEntries = applyRangeFilter(
       weeklyEntries.filter((entry) => entry.studentId === selectedStudent.id)
     );
-    const s = computeStatsFromEntries(studentEntries);
+    const rf = coachRangeYmd?.rangeFrom;
+    const rt = coachRangeYmd?.rangeTo;
+    const s = computeStatsFromEntries(
+      studentEntries,
+      coachGoalsForAnalytics,
+      useAllTime ? undefined : rf,
+      useAllTime ? undefined : rt
+    );
     const periodLabel = useAllTime ? 'Tüm veri' : `Tarih aralığı: ${rangeLabel}`;
     const text =
       `Merhaba, ${selectedStudent.name} icin ${periodLabel} analiz ozetini paylasiyorum.%0A` +
@@ -693,6 +774,15 @@ export default function Analytics() {
         preFiltered
         windowDays={rangeDayCount}
         chartDays={Math.min(14, Math.max(1, trendDayDates.length))}
+        coachInsight={
+          selectedStudentId && coachRangeYmd && coachGoalsForAnalytics.length > 0
+            ? {
+                rangeFrom: coachRangeYmd.rangeFrom,
+                rangeTo: coachRangeYmd.rangeTo,
+                goals: coachGoalsForAnalytics,
+              }
+            : undefined
+        }
         title={
           selectedStudent
             ? `${selectedStudent.name} · haftalık plan senkron analizi`
@@ -707,10 +797,17 @@ export default function Analytics() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
           <div className="flex items-center gap-2 mb-2">
             <Target className="w-5 h-5 text-blue-600" />
-            <span className="text-sm text-gray-500">Toplam Hedef ({rangeLabel})</span>
+            <span className="text-sm text-gray-500">
+              Toplam Hedef ({rangeLabel})
+              {selectedStudentId && coachRangeYmd && coachGoalsForAnalytics.length > 0
+                ? ' · koç'
+                : ''}
+            </span>
           </div>
           <p className="text-2xl font-bold text-slate-800">
-            {scopedEntries.reduce((sum, e) => sum + e.targetQuestions, 0)}
+            {selectedStudentId && studentStats
+              ? studentStats.totalTarget
+              : scopedEntries.reduce((sum, e) => sum + e.targetQuestions, 0)}
           </p>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
@@ -728,12 +825,14 @@ export default function Analytics() {
             <span className="text-sm text-gray-500">Gerçekleşme %</span>
           </div>
           <p className="text-2xl font-bold text-slate-800">
-            %{scopedEntries.reduce((sum, e) => sum + e.targetQuestions, 0) > 0
-              ? Math.round(
-                  (scopedEntries.reduce((sum, e) => sum + e.solvedQuestions, 0) /
-                    scopedEntries.reduce((sum, e) => sum + e.targetQuestions, 0)) * 100
-                )
-              : 0}
+            %{selectedStudentId && studentStats
+              ? studentStats.realizationRate
+              : scopedEntries.reduce((sum, e) => sum + e.targetQuestions, 0) > 0
+                ? Math.round(
+                    (scopedEntries.reduce((sum, e) => sum + e.solvedQuestions, 0) /
+                      scopedEntries.reduce((sum, e) => sum + e.targetQuestions, 0)) * 100
+                  )
+                : 0}
           </p>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">

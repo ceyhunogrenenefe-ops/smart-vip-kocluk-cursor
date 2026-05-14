@@ -24,12 +24,14 @@ export default async function handler(req, res) {
 
     const { data: urow } = await supabaseAdmin
       .from('users')
-      .select('email, institution_id')
+      .select('email, institution_id, role')
       .eq('id', uid)
       .maybeSingle();
 
     const userEmail = String(urow?.email || '').trim().toLowerCase();
     const inst = actor.institution_id ?? urow?.institution_id ?? null;
+    const dbRole = String(urow?.role || '').trim().toLowerCase();
+    const isStudentActor = dbRole === 'student' || String(actor.role || '').trim().toLowerCase() === 'student';
 
     const runResolve = () =>
       resolveStudentRowForUser({
@@ -63,7 +65,17 @@ export default async function handler(req, res) {
         !rowUser &&
         !rowPlat &&
         !rowAuth;
-      return linkedByFk || linkedByEmail;
+      /** users / JWT öğrenci + resolve ile bulunan kart (FK henüz yazılmamış olabilir) */
+      const linkedByResolvedProfile =
+        isStudentActor && Boolean(resolvedId) && String(row.id) === String(resolvedId);
+      /** JWT student_id + aynı e-posta (eski token / geçici kart) */
+      const linkedByJwtAndEmail =
+        isStudentActor &&
+        Boolean(jwtSid) &&
+        String(row.id) === String(jwtSid) &&
+        Boolean(userEmail) &&
+        rowEmail === userEmail;
+      return linkedByFk || linkedByEmail || linkedByResolvedProfile || linkedByJwtAndEmail;
     };
 
     let data = null;

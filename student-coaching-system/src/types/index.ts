@@ -71,6 +71,8 @@ export interface Institution {
   logo: string;
   isActive: boolean;
   createdAt: string;
+  /** Supabase `institutions.plan` — gösterge paneli / plan kartları */
+  plan?: OrganizationPlan;
 }
 
 // Kullanıcı Arayüzü

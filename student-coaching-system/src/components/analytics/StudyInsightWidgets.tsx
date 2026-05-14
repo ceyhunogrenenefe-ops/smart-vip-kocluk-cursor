@@ -5,7 +5,13 @@ import {
   dailySolvedSeries,
   filterEntriesSince,
   formatDurationFromMinutes,
+  type CoachInsightRange,
 } from '../../lib/studyInsightMetrics';
+import {
+  eachCalendarWeekInRange,
+  entriesSolvedInYmdRange,
+  weekCoachQuestionTarget,
+} from '../../lib/coachGoalAnalytics';
 import {
   Activity,
   BookOpen,
@@ -33,6 +39,8 @@ type Props = {
   preFiltered?: boolean;
   /** Günlük bar grafikte kaç gün (varsayılan min(14, windowDays)) */
   chartDays?: number;
+  /** Koç hedefi: toplam ve haftalık % bu aralığa göre hesaplanır */
+  coachInsight?: CoachInsightRange | null;
   title?: string;
   subtitle?: string;
   variant?: 'coach' | 'analytics';
@@ -44,6 +52,7 @@ export function StudyInsightWidgets({
   windowDays = 30,
   preFiltered = false,
   chartDays,
+  coachInsight,
   title = 'Plan & günlük kayıt özeti',
   subtitle,
   variant = 'analytics',
@@ -53,7 +62,27 @@ export function StudyInsightWidgets({
     () => (preFiltered ? entries : filterEntriesSince(entries, windowDays)),
     [entries, windowDays, preFiltered]
   );
-  const summary = useMemo(() => computeStudyInsightSummary(scoped), [scoped]);
+  const summary = useMemo(
+    () => computeStudyInsightSummary(scoped, coachInsight ?? undefined),
+    [scoped, coachInsight]
+  );
+  const weeklyCoachSeries = useMemo(() => {
+    if (!coachInsight?.goals?.length || !coachInsight.rangeFrom || !coachInsight.rangeTo) return null;
+    const weeks = eachCalendarWeekInRange(coachInsight.rangeFrom, coachInsight.rangeTo);
+    if (weeks.length === 0) return null;
+    return weeks.map((w) => {
+      const coachT = weekCoachQuestionTarget(
+        coachInsight.goals,
+        w.weekStart,
+        w.weekEnd,
+        coachInsight.rangeFrom,
+        coachInsight.rangeTo
+      );
+      const solved = entriesSolvedInYmdRange(scoped, w.weekStart, w.weekEnd);
+      const pct = coachT > 0 ? Math.round((solved / coachT) * 100) : 0;
+      return { label: w.label, coachTarget: coachT, solved, pct };
+    });
+  }, [coachInsight, scoped]);
   const barLen = chartDays ?? Math.min(14, windowDays);
   const daily = useMemo(() => dailySolvedSeries(scoped, barLen), [scoped, barLen]);
 
@@ -108,7 +137,11 @@ export function StudyInsightWidgets({
             icon={<Target className="w-4 h-4" />}
             label="Hedef gerçekleşme"
             value={`%${summary.realizationRate}`}
-            hint={`${summary.totalSolved} / ${summary.totalTarget} soru`}
+            hint={
+              coachInsight?.goals?.length
+                ? `${summary.totalSolved} / ${summary.totalTarget} soru (koç hedefi, aralığa göre)`
+                : `${summary.totalSolved} / ${summary.totalTarget} soru`
+            }
           />
           <MiniStat
             icon={<Crosshair className="w-4 h-4" />}
@@ -130,6 +163,48 @@ export function StudyInsightWidgets({
           />
         </div>
       </div>
+
+      {weeklyCoachSeries && weeklyCoachSeries.length > 0 ? (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 shadow-sm">
+          <div className="flex items-center gap-2 mb-3 text-slate-800 dark:text-slate-100 font-semibold text-sm">
+            <CalendarCheck className="w-4 h-4 text-sky-600" />
+            Haftalık koç hedefi vs çözülen (aralığa oransal hedef)
+          </div>
+          <div className="h-52">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={weeklyCoachSeries}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+                <XAxis dataKey="label" tick={{ fontSize: 9 }} interval={0} angle={-25} textAnchor="end" height={56} />
+                <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+                <Tooltip
+                  content={({ active, payload, label }) => {
+                    if (!active || !payload?.length) return null;
+                    const row = payload[0]?.payload as {
+                      coachTarget: number;
+                      solved: number;
+                      pct: number;
+                    };
+                    if (!row) return null;
+                    return (
+                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs shadow text-slate-800">
+                        <div className="font-medium mb-1">{label}</div>
+                        <div>Koç hedefi (hafta): {row.coachTarget} soru</div>
+                        <div>Çözülen: {row.solved}</div>
+                        <div className="mt-0.5 font-semibold">Gerçekleşme: %{row.pct}</div>
+                      </div>
+                    );
+                  }}
+                />
+                <Bar dataKey="coachTarget" fill="#0ea5e9" radius={[4, 4, 0, 0]} name="Koç hedefi" />
+                <Bar dataKey="solved" fill="#f97316" radius={[4, 4, 0, 0]} name="Çözülen" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+            Mavi: hafta dilimine düşen oransal koç kotası · Turuncu: o hafta çözülen (üzerine gelince haftalık %)
+          </p>
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 shadow-sm">

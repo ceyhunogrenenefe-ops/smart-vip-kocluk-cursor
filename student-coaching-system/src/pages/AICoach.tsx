@@ -62,7 +62,7 @@ export default function AICoach() {
   const { user } = useAuth();
   /** Sunucu OPENAI_API_KEY veya tarayıcı BYOK */
   const [openaiMode, setOpenaiMode] = useState<'unknown' | 'live' | 'limited'>('unknown');
-  const { students, weeklyEntries, getStudentStats, coaches, examResults: contextExamResults } = useApp();
+  const { students, weeklyEntries, getStudentStats, coaches, examResults } = useApp();
   const [searchParams, setSearchParams] = useSearchParams();
   const classAttendanceSeedRef = useRef<string | null>(null);
   const [selectedStudent, setSelectedStudent] = useState<string>(() =>
@@ -73,21 +73,6 @@ export default function AICoach() {
   const [isLoading, setIsLoading] = useState(false);
   const [showExamData, setShowExamData] = useState(false);
   const [analysisExpanded, setAnalysisExpanded] = useState<string | null>(null);
-
-  // AppContext'ten gelen examResults veya localStorage'dan yedek
-  const [localExamResults, setLocalExamResults] = useState<ExamResult[]>([]);
-
-  // Deneme sınavı sonuçlarını yükle (localStorage yedeği)
-  useEffect(() => {
-    const stored = localStorage.getItem('examResults');
-    if (stored) {
-      try {
-        setLocalExamResults(JSON.parse(stored));
-      } catch {
-        setLocalExamResults([]);
-      }
-    }
-  }, []);
 
   useEffect(() => {
     const sid = (searchParams.get('student') || '').trim();
@@ -197,11 +182,6 @@ export default function AICoach() {
       cancelled = true;
     };
   }, []);
-
-  // AppContext veya localStorage'dan gelen verileri birleştir
-  const examResults = useMemo(() => {
-    return contextExamResults.length > 0 ? contextExamResults : localExamResults;
-  }, [contextExamResults, localExamResults]);
 
   // Seçili öğrencinin verilerini al
   const student = students.find(s => s.id === selectedStudent);

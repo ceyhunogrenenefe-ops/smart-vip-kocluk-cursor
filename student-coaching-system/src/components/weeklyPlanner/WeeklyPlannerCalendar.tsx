@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { addDays, format, isBefore, parseISO, startOfWeek } from 'date-fns';
 import { tr } from 'date-fns/locale/tr';
 import {
@@ -50,6 +50,34 @@ function padHour(h: number) {
 function hourFromTime(t: string) {
   const h = parseInt(String(t || '').split(':')[0], 10);
   return Number.isNaN(h) ? null : h;
+}
+
+/**
+ * Aynı (tarih, saat) diliminde üst üste binmeden slot listesi.
+ * "Kalanı günlere böl" gibi akışlarda sunucunun 409 time_conflict dönmesini engeller.
+ */
+function buildDistinctPlannerSlots(
+  dayDates: string[],
+  spanStart: string,
+  spanEnd: string,
+  needed: number
+): { date: string; hour: number }[] {
+  const out: { date: string; hour: number }[] = [];
+  const used = new Set<string>();
+  const inSpan = dayDates.filter((d) => d >= spanStart && d <= spanEnd);
+  const pushSlots = (dates: string[]) => {
+    for (const date of dates) {
+      for (let hour = 8; hour <= 22 && out.length < needed; hour++) {
+        const key = `${date}_${hour}`;
+        if (used.has(key)) continue;
+        used.add(key);
+        out.push({ date, hour });
+      }
+    }
+  };
+  pushSlots(inSpan.length > 0 ? inSpan : dayDates);
+  if (out.length < needed) pushSlots(dayDates);
+  return out;
 }
 
 /** Hedef kartında gösterilecek okunaklı aralık (ör. tek gün Cumartesi veya 6–8 Şubat) */
@@ -192,6 +220,21 @@ export function WeeklyPlannerCalendar({
   /** Hedef kartını önceki/sonraki hafta şeridine sürüklerken vurgu */
   const [weekDropHighlight, setWeekDropHighlight] = useState<-1 | 0 | 1>(0);
 
+  /** Çift tıklama / yarış: aynı işlem iki kez API çağırmasın */
+  const plannerMutateLock = useRef(false);
+  const [plannerUiBusy, setPlannerUiBusy] = useState(false);
+  const runPlannerMutation = useCallback(async (fn: () => Promise<void>) => {
+    if (plannerMutateLock.current) return;
+    plannerMutateLock.current = true;
+    setPlannerUiBusy(true);
+    try {
+      await fn();
+    } finally {
+      plannerMutateLock.current = false;
+      setPlannerUiBusy(false);
+    }
+  }, []);
+
   const reload = useCallback(async () => {
     if (!studentId) return;
     setLoading(true);
@@ -322,220 +365,247 @@ export function WeeklyPlannerCalendar({
     const nextEnd = padHour(Math.min(hour + 1, 23));
 
     if (payload.startsWith('goal:')) {
-      const goalId = payload.slice('goal:'.length).trim();
-      const g = goals.find((x) => x.id === goalId);
-      if (!g) return;
-      const { start: spanS, end: spanE } = goalEffectiveSpan(g, weekStartStr, weekEndStr);
-      if (date < spanS || date > spanE) {
-        alert(
-          `Bu hedef yalnızca ${spanS} – ${spanE} aralığındaki günlere yerleştirilebilir. Tarih aralığını karttaki kalemle güncelleyebilirsiniz.`
-        );
-        return;
-      }
-      const agg = goalAggregates.find((a) => a.goal.id === goalId);
-      const remaining = Math.max(0, agg?.remaining ?? 0);
-      const chunk = Math.min(remaining, 50);
-      if (chunk <= 0) {
-        alert('Bu hedef için planlanabilir kota kalmadı.');
-        return;
-      }
-      try {
-        await createWeeklyPlannerEntry({
-          student_id: studentId,
-          planner_date: date,
-          start_time: nextStart,
-          end_time: nextEnd,
-          title: g.title,
-          subject: g.subject,
-          planned_quantity: chunk,
-          coach_goal_id: goalId,
-          status: 'planned',
-          completed_quantity: 0,
-        });
-        await reload();
-      } catch (e) {
-        alert(e instanceof Error ? e.message : 'Yerleştirilemedi (çakışma olabilir)');
-      }
+      await runPlannerMutation(async () => {
+        const goalId = payload.slice('goal:'.length).trim();
+        const g = goals.find((x) => x.id === goalId);
+        if (!g) return;
+        const { start: spanS, end: spanE } = goalEffectiveSpan(g, weekStartStr, weekEndStr);
+        if (date < spanS || date > spanE) {
+          alert(
+            `Bu hedef yalnızca ${spanS} – ${spanE} aralığındaki günlere yerleştirilebilir. Tarih aralığını karttaki kalemle güncelleyebilirsiniz.`
+          );
+          return;
+        }
+        const agg = goalAggregates.find((a) => a.goal.id === goalId);
+        const remaining = Math.max(0, agg?.remaining ?? 0);
+        const chunk = Math.min(remaining, 50);
+        if (chunk <= 0) {
+          alert('Bu hedef için planlanabilir kota kalmadı.');
+          return;
+        }
+        try {
+          await createWeeklyPlannerEntry({
+            student_id: studentId,
+            planner_date: date,
+            start_time: nextStart,
+            end_time: nextEnd,
+            title: g.title,
+            subject: g.subject,
+            planned_quantity: chunk,
+            coach_goal_id: goalId,
+            status: 'planned',
+            completed_quantity: 0,
+          });
+          await reload();
+        } catch (e) {
+          alert(e instanceof Error ? e.message : 'Yerleştirilemedi (çakışma olabilir)');
+        }
+      });
       return;
     }
 
-    try {
-      await patchWeeklyPlannerEntry(payload, {
-        planner_date: date,
-        start_time: nextStart,
-        end_time: nextEnd,
-      });
-      await reload();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Taşınamadı (çakışma olabilir)');
-    }
+    await runPlannerMutation(async () => {
+      try {
+        await patchWeeklyPlannerEntry(payload, {
+          planner_date: date,
+          start_time: nextStart,
+          end_time: nextEnd,
+        });
+        await reload();
+      } catch (e) {
+        alert(e instanceof Error ? e.message : 'Taşınamadı (çakışma olabilir)');
+      }
+    });
   };
 
   const splitGoalAcrossPresetDays = async (goal: CoachWeeklyGoalRow) => {
     if (!canEditPlan) return;
-    const agg = goalAggregates.find((a) => a.goal.id === goal.id);
-    const remaining = agg?.remaining ?? 0;
-    if (remaining <= 0) {
-      alert('Bölünecek kota kalmadı.');
-      return;
-    }
-    const parts = 4;
-    const base = Math.floor(remaining / parts);
-    let extra = remaining % parts;
-    const { start: gS, end: gE } = goalEffectiveSpan(goal, weekStartStr, weekEndStr);
-    const allowedIx = dayDates
-      .map((d, i) => ({ d, i }))
-      .filter(({ d }) => d >= gS && d <= gE)
-      .map((x) => x.i);
-    const pool = allowedIx.length ? allowedIx : [0, 1, 2, 3, 4, 5, 6];
-    const pickTemplate = [0, 1, 2, 3].map((k) => pool[Math.min(pool.length - 1, Math.floor((k * (pool.length - 1)) / 3))]);
-    const hour = 19;
-    try {
-      for (let i = 0; i < parts; i++) {
-        const q = base + (extra > 0 ? 1 : 0);
-        if (extra > 0) extra -= 1;
-        if (q <= 0) continue;
-        const date = dayDates[pickTemplate[i] ?? pool[0]];
-        await createWeeklyPlannerEntry({
-          student_id: studentId,
-          planner_date: date,
-          start_time: padHour(hour),
-          end_time: padHour(Math.min(hour + 1, 23)),
-          title: goal.title,
-          subject: goal.subject,
-          planned_quantity: q,
-          coach_goal_id: goal.id,
-          status: 'planned',
-          completed_quantity: 0,
-        });
+    await runPlannerMutation(async () => {
+      const agg = goalAggregates.find((a) => a.goal.id === goal.id);
+      const remaining = agg?.remaining ?? 0;
+      if (remaining <= 0) {
+        alert('Bölünecek kota kalmadı.');
+        return;
       }
-      await reload();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Bölünemedi');
-    }
+      const maxParts = 4;
+      const { start: gS, end: gE } = goalEffectiveSpan(goal, weekStartStr, weekEndStr);
+      const slots = buildDistinctPlannerSlots(dayDates, gS, gE, maxParts);
+      if (slots.length === 0) {
+        alert('Takvimde boş zaman dilimi bulunamadı. Bazı blokları silip tekrar deneyin.');
+        return;
+      }
+      const n = Math.min(maxParts, slots.length);
+      const base = Math.floor(remaining / n);
+      let extra = remaining % n;
+      try {
+        for (let i = 0; i < n; i++) {
+          const q = base + (extra > 0 ? 1 : 0);
+          if (extra > 0) extra -= 1;
+          if (q <= 0) continue;
+          const slot = slots[i];
+          if (!slot) break;
+          await createWeeklyPlannerEntry({
+            student_id: studentId,
+            planner_date: slot.date,
+            start_time: padHour(slot.hour),
+            end_time: padHour(Math.min(slot.hour + 1, 23)),
+            title: goal.title,
+            subject: goal.subject,
+            planned_quantity: q,
+            coach_goal_id: goal.id,
+            status: 'planned',
+            completed_quantity: 0,
+          });
+        }
+        await reload();
+      } catch (e) {
+        alert(e instanceof Error ? e.message : 'Bölünemedi');
+      }
+    });
   };
 
   const submitCreate = async () => {
     if (!slotContext || !studentId) return;
-    const start = padHour(slotContext.hour);
-    const end = padHour(Math.min(slotContext.hour + 1, 23));
-    const g = goals.find((x) => x.id === formGoalId);
-    if (
-      !formGoalId &&
-      modalTopicSelectOptions.length > 0 &&
-      !formTitle.trim()
-    ) {
-      alert('Konu seçin.');
-      return;
-    }
-    const title =
-      formTitle.trim() ||
-      (g ? `${g.title} (${g.quantity_unit})` : formSubject ? `${formSubject} çalışması` : 'Görev');
-    const subject = (g?.subject || formSubject || 'Genel').trim() || 'Genel';
-    try {
-      await createWeeklyPlannerEntry({
-        student_id: studentId,
-        planner_date: slotContext.date,
-        start_time: start,
-        end_time: end,
-        title,
-        subject,
-        planned_quantity: Math.max(0, formPlannedQty),
-        coach_goal_id: formGoalId,
-        status: 'planned',
-        completed_quantity: 0,
-      });
-      closeModal();
-      await reload();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Kayıt eklenemedi');
-    }
+    await runPlannerMutation(async () => {
+      const start = padHour(slotContext.hour);
+      const end = padHour(Math.min(slotContext.hour + 1, 23));
+      const g = goals.find((x) => x.id === formGoalId);
+      if (
+        !formGoalId &&
+        modalTopicSelectOptions.length > 0 &&
+        !formTitle.trim()
+      ) {
+        alert('Konu seçin.');
+        return;
+      }
+      const title =
+        formTitle.trim() ||
+        (g ? `${g.title} (${g.quantity_unit})` : formSubject ? `${formSubject} çalışması` : 'Görev');
+      const subject = (g?.subject || formSubject || 'Genel').trim() || 'Genel';
+      try {
+        await createWeeklyPlannerEntry({
+          student_id: studentId,
+          planner_date: slotContext.date,
+          start_time: start,
+          end_time: end,
+          title,
+          subject,
+          planned_quantity: Math.max(0, formPlannedQty),
+          coach_goal_id: formGoalId,
+          status: 'planned',
+          completed_quantity: 0,
+        });
+        closeModal();
+        await reload();
+      } catch (e) {
+        alert(e instanceof Error ? e.message : 'Kayıt eklenemedi');
+      }
+    });
   };
 
   const toggleComplete = async (entry: WeeklyPlannerEntryRow) => {
     if (!canEditPlan) return;
+    const plannedN = Number(entry.planned_quantity || 0);
     const nextDone = entry.status === 'completed' ? false : true;
-    try {
-      await patchWeeklyPlannerEntry(entry.id, {
-        status: nextDone ? 'completed' : 'planned',
-        completed_quantity: nextDone ? entry.planned_quantity : entry.completed_quantity,
-      });
-      await reload();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Güncellenemedi');
+    if (nextDone && plannedN <= 0) {
+      alert('Planlanan miktar 0 iken tamamlandı işaretlenemez. Önce hedefi girin.');
+      return;
     }
+    await runPlannerMutation(async () => {
+      try {
+        await patchWeeklyPlannerEntry(entry.id, {
+          status: nextDone ? 'completed' : 'planned',
+          completed_quantity: nextDone ? entry.planned_quantity : entry.completed_quantity,
+        });
+        await reload();
+      } catch (e) {
+        alert(e instanceof Error ? e.message : 'Güncellenemedi');
+      }
+    });
   };
 
   const saveEdit = async () => {
     if (!activeEntry) return;
-    if (
-      !formGoalId &&
-      modalTopicSelectOptions.length > 0 &&
-      !formTitle.trim()
-    ) {
-      alert('Konu seçin.');
-      return;
-    }
-    try {
-      await patchWeeklyPlannerEntry(activeEntry.id, {
+    await runPlannerMutation(async () => {
+      if (
+        !formGoalId &&
+        modalTopicSelectOptions.length > 0 &&
+        !formTitle.trim()
+      ) {
+        alert('Konu seçin.');
+        return;
+      }
+      const pq = Math.max(0, Math.round(Number(formPlannedQty)));
+      const patch: Record<string, unknown> = {
         title: formTitle,
         subject: formSubject,
-        planned_quantity: formPlannedQty,
+        planned_quantity: pq,
         coach_goal_id: formGoalId,
-      });
-      closeModal();
-      await reload();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Güncellenemedi');
-    }
+      };
+      if (pq <= 0 && activeEntry.status === 'completed') {
+        patch.status = 'planned';
+        patch.completed_quantity = 0;
+      }
+      try {
+        await patchWeeklyPlannerEntry(activeEntry.id, patch);
+        closeModal();
+        await reload();
+      } catch (e) {
+        alert(e instanceof Error ? e.message : 'Güncellenemedi');
+      }
+    });
   };
 
   const removeEntry = async () => {
     if (!activeEntry) return;
     if (!confirm('Bu planı silmek istiyor musunuz?')) return;
-    try {
-      await deleteWeeklyPlannerEntry(activeEntry.id);
-      closeModal();
-      await reload();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Silinemedi');
-    }
+    await runPlannerMutation(async () => {
+      try {
+        await deleteWeeklyPlannerEntry(activeEntry.id);
+        closeModal();
+        await reload();
+      } catch (e) {
+        alert(e instanceof Error ? e.message : 'Silinemedi');
+      }
+    });
   };
 
   const addCoachGoal = async () => {
     if (!canManageGoals || !studentId) return;
-    const subject = newGoalSubject.trim();
-    const title = newGoalTitle.trim() || subject || 'Hedef';
-    if (!subject) {
-      alert('Ders seçin.');
-      return;
-    }
-    if (newGoalTopicOptions.length > 0 && !newGoalTitle.trim()) {
-      alert('Konu seçin.');
-      return;
-    }
-    try {
-      const gs = newGoalStart.trim() || weekStartStr;
-      const ge = newGoalEnd.trim() || gs;
-      await createCoachWeeklyGoal({
-        student_id: studentId,
-        subject,
-        title,
-        target_quantity: Math.max(0, newGoalQty),
-        week_start_date: weekStartStr,
-        quantity_unit: newGoalUnit.trim() || 'soru',
-        goal_start_date: gs,
-        goal_end_date: ge,
-      });
-      setNewGoalSubject('');
-      setNewGoalTitle('');
-      setNewGoalQty(100);
-      setNewGoalStart(weekStartStr);
-      setNewGoalEnd(weekEndStr);
-      await reload();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Hedef eklenemedi');
-    }
+    await runPlannerMutation(async () => {
+      const subject = newGoalSubject.trim();
+      const title = newGoalTitle.trim() || subject || 'Hedef';
+      if (!subject) {
+        alert('Ders seçin.');
+        return;
+      }
+      if (newGoalTopicOptions.length > 0 && !newGoalTitle.trim()) {
+        alert('Konu seçin.');
+        return;
+      }
+      try {
+        const gs = newGoalStart.trim() || weekStartStr;
+        const ge = newGoalEnd.trim() || gs;
+        await createCoachWeeklyGoal({
+          student_id: studentId,
+          subject,
+          title,
+          target_quantity: Math.max(0, newGoalQty),
+          week_start_date: weekStartStr,
+          quantity_unit: newGoalUnit.trim() || 'soru',
+          goal_start_date: gs,
+          goal_end_date: ge,
+        });
+        setNewGoalSubject('');
+        setNewGoalTitle('');
+        setNewGoalQty(100);
+        setNewGoalStart(weekStartStr);
+        setNewGoalEnd(weekEndStr);
+        await reload();
+      } catch (e) {
+        alert(e instanceof Error ? e.message : 'Hedef eklenemedi');
+      }
+    });
   };
 
   const removeGoal = async (id: string) => {
@@ -868,8 +938,9 @@ export function WeeklyPlannerCalendar({
             </div>
             <button
               type="button"
+              disabled={plannerUiBusy}
               onClick={() => void addCoachGoal()}
-              className="inline-flex items-center gap-1 px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600"
+              className="inline-flex items-center gap-1 px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 disabled:opacity-50"
             >
               <Plus className="w-4 h-4" />
               Hedefi kaydet
@@ -970,7 +1041,10 @@ export function WeeklyPlannerCalendar({
                         >
                           {list.map((en) => {
                             const st = subjectPlannerStyle(en.subject, goals.find((g) => g.id === en.coach_goal_id)?.quantity_unit);
-                            const done = en.status === 'completed';
+                            const plannedN = Number(en.planned_quantity || 0);
+                            const done =
+                              en.status === 'completed' &&
+                              (plannedN > 0 || Number(en.completed_quantity || 0) > 0);
                             const miss = isPast && en.status === 'planned';
                             const borderCls = done
                               ? 'border-emerald-500 ring-1 ring-emerald-200'
@@ -1181,8 +1255,9 @@ export function WeeklyPlannerCalendar({
                       {canEditPlan && remaining > 0 ? (
                         <button
                           type="button"
+                          disabled={plannerUiBusy}
                           onClick={() => void splitGoalAcrossPresetDays(goal)}
-                          className="mt-2 w-full text-[11px] py-1.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+                          className="mt-2 w-full text-[11px] py-1.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
                         >
                           Kalanı günlere böl (ör. Pz-Sa-Pe-Cu)
                         </button>
@@ -1360,16 +1435,18 @@ export function WeeklyPlannerCalendar({
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
+                    disabled={plannerUiBusy || (Number(activeEntry.planned_quantity || 0) <= 0 && activeEntry.status !== 'completed')}
                     onClick={() => void toggleComplete(activeEntry)}
-                    className="inline-flex items-center gap-1 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm"
+                    className="inline-flex items-center gap-1 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm disabled:opacity-50"
                   >
                     <CheckCircle2 className="w-4 h-4" />
                     {activeEntry.status === 'completed' ? 'Tamamlanmadı yap' : 'Tamamlandı'}
                   </button>
                   <button
                     type="button"
+                    disabled={plannerUiBusy}
                     onClick={() => void removeEntry()}
-                    className="inline-flex items-center gap-1 px-4 py-2 rounded-lg border border-red-200 text-red-600 text-sm"
+                    className="inline-flex items-center gap-1 px-4 py-2 rounded-lg border border-red-200 text-red-600 text-sm disabled:opacity-50"
                   >
                     <Trash2 className="w-4 h-4" />
                     Sil
@@ -1378,23 +1455,25 @@ export function WeeklyPlannerCalendar({
               ) : null}
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-                <button type="button" onClick={closeModal} className="px-4 py-2 text-sm text-slate-600">
+                <button type="button" disabled={plannerUiBusy} onClick={closeModal} className="px-4 py-2 text-sm text-slate-600 disabled:opacity-50">
                   İptal
                 </button>
                 {modalMode === 'create' && canEditPlan ? (
                   <button
                     type="button"
+                    disabled={plannerUiBusy}
                     onClick={() => void submitCreate()}
-                    className="px-4 py-2 text-sm rounded-lg bg-red-600 text-white font-medium"
+                    className="px-4 py-2 text-sm rounded-lg bg-red-600 text-white font-medium disabled:opacity-50"
                   >
-                    Yerleştir
+                    Ekle
                   </button>
                 ) : null}
                 {modalMode === 'edit' && canEditPlan ? (
                   <button
                     type="button"
+                    disabled={plannerUiBusy}
                     onClick={() => void saveEdit()}
-                    className="px-4 py-2 text-sm rounded-lg bg-slate-800 text-white font-medium"
+                    className="px-4 py-2 text-sm rounded-lg bg-slate-800 text-white font-medium disabled:opacity-50"
                   >
                     Kaydet
                   </button>

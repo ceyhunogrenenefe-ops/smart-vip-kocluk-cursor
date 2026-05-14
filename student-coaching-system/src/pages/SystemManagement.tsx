@@ -1,11 +1,13 @@
 // Türkçe: Sistem Yönetimi Sayfası - Super Admin İçin
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth, SystemUser } from '../context/AuthContext';
-import { useOrganization } from '../context/OrganizationContext';
+import { useOrganization, PLAN_LIMITS } from '../context/OrganizationContext';
 import { useApp } from '../context/AppContext';
 import { db } from '../lib/database';
 import { getAuthToken } from '../lib/session';
+import { createInstitutionAdminUser } from '../lib/provisionInstitutionAdmin';
 import { userRowToSystemUser } from '../lib/userRowToSystemUser';
+import type { OrganizationPlan } from '../types';
 import {
   Settings,
   Users,
@@ -115,7 +117,11 @@ export default function SystemManagement() {
     email: '',
     phone: '',
     address: '',
-    plan: 'starter' as 'starter' | 'professional' | 'enterprise'
+    plan: 'starter' as 'starter' | 'professional' | 'enterprise',
+    adminName: '',
+    adminEmail: '',
+    adminPassword: '',
+    adminPhone: ''
   });
 
   // PayTR Ayarları
@@ -269,6 +275,16 @@ export default function SystemManagement() {
       alert('Kurum adı, e-posta ve telefon zorunludur.');
       return;
     }
+    if (getAuthToken()) {
+      if (!newOrgForm.adminName.trim() || !newOrgForm.adminEmail.trim() || !newOrgForm.adminPassword.trim()) {
+        alert('Satış teslimi için kurum yöneticisi adı, giriş e-postası ve şifre zorunludur.');
+        return;
+      }
+      if (newOrgForm.adminPassword.trim().length < 6) {
+        alert('Yönetici şifresi en az 6 karakter olmalıdır.');
+        return;
+      }
+    }
     setSavingOrg(true);
     try {
       if (getAuthToken()) {
@@ -300,6 +316,31 @@ export default function SystemManagement() {
           },
           { reuseInstitutionId: created.id, setAsActive: false }
         );
+        const plan = newOrgForm.plan as OrganizationPlan;
+        await createInstitutionAdminUser({
+          institutionId: created.id,
+          adminName: newOrgForm.adminName.trim(),
+          adminEmail: newOrgForm.adminEmail.trim().toLowerCase(),
+          adminPassword: newOrgForm.adminPassword.trim(),
+          adminPhone: newOrgForm.adminPhone.trim() || null,
+          plan
+        });
+        const lim = PLAN_LIMITS[plan];
+        setShowAddOrg(false);
+        setNewOrgForm({
+          name: '',
+          email: '',
+          phone: '',
+          address: '',
+          plan: 'starter',
+          adminName: '',
+          adminEmail: '',
+          adminPassword: '',
+          adminPhone: ''
+        });
+        alert(
+          `Kurum oluşturuldu. Öğrenci/koç/öğretmen sayıları sıfırdan başlar.\n\nMüşteri yönetici girişi:\nE-posta: ${newOrgForm.adminEmail.trim().toLowerCase()}\nŞifre: kurulumda girdiğiniz değer\n\nPaket kotası (üst sınır): öğrenci ${lim.students === 999999 ? 'sınırsız' : lim.students}, koç ${lim.coaches === 999999 ? 'sınırsız' : lim.coaches}.`
+        );
       } else {
         await createOrganization({
           name: newOrgForm.name.trim(),
@@ -308,14 +349,20 @@ export default function SystemManagement() {
           address: newOrgForm.address.trim(),
           plan: newOrgForm.plan
         });
+        setShowAddOrg(false);
+        setNewOrgForm({
+          name: '',
+          email: '',
+          phone: '',
+          address: '',
+          plan: 'starter',
+          adminName: '',
+          adminEmail: '',
+          adminPassword: '',
+          adminPhone: ''
+        });
+        alert('Kurum yalnızca yerel kaydedildi. Veritabanı senkronu için giriş yapın.');
       }
-      setShowAddOrg(false);
-      setNewOrgForm({ name: '', email: '', phone: '', address: '', plan: 'starter' });
-      alert(
-        getAuthToken()
-          ? 'Kurum veritabanına ve yerel liste kaydedildi. Bu kuruma yönetici atamak için kullanıcı eklerken aynı kurumu seçin.'
-          : 'Kurum yalnızca yerel kaydedildi. Veritabanı senkronu için giriş yapın.'
-      );
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Kurum oluşturulamadı.');
     } finally {
@@ -582,6 +629,48 @@ export default function SystemManagement() {
                       onChange={(e) => setNewOrgForm((p) => ({ ...p, address: e.target.value }))}
                       className="px-3 py-2 border border-gray-200 rounded-lg md:col-span-2"
                     />
+                    {getAuthToken() ? (
+                      <>
+                        <p className="text-sm text-slate-700 md:col-span-2 mt-1 font-medium border-t border-emerald-200 pt-3">
+                          İlk kurum yöneticisi (müşteriye vereceğiniz giriş)
+                        </p>
+                        <input
+                          type="text"
+                          placeholder="Yönetici adı soyadı *"
+                          value={newOrgForm.adminName}
+                          onChange={(e) => setNewOrgForm((p) => ({ ...p, adminName: e.target.value }))}
+                          className="px-3 py-2 border border-gray-200 rounded-lg"
+                        />
+                        <input
+                          type="email"
+                          placeholder="Yönetici giriş e-postası *"
+                          value={newOrgForm.adminEmail}
+                          onChange={(e) => setNewOrgForm((p) => ({ ...p, adminEmail: e.target.value }))}
+                          className="px-3 py-2 border border-gray-200 rounded-lg"
+                        />
+                        <input
+                          type="tel"
+                          placeholder="Yönetici telefon (opsiyonel)"
+                          value={newOrgForm.adminPhone}
+                          onChange={(e) => setNewOrgForm((p) => ({ ...p, adminPhone: e.target.value }))}
+                          className="px-3 py-2 border border-gray-200 rounded-lg"
+                        />
+                        <input
+                          type="password"
+                          placeholder="İlk şifre (min 6) *"
+                          value={newOrgForm.adminPassword}
+                          onChange={(e) => setNewOrgForm((p) => ({ ...p, adminPassword: e.target.value }))}
+                          className="px-3 py-2 border border-gray-200 rounded-lg"
+                        />
+                        <p className="text-xs text-slate-600 md:col-span-2">
+                          Öğrenci, koç ve öğretmen oluşturulmaz; yalnızca bu yönetici hesabı eklenir.
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-xs text-gray-600 md:col-span-2">
+                        Oturum açmadan kurum yalnızca yerelde tutulur; yönetici hesabı oluşturulmaz.
+                      </p>
+                    )}
                   </div>
                   <div className="flex gap-2 mt-3">
                     <button
@@ -593,7 +682,20 @@ export default function SystemManagement() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setShowAddOrg(false)}
+                      onClick={() => {
+                        setShowAddOrg(false);
+                        setNewOrgForm({
+                          name: '',
+                          email: '',
+                          phone: '',
+                          address: '',
+                          plan: 'starter',
+                          adminName: '',
+                          adminEmail: '',
+                          adminPassword: '',
+                          adminPhone: ''
+                        });
+                      }}
                       className="px-4 py-2 border border-gray-200 rounded-lg"
                     >
                       Vazgeç

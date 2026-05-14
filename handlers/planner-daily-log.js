@@ -40,13 +40,28 @@ function plannerTitleFromTopic(subject, topic) {
   return t ? `Günlük kayıt: ${t}` : `Günlük kayıt: ${sub}`;
 }
 
-function derivePlannerStatus(target, solved) {
-  const plannedQty = target > 0 ? Math.max(target, solved) : Math.max(solved, 1);
-  const completedQty = solved;
+/**
+ * Takvim bloğunun plan hedefi `plannerPlanned` ile kalır; 0 hedefte "tamamlandı" üretilmez.
+ */
+function derivePlannerStatus(plannerPlanned, targetFromBody, solved) {
+  const rawPlan = Number(plannerPlanned);
+  const fromBody = Number(targetFromBody);
+  const s = Math.max(0, Number(solved) || 0);
+  const effectivePlan =
+    Number.isFinite(rawPlan) && rawPlan > 0
+      ? rawPlan
+      : Number.isFinite(fromBody) && fromBody > 0
+        ? fromBody
+        : 0;
+  const completedQty = effectivePlan > 0 ? Math.min(s, effectivePlan) : s;
   let status = 'planned';
-  if (completedQty > 0 && target > 0 && completedQty >= target) status = 'completed';
-  else if (completedQty > 0) status = 'partial';
-  return { plannedQty, completedQty, status };
+  if (effectivePlan > 0) {
+    if (completedQty >= effectivePlan) status = 'completed';
+    else if (completedQty > 0) status = 'partial';
+  } else if (s > 0) {
+    status = 'partial';
+  }
+  return { plannedQty: effectivePlan, completedQty, status };
 }
 
 /**
@@ -139,7 +154,11 @@ export default async function handler(req, res) {
       updated_at: now,
     };
 
-    const { plannedQty, completedQty, status } = derivePlannerStatus(entryPayload.target_questions, entryPayload.solved_questions);
+    const { plannedQty, completedQty, status } = derivePlannerStatus(
+      planner.planned_quantity,
+      entryPayload.target_questions,
+      entryPayload.solved_questions
+    );
     const title = plannerTitleFromTopic(subject, entryPayload.topic);
 
     const { data: inserted, error: insErr } = await supabaseAdmin

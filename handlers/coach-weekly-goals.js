@@ -77,9 +77,53 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       const studentRaw =
         actor.role === 'student' ? String(actor.student_id || '') : String(req.query.student_id || '').trim();
+      if (!studentRaw) return res.status(400).json({ error: 'student_id_required' });
+
+      /** Analiz / rapor: `week_start` yerine tarih aralığı (YYYY-MM-DD) */
+      const rangeFrom = normalizeWeekStart(req.query.range_from || '');
+      const rangeTo = normalizeWeekStart(req.query.range_to || '');
+      if (rangeFrom && rangeTo) {
+        if (ymdCmp(rangeFrom, rangeTo) > 0) {
+          return res.status(400).json({ error: 'invalid_date_range' });
+        }
+        const gate = await assertCanReadStudentGoals(actor, studentRaw);
+        if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
+
+        const { data: overlap, error: e1 } = await supabaseAdmin
+          .from('coach_weekly_goals')
+          .select('*')
+          .eq('student_id', studentRaw)
+          .not('goal_start_date', 'is', null)
+          .not('goal_end_date', 'is', null)
+          .lte('goal_start_date', rangeTo)
+          .gte('goal_end_date', rangeFrom)
+          .order('created_at', { ascending: true });
+        if (e1) throw e1;
+
+        const { data: legacyOpen, error: e2 } = await supabaseAdmin
+          .from('coach_weekly_goals')
+          .select('*')
+          .eq('student_id', studentRaw)
+          .or('goal_start_date.is.null,goal_end_date.is.null')
+          .order('created_at', { ascending: true });
+        if (e2) throw e2;
+
+        const legacyFiltered = (legacyOpen || []).filter((row) => {
+          const ws = normalizeWeekStart(row.week_start_date);
+          if (!ws) return false;
+          const we = addCalendarDaysYmd(ws, 6);
+          return ws <= rangeTo && we >= rangeFrom;
+        });
+
+        const map = new Map();
+        for (const r of [...(overlap || []), ...legacyFiltered]) map.set(r.id, r);
+        return res.status(200).json({
+          data: [...map.values()].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+        });
+      }
+
       const weekStart = normalizeWeekStart(req.query.week_start || '');
       const weekEnd = normalizeWeekStart(req.query.week_end || '') || addCalendarDaysYmd(weekStart, 6);
-      if (!studentRaw) return res.status(400).json({ error: 'student_id_required' });
       if (!weekStart) return res.status(400).json({ error: 'week_start_required' });
 
       const gate = await assertCanReadStudentGoals(actor, studentRaw);

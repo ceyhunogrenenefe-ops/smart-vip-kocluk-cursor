@@ -1,7 +1,8 @@
 // Türkçe: Super Admin Paneli - Tüm Kurumları Yönetme
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { useOrganization, PLAN_LIMITS } from '../context/OrganizationContext';
 import { useAuth } from '../context/AuthContext';
+import { useApp } from '../context/AppContext';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch, getAuthToken } from '../lib/session';
 import { Organization, OrganizationPlan } from '../types';
@@ -56,6 +57,7 @@ const planColors: Record<OrganizationPlan, string> = {
 export default function AdminPanel() {
   const { user, getAllUsers, impersonate, canImpersonate } = useAuth();
   const { organizations, updateOrganization } = useOrganization();
+  const { institutions } = useApp();
   const navigate = useNavigate();
   const canWhatsAppTest = user?.role === 'super_admin' || user?.role === 'admin';
   const [searchTerm, setSearchTerm] = useState('');
@@ -81,6 +83,11 @@ export default function AdminPanel() {
     coaches: 0,
     classes: 0
   });
+
+  /** Kurum kartlarında gerçek zamanlı rol sayıları (users API) */
+  const [liveCountsByInst, setLiveCountsByInst] = useState<
+    Record<string, { students: number; coaches: number; teachers: number }>
+  >({});
 
   const [academicLinks, setAcademicLinks] = useState<AcademicCenterLinks>(() => ({
     ...defaultAcademicCenterLinks
@@ -170,6 +177,34 @@ export default function AdminPanel() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!getAuthToken() || user?.role !== 'super_admin') return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const uRes = await apiFetch('/api/users');
+        const uJson = await uRes.json().catch(() => ({}));
+        const users = Array.isArray(uJson.data) ? uJson.data : [];
+        const m: Record<string, { students: number; coaches: number; teachers: number }> = {};
+        for (const u of users as { institution_id?: string | null; role?: string }[]) {
+          const iid = u.institution_id;
+          if (!iid || typeof iid !== 'string') continue;
+          if (!m[iid]) m[iid] = { students: 0, coaches: 0, teachers: 0 };
+          const r = String(u.role || '');
+          if (r === 'student') m[iid].students += 1;
+          else if (r === 'coach') m[iid].coaches += 1;
+          else if (r === 'teacher') m[iid].teachers += 1;
+        }
+        if (!cancelled) setLiveCountsByInst(m);
+      } catch {
+        if (!cancelled) setLiveCountsByInst({});
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.role, organizations.length, institutions.length]);
 
   const sendWhatsAppTest = async () => {
     const p = waPhone.trim();
@@ -284,16 +319,28 @@ export default function AdminPanel() {
     return matchesSearch && matchesPlan && matchesStatus;
   });
 
-  // İstatistikler
-  const stats = {
-    totalOrgs: organizations.length,
-    activeOrgs: organizations.filter(o => o.isActive).length,
-    totalStudents: organizations.reduce((sum, o) => sum + o.stats.totalStudents, 0),
-    totalCoaches: organizations.reduce((sum, o) => sum + o.stats.totalCoaches, 0),
-    enterpriseCount: organizations.filter(o => o.plan === 'enterprise').length,
-    professionalCount: organizations.filter(o => o.plan === 'professional').length,
-    starterCount: organizations.filter(o => o.plan === 'starter').length
-  };
+  const orgStudentCount = (org: Organization) =>
+    liveCountsByInst[org.id]?.students ?? org.stats.totalStudents;
+  const orgCoachCount = (org: Organization) =>
+    liveCountsByInst[org.id]?.coaches ?? org.stats.totalCoaches;
+
+  // İstatistikler (kurum sayısı: yerel liste + DB senkronu; öğrenci/koç: canlı users)
+  const stats = useMemo(() => {
+    const sc = (o: Organization) => liveCountsByInst[o.id]?.students ?? o.stats.totalStudents;
+    const cc = (o: Organization) => liveCountsByInst[o.id]?.coaches ?? o.stats.totalCoaches;
+    const totalOrgs = Math.max(organizations.length, institutions.length);
+    const totalStudents = organizations.reduce((sum, o) => sum + sc(o), 0);
+    const totalCoaches = organizations.reduce((sum, o) => sum + cc(o), 0);
+    return {
+      totalOrgs,
+      activeOrgs: organizations.filter((o) => o.isActive).length,
+      totalStudents,
+      totalCoaches,
+      enterpriseCount: organizations.filter((o) => o.plan === 'enterprise').length,
+      professionalCount: organizations.filter((o) => o.plan === 'professional').length,
+      starterCount: organizations.filter((o) => o.plan === 'starter').length
+    };
+  }, [organizations, institutions.length, liveCountsByInst]);
 
   // Plan değiştir
   const handlePlanChange = (orgId: string, newPlan: OrganizationPlan) => {
@@ -803,11 +850,11 @@ export default function AdminPanel() {
                       <div className="text-sm">
                         <div className="flex items-center gap-1 text-slate-700">
                           <GraduationCap className="w-4 h-4 text-blue-500" />
-                          {org.stats.totalStudents}
+                          {orgStudentCount(org)}
                         </div>
                         <div className="flex items-center gap-1 text-gray-500">
                           <Users className="w-4 h-4" />
-                          {org.stats.totalCoaches}
+                          {orgCoachCount(org)}
                         </div>
                       </div>
                     </td>

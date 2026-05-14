@@ -331,6 +331,8 @@ export interface Database {
           blank: number;
           total_questions: number | null;
           institution_id: string | null;
+          /** Tam `ExamResult` JSON (tarayıcılar arası senkron) */
+          app_payload: Record<string, unknown> | null;
           created_at: string;
           updated_at: string;
         };
@@ -552,6 +554,48 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Database['public']['Tables']['analysis_details']['Insert']>;
+      };
+      reading_logs: {
+        Row: {
+          id: string;
+          student_id: string;
+          book_id: string | null;
+          date: string;
+          minutes_read: number;
+          pages_read: number | null;
+          notes: string | null;
+          institution_id: string | null;
+          created_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['reading_logs']['Row'], 'created_at'> & {
+          created_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['reading_logs']['Insert']>;
+      };
+      ai_coach_suggestions: {
+        Row: {
+          id: string;
+          student_id: string;
+          institution_id: string | null;
+          payload: Record<string, unknown>;
+          created_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['ai_coach_suggestions']['Row'], 'created_at'> & {
+          created_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['ai_coach_suggestions']['Insert']>;
+      };
+      institution_written_exam_prefs: {
+        Row: {
+          institution_id: string;
+          global_subjects: unknown;
+          per_student_subjects: unknown;
+          updated_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['institution_written_exam_prefs']['Row'], 'updated_at'> & {
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['institution_written_exam_prefs']['Insert']>;
       };
     };
   };

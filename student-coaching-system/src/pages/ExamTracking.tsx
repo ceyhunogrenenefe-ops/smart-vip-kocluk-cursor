@@ -526,7 +526,7 @@ export default function ExamTracking() {
   };
 
   // Seçili PDF Sonuçlarını İçe Aktar
-  const importSelectedPdfResults = () => {
+  const importSelectedPdfResults = async () => {
     const selectedStudents = Object.entries(pdfStudentMap)
       .filter(([_, studentId]) => studentId)
       .map(([index, studentId]) => ({ index: parseInt(index), studentId }));
@@ -565,7 +565,7 @@ export default function ExamTracking() {
           notes: result.parseError ? `Parse Notu: ${result.parseError}` : undefined,
           createdAt: new Date().toISOString()
         };
-        addExamResult(newExam);
+        await addExamResult(newExam);
         importedCount++;
       }
     }
@@ -851,7 +851,7 @@ export default function ExamTracking() {
   };
 
   // Deneme ekle
-  const addExam = () => {
+  const addExam = async () => {
     if (!newExam.studentId || !newExam.examDate) {
       alert('Öğrenci ve tarih seçimi zorunludur.');
       return;
@@ -872,7 +872,7 @@ export default function ExamTracking() {
       createdAt: new Date().toISOString()
     };
 
-    addExamResult(exam);
+    await addExamResult(exam);
     setShowAddForm(false);
     setNewExam({
       studentId: '',
@@ -883,9 +883,9 @@ export default function ExamTracking() {
   };
 
   // Deneme sil
-  const deleteExam = (id: string) => {
+  const deleteExam = async (id: string) => {
     if (confirm('Bu deneme sonucunu silmek istediğinizden emin misiniz?')) {
-      deleteExamResult(id);
+      await deleteExamResult(id);
     }
   };
 

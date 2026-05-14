@@ -79,6 +79,8 @@ export interface ParentSignContractRow {
   student_id?: string | null;
   ogrenci_user_id?: string | null;
   ders_programi_snapshot?: DersSatiri[] | unknown;
+  /** Veli öncesi kayıt formu aşaması (phase: needs_form | ready_to_sign) ve muhasebe özeti */
+  kayit_formu_json?: Record<string, unknown> | null;
 }
 
 export function sumDersSatirlari(rows: { haftalik_saat: number }[]): number {
@@ -250,6 +252,8 @@ export async function createParentSignContract(body: {
   sozlesme_basligi?: string;
   sablon_ek_detay_snapshot?: string;
   ders_satirlari?: DersSatiri[];
+  /** true ise veli linkinde önce kayıt formu; isim/telefon kurumda boş bırakılabilir */
+  registration_student_form?: boolean;
 }): Promise<ParentSignContractRow> {
   const res = await apiFetch('/api/parent-sign-contracts', { method: 'POST', headers: JSON_HDR, body: JSON.stringify(body) });
   const j = await res.json().catch(() => ({}));
@@ -296,21 +300,85 @@ export async function deleteParentSignContract(id: string): Promise<void> {
   if (!res.ok) throw new Error((j as { error?: string }).error || `API ${res.status}`);
 }
 
-export async function fetchVeliImzaPayload(token: string) {
+export type VeliImzaRegistrationHint = {
+  program_adi?: string | null;
+  sinif?: string | null;
+  baslangic_tarihi?: string | null;
+  bitis_tarihi?: string | null;
+  ucret?: number | null;
+  taksit_sayisi?: number | null;
+};
+
+export type VeliImzaPayload = {
+  document_id: string;
+  merged_html: string;
+  contract_number: string;
+  already_signed: boolean;
+  signed_at?: string | null;
+  institution_name?: string;
+  signature_png_base64?: string | null;
+  needs_student_form?: boolean;
+  registration_hint?: VeliImzaRegistrationHint;
+};
+
+export async function fetchVeliImzaPayload(token: string): Promise<VeliImzaPayload> {
   const res = await fetch(`/api/parent-sign-contracts?signing_token=${encodeURIComponent(token)}`);
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((j as { error?: string }).error || `API ${res.status}`);
-  return (j as {
-    data: {
-      document_id: string;
-      merged_html: string;
-      contract_number: string;
-      already_signed: boolean;
-      signed_at?: string | null;
-      institution_name?: string;
-      signature_png_base64?: string | null;
-    };
-  }).data;
+  return (j as { data: VeliImzaPayload }).data;
+}
+
+const REG_FORM_ERR: Record<string, string> = {
+  kvkk_form_required: 'Kayıt için KVKK onayı gereklidir.',
+  names_required: 'Ad ve soyad alanlarını doldurun.',
+  tc_invalid: 'T.C. kimlik numarası 11 haneli olmalıdır.',
+  dogum_required: 'Doğum tarihi zorunludur.',
+  okul_required: 'Okul adı zorunludur.',
+  eposta_invalid: 'Geçerli bir e-posta girin.',
+  il_ilce_required: 'İl ve ilçe zorunludur.',
+  veli_tel_invalid: 'Veli telefonu en az 10 rakam olmalıdır.',
+  ogrenci_tel_invalid: 'Öğrenci telefonu en az 10 rakam olmalıdır.',
+  sinif_program_required: 'Sınıf ve program bilgisi zorunludur.',
+  registration_form_not_expected: 'Bu bağlantı için kayıt formu adımı beklenmiyor.',
+  already_processed: 'Bu belge zaten işlenmiş.',
+  not_found: 'Bağlantı bulunamadı veya süresi dolmuş.'
+};
+
+export async function submitVeliRegistrationForm(payload: {
+  signing_token: string;
+  ogrenci_ad: string;
+  ogrenci_soyad: string;
+  veli_ad: string;
+  veli_soyad: string;
+  tc_kimlik: string;
+  dogum_tarihi: string;
+  okul_adi: string;
+  sinif_form: string;
+  program_form: string;
+  eposta: string;
+  il: string;
+  ilce: string;
+  adres_aciklama?: string;
+  veli_tel: string;
+  ogrenci_tel: string;
+  kvkk_form_ok: boolean;
+}): Promise<void> {
+  const { signing_token, kvkk_form_ok, ...rest } = payload;
+  const res = await fetch('/api/parent-sign-contracts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'submit_registration_form',
+      signing_token,
+      kvkk_form_ok,
+      ...rest
+    })
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const code = String((j as { error?: string }).error || '');
+    throw new Error(REG_FORM_ERR[code] || code || `API ${res.status}`);
+  }
 }
 
 export async function submitVeliImza(payload: {
@@ -325,7 +393,15 @@ export async function submitVeliImza(payload: {
     body: JSON.stringify(payload)
   });
   const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((j as { error?: string }).error || `API ${res.status}`);
+  if (!res.ok) {
+    const code = String((j as { error?: string }).error || '');
+    const map: Record<string, string> = {
+      registration_form_required_first: 'Önce kayıt bilgilerinizi göndermeniz gerekir.',
+      confirmations_required: 'Onay kutularını işaretleyin.',
+      signature_required: 'İmza gerekli.'
+    };
+    throw new Error(map[code] || code || `API ${res.status}`);
+  }
 }
 
 export async function verifyParentDocumentPublic(token: string): Promise<{

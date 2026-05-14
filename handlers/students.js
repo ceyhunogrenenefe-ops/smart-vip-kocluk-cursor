@@ -1,6 +1,6 @@
 import { requireAuth, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
-import { getSupabaseAdmin, supabaseAdmin } from '../api/_lib/supabase-admin.js';
+import { getSupabaseAdmin, hasSupabaseServiceRoleKey, supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { normalizeUuidOrGenerate } from '../api/_lib/uuid.js';
 import { rebuildCoachStudentIdsFromFk } from '../api/_lib/sync-coach-students.js';
 import { enforceStudentInsertQuotas, enforceCoachStudentQuota, QuotaError } from '../api/_lib/quota-enforce.js';
@@ -29,6 +29,8 @@ async function deleteStudentDependentRows(studentId) {
     () => supabaseAdmin.from('weekly_entries').delete().eq('student_id', sid),
     () => supabaseAdmin.from('book_readings').delete().eq('student_id', sid),
     () => supabaseAdmin.from('written_exams').delete().eq('student_id', sid),
+    () => supabaseAdmin.from('reading_logs').delete().eq('student_id', sid),
+    () => supabaseAdmin.from('ai_coach_suggestions').delete().eq('student_id', sid),
     () => supabaseAdmin.from('exam_results').delete().eq('student_id', sid),
     () => supabaseAdmin.from('exam_results_v2').delete().eq('student_id', sid),
     () => supabaseAdmin.from('student_topic_progress').delete().eq('student_id', sid),
@@ -330,7 +332,7 @@ export default async function handler(req, res) {
       const syncAuth =
         body.sync_supabase_auth === true &&
         authPw.length >= 6 &&
-        Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
+        hasSupabaseServiceRoleKey();
 
       if (syncAuth && data?.id) {
         try {
@@ -338,22 +340,39 @@ export default async function handler(req, res) {
           const em = String(payload.email || '')
             .toLowerCase()
             .trim();
-          const { data: auData, error: auErr } = await sb.auth.admin.createUser({
-            email: em,
-            password: authPw,
-            email_confirm: true
-          });
-          if (!auErr && auData?.user?.id) {
+          const { data: authExisting } = await sb.auth.admin.getUserById(String(data.id));
+          if (authExisting?.user?.id) {
             const { data: patched, error: pe } = await supabaseAdmin
               .from('students')
               .update({
-                auth_user_id: auData.user.id,
+                auth_user_id: authExisting.user.id,
                 updated_at: new Date().toISOString()
               })
               .eq('id', data.id)
               .select()
               .single();
             if (!pe && patched) data = patched;
+          } else {
+            const { data: auData, error: auErr } = await sb.auth.admin.createUser({
+              id: String(data.id),
+              email: em,
+              password: authPw,
+              email_confirm: true
+            });
+            if (!auErr && auData?.user?.id) {
+              const { data: patched, error: pe } = await supabaseAdmin
+                .from('students')
+                .update({
+                  auth_user_id: auData.user.id,
+                  updated_at: new Date().toISOString()
+                })
+                .eq('id', data.id)
+                .select()
+                .single();
+              if (!pe && patched) data = patched;
+            } else if (auErr) {
+              console.warn('[students POST] Supabase Auth provision:', auErr.message || String(auErr));
+            }
           }
         } catch (e) {
           console.warn('[students POST] Supabase Auth provision:', e);

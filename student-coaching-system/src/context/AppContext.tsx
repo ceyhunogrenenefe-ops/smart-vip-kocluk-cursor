@@ -10,6 +10,7 @@ import {
   TopicPool,
   TopicProgress,
   Institution,
+  OrganizationPlan,
   ExamResult,
   AICoachSuggestion,
   Book,
@@ -32,7 +33,9 @@ import {
   topicProgressRowToApp,
   type TopicProgressDbRow
 } from '../lib/topicProgressSync';
+import { aiSuggestionFromRow, examResultFromRow, readingLogFromRow, type ExamResultRow } from '../lib/appSyncMappers';
 import { useAuth } from './AuthContext';
+import { useOrganization } from './OrganizationContext';
 import { userRoleTags } from '../config/rolePermissions';
 import { topicPool as defaultTopicPool } from '../data/mockData';
 import { yosTopicPool } from '../data/yosTopicPool';
@@ -125,14 +128,14 @@ const saveToStorage = <T,>(key: string, value: T): void => {
   }
 };
 
-// Varsayılan kurum
+// Varsayılan kurum (yerel boş liste veya yedek)
 const createDefaultInstitution = (): Institution => ({
   id: 'default',
-  name: 'Smart Koçluk Sistemi',
-  phone: '0212 555 00 00',
-  address: 'Türkiye',
-  email: 'info@smartkocluk.com',
-  website: 'https://smartkocluk.com',
+  name: 'Kurum',
+  phone: '',
+  address: '',
+  email: '',
+  website: '',
   logo: '',
   isActive: true,
   createdAt: new Date().toISOString()
@@ -171,7 +174,7 @@ interface AppState {
     opts?: { plan?: 'starter' | 'professional' | 'enterprise' }
   ) => Promise<Institution | null>;
   updateInstitution: (id: string, info: Partial<Institution>) => void;
-  deleteInstitution: (id: string) => void;
+  deleteInstitution: (id: string) => Promise<void>;
   setActiveInstitution: (id: string) => void;
   institution: Institution;
   activeInstitutionId: string | null;
@@ -208,19 +211,19 @@ interface AppState {
 
   // Deneme Sınavları
   examResults: ExamResult[];
-  addExamResult: (exam: ExamResult) => void;
-  updateExamResult: (id: string, exam: Partial<ExamResult>) => void;
-  deleteExamResult: (id: string) => void;
+  addExamResult: (exam: ExamResult) => Promise<void>;
+  updateExamResult: (id: string, exam: Partial<ExamResult>) => Promise<void>;
+  deleteExamResult: (id: string) => Promise<void>;
   getStudentExamResults: (studentId: string) => ExamResult[];
   getLatestExamResult: (studentId: string) => ExamResult | null;
 
   // AI Koç Önerileri
   aiSuggestions: AICoachSuggestion[];
-  addAISuggestion: (suggestion: AICoachSuggestion) => void;
-  markSuggestionRead: (id: string) => void;
-  deleteAISuggestion: (id: string) => void;
+  addAISuggestion: (suggestion: AICoachSuggestion) => Promise<void>;
+  markSuggestionRead: (id: string) => Promise<void>;
+  deleteAISuggestion: (id: string) => Promise<void>;
   getStudentAISuggestions: (studentId: string) => AICoachSuggestion[];
-  generateAISuggestions: (studentId: string) => void;
+  generateAISuggestions: (studentId: string) => Promise<void>;
 
   // Seçili öğrenci
   selectedStudentId: string | null;
@@ -234,9 +237,9 @@ interface AppState {
   getStudentBooks: (studentId: string) => Book[];
 
   readingLogs: ReadingLog[];
-  addReadingLog: (log: ReadingLog) => void;
-  updateReadingLog: (id: string, log: Partial<ReadingLog>) => void;
-  deleteReadingLog: (id: string) => void;
+  addReadingLog: (log: ReadingLog) => Promise<void>;
+  updateReadingLog: (id: string, log: Partial<ReadingLog>) => Promise<void>;
+  deleteReadingLog: (id: string) => Promise<void>;
   getStudentReadingLogs: (studentId: string) => ReadingLog[];
   getReadingStats: (studentId: string) => ReadingStats;
   getBookReadingTime: (bookId: string) => number;
@@ -272,6 +275,7 @@ const AppContext = createContext<AppState | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const { effectiveUser, linkedStudent } = useAuth();
+  const { syncOrganizationsFromInstitutions } = useOrganization();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userRole, setUserRole] = useState<UserRole>('admin');
 
@@ -305,19 +309,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const stored = loadFromStorage<TopicPool>(STORAGE_KEYS.customTopics, {});
     return mergeTopicPools(mergeTopicPools(defaultTopicPool, yosTopicPool), stored);
   });
+  /** getTopics/getTopicsByClass: customTopics bazen kısmi kalabiliyor; her zaman varsayılan havuzla birleştir */
+  const effectiveTopicPool = React.useMemo(
+    () => mergeTopicPools(mergeTopicPools(defaultTopicPool, yosTopicPool), customTopics),
+    [customTopics]
+  );
   const [topicProgress, setTopicProgress] = useState<TopicProgress[]>(() =>
     loadFromStorage<TopicProgress[]>(STORAGE_KEYS.topicProgress, [])
   );
 
-  // Deneme Sınavları
-  const [examResults, setExamResults] = useState<ExamResult[]>(() =>
-    loadFromStorage(STORAGE_KEYS.examResults, [])
-  );
+  // Deneme sınavları — kaynak Supabase `exam_results.app_payload` (tarayıcılar arası)
+  const [examResults, setExamResults] = useState<ExamResult[]>(() => []);
 
-  // AI Koç Önerileri
-  const [aiSuggestions, setAISuggestions] = useState<AICoachSuggestion[]>(() =>
-    loadFromStorage(STORAGE_KEYS.aiSuggestions, [])
-  );
+  // AI Koç Önerileri — `ai_coach_suggestions`
+  const [aiSuggestions, setAISuggestions] = useState<AICoachSuggestion[]>(() => []);
 
   // ============ KİTAP OKUMA TAKİBİ - Gerçek database ============
   const [books, setBooks] = useState<Book[]>([]);
@@ -349,6 +354,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setBooks([]);
       setReadingLogs([]);
       setWrittenExamScores([]);
+      setExamResults([]);
+      setAISuggestions([]);
       return;
     }
 
@@ -359,26 +366,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // Initialize database first
         await db.initializeDatabase();
 
-        // Öğrenci oturumunda kurum filtresi istemci tarafında yanlış eşleşebilir; öğrenci için API rolüne göre daraltır.
-        // Süper admin dahil personel: seçili kurum (üst çubuk) = veri kiracısı; yalnız o kurumun öğrencileri ve ilişkili kayıtlar.
-        const isStudentRole = effectiveUser?.role === 'student';
+        // Öğrenci: kurum filtresi yok. Admin/süper admin: üst çubuktaki kurum = kiracı filtresi.
+        // Koç/öğretmen: API zaten atanan öğrencileri döndürür; aktif kurum ile istemci tarafında tekrar
+        // filtrelemek, başka tarayıcıda farklı kurum seçiliyken listeyi sıfırlıyordu.
 
         // Kurumları önce yükle — aktif kurum yoksa ilk kayıt bu yükleme turunun kapsamı olur
         const dbInstitutions = await db.getInstitutions();
         let loadedInstitutions: Institution[] = [];
         if (dbInstitutions.length > 0) {
-          loadedInstitutions = dbInstitutions.map(i => ({
-            id: i.id,
-            name: i.name,
-            email: i.email,
-            phone: i.phone || undefined,
-            address: i.address || undefined,
-            website: i.website || undefined,
-            logo: i.logo || undefined,
-            isActive: i.is_active,
-            createdAt: i.created_at
-          }));
-          setInstitutions(loadedInstitutions);
+          loadedInstitutions = dbInstitutions.map((i) => {
+            const plan: OrganizationPlan =
+              i.plan === 'starter' || i.plan === 'professional' || i.plan === 'enterprise'
+                ? i.plan
+                : 'professional';
+            return {
+              id: i.id,
+              name: i.name,
+              email: i.email,
+              phone: i.phone || undefined,
+              address: i.address || undefined,
+              website: i.website || undefined,
+              logo: i.logo || undefined,
+              isActive: i.is_active,
+              createdAt: i.created_at,
+              plan
+            };
+          });
+        }
+        setInstitutions(loadedInstitutions);
+        saveToStorage(STORAGE_KEYS.institutions, loadedInstitutions);
+        if (getAuthToken() && effectiveUser?.role === 'super_admin') {
+          syncOrganizationsFromInstitutions(loadedInstitutions);
+        }
+
+        if (loadedInstitutions.length === 0) {
+          setActiveInstitutionId(null);
+          saveToStorage(STORAGE_KEYS.activeInstitutionId, null);
         }
 
         const knownIds = new Set(loadedInstitutions.map((i) => i.id));
@@ -392,9 +415,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setActiveInstitutionId(resolvedActiveId || firstId);
         }
 
+        const isStudentRole = effectiveUser?.role === 'student';
+        const useTenantInstitutionFilter =
+          effectiveUser?.role === 'admin' || effectiveUser?.role === 'super_admin';
+
         const institutionScope = isStudentRole
           ? undefined
-          : resolvedActiveId || firstId || undefined;
+          : useTenantInstitutionFilter
+            ? resolvedActiveId || firstId || undefined
+            : undefined;
 
         const dbStudents = await db.getStudents(institutionScope);
         let loadedStudents: Student[] = dbStudents.map(studentRowToStudent);
@@ -465,7 +494,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setTopicProgress(loadFromStorage<TopicProgress[]>(STORAGE_KEYS.topicProgress, []));
         }
 
-        const dbCoaches = await db.getCoaches(institutionScope);
+        let dbCoaches: Awaited<ReturnType<typeof db.getCoaches>> = [];
+        try {
+          dbCoaches = await db.getCoaches(institutionScope);
+        } catch (coachErr) {
+          console.warn('[AppContext] getCoaches (boş devam):', coachErr);
+        }
         const loadedCoaches: Coach[] = dbCoaches.map(c => ({
           id: c.id,
           name: c.name,
@@ -547,7 +581,140 @@ export function AppProvider({ children }: { children: ReactNode }) {
           : mappedWritten;
         setWrittenExamScores(loadedWrittenScores);
 
-        console.log('Veritabanından veriler başarıyla yüklendi');
+        /** Deneme sınavları: exam_results + app_payload; yerel `coaching_exam_results` tek seferlik migrate */
+        try {
+          if (getAuthToken() && loadedStudents.length > 0) {
+            const sidList = loadedStudents.map((s) => s.id);
+            const examRows = await db.getExamResultsForStudents(sidList);
+            let exams = examRows.map((r) => examResultFromRow(r as ExamResultRow)).filter((e): e is ExamResult => Boolean(e));
+            if (restrictRelatedDataByStudents) {
+              exams = exams.filter((e) => studentIdScope.has(e.studentId));
+            }
+            const examMap = new Map(exams.map((e) => [e.id, e]));
+            const localExams = loadFromStorage<ExamResult[]>(STORAGE_KEYS.examResults, []);
+            for (const e of localExams) {
+              if (!studentIdScope.has(e.studentId)) continue;
+              if (examMap.has(e.id)) continue;
+              const inst = loadedStudents.find((s) => s.id === e.studentId)?.institutionId ?? null;
+              try {
+                await db.upsertExamResultFromApp(e, inst);
+                examMap.set(e.id, e);
+              } catch (migE) {
+                console.warn('[AppContext] exam_results yerel migrate edilemedi:', migE);
+              }
+            }
+            setExamResults(
+              [...examMap.values()].sort(
+                (a, b) => new Date(b.examDate).getTime() - new Date(a.examDate).getTime()
+              )
+            );
+          } else {
+            setExamResults([]);
+          }
+        } catch (examLoadErr) {
+          console.warn('[AppContext] exam_results yükleme (yerel önbellek):', examLoadErr);
+          setExamResults(loadFromStorage(STORAGE_KEYS.examResults, []));
+        }
+
+        /** Okuma günlükleri: reading_logs + yerel migrate */
+        try {
+          if (getAuthToken() && loadedStudents.length > 0) {
+            const sidList = loadedStudents.map((s) => s.id);
+            const logRows = await db.getReadingLogsForStudents(sidList);
+            let logs = logRows.map((r) => readingLogFromRow(r));
+            if (restrictRelatedDataByStudents) {
+              logs = logs.filter((l) => studentIdScope.has(l.studentId));
+            }
+            const logMap = new Map(logs.map((l) => [l.id, l]));
+            const localLogs = loadFromStorage<ReadingLog[]>(STORAGE_KEYS.readingLogs, []);
+            for (const l of localLogs) {
+              if (!studentIdScope.has(l.studentId)) continue;
+              if (logMap.has(l.id)) continue;
+              const inst = loadedStudents.find((s) => s.id === l.studentId)?.institutionId ?? null;
+              try {
+                await db.upsertReadingLogFromApp(l, inst);
+                logMap.set(l.id, l);
+              } catch (migL) {
+                console.warn('[AppContext] reading_logs yerel migrate edilemedi:', migL);
+              }
+            }
+            setReadingLogs(
+              [...logMap.values()].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+            );
+          } else {
+            setReadingLogs([]);
+          }
+        } catch (logLoadErr) {
+          console.warn('[AppContext] reading_logs yükleme (yerel önbellek):', logLoadErr);
+          setReadingLogs(loadFromStorage(STORAGE_KEYS.readingLogs, []));
+        }
+
+        /** AI Koç önerileri */
+        try {
+          if (getAuthToken() && loadedStudents.length > 0) {
+            const sidList = loadedStudents.map((s) => s.id);
+            const sugRows = await db.getAiCoachSuggestionsForStudents(sidList);
+            let sugs = sugRows
+              .map((r) => aiSuggestionFromRow(r))
+              .filter((s): s is AICoachSuggestion => Boolean(s));
+            if (restrictRelatedDataByStudents) {
+              sugs = sugs.filter((s) => studentIdScope.has(s.studentId));
+            }
+            const sugMap = new Map(sugs.map((s) => [s.id, s]));
+            const localSug = loadFromStorage<AICoachSuggestion[]>(STORAGE_KEYS.aiSuggestions, []);
+            for (const s of localSug) {
+              if (!studentIdScope.has(s.studentId)) continue;
+              if (sugMap.has(s.id)) continue;
+              const inst = loadedStudents.find((x) => x.id === s.studentId)?.institutionId ?? null;
+              try {
+                await db.upsertAiCoachSuggestion(s, inst);
+                sugMap.set(s.id, s);
+              } catch (migS) {
+                console.warn('[AppContext] ai_coach_suggestions yerel migrate edilemedi:', migS);
+              }
+            }
+            setAISuggestions(
+              [...sugMap.values()].sort(
+                (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+              )
+            );
+          } else {
+            setAISuggestions([]);
+          }
+        } catch (sugLoadErr) {
+          console.warn('[AppContext] ai_coach_suggestions yükleme (yerel önbellek):', sugLoadErr);
+          setAISuggestions(loadFromStorage(STORAGE_KEYS.aiSuggestions, []));
+        }
+
+        /** Kurum yazılı ders şablonları */
+        const prefsInstId = resolvedActiveId || firstId || null;
+        if (prefsInstId && getAuthToken()) {
+          try {
+            const prefs = await db.getInstitutionWrittenExamPrefs(prefsInstId);
+            if (prefs) {
+              setWrittenExamSubjects(
+                prefs.global_subjects.length > 0 ? prefs.global_subjects : [...DEFAULT_WRITTEN_EXAM_SUBJECTS]
+              );
+              setWrittenExamSubjectsByStudent(prefs.per_student_subjects || {});
+            } else {
+              const locS = loadFromStorage<string[]>(STORAGE_KEYS.writtenExamSubjects, DEFAULT_WRITTEN_EXAM_SUBJECTS);
+              const locM = loadFromStorage<Record<string, string[]>>(STORAGE_KEYS.writtenExamSubjectsByStudent, {});
+              const seedGlobal = Array.from(new Set([...DEFAULT_WRITTEN_EXAM_SUBJECTS, ...locS]));
+              setWrittenExamSubjects(seedGlobal);
+              setWrittenExamSubjectsByStudent(locM);
+              await db.upsertInstitutionWrittenExamPrefs(prefsInstId, {
+                global_subjects: seedGlobal,
+                per_student_subjects: locM
+              });
+            }
+          } catch (prefErr) {
+            console.warn('[AppContext] institution_written_exam_prefs:', prefErr);
+          }
+        }
+
+        if (import.meta.env.DEV) {
+          console.debug('[AppContext] Veritabanından veriler yüklendi');
+        }
       } catch (error) {
         console.error('Veritabanı yükleme hatası:', error);
         setStudents([]);
@@ -556,11 +723,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setBooks([]);
         setReadingLogs([]);
         setWrittenExamScores([]);
+        setExamResults([]);
+        setAISuggestions([]);
       }
     };
 
     loadDataFromDatabase();
-  }, [activeInstitutionId, effectiveUser?.role, effectiveUser?.id, effectiveUser?.studentId]); // Öğrenci JWT student_id sonradan dolabiliyor
+  }, [
+    activeInstitutionId,
+    effectiveUser?.role,
+    effectiveUser?.id,
+    effectiveUser?.studentId,
+    syncOrganizationsFromInstitutions
+  ]); // Öğrenci JWT student_id sonradan dolabiliyor
 
   // Veriler değiştiğinde localStorage'a kaydet
   useEffect(() => {
@@ -1012,6 +1187,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         plan: opts?.plan ?? 'professional',
         is_active: newInstitution.isActive
       });
+      const plan: OrganizationPlan =
+        created.plan === 'starter' || created.plan === 'professional' || created.plan === 'enterprise'
+          ? created.plan
+          : opts?.plan ?? 'professional';
       const newInst: Institution = {
         id: created.id,
         name: created.name,
@@ -1021,13 +1200,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
         website: created.website || undefined,
         logo: created.logo || undefined,
         isActive: created.is_active,
-        createdAt: created.created_at
+        createdAt: created.created_at,
+        plan
       };
-      setInstitutions(prev => {
-        if (prev.some((i) => i.id === newInst.id)) {
-          return prev.map((i) => (i.id === newInst.id ? newInst : i));
+      setInstitutions((prev) => {
+        const next = prev.some((i) => i.id === newInst.id)
+          ? prev.map((i) => (i.id === newInst.id ? newInst : i))
+          : [...prev, newInst];
+        if (getAuthToken() && effectiveUser?.role === 'super_admin') {
+          queueMicrotask(() => syncOrganizationsFromInstitutions(next));
         }
-        return [...prev, newInst];
+        return next;
       });
       return newInst;
     } catch (error) {
@@ -1061,14 +1244,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
     try {
-      await supabase.from('institutions').delete().eq('id', id);
+      await db.deleteInstitution(id);
+      let nextInstitutions: Institution[] = [];
+      setInstitutions((prev) => {
+        nextInstitutions = prev.filter((inst) => inst.id !== id);
+        return nextInstitutions;
+      });
+      if (activeInstitutionId === id) {
+        setActiveInstitutionId(nextInstitutions[0]?.id ?? null);
+      }
+      if (getAuthToken() && effectiveUser?.role === 'super_admin') {
+        queueMicrotask(() => syncOrganizationsFromInstitutions(nextInstitutions));
+      }
     } catch (error) {
       console.error('Kurum silme hatası:', error);
-    }
-    setInstitutions(prev => prev.filter(inst => inst.id !== id));
-    if (activeInstitutionId === id) {
-      const remaining = institutions.find(inst => inst.id !== id);
-      setActiveInstitutionId(remaining?.id || null);
+      alert(error instanceof Error ? error.message : 'Kurum silinemedi');
     }
   };
 
@@ -1086,14 +1276,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (typeof classLevel === 'string' && classLevel.startsWith('YKS-')) {
       // TYT konuları için (TYT TÜRKÇE, TYT MATEMATİK vb.)
       if (subject.startsWith('TYT ')) {
-        return customTopics[subject]?.[classLevel] || customTopics[subject]?.['YKS-Sayısal'] || [];
+        return (
+          effectiveTopicPool[subject]?.[classLevel] ||
+          effectiveTopicPool[subject]?.['YKS-Sayısal'] ||
+          []
+        );
       }
       // AYT konuları için
-      return customTopics[subject]?.[classLevel] || [];
+      return effectiveTopicPool[subject]?.[classLevel] || [];
     }
 
-    if (customTopics[subject] && customTopics[subject][classLevel]) {
-      return customTopics[subject][classLevel];
+    if (effectiveTopicPool[subject] && effectiveTopicPool[subject][classLevel]) {
+      return effectiveTopicPool[subject][classLevel];
     }
     return [];
   };
@@ -1122,18 +1316,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       isYKS = true;
 
       // TYT konularını al (her ders ayrı bir key'de - TYT TÜRKÇE, TYT MATEMATİK, vb.)
-      Object.keys(customTopics).forEach(subject => {
-        if (subject.startsWith('TYT ') && customTopics[subject]?.[classLevel]) {
+      Object.keys(effectiveTopicPool).forEach(subject => {
+        if (subject.startsWith('TYT ') && effectiveTopicPool[subject]?.[classLevel]) {
           const subjectName = subject; // 'TYT TÜRKÇE', 'TYT MATEMATİK' vb.
-          tytSubjects[subjectName] = customTopics[subject][classLevel];
+          tytSubjects[subjectName] = effectiveTopicPool[subject][classLevel];
         }
       });
 
       // AYT konularını al (her ders ayrı bir key'de)
-      Object.keys(customTopics).forEach(subject => {
-        if (subject.startsWith('AYT ') && customTopics[subject]?.[classLevel]) {
+      Object.keys(effectiveTopicPool).forEach(subject => {
+        if (subject.startsWith('AYT ') && effectiveTopicPool[subject]?.[classLevel]) {
           const subjectName = subject; // 'AYT MATEMATİK', 'AYT FİZİK' vb.
-          aytSubjects[subjectName] = customTopics[subject][classLevel];
+          aytSubjects[subjectName] = effectiveTopicPool[subject][classLevel];
         }
       });
 
@@ -1141,13 +1335,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     // Normal sınıflar (9, 10, 11, 12)
-    Object.keys(customTopics).forEach(subject => {
+    Object.keys(effectiveTopicPool).forEach(subject => {
       // YKS konularını atlama
       if (subject.startsWith('TYT ') || subject.startsWith('AYT ')) {
         return;
       }
-      if (customTopics[subject] && customTopics[subject][classLevel]) {
-        result[subject] = customTopics[subject][classLevel];
+      if (effectiveTopicPool[subject] && effectiveTopicPool[subject][classLevel]) {
+        result[subject] = effectiveTopicPool[subject][classLevel];
       }
     });
 
@@ -1284,17 +1478,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   };
 
-  // Deneme Sınavı işlemleri
-  const addExamResult = (exam: ExamResult) => {
-    setExamResults(prev => [...prev, exam]);
+  // Deneme Sınavı işlemleri — Supabase `exam_results` + `app_payload`
+  const addExamResult = async (exam: ExamResult) => {
+    if (!getAuthToken() || !isSupabaseReady) {
+      setExamResults((prev) => [...prev, exam]);
+      return;
+    }
+    const inst =
+      studentsRef.current.find((s) => s.id === exam.studentId)?.institutionId ?? activeInstitutionId ?? null;
+    try {
+      const row = await db.upsertExamResultFromApp(exam, inst);
+      const next = examResultFromRow(row);
+      if (next) {
+        setExamResults((prev) => {
+          const ix = prev.findIndex((e) => e.id === next.id);
+          if (ix === -1) return [...prev, next];
+          const c = [...prev];
+          c[ix] = next;
+          return c;
+        });
+      } else {
+        setExamResults((prev) => [...prev, exam]);
+      }
+    } catch (e) {
+      console.error('[AppContext] addExamResult DB:', e);
+      setExamResults((prev) => [...prev, exam]);
+    }
   };
 
-  const updateExamResult = (id: string, updatedExam: Partial<ExamResult>) => {
-    setExamResults(prev => prev.map(e => e.id === id ? { ...e, ...updatedExam } : e));
+  const updateExamResult = async (id: string, updatedExam: Partial<ExamResult>) => {
+    setExamResults((prev) => prev.map((e) => (e.id === id ? { ...e, ...updatedExam } : e)));
+    if (!getAuthToken() || !isSupabaseReady) return;
+    try {
+      await db.updateExamResultFromApp(id, updatedExam);
+    } catch (e) {
+      console.warn('[AppContext] updateExamResult DB:', e);
+    }
   };
 
-  const deleteExamResult = (id: string) => {
-    setExamResults(prev => prev.filter(e => e.id !== id));
+  const deleteExamResult = async (id: string) => {
+    setExamResults((prev) => prev.filter((e) => e.id !== id));
+    if (!getAuthToken() || !isSupabaseReady) return;
+    try {
+      await db.deleteExamResultById(id);
+    } catch (e) {
+      console.warn('[AppContext] deleteExamResult DB:', e);
+    }
   };
 
   const getStudentExamResults = (studentId: string) => {
@@ -1308,17 +1537,54 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return results.length > 0 ? results[0] : null;
   };
 
-  // AI Koç Öneri işlemleri
-  const addAISuggestion = (suggestion: AICoachSuggestion) => {
-    setAISuggestions(prev => [...prev, suggestion]);
+  // AI Koç Öneri işlemleri — `ai_coach_suggestions`
+  const addAISuggestion = async (suggestion: AICoachSuggestion) => {
+    let skip = false;
+    setAISuggestions((prev) => {
+      const exists = prev.some(
+        (existing) =>
+          existing.studentId === suggestion.studentId &&
+          existing.title === suggestion.title &&
+          !existing.isRead
+      );
+      if (exists) {
+        skip = true;
+        return prev;
+      }
+      return [...prev, suggestion];
+    });
+    if (skip) return;
+    if (!getAuthToken() || !isSupabaseReady) return;
+    const inst =
+      studentsRef.current.find((s) => s.id === suggestion.studentId)?.institutionId ?? activeInstitutionId ?? null;
+    try {
+      await db.upsertAiCoachSuggestion(suggestion, inst);
+    } catch (e) {
+      console.warn('[AppContext] addAISuggestion DB:', e);
+    }
   };
 
-  const markSuggestionRead = (id: string) => {
-    setAISuggestions(prev => prev.map(s => s.id === id ? { ...s, isRead: true } : s));
+  const markSuggestionRead = async (id: string) => {
+    const cur = aiSuggestions.find((s) => s.id === id);
+    if (!cur) return;
+    const merged: AICoachSuggestion = { ...cur, isRead: true };
+    setAISuggestions((prev) => prev.map((s) => (s.id === id ? merged : s)));
+    if (!getAuthToken() || !isSupabaseReady) return;
+    try {
+      await db.updateAiCoachSuggestionPayload(id, merged);
+    } catch (e) {
+      console.warn('[AppContext] markSuggestionRead DB:', e);
+    }
   };
 
-  const deleteAISuggestion = (id: string) => {
-    setAISuggestions(prev => prev.filter(s => s.id !== id));
+  const deleteAISuggestion = async (id: string) => {
+    setAISuggestions((prev) => prev.filter((s) => s.id !== id));
+    if (!getAuthToken() || !isSupabaseReady) return;
+    try {
+      await db.deleteAiCoachSuggestion(id);
+    } catch (e) {
+      console.warn('[AppContext] deleteAISuggestion DB:', e);
+    }
   };
 
   const getStudentAISuggestions = (studentId: string) => {
@@ -1334,7 +1600,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   // AI Öneri oluşturma (otomatik analiz)
-  const generateAISuggestions = (studentId: string) => {
+  const generateAISuggestions = async (studentId: string) => {
     const suggestions: AICoachSuggestion[] = [];
 
     // Haftalık verilerden analiz
@@ -1431,18 +1697,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     }
 
-    // Yeni önerileri ekle
-    suggestions.forEach(s => {
-      // Aynı öneri var mı kontrol et
-      const exists = aiSuggestions.some(existing =>
-        existing.studentId === studentId &&
-        existing.title === s.title &&
-        !existing.isRead
-      );
-      if (!exists) {
-        addAISuggestion(s);
-      }
-    });
+    for (const s of suggestions) {
+      await addAISuggestion(s);
+    }
   };
 
   // ============ KİTAP OKUMA TAKİBİ FONKSİYONLARI ============
@@ -1517,17 +1774,53 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime());
   };
 
-  // Okuma kaydı işlemleri
-  const addReadingLog = (log: ReadingLog) => {
-    setReadingLogs(prev => [...prev, log]);
+  // Okuma kaydı işlemleri — `reading_logs`
+  const addReadingLog = async (log: ReadingLog) => {
+    if (!getAuthToken() || !isSupabaseReady) {
+      setReadingLogs((prev) => [...prev, log]);
+      return;
+    }
+    const inst =
+      studentsRef.current.find((s) => s.id === log.studentId)?.institutionId ?? activeInstitutionId ?? null;
+    try {
+      const row = await db.upsertReadingLogFromApp(log, inst);
+      const next = readingLogFromRow(row);
+      setReadingLogs((prev) => {
+        const ix = prev.findIndex((l) => l.id === next.id);
+        if (ix === -1) return [...prev, next];
+        const c = [...prev];
+        c[ix] = next;
+        return c;
+      });
+    } catch (e) {
+      console.warn('[AppContext] addReadingLog DB:', e);
+      setReadingLogs((prev) => [...prev, log]);
+    }
   };
 
-  const updateReadingLog = (id: string, updatedLog: Partial<ReadingLog>) => {
-    setReadingLogs(prev => prev.map(l => l.id === id ? { ...l, ...updatedLog } : l));
+  const updateReadingLog = async (id: string, updatedLog: Partial<ReadingLog>) => {
+    const cur = readingLogs.find((l) => l.id === id);
+    if (!cur) return;
+    const merged: ReadingLog = { ...cur, ...updatedLog };
+    setReadingLogs((prev) => prev.map((l) => (l.id === id ? merged : l)));
+    if (!getAuthToken() || !isSupabaseReady) return;
+    const inst =
+      studentsRef.current.find((s) => s.id === merged.studentId)?.institutionId ?? activeInstitutionId ?? null;
+    try {
+      await db.upsertReadingLogFromApp(merged, inst);
+    } catch (e) {
+      console.warn('[AppContext] updateReadingLog DB:', e);
+    }
   };
 
-  const deleteReadingLog = (id: string) => {
-    setReadingLogs(prev => prev.filter(l => l.id !== id));
+  const deleteReadingLog = async (id: string) => {
+    setReadingLogs((prev) => prev.filter((l) => l.id !== id));
+    if (!getAuthToken() || !isSupabaseReady) return;
+    try {
+      await db.deleteReadingLogById(id);
+    } catch (e) {
+      console.warn('[AppContext] deleteReadingLog DB:', e);
+    }
   };
 
   const getStudentReadingLogs = (studentId: string) => {
@@ -1821,14 +2114,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Yazılı sınav notları state - Gerçek database'den yüklenecek
   const [writtenExamScores, setWrittenExamScores] = useState<WrittenExamScore[]>([]);
 
-  // Yazılı sınav dersleri state (admin ekleyebilir/sileyebilir) - localStorage'da tutulabilir
-  const [writtenExamSubjects, setWrittenExamSubjects] = useState<string[]>(() =>
-    loadFromStorage(STORAGE_KEYS.writtenExamSubjects, DEFAULT_WRITTEN_EXAM_SUBJECTS)
-  );
+  // Yazılı sınav dersleri — kurum bazlı DB (`institution_written_exam_prefs`); ilk yüklemede doldurulur
+  const [writtenExamSubjects, setWrittenExamSubjects] = useState<string[]>(() => [...DEFAULT_WRITTEN_EXAM_SUBJECTS]);
 
-  const [writtenExamSubjectsByStudent, setWrittenExamSubjectsByStudent] = useState<
-    Record<string, string[]>
-  >(() => loadFromStorage<Record<string, string[]>>(STORAGE_KEYS.writtenExamSubjectsByStudent, {}));
+  const [writtenExamSubjectsByStudent, setWrittenExamSubjectsByStudent] = useState<Record<string, string[]>>(() => ({}));
 
   // Yazılı sınav verisini localStorage'a kaydet
   useEffect(() => {
@@ -1842,6 +2131,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     saveToStorage(STORAGE_KEYS.writtenExamSubjectsByStudent, writtenExamSubjectsByStudent);
   }, [writtenExamSubjectsByStudent]);
+
+  /** Yazılı ders şablonları — kurum bazlı Supabase (debounce) */
+  useEffect(() => {
+    if (!getAuthToken() || !isSupabaseReady || !activeInstitutionId) return;
+    const t = window.setTimeout(() => {
+      db
+        .upsertInstitutionWrittenExamPrefs(activeInstitutionId, {
+          global_subjects: writtenExamSubjects,
+          per_student_subjects: writtenExamSubjectsByStudent
+        })
+        .catch((e) => console.warn('[AppContext] institution_written_exam_prefs kayıt:', e));
+    }, 900);
+    return () => window.clearTimeout(t);
+  }, [writtenExamSubjects, writtenExamSubjectsByStudent, activeInstitutionId]);
 
   // Yazılı not ekle - Supabase database
   const addWrittenExamScore = async (score: WrittenExamScore) => {

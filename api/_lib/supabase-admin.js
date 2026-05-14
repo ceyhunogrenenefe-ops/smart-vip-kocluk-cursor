@@ -54,3 +54,7 @@ export const supabaseAdmin = new Proxy(
   }
 );
 
+/** `auth.admin.createUser` yalnızca service role ile çalışır (anon ile Auth kullanıcısı oluşmaz). */
+export const hasSupabaseServiceRoleKey = () =>
+  Boolean(String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim());
+
