@@ -30,7 +30,21 @@ export async function resolveStudentRowForUser({ userId, email, institutionId })
         .eq('email', normalizedEmail)
         .order('updated_at', { ascending: false });
       if (institutionId) q = q.eq('institution_id', institutionId);
-      const { data: rows } = await q;
+      let { data: rows } = await q;
+
+      /**
+       * Kullanıcıda institution_id dolu, öğrenci kartında null/başka kurum ise
+       * kurumlu sorgu boş döner → GET /api/my-student 404 (student_profile_missing).
+       * FK (user_id / platform_user_id) yoksa yine de aynı e-posta ile kartı bul.
+       */
+      if ((!rows || rows.length === 0) && institutionId) {
+        const q2 = supabaseAdmin
+          .from('students')
+          .select('id, user_id, platform_user_id, updated_at')
+          .eq('email', normalizedEmail)
+          .order('updated_at', { ascending: false });
+        ({ data: rows } = await q2);
+      }
 
       if (rows?.length === 1 && rows[0]?.id) return { id: rows[0].id };
 
