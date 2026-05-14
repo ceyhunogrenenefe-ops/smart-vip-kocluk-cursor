@@ -46,6 +46,108 @@ async function deleteStudentDependentRows(studentId) {
   }
 }
 
+/** users.created_by FK — yalnızca actor gerçekten users’ta varsa */
+async function resolveCreatedByFkForStudent(actor) {
+  const sub = actor?.sub;
+  if (!sub || sub === 'anonymous') return null;
+  const { data, error } = await supabaseAdmin.from('users').select('id').eq('id', sub).maybeSingle();
+  if (error || !data?.id) return null;
+  return data.id;
+}
+
+/**
+ * Öğrenci paneli girişi public.users üzerinden; yalnızca students satırı users’ta yansımaz.
+ * Şifre (auth_password / password) ≥6 ise users upsert + students.user_id / platform_user_id bağlar.
+ */
+async function linkStudentToPlatformUser(actor, { studentRow, payload, institutionId, loginPwd }) {
+  const sid = studentRow?.id;
+  if (!sid) return studentRow;
+  const pwd = String(loginPwd || '').trim();
+  if (pwd.length < 6) return studentRow;
+
+  const em = String(payload.email || '')
+    .toLowerCase()
+    .trim();
+  if (!em) return studentRow;
+
+  try {
+    const { data: uExist, error: qErr } = await supabaseAdmin
+      .from('users')
+      .select('id, role, roles')
+      .eq('email', em)
+      .maybeSingle();
+    if (qErr) throw qErr;
+
+    if (uExist?.id) {
+      const roleLower = String(uExist.role || '').toLowerCase();
+      if (roleLower && roleLower !== 'student') {
+        console.warn(
+          '[students POST] Aynı e-posta student dışı bir hesaba ait; public.users yeni satırı/ bağlantı atlandı.'
+        );
+        return studentRow;
+      }
+    }
+
+    let platformId = uExist?.id || null;
+    const createdByFk = await resolveCreatedByFkForStudent(actor);
+    const now = new Date().toISOString();
+
+    if (!platformId) {
+      const uid = normalizeUuidOrGenerate(null);
+      const ins = {
+        id: uid,
+        email: em,
+        name: payload.name,
+        phone: payload.phone ?? null,
+        role: 'student',
+        roles: ['student'],
+        password_hash: pwd,
+        institution_id: institutionId || null,
+        is_active: true,
+        package: 'trial',
+        start_date: now,
+        end_date: null,
+        created_by: createdByFk,
+        created_at: now,
+        updated_at: now
+      };
+      const { data: uNew, error: insErr } = await supabaseAdmin.from('users').insert(ins).select().single();
+      if (insErr) throw insErr;
+      platformId = uNew?.id || null;
+    } else {
+      const patch = {
+        name: payload.name,
+        phone: payload.phone ?? null,
+        password_hash: pwd,
+        institution_id: institutionId ?? undefined,
+        updated_at: now
+      };
+      if (String(uExist?.role || '').toLowerCase() === 'student') {
+        patch.role = 'student';
+        patch.roles = ['student'];
+      }
+      await supabaseAdmin.from('users').update(patch).eq('id', platformId);
+    }
+
+    if (platformId) {
+      const { data: linked, error: linkErr } = await supabaseAdmin
+        .from('students')
+        .update({
+          platform_user_id: platformId,
+          user_id: platformId,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', sid)
+        .select()
+        .single();
+      if (!linkErr && linked) return linked;
+    }
+  } catch (e) {
+    console.warn('[students POST] public.users eşlemesi:', e instanceof Error ? e.message : e);
+  }
+  return studentRow;
+}
+
 /** Öğretmen + koç aynı hesapta: birleşik görünürlük */
 async function assertStudentVisibilityResolved(actor, student) {
   const rs = await actorRoleSet(actor);
@@ -256,6 +358,18 @@ export default async function handler(req, res) {
         } catch (e) {
           console.warn('[students POST] Supabase Auth provision:', e);
         }
+      }
+
+      const loginPwdForPlatform = String(
+        body.password ?? body.password_hash ?? body.auth_password ?? ''
+      ).trim();
+      if (data?.id) {
+        data = await linkStudentToPlatformUser(actor, {
+          studentRow: data,
+          payload,
+          institutionId,
+          loginPwd: loginPwdForPlatform
+        });
       }
 
       const cidNew = payload.coach_id || null;

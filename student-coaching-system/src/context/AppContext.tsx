@@ -650,47 +650,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       };
       setStudents(prev => [...prev, newStudent]);
 
-      // Öğrenci giriş yapabilsin diye users tablosunda da karşılığı olmalı; students.user_id ile bağla
-      try {
-        const existingUser = await db.getUserByEmail(student.email);
-        const passwordToSave = student.password || '123456';
-
-        let platformUserId: string;
-        if (existingUser) {
-          await db.updateUser(existingUser.id, {
-            name: student.name,
-            phone: student.phone || null,
-            role: 'student',
-            password_hash: passwordToSave,
-            institution_id: resolvedInstitutionId,
-            is_active: true
-          });
-          platformUserId = existingUser.id;
-        } else {
-          const createdUser = await db.createUser({
-            email: student.email.toLowerCase().trim(),
-            name: student.name,
-            phone: student.phone || null,
-            role: 'student',
-            password_hash: passwordToSave,
-            institution_id: resolvedInstitutionId,
-            is_active: true,
-            package: 'trial',
-            start_date: new Date().toISOString(),
-            end_date: null
-          });
-          platformUserId = createdUser.id;
-        }
-        try {
-          await db.updateStudent(created.id, {
-            platform_user_id: platformUserId
-          } as Parameters<(typeof db)['updateStudent']>[1]);
-        } catch (linkErr) {
-          console.warn('students.platform_user_id bağlantısı atlanıyor:', linkErr);
-        }
-      } catch (userSyncError) {
-        console.error('Öğrenci kullanıcı hesabı senkronizasyon hatası:', userSyncError);
-      }
       return { student: newStudent, persisted: true };
     } catch (error) {
       console.error('Öğrenci ekleme hatası:', error);
