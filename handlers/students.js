@@ -16,6 +16,36 @@ async function actorRoleSet(actor) {
   return set;
 }
 
+/**
+ * Öğrenci kartı silinmeden önce: haftalık çalışma (soru / deneme sayıları), kitap, sınav, konu ilerlemesi vb.
+ * Bazı kurulumlarda `students` üzerinde ON DELETE CASCADE tanımlı olmayabilir; yetim satır bırakmamak için
+ * açık silme (hata olursa log, akış devam — ardından students.delete ve DB CASCADE).
+ */
+async function deleteStudentDependentRows(studentId) {
+  const sid = String(studentId || '').trim();
+  if (!sid) return;
+  const runners = [
+    () => supabaseAdmin.from('weekly_planner_entries').delete().eq('student_id', sid),
+    () => supabaseAdmin.from('weekly_entries').delete().eq('student_id', sid),
+    () => supabaseAdmin.from('book_readings').delete().eq('student_id', sid),
+    () => supabaseAdmin.from('written_exams').delete().eq('student_id', sid),
+    () => supabaseAdmin.from('exam_results').delete().eq('student_id', sid),
+    () => supabaseAdmin.from('exam_results_v2').delete().eq('student_id', sid),
+    () => supabaseAdmin.from('student_topic_progress').delete().eq('student_id', sid),
+    () => supabaseAdmin.from('analysis_details').delete().eq('student_id', sid),
+    () => supabaseAdmin.from('topic_progress').delete().eq('student_id', sid),
+    () => supabaseAdmin.from('ai_exam_analysis').delete().eq('student_id', sid)
+  ];
+  for (const run of runners) {
+    try {
+      const { error } = await run();
+      if (error) console.warn('[students DELETE] bağımlı tablo:', error.message || String(error));
+    } catch (e) {
+      console.warn('[students DELETE] bağımlı tablo:', e instanceof Error ? e.message : e);
+    }
+  }
+}
+
 /** Öğretmen + koç aynı hesapta: birleşik görünürlük */
 async function assertStudentVisibilityResolved(actor, student) {
   const rs = await actorRoleSet(actor);
@@ -290,6 +320,7 @@ export default async function handler(req, res) {
       if (!existing || !(await assertStudentVisibilityResolved(actor, existing)))
         return res.status(403).json({ error: 'forbidden' });
       const prevCoachDel = existing.coach_id || null;
+      await deleteStudentDependentRows(id);
       const { error } = await supabaseAdmin.from('students').delete().eq('id', id);
       if (error) throw error;
       if (prevCoachDel) await rebuildCoachStudentIdsFromFk(prevCoachDel);
