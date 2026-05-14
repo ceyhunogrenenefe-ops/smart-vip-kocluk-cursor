@@ -4,7 +4,6 @@ import { useAuth, SystemUser } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useApp } from '../context/AppContext';
 import { db } from '../lib/database';
-import { isSupabaseReady } from '../lib/supabase';
 import { getAuthToken } from '../lib/session';
 import { userRowToSystemUser } from '../lib/userRowToSystemUser';
 import {
@@ -81,7 +80,7 @@ export default function SystemManagement() {
   const [apiManagedUsers, setApiManagedUsers] = useState<SystemUser[] | null>(null);
 
   const refreshUserDirectory = useCallback(async () => {
-    if (getAuthToken() && isSupabaseReady) {
+    if (getAuthToken()) {
       try {
         const rows = await db.getUsers();
         setApiManagedUsers(rows.map((r) => userRowToSystemUser(r, { coaches, students })));
@@ -193,7 +192,7 @@ export default function SystemManagement() {
     }
 
     const needsInstitution =
-      getAuthToken() && isSupabaseReady && tenantRoles.includes(newUserForm.role);
+      getAuthToken() && tenantRoles.includes(newUserForm.role);
 
     if (needsInstitution) {
       if (!appInstitutions.length) {
@@ -208,7 +207,7 @@ export default function SystemManagement() {
 
     setSavingUser(true);
     try {
-      if (getAuthToken() && isSupabaseReady) {
+      if (getAuthToken()) {
         await db.createUser({
           email: newUserForm.email.trim().toLowerCase(),
           name: newUserForm.name.trim(),
@@ -272,7 +271,7 @@ export default function SystemManagement() {
     }
     setSavingOrg(true);
     try {
-      if (getAuthToken() && isSupabaseReady) {
+      if (getAuthToken()) {
         const created = await addInstitution(
           {
             id: '',
@@ -313,7 +312,7 @@ export default function SystemManagement() {
       setShowAddOrg(false);
       setNewOrgForm({ name: '', email: '', phone: '', address: '', plan: 'starter' });
       alert(
-        getAuthToken() && isSupabaseReady
+        getAuthToken()
           ? 'Kurum veritabanına ve yerel liste kaydedildi. Bu kuruma yönetici atamak için kullanıcı eklerken aynı kurumu seçin.'
           : 'Kurum yalnızca yerel kaydedildi. Veritabanı senkronu için giriş yapın.'
       );
@@ -427,7 +426,7 @@ export default function SystemManagement() {
                       <option value="teacher">Öğretmen</option>
                       <option value="student">Öğrenci</option>
                     </select>
-                    {getAuthToken() && isSupabaseReady && tenantRoles.includes(newUserForm.role) ? (
+                    {getAuthToken() && tenantRoles.includes(newUserForm.role) ? (
                       <select
                         value={newUserForm.institutionId}
                         onChange={(e) => setNewUserForm((p) => ({ ...p, institutionId: e.target.value }))}

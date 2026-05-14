@@ -32,7 +32,6 @@ import {
 import { UserRole, ClassLevel, Coach, Student } from '../types';
 import { userRoleTags } from '../config/rolePermissions';
 import { db, QuotaSnapshot } from '../lib/database';
-import { isSupabaseReady } from '../lib/supabase';
 import { getAuthToken } from '../lib/session';
 import {
   userRowToSystemUser,
@@ -219,7 +218,7 @@ export default function UserManagement() {
   }, [currentUser]);
 
   const refreshUsers = useCallback(async () => {
-    if (getAuthToken() && isSupabaseReady) {
+    if (getAuthToken()) {
       try {
         const rows = await db.getUsers();
         setRawUserRows(rows as UserRow[]);
@@ -305,7 +304,7 @@ export default function UserManagement() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!getAuthToken() || !isSupabaseReady || !currentUser) return;
+      if (!getAuthToken() || !currentUser) return;
       const inst =
         currentUser.role === 'super_admin'
           ? activeInstitutionId || institution?.id || undefined
@@ -455,7 +454,7 @@ export default function UserManagement() {
       };
       let link = findStudentForPlatformUser(opts, students);
       if (link) return link;
-      if (!getAuthToken() || !isSupabaseReady) return null;
+      if (!getAuthToken()) return null;
       try {
         const rows = await db.getStudents(undefined);
         link = findStudentForPlatformUser(
@@ -688,7 +687,7 @@ export default function UserManagement() {
         }
         if (formData.password.trim().length >= 6) patch.password = formData.password;
         let result: { success: boolean; message: string } = { success: false, message: 'Güncellenemedi.' };
-        if (getAuthToken() && isSupabaseReady) {
+        if (getAuthToken()) {
           try {
             await db.updateUser(selectedUser.id, patch as Partial<UserRow>);
             result = { success: true, message: 'Güncellendi.' };
@@ -878,7 +877,7 @@ export default function UserManagement() {
           instFallback ||
           currentUser?.institutionId;
 
-        if (getAuthToken() && isSupabaseReady) {
+        if (getAuthToken()) {
           try {
             const row = await db.createUser(
               {
@@ -968,89 +967,13 @@ export default function UserManagement() {
             });
           }
         } else {
-          const createPayload: Record<string, unknown> = {
-            name: fullName,
-            email: formData.email,
-            phone: formData.phone,
-            password: formData.password,
-            role: formData.role,
-            package: formData.package,
-            startDate: new Date(formData.startDate).toISOString(),
-            endDate: formData.endDate ? new Date(formData.endDate).toISOString() : undefined,
-            isActive: formData.isActive,
-            institutionId: institutionIdForNewUser || resolvedInstitution || undefined,
-            institution_id: institutionIdForNewUser || resolvedInstitution || undefined
-          };
-
-          if (currentUser?.role === 'super_admin' && formData.role === 'admin') {
-            createPayload.bootstrap_max_students =
-              Number(formData.bootstrap_max_students) || undefined;
-            createPayload.bootstrap_max_coaches = Number(formData.bootstrap_max_coaches) || undefined;
-            createPayload.bootstrap_package_label =
-              formData.bootstrap_package_label || 'professional';
-          }
-
-          const result = await createUser(createPayload);
-
-          if (result.success) {
-            setMessage({ type: 'success', text: `${label} başarıyla oluşturuldu!` });
-            await refreshUsers();
-
-            const instId =
-              institutionIdForNewUser || resolvedInstitution || instFallback || currentUser?.institutionId;
-            const newUserId = result.userId || `user-${Date.now()}`;
-            try {
-              if (formData.role === 'student') {
-                await addStudent({
-                  id: newUserId,
-                  name: fullName,
-                  email: formData.email,
-                  password: formData.password || undefined,
-                  phone: formData.phone || '',
-                  birthDate: formData.birthDate || undefined,
-                  parentName: formData.parentName.trim() || undefined,
-                  parentPhone: formData.parentPhone.trim() || '',
-                  classLevel: toClassLevel(formData.classLevel),
-                  school: formData.branch.trim() || undefined,
-                  coachId: formData.assignCoachId || undefined,
-                  institutionId: studentInstForAdd || instId || undefined,
-                  createdAt: new Date().toISOString()
-                });
-              } else if (formData.role === 'coach' || (staffRolesNew?.roles || []).includes('coach')) {
-                await addCoach({
-                  id: newUserId,
-                  name: fullName,
-                  email: formData.email,
-                  phone: formData.phone || '',
-                  subjects: [],
-                  studentIds: [],
-                  institutionId: instId || undefined,
-                  createdAt: new Date().toISOString()
-                });
-              }
-            } catch (syncErr) {
-              console.error('Öğrenci/koç listesi senkron hatası:', syncErr);
-              setMessage({
-                type: 'error',
-                text: 'Kullanıcı oluşturuldu ancak öğrenci/koç listesine eklenirken sorun oluştu. Öğrenci/Koç sayfasından tekrar deneyin.'
-              });
-            }
-
-            setTimeout(() => {
-              setShowModal(false);
-              if (formData.role === 'student') navigate('/students');
-              else if (
-                formData.role === 'coach' &&
-                !(staffRolesNew?.roles || []).includes('teacher')
-              ) {
-                navigate('/coaches');
-              } else {
-                navigate('/dashboard');
-              }
-            }, 1500);
-          } else {
-            setMessage({ type: 'error', text: result.message });
-          }
+          setMessage({
+            type: 'error',
+            text:
+              'Kullanıcı Supabase `users` tablosuna yazılamıyor: sunucu API oturumu (JWT) yok. Çıkış yapıp tekrar giriş yapın. (Tarayıcıda VITE_SUPABASE_URL olmasa bile kayıt sunucu üzerinden yapılır.)'
+          });
+          setLoading(false);
+          return;
         }
       }
     } catch {
@@ -1082,7 +1005,7 @@ export default function UserManagement() {
 
     const target = users.find((u) => u.id === userId) || getUserById(userId);
 
-    if (getAuthToken() && isSupabaseReady) {
+    if (getAuthToken()) {
       const em = (target?.email || '').toLowerCase().trim();
       const tags = target ? userRoleTags(target as SystemUser) : [];
       try {
@@ -1342,7 +1265,7 @@ export default function UserManagement() {
         };
 
         try {
-          if (getAuthToken() && isSupabaseReady) {
+          if (getAuthToken()) {
             let existing: UserRow | null = null;
             try {
               existing = await db.getUserByEmail(emailLower);
