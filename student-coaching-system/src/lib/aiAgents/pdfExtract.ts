@@ -1,21 +1,21 @@
 /**
  * Tarayıcı tarafında PDF'ten sayfa sayfa metin çıkartma.
- * pdfjs-dist worker'ı CDN'den yüklenir (build'i şişirmemek için).
+ * pdfjs-dist v5 worker'ı Vite tarafından bundle edilir (?url import).
+ * Offline çalışır, CDN'e bağımlı değildir.
  */
 import * as pdfjsLib from 'pdfjs-dist';
+// pdfjs-dist v5 ESM worker — Vite ?url importu ile fingerprint'li statik dosyaya çevrilir
+// eslint-disable-next-line import/no-unresolved
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
-/** Worker URL'i — Vite üretiminde de çalışır */
-const setupWorker = () => {
+if (typeof window !== 'undefined') {
   try {
-    if (typeof window === 'undefined') return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (pdfjsLib as any).GlobalWorkerOptions.workerSrc =
-      `https://cdn.jsdelivr.net/npm/pdfjs-dist@${(pdfjsLib as { version: string }).version}/build/pdf.worker.min.js`;
+    (pdfjsLib as any).GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
   } catch {
     /* yoksay */
   }
-};
-setupWorker();
+}
 
 export interface PdfPageText {
   page: number;
