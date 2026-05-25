@@ -6,6 +6,7 @@ import { resolveOpenAIKey } from './ai-rag.js';
 
 const EXTRACT_MODEL = 'gpt-4o-mini';
 
+/** OpenAI strict mode: properties'teki TÜM alanlar required'da olmalı */
 const SCHEMA = {
   type: 'object',
   properties: {
@@ -17,16 +18,16 @@ const SCHEMA = {
           question_text: { type: 'string', description: 'Soru metni (gerekiyorsa kısa açıklama ile birlikte)' },
           options: {
             type: 'array',
-            description: 'Şıklar (genellikle 4 ya da 5 adet, A) ... gibi)',
+            description: 'Şıklar (genellikle 4 ya da 5 adet)',
             items: { type: 'string' }
           },
           answer_key: {
             type: 'string',
-            description: 'Doğru şık harfi (A, B, C, D, E) veya açık uçluysa boş'
+            description: 'Doğru şık harfi (A, B, C, D, E). Bilinmiyorsa boş string ""'
           },
-          solution: { type: 'string', description: 'Kısa çözüm/açıklama; PDF\'te varsa onu kullan' },
+          solution: { type: 'string', description: 'Kısa çözüm/açıklama. Yoksa boş string ""' },
           topic: { type: 'string', description: 'Konu (ör: Hareket, Kuvvet, Optik)' },
-          subtopic: { type: 'string', description: 'Alt konu (varsa, yoksa boş)' },
+          subtopic: { type: 'string', description: 'Alt konu. Yoksa boş string ""' },
           difficulty: {
             type: 'string',
             enum: ['kolay', 'orta', 'zor'],
@@ -34,10 +35,19 @@ const SCHEMA = {
           },
           confidence: {
             type: 'number',
-            description: '0.0–1.0 arası — bu sorunun gerçekten kaliteli/parse edilebilir olduğuna dair güven'
+            description: '0.0–1.0 arası — sorunun kaliteli/parse edilebilir olduğuna dair güven'
           }
         },
-        required: ['question_text', 'options', 'answer_key', 'solution', 'topic', 'difficulty', 'confidence'],
+        required: [
+          'question_text',
+          'options',
+          'answer_key',
+          'solution',
+          'topic',
+          'subtopic',
+          'difficulty',
+          'confidence'
+        ],
         additionalProperties: false
       }
     }
