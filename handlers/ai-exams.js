@@ -129,6 +129,9 @@ async function extract(req, res, actor) {
   let inserted = 0;
   let totalUsage = { prompt_tokens: 0, completion_tokens: 0 };
   let parsedQuestions = 0;
+  let lowConfidence = 0;
+  let duplicates = 0;
+  let batchErrors = [];
 
   for (let i = 0; i < chunks.length; i += BATCH) {
     const slice = chunks.slice(i, i + BATCH);
@@ -141,9 +144,16 @@ async function extract(req, res, actor) {
       const rows = [];
       for (const q of questions) {
         const conf = Number(q.confidence ?? 0);
-        if (conf < 0.65) continue;
+        if (conf < 0.45) {
+          lowConfidence += 1;
+          continue;
+        }
         const key = String(q.question_text || '').trim().slice(0, 80).toLowerCase();
-        if (!key || existingSet.has(key)) continue;
+        if (!key) continue;
+        if (existingSet.has(key)) {
+          duplicates += 1;
+          continue;
+        }
         existingSet.add(key);
         rows.push({
           agent_id: agentId,
@@ -178,14 +188,31 @@ async function extract(req, res, actor) {
         completionTokens: usage.completion_tokens || 0
       });
     } catch (e) {
-      console.warn('[ai-exams.extract] batch failed', e?.message);
+      const msg = e?.message || String(e);
+      console.warn('[ai-exams.extract] batch failed', msg);
+      batchErrors.push(msg.slice(0, 200));
     }
+  }
+
+  /** Hizli tani: chunklarda soru isareti / sik harfi var mi? */
+  let hasQuestionMark = 0;
+  let hasOptionLetters = 0;
+  for (const c of chunks) {
+    const t = String(c.content || '');
+    if (t.includes('?')) hasQuestionMark += 1;
+    if (/\b[A-E]\)/.test(t)) hasOptionLetters += 1;
   }
 
   return res.status(200).json({
     ok: true,
     parsed: parsedQuestions,
     inserted,
+    low_confidence: lowConfidence,
+    duplicates,
+    chunks_scanned: chunks.length,
+    chunks_with_qmark: hasQuestionMark,
+    chunks_with_options: hasOptionLetters,
+    batch_errors: batchErrors,
     usage: totalUsage,
     cost_usd: costFor(EXTRACT_MODEL, totalUsage.prompt_tokens, totalUsage.completion_tokens)
   });

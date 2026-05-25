@@ -26,10 +26,18 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
 
 /* SORU HAVUZU */
 export const extractQuestionsFromAgent = (payload: { agent_id: string; document_id?: string }) =>
-  postJson<{ ok: boolean; parsed: number; inserted: number; cost_usd: number }>(
-    '/api/ai-exams?op=extract',
-    payload
-  );
+  postJson<{
+    ok: boolean;
+    parsed: number;
+    inserted: number;
+    low_confidence?: number;
+    duplicates?: number;
+    chunks_scanned?: number;
+    chunks_with_qmark?: number;
+    chunks_with_options?: number;
+    batch_errors?: string[];
+    cost_usd: number;
+  }>('/api/ai-exams?op=extract', payload);
 
 export const listQuestions = (filters: {
   agent_id: string;

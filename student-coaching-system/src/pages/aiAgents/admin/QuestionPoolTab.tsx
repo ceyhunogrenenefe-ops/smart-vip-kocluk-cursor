@@ -65,9 +65,31 @@ export default function QuestionPoolTab({ agentId }: Props) {
     setExtractMsg(null);
     try {
       const r = await extractQuestionsFromAgent({ agent_id: agentId });
-      setExtractMsg(
-        `Tarama tamamlandı — ${r.parsed} soru parse edildi, ${r.inserted} tanesi havuza eklendi. Maliyet: $${r.cost_usd.toFixed(4)}`
+      const lines: string[] = [];
+      lines.push(
+        `Tarama: ${r.chunks_scanned ?? 0} parça tarandı, AI ${r.parsed} soru buldu, ${r.inserted} havuza eklendi.`
       );
+      if (r.low_confidence) lines.push(`Düşük güvenli (atlandı): ${r.low_confidence}`);
+      if (r.duplicates) lines.push(`Tekrarlanan (atlandı): ${r.duplicates}`);
+      lines.push(
+        `İçerik analizi: ${r.chunks_with_qmark ?? 0} parçada soru işareti, ${r.chunks_with_options ?? 0} parçada A) B) C) şık formatı bulundu.`
+      );
+      if (r.parsed === 0) {
+        if ((r.chunks_with_options ?? 0) === 0) {
+          lines.push(
+            '\n⚠ PDF\'lerinizde çoktan seçmeli soru yapısı (A) B) C)) bulunmadı. Bu kaynaklar konu anlatımı olabilir. Çözüm: soru bankası PDF\'leri yükleyin, ya da AI ile yeni soru üretme özelliğini isteyin.'
+          );
+        } else {
+          lines.push(
+            '\n⚠ AI sorular tespit edemedi. Confidence eşiği düşürüldü ama yine de sıfır. Olası nedenler: PDF taranmış görüntü (OCR yok), formatlar bozuk, ya da soru formatı çok atipik.'
+          );
+        }
+      }
+      if (r.batch_errors && r.batch_errors.length) {
+        lines.push(`\n⚠ ${r.batch_errors.length} batch'te hata: ${r.batch_errors[0]}`);
+      }
+      lines.push(`\nMaliyet: $${r.cost_usd.toFixed(4)}`);
+      setExtractMsg(lines.join('\n'));
       await refresh();
     } catch (e) {
       setExtractMsg(`Hata: ${(e as Error).message}`);
@@ -124,7 +146,7 @@ export default function QuestionPoolTab({ agentId }: Props) {
       </div>
 
       {extractMsg && (
-        <div className="p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-800">
+        <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-900 whitespace-pre-wrap">
           {extractMsg}
         </div>
       )}
