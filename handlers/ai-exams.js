@@ -156,6 +156,25 @@ async function extract(req, res, actor) {
     (existing || []).map((r) => String(r.question_text || '').trim().slice(0, 80).toLowerCase())
   );
 
+  /** Bu pencerenin sayfa goruntu URL'lerini onceden cek */
+  const pageKeys = new Set();
+  for (const c of chunks) {
+    if (c.document_id && c.page_no) pageKeys.add(`${c.document_id}|${c.page_no}`);
+  }
+  const pageImageMap = new Map();
+  if (pageKeys.size) {
+    const docIds = Array.from(new Set(chunks.map((c) => c.document_id).filter(Boolean)));
+    const pageNos = Array.from(new Set(chunks.map((c) => c.page_no).filter((n) => Number.isFinite(n))));
+    const { data: pages } = await supabaseAdmin
+      .from('ai_agent_pages')
+      .select('document_id, page_no, image_url')
+      .in('document_id', docIds.length ? docIds : ['__none__'])
+      .in('page_no', pageNos.length ? pageNos : [-1]);
+    for (const p of pages || []) {
+      pageImageMap.set(`${p.document_id}|${p.page_no}`, p.image_url);
+    }
+  }
+
   /** Her OpenAI cagrisi 6 chunk -> 4 paralel cagri = 24 chunk / call */
   const BATCH = 6;
   const slices = [];
@@ -199,10 +218,14 @@ async function extract(req, res, actor) {
         continue;
       }
       existingSet.add(key);
+      const docId = slice[0]?.document_id || null;
+      const pageNo = slice[0]?.page_no || null;
+      const pageImageUrl = docId && pageNo ? pageImageMap.get(`${docId}|${pageNo}`) || null : null;
       rows.push({
         agent_id: agentId,
-        document_id: slice[0]?.document_id || null,
-        page_no: slice[0]?.page_no || null,
+        document_id: docId,
+        page_no: pageNo,
+        page_image_url: pageImageUrl,
         question_text: String(q.question_text || '').trim(),
         options: Array.isArray(q.options) ? q.options : [],
         answer_key: q.answer_key ? String(q.answer_key).trim().toUpperCase().slice(0, 3) : null,
@@ -623,7 +646,7 @@ async function attemptStart(req, res, actor) {
   const ids = Array.isArray(paper.question_ids) ? paper.question_ids : [];
   const { data: questions } = await supabaseAdmin
     .from('ai_exam_questions')
-    .select('id, question_text, options, topic, difficulty')
+    .select('id, question_text, options, topic, difficulty, page_image_url')
     .in('id', ids.length ? ids : ['__none__']);
   const map = new Map((questions || []).map((q) => [q.id, q]));
   const ordered = ids.map((qid) => map.get(qid)).filter(Boolean);
@@ -758,7 +781,7 @@ async function attemptResult(req, res, actor) {
   const ids = Array.isArray(paper?.question_ids) ? paper.question_ids : [];
   const { data: questions } = await supabaseAdmin
     .from('ai_exam_questions')
-    .select('id, question_text, options, answer_key, solution, topic, difficulty, page_no, document_id')
+    .select('id, question_text, options, answer_key, solution, topic, difficulty, page_no, document_id, page_image_url')
     .in('id', ids.length ? ids : ['__none__']);
   const map = new Map((questions || []).map((q) => [q.id, q]));
   const ordered = ids.map((qid) => map.get(qid)).filter(Boolean);

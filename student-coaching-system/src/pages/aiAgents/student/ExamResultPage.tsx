@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { attemptResult } from '../../../lib/aiAgents/aiExamsApi';
 import type { AttemptResultResponse } from '../../../types/aiExams.types';
+import QuestionImageView from '../components/QuestionImageView';
 
 export default function ExamResultPage() {
   const { id: assignmentId } = useParams<{ id: string }>();
@@ -144,6 +145,7 @@ export default function ExamResultPage() {
                 </summary>
                 <div className="px-3 py-2 border-t text-sm">
                   <div className="whitespace-pre-wrap mb-2">{q.question_text}</div>
+                  <QuestionImageView url={q.page_image_url} pageNo={q.page_no} variant="full" />
                   <div className="space-y-1">
                     {q.options.map((opt, i) => {
                       const letter = String.fromCharCode(65 + i);

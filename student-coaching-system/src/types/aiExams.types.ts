@@ -9,6 +9,7 @@ export interface ExamQuestion {
   agent_id: string;
   document_id?: string | null;
   page_no?: number | null;
+  page_image_url?: string | null;
   question_text: string;
   options: string[];
   answer_key?: string | null;
@@ -117,6 +118,7 @@ export interface AttemptStartResponse {
     options: string[];
     topic?: string | null;
     difficulty?: ExamDifficulty | null;
+    page_image_url?: string | null;
   }>;
 }
 

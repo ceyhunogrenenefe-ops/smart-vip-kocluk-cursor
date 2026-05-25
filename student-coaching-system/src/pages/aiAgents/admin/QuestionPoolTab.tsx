@@ -16,6 +16,7 @@ import {
   updateQuestion
 } from '../../../lib/aiAgents/aiExamsApi';
 import type { ExamQuestion } from '../../../types/aiExams.types';
+import QuestionImageView from '../components/QuestionImageView';
 
 interface Props {
   agentId: string;
@@ -291,6 +292,7 @@ function QuestionCard(props: {
             {q.status === 'approved' && <Badge color="emerald" label="onaylı" />}
             {q.status === 'rejected' && <Badge color="rose" label="reddedildi" />}
             {q.status === 'draft' && <Badge color="amber" label="taslak" />}
+            <QuestionImageView url={q.page_image_url} pageNo={q.page_no} />
           </div>
           <div className="text-sm font-medium whitespace-pre-wrap mb-2">{q.question_text}</div>
           <div className="space-y-1">

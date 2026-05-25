@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Clock, Loader2, ChevronLeft, ChevronRight, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { attemptStart, attemptSubmit } from '../../../lib/aiAgents/aiExamsApi';
 import type { AttemptStartResponse } from '../../../types/aiExams.types';
+import QuestionImageView from '../components/QuestionImageView';
 
 export default function TakeExamPage() {
   const { id: assignmentId } = useParams<{ id: string }>();
@@ -114,7 +115,8 @@ export default function TakeExamPage() {
           {current.topic && <span className="mr-2">📚 {current.topic}</span>}
           {current.difficulty && <span>· {current.difficulty}</span>}
         </div>
-        <div className="text-base whitespace-pre-wrap mb-4 leading-relaxed">{current.question_text}</div>
+        <div className="text-base whitespace-pre-wrap mb-2 leading-relaxed">{current.question_text}</div>
+        <QuestionImageView url={current.page_image_url} variant="full" />
         <div className="space-y-2">
           {current.options.map((opt, i) => {
             const letter = String.fromCharCode(65 + i);

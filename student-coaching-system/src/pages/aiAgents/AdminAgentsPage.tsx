@@ -25,10 +25,11 @@ import {
   listDocuments,
   updateAgent,
   updateAiSettings,
-  uploadDocumentChunks
+  uploadDocumentChunks,
+  uploadPageImage
 } from '../../lib/aiAgents/aiAgentsApi';
 import type { AIAgent, AIAgentDocument, AIUsageSummary } from '../../types/aiAgents.types';
-import { extractPdfPages, hashFile } from '../../lib/aiAgents/pdfExtract';
+import { blobToBase64, hashFile, loadPdf, renderPageToPngBlob } from '../../lib/aiAgents/pdfExtract';
 import QuestionPoolTab from './admin/QuestionPoolTab';
 import PapersTab from './admin/PapersTab';
 
@@ -311,10 +312,28 @@ function AgentDetail(props: {
   };
 
   const onUploadFile = async (file: File) => {
-    setUploading({ phase: 'PDF okunuyor', pct: 5 });
+    setUploading({ phase: 'PDF okunuyor', pct: 3 });
     try {
       const hash = await hashFile(file);
-      const pages = await extractPdfPages(file);
+
+      /** PDF'i pdfjs ile bir kez aç — hem metin hem görüntü erişimi */
+      const pdf = await loadPdf(file);
+      const pageCount = pdf.numPages;
+
+      /** Metni çıkar */
+      setUploading({ phase: 'Metin ayrıştırılıyor', pct: 6 });
+      const pages: { page: number; text: string }[] = [];
+      for (let i = 1; i <= pageCount; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const text = (content.items as any[])
+          .map((it) => ('str' in it ? (it as { str: string }).str : ''))
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        pages.push({ page: i, text });
+      }
       const totalText = pages.reduce((acc, p) => acc + p.text.length, 0);
       if (!totalText) {
         alert('Bu PDF metin tabanlı değil (taranmış görünüyor). OCR/taranmış PDF desteği yakında.');
@@ -322,14 +341,15 @@ function AgentDetail(props: {
         return;
       }
 
-      setUploading({ phase: 'Döküman oluşturuluyor', pct: 15 });
+      setUploading({ phase: 'Döküman oluşturuluyor', pct: 10 });
       const doc = await initDocument({
         agent_id: agent.id,
         title: file.name.replace(/\.pdf$/i, ''),
         file_hash: hash,
-        page_count: pages.length
+        page_count: pageCount
       });
 
+      /** 1) Embedding (metin) — yukar 10%-50% */
       const PAGE_BATCH = 12;
       let processed = 0;
       for (let i = 0; i < pages.length; i += PAGE_BATCH) {
@@ -339,14 +359,61 @@ function AgentDetail(props: {
           await uploadDocumentChunks({ document_id: doc.id, pages: meaningful });
         }
         processed += batch.length;
-        const pct = 15 + Math.round((processed / pages.length) * 80);
-        setUploading({ phase: `Embedding (${processed}/${pages.length} sayfa)`, pct });
+        const pct = 10 + Math.round((processed / pages.length) * 40);
+        setUploading({ phase: `Embedding (${processed}/${pageCount} sayfa)`, pct });
       }
+
+      /** 2) Her sayfayı PNG render edip Storage'a yükle — 50%-98% */
+      const PARALLEL = 4;
+      let imgDone = 0;
+      let imgFailed = 0;
+      const renderAndUpload = async (pageNo: number) => {
+        try {
+          const { blob, width, height } = await renderPageToPngBlob(pdf, pageNo, 1.4);
+          /** 1.5MB üstü ise scale küçült (büyük A3 sayfalar) */
+          let finalBlob = blob;
+          if (blob.size > 1_500_000) {
+            const reduced = await renderPageToPngBlob(pdf, pageNo, 1.0);
+            finalBlob = reduced.blob;
+          }
+          const b64 = await blobToBase64(finalBlob);
+          await uploadPageImage({
+            document_id: doc.id,
+            page_no: pageNo,
+            image_base64: b64,
+            mime: 'image/png',
+            width,
+            height
+          });
+        } catch (e) {
+          imgFailed += 1;
+          console.warn(`page ${pageNo} image upload failed`, e);
+        } finally {
+          imgDone += 1;
+          const pct = 50 + Math.round((imgDone / pageCount) * 48);
+          setUploading({
+            phase: `Sayfa görüntüleri (${imgDone}/${pageCount})${imgFailed ? ` · ${imgFailed} hata` : ''}`,
+            pct
+          });
+        }
+      };
+
+      /** Paralel havuz: PARALLEL sayfa aynı anda */
+      let cursor = 1;
+      const workers: Promise<void>[] = [];
+      const next = async () => {
+        while (cursor <= pageCount) {
+          const p = cursor++;
+          await renderAndUpload(p);
+        }
+      };
+      for (let i = 0; i < PARALLEL; i++) workers.push(next());
+      await Promise.all(workers);
 
       await finalizeDocument({ document_id: doc.id });
       setUploading({ phase: 'Tamamlandı', pct: 100 });
       await refreshDocs();
-      setTimeout(() => setUploading(null), 800);
+      setTimeout(() => setUploading(null), 1000);
     } catch (e) {
       alert(`Yükleme başarısız: ${(e as Error).message}`);
       setUploading(null);

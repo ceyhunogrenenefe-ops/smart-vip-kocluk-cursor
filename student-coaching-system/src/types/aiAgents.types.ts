@@ -46,6 +46,12 @@ export interface AIAgentMessage {
   created_at: string;
 }
 
+export interface AIPageImageUploadResult {
+  ok: boolean;
+  url: string;
+  page_no: number;
+}
+
 export interface AIAgentUsageSelf {
   used: number;
   limit: number;

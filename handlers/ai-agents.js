@@ -10,6 +10,7 @@
  *  POST   ?op=document-chunks           → batch chunk gönder; sunucu embed eder
  *  POST   ?op=document-finalize         → dökümanı ready işaretle
  *  POST   ?op=document-delete           → döküman + chunks sil
+ *  POST   ?op=page-image                → bir sayfanın PNG görüntüsünü Storage'a yükle
  *
  *  GET    ?op=conversations             → kullanıcının kendi sohbetleri
  *  GET    ?op=messages&conversation_id  → bir sohbetin mesajları
@@ -84,6 +85,7 @@ export default async function handler(req, res) {
     if (op === 'document-chunks') return await documentChunks(req, res, actor);
     if (op === 'document-finalize') return await documentFinalize(req, res, actor);
     if (op === 'document-delete') return await documentDelete(req, res, actor);
+    if (op === 'page-image') return await pageImageUpload(req, res, actor);
 
     if (op === 'conversations') return await listConversations(req, res, actor);
     if (op === 'messages') return await listMessages(req, res, actor);
@@ -352,9 +354,112 @@ async function documentDelete(req, res, actor) {
   const { data: agent } = await supabaseAdmin.from('ai_agents').select('*').eq('id', doc.agent_id).maybeSingle();
   if (!canManageAgent(actor, agent)) return res.status(403).json({ error: 'forbidden' });
 
+  /** Storage'daki PNG sayfalarını da temizle */
+  try {
+    const { data: pageRows } = await supabaseAdmin
+      .from('ai_agent_pages')
+      .select('image_url')
+      .eq('document_id', documentId);
+    if (pageRows && pageRows.length) {
+      const paths = pageRows
+        .map((r) => extractStoragePath(r.image_url))
+        .filter(Boolean);
+      if (paths.length) {
+        await supabaseAdmin.storage.from('ai-exam-pages').remove(paths).catch(() => null);
+      }
+    }
+  } catch (e) {
+    console.warn('[ai-agents] storage cleanup failed', e?.message || e);
+  }
+
   const { error } = await supabaseAdmin.from('ai_agent_documents').delete().eq('id', documentId);
   if (error) throw error;
   return res.status(200).json({ ok: true });
+}
+
+function extractStoragePath(publicUrl) {
+  try {
+    const marker = '/ai-exam-pages/';
+    const i = String(publicUrl || '').indexOf(marker);
+    if (i < 0) return null;
+    return publicUrl.slice(i + marker.length);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Bir PDF sayfasının PNG'sini Storage'a yükler ve ai_agent_pages tablosuna kaydeder.
+ * Body: { document_id, page_no, image_base64, mime?, width?, height? }
+ * Vercel body limit ≈ 4.5MB → her PNG için bağımsız istek (paralel)
+ */
+async function pageImageUpload(req, res, actor) {
+  const body = parseBody(req);
+  const documentId = String(body.document_id || '').trim();
+  const pageNo = Number.parseInt(String(body.page_no), 10);
+  const base64 = String(body.image_base64 || '');
+  const mime = String(body.mime || 'image/png').toLowerCase();
+  const width = Number.isFinite(Number(body.width)) ? Number(body.width) : null;
+  const height = Number.isFinite(Number(body.height)) ? Number(body.height) : null;
+
+  if (!documentId || !Number.isFinite(pageNo) || pageNo < 1 || !base64) {
+    return res.status(400).json({ error: 'document_id_page_no_and_image_required' });
+  }
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(mime)) {
+    return res.status(400).json({ error: 'invalid_mime' });
+  }
+
+  const { data: doc } = await supabaseAdmin
+    .from('ai_agent_documents')
+    .select('*')
+    .eq('id', documentId)
+    .maybeSingle();
+  if (!doc) return res.status(404).json({ error: 'document_not_found' });
+
+  const { data: agent } = await supabaseAdmin
+    .from('ai_agents')
+    .select('*')
+    .eq('id', doc.agent_id)
+    .maybeSingle();
+  if (!agent) return res.status(404).json({ error: 'agent_not_found' });
+  if (!canManageAgent(actor, agent)) return res.status(403).json({ error: 'forbidden' });
+
+  const ext = mime === 'image/jpeg' ? 'jpg' : mime === 'image/webp' ? 'webp' : 'png';
+  const path = `${doc.agent_id}/${documentId}/p${String(pageNo).padStart(4, '0')}.${ext}`;
+  const buffer = Buffer.from(base64, 'base64');
+
+  const { error: upErr } = await supabaseAdmin.storage
+    .from('ai-exam-pages')
+    .upload(path, buffer, {
+      contentType: mime,
+      upsert: true,
+      cacheControl: '31536000'
+    });
+  if (upErr) {
+    return res.status(500).json({ error: 'storage_upload_failed', detail: errorMessage(upErr) });
+  }
+
+  const { data: pub } = supabaseAdmin.storage.from('ai-exam-pages').getPublicUrl(path);
+  const imageUrl = pub?.publicUrl;
+  if (!imageUrl) return res.status(500).json({ error: 'public_url_failed' });
+
+  /** Upsert ai_agent_pages */
+  const { error: dbErr } = await supabaseAdmin
+    .from('ai_agent_pages')
+    .upsert(
+      {
+        agent_id: doc.agent_id,
+        document_id: documentId,
+        page_no: pageNo,
+        image_url: imageUrl,
+        width,
+        height
+      },
+      { onConflict: 'document_id,page_no' }
+    );
+  if (dbErr) return res.status(500).json({ error: 'db_upsert_failed', detail: errorMessage(dbErr) });
+
+  return res.status(200).json({ ok: true, url: imageUrl, page_no: pageNo });
 }
 
 /* ─────────────────────────── SOHBET ─────────────────────────── */

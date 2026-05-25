@@ -5,6 +5,7 @@ import type {
   AIAgentDocument,
   AIAgentMessage,
   AIAgentUsageSelf,
+  AIPageImageUploadResult,
   AIUsageSummary
 } from '../../types/aiAgents.types';
 
@@ -64,6 +65,15 @@ export const finalizeDocument = (payload: { document_id: string; error?: string 
 
 export const deleteDocument = (documentId: string) =>
   postJson<{ ok: boolean }>('/api/ai-agents?op=document-delete', { document_id: documentId });
+
+export const uploadPageImage = (payload: {
+  document_id: string;
+  page_no: number;
+  image_base64: string;
+  mime?: string;
+  width?: number;
+  height?: number;
+}) => postJson<AIPageImageUploadResult>('/api/ai-agents?op=page-image', payload);
 
 /* SOHBET */
 export const listConversations = () =>
