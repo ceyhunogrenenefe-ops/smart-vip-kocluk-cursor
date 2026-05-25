@@ -2,15 +2,18 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { addDays, format, parseISO, startOfWeek } from 'date-fns';
 import { tr } from 'date-fns/locale/tr';
 import { ChevronLeft, ChevronRight, MonitorSmartphone, Save } from 'lucide-react';
+import { IconTapButton } from '../ui/IconTapButton';
 import {
   BarChart,
   Bar,
+  Cell,
   XAxis,
   YAxis,
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
 import { fetchScreenTimeLogs, upsertScreenTimeLog } from '../../lib/screenTimeApi';
+import { buildDailyScreenTimeSeries } from '../weeklyPlanner/DailyScreenTimeChart';
 
 interface StudentScreenTimePanelProps {
   studentId: string;
@@ -58,16 +61,10 @@ export function StudentScreenTimePanel({ studentId }: StudentScreenTimePanelProp
     return m;
   }, [logs]);
 
-  const chartData = useMemo(() => {
-    const labels = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = format(addDays(parseISO(weekStartStr), i), 'yyyy-MM-dd');
-      return {
-        gün: labels[i],
-        dk: byDate.get(d) ?? 0,
-      };
-    });
-  }, [weekStartStr, byDate]);
+  const chartData = useMemo(
+    () => buildDailyScreenTimeSeries(weekStartStr, byDate),
+    [weekStartStr, byDate]
+  );
 
   const weekTotal = useMemo(() => logs.reduce((s, r) => s + r.screen_minutes, 0), [logs]);
   const daysWithData = useMemo(() => logs.filter((r) => r.screen_minutes > 0).length, [logs]);
@@ -98,13 +95,13 @@ export function StudentScreenTimePanel({ studentId }: StudentScreenTimePanelProp
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <button
-            type="button"
+          <IconTapButton
             onClick={() => setAnchor((a) => addDays(a, -7))}
-            className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50"
+            className="border border-slate-200 bg-white hover:bg-slate-50"
+            aria-label="Önceki hafta"
           >
             <ChevronLeft className="w-4 h-4" />
-          </button>
+          </IconTapButton>
           <button
             type="button"
             onClick={() => setAnchor(new Date())}
@@ -112,13 +109,13 @@ export function StudentScreenTimePanel({ studentId }: StudentScreenTimePanelProp
           >
             Bu hafta
           </button>
-          <button
-            type="button"
+          <IconTapButton
             onClick={() => setAnchor((a) => addDays(a, 7))}
-            className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50"
+            className="border border-slate-200 bg-white hover:bg-slate-50"
+            aria-label="Sonraki hafta"
           >
             <ChevronRight className="w-4 h-4" />
-          </button>
+          </IconTapButton>
         </div>
       </div>
 
@@ -171,8 +168,17 @@ export function StudentScreenTimePanel({ studentId }: StudentScreenTimePanelProp
           <BarChart data={chartData}>
             <XAxis dataKey="gün" tick={{ fontSize: 11 }} />
             <YAxis tick={{ fontSize: 10 }} width={32} />
-            <Tooltip formatter={(v: number) => [`${v} dk`, 'Süre']} />
-            <Bar dataKey="dk" fill="#6366f1" radius={[6, 6, 0, 0]} />
+            <Tooltip
+              formatter={(v: number, _n, p) => {
+                const row = p?.payload as { bandLabel?: string };
+                return [`${v} dk · ${row?.bandLabel ?? ''}`, 'Ekran'];
+              }}
+            />
+            <Bar dataKey="dakika" radius={[6, 6, 0, 0]}>
+              {chartData.map((entry) => (
+                <Cell key={entry.gün} fill={entry.fill} />
+              ))}
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
       </div>

@@ -44,8 +44,49 @@ export async function stableTopicProgressTopicId(
   return u8ToUuidLower(hash);
 }
 
+export function normalizeTopicLabel(value: string): string {
+  return String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+export function topicLabelsEqual(a: string, b: string): boolean {
+  const na = normalizeTopicLabel(a);
+  const nb = normalizeTopicLabel(b);
+  if (!na || !nb) return na === nb;
+  return na.localeCompare(nb, 'tr', { sensitivity: 'accent' }) === 0;
+}
+
 export function topicProgressDedupeKey(studentId: string, subject: string, topic: string): string {
-  return `${studentId}\u0000${subject}\u0000${topic}`;
+  return `${studentId}\u0000${normalizeTopicLabel(subject)}\u0000${normalizeTopicLabel(topic)}`;
+}
+
+/** Konu havuzu satırı ile kayıtlı ilerleme eşleşmesi (büyük/küçük harf, boşluk toleranslı) */
+/** Planlayıcı başlığını konu havuzundaki resmi konu adına eşle (Konu Takibi satırı ile uyum) */
+export function resolveTopicLabelForTracking(plannerTitle: string, topicPool: string[]): string {
+  const top = normalizeTopicLabel(plannerTitle);
+  if (!top) return top;
+  const exact = topicPool.find((t) => topicLabelsEqual(t, top));
+  if (exact) return exact;
+  const fuzzy = topicPool.find((t) => {
+    const nt = normalizeTopicLabel(t);
+    return nt.includes(top) || top.includes(nt);
+  });
+  return fuzzy ?? top;
+}
+
+export function isTopicMarkedCompleted(
+  progress: { studentId: string; subject: string; topic: string }[],
+  studentId: string,
+  subject: string,
+  topic: string
+): boolean {
+  return progress.some(
+    (p) =>
+      p.studentId === studentId &&
+      topicLabelsEqual(p.subject, subject) &&
+      topicLabelsEqual(p.topic, topic)
+  );
 }
 
 export function encodeTopicProgressNotes(p: {

@@ -5,9 +5,11 @@ import { useAuth } from '../context/AuthContext';
 import { userRoleTags } from '../config/rolePermissions';
 import { resolveStudentRecordId } from '../lib/coachResolve';
 import { formatClassLevelLabel } from '../types';
+import { isTopicMarkedCompleted } from '../lib/topicProgressSync';
+import { isStudyTrackSubject, STUDY_TRACK_SUBJECTS } from '../lib/studyTrackSubjects';
+import { TapCheckbox } from '../components/ui/TapCheckbox';
 import {
   BookOpen,
-  CheckCircle,
   Search,
   GraduationCap,
   RotateCcw,
@@ -33,7 +35,8 @@ export default function TopicTracking() {
     markTopicCompleted,
     unmarkTopicCompleted,
     resetTopicProgress,
-    getStudentTopicProgress
+    getStudentTopicProgress,
+    refreshTopicProgress
   } = useApp();
 
   const tags = useMemo(() => (effectiveUser ? userRoleTags(effectiveUser) : []), [effectiveUser]);
@@ -63,6 +66,10 @@ export default function TopicTracking() {
     if (isStudentOnly && selfStudentId) setSelectedStudentId(selfStudentId);
   }, [isStudentOnly, selfStudentId]);
 
+  useEffect(() => {
+    void refreshTopicProgress();
+  }, [refreshTopicProgress, selectedStudentId]);
+
   const selectedStudent = students.find(s => s.id === selectedStudentId);
 
   /** Asla varsayılan sınıf uydurma — DB / öğrenci kartı ne diyorsa o (yoksa boş liste + uyarı) */
@@ -85,9 +92,8 @@ export default function TopicTracking() {
 
   // Konu bazında tamamlama durumu
   const getTopicCompletion = (subject: string, topic: string) => {
-    return completedTopics.some(
-      p => p.subject === subject && p.topic === topic
-    );
+    if (!selectedStudentId) return false;
+    return isTopicMarkedCompleted(completedTopics, selectedStudentId, subject, topic);
   };
 
   // YKS için TYT ve AYT konularını filtrele
@@ -157,6 +163,21 @@ export default function TopicTracking() {
 
   const filteredRegularTopics = isRegularStudent ? getFilteredRegularTopics() : null;
 
+  const filteredStudyTrackTopics = useMemo(() => {
+    const filtered: Record<string, string[]> = {};
+    STUDY_TRACK_SUBJECTS.forEach((subject) => {
+      const topics = topicsData.regular[subject];
+      if (!topics?.length) return;
+      if (searchTerm) {
+        const ft = topics.filter((t) => t.toLowerCase().includes(searchTerm.toLowerCase()));
+        if (ft.length) filtered[subject] = ft;
+      } else {
+        filtered[subject] = topics;
+      }
+    });
+    return filtered;
+  }, [topicsData.regular, searchTerm]);
+
   // Ders listesini al
   const getSubjectList = () => {
     if (isYKSStudent) {
@@ -172,6 +193,7 @@ export default function TopicTracking() {
           subjects.push(subject);
         });
       }
+      Object.keys(filteredStudyTrackTopics).forEach((s) => subjects.push(s));
       return subjects;
     }
     return Object.keys(filteredRegularTopics || {});
@@ -185,8 +207,9 @@ export default function TopicTracking() {
     const completed = completedTopics.filter(p => p.subject === subject).length;
 
     if (isYKSStudent) {
-      // TYT veya AYT konularını al
-      if (subject.startsWith('TYT ')) {
+      if (isStudyTrackSubject(subject)) {
+        topics = filteredStudyTrackTopics[subject] || [];
+      } else if (subject.startsWith('TYT ')) {
         topics = filteredYKSTopics?.tytSubjects[subject] || [];
       } else if (subject.startsWith('AYT ')) {
         topics = filteredYKSTopics?.aytSubjects[subject] || [];
@@ -217,6 +240,9 @@ export default function TopicTracking() {
           totalTopics += topics.length;
         });
       }
+      Object.values(filteredStudyTrackTopics).forEach((topics) => {
+        totalTopics += topics.length;
+      });
     } else {
       Object.values(filteredRegularTopics || {}).forEach(topics => {
         totalTopics += topics.length;
@@ -234,6 +260,9 @@ export default function TopicTracking() {
   // Konu listesini al
   const getTopicsForSubject = (subject: string): string[] => {
     if (isYKSStudent) {
+      if (isStudyTrackSubject(subject)) {
+        return filteredStudyTrackTopics[subject] || [];
+      }
       if (subject.startsWith('TYT ')) {
         return filteredYKSTopics?.tytSubjects[subject] || [];
       } else if (subject.startsWith('AYT ')) {
@@ -553,22 +582,19 @@ export default function TopicTracking() {
                                   : 'bg-gray-50 border-gray-200 hover:border-gray-300'
                               }`}
                             >
-                              <button
-                                onClick={() => {
+                              <TapCheckbox
+                                checked={isCompleted}
+                                aria-label={
+                                  isCompleted ? 'Tamamlanmadı olarak işaretle' : 'Tamamlandı olarak işaretle'
+                                }
+                                onToggle={() => {
                                   if (isCompleted) {
                                     void unmarkTopicCompleted(selectedStudentId, subject, topic);
                                   } else {
                                     void markTopicCompleted(selectedStudentId, subject, topic);
                                   }
                                 }}
-                                className={`flex-shrink-0 w-5 h-5 rounded border flex items-center justify-center transition-colors ${
-                                  isCompleted
-                                    ? 'bg-green-500 border-green-500 text-white'
-                                    : 'border-gray-300 hover:border-green-400'
-                                }`}
-                              >
-                                {isCompleted && <CheckCircle className="w-4 h-4" />}
-                              </button>
+                              />
                               <div className="flex-1 min-w-0">
                                 <p className={`text-sm font-medium ${
                                   isCompleted ? 'text-green-700' : 'text-gray-700'
@@ -641,26 +667,102 @@ export default function TopicTracking() {
                                   : 'bg-gray-50 border-gray-200 hover:border-gray-300'
                               }`}
                             >
-                              <button
-                                onClick={() => {
+                              <TapCheckbox
+                                checked={isCompleted}
+                                aria-label={
+                                  isCompleted ? 'Tamamlanmadı olarak işaretle' : 'Tamamlandı olarak işaretle'
+                                }
+                                onToggle={() => {
                                   if (isCompleted) {
                                     void unmarkTopicCompleted(selectedStudentId, subject, topic);
                                   } else {
                                     void markTopicCompleted(selectedStudentId, subject, topic);
                                   }
                                 }}
-                                className={`flex-shrink-0 w-5 h-5 rounded border flex items-center justify-center transition-colors ${
-                                  isCompleted
-                                    ? 'bg-green-500 border-green-500 text-white'
-                                    : 'border-gray-300 hover:border-green-400'
-                                }`}
-                              >
-                                {isCompleted && <CheckCircle className="w-4 h-4" />}
-                              </button>
+                              />
                               <div className="flex-1 min-w-0">
                                 <p className={`text-sm font-medium ${
                                   isCompleted ? 'text-green-700' : 'text-gray-700'
                                 }`}>
+                                  {topic}
+                                </p>
+                                {isCompleted && completion && (
+                                  <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
+                                    <Calendar className="w-3 h-3" />
+                                    {new Date(completion.completedAt).toLocaleDateString('tr-TR')}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Paragraf / problem / kitap — YKS öğrencilerinde TYT-AYT altında ayrı blok */}
+          {isYKSStudent && Object.keys(filteredStudyTrackTopics).length > 0 && (
+            <div className="space-y-4">
+              <p className="text-sm font-medium text-slate-600 px-1">Çalışma alanları</p>
+              {Object.keys(filteredStudyTrackTopics).map((subject) => {
+                if (selectedSubject !== 'all' && subject !== selectedSubject) return null;
+                const topics = filteredStudyTrackTopics[subject] || [];
+                const completedInSubject = completedTopics.filter((p) => p.subject === subject);
+                return (
+                  <div
+                    key={subject}
+                    className="bg-white rounded-xl shadow-sm border border-teal-100 overflow-hidden"
+                  >
+                    <div className="p-4 border-b border-teal-100 bg-teal-50/80">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <BookOpen className="w-5 h-5 text-teal-700" />
+                          <h3 className="font-semibold text-slate-800">{subject}</h3>
+                        </div>
+                        <span className="text-sm text-teal-700">
+                          {completedInSubject.length} / {topics.length} tamamlandı
+                        </span>
+                      </div>
+                    </div>
+                    <div className="p-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {topics.map((topic) => {
+                          const isCompleted = getTopicCompletion(subject, topic);
+                          const completion = completedTopics.find(
+                            (p) => p.subject === subject && p.topic === topic
+                          );
+                          return (
+                            <div
+                              key={topic}
+                              className={`flex items-start gap-2 p-3 rounded-lg border transition-colors ${
+                                isCompleted
+                                  ? 'bg-green-50 border-green-200'
+                                  : 'bg-gray-50 border-gray-200 hover:border-gray-300'
+                              }`}
+                            >
+                              <TapCheckbox
+                                checked={isCompleted}
+                                aria-label={
+                                  isCompleted ? 'Tamamlanmadı olarak işaretle' : 'Tamamlandı olarak işaretle'
+                                }
+                                onToggle={() => {
+                                  if (isCompleted) {
+                                    void unmarkTopicCompleted(selectedStudentId, subject, topic);
+                                  } else {
+                                    void markTopicCompleted(selectedStudentId, subject, topic);
+                                  }
+                                }}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <p
+                                  className={`text-sm font-medium ${
+                                    isCompleted ? 'text-green-700' : 'text-gray-700'
+                                  }`}
+                                >
                                   {topic}
                                 </p>
                                 {isCompleted && completion && (
@@ -721,22 +823,19 @@ export default function TopicTracking() {
                                   : 'bg-gray-50 border-gray-200 hover:border-gray-300'
                               }`}
                             >
-                              <button
-                                onClick={() => {
+                              <TapCheckbox
+                                checked={isCompleted}
+                                aria-label={
+                                  isCompleted ? 'Tamamlanmadı olarak işaretle' : 'Tamamlandı olarak işaretle'
+                                }
+                                onToggle={() => {
                                   if (isCompleted) {
                                     void unmarkTopicCompleted(selectedStudentId, subject, topic);
                                   } else {
                                     void markTopicCompleted(selectedStudentId, subject, topic);
                                   }
                                 }}
-                                className={`flex-shrink-0 w-5 h-5 rounded border flex items-center justify-center transition-colors ${
-                                  isCompleted
-                                    ? 'bg-green-500 border-green-500 text-white'
-                                    : 'border-gray-300 hover:border-green-400'
-                                }`}
-                              >
-                                {isCompleted && <CheckCircle className="w-4 h-4" />}
-                              </button>
+                              />
                               <div className="flex-1 min-w-0">
                                 <p className={`text-sm font-medium ${
                                   isCompleted ? 'text-green-700' : 'text-gray-700'

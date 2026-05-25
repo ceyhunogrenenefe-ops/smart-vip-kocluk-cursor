@@ -1,6 +1,6 @@
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
-import { fetchAllMetaMessageTemplates, findMetaTemplateStatus } from '../api/_lib/meta-templates-sync.js';
+import { fetchAllMetaMessageTemplates, findMetaTemplateStatus, findMetaTemplatesByName, fetchMetaTemplatesForName, getMetaTemplateSyncDiagnostics } from '../api/_lib/meta-templates-sync.js';
 import { buildTemplatePreview } from '../api/_lib/whatsapp-outbound.js';
 
 function parseBody(req) {
@@ -172,33 +172,88 @@ export default async function handler(req, res) {
     if (action === 'sync_meta_template') {
       const id = typeof body.id === 'string' ? body.id.trim() : '';
       if (!id) return res.status(400).json({ error: 'id_required' });
-      const list = await fetchAllMetaMessageTemplates();
-      if (!list.ok) {
-        return res.status(400).json({ ok: false, error: list.error || 'sync_failed' });
-      }
       const { data: row, error: oneErr } = await supabaseAdmin
         .from('message_templates')
-        .select('id,meta_template_name,meta_template_language')
+        .select('id,meta_template_name,meta_template_language,type')
         .eq('id', id)
         .maybeSingle();
       if (oneErr) return res.status(500).json({ error: oneErr.message });
-      const name = String(row?.meta_template_name || '').trim();
+      const name = String(row?.meta_template_name || row?.type || '').trim();
       if (!name) return res.status(400).json({ error: 'meta_template_name_missing' });
       const lang = String(row?.meta_template_language || 'tr').trim() || 'tr';
-      const status = findMetaTemplateStatus(list.templates, name, lang);
-      await supabaseAdmin
-        .from('message_templates')
-        .update({
-          whatsapp_template_status: status || 'unknown',
-          whatsapp_template_synced_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', row.id);
+
+      const diag = await getMetaTemplateSyncDiagnostics(name, lang);
+      if (!diag.ok) {
+        return res.status(400).json({
+          ok: false,
+          error: diag.error || 'sync_failed',
+          waba_ids: diag.waba_ids,
+          waba_errors: diag.waba_errors,
+          hint:
+            'Meta API şablon listesi alınamadı. Vercel’de META_WHATSAPP_TOKEN geçerli mi? META_WABA_ID, WhatsApp Manager’daki waba_id ile aynı mı? (İşletme kimliği değil, WABA kimliği olmalı.)'
+        });
+      }
+
+      const matches = diag.matches || [];
+      const available_languages = diag.available_languages || [];
+      let resolvedLang = lang;
+      if (!findMetaTemplateStatus(matches, name, lang) && matches.length === 1 && matches[0].language) {
+        resolvedLang = String(matches[0].language).trim();
+      } else if (!findMetaTemplateStatus(matches, name, lang) && matches.length > 1) {
+        const approved = matches.find((m) => String(m.status || '').toUpperCase() === 'APPROVED');
+        if (approved?.language) resolvedLang = String(approved.language).trim();
+      }
+
+      const finalStatus =
+        findMetaTemplateStatus(matches, name, lang) ||
+        findMetaTemplateStatus(matches, name, resolvedLang) ||
+        (matches[0] ? String(matches[0].status || 'unknown') : 'unknown');
+
+      const patch = {
+        whatsapp_template_status: finalStatus,
+        whatsapp_template_synced_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      if (resolvedLang !== lang) {
+        patch.meta_template_language = resolvedLang;
+      }
+      await supabaseAdmin.from('message_templates').update(patch).eq('id', row.id);
+
+      let hint = null;
+      if (finalStatus === 'unknown' || !matches.length) {
+        const parts = [
+          `Meta API’de "${name}" bulunamadı (${diag.template_count} şablon tarandı, WABA: ${(diag.waba_ids || []).join(', ') || 'yok'}).`,
+          diag.similar_names?.length
+            ? `Benzer adlar: ${diag.similar_names.join(', ')}`
+            : 'Benzer isimli şablon yok — Meta BM’deki adı birebir meta_template_name alanına yazın.',
+          diag.waba_errors && Object.keys(diag.waba_errors).length
+            ? `WABA hataları: ${Object.entries(diag.waba_errors).map(([k, v]) => `${k}=${v}`).join('; ')}`
+            : null
+        ].filter(Boolean);
+        hint = parts.join(' ');
+      } else if (!findMetaTemplateStatus(matches, name, lang) && matches.length > 0) {
+        hint = `Dil güncellendi veya Meta'da şu diller var: ${available_languages.map((x) => `${x.language} (${x.status})`).join(', ')}`;
+      }
+
       return res.status(200).json({
         ok: true,
         template_id: row.id,
-        status: status || 'unknown'
+        status: patch.whatsapp_template_status,
+        meta_template_language: patch.meta_template_language || lang,
+        available_languages,
+        waba_ids: diag.waba_ids,
+        template_count: diag.template_count,
+        similar_names: diag.similar_names,
+        hint
       });
+    }
+
+    if (action === 'debug_meta_waba') {
+      const diag = await getMetaTemplateSyncDiagnostics(
+        String(body.template_name || 'report_reminder').trim(),
+        String(body.language || 'tr').trim() || 'tr'
+      );
+      return res.status(diag.ok ? 200 : 400).json(diag);
     }
 
     return res.status(400).json({ error: 'unknown_action' });

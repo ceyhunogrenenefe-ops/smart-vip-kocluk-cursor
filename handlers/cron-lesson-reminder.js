@@ -256,7 +256,16 @@ export default async function handler(req, res) {
         parent_meta_language: lrParentRow?.meta_template_language ?? null
       }
     });
-    return res.status(200).json({ ok: true, processed: log.length, log });
+    let classGroupReminders = null;
+    try {
+      const { runClassLessonRemindersJob } = await import('../api/_lib/run-class-lesson-reminders-job.js');
+      classGroupReminders = await runClassLessonRemindersJob({ triggeredBy: 'lesson_reminders_piggyback' });
+    } catch (piggyErr) {
+      const piggyMsg = piggyErr instanceof Error ? piggyErr.message : String(piggyErr);
+      console.warn('[cron-lesson-reminder] class group piggyback failed', piggyMsg);
+      classGroupReminders = { ok: false, error: piggyMsg };
+    }
+    return res.status(200).json({ ok: true, processed: log.length, log, class_group_reminders: classGroupReminders });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await recordCronRun({ jobKey: 'lesson_reminders', ok: false, detail: { error: msg } });

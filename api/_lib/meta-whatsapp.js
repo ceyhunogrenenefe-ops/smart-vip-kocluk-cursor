@@ -111,6 +111,7 @@ export async function sendMetaTemplateMessage({
   toE164,
   templateName,
   languageCode = 'tr',
+  languageCandidates = null,
   bodyParameterTexts,
   bodyParameterNames = null
 }) {
@@ -138,6 +139,9 @@ export async function sendMetaTemplateMessage({
   }
 
   let lang = normalizeMetaLanguageCode(languageCode);
+  const candidateLangs = Array.isArray(languageCandidates) && languageCandidates.length
+    ? languageCandidates.map((c) => normalizeMetaLanguageCode(c)).filter(Boolean)
+    : [lang];
   const texts = Array.isArray(bodyParameterTexts) ? bodyParameterTexts : [];
   const names = Array.isArray(bodyParameterNames) ? bodyParameterNames : null;
   const useNamed =
@@ -180,40 +184,53 @@ export async function sendMetaTemplateMessage({
 
   /** @type {(Error & { status?: number; meta?: unknown }) | null} */
   let lastErr = null;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${tok}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(buildPayload(lang))
-    });
 
-    const json = await res.json().catch(() => ({}));
-    if (res.ok) {
-      const mid = json?.messages?.[0]?.id || null;
-      return { messageId: mid, raw: json };
-    }
-    const err = /** @type {Error & { status?: number; meta?: unknown }} */ (new Error(graphUserMessage(json, res.status)));
-    err.status = res.status;
-    err.meta = json;
-    lastErr = err;
-
+  function isTranslationError(json) {
     const graphCode = Number(json?.error?.code);
     const msg = String(json?.error?.message || '').toLowerCase();
-    const retryTrToTrTr =
-      attempt === 0 &&
-      lang.toLowerCase() === 'tr' &&
-      (graphCode === 100 ||
-        graphCode === 131026 ||
-        graphCode === 132001 ||
-        msg.includes('template') ||
-        msg.includes('translation') ||
-        msg.includes('language') ||
-        msg.includes('does not exist'));
-    if (!retryTrToTrTr) throw err;
-    lang = 'tr_TR';
+    return (
+      graphCode === 100 ||
+      graphCode === 131026 ||
+      graphCode === 132001 ||
+      msg.includes('template') ||
+      msg.includes('translation') ||
+      msg.includes('language') ||
+      msg.includes('does not exist')
+    );
+  }
+
+  for (const baseLang of candidateLangs) {
+    lang = normalizeMetaLanguageCode(baseLang);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${tok}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(buildPayload(lang))
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const mid = json?.messages?.[0]?.id || null;
+        return { messageId: mid, raw: json, languageUsed: lang };
+      }
+      const err = /** @type {Error & { status?: number; meta?: unknown }} */ (
+        new Error(graphUserMessage(json, res.status))
+      );
+      err.status = res.status;
+      err.meta = json;
+      lastErr = err;
+
+      const retryTrToTrTr = attempt === 0 && lang.toLowerCase() === 'tr' && isTranslationError(json);
+      if (retryTrToTrTr) {
+        lang = 'tr_TR';
+        continue;
+      }
+      if (!isTranslationError(json)) throw err;
+      break;
+    }
   }
 
   throw lastErr;

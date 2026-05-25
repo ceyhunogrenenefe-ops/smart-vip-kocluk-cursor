@@ -8,7 +8,7 @@ import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShe
 import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
 import { turkishFold } from '../lib/userBulkImport';
 import type { Student } from '../types';
-import { GripVertical, KeyRound, Loader2, Pencil, PlayCircle, Trash2, FileDown } from 'lucide-react';
+import { GripVertical, KeyRound, Loader2, Pencil, PlayCircle, Trash2, FileDown, Bell } from 'lucide-react';
 import { downloadCalendarPdfWithSnapshot } from '../lib/pdfLiveWeekGrid';
 
 type ClassRow = {
@@ -82,6 +82,7 @@ type SessionRow = {
   meeting_link: string;
   status: string;
   homework?: string | null;
+  reminder_sent?: boolean;
 };
 
 /** Canlı grup dersi sınıf oluştur: sınıf seviye / programa göre seçenekler */
@@ -205,6 +206,61 @@ export default function ClassLiveLessons() {
   const [classPdfSnapBusy, setClassPdfSnapBusy] = useState(false);
 
   const canMarkAttendance = canManageSlots && !isStudentView && Boolean(selectedClassId);
+  const canSendLessonReminder = canMarkAttendance;
+
+  const hintLessonReminderError = (note: string) => {
+    const n = String(note || '').toLowerCase();
+    if (n.includes('template_not_found')) return 'Grup dersi hatırlatma şablonu (class_lesson_reminder) tanımlı değil.';
+    if (n.includes('template_inactive')) return 'Hatırlatma şablonu pasif — Mesaj şablonlarından açın.';
+    if (n.includes('meta_whatsapp_not_ready')) return 'Meta WhatsApp yapılandırması eksik.';
+    if (n.includes('meta_template_name_required')) return 'Şablonda Meta adı (meta_template_name) boş.';
+    if (n.includes('invalid_phone') || n.includes('no_valid_phone')) return 'Öğrenci/veli telefonu geçersiz veya eksik.';
+    if (n.includes('132001') || (n.includes('template') && n.includes('not exist')))
+      return 'Meta’da class_lesson_reminder şablonu onaylı değil veya senkron değil.';
+    return String(note || 'Gönderim başarısız');
+  };
+
+  const sendSessionLessonReminder = async (s: SessionRow) => {
+    if (reminderBusyId || s.reminder_sent) return;
+    const ok = window.confirm(
+      `${s.subject} (${String(s.start_time).slice(0, 5)}) için sınıftaki öğrenci ve velilere WhatsApp hatırlatması gönderilsin mi?\n\nOtomatik cron ile aynı şablon kullanılır.`
+    );
+    if (!ok) return;
+    setReminderBusyId(s.id);
+    setError(null);
+    try {
+      const res = await apiFetch('/api/class-live-lessons?op=send-lesson-reminder', {
+        method: 'POST',
+        body: JSON.stringify({ session_id: s.id })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (j.skipped === 'already_sent') {
+        setWeekSessions((prev) => prev.map((row) => (row.id === s.id ? { ...row, reminder_sent: true } : row)));
+        return;
+      }
+      if (!res.ok) {
+        setError(hintLessonReminderError(String(j.error || 'send_failed')));
+        return;
+      }
+      const sent = Number(j.sent_count) || 0;
+      const failed = Number(j.failed_count) || 0;
+      if (j.reminder_sent) {
+        setWeekSessions((prev) => prev.map((row) => (row.id === s.id ? { ...row, reminder_sent: true } : row)));
+      }
+      if (failed > 0 && sent === 0) {
+        const details = Array.isArray(j.details) ? j.details : [];
+        const firstErr = details.find((d: { error?: string }) => d?.error);
+        setError(`Hatırlatma gönderilemedi: ${hintLessonReminderError(String(firstErr?.error || ''))}`);
+      } else if (failed > 0) {
+        setError(`Hatırlatma kısmen gönderildi (${sent} başarılı, ${failed} hatalı). WhatsApp Merkezi loglarına bakın.`);
+      }
+      void loadWeekSessions();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Hatırlatma gönderilemedi');
+    } finally {
+      setReminderBusyId(null);
+    }
+  };
 
   const [attendanceSession, setAttendanceSession] = useState<SessionRow | null>(null);
   const [attendanceDraft, setAttendanceDraft] = useState<
@@ -217,6 +273,7 @@ export default function ClassLiveLessons() {
   const [editingSlotRow, setEditingSlotRow] = useState<SlotRow | null>(null);
   const [sessionEditBusy, setSessionEditBusy] = useState(false);
   const [slotEditBusy, setSlotEditBusy] = useState(false);
+  const [reminderBusyId, setReminderBusyId] = useState<string | null>(null);
   const [esSubject, setEsSubject] = useState('');
   const [esDate, setEsDate] = useState('');
   const [esStart, setEsStart] = useState('');
@@ -1345,6 +1402,11 @@ export default function ClassLiveLessons() {
                                           Planlı
                                         </span>
                                       ) : null}
+                                      {s.status === 'scheduled' && s.reminder_sent ? (
+                                        <span className="rounded-md bg-teal-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-teal-800 ring-1 ring-teal-400/40">
+                                          Hatırlatma ✓
+                                        </span>
+                                      ) : null}
                                     </div>
                                     <p className="mt-0.5 text-[11px] font-medium text-slate-800">
                                       {teacher?.name || s.teacher_name || s.teacher_id}
@@ -1374,6 +1436,22 @@ export default function ClassLiveLessons() {
                                     >
                                       <PlayCircle className="h-3 w-3 shrink-0" aria-hidden />
                                       Kaydı izle
+                                    </button>
+                                  ) : null}
+                                  {canSendLessonReminder && s.status === 'scheduled' && !s.reminder_sent ? (
+                                    <button
+                                      type="button"
+                                      disabled={reminderBusyId === s.id}
+                                      title="Otomatik cron gitmezse — aynı WhatsApp şablonu ile manuel hatırlatma"
+                                      onClick={() => void sendSessionLessonReminder(s)}
+                                      className="inline-flex items-center gap-0.5 rounded-lg bg-gradient-to-r from-teal-600 to-emerald-600 px-2 py-1 text-[10px] font-semibold text-white shadow-sm hover:brightness-110 disabled:cursor-wait disabled:opacity-60"
+                                    >
+                                      {reminderBusyId === s.id ? (
+                                        <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                                      ) : (
+                                        <Bell className="h-3 w-3 shrink-0" aria-hidden />
+                                      )}
+                                      Hatırlat
                                     </button>
                                   ) : null}
                                   {canMarkAttendance && s.status === 'scheduled' ? (

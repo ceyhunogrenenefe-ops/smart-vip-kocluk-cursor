@@ -1,11 +1,10 @@
-// Türkçe: Öğrenci Özel Dashboard Sayfası - Günlük Çalışma Kaydı ve Deneme Sınavları ile
+// Türkçe: Öğrenci Özel Dashboard — deneme, yazılı ve kitap takibi
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { resolveStudentRecordId } from '../lib/coachResolve';
 import type { WrittenExamScore } from '../types';
-import { topicPool } from '../data/mockData';
 import {
   GraduationCap,
   TrendingUp,
@@ -18,7 +17,6 @@ import {
   Download,
   Plus,
   Save,
-  X,
   BookOpen,
   AlertCircle,
   ClipboardList,
@@ -40,17 +38,15 @@ import {
   LineChart,
   Line
 } from 'recharts';
-type TabType = 'daily' | 'exams' | 'written' | 'books';
+type TabType = 'exams' | 'written' | 'books';
 
 const TAB_SEGMENT: Record<TabType, string> = {
-  daily: 'gunluk',
   exams: 'denemeler',
   written: 'yazili',
   books: 'kitaplar'
 };
 
 const SEGMENT_TAB: Record<string, TabType> = {
-  gunluk: 'daily',
   denemeler: 'exams',
   yazili: 'written',
   kitaplar: 'books'
@@ -61,13 +57,11 @@ export default function StudentDashboard() {
   const navigate = useNavigate();
   const { user, effectiveUser, linkedStudent, linkedStudentError, linkedStudentLoading } = useAuth();
   const {
-    weeklyEntries,
     getStudentStats,
-    institution,
-    addWeeklyEntry,
     students,
     getReadingStats,
     books,
+    updateBook,
     writtenExamScores,
     getWrittenExamSubjectsForStudent,
     addWrittenExamSubjectForStudent,
@@ -98,15 +92,15 @@ export default function StudentDashboard() {
     [linkedStudent?.id, effectiveUser?.role, effectiveUser?.studentId, effectiveUser?.email, students]
   );
 
-  // Tab state — URL: /student-dashboard/:gunluk | denemeler | yazili | kitaplar (kök /student-dashboard rotası gunluk’a yönlenir)
-  const [activeTab, setActiveTab] = useState<TabType>('daily');
+  // Tab state — URL: /student-dashboard/:denemeler | yazili | kitaplar
+  const [activeTab, setActiveTab] = useState<TabType>('exams');
 
   useEffect(() => {
     const mapped = tabKey ? SEGMENT_TAB[tabKey] : undefined;
     if (mapped) {
       setActiveTab(mapped);
     } else {
-      navigate('/student-dashboard/gunluk', { replace: true });
+      navigate('/student-dashboard/denemeler', { replace: true });
     }
   }, [tabKey, navigate]);
 
@@ -125,12 +119,6 @@ export default function StudentDashboard() {
       .sort((a, b) => new Date(b.examDate).getTime() - new Date(a.examDate).getTime());
   }, [examResults, resolvedStudentId]);
 
-  // Öğrencinin kendi kayıtları
-  const myEntries = useMemo(() => {
-    if (!resolvedStudentId) return [];
-    return weeklyEntries.filter(e => e.studentId === resolvedStudentId);
-  }, [resolvedStudentId, weeklyEntries]);
-
   // Öğrencinin istatistikleri
   const myStats = useMemo(() => {
     if (!resolvedStudentId) return null;
@@ -141,13 +129,29 @@ export default function StudentDashboard() {
   const myReadingStats = useMemo(() => {
     if (!resolvedStudentId) return null;
     return getReadingStats(resolvedStudentId);
-  }, [resolvedStudentId, weeklyEntries, getReadingStats]);
+  }, [resolvedStudentId, getReadingStats]);
 
   // Öğrencinin kitapları
   const myBooks = useMemo(() => {
     if (!resolvedStudentId) return [];
     return books.filter(b => b.studentId === resolvedStudentId);
   }, [resolvedStudentId, books]);
+
+  const myActiveBooks = useMemo(
+    () => myBooks.filter((b) => b.status !== 'completed'),
+    [myBooks]
+  );
+  const myCompletedBooks = useMemo(
+    () => myBooks.filter((b) => b.status === 'completed'),
+    [myBooks]
+  );
+
+  const handleMarkMyBookFinished = (bookId: string) => {
+    void updateBook(bookId, {
+      status: 'completed',
+      endDate: new Date().toISOString().split('T')[0]
+    });
+  };
 
   // Öğrencinin okuma kayıtları
   const studentReadingLogs = useMemo(() => {
@@ -173,50 +177,6 @@ export default function StudentDashboard() {
     })).filter(s => s.sem1Avg > 0 || s.sem2Avg > 0);
   }, [resolvedStudentId, writtenExamScores, getWrittenExamSubjectsForStudent, writtenExamSubjectsByStudent, calculateSemesterAverage, calculateYearlyAverage]);
 
-  // Öğrencinin sınıfı (kartta yoksa undefined — konu havuzu yanlış sınıfa düşmesin)
-  const myClassLevel = useMemo(() => {
-    if (!resolvedStudentId) return undefined;
-    const student = students.find(s => s.id === resolvedStudentId);
-    return student?.classLevel;
-  }, [resolvedStudentId, students]);
-
-  // Ders bazlı başarı
-  const subjectStats = useMemo(() => {
-    const stats: { [key: string]: { correct: number; solved: number } } = {};
-    myEntries.forEach(entry => {
-      if (!stats[entry.subject]) {
-        stats[entry.subject] = { correct: 0, solved: 0 };
-      }
-      stats[entry.subject].correct += entry.correctAnswers;
-      stats[entry.subject].solved += entry.solvedQuestions;
-    });
-
-    return Object.entries(stats).map(([subject, data]) => ({
-      subject,
-      başarı: data.solved > 0 ? Math.round((data.correct / data.solved) * 100) : 0
-    }));
-  }, [myEntries]);
-
-  // Son 7 günlük trend
-  const last7Days = Array.from({ length: 7 }, (_, i) => {
-    const date = new Date();
-    date.setDate(date.getDate() - (6 - i));
-    return date.toISOString().split('T')[0];
-  });
-
-  const dailyTrend = last7Days.map(date => {
-    const dayEntries = myEntries.filter(e => e.date === date);
-    return {
-      tarih: new Date(date).toLocaleDateString('tr-TR', { weekday: 'short' }),
-      başarı: dayEntries.reduce((sum, e) => sum + e.solvedQuestions, 0) > 0
-        ? Math.round(
-            (dayEntries.reduce((sum, e) => sum + e.correctAnswers, 0) /
-              dayEntries.reduce((sum, e) => sum + e.solvedQuestions, 0)) * 100
-          )
-        : 0
-    };
-  });
-
   // Başarı rengi
   const getSuccessColor = (rate: number) => {
     if (rate >= 90) return 'text-green-600 bg-green-50';
@@ -224,22 +184,6 @@ export default function StudentDashboard() {
     return 'text-red-600 bg-red-50';
   };
 
-  // Form state
-  const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({
-    date: new Date().toISOString().split('T')[0],
-    subject: '',
-    topic: '',
-    targetQuestions: 20,
-    solvedQuestions: 0,
-    correctAnswers: 0,
-    wrongAnswers: 0,
-    blankAnswers: 0,
-    // Kitap Alanları
-    bookTitle: '',
-    pagesRead: 0
-  });
-  const [formError, setFormError] = useState('');
   const [writtenFormError, setWrittenFormError] = useState('');
   const [writtenForm, setWrittenForm] = useState({
     subject: '',
@@ -250,9 +194,6 @@ export default function StudentDashboard() {
     date: new Date().toISOString().split('T')[0],
     notes: ''
   });
-
-  // Ders ve konu seçenekleri - Her ders için sadece o derse ait konular
-  const subjects = Object.keys(topicPool);
 
   const writtenSubjectOptions = useMemo(() => {
     if (!resolvedStudentId) return [] as string[];
@@ -265,106 +206,6 @@ export default function StudentDashboard() {
       .slice()
       .sort((a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime());
   }, [getStudentWrittenExamScores, resolvedStudentId, writtenExamScores]);
-
-  // Ders seçildiğinde sadece o derse ait konuları getir
-  const availableTopics = useMemo(() => {
-    if (!formData.subject) return [];
-
-    // YKS sınıfları için doğrudan subject key'inde ara
-    if (typeof myClassLevel === 'string' && myClassLevel.startsWith('YKS-')) {
-      return topicPool[formData.subject]?.[myClassLevel] || [];
-    }
-
-    // Normal sınıflar (9, 10, 11, 12) + LGS/YOS metin
-    if (typeof myClassLevel === 'number') {
-      return topicPool[formData.subject]?.[myClassLevel] || [];
-    }
-    if (myClassLevel === 'LGS' || myClassLevel === 'YOS') {
-      return topicPool[formData.subject]?.[myClassLevel] || [];
-    }
-
-    return [];
-  }, [formData.subject, myClassLevel]);
-
-  // Form işlemleri
-  const resetForm = () => {
-    setFormData({
-      date: new Date().toISOString().split('T')[0],
-      subject: '',
-      topic: '',
-      targetQuestions: 20,
-      solvedQuestions: 0,
-      correctAnswers: 0,
-      wrongAnswers: 0,
-      blankAnswers: 0,
-      bookTitle: '',
-      pagesRead: 0
-    });
-    setFormError('');
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormError('');
-
-    const sid = resolvedStudentId;
-    if (!sid) {
-      setFormError(
-        linkedStudentError ||
-          'Hesabınız bir öğrenci kartına bağlı değil. Yöneticinize veya koçunuza başvurun.'
-      );
-      return;
-    }
-
-    if (!formData.subject) {
-      setFormError('Lütfen ders seçiniz.');
-      return;
-    }
-    if (!formData.topic) {
-      setFormError('Lütfen konu seçiniz.');
-      return;
-    }
-    if (formData.solvedQuestions <= 0) {
-      setFormError('En az 1 soru çözdüyseniz sayı giriniz.');
-      return;
-    }
-
-    const total = formData.correctAnswers + formData.wrongAnswers + formData.blankAnswers;
-    if (total !== formData.solvedQuestions) {
-      setFormError(`Doğru + Yanlış + Boş (${total}) çözülen soruya (${formData.solvedQuestions}) eşit olmalı!`);
-      return;
-    }
-
-    const newEntry = {
-      id: Date.now().toString(),
-      studentId: sid,
-      date: formData.date,
-      subject: formData.subject,
-      topic: formData.topic,
-      targetQuestions: formData.targetQuestions,
-      solvedQuestions: formData.solvedQuestions,
-      correctAnswers: formData.correctAnswers,
-      wrongAnswers: formData.wrongAnswers,
-      blankAnswers: formData.blankAnswers,
-      createdAt: new Date().toISOString(),
-      // Kitap okuma verileri
-      bookTitle: formData.bookTitle || undefined,
-      readingMinutes: formData.pagesRead > 0 ? formData.pagesRead : undefined
-    };
-
-    addWeeklyEntry(newEntry);
-    setShowForm(false);
-    resetForm();
-  };
-
-  const handleChange = (field: string, value: string | number) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-    if (field === 'subject') {
-      setFormData(prev => ({ ...prev, topic: '' }));
-    }
-  };
-
-  const netCount = formData.correctAnswers - (formData.wrongAnswers * 0.25);
 
   const submitWrittenExam = (e: React.FormEvent) => {
     e.preventDefault();
@@ -386,6 +227,7 @@ export default function StudentDashboard() {
       setWrittenFormError('Ders seçin veya yeni ders adı yazın.');
       return;
     }
+    addWrittenExamSubjectForStudent(sid, subject);
     const scoreNum = parseInt(writtenForm.score, 10);
     if (Number.isNaN(scoreNum) || scoreNum < 0 || scoreNum > 100) {
       setWrittenFormError('Not 0–100 arasında olmalıdır.');
@@ -505,17 +347,6 @@ export default function StudentDashboard() {
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="flex border-b border-gray-100">
           <button
-            onClick={() => goTab('daily')}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-4 text-sm font-medium transition-colors ${
-              activeTab === 'daily'
-                ? 'text-blue-600 bg-blue-50 border-b-2 border-blue-600'
-                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-            }`}
-          >
-            <BookOpen className="w-4 h-4" />
-            Günlük Kayıt
-          </button>
-          <button
             onClick={() => goTab('exams')}
             className={`flex-1 flex items-center justify-center gap-2 px-4 py-4 text-sm font-medium transition-colors ${
               activeTab === 'exams'
@@ -551,274 +382,6 @@ export default function StudentDashboard() {
         </div>
 
         <div className="p-6">
-          {/* Günlük Kayıt Tab */}
-          {activeTab === 'daily' && (
-            <div className="space-y-6">
-              {/* Günlük Çalışma Kaydı Ekle */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <BookOpen className="w-6 h-6 text-blue-600" />
-                    <h3 className="text-lg font-semibold text-slate-800">Günlük Çalışma Kaydı</h3>
-                  </div>
-                  {!showForm && (
-                    <button
-                      onClick={() => setShowForm(true)}
-                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                    >
-                      <Plus className="w-4 h-4" />
-                      Kayıt Ekle
-                    </button>
-                  )}
-                </div>
-
-                {showForm ? (
-                  <form onSubmit={handleSubmit} className="space-y-4">
-                    {resolvedStudentId && myClassLevel === undefined && (
-                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-                        Kartınızda sınıf seviyesi tanımlı değil; konu listesi yanlış veri üretmesin diye
-                        boş bırakıldı. Lütfen kurumunuzdan sınıf / program bilginizin güncellenmesini isteyin.
-                      </div>
-                    )}
-                    <div className="flex items-center justify-between bg-blue-50 p-3 rounded-lg">
-                      <span className="text-sm font-medium text-blue-800">Yeni Kayıt</span>
-                      <button
-                        type="button"
-                        onClick={() => { setShowForm(false); resetForm(); }}
-                        className="p-1 text-gray-500 hover:text-gray-700"
-                      >
-                        <X className="w-5 h-5" />
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Tarih</label>
-                        <input
-                          type="date"
-                          value={formData.date}
-                          onChange={e => handleChange('date', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          max={new Date().toISOString().split('T')[0]}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Ders</label>
-                        <select
-                          value={formData.subject}
-                          onChange={e => handleChange('subject', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        >
-                          <option value="">Ders Seçiniz</option>
-                          {subjects.map(subject => (
-                            <option key={subject} value={subject}>{subject}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Çalıştığın Konu</label>
-                      <select
-                        value={formData.topic}
-                        onChange={e => handleChange('topic', e.target.value)}
-                        disabled={!formData.subject}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-                      >
-                        <option value="">Konu Seçiniz</option>
-                        {availableTopics.map(topic => (
-                          <option key={topic} value={topic}>{topic}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="bg-gray-50 p-4 rounded-lg space-y-4">
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Hedef Soru</label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={formData.targetQuestions}
-                            onChange={e => handleChange('targetQuestions', parseInt(e.target.value) || 0)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Çözülen</label>
-                          <input
-                            type="number"
-                            min="0"
-                            value={formData.solvedQuestions}
-                            onChange={e => handleChange('solvedQuestions', parseInt(e.target.value) || 0)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Doğru</label>
-                          <input
-                            type="number"
-                            min="0"
-                            value={formData.correctAnswers}
-                            onChange={e => handleChange('correctAnswers', parseInt(e.target.value) || 0)}
-                            className="w-full px-3 py-2 border border-green-500 bg-green-50 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Yanlış</label>
-                          <input
-                            type="number"
-                            min="0"
-                            value={formData.wrongAnswers}
-                            onChange={e => handleChange('wrongAnswers', parseInt(e.target.value) || 0)}
-                            className="w-full px-3 py-2 border border-red-500 bg-red-50 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Boş</label>
-                          <input
-                            type="number"
-                            min="0"
-                            value={formData.blankAnswers}
-                            onChange={e => handleChange('blankAnswers', parseInt(e.target.value) || 0)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          />
-                        </div>
-                        <div className="bg-purple-100 p-3 rounded-lg flex items-center justify-center">
-                          <div className="text-center">
-                            <p className="text-sm text-purple-600">Net</p>
-                            <p className="text-2xl font-bold text-purple-700">{netCount.toFixed(2)}</p>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Kitap Okuma Alanları */}
-                      <div className="border-t border-gray-200 pt-4 mt-4">
-                        <div className="flex items-center gap-2 mb-3">
-                          <BookMarked className="w-5 h-5 text-emerald-600" />
-                          <h4 className="text-sm font-semibold text-gray-700">📚 Kitap Okuma (Opsiyonel)</h4>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Kitap Adı</label>
-                            <input
-                              type="text"
-                              value={formData.bookTitle}
-                              onChange={e => handleChange('bookTitle', e.target.value)}
-                              placeholder="Okuduğun kitap..."
-                              className="w-full px-3 py-2 border border-emerald-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-emerald-50"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Okunan Sayfa</label>
-                            <input
-                              type="number"
-                              min="0"
-                              value={formData.pagesRead}
-                              onChange={e => handleChange('pagesRead', parseInt(e.target.value) || 0)}
-                              placeholder="0"
-                              className="w-full px-3 py-2 border border-emerald-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-emerald-50"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-4 text-sm">
-                        <span className="text-gray-600">
-                          Toplam: <span className="font-medium">{formData.correctAnswers + formData.wrongAnswers + formData.blankAnswers}</span>
-                        </span>
-                        <span className="text-gray-600">
-                          Hedef: <span className="font-medium">{formData.targetQuestions}</span>
-                        </span>
-                        <span className={`px-2 py-1 rounded ${getSuccessColor(formData.solvedQuestions > 0 ? Math.round((formData.correctAnswers / formData.solvedQuestions) * 100) : 0)}`}>
-                          Başarı: %{formData.solvedQuestions > 0 ? Math.round((formData.correctAnswers / formData.solvedQuestions) * 100) : 0}
-                        </span>
-                      </div>
-                    </div>
-
-                    {formError && (
-                      <div className="flex items-center gap-2 p-3 bg-red-50 text-red-700 rounded-lg">
-                        <AlertCircle className="w-5 h-5" />
-                        <span className="text-sm">{formError}</span>
-                      </div>
-                    )}
-
-                    <div className="flex justify-end gap-3">
-                      <button
-                        type="button"
-                        onClick={() => { setShowForm(false); resetForm(); }}
-                        className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-                      >
-                        İptal
-                      </button>
-                      <button
-                        type="submit"
-                        className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                      >
-                        <Save className="w-4 h-4" />
-                        Kaydet
-                      </button>
-                    </div>
-                  </form>
-                ) : (
-                  <p className="text-sm text-gray-500">Günlük çalışma kayıtlarınızı ekleyerek ilerlemenizi takip edebilirsiniz.</p>
-                )}
-              </div>
-
-              {/* Son Kayıtlar */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                <h3 className="text-lg font-semibold text-slate-800 mb-4">Son Kayıtların</h3>
-                {myEntries.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-slate-50">
-                        <tr>
-                          <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600">Tarih</th>
-                          <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600">Ders</th>
-                          <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600">Konu</th>
-                          <th className="px-4 py-2 text-center text-xs font-semibold text-gray-600">Çözülen</th>
-                          <th className="px-4 py-2 text-center text-xs font-semibold text-gray-600">Doğru</th>
-                          <th className="px-4 py-2 text-center text-xs font-semibold text-gray-600">Başarı %</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {myEntries.slice(0, 5).map((entry) => {
-                          const successRate = entry.solvedQuestions > 0
-                            ? Math.round((entry.correctAnswers / entry.solvedQuestions) * 100)
-                            : 0;
-                          return (
-                            <tr key={entry.id} className="hover:bg-gray-50">
-                              <td className="px-4 py-2 text-sm text-gray-600">
-                                {new Date(entry.date).toLocaleDateString('tr-TR')}
-                              </td>
-                              <td className="px-4 py-2 text-sm font-medium text-gray-800">{entry.subject}</td>
-                              <td className="px-4 py-2 text-sm text-gray-600">{entry.topic}</td>
-                              <td className="px-4 py-2 text-sm text-center text-gray-600">{entry.solvedQuestions}</td>
-                              <td className="px-4 py-2 text-sm text-center text-green-600 font-medium">{entry.correctAnswers}</td>
-                              <td className="px-4 py-2 text-center">
-                                <span className={`px-2 py-1 rounded-lg text-xs font-medium ${getSuccessColor(successRate)}`}>
-                                  %{successRate}
-                                </span>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div className="text-center py-8">
-                    <Calendar className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                    <p className="text-gray-500">Henüz kayıt bulunmuyor.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
           {/* Deneme Sınavları Tab */}
           {activeTab === 'exams' && (
             <div className="space-y-6">
@@ -1286,10 +849,34 @@ export default function StudentDashboard() {
                     </div>
                   </div>
 
-                  {/* Okunan Kitaplar */}
-                  {myBooks.length > 0 ? (
+                  {myCompletedBooks.length > 0 ? (
+                    <div className="rounded-xl border border-green-200 bg-green-50/60 p-4">
+                      <h3 className="text-sm font-semibold text-green-900 mb-3 flex items-center gap-2">
+                        <CheckCircle className="w-4 h-4" />
+                        Bitirdiğim kitaplar ({myCompletedBooks.length})
+                      </h3>
+                      <ul className="space-y-2">
+                        {myCompletedBooks.map((book) => (
+                          <li
+                            key={book.id}
+                            className="flex items-center justify-between gap-2 rounded-lg bg-white/80 px-3 py-2 text-sm"
+                          >
+                            <span className="font-medium text-slate-800">{book.title}</span>
+                            <span className="text-xs text-gray-500 shrink-0">
+                              {book.endDate
+                                ? new Date(book.endDate).toLocaleDateString('tr-TR')
+                                : 'Tamamlandı'}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {/* Okunan / devam eden kitaplar */}
+                  {myActiveBooks.length > 0 ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {myBooks.map(book => {
+                      {myActiveBooks.map(book => {
                         const bookLogs = studentReadingLogs?.filter(l => l.bookId === book.id) || [];
                         const totalPagesRead = bookLogs.reduce((sum, l) => sum + (l.pagesRead || 0), 0);
                         const progress = book.totalPages ? Math.min(Math.round((totalPagesRead / book.totalPages) * 100), 100) : undefined;
@@ -1318,27 +905,34 @@ export default function StudentDashboard() {
                                 </div>
                               </div>
                             )}
-                            <div className="mt-3 flex items-center justify-between">
-                              <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                book.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
-                              }`}>
-                                {book.status === 'completed' ? '✅ Tamamlandı' : '📖 Okunuyor'}
-                              </span>
-                              <span className="text-xs text-gray-400">
-                                {totalPagesRead > 0 ? `${totalPagesRead} sayfa` : 'Henüz başlamadı'}
-                              </span>
+                            <div className="mt-3 flex flex-col gap-2">
+                              <div className="flex items-center justify-between">
+                                <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
+                                  📖 Okunuyor
+                                </span>
+                                <span className="text-xs text-gray-400">
+                                  {totalPagesRead > 0 ? `${totalPagesRead} sayfa` : 'Henüz başlamadı'}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleMarkMyBookFinished(book.id)}
+                                className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
+                              >
+                                Kitabı bitirdim
+                              </button>
                             </div>
                           </div>
                         );
                       })}
                     </div>
-                  ) : (
+                  ) : myCompletedBooks.length === 0 ? (
                     <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
                       <BookOpen className="w-12 h-12 text-gray-300 mx-auto mb-4" />
                       <h3 className="text-lg font-semibold text-gray-700 mb-2">Henüz Kitap Eklenmedi</h3>
                       <p className="text-gray-500">Koçunuz kitap eklediğinde burada görünecek.</p>
                     </div>
-                  )}
+                  ) : null}
                 </>
               ) : (
                 <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
@@ -1346,8 +940,8 @@ export default function StudentDashboard() {
                   <h3 className="text-xl font-semibold text-gray-700 mb-2">Kitap Okuma Takibi</h3>
                   <p className="text-gray-500 mb-4">Henüz okuma kaydınız bulunmuyor.</p>
                   <div className="bg-emerald-50 rounded-xl p-4 text-sm text-emerald-700">
-                    <p className="font-medium mb-2">📚 Günlük Kayıt'tan kitap bilgisi ekleyebilirsiniz!</p>
-                    <p>Günlük çalışma kaydı formunda "Kitap Adı" ve "Okunan Sayfa" alanlarını doldurarak okuma takibinizi başlatın.</p>
+                    <p className="font-medium mb-2">Çalışma kaydı haftalık plandan</p>
+                    <p>Kitap okuma ve çalışma sürelerini Haftalık Plan üzerinden girebilirsiniz; koçunuz kitap eklediğinde burada da görünür.</p>
                   </div>
                 </div>
               )}

@@ -8,6 +8,7 @@ import type { FlatNavItem, NavGroupKind } from './navModel';
 import { pathnameMatchesGroup } from './navModel';
 
 type Props = {
+  /** lessons | academic | org | settings | studentPanel | team | whatsapp */
   id: NavGroupKind;
   label: string;
   icon: LucideIcon;
@@ -34,13 +35,14 @@ export function SidebarNavGroup({
   itemMatchExact = false
 }: Props) {
   const routeIn = routeInGroup(pathname, id, items);
-  const [userOpen, setUserOpen] = useState(false);
+  /** null = otomatik (aktif rota varsa açık); kullanıcı ok ile açıp kapatabilir */
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
 
   useEffect(() => {
-    if (!routeIn) setUserOpen(false);
-  }, [routeIn, pathname]);
+    setUserOpen(null);
+  }, [pathname]);
 
-  const mergedOpen = routeIn || userOpen;
+  const mergedOpen = userOpen !== null ? userOpen : routeIn;
 
   if (items.length === 0) return null;
 
@@ -99,10 +101,7 @@ export function SidebarNavGroup({
   return (
     <Collapsible.Root
       open={mergedOpen}
-      onOpenChange={(next) => {
-        if (routeIn && !next) return;
-        setUserOpen(next);
-      }}
+      onOpenChange={setUserOpen}
       className="w-full"
     >
       <Collapsible.Trigger asChild>

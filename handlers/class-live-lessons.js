@@ -10,6 +10,12 @@ import { resolveStudentRowForUser } from '../api/_lib/resolve-student-id.js';
 import { buildAttendanceReport, getVisibleStudentIdSet } from '../api/_lib/attendance-report-query.js';
 import { sendMetaTextMessage } from '../api/_lib/meta-whatsapp.js';
 import { isUuid } from '../api/_lib/uuid.js';
+import {
+  loadClassLessonReminderTemplate,
+  validateClassLessonReminderTemplate,
+  sendClassLessonReminderForSession,
+  markClassSessionReminderSent
+} from '../api/_lib/class-lesson-reminder-send.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -874,6 +880,78 @@ export default async function handler(req, res) {
         .maybeSingle();
       if (error) return res.status(500).json({ error: error.message });
       return res.status(201).json({ data });
+    }
+
+    if (op === 'send-lesson-reminder') {
+      const sessionId = String(body.session_id || '').trim();
+      if (!sessionId) return res.status(400).json({ error: 'session_id_required' });
+      if (!metaWhatsAppConfigured()) {
+        return res.status(503).json({ error: 'meta_whatsapp_not_ready' });
+      }
+
+      const { data: session } = await supabaseAdmin
+        .from('class_sessions')
+        .select('*')
+        .eq('id', sessionId)
+        .maybeSingle();
+      if (!session) return res.status(404).json({ error: 'session_not_found' });
+      if (String(session.status || '') !== 'scheduled') {
+        return res.status(400).json({ error: 'session_not_scheduled' });
+      }
+
+      const details = await getClassDetails(session.class_id);
+      if (!isAdminRole(role) && session.teacher_id !== actor.sub && !details.teacher_ids.includes(actor.sub)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+
+      if (session.reminder_sent) {
+        return res.status(200).json({
+          ok: true,
+          skipped: 'already_sent',
+          reminder_sent: true,
+          sent_count: 0,
+          failed_count: 0
+        });
+      }
+
+      const templateRow = await loadClassLessonReminderTemplate();
+      const tplCheck = validateClassLessonReminderTemplate(templateRow);
+      if (!tplCheck.ok) {
+        return res.status(400).json({ error: tplCheck.code });
+      }
+
+      const studentIds = details.student_ids || [];
+      const { data: students } = studentIds.length
+        ? await supabaseAdmin
+            .from('students')
+            .select('id,name,phone,parent_phone')
+            .in('id', studentIds)
+        : { data: [] };
+      const studentById = new Map((students || []).map((s) => [String(s.id), s]));
+      const className = details.class?.name || 'Sınıf';
+
+      const result = await sendClassLessonReminderForSession({
+        session,
+        templateRow,
+        className,
+        studentIds,
+        studentById,
+        applyConsecutiveSkip: false,
+        source: 'manual'
+      });
+
+      const reminderMarked = await markClassSessionReminderSent(session.id, result);
+      const sentCount = result.log.filter((x) => x.ok === true && !x.skipped).length;
+      const failedCount = result.log.filter((x) => x.error && !x.skipped).length;
+
+      return res.status(200).json({
+        ok: sentCount > 0,
+        reminder_sent: reminderMarked,
+        sent_count: sentCount,
+        failed_count: failedCount,
+        students_in_class: studentIds.length,
+        details: result.log
+      });
     }
 
     if (op === 'mark-attendance') {

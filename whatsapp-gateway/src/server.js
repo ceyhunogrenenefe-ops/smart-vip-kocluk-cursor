@@ -308,6 +308,24 @@ app.post('/sessions/:coachId/logout', requireGatewayAuth, requireCoachScope, asy
   res.json({ ok: true, coachId, status: session.status });
 });
 
+async function sendTextWithTimeout(sock, jid, message) {
+  const ms = Math.min(60000, Math.max(10000, Number(process.env.SEND_MESSAGE_TIMEOUT_MS) || 35000));
+  const work = (async () => {
+    try {
+      await sock.sendPresenceUpdate('composing', jid);
+    } catch {
+      /* presence optional */
+    }
+    return sock.sendMessage(jid, { text: message });
+  })();
+  return Promise.race([
+    work,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('send_message_timeout')), ms);
+    }),
+  ]);
+}
+
 app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async (req, res) => {
   try {
     const coachId = getCoachId(req);
@@ -317,16 +335,34 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
       return res.status(409).json({ ok: false, error: 'session_not_connected' });
     }
 
-    const jid = ensurePhoneJid(req.body?.phone);
+    const digits = normalizeDigitsForWhatsApp(req.body?.phone);
+    const jid = ensurePhoneJid(digits);
     const message = String(req.body?.message || '').trim();
     if (!jid || !message) {
       return res.status(400).json({ ok: false, error: 'phone_and_message_required' });
     }
 
-    const result = await session.sock.sendMessage(jid, { text: message });
-    res.json({ ok: true, id: result?.key?.id || null });
+    try {
+      const onWa = await session.sock.onWhatsApp(digits);
+      const exists = Array.isArray(onWa) && onWa.some((r) => r?.exists);
+      if (!exists) {
+        return res.status(404).json({
+          ok: false,
+          error: 'number_not_on_whatsapp',
+          phone: digits,
+        });
+      }
+    } catch (checkErr) {
+      logger.warn({ err: checkErr, coachId, digits }, 'onWhatsApp check skipped');
+    }
+
+    const result = await sendTextWithTimeout(session.sock, jid, message);
+    res.json({ ok: true, id: result?.key?.id || null, phone: digits });
   } catch (error) {
-    res.status(500).json({ ok: false, error: error.message || 'send_failed' });
+    const msg = error instanceof Error ? error.message : 'send_failed';
+    const status = msg === 'send_message_timeout' ? 504 : 500;
+    logger.error({ err: error, coachId: getCoachId(req) }, 'send message failed');
+    res.status(status).json({ ok: false, error: msg });
   }
 });
 

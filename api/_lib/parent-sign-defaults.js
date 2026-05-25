@@ -171,17 +171,88 @@ export function buildRegistrationPlaceholderHtml(opts) {
 <style>body{font-family:system-ui,sans-serif;line-height:1.55;color:#0f172a;max-width:720px;margin:0 auto;padding:20px}h1{font-size:1.15rem;color:#1e3a8a}</style></head><body>
 <h1>Ön kayıt formu</h1>
 <p style="font-size:13px;color:#64748b">Belge no: <strong>${esc(contract_number)}</strong>${kurum_adi ? ` · ${esc(kurum_adi)}` : ''}</p>
-<p>Aşağıdaki ekranda <strong>kayıt bilgilerinizi</strong> (ad, soyad, T.C., doğum tarihi, okul, sınıf, e-posta, il/ilçe, telefonlar) gireceksiniz; KVKK onayından sonra sözleşme metni otomatik oluşturulacak ve imza adımına geçeceksiniz.</p>
+<p>Aşağıdaki ekranda <strong>kayıt bilgilerinizi</strong> gireceksiniz; KVKK ve satış sözleşmesi bilgilendirmesini onayladıktan sonra kayıt kuruma iletilecek. <strong>Ücret ve taksit</strong> kurum tarafından girildikten sonra bu sayfada tam sözleşme ve e-imza adımı açılacaktır.</p>
 <table style="width:100%;border-collapse:collapse;margin-top:16px;font-size:14px">
 <tr><td style="border:1px solid #e2e8f0;padding:8px;width:38%;background:#f8fafc;font-weight:600">Program</td><td style="border:1px solid #e2e8f0;padding:8px">${esc(program_adi)}</td></tr>
 <tr><td style="border:1px solid #e2e8f0;padding:8px;background:#f8fafc;font-weight:600">Sınıf</td><td style="border:1px solid #e2e8f0;padding:8px">${esc(sinif)}</td></tr>
 <tr><td style="border:1px solid #e2e8f0;padding:8px;background:#f8fafc;font-weight:600">Dönem</td><td style="border:1px solid #e2e8f0;padding:8px">${esc(String(baslangic_tarihi))} – ${esc(String(bitis_tarihi))}</td></tr>
-<tr><td style="border:1px solid #e2e8f0;padding:8px;background:#f8fafc;font-weight:600">Ücret (TL)</td><td style="border:1px solid #e2e8f0;padding:8px">${esc(String(ucret))}</td></tr>
+<tr><td style="border:1px solid #e2e8f0;padding:8px;background:#f8fafc;font-weight:600">Ücret (TL)</td><td style="border:1px solid #e2e8f0;padding:8px">${
+    Number(ucret) > 0 ? esc(String(ucret)) : 'Kurum tarafından girilecek'
+  }</td></tr>
 <tr><td style="border:1px solid #e2e8f0;padding:8px;background:#f8fafc;font-weight:600">Taksit</td><td style="border:1px solid #e2e8f0;padding:8px">${esc(String(taksitN))}${
     taksitTutar != null ? ` · Yaklaşık ${esc(String(taksitTutar))} TL/taksit` : ''
   }</td></tr>
 </table>
 </body></html>`;
+}
+
+/** Veli kayıt gönderildi; kurum henüz ücret girmedi */
+export function buildAwaitingAdminPriceHtml(opts) {
+  const { kurum_adi, contract_number, ogrenci_label, program_adi, sinif } = opts;
+  return `<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<style>body{font-family:system-ui,sans-serif;line-height:1.55;color:#0f172a;max-width:720px;margin:0 auto;padding:20px}h1{font-size:1.15rem;color:#1e3a8a}</style></head><body>
+<h1>Kayıt bilgileri alındı</h1>
+<p style="font-size:13px;color:#64748b">Belge no: <strong>${esc(contract_number)}</strong>${kurum_adi ? ` · ${esc(kurum_adi)}` : ''}</p>
+<p>Kayıt bilgileriniz kuruma iletildi. <strong>Ücret ve taksit</strong> kurum tarafından sisteme girildikten sonra bu sayfada <strong>satış sözleşmesi</strong> görünecek ve e-imza adımına geçebileceksiniz. Lütfen bir süre sonra sayfayı yenileyin.</p>
+${ogrenci_label ? `<p style="font-size:14px"><strong>Öğrenci:</strong> ${esc(ogrenci_label)}</p>` : ''}
+${program_adi ? `<p style="font-size:14px"><strong>Program:</strong> ${esc(program_adi)} · <strong>Sınıf:</strong> ${esc(sinif || '—')}</p>` : ''}
+</body></html>`;
+}
+
+/** YYYY-MM-DD + ay (yerel; ay sonu gün taşması güvenli) */
+export function shiftYmdByMonths(ymd, deltaMonths) {
+  const m = String(ymd || '')
+    .trim()
+    .slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(m)) return null;
+  const [y, mo, d] = m.split('-').map((x) => parseInt(x, 10));
+  const t = new Date(y, mo - 1 + deltaMonths, 1);
+  const last = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate();
+  const day = Math.min(d, last);
+  const r = new Date(t.getFullYear(), t.getMonth(), day);
+  const yy = r.getFullYear();
+  const mm = String(r.getMonth() + 1).padStart(2, '0');
+  const dd = String(r.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+function todayYmdLocal() {
+  const n = new Date();
+  const yy = n.getFullYear();
+  const mm = String(n.getMonth() + 1).padStart(2, '0');
+  const dd = String(n.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+/** Elden / taksitli ödeme takibi — her taksit için vade (sözleşme başlangıcından aylık) */
+export function buildTaksitPlan(ucret, taksitN, baslangicYmd) {
+  const u = Number(ucret);
+  const n = Math.max(1, Math.min(48, Math.round(Number(taksitN) || 1)));
+  if (!Number.isFinite(u) || u <= 0 || n <= 0) return [];
+  const base = Math.floor(u / n);
+  let rem = u - base * n;
+  const rawStart = String(baslangicYmd || '')
+    .trim()
+    .slice(0, 10);
+  const start = /^\d{4}-\d{2}-\d{2}$/.test(rawStart) ? rawStart : todayYmdLocal();
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    let t = base;
+    if (rem > 0) {
+      t++;
+      rem--;
+    }
+    const vade = shiftYmdByMonths(start, i) || start;
+    out.push({
+      no: i + 1,
+      tutar_tl: t,
+      odendi: false,
+      odeme_notu: '',
+      vade_tarihi: vade,
+      odendi_tarihi: ''
+    });
+  }
+  return out;
 }
 
 export function buildParentContractHtml(fields) {

@@ -33,6 +33,7 @@ import { apiFetch, getAuthToken } from '../lib/session';
 import { db } from '../lib/database';
 import { createInstitutionAdminUser } from '../lib/provisionInstitutionAdmin';
 import { AttendanceReportHub } from '../components/attendance/AttendanceReportHub';
+import EdesisSyncPanel from '../components/settings/EdesisSyncPanel';
 import { userHasAnyRole } from '../config/rolePermissions';
 
 /** GET /api/meta/whatsapp yanıtı — sırlar içermez */
@@ -1174,27 +1175,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Webhook Ayarları */}
-      <div className="bg-gradient-to-r from-blue-50 to-cyan-50 rounded-xl p-6 border border-blue-100">
-        <div className="flex items-start gap-4">
-          <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-xl flex items-center justify-center flex-shrink-0">
-            <Webhook className="w-6 h-6 text-white" />
-          </div>
-          <div className="flex-1">
-            <h4 className="font-semibold text-blue-800 mb-2">Webhook Entegrasyonu</h4>
-            <p className="text-sm text-blue-700 mb-3">
-              Edisis veya benzeri sınav sistemlerinden otomatik veri çekmek için webhook URL'inizi alın.
-            </p>
-            <div className="bg-white rounded-lg p-3 border border-blue-200">
-              <code className="text-sm text-blue-700 break-all">
-                {typeof window !== 'undefined' ? window.location.origin : ''}/api/webhooks/exam-results
-              </code>
-            </div>
-            <p className="text-xs text-blue-600 mt-2">
-              Bu URL'yi sınav sisteminize webhook olarak tanımlayın. Veriler otomatik olarak öğrencilere eklenecektir.
-            </p>
-          </div>
-        </div>
-      </div>
+      <EdesisSyncPanel />
 
       {/* Veri Yönetimi */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">

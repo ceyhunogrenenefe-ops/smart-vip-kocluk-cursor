@@ -1,4 +1,5 @@
 import { apiFetch } from './session';
+import type { WeeklyEntry } from '../types';
 
 export interface CoachWeeklyGoalRow {
   id: string;
@@ -205,6 +206,98 @@ export async function patchWeeklyEntryApi(id: string, patch: Record<string, unkn
 /**
  * Planner bloğu için ilk günlük kayıt: weekly_entries oluşturur ve bloğu bağlar.
  */
+type WeeklyEntryScreenRow = {
+  student_id: string;
+  date: string;
+  screen_time_minutes?: number | null;
+};
+
+type WeeklyEntryApiRow = {
+  id: string;
+  student_id: string;
+  date: string;
+  subject: string;
+  topic: string;
+  target_questions: number;
+  solved_questions: number;
+  correct: number;
+  wrong: number;
+  blank: number;
+  notes?: string | null;
+  reading_minutes?: number | null;
+  pages_read?: number | null;
+  screen_time_minutes?: number | null;
+  book_id?: string | null;
+  book_title?: string | null;
+  created_at: string;
+};
+
+export function mapWeeklyEntryApiRow(e: WeeklyEntryApiRow): WeeklyEntry {
+  return {
+    id: e.id,
+    studentId: e.student_id,
+    date: e.date,
+    subject: e.subject,
+    topic: e.topic,
+    targetQuestions: e.target_questions,
+    solvedQuestions: e.solved_questions,
+    correctAnswers: e.correct,
+    wrongAnswers: e.wrong,
+    blankAnswers: e.blank,
+    coachComment: e.notes || undefined,
+    readingMinutes: e.reading_minutes || undefined,
+    pagesRead: e.pages_read ?? undefined,
+    screenTimeMinutes: e.screen_time_minutes ?? undefined,
+    bookId: e.book_id || undefined,
+    bookTitle: e.book_title || undefined,
+    createdAt: e.created_at,
+  };
+}
+
+/** Analiz: öğrencinin tarih aralığındaki günlük çalışma kayıtları (taze API) */
+export async function fetchWeeklyEntriesForStudentRange(
+  studentId: string,
+  from: string,
+  to: string
+): Promise<WeeklyEntry[]> {
+  const res = await apiFetch('/api/weekly-entries');
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((payload as { error?: string })?.error || `API (${res.status})`);
+  const data = unwrap<WeeklyEntryApiRow[]>(payload);
+  if (!Array.isArray(data)) return [];
+  const sid = studentId.trim();
+  const f = from.slice(0, 10);
+  const t = to.slice(0, 10);
+  return data
+    .filter((row) => {
+      const d = String(row.date || '').slice(0, 10);
+      return String(row.student_id) === sid && d >= f && d <= t;
+    })
+    .map(mapWeeklyEntryApiRow);
+}
+
+/** Haftalık plandan girilen ekran süreleri (weekly_entries). */
+export async function fetchWeeklyEntriesScreenTimeForStudent(
+  studentId: string,
+  from: string,
+  to: string
+): Promise<WeeklyEntryScreenRow[]> {
+  const res = await apiFetch('/api/weekly-entries');
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((payload as { error?: string })?.error || `API (${res.status})`);
+  const data = unwrap<WeeklyEntryScreenRow[]>(payload);
+  if (!Array.isArray(data)) return [];
+  const sid = studentId.trim();
+  const f = from.slice(0, 10);
+  const t = to.slice(0, 10);
+  return data.filter(
+    (row) =>
+      String(row.student_id) === sid &&
+      String(row.date || '').slice(0, 10) >= f &&
+      String(row.date || '').slice(0, 10) <= t
+  );
+}
+
 export async function submitPlannerDailyLog(
   plannerEntryId: string,
   body: Record<string, unknown>

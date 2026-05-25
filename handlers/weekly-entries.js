@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { getTeacherGroupClassStudentScope } from '../api/_lib/teacher-class-scope.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { syncWeeklyEntryPlannerRow } from '../api/_lib/sync-weekly-entry-planner.js';
+import { syncStudentScreenTimeLog } from '../api/_lib/sync-student-screen-time-log.js';
 
 const canAccessEntry = async (actor, entry) => {
   if (actor.role === 'super_admin') return true;
@@ -154,6 +155,16 @@ export default async function handler(req, res) {
         if (data) await syncWeeklyEntryPlannerRow(data);
       } catch (se) {
         console.error('[weekly-entries] syncWeeklyEntryPlannerRow', se);
+      }
+      const screenMins =
+        data?.screen_time_minutes != null ? Number(data.screen_time_minutes) : null;
+      if (data && screenMins != null && Number.isFinite(screenMins) && screenMins > 0) {
+        await syncStudentScreenTimeLog({
+          studentId: data.student_id,
+          logDate: data.date,
+          screenMinutes: screenMins,
+          institutionId: data.institution_id
+        });
       }
       return res.status(200).json({ data });
     }

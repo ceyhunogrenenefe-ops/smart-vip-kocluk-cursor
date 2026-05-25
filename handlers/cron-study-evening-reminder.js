@@ -8,6 +8,7 @@ import { getStudentPhoneForReport } from '../api/_lib/meetings-resolve.js';
 import { recordCronRun } from '../api/_lib/cron-run-log.js';
 
 /**
+ * @deprecated Günlük rapor için `cron-report-check.js` (report_reminder, 22:00 TR) kullanın.
  * İstanbul 22:00 — Bugün için henüz günlük kayıt girmemiş öğrencilere hatırlatma.
  * Şablon: message_templates.type = `study_evening_reminder`
  *

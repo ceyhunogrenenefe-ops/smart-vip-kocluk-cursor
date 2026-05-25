@@ -285,6 +285,7 @@ export interface Database {
           pages_read: number;
           start_date: string | null;
           end_date: string | null;
+          status: string | null;
           notes: string | null;
           institution_id: string | null;
           created_at: string;

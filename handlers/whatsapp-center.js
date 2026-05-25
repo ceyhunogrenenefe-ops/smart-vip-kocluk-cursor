@@ -6,12 +6,22 @@ import { normalizePhoneToE164 } from '../api/_lib/phone-whatsapp.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import { getTeacherGroupClassStudentScope } from '../api/_lib/teacher-class-scope.js';
 import { getTemplateBindingKeys } from '../api/_lib/whatsapp-outbound.js';
+import {
+  istanbulDayUtcRange,
+  countMessageStats,
+  templateTelemetry,
+  cronVisualState,
+  aggregateCronToday,
+  kindLabelTr
+} from '../api/_lib/whatsapp-center-stats.js';
+import { summarizeUnsentClassSessions } from '../api/_lib/class-lesson-reminder-logic.js';
 
 /** Panel — `cron_run_log.job_key`; ek kayıtlar otomatik birleştirilir */
 export const TEMPLATE_TYPE_TO_CRON_JOB_KEY = {
   lesson_reminder: 'lesson_reminders',
   lesson_reminder_parent: 'lesson_reminder_parent',
   report_reminder: 'daily_report_reminder',
+  report_reminder_parent: 'daily_report_reminder',
   class_lesson_reminder: 'class_lesson_reminders',
   class_homework_notice: 'class_homework_notify',
   meeting_notification: 'meeting_reminders',
@@ -20,11 +30,11 @@ export const TEMPLATE_TYPE_TO_CRON_JOB_KEY = {
 };
 
 export const KNOWN_CRON_JOBS = [
-  { key: 'class_lesson_reminders', label: 'Grup dersi hatırlatma (10 dk)', expectEveryMinutes: 5 },
-  { key: 'daily_report_reminder', label: 'Günlük rapor hatırlatması', expectEveryMinutes: 24 * 60 },
+  { key: 'class_lesson_reminders', label: 'Grup dersi hatırlatma (45 dk pencere, ardışık aynı ders atlanır)', expectEveryMinutes: 5 },
+  { key: 'daily_report_reminder', label: 'Günlük rapor hatırlatması (22:00 TR)', expectEveryMinutes: 24 * 60 },
   { key: 'lesson_reminders', label: 'Birebir ders hatırlatma — öğrenci', expectEveryMinutes: 5 },
   { key: 'lesson_reminder_parent', label: 'Veli ders hatırlatma (Meta)', expectEveryMinutes: 5 },
-  { key: 'meeting_reminders', label: 'Görüşme 10 dk hatırlatma', expectEveryMinutes: 5 },
+  { key: 'meeting_reminders', label: 'Görüşme 10 dk hatırlatma (Meta)', expectEveryMinutes: 5 },
   { key: 'class_homework_notify', label: 'Grup ödev bildirimi', expectEveryMinutes: 10 },
   { key: 'coach_followup', label: 'Koç otomasyon (Meta şablon)', expectEveryMinutes: 15 },
   { key: 'study_evening_reminder', label: 'Akşam çalışma hatırlatması', expectEveryMinutes: 24 * 60 },
@@ -95,38 +105,6 @@ function buildCronStatusDefinitions(latestByJob, tplRows) {
   return [...rows, ...pending];
 }
 
-function cronVisualState(def, last, nowMs) {
-  const ranAt = last?.ran_at ? new Date(last.ran_at).getTime() : 0;
-  const ageMin = ranAt ? (nowMs - ranAt) / 60000 : null;
-  if (def.awaiting_first_run) return { state: 'pending', age_minutes: null };
-  if (!last) return { state: 'stale', age_minutes: null };
-  if (last.ok === false && !last.skipped) return { state: 'error', age_minutes: ageMin };
-  const expectMin = def.expectEveryMinutes || 60;
-  const frequent = expectMin <= 30;
-  if (frequent && ageMin != null && ageMin > 60) {
-    return { state: 'idle_1h', age_minutes: ageMin };
-  }
-  if (ageMin != null && ageMin > expectMin * 2.5) {
-    return { state: 'stale', age_minutes: ageMin };
-  }
-  return { state: 'ok', age_minutes: ageMin };
-}
-
-function kindForTemplateType(type) {
-  const t = String(type || '').trim();
-  const map = {
-    class_lesson_reminder: 'class_lesson_reminder',
-    class_homework_notice: 'class_homework_notice',
-    class_absent_notice_1: 'class_absent_notice_1',
-    class_absent_notice: 'class_absent_notice',
-    lesson_reminder: 'lesson_reminder',
-    lesson_reminder_parent: 'lesson_reminder_parent',
-    report_reminder: 'report_reminder',
-    meeting_notification: 'meeting_notification'
-  };
-  return map[t] || t;
-}
-
 function parseLogErrorCode(errorText) {
   const s = String(errorText || '').trim();
   if (!s) return null;
@@ -145,56 +123,17 @@ function parseLogErrorCode(errorText) {
   return null;
 }
 
-function templateTelemetry(tpl, logsForStats) {
-  const type = String(tpl.type || '');
-  const kind = kindForTemplateType(type);
-  const metaName = String(tpl.meta_template_name || '').trim();
-  let total = 0;
-  let ok = 0;
-  let fail = 0;
-  let lastSent = null;
-  for (const row of logsForStats) {
-    const k = String(row.kind || '');
-    const matches =
-      k === kind ||
-      (metaName && String(row.meta_template_name || '').trim() === metaName) ||
-      (type === 'meeting_notification' &&
-        (k === 'meeting_notification' || k === 'whatsapp_created' || k === 'whatsapp_reminder_10m'));
-    if (!matches) continue;
-    total += 1;
-    if (row.status === 'sent') {
-      ok += 1;
-      const t = row.sent_at ? new Date(row.sent_at).getTime() : 0;
-      if (t && (!lastSent || t > new Date(lastSent).getTime())) lastSent = row.sent_at;
-    } else if (row.status === 'failed') fail += 1;
+function applyMessageLogScope(query, { mode, scopedStudentIds, students, isSuper, institutionId }) {
+  if (mode === 'scoped') {
+    if (scopedStudentIds?.length) return query.in('student_id', scopedStudentIds);
+    return query.eq('student_id', '__none__');
   }
-  const isActive = tpl.is_active !== false;
-  const metaMissing = !metaName;
-  let badge = 'active';
-  if (!isActive) badge = 'inactive';
-  else if (metaMissing) badge = 'meta_missing';
-  else if (fail > ok && total > 2) badge = 'unhealthy';
-  const bindingKeys = getTemplateBindingKeys(tpl);
-  const varsArr = Array.isArray(tpl.variables) ? tpl.variables.map((x) => String(x || '').trim()).filter(Boolean) : [];
-  return {
-    id: tpl.id,
-    name: tpl.name,
-    type,
-    channel: tpl.channel || 'whatsapp',
-    is_active: isActive,
-    meta_template_name: tpl.meta_template_name || null,
-    meta_template_language: tpl.meta_template_language || 'tr',
-    whatsapp_template_status: tpl.whatsapp_template_status || null,
-    total_sent_window: total,
-    success_count: ok,
-    failed_count: fail,
-    last_sent_at: lastSent,
-    badge,
-    meta_missing: metaMissing,
-    /** Test gönderimi: Meta {{1}}… sırası — twilio_variable_bindings öncelikli */
-    binding_keys: bindingKeys,
-    variables: varsArr
-  };
+  if (!isSuper && institutionId) {
+    const ids = students.map((s) => s.id);
+    if (ids.length) return query.in('student_id', ids);
+    return query.eq('student_id', '__none__');
+  }
+  return query;
 }
 
 function studentPhoneIssues(st) {
@@ -301,6 +240,9 @@ export default async function handler(req, res) {
     }
 
     const today = getIstanbulDateString();
+    const { startIso, endExclusiveIso } = istanbulDayUtcRange(today);
+    const scopeCtx = { mode, scopedStudentIds, students, isSuper, institutionId };
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
     let logQuery = supabaseAdmin
       .from('message_logs')
@@ -310,13 +252,7 @@ export default async function handler(req, res) {
       .order('sent_at', { ascending: false })
       .limit(mode === 'admin' ? 500 : 250);
 
-    if (mode === 'scoped') {
-      if (scopedStudentIds?.length) logQuery = logQuery.in('student_id', scopedStudentIds);
-      else logQuery = logQuery.eq('student_id', '__none__');
-    } else if (!isSuper && institutionId) {
-      const instIds = students.map((s) => s.id);
-      if (instIds.length) logQuery = logQuery.in('student_id', instIds);
-    }
+    logQuery = applyMessageLogScope(logQuery, scopeCtx);
 
     if (sinceParam) {
       logQuery = logQuery.gt('sent_at', sinceParam);
@@ -328,44 +264,63 @@ export default async function handler(req, res) {
 
     let sentToday = 0;
     let failedToday = 0;
-    const todayRows = logs.filter((l) => l.log_date === today);
-    for (const l of todayRows) {
-      if (l.status === 'sent') sentToday += 1;
-      else if (l.status === 'failed') failedToday += 1;
-    }
+    let sent7d = 0;
+    let failed7d = 0;
     let pendingMessagesToday = 0;
+
     if (sinceParam === '') {
-      const cQ = supabaseAdmin
+      let cSent = supabaseAdmin
         .from('message_logs')
         .select('id', { count: 'exact', head: true })
-        .eq('log_date', today)
-        .eq('status', 'sent');
-      const fQ = supabaseAdmin
+        .eq('status', 'sent')
+        .gte('sent_at', startIso)
+        .lt('sent_at', endExclusiveIso)
+        .neq('kind', 'template_test');
+      let cFail = supabaseAdmin
         .from('message_logs')
         .select('id', { count: 'exact', head: true })
-        .eq('log_date', today)
-        .eq('status', 'failed');
-      const pQ = supabaseAdmin
+        .eq('status', 'failed')
+        .gte('sent_at', startIso)
+        .lt('sent_at', endExclusiveIso)
+        .neq('kind', 'template_test');
+      let cPending = supabaseAdmin
         .from('message_logs')
         .select('id', { count: 'exact', head: true })
-        .eq('log_date', today)
-        .eq('status', 'pending');
-      if (mode === 'scoped' && scopedStudentIds?.length) {
-        cQ.in('student_id', scopedStudentIds);
-        fQ.in('student_id', scopedStudentIds);
-        pQ.in('student_id', scopedStudentIds);
-      } else if (mode === 'admin' && !isSuper && institutionId) {
-        const ids = students.map((s) => s.id);
-        if (ids.length) {
-          cQ.in('student_id', ids);
-          fQ.in('student_id', ids);
-          pQ.in('student_id', ids);
-        }
-      }
-      const [{ count: sc }, { count: fc }, { count: pc }] = await Promise.all([cQ, fQ, pQ]);
-      sentToday = sc ?? sentToday;
-      failedToday = fc ?? failedToday;
+        .eq('status', 'pending')
+        .gte('sent_at', startIso)
+        .lt('sent_at', endExclusiveIso)
+        .neq('kind', 'template_test');
+      let stats7 = supabaseAdmin
+        .from('message_logs')
+        .select('kind,status,sent_at,log_date,error,twilio_error_code')
+        .gte('sent_at', sevenDaysAgo)
+        .neq('kind', 'template_test')
+        .order('sent_at', { ascending: false })
+        .limit(mode === 'admin' ? 20000 : 8000);
+
+      cSent = applyMessageLogScope(cSent, scopeCtx);
+      cFail = applyMessageLogScope(cFail, scopeCtx);
+      cPending = applyMessageLogScope(cPending, scopeCtx);
+      stats7 = applyMessageLogScope(stats7, scopeCtx);
+
+      const [{ count: sc }, { count: fc }, { count: pc }, stats7Res] = await Promise.all([
+        cSent,
+        cFail,
+        cPending,
+        stats7
+      ]);
+      sentToday = sc ?? 0;
+      failedToday = fc ?? 0;
       pendingMessagesToday = pc ?? 0;
+      const weekCounts = countMessageStats(stats7Res.data || [], today);
+      sent7d = weekCounts.sent7d;
+      failed7d = weekCounts.failed7d;
+    } else {
+      const dayCounts = countMessageStats(logs, today);
+      sentToday = dayCounts.sentToday;
+      failedToday = dayCounts.failedToday;
+      sent7d = dayCounts.sent7d;
+      failed7d = dayCounts.failed7d;
     }
 
     const { data: tplRows } = await supabaseAdmin
@@ -373,24 +328,36 @@ export default async function handler(req, res) {
       .select('*')
       .order('type', { ascending: true });
 
-    const { data: cronRows } = await supabaseAdmin
+    let cronRows = [];
+    let cronTableMissing = false;
+    const cronRes = await supabaseAdmin
       .from('cron_run_log')
       .select('job_key,ran_at,ok,skipped,messages_sent,messages_failed,detail')
       .order('ran_at', { ascending: false })
-      .limit(1200);
+      .limit(2000);
+    if (cronRes.error) {
+      cronTableMissing = /does not exist|relation/i.test(cronRes.error.message || '');
+      if (!cronTableMissing) throw cronRes.error;
+    } else {
+      cronRows = cronRes.data || [];
+    }
 
     const latestByJob = new Map();
-    for (const row of cronRows || []) {
+    for (const row of cronRows) {
       const k = row.job_key;
       if (!latestByJob.has(k)) latestByJob.set(k, row);
     }
 
-    const { data: cronFailRows } = await supabaseAdmin
-      .from('cron_run_log')
-      .select('job_key,ran_at,ok,skipped,detail,messages_failed')
-      .eq('ok', false)
-      .order('ran_at', { ascending: false })
-      .limit(20);
+    const cronTodayAgg = aggregateCronToday(cronRows, today);
+
+    const { data: cronFailRows } = cronTableMissing
+      ? { data: [] }
+      : await supabaseAdmin
+          .from('cron_run_log')
+          .select('job_key,ran_at,ok,skipped,detail,messages_failed')
+          .or('ok.eq.false,messages_failed.gt.0')
+          .order('ran_at', { ascending: false })
+          .limit(25);
 
     const cron_recent_errors = (cronFailRows || []).map((r) => {
       const d = r.detail && typeof r.detail === 'object' ? r.detail : {};
@@ -413,7 +380,8 @@ export default async function handler(req, res) {
     const cronDefs = buildCronStatusDefinitions(latestByJob, tplRows || []);
     const cron_status = cronDefs.map((def) => {
       const last = latestByJob.get(def.key);
-      const vis = cronVisualState(def, last, nowMs);
+      const vis = cronVisualState(def, last, nowMs, today);
+      const dayAgg = cronTodayAgg.get(def.key);
       return {
         key: def.key,
         label: def.label,
@@ -425,49 +393,84 @@ export default async function handler(req, res) {
         last_skipped: last?.skipped || null,
         messages_sent: last?.messages_sent ?? 0,
         messages_failed: last?.messages_failed ?? 0,
+        runs_today: dayAgg?.runs ?? 0,
+        messages_sent_today: dayAgg?.sent ?? 0,
+        messages_failed_today: dayAgg?.failed ?? 0,
+        last_skip_today: dayAgg?.last_skip ?? null,
         age_minutes: vis.age_minutes,
         state: vis.state
       };
     });
 
-    const statsPool =
-      sinceParam === ''
-        ? (
-            await supabaseAdmin
-              .from('message_logs')
-              .select('kind,status,sent_at,meta_template_name,log_date')
-              .order('sent_at', { ascending: false })
-              .limit(mode === 'admin' ? 12000 : 4000)
-          ).data || []
-        : [];
+    let statsPool = [];
+    if (sinceParam === '' && mode === 'admin') {
+      let poolQ = supabaseAdmin
+        .from('message_logs')
+        .select('kind,status,sent_at,meta_template_name,log_date,error,twilio_error_code')
+        .gte('sent_at', sevenDaysAgo)
+        .neq('kind', 'template_test')
+        .order('sent_at', { ascending: false })
+        .limit(20000);
+      poolQ = applyMessageLogScope(poolQ, scopeCtx);
+      const poolRes = await poolQ;
+      statsPool = poolRes.data || [];
+    }
 
     const templates_detailed =
       mode === 'admin'
-        ? (tplRows || []).map((t) => templateTelemetry(t, statsPool))
+        ? (tplRows || []).map((t) => {
+            const base = templateTelemetry(t, statsPool, today);
+            const bindingKeys = getTemplateBindingKeys(t);
+            const varsArr = Array.isArray(t.variables)
+              ? t.variables.map((x) => String(x || '').trim()).filter(Boolean)
+              : [];
+            return { ...base, binding_keys: bindingKeys, variables: varsArr };
+          })
         : [];
 
     const active_templates_count = (tplRows || []).filter(
       (t) => t.is_active !== false && String(t.meta_template_name || '').trim()
     ).length;
 
-    /** lesson_date İstanbul takvim günü; UTC .toISOString() ile karşılaştırma sınır günü kaydırabiliyordu */
+    /** lesson_date İstanbul takvim günü; hatırlatma ders başlamadan 10 dk önce gider */
     const todayIst = getIstanbulDateString();
     const upcomingIso = addCalendarDaysYmd(todayIst, 2);
     let pendingSessions = 0;
+    let pendingDueNow = 0;
+    let pendingWaiting = 0;
+    let pendingMissed = 0;
     if (mode === 'admin') {
       let clsq = supabaseAdmin.from('classes').select('id');
       if (!isSuper && institutionId) clsq = clsq.eq('institution_id', institutionId);
       const { data: cls } = await clsq.limit(8000);
       const cids = (cls || []).map((c) => c.id);
       if (cids.length) {
-        const { count } = await supabaseAdmin
+        const { data: sessRows } = await supabaseAdmin
           .from('class_sessions')
-          .select('id', { count: 'exact', head: true })
+          .select('id,lesson_date,start_time,reminder_sent,status')
           .in('class_id', cids)
           .eq('status', 'scheduled')
           .eq('reminder_sent', false)
+          .gte('lesson_date', todayIst)
           .lte('lesson_date', upcomingIso);
-        pendingSessions = count ?? 0;
+        const sum = summarizeUnsentClassSessions(sessRows || []);
+        pendingDueNow = sum.due_now;
+        pendingWaiting = sum.waiting_for_window;
+        pendingMissed = sum.started_without_reminder;
+        pendingSessions = sum.total_unsent;
+
+        const { data: missedCompletedRows } = await supabaseAdmin
+          .from('class_sessions')
+          .select('id,lesson_date,start_time,reminder_sent,status')
+          .in('class_id', cids)
+          .eq('status', 'completed')
+          .eq('reminder_sent', false)
+          .eq('lesson_date', todayIst);
+        const missedCompleted = (missedCompletedRows || []).length;
+        if (missedCompleted > 0) {
+          pendingMissed += missedCompleted;
+          pendingSessions += missedCompleted;
+        }
       }
     }
 
@@ -479,6 +482,7 @@ export default async function handler(req, res) {
         at: l.sent_at,
         status: l.status,
         kind: l.kind,
+        kind_label: kindLabelTr(l.kind),
         student_name: st?.name || null,
         phone: l.phone,
         error_code: errCode,
@@ -495,6 +499,7 @@ export default async function handler(req, res) {
         student_name: st?.name || null,
         coach_name: coachName,
         recipient: st ? recipientLabel(st, l.phone) : '—',
+        kind_label: kindLabelTr(l.kind),
         error_code: parseLogErrorCode(l.error)
       };
     });
@@ -554,13 +559,19 @@ export default async function handler(req, res) {
       summary: {
         sent_today: sentToday,
         failed_today: failedToday,
+        sent_7d: sent7d,
+        failed_7d: failed7d,
         pending_messages_today: pendingMessagesToday,
         pending_estimate: pendingSessions,
+        pending_class_reminder_due_now: pendingDueNow,
+        pending_class_reminder_waiting: pendingWaiting,
+        pending_class_reminder_missed: pendingMissed,
         students_missing_phone: missingPhone,
         active_templates_count
       },
       cron_status,
       cron_recent_errors,
+      cron_table_missing: cronTableMissing,
       templates: templates_detailed,
       logs: logs_enriched,
       live_events,

@@ -5,6 +5,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
     "googleapis": "^146.0.0",
+    "postgres": "^3.4.7",
     "twilio": "^5.5.4"
   }
 }

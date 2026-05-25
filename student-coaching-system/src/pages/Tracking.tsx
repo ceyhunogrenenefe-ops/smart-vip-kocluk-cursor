@@ -1,5 +1,8 @@
-// Türkçe: Haftalık Takip Sayfası
-import React, { useState, useMemo } from 'react';
+// Türkçe: Haftalık Takip Sayfası (yönetici; koç → haftalık plan)
+import React, { useState, useMemo, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { userRoleTags } from '../config/rolePermissions';
 import { useApp } from '../context/AppContext';
 import { WeeklyEntry, Book, formatClassLevelLabel } from '../types';
 import { topicPool } from '../data/mockData';
@@ -104,7 +107,16 @@ const SUBJECT_TOPIC_MAP: Record<string, string> = {
 };
 
 export default function Tracking() {
+  const navigate = useNavigate();
+  const { effectiveUser } = useAuth();
+  const tags = userRoleTags(effectiveUser);
   const { students, weeklyEntries, addWeeklyEntry, updateWeeklyEntry, deleteWeeklyEntry, getStudentStats, getTopics, books, addBook, getStudentBooks } = useApp();
+
+  useEffect(() => {
+    if (tags.includes('coach') && !tags.includes('admin') && !tags.includes('super_admin')) {
+      navigate('/weekly-planner', { replace: true });
+    }
+  }, [tags, navigate]);
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [showForm, setShowForm] = useState(false);
@@ -513,7 +525,7 @@ export default function Tracking() {
 
       {/* Add/Edit Modal */}
       {showForm && selectedStudent && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4">
           <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-6 border-b border-gray-100">
               <h3 className="text-xl font-bold text-slate-800">
@@ -524,7 +536,7 @@ export default function Tracking() {
                   setShowForm(false);
                   resetForm();
                 }}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                className="icon-tap-btn hover:bg-gray-100 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>

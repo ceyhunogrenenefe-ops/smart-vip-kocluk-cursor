@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { addDays, format, isBefore, parseISO, startOfWeek } from 'date-fns';
 import { tr } from 'date-fns/locale/tr';
+import { IconTapButton } from '../ui/IconTapButton';
 import {
   ChevronLeft,
   ChevronRight,
@@ -12,15 +13,9 @@ import {
   BookOpen,
   CalendarRange,
   Pencil,
+  Clock,
+  Target,
 } from 'lucide-react';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts';
 import type { CoachWeeklyGoalRow, WeeklyPlannerEntryRow } from '../../lib/weeklyPlannerApi';
 import {
   createCoachWeeklyGoal,
@@ -32,7 +27,18 @@ import {
   patchCoachWeeklyGoal,
   patchWeeklyPlannerEntry,
 } from '../../lib/weeklyPlannerApi';
+import { COACH_GOAL_QUANTITY_UNITS } from '../../lib/coachGoalUnits';
+import { effectivePlannerEntryDone } from '../../lib/coachGoalAnalytics';
+import { defaultGoalUnitForSubject, sortSubjectsWithStudyTracks } from '../../lib/studyTrackSubjects';
+import {
+  isTopicMarkedCompleted,
+  resolveTopicLabelForTracking
+} from '../../lib/topicProgressSync';
 import { WeeklyPlannerStudyModal } from './WeeklyPlannerStudyModal';
+import { DailyScreenTimeChart } from './DailyScreenTimeChart';
+import { fetchScreenTimeLogs } from '../../lib/screenTimeApi';
+import { mergeScreenTimeByDate } from '../../lib/mergeScreenTimeByDate';
+import { fetchWeeklyEntriesScreenTimeForStudent } from '../../lib/weeklyPlannerApi';
 import { subjectPlannerStyle } from './subjectPlannerStyle';
 import { cn } from '../../lib/utils';
 import { useApp } from '../../context/AppContext';
@@ -132,6 +138,8 @@ interface WeeklyPlannerCalendarProps {
   canManageGoals: boolean;
   /** Öğrenci kendi planında: blok tıklanınca günlük çalışma kaydı modalı */
   studentStudyLogUi?: boolean;
+  /** Öğrenci veya koç: blok tıklanınca çalışma kaydı (soru / sayfa / süre) */
+  studyLogOnClick?: boolean;
 }
 
 export function WeeklyPlannerCalendar({
@@ -140,8 +148,22 @@ export function WeeklyPlannerCalendar({
   canEditPlan,
   canManageGoals,
   studentStudyLogUi = false,
+  studyLogOnClick = false,
 }: WeeklyPlannerCalendarProps) {
-  const { students, getTopics, getTopicsByClass } = useApp();
+  const {
+    students,
+    getTopics,
+    getTopicsByClass,
+    markTopicCompleted,
+    getStudentTopicProgress,
+    refreshTopicProgress,
+    weeklyEntries,
+  } = useApp();
+
+  const studentWeeklyEntries = useMemo(
+    () => weeklyEntries.filter((e) => e.studentId === studentId),
+    [weeklyEntries, studentId]
+  );
 
   const plannerStudent = useMemo(() => students.find((s) => s.id === studentId), [students, studentId]);
   const classLevel = plannerStudent?.classLevel;
@@ -151,10 +173,14 @@ export function WeeklyPlannerCalendar({
     if (classLevel === undefined || classLevel === null) return [] as string[];
     const tb = getTopicsByClass(classLevel);
     if (tb.isYKS) {
-      const list = [...Object.keys(tb.tytSubjects), ...Object.keys(tb.aytSubjects)];
-      return list.sort((a, b) => a.localeCompare(b, 'tr'));
+      const list = [
+        ...Object.keys(tb.tytSubjects),
+        ...Object.keys(tb.aytSubjects),
+        ...Object.keys(tb.regular)
+      ];
+      return sortSubjectsWithStudyTracks(list);
     }
-    return Object.keys(tb.regular).sort((a, b) => a.localeCompare(b, 'tr'));
+    return sortSubjectsWithStudyTracks(Object.keys(tb.regular));
   }, [classLevel, getTopicsByClass]);
 
   const [anchor, setAnchor] = useState(() => new Date());
@@ -169,6 +195,8 @@ export function WeeklyPlannerCalendar({
 
   const [goals, setGoals] = useState<CoachWeeklyGoalRow[]>([]);
   const [entries, setEntries] = useState<WeeklyPlannerEntryRow[]>([]);
+  const [screenTimeByDate, setScreenTimeByDate] = useState<Map<string, number>>(() => new Map());
+  const [screenTimeLoading, setScreenTimeLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string>('');
 
@@ -251,6 +279,24 @@ export function WeeklyPlannerCalendar({
       const e = await fetchWeeklyPlannerEntries(studentId, entryFrom, entryTo);
       setGoals(g);
       setEntries(e);
+      setScreenTimeLoading(true);
+      try {
+        const [st, weeklyRows] = await Promise.all([
+          fetchScreenTimeLogs(studentId, weekStartStr, weekEndStr),
+          fetchWeeklyEntriesScreenTimeForStudent(studentId, weekStartStr, weekEndStr).catch(
+            () => [] as Awaited<ReturnType<typeof fetchWeeklyEntriesScreenTimeForStudent>>
+          )
+        ]);
+        const dedicated = new Map<string, number>();
+        for (const row of st) {
+          dedicated.set(String(row.log_date).slice(0, 10), Number(row.screen_minutes) || 0);
+        }
+        setScreenTimeByDate(mergeScreenTimeByDate(dedicated, weeklyRows));
+      } catch {
+        setScreenTimeByDate(new Map());
+      } finally {
+        setScreenTimeLoading(false);
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Yükleme hatası');
     } finally {
@@ -289,13 +335,16 @@ export function WeeklyPlannerCalendar({
         (e) => e.coach_goal_id === g.id && e.planner_date >= gStart && e.planner_date <= gEnd
       );
       const plannedSum = rel.reduce((s, e) => s + Number(e.planned_quantity || 0), 0);
-      const completedSum = rel.reduce((s, e) => s + Number(e.completed_quantity || 0), 0);
+      const completedSum = rel.reduce(
+        (s, e) => s + effectivePlannerEntryDone(g, e, studentWeeklyEntries),
+        0
+      );
       const target = Number(g.target_quantity || 0);
       const remaining = Math.max(0, target - plannedSum);
       const over = plannedSum > target;
       return { goal: g, plannedSum, completedSum, target, remaining, over };
     });
-  }, [goals, entries, weekStartStr, weekEndStr]);
+  }, [goals, entries, weekStartStr, weekEndStr, studentWeeklyEntries]);
 
   const goalsByDayDate = useMemo(() => {
     const out: Record<string, CoachWeeklyGoalRow[]> = {};
@@ -315,23 +364,17 @@ export function WeeklyPlannerCalendar({
     for (const e of entries) {
       if (e.planner_date < weekStartStr || e.planner_date > weekEndStr) continue;
       planned += Number(e.planned_quantity || 0);
-      done += Math.min(Number(e.completed_quantity || 0), Number(e.planned_quantity || 0));
+      const linkedGoal = e.coach_goal_id ? goals.find((g) => g.id === e.coach_goal_id) : undefined;
+      if (linkedGoal) {
+        done += effectivePlannerEntryDone(linkedGoal, e, studentWeeklyEntries);
+      } else {
+        done += Math.min(Number(e.completed_quantity || 0), Number(e.planned_quantity || 0));
+      }
       minutes += slotMinutes(e.start_time, e.end_time);
     }
     const pct = planned > 0 ? Math.round((done / planned) * 100) : 0;
     return { planned, done, minutes, pct };
-  }, [entries, weekStartStr, weekEndStr]);
-
-  const dailyChart = useMemo(() => {
-    return dayDates.map((d, i) => {
-      let minutes = 0;
-      for (const e of entries) {
-        if (e.planner_date !== d) continue;
-        minutes += slotMinutes(e.start_time, e.end_time);
-      }
-      return { gün: DAY_LABELS[i].slice(0, 3), dakika: minutes };
-    });
-  }, [dayDates, entries]);
+  }, [entries, weekStartStr, weekEndStr, goals, studentWeeklyEntries]);
 
   const openCreate = (date: string, hour: number) => {
     setSlotContext({ date, hour });
@@ -515,8 +558,24 @@ export function WeeklyPlannerCalendar({
       try {
         await patchWeeklyPlannerEntry(entry.id, {
           status: nextDone ? 'completed' : 'planned',
-          completed_quantity: nextDone ? entry.planned_quantity : entry.completed_quantity,
+          ...(nextDone ? {} : { completed_quantity: 0 }),
         });
+        if (nextDone) {
+          const sub = entry.subject?.trim() || 'Genel';
+          const top = entry.title?.trim() || sub;
+          const sid = entry.student_id;
+          const pool = classLevel != null ? getTopics(sub, classLevel) : [];
+          const resolvedTop = resolveTopicLabelForTracking(top, pool);
+          const already = isTopicMarkedCompleted(
+            getStudentTopicProgress(sid),
+            sid,
+            sub,
+            resolvedTop
+          );
+          if (!already && resolvedTop) {
+            await markTopicCompleted(sid, sub, resolvedTop, entry.weekly_entry_id || entry.id);
+          }
+        }
         await reload();
       } catch (e) {
         alert(e instanceof Error ? e.message : 'Güncellenemedi');
@@ -716,78 +775,166 @@ export function WeeklyPlannerCalendar({
     }
   };
 
+  const todayYmd = format(new Date(), 'yyyy-MM-dd');
+  const columnMeta = dayDates.map((d, i) => ({
+    isToday: d === todayYmd,
+    isWeekend: i >= 5,
+  }));
+
+  const dayHeaderClass = (i: number) =>
+    cn(
+      'relative h-[52px] border-b px-2 flex flex-col items-center justify-center text-center transition-colors duration-300',
+      columnMeta[i]?.isToday
+        ? studentStudyLogUi
+          ? 'border-indigo-300/90 bg-gradient-to-b from-indigo-100 via-violet-100 to-fuchsia-100/85 shadow-[inset_0_-3px_0_0_rgb(139,92,246,0.4)] ring-1 ring-indigo-200/50 dark:border-indigo-700 dark:from-indigo-950/55 dark:via-violet-950/45 dark:to-fuchsia-950/35 dark:ring-indigo-800/40'
+          : 'border-indigo-200/90 bg-gradient-to-b from-indigo-50 via-indigo-50/80 to-violet-50/60 shadow-[inset_0_-2px_0_0_rgb(129,140,248,0.45)] dark:border-indigo-900/70 dark:from-indigo-950/50 dark:via-indigo-950/30 dark:to-slate-900'
+        : columnMeta[i]?.isWeekend
+          ? studentStudyLogUi
+            ? 'border-orange-200/70 bg-gradient-to-br from-amber-50 via-orange-50/95 to-rose-50/80 dark:border-orange-900/45 dark:from-amber-950/35 dark:via-orange-950/25 dark:to-rose-950/20'
+            : 'border-slate-200/80 bg-slate-50/90 dark:bg-slate-900/65 dark:border-slate-700/80'
+          : studentStudyLogUi
+            ? 'border-violet-100/90 bg-gradient-to-b from-white via-violet-50/40 to-indigo-50/25 dark:border-slate-700 dark:from-slate-900 dark:via-violet-950/15 dark:to-slate-900/95'
+            : 'border-slate-200/80 bg-gradient-to-b from-white to-slate-50/80 dark:border-slate-700 dark:from-slate-900 dark:to-slate-900/95'
+    );
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
-            <BookOpen className="w-5 h-5 text-red-500" />
-            Haftalık çalışma planı
-            {studentName ? <span className="text-slate-500 font-normal text-sm">— {studentName}</span> : null}
-          </h3>
-          <p className="text-sm text-slate-500">
-            {format(parseISO(weekStartStr), 'd MMMM', { locale: tr })} –{' '}
-            {format(parseISO(weekEndStr), 'd MMMM yyyy', { locale: tr })}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {canManageGoals ? (
-            <div
-              role="region"
-              aria-label="Hedefi önceki haftaya taşı"
-              onDragOver={(e) => onWeekGoalDragOver(e, -1)}
-              onDragLeave={onWeekGoalDragLeave}
-              onDrop={(e) => void onWeekGoalDrop(e, -1)}
-              className={cn(
-                'flex min-h-[40px] min-w-[7.5rem] select-none items-center justify-center rounded-lg border border-dashed px-2 py-1.5 text-center text-[10px] font-semibold leading-tight transition-colors sm:min-w-[8.5rem] sm:text-[11px]',
-                weekDropHighlight === -1
-                  ? 'border-amber-500 bg-amber-100 text-amber-950 shadow-inner'
-                  : 'border-slate-200 text-slate-500 hover:border-amber-300 hover:bg-amber-50/60'
-              )}
-            >
-              ← Önceki haftaya bırak
+    <div className={cn('space-y-8', studentStudyLogUi && 'motion-safe:animate-in fade-in duration-500')}>
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-stretch lg:justify-between">
+        <div
+          className={cn(
+            'relative overflow-hidden rounded-2xl border p-5 lg:min-w-0 lg:flex-1 lg:p-6',
+            studentStudyLogUi
+              ? 'border-violet-200/90 bg-gradient-to-br from-violet-50 via-white to-amber-50/90 shadow-[0_16px_48px_-20px_rgb(139,92,246,0.35)] ring-1 ring-violet-100/80 dark:border-violet-900/50 dark:from-violet-950/40 dark:via-slate-900 dark:to-amber-950/25 dark:ring-violet-900/30'
+              : 'border-slate-200/90 bg-white shadow-[0_12px_40px_-18px_rgb(15,23,42,0.25)] dark:border-slate-700 dark:bg-slate-900'
+          )}
+        >
+          <div
+            className={cn(
+              'pointer-events-none absolute -right-8 -top-10 h-36 w-36 rounded-full blur-2xl',
+              studentStudyLogUi
+                ? 'bg-gradient-to-br from-fuchsia-400/20 via-violet-400/15 to-amber-300/20 dark:from-fuchsia-600/15 dark:via-violet-600/12 dark:to-amber-500/10'
+                : 'bg-gradient-to-br from-indigo-400/12 to-violet-500/12 dark:from-indigo-500/8 dark:to-violet-600/10'
+            )}
+            aria-hidden
+          />
+          <div className="relative flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
+                <span
+                  className={cn(
+                    'flex h-9 w-9 items-center justify-center rounded-xl',
+                    studentStudyLogUi
+                      ? 'bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-lg shadow-violet-500/25 dark:from-violet-600 dark:to-indigo-700'
+                      : 'bg-indigo-100 dark:bg-indigo-950/80'
+                  )}
+                >
+                  <BookOpen className={cn('h-[18px] w-[18px]', studentStudyLogUi && 'text-white')} />
+                </span>
+                <span className="text-xs font-bold uppercase tracking-widest opacity-90">
+                  {studentStudyLogUi ? 'Senin haftan' : 'Takvim'}
+                </span>
+              </div>
+              <h3 className="mt-2 text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50 sm:text-2xl">
+                {studentStudyLogUi ? 'Çalışma takvimin' : 'Haftalık çalışma planı'}
+                {studentName ? (
+                  <span className="mt-1 block text-sm font-medium text-slate-500 dark:text-slate-400 sm:mt-0 sm:inline sm:ml-2">
+                    · {studentName}
+                  </span>
+                ) : null}
+              </h3>
+              <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
+                <span className="inline-flex flex-wrap items-center gap-x-1 font-medium text-slate-800 dark:text-slate-200">
+                  <span>{format(parseISO(weekStartStr), 'd MMMM', { locale: tr })}</span>
+                  <span className="text-slate-400">—</span>
+                  <span>{format(parseISO(weekEndStr), 'd MMMM yyyy', { locale: tr })}</span>
+                </span>
+              </p>
+              {studentStudyLogUi ? (
+                <p className="mt-2 max-w-md text-xs leading-relaxed text-violet-900/85 dark:text-violet-200/80">
+                  Küçük adımlar büyük sonuçlar getirir — bugün için bir blok seç, tamamladıkça yeşile dönsün.
+                </p>
+              ) : null}
             </div>
-          ) : null}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setAnchor((a) => addDays(a, -7))}
-              className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50"
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setAnchor(new Date())}
-              className="px-3 py-2 text-sm rounded-lg border border-slate-200 hover:bg-slate-50"
-            >
-              Bu hafta
-            </button>
-            <button
-              type="button"
-              onClick={() => setAnchor((a) => addDays(a, 7))}
-              className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50"
-            >
-              <ChevronRight className="w-5 h-5" />
-            </button>
+            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+              {canManageGoals ? (
+                <div
+                  role="region"
+                  aria-label="Hedefi önceki haftaya taşı"
+                  onDragOver={(e) => onWeekGoalDragOver(e, -1)}
+                  onDragLeave={onWeekGoalDragLeave}
+                  onDrop={(e) => void onWeekGoalDrop(e, -1)}
+                  className={cn(
+                    'flex min-h-[42px] min-w-[7.5rem] select-none items-center justify-center rounded-xl border border-dashed px-2.5 py-2 text-center text-[10px] font-semibold leading-tight transition-all sm:min-w-[8.75rem] sm:text-[11px]',
+                    weekDropHighlight === -1
+                      ? 'border-amber-500 bg-amber-100 text-amber-950 shadow-md ring-2 ring-amber-400/30'
+                      : 'border-slate-200/90 text-slate-500 hover:border-amber-300/80 hover:bg-amber-50/70 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-amber-950/20'
+                  )}
+                >
+                  ← Önceki haftaya bırak
+                </div>
+              ) : null}
+              <div
+                className={cn(
+                  'relative z-10 flex items-center gap-1 rounded-xl border p-1 shadow-inner',
+                  studentStudyLogUi
+                    ? 'border-violet-200/80 bg-white/90 backdrop-blur-sm dark:border-violet-800/60 dark:bg-violet-950/40'
+                    : 'border-slate-200/90 bg-slate-50/80 dark:border-slate-600 dark:bg-slate-800/50'
+                )}
+              >
+                <IconTapButton
+                  onClick={() => setAnchor((a) => addDays(a, -7))}
+                  className={cn(
+                    studentStudyLogUi
+                      ? 'text-violet-700 hover:bg-violet-100/90 dark:text-violet-300 dark:hover:bg-violet-900/50'
+                      : 'text-slate-600 hover:bg-white hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-white'
+                  )}
+                  aria-label="Önceki hafta"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </IconTapButton>
+                <button
+                  type="button"
+                  onClick={() => setAnchor(new Date())}
+                  className={cn(
+                    'min-h-[44px] touch-manipulation rounded-lg px-3 py-2 text-xs font-semibold transition hover:shadow-sm',
+                    studentStudyLogUi
+                      ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-500/25 hover:from-violet-500 hover:to-indigo-500 dark:shadow-none'
+                      : 'text-slate-700 hover:bg-white dark:text-slate-200 dark:hover:bg-slate-700'
+                  )}
+                >
+                  Bu hafta
+                </button>
+                <IconTapButton
+                  onClick={() => setAnchor((a) => addDays(a, 7))}
+                  className={cn(
+                    studentStudyLogUi
+                      ? 'text-violet-700 hover:bg-violet-100/90 dark:text-violet-300 dark:hover:bg-violet-900/50'
+                      : 'text-slate-600 hover:bg-white hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-white'
+                  )}
+                  aria-label="Sonraki hafta"
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </IconTapButton>
+              </div>
+              {canManageGoals ? (
+                <div
+                  role="region"
+                  aria-label="Hedefi sonraki haftaya taşı"
+                  onDragOver={(e) => onWeekGoalDragOver(e, 1)}
+                  onDragLeave={onWeekGoalDragLeave}
+                  onDrop={(e) => void onWeekGoalDrop(e, 1)}
+                  className={cn(
+                    'flex min-h-[42px] min-w-[7.5rem] select-none items-center justify-center rounded-xl border border-dashed px-2.5 py-2 text-center text-[10px] font-semibold leading-tight transition-all sm:min-w-[8.75rem] sm:text-[11px]',
+                    weekDropHighlight === 1
+                      ? 'border-amber-500 bg-amber-100 text-amber-950 shadow-md ring-2 ring-amber-400/30'
+                      : 'border-slate-200/90 text-slate-500 hover:border-amber-300/80 hover:bg-amber-50/70 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-amber-950/20'
+                  )}
+                >
+                  Sonraki haftaya bırak →
+                </div>
+              ) : null}
+            </div>
           </div>
-          {canManageGoals ? (
-            <div
-              role="region"
-              aria-label="Hedefi sonraki haftaya taşı"
-              onDragOver={(e) => onWeekGoalDragOver(e, 1)}
-              onDragLeave={onWeekGoalDragLeave}
-              onDrop={(e) => void onWeekGoalDrop(e, 1)}
-              className={cn(
-                'flex min-h-[40px] min-w-[7.5rem] select-none items-center justify-center rounded-lg border border-dashed px-2 py-1.5 text-center text-[10px] font-semibold leading-tight transition-colors sm:min-w-[8.5rem] sm:text-[11px]',
-                weekDropHighlight === 1
-                  ? 'border-amber-500 bg-amber-100 text-amber-950 shadow-inner'
-                  : 'border-slate-200 text-slate-500 hover:border-amber-300 hover:bg-amber-50/60'
-              )}
-            >
-              Sonraki haftaya bırak →
-            </div>
-          ) : null}
         </div>
       </div>
 
@@ -799,31 +946,48 @@ export function WeeklyPlannerCalendar({
       ) : null}
 
       {/* Özet */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
-          <p className="text-xs text-slate-500">Haftalık tamamlanma</p>
-          <p className="text-2xl font-bold text-emerald-600">{weekStats.pct}%</p>
-          <p className="text-xs text-slate-400 mt-1">
-            {weekStats.done} / {weekStats.planned} birim
-          </p>
-        </div>
-        <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
-          <p className="text-xs text-slate-500">Planlanan süre</p>
-          <p className="text-2xl font-bold text-slate-800">{weekStats.minutes} dk</p>
-        </div>
-        <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm sm:col-span-2">
-          <p className="text-xs text-slate-500 mb-2">Günlük süre (dakika)</p>
-          <div className="h-28">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={dailyChart}>
-                <XAxis dataKey="gün" tick={{ fontSize: 11 }} />
-                <YAxis hide />
-                <Tooltip />
-                <Bar dataKey="dakika" fill="#f97316" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="group relative overflow-hidden rounded-2xl border border-emerald-100/90 bg-gradient-to-br from-emerald-50/95 via-white to-teal-50/50 p-5 shadow-sm transition hover:shadow-md dark:border-emerald-900/40 dark:from-emerald-950/35 dark:via-slate-900 dark:to-slate-900">
+          <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-emerald-400/10 blur-2xl transition group-hover:bg-emerald-400/20" aria-hidden />
+          <div className="relative flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 shadow-sm dark:bg-emerald-950/80 dark:text-emerald-300">
+              <Target className="h-5 w-5" />
+            </span>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700/90 dark:text-emerald-400/90">
+                Haftalık tamamlanma
+              </p>
+              <p className="mt-1 font-mono text-3xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                {weekStats.pct}%
+              </p>
+              <p className="mt-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+                {weekStats.done} / {weekStats.planned} birim
+              </p>
+            </div>
           </div>
         </div>
+        <div className="group relative overflow-hidden rounded-2xl border border-indigo-100/90 bg-gradient-to-br from-indigo-50/90 via-white to-violet-50/40 p-5 shadow-sm transition hover:shadow-md dark:border-indigo-900/40 dark:from-indigo-950/30 dark:via-slate-900 dark:to-slate-900">
+          <div className="absolute -bottom-8 -right-4 h-28 w-28 rounded-full bg-violet-400/10 blur-2xl" aria-hidden />
+          <div className="relative flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700 shadow-sm dark:bg-indigo-950/80 dark:text-indigo-300">
+              <Clock className="h-5 w-5" />
+            </span>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-700/90 dark:text-indigo-400/90">
+                Planlanan süre
+              </p>
+              <p className="mt-1 font-mono text-3xl font-bold tabular-nums text-slate-900 dark:text-slate-50">
+                {weekStats.minutes}
+              </p>
+              <p className="mt-1 text-xs font-medium text-slate-600 dark:text-slate-400">dakika</p>
+            </div>
+          </div>
+        </div>
+        <DailyScreenTimeChart
+          weekStartStr={weekStartStr}
+          byDate={screenTimeByDate}
+          loading={screenTimeLoading || loading}
+        />
       </div>
 
       {/* Koç hedefleri */}
@@ -852,8 +1016,10 @@ export function WeeklyPlannerCalendar({
               <select
                 value={newGoalSubject}
                 onChange={(e) => {
-                  setNewGoalSubject(e.target.value);
+                  const sub = e.target.value;
+                  setNewGoalSubject(sub);
                   setNewGoalTitle('');
+                  if (sub) setNewGoalUnit(defaultGoalUnitForSubject(sub));
                 }}
                 className="px-3 py-2 border rounded-lg text-sm min-w-[180px] max-w-[260px] bg-white dark:bg-slate-900"
               >
@@ -902,9 +1068,11 @@ export function WeeklyPlannerCalendar({
                 onChange={(e) => setNewGoalUnit(e.target.value)}
                 className="px-3 py-2 border rounded-lg text-sm"
               >
-                <option value="soru">soru</option>
-                <option value="sayfa">sayfa</option>
-                <option value="tekrar">tekrar</option>
+                {COACH_GOAL_QUANTITY_UNITS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
@@ -949,46 +1117,91 @@ export function WeeklyPlannerCalendar({
         </div>
       )}
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
         {/* Takvim */}
-        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm overflow-hidden transition-colors">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-slate-50 to-white dark:from-slate-900 dark:to-slate-900 text-xs text-slate-600 dark:text-slate-400">
-            <span>
+        <div
+          className={cn(
+            'overflow-hidden rounded-2xl border bg-white dark:bg-slate-900',
+            studentStudyLogUi
+              ? 'border-violet-200/90 shadow-[0_24px_56px_-28px_rgb(139,92,246,0.38)] ring-2 ring-violet-100/70 dark:border-violet-900/55 dark:shadow-[0_20px_50px_-24px_rgb(0,0,0,0.5)] dark:ring-violet-900/40'
+              : 'border-slate-200/95 shadow-[0_20px_50px_-24px_rgb(15,23,42,0.18)] ring-1 ring-slate-100/90 dark:border-slate-700 dark:shadow-none dark:ring-slate-800/80'
+          )}
+        >
+          <div
+            className={cn(
+              'flex flex-col gap-2 border-b px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between',
+              studentStudyLogUi
+                ? 'border-violet-100/90 bg-gradient-to-r from-violet-100/90 via-fuchsia-50/80 to-amber-50/70 dark:border-violet-900/50 dark:from-violet-950/45 dark:via-fuchsia-950/25 dark:to-amber-950/20'
+                : 'border-slate-100 bg-gradient-to-r from-indigo-50/85 via-white to-violet-50/40 dark:border-slate-800 dark:from-indigo-950/30 dark:via-slate-900 dark:to-violet-950/20'
+            )}
+          >
+            <span className="flex items-start gap-2.5 text-xs font-medium leading-relaxed text-slate-700 dark:text-slate-300">
+              <span
+                className={cn(
+                  'mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full',
+                  studentStudyLogUi
+                    ? 'bg-gradient-to-br from-violet-500 to-fuchsia-500 shadow-[0_0_14px_rgb(167,139,250,0.55)]'
+                    : 'bg-emerald-500 shadow-[0_0_12px_rgb(52,211,153,0.45)] dark:shadow-emerald-500/30'
+                )}
+                aria-hidden
+              />
               {loading
                 ? 'Yükleniyor…'
                 : studentStudyLogUi
-                  ? 'Bloklara tıklayı günlük kayıt gir · hedef kartını sürükleyerek yerleştir'
-                  : 'Öğrenci blokları sürükleyerek taşıyabilir'}
+                  ? 'Bloka tıkla → çalışma kaydı ve “Konuyu bitirdim” ile Konu Takibi güncellenir'
+                  : 'Blokları sürükleyerek taşı · Boş saate tıklayarak yeni görev ekle'}
             </span>
           </div>
-          <div className="overflow-x-auto">
-            <div className="min-w-[720px]">
+          <div
+            className={cn(
+              'overflow-x-auto',
+              studentStudyLogUi
+                ? 'bg-gradient-to-b from-violet-50/50 via-white to-amber-50/30 dark:from-slate-950 dark:via-slate-950 dark:to-violet-950/20'
+                : 'bg-slate-50/40 dark:bg-slate-950/40'
+            )}
+          >
+            <div className="min-w-[760px] p-3 sm:p-4">
               <div
-                className="grid"
-                style={{ gridTemplateColumns: `56px repeat(7, minmax(90px,1fr))` }}
+                className={cn(
+                  'grid overflow-hidden rounded-xl border shadow-inner',
+                  studentStudyLogUi
+                    ? 'border-violet-100/90 bg-white/95 ring-1 ring-violet-100/60 dark:border-violet-900/40 dark:bg-slate-900/95 dark:ring-violet-900/25'
+                    : 'border-slate-200/90 bg-white dark:border-slate-700 dark:bg-slate-900'
+                )}
+                style={{ gridTemplateColumns: `64px repeat(7, minmax(92px,1fr))` }}
               >
-                <div className="h-10 border-b border-r bg-slate-100" />
+                <div className="sticky left-0 z-20 h-[52px] border-b border-r border-slate-200/95 bg-gradient-to-br from-slate-100 via-slate-50 to-white dark:border-slate-700 dark:from-slate-800 dark:via-slate-900 dark:to-slate-900" />
                 {DAY_LABELS.map((d, i) => (
-                  <div
-                    key={d}
-                    className="h-10 border-b border-slate-200 flex flex-col items-center justify-center bg-slate-50 text-xs font-semibold text-slate-700"
-                  >
-                    <span>{d.slice(0, 3)}</span>
-                    <span className="text-[10px] font-normal text-slate-500">
+                  <div key={d} className={dayHeaderClass(i)}>
+                    {columnMeta[i]?.isToday ? (
+                      <span className="absolute top-1.5 right-1.5 hidden rounded-full bg-indigo-600 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white shadow-md sm:inline-flex dark:bg-indigo-500">
+                        Bugün
+                      </span>
+                    ) : null}
+                    <span className="hidden text-[13px] font-bold text-slate-800 dark:text-slate-100 sm:inline">{d}</span>
+                    <span className="text-[12px] font-bold text-slate-800 dark:text-slate-100 sm:hidden">{d.slice(0, 3)}</span>
+                    <span className="mt-0.5 inline-flex items-center rounded-md bg-white/85 px-1.5 py-0 text-[11px] font-semibold tabular-nums text-slate-600 shadow-sm ring-1 ring-slate-200/80 dark:bg-slate-800/90 dark:text-slate-400 dark:ring-slate-600/80">
                       {format(parseISO(dayDates[i]), 'd MMM', { locale: tr })}
                     </span>
                   </div>
                 ))}
 
-                <div className="border-r border-b border-slate-200 bg-amber-50/40 dark:bg-amber-950/20 px-1 py-0.5 text-[9px] text-amber-900/80 dark:text-amber-200/90 leading-tight">
+                <div className="sticky left-0 z-10 border-r border-b border-slate-200/90 bg-gradient-to-br from-amber-50 to-amber-100/70 px-2 py-2 text-[10px] font-bold uppercase leading-tight tracking-wide text-amber-900 dark:border-slate-700 dark:from-amber-950/50 dark:to-amber-950/25 dark:text-amber-200/95">
                   Hedef süresi
                 </div>
-                {dayDates.map((date) => {
+                {dayDates.map((date, colIdx) => {
                   const dayGoals = goalsByDayDate[date] ?? [];
                   return (
                     <div
                       key={`goal-span-${date}`}
-                      className="border-b border-slate-200 bg-amber-50/30 dark:bg-amber-950/15 px-0.5 py-0.5 min-h-[28px] flex flex-col gap-0.5"
+                      className={cn(
+                        'border-b border-slate-200/90 px-1 py-1.5 min-h-[34px] flex flex-col gap-1',
+                        columnMeta[colIdx]?.isToday
+                          ? 'bg-indigo-50/45 dark:bg-indigo-950/25'
+                          : columnMeta[colIdx]?.isWeekend
+                            ? 'bg-slate-50/95 dark:bg-slate-900/75'
+                            : 'bg-gradient-to-b from-amber-50/40 to-transparent dark:from-amber-950/20'
+                      )}
                     >
                       {dayGoals.slice(0, 3).map((g) => {
                         const st = subjectPlannerStyle(g.subject, g.quantity_unit);
@@ -997,14 +1210,19 @@ export function WeeklyPlannerCalendar({
                           <div
                             key={g.id}
                             title={`${g.title} (${sp.start} → ${sp.end})`}
-                            className={`truncate rounded px-0.5 text-[9px] font-medium leading-tight ${st.chip}`}
+                            className={cn(
+                              'truncate rounded-md px-1.5 py-0.5 text-[10px] font-semibold leading-tight shadow-sm ring-1 ring-slate-900/5 dark:ring-white/10',
+                              st.chip
+                            )}
                           >
                             {g.subject}
                           </div>
                         );
                       })}
                       {dayGoals.length > 3 ? (
-                        <span className="text-[8px] text-amber-800/80 dark:text-amber-300/80">+{dayGoals.length - 3}</span>
+                        <span className="pl-0.5 text-[9px] font-bold text-amber-900/85 dark:text-amber-400/95">
+                          +{dayGoals.length - 3} hedef
+                        </span>
                       ) : null}
                     </div>
                   );
@@ -1012,18 +1230,33 @@ export function WeeklyPlannerCalendar({
 
                 {HOURS.map((hour) => (
                   <React.Fragment key={hour}>
-                    <div className="border-r border-b border-slate-100 text-[11px] text-slate-500 text-right pr-1 py-1 bg-white">
-                      {padHour(hour)}
+                    <div className="sticky left-0 z-10 border-r border-b border-slate-100 bg-slate-50/98 py-2.5 pr-2 text-right text-[11px] font-medium tabular-nums tracking-tight text-slate-500 dark:border-slate-800 dark:bg-slate-900/98 dark:text-slate-400">
+                      <span className="font-mono">{padHour(hour)}</span>
                     </div>
-                    {dayDates.map((date) => {
+                    {dayDates.map((date, colIdx) => {
                       const list = cellEntries(date, hour);
                       const isPast = pastSlot(date, hour);
                       return (
                         <div
                           key={`${date}-${hour}`}
-                          className={`border-b border-slate-100 min-h-[52px] p-0.5 relative ${
-                            isPast ? 'bg-slate-50/80' : 'bg-white'
-                          } ${canEditPlan ? 'hover:bg-blue-50/40 cursor-pointer' : ''}`}
+                          className={cn(
+                            'border-b border-slate-100 min-h-[58px] p-1 relative transition-[background-color,box-shadow] duration-150 dark:border-slate-800/85',
+                            columnMeta[colIdx]?.isToday
+                              ? isPast
+                                ? 'bg-indigo-50/35 dark:bg-indigo-950/18'
+                                : 'bg-[linear-gradient(180deg,rgb(238,242,255,0.5)_0%,transparent_85%)] dark:bg-indigo-950/12'
+                              : columnMeta[colIdx]?.isWeekend
+                                ? isPast
+                                  ? 'bg-slate-100/75 dark:bg-slate-900/72'
+                                  : 'bg-slate-50/50 dark:bg-slate-900/45'
+                                : isPast
+                                  ? 'bg-slate-50/85 dark:bg-slate-950/82'
+                                  : 'bg-white dark:bg-slate-950',
+                            canEditPlan &&
+                              (studentStudyLogUi
+                                ? 'hover:bg-gradient-to-br hover:from-violet-50 hover:to-fuchsia-50/80 hover:shadow-[inset_0_0_0_2px_rgb(167,139,250,0.45)] cursor-pointer dark:hover:from-violet-950/40 dark:hover:to-fuchsia-950/25 dark:hover:shadow-[inset_0_0_0_1px_rgb(139,92,246,0.35)]'
+                                : 'hover:bg-violet-50/60 hover:shadow-[inset_0_0_0_1px_rgb(167,139,250,0.35)] cursor-pointer dark:hover:bg-violet-950/35 dark:hover:shadow-[inset_0_0_0_1px_rgb(139,92,246,0.25)]')
+                          )}
                           onClick={() => {
                             if (!canEditPlan) return;
                             if (list.length === 0) openCreate(date, hour);
@@ -1040,18 +1273,24 @@ export function WeeklyPlannerCalendar({
                           }}
                         >
                           {list.map((en) => {
-                            const st = subjectPlannerStyle(en.subject, goals.find((g) => g.id === en.coach_goal_id)?.quantity_unit);
+                            const linkedGoal = goals.find((g) => g.id === en.coach_goal_id);
+                            const st = subjectPlannerStyle(en.subject, linkedGoal?.quantity_unit);
                             const plannedN = Number(en.planned_quantity || 0);
-                            const done =
-                              en.status === 'completed' &&
-                              (plannedN > 0 || Number(en.completed_quantity || 0) > 0);
-                            const miss = isPast && en.status === 'planned';
-                            const borderCls = done
-                              ? 'border-emerald-500 ring-1 ring-emerald-200'
-                              : miss
-                                ? 'border-red-400 ring-1 ring-red-100'
-                                : en.status === 'partial'
-                                  ? 'border-amber-400 ring-1 ring-amber-100'
+                            const doneQty = linkedGoal
+                              ? effectivePlannerEntryDone(linkedGoal, en, studentWeeklyEntries)
+                              : Math.min(
+                                  Number(en.completed_quantity || 0),
+                                  plannedN > 0 ? plannedN : Number(en.completed_quantity || 0)
+                                );
+                            const isRealized = doneQty > 0;
+                            const hasPlan = plannedN > 0;
+                            const miss = isPast && !isRealized && en.status === 'planned';
+                            const borderCls = isRealized
+                              ? 'border-emerald-500 ring-1 ring-emerald-200 bg-emerald-50/95 dark:bg-emerald-950/45 dark:ring-emerald-900/50'
+                              : hasPlan
+                                ? 'border-orange-500 ring-1 ring-orange-200 bg-orange-50/95 dark:bg-orange-950/35 dark:ring-orange-900/45'
+                                : miss
+                                  ? 'border-red-400 ring-1 ring-red-100 dark:ring-red-900/35'
                                   : st.chip.replace('bg-', 'border-').split(' ')[1] || 'border-slate-300';
                             return (
                               <div
@@ -1065,20 +1304,25 @@ export function WeeklyPlannerCalendar({
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   if (!canEditPlan) return;
-                                  if (studentStudyLogUi) {
+                                  if (studyLogOnClick) {
                                     setStudyModalEntry(en);
                                   } else {
                                     openEdit(en);
                                   }
                                 }}
-                                className={`text-[10px] leading-tight rounded px-1 py-0.5 mb-0.5 border ${st.chip} ${borderCls} ${canEditPlan ? 'cursor-grab' : ''}`}
+                                className={cn(
+                                  'text-[11px] leading-snug rounded-lg px-2 py-1.5 mb-1 border shadow-sm backdrop-blur-[1px] transition hover:brightness-[1.03] dark:hover:brightness-110',
+                                  st.chip,
+                                  borderCls,
+                                  canEditPlan ? 'cursor-grab active:cursor-grabbing' : ''
+                                )}
                               >
-                                <div className="flex items-start gap-0.5">
-                                  {canEditPlan ? <GripVertical className="w-3 h-3 text-slate-400 flex-shrink-0 mt-0.5" /> : null}
+                                <div className="flex items-start gap-1">
+                                  {canEditPlan ? <GripVertical className="w-3.5 h-3.5 text-slate-400/90 flex-shrink-0 mt-0.5" /> : null}
                                   <div className="min-w-0 flex-1">
-                                    <div className="font-semibold truncate">{en.title}</div>
-                                    <div className="opacity-80">
-                                      {en.planned_quantity} plan / {en.completed_quantity} yap
+                                    <div className="font-bold truncate text-slate-900/95 dark:text-slate-100">{en.title}</div>
+                                    <div className="mt-0.5 text-[10px] font-medium opacity-85">
+                                      {plannedN} plan · {doneQty} yap
                                     </div>
                                   </div>
                                 </div>
@@ -1096,9 +1340,17 @@ export function WeeklyPlannerCalendar({
         </div>
 
         {/* Hedef özet */}
-        <div className="space-y-3">
-          <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm p-4 shadow-sm">
+        <div className="space-y-3 xl:sticky xl:top-24 xl:self-start">
+          <div className="rounded-2xl border border-slate-200/95 bg-white/95 p-5 shadow-[0_16px_40px_-28px_rgb(15,23,42,0.35)] backdrop-blur-sm dark:border-slate-700 dark:bg-slate-900/95">
             <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-1">Koç hedefleri</h4>
+            <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-2 flex flex-wrap gap-2">
+              <span className="inline-flex items-center gap-1 rounded-md border border-orange-300 bg-orange-50 px-1.5 py-0.5 text-orange-900 dark:border-orange-800 dark:bg-orange-950/40 dark:text-orange-200">
+                Turuncu: planlandı
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+                Yeşil: yapıldı
+              </span>
+            </p>
             <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3">
               Kartı takvim hücresine sürükleyerek plana yerleştirin (yalnızca hedefin başlangıç–bitiş
               günleri) · Üstteki &quot;Önceki / Sonraki haftaya bırak&quot; ile hedefi ve plan bloklarını
@@ -1113,9 +1365,16 @@ export function WeeklyPlannerCalendar({
               </p>
             ) : (
               <ul className="space-y-3 text-xs">
-                {goalAggregates.map(({ goal, plannedSum, target, remaining, over }) => {
+                {goalAggregates.map(({ goal, plannedSum, completedSum, target, remaining, over }) => {
                   const pct = target > 0 ? Math.min(100, Math.round((plannedSum / target) * 100)) : 0;
+                  const donePct = target > 0 ? Math.min(100, Math.round((completedSum / target) * 100)) : 0;
                   const { start, end } = goalEffectiveSpan(goal, weekStartStr, weekEndStr);
+                  const cardTone =
+                    completedSum > 0
+                      ? 'border-emerald-200/90 bg-gradient-to-br from-emerald-50/90 to-white dark:border-emerald-900/50 dark:from-emerald-950/35 dark:to-slate-950'
+                      : plannedSum > 0
+                        ? 'border-orange-200/90 bg-gradient-to-br from-orange-50/90 to-white dark:border-orange-900/45 dark:from-orange-950/30 dark:to-slate-950'
+                        : 'border-slate-100 dark:border-slate-700 bg-gradient-to-br from-white to-slate-50 dark:from-slate-900 dark:to-slate-950';
                   return (
                     <li
                       key={goal.id}
@@ -1125,7 +1384,7 @@ export function WeeklyPlannerCalendar({
                         e.dataTransfer.setData('text/plain', `goal:${goal.id}`);
                         e.dataTransfer.effectAllowed = 'copy';
                       }}
-                      className={`rounded-xl border border-slate-100 dark:border-slate-700 p-3 bg-gradient-to-br from-white to-slate-50 dark:from-slate-900 dark:to-slate-950 shadow-sm ${
+                      className={`rounded-xl border p-3 shadow-sm ${cardTone} ${
                         canEditPlan ? 'cursor-grab active:cursor-grabbing' : ''
                       }`}
                     >
@@ -1161,15 +1420,19 @@ export function WeeklyPlannerCalendar({
                           </div>
                         ) : null}
                       </div>
-                      <div className="mt-2 h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                      <div className="mt-2 h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden relative">
                         <div
-                          className="h-full rounded-full bg-gradient-to-r from-red-400 to-orange-400 transition-all duration-300"
+                          className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-orange-400 to-amber-400 transition-all duration-300"
                           style={{ width: `${pct}%` }}
+                        />
+                        <div
+                          className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-300"
+                          style={{ width: `${donePct}%` }}
                         />
                       </div>
                       <div className="mt-2 text-slate-600 dark:text-slate-300 space-y-0.5">
                         <div>
-                          {target} {goal.quantity_unit} · Planlanan {plannedSum}
+                          {target} {goal.quantity_unit} · Planlanan {plannedSum} · Yapılan {completedSum}
                         </div>
                         <div className="font-medium text-slate-800 dark:text-slate-100">
                           Kalan kota: {over ? `0 (aşım ${plannedSum - target})` : remaining}
@@ -1274,8 +1537,12 @@ export function WeeklyPlannerCalendar({
       {studyModalEntry ? (
         <WeeklyPlannerStudyModal
           plannerEntry={studyModalEntry}
+          quantityUnit={goals.find((g) => g.id === studyModalEntry.coach_goal_id)?.quantity_unit}
           onClose={() => setStudyModalEntry(null)}
-          onSaved={() => void reload()}
+          onSaved={async () => {
+            await reload();
+            await refreshTopicProgress();
+          }}
           onEditPlanner={(en) => {
             setStudyModalEntry(null);
             openEdit(en);
@@ -1285,7 +1552,7 @@ export function WeeklyPlannerCalendar({
 
       {/* Modal */}
       {(modalMode === 'create' || modalMode === 'edit') && slotContext && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div className="fixed inset-0 z-[200] bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div className="p-5 border-b border-slate-100 flex justify-between items-center">
               <h4 className="font-semibold text-slate-800">

@@ -12,7 +12,7 @@
 --   6) 2026-05-25-cron-run-log.sql                        → cron_run_log (WhatsApp Merkezi / sağlık)
 --
 -- CRON (Vercel): kök vercel.json → "path": "/api/cron/daily-report-reminders"
---   Schedule UTC: 0 20 * * *  → İstanbul 23:00 (TR yıl boyu UTC+3).
+--   Schedule UTC: 0 19 * * *  → İstanbul 22:00 (TR yıl boyu UTC+3).
 --   Kod sözleşmesi: api/_lib/vercel-cron-contract.js → CRON_DAILY_REPORT_REMINDERS_UTC
 --
 -- META İŞ AKIŞI:
@@ -50,7 +50,7 @@ Online VIP Dershane',
   '["student_name"]'::jsonb,
   'whatsapp',
   true,
-  'daily_report_reminder',
+  'report_reminder',
   'tr',
   NOW()
 )

@@ -1,6 +1,6 @@
 // Türkçe: Veritabanı Servis Katmanı - Supabase Entegrasyonu
 import { supabase, Database } from './supabase';
-import { apiFetch } from './session';
+import { apiFetch, getAuthToken } from './session';
 import type { AICoachSuggestion, ExamResult, ReadingLog, StudentTeacherLessonQuota } from '../types';
 import {
   aiSuggestionToPayload,
@@ -293,9 +293,11 @@ class DatabaseService {
       const p = payload as { message?: string; error?: string };
       throw new Error(p.message || p.error || `API error (${res.status})`);
     }
-    // Sunucu { data: row }; unwrapData içeriği tek seferde döner
     const data = this.unwrapData<StudentRow>(payload);
-    return data ?? null;
+    if (data) return data;
+    const reason = (payload as { reason?: string }).reason;
+    if (reason === 'student_profile_missing' || reason === 'not_found') return null;
+    return null;
   }
 
   // Öğrenci güncelle
@@ -787,6 +789,12 @@ class DatabaseService {
 
   // Konu ilerleme güncelle/oluştur
   async upsertTopicProgress(progress: Omit<TopicProgressRow, 'id' | 'created_at' | 'updated_at'>): Promise<TopicProgressRow> {
+    if (getAuthToken()) {
+      return this.apiJson<TopicProgressRow>('/api/topic-progress', {
+        method: 'POST',
+        body: JSON.stringify(progress)
+      });
+    }
     const { data: existing } = await supabase
       .from('topic_progress')
       .select('*')
@@ -835,6 +843,13 @@ class DatabaseService {
   /** Yüklü öğrenci id listesi için konu ilerlemesi (Konu Takibi senkronu). */
   async getTopicProgressForStudents(studentIds: string[]): Promise<TopicProgressRow[]> {
     if (!studentIds.length) return [];
+    if (getAuthToken()) {
+      const q =
+        studentIds.length === 1
+          ? `?student_id=${encodeURIComponent(studentIds[0]!)}`
+          : `?student_ids=${encodeURIComponent(studentIds.join(','))}`;
+      return this.apiListJson<TopicProgressRow>(`/api/topic-progress${q}`, 'topic-progress');
+    }
     const CHUNK = 100;
     const acc: TopicProgressRow[] = [];
     for (let i = 0; i < studentIds.length; i += CHUNK) {
@@ -850,6 +865,13 @@ class DatabaseService {
   }
 
   async deleteTopicProgress(studentId: string, topicId: string): Promise<void> {
+    if (getAuthToken()) {
+      await this.apiJson<{ ok: boolean }>(
+        `/api/topic-progress?student_id=${encodeURIComponent(studentId)}&topic_id=${encodeURIComponent(topicId)}`,
+        { method: 'DELETE' }
+      );
+      return;
+    }
     const { error } = await supabase
       .from('topic_progress')
       .delete()
@@ -862,6 +884,13 @@ class DatabaseService {
   }
 
   async deleteTopicProgressForStudent(studentId: string): Promise<void> {
+    if (getAuthToken()) {
+      const rows = await this.getTopicProgressForStudents([studentId]);
+      for (const row of rows) {
+        await this.deleteTopicProgress(studentId, row.topic_id);
+      }
+      return;
+    }
     const { error } = await supabase.from('topic_progress').delete().eq('student_id', studentId);
     if (error) {
       console.error('deleteTopicProgressForStudent:', error);

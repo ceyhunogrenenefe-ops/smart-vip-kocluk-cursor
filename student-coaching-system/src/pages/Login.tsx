@@ -110,10 +110,18 @@ export default function Login() {
 
             {/* Password */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                <Lock className="w-4 h-4 inline mr-1" />
-                Şifre
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  <Lock className="w-4 h-4 inline mr-1" />
+                  Şifre
+                </label>
+                <Link
+                  to="/forgot-password"
+                  className="text-xs font-medium text-red-600 hover:text-red-700 hover:underline"
+                >
+                  Şifremi unuttum
+                </Link>
+              </div>
               <div className="relative">
                 <input
                   type={showPassword ? 'text' : 'password'}

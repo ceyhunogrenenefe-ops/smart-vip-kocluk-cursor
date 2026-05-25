@@ -1,5 +1,6 @@
 // Türkçe: Kitap Okuma Takip Sistemi - Admin ve Koç Paneli
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { IconTapButton } from '../components/ui/IconTapButton';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { resolveCoachRecordId } from '../lib/coachResolve';
@@ -76,11 +77,16 @@ export default function BookTracking() {
     getReadingHeatmap,
     getReadingComments,
     getReadingBadges,
-    getBookReadingTime
+    getBookReadingTime,
+    refreshBooks
   } = useApp();
 
   // State
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
+
+  useEffect(() => {
+    void refreshBooks();
+  }, [refreshBooks, selectedStudentId]);
   const [showAddBook, setShowAddBook] = useState(false);
   const [showAddLog, setShowAddLog] = useState(false);
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
@@ -107,6 +113,14 @@ export default function BookTracking() {
   // Seçili öğrencinin verileri
   const selectedStudent = students.find(s => s.id === selectedStudentId);
   const studentBooks = selectedStudentId ? getStudentBooks(selectedStudentId) : [];
+  const activeReadingBooks = useMemo(
+    () => studentBooks.filter((b) => b.status !== 'completed'),
+    [studentBooks]
+  );
+  const completedBooksList = useMemo(
+    () => studentBooks.filter((b) => b.status === 'completed'),
+    [studentBooks]
+  );
   const studentLogs = selectedStudentId ? getStudentReadingLogs(selectedStudentId) : [];
   const studentWeeklyEntries = selectedStudentId ? weeklyEntries.filter(e => e.studentId === selectedStudentId && e.readingMinutes && e.readingMinutes > 0) : [];
   const stats = selectedStudentId ? getReadingStats(selectedStudentId) : null;
@@ -169,18 +183,27 @@ export default function BookTracking() {
       totalPages: newBook.totalPages ? parseInt(newBook.totalPages) : undefined,
       startDate: newBook.startDate,
       status: newBook.status,
+      endDate:
+        newBook.status === 'completed' ? new Date().toISOString().split('T')[0] : undefined,
       createdAt: new Date().toISOString()
     };
 
-    addBook(book);
+    void addBook(book);
     setNewBook({ title: '', author: '', totalPages: '', startDate: new Date().toISOString().split('T')[0], status: 'reading' });
     setShowAddBook(false);
   };
 
   // Kitap güncelle
   const handleUpdateBook = (bookId: string, updates: Partial<Book>) => {
-    updateBook(bookId, updates);
+    void updateBook(bookId, updates);
     setEditingBookId(null);
+  };
+
+  const handleMarkBookFinished = (bookId: string) => {
+    void updateBook(bookId, {
+      status: 'completed',
+      endDate: new Date().toISOString().split('T')[0]
+    });
   };
 
   // Yeni okuma kaydı ekle
@@ -459,7 +482,7 @@ export default function BookTracking() {
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-slate-800">Aylık Okuma Takvimi</h3>
               <div className="flex items-center gap-2">
-                <button
+                <IconTapButton
                   onClick={() => {
                     if (selectedMonth === 0) {
                       setSelectedMonth(11);
@@ -468,14 +491,15 @@ export default function BookTracking() {
                       setSelectedMonth(selectedMonth - 1);
                     }
                   }}
-                  className="p-2 hover:bg-gray-100 rounded-lg"
+                  className="hover:bg-gray-100"
+                  aria-label="Önceki ay"
                 >
                   <ChevronLeft className="w-5 h-5" />
-                </button>
+                </IconTapButton>
                 <span className="font-medium min-w-[140px] text-center">
                   {MONTHS_TR[selectedMonth]} {selectedYear}
                 </span>
-                <button
+                <IconTapButton
                   onClick={() => {
                     if (selectedMonth === 11) {
                       setSelectedMonth(0);
@@ -484,10 +508,11 @@ export default function BookTracking() {
                       setSelectedMonth(selectedMonth + 1);
                     }
                   }}
-                  className="p-2 hover:bg-gray-100 rounded-lg"
+                  className="hover:bg-gray-100"
+                  aria-label="Sonraki ay"
                 >
                   <ChevronRight className="w-5 h-5" />
-                </button>
+                </IconTapButton>
               </div>
             </div>
 
@@ -601,6 +626,39 @@ export default function BookTracking() {
               </div>
             )}
 
+            {completedBooksList.length > 0 ? (
+              <div className="mb-6">
+                <h4 className="text-sm font-semibold text-green-800 mb-2 flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4" />
+                  Bitirilen kitaplar ({completedBooksList.length})
+                </h4>
+                <div className="overflow-x-auto rounded-lg border border-green-100 bg-green-50/40">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-green-200/80">
+                        <th className="text-left py-2 px-4 text-xs font-medium text-green-900/70">Kitap</th>
+                        <th className="text-left py-2 px-4 text-xs font-medium text-green-900/70">Yazar</th>
+                        <th className="text-left py-2 px-4 text-xs font-medium text-green-900/70">Bitiş</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {completedBooksList.map((book) => (
+                        <tr key={book.id} className="border-b border-green-100/80 last:border-0">
+                          <td className="py-2 px-4 text-sm font-medium text-slate-800">{book.title}</td>
+                          <td className="py-2 px-4 text-sm text-gray-600">{book.author || '—'}</td>
+                          <td className="py-2 px-4 text-sm text-gray-600">{book.endDate || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+
+            <h4 className="text-sm font-semibold text-slate-700 mb-2">
+              Okunan / devam eden kitaplar ({activeReadingBooks.length})
+            </h4>
+
             {/* Kitap Tablosu */}
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -613,11 +671,12 @@ export default function BookTracking() {
                     <th className="text-left py-3 px-4 text-sm font-medium text-gray-500">Bitiş</th>
                     <th className="text-left py-3 px-4 text-sm font-medium text-gray-500">Süre</th>
                     <th className="text-left py-3 px-4 text-sm font-medium text-gray-500">Durum</th>
+                    <th className="text-left py-3 px-4 text-sm font-medium text-gray-500">İşlem</th>
                     <th className="text-left py-3 px-4 text-sm font-medium text-gray-500">Puan</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {studentBooks.map((book, idx) => (
+                  {activeReadingBooks.map((book, idx) => (
                     <tr key={book.id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="py-3 px-4 text-sm text-gray-500">{idx + 1}</td>
                       <td className="py-3 px-4 text-sm font-medium text-slate-800">{book.title}</td>
@@ -635,6 +694,19 @@ export default function BookTracking() {
                         </span>
                       </td>
                       <td className="py-3 px-4">
+                        {book.status !== 'completed' ? (
+                          <button
+                            type="button"
+                            onClick={() => handleMarkBookFinished(book.id)}
+                            className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-700"
+                          >
+                            Kitabı bitirdim
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4">
                         {book.rating ? (
                           <div className="flex items-center gap-1">
                             {Array.from({ length: 5 }).map((_, i) => (
@@ -650,10 +722,17 @@ export default function BookTracking() {
                       </td>
                     </tr>
                   ))}
-                  {studentBooks.length === 0 && (
+                  {activeReadingBooks.length === 0 && completedBooksList.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="py-8 text-center text-gray-500">
+                      <td colSpan={9} className="py-8 text-center text-gray-500">
                         Henüz kitap eklenmemiş.
+                      </td>
+                    </tr>
+                  )}
+                  {activeReadingBooks.length === 0 && completedBooksList.length > 0 && (
+                    <tr>
+                      <td colSpan={9} className="py-4 text-center text-sm text-gray-500">
+                        Devam eden kitap yok; tamamlananlar yukarıda listelenir.
                       </td>
                     </tr>
                   )}

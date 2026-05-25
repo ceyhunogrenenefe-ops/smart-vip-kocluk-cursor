@@ -12,6 +12,8 @@ interface CronRow {
   last_skipped: string | null;
   messages_sent: number;
   messages_failed: number;
+  runs_today?: number;
+  messages_sent_today?: number;
   state: string;
   age_minutes: number | null;
   awaiting_first_run?: boolean;
@@ -30,6 +32,7 @@ interface CenterPayload {
   server_time?: string;
   cron_status: CronRow[];
   cron_recent_errors: CronErrorRow[];
+  cron_table_missing?: boolean;
 }
 
 function badgeCron(state: string) {
@@ -119,7 +122,7 @@ export default function CronSummarySection() {
             Yenile
           </button>
           <Link
-            to="/coach-whatsapp-settings"
+            to="/coach-whatsapp-settings#cron"
             className="inline-flex items-center rounded-lg border border-purple-200 bg-purple-50 px-3 py-1.5 text-sm font-medium text-purple-900 hover:bg-purple-100"
           >
             WhatsApp merkezi → Cron
@@ -146,14 +149,21 @@ export default function CronSummarySection() {
         </div>
       ) : null}
 
-      {payload && !isAdminMode ? (
-        <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-          Bu oturumda cron özeti kurum geneli değil; tam görünüm için yönetici veya süper admin hesabı kullanın.
-        </p>
-      ) : null}
-
-      {payload && isAdminMode ? (
+      {payload ? (
         <>
+          {!isAdminMode ? (
+            <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
+              Mesaj ve öğrenci özeti hesabınıza göre filtrelenir; cron durumu tüm sistem için gösterilir.
+            </p>
+          ) : null}
+
+          {payload.cron_table_missing ? (
+            <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
+              <code className="text-xs">cron_run_log</code> tablosu yok — migration:{' '}
+              <code className="text-xs">sql/2026-05-25-cron-run-log.sql</code>
+            </p>
+          ) : null}
+
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-100">
               <p className="text-xs text-emerald-700 font-medium">Çalışıyor</p>
@@ -181,6 +191,7 @@ export default function CronSummarySection() {
                   <th className="px-3 py-2">İş</th>
                   <th className="px-3 py-2 hidden sm:table-cell">Anahtar</th>
                   <th className="px-3 py-2">Son çalışma</th>
+                  <th className="px-3 py-2 text-right">Bugün mesaj</th>
                   <th className="px-3 py-2 text-right">Süre (dk)</th>
                 </tr>
               </thead>
@@ -198,6 +209,9 @@ export default function CronSummarySection() {
                       <td className="px-3 py-2 font-mono text-xs text-slate-500 hidden sm:table-cell">{c.key}</td>
                       <td className="px-3 py-2 text-xs text-slate-600 whitespace-nowrap">
                         {c.last_run_at ? new Date(c.last_run_at).toLocaleString('tr-TR') : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-emerald-800">
+                        {c.messages_sent_today ?? 0}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">
                         {c.age_minutes != null ? Math.round(c.age_minutes) : '—'}

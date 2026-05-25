@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth, SystemUser } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Users,
   UserPlus,
@@ -49,6 +49,24 @@ import {
   readUserImportFileAsGrid,
   USER_IMPORT_TEMPLATE_HEADERS
 } from '../lib/userBulkImport';
+import {
+  COACH_PROFILE_ONLY_PREFIX,
+  computeSystemUserStats,
+  getDaysLeftFromEndDate,
+  isUserActiveAccount,
+  isUserExpiredAccount
+} from '../lib/userStats';
+import TeacherQuestionProfileFields from '../components/questionHelp/TeacherQuestionProfileFields';
+import { saveTeacherQuestionProfile, fetchTeacherQuestionProfile } from '../lib/questionHelp/questionHelpApi';
+
+function formHasTeacherRole(role: UserRole, alsoTeacher: boolean): boolean {
+  return role === 'teacher' || alsoTeacher;
+}
+
+function userHasTeacherQuestionRole(user: SystemUser): boolean {
+  const rt = userRoleTags(user as SystemUser);
+  return formHasTeacherRole(user.role, rt.includes('teacher') && user.role === 'coach');
+}
 
 const toClassLevel = (raw: string): ClassLevel => {
   const v = String(raw || '').trim();
@@ -58,9 +76,6 @@ const toClassLevel = (raw: string): ClassLevel => {
   if (!Number.isNaN(n)) return n as ClassLevel;
   return 9;
 };
-
-/** `users` satırı yok; yalnızca `coaches` tablosunda olan profiller (liste + düzenlemede hesap açma) */
-const COACH_PROFILE_ONLY_PREFIX = '__coach_profile__:';
 
 const coachProfilesWithoutLoginUser = (coachList: Coach[], userRows: UserRow[]): SystemUser[] => {
   const emailsWithUser = new Set(
@@ -127,9 +142,11 @@ function roleBadgeForUser(user: SystemUser): { label: string; className: string 
 
 export default function UserManagement() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const {
     user: currentUser,
-    loginAsEmail,
+    isLoading: authLoading,
+    impersonate,
     canImpersonate,
     getAllUsers,
     createUser,
@@ -151,12 +168,7 @@ export default function UserManagement() {
     deleteCoach
   } = useApp();
 
-  useEffect(() => {
-    const r = currentUser?.role;
-    if (!r || !['super_admin', 'admin', 'teacher'].includes(r)) {
-      navigate('/');
-    }
-  }, [currentUser, navigate]);
+  // Erişim: ProtectedRoute (/user-management) — burada yeniden navigate yok (auth yüklenirken yanlış / yönlendirmesini engeller)
 
   // State
   const [users, setUsers] = useState<SystemUser[]>([]);
@@ -190,7 +202,7 @@ export default function UserManagement() {
     setLoginAsBusyId(row.id);
     setMessage(null);
     try {
-      const r = await loginAsEmail(row.email, row.role);
+      const r = await impersonate(row);
       if (!r.success) {
         setMessage({ type: 'error', text: r.message });
         return;
@@ -263,6 +275,27 @@ export default function UserManagement() {
   useEffect(() => {
     void refreshUsers();
   }, [refreshUsers]);
+
+  useEffect(() => {
+    if (!showModal || modalMode !== 'edit' || !selectedUser?.id) return;
+    if (selectedUser.id.startsWith(COACH_PROFILE_ONLY_PREFIX)) return;
+    if (!userHasTeacherQuestionRole(selectedUser)) return;
+    let cancelled = false;
+    void fetchTeacherQuestionProfile(selectedUser.id)
+      .then((p) => {
+        if (!cancelled) {
+          setFormData((prev) => ({
+            ...prev,
+            questionBranches: p.branches,
+            questionGrades: p.grades
+          }));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [showModal, modalMode, selectedUser?.id, selectedUser?.role]);
 
   useEffect(() => {
     if (
@@ -349,45 +382,41 @@ export default function UserManagement() {
     package: 'trial' as 'trial' | 'starter' | 'professional' | 'enterprise',
     startDate: new Date().toISOString().split('T')[0],
     endDate: '',
-    isActive: true
+    isActive: true,
+    questionBranches: [] as string[],
+    questionGrades: [] as string[]
   });
 
   const [showPassword, setShowPassword] = useState(false);
 
   // Filtrelenmiş kullanıcılar
+  const trIncludes = (haystack: string, needle: string) =>
+    haystack.toLocaleLowerCase('tr-TR').includes(needle.toLocaleLowerCase('tr-TR'));
+
   const filteredUsers = users.filter(user => {
-    const q = searchTerm.toLowerCase().trim();
+    const q = searchTerm.trim();
     const phoneMatch = (user.phone || '').replace(/\s/g, '').toLowerCase();
     const qDigits = q.replace(/\D/g, '');
     if (
       searchTerm &&
-      !user.name.toLowerCase().includes(q) &&
-      !user.email.toLowerCase().includes(q) &&
+      !trIncludes(user.name, q) &&
+      !trIncludes(user.email, q) &&
       !(user.phone && (phoneMatch.includes(q.replace(/\s/g, '')) || (qDigits.length >= 4 && phoneMatch.includes(qDigits))))
     ) {
       return false;
     }
 
-    // Rol filtresi (çoklu rol: örneğin öğretmen+koç kullanıcıda `roles` dizisi)
+    // Rol filtresi (çoklu rol: örneğin öğretmen+koç)
     if (filterRole !== 'all') {
-      const tags = user.roles?.length ? user.roles : [user.role];
+      const tags = userRoleTags(user as { role: UserRole; roles?: UserRole[] });
       if (!tags.includes(filterRole)) return false;
     }
 
     // Durum filtresi
     if (filterStatus !== 'all') {
-      if (filterStatus === 'active') {
-        if (user.isActive === false) return false;
-        const daysLeft = getDaysLeft(user.endDate);
-        // Bitiş tarihi yok (süresiz) → aktif say
-        if (user.endDate && daysLeft != null && daysLeft <= 0) return false;
-      } else if (filterStatus === 'expired') {
-        const daysLeft = getDaysLeft(user.endDate);
-        if (daysLeft !== null && daysLeft <= 0) return false;
-        if (user.isActive === false) return false;
-      } else if (filterStatus === 'inactive') {
-        if (user.isActive !== false) return false;
-      }
+      if (filterStatus === 'active' && !isUserActiveAccount(user)) return false;
+      if (filterStatus === 'expired' && !isUserExpiredAccount(user)) return false;
+      if (filterStatus === 'inactive' && user.isActive !== false) return false;
     }
 
     return true;
@@ -399,14 +428,7 @@ export default function UserManagement() {
     return coaches.filter((c) => !c.institutionId || c.institutionId === inst);
   }, [coaches, formData.studentInstitutionId]);
 
-  // Gün sayısını hesapla
-  const getDaysLeft = (endDate?: string) => {
-    if (!endDate) return null;
-    const end = new Date(endDate);
-    const now = new Date();
-    const diff = end.getTime() - now.getTime();
-    return Math.ceil(diff / (1000 * 60 * 60 * 24));
-  };
+  const getDaysLeft = getDaysLeftFromEndDate;
 
   // Abonelik durumu (Süresiz açık mavi, N gün kaldı açık yeşil rozet)
   const getSubscriptionStatus = (user: SystemUser) => {
@@ -541,8 +563,21 @@ export default function UserManagement() {
         package: user.package || 'trial',
         startDate: user.startDate?.split('T')[0] || new Date().toISOString().split('T')[0],
         endDate: user.endDate?.split('T')[0] || '',
-        isActive: user.isActive !== false
+        isActive: user.isActive !== false,
+        questionBranches: [],
+        questionGrades: []
       });
+      if (userHasTeacherQuestionRole(user) && getAuthToken()) {
+        void fetchTeacherQuestionProfile(user.id)
+          .then((p) => {
+            setFormData((prev) => ({
+              ...prev,
+              questionBranches: p.branches,
+              questionGrades: p.grades
+            }));
+          })
+          .catch(() => {});
+      }
     } else {
       // Yeni kullanıcı için
       const days = PACKAGES[formData.package].days;
@@ -575,12 +610,96 @@ export default function UserManagement() {
         package: 'trial',
         startDate: new Date().toISOString().split('T')[0],
         endDate: endDate.toISOString().split('T')[0],
-        isActive: true
+        isActive: true,
+        questionBranches: [],
+        questionGrades: []
       });
     }
 
     setShowModal(true);
   };
+
+  /** Veli imzası sonrası: `/user-management?veli_hesap=1&...` ile gelen öğrenci/veli bilgilerini yeni kullanıcı formuna doldurur. */
+  useEffect(() => {
+    if (authLoading) return;
+    if (searchParams.get('veli_hesap') !== '1') return;
+
+    const email = (searchParams.get('email') || '').trim().toLowerCase();
+    if (!email || !email.includes('@')) {
+      setMessage({ type: 'error', text: 'Veli bağlantısında e-posta eksik veya geçersiz.' });
+      navigate('/user-management', { replace: true });
+      return;
+    }
+
+    const kurumFromQuery = (searchParams.get('kurum_id') || '').trim();
+    const myInst = String(activeInstitutionId || currentUser?.institutionId || institution?.id || '').trim();
+    if (currentUser?.role !== 'super_admin' && kurumFromQuery && myInst && kurumFromQuery !== myInst) {
+      setMessage({
+        type: 'error',
+        text: 'Bu kayıt başka bir kuruma ait. O kurumda oturum açıp kullanıcı oluşturun.'
+      });
+      navigate('/user-management', { replace: true });
+      return;
+    }
+
+    const studentInst =
+      currentUser?.role === 'super_admin'
+        ? (kurumFromQuery || myInst || '')
+        : (myInst || kurumFromQuery || '');
+
+    const sinifRaw = (searchParams.get('sinif') || '9').trim() || '9';
+    const days = PACKAGES.trial.days;
+    const endDate = new Date();
+    endDate.setDate(endDate.getDate() + days);
+    const sozlesmeNo = (searchParams.get('sozlesme') || '').trim();
+
+    setModalMode('add');
+    setSelectedUser(null);
+    setMessage(null);
+    setFormData({
+      firstName: (searchParams.get('ad') || '').trim(),
+      lastName: (searchParams.get('soyad') || '').trim(),
+      email,
+      phone: (searchParams.get('tel') || '').trim(),
+      birthDate: (searchParams.get('dogum') || '').trim().slice(0, 10),
+      classLevel: String(toClassLevel(sinifRaw)),
+      branch: (searchParams.get('okul') || '').trim(),
+      parentName: (searchParams.get('veli_adsoyad') || '').trim(),
+      parentPhone: (searchParams.get('veli_tel') || '').trim(),
+      password: '',
+      role: 'student',
+      alsoCoach: false,
+      alsoTeacher: false,
+      assignCoachId: '',
+      studentInstitutionId: studentInst,
+      bootstrap_max_students: '50',
+      bootstrap_max_coaches: '10',
+      bootstrap_package_label: 'professional',
+      package: 'trial',
+      startDate: new Date().toISOString().split('T')[0],
+      endDate: endDate.toISOString().split('T')[0],
+      isActive: true,
+      questionBranches: [],
+      questionGrades: []
+    });
+    setShowPassword(false);
+    setShowModal(true);
+    setMessage({
+      type: 'success',
+      text: sozlesmeNo
+        ? `Veli imzası (${sozlesmeNo}): bilgiler yüklendi. Şifre (en az 6 karakter) girip kaydedin.`
+        : 'Veli imzası bilgileri yüklendi. Şifre (en az 6 karakter) girip kaydedin.'
+    });
+    navigate('/user-management', { replace: true });
+  }, [
+    authLoading,
+    searchParams,
+    navigate,
+    activeInstitutionId,
+    institution?.id,
+    currentUser?.role,
+    currentUser?.institutionId
+  ]);
 
   // Paket değiştiğinde bitiş tarihini güncelle
   const handlePackageChange = (pkg: typeof formData.package) => {
@@ -601,6 +720,23 @@ export default function UserManagement() {
     e.preventDefault();
     setLoading(true);
     setMessage(null);
+
+    const needsTeacherQuestionProfile =
+      (currentUser?.role === 'admin' || currentUser?.role === 'super_admin') &&
+      formHasTeacherRole(formData.role, formData.alsoTeacher);
+
+    if (needsTeacherQuestionProfile) {
+      if (!formData.questionBranches.length) {
+        setMessage({ type: 'error', text: 'Öğretmen için en az bir branş (ders) seçin.' });
+        setLoading(false);
+        return;
+      }
+      if (!formData.questionGrades.length) {
+        setMessage({ type: 'error', text: 'Öğretmen için en az bir sınıf veya sınav grubu seçin.' });
+        setLoading(false);
+        return;
+      }
+    }
 
     try {
       const fullName = `${formData.firstName} ${formData.lastName}`.trim();
@@ -685,7 +821,7 @@ export default function UserManagement() {
           const v = String(formData.studentInstitutionId || '').trim();
           patch.institution_id = v.length ? v : null;
         }
-        if (formData.password.trim().length >= 6) patch.password = formData.password;
+        if (formData.password.trim().length >= 6) patch.password_hash = formData.password.trim();
         let result: { success: boolean; message: string } = { success: false, message: 'Güncellenemedi.' };
         if (getAuthToken()) {
           try {
@@ -739,6 +875,40 @@ export default function UserManagement() {
             } else {
               studentCardNote =
                 ' Öğrenci kartı güncellenemedi: kullanıcıyla eşleşen öğrenci kaydı bulunamadı (e-posta veya platform bağlantısı).';
+            }
+          }
+          const editTags = userRoleTags(selectedUser as SystemUser);
+          const editIsTeacher =
+            (selectedUser && userHasTeacherQuestionRole(selectedUser)) ||
+            formHasTeacherRole(formData.role, formData.alsoTeacher);
+          if (
+            editIsTeacher &&
+            needsTeacherQuestionProfile &&
+            getAuthToken() &&
+            !selectedUser.id.startsWith(COACH_PROFILE_ONLY_PREFIX)
+          ) {
+            try {
+              const instV =
+                selectedUser.institutionId ||
+                String(formData.studentInstitutionId || '').trim() ||
+                currentUser?.institutionId ||
+                null;
+              await saveTeacherQuestionProfile({
+                userId: selectedUser.id,
+                branches: formData.questionBranches,
+                grades: formData.questionGrades,
+                institutionId: instV
+              });
+              const synced = await fetchTeacherQuestionProfile(selectedUser.id);
+              setFormData((prev) => ({
+                ...prev,
+                questionBranches: synced.branches,
+                questionGrades: synced.grades
+              }));
+            } catch (te) {
+              studentCardNote +=
+                ' Soru Sor branş/sınıf kaydı yazılamadı: ' +
+                (te instanceof Error ? te.message : 'bilinmeyen hata');
             }
           }
           if (currentUser?.role === 'super_admin') {
@@ -911,6 +1081,20 @@ export default function UserManagement() {
             const instId =
               institutionIdForNewUser || resolvedInstitution || instFallback || currentUser?.institutionId;
             const newUserId = row.id;
+            const newIsTeacher =
+              formData.role === 'teacher' || (staffRolesNew?.roles || []).includes('teacher');
+            if (newIsTeacher && needsTeacherQuestionProfile && newUserId) {
+              try {
+                await saveTeacherQuestionProfile({
+                  userId: newUserId,
+                  branches: formData.questionBranches,
+                  grades: formData.questionGrades,
+                  institutionId: institutionIdForNewUser || instId || null
+                });
+              } catch (te) {
+                console.error('Öğretmen branş profili:', te);
+              }
+            }
             try {
               if (formData.role === 'student') {
                 await addStudent({
@@ -1047,22 +1231,7 @@ export default function UserManagement() {
     void refreshUsers();
   };
 
-  // İstatistikler
-  const stats = {
-    total: users.length,
-    admins: users.filter(u => u.role === 'admin').length,
-    coaches: users.filter(u => u.role === 'coach').length,
-    teachers: users.filter(u => u.role === 'teacher' || (u.roles || []).includes('teacher')).length,
-    students: users.filter(u => u.role === 'student').length,
-    active: users.filter(u => {
-      const daysLeft = getDaysLeft(u.endDate);
-      return u.isActive !== false && daysLeft !== null && daysLeft > 0;
-    }).length,
-    expired: users.filter(u => {
-      const daysLeft = getDaysLeft(u.endDate);
-      return daysLeft !== null && daysLeft <= 0;
-    }).length
-  };
+  const stats = useMemo(() => computeSystemUserStats(users), [users]);
 
   const importAllowedRoles = useMemo((): UserRole[] => {
     const r = currentUser?.role;
@@ -1632,8 +1801,12 @@ export default function UserManagement() {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
         <div className="bg-white rounded-xl p-4 border border-gray-100">
-          <div className="text-2xl font-bold text-slate-800">{stats.total}</div>
-          <div className="text-sm text-gray-500">Toplam Kullanıcı</div>
+          <div className="text-2xl font-bold text-slate-800">{stats.totalListed}</div>
+          <div className="text-sm text-gray-500">Liste kaydı</div>
+          <p className="text-xs text-slate-400 mt-1">
+            Giriş: {stats.loginAccounts}
+            {stats.profileOnlyCoaches > 0 ? ` · Profil koç: ${stats.profileOnlyCoaches}` : ''}
+          </p>
         </div>
         <div className="bg-white rounded-xl p-4 border border-gray-100">
           <div className="text-2xl font-bold text-red-600">{stats.admins}</div>
@@ -1641,7 +1814,8 @@ export default function UserManagement() {
         </div>
         <div className="bg-white rounded-xl p-4 border border-gray-100">
           <div className="text-2xl font-bold text-blue-600">{stats.coaches}</div>
-          <div className="text-sm text-gray-500">Koç</div>
+          <div className="text-sm text-gray-500">Koç hesabı</div>
+          <p className="text-xs text-slate-400 mt-1">Profil: {coaches.length}</p>
         </div>
         <div className="bg-white rounded-xl p-4 border border-gray-100">
           <div className="text-2xl font-bold text-violet-600">{stats.teachers}</div>
@@ -1649,7 +1823,8 @@ export default function UserManagement() {
         </div>
         <div className="bg-white rounded-xl p-4 border border-gray-100">
           <div className="text-2xl font-bold text-green-600">{stats.students}</div>
-          <div className="text-sm text-gray-500">Öğrenci</div>
+          <div className="text-sm text-gray-500">Öğrenci hesabı</div>
+          <p className="text-xs text-slate-400 mt-1">Profil: {students.length}</p>
         </div>
         <div className="bg-white rounded-xl p-4 border border-gray-100">
           <div className="text-2xl font-bold text-green-600">{stats.active}</div>
@@ -1687,6 +1862,10 @@ export default function UserManagement() {
             {quota.usage_pct?.coaches != null && (
               <span className="ml-2">(~%{quota.usage_pct.coaches})</span>
             )}
+          </p>
+          <p className="text-xs mt-2 opacity-90">
+            Kota öğrenci/koç profil kayıtlarını sayar (Öğrenciler / Koçlar sayfaları ile aynı:{' '}
+            {students.length} öğrenci, {coaches.length} koç).
           </p>
           {(quota.usage_pct?.students ?? 0) >= 90 || (quota.usage_pct?.coaches ?? 0) >= 90 ? (
             <p className="text-sm mt-2">
@@ -1872,9 +2051,7 @@ export default function UserManagement() {
                     </td>
                     <td className="px-3 py-3">
                       <div className="flex items-center justify-end gap-1">
-                        {(currentUser?.role === 'super_admin' || currentUser?.role === 'admin') &&
-                        canImpersonate(user) &&
-                        !user.id.startsWith('demo-seed-') ? (
+                        {canImpersonate(user) && !user.id.startsWith('demo-seed-') ? (
                           <button
                             type="button"
                             onClick={() => void handleLoginAsUser(user)}
@@ -1926,7 +2103,7 @@ export default function UserManagement() {
 
       {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4">
           <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
             {/* Header */}
             <div className="p-6 border-b flex items-center justify-between">
@@ -1937,7 +2114,7 @@ export default function UserManagement() {
                     ? 'Koç — giriş hesabı oluştur'
                     : 'Kullanıcı Düzenle'}
               </h2>
-              <button onClick={() => setShowModal(false)} className="p-2 hover:bg-gray-100 rounded-lg">
+              <button onClick={() => setShowModal(false)} className="icon-tap-btn hover:bg-gray-100">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -2171,6 +2348,29 @@ export default function UserManagement() {
                         Öğretmen rolü de ver
                       </label>
                     )}
+                  </div>
+                )}
+
+              {(currentUser?.role === 'admin' || currentUser?.role === 'super_admin') &&
+                formHasTeacherRole(formData.role, formData.alsoTeacher) && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-violet-800">
+                      Bu atama öğretmenin Soru Havuzu ekranıyla paylaşılır. Öğretmen kendi
+                      güncellemesini yaptığında burada da görünür.
+                    </p>
+                    <TeacherQuestionProfileFields
+                      value={{
+                        branches: formData.questionBranches,
+                        grades: formData.questionGrades
+                      }}
+                      onChange={(next) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          questionBranches: next.branches,
+                          questionGrades: next.grades
+                        }))
+                      }
+                    />
                   </div>
                 )}
 

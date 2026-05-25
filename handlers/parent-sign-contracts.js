@@ -2,8 +2,10 @@ import { requireAuthenticatedActor, hasInstitutionAccess } from '../api/_lib/aut
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import {
+  buildAwaitingAdminPriceHtml,
   buildParentContractHtml,
   buildRegistrationPlaceholderHtml,
+  buildTaksitPlan,
   contractNumber,
   institutionCodeFromRow,
   kayitDetayForHtml,
@@ -15,6 +17,21 @@ import {
   suggestHoursAndFeeFromSinif,
   sumDersHours
 } from '../api/_lib/parent-sign-defaults.js';
+
+const VELI_KAYIT_PROGRAM_SET = new Set([
+  '3. Sınıf dönem programı',
+  '4. Sınıf dönem programı',
+  '5, 6, 7. Sınıf dönem programı',
+  'LGS dönem programı',
+  '9, 10, 11. Sınıf dönem programı',
+  'TYT dönem programı',
+  'AYT dönem programı',
+  'TYT + AYT dönem programı',
+  'TYT yaz kampı',
+  'LGS yaz kampı',
+  '5 ve 6. Sınıf yaz kampı',
+  '3 ve 4. Sınıf yaz kampı'
+]);
 
 function pickFirstNonEmpty(...vals) {
   for (const v of vals) {
@@ -137,6 +154,10 @@ export default async function handler(req, res) {
       const kj = row.kayit_formu_json;
       const j = kj && typeof kj === 'object' ? kj : {};
       const needs_student_form = String(j.phase || '') === 'needs_form';
+      const awaiting_admin_price = String(j.phase || '') === 'awaiting_admin_price';
+      // Veli sayfası ücret sonrası güncellensin; CDN/tarayıcı GET önbelleği imzayı geciktirmesin.
+      res.setHeader('Cache-Control', 'private, no-store, no-cache, must-revalidate, max-age=0');
+      res.setHeader('Pragma', 'no-cache');
       return res.status(200).json({
         data: {
           document_id: row.id,
@@ -147,6 +168,8 @@ export default async function handler(req, res) {
           institution_name,
           signature_png_base64,
           needs_student_form,
+          awaiting_admin_price,
+          registration_phase: String(j.phase || '') || null,
           registration_hint: {
             program_adi: row.program_adi,
             sinif: row.sinif,
@@ -171,6 +194,7 @@ export default async function handler(req, res) {
       const token = String(body.signing_token || signingToken || '').trim();
       if (!token) return res.status(400).json({ error: 'signing_token_required' });
       if (!body.kvkk_form_ok) return res.status(400).json({ error: 'kvkk_form_required' });
+      if (!body.satis_kvkk_form_ok) return res.status(400).json({ error: 'satis_kvkk_form_required' });
       const T = (k) => String(body[k] ?? '').trim();
       try {
         const { data: row, error: dErr } = await supabaseAdmin.from('parent_sign_contracts').select('*').eq('signing_token', token).maybeSingle();
@@ -188,14 +212,14 @@ export default async function handler(req, res) {
         const ogrenci_soyad = T('ogrenci_soyad');
         const veli_ad = T('veli_ad');
         const veli_soyad = T('veli_soyad');
-        const tcDigits = T('tc_kimlik').replace(/\D/g, '');
+        let tcDigits = T('tc_kimlik').replace(/\D/g, '');
         const dogum_tarihi = T('dogum_tarihi').slice(0, 10);
         const okul_adi = T('okul_adi');
         const eposta = T('eposta');
         const il = T('il');
         const ilce = T('ilce');
-        const veli_tel = T('veli_tel').replace(/\D/g, '');
-        const ogrenci_tel = T('ogrenci_tel').replace(/\D/g, '');
+        let veli_tel = T('veli_tel').replace(/\D/g, '');
+        let ogrenci_tel = T('ogrenci_tel').replace(/\D/g, '');
         const sinif_form = T('sinif_form');
         const program_form = T('program_form');
         const adres_aciklama = T('adres_aciklama');
@@ -203,37 +227,33 @@ export default async function handler(req, res) {
         if (!ogrenci_ad || !ogrenci_soyad || !veli_ad || !veli_soyad) {
           return res.status(400).json({ error: 'names_required' });
         }
-        if (tcDigits.length !== 11) return res.status(400).json({ error: 'tc_invalid' });
-        if (!dogum_tarihi) return res.status(400).json({ error: 'dogum_required' });
-        if (!okul_adi) return res.status(400).json({ error: 'okul_required' });
+        if (tcDigits.length > 0 && tcDigits.length !== 11) return res.status(400).json({ error: 'tc_invalid' });
         if (!eposta || !eposta.includes('@')) return res.status(400).json({ error: 'eposta_invalid' });
-        if (!il || !ilce) return res.status(400).json({ error: 'il_ilce_required' });
-        if (veli_tel.length < 10) return res.status(400).json({ error: 'veli_tel_invalid' });
-        if (ogrenci_tel.length < 10) return res.status(400).json({ error: 'ogrenci_tel_invalid' });
+        if (!program_form || !VELI_KAYIT_PROGRAM_SET.has(program_form)) {
+          return res.status(400).json({ error: 'program_invalid' });
+        }
+        if (!veli_tel || veli_tel.length < 10) return res.status(400).json({ error: 'veli_tel_invalid' });
+        if (!ogrenci_tel || ogrenci_tel.length < 10) return res.status(400).json({ error: 'ogrenci_tel_invalid' });
+        if (!adres_aciklama) return res.status(400).json({ error: 'adres_required' });
+        if (!il) return res.status(400).json({ error: 'il_required' });
+        if (!ilce) return res.status(400).json({ error: 'ilce_required' });
 
         const sinif = pickFirstNonEmpty(sinif_form, row.sinif);
         const program_adi = pickFirstNonEmpty(program_form, row.program_adi);
         if (!sinif || !program_adi) return res.status(400).json({ error: 'sinif_program_required' });
 
-        const adresParts = [il, ilce, adres_aciklama].filter(Boolean);
-        const adres = adresParts.join(' · ') || String(row.adres || '');
+        const adres = [il, ilce, adres_aciklama].map((x) => String(x || '').trim()).join(' · ');
 
-        const taksitN = Math.max(1, Math.min(48, Math.round(Number(row.taksit_sayisi) || 1)));
-        const ucretNum = Number(row.ucret);
-        const ort =
-          Number.isFinite(ucretNum) && ucretNum > 0 && taksitN > 0 ? Math.round(ucretNum / taksitN) : null;
-        const muhasebe_ozet = `Öğrenci: ${ogrenci_ad} ${ogrenci_soyad} | Program: ${program_adi} | Sınıf: ${sinif} | Toplam ücret: ${row.ucret} TL | Taksit: ${taksitN}${
-          ort != null ? ` | Yaklaşık taksit: ${ort} TL` : ''
-        } | E-posta: ${eposta} | Veli tel: ${veli_tel} | Öğr. tel: ${ogrenci_tel}`;
+        const muhasebe_ozet = `Kayıt | ${ogrenci_ad} ${ogrenci_soyad} | Program: ${program_adi} | Sınıf: ${sinif} | Ücret: kurum tarafından girilecek | E-posta: ${eposta} | Veli tel: ${veli_tel} | Öğr. tel: ${ogrenci_tel}`;
 
         const nextJson = {
-          phase: 'ready_to_sign',
-          tc_kimlik: tcDigits,
-          dogum_tarihi,
-          okul_adi,
+          phase: 'awaiting_admin_price',
+          tc_kimlik: tcDigits.length === 11 ? tcDigits : '',
+          dogum_tarihi: dogum_tarihi || '',
+          okul_adi: okul_adi || '',
           eposta,
-          il,
-          ilce,
+          il: il || '',
+          ilce: ilce || '',
           veli_tel,
           ogrenci_tel,
           muhasebe_ozet,
@@ -247,35 +267,12 @@ export default async function handler(req, res) {
           .maybeSingle();
         if (iErr) throw iErr;
 
-        const kurum_kodu = institutionCodeFromRow(inst || { id: row.institution_id });
-        const verifyToken = String(row.verify_token || '');
-        const base = publicBaseUrl();
-        const verifyUrl = verifyToken && base ? `${base}/verify-document?t=${encodeURIComponent(verifyToken)}` : '#';
-
-        const sozlesme_basligi = String(row.sozlesme_basligi || '').trim() || 'Satış sözleşmesi';
-
-        const merged_html = buildParentContractHtml({
-          ogrenci_ad,
-          ogrenci_soyad,
-          veli_ad,
-          veli_soyad,
-          telefon: veli_tel,
-          adres,
-          sinif,
-          program_adi,
-          baslangic_tarihi: String(row.baslangic_tarihi || '').trim().slice(0, 10),
-          bitis_tarihi: String(row.bitis_tarihi || '').trim().slice(0, 10),
-          haftalik_ders_saati: Number(row.haftalik_ders_saati) || 0,
-          ucret: Number(row.ucret) || 0,
-          taksit_sayisi: taksitN,
-          kurum_kodu,
-          contract_number: String(row.contract_number || ''),
+        const merged_html = buildAwaitingAdminPriceHtml({
           kurum_adi: inst?.name || '',
-          verify_url: verifyUrl || '#',
-          document_title: sozlesme_basligi,
-          extra_detail_plain: String(row.sablon_ek_detay_snapshot || ''),
-          ders_satirlari: row.ders_programi_snapshot,
-          kayit_formu_detay: nextJson
+          contract_number: String(row.contract_number || ''),
+          ogrenci_label: `${ogrenci_ad} ${ogrenci_soyad}`.trim(),
+          program_adi,
+          sinif
         });
 
         const now = new Date().toISOString();
@@ -320,6 +317,9 @@ export default async function handler(req, res) {
       const j = kj && typeof kj === 'object' ? kj : {};
       if (String(j.phase || '') === 'needs_form') {
         return res.status(400).json({ error: 'registration_form_required_first' });
+      }
+      if (String(j.phase || '') === 'awaiting_admin_price') {
+        return res.status(400).json({ error: 'admin_price_required_before_sign' });
       }
       const done = String(row.status || '').toLowerCase() === 'signed' || Boolean(row.signed_at);
       if (done) return res.status(200).json({ ok: true, duplicate: true });
@@ -447,13 +447,57 @@ export default async function handler(req, res) {
       const { data: existing, error: fe } = await supabaseAdmin.from('parent_sign_contracts').select('*').eq('id', id).maybeSingle();
       if (fe) throw fe;
       if (!existing) return res.status(404).json({ error: 'not_found' });
-      const existingSigned =
-        String(existing.status || '').toLowerCase() === 'signed' || Boolean(existing.signed_at);
-      if (existingSigned) {
-        return res.status(400).json({ error: 'contract_already_signed' });
-      }
       if (role !== 'super_admin' && !hasInstitutionAccess(actor, existing.institution_id)) {
         return res.status(403).json({ error: 'forbidden' });
+      }
+
+      const existingSigned =
+        String(existing.status || '').toLowerCase() === 'signed' || Boolean(existing.signed_at);
+
+      const mergeTak = body.taksit_odeme_update;
+      if (mergeTak && mergeTak !== null && typeof mergeTak === 'object' && mergeTak.index != null) {
+        const kjM = existing.kayit_formu_json && typeof existing.kayit_formu_json === 'object' ? { ...existing.kayit_formu_json } : {};
+        const tk = Array.isArray(kjM.taksit_kartlari) ? [...kjM.taksit_kartlari] : [];
+        const idx = Math.max(0, Math.round(Number(mergeTak.index)));
+        if (idx < 0 || idx >= tk.length) return res.status(400).json({ error: 'taksit_index_invalid' });
+        const cur = tk[idx] && typeof tk[idx] === 'object' ? { ...tk[idx] } : { no: idx + 1 };
+        const paid = Boolean(mergeTak.odendi);
+        const todayStr = new Date().toISOString().slice(0, 10);
+        tk[idx] = {
+          ...cur,
+          odendi: paid,
+          odendi_tarihi: paid ? String(mergeTak.odendi_tarihi || '').trim().slice(0, 10) || todayStr : '',
+          odeme_notu: mergeTak.not != null ? String(mergeTak.not).slice(0, 200) : String(cur.odeme_notu || '')
+        };
+        kjM.taksit_kartlari = tk;
+        const nowM = new Date().toISOString();
+        const { data: updM, error: uErrM } = await supabaseAdmin
+          .from('parent_sign_contracts')
+          .update({ kayit_formu_json: kjM, updated_at: nowM })
+          .eq('id', id)
+          .select()
+          .single();
+        if (uErrM) throw uErrM;
+        return res.status(200).json({ data: updM });
+      }
+
+      const kjm = body.kayit_json_merge;
+      if (kjm && typeof kjm === 'object' && !Array.isArray(kjm) && Object.keys(kjm).length > 0) {
+        const baseJ = existing.kayit_formu_json && typeof existing.kayit_formu_json === 'object' ? { ...existing.kayit_formu_json } : {};
+        const mergedJ = { ...baseJ, ...kjm };
+        const nowJ = new Date().toISOString();
+        const { data: updJ2, error: erJ2 } = await supabaseAdmin
+          .from('parent_sign_contracts')
+          .update({ kayit_formu_json: mergedJ, updated_at: nowJ })
+          .eq('id', id)
+          .select()
+          .single();
+        if (erJ2) throw erJ2;
+        return res.status(200).json({ data: updJ2 });
+      }
+
+      if (existingSigned) {
+        return res.status(400).json({ error: 'contract_already_signed' });
       }
 
       const institutionId = String(existing.institution_id || '').trim();
@@ -548,6 +592,10 @@ export default async function handler(req, res) {
       const base = publicBaseUrl();
       const verifyUrl = verifyToken && base ? `${base}/verify-document?t=${encodeURIComponent(verifyToken)}` : '#';
 
+      const kj0 = existing.kayit_formu_json && typeof existing.kayit_formu_json === 'object' ? existing.kayit_formu_json : {};
+      const phase0 = String(kj0.phase || '');
+      let nextKayitJson;
+
       const MAX_MERGED_HTML = 1_500_000;
       const customMergedRaw =
         body.custom_merged_html !== undefined && body.custom_merged_html !== null
@@ -560,6 +608,22 @@ export default async function handler(req, res) {
         }
         merged_html = customMergedRaw.slice(0, MAX_MERGED_HTML);
       } else {
+        if (phase0 === 'awaiting_admin_price') {
+          if (!(Number(fee) > 0)) {
+            return res.status(400).json({ error: 'ucret_required_before_signature_release' });
+          }
+          const taksit_kartlari = buildTaksitPlan(fee, taksit_sayisi, bas);
+          const tN = Math.max(1, Math.min(48, Math.round(Number(taksit_sayisi) || 1)));
+          const ort = tN > 0 ? Math.round(fee / tN) : 0;
+          const muhasebe_ozet2 = `Öğrenci: ${ogrenci_ad} ${ogrenci_soyad} | Program: ${program_adi} | Sınıf: ${sinif} | Toplam: ${fee} TL | ${tN} taksit | ~${ort} TL/taksit | E-posta: ${String(kj0.eposta || '')}`;
+          nextKayitJson = {
+            ...kj0,
+            phase: 'ready_to_sign',
+            admin_priced_at: new Date().toISOString(),
+            taksit_kartlari,
+            muhasebe_ozet: muhasebe_ozet2
+          };
+        }
         merged_html = buildParentContractHtml({
           ogrenci_ad,
           ogrenci_soyad,
@@ -581,35 +645,38 @@ export default async function handler(req, res) {
           document_title: sozlesme_basligi,
           extra_detail_plain: sablon_ek_detay_snapshot,
           ders_satirlari: dersSnapshot,
-          kayit_formu_detay: existing.kayit_formu_json || {}
+          kayit_formu_detay: nextKayitJson != null ? nextKayitJson : existing.kayit_formu_json || {}
         });
       }
 
       const now = new Date().toISOString();
+      const updatePayload = {
+        ogrenci_ad,
+        ogrenci_soyad,
+        veli_ad,
+        veli_soyad,
+        telefon,
+        adres,
+        sinif,
+        program_adi,
+        baslangic_tarihi: bas,
+        bitis_tarihi: bit,
+        haftalik_ders_saati: hours,
+        ucret: fee,
+        taksit_sayisi,
+        kurum_kodu,
+        merged_html,
+        sozlesme_turu,
+        sozlesme_basligi,
+        sablon_ek_detay_snapshot,
+        ders_programi_snapshot: dersSnapshot,
+        updated_at: now
+      };
+      if (nextKayitJson !== undefined) updatePayload.kayit_formu_json = nextKayitJson;
+
       const { data: updated, error: uErr } = await supabaseAdmin
         .from('parent_sign_contracts')
-        .update({
-          ogrenci_ad,
-          ogrenci_soyad,
-          veli_ad,
-          veli_soyad,
-          telefon,
-          adres,
-          sinif,
-          program_adi,
-          baslangic_tarihi: bas,
-          bitis_tarihi: bit,
-          haftalik_ders_saati: hours,
-          ucret: fee,
-          taksit_sayisi,
-          kurum_kodu,
-          merged_html,
-          sozlesme_turu,
-          sozlesme_basligi,
-          sablon_ek_detay_snapshot,
-          ders_programi_snapshot: dersSnapshot,
-          updated_at: now
-        })
+        .update(updatePayload)
         .eq('id', id)
         .select()
         .single();
@@ -748,12 +815,16 @@ export default async function handler(req, res) {
       const hours = Number.isFinite(hoursParsed)
         ? Math.min(80, Math.max(0, hoursParsed))
         : suggested.hours;
-      const fee = Number.isFinite(feeParsed)
+      let fee = Number.isFinite(feeParsed)
         ? Math.min(999999999, Math.max(0, feeParsed))
         : suggested.fee;
-      const taksit_sayisi = Number.isFinite(taksitParsed)
+      let taksit_sayisi = Number.isFinite(taksitParsed)
         ? Math.min(48, Math.max(1, Math.round(taksitParsed)))
         : 1;
+      if (regFormFirst) {
+        fee = 0;
+        taksit_sayisi = 1;
+      }
 
       const kurum_kodu = institutionCodeFromRow(inst || { id: institutionId });
       const cnum = contractNumber(kurum_kodu);

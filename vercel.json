@@ -76,11 +76,11 @@
     },
     {
       "path": "/api/cron/daily-report-reminders",
-      "schedule": "0 20 * * *"
+      "schedule": "0 19 * * *"
     },
     {
-      "path": "/api/cron/study-evening-reminder",
-      "schedule": "0 19 * * *"
+      "path": "/api/cron/edesis-sync",
+      "schedule": "0 6,18 * * *"
     }
   ],
 
@@ -123,6 +123,14 @@
       "source": "/api/whatsapp/(.*)",
 
       "destination": "/api/deep-api?path=whatsapp/$1"
+
+    },
+
+    {
+
+      "source": "/api/question-help/webhook",
+
+      "destination": "/api/deep-api?path=question-help/webhook"
 
     },
 

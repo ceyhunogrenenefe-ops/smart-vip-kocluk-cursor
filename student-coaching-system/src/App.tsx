@@ -3,11 +3,14 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import NotificationAuthBridge from './components/notifications/NotificationAuthBridge';
 import { OrganizationProvider } from './context/OrganizationContext';
 import Layout from './components/layout/Layout';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import Dashboard from './pages/Dashboard';
 import Students from './pages/Students';
 import Teachers from './pages/Teachers';
@@ -42,10 +45,22 @@ import LiveLessons from './pages/LiveLessons';
 import ClassLiveLessons from './pages/ClassLiveLessons';
 import TeacherPanel from './pages/TeacherPanel';
 import WeeklyPlannerPage from './pages/WeeklyPlannerPage';
+import MyProfilePage from './pages/MyProfilePage';
 import AcademicCenter from './pages/AcademicCenter';
 import ParentSignFlowPage from './pages/ParentSignFlowPage';
+import TahsilatMuhasebePage from './pages/TahsilatMuhasebePage';
 import VeliImzaPage from './pages/VeliImzaPage';
+import VeliKayitLegalDocPage from './pages/VeliKayitLegalDocPage';
 import VerifyDocumentPage from './pages/VerifyDocumentPage';
+import StudentSoruSorPage from './pages/questionHelp/StudentSoruSorPage';
+import TeacherSoruHavuzuPage from './pages/questionHelp/TeacherSoruHavuzuPage';
+import CoachSoruAnalitikPage from './pages/questionHelp/CoachSoruAnalitikPage';
+import NotificationsPage from './pages/NotificationsPage';
+import TeacherEduPanelPage from './pages/eduPanel/TeacherEduPanelPage';
+import StudentEduPanelPage from './pages/eduPanel/StudentEduPanelPage';
+import AdminAgentsPage from './pages/aiAgents/AdminAgentsPage';
+import StudentAgentListPage from './pages/aiAgents/StudentAgentListPage';
+import StudentAgentChatPage from './pages/aiAgents/StudentAgentChatPage';
 import { rolesForProtectedRoute, userRoleTags } from './config/rolePermissions';
 
 // Yönlendirme bileşeni
@@ -64,7 +79,7 @@ function HomeRedirect() {
   }
   /** Koç (aynı anda öğretmen olsa da) varsayılan giriş: koç paneli */
   if (tags.includes('coach')) return <Navigate to="/coach-dashboard" replace />;
-  if (tags.includes('student')) return <Navigate to="/student-dashboard" replace />;
+  if (tags.includes('student')) return <Navigate to="/weekly-planner" replace />;
 
   return <Navigate to="/login" replace />;
 }
@@ -74,6 +89,7 @@ function App() {
     <>
     <SupabaseConfigBanner />
     <AuthProvider>
+      <NotificationAuthBridge>
       <OrganizationProvider>
         <AppProvider>
           <Router>
@@ -86,6 +102,8 @@ function App() {
               {/* Auth Sayfaları */}
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
 
             {/* Ana sayfa yönlendirmesi */}
             <Route path="/" element={<HomeRedirect />} />
@@ -229,6 +247,14 @@ function App() {
               </ProtectedRoute>
             } />
 
+            <Route path="/my-profile" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/my-profile')}>
+                <Layout>
+                  <MyProfilePage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
             {/* Super Admin Paneli */}
             <Route path="/super-admin" element={
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/super-admin')}>
@@ -243,6 +269,14 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/user-management')}>
                 <Layout>
                   <UserManagement />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/notifications" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/notifications')}>
+                <Layout>
+                  <NotificationsPage />
                 </Layout>
               </ProtectedRoute>
             } />
@@ -272,7 +306,8 @@ function App() {
               </ProtectedRoute>
             } />
 
-            {/* Öğrenci Dashboard — sekme URL’leri; kök adres günlük sekmeye yönlendirilir */}
+            {/* Öğrenci Dashboard — deneme / yazılı / kitap sekmeleri */}
+            <Route path="/student-dashboard/gunluk" element={<Navigate to="/student-dashboard/denemeler" replace />} />
             <Route path="/student-dashboard/:tabKey" element={
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/student-dashboard')}>
                 <Layout>
@@ -282,7 +317,7 @@ function App() {
             } />
             <Route path="/student-dashboard" element={
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/student-dashboard')}>
-                <Navigate to="/student-dashboard/gunluk" replace />
+                <Navigate to="/student-dashboard/denemeler" replace />
               </ProtectedRoute>
             } />
 
@@ -378,6 +413,7 @@ function App() {
 
             <Route path="/veli-imza/:token" element={<VeliImzaPage />} />
             <Route path="/sign-contract/:token" element={<VeliImzaPage />} />
+            <Route path="/veli-kayit-metin/:slug" element={<VeliKayitLegalDocPage />} />
             <Route path="/verify-document" element={<VerifyDocumentPage />} />
 
             <Route path="/veli-onay" element={
@@ -388,12 +424,82 @@ function App() {
               </ProtectedRoute>
             } />
 
+            <Route path="/tahsilat-muhasebe" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/tahsilat-muhasebe')}>
+                <Layout>
+                  <TahsilatMuhasebePage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/soru-sor" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/soru-sor')}>
+                <Layout>
+                  <StudentSoruSorPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            <Route path="/soru-havuzu" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/soru-havuzu')}>
+                <Layout>
+                  <TeacherSoruHavuzuPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            <Route path="/soru-analitik" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/soru-analitik')}>
+                <Layout>
+                  <CoachSoruAnalitikPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/edu-panel" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/edu-panel')}>
+                <Layout>
+                  <TeacherEduPanelPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/edu-derslerim" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/edu-derslerim')}>
+                <Layout>
+                  <StudentEduPanelPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            {/* AI Ders Ajanları */}
+            <Route path="/ai-agents-admin" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/ai-agents-admin')}>
+                <Layout>
+                  <AdminAgentsPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            <Route path="/ai-agents" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/ai-agents')}>
+                <Layout>
+                  <StudentAgentListPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            <Route path="/ai-agents/:id" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/ai-agents/:id')}>
+                <Layout>
+                  <StudentAgentChatPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
             {/* Bulunamadı sayfası */}
             <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Router>
         </AppProvider>
       </OrganizationProvider>
+      </NotificationAuthBridge>
     </AuthProvider>
     </>
   );

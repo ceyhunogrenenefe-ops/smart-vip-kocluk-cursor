@@ -166,7 +166,7 @@ export default async function handler(req, res) {
       const resolved = await resolveStudentRowForUser({
         userId: user.id,
         email: user.email,
-        institutionId: user.institution_id
+        institutionId: null
       });
       studentId = resolved?.id;
     } else if (user.role === 'coach' || user.role === 'teacher') {

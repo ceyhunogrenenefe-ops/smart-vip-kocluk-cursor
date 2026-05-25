@@ -1,5 +1,5 @@
 // Türkçe: Uygulama genel durum yönetimi - Supabase Gerçek Veritabanı ile
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { isUuid } from '../utils/uuid';
 import {
   Student,
@@ -23,12 +23,16 @@ import {
 } from '../types';
 import { db } from '../lib/database';
 import { getAuthToken } from '../lib/session';
+import { bookRowPatchFromBook, bookStatusFromRow, mergeBookStatusPatch } from '../lib/bookReadingStatus';
 import { resolveCoachRecordId, resolveStudentRecordId } from '../lib/coachResolve';
 import { isSupabaseReady, supabase, supabaseBaseUrl, verifySupabaseReachable } from '../lib/supabase';
 import { studentRowToStudent, type ApiStudentRow } from '../lib/mapStudentRow';
 import {
   encodeTopicProgressNotes,
+  isTopicMarkedCompleted,
+  normalizeTopicLabel,
   stableTopicProgressTopicId,
+  topicLabelsEqual,
   topicProgressDedupeKey,
   topicProgressRowToApp,
   type TopicProgressDbRow
@@ -39,6 +43,13 @@ import { useOrganization } from './OrganizationContext';
 import { userRoleTags } from '../config/rolePermissions';
 import { topicPool as defaultTopicPool } from '../data/mockData';
 import { yosTopicPool } from '../data/yosTopicPool';
+import { mergeStudyTracksIntoSubjects, studyTracksForClassLevel } from '../lib/studyTrackSubjects';
+import {
+  clearStudentCoachQuestionStatsCache,
+  currentWeekRangeYmd,
+  getCachedStudentCoachQuestionStats,
+  loadCoachQuestionStatsBatch,
+} from '../lib/studentCoachQuestionStats';
 
 // LocalStorage anahtarları
 const STORAGE_KEYS = {
@@ -196,6 +207,8 @@ interface AppState {
   getStudentTopicProgress: (studentId: string) => TopicProgress[];
   getCompletedTopicsBySubject: (studentId: string, subject: string) => TopicProgress[];
   resetTopicProgress: (studentId: string) => Promise<void>;
+  refreshTopicProgress: () => Promise<void>;
+  refreshBooks: () => Promise<void>;
 
   // İstatistikler
   getStudentStats: (studentId: string) => {
@@ -208,6 +221,9 @@ interface AppState {
     successRate: number;
     totalReadingMinutes: number;
   };
+  /** Koç kotası / çözülen önbelleğini yeniler (tüm öğrenciler veya verilen liste) */
+  refreshCoachQuestionStats: (studentIds?: string[]) => Promise<void>;
+  coachQuestionStatsTick: number;
 
   // Deneme Sınavları
   examResults: ExamResult[];
@@ -546,7 +562,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const restrictRelatedDataByStudents = !isStudentRole && Boolean(institutionScope);
 
         const dbBooks = await db.getBookReadings();
-        const mappedBooks: Book[] = dbBooks.map(b => ({
+        const mappedBooks: Book[] = dbBooks.map((b) => ({
           id: b.id,
           studentId: b.student_id,
           title: b.book_title,
@@ -554,7 +570,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           pagesRead: b.pages_read,
           startDate: b.start_date || '',
           endDate: b.end_date || undefined,
-          status: 'reading' as const,
+          status: bookStatusFromRow(b),
           notes: b.notes || undefined,
           institutionId: b.institution_id || undefined,
           createdAt: b.created_at
@@ -1289,6 +1305,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (effectiveTopicPool[subject] && effectiveTopicPool[subject][classLevel]) {
       return effectiveTopicPool[subject][classLevel];
     }
+    const tracks = studyTracksForClassLevel(classLevel);
+    if (tracks[subject]) return tracks[subject];
     return [];
   };
 
@@ -1331,7 +1349,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       });
 
-      return { regular: result, tytSubjects, aytSubjects, isYKS };
+      return {
+        regular: mergeStudyTracksIntoSubjects(classLevel, result),
+        tytSubjects,
+        aytSubjects,
+        isYKS
+      };
     }
 
     // Normal sınıflar (9, 10, 11, 12)
@@ -1345,41 +1368,117 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    return { regular: result, tytSubjects: {}, aytSubjects: {}, isYKS };
+    return {
+      regular: mergeStudyTracksIntoSubjects(classLevel, result),
+      tytSubjects: {},
+      aytSubjects: {},
+      isYKS
+    };
   };
 
-  // Konu takibi işlemleri (Supabase topic_progress ile senkron)
+  const mergeTopicProgressRows = (
+    rows: Awaited<ReturnType<typeof db.getTopicProgressForStudents>>,
+    mergeWithExisting = true
+  ) => {
+    setTopicProgress((prev) => {
+      const map = new Map<string, TopicProgress>();
+      if (mergeWithExisting) {
+        for (const p of prev) {
+          map.set(topicProgressDedupeKey(p.studentId, p.subject, p.topic), p);
+        }
+      }
+      for (const row of rows) {
+        const app = topicProgressRowToApp(row as unknown as TopicProgressDbRow);
+        if (app) map.set(topicProgressDedupeKey(app.studentId, app.subject, app.topic), app);
+      }
+      return [...map.values()];
+    });
+  };
+
+  const refreshTopicProgress = useCallback(async (): Promise<void> => {
+    if (!getAuthToken()) return;
+    const ids = studentsRef.current.map((s) => s.id);
+    if (!ids.length) {
+      setTopicProgress([]);
+      return;
+    }
+    try {
+      const rows = await db.getTopicProgressForStudents(ids);
+      mergeTopicProgressRows(rows, true);
+    } catch (e) {
+      console.warn('[AppContext] refreshTopicProgress:', e);
+    }
+  }, []);
+
+  const mapBookRows = (dbBooks: Awaited<ReturnType<typeof db.getBookReadings>>): Book[] =>
+    dbBooks.map((b) => ({
+      id: b.id,
+      studentId: b.student_id,
+      title: b.book_title,
+      author: b.author || undefined,
+      pagesRead: b.pages_read,
+      startDate: b.start_date || '',
+      endDate: b.end_date || undefined,
+      status: bookStatusFromRow(b),
+      notes: b.notes || undefined,
+      institutionId: b.institution_id || undefined,
+      createdAt: b.created_at
+    }));
+
+  const refreshBooks = useCallback(async (): Promise<void> => {
+    if (!getAuthToken()) return;
+    try {
+      const dbBooks = await db.getBookReadings();
+      const studentIdScope = new Set(studentsRef.current.map((s) => s.id));
+      const mapped = mapBookRows(dbBooks);
+      const scoped =
+        studentIdScope.size > 0
+          ? mapped.filter((b) => studentIdScope.has(b.studentId))
+          : mapped;
+      setBooks((prev) => {
+        const map = new Map<string, Book>();
+        for (const b of prev) map.set(b.id, b);
+        for (const b of scoped) map.set(b.id, b);
+        return [...map.values()];
+      });
+    } catch (e) {
+      console.warn('[AppContext] refreshBooks:', e);
+    }
+  }, []);
+
+  // Konu takibi işlemleri (API topic_progress ile senkron)
   const markTopicCompleted = async (
     studentId: string,
     subject: string,
     topic: string,
     entryId?: string
   ): Promise<void> => {
+    const sub = normalizeTopicLabel(subject);
+    const top = normalizeTopicLabel(topic);
     const completedAt = new Date().toISOString();
-    const next: TopicProgress = { studentId, subject, topic, completedAt, entryId };
+    const next: TopicProgress = { studentId, subject: sub, topic: top, completedAt, entryId };
     setTopicProgress((prev) => {
-      if (prev.some((p) => p.studentId === studentId && p.subject === subject && p.topic === topic)) {
-        return prev;
-      }
+      if (isTopicMarkedCompleted(prev, studentId, sub, top)) return prev;
       return [...prev, next];
     });
     if (!getAuthToken() || !isSupabaseReady) return;
     try {
-      const topic_id = await stableTopicProgressTopicId(studentId, subject, topic);
-      const inst = studentsRef.current.find((s) => s.id === studentId)?.institutionId ?? null;
+      const topic_id = await stableTopicProgressTopicId(studentId, sub, top);
       await db.upsertTopicProgress({
         student_id: studentId,
         topic_id,
         status: 'completed',
         completion_date: completedAt,
-        notes: encodeTopicProgressNotes({ subject, topic, entryId }),
-        institution_id: inst
-      });
+        notes: encodeTopicProgressNotes({ subject: sub, topic: top, entryId }),
+        subject: sub,
+        topic: top
+      } as never);
     } catch (e) {
       console.warn('[AppContext] markTopicCompleted sunucu kaydı başarısız:', e);
       setTopicProgress((prev) =>
-        prev.filter((p) => !(p.studentId === studentId && p.subject === subject && p.topic === topic))
+        prev.filter((p) => !(p.studentId === studentId && topicLabelsEqual(p.subject, sub) && topicLabelsEqual(p.topic, top)))
       );
+      throw e instanceof Error ? e : new Error('Konu kaydı sunucuya yazılamadı');
     }
   };
 
@@ -1388,9 +1487,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     subject: string,
     topic: string
   ): Promise<void> => {
+    const sub = normalizeTopicLabel(subject);
+    const top = normalizeTopicLabel(topic);
     if (getAuthToken() && isSupabaseReady) {
       try {
-        const topic_id = await stableTopicProgressTopicId(studentId, subject, topic);
+        const topic_id = await stableTopicProgressTopicId(studentId, sub, top);
         await db.deleteTopicProgress(studentId, topic_id);
       } catch (e) {
         console.warn('[AppContext] unmarkTopicCompleted sunucu silme başarısız:', e);
@@ -1398,7 +1499,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     }
     setTopicProgress((prev) =>
-      prev.filter((p) => !(p.studentId === studentId && p.subject === subject && p.topic === topic))
+      prev.filter((p) => !(p.studentId === studentId && topicLabelsEqual(p.subject, sub) && topicLabelsEqual(p.topic, top)))
     );
   };
 
@@ -1407,7 +1508,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const getCompletedTopicsBySubject = (studentId: string, subject: string): TopicProgress[] => {
-    return topicProgress.filter(p => p.studentId === studentId && p.subject === subject);
+    return topicProgress.filter(
+      (p) => p.studentId === studentId && topicLabelsEqual(p.subject, subject)
+    );
   };
 
   const resetTopicProgress = async (studentId: string): Promise<void> => {
@@ -1439,11 +1542,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  // İstatistik hesaplama
+  const [coachQuestionStatsTick, setCoachQuestionStatsTick] = useState(0);
+
+  const refreshCoachQuestionStats = useCallback(
+    async (studentIds?: string[]) => {
+      if (!getAuthToken()) return;
+      const ids =
+        studentIds?.length && studentIds.length > 0
+          ? studentIds
+          : studentsRef.current.map((s) => s.id);
+      if (!ids.length) return;
+      const { from, to } = currentWeekRangeYmd();
+      clearStudentCoachQuestionStatsCache();
+      await loadCoachQuestionStatsBatch(ids, from, to);
+      setCoachQuestionStatsTick((t) => t + 1);
+    },
+    []
+  );
+
+  // İstatistik hesaplama — koç kotası (target_quantity) / çözülen; planlanan sayılmaz
   const getStudentStats = (studentId: string) => {
     const entries = getStudentEntries(studentId);
+    const { from, to } = currentWeekRangeYmd();
+    const coachCached = getCachedStudentCoachQuestionStats(studentId, from, to);
 
-    if (entries.length === 0) {
+    if (entries.length === 0 && !coachCached?.hasCoachGoals) {
       return {
         totalTarget: 0,
         totalSolved: 0,
@@ -1452,17 +1575,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
         totalBlank: 0,
         realizationRate: 0,
         successRate: 0,
-        totalReadingMinutes: 0
+        totalReadingMinutes: 0,
       };
     }
 
-    const totalTarget = entries.reduce((sum, e) => sum + e.targetQuestions, 0);
-    const totalSolved = entries.reduce((sum, e) => sum + e.solvedQuestions, 0);
     const totalCorrect = entries.reduce((sum, e) => sum + e.correctAnswers, 0);
     const totalWrong = entries.reduce((sum, e) => sum + e.wrongAnswers, 0);
     const totalBlank = entries.reduce((sum, e) => sum + e.blankAnswers, 0);
     const totalReadingMinutes = entries.reduce((sum, e) => sum + (e.readingMinutes || 0), 0);
 
+    if (coachCached?.hasCoachGoals && coachCached.coachTarget > 0) {
+      const totalSolved = coachCached.solved;
+      const successRate =
+        totalSolved > 0 ? Math.round((totalCorrect / totalSolved) * 100) : 0;
+      return {
+        totalTarget: coachCached.coachTarget,
+        totalSolved,
+        totalCorrect,
+        totalWrong,
+        totalBlank,
+        realizationRate: coachCached.realizationPct,
+        successRate,
+        totalReadingMinutes,
+      };
+    }
+
+    const totalTarget = entries.reduce((sum, e) => sum + e.targetQuestions, 0);
+    const totalSolved = entries.reduce((sum, e) => sum + e.solvedQuestions, 0);
     const realizationRate = totalTarget > 0 ? Math.round((totalSolved / totalTarget) * 100) : 0;
     const successRate = totalSolved > 0 ? Math.round((totalCorrect / totalSolved) * 100) : 0;
 
@@ -1474,7 +1613,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       totalBlank,
       realizationRate,
       successRate,
-      totalReadingMinutes
+      totalReadingMinutes,
     };
   };
 
@@ -1706,18 +1845,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Kitap işlemleri - Supabase database
   const addBook = async (book: Book) => {
+    const merged = mergeBookStatusPatch(book, book);
+    const status = merged.status || book.status || 'reading';
+    const endDate = merged.endDate ?? book.endDate;
+    const bookInst =
+      book.institutionId ??
+      studentsRef.current.find((s) => s.id === book.studentId)?.institutionId ??
+      activeInstitutionId ??
+      null;
     try {
       const created = await db.createBookReading({
         student_id: book.studentId,
         book_title: book.title,
         author: book.author || null,
-        pages_read: book.pagesRead,
+        pages_read: book.pagesRead ?? 0,
         start_date: book.startDate || null,
-        end_date: book.endDate || null,
+        end_date: endDate || null,
+        status,
         notes: book.notes || null,
-        institution_id: activeInstitutionId || null
-      });
-      // Convert and add to state
+        institution_id: bookInst
+      } as never);
       const newBook: Book = {
         id: created.id,
         studentId: created.student_id,
@@ -1726,37 +1873,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
         pagesRead: created.pages_read,
         startDate: created.start_date || '',
         endDate: created.end_date || undefined,
-        status: 'reading',
+        status: bookStatusFromRow(created),
         notes: created.notes || undefined,
         institutionId: created.institution_id || undefined,
         createdAt: created.created_at
       };
-      setBooks(prev => [...prev, newBook]);
+      setBooks((prev) => [...prev, newBook]);
     } catch (error) {
       console.error('Kitap ekleme hatası:', error);
-      // Fallback
+      if (status === 'completed') {
+        throw error instanceof Error ? error : new Error('Kitap kaydı oluşturulamadı');
+      }
       const newBook: Book = {
-        ...book,
+        ...mergeBookStatusPatch(book, book),
         id: book.id || `book-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         createdAt: new Date().toISOString()
       };
-      setBooks(prev => [...prev, newBook]);
+      setBooks((prev) => [...prev, newBook]);
     }
   };
 
   const updateBook = async (id: string, updatedBook: Partial<Book>) => {
+    const current = books.find((b) => b.id === id);
+    const merged = mergeBookStatusPatch(updatedBook, current);
+    const next: Partial<Book> = { ...updatedBook, ...merged };
     try {
-      await db.updateBookReading(id, {
-        book_title: updatedBook.title,
-        author: updatedBook.author,
-        pages_read: updatedBook.pagesRead,
-        end_date: updatedBook.endDate,
-        notes: updatedBook.notes
-      });
+      const apiPatch = bookRowPatchFromBook(next);
+      if (Object.keys(apiPatch).length > 0) {
+        await db.updateBookReading(id, apiPatch as never);
+      }
     } catch (error) {
       console.error('Kitap güncelleme hatası:', error);
+      if (next.status === 'completed') {
+        throw error instanceof Error ? error : new Error('Kitap güncellenemedi');
+      }
     }
-    setBooks(prev => prev.map(b => b.id === id ? { ...b, ...updatedBook } : b));
+    setBooks((prev) => prev.map((b) => (b.id === id ? { ...b, ...next } : b)));
   };
 
   const deleteBook = async (id: string) => {
@@ -2146,63 +2298,114 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(t);
   }, [writtenExamSubjects, writtenExamSubjectsByStudent, activeInstitutionId]);
 
+  const ensureWrittenExamSubjectForStudent = (studentId: string, subject: string) => {
+    const t = subject.trim();
+    if (!t) return;
+    setWrittenExamSubjectsByStudent((prev) => {
+      const hasKey = Object.prototype.hasOwnProperty.call(prev, studentId);
+      const cur = hasKey
+        ? (Array.isArray(prev[studentId]) ? prev[studentId] : [])
+        : [...writtenExamSubjects];
+      if (cur.includes(t)) return prev;
+      return { ...prev, [studentId]: [...cur, t] };
+    });
+  };
+
+  const rowToWrittenExamScore = (w: {
+    id: string;
+    student_id: string;
+    subject: string;
+    semester: number;
+    exam_type: string;
+    score: number;
+    date: string | null;
+    notes: string | null;
+    created_at: string;
+  }): WrittenExamScore => ({
+    id: w.id,
+    studentId: w.student_id,
+    subject: w.subject,
+    semester: (w.semester === 1 || w.semester === 2 ? w.semester : 1) as 1 | 2,
+    examType: w.exam_type as WrittenExamScore['examType'],
+    examNumber:
+      w.exam_type === 'Final' ? 3 : w.exam_type === '1. Yazılı' ? 1 : 2,
+    score: w.score,
+    date: w.date || new Date().toISOString().split('T')[0],
+    notes: w.notes || undefined,
+    createdAt: w.created_at
+  });
+
   // Yazılı not ekle - Supabase database
   const addWrittenExamScore = async (score: WrittenExamScore) => {
-    try {
-      // Check if same exam exists (same student, subject, semester, examType)
-      const existing = writtenExamScores.find(
-        s => s.studentId === score.studentId && s.subject === score.subject && s.semester === score.semester && s.examType === score.examType
-      );
+    const subjectTrim = score.subject.trim();
+    if (subjectTrim) ensureWrittenExamSubjectForStudent(score.studentId, subjectTrim);
 
-      if (existing) {
-        // Update existing
-        await db.updateWrittenExam(existing.id, {
+    const matchKey = (s: WrittenExamScore) =>
+      s.studentId === score.studentId &&
+      s.subject === score.subject &&
+      s.semester === score.semester &&
+      s.examType === score.examType;
+
+    const existing = writtenExamScores.find(matchKey);
+    const localOnlyId =
+      !existing?.id ||
+      existing.id.startsWith('we-student-') ||
+      existing.id.startsWith('we-');
+
+    const persistCreate = async () => {
+      const created = await db.createWrittenExam({
+        student_id: score.studentId,
+        subject: subjectTrim || score.subject,
+        semester: score.semester,
+        exam_type: score.examType,
+        score: score.score,
+        date: score.date || null,
+        notes: score.notes || null,
+        institution_id: activeInstitutionId || null
+      });
+      const newScore = rowToWrittenExamScore(created);
+      setWrittenExamScores((prev) => [...prev.filter((s) => !matchKey(s)), newScore]);
+    };
+
+    try {
+      if (existing && !localOnlyId) {
+        const updated = await db.updateWrittenExam(existing.id, {
           score: score.score,
           date: score.date,
           notes: score.notes
         });
-        setWrittenExamScores(prev => prev.map(s => s.id === existing.id ? score : s));
+        const merged = rowToWrittenExamScore(updated);
+        setWrittenExamScores((prev) =>
+          prev.map((s) => (s.id === existing.id ? merged : s))
+        );
       } else {
-        // Create new
-        const created = await db.createWrittenExam({
-          student_id: score.studentId,
-          subject: score.subject,
-          semester: score.semester,
-          exam_type: score.examType,
-          score: score.score,
-          date: score.date || null,
-          notes: score.notes || null,
-          institution_id: activeInstitutionId || null
-        });
-        // Convert and add to state
-        const newScore: WrittenExamScore = {
-          id: created.id,
-          studentId: created.student_id,
-          subject: created.subject,
-          semester: created.semester,
-          examType: created.exam_type,
-          score: created.score,
-          date: created.date || new Date().toISOString().split('T')[0],
-          notes: created.notes || undefined,
-          createdAt: created.created_at
-        };
-        setWrittenExamScores(prev => [...prev, newScore]);
+        await persistCreate();
       }
     } catch (error) {
       console.error('Yazılı not ekleme hatası:', error);
-      // Fallback - just update local state
-      const existingIndex = writtenExamScores.findIndex(
-        s => s.studentId === score.studentId && s.subject === score.subject && s.semester === score.semester && s.examType === score.examType
-      );
+      if (existing && localOnlyId) {
+        try {
+          await persistCreate();
+          return;
+        } catch (retryErr) {
+          console.error('Yazılı not yeniden kayıt hatası:', retryErr);
+        }
+      }
+      const existingIndex = writtenExamScores.findIndex(matchKey);
       if (existingIndex >= 0) {
-        setWrittenExamScores(prev => prev.map((s, i) => i === existingIndex ? score : s));
+        setWrittenExamScores((prev) =>
+          prev.map((s, i) =>
+            i === existingIndex ? { ...s, ...score, id: s.id } : s
+          )
+        );
       } else {
         const newScore: WrittenExamScore = {
           ...score,
+          subject: subjectTrim || score.subject,
           id: score.id || `exam-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          createdAt: new Date().toISOString()
+          createdAt: score.createdAt || new Date().toISOString()
         };
-        setWrittenExamScores(prev => [...prev, newScore]);
+        setWrittenExamScores((prev) => [...prev, newScore]);
       }
     }
   };
@@ -2362,12 +2565,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const getWrittenExamSubjectsForStudent = (studentId: string): string[] => {
     /** Anahtar yoksa genel şablon; `[]` ise bilinçli boş liste (varsayılanlara düşme). */
+    let base: string[];
     if (!Object.prototype.hasOwnProperty.call(writtenExamSubjectsByStudent, studentId)) {
-      return [...writtenExamSubjects];
+      base = [...writtenExamSubjects];
+    } else {
+      const custom = writtenExamSubjectsByStudent[studentId];
+      const arr = Array.isArray(custom) ? custom : [];
+      base = [...new Set(arr.map((s) => String(s).trim()).filter(Boolean))];
     }
-    const custom = writtenExamSubjectsByStudent[studentId];
-    const arr = Array.isArray(custom) ? custom : [];
-    return [...new Set(arr.map(s => String(s).trim()).filter(Boolean))];
+    /** Öğrenci/koç girişi: kayıtlı notların dersleri tabloda mutlaka görünsün */
+    const fromScores = writtenExamScores
+      .filter((s) => s.studentId === studentId)
+      .map((s) => String(s.subject).trim())
+      .filter(Boolean);
+    return [...new Set([...base, ...fromScores])].sort((a, b) => a.localeCompare(b, 'tr'));
   };
 
   const addWrittenExamSubjectForStudent = (studentId: string, subject: string) => {
@@ -2596,6 +2807,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return institutions.filter(i => i.id === effectiveUser.institutionId);
   }, [institutions, effectiveUser]);
 
+  /** Koç kotası / çözülen: tüm öğrenciler (veya öğrenci kendi) için haftalık önbellek */
+  useEffect(() => {
+    if (!getAuthToken() || !effectiveUser) return;
+    const role = effectiveUser.role;
+    if (role === 'coach' || role === 'admin' || role === 'super_admin') {
+      const ids = scopedStudents.map((s) => s.id);
+      if (ids.length) void refreshCoachQuestionStats(ids);
+      return;
+    }
+    if (role === 'student') {
+      const sid = linkedStudent?.id ?? effectiveUser.studentId ?? null;
+      if (sid) void refreshCoachQuestionStats([sid]);
+    }
+  }, [
+    effectiveUser?.role,
+    effectiveUser?.studentId,
+    linkedStudent?.id,
+    scopedStudents.map((s) => s.id).join(','),
+    refreshCoachQuestionStats,
+  ]);
+
+  useEffect(() => {
+    if (!getAuthToken() || !effectiveUser) return;
+    const role = effectiveUser.role;
+    const t = window.setTimeout(() => {
+      if (role === 'coach' || role === 'admin' || role === 'super_admin') {
+        const ids = scopedStudents.map((s) => s.id);
+        if (ids.length) void refreshCoachQuestionStats(ids);
+      } else if (role === 'student') {
+        const sid = linkedStudent?.id ?? effectiveUser.studentId ?? null;
+        if (sid) void refreshCoachQuestionStats([sid]);
+      }
+    }, 2500);
+    return () => window.clearTimeout(t);
+  }, [weeklyEntries.length, refreshCoachQuestionStats, effectiveUser?.role, scopedStudents.length]);
+
   return (
     <AppContext.Provider value={{
       currentUser,
@@ -2631,7 +2878,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       getStudentTopicProgress,
       getCompletedTopicsBySubject,
       resetTopicProgress,
+      refreshTopicProgress,
+      refreshBooks,
       getStudentStats,
+      refreshCoachQuestionStats,
+      coachQuestionStatsTick,
       selectedStudentId,
       setSelectedStudentId,
       examResults: scopedExamResults,

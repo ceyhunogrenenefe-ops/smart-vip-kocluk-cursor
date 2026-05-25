@@ -1,9 +1,5 @@
 import { supabaseAdmin } from './supabase-admin.js';
-import {
-  metaWhatsAppConfigured,
-  sendMetaTemplateMessage,
-  parseMetaSendError
-} from './meta-whatsapp.js';
+import { metaWhatsAppConfigured, sendMetaTextMessage } from './meta-whatsapp.js';
 import { getStudentPhones } from './meetings-resolve.js';
 import {
   getIstanbulDateString,
@@ -15,8 +11,8 @@ import { renderCoachScheduleTemplate } from './coach-whatsapp-schedule-render.js
 
 const KIND = 'coach_auto_template';
 
-function coachAutomationTemplateConfigured() {
-  return Boolean(process.env.META_COACH_AUTOMATION_TEMPLATE_NAME?.trim());
+function metaReady() {
+  return metaWhatsAppConfigured();
 }
 
 function istanbulDayDelta(fromIsoDate, toIsoDate) {
@@ -108,20 +104,9 @@ export async function runCoachWhatsappAutoCron(opts = {}) {
     opts.istanbulMinute != null ? opts.istanbulMinute : getIstanbulMinute();
   const todayTr = opts.todayTr ?? getIstanbulDateString();
 
-  if (!metaWhatsAppConfigured()) {
+  if (!metaReady()) {
     return { ok: false, skipped: true, reason: 'missing_meta_whatsapp_env' };
   }
-  if (!coachAutomationTemplateConfigured()) {
-    return {
-      ok: false,
-      skipped: true,
-      reason: 'missing_META_COACH_AUTOMATION_TEMPLATE_NAME',
-      hint: 'Koç otomasyonu için Meta’da tek gövde değişkenli şablon oluşturun ve META_COACH_AUTOMATION_TEMPLATE_NAME (+ isteğe META_COACH_AUTOMATION_TEMPLATE_LANGUAGE) ortam değişkenini ayarlayın.'
-    };
-  }
-
-  const coachTpl = String(process.env.META_COACH_AUTOMATION_TEMPLATE_NAME || '').trim();
-  const coachLang = String(process.env.META_COACH_AUTOMATION_TEMPLATE_LANGUAGE || 'tr').trim() || 'tr';
 
   const { data: schedules, error: schErr } = await supabaseAdmin
     .from('coach_whatsapp_schedules')
@@ -196,19 +181,7 @@ export async function runCoachWhatsappAutoCron(opts = {}) {
           date: todayTr
         }).trim();
 
-        let sid = null;
-        try {
-          const r = await sendMetaTemplateMessage({
-            toE164: phones[0],
-            templateName: coachTpl,
-            languageCode: coachLang,
-            bodyParameterTexts: [body]
-          });
-          sid = r.messageId || null;
-        } catch (err) {
-          const parsed = parseMetaSendError(err);
-          throw new Error(parsed.message || String(err));
-        }
+        const { messageId } = await sendMetaTextMessage({ toE164: phones[0], text: body });
 
         await persistSuccessLog({
           scheduleId: schedule.id,
@@ -216,9 +189,9 @@ export async function runCoachWhatsappAutoCron(opts = {}) {
           todayTr,
           recipient: phones[0],
           body,
-          sid
+          sid: messageId
         });
-        logDetail.push({ student_id: st.id, ok: true, sid });
+        logDetail.push({ student_id: st.id, ok: true, sid: messageId });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         logDetail.push({ student_id: st.id, ok: false, error: msg });

@@ -34,14 +34,19 @@ import {
   LineChart,
   Line
 } from 'recharts';
-import { StudyInsightWidgets } from '../components/analytics/StudyInsightWidgets';
 
 export default function CoachDashboard() {
   const navigate = useNavigate();
   const { user, effectiveUser } = useAuth();
   const {
-    students, weeklyEntries, getStudentStats, coaches, getReadingStats,
-    writtenExamScores, getWrittenExamStats
+    students,
+    weeklyEntries,
+    getStudentStats,
+    coaches,
+    getReadingStats,
+    writtenExamScores,
+    getWrittenExamStats,
+    coachQuestionStatsTick,
   } = useApp();
 
   // Koçun kayıtlı öğrencileri
@@ -111,18 +116,26 @@ export default function CoachDashboard() {
       .slice(0, 5);
   }, [writtenExamStats]);
 
-  // Genel istatistikler
+  // Genel istatistikler — öğrenci başına koç kotası / çözülen toplamı
   const generalStats = useMemo(() => {
-    const totalTarget = myEntries.reduce((sum, e) => sum + e.targetQuestions, 0);
-    const totalSolved = myEntries.reduce((sum, e) => sum + e.solvedQuestions, 0);
-    const totalCorrect = myEntries.reduce((sum, e) => sum + e.correctAnswers, 0);
-    const totalWrong = myEntries.reduce((sum, e) => sum + e.wrongAnswers, 0);
-    const totalBlank = myEntries.reduce((sum, e) => sum + e.blankAnswers, 0);
+    let totalTarget = 0;
+    let totalSolved = 0;
+    let totalCorrect = 0;
+    let totalWrong = 0;
+    let totalBlank = 0;
+    for (const student of myStudents) {
+      const st = getStudentStats(student.id);
+      totalTarget += st.totalTarget;
+      totalSolved += st.totalSolved;
+      totalCorrect += st.totalCorrect;
+      totalWrong += st.totalWrong;
+      totalBlank += st.totalBlank;
+    }
     const successRate = totalSolved > 0 ? Math.round((totalCorrect / totalSolved) * 100) : 0;
     const realizationRate = totalTarget > 0 ? Math.round((totalSolved / totalTarget) * 100) : 0;
 
     return { totalTarget, totalSolved, totalCorrect, totalWrong, totalBlank, successRate, realizationRate };
-  }, [myEntries]);
+  }, [myStudents, getStudentStats, coachQuestionStatsTick]);
 
   // Ders bazlı başarı
   const subjectStats = useMemo(() => {
@@ -236,7 +249,7 @@ export default function CoachDashboard() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
           <div className="flex items-center gap-2 mb-2">
             <Target className="w-5 h-5 text-blue-600" />
-            <span className="text-sm text-gray-500">Toplam Hedef</span>
+            <span className="text-sm text-gray-500">Koç hedefi (toplam)</span>
           </div>
           <p className="text-2xl font-bold text-slate-800">{generalStats.totalTarget}</p>
         </div>
@@ -255,17 +268,6 @@ export default function CoachDashboard() {
           <p className="text-2xl font-bold text-slate-800">%{generalStats.successRate}</p>
         </div>
       </div>
-
-      {myStudents.length > 0 ? (
-        <StudyInsightWidgets
-          entries={myEntries}
-          windowDays={30}
-          chartDays={14}
-          title="Haftalık plan & günlük kayıt özeti"
-          subtitle="Son 30 gün · Tüm öğrencilerinizin senkron kayıtları"
-          variant="coach"
-        />
-      ) : null}
 
       {/* Detaylı İstatistikler */}
       <div className="grid grid-cols-3 gap-4">
@@ -543,7 +545,7 @@ export default function CoachDashboard() {
               <tr>
                 <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600">Öğrenci</th>
                 <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600">Sınıf</th>
-                <th className="px-4 py-2 text-center text-xs font-semibold text-gray-600">Hedef</th>
+                <th className="px-4 py-2 text-center text-xs font-semibold text-gray-600">Koç hedefi</th>
                 <th className="px-4 py-2 text-center text-xs font-semibold text-gray-600">Çözülen</th>
                 <th className="px-4 py-2 text-center text-xs font-semibold text-gray-600">Doğru</th>
                 <th className="px-4 py-2 text-center text-xs font-semibold text-gray-600">Başarı %</th>

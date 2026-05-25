@@ -28,7 +28,10 @@ export default async function handler(req, res) {
       }
       let query = supabaseAdmin.from('written_exams').select('*').order('date', { ascending: false });
       if (actor.role === 'admin' || actor.role === 'teacher') {
-        query = query.eq('institution_id', actor.institution_id);
+        const inst = actor.institution_id;
+        if (inst) {
+          query = query.or(`institution_id.eq.${inst},institution_id.is.null`);
+        }
       }
       if (actor.role === 'student') query = query.eq('student_id', actor.student_id);
       if (actor.role === 'coach') {
@@ -91,6 +94,30 @@ export default async function handler(req, res) {
         if (!Number.isFinite(payload.score)) {
           return res.status(400).json({ error: 'score_required' });
         }
+        const { data: existingRow } = await supabaseAdmin
+          .from('written_exams')
+          .select('*')
+          .eq('student_id', actor.student_id)
+          .eq('subject', payload.subject)
+          .eq('semester', payload.semester)
+          .eq('exam_type', payload.exam_type)
+          .maybeSingle();
+        if (existingRow) {
+          const { data, error } = await supabaseAdmin
+            .from('written_exams')
+            .update({
+              score: payload.score,
+              date: payload.date,
+              notes: payload.notes,
+              institution_id: payload.institution_id ?? existingRow.institution_id,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', existingRow.id)
+            .select()
+            .single();
+          if (error) throw error;
+          return res.status(200).json({ data });
+        }
         const { data, error } = await supabaseAdmin.from('written_exams').insert(payload).select().single();
         if (error) throw error;
         return res.status(200).json({ data });
@@ -138,6 +165,31 @@ export default async function handler(req, res) {
       };
       if (!payload.subject) {
         return res.status(400).json({ error: 'subject_required' });
+      }
+
+      const { data: existingStaff } = await supabaseAdmin
+        .from('written_exams')
+        .select('*')
+        .eq('student_id', sidRaw)
+        .eq('subject', payload.subject)
+        .eq('semester', payload.semester)
+        .eq('exam_type', payload.exam_type)
+        .maybeSingle();
+      if (existingStaff) {
+        const { data, error } = await supabaseAdmin
+          .from('written_exams')
+          .update({
+            score: payload.score,
+            date: payload.date,
+            notes: payload.notes,
+            institution_id: payload.institution_id ?? existingStaff.institution_id,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existingStaff.id)
+          .select()
+          .single();
+        if (error) throw error;
+        return res.status(200).json({ data });
       }
 
       const { data, error } = await supabaseAdmin.from('written_exams').insert(payload).select().single();

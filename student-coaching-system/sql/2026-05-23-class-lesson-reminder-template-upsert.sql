@@ -1,6 +1,6 @@
 -- Grup canlı ders ~10 dk hatırlatma: şablon satırı + message_logs.related_id için FK esnetmesi
 -- Cron: /api/cron/class-lesson-reminders (Vercel her 5 dk). Oturum: status=scheduled, reminder_sent=false,
---       ders başlangıcına kalan süre (0, 10] dakika aralığında iken gönderim.
+--       ders başlangıcına kalan süre (0, 10] dakika; ardışık aynı sınıf/konu/link için tek hatırlatma.
 
 -- Opsiyonel: kanal ve aktiflik (cron bu alanları okuyabilir)
 ALTER TABLE message_templates ADD COLUMN IF NOT EXISTS channel TEXT;

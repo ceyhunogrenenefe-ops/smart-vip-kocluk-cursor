@@ -5,8 +5,13 @@ import { apiFetch } from '../../lib/session';
 interface CenterSummary {
   sent_today: number;
   failed_today: number;
+  sent_7d?: number;
+  failed_7d?: number;
   pending_messages_today: number;
   pending_estimate: number;
+  pending_class_reminder_due_now?: number;
+  pending_class_reminder_waiting?: number;
+  pending_class_reminder_missed?: number;
   students_missing_phone: number;
   active_templates_count: number;
 }
@@ -28,6 +33,10 @@ interface CronRow {
   last_skipped: string | null;
   messages_sent: number;
   messages_failed: number;
+  runs_today?: number;
+  messages_sent_today?: number;
+  messages_failed_today?: number;
+  last_skip_today?: string | null;
   state: string;
   age_minutes: number | null;
   awaiting_first_run?: boolean;
@@ -46,6 +55,9 @@ interface TemplateRow {
   meta_template_name: string | null;
   meta_template_language: string | null;
   whatsapp_template_status: string | null;
+  success_today?: number;
+  failed_today?: number;
+  failed_today_operational?: number;
   total_sent_window: number;
   success_count: number;
   failed_count: number;
@@ -58,6 +70,7 @@ interface LogRow {
   id: string;
   student_id: string | null;
   kind: string;
+  kind_label?: string;
   phone: string | null;
   status: string;
   sent_at: string;
@@ -74,6 +87,7 @@ interface LiveEv {
   at: string;
   status: string;
   kind: string;
+  kind_label?: string;
   student_name: string | null;
   error_code: string | null;
   message: string | null;
@@ -100,6 +114,7 @@ interface CenterPayload {
   summary: CenterSummary;
   cron_status: CronRow[];
   cron_recent_errors: CronErrorRow[];
+  cron_table_missing?: boolean;
   templates: TemplateRow[];
   logs: LogRow[];
   live_events: LiveEv[];
@@ -113,7 +128,9 @@ const POLL_MS = 8000;
 function badgeTpl(t: TemplateRow) {
   if (t.badge === 'inactive') return { emoji: '🔴', label: 'Pasif' };
   if (t.badge === 'meta_missing') return { emoji: '🟡', label: 'Meta eksik' };
-  if (t.badge === 'unhealthy') return { emoji: '🟠', label: 'Hatalı' };
+  if (t.badge === 'unhealthy') return { emoji: '🟠', label: 'Bugün hatalı' };
+  if (t.badge === 'warning') return { emoji: '🟡', label: '7 gün zayıf' };
+  if ((t.success_today ?? 0) > 0) return { emoji: '🟢', label: 'Bugün aktif' };
   return { emoji: '🟢', label: 'Aktif' };
 }
 
@@ -204,6 +221,11 @@ export default function WhatsAppMerkeziPanel() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    const hash = window.location.hash.replace('#', '').trim();
+    if (hash === 'cron') setInnerTab('cron');
+  }, []);
 
   useEffect(() => {
     const t = window.setInterval(() => void load(), POLL_MS);
@@ -333,13 +355,19 @@ export default function WhatsAppMerkeziPanel() {
       {/* ÖZET */}
       {innerTab === 'ozet' && payload && summary ? (
         <div className="space-y-5">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             {[
-              { emoji: '🟢', title: 'Bugün gönderilen mesaj', val: summary.sent_today },
-              { emoji: '🔴', title: 'Başarısız mesaj', val: summary.failed_today },
-              { emoji: '🟡', title: 'Bekleyen mesaj', val: summary.pending_messages_today ?? 0 },
-              { emoji: '⚪', title: 'Telefonu eksik öğrenci', val: summary.students_missing_phone },
-              { emoji: '📨', title: 'Aktif şablon sayısı', val: summary.active_templates_count }
+              { emoji: '🟢', title: 'Bugün gönderilen', val: summary.sent_today, sub: 'sent_at · İstanbul' },
+              { emoji: '🔴', title: 'Bugün başarısız', val: summary.failed_today, sub: 'gerçek + telefon hatası' },
+              {
+                emoji: '📊',
+                title: '7 gün gönderilen',
+                val: summary.sent_7d ?? '—',
+                sub: 'test hariç'
+              },
+              { emoji: '🟡', title: 'Bekleyen', val: summary.pending_messages_today ?? 0, sub: 'pending' },
+              { emoji: '⚪', title: 'Telefon eksik', val: summary.students_missing_phone, sub: 'öğrenci' },
+              { emoji: '📨', title: 'Aktif şablon', val: summary.active_templates_count, sub: 'Meta adı var' }
             ].map((c) => (
               <div
                 key={c.title}
@@ -348,20 +376,94 @@ export default function WhatsAppMerkeziPanel() {
                 <div className="text-2xl">{c.emoji}</div>
                 <p className="mt-2 text-xs font-medium text-slate-600">{c.title}</p>
                 <p className="mt-1 text-3xl font-bold tabular-nums text-slate-900">{c.val}</p>
+                <p className="mt-1 text-[10px] text-slate-400">{c.sub}</p>
               </div>
             ))}
           </div>
 
-          {summary.pending_estimate > 0 ? (
-            <p className="text-sm text-amber-800">
-              🟡 Yaklaşan <strong>grup canlı ders</strong> oturumlarında (<code className="text-xs">class_sessions</code>)
-              hatırlatma henüz gitmemiş (tahmini): <strong>{summary.pending_estimate}</strong>
-              <span className="block mt-1 text-xs text-amber-900/90">
-                Birebir dersler (<code className="text-[10px]">teacher_lessons</code>) bu sayıya dahil değildir; onlar için
-                cron <code className="text-[10px]">lesson-reminders</code> + şablonlar{' '}
-                <code className="text-[10px]">lesson_reminder</code> / <code className="text-[10px]">lesson_reminder_parent</code>.
-              </span>
-            </p>
+          {payload.cron_table_missing ? (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+              <strong>Cron tablosu eksik.</strong> Supabase SQL:{' '}
+              <code className="text-xs">2026-05-25-cron-run-log.sql</code> — cron özeti boş kalır; mesaj sayıları{' '}
+              <code className="text-xs">message_logs</code> üzerinden doğru hesaplanır.
+            </div>
+          ) : null}
+
+          {(summary.pending_estimate > 0 ||
+            (summary.pending_class_reminder_due_now ?? 0) > 0 ||
+            (summary.pending_class_reminder_missed ?? 0) > 0) ? (
+            <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950 space-y-2">
+              <p>
+                <strong>Grup dersi hatırlatmaları</strong> — hatırlatma her oturum için{' '}
+                <strong>ders başlamadan en geç 45 dk içinde bir kez</strong> gider (cron 5 dk&apos;da bir kontrol eder; birebir ders hatırlatması ile aynı mantık).
+              </p>
+              <ul className="list-disc pl-5 text-xs space-y-1">
+                {(summary.pending_class_reminder_due_now ?? 0) > 0 ? (
+                  <li>
+                    <strong className="text-emerald-800">
+                      Şimdi gönderilecek: {summary.pending_class_reminder_due_now}
+                    </strong>{' '}
+                    oturum (hatırlatma penceresinde)
+                  </li>
+                ) : (
+                  <li>Şu an hatırlatma penceresinde oturum yok — beklenen; ders yaklaşınca cron gönderir.</li>
+                )}
+                {(summary.pending_class_reminder_waiting ?? 0) > 0 ? (
+                  <li>
+                    <strong>{summary.pending_class_reminder_waiting}</strong> oturum daha var — henüz
+                    hatırlatma saati gelmedi (normal)
+                  </li>
+                ) : null}
+                {(summary.pending_class_reminder_missed ?? 0) > 0 ? (
+                  <li className="text-amber-900">
+                    <strong>{summary.pending_class_reminder_missed}</strong> oturum dersi başladı ama{' '}
+                    <code className="text-[10px]">reminder_sent=false</code> — telefon/cron hatası veya atlanmış
+                    olabilir
+                  </li>
+                ) : null}
+              </ul>
+            </div>
+          ) : null}
+
+          {(payload.cron_status || []).length > 0 ? (
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3">
+                <div>
+                  <h3 className="font-semibold text-slate-900">Cron özeti</h3>
+                  <p className="text-xs text-slate-500">Zamanlanmış WhatsApp işlerinin son durumu</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setInnerTab('cron')}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Tümünü gör →
+                </button>
+              </div>
+              <div className="grid gap-2 p-4 sm:grid-cols-2 lg:grid-cols-3">
+                {(payload.cron_status || []).slice(0, 6).map((c) => {
+                  const b = badgeCron(c.state);
+                  return (
+                    <div
+                      key={c.key}
+                      className="rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2 text-sm"
+                    >
+                      <p className="font-medium text-slate-800">
+                        {b.emoji} {c.label}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {c.last_run_at ? new Date(c.last_run_at).toLocaleString('tr-TR') : 'Kayıt yok'}
+                        {' · '}
+                        {b.label}
+                        {(c.messages_sent_today ?? 0) > 0 ? (
+                          <span className="text-emerald-700"> · bugün +{c.messages_sent_today} mesaj</span>
+                        ) : null}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           ) : null}
 
           {(payload.cron_recent_errors || []).length > 0 ? (
@@ -393,7 +495,7 @@ export default function WhatsAppMerkeziPanel() {
                   <li key={ev.id} className="flex gap-3 px-4 py-2.5">
                     <span className="shrink-0 text-lg">{ev.status === 'sent' ? '🟢' : '🔴'}</span>
                     <div>
-                      <p className="font-medium text-slate-800">{ev.kind}</p>
+                      <p className="font-medium text-slate-800">{ev.kind_label || ev.kind}</p>
                       <p className="text-slate-600">
                         {ev.student_name || '—'}
                         {ev.status === 'failed' && ev.error_code ? (
@@ -427,10 +529,12 @@ export default function WhatsAppMerkeziPanel() {
                   <th className="px-3 py-3">Meta şablon adı</th>
                   <th className="px-3 py-3">Dil</th>
                   <th className="px-3 py-3">Aktif</th>
+                  <th className="px-3 py-3">Bugün ✓</th>
+                  <th className="px-3 py-3">Bugün ✗</th>
                   <th className="px-3 py-3">Son gönderim</th>
-                  <th className="px-3 py-3 text-right">Toplam</th>
-                  <th className="px-3 py-3 text-right">Başarılı</th>
-                  <th className="px-3 py-3 text-right">Başarısız</th>
+                  <th className="px-3 py-3 text-right">7 gün</th>
+                  <th className="px-3 py-3 text-right">7g ✓</th>
+                  <th className="px-3 py-3 text-right">7g ✗</th>
                   <th className="px-3 py-3">Test</th>
                 </tr>
               </thead>
@@ -447,6 +551,15 @@ export default function WhatsAppMerkeziPanel() {
                       <td className="px-3 py-3 font-mono text-xs">{t.meta_template_name || '—'}</td>
                       <td className="px-3 py-3">{t.meta_template_language || '—'}</td>
                       <td className="px-3 py-3">{t.is_active ? 'Evet' : 'Hayır'}</td>
+                      <td className="px-3 py-3 text-right tabular-nums text-emerald-700">{t.success_today ?? 0}</td>
+                      <td className="px-3 py-3 text-right tabular-nums text-red-700">
+                        {t.failed_today ?? 0}
+                        {(t.failed_today_operational ?? 0) > 0 ? (
+                          <span className="block text-[10px] text-slate-400">
+                            ({t.failed_today_operational} telefon)
+                          </span>
+                        ) : null}
+                      </td>
                       <td className="px-3 py-3 text-xs text-slate-600">
                         {t.last_sent_at ? new Date(t.last_sent_at).toLocaleString('tr-TR') : '—'}
                       </td>
@@ -517,11 +630,19 @@ export default function WhatsAppMerkeziPanel() {
                       <dd>{c.age_minutes != null ? Math.round(c.age_minutes) : '—'}</dd>
                     </div>
                     <div>
-                      <dt className="text-slate-500">Gönderilen</dt>
+                      <dt className="text-slate-500">Bugün gönderilen</dt>
+                      <dd className="font-semibold text-emerald-800">{c.messages_sent_today ?? 0}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">Bugün tetik</dt>
+                      <dd>{c.runs_today ?? 0} kez</dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">Son tur</dt>
                       <dd className="text-emerald-800">{c.messages_sent}</dd>
                     </div>
                     <div>
-                      <dt className="text-slate-500">Hata</dt>
+                      <dt className="text-slate-500">Son tur hata</dt>
                       <dd className="text-red-800">{c.messages_failed}</dd>
                     </div>
                     <div className="col-span-2">
@@ -579,7 +700,7 @@ export default function WhatsAppMerkeziPanel() {
                     <td className="px-3 py-2">{r.student_name || '—'}</td>
                     {isAdmin ? <td className="px-3 py-2 text-xs">{r.coach_name || '—'}</td> : null}
                     <td className="px-3 py-2 text-xs">{r.recipient}</td>
-                    <td className="px-3 py-2 font-mono text-xs">{r.kind}</td>
+                    <td className="px-3 py-2 font-mono text-xs">{r.kind_label || r.kind}</td>
                     <td className="px-3 py-2 font-mono text-xs">{r.phone || '—'}</td>
                     <td className="px-3 py-2 text-xs text-slate-600">
                       {r.sent_at ? new Date(r.sent_at).toLocaleString('tr-TR') : '—'}

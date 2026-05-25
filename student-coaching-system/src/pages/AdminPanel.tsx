@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch, getAuthToken } from '../lib/session';
+import { buildLiveCountsByInstitution, countApiUsersByRole } from '../lib/userStats';
 import { Organization, OrganizationPlan } from '../types';
 import {
   Building2,
@@ -160,10 +161,11 @@ export default function AdminPanel() {
         const [uJson, cJson] = await Promise.all([uRes.json().catch(() => ({})), cRes.json().catch(() => ({}))]);
         const users = Array.isArray(uJson.data) ? uJson.data : [];
         const classes = Array.isArray(cJson.data) ? cJson.data : [];
+        const roleCounts = countApiUsersByRole(users);
         const next = {
-          students: users.filter((u: { role?: string }) => u.role === 'student').length,
-          teachers: users.filter((u: { role?: string }) => u.role === 'teacher').length,
-          coaches: users.filter((u: { role?: string }) => u.role === 'coach').length,
+          students: roleCounts.students,
+          teachers: roleCounts.teachers,
+          coaches: roleCounts.coaches,
           classes: classes.length
         };
         if (!cancelled) setGlobalCounts(next);
@@ -186,16 +188,7 @@ export default function AdminPanel() {
         const uRes = await apiFetch('/api/users');
         const uJson = await uRes.json().catch(() => ({}));
         const users = Array.isArray(uJson.data) ? uJson.data : [];
-        const m: Record<string, { students: number; coaches: number; teachers: number }> = {};
-        for (const u of users as { institution_id?: string | null; role?: string }[]) {
-          const iid = u.institution_id;
-          if (!iid || typeof iid !== 'string') continue;
-          if (!m[iid]) m[iid] = { students: 0, coaches: 0, teachers: 0 };
-          const r = String(u.role || '');
-          if (r === 'student') m[iid].students += 1;
-          else if (r === 'coach') m[iid].coaches += 1;
-          else if (r === 'teacher') m[iid].teachers += 1;
-        }
+        const m = buildLiveCountsByInstitution(users);
         if (!cancelled) setLiveCountsByInst(m);
       } catch {
         if (!cancelled) setLiveCountsByInst({});

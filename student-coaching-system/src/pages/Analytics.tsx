@@ -2,13 +2,19 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
-import { formatClassLevelLabel } from '../types';
+import { formatClassLevelLabel, type WeeklyEntry } from '../types';
 import { userRoleTags } from '../config/rolePermissions';
 import { resolveStudentRecordId } from '../lib/coachResolve';
-import { eachDayOfInterval, parseISO, differenceInCalendarDays } from 'date-fns';
-import { fetchCoachWeeklyGoalsInRange, type CoachWeeklyGoalRow } from '../lib/weeklyPlannerApi';
+import { eachDayOfInterval, differenceInCalendarDays } from 'date-fns';
+import type { CoachWeeklyGoalRow, WeeklyPlannerEntryRow } from '../lib/weeklyPlannerApi';
+import { loadStudentCoachAnalyticsBundle } from '../lib/studentCoachQuestionStats';
 import { getAuthToken } from '../lib/session';
-import { coachSubjectProratedTargetsInRange, totalCoachQuestionTargetsInRange } from '../lib/coachGoalAnalytics';
+import { formatWhatsAppPhone, sendWhatsAppOutbound } from '../lib/whatsappOutbound';
+import {
+  computeCoachGoalRangeAnalytics,
+  coachSubjectProgressInRange,
+  totalCoachQuestionTargetsInRange,
+} from '../lib/coachGoalAnalytics';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import {
@@ -29,7 +35,8 @@ import {
   Timer,
   FileText,
   MessageCircle,
-  Download
+  Download,
+  CalendarCheck,
 } from 'lucide-react';
 import {
   BarChart,
@@ -80,8 +87,13 @@ export default function Analytics() {
   /** Tüm kayıtlar; grafikte tarih ekseni için son 90 gün kullanılır */
   const [useAllTime, setUseAllTime] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [parentShareBusy, setParentShareBusy] = useState(false);
+  const [parentShareNotice, setParentShareNotice] = useState('');
+  const [parentShareWaUrl, setParentShareWaUrl] = useState<string | null>(null);
   /** Tek öğrenci + tarih aralığı: analiz KPI ve grafiklerde koç hedefi (oransal) */
   const [coachGoalsForAnalytics, setCoachGoalsForAnalytics] = useState<CoachWeeklyGoalRow[]>([]);
+  const [plannerEntriesForAnalytics, setPlannerEntriesForAnalytics] = useState<WeeklyPlannerEntryRow[]>([]);
+  const [weeklyEntriesForCoachAnalytics, setWeeklyEntriesForCoachAnalytics] = useState<WeeklyEntry[]>([]);
   const reportRef = useRef<HTMLDivElement | null>(null);
 
   const tags = useMemo(() => (effectiveUser ? userRoleTags(effectiveUser) : []), [effectiveUser]);
@@ -104,6 +116,8 @@ export default function Analytics() {
     let cancelled = false;
     if (!selectedStudentId || useAllTime || !getAuthToken()) {
       setCoachGoalsForAnalytics([]);
+      setPlannerEntriesForAnalytics([]);
+      setWeeklyEntriesForCoachAnalytics([]);
       return () => {
         cancelled = true;
       };
@@ -112,16 +126,25 @@ export default function Analytics() {
     const rt = rangeEnd.slice(0, 10);
     if (!rf || !rt || rf > rt) {
       setCoachGoalsForAnalytics([]);
+      setPlannerEntriesForAnalytics([]);
+      setWeeklyEntriesForCoachAnalytics([]);
       return () => {
         cancelled = true;
       };
     }
-    fetchCoachWeeklyGoalsInRange(selectedStudentId, rf, rt)
-      .then((data) => {
-        if (!cancelled) setCoachGoalsForAnalytics(data);
+    loadStudentCoachAnalyticsBundle(selectedStudentId, rf, rt)
+      .then((bundle) => {
+        if (cancelled) return;
+        setCoachGoalsForAnalytics(bundle.goals);
+        setPlannerEntriesForAnalytics(bundle.plannerEntries);
+        setWeeklyEntriesForCoachAnalytics(bundle.weeklyEntries);
       })
       .catch(() => {
-        if (!cancelled) setCoachGoalsForAnalytics([]);
+        if (!cancelled) {
+          setCoachGoalsForAnalytics([]);
+          setPlannerEntriesForAnalytics([]);
+          setWeeklyEntriesForCoachAnalytics([]);
+        }
       });
     return () => {
       cancelled = true;
@@ -239,18 +262,57 @@ export default function Analytics() {
     return { rangeFrom: rf, rangeTo: rt };
   }, [useAllTime, rangeStart, rangeEnd]);
 
+  const coachGoalAnalytics = useMemo(() => {
+    if (!selectedStudentId || !coachRangeYmd) return null;
+    if (
+      coachGoalsForAnalytics.length === 0 &&
+      !plannerEntriesForAnalytics.some((e) => e.coach_goal_id)
+    ) {
+      return null;
+    }
+    return computeCoachGoalRangeAnalytics(
+      coachGoalsForAnalytics,
+      weeklyEntriesForCoachAnalytics,
+      coachRangeYmd.rangeFrom,
+      coachRangeYmd.rangeTo,
+      plannerEntriesForAnalytics
+    );
+  }, [
+    selectedStudentId,
+    coachGoalsForAnalytics,
+    coachRangeYmd,
+    weeklyEntriesForCoachAnalytics,
+    plannerEntriesForAnalytics,
+  ]);
+
   // Öğrenci istatistikleri
   const studentStats = useMemo(() => {
     if (!selectedStudentId) return null;
     const rf = coachRangeYmd?.rangeFrom;
     const rt = coachRangeYmd?.rangeTo;
-    return computeStatsFromEntries(
+    const base = computeStatsFromEntries(
       scopedEntries,
       coachGoalsForAnalytics,
       rf ?? undefined,
       rt ?? undefined
     );
-  }, [selectedStudentId, scopedEntries, coachGoalsForAnalytics, coachRangeYmd]);
+    if (!coachGoalAnalytics || !coachRangeYmd) return base;
+    const coachQuota = totalCoachQuestionTargetsInRange(
+      coachGoalsForAnalytics,
+      coachRangeYmd.rangeFrom,
+      coachRangeYmd.rangeTo
+    );
+    const totalTarget = coachQuota > 0 ? coachQuota : coachGoalAnalytics.questionTarget;
+    const totalSolved = coachGoalAnalytics.questionCompleted;
+    const realizationRate =
+      totalTarget > 0 ? Math.min(999, Math.round((totalSolved / totalTarget) * 100)) : 0;
+    return {
+      ...base,
+      totalTarget,
+      totalSolved,
+      realizationRate,
+    };
+  }, [selectedStudentId, scopedEntries, coachGoalsForAnalytics, coachRangeYmd, coachGoalAnalytics]);
 
   // Okuma istatistikleri
   const readingStats = useMemo(() => {
@@ -286,19 +348,33 @@ export default function Analytics() {
     }).filter(s => s.sem1Avg > 0 || s.sem2Avg > 0);
   }, [selectedStudentId, writtenExamScores, getWrittenExamSubjectsForStudent, writtenExamSubjectsByStudent]);
 
-  // Ders bazlı başarı analizi
+  // Ders bazlı başarı analizi (koç hedefi: günlere oransal kota + birime göre gerçekleşen)
   const subjectAnalysis = useMemo(() => {
-    const coachBySub =
+    if (
       selectedStudentId &&
       !useAllTime &&
       coachGoalsForAnalytics.length > 0 &&
       coachRangeYmd
-        ? coachSubjectProratedTargetsInRange(
-            coachGoalsForAnalytics,
-            coachRangeYmd.rangeFrom,
-            coachRangeYmd.rangeTo
-          )
-        : {};
+    ) {
+      return coachSubjectProgressInRange(
+        coachGoalsForAnalytics,
+        weeklyEntriesForCoachAnalytics,
+        coachRangeYmd.rangeFrom,
+        coachRangeYmd.rangeTo,
+        plannerEntriesForAnalytics
+      ).map((row) => ({
+        subject: row.subject,
+        başarı: row.successPct,
+        hedef: row.target,
+        çözülen: row.completed,
+        birim: row.unitLabel,
+        gerçekleşme: row.realizationPct,
+        doğru: row.correct,
+        yanlış: row.wrong,
+        boş: row.blank,
+        entry: 0,
+      }));
+    }
 
     const subjectStats = scopedEntries.reduce((acc, entry) => {
       if (!acc[entry.subject]) {
@@ -308,7 +384,7 @@ export default function Analytics() {
           blank: 0,
           solved: 0,
           target: 0,
-          entries: 0
+          entries: 0,
         };
       }
       acc[entry.subject].correct += entry.correctAnswers;
@@ -318,23 +394,29 @@ export default function Analytics() {
       acc[entry.subject].target += entry.targetQuestions;
       acc[entry.subject].entries += 1;
       return acc;
-    }, {} as { [key: string]: any });
+    }, {} as { [key: string]: { correct: number; wrong: number; blank: number; solved: number; target: number; entries: number } });
 
-    return Object.entries(subjectStats).map(([subject, stats]: [string, any]) => {
-      const ct = coachBySub[subject];
-      const hedef = ct > 0 ? ct : stats.target;
-      return {
-        subject,
-        başarı: stats.solved > 0 ? Math.round((stats.correct / stats.solved) * 100) : 0,
-        hedef,
-        çözülen: stats.solved,
-        doğru: stats.correct,
-        yanlış: stats.wrong,
-        boş: stats.blank,
-        entry: stats.entries
-      };
-    }).sort((a, b) => b.başarı - a.başarı);
-  }, [scopedEntries, selectedStudentId, useAllTime, coachGoalsForAnalytics, coachRangeYmd]);
+    return Object.entries(subjectStats).map(([subject, stats]) => ({
+      subject,
+      başarı: stats.solved > 0 ? Math.round((stats.correct / stats.solved) * 100) : 0,
+      hedef: stats.target,
+      çözülen: stats.solved,
+      birim: 'Soru',
+      gerçekleşme: stats.target > 0 ? Math.round((stats.solved / stats.target) * 100) : 0,
+      doğru: stats.correct,
+      yanlış: stats.wrong,
+      boş: stats.blank,
+      entry: stats.entries,
+    })).sort((a, b) => b.başarı - a.başarı);
+  }, [
+    selectedStudentId,
+    useAllTime,
+    coachGoalsForAnalytics,
+    coachRangeYmd,
+    plannerEntriesForAnalytics,
+    weeklyEntriesForCoachAnalytics,
+    scopedEntries,
+  ]);
 
   // En zayıf dersler
   const weakSubjects = subjectAnalysis.slice(-3);
@@ -459,14 +541,8 @@ export default function Analytics() {
     }
   }, [useAllTime, rangeStart, rangeEnd]);
 
-  const shareWithParent = () => {
-    if (!selectedStudent) return;
-    const parentPhone = (selectedStudent.parentPhone || '').replace(/\D/g, '');
-    if (!parentPhone) {
-      alert('Bu öğrenci için veli telefonu tanımlı değil.');
-      return;
-    }
-
+  const buildParentAnalyticsMessage = useCallback(() => {
+    if (!selectedStudent) return '';
     const studentEntries = applyRangeFilter(
       weeklyEntries.filter((entry) => entry.studentId === selectedStudent.id)
     );
@@ -478,15 +554,80 @@ export default function Analytics() {
       useAllTime ? undefined : rf,
       useAllTime ? undefined : rt
     );
-    const periodLabel = useAllTime ? 'Tüm veri' : `Tarih aralığı: ${rangeLabel}`;
-    const text =
-      `Merhaba, ${selectedStudent.name} icin ${periodLabel} analiz ozetini paylasiyorum.%0A` +
-      `Toplam hedef: ${s.totalTarget}%0A` +
-      `Toplam cozulen: ${s.totalSolved}%0A` +
-      `Dogru: ${s.totalCorrect} | Yanlis: ${s.totalWrong} | Bos: ${s.totalBlank}%0A` +
-      `Gerceklesme: %${s.realizationRate} | Basari: %${s.successRate}`;
+    const coachAgg =
+      !useAllTime && rf && rt && coachGoalsForAnalytics.length > 0
+        ? computeCoachGoalRangeAnalytics(
+            coachGoalsForAnalytics,
+            weeklyEntriesForCoachAnalytics.length > 0
+              ? weeklyEntriesForCoachAnalytics
+              : studentEntries,
+            rf,
+            rt,
+            plannerEntriesForAnalytics
+          )
+        : null;
+    const periodLabel = useAllTime ? 'Tüm veri' : rangeLabel;
+    const coachLines = coachAgg
+      ? [
+          coachAgg.questionTarget > 0
+            ? `• Soru — koç hedefi: ${coachAgg.questionTarget}, çözülen: ${coachAgg.questionCompleted} (%${coachAgg.questionRealizationPct})`
+            : null,
+          coachAgg.paragraf.target > 0 || coachAgg.paragraf.completed > 0
+            ? `• Paragraf: ${coachAgg.paragraf.completed}/${coachAgg.paragraf.target} (%${coachAgg.paragraf.realizationPct})`
+            : null,
+          coachAgg.problem.target > 0 || coachAgg.problem.completed > 0
+            ? `• Problem: ${coachAgg.problem.completed}/${coachAgg.problem.target} (%${coachAgg.problem.realizationPct})`
+            : null,
+          coachAgg.sayfa.target > 0 || coachAgg.sayfa.completed > 0
+            ? `• Kitap/sayfa: ${coachAgg.sayfa.completed}/${coachAgg.sayfa.target} (%${coachAgg.sayfa.realizationPct})`
+            : null,
+        ]
+          .filter(Boolean)
+          .join('\n')
+      : '';
+    return (
+      `Merhaba,\n\n${selectedStudent.name} için ${periodLabel} analiz özetini paylaşıyorum.\n\n` +
+      (coachLines ? `${coachLines}\n` : `• Toplam hedef: ${s.totalTarget}\n• Toplam çözülen: ${s.totalSolved}\n• Gerçekleşme: %${s.realizationRate}\n`) +
+      `• Doğru: ${s.totalCorrect} | Yanlış: ${s.totalWrong} | Boş: ${s.totalBlank}\n` +
+      `• Doğruluk (başarı): %${s.successRate}\n\n` +
+      `Smart VIP Koçluk`
+    );
+  }, [
+    selectedStudent,
+    weeklyEntries,
+    coachGoalsForAnalytics,
+    coachRangeYmd,
+    useAllTime,
+    rangeLabel,
+    applyRangeFilter,
+  ]);
 
-    window.open(`https://wa.me/${parentPhone}?text=${text}`, '_blank');
+  const shareWithParent = async () => {
+    setParentShareNotice('');
+    setParentShareWaUrl(null);
+    if (!selectedStudent || !effectiveUser?.id) return;
+    const parentPhone = formatWhatsAppPhone(selectedStudent.parentPhone || '');
+    if (!parentPhone) {
+      setParentShareNotice('Bu öğrenci için veli telefonu tanımlı değil.');
+      return;
+    }
+    const message = buildParentAnalyticsMessage();
+    if (!message) return;
+
+    setParentShareBusy(true);
+    try {
+      const result = await sendWhatsAppOutbound({
+        coachUserId: effectiveUser.id,
+        targetPhone: parentPhone,
+        message
+      });
+      setParentShareNotice(result.notice);
+      setParentShareWaUrl(result.waUrl ?? null);
+    } catch (e) {
+      setParentShareNotice(e instanceof Error ? e.message : 'Mesaj gönderilemedi');
+    } finally {
+      setParentShareBusy(false);
+    }
   };
 
   const generateAnalyticsPdf = async () => {
@@ -719,20 +860,42 @@ export default function Analytics() {
       </div>
 
       {effectiveUser?.role === 'coach' && selectedStudent && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <p className="text-sm text-gray-600">
-              Veli ile analiz paylaşımı ({selectedStudent.name}) — seçili aralık: {rangeLabel}
+              Veli ile analiz paylaşımı ({selectedStudent.name}) — seçili aralık: {rangeLabel}. Bağlı WhatsApp
+              gateway varsa doğrudan gönderilir; yoksa Twilio veya wa.me kullanılır.
             </p>
             <button
               type="button"
-              onClick={() => shareWithParent()}
-              className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm inline-flex items-center gap-2"
+              onClick={() => void shareWithParent()}
+              disabled={parentShareBusy}
+              className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm inline-flex items-center gap-2"
             >
               <MessageCircle className="w-4 h-4" />
-              Veliye WhatsApp gönder
+              {parentShareBusy ? 'Gönderiliyor…' : 'Veliye WhatsApp gönder'}
             </button>
           </div>
+          {parentShareNotice ? (
+            <div
+              role="status"
+              className="rounded-lg border border-green-100 bg-green-50 px-3 py-2 text-sm text-green-900 whitespace-pre-wrap"
+            >
+              {parentShareNotice}
+              {parentShareWaUrl ? (
+                <p className="mt-2">
+                  <a
+                    href={parentShareWaUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium underline text-green-800"
+                  >
+                    WhatsApp bağlantısını aç
+                  </a>
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -769,6 +932,65 @@ export default function Analytics() {
         </div>
       )}
 
+      {coachGoalAnalytics && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+          <p className="text-sm text-gray-600 mb-3">
+            Koç hedefleri ({rangeLabel}) — koçun verdiği kota; çözülen günlük kayıt (takvime bağlı değil).
+          </p>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {[
+              {
+                key: 'soru',
+                label: 'Soru',
+                target: coachGoalAnalytics.questionTarget,
+                completed: coachGoalAnalytics.questionCompleted,
+                pct: coachGoalAnalytics.questionRealizationPct,
+                color: 'text-blue-600',
+              },
+              {
+                key: 'paragraf',
+                label: 'Paragraf',
+                target: coachGoalAnalytics.paragraf.target,
+                completed: coachGoalAnalytics.paragraf.completed,
+                pct: coachGoalAnalytics.paragraf.realizationPct,
+                color: 'text-violet-600',
+              },
+              {
+                key: 'problem',
+                label: 'Problem',
+                target: coachGoalAnalytics.problem.target,
+                completed: coachGoalAnalytics.problem.completed,
+                pct: coachGoalAnalytics.problem.realizationPct,
+                color: 'text-amber-600',
+              },
+              {
+                key: 'sayfa',
+                label: 'Kitap / sayfa',
+                target: coachGoalAnalytics.sayfa.target,
+                completed: coachGoalAnalytics.sayfa.completed,
+                pct: coachGoalAnalytics.sayfa.realizationPct,
+                color: 'text-emerald-600',
+              },
+            ]
+              .filter((b) => b.target > 0 || b.completed > 0)
+              .map((b) => (
+                <div key={b.key} className="rounded-lg border border-slate-100 bg-slate-50/80 p-3 space-y-1">
+                  <p className="text-xs text-gray-500">{b.label}</p>
+                  <p className="text-sm text-slate-700">
+                    Koç hedefi: <span className={`font-bold ${b.color}`}>{b.target}</span>
+                  </p>
+                  <p className="text-sm text-slate-800">
+                    Çözülen: <span className={`font-bold ${b.color}`}>{b.completed}</span>
+                  </p>
+                  <p className="text-xs font-semibold text-slate-600">
+                    Oran: %{b.pct}
+                  </p>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
       <StudyInsightWidgets
         entries={scopedEntries}
         preFiltered
@@ -780,6 +1002,8 @@ export default function Analytics() {
                 rangeFrom: coachRangeYmd.rangeFrom,
                 rangeTo: coachRangeYmd.rangeTo,
                 goals: coachGoalsForAnalytics,
+                plannerEntries: plannerEntriesForAnalytics,
+                weeklyEntries: weeklyEntriesForCoachAnalytics,
               }
             : undefined
         }
@@ -794,47 +1018,73 @@ export default function Analytics() {
 
       {/* Genel İstatistikler */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Target className="w-5 h-5 text-blue-600" />
-            <span className="text-sm text-gray-500">
-              Toplam Hedef ({rangeLabel})
-              {selectedStudentId && coachRangeYmd && coachGoalsForAnalytics.length > 0
-                ? ' · koç'
-                : ''}
-            </span>
-          </div>
-          <p className="text-2xl font-bold text-slate-800">
-            {selectedStudentId && studentStats
-              ? studentStats.totalTarget
-              : scopedEntries.reduce((sum, e) => sum + e.targetQuestions, 0)}
-          </p>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <BarChart3 className="w-5 h-5 text-green-600" />
-            <span className="text-sm text-gray-500">Toplam Çözülen ({rangeLabel})</span>
-          </div>
-          <p className="text-2xl font-bold text-slate-800">
-            {scopedEntries.reduce((sum, e) => sum + e.solvedQuestions, 0)}
-          </p>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <TrendingUp className="w-5 h-5 text-purple-600" />
-            <span className="text-sm text-gray-500">Gerçekleşme %</span>
-          </div>
-          <p className="text-2xl font-bold text-slate-800">
-            %{selectedStudentId && studentStats
-              ? studentStats.realizationRate
-              : scopedEntries.reduce((sum, e) => sum + e.targetQuestions, 0) > 0
-                ? Math.round(
-                    (scopedEntries.reduce((sum, e) => sum + e.solvedQuestions, 0) /
-                      scopedEntries.reduce((sum, e) => sum + e.targetQuestions, 0)) * 100
-                  )
-                : 0}
-          </p>
-        </div>
+        {coachGoalAnalytics ? (
+          <>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Target className="w-5 h-5 text-blue-600" />
+                <span className="text-sm text-gray-500">Koç hedefi ({rangeLabel})</span>
+              </div>
+              <p className="text-2xl font-bold text-slate-800">{coachGoalAnalytics.questionTarget}</p>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <BarChart3 className="w-5 h-5 text-green-600" />
+                <span className="text-sm text-gray-500">Çözülen soru</span>
+              </div>
+              <p className="text-2xl font-bold text-green-700">{coachGoalAnalytics.questionCompleted}</p>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <TrendingUp className="w-5 h-5 text-purple-600" />
+                <span className="text-sm text-gray-500">Gerçekleşme oranı</span>
+              </div>
+              <p className="text-2xl font-bold text-slate-800">%{coachGoalAnalytics.questionRealizationPct}</p>
+              <p className="text-xs text-gray-500 mt-1">
+                {coachGoalAnalytics.questionCompleted} / {coachGoalAnalytics.questionTarget}
+              </p>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Target className="w-5 h-5 text-blue-600" />
+                <span className="text-sm text-gray-500">Toplam Hedef ({rangeLabel})</span>
+              </div>
+              <p className="text-2xl font-bold text-slate-800">
+                {selectedStudentId && studentStats
+                  ? studentStats.totalTarget
+                  : scopedEntries.reduce((sum, e) => sum + e.targetQuestions, 0)}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <BarChart3 className="w-5 h-5 text-green-600" />
+                <span className="text-sm text-gray-500">Toplam Çözülen ({rangeLabel})</span>
+              </div>
+              <p className="text-2xl font-bold text-slate-800">
+                {scopedEntries.reduce((sum, e) => sum + e.solvedQuestions, 0)}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <TrendingUp className="w-5 h-5 text-purple-600" />
+                <span className="text-sm text-gray-500">Gerçekleşme %</span>
+              </div>
+              <p className="text-2xl font-bold text-slate-800">
+                %{selectedStudentId && studentStats
+                  ? studentStats.realizationRate
+                  : scopedEntries.reduce((sum, e) => sum + e.targetQuestions, 0) > 0
+                    ? Math.round(
+                        (scopedEntries.reduce((sum, e) => sum + e.solvedQuestions, 0) /
+                          scopedEntries.reduce((sum, e) => sum + e.targetQuestions, 0)) * 100
+                      )
+                    : 0}
+              </p>
+            </div>
+          </>
+        )}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
           <div className="flex items-center gap-2 mb-2">
             <Award className="w-5 h-5 text-green-600" />
@@ -1316,7 +1566,11 @@ export default function Analytics() {
                 </div>
                 <div className="space-y-1 text-sm text-orange-700">
                   <p>Doğru: {subject.doğru} | Yanlış: {subject.yanlış} | Boş: {subject.boş}</p>
-                  <p>Çözülen: {subject.çözülen}/{subject.hedef} soru</p>
+                  <p>
+                    Gerçekleşen: {subject.çözülen}/{subject.hedef}{' '}
+                    {(subject as { birim?: string }).birim ?? 'soru'} · Hedef %{' '}
+                    {(subject as { gerçekleşme?: number }).gerçekleşme ?? 0}
+                  </p>
                 </div>
               </div>
             ))}

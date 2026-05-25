@@ -273,7 +273,23 @@ export default function MessageTemplates() {
         setError(typeof j.error === 'string' ? j.error : 'Senkron başarısız');
         return;
       }
-      setSuccess(`Meta şablon durumu: ${typeof j.status === 'string' ? j.status : 'güncellendi'}`);
+      setSuccess(
+        [
+          `Meta şablon durumu: ${typeof j.status === 'string' ? j.status : 'güncellendi'}`,
+          j.meta_template_language ? `Dil: ${j.meta_template_language}` : '',
+          typeof j.template_count === 'number' ? `WABA’da ${j.template_count} şablon tarandı` : '',
+          Array.isArray(j.waba_ids) && j.waba_ids.length ? `WABA ID: ${j.waba_ids.join(', ')}` : '',
+          Array.isArray(j.similar_names) && j.similar_names.length
+            ? `Benzer adlar: ${j.similar_names.join(', ')}`
+            : '',
+          j.hint ? String(j.hint) : '',
+          Array.isArray(j.available_languages) && j.available_languages.length
+            ? `Meta dilleri: ${j.available_languages.map((x: { language?: string; status?: string }) => `${x.language} (${x.status})`).join(', ')}`
+            : ''
+        ]
+          .filter(Boolean)
+          .join(' · ')
+      );
       await load();
       setTimeout(() => setSuccess(null), 5000);
     } catch {

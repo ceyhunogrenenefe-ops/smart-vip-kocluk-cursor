@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { fetchVeliImzaPayload, submitVeliImza, submitVeliRegistrationForm, type VeliImzaRegistrationHint } from '../lib/parentSignApi';
 import { downloadParentSignContractPdf } from '../lib/parentSignPdfDownload';
+import { VELI_KAYIT_PROGRAM_SECENEKLERI } from '../lib/veliKayitConstants';
+import { VELI_KAYIT_KVKK_DOC_HREF, VELI_KAYIT_SATIS_ONBILGI_DOC_HREF } from '../lib/veliKayitLegalLinks';
 import { CheckCircle2, Download, FileText, Loader2 } from 'lucide-react';
 
 type RegFields = {
@@ -21,6 +23,7 @@ type RegFields = {
   veli_tel: string;
   ogrenci_tel: string;
   kvkk_form_ok: boolean;
+  satis_kvkk_form_ok: boolean;
 };
 
 const emptyReg = (): RegFields => ({
@@ -39,7 +42,8 @@ const emptyReg = (): RegFields => ({
   adres_aciklama: '',
   veli_tel: '',
   ogrenci_tel: '',
-  kvkk_form_ok: false
+  kvkk_form_ok: false,
+  satis_kvkk_form_ok: false
 });
 
 function hintMoney(n: unknown): string {
@@ -66,6 +70,7 @@ export default function VeliImzaPage() {
   const [regHint, setRegHint] = useState<VeliImzaRegistrationHint | null>(null);
   const [rf, setRf] = useState<RegFields>(emptyReg);
   const [regSaving, setRegSaving] = useState(false);
+  const [awaitingAdminPrice, setAwaitingAdminPrice] = useState(false);
 
   const loadPayload = useCallback(async () => {
     if (!token) throw new Error('Geçersiz bağlantı');
@@ -77,6 +82,7 @@ export default function VeliImzaPage() {
     setInstitutionName(String(d.institution_name || '').trim());
     setSignaturePng(d.signature_png_base64 && d.signature_png_base64.length > 80 ? d.signature_png_base64 : null);
     setNeedsStudentForm(Boolean(d.needs_student_form));
+    setAwaitingAdminPrice(Boolean(d.awaiting_admin_price));
     setRegHint(d.registration_hint || null);
     return d;
   }, [token]);
@@ -110,6 +116,33 @@ export default function VeliImzaPage() {
       sinif_form: f.sinif_form.trim() ? f.sinif_form : String(regHint.sinif || '')
     }));
   }, [needsStudentForm, regHint]);
+
+  useEffect(() => {
+    if (!awaitingAdminPrice || signed || !token) return;
+    const tick = () => {
+      void loadPayload().catch(() => {});
+    };
+    tick();
+    const t = window.setInterval(tick, 5000);
+    return () => window.clearInterval(t);
+  }, [awaitingAdminPrice, signed, token, loadPayload]);
+
+  /** Ücret girildikten sonra veli sekmesi / uygulamaya dönünce hemen güncelle (yoklama + önbellek sorunlarına karşı). */
+  useEffect(() => {
+    if (!token || signed) return;
+    const refresh = () => {
+      void loadPayload().catch(() => {});
+    };
+    const onVis = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [token, signed, loadPayload]);
 
   const resizeCanvas = useCallback(() => {
     const c = canvasRef.current;
@@ -145,7 +178,7 @@ export default function VeliImzaPage() {
   };
 
   const startDraw = (e: React.MouseEvent | React.TouchEvent) => {
-    if (signed || needsStudentForm) return;
+    if (signed || needsStudentForm || awaitingAdminPrice) return;
     drawing.current = true;
     const ctx = canvasRef.current?.getContext('2d');
     if (!ctx) return;
@@ -154,7 +187,7 @@ export default function VeliImzaPage() {
     ctx.moveTo(p.x, p.y);
   };
   const draw = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!drawing.current || signed || needsStudentForm) return;
+    if (!drawing.current || signed || needsStudentForm || awaitingAdminPrice) return;
     const ctx = canvasRef.current?.getContext('2d');
     if (!ctx) return;
     const p = pos(e);
@@ -167,8 +200,34 @@ export default function VeliImzaPage() {
 
   const submitRegistration = async () => {
     if (!token || signed) return;
-    if (!rf.kvkk_form_ok) {
-      setErr('Kayıt formu için KVKK onay kutusunu işaretleyin.');
+    if (!rf.kvkk_form_ok || !rf.satis_kvkk_form_ok) {
+      setErr('KVKK ve satış sözleşmesi bilgilendirme onaylarını işaretleyin.');
+      return;
+    }
+    if (!VELI_KAYIT_PROGRAM_SECENEKLERI.includes(rf.program_form.trim())) {
+      setErr('Lütfen listeden bir program seçin.');
+      return;
+    }
+    const veliDigits = rf.veli_tel.replace(/\D/g, '');
+    const ogrDigits = rf.ogrenci_tel.replace(/\D/g, '');
+    if (veliDigits.length < 10) {
+      setErr('Veli telefonu zorunludur; en az 10 rakam girin.');
+      return;
+    }
+    if (ogrDigits.length < 10) {
+      setErr('Öğrenci telefonu zorunludur; en az 10 rakam girin.');
+      return;
+    }
+    if (!rf.adres_aciklama.trim()) {
+      setErr('Adres zorunludur.');
+      return;
+    }
+    if (!rf.ilce.trim()) {
+      setErr('İlçe zorunludur.');
+      return;
+    }
+    if (!rf.il.trim()) {
+      setErr('İl zorunludur.');
       return;
     }
     setRegSaving(true);
@@ -176,7 +235,8 @@ export default function VeliImzaPage() {
     try {
       await submitVeliRegistrationForm({
         signing_token: token,
-        kvkk_form_ok: true,
+        kvkk_form_ok: rf.kvkk_form_ok,
+        satis_kvkk_form_ok: rf.satis_kvkk_form_ok,
         ogrenci_ad: rf.ogrenci_ad.trim(),
         ogrenci_soyad: rf.ogrenci_soyad.trim(),
         veli_ad: rf.veli_ad.trim(),
@@ -204,7 +264,7 @@ export default function VeliImzaPage() {
   };
 
   const submit = async () => {
-    if (!token || signed || needsStudentForm) return;
+    if (!token || signed || needsStudentForm || awaitingAdminPrice) return;
     if (!kvkk || !soz) {
       setErr('Lütfen yukarıdaki onay kutularını işaretleyin.');
       return;
@@ -253,6 +313,7 @@ export default function VeliImzaPage() {
   };
 
   const showContractBlock = !needsStudentForm || signed;
+  const showSignPanel = !signed && !needsStudentForm && !awaitingAdminPrice;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-blue-950 to-slate-950 text-white px-4 py-8">
@@ -264,7 +325,11 @@ export default function VeliImzaPage() {
               {institutionName || 'Kurum'}
             </p>
             <h1 className="text-xl font-bold leading-tight">
-              {needsStudentForm && !signed ? 'Kayıt formu ve veli onayı' : 'Veli onayı ve e-imza'}
+              {needsStudentForm && !signed
+                ? 'Kayıt bilgisi'
+                : awaitingAdminPrice && !signed
+                  ? 'Kayıt alındı — ücret bekleniyor'
+                  : 'Veli onayı ve e-imza'}
             </h1>
             {contractNo ? <p className="text-sm text-slate-300 font-mono mt-1">{contractNo}</p> : null}
           </div>
@@ -280,14 +345,18 @@ export default function VeliImzaPage() {
           <>
             {needsStudentForm && !signed ? (
               <div className="rounded-2xl border border-white/10 bg-white text-slate-900 shadow-2xl p-4 mb-5 space-y-3 text-sm">
-                <p className="text-slate-700 font-semibold">Kayıt bilgileri</p>
+                <p className="text-slate-700 font-semibold">Kayıt bilgisi gönder</p>
                 <p className="text-xs text-slate-500">
-                  Aşağıdaki bilgilerle sözleşme metni oluşturulur; ardından sözleşmeyi okuyup imzalayabilirsiniz.
+                  Bilgilerinizi iletin; kurum ücret ve taksiti girdikten sonra bu bağlantıda e-sözleşme görünür ve
+                  imzalayabilirsiniz. <strong>Zorunlu alanlar:</strong> öğrenci adı/soyadı, veli adı/soyadı, öğrenci ve
+                  veli telefonu (en az 10 rakam), e-posta, program seçimi, adres, ilçe ve il. Bu alanlar doldurulmadan
+                  form gönderilmez. Aşağıdaki onay satırlarındaki <span className="text-blue-700">mavi bağlantılar</span> ile
+                  KVKK ve satış / ön bilgilendirme metinlerini sitemizde ayrı sayfada (çoğu tarayıcıda yeni sekmede) açabilirsiniz.
                 </p>
                 {regHint ? (
                   <div className="rounded-lg bg-slate-50 border border-slate-200 p-2 text-xs text-slate-600 space-y-0.5">
                     <p>
-                      <strong>Program:</strong> {String(regHint.program_adi || '—')}
+                      <strong>Ön bilgi — program:</strong> {String(regHint.program_adi || '—')}
                     </p>
                     <p>
                       <strong>Sınıf:</strong> {String(regHint.sinif || '—')}
@@ -297,14 +366,14 @@ export default function VeliImzaPage() {
                       {String(regHint.bitis_tarihi || '').slice(0, 10)}
                     </p>
                     <p>
-                      <strong>Ücret:</strong> {hintMoney(regHint.ucret)} TL · <strong>Taksit:</strong>{' '}
+                      <strong>Ücret (kurum girecek):</strong> {hintMoney(regHint.ucret)} TL · <strong>Taksit:</strong>{' '}
                       {String(regHint.taksit_sayisi ?? '—')}
                     </p>
                   </div>
                 ) : null}
                 <div className="grid gap-2 sm:grid-cols-2">
                   <div>
-                    <label className="text-[11px] text-slate-500">Öğrenci adı</label>
+                    <label className="text-[11px] text-slate-500">Öğrenci adı (zorunlu)</label>
                     <input
                       className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
                       value={rf.ogrenci_ad}
@@ -312,7 +381,7 @@ export default function VeliImzaPage() {
                     />
                   </div>
                   <div>
-                    <label className="text-[11px] text-slate-500">Öğrenci soyadı</label>
+                    <label className="text-[11px] text-slate-500">Öğrenci soyadı (zorunlu)</label>
                     <input
                       className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
                       value={rf.ogrenci_soyad}
@@ -320,7 +389,27 @@ export default function VeliImzaPage() {
                     />
                   </div>
                   <div>
-                    <label className="text-[11px] text-slate-500">Veli adı</label>
+                    <label className="text-[11px] text-slate-500">Öğrenci sınıfı</label>
+                    <input
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                      value={rf.sinif_form}
+                      onChange={(e) => setRf((p) => ({ ...p, sinif_form: e.target.value }))}
+                      placeholder="Örn. 9, LGS, 12"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-slate-500">Öğrenci telefonu (zorunlu)</label>
+                    <input
+                      required
+                      inputMode="tel"
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                      value={rf.ogrenci_tel}
+                      onChange={(e) => setRf((p) => ({ ...p, ogrenci_tel: e.target.value }))}
+                      placeholder="Örn. 05xx xxx xx xx"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-slate-500">Veli adı (zorunlu)</label>
                     <input
                       className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
                       value={rf.veli_ad}
@@ -328,7 +417,7 @@ export default function VeliImzaPage() {
                     />
                   </div>
                   <div>
-                    <label className="text-[11px] text-slate-500">Veli soyadı</label>
+                    <label className="text-[11px] text-slate-500">Veli soyadı (zorunlu)</label>
                     <input
                       className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
                       value={rf.veli_soyad}
@@ -336,12 +425,23 @@ export default function VeliImzaPage() {
                     />
                   </div>
                   <div>
-                    <label className="text-[11px] text-slate-500">T.C. kimlik no</label>
+                    <label className="text-[11px] text-slate-500">Veli telefonu (zorunlu)</label>
                     <input
-                      inputMode="numeric"
+                      required
+                      inputMode="tel"
                       className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-                      value={rf.tc_kimlik}
-                      onChange={(e) => setRf((p) => ({ ...p, tc_kimlik: e.target.value.replace(/\D/g, '').slice(0, 11) }))}
+                      value={rf.veli_tel}
+                      onChange={(e) => setRf((p) => ({ ...p, veli_tel: e.target.value }))}
+                      placeholder="Örn. 05xx xxx xx xx"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="text-[11px] text-slate-500">Okul adı</label>
+                    <input
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                      value={rf.okul_adi}
+                      onChange={(e) => setRf((p) => ({ ...p, okul_adi: e.target.value }))}
+                      placeholder="Okulun tam adı"
                     />
                   </div>
                   <div>
@@ -353,32 +453,33 @@ export default function VeliImzaPage() {
                       onChange={(e) => setRf((p) => ({ ...p, dogum_tarihi: e.target.value }))}
                     />
                   </div>
+                  <div>
+                    <label className="text-[11px] text-slate-500">T.C. kimlik no</label>
+                    <input
+                      inputMode="numeric"
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                      value={rf.tc_kimlik}
+                      onChange={(e) => setRf((p) => ({ ...p, tc_kimlik: e.target.value.replace(/\D/g, '').slice(0, 11) }))}
+                      placeholder="11 hane"
+                    />
+                  </div>
                   <div className="sm:col-span-2">
-                    <label className="text-[11px] text-slate-500">Okul</label>
-                    <input
-                      className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-                      value={rf.okul_adi}
-                      onChange={(e) => setRf((p) => ({ ...p, okul_adi: e.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] text-slate-500">Sınıf</label>
-                    <input
-                      className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-                      value={rf.sinif_form}
-                      onChange={(e) => setRf((p) => ({ ...p, sinif_form: e.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] text-slate-500">Katılmak istediği program</label>
-                    <input
-                      className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                    <label className="text-[11px] text-slate-500">Kayıt olmak istediği program (zorunlu — listeden)</label>
+                    <select
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm bg-white"
                       value={rf.program_form}
                       onChange={(e) => setRf((p) => ({ ...p, program_form: e.target.value }))}
-                    />
+                    >
+                      <option value="">Seçiniz…</option>
+                      {VELI_KAYIT_PROGRAM_SECENEKLERI.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div className="sm:col-span-2">
-                    <label className="text-[11px] text-slate-500">E-posta</label>
+                    <label className="text-[11px] text-slate-500">E-posta adresi (zorunlu)</label>
                     <input
                       type="email"
                       className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
@@ -386,60 +487,77 @@ export default function VeliImzaPage() {
                       onChange={(e) => setRf((p) => ({ ...p, eposta: e.target.value }))}
                     />
                   </div>
-                  <div>
-                    <label className="text-[11px] text-slate-500">İl</label>
-                    <input
-                      className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-                      value={rf.il}
-                      onChange={(e) => setRf((p) => ({ ...p, il: e.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] text-slate-500">İlçe</label>
-                    <input
-                      className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-                      value={rf.ilce}
-                      onChange={(e) => setRf((p) => ({ ...p, ilce: e.target.value }))}
-                    />
-                  </div>
                   <div className="sm:col-span-2">
-                    <label className="text-[11px] text-slate-500">Adres (isteğe bağlı açıklama)</label>
+                    <label className="text-[11px] text-slate-500">Adres (zorunlu)</label>
                     <input
+                      required
                       className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
                       value={rf.adres_aciklama}
                       onChange={(e) => setRf((p) => ({ ...p, adres_aciklama: e.target.value }))}
-                      placeholder="Mahalle, sokak…"
+                      placeholder="Mahalle, sokak, bina ve kapı no"
                     />
                   </div>
                   <div>
-                    <label className="text-[11px] text-slate-500">Veli telefon</label>
+                    <label className="text-[11px] text-slate-500">İlçe (zorunlu)</label>
                     <input
-                      inputMode="tel"
+                      required
                       className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-                      value={rf.veli_tel}
-                      onChange={(e) => setRf((p) => ({ ...p, veli_tel: e.target.value }))}
+                      value={rf.ilce}
+                      onChange={(e) => setRf((p) => ({ ...p, ilce: e.target.value }))}
+                      placeholder="İlçe adı"
                     />
                   </div>
                   <div>
-                    <label className="text-[11px] text-slate-500">Öğrenci telefon</label>
+                    <label className="text-[11px] text-slate-500">İl (zorunlu)</label>
                     <input
-                      inputMode="tel"
+                      required
                       className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-                      value={rf.ogrenci_tel}
-                      onChange={(e) => setRf((p) => ({ ...p, ogrenci_tel: e.target.value }))}
+                      value={rf.il}
+                      onChange={(e) => setRf((p) => ({ ...p, il: e.target.value }))}
+                      placeholder="İl adı"
                     />
                   </div>
                 </div>
                 <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
                   <input
                     type="checkbox"
-                    className="mt-0.5 h-4 w-4 rounded border-slate-400"
+                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-400"
                     checked={rf.kvkk_form_ok}
                     onChange={(e) => setRf((p) => ({ ...p, kvkk_form_ok: e.target.checked }))}
                   />
-                  <span>
-                    <strong>6698 sayılı KVKK</strong> kapsamında bu formda paylaştığım kişisel verilerin işlenmesine onay
-                    veriyorum.
+                  <span className="leading-relaxed">
+                    <a
+                      href={VELI_KAYIT_KVKK_DOC_HREF}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold text-blue-700 underline decoration-blue-400/70 underline-offset-2 hover:text-blue-900"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      6698 sayılı KVKK bilgilendirmesi
+                    </a>
+                    {' '}
+                    metnini okudum ve onaylıyorum.
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-400"
+                    checked={rf.satis_kvkk_form_ok}
+                    onChange={(e) => setRf((p) => ({ ...p, satis_kvkk_form_ok: e.target.checked }))}
+                  />
+                  <span className="leading-relaxed">
+                    <a
+                      href={VELI_KAYIT_SATIS_ONBILGI_DOC_HREF}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold text-blue-700 underline decoration-blue-400/70 underline-offset-2 hover:text-blue-900"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Satış sözleşmesi ve ön bilgilendirme
+                    </a>
+                    {' '}
+                    metnini okudum; kayıt öncesi bilgilendirme ve sözleşme sürecine onay veriyorum.
                   </span>
                 </label>
                 {err ? <p className="text-sm text-red-600">{err}</p> : null}
@@ -449,7 +567,30 @@ export default function VeliImzaPage() {
                   onClick={() => void submitRegistration()}
                   className="w-full rounded-xl bg-blue-700 py-3 text-sm font-bold text-white shadow disabled:opacity-50"
                 >
-                  {regSaving ? 'Gönderiliyor…' : 'Kayıt bilgilerini gönder ve sözleşmeyi oluştur'}
+                  {regSaving ? 'Gönderiliyor…' : 'Kayıt bilgisini gönder'}
+                </button>
+              </div>
+            ) : null}
+
+            {awaitingAdminPrice && !signed ? (
+              <div className="rounded-2xl border border-amber-500/40 bg-amber-950/40 p-4 mb-4 text-sm text-amber-50 space-y-2">
+                <p className="font-semibold">Kurum ücreti ve taksit bilgisi bekleniyor</p>
+                <p className="text-xs text-amber-100/90">
+                  Bu sayfa birkaç saniyede bir otomatik yenilenir; sekmeye döndüğünüzde de güncellenir. Hazır
+                  olduğunda aşağıda tam sözleşme metni görünür ve
+                  imzalayabilirsiniz.
+                </p>
+                <button
+                  type="button"
+                  className="w-full rounded-lg border border-amber-400/60 py-2 text-xs font-semibold text-amber-100 hover:bg-amber-900/50"
+                  onClick={() => {
+                    setBusy(true);
+                    void loadPayload()
+                      .catch((e) => setErr(e instanceof Error ? e.message : 'Yüklenemedi'))
+                      .finally(() => setBusy(false));
+                  }}
+                >
+                  Şimdi yenile
                 </button>
               </div>
             ) : null}
@@ -460,10 +601,9 @@ export default function VeliImzaPage() {
               </div>
             ) : null}
 
-            {!signed ? (
+            {!signed && showSignPanel ? (
               <p className="text-xs text-slate-400 mb-3 text-center">
-                Kaydı tamamladığınızda bu sayfada <strong>PDF olarak indir</strong> düğmesi görünür; imzalı sözleşmenizi
-                indirebilirsiniz.
+                İmzadan sonra bu sayfada <strong>PDF olarak indir</strong> düğmesi görünür.
               </p>
             ) : null}
 
@@ -483,7 +623,7 @@ export default function VeliImzaPage() {
                   PDF olarak indir
                 </button>
               </div>
-            ) : showContractBlock ? (
+            ) : showSignPanel ? (
               <div className="rounded-2xl border border-white/15 bg-slate-900/70 p-4 space-y-4 backdrop-blur-sm">
                 <p className="text-sm font-semibold text-white border-b border-white/10 pb-2">Onaylar</p>
                 <label className="flex items-start gap-3 text-sm text-slate-100 cursor-pointer">

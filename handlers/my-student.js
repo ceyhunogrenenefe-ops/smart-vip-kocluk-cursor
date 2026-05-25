@@ -1,5 +1,7 @@
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
+import { linkStudentToUser } from '../api/_lib/link-student-user.js';
+import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { resolveStudentRowForUser } from '../api/_lib/resolve-student-id.js';
 
@@ -30,17 +32,21 @@ export default async function handler(req, res) {
 
     const userEmail = String(urow?.email || '').trim().toLowerCase();
     const inst = actor.institution_id ?? urow?.institution_id ?? null;
+    const roleTags = await normalizedUserRolesFromDb(uid);
     const dbRole = String(urow?.role || '').trim().toLowerCase();
-    const isStudentActor = dbRole === 'student' || String(actor.role || '').trim().toLowerCase() === 'student';
+    const isStudentActor =
+      roleTags.includes('student') ||
+      dbRole === 'student' ||
+      String(actor.role || '').trim().toLowerCase() === 'student';
 
-    const runResolve = () =>
-      resolveStudentRowForUser({
-        userId: uid,
-        email: userEmail || undefined,
-        institutionId: inst
-      });
+    /** Öğrenci oturumunda kurum filtresi e-posta eşleşmesini bozabiliyor */
+    const resolveInstitutionId = isStudentActor ? null : inst;
 
-    const resolved = await runResolve();
+    const resolved = await resolveStudentRowForUser({
+      userId: uid,
+      email: userEmail || undefined,
+      institutionId: resolveInstitutionId
+    });
     const resolvedId = resolved?.id ? String(resolved.id).trim() : '';
     const jwtSid = String(actor.student_id || '').trim();
 
@@ -93,14 +99,34 @@ export default async function handler(req, res) {
       sawUnlinked = true;
     }
 
+    if (!data && userEmail && isStudentActor) {
+      const { data: loose } = await supabaseAdmin
+        .from('students')
+        .select('*')
+        .ilike('email', userEmail)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (loose?.id) {
+        data = await linkStudentToUser(loose, uid);
+      }
+    }
+
     if (!data) {
+      if (!candidates.length && !isStudentActor) {
+        return res.status(200).json({ data: null, reason: 'student_profile_missing' });
+      }
       if (!candidates.length) {
-        return res.status(404).json({ error: 'student_profile_missing' });
+        return res.status(200).json({ data: null, reason: 'student_profile_missing' });
       }
       if (!sawUnlinked && !sawRow) {
-        return res.status(404).json({ error: 'not_found' });
+        return res.status(200).json({ data: null, reason: 'not_found' });
       }
       return res.status(403).json({ error: 'forbidden' });
+    }
+
+    if (isStudentActor) {
+      data = await linkStudentToUser(data, uid);
     }
 
     return res.status(200).json({ data });

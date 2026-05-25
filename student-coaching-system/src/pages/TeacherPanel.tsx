@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { Users, Radio, CheckCircle2 } from 'lucide-react';
+import { Users, Radio, CheckCircle2, Presentation } from 'lucide-react';
 
 export default function TeacherPanel() {
   const navigate = useNavigate();
@@ -18,7 +18,7 @@ export default function TeacherPanel() {
         </p>
       </div>
 
-      <div className="grid md:grid-cols-3 gap-4">
+      <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white border border-slate-100 rounded-xl p-4">
           <div className="flex items-center gap-2 text-violet-600 mb-1">
             <Users className="w-4 h-4" />
@@ -35,6 +35,17 @@ export default function TeacherPanel() {
             <span className="text-sm">Canlı özel ders</span>
           </div>
           <p className="text-slate-700 text-sm">Ders oluştur / haftalık plan / tekrar / çakışma kontrolü</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('/edu-panel')}
+          className="bg-white border border-slate-100 rounded-xl p-4 text-left hover:bg-slate-50"
+        >
+          <div className="flex items-center gap-2 text-violet-600 mb-1">
+            <Presentation className="w-4 h-4" />
+            <span className="text-sm">Ders içerik paneli</span>
+          </div>
+          <p className="text-slate-700 text-sm">HTML animasyon, ödev ve sınıf ders satırları</p>
         </button>
         <button
           onClick={() => navigate('/live-lessons')}

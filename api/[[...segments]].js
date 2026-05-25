@@ -25,14 +25,27 @@ function segmentsFromReq(req) {
 
 export default async function handler(req, res) {
   const segments = segmentsFromReq(req);
-  const routePath = segments.join('/');
+  let routePath = segments.join('/');
+  let load = routeLoaders[routePath];
+  let extraSegments = [];
+
+  if (!load && segments.length > 1) {
+    for (let i = segments.length - 1; i > 0; i -= 1) {
+      const prefix = segments.slice(0, i).join('/');
+      if (routeLoaders[prefix]) {
+        load = routeLoaders[prefix];
+        routePath = prefix;
+        extraSegments = segments.slice(i);
+        break;
+      }
+    }
+  }
 
   if (!routePath) {
     res.status(404).json({ error: 'missing_path', hint: '/api/auth-login · /api/students · …' });
     return;
   }
 
-  const load = routeLoaders[routePath];
   if (!load) {
     res.status(404).json({ error: 'unknown_route', path: routePath });
     return;
@@ -45,6 +58,7 @@ export default async function handler(req, res) {
       res.status(500).json({ error: 'handler_not_loaded', path: routePath });
       return;
     }
+    req.apiExtraSegments = extraSegments;
     return await fn(req, res);
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'router_failed';

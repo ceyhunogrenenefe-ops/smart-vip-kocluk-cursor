@@ -117,7 +117,7 @@ export default function Dashboard() {
       onClick: () => navigate('/students'),
     },
     {
-      title: 'Toplam Öğretmen',
+      title: 'Toplam Koç',
       value: totalStats.coaches,
       icon: Users,
       color: 'from-purple-500 to-purple-600',
@@ -164,11 +164,11 @@ export default function Dashboard() {
           </div>
           <div className="hidden md:flex items-center gap-4">
             <button
-              onClick={() => navigate('/tracking')}
+              onClick={() => navigate('/weekly-planner')}
               className="px-4 py-2 bg-white/10 rounded-lg hover:bg-white/20 transition-colors flex items-center gap-2"
             >
               <Calendar className="w-4 h-4" />
-              Haftalık Takip
+              Haftalık plan
             </button>
             <button
               onClick={() => navigate('/reports')}
@@ -426,13 +426,13 @@ export default function Dashboard() {
           <span className="font-medium text-slate-800">Öğretmen Ekle</span>
         </button>
         <button
-          onClick={() => navigate('/tracking')}
+          onClick={() => navigate('/weekly-planner')}
           className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 hover:shadow-md transition-shadow flex items-center gap-3"
         >
           <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
             <BookOpen className="w-5 h-5 text-green-600" />
           </div>
-          <span className="font-medium text-slate-800">Kayıt Gir</span>
+          <span className="font-medium text-slate-800">Haftalık plan</span>
         </button>
         <button
           onClick={() => navigate('/whatsapp')}

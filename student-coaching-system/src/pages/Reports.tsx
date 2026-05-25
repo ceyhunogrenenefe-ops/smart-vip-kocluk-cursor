@@ -1363,7 +1363,7 @@ _${institution.name}_`;
 
       {/* WhatsApp Önizleme Modal */}
       {showWhatsAppPreview && selectedStudent && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg">
             <div className="p-6 border-b border-gray-100 flex items-center justify-between">
               <h3 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
@@ -1372,7 +1372,7 @@ _${institution.name}_`;
               </h3>
               <button
                 onClick={() => setShowWhatsAppPreview(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg"
+                className="icon-tap-btn hover:bg-gray-100"
               >
                 ✕
               </button>

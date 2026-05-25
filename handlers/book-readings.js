@@ -1,6 +1,57 @@
 import { requireAuth, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 
+const BOOK_STATUSES = ['reading', 'completed', 'planned'];
+
+function normalizeBookStatus(raw, endDate) {
+  const s = String(raw || '')
+    .trim()
+    .toLowerCase();
+  if (BOOK_STATUSES.includes(s)) return s;
+  if (endDate != null && String(endDate).trim()) return 'completed';
+  return 'reading';
+}
+
+function endDateForStatus(status, endDate) {
+  if (status === 'completed') {
+    const d = endDate != null && String(endDate).trim() ? String(endDate).trim() : null;
+    return d || new Date().toISOString().split('T')[0];
+  }
+  return endDate ?? null;
+}
+
+function isMissingColumnError(err, column) {
+  const msg = String(err?.message || err || '').toLowerCase();
+  return msg.includes(String(column).toLowerCase()) && msg.includes('schema cache');
+}
+
+/** `status` sütunu yoksa yalnızca end_date ile tamamlanma (eski şema uyumu) */
+async function upsertBookReadingRow(id, patch) {
+  let result = await supabaseAdmin.from('book_readings').update(patch).eq('id', id).select().single();
+  if (!result.error || patch.status === undefined || !isMissingColumnError(result.error, 'status')) {
+    return result;
+  }
+  const fallback = { ...patch };
+  delete fallback.status;
+  if (patch.status === 'completed') {
+    fallback.end_date = endDateForStatus('completed', patch.end_date ?? null);
+  }
+  return supabaseAdmin.from('book_readings').update(fallback).eq('id', id).select().single();
+}
+
+async function insertBookReadingRow(payload) {
+  let result = await supabaseAdmin.from('book_readings').insert(payload).select().single();
+  if (!result.error || payload.status === undefined || !isMissingColumnError(result.error, 'status')) {
+    return result;
+  }
+  const fallback = { ...payload };
+  delete fallback.status;
+  if (payload.status === 'completed') {
+    fallback.end_date = endDateForStatus('completed', payload.end_date ?? null);
+  }
+  return supabaseAdmin.from('book_readings').insert(fallback).select().single();
+}
+
 const canAccessBook = async (actor, row) => {
   if (actor.role === 'super_admin') return true;
   if (actor.role === 'teacher') return false;
@@ -50,14 +101,17 @@ export default async function handler(req, res) {
       if (actor.role === 'student' && actor.student_id && body.student_id !== actor.student_id) {
         return res.status(403).json({ error: 'student_forbidden' });
       }
+      const status = normalizeBookStatus(body.status, body.end_date);
       const payload = {
         id: body.id || `book-${Date.now()}`,
         ...body,
+        status,
+        end_date: endDateForStatus(status, body.end_date),
         institution_id: institutionId,
         created_at: body.created_at || new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
-      const { data, error } = await supabaseAdmin.from('book_readings').insert(payload).select().single();
+      const { data, error } = await insertBookReadingRow(payload);
       if (error) throw error;
       return res.status(200).json({ data });
     }
@@ -66,12 +120,20 @@ export default async function handler(req, res) {
       const id = String(req.query.id || '');
       const { data: existing } = await supabaseAdmin.from('book_readings').select('*').eq('id', id).maybeSingle();
       if (!existing || !(await canAccessBook(actor, existing))) return res.status(403).json({ error: 'forbidden' });
-      const { data, error } = await supabaseAdmin
-        .from('book_readings')
-        .update({ ...(req.body || {}), updated_at: new Date().toISOString() })
-        .eq('id', id)
-        .select()
-        .single();
+      const raw = req.body || {};
+      const patch = { ...raw, updated_at: new Date().toISOString() };
+      if (raw.status !== undefined || raw.end_date !== undefined) {
+        const status = normalizeBookStatus(
+          raw.status !== undefined ? raw.status : existing.status,
+          raw.end_date !== undefined ? raw.end_date : existing.end_date
+        );
+        patch.status = status;
+        patch.end_date = endDateForStatus(
+          status,
+          raw.end_date !== undefined ? raw.end_date : existing.end_date
+        );
+      }
+      const { data, error } = await upsertBookReadingRow(id, patch);
       if (error) throw error;
       return res.status(200).json({ data });
     }

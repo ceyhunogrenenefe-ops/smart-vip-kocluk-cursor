@@ -1,6 +1,7 @@
 import { requireAuth, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
+import { syncStudentScreenTimeLog } from '../api/_lib/sync-student-screen-time-log.js';
 
 const padDate = (v) => String(v || '').trim().slice(0, 10);
 
@@ -40,13 +41,31 @@ function plannerTitleFromTopic(subject, topic) {
   return t ? `Günlük kayıt: ${t}` : `Günlük kayıt: ${sub}`;
 }
 
+function normalizeGoalUnit(raw) {
+  const u = String(raw || 'soru')
+    .trim()
+    .toLowerCase();
+  if (u === 'dk' || u === 'dakika' || u === 'süre' || u === 'sure' || u === 'dak') return 'dakika';
+  if (u === 'sayfa' || u === 'kitap') return 'sayfa';
+  if (u === 'paragraf' || u === 'paragraflar' || u === 'problem' || u === 'problemler') return 'soru';
+  if (u === 'sorular' || u === 'adet' || u === '') return 'soru';
+  return u;
+}
+
+function completedAmountForUnit(unit, { solved, pagesRead, screenTimeMin }) {
+  const u = normalizeGoalUnit(unit);
+  if (u === 'sayfa') return Math.max(0, Number(pagesRead) || 0);
+  if (u === 'dakika') return Math.max(0, Number(screenTimeMin) || 0);
+  return Math.max(0, Number(solved) || 0);
+}
+
 /**
  * Takvim bloğunun plan hedefi `plannerPlanned` ile kalır; 0 hedefte "tamamlandı" üretilmez.
  */
-function derivePlannerStatus(plannerPlanned, targetFromBody, solved) {
+function derivePlannerStatus(plannerPlanned, targetFromBody, completedAmount) {
   const rawPlan = Number(plannerPlanned);
   const fromBody = Number(targetFromBody);
-  const s = Math.max(0, Number(solved) || 0);
+  const s = Math.max(0, Number(completedAmount) || 0);
   const effectivePlan =
     Number.isFinite(rawPlan) && rawPlan > 0
       ? rawPlan
@@ -116,8 +135,29 @@ export default async function handler(req, res) {
         ? Number(b.screen_time_minutes ?? b.screenTimeMinutes)
         : null;
 
-    if (!(target > 0 || solved > 0)) {
-      return res.status(400).json({ error: 'target_or_solved_required' });
+    let goalUnit = 'soru';
+    if (planner.coach_goal_id) {
+      const { data: goalRow } = await supabaseAdmin
+        .from('coach_weekly_goals')
+        .select('quantity_unit')
+        .eq('id', planner.coach_goal_id)
+        .maybeSingle();
+      if (goalRow?.quantity_unit) goalUnit = goalRow.quantity_unit;
+    }
+
+    const pagesVal =
+      pagesRead != null && Number.isFinite(pagesRead) ? Math.max(0, Math.round(pagesRead)) : 0;
+    const screenVal =
+      screenTimeMin != null && Number.isFinite(screenTimeMin) ? Math.max(0, Math.round(screenTimeMin)) : 0;
+    const completedAmount = completedAmountForUnit(goalUnit, {
+      solved,
+      pagesRead: pagesVal,
+      screenTimeMin: screenVal
+    });
+
+    const markTopicOnly = Boolean(b.mark_topic_only ?? b.markTopicOnly);
+    if (!(target > 0 || completedAmount > 0 || markTopicOnly)) {
+      return res.status(400).json({ error: 'target_or_progress_required' });
     }
 
     const institutionId = planner.institution_id ?? gate.student?.institution_id ?? actor.institution_id ?? null;
@@ -157,7 +197,7 @@ export default async function handler(req, res) {
     const { plannedQty, completedQty, status } = derivePlannerStatus(
       planner.planned_quantity,
       entryPayload.target_questions,
-      entryPayload.solved_questions
+      completedAmount
     );
     const title = plannerTitleFromTopic(subject, entryPayload.topic);
 
@@ -183,6 +223,15 @@ export default async function handler(req, res) {
       .select()
       .single();
     if (upErr) throw upErr;
+
+    if (screenVal > 0) {
+      await syncStudentScreenTimeLog({
+        studentId: planner.student_id,
+        logDate: entryPayload.date,
+        screenMinutes: screenVal,
+        institutionId
+      });
+    }
 
     return res.status(200).json({ data: { weekly_entry: inserted, planner_entry: updatedPlanner } });
   } catch (e) {

@@ -1,5 +1,5 @@
 // Türkçe: Sistem Yönetimi Sayfası - Super Admin İçin
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth, SystemUser } from '../context/AuthContext';
 import { useOrganization, PLAN_LIMITS } from '../context/OrganizationContext';
 import { useApp } from '../context/AppContext';
@@ -31,6 +31,7 @@ import {
   Activity
 } from 'lucide-react';
 import CronSummarySection from '../components/system/CronSummarySection';
+import { computeSystemUserStats } from '../lib/userStats';
 
 // PayTR yapılandırması
 interface PayTRConfig {
@@ -157,6 +158,7 @@ export default function SystemManagement() {
 
   // Kullanıcılar: oturum + Supabase varsa API (`users` tablosu), yoksa yerel demo + managed liste
   const allUsers = apiManagedUsers ?? getAllUsers();
+  const userStats = useMemo(() => computeSystemUserStats(allUsers), [allUsers]);
   const filteredUsers = allUsers.filter(u =>
     u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     u.email.toLowerCase().includes(searchTerm.toLowerCase())
@@ -180,7 +182,7 @@ export default function SystemManagement() {
   };
 
   const tabs = [
-    { id: 'users' as const, label: 'Kullanıcılar', icon: Users, count: allUsers.length },
+    { id: 'users' as const, label: 'Kullanıcılar', icon: Users, count: userStats.loginAccounts },
     { id: 'organizations' as const, label: 'Kurumlar', icon: Building2, count: mergedOrgCount },
     { id: 'payments' as const, label: 'Ödeme Sistemleri', icon: CreditCard, count: 0 },
     { id: 'system' as const, label: 'Sistem Ayarları', icon: Server, count: 0 }
@@ -962,20 +964,22 @@ export default function SystemManagement() {
                 </h4>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                   <div className="bg-gray-50 rounded-lg p-3">
-                    <p className="text-gray-500">Toplam Kullanıcı</p>
-                    <p className="text-xl font-bold text-slate-800">{allUsers.length}</p>
+                    <p className="text-gray-500">Giriş hesabı</p>
+                    <p className="text-xl font-bold text-slate-800">{userStats.loginAccounts}</p>
                   </div>
                   <div className="bg-gray-50 rounded-lg p-3">
                     <p className="text-gray-500">Toplam Kurum</p>
                     <p className="text-xl font-bold text-slate-800">{mergedOrgCount}</p>
                   </div>
                   <div className="bg-gray-50 rounded-lg p-3">
-                    <p className="text-gray-500">Toplam Öğrenci</p>
+                    <p className="text-gray-500">Öğrenci profili</p>
                     <p className="text-xl font-bold text-slate-800">{students.length}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Hesap: {userStats.students}</p>
                   </div>
                   <div className="bg-gray-50 rounded-lg p-3">
-                    <p className="text-gray-500">Toplam Koç</p>
+                    <p className="text-gray-500">Koç profili</p>
                     <p className="text-xl font-bold text-slate-800">{coaches.length}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Hesap: {userStats.coaches}</p>
                   </div>
                 </div>
               </div>

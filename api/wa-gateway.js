@@ -50,20 +50,22 @@ export default async function handler(req, res) {
   /** @type {RequestInit} */
   const init = { method, headers: fwd };
 
-  if (method !== 'GET' && method !== 'HEAD' && req.body !== undefined && req.body !== null) {
+  if (method !== 'GET' && method !== 'HEAD') {
     fwd['Content-Type'] = fwd['Content-Type'] || 'application/json';
-    init.body =
-      typeof req.body === 'string'
-        ? req.body
-        : Buffer.isBuffer(req.body)
+    if (req.body !== undefined && req.body !== null) {
+      init.body =
+        typeof req.body === 'string'
           ? req.body
-          : JSON.stringify(req.body);
+          : Buffer.isBuffer(req.body)
+            ? req.body
+            : JSON.stringify(req.body);
+    }
   }
 
-  const timeoutMs = Math.min(
-    115000,
-    Math.max(8000, Number(process.env.WA_GATEWAY_FETCH_TIMEOUT_MS) || 115000)
-  );
+  const isSendRoute = /\/send\/?$/i.test(pathPart);
+  const timeoutMs = isSendRoute
+    ? Math.min(55000, Math.max(15000, Number(process.env.WA_GATEWAY_SEND_TIMEOUT_MS) || 48000))
+    : Math.min(25000, Math.max(8000, Number(process.env.WA_GATEWAY_STATUS_TIMEOUT_MS) || 20000));
   const controller = new AbortController();
   const tid = setTimeout(() => controller.abort(), timeoutMs);
 

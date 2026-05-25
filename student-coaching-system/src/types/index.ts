@@ -208,7 +208,7 @@ export interface ExamResult {
   studentId: string;
   examType: '3' | '4' | '5' | '6' | '7' | 'LGS' | 'YOS' | 'TYT' | 'YKS-EA' | 'YKS-SAY' | 'AYT';
   examDate: string;
-  source: 'webhook' | 'manual' | 'pdf';
+  source: 'webhook' | 'manual' | 'pdf' | 'edesis';
   totalNet: number;
   subjects: ExamSubjectResult[];
   notes?: string;

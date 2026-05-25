@@ -31,7 +31,10 @@ dist-ssr
 .local-deploy-secrets.txt
 .env.production
 .env.vercel
+.env.vercel.pull
 .env.local
+.env.mobile
+student-coaching-system/.env.mobile
 *.zip
 
 # Kaynak Excel (konular mockData + database/*.json ile uygulamada)

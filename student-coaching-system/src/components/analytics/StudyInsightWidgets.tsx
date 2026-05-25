@@ -8,6 +8,7 @@ import {
   type CoachInsightRange,
 } from '../../lib/studyInsightMetrics';
 import {
+  coachQuestionCompletedInYmdRange,
   eachCalendarWeekInRange,
   entriesSolvedInYmdRange,
   weekCoachQuestionTarget,
@@ -20,6 +21,7 @@ import {
   MonitorSmartphone,
   Sparkles,
   Target,
+  TrendingUp,
 } from 'lucide-react';
 import {
   Bar,
@@ -78,7 +80,18 @@ export function StudyInsightWidgets({
         coachInsight.rangeFrom,
         coachInsight.rangeTo
       );
-      const solved = entriesSolvedInYmdRange(scoped, w.weekStart, w.weekEnd);
+      const solved =
+        coachInsight.plannerEntries?.length && coachInsight.weeklyEntries
+          ? coachQuestionCompletedInYmdRange(
+              coachInsight.goals,
+              coachInsight.plannerEntries,
+              coachInsight.weeklyEntries,
+              w.weekStart,
+              w.weekEnd,
+              coachInsight.rangeFrom,
+              coachInsight.rangeTo
+            )
+          : entriesSolvedInYmdRange(scoped, w.weekStart, w.weekEnd);
       const pct = coachT > 0 ? Math.round((solved / coachT) * 100) : 0;
       return { label: w.label, coachTarget: coachT, solved, pct };
     });
@@ -133,16 +146,62 @@ export function StudyInsightWidgets({
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-5">
-          <MiniStat
-            icon={<Target className="w-4 h-4" />}
-            label="Hedef gerçekleşme"
-            value={`%${summary.realizationRate}`}
-            hint={
-              coachInsight?.goals?.length
-                ? `${summary.totalSolved} / ${summary.totalTarget} soru (koç hedefi, aralığa göre)`
-                : `${summary.totalSolved} / ${summary.totalTarget} soru`
-            }
-          />
+          {summary.coachGoalBreakdown ? (
+            <>
+              <MiniStat
+                icon={<Target className="w-4 h-4" />}
+                label="Koç hedefi"
+                value={`${summary.coachGoalBreakdown.questionTarget || summary.totalTarget}`}
+                hint="Koçun verdiği toplam soru kotası"
+              />
+              <MiniStat
+                icon={<Crosshair className="w-4 h-4" />}
+                label="Çözülen"
+                value={`${summary.coachGoalBreakdown.questionCompleted}`}
+                hint={`${summary.coachGoalBreakdown.questionCompleted} / ${summary.coachGoalBreakdown.questionTarget || summary.totalTarget} soru`}
+              />
+              <MiniStat
+                icon={<TrendingUp className="w-4 h-4" />}
+                label="Oran"
+                value={`%${summary.coachGoalBreakdown.questionRealizationPct}`}
+                hint="Çözülen ÷ koç hedefi"
+              />
+              {(summary.coachGoalBreakdown.paragraf.target > 0 ||
+                summary.coachGoalBreakdown.paragraf.completed > 0) && (
+                <MiniStat
+                  icon={<Target className="w-4 h-4" />}
+                  label="Paragraf"
+                  value={`%${summary.coachGoalBreakdown.paragraf.realizationPct}`}
+                  hint={`${summary.coachGoalBreakdown.paragraf.completed} / ${summary.coachGoalBreakdown.paragraf.target}`}
+                />
+              )}
+              {(summary.coachGoalBreakdown.problem.target > 0 ||
+                summary.coachGoalBreakdown.problem.completed > 0) && (
+                <MiniStat
+                  icon={<Target className="w-4 h-4" />}
+                  label="Problem"
+                  value={`%${summary.coachGoalBreakdown.problem.realizationPct}`}
+                  hint={`${summary.coachGoalBreakdown.problem.completed} / ${summary.coachGoalBreakdown.problem.target}`}
+                />
+              )}
+              {(summary.coachGoalBreakdown.sayfa.target > 0 ||
+                summary.coachGoalBreakdown.sayfa.completed > 0) && (
+                <MiniStat
+                  icon={<BookOpen className="w-4 h-4" />}
+                  label="Kitap / sayfa"
+                  value={`%${summary.coachGoalBreakdown.sayfa.realizationPct}`}
+                  hint={`${summary.coachGoalBreakdown.sayfa.completed} / ${summary.coachGoalBreakdown.sayfa.target} syf.`}
+                />
+              )}
+            </>
+          ) : (
+            <MiniStat
+              icon={<Target className="w-4 h-4" />}
+              label="Hedef gerçekleşme"
+              value={`%${summary.realizationRate}`}
+              hint={`${summary.totalSolved} / ${summary.totalTarget} soru`}
+            />
+          )}
           <MiniStat
             icon={<Crosshair className="w-4 h-4" />}
             label="Doğruluk"
@@ -155,12 +214,16 @@ export function StudyInsightWidgets({
             value={formatDurationFromMinutes(summary.totalScreenMinutes)}
             hint="Toplam (öğrenci bildirimi)"
           />
-          <MiniStat
-            icon={<BookOpen className="w-4 h-4" />}
-            label="Okunan sayfa"
-            value={summary.totalPagesRead > 0 ? `${summary.totalPagesRead} syf.` : '—'}
-            hint="Kitap takibi"
-          />
+          {!summary.coachGoalBreakdown ||
+          (summary.coachGoalBreakdown.sayfa.target <= 0 &&
+            summary.coachGoalBreakdown.sayfa.completed <= 0) ? (
+            <MiniStat
+              icon={<BookOpen className="w-4 h-4" />}
+              label="Okunan sayfa"
+              value={summary.totalPagesRead > 0 ? `${summary.totalPagesRead} syf.` : '—'}
+              hint="Kayıtlardan toplam"
+            />
+          ) : null}
         </div>
       </div>
 
@@ -168,7 +231,7 @@ export function StudyInsightWidgets({
         <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-3 text-slate-800 dark:text-slate-100 font-semibold text-sm">
             <CalendarCheck className="w-4 h-4 text-sky-600" />
-            Haftalık koç hedefi vs çözülen (aralığa oransal hedef)
+            Haftalık koç hedefi vs çözülen (günlük kayıt)
           </div>
           <div className="h-52">
             <ResponsiveContainer width="100%" height="100%">
@@ -201,7 +264,8 @@ export function StudyInsightWidgets({
             </ResponsiveContainer>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
-            Mavi: hafta dilimine düşen oransal koç kotası · Turuncu: o hafta çözülen (üzerine gelince haftalık %)
+            Mavi: hafta dilimine düşen koç soru kotası · Turuncu: o hafta takvim kaydından yapılan (paragraf/problem/sayfa
+            ayrı kartlarda)
           </p>
         </div>
       ) : null}

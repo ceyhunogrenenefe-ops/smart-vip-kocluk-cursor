@@ -1,7 +1,17 @@
 export function subjectPlannerStyle(subject: string, quantityUnit?: string) {
-  const s = `${subject} ${quantityUnit || ''}`.toLowerCase();
-  if (/kitap|okuma/.test(s)) {
+  const u = String(quantityUnit || '').toLowerCase();
+  const s = `${subject} ${u}`.toLowerCase();
+  if (u === 'sayfa' || /kitap|okuma/.test(s)) {
     return { bar: 'bg-amber-200 border-amber-500 text-amber-950', chip: 'bg-amber-100 border-amber-400' };
+  }
+  if (u === 'dakika' || /dakika|süre|sure/.test(s)) {
+    return { bar: 'bg-cyan-200 border-cyan-600 text-cyan-950', chip: 'bg-cyan-100 border-cyan-500' };
+  }
+  if (/paragraf\s*çözme/i.test(s)) {
+    return { bar: 'bg-fuchsia-200 border-fuchsia-600 text-fuchsia-950', chip: 'bg-fuchsia-100 border-fuchsia-500' };
+  }
+  if (/problem\s*çözme/i.test(s)) {
+    return { bar: 'bg-rose-200 border-rose-600 text-rose-950', chip: 'bg-rose-100 border-rose-500' };
   }
   if (/matematik|mat\./.test(s)) {
     return { bar: 'bg-sky-200 border-sky-600 text-sky-950', chip: 'bg-sky-100 border-sky-500' };

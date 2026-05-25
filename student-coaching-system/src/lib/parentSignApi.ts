@@ -283,6 +283,10 @@ export async function updateParentSignContract(body: {
   ders_satirlari?: DersSatiri[];
   /** Doluysa şablon yerine bu HTML `merged_html` olarak kaydedilir (yalnız imzalanmamış kayıtta). */
   custom_merged_html?: string;
+  /** Taksit satırı ödeme işareti (imzalı veya fiyat sonrası kartlar). */
+  taksit_odeme_update?: { index: number; odendi: boolean; not?: string; odendi_tarihi?: string };
+  /** `kayit_formu_json` ile sığ birleştirme (ör. platform_user_id). */
+  kayit_json_merge?: Record<string, unknown>;
 }): Promise<ParentSignContractRow> {
   const res = await apiFetch('/api/parent-sign-contracts', {
     method: 'PATCH',
@@ -298,6 +302,22 @@ export async function deleteParentSignContract(id: string): Promise<void> {
   const res = await apiFetch(`/api/parent-sign-contracts?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((j as { error?: string }).error || `API ${res.status}`);
+}
+
+/** Sadece `kayit_json_merge` veya `taksit_odeme_update` (tam form PATCH’i gerekmez). */
+export async function patchParentSignKayitOnly(body: {
+  id: string;
+  kayit_json_merge?: Record<string, unknown>;
+  taksit_odeme_update?: { index: number; odendi: boolean; not?: string; odendi_tarihi?: string };
+}): Promise<ParentSignContractRow> {
+  const res = await apiFetch('/api/parent-sign-contracts', {
+    method: 'PATCH',
+    headers: JSON_HDR,
+    body: JSON.stringify(body)
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((j as { error?: string }).error || `API ${res.status}`);
+  return (j as { data: ParentSignContractRow }).data;
 }
 
 export type VeliImzaRegistrationHint = {
@@ -318,11 +338,17 @@ export type VeliImzaPayload = {
   institution_name?: string;
   signature_png_base64?: string | null;
   needs_student_form?: boolean;
+  awaiting_admin_price?: boolean;
+  registration_phase?: string | null;
   registration_hint?: VeliImzaRegistrationHint;
 };
 
 export async function fetchVeliImzaPayload(token: string): Promise<VeliImzaPayload> {
-  const res = await fetch(`/api/parent-sign-contracts?signing_token=${encodeURIComponent(token)}`);
+  const q = new URLSearchParams({ signing_token: token, _ts: String(Date.now()) });
+  const res = await fetch(`/api/parent-sign-contracts?${q.toString()}`, {
+    cache: 'no-store',
+    headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' }
+  });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((j as { error?: string }).error || `API ${res.status}`);
   return (j as { data: VeliImzaPayload }).data;
@@ -336,12 +362,17 @@ const REG_FORM_ERR: Record<string, string> = {
   okul_required: 'Okul adı zorunludur.',
   eposta_invalid: 'Geçerli bir e-posta girin.',
   il_ilce_required: 'İl ve ilçe zorunludur.',
+  adres_required: 'Adres (mahalle, sokak ve kapı bilgisi) zorunludur.',
+  il_required: 'İl zorunludur.',
+  ilce_required: 'İlçe zorunludur.',
   veli_tel_invalid: 'Veli telefonu en az 10 rakam olmalıdır.',
   ogrenci_tel_invalid: 'Öğrenci telefonu en az 10 rakam olmalıdır.',
   sinif_program_required: 'Sınıf ve program bilgisi zorunludur.',
   registration_form_not_expected: 'Bu bağlantı için kayıt formu adımı beklenmiyor.',
   already_processed: 'Bu belge zaten işlenmiş.',
-  not_found: 'Bağlantı bulunamadı veya süresi dolmuş.'
+  not_found: 'Bağlantı bulunamadı veya süresi dolmuş.',
+  program_invalid: 'Listeden geçerli bir program seçin.',
+  satis_kvkk_form_required: 'Satış sözleşmesi / bilgilendirme onayı gereklidir.'
 };
 
 export async function submitVeliRegistrationForm(payload: {
@@ -362,8 +393,9 @@ export async function submitVeliRegistrationForm(payload: {
   veli_tel: string;
   ogrenci_tel: string;
   kvkk_form_ok: boolean;
+  satis_kvkk_form_ok: boolean;
 }): Promise<void> {
-  const { signing_token, kvkk_form_ok, ...rest } = payload;
+  const { signing_token, kvkk_form_ok, satis_kvkk_form_ok, ...rest } = payload;
   const res = await fetch('/api/parent-sign-contracts', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -371,6 +403,7 @@ export async function submitVeliRegistrationForm(payload: {
       action: 'submit_registration_form',
       signing_token,
       kvkk_form_ok,
+      satis_kvkk_form_ok,
       ...rest
     })
   });
@@ -397,6 +430,7 @@ export async function submitVeliImza(payload: {
     const code = String((j as { error?: string }).error || '');
     const map: Record<string, string> = {
       registration_form_required_first: 'Önce kayıt bilgilerinizi göndermeniz gerekir.',
+      admin_price_required_before_sign: 'Kurum ücreti girilene kadar imza alınamaz. Lütfen daha sonra tekrar deneyin.',
       confirmations_required: 'Onay kutularını işaretleyin.',
       signature_required: 'İmza gerekli.'
     };
@@ -416,4 +450,45 @@ export async function verifyParentDocumentPublic(token: string): Promise<{
 }> {
   const res = await fetch(`/api/parent-sign-contracts?verify=${encodeURIComponent(token)}`);
   return res.json().catch(() => ({ ok: false }));
+}
+
+function randomStudentPassword(length = 10): string {
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
+  let s = '';
+  for (let i = 0; i < length; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return `${s}A1`;
+}
+
+/** İmzalı veli kaydından `users` öğrencisi oluşturur; şifreyi döner (kullanıcı yönetiminde değiştirebilirsiniz). */
+export async function createStudentUserFromParentSign(opts: {
+  contractId: string;
+  institution_id: string;
+  studentName: string;
+  email: string;
+  phone: string | null;
+}): Promise<{ passwordPlain: string; userId: string }> {
+  const passwordPlain = randomStudentPassword(10);
+  const res = await apiFetch('/api/users', {
+    method: 'POST',
+    headers: JSON_HDR,
+    body: JSON.stringify({
+      role: 'student',
+      email: opts.email.trim().toLowerCase(),
+      name: opts.studentName.trim(),
+      phone: opts.phone?.trim() || null,
+      password: passwordPlain,
+      institution_id: opts.institution_id,
+      is_active: true,
+      package: 'trial',
+      start_date: new Date().toISOString(),
+      end_date: null
+    })
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((j as { error?: string }).error || `API ${res.status}`);
+  const user = (j as { data: { id: string } }).data;
+  const uid = String(user?.id || '');
+  if (!uid) throw new Error('Kullanıcı oluşturulamadı');
+  await patchParentSignKayitOnly({ id: opts.contractId, kayit_json_merge: { platform_user_id: uid } });
+  return { passwordPlain, userId: uid };
 }

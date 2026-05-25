@@ -26,6 +26,14 @@
   .pt-safe {
     padding-top: env(safe-area-inset-top, 0px);
   }
+  .tap-target {
+    @apply relative inline-flex touch-manipulation items-center justify-center;
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+  }
+  .icon-tap-btn {
+    @apply inline-flex h-11 w-11 min-h-[44px] min-w-[44px] shrink-0 touch-manipulation select-none items-center justify-center rounded-lg;
+  }
 }
 
 @layer base {
@@ -37,6 +45,21 @@
   body {
     @apply antialiased;
     overflow-x: clip;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  a[href],
+  input,
+  select,
+  textarea {
+    touch-action: manipulation;
+  }
+
+  /* İkon tıklaması düğmeye düşsün; ilk basışta kaçan tıklamaları önler */
+  button:not(:disabled) svg,
+  [role="button"]:not([aria-disabled="true"]) svg {
+    pointer-events: none;
   }
 
   :root {
@@ -61,14 +84,19 @@
     --sidebar-border: 240 3.7% 15.9%;
     --sidebar-ring: 217.2 91.2% 59.8%;
   }
+
+  /* Layout kabuğu: sidebar sabit, scroll yalnızca main içinde */
+  @media (min-width: 1024px) {
+    html.app-shell,
+    html.app-shell body,
+    html.app-shell #root {
+      height: 100%;
+      max-height: 100dvh;
+      overflow: hidden;
+    }
+  }
 }
-
-
 
 img {
   object-position: top;
-}
-
-.fixed {
-  position: fixed;
 }

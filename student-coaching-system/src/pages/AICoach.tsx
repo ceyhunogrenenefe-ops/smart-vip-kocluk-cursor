@@ -642,9 +642,11 @@ ${studentTeacher ? `\n👨‍🏫 **Öğretmen Koç:** ${studentTeacher.name}` :
           {/* Deneme Sınavı Verileri */}
           {showExamData && selectedStudent && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-              <div
-                className="p-4 bg-gradient-to-r from-orange-50 to-red-50 cursor-pointer flex items-center justify-between"
+              <button
+                type="button"
+                className="flex min-h-[44px] w-full touch-manipulation items-center justify-between p-4 bg-gradient-to-r from-orange-50 to-red-50 text-left"
                 onClick={() => setAnalysisExpanded(analysisExpanded === 'exams' ? null : 'exams')}
+                aria-expanded={analysisExpanded === 'exams'}
               >
                 <div className="flex items-center gap-3">
                   <ClipboardList className="w-6 h-6 text-orange-600" />
@@ -654,11 +656,11 @@ ${studentTeacher ? `\n👨‍🏫 **Öğretmen Koç:** ${studentTeacher.name}` :
                   </span>
                 </div>
                 {analysisExpanded === 'exams' ? (
-                  <ChevronUp className="w-5 h-5 text-gray-400" />
+                  <ChevronUp className="w-5 h-5 shrink-0 text-gray-400" />
                 ) : (
-                  <ChevronDown className="w-5 h-5 text-gray-400" />
+                  <ChevronDown className="w-5 h-5 shrink-0 text-gray-400" />
                 )}
-              </div>
+              </button>
 
               {analysisExpanded === 'exams' && (
                 <div className="p-4 space-y-4">

@@ -216,7 +216,7 @@ export default function Topics() {
 
       {/* Add Topic Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4">
           <div className="bg-white rounded-2xl w-full max-w-md">
             <div className="flex items-center justify-between p-6 border-b border-gray-100">
               <h3 className="text-xl font-bold text-slate-800">Yeni Konu Ekle</h3>
@@ -225,7 +225,7 @@ export default function Topics() {
                   setShowAddModal(false);
                   setNewTopic('');
                 }}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                className="icon-tap-btn hover:bg-gray-100 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>

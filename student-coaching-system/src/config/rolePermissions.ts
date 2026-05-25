@@ -30,8 +30,9 @@ export const ROUTE_ALLOWED_ROLES = {
   '/message-templates': ['admin', 'super_admin'],
   '/webhooks': ['super_admin', 'admin', 'coach'],
   '/settings': ['super_admin', 'admin', 'teacher', 'coach'],
-  '/tracking': ['admin', 'coach'],
+  '/tracking': ['admin'],
   '/weekly-planner': ['super_admin', 'admin', 'coach', 'student'],
+  '/my-profile': ['super_admin', 'admin', 'coach', 'student', 'teacher'],
   '/academic-center': ['super_admin', 'admin', 'coach', 'student', 'teacher'],
   '/super-admin': ['super_admin', 'admin'],
   '/user-management': ['super_admin', 'admin'],
@@ -49,7 +50,17 @@ export const ROUTE_ALLOWED_ROLES = {
   '/teacher-panel': ['teacher'],
   '/class-live-lessons': ['super_admin', 'admin', 'coach', 'teacher'],
   '/class-schedule': ['student'],
-  '/veli-onay': ['super_admin', 'admin', 'coach']
+  '/veli-onay': ['super_admin', 'admin', 'coach'],
+  '/tahsilat-muhasebe': ['super_admin', 'admin', 'coach'],
+  '/soru-sor': ['student'],
+  '/soru-havuzu': ['super_admin', 'admin', 'teacher', 'coach'],
+  '/soru-analitik': ['super_admin', 'admin', 'coach'],
+  '/notifications': ['super_admin', 'admin', 'coach'],
+  '/edu-panel': ['super_admin', 'admin', 'coach', 'teacher'],
+  '/edu-derslerim': ['student'],
+  '/ai-agents-admin': ['super_admin', 'admin', 'teacher', 'coach'],
+  '/ai-agents': ['super_admin', 'admin', 'teacher', 'coach', 'student'],
+  '/ai-agents/:id': ['super_admin', 'admin', 'teacher', 'coach', 'student']
 } as const satisfies Record<string, readonly UserRole[]>;
 
 export type ProtectedAppPath = keyof typeof ROUTE_ALLOWED_ROLES;

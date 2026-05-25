@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams, useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
+import { studentToImpersonationTarget } from '../lib/studentImpersonation';
 import {
   Student,
   ClassLevel,
@@ -30,11 +31,12 @@ import {
   Link2,
   Eye,
   Plus,
-  Loader2
+  Loader2,
+  LogIn
 } from 'lucide-react';
 
 export default function Students() {
-  const { effectiveUser } = useAuth();
+  const { user, effectiveUser, impersonate, canImpersonate } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -55,6 +57,7 @@ export default function Students() {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [saving, setSaving] = useState(false);
+  const [enterAsBusyId, setEnterAsBusyId] = useState<string | null>(null);
 
   const [lessonQuotas, setLessonQuotas] = useState<StudentTeacherLessonQuota[]>([]);
   const [quotaLoading, setQuotaLoading] = useState(false);
@@ -95,6 +98,29 @@ export default function Students() {
   const canEditStudents =
     !!effectiveUser &&
     (effectiveUser.role === 'super_admin' || effectiveUser.role === 'admin' || effectiveUser.role === 'coach');
+
+  const canEnterStudentAccount = (student: Student) => {
+    if (!user || !student.email?.trim()) return false;
+    return canImpersonate(studentToImpersonationTarget(student));
+  };
+
+  const handleEnterAsStudent = async (student: Student) => {
+    if (!student.email?.trim()) {
+      alert('Öğrencinin e-posta adresi yok; hesaba geçilemez.');
+      return;
+    }
+    setEnterAsBusyId(student.id);
+    try {
+      const r = await impersonate(studentToImpersonationTarget(student));
+      if (!r.success) {
+        alert(r.message || 'Öğrenci hesabına geçilemedi.');
+        return;
+      }
+      navigate('/student-dashboard');
+    } finally {
+      setEnterAsBusyId(null);
+    }
+  };
 
   useEffect(() => {
     if (!selectedStudent) {
@@ -382,6 +408,11 @@ export default function Students() {
           <p className="text-gray-500">Toplam {students.length} öğrenci kayıtlı</p>
           <p className="text-sm text-gray-500 mt-1">
             Koç hesapları buradan şifre belirleyerek öğrenci ekleyebilir; müdür ve süper admin tüm süreci kullanıcı veya öğrenci üzerinden yönetir.
+            {user?.role === 'coach' ? (
+              <span className="block mt-1 text-violet-700">
+                Mor giriş simgesiyle öğrencinin paneline geçebilir; üst çubuktan «Geri dön» ile koç panelinize dönersiniz.
+              </span>
+            ) : null}
           </p>
         </div>
         {canEditStudents && (
@@ -475,7 +506,23 @@ export default function Students() {
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
+                  {canEnterStudentAccount(student) ? (
+                    <button
+                      type="button"
+                      title="Öğrenci hesabına gir"
+                      disabled={enterAsBusyId === student.id}
+                      onClick={() => void handleEnterAsStudent(student)}
+                      className="p-1.5 text-violet-600 hover:text-violet-800 hover:bg-violet-50 rounded-lg transition-colors disabled:opacity-50"
+                    >
+                      {enterAsBusyId === student.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <LogIn className="w-4 h-4" />
+                      )}
+                    </button>
+                  ) : null}
                   <button
+                    type="button"
                     onClick={() => setSelectedStudent(student)}
                     className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                   >
@@ -521,21 +568,16 @@ export default function Students() {
               {/* Stats */}
               <div className="grid grid-cols-3 gap-2 pt-4 border-t border-gray-100">
                 <div className="text-center">
+                  <p className="text-lg font-bold text-slate-800">{stats.totalTarget}</p>
+                  <p className="text-xs text-gray-500">Koç hedefi</p>
+                </div>
+                <div className="text-center">
                   <p className="text-lg font-bold text-slate-800">{stats.totalSolved}</p>
                   <p className="text-xs text-gray-500">Çözülen</p>
                 </div>
                 <div className="text-center">
-                  <p className={`text-lg font-bold ${
-                    stats.successRate >= 70 ? 'text-green-600' :
-                    stats.successRate >= 50 ? 'text-yellow-600' : 'text-red-600'
-                  }`}>
-                    %{stats.successRate}
-                  </p>
-                  <p className="text-xs text-gray-500">Başarı</p>
-                </div>
-                <div className="text-center">
                   <p className="text-lg font-bold text-slate-800">%{stats.realizationRate}</p>
-                  <p className="text-xs text-gray-500">Hedef</p>
+                  <p className="text-xs text-gray-500">Oran</p>
                 </div>
               </div>
             </div>
@@ -564,7 +606,7 @@ export default function Students() {
 
       {/* Add/Edit Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4">
           <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-6 border-b border-gray-100">
               <h3 className="text-xl font-bold text-slate-800">
@@ -576,7 +618,7 @@ export default function Students() {
                   setEditingStudent(null);
                   resetForm();
                 }}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                className="icon-tap-btn hover:bg-gray-100 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -815,7 +857,7 @@ export default function Students() {
 
       {/* Student Detail Modal */}
       {selectedStudent && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4">
           <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-gray-100">
               <div className="flex items-center justify-between">
@@ -830,7 +872,7 @@ export default function Students() {
                 </div>
                 <button
                   onClick={() => setSelectedStudent(null)}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="icon-tap-btn hover:bg-gray-100 transition-colors"
                 >
                   <X className="w-5 h-5" />
                 </button>

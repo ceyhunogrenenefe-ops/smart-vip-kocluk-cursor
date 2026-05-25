@@ -44,8 +44,10 @@ function AccordionItem({ question, answer }: { question: string; answer: string 
   return (
     <div className="border-b border-gray-200 last:border-0">
       <button
+        type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full py-5 flex items-center justify-between text-left hover:text-red-600 transition-colors"
+        className="flex min-h-[44px] w-full touch-manipulation items-center justify-between py-5 text-left hover:text-red-600 transition-colors"
+        aria-expanded={isOpen}
       >
         <span className="font-semibold text-gray-900">{question}</span>
         {isOpen ? (

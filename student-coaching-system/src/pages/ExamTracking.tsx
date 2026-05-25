@@ -1,5 +1,6 @@
 // Türkçe: Deneme Sınavları Takip Sayfası - AI Koç entegrasyonu
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { IconTapButton } from '../components/ui/IconTapButton';
 import { useApp } from '../context/AppContext';
 import { mergeYosMatematikGenelSubjects } from '../lib/mergeYosExamSubjects';
 import {
@@ -70,7 +71,7 @@ interface ExamResult {
   studentId: string;
   examType: '3' | '4' | '5' | '6' | '7' | 'LGS' | 'YOS' | 'TYT' | 'YKS-EA' | 'YKS-SAY' | 'AYT';
   examDate: string;
-  source: 'webhook' | 'manual';
+  source: 'webhook' | 'manual' | 'edesis';
   totalNet: number;
   subjects: {
     name: string;
@@ -766,6 +767,7 @@ export default function ExamTracking() {
   const getSourceLabel = (source: string) => {
     switch (source) {
       case 'webhook': return 'Webhook';
+      case 'edesis': return 'Edesis';
       case 'manual': return 'Manuel';
       case 'pdf': return 'PDF İçe Aktar';
       default: return source;
@@ -775,6 +777,7 @@ export default function ExamTracking() {
   const getSourceColor = (source: string) => {
     switch (source) {
       case 'webhook': return 'bg-green-100 text-green-700';
+      case 'edesis': return 'bg-indigo-100 text-indigo-700';
       case 'manual': return 'bg-orange-100 text-orange-700';
       case 'pdf': return 'bg-blue-100 text-blue-700';
       default: return 'bg-gray-100 text-gray-700';
@@ -844,7 +847,7 @@ export default function ExamTracking() {
       yosAvg: yosResults.length > 0
         ? Math.round(yosResults.reduce((sum, r) => sum + r.totalNet, 0) / yosResults.length * 10) / 10
         : 0,
-      webhookCount: allExamResults.filter(r => r.source === 'webhook').length,
+      webhookCount: allExamResults.filter(r => r.source === 'webhook' || r.source === 'edesis').length,
       manualCount: allExamResults.filter(r => r.source === 'manual').length,
       pdfCount: allExamResults.filter(r => r.source === 'pdf').length
     };
@@ -1143,12 +1146,14 @@ export default function ExamTracking() {
                             <div className="text-xl font-bold text-orange-600">
                               {result.totalNet} net
                             </div>
-                            <button
+                            <IconTapButton
                               onClick={() => setExpandedExam(isExpanded ? null : result.id)}
-                              className="ml-auto text-gray-400 hover:text-gray-600"
+                              className="ml-auto text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                              aria-label={isExpanded ? 'Detayı kapat' : 'Detayı aç'}
+                              aria-expanded={isExpanded}
                             >
                               {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-                            </button>
+                            </IconTapButton>
                           </div>
 
                           {/* Ders Bazlı Sonuçlar (Genişletilmiş) */}
@@ -1228,13 +1233,13 @@ export default function ExamTracking() {
 
       {/* Yeni Deneme Formu (Modal) */}
       {showAddForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-gray-100 flex items-center justify-between">
               <h3 className="text-xl font-semibold text-slate-800">Manuel Deneme Ekle</h3>
               <button
                 onClick={() => setShowAddForm(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg"
+                className="icon-tap-btn hover:bg-gray-100"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1405,7 +1410,7 @@ export default function ExamTracking() {
 
       {/* PDF İçe Aktarma Modalı */}
       {showPdfImport && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-gray-100 flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -1419,7 +1424,7 @@ export default function ExamTracking() {
               </div>
               <button
                 onClick={closePdfImport}
-                className="p-2 hover:bg-gray-100 rounded-lg"
+                className="icon-tap-btn hover:bg-gray-100"
               >
                 <X className="w-5 h-5" />
               </button>

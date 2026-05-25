@@ -5,6 +5,7 @@ import {
   parseMetaSendError,
   normalizeMetaLanguageCode
 } from './meta-whatsapp.js';
+import { resolveLanguageTryOrderForSend } from './meta-templates-sync.js';
 import { supabaseAdmin } from './supabase-admin.js';
 
 function normalizeBindingList(templateRow) {
@@ -172,12 +173,14 @@ export async function sendWhatsAppUsingTemplateRow({ phone, templateRow, vars, t
 
   const bodyParameterTexts = buildTemplateBodyParameters(bindings, vars);
   const useNamedMetaBody = templateRow?.meta_named_body_parameters === true;
+  const languageCandidates = await resolveLanguageTryOrderForSend(metaName, lang);
 
   try {
     const r = await sendMetaTemplateMessage({
       toE164: e164,
       templateName: metaName,
       languageCode: lang,
+      languageCandidates,
       bodyParameterTexts,
       bodyParameterNames: useNamedMetaBody ? bindings : null
     });

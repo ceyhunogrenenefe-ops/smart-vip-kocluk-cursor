@@ -1,11 +1,6 @@
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
-import {
-  getMetaWhatsAppEnvStatus,
-  normalizePhoneToE164,
-  sendMetaTextMessage,
-  parseMetaSendError
-} from '../api/_lib/meta-whatsapp.js';
+import { getTwilioEnvStatus, sendMeetingWhatsApp, normalizePhoneToE164 } from '../api/_lib/whatsapp-twilio.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { getIstanbulDateString } from '../api/_lib/istanbul-time.js';
 
@@ -24,7 +19,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'GET') {
-    return res.status(200).json({ data: getMetaWhatsAppEnvStatus() });
+    return res.status(200).json({ data: getTwilioEnvStatus() });
   }
 
   if (req.method !== 'POST') {
@@ -46,10 +41,11 @@ export default async function handler(req, res) {
   }
 
   const today = getIstanbulDateString();
+  const statusRef = { sid: null, err: null };
 
   try {
-    const { messageId } = await sendMetaTextMessage({ toE164: e164, text: message });
-    const sid = messageId || null;
+    const { sid } = await sendMeetingWhatsApp(e164, message);
+    statusRef.sid = sid;
     try {
       await supabaseAdmin.from('message_logs').insert({
         student_id: null,
@@ -59,20 +55,15 @@ export default async function handler(req, res) {
         status: 'sent',
         log_date: today,
         error: null,
-        phone: e164,
-        twilio_sid: null,
-        twilio_error_code: null,
-        twilio_content_sid: null,
-        meta_message_id: sid,
-        meta_template_name: null
+        phone: e164
       });
     } catch (logErr) {
       console.warn('[whatsapp-send] log insert', logErr?.message || logErr);
     }
-    return res.status(200).json({ ok: true, sid });
+    return res.status(200).json({ ok: true, sid: statusRef.sid });
   } catch (e) {
-    const parsed = parseMetaSendError(e);
-    const errMsg = parsed.message;
+    const errMsg = e instanceof Error ? e.message : String(e);
+    statusRef.err = errMsg;
     try {
       await supabaseAdmin.from('message_logs').insert({
         student_id: null,
@@ -82,12 +73,7 @@ export default async function handler(req, res) {
         status: 'failed',
         log_date: today,
         error: errMsg,
-        phone: e164,
-        twilio_sid: null,
-        twilio_error_code: parsed.code != null ? String(parsed.code) : null,
-        twilio_content_sid: null,
-        meta_message_id: null,
-        meta_template_name: null
+        phone: e164
       });
     } catch (logErr) {
       console.warn('[whatsapp-send] failed log insert', logErr?.message || logErr);

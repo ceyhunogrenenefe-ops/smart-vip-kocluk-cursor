@@ -52,7 +52,20 @@ export async function getStudentPhones(studentRow) {
   return candidates;
 }
 
-/** Günlük rapor hatırlatması: yalnızca öğrenci hattı (veli hariç) */
+/** Günlük rapor hatırlatması: öğrenci + veli (aynı numarada tek mesaj, veli satırı öncelikli) */
+export function getReportReminderRecipients(studentRow) {
+  const st = normalizePhoneToE164(studentRow.phone || '');
+  const pr = normalizePhoneToE164(studentRow.parent_phone || '');
+  if (st && pr && st === pr) {
+    return [{ phone: st, role: 'parent', kind: 'report_reminder_parent' }];
+  }
+  const out = [];
+  if (st) out.push({ phone: st, role: 'student', kind: 'report_reminder' });
+  if (pr) out.push({ phone: pr, role: 'parent', kind: 'report_reminder_parent' });
+  return out;
+}
+
+/** Günlük rapor hatırlatması: yalnızca öğrenci hattı (veli hariç) — study_evening vb. için */
 export async function getStudentPhoneForReport(studentRow) {
   const toE164 = (tr) => {
     const digits = String(tr || '').replace(/\D/g, '');

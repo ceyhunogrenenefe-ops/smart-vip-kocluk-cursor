@@ -7,8 +7,10 @@ import {
   ChevronLeft,
   ChevronRight,
   LayoutDashboard,
+  MessageCircle,
   Settings,
   TrendingUp,
+  Users,
   Video
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -19,6 +21,10 @@ import {
   getFlatMenuForRoles,
   structureNavFromFlat,
   STUDENT_PANEL_SUBMENU_ITEMS,
+  STUDENT_LESSON_NAV_ITEMS,
+  STUDENT_NAV_ACADEMIC_CENTER,
+  STUDENT_NAV_SORU_SOR,
+  NAV_MY_PROFILE,
   type FlatNavItem
 } from './sidebar/navModel';
 import { SidebarNavLink } from './sidebar/SidebarNavLink';
@@ -51,8 +57,11 @@ export default function Sidebar({
     tags.includes('student') &&
     !tags.some((t) => ['super_admin', 'admin', 'coach', 'teacher'].includes(t));
   const hasGroupedSection =
+    Boolean(nav.academicCenter) ||
     nav.lessons.length > 0 ||
+    nav.team.length > 0 ||
     nav.academic.length > 0 ||
+    nav.whatsapp.length > 0 ||
     nav.orgSystem.length > 0 ||
     nav.settings.length > 0;
 
@@ -108,7 +117,10 @@ export default function Sidebar({
   return (
     <aside
       className={cn(
-        'fixed left-0 top-0 z-[110] flex min-h-0 h-screen max-h-[100dvh] flex-col overflow-hidden',
+        'flex min-h-0 h-screen max-h-[100dvh] flex-col overflow-hidden',
+        'max-lg:fixed max-lg:left-0 max-lg:top-0',
+        mobileOpen ? 'max-lg:z-[160] max-lg:pointer-events-auto max-lg:visible' : 'max-lg:z-[110] max-lg:pointer-events-none max-lg:invisible',
+        'lg:fixed lg:inset-y-0 lg:left-0 lg:z-40 lg:visible lg:pointer-events-auto',
         'border-r border-slate-400/25 text-white',
         'bg-gradient-to-b from-slate-800 via-slate-800 to-slate-950',
         '[box-shadow:inset_1px_0_0_0_rgba(255,255,255,0.045)]',
@@ -147,16 +159,57 @@ export default function Sidebar({
 
       <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden px-2 py-3">
         {isStudentOnlyNav ? (
-          <SidebarNavGroup
-            id="studentPanel"
-            label="Öğrenci Paneli"
-            icon={LayoutDashboard}
-            items={STUDENT_PANEL_SUBMENU_ITEMS}
-            pathname={location.pathname}
-            collapsed={railCollapsed}
-            onNavigate={go}
-            itemMatchExact
-          />
+          <>
+            <SidebarNavLink
+              label={STUDENT_NAV_ACADEMIC_CENTER.label}
+              icon={STUDENT_NAV_ACADEMIC_CENTER.icon}
+              active={
+                location.pathname === STUDENT_NAV_ACADEMIC_CENTER.path ||
+                location.pathname.startsWith(`${STUDENT_NAV_ACADEMIC_CENTER.path}/`)
+              }
+              collapsed={railCollapsed}
+              onNavigate={() => go(STUDENT_NAV_ACADEMIC_CENTER.path)}
+            />
+            <SidebarNavGroup
+              id="studentLessons"
+              label="Ders & Görüşmeler"
+              icon={Video}
+              items={STUDENT_LESSON_NAV_ITEMS}
+              pathname={location.pathname}
+              collapsed={railCollapsed}
+              onNavigate={go}
+            />
+            <SidebarNavGroup
+              id="studentPanel"
+              label="Öğrenci Paneli"
+              icon={LayoutDashboard}
+              items={STUDENT_PANEL_SUBMENU_ITEMS}
+              pathname={location.pathname}
+              collapsed={railCollapsed}
+              onNavigate={go}
+              itemMatchExact
+            />
+            <SidebarNavLink
+              label={STUDENT_NAV_SORU_SOR.label}
+              icon={STUDENT_NAV_SORU_SOR.icon}
+              active={
+                location.pathname === STUDENT_NAV_SORU_SOR.path ||
+                location.pathname.startsWith(`${STUDENT_NAV_SORU_SOR.path}/`)
+              }
+              collapsed={railCollapsed}
+              onNavigate={() => go(STUDENT_NAV_SORU_SOR.path)}
+            />
+            <SidebarNavLink
+              label={NAV_MY_PROFILE.label}
+              icon={NAV_MY_PROFILE.icon}
+              active={
+                location.pathname === NAV_MY_PROFILE.path ||
+                location.pathname.startsWith(`${NAV_MY_PROFILE.path}/`)
+              }
+              collapsed={railCollapsed}
+              onNavigate={() => go(NAV_MY_PROFILE.path)}
+            />
+          </>
         ) : null}
 
         {/* Panel */}
@@ -178,6 +231,18 @@ export default function Sidebar({
         {hasGroupedSection ? (
           <>
             <div className="my-2 h-px bg-gradient-to-r from-transparent via-slate-400/35 to-transparent" />
+            {nav.academicCenter ? (
+              <SidebarNavLink
+                label={nav.academicCenter.label}
+                icon={nav.academicCenter.icon}
+                active={
+                  location.pathname === nav.academicCenter.path ||
+                  location.pathname.startsWith(`${nav.academicCenter.path}/`)
+                }
+                collapsed={railCollapsed}
+                onNavigate={() => go(nav.academicCenter!.path)}
+              />
+            ) : null}
             <SidebarNavGroup
               id="lessons"
               label="Ders & Görüşmeler"
@@ -188,10 +253,28 @@ export default function Sidebar({
               onNavigate={go}
             />
             <SidebarNavGroup
+              id="team"
+              label="Öğrenci ve Ekip"
+              icon={Users}
+              items={nav.team}
+              pathname={location.pathname}
+              collapsed={railCollapsed}
+              onNavigate={go}
+            />
+            <SidebarNavGroup
               id="academic"
               label="Akademik Takip"
               icon={BarChart3}
               items={nav.academic}
+              pathname={location.pathname}
+              collapsed={railCollapsed}
+              onNavigate={go}
+            />
+            <SidebarNavGroup
+              id="whatsapp"
+              label="WhatsApp"
+              icon={MessageCircle}
+              items={nav.whatsapp}
               pathname={location.pathname}
               collapsed={railCollapsed}
               onNavigate={go}
@@ -233,7 +316,7 @@ export default function Sidebar({
           type="button"
           onClick={() => persistWide(!desktopWide)}
           title={desktopWide ? 'Menüyü daralt' : 'Menüyü genişlet'}
-          className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-slate-300 transition-all duration-200 hover:bg-white/10 hover:text-white"
+          className="flex min-h-[44px] w-full touch-manipulation items-center justify-center gap-2 rounded-xl py-2.5 text-slate-300 transition-all duration-200 hover:bg-white/10 hover:text-white"
         >
           {desktopWide ? (
             <ChevronLeft className="h-5 w-5" strokeWidth={1.75} />

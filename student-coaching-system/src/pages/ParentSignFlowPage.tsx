@@ -1,10 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import {
   createParentSignClassPreset,
   createParentSignContract,
+  createStudentUserFromParentSign,
   updateParentSignContract,
+  patchParentSignKayitOnly,
   deleteParentSignClassPreset,
   deleteParentSignContract,
   listInstitutionsForPicker,
@@ -24,7 +27,13 @@ import {
   type StudentFillRow,
   type UserStudentFillRow
 } from '../lib/parentSignApi';
-import { downloadParentSignContractPdf } from '../lib/parentSignPdfDownload';
+import {
+  classifyTaksit,
+  effectiveVadeYmd,
+  formatTrShortDate,
+  type TaksitKartMuhasebe
+} from '../lib/taksitMuhasebe';
+import { rolesForProtectedRoute, userHasAnyRole } from '../config/rolePermissions';
 import {
   Copy,
   Loader2,
@@ -98,6 +107,85 @@ function muhasebeOzetFromRow(r: ParentSignContractRow): string {
   return '';
 }
 
+function kayitJsonRecord(r: ParentSignContractRow): Record<string, unknown> {
+  const j = r.kayit_formu_json;
+  return j && typeof j === 'object' && !Array.isArray(j) ? (j as Record<string, unknown>) : {};
+}
+
+function epostaFromKayitJson(r: ParentSignContractRow): string {
+  return String(kayitJsonRecord(r).eposta || '')
+    .trim()
+    .toLowerCase();
+}
+
+function platformUserIdFromKayit(r: ParentSignContractRow): string {
+  const v = kayitJsonRecord(r).platform_user_id;
+  return typeof v === 'string' ? v.trim() : '';
+}
+
+function linkedStudentUserId(r: ParentSignContractRow): string {
+  const col = r.ogrenci_user_id != null ? String(r.ogrenci_user_id).trim() : '';
+  if (col) return col;
+  return platformUserIdFromKayit(r);
+}
+
+type TaksitKart = TaksitKartMuhasebe;
+
+function taksitKartlariFromRow(r: ParentSignContractRow): TaksitKart[] {
+  const raw = kayitJsonRecord(r).taksit_kartlari;
+  if (!Array.isArray(raw)) return [];
+  const out: TaksitKart[] = [];
+  for (const x of raw) {
+    if (!x || typeof x !== 'object') continue;
+    const o = x as Record<string, unknown>;
+    out.push({
+      no: typeof o.no === 'number' ? o.no : Number(o.no) || undefined,
+      tutar_tl: typeof o.tutar_tl === 'number' ? o.tutar_tl : Number(o.tutar_tl) || undefined,
+      odendi: Boolean(o.odendi),
+      odeme_notu: o.odeme_notu != null ? String(o.odeme_notu) : '',
+      vade_tarihi: o.vade_tarihi != null ? String(o.vade_tarihi).slice(0, 10) : undefined,
+      odendi_tarihi: o.odendi_tarihi != null ? String(o.odendi_tarihi).slice(0, 10) : undefined
+    });
+  }
+  return out;
+}
+
+/** İmzalı kayıt + e-posta: `/user-management` modalını veli/öğrenci bilgileriyle doldurmak için bağlantı. */
+function buildVeliSignedUserManagementPrefillUrl(r: ParentSignContractRow, origin: string): string | null {
+  if (!parentContractRowSigned(r)) return null;
+  if (linkedStudentUserId(r)) return null;
+  const email = epostaFromKayitJson(r);
+  if (!email || !email.includes('@')) return null;
+  const kj = kayitJsonRecord(r);
+  const q = new URLSearchParams();
+  q.set('veli_hesap', '1');
+  q.set('email', email);
+  q.set('ad', String(r.ogrenci_ad || '').trim());
+  q.set('soyad', String(r.ogrenci_soyad || '').trim());
+  const ogTel = String(kj.ogrenci_tel || '')
+    .replace(/\D/g, '');
+  if (ogTel.length >= 10) q.set('tel', ogTel);
+  const veliLine = `${String(r.veli_ad || '').trim()} ${String(r.veli_soyad || '').trim()}`.trim();
+  if (veliLine) q.set('veli_adsoyad', veliLine);
+  const veliTel = String(kj.veli_tel || r.telefon || '')
+    .replace(/\D/g, '');
+  if (veliTel.length >= 10) q.set('veli_tel', veliTel);
+  const sinif = String(r.sinif || '').trim();
+  if (sinif) q.set('sinif', sinif);
+  const okul = String(kj.okul_adi || '').trim();
+  if (okul) q.set('okul', okul);
+  const dogum = String(kj.dogum_tarihi || '')
+    .trim()
+    .slice(0, 10);
+  if (dogum) q.set('dogum', dogum);
+  const inst = String(r.institution_id || '').trim();
+  if (inst) q.set('kurum_id', inst);
+  const cno = String(r.contract_number || '').trim();
+  if (cno) q.set('sozlesme', cno);
+  const base = origin.replace(/\/+$/, '');
+  return `${base}/user-management?${q.toString()}`;
+}
+
 /** Tarayıcıda saklanan ek program isimleri (şablonda olmasa da seçicide listelenir) */
 const LS_EXTRA_PROGRAM_NAMES = 'veli_onay_extra_program_names_v1';
 
@@ -114,6 +202,8 @@ export default function ParentSignFlowPage() {
   const [institutionId, setInstitutionId] = useState('');
   const [institutionOptions, setInstitutionOptions] = useState<InstitutionPickRow[]>([]);
   const [loadingInstitutions, setLoadingInstitutions] = useState(false);
+  /** Kullanıcı yönetimi rotası yalnızca admin / süper_admin; koç bağlantıya tıklayınca yetkisiz yönlendirme yaşanmasın. */
+  const canOpenUserManagement = userHasAnyRole(effectiveUser, rolesForProtectedRoute('/user-management'));
   const effectiveInstitutionId = useMemo(() => {
     if (isSuper) {
       const fromPicker = institutionId.trim();
@@ -194,6 +284,8 @@ export default function ParentSignFlowPage() {
   const [editMergedHtml, setEditMergedHtml] = useState('');
 
   const [pdfRowId, setPdfRowId] = useState<string | null>(null);
+  /** `contractId:suffix` — taksit / hesap oluşturma */
+  const [parentSignRowBusy, setParentSignRowBusy] = useState<string | null>(null);
 
   const [extraProgramLines, setExtraProgramLines] = useState('');
 
@@ -524,6 +616,52 @@ export default function ParentSignFlowPage() {
     const path = `/veli-imza/${encodeURIComponent(r.signing_token)}`;
     if (typeof window !== 'undefined' && window.location?.origin) return `${window.location.origin}${path}`;
     return path;
+  };
+
+  const toggleTaksitOdeme = async (r: ParentSignContractRow, index: number, odendi: boolean) => {
+    setParentSignRowBusy(`${r.id}:t${index}`);
+    setMsg(null);
+    try {
+      await patchParentSignKayitOnly({ id: r.id, taksit_odeme_update: { index, odendi } });
+      void load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Taksit güncellenemedi');
+    } finally {
+      setParentSignRowBusy(null);
+    }
+  };
+
+  const createStudentAccountFromRow = async (r: ParentSignContractRow) => {
+    const email = epostaFromKayitJson(r);
+    if (!email || !email.includes('@')) {
+      setMsg('Kayıt formunda geçerli e-posta yok; veli formunu kontrol edin.');
+      return;
+    }
+    const inst = String(r.institution_id || '').trim();
+    if (!inst) {
+      setMsg('Kurum bilgisi eksik.');
+      return;
+    }
+    setParentSignRowBusy(`${r.id}:acc`);
+    setMsg(null);
+    try {
+      const fullName = `${String(r.ogrenci_ad || '').trim()} ${String(r.ogrenci_soyad || '').trim()}`.trim() || 'Öğrenci';
+      const { passwordPlain } = await createStudentUserFromParentSign({
+        contractId: r.id,
+        institution_id: inst,
+        studentName: fullName,
+        email,
+        phone: r.telefon != null ? String(r.telefon).trim() : null
+      });
+      setMsg(
+        `Öğrenci girişi oluşturuldu. Kullanıcı yönetiminden e-posta ve şifreyi düzenleyebilirsiniz. Geçici şifre: ${passwordPlain}`
+      );
+      void load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Hesap oluşturulamadı');
+    } finally {
+      setParentSignRowBusy(null);
+    }
   };
 
   const openEditContract = (r: ParentSignContractRow) => {
@@ -1099,10 +1237,12 @@ export default function ParentSignFlowPage() {
                   onChange={(e) => setOgrenciOnceKayitFormu(e.target.checked)}
                 />
                 <span>
-                  <strong>Önce veli kayıt formunu doldursun</strong> — veli linkinde ad, soyad, T.C., doğum tarihi, okul,
-                  sınıf, e-posta, il/ilçe, program, veli ve öğrenci telefonu ile form KVKK onayı istenir; gönderimden sonra
-                  sözleşme otomatik oluşur ve imza adımına geçilir. Muhasebe özeti kayda yazılır; aşağıdaki listeden
-                  panoya kopyalayabilirsiniz. Öğrenci/veli adını burada boş bırakabilirsiniz (yer tutucu kaydedilir).
+                  <strong>Önce veli kayıt formunu doldursun</strong> — veli linkinde öğrenci/veli bilgileri, program
+                  (sabit liste), KVKK ve satış / ön bilgilendirme onayları istenir. Veli gönderdikten sonra kayıt
+                  kurumda görünür; <strong>Düzenle</strong> ile ücreti 0 TL&apos;den büyük ve taksiti girince e-sözleşme
+                  veliye açılır (aynı link). İmzadan sonra taksit tahsilatını listeden işaretleyebilir, e-posta ile
+                  öğrenci girişi oluşturabilirsiniz. Muhasebe özeti kayda yazılır. Öğrenci/veli adını burada boş
+                  bırakabilirsiniz (yer tutucu kaydedilir).
                 </span>
               </label>
             </div>
@@ -1386,9 +1526,9 @@ export default function ParentSignFlowPage() {
                           Öğrenci kartı: {r.student_id.slice(0, 8)}…
                         </span>
                       ) : null}
-                      {r.ogrenci_user_id ? (
+                      {linkedStudentUserId(r) ? (
                         <span className="block mt-0.5 text-[11px] font-mono text-slate-500">
-                          Kullanıcı (users): {r.ogrenci_user_id.slice(0, 8)}…
+                          Kullanıcı (users): {linkedStudentUserId(r).slice(0, 8)}…
                         </span>
                       ) : null}
                     </p>
@@ -1404,15 +1544,162 @@ export default function ParentSignFlowPage() {
                           >
                             <Copy className="w-3 h-3" /> Özeti kopyala
                           </button>
-                          <a
-                            href={`${typeof window !== 'undefined' ? window.location.origin : ''}/user-management`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-900 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-100"
-                          >
-                            <UserCog className="w-3 h-3" /> Kullanıcı yönetimi
-                          </a>
+                          {canOpenUserManagement ? (
+                            <a
+                              href={
+                                typeof window !== 'undefined' &&
+                                parentContractRowSigned(r) &&
+                                !linkedStudentUserId(r) &&
+                                epostaFromKayitJson(r).includes('@')
+                                  ? buildVeliSignedUserManagementPrefillUrl(r, window.location.origin) ||
+                                    `${window.location.origin}/user-management`
+                                  : `${window.location.origin}/user-management`
+                              }
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-900 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-100"
+                            >
+                              <UserCog className="w-3 h-3" /> Kullanıcı yönetimi
+                            </a>
+                          ) : (
+                            (() => {
+                              const prefill =
+                                typeof window !== 'undefined' &&
+                                parentContractRowSigned(r) &&
+                                !linkedStudentUserId(r) &&
+                                epostaFromKayitJson(r).includes('@')
+                                  ? buildVeliSignedUserManagementPrefillUrl(r, window.location.origin)
+                                  : null;
+                              if (prefill) {
+                                return (
+                                  <button
+                                    type="button"
+                                    className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-950 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100"
+                                    onClick={() => void navigator.clipboard.writeText(prefill)}
+                                  >
+                                    <Copy className="w-3 h-3" /> Yöneticiye kullanıcı linki kopyala
+                                  </button>
+                                );
+                              }
+                              return (
+                                <span className="self-center text-[10px] text-slate-500 dark:text-slate-400">
+                                  Öğrenci girişi yönetici tarafından açılır.
+                                </span>
+                              );
+                            })()
+                          )}
                         </div>
+                      </div>
+                    ) : null}
+                    {taksitKartlariFromRow(r).length > 0 ? (
+                      <div className="mt-2 rounded-lg border border-slate-200 bg-white/90 p-2 text-[11px] dark:border-slate-600 dark:bg-slate-900/60">
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                          <p className="font-semibold text-slate-800 dark:text-slate-100">Taksit / tahsilat</p>
+                          <Link
+                            to="/tahsilat-muhasebe"
+                            className="text-[10px] font-semibold text-blue-700 hover:underline dark:text-blue-300"
+                          >
+                            Aylık tahsilat panosu →
+                          </Link>
+                        </div>
+                        <ul className="space-y-1">
+                          {taksitKartlariFromRow(r).map((tk, idx) => {
+                            const vade = effectiveVadeYmd(tk, r.baslangic_tarihi, idx);
+                            const dur = classifyTaksit(vade, Boolean(tk.odendi));
+                            const vurgu =
+                              dur === 'overdue' && !tk.odendi
+                                ? 'text-red-700 dark:text-red-300 font-semibold'
+                                : dur === 'due_week' && !tk.odendi
+                                  ? 'text-amber-800 dark:text-amber-200'
+                                  : 'text-slate-700 dark:text-slate-200';
+                            return (
+                              <li
+                                key={idx}
+                                className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-1 last:border-0 dark:border-slate-700"
+                              >
+                                <span className={vurgu}>
+                                  {tk.no ?? idx + 1}. taksit · {tk.tutar_tl != null && Number.isFinite(tk.tutar_tl) ? `${tk.tutar_tl} TL` : '—'} · vade{' '}
+                                  {formatTrShortDate(vade)}
+                                  {tk.odendi ? (
+                                    <span className="ml-1 text-emerald-600 font-semibold dark:text-emerald-400">(tahsil)</span>
+                                  ) : dur === 'overdue' ? (
+                                    <span className="ml-1 text-red-600 font-semibold dark:text-red-400">(gecikti)</span>
+                                  ) : (
+                                    <span className="ml-1 text-amber-700 dark:text-amber-300">(bekliyor)</span>
+                                  )}
+                                </span>
+                                <label className="inline-flex items-center gap-1.5 cursor-pointer text-slate-600 dark:text-slate-300">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(tk.odendi)}
+                                    disabled={parentSignRowBusy === `${r.id}:t${idx}`}
+                                    onChange={(e) => void toggleTaksitOdeme(r, idx, e.target.checked)}
+                                  />
+                                  Ödendi
+                                </label>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {parentContractRowSigned(r) && !linkedStudentUserId(r) && epostaFromKayitJson(r).includes('@') ? (
+                      <div className="mt-2 space-y-2 rounded-lg border border-emerald-200/80 bg-emerald-50/50 p-2 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+                        <p className="text-[11px] font-semibold text-emerald-900 dark:text-emerald-100">
+                          Öğrenci girişi (yönetici)
+                        </p>
+                        {(() => {
+                          const prefillUrl =
+                            typeof window !== 'undefined'
+                              ? buildVeliSignedUserManagementPrefillUrl(r, window.location.origin)
+                              : null;
+                          if (!prefillUrl) return null;
+                          return (
+                            <div className="flex flex-wrap gap-2">
+                              {canOpenUserManagement ? (
+                                <a
+                                  href={prefillUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1 rounded-lg border border-emerald-600 bg-emerald-600 px-2 py-1.5 text-[11px] font-bold text-white hover:bg-emerald-700 dark:border-emerald-500 dark:bg-emerald-700"
+                                >
+                                  <UserCog className="w-3 h-3" />
+                                  Kullanıcı yönetiminde aç (form dolu)
+                                </a>
+                              ) : null}
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-slate-800 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                                onClick={() => void navigator.clipboard.writeText(prefillUrl)}
+                              >
+                                <Copy className="w-3 h-3" /> Bağlantıyı kopyala
+                              </button>
+                              {!canOpenUserManagement ? (
+                                <p className="w-full text-[10px] text-amber-900/90 dark:text-amber-200/90">
+                                  Giriş hesabı yalnızca yönetici oluşturabilir. Bağlantıyı yöneticinize iletin;
+                                  siz açmaya çalışırsanız erişim olmaz.
+                                </p>
+                              ) : null}
+                            </div>
+                          );
+                        })()}
+                        <p className="text-[10px] text-slate-600 dark:text-slate-400">
+                          Açılan sayfada öğrenci bilgileri doldurulur; yalnızca şifre (en az 6 karakter) girip
+                          kaydedin. İsterseniz aşağıdan otomatik hesap da oluşturabilirsiniz.
+                        </p>
+                        <button
+                          type="button"
+                          disabled={parentSignRowBusy === `${r.id}:acc`}
+                          onClick={() => void createStudentAccountFromRow(r)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-[11px] font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                        >
+                          {parentSignRowBusy === `${r.id}:acc` ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <UserCog className="w-3 h-3" />
+                          )}
+                          Otomatik hesap (geçici şifre)
+                        </button>
                       </div>
                     ) : null}
                   </div>
@@ -1424,6 +1711,10 @@ export default function ParentSignFlowPage() {
                     ) : kayitFormPhase(r) === 'needs_form' ? (
                       <span className="inline-flex items-center justify-center gap-1 rounded-full bg-sky-100 text-sky-900 px-2 py-1 text-xs font-semibold dark:bg-sky-900/40 dark:text-sky-100">
                         <Clock className="w-3.5 h-3.5" /> Kayıt formu bekleniyor
+                      </span>
+                    ) : kayitFormPhase(r) === 'awaiting_admin_price' ? (
+                      <span className="inline-flex items-center justify-center gap-1 rounded-full bg-violet-100 text-violet-900 px-2 py-1 text-xs font-semibold dark:bg-violet-900/40 dark:text-violet-100">
+                        <Clock className="w-3.5 h-3.5" /> Ücret / taksit girilmeli
                       </span>
                     ) : (
                       <span className="inline-flex items-center justify-center gap-1 rounded-full bg-amber-100 text-amber-900 px-2 py-1 text-xs font-semibold dark:bg-amber-900/30 dark:text-amber-100">
@@ -1505,7 +1796,7 @@ export default function ParentSignFlowPage() {
 
       {editOpen ? (
         <div
-          className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/50 px-3 py-8 backdrop-blur-sm"
+          className="fixed inset-0 z-[200] flex items-start justify-center overflow-y-auto bg-black/50 px-3 py-8 backdrop-blur-sm"
           role="presentation"
           onClick={() => !editSaving && closeEditContract()}
         >

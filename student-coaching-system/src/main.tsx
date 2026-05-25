@@ -4,6 +4,10 @@ import { ErrorBoundary } from './components/ErrorBoundary.tsx'
 import './index.css'
 import App from './App.tsx'
 
+import { initNativeApp } from './lib/nativeApp'
+
+void initNativeApp()
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>

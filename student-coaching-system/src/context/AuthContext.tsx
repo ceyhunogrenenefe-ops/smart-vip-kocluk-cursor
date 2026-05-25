@@ -3,6 +3,9 @@ import React, { createContext, useContext, useState, useEffect, useCallback, Rea
 import { supabase } from '../lib/supabase';
 import type { Student } from '../types';
 import { clearAuthToken, fetchPublicPost, setAuthToken, getAuthToken } from '../lib/session';
+import { db } from '../lib/database';
+import { studentRowToStudent } from '../lib/mapStudentRow';
+import type { UserRow } from '../lib/userRowToSystemUser';
 
 // Demo mod - girişin her zaman çalışması için aktif
 const USE_DEMO_MODE = true;
@@ -35,7 +38,8 @@ interface AuthContextType {
   linkedStudentError: string | null;
   linkedStudentLoading: boolean;
   isImpersonating: boolean;
-  stopImpersonation: () => void;
+  /** Taklidi sonlandırır; varsa dönülecek rota yolunu döner (ör. /students). */
+  stopImpersonation: () => string | null;
   /** `string` = yerel/demo id; `SystemUser` = Kullanıcı Yönetimi’nden doğrudan satır (Supabase). */
   impersonate: (
     targetOrId: SystemUser | string
@@ -72,6 +76,8 @@ const TRIAL_USERS_STORAGE_KEY = 'coaching_trial_users';
 const MANAGED_USERS_STORAGE_KEY = 'coaching_managed_users';
 /** Taklit: gerçek oturum `coaching_user`; hedef profil burada */
 const IMPERSONATION_STORAGE_KEY = 'coaching_impersonation';
+/** Taklit öncesi sayfa — “Kendi hesabıma dön” ile geri dönülür */
+export const IMPERSONATION_RETURN_PATH_KEY = 'coaching_impersonation_return';
 
 export function canImpersonateRoles(
   actorRole: SystemUser['role'],
@@ -278,11 +284,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<SystemUser | null>(null);
   const [impersonationTarget, setImpersonationTarget] = useState<SystemUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [linkedStudent, setLinkedStudent] = useState<Student | null>(null);
+  const [linkedStudentError, setLinkedStudentError] = useState<string | null>(null);
+  const [linkedStudentLoading, setLinkedStudentLoading] = useState(false);
 
   const effectiveUser = impersonationTarget
     ? applyTrialAccountCoachOnly(impersonationTarget)
     : user;
   const isImpersonating = impersonationTarget !== null;
+
+  const refreshLinkedStudent = useCallback(async () => {
+    const u = impersonationTarget ?? user;
+    if (!u || !getAuthToken()) {
+      setLinkedStudent(null);
+      setLinkedStudentError(null);
+      setLinkedStudentLoading(false);
+      return;
+    }
+    const tags = u.roles?.length ? u.roles : [u.role];
+    if (!tags.includes('student')) {
+      setLinkedStudent(null);
+      setLinkedStudentError(null);
+      setLinkedStudentLoading(false);
+      return;
+    }
+    setLinkedStudentLoading(true);
+    setLinkedStudentError(null);
+    try {
+      const row = await db.getMyStudent();
+      if (row) {
+        const st = studentRowToStudent(row);
+        setLinkedStudent(st);
+        if (!u.studentId && st.id) {
+          const next = { ...u, studentId: st.id };
+          if (impersonationTarget) setImpersonationTarget(next);
+          else {
+            setUser(next);
+            localStorage.setItem('coaching_user', JSON.stringify(next));
+          }
+        }
+      } else {
+        setLinkedStudent(null);
+        setLinkedStudentError(
+          'Öğrenci profili henüz bağlı değil. Yöneticinizden öğrenci kaydınızın e-postanızla eşleştirilmesini isteyin.'
+        );
+      }
+    } catch (e) {
+      setLinkedStudent(null);
+      setLinkedStudentError(e instanceof Error ? e.message : 'Öğrenci profili yüklenemedi');
+    } finally {
+      setLinkedStudentLoading(false);
+    }
+  }, [user, impersonationTarget]);
+
+  useEffect(() => {
+    void refreshLinkedStudent();
+  }, [refreshLinkedStudent]);
 
   // Sayfa yüklendiğinde oturum kontrolü
   useEffect(() => {
@@ -316,9 +373,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                   setImpersonationTarget(applyTrialAccountCoachOnly(imp));
                 } else {
                   localStorage.removeItem(IMPERSONATION_STORAGE_KEY);
+    localStorage.removeItem(IMPERSONATION_RETURN_PATH_KEY);
                 }
               } catch {
                 localStorage.removeItem(IMPERSONATION_STORAGE_KEY);
+    localStorage.removeItem(IMPERSONATION_RETURN_PATH_KEY);
               }
             }
             }
@@ -338,6 +397,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string): Promise<{ success: boolean; message: string }> => {
     setImpersonationTarget(null);
     localStorage.removeItem(IMPERSONATION_STORAGE_KEY);
+    localStorage.removeItem(IMPERSONATION_RETURN_PATH_KEY);
 
     const normalizedEmail = email.toLowerCase().trim();
 
@@ -533,10 +593,89 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     localStorage.removeItem('coaching_user');
     localStorage.removeItem(IMPERSONATION_STORAGE_KEY);
+    localStorage.removeItem(IMPERSONATION_RETURN_PATH_KEY);
     clearAuthToken();
     setUser(null);
     setImpersonationTarget(null);
   };
+
+  const userRowToLoginTarget = (row: UserRow): SystemUser => {
+    const rawRoles = Array.isArray((row as { roles?: string[] }).roles)
+      ? ((row as { roles?: string[] }).roles || [])
+          .map((x) => String(x || '').trim())
+          .filter(Boolean)
+      : [];
+    const rolesList = (
+      rawRoles.length > 0 ? [...new Set(rawRoles)] : [String(row.role || 'student')]
+    ) as SystemUser['role'][];
+    return {
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      role: (row.role || rolesList[0] || 'student') as SystemUser['role'],
+      roles: rolesList,
+      phone: row.phone || undefined,
+      institutionId: row.institution_id || undefined,
+      package: row.package ?? undefined,
+      startDate: row.start_date ?? undefined,
+      endDate: row.end_date ?? undefined,
+      isActive: row.is_active,
+      createdAt: row.created_at
+    };
+  };
+
+  const finalizeImpersonation = useCallback(
+    async (
+      target: SystemUser,
+      roleHint?: SystemUser['role']
+    ): Promise<{ success: boolean; message: string }> => {
+      if (!user) return { success: false, message: 'Önce giriş yapın.' };
+      if (roleHint) {
+        const tags = target.roles?.length ? target.roles : [target.role];
+        if (!tags.includes(roleHint) && target.role !== roleHint) {
+          return { success: false, message: 'Hedef rol doğrulanamadı.' };
+        }
+      }
+      if (!canImpersonateRoles(user.role, target.role)) {
+        return { success: false, message: 'Bu hesaba geçiş yetkiniz yok.' };
+      }
+
+      const normalized = target.email.toLowerCase().trim();
+      if (user.role === 'coach' && target.role === 'student') {
+        const actorCoachId =
+          user.coachId ||
+          (
+            await withTimeout(
+              supabase.from('coaches').select('id').eq('email', user.email.toLowerCase().trim()).maybeSingle()
+            )
+          ).data?.id;
+        const targetStudent = await withTimeout(
+          supabase.from('students').select('id,coach_id').eq('email', normalized).maybeSingle()
+        );
+        if (!targetStudent.data?.id || targetStudent.data.coach_id !== actorCoachId) {
+          return { success: false, message: 'Sadece kendi öğrencinize geçiş yapabilirsiniz.' };
+        }
+      }
+
+      let hydratedTarget = target;
+      try {
+        hydratedTarget = await enrichRoleLinks(target);
+      } catch {
+        hydratedTarget = target;
+      }
+      const hydrated = applyTrialAccountCoachOnly(hydratedTarget);
+      if (typeof window !== 'undefined') {
+        const path = `${window.location.pathname}${window.location.search}`;
+        if (path && !path.startsWith('/login')) {
+          localStorage.setItem(IMPERSONATION_RETURN_PATH_KEY, path);
+        }
+      }
+      setImpersonationTarget(hydrated);
+      localStorage.setItem(IMPERSONATION_STORAGE_KEY, JSON.stringify(hydrated));
+      return { success: true, message: `${hydrated.name} hesabına geçiş yapıldı.` };
+    },
+    [user]
+  );
 
   const enrichRoleLinks = async (u: SystemUser): Promise<SystemUser> => {
     const email = u.email.toLowerCase().trim();
@@ -583,11 +722,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const normalized = email.toLowerCase().trim();
         if (!normalized) return { success: false, message: 'Geçersiz e-posta.' };
 
-        // Önce Supabase users tablosundan dene
         let target: SystemUser | null = null;
 
-        // Demo kullanıcı fallback
-        const demo = DEMO_USERS.find(d => d.email.toLowerCase() === normalized);
+        const demo = DEMO_USERS.find((d) => d.email.toLowerCase() === normalized);
         if (demo) {
           target = {
             id: `demo-${demo.role}`,
@@ -599,43 +736,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           };
         }
 
-        try {
-          const { data: dbUser, error } = await withTimeout(
-            supabase.from('users').select('*').eq('email', normalized).maybeSingle()
-          );
-          if (!target && !error && dbUser) {
-            target = {
-              id: dbUser.id,
-              name: dbUser.name,
-              email: dbUser.email,
-              role: dbUser.role,
-              phone: dbUser.phone || undefined,
-              institutionId: dbUser.institution_id || undefined,
-              package: dbUser.package || undefined,
-              startDate: dbUser.start_date || undefined,
-              endDate: dbUser.end_date || undefined,
-              isActive: dbUser.is_active,
-              createdAt: dbUser.created_at
-            };
+        /** Kullanıcı listesi API ile gelir; istemci Supabase RLS ile `users` okuyamayabilir */
+        if (!target && getAuthToken()) {
+          try {
+            const row = await db.getUserByEmail(normalized);
+            if (row) target = userRowToLoginTarget(row);
+          } catch {
+            /* yoksay */
           }
-        } catch {
-          /* yoksay */
         }
 
-        // Yerelde yönetilen listeden fallback
         if (!target) {
-          const local = readManagedUsers().find(x => x.email.toLowerCase() === normalized);
+          try {
+            const { data: dbUser, error } = await withTimeout(
+              supabase.from('users').select('*').eq('email', normalized).maybeSingle()
+            );
+            if (!error && dbUser) {
+              target = userRowToLoginTarget(dbUser as UserRow);
+            }
+          } catch {
+            /* yoksay */
+          }
+        }
+
+        if (!target) {
+          const local = readManagedUsers().find((x) => x.email.toLowerCase() === normalized);
           if (local) {
             const { password: _pw, ...pub } = local;
             target = pub;
           }
         }
 
-        // users tablosunda olmayan eski kayıtlar için doğrudan role tabanlı fallback
         if (!target && roleHint === 'student') {
           try {
             const { data: st } = await withTimeout(
-              supabase.from('students').select('id,name,email,phone,institution_id,created_at').eq('email', normalized).maybeSingle()
+              supabase
+                .from('students')
+                .select('id,name,email,phone,institution_id,created_at')
+                .eq('email', normalized)
+                .maybeSingle()
             );
             if (st) {
               target = {
@@ -657,7 +796,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!target && roleHint === 'coach') {
           try {
             const { data: ch } = await withTimeout(
-              supabase.from('coaches').select('id,name,email,phone,institution_id,created_at').eq('email', normalized).maybeSingle()
+              supabase
+                .from('coaches')
+                .select('id,name,email,phone,institution_id,created_at')
+                .eq('email', normalized)
+                .maybeSingle()
             );
             if (ch) {
               target = {
@@ -678,45 +821,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         if (!target) return { success: false, message: 'Hedef kullanıcı bulunamadı.' };
-        if (roleHint && target.role !== roleHint) {
-          return { success: false, message: 'Hedef rol doğrulanamadı.' };
-        }
-        if (!canImpersonateRoles(user.role, target.role)) {
-          return { success: false, message: 'Bu hesaba geçiş yetkiniz yok.' };
-        }
-
-        // Koç -> öğrenci geçişinde sahiplik kontrolü
-        if (user.role === 'coach' && target.role === 'student') {
-          const actorCoachId =
-            user.coachId ||
-            (
-              await withTimeout(
-                supabase
-                  .from('coaches')
-                  .select('id')
-                  .eq('email', user.email.toLowerCase().trim())
-                  .maybeSingle()
-              )
-            ).data?.id;
-          const targetStudent = await withTimeout(
-            supabase.from('students').select('id,coach_id').eq('email', normalized).maybeSingle()
-          );
-          if (!targetStudent.data?.id || targetStudent.data.coach_id !== actorCoachId) {
-            return { success: false, message: 'Sadece kendi öğrencinize geçiş yapabilirsiniz.' };
-          }
-        }
-
-        let hydratedTarget = target;
-        try {
-          hydratedTarget = await enrichRoleLinks(target);
-        } catch {
-          // DB bağlantısı olmasa bile role+email ile geçişe izin ver
-          hydratedTarget = target;
-        }
-        const hydrated = applyTrialAccountCoachOnly(hydratedTarget);
-        setImpersonationTarget(hydrated);
-        localStorage.setItem(IMPERSONATION_STORAGE_KEY, JSON.stringify(hydrated));
-        return { success: true, message: `${hydrated.name} hesabına geçiş yapıldı.` };
+        return finalizeImpersonation(target, roleHint);
       } catch (e) {
         return {
           success: false,
@@ -724,7 +829,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
       }
     },
-    [user]
+    [user, finalizeImpersonation]
   );
 
   const getAllUsers = useCallback((): SystemUser[] => {
@@ -751,6 +856,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (
       targetOrId: SystemUser | string
     ): Promise<{ success: boolean; message?: string }> => {
+      if (typeof targetOrId === 'object' && targetOrId !== null && 'email' in targetOrId) {
+        const row = targetOrId;
+        if (!row.email?.trim()) {
+          return { success: false, message: 'Kullanıcı bulunamadı.' };
+        }
+        if (!row.id.startsWith('demo-')) {
+          const r = await finalizeImpersonation(row, row.role);
+          return { success: r.success, message: r.message };
+        }
+      }
       const target =
         typeof targetOrId === 'object' && targetOrId !== null && 'email' in targetOrId
           ? targetOrId
@@ -758,14 +873,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!target?.email?.trim()) {
         return { success: false, message: 'Kullanıcı bulunamadı.' };
       }
-      return loginAsEmail(target.email.trim(), target.role);
+      const r = await loginAsEmail(target.email.trim(), target.role);
+      return { success: r.success, message: r.message };
     },
-    [getUserById, loginAsEmail]
+    [getUserById, loginAsEmail, finalizeImpersonation]
   );
 
-  const stopImpersonation = useCallback(() => {
+  const stopImpersonation = useCallback((): string | null => {
+    const back =
+      typeof window !== 'undefined'
+        ? localStorage.getItem(IMPERSONATION_RETURN_PATH_KEY)
+        : null;
     setImpersonationTarget(null);
     localStorage.removeItem(IMPERSONATION_STORAGE_KEY);
+    localStorage.removeItem(IMPERSONATION_RETURN_PATH_KEY);
+    localStorage.removeItem(IMPERSONATION_RETURN_PATH_KEY);
+    return back;
   }, []);
 
   const createUser = useCallback(
@@ -871,9 +994,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         effectiveUser,
-        linkedStudent: null,
-        linkedStudentError: null,
-        linkedStudentLoading: false,
+        linkedStudent,
+        linkedStudentError,
+        linkedStudentLoading,
         isImpersonating,
         stopImpersonation,
         impersonate,

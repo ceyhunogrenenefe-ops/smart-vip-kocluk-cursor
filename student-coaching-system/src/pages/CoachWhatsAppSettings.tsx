@@ -1,8 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import {
-  Building2,
   CheckCircle,
   Clock,
   Loader2,
@@ -13,13 +12,13 @@ import {
   Smartphone,
   Unlink,
   User,
-  Users,
-  Zap
+  Users
 } from 'lucide-react';
 import { apiFetch, getAuthToken } from '../lib/session';
+import { normalizeWhatsAppPhoneForSend } from '../lib/whatsappOutbound';
 import WhatsAppMerkeziPanel from '../components/whatsapp/WhatsAppMerkeziPanel';
 
-const formatPhone = (value: string) => value.replace(/\D/g, '');
+const formatPhone = (value: string) => normalizeWhatsAppPhoneForSend(value);
 
 function isValidGatewayEnvUrl(s: string): boolean {
   const t = s.trim();
@@ -48,15 +47,6 @@ function resolveWhatsAppGatewayBase(): string {
 
 type GatewayStatus = 'idle' | 'connecting' | 'qr_ready' | 'connected' | 'logged_out' | 'reconnecting';
 
-interface MetaWhatsAppServerStatus {
-  configured: boolean;
-  graph_api_version?: string;
-  phone_number_id_suffix?: string | null;
-  waba_id_suffix?: string | null;
-  has_token?: boolean;
-  hint?: string | null;
-}
-
 interface WaScheduleDTO {
   coach_id: string;
   is_active: boolean;
@@ -84,9 +74,6 @@ export default function CoachWhatsAppSettings() {
   const gatewayUrl = resolveWhatsAppGatewayBase();
   const gatewayKey = (import.meta.env.VITE_WHATSAPP_GATEWAY_KEY || '').trim();
 
-  const [metaWaStatus, setMetaWaStatus] = useState<MetaWhatsAppServerStatus | null>(null);
-  const [metaWaLoading, setMetaWaLoading] = useState(true);
-
   const [waScheduleLoading, setWaScheduleLoading] = useState(false);
   const [waScheduleSaving, setWaScheduleSaving] = useState(false);
   const [waScheduleMsg, setWaScheduleMsg] = useState('');
@@ -96,9 +83,6 @@ export default function CoachWhatsAppSettings() {
   const [phone, setPhone] = useState('');
   const [status, setStatus] = useState<GatewayStatus>('idle');
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
-  /** QR verisi değişince img yeniden mount — tarayıcı önbelleği / eski kod gösterimini önler */
-  const [qrVisualEpoch, setQrVisualEpoch] = useState(0);
-  const prevQrDataRef = useRef<string | null>(null);
   const [lastConnectedAt, setLastConnectedAt] = useState<string | null>(null);
   /** VPS gateway (Baileys) bağlantı hatası — WhatsApp oturumu düşünce dolabilir */
   const [gatewaySessionError, setGatewaySessionError] = useState<string | null>(null);
@@ -112,36 +96,11 @@ export default function CoachWhatsAppSettings() {
   const [templateWaUrl, setTemplateWaUrl] = useState<string | null>(null);
 
   const selectedStudent = students.find((s) => s.id === selectedStudentId);
-  /** Admin menüsünden sayfa açılırsa zamanlayıcı sunucuda kayda kapalıdır */
-  const waScheduleReadOnly =
-    actor?.role === 'admin' || actor?.role === 'super_admin';
   const isConnected = status === 'connected';
   const hasServerJwt = Boolean(getAuthToken());
   /** Gateway VPS JWT imzasını doğrular; yalnızca localStorage kullanıcısı (JWT yok) yetmez. */
   const canUseGateway = Boolean(gatewayUrl && coachId && hasServerJwt);
   const needsJwtForGateway = Boolean(gatewayUrl && coachId && !hasServerJwt);
-
-  const refreshMetaWa = useCallback(async () => {
-    if (!getAuthToken()) {
-      setMetaWaLoading(false);
-      return;
-    }
-    setMetaWaLoading(true);
-    try {
-      const res = await apiFetch('/api/meta/whatsapp');
-      const payload = (await res.json().catch(() => ({}))) as { data?: MetaWhatsAppServerStatus };
-      if (res.ok && payload?.data) setMetaWaStatus(payload.data);
-      else setMetaWaStatus(null);
-    } catch {
-      setMetaWaStatus(null);
-    } finally {
-      setMetaWaLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshMetaWa();
-  }, [refreshMetaWa]);
 
   const loadWaSchedule = useCallback(async () => {
     if (!getAuthToken()) {
@@ -174,8 +133,6 @@ export default function CoachWhatsAppSettings() {
         return;
       }
       if (payload.data) setWaDraft(payload.data);
-      const okHint = typeof payload.hint === 'string' ? payload.hint.trim() : '';
-      if (okHint) setWaScheduleMsg(okHint);
     } catch {
       setWaDraft(null);
       setWaScheduleMsg('Zamanlayıcı ayarları yüklenemedi.');
@@ -190,12 +147,6 @@ export default function CoachWhatsAppSettings() {
 
   const saveWaSchedule = async () => {
     if (!waDraft || !getAuthToken()) return;
-    if (waScheduleReadOnly) {
-      setWaScheduleMsg(
-        'Yönetici hesabıyla otomatik koç zamanlayıcısı kaydedilemez. Koç veya öğretmen hesabıyla giriş yapın.'
-      );
-      return;
-    }
     setWaScheduleSaving(true);
     setWaScheduleMsg('');
     try {
@@ -219,24 +170,14 @@ export default function CoachWhatsAppSettings() {
       const payload = (await res.json().catch(() => ({}))) as {
         data?: WaScheduleDTO;
         error?: string;
-        hint?: string;
       };
       if (!res.ok) {
-        const err = String(payload?.error || '');
-        const hint = typeof payload?.hint === 'string' ? payload.hint.trim() : '';
-        if (err === 'admin_schedule_readonly') {
-          setWaScheduleMsg(
-            hint ||
-              'Yönetici hesabıyla otomatik koç zamanlayıcısı kaydedilemez. Koç veya öğretmen hesabıyla giriş yapın.'
-          );
-          return;
-        }
-        setWaScheduleMsg(hint || payload?.error || 'Kayıt başarısız.');
+        setWaScheduleMsg(payload?.error || 'Kayıt başarısız.');
         return;
       }
       if (payload.data) setWaDraft(payload.data);
       setRestartCampaignOnSave(false);
-      setWaScheduleMsg('Plan kaydedildi. Gönderimler Meta WhatsApp (kurumsal hat) ile sunucudan yapılır (öğrenci telefonları kayıtlı olmalı).');
+      setWaScheduleMsg('Plan kaydedildi. Gönderimler Meta Cloud API ile sunucudan yapılır (öğrenci telefonları kayıtlı olmalı).');
     } catch {
       setWaScheduleMsg('Kayıt başarısız.');
     } finally {
@@ -266,13 +207,8 @@ export default function CoachWhatsAppSettings() {
   };
 
   const applyGatewayStatusPayload = (data: GatewayStatusPayload) => {
-    const nextQr = data.qr || null;
-    if (nextQr !== prevQrDataRef.current) {
-      prevQrDataRef.current = nextQr;
-      if (nextQr) setQrVisualEpoch((e) => e + 1);
-    }
     setStatus(data.status || 'idle');
-    setQrDataUrl(nextQr);
+    setQrDataUrl(data.qr || null);
     setLastConnectedAt(data.connectedAt || null);
     setGatewaySessionError(
       data.status === 'connected'
@@ -321,12 +257,6 @@ export default function CoachWhatsAppSettings() {
             : '';
       throw new Error(`${base}${authHint}`);
     }
-    if (typeof data === 'object' && data !== null && data.ok === false) {
-      const parts = [data.error, data.detail, data.hint].filter(
-        (x): x is string => typeof x === 'string' && x.length > 0
-      );
-      throw new Error(parts.join(' — ') || 'gateway_ok_false');
-    }
     return data as T;
   };
 
@@ -345,19 +275,12 @@ export default function CoachWhatsAppSettings() {
     }
   };
 
-  /**
-   * Baileys QR çok çabuk yenilenir; 5 sn poll ile ekranda süresi dolmuş kod kalır → WhatsApp "QR geçerli değil".
-   * QR / bağlanıyor aşamasında ~0,75 sn ile güncelle.
-   */
   useEffect(() => {
     void fetchStatus();
     if (!canUseGateway) return;
-    const fastPoll =
-      status === 'qr_ready' || status === 'connecting' || status === 'reconnecting';
-    const pollMs = fastPoll ? 750 : 5000;
-    const timer = setInterval(() => void fetchStatus(), pollMs);
+    const timer = setInterval(() => void fetchStatus(), 5000);
     return () => clearInterval(timer);
-  }, [canUseGateway, coachId, hasServerJwt, status]);
+  }, [canUseGateway, coachId, hasServerJwt]);
 
   const startConnection = async () => {
     if (!canUseGateway) {
@@ -386,9 +309,9 @@ export default function CoachWhatsAppSettings() {
       if (started?.lastError && started.status !== 'connected') {
         setGatewaySessionError(started.lastError);
       }
-      /** Baileys QR’sı connection.update ile gelir; kısa aralıkla status çekmeden güncel kod kaçabilir. */
+      /** Baileys QR’sı genelde bir sonraki connection.update ile gelir; 5 sn aralık tek tur yetmez. */
       let sawQrOrConnected = Boolean(started?.qr) || started?.status === 'connected';
-      for (let i = 0; i < 90; i++) {
+      for (let i = 0; i < 60; i++) {
         try {
           const snap = await callGateway<GatewayStatusPayload>(`/sessions/${coachId}/status`);
           applyGatewayStatusPayload(snap);
@@ -399,12 +322,12 @@ export default function CoachWhatsAppSettings() {
         } catch {
           /* geçici proxy/VPS — kısa aralıkla yeniden dene */
         }
-        await new Promise((r) => setTimeout(r, 280));
+        await new Promise((r) => setTimeout(r, 450));
       }
       await fetchStatus();
       setStatusMessage(
         sawQrOrConnected
-          ? 'QR hazır. WhatsApp → Ayarlar → Bağlı cihazlar → Cihaz bağla ile tarayın; kod birkaç saniyede bir yenilenir — telefon “geçerli değil” derse birkaç saniye bekleyip tekrar deneyin veya bu düğmeyi yeniden kullanın.'
+          ? 'QR oluşturuldu. WhatsApp ile tarayın.'
           : 'İstek gönderildi ancak QR henüz gelmedi. Vercel’de WHATSAPP_GATEWAY_UPSTREAM, VPS’te gateway süreci (pm2), APP_JWT_SECRET eşleşmesi ve CORS_ALLOWED_ORIGINS (panel kökeni) kontrol edin.'
       );
     } catch (error) {
@@ -420,7 +343,6 @@ export default function CoachWhatsAppSettings() {
     try {
       await callGateway(`/sessions/${coachId}/logout`, { method: 'POST' });
       setStatus('logged_out');
-      prevQrDataRef.current = null;
       setQrDataUrl(null);
       setStatusMessage('WhatsApp bağlantısı kapatıldı.');
     } catch (error) {
@@ -439,7 +361,7 @@ export default function CoachWhatsAppSettings() {
   };
 
   const sendGatewayMessage = async (targetPhone: string, message: string) => {
-    return callGateway<{ ok?: boolean; id?: string | null; error?: string }>(`/sessions/${coachId}/send`, {
+    await callGateway(`/sessions/${coachId}/send`, {
       method: 'POST',
       body: JSON.stringify({ phone: targetPhone, message })
     });
@@ -485,47 +407,8 @@ export default function CoachWhatsAppSettings() {
     setTemplateSendBusy(true);
     try {
       if (isConnected && canUseGateway) {
-        const gw = await sendGatewayMessage(target, message);
-        const wid = gw && typeof gw === 'object' && 'id' in gw && gw.id ? String(gw.id) : '';
-        setTemplateNotice(
-          wid
-            ? `Mesaj bağlı WhatsApp oturumundan gönderildi (iletildi). WhatsApp mesaj id: ${wid}`
-            : 'Mesaj bağlı WhatsApp oturumundan gönderildi (iletildi).'
-        );
-      } else if (metaWaStatus?.configured && hasServerJwt) {
-        try {
-          const res = await apiFetch('/api/meta/whatsapp', {
-            method: 'POST',
-            body: JSON.stringify({ to: target, message })
-          });
-          const payload = (await res.json().catch(() => ({}))) as { error?: string; hint?: string };
-          if (res.ok) {
-            setTemplateNotice('Mesaj kurumsal hat (Meta WhatsApp) üzerinden gönderildi.');
-          } else {
-            const { opened, url } = openWaFallback(target, message);
-            setTemplateWaUrl(url);
-            const hintTail = payload?.hint ? ` ${payload.hint}` : '';
-            if (payload?.error === 'forbidden' || res.status === 403) {
-              setTemplateNotice(
-                opened
-                  ? `Sunucu reddetti (403).${hintTail} wa.me yeni sekmede açıldı.`
-                  : `Sunucu reddetti (403).${hintTail}\nBağlantı: ${url}`
-              );
-            } else {
-              setTemplateNotice(
-                `Sunucu (${res.status}): ${payload?.error || res.statusText || 'bilinmeyen'}${hintTail} — wa.me ${opened ? 'açıldı' : `açılmadı\n${url}`}`
-              );
-            }
-          }
-        } catch {
-          const { opened, url } = openWaFallback(target, message);
-          setTemplateWaUrl(url);
-          setTemplateNotice(
-            opened
-              ? 'Kurumsal hatta ulaşılamadı; wa.me için yeni sekme açıldı.'
-              : `Kurumsal hat isteği atılamadı. Engel varsa bağlantıyı kopyalayın:\n${url}`
-          );
-        }
+        await sendGatewayMessage(target, message);
+        setTemplateNotice('Mesaj bağlı WhatsApp oturumundan gönderildi.');
       } else {
         const { opened, url } = openWaFallback(target, message);
         setTemplateWaUrl(url);
@@ -563,27 +446,8 @@ export default function CoachWhatsAppSettings() {
     const message = 'Merhaba, koç paneli WhatsApp bağlantı test mesajı.';
     try {
       if (isConnected && canUseGateway) {
-        const gw = await sendGatewayMessage(target, message);
-        const wid = gw && typeof gw === 'object' && 'id' in gw && gw.id ? String(gw.id) : '';
-        setStatusMessage(
-          wid
-            ? `Test mesajı bağlı oturumdan gönderildi. WhatsApp mesaj id: ${wid}`
-            : 'Test mesajı bağlı oturumdan gönderildi.'
-        );
-      } else if (metaWaStatus?.configured && hasServerJwt) {
-        const res = await apiFetch('/api/meta/whatsapp', {
-          method: 'POST',
-          body: JSON.stringify({ to: target, message })
-        });
-        const payload = (await res.json().catch(() => ({}))) as { error?: string; hint?: string };
-        if (res.ok) {
-          setStatusMessage('Test mesajı Meta WhatsApp (kurumsal hat) üzerinden gönderildi.');
-        } else {
-          const { opened, url } = openWaFallback(target, message);
-          setStatusMessage(
-            `Sunucu (${res.status}): ${payload?.error || res.statusText || 'hata'}${payload?.hint ? ` — ${payload.hint}` : ''}. wa.me: ${opened ? 'sekme açıldı' : url}`
-          );
-        }
+        await sendGatewayMessage(target, message);
+        setStatusMessage('Test mesajı bağlı oturumdan gönderildi.');
       } else {
         const { opened, url } = openWaFallback(target, message);
         setStatusMessage(
@@ -598,87 +462,21 @@ export default function CoachWhatsAppSettings() {
   };
 
   return (
-    <div className="mx-auto max-w-5xl space-y-8 pb-8">
+    <div className="mx-auto max-w-7xl space-y-8 pb-8">
       {/* Üst başlık */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-700 via-teal-800 to-slate-900 p-8 text-white shadow-xl">
         <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-white/10 blur-2xl" />
-        <div className="relative flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <div>
-            <p className="text-sm font-medium uppercase tracking-wider text-emerald-200/90">Koç · Mesajlaşma</p>
-            <h1 className="mt-1 text-2xl font-bold md:text-3xl">WhatsApp merkezi</h1>
-            <p className="mt-2 max-w-xl text-sm text-emerald-100/95">
-              <strong className="text-white">Meta WhatsApp</strong> ile kurumsal otomatik mesajlar sunucudan gider; isteğe bağlı{' '}
-              <strong className="text-white">QR gateway</strong> ile kendi WhatsApp hattınızdan anlık mesaj atabilirsiniz.
-              İkisi birbirini tamamlar.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => void refreshMetaWa()}
-            className="shrink-0 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium backdrop-blur hover:bg-white/20"
-          >
-            Meta durumunu yenile
-          </button>
+        <div className="relative">
+          <p className="text-sm font-medium uppercase tracking-wider text-emerald-200/90">Koç · Mesajlaşma</p>
+          <h1 className="mt-1 text-2xl font-bold md:text-3xl">WhatsApp merkezi</h1>
+          <p className="mt-2 max-w-xl text-sm text-emerald-100/95">
+            Otomatik bildirimler <strong className="text-white">Meta Cloud API</strong> üzerinden gider. İsteğe bağlı{' '}
+            <strong className="text-white">QR gateway</strong> ile kendi WhatsApp hattınızdan anlık mesaj atabilirsiniz.
+          </p>
         </div>
       </div>
 
       <WhatsAppMerkeziPanel />
-
-      {/* 1 — Kurumsal Meta WhatsApp */}
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-wrap items-center gap-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-emerald-50/40 px-6 py-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-md">
-            <Building2 className="h-6 w-6" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-semibold text-slate-900">Kurumsal WhatsApp (Meta)</h2>
-            <p className="text-sm text-slate-600">
-              Kurumsal hat açıksa aşağıdaki hızlı şablonlar ve test mesajı <strong>Meta Cloud API</strong> üzerinden sunucudan gider
-              (JWT ile oturum gerekli). Anahtarlar Vercel&apos;de tanımlıdır; koç olarak gönderim yapabilirsiniz.
-            </p>
-          </div>
-        </div>
-        <div className="p-6">
-          {metaWaLoading ? (
-            <p className="flex items-center gap-2 text-slate-600">
-              <Loader2 className="h-5 w-5 animate-spin text-emerald-600" />
-              Meta yapılandırması kontrol ediliyor…
-            </p>
-          ) : metaWaStatus?.configured ? (
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div className="flex items-start gap-3">
-                <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-900">
-                  Aktif
-                </span>
-                <ul className="space-y-1 text-sm text-slate-700">
-                  <li className="flex items-center gap-2">
-                    <Zap className="h-4 w-4 shrink-0 text-amber-500" />
-                    Planlı görüşme ve sistem mesajları WhatsApp ile iletilebilir.
-                  </li>
-                  {metaWaStatus.graph_api_version && (
-                    <li className="text-slate-500">Graph API: {metaWaStatus.graph_api_version}</li>
-                  )}
-                  {metaWaStatus.phone_number_id_suffix && (
-                    <li className="text-slate-500">Telefon kimliği (sonu): …{metaWaStatus.phone_number_id_suffix}</li>
-                  )}
-                  {metaWaStatus.waba_id_suffix && (
-                    <li className="text-slate-500">WABA (sonu): …{metaWaStatus.waba_id_suffix}</li>
-                  )}
-                </ul>
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-              <p className="font-medium">Meta WhatsApp henüz tam yapılandırılmamış veya okunamadı.</p>
-              <p className="mt-1 text-amber-900/90">
-                Yöneticinizin Vercel&apos;de <code className="rounded bg-amber-100 px-1 text-xs">META_WHATSAPP_TOKEN</code>,{' '}
-                <code className="rounded bg-amber-100 px-1 text-xs">META_PHONE_NUMBER_ID</code> değişkenlerini kaydetmesi gerekir.
-                Bu koşul sağlanana kadar otomatik kurumsal WhatsApp gönderilemez; aşağıdaki kişisel gateway veya wa.me yedeğini kullanabilirsiniz.
-            </p>
-            </div>
-          )}
-        </div>
-      </section>
 
       {/* Otomatik Meta zamanlayıcı */}
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -687,7 +485,7 @@ export default function CoachWhatsAppSettings() {
             <Clock className="h-6 w-6" />
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-semibold text-slate-900">Otomatik mesaj (Meta şablon)</h2>
+            <h2 className="text-lg font-semibold text-slate-900">Otomatik mesaj (Meta)</h2>
             <p className="text-sm text-slate-600">
               Tüm öğrencilerinize aynı şablonla, seçtiğiniz İstanbul saatinde ve <strong>her N günde bir</strong> gönderilir.
               Kampanya süresi (gün) dolduğunda durur; boş bırakırsanız süresiz çalışır. Sunucuda{' '}
@@ -716,20 +514,6 @@ export default function CoachWhatsAppSettings() {
               Otomatik WhatsApp zamanlayıcısı bu yüzden sunucuda reddedilir. Yöneticiniz e-postayı coaches tablosuyla eşleştirmeli.
             </div>
           )}
-          {!metaWaLoading && !metaWaStatus?.configured && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-              Meta şablonu ve ortam yapılandırılmadan otomatik mesaj gönderilemez; ayarları yine de kaydedebilirsiniz.
-            </div>
-          )}
-          {waScheduleReadOnly && (
-            <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
-              <p className="font-medium">Yönetici görünümü — zamanlayıcı salt okunur</p>
-              <p className="mt-1 text-sky-900/95">
-                Otomatik koç WhatsApp planını kaydetmek için <strong>koç</strong> veya <strong>öğretmen</strong> hesabıyla
-                giriş yapın. Bu bölümde yalnızca örnek ayarlar görüntülenir; Kaydet sunucuya yazılmaz.
-              </p>
-            </div>
-          )}
           {waScheduleLoading ? (
             <p className="flex items-center gap-2 text-slate-600">
               <Loader2 className="h-5 w-5 animate-spin text-teal-600" />
@@ -741,9 +525,8 @@ export default function CoachWhatsAppSettings() {
                 <input
                   type="checkbox"
                   checked={waDraft.is_active}
-                  disabled={waScheduleReadOnly}
                   onChange={(e) => setWaDraft({ ...waDraft, is_active: e.target.checked })}
-                  className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500 disabled:opacity-50"
+                  className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
                 />
                 Planlayıcıyı aktif et
               </label>
@@ -752,10 +535,9 @@ export default function CoachWhatsAppSettings() {
                 <label className="mb-1 block text-sm font-medium text-slate-700">Mesaj şablonu</label>
                 <textarea
                   value={waDraft.message_template}
-                  disabled={waScheduleReadOnly}
                   onChange={(e) => setWaDraft({ ...waDraft, message_template: e.target.value })}
                   rows={5}
-                  className="w-full rounded-xl border border-slate-200 p-3 text-sm focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-100 disabled:bg-slate-50 disabled:text-slate-600"
+                  className="w-full rounded-xl border border-slate-200 p-3 text-sm focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-100"
                 />
                 <p className="mt-1 text-xs text-slate-500">
                   Yer tutucular:{' '}
@@ -774,11 +556,10 @@ export default function CoachWhatsAppSettings() {
                   <div className="flex gap-2">
                     <select
                       value={waDraft.send_hour_tr}
-                      disabled={waScheduleReadOnly}
                       onChange={(e) =>
                         setWaDraft({ ...waDraft, send_hour_tr: Math.min(23, Math.max(0, Number(e.target.value))) })
                       }
-                      className="w-full rounded-xl border border-slate-200 py-2 px-3 text-sm disabled:bg-slate-50"
+                      className="w-full rounded-xl border border-slate-200 py-2 px-3 text-sm"
                     >
                       {Array.from({ length: 24 }, (_, h) => (
                         <option key={h} value={h}>
@@ -788,14 +569,13 @@ export default function CoachWhatsAppSettings() {
                     </select>
                     <select
                       value={Math.min(59, Math.max(0, waDraft.send_minute_tr || 0))}
-                      disabled={waScheduleReadOnly}
                       onChange={(e) =>
                         setWaDraft({
                           ...waDraft,
                           send_minute_tr: Math.min(59, Math.max(0, Number(e.target.value)))
                         })
                       }
-                      className="w-full rounded-xl border border-slate-200 py-2 px-3 text-sm disabled:bg-slate-50"
+                      className="w-full rounded-xl border border-slate-200 py-2 px-3 text-sm"
                     >
                       {Array.from({ length: 60 }, (_, m) => (
                         <option key={m} value={m}>
@@ -817,14 +597,13 @@ export default function CoachWhatsAppSettings() {
                     min={1}
                     max={365}
                     value={waDraft.interval_days}
-                    disabled={waScheduleReadOnly}
                     onChange={(e) =>
                       setWaDraft({
                         ...waDraft,
                         interval_days: Math.min(365, Math.max(1, Number(e.target.value) || 1))
                       })
                     }
-                    className="w-full rounded-xl border border-slate-200 py-2 px-3 text-sm disabled:bg-slate-50"
+                    className="w-full rounded-xl border border-slate-200 py-2 px-3 text-sm"
                   />
                   <p className="mt-1 text-xs text-slate-500">
                     Son başarılı gönderimden bu kadar İstanbul günü sonra yeniden gönderilir.
@@ -843,7 +622,6 @@ export default function CoachWhatsAppSettings() {
                     max={3650}
                     value={waDraft.campaign_days ?? ''}
                     placeholder="Boş = süresiz"
-                    disabled={waScheduleReadOnly}
                     onChange={(e) => {
                       const raw = e.target.value.trim();
                       if (raw === '') {
@@ -868,9 +646,8 @@ export default function CoachWhatsAppSettings() {
                 <input
                   type="checkbox"
                   checked={waDraft.weekdays_only}
-                  disabled={waScheduleReadOnly}
                   onChange={(e) => setWaDraft({ ...waDraft, weekdays_only: e.target.checked })}
-                  className="h-4 w-4 rounded border-slate-300 text-teal-600 disabled:opacity-50"
+                  className="h-4 w-4 rounded border-slate-300 text-teal-600"
                 />
                 Yalnızca hafta içi (Cumartesi–Pazar atla)
               </label>
@@ -879,9 +656,8 @@ export default function CoachWhatsAppSettings() {
                 <input
                   type="checkbox"
                   checked={waDraft.prefer_parent_phone}
-                  disabled={waScheduleReadOnly}
                   onChange={(e) => setWaDraft({ ...waDraft, prefer_parent_phone: e.target.checked })}
-                  className="h-4 w-4 rounded border-slate-300 text-teal-600 disabled:opacity-50"
+                  className="h-4 w-4 rounded border-slate-300 text-teal-600"
                 />
                 Varsa önce veli telefonunu kullan
               </label>
@@ -890,9 +666,8 @@ export default function CoachWhatsAppSettings() {
                 <input
                   type="checkbox"
                   checked={restartCampaignOnSave}
-                  disabled={waScheduleReadOnly}
                   onChange={(e) => setRestartCampaignOnSave(e.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300 text-teal-600 disabled:opacity-50"
+                  className="h-4 w-4 rounded border-slate-300 text-teal-600"
                 />
                 Kaydederken kampanya başlangıcını sıfırla (süreli kampanyalar için)
               </label>
@@ -900,7 +675,7 @@ export default function CoachWhatsAppSettings() {
               <button
                 type="button"
                 onClick={() => void saveWaSchedule()}
-                disabled={waScheduleSaving || !hasServerJwt || waScheduleReadOnly}
+                disabled={waScheduleSaving || !hasServerJwt}
                 className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-6 py-2.5 text-sm font-semibold text-white shadow hover:bg-teal-700 disabled:opacity-50"
               >
                 {waScheduleSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
@@ -1050,20 +825,8 @@ export default function CoachWhatsAppSettings() {
             </div>
             <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 p-4">
               <p className="mb-3 text-xs font-medium uppercase tracking-wide text-slate-500">QR kod</p>
-              {status === 'qr_ready' && qrDataUrl ? (
-                <p className="mb-2 max-w-[16rem] text-center text-[11px] leading-snug text-amber-900/90">
-                  Kod sürekli yenilenir; kamerayı normal fotoğraf modunda değil, WhatsApp içindeki{' '}
-                  <strong>Bağlı cihazlar → Cihaz bağla</strong> ile kullanın. “Geçerli değil” görürseniz birkaç saniye bekleyip
-                  yeniden tarayın.
-                </p>
-              ) : null}
               {qrDataUrl ? (
-                <img
-                  key={qrVisualEpoch}
-                  src={qrDataUrl}
-                  alt="WhatsApp QR"
-                  className="h-52 w-52 rounded-xl border border-white shadow-md"
-                />
+                <img src={qrDataUrl} alt="WhatsApp QR" className="h-52 w-52 rounded-xl border border-white shadow-md" />
               ) : (
                 <div className="flex h-52 w-52 flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white text-slate-400">
                   <QrCode className="mb-2 h-12 w-12" />
@@ -1084,10 +847,8 @@ export default function CoachWhatsAppSettings() {
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Hızlı şablonlar</h2>
             <p className="text-sm text-slate-600">
-              Öğrenci veya veliye metin hazırlayın. <strong>Oturum bağlıysa</strong> (üst bölümde durum: bağlı) gönderim
-              gateway üzerinden sunucudan gider; bağlı değilse veya gönderim reddedilirse <strong>wa.me</strong> yedeği
-              açılır. Numara kayıtta <strong>05… veya 5XXXXXXXXX</strong> olabilir; sunucu Türkiye cep kodunu WhatsApp
-              formatına çevirir.
+              Öğrenci veya veliye metin hazırlayın. Oturum bağlıysa gateway üzerinden; değilse WhatsApp Web / uygulama
+              (wa.me) açılır.
             </p>
           </div>
         </div>

@@ -1,5 +1,5 @@
 import { supabaseAdmin } from './supabase-admin.js';
-import { sendAutomatedWhatsApp } from './whatsapp-outbound.js';
+import { sendMetaTextMessage } from './meta-whatsapp.js';
 
 const CHANNEL = 'whatsapp';
 
@@ -42,22 +42,14 @@ export async function deliverWhatsAppWithLog({ meetingId, kind, recipientE164, b
   const nextAttempt = (row?.attempt_count || 0) + 1;
 
   try {
-    const sent = await sendAutomatedWhatsApp({
-      phone: recipientE164,
-      templateType: 'meeting_notification',
-      vars: { body }
-    });
-    if (!sent.ok) {
-      throw new Error(sent.error || 'whatsapp_template_failed');
-    }
-    const sid = sent.sid || null;
+    const { messageId } = await sendMetaTextMessage({ toE164: recipientE164, text: body });
     await supabaseAdmin
       .from('meeting_notification_log')
       .update({
         status: 'sent',
         attempt_count: nextAttempt,
         processed_at: now,
-        external_sid: sid || null,
+        external_sid: messageId || null,
         last_error: null,
         recipient_e164: recipientE164,
         payload: { body }
