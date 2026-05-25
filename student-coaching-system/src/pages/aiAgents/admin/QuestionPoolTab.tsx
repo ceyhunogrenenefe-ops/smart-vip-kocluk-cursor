@@ -60,39 +60,74 @@ export default function QuestionPoolTab({ agentId }: Props) {
   }, [items]);
 
   const runExtraction = async () => {
-    if (!confirm('AI tüm PDF kaynaklarını tarayarak soruları çıkarmaya başlasın mı? Bu işlem 1-3 dakika sürebilir.')) return;
+    if (!confirm('AI tüm PDF kaynaklarını tarayarak soruları çıkarmaya başlasın mı? Pencereyi kapatmayın.')) return;
     setExtracting(true);
     setExtractMsg(null);
+
+    let offset = 0;
+    let total = 0;
+    let totalInserted = 0;
+    let totalParsed = 0;
+    let totalLowConf = 0;
+    let totalDuplicates = 0;
+    let totalCost = 0;
+    let firstError: string | null = null;
+    let chunksWithOptions = 0;
+    let chunksWithQmark = 0;
+
     try {
-      const r = await extractQuestionsFromAgent({ agent_id: agentId });
+      while (true) {
+        const r = await extractQuestionsFromAgent({ agent_id: agentId, offset, limit: 24 });
+        total = r.total || 0;
+        totalInserted += r.inserted;
+        totalParsed += r.parsed;
+        totalLowConf += r.low_confidence || 0;
+        totalDuplicates += r.duplicates || 0;
+        totalCost += r.cost_usd;
+        chunksWithOptions += r.chunks_with_options || 0;
+        chunksWithQmark += r.chunks_with_qmark || 0;
+        if (!firstError && r.batch_errors && r.batch_errors.length) {
+          firstError = r.batch_errors[0];
+        }
+
+        const pct = total ? Math.round((r.processed / total) * 100) : 0;
+        setExtractMsg(
+          `İşleniyor… ${r.processed}/${total} parça (%${pct}) · ${totalInserted} soru havuza eklendi · maliyet $${totalCost.toFixed(4)}`
+        );
+
+        if (r.done) break;
+        offset = r.next_offset ?? r.processed;
+      }
+
       const lines: string[] = [];
       lines.push(
-        `Tarama: ${r.chunks_scanned ?? 0} parça tarandı, AI ${r.parsed} soru buldu, ${r.inserted} havuza eklendi.`
+        `✓ Tarama tamamlandı — ${total} parça tarandı, AI ${totalParsed} soru buldu, ${totalInserted} havuza eklendi.`
       );
-      if (r.low_confidence) lines.push(`Düşük güvenli (atlandı): ${r.low_confidence}`);
-      if (r.duplicates) lines.push(`Tekrarlanan (atlandı): ${r.duplicates}`);
+      if (totalLowConf) lines.push(`Düşük güvenli (atlandı): ${totalLowConf}`);
+      if (totalDuplicates) lines.push(`Tekrarlanan (atlandı): ${totalDuplicates}`);
       lines.push(
-        `İçerik analizi: ${r.chunks_with_qmark ?? 0} parçada soru işareti, ${r.chunks_with_options ?? 0} parçada A) B) C) şık formatı bulundu.`
+        `İçerik analizi: ${chunksWithQmark} parçada soru işareti, ${chunksWithOptions} parçada A) B) C) şık formatı bulundu.`
       );
-      if (r.parsed === 0) {
-        if ((r.chunks_with_options ?? 0) === 0) {
+      if (totalInserted === 0 && totalParsed === 0) {
+        if (chunksWithOptions === 0) {
           lines.push(
-            '\n⚠ PDF\'lerinizde çoktan seçmeli soru yapısı (A) B) C)) bulunmadı. Bu kaynaklar konu anlatımı olabilir. Çözüm: soru bankası PDF\'leri yükleyin, ya da AI ile yeni soru üretme özelliğini isteyin.'
+            '\n⚠ PDF\'lerinizde çoktan seçmeli soru yapısı (A) B) C)) bulunmadı. Bu kaynaklar konu anlatımı olabilir.'
           );
         } else {
-          lines.push(
-            '\n⚠ AI sorular tespit edemedi. Confidence eşiği düşürüldü ama yine de sıfır. Olası nedenler: PDF taranmış görüntü (OCR yok), formatlar bozuk, ya da soru formatı çok atipik.'
-          );
+          lines.push('\n⚠ AI sorular tespit edemedi. Formatlar atipik olabilir.');
         }
       }
-      if (r.batch_errors && r.batch_errors.length) {
-        lines.push(`\n⚠ ${r.batch_errors.length} batch'te hata: ${r.batch_errors[0]}`);
+      if (firstError) {
+        lines.push(`\n⚠ Bazı batch hatası: ${firstError}`);
       }
-      lines.push(`\nMaliyet: $${r.cost_usd.toFixed(4)}`);
+      lines.push(`\nToplam maliyet: $${totalCost.toFixed(4)}`);
       setExtractMsg(lines.join('\n'));
       await refresh();
     } catch (e) {
-      setExtractMsg(`Hata: ${(e as Error).message}`);
+      setExtractMsg(
+        `Hata: ${(e as Error).message}\n${totalInserted ? `(O ana kadar ${totalInserted} soru eklendi)` : ''}`
+      );
+      await refresh();
     } finally {
       setExtracting(false);
     }

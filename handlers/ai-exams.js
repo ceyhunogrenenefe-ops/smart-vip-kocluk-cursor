@@ -89,6 +89,10 @@ export default async function handler(req, res) {
 
 /* ─────────────────────────── SORU ÇIKARMA (AI) ─────────────────────────── */
 
+/**
+ * Vercel serverless 60sn limit yüzünden chunkları sayfa sayfa işliyoruz.
+ * UI cursor (offset) ile döngü kurar; her çağrı küçük bir pencereyi paralel olarak işler.
+ */
 async function extract(req, res, actor) {
   if (!isStaff(actor)) return res.status(403).json({ error: 'forbidden' });
   if (!isOpenAIConfigured()) return res.status(503).json({ error: 'openai_api_key_missing' });
@@ -96,26 +100,54 @@ async function extract(req, res, actor) {
   const body = parseBody(req);
   const agentId = String(body.agent_id || '').trim();
   const documentId = body.document_id ? String(body.document_id).trim() : null;
+  const offset = Math.max(0, Number(body.offset) || 0);
+  const limit = Math.min(36, Math.max(6, Number(body.limit) || 24));
   if (!agentId) return res.status(400).json({ error: 'agent_id_required' });
 
   const agent = await loadAgent(agentId);
   if (!agent) return res.status(404).json({ error: 'agent_not_found' });
   if (!canManageAgent(actor, agent)) return res.status(403).json({ error: 'forbidden' });
 
-  /** İlgili dokümandan tüm chunkları çek (veya ajanın tümünden) */
+  /** Toplam chunk sayisi (progress icin) */
+  const totalQuery = supabaseAdmin
+    .from('ai_agent_chunks')
+    .select('id', { count: 'exact', head: true })
+    .eq('agent_id', agentId);
+  if (documentId) totalQuery.eq('document_id', documentId);
+  const { count: totalChunks } = await totalQuery;
+
+  if (!totalChunks) {
+    return res.status(200).json({
+      ok: true, done: true, total: 0, processed: 0,
+      inserted: 0, parsed: 0, low_confidence: 0, duplicates: 0,
+      chunks_with_qmark: 0, chunks_with_options: 0,
+      batch_errors: [], cost_usd: 0,
+      reason: 'no_chunks'
+    });
+  }
+
+  /** Bu pencerenin chunklari */
   const q = supabaseAdmin
     .from('ai_agent_chunks')
     .select('id, document_id, page_no, content')
     .eq('agent_id', agentId)
     .order('document_id')
     .order('chunk_index')
-    .limit(2000);
+    .range(offset, offset + limit - 1);
   if (documentId) q.eq('document_id', documentId);
   const { data: chunks, error: cErr } = await q;
   if (cErr) throw cErr;
-  if (!chunks?.length) return res.status(200).json({ ok: true, inserted: 0, reason: 'no_chunks' });
 
-  /** Soruları bilinen ile çakışmasın diye mevcutları topla (basit dedupe için) */
+  if (!chunks?.length) {
+    return res.status(200).json({
+      ok: true, done: true, total: totalChunks, processed: offset,
+      inserted: 0, parsed: 0, low_confidence: 0, duplicates: 0,
+      chunks_with_qmark: 0, chunks_with_options: 0,
+      batch_errors: [], cost_usd: 0
+    });
+  }
+
+  /** Dedupe icin mevcut soru hash'lerini bir kez yukle (kucuk veri) */
   const { data: existing } = await supabaseAdmin
     .from('ai_exam_questions')
     .select('question_text')
@@ -124,8 +156,11 @@ async function extract(req, res, actor) {
     (existing || []).map((r) => String(r.question_text || '').trim().slice(0, 80).toLowerCase())
   );
 
-  /** ~12 chunk = ~12K karakter parçalar halinde çağır */
+  /** Her OpenAI cagrisi 6 chunk -> 4 paralel cagri = 24 chunk / call */
   const BATCH = 6;
+  const slices = [];
+  for (let i = 0; i < chunks.length; i += BATCH) slices.push(chunks.slice(i, i + BATCH));
+
   let inserted = 0;
   let totalUsage = { prompt_tokens: 0, completion_tokens: 0 };
   let parsedQuestions = 0;
@@ -133,68 +168,68 @@ async function extract(req, res, actor) {
   let duplicates = 0;
   let batchErrors = [];
 
-  for (let i = 0; i < chunks.length; i += BATCH) {
-    const slice = chunks.slice(i, i + BATCH);
-    try {
-      const { questions, usage, model } = await extractQuestionsFromChunks(slice);
-      parsedQuestions += questions.length;
-      totalUsage.prompt_tokens += usage.prompt_tokens || 0;
-      totalUsage.completion_tokens += usage.completion_tokens || 0;
+  /** Paralel calistir (ama OpenAI rate limit'ini zorlamadan) */
+  const settled = await Promise.allSettled(
+    slices.map((slice) => extractQuestionsFromChunks(slice))
+  );
 
-      const rows = [];
-      for (const q of questions) {
-        const conf = Number(q.confidence ?? 0);
-        if (conf < 0.45) {
-          lowConfidence += 1;
-          continue;
-        }
-        const key = String(q.question_text || '').trim().slice(0, 80).toLowerCase();
-        if (!key) continue;
-        if (existingSet.has(key)) {
-          duplicates += 1;
-          continue;
-        }
-        existingSet.add(key);
-        rows.push({
-          agent_id: agentId,
-          document_id: slice[0]?.document_id || null,
-          page_no: slice[0]?.page_no || null,
-          question_text: String(q.question_text || '').trim(),
-          options: Array.isArray(q.options) ? q.options : [],
-          answer_key: q.answer_key ? String(q.answer_key).trim().toUpperCase().slice(0, 3) : null,
-          solution: q.solution ? String(q.solution).slice(0, 4000) : null,
-          topic: q.topic ? String(q.topic).slice(0, 80) : null,
-          subtopic: q.subtopic ? String(q.subtopic).slice(0, 80) : null,
-          difficulty: ['kolay', 'orta', 'zor'].includes(q.difficulty) ? q.difficulty : 'orta',
-          question_type: 'multiple_choice',
-          status: 'draft',
-          ai_model: model,
-          ai_confidence: conf,
-          created_by: actor.sub
-        });
-      }
-
-      if (rows.length) {
-        const { error } = await supabaseAdmin.from('ai_exam_questions').insert(rows);
-        if (!error) inserted += rows.length;
-      }
-
-      await logUsage({
-        agentId,
-        userId: actor.sub,
-        operation: 'chat',
-        model,
-        promptTokens: usage.prompt_tokens || 0,
-        completionTokens: usage.completion_tokens || 0
-      });
-    } catch (e) {
-      const msg = e?.message || String(e);
-      console.warn('[ai-exams.extract] batch failed', msg);
-      batchErrors.push(msg.slice(0, 200));
+  for (let idx = 0; idx < settled.length; idx++) {
+    const r = settled[idx];
+    if (r.status === 'rejected') {
+      batchErrors.push(String(r.reason?.message || r.reason).slice(0, 200));
+      continue;
     }
+    const { questions, usage, model } = r.value;
+    parsedQuestions += questions.length;
+    totalUsage.prompt_tokens += usage.prompt_tokens || 0;
+    totalUsage.completion_tokens += usage.completion_tokens || 0;
+
+    const slice = slices[idx];
+    const rows = [];
+    for (const q of questions) {
+      const conf = Number(q.confidence ?? 0);
+      if (conf < 0.45) {
+        lowConfidence += 1;
+        continue;
+      }
+      const key = String(q.question_text || '').trim().slice(0, 80).toLowerCase();
+      if (!key) continue;
+      if (existingSet.has(key)) {
+        duplicates += 1;
+        continue;
+      }
+      existingSet.add(key);
+      rows.push({
+        agent_id: agentId,
+        document_id: slice[0]?.document_id || null,
+        page_no: slice[0]?.page_no || null,
+        question_text: String(q.question_text || '').trim(),
+        options: Array.isArray(q.options) ? q.options : [],
+        answer_key: q.answer_key ? String(q.answer_key).trim().toUpperCase().slice(0, 3) : null,
+        solution: q.solution ? String(q.solution).slice(0, 4000) : null,
+        topic: q.topic ? String(q.topic).slice(0, 80) : null,
+        subtopic: q.subtopic ? String(q.subtopic).slice(0, 80) : null,
+        difficulty: ['kolay', 'orta', 'zor'].includes(q.difficulty) ? q.difficulty : 'orta',
+        question_type: 'multiple_choice',
+        status: 'draft',
+        ai_model: model,
+        ai_confidence: conf,
+        created_by: actor.sub
+      });
+    }
+
+    if (rows.length) {
+      const { error } = await supabaseAdmin.from('ai_exam_questions').insert(rows);
+      if (!error) inserted += rows.length;
+    }
+
+    await logUsage({
+      agentId, userId: actor.sub, operation: 'chat',
+      model, promptTokens: usage.prompt_tokens || 0,
+      completionTokens: usage.completion_tokens || 0
+    });
   }
 
-  /** Hizli tani: chunklarda soru isareti / sik harfi var mi? */
   let hasQuestionMark = 0;
   let hasOptionLetters = 0;
   for (const c of chunks) {
@@ -203,13 +238,19 @@ async function extract(req, res, actor) {
     if (/\b[A-E]\)/.test(t)) hasOptionLetters += 1;
   }
 
+  const processed = offset + chunks.length;
+  const done = processed >= totalChunks;
+
   return res.status(200).json({
     ok: true,
+    total: totalChunks,
+    processed,
+    done,
+    next_offset: done ? null : processed,
     parsed: parsedQuestions,
     inserted,
     low_confidence: lowConfidence,
     duplicates,
-    chunks_scanned: chunks.length,
     chunks_with_qmark: hasQuestionMark,
     chunks_with_options: hasOptionLetters,
     batch_errors: batchErrors,
