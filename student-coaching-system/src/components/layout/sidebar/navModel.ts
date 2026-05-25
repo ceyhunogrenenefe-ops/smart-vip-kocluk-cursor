@@ -58,6 +58,7 @@ export const STUDENT_NAV_SORU_SOR: FlatNavItem = {
 export const STUDENT_LESSON_NAV_ITEMS: FlatNavItem[] = [
   { path: '/edu-derslerim', icon: Presentation, label: 'Derslerim' },
   { path: '/ai-agents', icon: Bot, label: 'AI Koçlarım' },
+  { path: '/exams', icon: ClipboardList, label: 'AI Denemelerim' },
   { path: '/class-schedule', icon: Calendar, label: 'Canlı derslerim' },
   { path: '/student-meetings', icon: Video, label: 'Görüşmelerim' }
 ];
@@ -86,7 +87,8 @@ const LESSON_PATHS = new Set([
   '/student-meetings',
   '/edu-panel',
   '/edu-derslerim',
-  '/ai-agents'
+  '/ai-agents',
+  '/exams'
 ]);
 
 const ACADEMIC_CENTER_PATH = '/academic-center';
@@ -141,7 +143,8 @@ const LESSON_LABELS: Record<string, string> = {
   '/student-meetings': 'Online Görüşmeler',
   '/edu-panel': 'Ders içerik paneli',
   '/edu-derslerim': 'Derslerim',
-  '/ai-agents': 'AI Koçlarım'
+  '/ai-agents': 'AI Koçlarım',
+  '/exams': 'AI Denemelerim'
 };
 
 const ACADEMIC_LABELS: Record<string, string> = {

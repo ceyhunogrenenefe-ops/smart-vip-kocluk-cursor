@@ -60,7 +60,10 @@ export const ROUTE_ALLOWED_ROLES = {
   '/edu-derslerim': ['student'],
   '/ai-agents-admin': ['super_admin', 'admin', 'teacher', 'coach'],
   '/ai-agents': ['super_admin', 'admin', 'teacher', 'coach', 'student'],
-  '/ai-agents/:id': ['super_admin', 'admin', 'teacher', 'coach', 'student']
+  '/ai-agents/:id': ['super_admin', 'admin', 'teacher', 'coach', 'student'],
+  '/exams': ['super_admin', 'admin', 'teacher', 'coach', 'student'],
+  '/exams/take/:id': ['super_admin', 'admin', 'teacher', 'coach', 'student'],
+  '/exams/result/:id': ['super_admin', 'admin', 'teacher', 'coach', 'student']
 } as const satisfies Record<string, readonly UserRole[]>;
 
 export type ProtectedAppPath = keyof typeof ROUTE_ALLOWED_ROLES;

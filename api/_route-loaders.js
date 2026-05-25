@@ -22,6 +22,7 @@ export const routeLoaders = {
   'written-exams': () => import('../handlers/written-exams.js'),
   'ai-chat': () => import('../handlers/ai-chat.js'),
   'ai-agents': () => import('../handlers/ai-agents.js'),
+  'ai-exams': () => import('../handlers/ai-exams.js'),
   meetings: () => import('../handlers/meetings.js'),
   'meta/whatsapp': () => import('../handlers/meta-whatsapp.js'),
   'whatsapp/send': () => import('../handlers/whatsapp-send.js'),

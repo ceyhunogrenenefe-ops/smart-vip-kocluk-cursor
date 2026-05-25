@@ -29,6 +29,8 @@ import {
 } from '../../lib/aiAgents/aiAgentsApi';
 import type { AIAgent, AIAgentDocument, AIUsageSummary } from '../../types/aiAgents.types';
 import { extractPdfPages, hashFile } from '../../lib/aiAgents/pdfExtract';
+import QuestionPoolTab from './admin/QuestionPoolTab';
+import PapersTab from './admin/PapersTab';
 
 const SUBJECT_PRESETS = [
   'Fizik',
@@ -254,6 +256,7 @@ function AgentDetail(props: {
   const [docs, setDocs] = useState<AIAgentDocument[]>([]);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [subTab, setSubTab] = useState<'sources' | 'questions' | 'papers'>('sources');
   const [form, setForm] = useState({
     name: agent.name,
     subject: agent.subject,
@@ -458,6 +461,31 @@ function AgentDetail(props: {
         )}
       </div>
 
+      <div className="flex border-b text-sm">
+        <button
+          onClick={() => setSubTab('sources')}
+          className={`px-3 py-2 ${subTab === 'sources' ? 'border-b-2 border-blue-600 font-medium' : 'text-slate-500'}`}
+        >
+          Kaynaklar
+        </button>
+        <button
+          onClick={() => setSubTab('questions')}
+          className={`px-3 py-2 ${subTab === 'questions' ? 'border-b-2 border-blue-600 font-medium' : 'text-slate-500'}`}
+        >
+          Soru Havuzu
+        </button>
+        <button
+          onClick={() => setSubTab('papers')}
+          className={`px-3 py-2 ${subTab === 'papers' ? 'border-b-2 border-blue-600 font-medium' : 'text-slate-500'}`}
+        >
+          Denemeler
+        </button>
+      </div>
+
+      {subTab === 'questions' && <QuestionPoolTab agentId={agent.id} />}
+      {subTab === 'papers' && <PapersTab agentId={agent.id} />}
+
+      {subTab === 'sources' && (
       <div className="bg-white border rounded-xl p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold flex items-center gap-2">
@@ -541,6 +569,7 @@ function AgentDetail(props: {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

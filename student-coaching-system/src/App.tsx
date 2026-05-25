@@ -61,6 +61,9 @@ import StudentEduPanelPage from './pages/eduPanel/StudentEduPanelPage';
 import AdminAgentsPage from './pages/aiAgents/AdminAgentsPage';
 import StudentAgentListPage from './pages/aiAgents/StudentAgentListPage';
 import StudentAgentChatPage from './pages/aiAgents/StudentAgentChatPage';
+import MyExamsPage from './pages/aiAgents/student/MyExamsPage';
+import TakeExamPage from './pages/aiAgents/student/TakeExamPage';
+import ExamResultPage from './pages/aiAgents/student/ExamResultPage';
 import { rolesForProtectedRoute, userRoleTags } from './config/rolePermissions';
 
 // Yönlendirme bileşeni
@@ -489,6 +492,29 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/ai-agents/:id')}>
                 <Layout>
                   <StudentAgentChatPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            {/* AI Denemeler — öğrenci */}
+            <Route path="/exams" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/exams')}>
+                <Layout>
+                  <MyExamsPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            <Route path="/exams/take/:id" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/exams/take/:id')}>
+                <Layout>
+                  <TakeExamPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            <Route path="/exams/result/:id" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/exams/result/:id')}>
+                <Layout>
+                  <ExamResultPage />
                 </Layout>
               </ProtectedRoute>
             } />
