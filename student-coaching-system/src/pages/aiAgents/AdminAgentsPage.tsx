@@ -11,9 +11,11 @@ import {
   RefreshCcw,
   FileText,
   CheckCircle2,
-  XCircle
+  XCircle,
+  Image as ImageIcon
 } from 'lucide-react';
 import {
+  backfillQuestionImages,
   createAgent,
   deleteAgent,
   deleteDocument,
@@ -426,6 +428,87 @@ function AgentDetail(props: {
     setDocs((prev) => prev.filter((d) => d.id !== id));
   };
 
+  /**
+   * Mevcut bir döküman için SADECE sayfa görüntülerini oluşturur.
+   * Embedding/chunks/soru havuzunu DOKUNMAZ. Bittiğinde mevcut sorulara
+   * görüntü URL'i otomatik bağlanır.
+   */
+  const onAddImagesForDoc = async (doc: AIAgentDocument, file: File) => {
+    setUploading({ phase: 'PDF okunuyor', pct: 3 });
+    try {
+      const pdf = await loadPdf(file);
+      const pageCount = pdf.numPages;
+
+      if (doc.page_count && pageCount !== doc.page_count) {
+        const ok = confirm(
+          `Seçtiğin PDF ${pageCount} sayfa, döküman kaydında ${doc.page_count} sayfa kayıtlı.\nYine de devam edilsin mi?`
+        );
+        if (!ok) {
+          setUploading(null);
+          return;
+        }
+      }
+
+      const PARALLEL = 4;
+      let imgDone = 0;
+      let imgFailed = 0;
+      const renderAndUpload = async (pageNo: number) => {
+        try {
+          let { blob, width, height } = await renderPageToPngBlob(pdf, pageNo, 1.4);
+          if (blob.size > 1_500_000) {
+            const reduced = await renderPageToPngBlob(pdf, pageNo, 1.0);
+            blob = reduced.blob;
+            width = reduced.width;
+            height = reduced.height;
+          }
+          const b64 = await blobToBase64(blob);
+          await uploadPageImage({
+            document_id: doc.id,
+            page_no: pageNo,
+            image_base64: b64,
+            mime: 'image/png',
+            width,
+            height
+          });
+        } catch (e) {
+          imgFailed += 1;
+          console.warn(`page ${pageNo} image upload failed`, e);
+        } finally {
+          imgDone += 1;
+          const pct = Math.round((imgDone / pageCount) * 95);
+          setUploading({
+            phase: `Sayfa görüntüleri (${imgDone}/${pageCount})${imgFailed ? ` · ${imgFailed} hata` : ''}`,
+            pct
+          });
+        }
+      };
+
+      let cursor = 1;
+      const workers: Promise<void>[] = [];
+      const next = async () => {
+        while (cursor <= pageCount) {
+          const p = cursor++;
+          await renderAndUpload(p);
+        }
+      };
+      for (let i = 0; i < PARALLEL; i++) workers.push(next());
+      await Promise.all(workers);
+
+      /** Mevcut sorulara görsel URL'lerini bağla */
+      setUploading({ phase: 'Sorulara görseller bağlanıyor', pct: 96 });
+      const r = await backfillQuestionImages({ document_id: doc.id });
+
+      setUploading({
+        phase: `Tamamlandı (${r.updated} soruya görsel bağlandı)`,
+        pct: 100
+      });
+      setTimeout(() => setUploading(null), 1500);
+    } catch (e) {
+      alert(`Görsel yükleme başarısız: ${(e as Error).message}`);
+      setUploading(null);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="bg-white border rounded-xl p-4">
@@ -590,6 +673,15 @@ function AgentDetail(props: {
           </div>
         )}
 
+        {!uploading && docs.length > 0 && (
+          <div className="mb-3 p-2.5 rounded-lg bg-violet-50 border border-violet-200 text-xs text-violet-900">
+            <ImageIcon className="w-4 h-4 inline -mt-0.5 mr-1" />
+            Eski PDF'lerin <strong>sayfa görüntüleri yok mu?</strong> Listedeki bir döküman satırında mor{' '}
+            <ImageIcon className="w-3 h-3 inline -mt-0.5" /> ikonuna tıkla ve <strong>aynı PDF'i tekrar seç</strong>.
+            Embedding'ler ve mevcut soru havuzu silinmez; sadece her sayfanın görüntüsü oluşturulup mevcut sorulara bağlanır.
+          </div>
+        )}
+
         {loading ? (
           <div className="text-center text-slate-400 text-sm py-4">
             <Loader2 className="w-4 h-4 animate-spin inline" /> Yükleniyor…
@@ -624,6 +716,22 @@ function AgentDetail(props: {
                   ) : (
                     <span className="text-xs text-amber-700">işleniyor</span>
                   )}
+                  <label
+                    className="p-1 rounded hover:bg-violet-50 text-violet-600 cursor-pointer"
+                    title="Sayfa görüntülerini bu PDF'ten oluştur (mevcut sorulara bağlanır)"
+                  >
+                    <ImageIcon className="w-4 h-4" />
+                    <input
+                      type="file"
+                      accept="application/pdf"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) onAddImagesForDoc(d, f);
+                        e.target.value = '';
+                      }}
+                    />
+                  </label>
                   <button
                     onClick={() => removeDoc(d.id)}
                     className="p-1 rounded hover:bg-slate-100 text-rose-600"

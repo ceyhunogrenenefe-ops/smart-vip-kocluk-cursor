@@ -11,6 +11,7 @@
  *  POST   ?op=document-finalize         → dökümanı ready işaretle
  *  POST   ?op=document-delete           → döküman + chunks sil
  *  POST   ?op=page-image                → bir sayfanın PNG görüntüsünü Storage'a yükle
+ *  POST   ?op=pages-backfill-questions  → mevcut sorulara ai_agent_pages.image_url'i bağla
  *
  *  GET    ?op=conversations             → kullanıcının kendi sohbetleri
  *  GET    ?op=messages&conversation_id  → bir sohbetin mesajları
@@ -86,6 +87,7 @@ export default async function handler(req, res) {
     if (op === 'document-finalize') return await documentFinalize(req, res, actor);
     if (op === 'document-delete') return await documentDelete(req, res, actor);
     if (op === 'page-image') return await pageImageUpload(req, res, actor);
+    if (op === 'pages-backfill-questions') return await backfillQuestionImages(req, res, actor);
 
     if (op === 'conversations') return await listConversations(req, res, actor);
     if (op === 'messages') return await listMessages(req, res, actor);
@@ -460,6 +462,70 @@ async function pageImageUpload(req, res, actor) {
   if (dbErr) return res.status(500).json({ error: 'db_upsert_failed', detail: errorMessage(dbErr) });
 
   return res.status(200).json({ ok: true, url: imageUrl, page_no: pageNo });
+}
+
+/**
+ * Mevcut sorulara, dokumanin sayfa goruntu URL'lerini baglar.
+ * Sayfa goruntuleri yuklendikten SONRA cagrilir (PDF tekrar yuklemeden).
+ *
+ * Body: { document_id } veya { agent_id } (agent_id ile tum belgeler icin)
+ */
+async function backfillQuestionImages(req, res, actor) {
+  const body = parseBody(req);
+  const documentId = body.document_id ? String(body.document_id).trim() : null;
+  const agentId = body.agent_id ? String(body.agent_id).trim() : null;
+  if (!documentId && !agentId) return res.status(400).json({ error: 'document_id_or_agent_id_required' });
+
+  /** Yetki: belge ya da ajan uzerinden */
+  let targetAgentId = agentId;
+  if (documentId) {
+    const { data: doc } = await supabaseAdmin
+      .from('ai_agent_documents')
+      .select('agent_id')
+      .eq('id', documentId)
+      .maybeSingle();
+    if (!doc) return res.status(404).json({ error: 'document_not_found' });
+    targetAgentId = doc.agent_id;
+  }
+  const agent = await supabaseAdmin
+    .from('ai_agents')
+    .select('*')
+    .eq('id', targetAgentId)
+    .maybeSingle()
+    .then((r) => r.data);
+  if (!agent) return res.status(404).json({ error: 'agent_not_found' });
+  if (!canManageAgent(actor, agent)) return res.status(403).json({ error: 'forbidden' });
+
+  /** Sayfa kayitlarini cek */
+  const pageQuery = supabaseAdmin
+    .from('ai_agent_pages')
+    .select('document_id, page_no, image_url');
+  if (documentId) pageQuery.eq('document_id', documentId);
+  else pageQuery.eq('agent_id', targetAgentId);
+  const { data: pages, error: pErr } = await pageQuery;
+  if (pErr) throw pErr;
+  if (!pages?.length) {
+    return res.status(200).json({ ok: true, updated: 0, reason: 'no_page_images' });
+  }
+
+  /** Her sayfa icin ai_exam_questions'i guncelle */
+  let updated = 0;
+  for (const p of pages) {
+    const { data: rows, error } = await supabaseAdmin
+      .from('ai_exam_questions')
+      .update({ page_image_url: p.image_url, updated_at: new Date().toISOString() })
+      .eq('document_id', p.document_id)
+      .eq('page_no', p.page_no)
+      .is('page_image_url', null)
+      .select('id');
+    if (error) {
+      console.warn('[backfill] update failed', error.message);
+      continue;
+    }
+    updated += rows?.length || 0;
+  }
+
+  return res.status(200).json({ ok: true, updated, pages: pages.length });
 }
 
 /* ─────────────────────────── SOHBET ─────────────────────────── */

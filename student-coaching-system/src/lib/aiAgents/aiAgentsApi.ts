@@ -75,6 +75,12 @@ export const uploadPageImage = (payload: {
   height?: number;
 }) => postJson<AIPageImageUploadResult>('/api/ai-agents?op=page-image', payload);
 
+export const backfillQuestionImages = (payload: { document_id?: string; agent_id?: string }) =>
+  postJson<{ ok: boolean; updated: number; pages?: number; reason?: string }>(
+    '/api/ai-agents?op=pages-backfill-questions',
+    payload
+  );
+
 /* SOHBET */
 export const listConversations = () =>
   getJson<{ data: AIAgentConversation[] }>('/api/ai-agents?op=conversations').then((r) => r.data);
