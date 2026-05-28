@@ -326,7 +326,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         setLinkedStudent(null);
         setLinkedStudentError(
-          'Öğrenci profili henüz bağlı değil. Yöneticinizden öğrenci kaydınızın e-postanızla eşleştirilmesini isteyin.'
+          'Öğrenci profiliniz henüz hazır değil. Sayfayı yenileyin — hesabınız otomatik oluşturulacaktır.'
         );
       }
     } catch (e) {

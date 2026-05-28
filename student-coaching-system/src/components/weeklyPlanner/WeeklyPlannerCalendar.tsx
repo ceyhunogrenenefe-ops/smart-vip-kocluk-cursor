@@ -136,6 +136,10 @@ interface WeeklyPlannerCalendarProps {
   studentName?: string;
   canEditPlan: boolean;
   canManageGoals: boolean;
+  /** Koç atanmamış öğrenci — tüm hedefleri kendisi yönetir */
+  selfCoachingMode?: boolean;
+  /** Atanmış koç var — koç hedefleri salt okunur, öğrenci ek hedef ekleyebilir */
+  hasAssignedCoach?: boolean;
   /** Öğrenci kendi planında: blok tıklanınca günlük çalışma kaydı modalı */
   studentStudyLogUi?: boolean;
   /** Öğrenci veya koç: blok tıklanınca çalışma kaydı (soru / sayfa / süre) */
@@ -147,6 +151,8 @@ export function WeeklyPlannerCalendar({
   studentName,
   canEditPlan,
   canManageGoals,
+  selfCoachingMode = false,
+  hasAssignedCoach = false,
   studentStudyLogUi = false,
   studyLogOnClick = false,
 }: WeeklyPlannerCalendarProps) {
@@ -167,6 +173,20 @@ export function WeeklyPlannerCalendar({
 
   const plannerStudent = useMemo(() => students.find((s) => s.id === studentId), [students, studentId]);
   const classLevel = plannerStudent?.classLevel;
+
+  /** Öğrenci: koçsuz modda tüm hedefler; koçlu modda yalnızca kendi hedefleri (coach_id null) */
+  const canEditGoal = useCallback(
+    (goal: CoachWeeklyGoalRow) => {
+      if (!canManageGoals) return false;
+      if (!studentStudyLogUi) return true;
+      if (selfCoachingMode) return true;
+      return !goal.coach_id;
+    },
+    [canManageGoals, studentStudyLogUi, selfCoachingMode]
+  );
+
+  const goalsSectionTitle =
+    studentStudyLogUi || selfCoachingMode ? 'Haftalık hedeflerin' : 'Koç hedefleri';
 
   /** Öğrenci sınıfına göre konu havuzunda tanımlı dersler */
   const poolSubjects = useMemo(() => {
@@ -667,12 +687,12 @@ export function WeeklyPlannerCalendar({
     });
   };
 
-  const removeGoal = async (id: string) => {
-    if (!canManageGoals) return;
+  const removeGoal = async (goal: CoachWeeklyGoalRow) => {
+    if (!canEditGoal(goal)) return;
     if (!confirm('Hedef kartını silmek istiyor musunuz?')) return;
     try {
-      await deleteCoachWeeklyGoal(id);
-      if (goalDateEditId === id) {
+      await deleteCoachWeeklyGoal(goal.id);
+      if (goalDateEditId === goal.id) {
         setGoalDateEditId(null);
         setGoalDateEditStart('');
         setGoalDateEditEnd('');
@@ -684,6 +704,7 @@ export function WeeklyPlannerCalendar({
   };
 
   const openGoalDateEdit = (goal: CoachWeeklyGoalRow) => {
+    if (!canEditGoal(goal)) return;
     setGoalDateEditId(goal.id);
     setGoalDateEditStart((goal.goal_start_date || weekStartStr).trim());
     setGoalDateEditEnd((goal.goal_end_date || weekEndStr).trim());
@@ -697,6 +718,8 @@ export function WeeklyPlannerCalendar({
 
   const saveGoalDateEdit = async () => {
     if (!goalDateEditId || !canManageGoals) return;
+    const editingGoal = goals.find((g) => g.id === goalDateEditId);
+    if (editingGoal && !canEditGoal(editingGoal)) return;
     setGoalDateSaving(true);
     try {
       const gs = goalDateEditStart.trim() || weekStartStr;
@@ -721,6 +744,8 @@ export function WeeklyPlannerCalendar({
   const moveGoalToAdjacentWeek = useCallback(
     async (goalId: string, deltaWeeks: -1 | 1) => {
       if (!canManageGoals) return;
+      const goal = goals.find((g) => g.id === goalId);
+      if (goal && !canEditGoal(goal)) return;
       const newWs = shiftWeekStartStr(weekStartStr, deltaWeeks);
       try {
         await patchCoachWeeklyGoal(goalId, { week_start_date: newWs });
@@ -730,7 +755,7 @@ export function WeeklyPlannerCalendar({
         alert(e instanceof Error ? e.message : 'Hedef haftaya taşınamadı');
       }
     },
-    [canManageGoals, weekStartStr, shiftWeekStartStr]
+    [canManageGoals, canEditGoal, goals, weekStartStr, shiftWeekStartStr]
   );
 
   const onWeekGoalDragOver = useCallback(
@@ -993,11 +1018,15 @@ export function WeeklyPlannerCalendar({
       {/* Koç hedefleri */}
       {canManageGoals && (
         <div className="rounded-xl border border-dashed border-amber-200 bg-amber-50/50 p-4 space-y-3">
-          <p className="text-sm font-medium text-amber-900">Koç — bu hafta için hedef ekle</p>
+          <p className="text-sm font-medium text-amber-900">
+            {studentStudyLogUi || selfCoachingMode
+              ? 'Bu hafta için hedef ekle'
+              : 'Koç — bu hafta için hedef ekle'}
+          </p>
           <p className="text-xs text-amber-800/90 leading-relaxed max-w-2xl">
-            Başlangıç ve bitişi istediğiniz takvim günleri olarak seçebilirsiniz (ör. Cumartesi–gelecek hafta
-            Cuma). Takvimde üst şeritte hangi günlerin bu hedefe dahil olduğu işaretlenir; plan bloklarını
-            yalnızca bu aralıktaki günlere sürükleyebilirsiniz.
+            {studentStudyLogUi || selfCoachingMode
+              ? 'Ders ve konu seçerek haftalık hedefini oluştur; kartı takvime sürükleyerek plana yerleştir. Tamamladıkça ilerlemen otomatik güncellenir.'
+              : 'Başlangıç ve bitişi istediğiniz takvim günleri olarak seçebilirsiniz (ör. Cumartesi–gelecek hafta Cuma). Takvimde üst şeritte hangi günlerin bu hedefe dahil olduğu işaretlenir; plan bloklarını yalnızca bu aralıktaki günlere sürükleyebilirsiniz.'}
           </p>
           {plannerStudent && classLevel !== undefined && classLevel !== null ? (
             <p className="text-[11px] text-amber-950/80">
@@ -1342,7 +1371,7 @@ export function WeeklyPlannerCalendar({
         {/* Hedef özet */}
         <div className="space-y-3 xl:sticky xl:top-24 xl:self-start">
           <div className="rounded-2xl border border-slate-200/95 bg-white/95 p-5 shadow-[0_16px_40px_-28px_rgb(15,23,42,0.35)] backdrop-blur-sm dark:border-slate-700 dark:bg-slate-900/95">
-            <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-1">Koç hedefleri</h4>
+            <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-1">{goalsSectionTitle}</h4>
             <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-2 flex flex-wrap gap-2">
               <span className="inline-flex items-center gap-1 rounded-md border border-orange-300 bg-orange-50 px-1.5 py-0.5 text-orange-900 dark:border-orange-800 dark:bg-orange-950/40 dark:text-orange-200">
                 Turuncu: planlandı
@@ -1360,7 +1389,11 @@ export function WeeklyPlannerCalendar({
             {goalAggregates.length === 0 ? (
               <p className="text-xs text-slate-500">
                 {canManageGoals
-                  ? 'Henüz hedef yok. Yukarıdan ekleyin veya öğrenci manuel görev yerleştirsin.'
+                  ? selfCoachingMode
+                    ? 'Henüz hedef yok. Yukarıdan haftalık hedeflerini ekleyebilir veya takvime manuel görev yerleştirebilirsin.'
+                    : studentStudyLogUi && hasAssignedCoach
+                      ? 'Koçun henüz hedef tanımlamadı. Yukarıdan kendi hedeflerini ekleyebilir veya takvime manuel görev yerleştirebilirsin.'
+                      : 'Henüz hedef yok. Yukarıdan ekleyin veya öğrenci manuel görev yerleştirsin.'
                   : 'Koçunuz hedef tanımladığında burada görünür.'}
               </p>
             ) : (
@@ -1397,7 +1430,7 @@ export function WeeklyPlannerCalendar({
                             {goal.title}
                           </span>
                         </div>
-                        {canManageGoals ? (
+                        {canEditGoal(goal) ? (
                           <div className="flex items-center gap-0.5 flex-shrink-0">
                             <button
                               type="button"
@@ -1411,13 +1444,15 @@ export function WeeklyPlannerCalendar({
                             </button>
                             <button
                               type="button"
-                              onClick={() => void removeGoal(goal.id)}
+                              onClick={() => void removeGoal(goal)}
                               className="text-red-500 hover:text-red-700 p-1"
                               title="Hedefi sil"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
+                        ) : goal.coach_id ? (
+                          <span className="text-[10px] text-slate-400 flex-shrink-0">Koç hedefi</span>
                         ) : null}
                       </div>
                       <div className="mt-2 h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden relative">
@@ -1451,7 +1486,7 @@ export function WeeklyPlannerCalendar({
                             </p>
                           </div>
                         </div>
-                        {canManageGoals && goalDateEditId === goal.id ? (
+                        {canEditGoal(goal) && goalDateEditId === goal.id ? (
                           <div className="mt-2 space-y-2 rounded-lg border border-amber-200 bg-amber-50/80 p-2 dark:border-amber-900/50 dark:bg-amber-950/30">
                             <p className="text-[10px] text-amber-900 dark:text-amber-200/90">
                               İstediğiniz takvim günlerini seçin; bitiş boşsa başlangıç günü kullanılır.

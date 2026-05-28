@@ -47,7 +47,14 @@ export default function WeeklyPlannerPage() {
 
   const selected = useMemo(() => students.find((s) => s.id === activeStudentId), [students, activeStudentId]);
 
-  const canManageGoals = tags.some((t) => ['coach', 'admin', 'super_admin'].includes(t));
+  const hasAssignedCoach = Boolean(
+    linkedStudent?.coachId || selected?.coachId
+  );
+  /** Koçsuz öğrenci kendi hedeflerini yönetir; koçlu öğrenci de ek hedef ekleyebilir */
+  const canManageGoals =
+    tags.some((t) => ['coach', 'admin', 'super_admin'].includes(t)) ||
+    Boolean(isStudentUi && activeStudentId);
+  const selfCoachingMode = Boolean(isStudentUi && activeStudentId && !hasAssignedCoach);
   const canEditPlan = tags.some((t) => ['student', 'coach', 'admin', 'super_admin'].includes(t));
 
   if (!canManageGoals && !canEditPlan) {
@@ -82,7 +89,9 @@ export default function WeeklyPlannerPage() {
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
               {isStudentUi
-                ? 'Takvimini kişiselleştirdik — görevlerin renkli bloklar halinde; tikledikçe ilerlemen görünsün. Haftayı kolayca değiştir, küçük hedefler koy.'
+                ? selfCoachingMode
+                  ? 'Koçun olmasa da haftalık hedeflerini buradan belirleyebilir, takvimine görev ekleyip çalışmanı kaydedebilirsin. Küçük adımlarla ilerlemeni takip et.'
+                  : 'Takvimini kişiselleştirdik — koç hedeflerin ve kendi hedeflerin renkli bloklar halinde; tikledikçe ilerlemen görünsün. Haftayı kolayca değiştir, çalışmanı kaydet.'
                 : 'Koç hedef tanımlar ve öğrenci gibi çalışma verisi (soru, sayfa, süre) girer; öğrenci kendi takvimini düzenler. Eski «Haftalık Takip» bu sayfada birleşti.'}
             </p>
           </div>
@@ -121,11 +130,18 @@ export default function WeeklyPlannerPage() {
 
       <AcademicCenterQuickLinks />
 
+      {selfCoachingMode && (
+        <div className="rounded-xl border border-indigo-200 bg-indigo-50/80 px-4 py-3 text-sm text-indigo-950 dark:border-indigo-900/50 dark:bg-indigo-950/30 dark:text-indigo-100">
+          <strong>Kendi kendine takip modu:</strong> Sana atanmış bir koç yok. Haftalık hedeflerini aşağıdan
+          ekleyebilir, takvime sürükleyebilir ve her blokta çözdüğün soruları kaydedebilirsin.
+        </div>
+      )}
+
       {!activeStudentId ? (
         <div className="flex items-center gap-2 text-amber-800 bg-amber-50 border border-amber-100 rounded-lg p-4 text-sm">
           <AlertCircle className="w-5 h-5 flex-shrink-0" />
           {isStudentUi
-            ? 'Öğrenci profiliniz yükleniyor veya oturumda öğrenci kimliği yok. Sayfayı yenileyin veya tekrar giriş yapın.'
+            ? 'Öğrenci profiliniz yükleniyor. Birkaç saniye bekleyin veya sayfayı yenileyin — hesabınız otomatik oluşturuluyor.'
             : 'Planı görmek için bir öğrenci seçin.'}
         </div>
       ) : (
@@ -134,6 +150,8 @@ export default function WeeklyPlannerPage() {
           studentName={selected?.name ?? effectiveUser?.name}
           canEditPlan={canEditPlan}
           canManageGoals={canManageGoals}
+          selfCoachingMode={selfCoachingMode}
+          hasAssignedCoach={hasAssignedCoach}
           studentStudyLogUi={studentStudyLogUi}
           studyLogOnClick={studyLogOnClick}
         />

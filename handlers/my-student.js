@@ -1,5 +1,6 @@
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
+import { ensureStudentProfileForActor } from '../api/_lib/ensure-student-profile.js';
 import { linkStudentToUser } from '../api/_lib/link-student-user.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
@@ -116,13 +117,24 @@ export default async function handler(req, res) {
       if (!candidates.length && !isStudentActor) {
         return res.status(200).json({ data: null, reason: 'student_profile_missing' });
       }
-      if (!candidates.length) {
-        return res.status(200).json({ data: null, reason: 'student_profile_missing' });
+      if (!candidates.length && isStudentActor) {
+        const ensured = await ensureStudentProfileForActor(actor);
+        if (ensured.hasStudentId && ensured.studentId) {
+          const { data: row, error: rowErr } = await supabaseAdmin
+            .from('students')
+            .select('*')
+            .eq('id', ensured.studentId)
+            .maybeSingle();
+          if (rowErr) throw rowErr;
+          if (row) data = await linkStudentToUser(row, uid);
+        }
       }
-      if (!sawUnlinked && !sawRow) {
-        return res.status(200).json({ data: null, reason: 'not_found' });
+      if (!data) {
+        if (!sawUnlinked && !sawRow) {
+          return res.status(200).json({ data: null, reason: 'not_found' });
+        }
+        return res.status(403).json({ error: 'forbidden' });
       }
-      return res.status(403).json({ error: 'forbidden' });
     }
 
     if (isStudentActor) {

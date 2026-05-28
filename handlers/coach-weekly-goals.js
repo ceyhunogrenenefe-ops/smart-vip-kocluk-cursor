@@ -63,10 +63,18 @@ const assertCanReadStudentGoals = async (actor, studentId) => {
   return { ok: false, status: 403, student: st };
 };
 
-const assertCoachOrAdminGoalsWrite = async (actor, studentId) => {
+const assertGoalsWrite = async (actor, studentId, existingGoal = null) => {
   const chk = await assertCanReadStudentGoals(actor, studentId);
   if (!chk.ok || !chk.student) return chk;
-  if (actor.role === 'coach' || actor.role === 'admin' || actor.role === 'super_admin') return chk;
+  const role = String(actor.role || '').trim();
+  if (role === 'coach' || role === 'admin' || role === 'super_admin') return chk;
+  if (role === 'student' && actor.student_id === studentId) {
+    /** Koç atanmamış öğrenci: tam self-coaching */
+    if (!chk.student.coach_id) return chk;
+    /** Koçlu öğrenci: yalnızca kendi oluşturduğu hedefler (coach_id null) */
+    if (existingGoal?.coach_id) return { ok: false, status: 403, student: chk.student };
+    return chk;
+  }
   return { ok: false, status: 403, student: chk.student };
 };
 
@@ -167,7 +175,7 @@ export default async function handler(req, res) {
       goalStart = norm.goalStart;
       goalEnd = norm.goalEnd;
 
-      const gate = await assertCoachOrAdminGoalsWrite(actor, sid);
+      const gate = await assertGoalsWrite(actor, sid);
       if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
       const st = gate.student;
 
@@ -182,7 +190,13 @@ export default async function handler(req, res) {
           : `cwg-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 
       const coachId =
-        actor.role === 'coach' ? actor.coach_id : body.coach_id != null ? body.coach_id : st.coach_id;
+        actor.role === 'student'
+          ? null
+          : actor.role === 'coach'
+            ? actor.coach_id
+            : body.coach_id != null
+              ? body.coach_id
+              : st.coach_id;
       const institutionId = body.institution_id ?? st.institution_id ?? actor.institution_id ?? null;
 
       const now = new Date().toISOString();
@@ -219,7 +233,7 @@ export default async function handler(req, res) {
       if (exErr) throw exErr;
       if (!existing) return res.status(404).json({ error: 'not_found' });
 
-      const gate = await assertCoachOrAdminGoalsWrite(actor, existing.student_id);
+      const gate = await assertGoalsWrite(actor, existing.student_id, existing);
       if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
 
       const patch = { ...(req.body || {}), updated_at: new Date().toISOString() };
@@ -227,6 +241,10 @@ export default async function handler(req, res) {
       delete patch.student_id;
       delete patch.created_at;
       delete patch.weekStartDate;
+      if (actor.role === 'student') {
+        delete patch.coach_id;
+        delete patch.institution_id;
+      }
 
       const ws = normalizeWeekStart(existing.week_start_date);
       const newWsRequested =
@@ -299,7 +317,7 @@ export default async function handler(req, res) {
       if (exErr) throw exErr;
       if (!existing) return res.status(404).json({ error: 'not_found' });
 
-      const gate = await assertCoachOrAdminGoalsWrite(actor, existing.student_id);
+      const gate = await assertGoalsWrite(actor, existing.student_id, existing);
       if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
 
       const { error } = await supabaseAdmin.from('coach_weekly_goals').delete().eq('id', id);
