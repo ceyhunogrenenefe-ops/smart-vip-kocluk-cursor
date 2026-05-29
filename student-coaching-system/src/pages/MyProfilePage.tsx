@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { apiFetch } from '../lib/session';
 import { useAuth } from '../context/AuthContext';
 import { useStudentMobileShell } from '../hooks/useStudentMobileShell';
+import { isNativeApp } from '../lib/nativeApp';
 
 type ProfilePayload = {
   user: { id: string; name: string; email: string; phone?: string | null; role: string };
@@ -21,6 +22,15 @@ export default function MyProfilePage() {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isNativeApp()) return;
+    void import('@capacitor/app')
+      .then(({ App }) => App.getInfo())
+      .then((info) => setAppVersion(`${info.version} (${info.build})`))
+      .catch(() => setAppVersion(null));
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -174,6 +184,11 @@ export default function MyProfilePage() {
             </button>
           </form>
         )}
+        {appVersion ? (
+          <p className="mt-4 border-t border-slate-100 pt-3 text-center text-[11px] text-slate-400">
+            Uygulama sürümü: {appVersion}
+          </p>
+        ) : null}
       </div>
     </div>
   );
