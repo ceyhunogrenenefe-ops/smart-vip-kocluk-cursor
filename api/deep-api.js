@@ -2,8 +2,12 @@
  * `/api/google/...` ve `/api/cron/...` — Vite+Vercel’de çok segment tek handler’a düşmez; rewrite ile buraya gelir.
  */
 import { routeLoaders } from './_route-loaders.js';
+import { applyCors, handleCorsPreflight } from './_lib/cors-mobile.js';
 
 export default async function handler(req, res) {
+  if (handleCorsPreflight(req, res)) return;
+  applyCors(req, res);
+
   const raw = req.query?.path;
   const routePath =
     raw === undefined || raw === null ? '' : Array.isArray(raw) ? raw.join('/') : String(raw);

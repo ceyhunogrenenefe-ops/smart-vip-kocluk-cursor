@@ -1,6 +1,7 @@
 // Türkçe: Giriş Sayfası - Güvenlik Sistemi ile
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { PRIVACY_POLICY_PATH } from '../lib/playStoreLinks';
 import { useAuth } from '../context/AuthContext';
 import { GraduationCap, Lock, Mail, Eye, EyeOff, AlertCircle, CheckCircle, Shield, AlertTriangle } from 'lucide-react';
 
@@ -189,7 +190,10 @@ export default function Login() {
           </Link>
         </div>
         <p className="text-center text-slate-400 text-sm mt-4">
-          © 2024 Smart VIP Koçluk Sistemi
+          © 2024 Smart VIP Koçluk Sistemi ·{' '}
+          <Link to={PRIVACY_POLICY_PATH} className="underline hover:text-slate-300">
+            Gizlilik
+          </Link>
         </p>
       </div>
     </div>

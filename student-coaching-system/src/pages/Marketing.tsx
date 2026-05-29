@@ -866,9 +866,15 @@ export default function Marketing() {
               © 2024 Smart Koçluk Sistemi. Tüm hakları saklıdır.
             </p>
             <div className="flex gap-6 text-sm">
-              <a href="#" className="text-slate-500 hover:text-red-400 transition-colors">Gizlilik Politikası</a>
-              <a href="#" className="text-slate-500 hover:text-red-400 transition-colors">Kullanım Koşulları</a>
-              <a href="#" className="text-slate-500 hover:text-red-400 transition-colors">KVKK Aydınlatma</a>
+              <Link to="/gizlilik" className="text-slate-500 hover:text-red-400 transition-colors">
+                Gizlilik Politikası
+              </Link>
+              <Link to="/kullanim-kosullari" className="text-slate-500 hover:text-red-400 transition-colors">
+                Kullanım Koşulları
+              </Link>
+              <Link to="/veli-kayit-metin/kvkk" className="text-slate-500 hover:text-red-400 transition-colors">
+                KVKK Aydınlatma
+              </Link>
             </div>
           </div>
         </div>

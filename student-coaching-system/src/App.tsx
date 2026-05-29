@@ -51,6 +51,7 @@ import ParentSignFlowPage from './pages/ParentSignFlowPage';
 import TahsilatMuhasebePage from './pages/TahsilatMuhasebePage';
 import VeliImzaPage from './pages/VeliImzaPage';
 import VeliKayitLegalDocPage from './pages/VeliKayitLegalDocPage';
+import PlayStoreLegalPage from './pages/PlayStoreLegalPage';
 import VerifyDocumentPage from './pages/VerifyDocumentPage';
 import StudentSoruSorPage from './pages/questionHelp/StudentSoruSorPage';
 import TeacherSoruHavuzuPage from './pages/questionHelp/TeacherSoruHavuzuPage';
@@ -101,6 +102,8 @@ function App() {
               <Route path="/marketing" element={<Marketing />} />
               <Route path="/hakkimizda" element={<Marketing />} />
               <Route path="/fiyat" element={<Marketing />} />
+              <Route path="/gizlilik" element={<PlayStoreLegalPage />} />
+              <Route path="/kullanim-kosullari" element={<PlayStoreLegalPage />} />
 
               {/* Auth Sayfaları */}
               <Route path="/login" element={<Login />} />

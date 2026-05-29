@@ -16,6 +16,10 @@ const config: CapacitorConfig = {
     scheme: 'VIP Koçluk'
   },
   plugins: {
+    /** Mobil WebView: fetch → native HTTP (CORS engeli olmadan production API) */
+    CapacitorHttp: {
+      enabled: true
+    },
     SplashScreen: {
       launchShowDuration: 1800,
       launchAutoHide: true,

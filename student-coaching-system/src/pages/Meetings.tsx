@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { apiFetch } from '../lib/session';
+import { isNativeApp } from '../lib/nativeApp';
 import { resolveCoachRecordId } from '../lib/coachResolve';
 import type { CoachingMeetingRecord, MeetingStatus } from '../types';
 import {
@@ -334,6 +335,13 @@ export default function Meetings() {
   }, [visibleMeetings]);
 
   const handleConnectGoogle = async () => {
+    if (isNativeApp()) {
+      setError(null);
+      setConfigHint(
+        'Google Takvim bağlantısı mobil uygulamada desteklenmiyor. Telefonda Chrome/Safari ile www.dersonlinevipkocluk.com adresine girip Görüşmeler → Google ile bağlan kullanın.'
+      );
+      return;
+    }
     setConnectBusy(true);
     try {
       const res = await apiFetch('/api/google/oauth', { method: 'POST', body: JSON.stringify({}) });

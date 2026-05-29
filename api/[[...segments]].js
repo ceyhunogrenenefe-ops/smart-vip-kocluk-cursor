@@ -5,6 +5,7 @@
  */
 
 import { routeLoaders } from './_route-loaders.js';
+import { applyCors, handleCorsPreflight } from './_lib/cors-mobile.js';
 
 function segmentsFromReq(req) {
   const raw = req.query?.segments;
@@ -24,6 +25,9 @@ function segmentsFromReq(req) {
 }
 
 export default async function handler(req, res) {
+  if (handleCorsPreflight(req, res)) return;
+  applyCors(req, res);
+
   const segments = segmentsFromReq(req);
   let routePath = segments.join('/');
   let load = routeLoaders[routePath];

@@ -45,11 +45,17 @@ export const clearAuthToken = () => {
 
 /** JWT göndermez: /api/auth-login gibi oturumsuz istekleri eski Bearer ile bozmamak için. */
 export async function fetchPublicPost(pathOrUrl: string, body: Record<string, unknown>): Promise<Response> {
-  return fetch(resolveApiUrl(pathOrUrl), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
+  try {
+    return await fetch(resolveApiUrl(pathOrUrl), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+  } catch {
+    throw new Error(
+      'Sunucuya bağlanılamadı. İnternet bağlantınızı kontrol edin; mobil uygulamayı güncelleyin veya tarayıcıdan www.dersonlinevipkocluk.com adresine girin.'
+    );
+  }
 }
 
 /** Aynı anda çoklu 401 → çoklu window.location Chrome’da "Throttling navigation" üretir; tek yönlendirme. */
