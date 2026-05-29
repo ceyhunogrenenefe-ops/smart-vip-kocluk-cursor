@@ -267,6 +267,19 @@ export function WeeklyPlannerCalendar({
   const [goalDateSaving, setGoalDateSaving] = useState(false);
   /** Hedef kartını önceki/sonraki hafta şeridine sürüklerken vurgu */
   const [weekDropHighlight, setWeekDropHighlight] = useState<-1 | 0 | 1>(0);
+  /** Öğrenci mobil: haftalık grid yerine günlük liste */
+  const [isCompactMobile, setIsCompactMobile] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false
+  );
+  const [mobileDayIdx, setMobileDayIdx] = useState(0);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const sync = () => setIsCompactMobile(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
 
   /** Çift tıklama / yarış: aynı işlem iki kez API çağırmasın */
   const plannerMutateLock = useRef(false);
@@ -376,6 +389,23 @@ export function WeeklyPlannerCalendar({
     }
     return out;
   }, [goals, dayDates, weekStartStr, weekEndStr]);
+
+  useEffect(() => {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const idx = dayDates.indexOf(today);
+    setMobileDayIdx(idx >= 0 ? idx : 0);
+  }, [weekStartStr, dayDates]);
+
+  const showMobileDayView = studentStudyLogUi && isCompactMobile;
+  const mobileDayDate = dayDates[Math.min(mobileDayIdx, Math.max(dayDates.length - 1, 0))] ?? weekStartStr;
+  const mobileDayEntries = useMemo(
+    () =>
+      entries
+        .filter((e) => e.planner_date === mobileDayDate)
+        .sort((a, b) => String(a.start_time || '').localeCompare(String(b.start_time || ''))),
+    [entries, mobileDayDate]
+  );
+  const mobileDayGoals = goalsByDayDate[mobileDayDate] ?? [];
 
   const weekStats = useMemo(() => {
     let planned = 0;
@@ -823,7 +853,7 @@ export function WeeklyPlannerCalendar({
     );
 
   return (
-    <div className={cn('space-y-8', studentStudyLogUi && 'motion-safe:animate-in fade-in duration-500')}>
+    <div className={cn('space-y-4 sm:space-y-8', studentStudyLogUi && 'motion-safe:animate-in fade-in duration-500')}>
       <div className="flex flex-col gap-5 lg:flex-row lg:items-stretch lg:justify-between">
         <div
           className={cn(
@@ -971,7 +1001,7 @@ export function WeeklyPlannerCalendar({
       ) : null}
 
       {/* Özet */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4 sm:gap-4">
         <div className="group relative overflow-hidden rounded-2xl border border-emerald-100/90 bg-gradient-to-br from-emerald-50/95 via-white to-teal-50/50 p-5 shadow-sm transition hover:shadow-md dark:border-emerald-900/40 dark:from-emerald-950/35 dark:via-slate-900 dark:to-slate-900">
           <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-emerald-400/10 blur-2xl transition group-hover:bg-emerald-400/20" aria-hidden />
           <div className="relative flex items-start gap-3">
@@ -1177,18 +1207,141 @@ export function WeeklyPlannerCalendar({
               {loading
                 ? 'Yükleniyor…'
                 : studentStudyLogUi
-                  ? 'Bloka tıkla → çalışma kaydı ve “Konuyu bitirdim” ile Konu Takibi güncellenir'
+                  ? showMobileDayView
+                    ? 'Gün seç · Göreve dokun → çalışma kaydı'
+                    : 'Bloka tıkla → çalışma kaydı ve “Konuyu bitirdim” ile Konu Takibi güncellenir'
                   : 'Blokları sürükleyerek taşı · Boş saate tıklayarak yeni görev ekle'}
             </span>
           </div>
           <div
             className={cn(
-              'overflow-x-auto',
+              showMobileDayView ? '' : 'overflow-x-auto',
               studentStudyLogUi
                 ? 'bg-gradient-to-b from-violet-50/50 via-white to-amber-50/30 dark:from-slate-950 dark:via-slate-950 dark:to-violet-950/20'
                 : 'bg-slate-50/40 dark:bg-slate-950/40'
             )}
           >
+            {showMobileDayView ? (
+              <div className="space-y-3 p-3 sm:p-4">
+                <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+                  {dayDates.map((date, i) => (
+                    <button
+                      key={date}
+                      type="button"
+                      onClick={() => setMobileDayIdx(i)}
+                      className={cn(
+                        'min-w-[3.1rem] shrink-0 rounded-xl border px-2 py-2 text-center transition',
+                        mobileDayIdx === i
+                          ? 'border-indigo-600 bg-indigo-600 text-white shadow-md'
+                          : 'border-slate-200 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200',
+                        columnMeta[i]?.isToday && mobileDayIdx !== i && 'ring-2 ring-indigo-300/80'
+                      )}
+                    >
+                      <div className="text-[9px] font-bold uppercase tracking-wide opacity-90">
+                        {DAY_LABELS[i].slice(0, 3)}
+                      </div>
+                      <div className="text-base font-bold tabular-nums leading-none">
+                        {format(parseISO(date), 'd', { locale: tr })}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                {mobileDayGoals.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {mobileDayGoals.map((g) => {
+                      const st = subjectPlannerStyle(g.subject, g.quantity_unit);
+                      return (
+                        <span
+                          key={g.id}
+                          className={cn(
+                            'rounded-lg px-2 py-1 text-[10px] font-semibold shadow-sm ring-1 ring-slate-900/5',
+                            st.chip
+                          )}
+                        >
+                          {g.subject}: {g.title}
+                        </span>
+                      );
+                    })}
+                  </div>
+                ) : null}
+
+                {mobileDayEntries.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-slate-200 bg-white/80 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/50">
+                    Bu gün için plan yok. Aşağıdan görev ekleyebilirsin.
+                  </p>
+                ) : (
+                  <ul className="space-y-2">
+                    {mobileDayEntries.map((en) => {
+                      const linkedGoal = goals.find((g) => g.id === en.coach_goal_id);
+                      const st = subjectPlannerStyle(en.subject, linkedGoal?.quantity_unit);
+                      const plannedN = Number(en.planned_quantity || 0);
+                      const doneQty = linkedGoal
+                        ? effectivePlannerEntryDone(linkedGoal, en, studentWeeklyEntries)
+                        : Math.min(
+                            Number(en.completed_quantity || 0),
+                            plannedN > 0 ? plannedN : Number(en.completed_quantity || 0)
+                          );
+                      const isRealized = doneQty > 0;
+                      const hour = hourFromTime(en.start_time) ?? 9;
+                      const miss = pastSlot(mobileDayDate, hour) && !isRealized && en.status === 'planned';
+                      const borderCls = isRealized
+                        ? 'border-emerald-500 ring-1 ring-emerald-200 bg-emerald-50/95 dark:bg-emerald-950/45'
+                        : plannedN > 0
+                          ? 'border-orange-500 ring-1 ring-orange-200 bg-orange-50/95 dark:bg-orange-950/35'
+                          : miss
+                            ? 'border-red-400 ring-1 ring-red-100'
+                            : 'border-slate-200';
+                      return (
+                        <li key={en.id}>
+                          <button
+                            type="button"
+                            disabled={!canEditPlan}
+                            onClick={() => {
+                              if (!canEditPlan) return;
+                              if (studyLogOnClick) setStudyModalEntry(en);
+                              else openEdit(en);
+                            }}
+                            className={cn(
+                              'w-full rounded-xl border px-3 py-3 text-left shadow-sm transition active:scale-[0.99]',
+                              st.chip,
+                              borderCls,
+                              canEditPlan ? 'touch-manipulation' : 'opacity-80'
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-bold text-slate-900 dark:text-slate-100">
+                                  {en.title}
+                                </p>
+                                <p className="mt-0.5 text-xs font-medium text-slate-600 dark:text-slate-300">
+                                  {en.subject}
+                                  {en.start_time ? ` · ${String(en.start_time).slice(0, 5)}` : ''}
+                                </p>
+                              </div>
+                              <span className="shrink-0 rounded-lg bg-white/70 px-2 py-1 text-[10px] font-bold tabular-nums text-slate-700 dark:bg-slate-950/40 dark:text-slate-200">
+                                {doneQty}/{plannedN || '–'}
+                              </span>
+                            </div>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+
+                {canEditPlan ? (
+                  <button
+                    type="button"
+                    onClick={() => openCreate(mobileDayDate, hourFromTime(mobileDayEntries[0]?.start_time) ?? 9)}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-violet-200 bg-violet-50 py-3 text-sm font-semibold text-violet-900 touch-manipulation active:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-100"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Görev ekle
+                  </button>
+                ) : null}
+              </div>
+            ) : (
             <div className="min-w-[760px] p-3 sm:p-4">
               <div
                 className={cn(
@@ -1365,6 +1518,7 @@ export function WeeklyPlannerCalendar({
                 ))}
               </div>
             </div>
+            )}
           </div>
         </div>
 
@@ -1372,7 +1526,7 @@ export function WeeklyPlannerCalendar({
         <div className="space-y-3 xl:sticky xl:top-24 xl:self-start">
           <div className="rounded-2xl border border-slate-200/95 bg-white/95 p-5 shadow-[0_16px_40px_-28px_rgb(15,23,42,0.35)] backdrop-blur-sm dark:border-slate-700 dark:bg-slate-900/95">
             <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-1">{goalsSectionTitle}</h4>
-            <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-2 flex flex-wrap gap-2">
+            <p className="mb-2 hidden flex-wrap gap-2 text-[10px] text-slate-500 dark:text-slate-400 sm:flex">
               <span className="inline-flex items-center gap-1 rounded-md border border-orange-300 bg-orange-50 px-1.5 py-0.5 text-orange-900 dark:border-orange-800 dark:bg-orange-950/40 dark:text-orange-200">
                 Turuncu: planlandı
               </span>
@@ -1380,7 +1534,7 @@ export function WeeklyPlannerCalendar({
                 Yeşil: yapıldı
               </span>
             </p>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3">
+            <p className="mb-3 hidden text-[11px] text-slate-500 dark:text-slate-400 sm:block">
               Kartı takvim hücresine sürükleyerek plana yerleştirin (yalnızca hedefin başlangıç–bitiş
               günleri) · Üstteki &quot;Önceki / Sonraki haftaya bırak&quot; ile hedefi ve plan bloklarını
               kaydırın · Tarih aralığını karttaki kalemle istediğiniz günler olarak düzenleyin · Kalan kotayı

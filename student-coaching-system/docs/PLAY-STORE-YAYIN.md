@@ -57,17 +57,17 @@ Telefonda uygulamayı açıp ekran görüntüsü almanız yeterli.
 
 ### Uygulama adı
 ```
-VIP Koçluk
+Online VIP Ders ve Koçluk
 ```
 
 ### Kısa açıklama (max 80 karakter)
 ```
-Öğrenci koçluk takibi, haftalık hedefler ve deneme sonuçları — tek uygulama.
+Online VIP ders ve koçluk — haftalık plan, deneme ve analiz tek uygulamada.
 ```
 
 ### Uzun açıklama
 ```
-VIP Koçluk, öğrenci koçluk sürecinizi dijitalleştirir.
+Online VIP Ders ve Koçluk, öğrenci koçluk sürecinizi dijitalleştirir.
 
 • Haftalık ders ve hedef planlama
 • Deneme sonuçları ve analiz

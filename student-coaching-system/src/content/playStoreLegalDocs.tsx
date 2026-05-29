@@ -5,9 +5,10 @@ export function MobileAppPrivacyBody() {
   return (
     <div className="space-y-4 text-sm leading-relaxed text-slate-700">
       <p className="text-xs text-slate-500">Son güncelleme: Mayıs 2026</p>
-      <p className="font-medium text-slate-900">VIP Koçluk mobil uygulaması — Gizlilik Politikası</p>
+      <p className="font-medium text-slate-900">Online VIP Ders ve Koçluk — Gizlilik Politikası</p>
       <p>
-        Bu metin, <strong>VIP Koçluk</strong> Android uygulaması (<code>com.dersonlinevipkocluk.student</code>) ve{' '}
+        Bu metin, <strong>Online VIP Ders ve Koçluk</strong> Android uygulaması (
+        <code>com.dersonlinevipkocluk.student</code>) ve{' '}
         <a href="https://www.dersonlinevipkocluk.com" className="text-blue-700 underline">
           www.dersonlinevipkocluk.com
         </a>{' '}
@@ -81,9 +82,10 @@ export function MobileAppTermsBody() {
   return (
     <div className="space-y-4 text-sm leading-relaxed text-slate-700">
       <p className="text-xs text-slate-500">Son güncelleme: Mayıs 2026</p>
-      <p className="font-medium text-slate-900">VIP Koçluk — Kullanım Koşulları</p>
+      <p className="font-medium text-slate-900">Online VIP Ders ve Koçluk — Kullanım Koşulları</p>
       <p>
-        Bu koşullar VIP Koçluk mobil uygulaması ve ilişkili web panelinin kullanımını düzenler. Uygulamayı indirerek
+        Bu koşullar Online VIP Ders ve Koçluk mobil uygulaması ve ilişkili web panelinin kullanımını düzenler.
+        Uygulamayı indirerek
         veya giriş yaparak bu koşulları kabul etmiş sayılırsınız.
       </p>
       <h2 className="pt-2 text-base font-semibold text-slate-900">Hizmet</h2>

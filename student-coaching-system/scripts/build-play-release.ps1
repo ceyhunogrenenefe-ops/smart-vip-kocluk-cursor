@@ -8,7 +8,7 @@ $propsPath = Join-Path $androidDir 'keystore.properties'
 $aabPath = Join-Path $androidDir 'app\build\outputs\bundle\release\app-release.aab'
 
 Write-Host ''
-Write-Host '=== VIP Kocluk — Play Store AAB build ===' -ForegroundColor Cyan
+Write-Host '=== VIP Kocluk - Play Store AAB build ===' -ForegroundColor Cyan
 Write-Host ''
 
 if (-not (Test-Path -LiteralPath $propsPath)) {
@@ -39,11 +39,11 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host ''
 if (Test-Path -LiteralPath $aabPath) {
     $info = Get-Item -LiteralPath $aabPath
-    Write-Host 'BASARILI — Play Store paketi:' -ForegroundColor Green
+    Write-Host 'BASARILI - Play Store paketi:' -ForegroundColor Green
     Write-Host $aabPath
     Write-Host ("Boyut: {0:N1} MB" -f ($info.Length / 1MB))
     Write-Host ''
-    Write-Host 'Play Console → Uretim → Yeni surum → bu AAB dosyasini yukleyin.' -ForegroundColor Cyan
+    Write-Host 'Play Console -> Uretim -> Yeni surum -> bu AAB dosyasini yukleyin.' -ForegroundColor Cyan
 } else {
     Write-Host 'AAB bulunamadi. Gradle ciktisini kontrol edin.' -ForegroundColor Red
     exit 1

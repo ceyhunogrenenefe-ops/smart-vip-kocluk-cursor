@@ -6,7 +6,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
  */
 const config: CapacitorConfig = {
   appId: 'com.dersonlinevipkocluk.student',
-  appName: 'VIP Koçluk',
+  appName: 'Online VIP Ders ve Koçluk',
   webDir: 'dist',
   android: {
     allowMixedContent: false

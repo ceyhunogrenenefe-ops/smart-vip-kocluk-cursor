@@ -59,7 +59,7 @@ export default function Login() {
             <div className="w-16 h-16 bg-red-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-red-500/30">
               <GraduationCap className="w-8 h-8 text-white" />
             </div>
-            <h1 className="text-2xl font-bold text-white">Smart VIP Koçluk</h1>
+            <h1 className="text-xl font-bold leading-tight text-white sm:text-2xl">Online VIP Ders ve Koçluk</h1>
             <p className="text-slate-300 mt-1">Öğrenci Takip Sistemi</p>
           </div>
 
@@ -190,7 +190,7 @@ export default function Login() {
           </Link>
         </div>
         <p className="text-center text-slate-400 text-sm mt-4">
-          © 2024 Smart VIP Koçluk Sistemi ·{' '}
+          © 2024 Online VIP Ders ve Koçluk ·{' '}
           <Link to={PRIVACY_POLICY_PATH} className="underline hover:text-slate-300">
             Gizlilik
           </Link>
