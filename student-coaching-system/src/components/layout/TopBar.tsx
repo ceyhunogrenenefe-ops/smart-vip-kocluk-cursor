@@ -8,6 +8,8 @@ import { cn } from '../../lib/utils';
 import { Menu, User, ChevronDown, LogOut, Undo2 } from 'lucide-react';
 import { getAuthToken } from '../../lib/session';
 import NotificationBell from '../notifications/NotificationBell';
+import { useStudentMobileShell } from '../../hooks/useStudentMobileShell';
+import { APP_DISPLAY_NAME, displayInstitutionName } from '../../lib/appBrand';
 
 type TopBarProps = {
   onMenuClick: () => void;
@@ -22,6 +24,7 @@ export default function TopBar({ onMenuClick, drawerOpen = false, hideMenuButton
   const navigate = useNavigate();
   const { user, effectiveUser, isImpersonating, stopImpersonation, logout } = useAuth();
   const { institution } = useApp();
+  const studentMobileShell = useStudentMobileShell();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
@@ -68,7 +71,7 @@ export default function TopBar({ onMenuClick, drawerOpen = false, hideMenuButton
       '/academic-center': 'Akademik Merkez',
       '/weekly-planner': 'Haftalık Plan'
     };
-    return titles[path] || 'Öğrenci Koçluk Sistemi';
+    return titles[path] || APP_DISPLAY_NAME;
   };
 
   const roleLabels: { [key: string]: string } = {
@@ -101,7 +104,8 @@ export default function TopBar({ onMenuClick, drawerOpen = false, hideMenuButton
   return (
     <header
       className={cn(
-        'z-30 flex min-h-14 shrink-0 items-center justify-between gap-2 border-b border-gray-200 bg-white px-3 py-2 shadow-sm backdrop-blur-md supports-[backdrop-filter]:bg-white/92 sm:gap-4 sm:px-5 sm:py-0 lg:min-h-16 lg:flex-shrink-0 lg:px-6 pt-safe',
+        'z-30 flex shrink-0 items-center justify-between gap-2 border-b border-gray-200 bg-white px-3 shadow-sm backdrop-blur-md supports-[backdrop-filter]:bg-white/92 sm:gap-4 sm:px-5 lg:flex-shrink-0 lg:px-6 pt-safe',
+        studentMobileShell ? 'min-h-12 py-1.5' : 'min-h-14 py-2 sm:py-0 lg:min-h-16',
         'max-lg:sticky max-lg:top-0',
         drawerOpen && 'max-lg:z-0 max-lg:shadow-none'
       )}
@@ -123,7 +127,11 @@ export default function TopBar({ onMenuClick, drawerOpen = false, hideMenuButton
           <h1 className="truncate text-base font-bold leading-tight text-slate-800 sm:text-lg lg:text-xl">
             {getPageTitle()}
           </h1>
-          <p className="truncate text-xs text-gray-500 sm:text-sm">{institution.name}</p>
+          {!studentMobileShell ? (
+            <p className="truncate text-xs text-gray-500 sm:text-sm">
+              {displayInstitutionName(institution?.name)}
+            </p>
+          ) : null}
         </div>
       </div>
 

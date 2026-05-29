@@ -5,7 +5,9 @@ import { apiFetch } from '../lib/session';
 import { resolveStudentRecordId } from '../lib/coachResolve';
 import StudentLiveLessonsPanel from '../components/liveLessons/StudentLiveLessonsPanel';
 import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShell';
+import { ClassLiveStudentMobileCalendar } from '../components/liveLessons/ClassLiveStudentMobileCalendar';
 import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
+import { useStudentMobileShell } from '../hooks/useStudentMobileShell';
 import { turkishFold } from '../lib/userBulkImport';
 import type { Student } from '../types';
 import { GripVertical, KeyRound, Loader2, Pencil, PlayCircle, Trash2, FileDown, Bell } from 'lucide-react';
@@ -158,6 +160,20 @@ export default function ClassLiveLessons() {
   const canManageSlots = canManageClasses || role === 'teacher';
   const canViewPaymentSummary = role === 'super_admin';
   const isStudentView = role.toLowerCase() === 'student';
+  const studentMobileShell = useStudentMobileShell();
+  const [isCompactMobile, setIsCompactMobile] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const sync = () => setIsCompactMobile(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+
+  const showMobileCalendar = isStudentView && (studentMobileShell || isCompactMobile);
 
   const resolvedStudentId = useMemo(() => {
     const sid =
@@ -829,7 +845,7 @@ export default function ClassLiveLessons() {
         <StudentLiveLessonsPanel />
       ) : (
         <>
-      <div className="rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-4 shadow-sm">
+      <div className={`rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-4 shadow-sm ${showMobileCalendar ? 'p-3' : ''}`}>
         <div className="flex flex-wrap items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-800">
             <KeyRound className="h-5 w-5" aria-hidden />
@@ -855,7 +871,7 @@ export default function ClassLiveLessons() {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 p-4">
+      <div className={`bg-white rounded-xl border border-slate-200 p-4 ${isStudentView ? 'hidden sm:block' : ''}`}>
         <h1 className="text-xl font-bold text-slate-800">
           {isStudentView ? 'Canlı derslerim' : 'Canlı Grup Dersi Yönetimi'}
         </h1>
@@ -1223,13 +1239,18 @@ export default function ClassLiveLessons() {
 
       <WeeklyLiveGridShell
         title={isStudentView ? 'Bu haftanın canlı grup dersleri' : 'Haftalık grup ders takvimi'}
-        subtitle="Sütunlar Pazartesi → Pazar (yerel hafta). Tarihli oturumlar ve haftalık şablon üzerinden tek ekranda planlayın."
+        subtitle={
+          showMobileCalendar
+            ? 'Gün seçin · Planlı derslerde Katıl ile bağlanın'
+            : 'Sütunlar Pazartesi → Pazar (yerel hafta). Tarihli oturumlar ve haftalık şablon üzerinden tek ekranda planlayın.'
+        }
         weekRangeLabel={weekRangeLabel}
         loading={calendarLoading}
         onPrevWeek={() => setCalendarWeekMondayIso((prev) => addDaysIso(prev, -7))}
         onNextWeek={() => setCalendarWeekMondayIso((prev) => addDaysIso(prev, 7))}
         onThisWeek={() => setCalendarWeekMondayIso(mondayIsoContaining())}
         legend={
+          showMobileCalendar ? null : (
           <>
             <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/40 bg-emerald-500/15 px-3 py-1.5 text-[11px] font-semibold text-emerald-50 shadow-sm backdrop-blur-sm">
               <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/60" />
@@ -1240,9 +1261,16 @@ export default function ClassLiveLessons() {
               Haftalık şablon
             </span>
           </>
+          )
         }
-        hint="Yeşil kartlar gerçek oturumdur (planlı: Katıl; tamamlanınca kayıt linki varsa Kaydı izle). Kesik çizgili kartlar şablondur. «PDF görüntü + ders listesi» önce takvim görüntüsü, sonra metin listesi üretir."
+        hint={
+          showMobileCalendar
+            ? undefined
+            : 'Yeşil kartlar gerçek oturumdur (planlı: Katıl; tamamlanınca kayıt linki varsa Kaydı izle). Kesik çizgili kartlar şablondur. «PDF görüntü + ders listesi» önce takvim görüntüsü, sonra metin listesi üretir.'
+        }
       >
+        {!showMobileCalendar ? (
+        <>
         <div className="flex flex-wrap items-center justify-end gap-2 border-b border-slate-100 bg-slate-50/80 px-2 py-2 sm:px-3">
           <button
             type="button"
@@ -1541,6 +1569,18 @@ export default function ClassLiveLessons() {
             </tbody>
           </table>
         </div>
+        </>
+        ) : (
+          <ClassLiveStudentMobileCalendar
+            weekColumnDates={weekColumnDates}
+            weekSessions={weekSessions.filter((s) => s.class_id === selectedClassId)}
+            classSlots={classSlots}
+            teacherCandidates={teacherCandidates}
+            formatDateDots={formatDdMmYyyyDots}
+            dowFromIso={dowSlotFromIso}
+            todayIso={todayIso()}
+          />
+        )}
       </WeeklyLiveGridShell>
 
       {editingSession && (

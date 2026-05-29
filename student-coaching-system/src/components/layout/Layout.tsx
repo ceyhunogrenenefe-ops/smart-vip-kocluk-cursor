@@ -86,7 +86,9 @@ export default function Layout({ children }: LayoutProps) {
         <main
           className={cn(
             'max-w-[100vw] flex-1 px-3 py-4 sm:px-5 sm:py-6 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:px-6 lg:py-6',
-            studentMobileShell ? 'pb-24 pt-safe' : 'pb-safe'
+            studentMobileShell
+              ? 'min-h-0 flex-1 overflow-y-auto overscroll-contain pb-24'
+              : 'pb-safe'
           )}
         >
           {children}

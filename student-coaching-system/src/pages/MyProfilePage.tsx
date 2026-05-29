@@ -3,6 +3,7 @@ import { Save, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '../lib/session';
 import { useAuth } from '../context/AuthContext';
+import { useStudentMobileShell } from '../hooks/useStudentMobileShell';
 
 type ProfilePayload = {
   user: { id: string; name: string; email: string; phone?: string | null; role: string };
@@ -12,6 +13,7 @@ type ProfilePayload = {
 
 export default function MyProfilePage() {
   const { user, effectiveUser } = useAuth();
+  const studentMobileShell = useStudentMobileShell();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState('');
@@ -90,8 +92,9 @@ export default function MyProfilePage() {
   const displayName = effectiveUser?.name || user?.name || 'Kullanıcı';
 
   return (
-    <div className="mx-auto max-w-lg space-y-6 pb-10">
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+    <div className={`mx-auto max-w-lg space-y-6 ${studentMobileShell ? 'pb-6' : 'pb-10'}`}>
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-6">
+        {!studentMobileShell ? (
         <div className="mb-6 flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-lg font-bold text-white">
             {displayName.charAt(0).toUpperCase()}
@@ -101,6 +104,9 @@ export default function MyProfilePage() {
             <p className="text-sm text-slate-500">Ad, e-posta, telefon ve şifrenizi güncelleyin</p>
           </div>
         </div>
+        ) : (
+          <p className="mb-4 text-sm text-slate-500">Ad, e-posta, telefon ve şifrenizi güncelleyin</p>
+        )}
 
         {loading ? (
           <p className="flex items-center gap-2 text-sm text-slate-500">
