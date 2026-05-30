@@ -10,12 +10,10 @@
  * Handler: `getIstanbulHour() === 22` (Bearer ile saat dışı testte filtre atlanır).
  *
  * --- Canlı ders hatırlatma (handlers/cron-lesson-reminder.js) ---
- * `*/5 * * * *` UTC; pencere üst sınırı `LESSON_REMINDER_MAX_LEAD_MINUTES` (varsayılan 45 dk, en fazla 1440).
+ * Her 5 dk UTC; pencere: ders başlamadan 7–13 dk (≈10 dk).
  *
  * --- Grup canlı ders hatırlatma (handlers/cron-class-lesson-reminders.js) ---
- * `*/5 * * * *` UTC; gönderim: ders başlangıcına **10 dk** kala (0–10 dk penceresi).
- * `CLASS_LESSON_REMINDER_LEAD_MINUTES` (varsayılan 10). Ardışık aynı sınıf/konu/link oturumunda tekrar yok.
- */
+ * Her 5 dk UTC; aynı 7–13 dk penceresi. Ardışık aynı sınıf/konu/link oturumunda tekrar yok. */
 
 /** vercel.json → crons → daily-report-reminders ile aynı olmalı */
 export const CRON_DAILY_REPORT_REMINDERS_UTC = '0 19 * * *';

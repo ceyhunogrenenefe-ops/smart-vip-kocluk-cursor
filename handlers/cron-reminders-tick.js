@@ -3,9 +3,8 @@
  * GET/POST /api/cron/reminders-tick
  * Authorization: Bearer CRON_SECRET
  *
- * Vercel Hobby: */5 cron çalışmaz; cron-job.org vb. ile 5 dk'da bir bu URL'yi çağırın.
- */
-import { authorizeVercelOrCronSecret } from '../api/_lib/cron-auth.js';
+ * Vercel Hobby: 5 dakikada bir cron çalışmaz; harici servis ile bu URL çağrılmalı.
+ */import { authorizeVercelOrCronSecret } from '../api/_lib/cron-auth.js';
 import cronMeetingReminders from './cron-meeting-reminders.js';
 import cronLessonReminder from './cron-lesson-reminder.js';
 
