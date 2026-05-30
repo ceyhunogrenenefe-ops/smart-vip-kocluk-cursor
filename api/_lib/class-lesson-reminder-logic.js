@@ -1,19 +1,14 @@
 /**
- * Grup dersi WhatsApp hatırlatması — birebir ders cron ile aynı mantık:
- * ders başlamadan en fazla MAX_LEAD dakika içinde bir kez (reminder_sent).
+ * Grup dersi WhatsApp hatırlatması — ders başlamadan ~10 dk (7–13 dk penceresi, cron 5 dk).
  */
+import { parseReminderWindowConfig, isWithinReminderWindowMs } from './lesson-reminder-window.js';
 
-/** @deprecated UI etiketi; env uyumu için tutuldu */
-export const CLASS_LESSON_REMINDER_LEAD_MINUTES = Math.max(
-  10,
-  Math.min(120, Number(process.env.CLASS_LESSON_REMINDER_MAX_LEAD_MINUTES || process.env.CLASS_LESSON_REMINDER_LEAD_MINUTES || 45) || 45)
-);
+const CLASS_WINDOW = parseReminderWindowConfig('CLASS_LESSON_REMINDER');
 
-/** Cron penceresi (dakika) — varsayılan 45, birebir lesson_reminder ile uyumlu */
-export const CLASS_LESSON_REMINDER_MAX_LEAD_MINUTES = CLASS_LESSON_REMINDER_LEAD_MINUTES;
-
-const MAX_LEAD_MS = CLASS_LESSON_REMINDER_MAX_LEAD_MINUTES * 60 * 1000;
-
+/** @deprecated UI etiketi */
+export const CLASS_LESSON_REMINDER_LEAD_MINUTES = CLASS_WINDOW.maxMinutes;
+export const CLASS_LESSON_REMINDER_MAX_LEAD_MINUTES = CLASS_WINDOW.maxMinutes;
+export const CLASS_LESSON_REMINDER_WINDOW_LABEL = CLASS_WINDOW.label;
 export function normalizeTimeHms(timeStr, fallback = '00:00:00') {
   const s = String(timeStr || '').trim();
   if (/^\d{2}:\d{2}:\d{2}/.test(s)) return s.slice(0, 8);
@@ -31,12 +26,11 @@ export function msUntilLessonStart(dateStr, timeStr, nowMs = Date.now()) {
   return toLessonStartUtcMs(dateStr, timeStr) - nowMs;
 }
 
-/** (0, maxLeadMinutes] — cron 5 dk; reminder_sent ile tek gönderim */
+/** Cron penceresi — varsayılan 7–13 dk kala (≈10 dk önce) */
 export function isInReminderWindow(dateStr, timeStr, nowMs = Date.now()) {
   const until = msUntilLessonStart(dateStr, timeStr, nowMs);
-  return until > 0 && until <= MAX_LEAD_MS;
+  return isWithinReminderWindowMs(until, CLASS_WINDOW);
 }
-
 /** Hatırlatma henüz gitmemiş oturumları sınıflandır (panel özeti). */
 export function classifyUnsentSessionReminder(session, nowMs = Date.now()) {
   if (session?.reminder_sent) return 'already_sent';

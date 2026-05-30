@@ -30,9 +30,9 @@ export const TEMPLATE_TYPE_TO_CRON_JOB_KEY = {
 };
 
 export const KNOWN_CRON_JOBS = [
-  { key: 'class_lesson_reminders', label: 'Grup dersi hatırlatma (45 dk pencere, ardışık aynı ders atlanır)', expectEveryMinutes: 5 },
+  { key: 'class_lesson_reminders', label: 'Grup dersi hatırlatma (~10 dk önce, 7–13 dk pencere)', expectEveryMinutes: 5 },
   { key: 'daily_report_reminder', label: 'Günlük rapor hatırlatması (22:00 TR)', expectEveryMinutes: 24 * 60 },
-  { key: 'lesson_reminders', label: 'Birebir ders hatırlatma — öğrenci', expectEveryMinutes: 5 },
+  { key: 'lesson_reminders', label: 'Birebir ders hatırlatma (~10 dk önce)', expectEveryMinutes: 5 },
   { key: 'lesson_reminder_parent', label: 'Veli ders hatırlatma (Meta)', expectEveryMinutes: 5 },
   { key: 'meeting_reminders', label: 'Görüşme 10 dk hatırlatma (Meta)', expectEveryMinutes: 5 },
   { key: 'class_homework_notify', label: 'Grup ödev bildirimi', expectEveryMinutes: 10 },

@@ -8,10 +8,9 @@ import { sendAutomatedWhatsApp, resolveMetaTemplateName } from '../api/_lib/what
 import { getStudentPhones, classifyLessonReminderRecipients } from '../api/_lib/meetings-resolve.js';
 import { alreadySentLessonReminder } from '../api/_lib/message-log.js';
 import { recordCronRun } from '../api/_lib/cron-run-log.js';
+import { parseReminderWindowConfig, isWithinReminderWindowMs } from '../api/_lib/lesson-reminder-window.js';
 
-/** Ders başlangıcına kalan süre üst sınırı (dakika). Cron her 5 dk; varsayılan 45 dk öncesine kadar bir kez gönderilir. */
-const MAX_LEAD_MS =
-  Math.max(5, Math.min(24 * 60, Number(process.env.LESSON_REMINDER_MAX_LEAD_MINUTES || 45) || 45)) * 60 * 1000;
+const LESSON_WINDOW = parseReminderWindowConfig('LESSON_REMINDER');
 
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {
@@ -70,10 +69,7 @@ export default async function handler(req, res) {
         continue;
       }
       const until = startMs - nowMs;
-      if (until <= 0) {
-        continue;
-      }
-      if (until > MAX_LEAD_MS) {
+      if (!isWithinReminderWindowMs(until, LESSON_WINDOW)) {
         continue;
       }
 
@@ -238,7 +234,9 @@ export default async function handler(req, res) {
         entries: log.length,
         lessons_total: (lessons || []).length,
         lessons_in_reminder_window: lessonsInReminderWindow,
-        max_lead_minutes: MAX_LEAD_MS / 60000
+        max_lead_minutes: LESSON_WINDOW.maxMinutes,
+        window_mode: LESSON_WINDOW.mode,
+        window_label: LESSON_WINDOW.label
       }
     });
     await recordCronRun({

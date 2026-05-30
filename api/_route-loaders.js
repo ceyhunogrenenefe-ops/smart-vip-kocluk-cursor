@@ -38,6 +38,7 @@ export const routeLoaders = {
   'cron/lesson-reminder': () => import('../handlers/cron-lesson-reminder.js'),
   'cron/lesson-reminders': () => import('../handlers/cron-lesson-reminder.js'),
   'cron/class-lesson-reminders': () => import('../handlers/cron-class-lesson-reminders.js'),
+  'cron/reminders-tick': () => import('../handlers/cron-reminders-tick.js'),
   'cron/class-homework-notify': () => import('../handlers/cron-class-homework-notify.js'),
   'cron/class-sessions': () => import('../handlers/cron-class-sessions.js'),
   'cron/class-absent-notify-retry': () => import('../handlers/cron-class-absent-notify-retry.js'),

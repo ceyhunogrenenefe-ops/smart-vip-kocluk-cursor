@@ -30,9 +30,9 @@ const start = '14:00:00';
 const startMs = toLessonStartUtcMs(lessonDate, start);
 const nineMinBefore = startMs - 9 * 60 * 1000;
 assert.equal(isInReminderWindow(lessonDate, start, nineMinBefore), true);
+const fourteenMinBefore = startMs - 14 * 60 * 1000;
+assert.equal(isInReminderWindow(lessonDate, start, fourteenMinBefore), false);
 const fortyMinBefore = startMs - 40 * 60 * 1000;
-assert.equal(isInReminderWindow(lessonDate, start, fortyMinBefore), true);
-const fiftyMinBefore = startMs - 50 * 60 * 1000;
-assert.equal(isInReminderWindow(lessonDate, start, fiftyMinBefore), false);
+assert.equal(isInReminderWindow(lessonDate, start, fortyMinBefore), false);
 
 console.log('class-lesson-reminder-logic: ok');

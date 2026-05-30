@@ -12,6 +12,7 @@ import { reconcileClassSessionsForReminders } from './class-session-reminder-rec
 import { addCalendarDaysYmd } from './istanbul-time.js';
 import {
   CLASS_LESSON_REMINDER_MAX_LEAD_MINUTES,
+  CLASS_LESSON_REMINDER_WINDOW_LABEL,
   isInReminderWindow,
   buildClassStudentMap,
   buildStudentDaySessionIndex,
@@ -72,11 +73,19 @@ export async function runClassLessonRemindersJob(opts = {}) {
     console.info('[class-lesson-reminders]', triggeredBy, 'materialized sessions', materialize);
   }
 
-  const { data: rawDaySessions, error: sessErr } = await supabaseAdmin
+  const { data: rawToday, error: sessErrToday } = await supabaseAdmin
     .from('class_sessions')
     .select('id,class_id,lesson_date,start_time,end_time,subject,meeting_link,reminder_sent,status')
     .eq('lesson_date', logDate)
     .order('start_time', { ascending: true });
+  const tomorrow = addCalendarDaysYmd(logDate, 1);
+  const { data: rawTomorrow, error: sessErrTomorrow } = await supabaseAdmin
+    .from('class_sessions')
+    .select('id,class_id,lesson_date,start_time,end_time,subject,meeting_link,reminder_sent,status')
+    .eq('lesson_date', tomorrow)
+    .order('start_time', { ascending: true });
+  const sessErr = sessErrToday || sessErrTomorrow;
+  const rawDaySessions = [...(rawToday || []), ...(rawTomorrow || [])];
   if (sessErr) throw sessErr;
 
   const reconcile = await reconcileClassSessionsForReminders(rawDaySessions || [], now);
@@ -94,6 +103,7 @@ export async function runClassLessonRemindersJob(opts = {}) {
     const detail = {
       due_sessions: 0,
       max_lead_minutes: CLASS_LESSON_REMINDER_MAX_LEAD_MINUTES,
+      window_label: CLASS_LESSON_REMINDER_WINDOW_LABEL,
       log_date: logDate,
       materialize,
       reconcile,
@@ -113,6 +123,7 @@ export async function runClassLessonRemindersJob(opts = {}) {
       processed: 0,
       due_sessions: 0,
       max_lead_minutes: CLASS_LESSON_REMINDER_MAX_LEAD_MINUTES,
+      window_label: CLASS_LESSON_REMINDER_WINDOW_LABEL,
       materialize,
       reconcile,
       scheduled_today: (daySessions || []).length,
@@ -178,6 +189,7 @@ export async function runClassLessonRemindersJob(opts = {}) {
     detail: {
       entries: log.length,
       max_lead_minutes: CLASS_LESSON_REMINDER_MAX_LEAD_MINUTES,
+      window_label: CLASS_LESSON_REMINDER_WINDOW_LABEL,
       due_sessions: dueSessions.length,
       skipped_consecutive_same_lesson: skippedConsecutive,
       log_date: logDate,

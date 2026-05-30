@@ -105,7 +105,9 @@ export async function sendClassLessonReminderForSession(p) {
       class_name: className,
       subject: session.subject || 'Ders',
       lesson_time: String(session.start_time || '').slice(0, 5),
-      meeting_link: session.meeting_link || ''
+      meeting_link:
+        String(session.meeting_link || '').trim() ||
+        String(process.env.APP_PUBLIC_URL || process.env.APP_BASE_URL || 'https://www.dersonlinevipkocluk.com').trim()
     };
     const phones = uniqPhones([st.parent_phone, st.phone]);
     if (!phones.length) {
