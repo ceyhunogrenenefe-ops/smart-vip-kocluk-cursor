@@ -104,14 +104,6 @@
 
     {
 
-      "source": "/api/cron/(.*)",
-
-      "destination": "/api/deep-api?path=cron/$1"
-
-    },
-
-    {
-
       "source": "/api/meta/(.*)",
 
       "destination": "/api/deep-api?path=meta/$1"

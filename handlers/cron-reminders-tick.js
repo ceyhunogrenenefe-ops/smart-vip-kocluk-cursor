@@ -4,7 +4,8 @@
  * Authorization: Bearer CRON_SECRET
  *
  * Vercel Hobby: 5 dakikada bir cron çalışmaz; harici servis ile bu URL çağrılmalı.
- */import { authorizeVercelOrCronSecret } from '../api/_lib/cron-auth.js';
+ */
+import { authorizeVercelOrCronSecret } from '../api/_lib/cron-auth.js';
 import cronMeetingReminders from './cron-meeting-reminders.js';
 import cronLessonReminder from './cron-lesson-reminder.js';
 

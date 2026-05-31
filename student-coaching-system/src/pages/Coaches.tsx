@@ -21,6 +21,7 @@ import {
   GraduationCap,
   UserCircle
 } from 'lucide-react';
+import { CopyableLoginCredentialsPanel } from '../components/auth/CopyableLoginCredentials';
 
 export default function Coaches() {
   const { effectiveUser } = useAuth();
@@ -494,38 +495,20 @@ export default function Coaches() {
 
             {/* Oluşturulan Şifre Gösterimi */}
             {createdCredentials && (
-              <div className="p-6 bg-green-50 border-t border-green-200">
-                <div className="text-center">
-                  <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-3">
-                    <Check className="w-6 h-6 text-white" />
-                  </div>
-                  <h4 className="text-lg font-bold text-green-800 mb-3">Koç Kaydedildi!</h4>
-                  <p className="text-sm text-green-700 mb-4">
-                    Koça aşağıdaki bilgilerle giriş yapabilir:
-                  </p>
-                  <div className="bg-white rounded-lg p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-500">E-posta:</span>
-                      <span className="font-mono font-bold text-slate-800">{createdCredentials.email}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-500">Şifre:</span>
-                      <span className="font-mono font-bold text-red-600">{createdCredentials.password}</span>
-                    </div>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-4">
-                    Bu bilgileri koça iletmeyi unutmayın!
-                  </p>
-                  <button
-                    onClick={() => {
-                      setCreatedCredentials(null);
-                      resetForm();
-                    }}
-                    className="mt-4 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
-                  >
-                    Tamam
-                  </button>
-                </div>
+              <div className="border-t border-green-200 bg-green-50">
+                <CopyableLoginCredentialsPanel
+                  data={{
+                    title: 'Koç kaydedildi',
+                    subtitle: 'Koça aşağıdaki bilgilerle giriş yapabilir.',
+                    email: createdCredentials.email,
+                    password: createdCredentials.password,
+                    roleLabel: 'Koç'
+                  }}
+                  onDismiss={() => {
+                    setCreatedCredentials(null);
+                    resetForm();
+                  }}
+                />
               </div>
             )}
           </div>

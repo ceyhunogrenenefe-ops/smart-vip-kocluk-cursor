@@ -31,6 +31,10 @@ import {
   Activity
 } from 'lucide-react';
 import CronSummarySection from '../components/system/CronSummarySection';
+import {
+  CopyableLoginCredentialsModal,
+  type LoginCredentialsData
+} from '../components/auth/CopyableLoginCredentials';
 import { computeSystemUserStats } from '../lib/userStats';
 
 // PayTR yapılandırması
@@ -105,6 +109,7 @@ export default function SystemManagement() {
   const [showAddOrg, setShowAddOrg] = useState(false);
   const [savingUser, setSavingUser] = useState(false);
   const [savingOrg, setSavingOrg] = useState(false);
+  const [loginCredentialsModal, setLoginCredentialsModal] = useState<LoginCredentialsData | null>(null);
   const [newUserForm, setNewUserForm] = useState({
     name: '',
     email: '',
@@ -229,6 +234,10 @@ export default function SystemManagement() {
           end_date: null,
           created_by: null
         });
+        const createdEmail = newUserForm.email.trim().toLowerCase();
+        const createdPassword = newUserForm.password;
+        const createdRole = newUserForm.role;
+        const createdInstitutionId = newUserForm.institutionId.trim();
         setShowAddUser(false);
         setNewUserForm({
           name: '',
@@ -239,7 +248,15 @@ export default function SystemManagement() {
           password: ''
         });
         await refreshUserDirectory();
-        alert('Kullanıcı oluşturuldu.');
+        const instName = appInstitutions.find((i) => i.id === createdInstitutionId)?.name;
+        setLoginCredentialsModal({
+          title: 'Kullanıcı oluşturuldu',
+          subtitle: 'Bilgileri müşteriye iletin.',
+          email: createdEmail,
+          password: createdPassword,
+          roleLabel: roleLabelTr(createdRole),
+          institutionName: instName || undefined
+        });
       } else {
         const result = await createUser({
           name: newUserForm.name.trim(),
@@ -319,11 +336,14 @@ export default function SystemManagement() {
           { reuseInstitutionId: created.id, setAsActive: false }
         );
         const plan = newOrgForm.plan as OrganizationPlan;
+        const adminEmail = newOrgForm.adminEmail.trim().toLowerCase();
+        const adminPassword = newOrgForm.adminPassword.trim();
+        const orgName = newOrgForm.name.trim();
         await createInstitutionAdminUser({
           institutionId: created.id,
           adminName: newOrgForm.adminName.trim(),
-          adminEmail: newOrgForm.adminEmail.trim().toLowerCase(),
-          adminPassword: newOrgForm.adminPassword.trim(),
+          adminEmail,
+          adminPassword,
           adminPhone: newOrgForm.adminPhone.trim() || null,
           plan
         });
@@ -340,9 +360,15 @@ export default function SystemManagement() {
           adminPassword: '',
           adminPhone: ''
         });
-        alert(
-          `Kurum oluşturuldu. Öğrenci/koç/öğretmen sayıları sıfırdan başlar.\n\nMüşteri yönetici girişi:\nE-posta: ${newOrgForm.adminEmail.trim().toLowerCase()}\nŞifre: kurulumda girdiğiniz değer\n\nPaket kotası (üst sınır): öğrenci ${lim.students === 999999 ? 'sınırsız' : lim.students}, koç ${lim.coaches === 999999 ? 'sınırsız' : lim.coaches}.`
-        );
+        setLoginCredentialsModal({
+          title: 'Kurum oluşturuldu',
+          subtitle: 'Öğrenci/koç/öğretmen sayıları sıfırdan başlar.',
+          institutionName: orgName,
+          email: adminEmail,
+          password: adminPassword,
+          roleLabel: 'Kurum yöneticisi (admin)',
+          extraNote: `Paket kotası: öğrenci ${lim.students === 999999 ? 'sınırsız' : lim.students}, koç ${lim.coaches === 999999 ? 'sınırsız' : lim.coaches}.`
+        });
       } else {
         await createOrganization({
           name: newOrgForm.name.trim(),
@@ -987,6 +1013,12 @@ export default function SystemManagement() {
           )}
         </div>
       </div>
+
+      <CopyableLoginCredentialsModal
+        open={loginCredentialsModal != null}
+        onClose={() => setLoginCredentialsModal(null)}
+        data={loginCredentialsModal}
+      />
     </div>
   );
 }

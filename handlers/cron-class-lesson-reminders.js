@@ -1,4 +1,4 @@
-import { authorizeVercelOrCronSecret } from '../api/_lib/cron-auth.js';
+import { authorizeVercelOrCronSecret, rejectUnauthorizedCron } from '../api/_lib/cron-auth.js';
 import { runClassLessonRemindersJob } from '../api/_lib/run-class-lesson-reminders-job.js';
 
 export default async function handler(req, res) {
@@ -6,7 +6,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
   const auth = authorizeVercelOrCronSecret(req);
-  if (!auth.ok) return res.status(401).json({ error: 'Unauthorized cron' });
+  if (rejectUnauthorizedCron(res, auth)) return;
 
   try {
     const result = await runClassLessonRemindersJob({ triggeredBy: 'class-lesson-reminders' });

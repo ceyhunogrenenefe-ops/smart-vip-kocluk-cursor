@@ -34,6 +34,10 @@ import { db } from '../lib/database';
 import { createInstitutionAdminUser } from '../lib/provisionInstitutionAdmin';
 import { AttendanceReportHub } from '../components/attendance/AttendanceReportHub';
 import EdesisSyncPanel from '../components/settings/EdesisSyncPanel';
+import {
+  CopyableLoginCredentialsModal,
+  type LoginCredentialsData
+} from '../components/auth/CopyableLoginCredentials';
 import { userHasAnyRole } from '../config/rolePermissions';
 
 /** GET /api/meta/whatsapp yanıtı — sırlar içermez */
@@ -73,6 +77,7 @@ export default function SettingsPage() {
     adminPassword: '',
     adminPhone: ''
   });
+  const [loginCredentialsModal, setLoginCredentialsModal] = useState<LoginCredentialsData | null>(null);
 
   // Super Admin mi kontrol et
   const isSuperAdmin = user?.role === 'super_admin';
@@ -244,17 +249,24 @@ export default function SettingsPage() {
         { reuseInstitutionId: created.id, setAsActive: true }
       );
       if (getAuthToken()) {
+        const adminEmail = newInstSale.adminEmail.trim().toLowerCase();
+        const adminPassword = newInstSale.adminPassword.trim();
         await createInstitutionAdminUser({
           institutionId: created.id,
           adminName: newInstSale.adminName.trim(),
-          adminEmail: newInstSale.adminEmail.trim().toLowerCase(),
-          adminPassword: newInstSale.adminPassword.trim(),
+          adminEmail,
+          adminPassword,
           adminPhone: newInstSale.adminPhone.trim() || null,
           plan: newInstSale.plan
         });
-        alert(
-          `Kurum ve ilk yönetici oluşturuldu. Öğrenci/koç/öğretmen eklenmedi.\n\nMüşteri girişi:\nE-posta: ${newInstSale.adminEmail.trim().toLowerCase()}\nŞifre: kurulumda girdiğiniz değer`
-        );
+        setLoginCredentialsModal({
+          title: 'Kurum ve yönetici oluşturuldu',
+          subtitle: 'Öğrenci/koç/öğretmen eklenmedi — müşteri panelden ekleyecek.',
+          institutionName: name,
+          email: adminEmail,
+          password: adminPassword,
+          roleLabel: 'Kurum yöneticisi (admin)'
+        });
       } else {
         alert('Kurum kaydedildi. Oturum açılmadığı için yönetici hesabı oluşturulmadı; giriş yaptıktan sonra bu kurum için kullanıcı ekleyebilirsiniz.');
       }
@@ -1232,6 +1244,12 @@ export default function SettingsPage() {
       </div>
     </>
       )}
+
+      <CopyableLoginCredentialsModal
+        open={loginCredentialsModal != null}
+        onClose={() => setLoginCredentialsModal(null)}
+        data={loginCredentialsModal}
+      />
     </div>
   );
 }
