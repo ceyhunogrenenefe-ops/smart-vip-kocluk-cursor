@@ -34,6 +34,7 @@ import {
   LineChart,
   Line
 } from 'recharts';
+import { DailyReportTrackingPanel } from '../components/dashboard/DailyReportTrackingPanel';
 
 export default function CoachDashboard() {
   const navigate = useNavigate();
@@ -268,6 +269,13 @@ export default function CoachDashboard() {
           <p className="text-2xl font-bold text-slate-800">%{generalStats.successRate}</p>
         </div>
       </div>
+
+      <DailyReportTrackingPanel
+        students={myStudents}
+        weeklyEntries={weeklyEntries}
+        title="Günlük rapor takibi"
+        subtitle="Öğrencilerinizin seçili günde rapor doldurup doldurmadığını görün."
+      />
 
       {/* Detaylı İstatistikler */}
       <div className="grid grid-cols-3 gap-4">

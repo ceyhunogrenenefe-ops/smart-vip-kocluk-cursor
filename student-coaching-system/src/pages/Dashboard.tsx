@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
 import { CLASS_LEVELS, formatClassLevelLabel } from '../types';
+import { DailyReportTrackingPanel } from '../components/dashboard/DailyReportTrackingPanel';
 
 export default function Dashboard() {
   const { students, coaches, weeklyEntries, getStudentStats, institution } = useApp();
@@ -214,6 +215,13 @@ export default function Dashboard() {
           );
         })}
       </div>
+
+      <DailyReportTrackingPanel
+        students={students}
+        weeklyEntries={weeklyEntries}
+        title="Günlük rapor takibi"
+        subtitle={`${institution?.name || 'Kurum'} öğrencilerinin günlük rapor durumu.`}
+      />
 
       {/* Hızlı İstatistikler */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
