@@ -6,6 +6,7 @@ import { clearAuthToken, fetchPublicPost, setAuthToken, getAuthToken } from '../
 import { db } from '../lib/database';
 import { studentRowToStudent } from '../lib/mapStudentRow';
 import type { UserRow } from '../lib/userRowToSystemUser';
+import { pinActiveInstitutionForUser, prepareInstitutionStorageForLogin, clearTenantSessionStorage } from '../lib/activeInstitutionScope';
 
 // Demo mod - girişin her zaman çalışması için aktif
 const USE_DEMO_MODE = true;
@@ -357,6 +358,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               localStorage.removeItem('coaching_user');
             } else {
             setUser(normalized);
+            pinActiveInstitutionForUser(normalized.institutionId, normalized.role);
             if (JSON.stringify(parsed) !== JSON.stringify(normalized)) {
               localStorage.setItem('coaching_user', JSON.stringify(normalized));
             }
@@ -398,6 +400,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setImpersonationTarget(null);
     localStorage.removeItem(IMPERSONATION_STORAGE_KEY);
     localStorage.removeItem(IMPERSONATION_RETURN_PATH_KEY);
+    localStorage.removeItem('coaching_active_organization');
+    prepareInstitutionStorageForLogin(null);
 
     const normalizedEmail = email.toLowerCase().trim();
 
@@ -422,6 +426,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
       }
       localStorage.setItem('coaching_user', JSON.stringify(merged));
+      pinActiveInstitutionForUser(merged.institutionId, merged.role);
       setUser(merged);
       return { success: true, message: 'Giriş başarılı!' };
     }
@@ -512,6 +517,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           };
         }
         localStorage.setItem('coaching_user', JSON.stringify(merged));
+        pinActiveInstitutionForUser(merged.institutionId, merged.role);
         setUser(merged);
         return { success: true, message: 'Giriş başarılı!' };
       }
@@ -579,6 +585,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
       }
       localStorage.setItem('coaching_user', JSON.stringify(merged));
+      pinActiveInstitutionForUser(merged.institutionId, merged.role);
       setUser(merged);
       return { success: true, message: 'Giriş başarılı!' };
     }
@@ -594,6 +601,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem('coaching_user');
     localStorage.removeItem(IMPERSONATION_STORAGE_KEY);
     localStorage.removeItem(IMPERSONATION_RETURN_PATH_KEY);
+    localStorage.removeItem('coaching_active_organization');
+    prepareInstitutionStorageForLogin(null);
     clearAuthToken();
     setUser(null);
     setImpersonationTarget(null);
@@ -672,6 +681,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       setImpersonationTarget(hydrated);
       localStorage.setItem(IMPERSONATION_STORAGE_KEY, JSON.stringify(hydrated));
+      pinActiveInstitutionForUser(hydrated.institutionId, hydrated.role);
       return { success: true, message: `${hydrated.name} hesabına geçiş yapıldı.` };
     },
     [user]

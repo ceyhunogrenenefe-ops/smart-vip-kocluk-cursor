@@ -1,5 +1,5 @@
 // Türkçe: Uygulama genel durum yönetimi - Supabase Gerçek Veritabanı ile
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useLayoutEffect, ReactNode } from 'react';
 import { isUuid } from '../utils/uuid';
 import {
   Student,
@@ -38,6 +38,16 @@ import {
   type TopicProgressDbRow
 } from '../lib/topicProgressSync';
 import { aiSuggestionFromRow, examResultFromRow, readingLogFromRow, type ExamResultRow } from '../lib/appSyncMappers';
+import {
+  pickInstitutionForActor,
+  readActiveInstitutionIdForRole,
+  resolveSuperAdminDefaultInstitutionId,
+  resolveTenantScopeInstitutionId,
+  userMaySwitchInstitution,
+  writeActiveInstitutionIdForRole,
+  ACTIVE_INSTITUTION_STORAGE_KEY,
+  SUPER_ADMIN_ACTIVE_INSTITUTION_STORAGE_KEY
+} from '../lib/activeInstitutionScope';
 import { useAuth } from './AuthContext';
 import { useOrganization } from './OrganizationContext';
 import { userRoleTags } from '../config/rolePermissions';
@@ -303,22 +313,71 @@ export function AppProvider({ children }: { children: ReactNode }) {
   studentsRef.current = students;
   const [weeklyEntries, setWeeklyEntries] = useState<WeeklyEntry[]>([]);
 
-  // Kurumlar için state
-  const [institutions, setInstitutions] = useState<Institution[]>(() => {
-    const stored = loadFromStorage<Institution[]>(STORAGE_KEYS.institutions, []);
-    const valid = stored.filter((i) => isUuid(String(i.id || '')));
-    if (valid.length > 0) return valid;
-    if (stored.length === 0) return [createDefaultInstitution()];
-    return [];
-  });
+  // Kurumlar — oturumlar arası önbellekten okuma yok (yanlış kurum flaşı); kaynak Supabase.
+  const [institutions, setInstitutions] = useState<Institution[]>(() => []);
 
-  const [activeInstitutionId, setActiveInstitutionId] = useState<string | null>(() => {
-    const raw = loadFromStorage<string | null>(STORAGE_KEYS.activeInstitutionId, null);
-    return raw && isUuid(raw) ? raw : null;
-  });
+  const [activeInstitutionId, setActiveInstitutionId] = useState<string | null>(() => null);
 
-  // Aktif kurum
-  const institution = institutions.find(i => i.id === activeInstitutionId) || institutions[0] || createDefaultInstitution();
+  const tenantScopeInstitutionId = React.useMemo(
+    () =>
+      resolveTenantScopeInstitutionId({
+        role: effectiveUser?.role,
+        userInstitutionId: effectiveUser?.institutionId,
+        selectedInstitutionId: activeInstitutionId,
+        fallbackInstitutionId: userMaySwitchInstitution(effectiveUser?.role)
+          ? resolveSuperAdminDefaultInstitutionId(institutions)
+          : institutions[0]?.id ?? null
+      }),
+    [effectiveUser?.role, effectiveUser?.institutionId, activeInstitutionId, institutions]
+  );
+
+  const institution = React.useMemo(
+    () =>
+      pickInstitutionForActor(institutions, {
+        role: effectiveUser?.role,
+        userInstitutionId: effectiveUser?.institutionId,
+        activeInstitutionId: tenantScopeInstitutionId
+      }) || createDefaultInstitution(),
+    [institutions, effectiveUser?.role, effectiveUser?.institutionId, tenantScopeInstitutionId]
+  );
+
+  const clearTenantData = useCallback(() => {
+    setStudents([]);
+    setCoaches([]);
+    setWeeklyEntries([]);
+    setBooks([]);
+    setReadingLogs([]);
+    setWrittenExamScores([]);
+    setExamResults([]);
+    setAISuggestions([]);
+    setTopicProgress([]);
+  }, []);
+
+  /** Kullanıcı değişince eski kiracı verisini ve kurum seçimini anında sıfırla. */
+  useLayoutEffect(() => {
+    clearTenantData();
+    if (!effectiveUser) {
+      setActiveInstitutionId(null);
+      return;
+    }
+    if (!userMaySwitchInstitution(effectiveUser.role)) {
+      const own = String(effectiveUser.institutionId || '').trim();
+      if (own) {
+        setActiveInstitutionId(own);
+        writeActiveInstitutionIdForRole(own, effectiveUser.role);
+      } else {
+        setActiveInstitutionId(null);
+      }
+      return;
+    }
+    try {
+      localStorage.removeItem(ACTIVE_INSTITUTION_STORAGE_KEY);
+    } catch {
+      /* noop */
+    }
+    const stored = readActiveInstitutionIdForRole(effectiveUser.role);
+    setActiveInstitutionId(stored);
+  }, [effectiveUser?.id, effectiveUser?.role, effectiveUser?.institutionId, clearTenantData]);
 
   // Topic pool - varsayılan mockData + kullanıcı ekleri (localStorage)
   const [customTopics, setCustomTopics] = useState<TopicPool>(() => {
@@ -375,6 +434,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    if (!isSupabaseReady || !effectiveUser) {
+      return;
+    }
+
+    const loadForUserId = effectiveUser.id;
+
     const loadDataFromDatabase = async () => {
       try {
         await ensureSupabaseReady();
@@ -421,14 +486,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
 
         const knownIds = new Set(loadedInstitutions.map((i) => i.id));
-        const firstId = loadedInstitutions[0]?.id;
+        const canSwitchTenant = userMaySwitchInstitution(effectiveUser?.role);
+        const defaultInstitutionId = canSwitchTenant
+          ? resolveSuperAdminDefaultInstitutionId(loadedInstitutions)
+          : loadedInstitutions[0]?.id;
+        const userInstId =
+          effectiveUser?.institutionId && isUuid(effectiveUser.institutionId)
+            ? effectiveUser.institutionId
+            : null;
+        const scopeInstitutionId = resolveTenantScopeInstitutionId({
+          role: effectiveUser?.role,
+          userInstitutionId: userInstId,
+          selectedInstitutionId: activeInstitutionId,
+          fallbackInstitutionId: defaultInstitutionId ?? null
+        });
         const resolvedActiveId =
-          activeInstitutionId && knownIds.has(activeInstitutionId)
-            ? activeInstitutionId
-            : firstId;
-        // Eski `inst-...` yerel ID veya silinmiş kurum: DB'deki geçerli kuruma düşür (uuid API hatalarını önler)
-        if (loadedInstitutions.length > 0 && (!activeInstitutionId || !knownIds.has(activeInstitutionId))) {
-          setActiveInstitutionId(resolvedActiveId || firstId);
+          scopeInstitutionId && knownIds.has(scopeInstitutionId)
+            ? scopeInstitutionId
+            : !canSwitchTenant && userInstId && knownIds.has(userInstId)
+              ? userInstId
+              : defaultInstitutionId;
+        if (loadedInstitutions.length > 0) {
+          if (!canSwitchTenant && userInstId && knownIds.has(userInstId)) {
+            if (activeInstitutionId !== userInstId) setActiveInstitutionId(userInstId);
+          } else if (canSwitchTenant) {
+            const next = resolvedActiveId || defaultInstitutionId || null;
+            if (next && activeInstitutionId !== next) {
+              setActiveInstitutionId(next);
+              writeActiveInstitutionIdForRole(next, effectiveUser?.role);
+            } else if (!readActiveInstitutionIdForRole(effectiveUser?.role) && next) {
+              writeActiveInstitutionIdForRole(next, effectiveUser?.role);
+            }
+          } else if (!scopeInstitutionId || !knownIds.has(scopeInstitutionId)) {
+            setActiveInstitutionId(resolvedActiveId || defaultInstitutionId);
+          }
         }
 
         const isStudentRole = effectiveUser?.role === 'student';
@@ -438,7 +529,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const institutionScope = isStudentRole
           ? undefined
           : useTenantInstitutionFilter
-            ? resolvedActiveId || firstId || undefined
+            ? resolvedActiveId || defaultInstitutionId || undefined
             : undefined;
 
         const dbStudents = await db.getStudents(institutionScope);
@@ -703,7 +794,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
 
         /** Kurum yazılı ders şablonları */
-        const prefsInstId = resolvedActiveId || firstId || null;
+        const prefsInstId = resolvedActiveId || defaultInstitutionId || null;
         if (prefsInstId && getAuthToken()) {
           try {
             const prefs = await db.getInstitutionWrittenExamPrefs(prefsInstId);
@@ -731,7 +822,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (import.meta.env.DEV) {
           console.debug('[AppContext] Veritabanından veriler yüklendi');
         }
+        if (effectiveUser?.id !== loadForUserId) return;
       } catch (error) {
+        if (effectiveUser?.id !== loadForUserId) return;
         console.error('Veritabanı yükleme hatası:', error);
         setStudents([]);
         setCoaches([]);
@@ -746,7 +839,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     loadDataFromDatabase();
   }, [
-    activeInstitutionId,
+    tenantScopeInstitutionId,
     effectiveUser?.role,
     effectiveUser?.id,
     effectiveUser?.studentId,
@@ -771,8 +864,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [institutions]);
 
   useEffect(() => {
-    saveToStorage(STORAGE_KEYS.activeInstitutionId, activeInstitutionId);
-  }, [activeInstitutionId]);
+    if (!effectiveUser) return;
+    const key = userMaySwitchInstitution(effectiveUser.role)
+      ? SUPER_ADMIN_ACTIVE_INSTITUTION_STORAGE_KEY
+      : STORAGE_KEYS.activeInstitutionId;
+    saveToStorage(key, activeInstitutionId);
+    if (userMaySwitchInstitution(effectiveUser.role)) {
+      try {
+        localStorage.removeItem(STORAGE_KEYS.activeInstitutionId);
+      } catch {
+        /* noop */
+      }
+    }
+  }, [activeInstitutionId, effectiveUser?.role]);
 
   useEffect(() => {
     saveToStorage(STORAGE_KEYS.customTopics, customTopics);
@@ -807,8 +911,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       student.institutionId ||
       activeInstitutionId ||
       institution?.id ||
-      loadFromStorage<string | null>(STORAGE_KEYS.activeInstitutionId, null) ||
-      institutions[0]?.id ||
+      loadFromStorage<string | null>(
+        userMaySwitchInstitution(effectiveUser?.role)
+          ? SUPER_ADMIN_ACTIVE_INSTITUTION_STORAGE_KEY
+          : STORAGE_KEYS.activeInstitutionId,
+        null
+      ) ||
+      (userMaySwitchInstitution(effectiveUser?.role)
+        ? resolveSuperAdminDefaultInstitutionId(institutions)
+        : institutions[0]?.id) ||
       null;
     const preferredRowId = student.id?.trim() ? student.id.trim() : undefined;
     /** Öğrenci yazımı /api/students ile gider; tarayıcıda VITE_SUPABASE_* olmasını zorunlu kılma */
@@ -946,8 +1057,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       coach.institutionId ||
       activeInstitutionId ||
       institution?.id ||
-      loadFromStorage<string | null>(STORAGE_KEYS.activeInstitutionId, null) ||
-      institutions[0]?.id ||
+      loadFromStorage<string | null>(
+        userMaySwitchInstitution(effectiveUser?.role)
+          ? SUPER_ADMIN_ACTIVE_INSTITUTION_STORAGE_KEY
+          : STORAGE_KEYS.activeInstitutionId,
+        null
+      ) ||
+      (userMaySwitchInstitution(effectiveUser?.role)
+        ? resolveSuperAdminDefaultInstitutionId(institutions)
+        : institutions[0]?.id) ||
       null;
     const preferredRowId = coach.id?.trim() ? coach.id.trim() : undefined;
     try {
@@ -1267,7 +1385,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return nextInstitutions;
       });
       if (activeInstitutionId === id) {
-        setActiveInstitutionId(nextInstitutions[0]?.id ?? null);
+        const nextDefault =
+          effectiveUser?.role === 'super_admin'
+            ? resolveSuperAdminDefaultInstitutionId(nextInstitutions)
+            : nextInstitutions[0]?.id ?? null;
+        setActiveInstitutionId(nextDefault);
+        writeActiveInstitutionIdForRole(nextDefault, effectiveUser?.role);
       }
       if (getAuthToken() && effectiveUser?.role === 'super_admin') {
         queueMicrotask(() => syncOrganizationsFromInstitutions(nextInstitutions));
@@ -1281,7 +1404,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const setActiveInstitution = (id: string) => {
     const v = String(id || '').trim();
     if (!isUuid(v)) return;
+    if (effectiveUser && !userMaySwitchInstitution(effectiveUser.role)) {
+      const own = String(effectiveUser.institutionId || '').trim();
+      if (own && v !== own) return;
+    }
     setActiveInstitutionId(v);
+    writeActiveInstitutionIdForRole(v, effectiveUser?.role);
   };
 
   // Konu havuzu işlemleri
@@ -2673,8 +2801,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!effectiveUser) return [];
     const tags = userRoleTags(effectiveUser);
     if (tags.includes('super_admin')) {
-      if (!activeInstitutionId) return students;
-      return students.filter((s) => s.institutionId === activeInstitutionId);
+      const iid = tenantScopeInstitutionId;
+      if (!iid) return students;
+      return students.filter((s) => s.institutionId === iid);
     }
     if (tags.includes('student')) {
       const sid = resolveStudentRecordId(
@@ -2709,13 +2838,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return students.filter((s) => s.institutionId === effectiveUser.institutionId);
     }
     return students;
-  }, [students, effectiveUser, coaches, activeInstitutionId]);
+  }, [students, effectiveUser, coaches, tenantScopeInstitutionId]);
 
   const scopedCoaches = React.useMemo(() => {
     if (!effectiveUser) return [];
     const tags = userRoleTags(effectiveUser);
     if (tags.includes('super_admin')) {
-      const iid = activeInstitutionId;
+      const iid = tenantScopeInstitutionId;
       if (!iid) return coaches;
       return coaches.filter((c) => !c.institutionId || c.institutionId === iid);
     }
@@ -2741,7 +2870,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return coaches.filter((c) => coachIds.has(c.id));
     }
     return [];
-  }, [coaches, effectiveUser, scopedStudents, activeInstitutionId]);
+  }, [coaches, effectiveUser, scopedStudents, tenantScopeInstitutionId]);
 
   const scopedWeeklyEntries = React.useMemo(() => {
     if (!effectiveUser) return [];

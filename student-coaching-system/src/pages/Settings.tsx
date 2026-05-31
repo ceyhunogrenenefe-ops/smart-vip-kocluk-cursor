@@ -39,6 +39,7 @@ import {
   type LoginCredentialsData
 } from '../components/auth/CopyableLoginCredentials';
 import { userHasAnyRole } from '../config/rolePermissions';
+import { isPrimaryOnlineVipInstitution } from '../lib/activeInstitutionScope';
 
 /** GET /api/meta/whatsapp yanıtı — sırlar içermez */
 interface MetaWhatsAppServerStatus {
@@ -51,21 +52,10 @@ interface MetaWhatsAppServerStatus {
   hint?: string | null;
 }
 
-/** Telefondaki rakamlar (boşluk/tire atılır) */
-function institutionPhoneDigits(phone: string | undefined | null): string {
-  return String(phone || '').replace(/\D/g, '');
-}
-
-/** Online VIP ana hat — kullanıcı isteği: yalnız bu telefonlu kayıt silinmesin (0 ile veya olmadan). */
-function isPrimaryOnlineVipInstitution(inst: Institution): boolean {
-  const d = institutionPhoneDigits(inst.phone);
-  return d === '08503034014' || d === '8503034014';
-}
-
 export default function SettingsPage() {
   const { user } = useAuth();
   const { createOrganization } = useOrganization();
-  const { institutions, addInstitution, updateInstitution, deleteInstitution, setActiveInstitution, activeInstitutionId, students, coaches, weeklyEntries } = useApp();
+  const { institutions, addInstitution, updateInstitution, deleteInstitution, setActiveInstitution, activeInstitutionId, institution, students, coaches, weeklyEntries } = useApp();
   const [saved, setSaved] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -137,8 +127,8 @@ export default function SettingsPage() {
     void refreshOpenAiServerStatus();
   }, [refreshOpenAiServerStatus]);
 
-  // Aktif kurumu bul
-  const activeInstitution = institutions.find(i => i.id === activeInstitutionId) || institutions[0];
+  // Aktif kurum — süper admin seçer; diğer roller yalnız kendi kurumunu görür
+  const activeInstitution = institution || institutions[0];
 
   const [formData, setFormData] = useState({
     name: activeInstitution?.name || '',
@@ -151,6 +141,7 @@ export default function SettingsPage() {
 
   // Kurum seçildiğinde formu güncelle
   const handleSelectInstitution = (id: string) => {
+    if (!isSuperAdmin) return;
     setActiveInstitution(id);
     const inst = institutions.find(i => i.id === id);
     if (inst) {
@@ -193,8 +184,9 @@ export default function SettingsPage() {
   };
 
   const handleSave = () => {
-    if (activeInstitutionId) {
-      updateInstitution(activeInstitutionId, { ...formData });
+    const instId = activeInstitution?.id || activeInstitutionId;
+    if (instId) {
+      updateInstitution(instId, { ...formData });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     }
@@ -246,7 +238,7 @@ export default function SettingsPage() {
           address: formData.address || '',
           plan: newInstSale.plan
         },
-        { reuseInstitutionId: created.id, setAsActive: true }
+        { reuseInstitutionId: created.id, setAsActive: false }
       );
       if (getAuthToken()) {
         const adminEmail = newInstSale.adminEmail.trim().toLowerCase();
@@ -270,7 +262,6 @@ export default function SettingsPage() {
       } else {
         alert('Kurum kaydedildi. Oturum açılmadığı için yönetici hesabı oluşturulmadı; giriş yaptıktan sonra bu kurum için kullanıcı ekleyebilirsiniz.');
       }
-      setActiveInstitution(created.id);
       setShowAddForm(false);
       setNewInstSale({
         plan: 'professional',
@@ -572,9 +563,11 @@ export default function SettingsPage() {
           {institutions.map((inst) => (
             <div
               key={inst.id}
-              onClick={() => handleSelectInstitution(inst.id)}
-              className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
-                activeInstitutionId === inst.id || (!activeInstitutionId && inst === institutions[0])
+              onClick={() => (isSuperAdmin ? handleSelectInstitution(inst.id) : undefined)}
+              className={`p-4 rounded-xl border-2 transition-all ${
+                isSuperAdmin ? 'cursor-pointer' : 'cursor-default'
+              } ${
+                activeInstitution?.id === inst.id
                   ? 'border-red-500 bg-red-50'
                   : 'border-gray-200 hover:border-gray-300'
               }`}
@@ -594,7 +587,7 @@ export default function SettingsPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {(activeInstitutionId === inst.id || (!activeInstitutionId && inst === institutions[0])) && (
+                  {(activeInstitution?.id === inst.id) && (
                     <CheckCircle className="w-5 h-5 text-green-500" />
                   )}
                   {isSuperAdmin && !isPrimaryOnlineVipInstitution(inst) && (
