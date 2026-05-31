@@ -7,6 +7,10 @@ import { metaWhatsAppConfigured } from '../api/_lib/meta-whatsapp.js';
 import { getReportReminderRecipients } from '../api/_lib/meetings-resolve.js';
 import { studentNeedsReportReminder } from '../api/_lib/report-reminder-eligibility.js';
 import { recordCronRun } from '../api/_lib/cron-run-log.js';
+import {
+  loadInstitutionWhatsappAutomationMap,
+  studentAllowsWhatsappAutomation
+} from '../api/_lib/whatsapp-automation-eligibility.js';
 
 /** İstanbul 22:00 — vercel.json `0 19 * * *` (UTC+3) */
 const REPORT_REMINDER_IST_HOUR = 22;
@@ -95,13 +99,19 @@ export default async function handler(req, res) {
       (sentRows || []).map((r) => `${r.student_id}:${r.kind}:${String(r.phone || '').trim()}`)
     );
 
+    const institutionFlags = await loadInstitutionWhatsappAutomationMap(supabaseAdmin);
+
     const { data: students, error: sErr } = await supabaseAdmin
       .from('students')
-      .select('id,name,phone,parent_phone,email')
+      .select('id,name,phone,parent_phone,email,institution_id,whatsapp_automation_enabled')
       .limit(8000);
     if (sErr) throw sErr;
 
     for (const student of students || []) {
+      if (!studentAllowsWhatsappAutomation(student, institutionFlags)) {
+        log.push({ student_id: student.id, note: 'whatsapp_automation_disabled' });
+        continue;
+      }
       if (!studentNeedsReportReminder(student.id, entries || [], plannerStudentIds)) {
         continue;
       }

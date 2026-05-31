@@ -584,6 +584,24 @@ export default function SettingsPage() {
                   <div>
                     <p className="font-medium text-slate-800">{inst.name}</p>
                     <p className="text-sm text-gray-500">{inst.phone || '—'}</p>
+                    {isSuperAdmin && (
+                      <label
+                        className="mt-2 flex items-center gap-2 text-xs text-gray-600 cursor-pointer"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={inst.whatsappAutomationEnabled !== false}
+                          onChange={(e) => {
+                            void updateInstitution(inst.id, {
+                              whatsappAutomationEnabled: e.target.checked
+                            });
+                          }}
+                          className="rounded border-gray-300"
+                        />
+                        Otomatik WhatsApp mesajları
+                      </label>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">

@@ -73,6 +73,8 @@ export interface Institution {
   createdAt: string;
   /** Supabase `institutions.plan` — gösterge paneli / plan kartları */
   plan?: OrganizationPlan;
+  /** false ise kuruma otomatik WhatsApp cron mesajları gitmez */
+  whatsappAutomationEnabled?: boolean;
 }
 
 // Kullanıcı Arayüzü
@@ -108,6 +110,8 @@ export interface Student {
   programName?: ProgramName;
   groupName?: string;
   institutionId?: string;
+  /** false ise otomatik WhatsApp hatırlatmaları gitmez */
+  whatsappAutomationEnabled?: boolean;
   /** Supabase Auth kullanıcısı (auth.users.id) — kalıcı bağlantı */
   authUserId?: string;
   /** Platform kullanıcısı (public.users.id) — özel JWT oturumu */

@@ -39,6 +39,10 @@ import {
   type StudentPlatformLink,
   type UserRow
 } from '../lib/userRowToSystemUser';
+import {
+  CopyableLoginCredentialsModal,
+  type LoginCredentialsData
+} from '../components/auth/CopyableLoginCredentials';
 import { studentRowToStudent, coachRowToCoach } from '../lib/mapStudentRow';
 import {
   downloadUserImportTemplateXlsx,
@@ -124,6 +128,11 @@ const ROLES: { value: UserRole; label: string; color: string }[] = [
 
 const ROLE_BADGE_ORDER: UserRole[] = ['super_admin', 'admin', 'teacher', 'coach', 'student'];
 
+function roleLabelFromRoles(role: UserRole, extraRoles?: UserRole[] | null): string {
+  const tags = extraRoles?.length ? extraRoles : [role];
+  return tags.map((t) => ROLES.find((r) => r.value === t)?.label || t).join(' · ');
+}
+
 function roleBadgeForUser(user: SystemUser): { label: string; className: string } {
   const tags = userRoleTags(user as { role: UserRole; roles?: UserRole[] });
   const sorted = [...tags].sort(
@@ -177,6 +186,7 @@ export default function UserManagement() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterRole, setFilterRole] = useState<UserRole | 'all'>('all');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'expired' | 'inactive'>('all');
+  const [filterInstitutionId, setFilterInstitutionId] = useState<string>('all');
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<'add' | 'edit'>('add');
   const [selectedUser, setSelectedUser] = useState<SystemUser | null>(null);
@@ -187,6 +197,31 @@ export default function UserManagement() {
   /** Satır içi koç ataması PATCH sırasında */
   const [coachAssignBusy, setCoachAssignBusy] = useState<string | null>(null);
   const [loginAsBusyId, setLoginAsBusyId] = useState<string | null>(null);
+  const [loginCredentialsModal, setLoginCredentialsModal] = useState<LoginCredentialsData | null>(null);
+
+  const openCreatedLoginCredentials = useCallback(
+    (opts: {
+      title: string;
+      email: string;
+      password: string;
+      role: UserRole;
+      roles?: UserRole[] | null;
+      institutionId?: string | null;
+    }) => {
+      const institutionName = opts.institutionId
+        ? institutions.find((i) => i.id === opts.institutionId)?.name
+        : institution?.name;
+      setLoginCredentialsModal({
+        title: opts.title,
+        subtitle: 'Giriş bilgileri panoya otomatik kopyalandı. Tekrar kopyalamak için alttaki düğmeyi kullanın.',
+        email: opts.email.toLowerCase().trim(),
+        password: opts.password,
+        roleLabel: roleLabelFromRoles(opts.role, opts.roles),
+        institutionName: institutionName || undefined
+      });
+    },
+    [institutions, institution?.name]
+  );
 
   const handleLoginAsUser = async (row: SystemUser) => {
     if (
@@ -383,6 +418,7 @@ export default function UserManagement() {
     startDate: new Date().toISOString().split('T')[0],
     endDate: '',
     isActive: true,
+    whatsappAutomationEnabled: true,
     questionBranches: [] as string[],
     questionGrades: [] as string[]
   });
@@ -397,6 +433,18 @@ export default function UserManagement() {
     const q = searchTerm.trim();
     const phoneMatch = (user.phone || '').replace(/\s/g, '').toLowerCase();
     const qDigits = q.replace(/\D/g, '');
+    const tags = userRoleTags(user as { role: UserRole; roles?: UserRole[] });
+    const studentMatchForFilter =
+      tags.includes('student')
+        ? findStudentForPlatformUser(
+            {
+              platformUserId: user.id,
+              email: user.email,
+              studentId: user.studentId
+            },
+            students
+          )
+        : undefined;
     if (
       searchTerm &&
       !trIncludes(user.name, q) &&
@@ -406,9 +454,14 @@ export default function UserManagement() {
       return false;
     }
 
+    if (filterInstitutionId !== 'all' && currentUser?.role === 'super_admin') {
+      const userInst =
+        String(studentMatchForFilter?.institutionId || user.institutionId || '').trim();
+      if (userInst !== filterInstitutionId) return false;
+    }
+
     // Rol filtresi (çoklu rol: örneğin öğretmen+koç)
     if (filterRole !== 'all') {
-      const tags = userRoleTags(user as { role: UserRole; roles?: UserRole[] });
       if (!tags.includes(filterRole)) return false;
     }
 
@@ -564,6 +617,7 @@ export default function UserManagement() {
         startDate: user.startDate?.split('T')[0] || new Date().toISOString().split('T')[0],
         endDate: user.endDate?.split('T')[0] || '',
         isActive: user.isActive !== false,
+        whatsappAutomationEnabled: studentMatch?.whatsappAutomationEnabled !== false,
         questionBranches: [],
         questionGrades: []
       });
@@ -611,6 +665,7 @@ export default function UserManagement() {
         startDate: new Date().toISOString().split('T')[0],
         endDate: endDate.toISOString().split('T')[0],
         isActive: true,
+        whatsappAutomationEnabled: true,
         questionBranches: [],
         questionGrades: []
       });
@@ -775,6 +830,13 @@ export default function UserManagement() {
             setMessage({ type: 'success', text: 'Koç için giriş hesabı oluşturuldu.' });
             await refreshUsers();
             setShowModal(false);
+            openCreatedLoginCredentials({
+              title: 'Koç giriş hesabı oluşturuldu',
+              email: formData.email,
+              password: pwd,
+              role: 'coach',
+              institutionId: instId
+            });
           } catch (err) {
             setMessage({
               type: 'error',
@@ -865,7 +927,8 @@ export default function UserManagement() {
                   parentName: formData.parentName.trim() || undefined,
                   parentPhone: formData.parentPhone.trim() || undefined,
                   coachId: formData.assignCoachId.trim() || undefined,
-                  institutionId: formData.studentInstitutionId.trim() || undefined
+                  institutionId: formData.studentInstitutionId.trim() || undefined,
+                  whatsappAutomationEnabled: formData.whatsappAutomationEnabled
                 });
               } catch (se) {
                 studentCardNote =
@@ -1080,6 +1143,18 @@ export default function UserManagement() {
 
             const instId =
               institutionIdForNewUser || resolvedInstitution || instFallback || currentUser?.institutionId;
+            const createdEmail = formData.email.toLowerCase().trim();
+            const createdRole = (staffRolesNew?.primary || formData.role) as UserRole;
+            setShowModal(false);
+            openCreatedLoginCredentials({
+              title: `${label} oluşturuldu`,
+              email: createdEmail,
+              password: pwdPlain,
+              role: createdRole,
+              roles: staffRolesNew?.roles ?? null,
+              institutionId: instId ?? null
+            });
+
             const newUserId = row.id;
             const newIsTeacher =
               formData.role === 'teacher' || (staffRolesNew?.roles || []).includes('teacher');
@@ -1110,6 +1185,7 @@ export default function UserManagement() {
                   school: formData.branch.trim() || undefined,
                   coachId: formData.assignCoachId || undefined,
                   institutionId: studentInstForAdd || undefined,
+                  whatsappAutomationEnabled: formData.whatsappAutomationEnabled,
                   createdAt: new Date().toISOString()
                 });
               } else if (formData.role === 'coach' || (staffRolesNew?.roles || []).includes('coach')) {
@@ -1131,19 +1207,6 @@ export default function UserManagement() {
                 text: 'Kullanıcı oluşturuldu ancak öğrenci/koç listesine eklenirken sorun oluştu. Öğrenci/Koç sayfasından tekrar deneyin.'
               });
             }
-
-            setTimeout(() => {
-              setShowModal(false);
-              if (formData.role === 'student') navigate('/students');
-              else if (
-                formData.role === 'coach' &&
-                !(staffRolesNew?.roles || []).includes('teacher')
-              ) {
-                navigate('/coaches');
-              } else {
-                navigate('/dashboard');
-              }
-            }, 1500);
           } catch (err) {
             setMessage({
               type: 'error',
@@ -1913,8 +1976,30 @@ export default function UserManagement() {
             <option value="expired">Süresi Dolmuş</option>
             <option value="inactive">Pasif</option>
           </select>
+
+          {currentUser?.role === 'super_admin' && (
+            <select
+              value={filterInstitutionId}
+              onChange={(e) => setFilterInstitutionId(e.target.value)}
+              className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-w-[12rem]"
+            >
+              <option value="all">Tüm kurumlar</option>
+              {institutions.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
+
+      {currentUser?.role === 'super_admin' && (
+        <p className="text-sm text-slate-600 -mt-2">
+          Otomatik WhatsApp (günlük rapor, koç mesajı, ders hatırlatma): öğrenci düzenleme formunda
+          kapatabilirsiniz. Kurum genelinde kapatmak için Ayarlar → Kurumlar.
+        </p>
+      )}
 
       {/* Message */}
       {message && (
@@ -2504,6 +2589,22 @@ export default function UserManagement() {
                         </span>
                       </p>
                     )}
+                  <label className="flex items-start gap-2 text-sm text-gray-800 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.whatsappAutomationEnabled}
+                      onChange={(e) =>
+                        setFormData({ ...formData, whatsappAutomationEnabled: e.target.checked })
+                      }
+                      className="mt-0.5 rounded border-gray-300"
+                    />
+                    <span>
+                      Otomatik WhatsApp mesajları (günlük rapor, koç otomasyonu, ders hatırlatma)
+                      <span className="block text-xs text-gray-500 mt-0.5">
+                        Kapalıysa cron ile giden otomatik mesajlar bu öğrenciye gitmez.
+                      </span>
+                    </span>
+                  </label>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       <Briefcase className="w-4 h-4 inline mr-1" />
@@ -2642,6 +2743,12 @@ export default function UserManagement() {
           </div>
         </div>
       )}
+      <CopyableLoginCredentialsModal
+        open={loginCredentialsModal != null}
+        onClose={() => setLoginCredentialsModal(null)}
+        data={loginCredentialsModal}
+        autoCopyAll
+      />
     </div>
   );
 }

@@ -469,6 +469,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
               website: i.website || undefined,
               logo: i.logo || undefined,
               isActive: i.is_active,
+              whatsappAutomationEnabled:
+                (i as { whatsapp_automation_enabled?: boolean | null }).whatsapp_automation_enabled !==
+                false,
               createdAt: i.created_at,
               plan
             };
@@ -936,7 +939,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           parent_phone: student.parentPhone ?? null,
           coach_id: student.coachId || null,
           institution_id: resolvedInstitutionId,
-          program_id: student.programId || inferProgramName(student.classLevel)
+          program_id: student.programId || inferProgramName(student.classLevel),
+          whatsapp_automation_enabled: student.whatsappAutomationEnabled !== false
         },
         preferredRowId,
         {
@@ -976,6 +980,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (updatedStudent.coachId !== undefined) patch.coach_id = updatedStudent.coachId ?? null;
     if (updatedStudent.institutionId !== undefined)
       patch.institution_id = updatedStudent.institutionId ?? null;
+    if (updatedStudent.whatsappAutomationEnabled !== undefined)
+      patch.whatsapp_automation_enabled = Boolean(updatedStudent.whatsappAutomationEnabled);
     if (updatedStudent.programId !== undefined) patch.program_id = updatedStudent.programId;
 
     let saved: ApiStudentRow;
@@ -1362,7 +1368,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         address: info.address,
         website: info.website,
         logo: info.logo,
-        is_active: info.isActive
+        is_active: info.isActive,
+        whatsapp_automation_enabled:
+          info.whatsappAutomationEnabled === undefined
+            ? undefined
+            : Boolean(info.whatsappAutomationEnabled)
       });
     } catch (error) {
       console.error('Kurum güncelleme hatası:', error);

@@ -166,6 +166,7 @@ export interface Database {
           platform_user_id?: string | null;
           auth_user_id?: string | null;
           program_id?: string | null;
+          whatsapp_automation_enabled?: boolean | null;
           created_at: string;
           updated_at: string;
         };
@@ -266,6 +267,7 @@ export interface Database {
           logo: string | null;
           plan: 'starter' | 'professional' | 'enterprise';
           is_active: boolean;
+          whatsapp_automation_enabled?: boolean | null;
           created_at: string;
           updated_at: string;
         };

@@ -9,6 +9,10 @@ import { getStudentPhones, classifyLessonReminderRecipients } from '../api/_lib/
 import { alreadySentLessonReminder } from '../api/_lib/message-log.js';
 import { recordCronRun } from '../api/_lib/cron-run-log.js';
 import { parseReminderWindowConfig, isWithinReminderWindowMs } from '../api/_lib/lesson-reminder-window.js';
+import {
+  loadInstitutionWhatsappAutomationMap,
+  studentAllowsWhatsappAutomation
+} from '../api/_lib/whatsapp-automation-eligibility.js';
 
 const LESSON_WINDOW = parseReminderWindowConfig('LESSON_REMINDER');
 
@@ -55,6 +59,8 @@ export default async function handler(req, res) {
     let parentSentFail = 0;
     let lessonsInReminderWindow = 0;
 
+    const institutionFlags = await loadInstitutionWhatsappAutomationMap(supabaseAdmin);
+
     const { data: lessons, error: lErr } = await supabaseAdmin
       .from('teacher_lessons')
       .select('*')
@@ -78,6 +84,10 @@ export default async function handler(req, res) {
       const { data: student } = await supabaseAdmin.from('students').select('*').eq('id', lesson.student_id).maybeSingle();
       if (!student) {
         log.push({ lesson_id: lesson.id, note: 'no_student' });
+        continue;
+      }
+      if (!studentAllowsWhatsappAutomation(student, institutionFlags)) {
+        log.push({ lesson_id: lesson.id, student_id: student.id, note: 'whatsapp_automation_disabled' });
         continue;
       }
 

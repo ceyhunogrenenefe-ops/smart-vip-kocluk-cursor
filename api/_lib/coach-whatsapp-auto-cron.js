@@ -8,6 +8,10 @@ import {
   getIstanbulWeekdayShort
 } from './istanbul-time.js';
 import { renderCoachScheduleTemplate } from './coach-whatsapp-schedule-render.js';
+import {
+  loadInstitutionWhatsappAutomationMap,
+  studentAllowsWhatsappAutomation
+} from './whatsapp-automation-eligibility.js';
 
 const KIND = 'coach_auto_template';
 
@@ -117,6 +121,8 @@ export async function runCoachWhatsappAutoCron(opts = {}) {
 
   if (schErr) throw schErr;
 
+  const institutionFlags = await loadInstitutionWhatsappAutomationMap(supabaseAdmin);
+
   const summary = [];
 
   for (const schedule of schedules || []) {
@@ -147,7 +153,7 @@ export async function runCoachWhatsappAutoCron(opts = {}) {
 
     const { data: students, error: stErr } = await supabaseAdmin
       .from('students')
-      .select('id,name,phone,parent_phone,coach_id')
+      .select('id,name,phone,parent_phone,coach_id,institution_id,whatsapp_automation_enabled')
       .eq('coach_id', schedule.coach_id);
 
     if (stErr) {
@@ -159,6 +165,10 @@ export async function runCoachWhatsappAutoCron(opts = {}) {
 
     for (const st of students || []) {
       try {
+        if (!studentAllowsWhatsappAutomation(st, institutionFlags)) {
+          logDetail.push({ student_id: st.id, skipped: 'whatsapp_automation_disabled' });
+          continue;
+        }
         if (await sentToday(schedule.id, st.id, todayTr)) {
           logDetail.push({ student_id: st.id, skipped: 'already_sent_today' });
           continue;

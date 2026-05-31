@@ -43,6 +43,7 @@ export function studentRowToStudent(s: ApiStudentRow): Student {
     parentPhone: s.parent_phone || '',
     coachId: s.coach_id || undefined,
     institutionId: s.institution_id || undefined,
+    whatsappAutomationEnabled: s.whatsapp_automation_enabled !== false,
     programId: s.program_id || undefined,
     programName: inferProgramName(classLevel),
     createdAt: s.created_at
