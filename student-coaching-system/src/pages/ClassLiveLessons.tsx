@@ -1521,7 +1521,7 @@ export default function ClassLiveLessons() {
                                   {canJoin ? (
                                     <button
                                       type="button"
-                                      onClick={() => window.open(sessionLink, '_blank', 'noopener,noreferrer')}
+                                      onClick={() => void joinClassSession(s)}
                                       className="rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-2 py-1 text-[10px] font-semibold text-white shadow-sm hover:brightness-110"
                                     >
                                       Katıl
