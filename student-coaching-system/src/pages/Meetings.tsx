@@ -464,7 +464,7 @@ export default function Meetings() {
             {isStudent ? 'Görüşmelerim' : 'Online görüşmeler'}
           </h1>
           <p className="text-slate-600 mt-1 text-sm">
-            Google Meet için Takvim bağlayabilirsiniz; Zoom veya BBB ile de Takvim olmadan görüşme planlayabilirsiniz. WhatsApp bildirimleri (hatırlatma cron ile).
+            Google Meet için Takvim bağlayabilirsiniz; Zoom/BBB linki yazabilir veya BBB API bağlıysa link girmeden otomatik görüşme oluşturabilirsiniz.
           </p>
         </div>
       </div>
@@ -649,23 +649,22 @@ export default function Meetings() {
               <button
                 type="button"
                 disabled={
-                  createBusy ||
-                  (effectiveUser?.role === 'coach' && !googleConnected && !hasManualMeetingLinks)
+                  createBusy
                 }
                 onClick={() => void handleCreate()}
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-45"
               >
                 <CalendarIcon className="w-4 h-4" />
-                {meetingRecurrence ? 'Tekrarlayan seriyi oluştur' : 'Oluştur (Meet ve/veya Zoom/BBB)'}
+                {meetingRecurrence ? 'Tekrarlayan seriyi oluştur' : 'Görüşmeyi oluştur'}
               </button>
               {(role === 'admin' || role === 'super_admin') ? (
                 <p className="text-xs text-slate-600">
-                  Meet için seçilen koçun hesabında Google Takvim bağlı olmalı. Bağlı değilse en az Zoom veya BBB adresi girerek yine de planlayabilirsiniz (koçun platform kullanıcısına göre kayıt tutulur).
+                  Meet için seçilen koçun hesabında Google Takvim bağlı olmalı. Takvim bağlı değilse Zoom/BBB linki girin; BBB API etkinse sistem otomatik BBB linki üretir.
                 </p>
               ) : null}
-              {effectiveUser?.role === 'coach' && !googleConnected ? (
+              {effectiveUser?.role === 'coach' ? (
                 <p className="text-xs text-amber-700">
-                  Google ile bağlanırsanız Meet otomatik üretilir. Bağlamadan da Zoom veya BBB bağlantısı (https://…) girerek görüşme oluşturabilirsiniz.
+                  Google ile bağlanırsanız Meet otomatik üretilir. Google yoksa Zoom/BBB linki girin; BBB API tanımlıysa link girmeden BBB odası otomatik açılır.
                 </p>
               ) : null}
           </div>

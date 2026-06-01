@@ -5,6 +5,7 @@ import { resolveStudentRowForUser } from '../api/_lib/resolve-student-id.js';
 import { coachRowToPlatformUserId, getStudentPhones } from '../api/_lib/meetings-resolve.js';
 import { createMeetCalendarEvent } from '../api/_lib/google-calendar-meet.js';
 import { deliverWhatsAppWithLog } from '../api/_lib/meeting-notify.js';
+import { createBbbMeetingAndJoinLink, isBbbConfigured } from '../api/_lib/bbb.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
 
@@ -230,12 +231,13 @@ async function handleCreate(req, res) {
       .maybeSingle();
 
     const hasManualLinks = Boolean(linkZoom || linkBbb);
-    if (!integration && !hasManualLinks) {
+    const canAutoBbb = isBbbConfigured();
+    if (!integration && !hasManualLinks && !canAutoBbb) {
       const who =
         actor.role === 'admin' || actor.role === 'super_admin'
           ? 'Seçilen koçun platform kullanıcısında'
           : 'Hesabınızda';
-      return jsonError(res, 400, `${who} Google Takvim kaydı yok. Ya “Google ile bağlan” (${who === 'Hesabınızda' ? 'koç hesabı' : 'o koç giriş yaptığında'}) kullanın ya da aşağıya en az bir Zoom veya BBB bağlantısı (https://…) girin; Takvim olmadan da planlanır.`, {
+      return jsonError(res, 400, `${who} Google Takvim kaydı yok. Ya “Google ile bağlan” (${who === 'Hesabınızda' ? 'koç hesabı' : 'o koç giriş yaptığında'}) kullanın, ya en az bir Zoom/BBB bağlantısı girin, ya da BBB API ayarlarını etkinleştirin.`, {
         code: 'meetings_need_calendar_or_links'
       });
     }
@@ -251,6 +253,7 @@ async function handleCreate(req, res) {
 
     let meetLinkResult = null;
     let googleEventId = null;
+    let autoBbbLink = null;
 
     if (integration) {
       try {
@@ -270,6 +273,19 @@ async function handleCreate(req, res) {
           meetLinkResult = linkZoom || linkBbb;
           googleEventId = null;
           console.warn('[meetings create] Google Takvim hatası, Zoom/BBB kullanılıyor:', msg);
+        } else if (canAutoBbb) {
+          const bbb = await createBbbMeetingAndJoinLink({
+            meetingId: `coaching-${studentId}-${Date.now()}`,
+            meetingName: summary,
+            attendeeName: student.name || 'Öğrenci',
+            moderatorName: coachRow?.name || 'Koç',
+            durationMinutes
+          });
+          autoBbbLink = bbb.attendeeJoinLink;
+          meetLinkResult = bbb.attendeeJoinLink;
+          linkBbb = bbb.attendeeJoinLink;
+          googleEventId = null;
+          console.warn('[meetings create] Google Takvim hatası, otomatik BBB fallback kullanıldı.');
         } else {
           return jsonError(res, 502, msg);
         }
@@ -277,12 +293,36 @@ async function handleCreate(req, res) {
       if (!meetLinkResult) {
         if (hasManualLinks) {
           meetLinkResult = linkZoom || linkBbb;
+        } else if (canAutoBbb) {
+          const bbb = await createBbbMeetingAndJoinLink({
+            meetingId: `coaching-${studentId}-${Date.now()}`,
+            meetingName: summary,
+            attendeeName: student.name || 'Öğrenci',
+            moderatorName: coachRow?.name || 'Koç',
+            durationMinutes
+          });
+          autoBbbLink = bbb.attendeeJoinLink;
+          meetLinkResult = bbb.attendeeJoinLink;
+          linkBbb = bbb.attendeeJoinLink;
         } else {
           return jsonError(res, 502, 'Google Meet bağlantısı oluşturulamadı. Zoom veya BBB adresi ekleyip tekrar deneyin.');
         }
       }
     } else {
-      meetLinkResult = linkZoom || linkBbb;
+      if (hasManualLinks) {
+        meetLinkResult = linkZoom || linkBbb;
+      } else if (canAutoBbb) {
+        const bbb = await createBbbMeetingAndJoinLink({
+          meetingId: `coaching-${studentId}-${Date.now()}`,
+          meetingName: summary,
+          attendeeName: student.name || 'Öğrenci',
+          moderatorName: coachRow?.name || 'Koç',
+          durationMinutes
+        });
+        autoBbbLink = bbb.attendeeJoinLink;
+        meetLinkResult = bbb.attendeeJoinLink;
+        linkBbb = bbb.attendeeJoinLink;
+      }
     }
 
     const insertPayload = {
@@ -335,7 +375,8 @@ async function handleCreate(req, res) {
     return res.status(200).json({
       data: meeting,
       whatsapp: whatsappNote || (phones.length ? 'missing_twilio_env' : 'no_student_phone'),
-      calendar: googleEventId ? { ok: true } : { skipped: true }
+      calendar: googleEventId ? { ok: true } : { skipped: true },
+      auto_bbb: autoBbbLink ? { ok: true, provider: 'bbb' } : { skipped: true }
     });
   } catch (e) {
     const msg = errorMessage(e);
@@ -441,7 +482,8 @@ async function handleCreateSeries(req, res) {
       .maybeSingle();
 
     const hasManualLinks = Boolean(linkZoom || linkBbb);
-    if (!integration && !hasManualLinks) {
+    const canAutoBbb = isBbbConfigured();
+    if (!integration && !hasManualLinks && !canAutoBbb) {
       const who =
         actor.role === 'admin' || actor.role === 'super_admin'
           ? 'Seçilen koçun platform kullanıcısında'
@@ -466,6 +508,7 @@ async function handleCreateSeries(req, res) {
     const firstEnd = new Date(start.getTime() + Math.max(15, durationMinutes) * 60_000);
     let meetLinkResult = null;
     let googleEventId = null;
+    let autoBbbLink = null;
 
     if (integration) {
       try {
@@ -485,18 +528,55 @@ async function handleCreateSeries(req, res) {
           meetLinkResult = linkZoom || linkBbb;
           googleEventId = null;
           console.warn('[meetings create-series] Google Takvim hatası, Zoom/BBB kullanılıyor:', msg);
+        } else if (canAutoBbb) {
+          const bbb = await createBbbMeetingAndJoinLink({
+            meetingId: `coaching-series-${studentId}-${Date.now()}`,
+            meetingName: summary,
+            attendeeName: student.name || 'Öğrenci',
+            moderatorName: coachRow?.name || 'Koç',
+            durationMinutes
+          });
+          autoBbbLink = bbb.attendeeJoinLink;
+          meetLinkResult = bbb.attendeeJoinLink;
+          linkBbb = bbb.attendeeJoinLink;
+          googleEventId = null;
         } else {
           return jsonError(res, 502, msg);
         }
       }
       if (!meetLinkResult) {
         meetLinkResult = linkZoom || linkBbb;
+        if (!meetLinkResult && canAutoBbb) {
+          const bbb = await createBbbMeetingAndJoinLink({
+            meetingId: `coaching-series-${studentId}-${Date.now()}`,
+            meetingName: summary,
+            attendeeName: student.name || 'Öğrenci',
+            moderatorName: coachRow?.name || 'Koç',
+            durationMinutes
+          });
+          autoBbbLink = bbb.attendeeJoinLink;
+          meetLinkResult = bbb.attendeeJoinLink;
+          linkBbb = bbb.attendeeJoinLink;
+        }
         if (!meetLinkResult) {
           return jsonError(res, 502, 'Google Meet oluşturulamadı; Zoom veya BBB girin.');
         }
       }
     } else {
-      meetLinkResult = linkZoom || linkBbb;
+      if (hasManualLinks) {
+        meetLinkResult = linkZoom || linkBbb;
+      } else if (canAutoBbb) {
+        const bbb = await createBbbMeetingAndJoinLink({
+          meetingId: `coaching-series-${studentId}-${Date.now()}`,
+          meetingName: summary,
+          attendeeName: student.name || 'Öğrenci',
+          moderatorName: coachRow?.name || 'Koç',
+          durationMinutes
+        });
+        autoBbbLink = bbb.attendeeJoinLink;
+        meetLinkResult = bbb.attendeeJoinLink;
+        linkBbb = bbb.attendeeJoinLink;
+      }
     }
 
     const untilTs = new Date(`${recurrenceUntil}T23:59:59.999+03:00`).getTime();
@@ -611,7 +691,8 @@ async function handleCreateSeries(req, res) {
         count: occurrences.length,
         meetings: meetingsIns || []
       },
-      whatsapp: whatsappNote
+      whatsapp: whatsappNote,
+      auto_bbb: autoBbbLink ? { ok: true, provider: 'bbb' } : { skipped: true }
     });
   } catch (e) {
     const msg = errorMessage(e);
