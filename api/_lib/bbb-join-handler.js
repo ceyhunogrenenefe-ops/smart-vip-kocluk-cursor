@@ -1,7 +1,7 @@
 import { requireAuthenticatedActor } from './auth.js';
 import { supabaseAdmin } from './supabase-admin.js';
 import { errorMessage } from './error-msg.js';
-import { ensureBbbMeetingAlive, isBbbJoinUrl } from './bbb.js';
+import { ensureBbbMeetingAlive, isBbbJoinUrl, buildBbbAttendeeJoinUrl, parseBbbJoinCredentials, parseBbbMeetingIdFromJoinUrl } from './bbb.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
 
@@ -29,6 +29,7 @@ function pickJoinUrl({ isStudent, attendeeLink, moderatorLink, joinLink }) {
  *   }>,
  *   patchLinks: (id: string, links: { meeting_link: string, meeting_link_moderator?: string }) => Promise<void>,
  *   getLinks: (row: Record<string, unknown>) => { attendeeLink: string, moderatorLink: string | null },
+ *   resolveStudentJoinUrl?: (actor: object, row: Record<string, unknown>, ensured: object) => Promise<string | null>,
  * }} config
  */
 export async function handleBbbJoinGet(req, res, config) {
@@ -82,16 +83,23 @@ export async function handleBbbJoinGet(req, res, config) {
     if (ensured.refreshed) {
       await config.patchLinks(id, {
         meeting_link: ensured.attendeeLink,
-        ...(ensured.moderatorLink ? { meeting_link_moderator: ensured.moderatorLink } : {})
+        ...(ensured.moderatorLink ? { meeting_link_moderator: ensured.moderatorLink } : {}),
+        ...(ensured.meetingId ? { bbb_meeting_id: ensured.meetingId } : {}),
+        ...(ensured.attendeePW ? { bbb_attendee_pw: ensured.attendeePW } : {})
       });
     }
 
-    const url = pickJoinUrl({
+    let url = pickJoinUrl({
       isStudent,
       attendeeLink: ensured.attendeeLink,
       moderatorLink: ensured.moderatorLink,
       joinLink: null
     });
+
+    if (isStudent && config.resolveStudentJoinUrl) {
+      const studentUrl = await config.resolveStudentJoinUrl(actor, row, ensured);
+      if (studentUrl) url = studentUrl;
+    }
 
     return res.status(200).json({
       url,
@@ -109,16 +117,21 @@ export async function patchRowMeetingLinks(table, id, links) {
     meeting_link: links.meeting_link,
     updated_at: new Date().toISOString()
   };
-  if (links.meeting_link_moderator) {
-    patch.meeting_link_moderator = links.meeting_link_moderator;
-  }
+  if (links.meeting_link_moderator) patch.meeting_link_moderator = links.meeting_link_moderator;
+  if (links.bbb_meeting_id) patch.bbb_meeting_id = links.bbb_meeting_id;
+  if (links.bbb_attendee_pw) patch.bbb_attendee_pw = links.bbb_attendee_pw;
+
   const { error } = await supabaseAdmin.from(table).update(patch).eq('id', id);
-  if (error && links.meeting_link_moderator && /meeting_link_moderator/i.test(errorMessage(error))) {
-    const { meeting_link_moderator: _m, ...withoutMod } = patch;
-    await supabaseAdmin.from(table).update(withoutMod).eq('id', id);
-    return;
+  if (error) {
+    const msg = errorMessage(error);
+    if (/meeting_link_moderator|PGRST204|schema cache/i.test(msg)) {
+      const { meeting_link_moderator: _m, bbb_meeting_id: _b, bbb_attendee_pw: _p, ...core } = patch;
+      const { error: e2 } = await supabaseAdmin.from(table).update(core).eq('id', id);
+      if (e2) throw e2;
+      return;
+    }
+    throw error;
   }
-  if (error) throw error;
 }
 
 export async function patchCoachingMeetingLinks(id, links) {

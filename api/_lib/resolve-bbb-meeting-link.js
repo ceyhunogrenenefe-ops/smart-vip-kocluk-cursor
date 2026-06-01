@@ -54,6 +54,8 @@ export async function resolveBbbOrManualMeetingLink({
       meetingLink: bbb.attendeeJoinLink,
       meetingLinkModerator: bbb.moderatorJoinLink,
       platform: 'bbb',
+      bbbMeetingId: bbb.meetingId,
+      bbbAttendeePw: bbb.attendeePW,
       autoBbb: { ok: true, provider: 'bbb', meetingId: bbb.meetingId }
     };
   } catch (e) {
@@ -69,6 +71,8 @@ export function applyResolvedMeetingLinkToRow(resolved) {
   if (!resolved?.ok) return {};
   return {
     meeting_link: resolved.meetingLink,
-    ...(resolved.meetingLinkModerator ? { meeting_link_moderator: resolved.meetingLinkModerator } : {})
+    ...(resolved.meetingLinkModerator ? { meeting_link_moderator: resolved.meetingLinkModerator } : {}),
+    ...(resolved.bbbMeetingId ? { bbb_meeting_id: resolved.bbbMeetingId } : {}),
+    ...(resolved.bbbAttendeePw ? { bbb_attendee_pw: resolved.bbbAttendeePw } : {})
   };
 }

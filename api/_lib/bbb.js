@@ -135,6 +135,102 @@ export function parseBbbMeetingIdFromJoinUrl(joinUrl) {
   }
 }
 
+/** Kayıtlı BBB join URL'sinden meetingID ve attendee şifresi. */
+export function parseBbbJoinCredentials(joinUrl) {
+  const s = String(joinUrl || '').trim();
+  if (!s) return null;
+  try {
+    const u = new URL(s);
+    const meetingID = u.searchParams.get('meetingID');
+    const password = u.searchParams.get('password');
+    if (!meetingID || !password) return null;
+    let apiBase = `${u.origin}${u.pathname.replace(/\/?join\/?$/i, '')}/`;
+    if (!apiBase.includes('/api/')) {
+      apiBase = `${u.origin}/bigbluebutton/api/`;
+    }
+    return {
+      meetingId: String(meetingID).trim(),
+      attendeePassword: String(password).trim(),
+      apiBase
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function buildBbbAttendeeJoinUrl({ meetingId, attendeePassword, fullName }) {
+  const { apiBase, secret } = bbbApiConfig();
+  if (!apiBase || !secret) throw new Error('BBB API ayarları eksik.');
+  const safeMeetingId = sanitizeBbbMeetingId(meetingId);
+  const joinQuery = asQuery({
+    fullName: String(fullName || 'Öğrenci').trim().slice(0, 64) || 'Öğrenci',
+    meetingID: safeMeetingId,
+    password: attendeePassword,
+    redirect: true
+  });
+  const joinChecksum = bbbChecksum('join', joinQuery, secret);
+  return `${apiBase}join?${joinQuery}&checksum=${joinChecksum}`;
+}
+
+function parseXmlTagValues(xml, tagName) {
+  const names = [];
+  const cdataRe = new RegExp(`<${tagName}><!\\[CDATA\\[(.*?)\\]\\]></${tagName}>`, 'gi');
+  const plainRe = new RegExp(`<${tagName}>([^<]*)</${tagName}>`, 'gi');
+  let m;
+  while ((m = cdataRe.exec(xml))) {
+    const v = String(m[1] || '').trim();
+    if (v) names.push(v);
+  }
+  while ((m = plainRe.exec(xml))) {
+    const v = String(m[1] || '').trim();
+    if (v) names.push(v);
+  }
+  return names;
+}
+
+/**
+ * Aktif toplantıdaki katılımcı isimleri (MODERATOR hariç).
+ * @returns {Promise<string[]>}
+ */
+export async function bbbGetMeetingAttendeeNames(meetingId) {
+  const { apiBase, secret } = bbbApiConfig();
+  if (!apiBase || !secret) return [];
+  const safeMeetingId = sanitizeBbbMeetingId(meetingId);
+  if (!safeMeetingId) return [];
+
+  const query = asQuery({ meetingID: safeMeetingId });
+  const checksum = bbbChecksum('getMeetingInfo', query, secret);
+  const url = `${apiBase}getMeetingInfo?${query}&checksum=${checksum}`;
+
+  try {
+    const res = await fetch(url);
+    const text = await res.text();
+    if (!res.ok || !text.includes('<returncode>SUCCESS</returncode>')) return [];
+
+    const roles = parseXmlTagValues(text, 'role');
+    const fullNames = parseXmlTagValues(text, 'fullName');
+    const attendees = [];
+    const attendeeBlocks = text.match(/<attendee>[\s\S]*?<\/attendee>/gi) || [];
+    if (attendeeBlocks.length) {
+      for (const block of attendeeBlocks) {
+        const role = (parseXmlTagValues(block, 'role')[0] || '').toUpperCase();
+        if (role === 'MODERATOR') continue;
+        const fn = parseXmlTagValues(block, 'fullName')[0];
+        if (fn) attendees.push(fn);
+      }
+      return attendees;
+    }
+    for (let i = 0; i < fullNames.length; i++) {
+      const role = (roles[i] || '').toUpperCase();
+      if (role === 'MODERATOR') continue;
+      if (fullNames[i]) attendees.push(fullNames[i]);
+    }
+    return attendees;
+  } catch {
+    return [];
+  }
+}
+
 export async function bbbMeetingExists(meetingId) {
   const { apiBase, secret } = bbbApiConfig();
   if (!apiBase || !secret) return false;
@@ -207,7 +303,9 @@ export async function ensureBbbMeetingAlive({
     refreshed: true,
     attendeeLink: bbb.attendeeJoinLink,
     moderatorLink: bbb.moderatorJoinLink,
-    meetingId: bbb.meetingId
+    meetingId: bbb.meetingId,
+    attendeePW: bbb.attendeePW,
+    moderatorPW: bbb.moderatorPW
   };
 }
 
@@ -270,6 +368,8 @@ export async function createBbbMeetingAndJoinLink({
   return {
     attendeeJoinLink,
     moderatorJoinLink,
-    meetingId: safeMeetingId
+    meetingId: safeMeetingId,
+    attendeePW,
+    moderatorPW
   };
 }

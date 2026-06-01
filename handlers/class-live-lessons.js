@@ -24,6 +24,9 @@ import {
   insertManyOptionalModerator
 } from '../api/_lib/supabase-optional-moderator.js';
 import { handleBbbJoinGet, patchRowMeetingLinks } from '../api/_lib/bbb-join-handler.js';
+import { buildBbbAttendeeJoinUrl, parseBbbJoinCredentials, parseBbbMeetingIdFromJoinUrl } from '../api/_lib/bbb.js';
+import { pollBbbPresenceForSession, applyAutoAttendanceForClassSession } from '../api/_lib/bbb-attendance.js';
+import { sendAbsentNoticeForStudent } from '../api/_lib/class-attendance-notify.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -313,79 +316,6 @@ async function getClassDetails(classId) {
   };
 }
 
-async function sendAbsentNotice({ session, className, studentId }) {
-  const waReady = metaWhatsAppConfigured();
-  if (!waReady) return { ok: false, note: 'meta_whatsapp_not_ready', student_id: studentId };
-  const { data: student } = await supabaseAdmin
-    .from('students')
-    .select('name, parent_phone')
-    .eq('id', studentId)
-    .maybeSingle();
-  if (!student) return { ok: false, note: 'student_not_found', student_id: studentId };
-  const parentPhone = normalizePhoneToE164(student.parent_phone);
-  if (!parentPhone) return { ok: false, note: 'parent_phone_missing', student_id: studentId };
-  const lessonDate = String(session.lesson_date || '').trim();
-  const lessonTime = String(session.start_time || '').slice(0, 5);
-  const vars = {
-    student_name: student.name || 'Öğrenciniz',
-    class_name: className || 'Sınıf',
-    subject: session.subject || 'Ders',
-    lesson_date: lessonDate,
-    lesson_time: lessonTime
-  };
-  const sent = await sendAutomatedWhatsApp({
-    phone: parentPhone,
-    templateType: 'class_absent_notice_1',
-    vars
-  });
-  const logDate = session.lesson_date && /^\d{4}-\d{2}-\d{2}$/.test(session.lesson_date) ? session.lesson_date : new Date().toISOString().slice(0, 10);
-  const preview =
-    sent.bodyPreview ||
-    renderMessageTemplate(
-      'Sayın veli, {{student_name}} {{lesson_date}} tarihinde {{lesson_time}} başlangıçlı {{class_name}} sınıfı {{subject}} grup canlı dersine katılmamıştır (yoklama: gelmedi).',
-      vars
-    );
-  try {
-    await supabaseAdmin.from('message_logs').insert({
-      student_id: studentId,
-      kind: 'class_absent_notice_1',
-      related_id: session.id,
-      message: preview,
-      status: sent.ok ? 'sent' : 'failed',
-      log_date: logDate,
-      error: sent.ok ? null : sent.error || 'send_failed',
-      phone: parentPhone,
-      twilio_sid: null,
-      twilio_error_code: sent.errorCode || null,
-      twilio_content_sid: null,
-      meta_message_id: sent.sid || null,
-      meta_template_name: sent.meta_template_name || null
-    });
-  } catch {
-    /* log tablosu yoksa veya unique — yoklama akışını bozma */
-  }
-  return sent.ok
-    ? { ok: true, student_id: studentId }
-    : {
-        ok: false,
-        student_id: studentId,
-        note: sent.error || 'whatsapp_failed',
-        error_code: sent.errorCode != null ? String(sent.errorCode) : null
-      };
-}
-
-async function attendanceAutoWaEnabled(institutionId) {
-  const iid = institutionId != null && institutionId !== '' ? String(institutionId).trim() : '';
-  if (!iid) return true;
-  const { data, error } = await supabaseAdmin
-    .from('attendance_institution_prefs')
-    .select('auto_whatsapp_absent')
-    .eq('institution_id', iid)
-    .maybeSingle();
-  if (error || !data) return true;
-  return data.auto_whatsapp_absent !== false;
-}
-
 function normalizeAttendanceStatus(raw) {
   const v = String(raw || '').trim().toLowerCase();
   if (v === 'present' || v === 'absent' || v === 'late') return v;
@@ -435,6 +365,47 @@ async function canAccessClassLiveRow(actor, role, row) {
   );
 }
 
+function bbbFieldsFromResolved(resolved) {
+  if (!resolved?.bbbMeetingId && !resolved?.bbbAttendeePw) return {};
+  return {
+    ...(resolved.bbbMeetingId ? { bbb_meeting_id: resolved.bbbMeetingId } : {}),
+    ...(resolved.bbbAttendeePw ? { bbb_attendee_pw: resolved.bbbAttendeePw } : {})
+  };
+}
+
+async function resolveStudentBbbJoinUrl(actor, row, ensured) {
+  let sid = actor.student_id ? String(actor.student_id).trim() : '';
+  if (!sid && actor.sub) {
+    const { data: userRow } = await supabaseAdmin
+      .from('users')
+      .select('email, institution_id')
+      .eq('id', actor.sub)
+      .maybeSingle();
+    const resolved = await resolveStudentRowForUser({
+      userId: actor.sub,
+      email: userRow?.email,
+      institutionId: userRow?.institution_id ?? actor.institution_id ?? null
+    });
+    if (resolved?.id) sid = String(resolved.id).trim();
+  }
+  if (!sid) return null;
+  const { data: student } = await supabaseAdmin.from('students').select('name').eq('id', sid).maybeSingle();
+  const fullName = String(student?.name || '').trim();
+  if (!fullName) return null;
+
+  const attendeeLink = String(ensured.attendeeLink || row.meeting_link || '').trim();
+  const meetingId =
+    String(row.bbb_meeting_id || ensured.meetingId || '').trim() ||
+    parseBbbMeetingIdFromJoinUrl(attendeeLink) ||
+    '';
+  const attendeePw =
+    String(row.bbb_attendee_pw || ensured.attendeePW || '').trim() ||
+    parseBbbJoinCredentials(attendeeLink)?.attendeePassword ||
+    '';
+  if (!meetingId || !attendeePw) return null;
+  return buildBbbAttendeeJoinUrl({ meetingId, attendeePassword: attendeePw, fullName });
+}
+
 async function handleClassLiveBbbJoin(req, res, actor, role) {
   const slotMode = String(req.query?.kind || 'session').trim() === 'slot';
   const table = slotMode ? 'class_weekly_slots' : 'class_sessions';
@@ -472,8 +443,11 @@ async function handleClassLiveBbbJoin(req, res, actor, role) {
     patchLinks: (id, links) =>
       patchRowMeetingLinks(table, id, {
         meeting_link: links.meeting_link,
-        meeting_link_moderator: links.meeting_link_moderator
-      })
+        meeting_link_moderator: links.meeting_link_moderator,
+        bbb_meeting_id: links.bbb_meeting_id,
+        bbb_attendee_pw: links.bbb_attendee_pw
+      }),
+    resolveStudentJoinUrl: slotMode ? undefined : (act, row, ensured) => resolveStudentBbbJoinUrl(act, row, ensured)
   });
 }
 
@@ -1020,6 +994,7 @@ export default async function handler(req, res) {
           teacher_id: teacherId,
           meeting_link: meetingLink,
           ...(meetingLinkModerator ? { meeting_link_moderator: meetingLinkModerator } : {}),
+          ...bbbFieldsFromResolved(resolved),
           homework: String(body.homework || '').trim() || null,
           status: 'scheduled'
         });
@@ -1099,6 +1074,34 @@ export default async function handler(req, res) {
       });
     }
 
+    if (op === 'bbb-sync-attendance') {
+      const sessionId = String(body.session_id || '').trim();
+      if (!sessionId) return res.status(400).json({ error: 'session_id_required' });
+      const { data: session } = await supabaseAdmin
+        .from('class_sessions')
+        .select('*')
+        .eq('id', sessionId)
+        .maybeSingle();
+      if (!session) return res.status(404).json({ error: 'session_not_found' });
+      const details = await getClassDetails(session.class_id);
+      if (!isAdminRole(role) && session.teacher_id !== actor.sub && !details.teacher_ids.includes(actor.sub)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      await pollBbbPresenceForSession(session);
+      const { data: fresh } = await supabaseAdmin
+        .from('class_sessions')
+        .select('*')
+        .eq('id', sessionId)
+        .maybeSingle();
+      const result = await applyAutoAttendanceForClassSession(
+        fresh || session,
+        details.student_ids || [],
+        details.class?.name || 'Sınıf',
+        { force: true }
+      );
+      return res.status(200).json({ ok: true, ...result });
+    }
+
     if (op === 'mark-attendance') {
       const sessionId = String(body.session_id || '').trim();
       const rows = Array.isArray(body.attendance) ? body.attendance : [];
@@ -1135,29 +1138,26 @@ export default async function handler(req, res) {
         .upsert(prepared, { onConflict: 'session_id,student_id' });
       if (error) return res.status(500).json({ error: error.message });
 
-      const className = details.class?.name || 'Sınıf';
       const instKey = session.institution_id != null ? String(session.institution_id).trim() : '';
-      const allowAutoWa = await attendanceAutoWaEnabled(instKey);
+      const className = details.class?.name || 'Sınıf';
       /** @type {{ student_id: string, ok: boolean, note?: string|null, error_code?: string|null, skipped?: string }[]} */
       const absent_whatsapp = [];
       for (const row of prepared) {
         if (row.status !== 'absent') continue;
         if (priorStatusByStudent.get(row.student_id) === 'absent') continue;
-        if (!allowAutoWa) {
-          absent_whatsapp.push({
-            student_id: row.student_id,
-            ok: true,
-            skipped: 'auto_whatsapp_absent_disabled'
-          });
-          continue;
-        }
         try {
-          const r = await sendAbsentNotice({ session, className, studentId: row.student_id });
+          const r = await sendAbsentNoticeForStudent({
+            session,
+            className,
+            studentId: row.student_id,
+            institutionId: instKey
+          });
           absent_whatsapp.push({
             student_id: row.student_id,
             ok: Boolean(r.ok),
             note: r.ok ? null : r.note || null,
-            error_code: r.ok ? null : r.error_code || null
+            error_code: r.ok ? null : r.error_code || null,
+            skipped: r.skipped
           });
         } catch (e) {
           absent_whatsapp.push({
@@ -1262,6 +1262,7 @@ export default async function handler(req, res) {
           teacher_id: teacherId,
           meeting_link: meetingLink,
           ...(meetingLinkModerator ? { meeting_link_moderator: meetingLinkModerator } : {}),
+          ...bbbFieldsFromResolved(resolved),
           homework: String(body.homework || '').trim() || null
         });
       if (error) return res.status(500).json({ error: error.message });
@@ -1352,6 +1353,7 @@ export default async function handler(req, res) {
           teacher_id: teacherId,
           meeting_link: meetingLink,
           ...(meetingLinkModerator ? { meeting_link_moderator: meetingLinkModerator } : {}),
+          ...bbbFieldsFromResolved(resolved),
           homework: String(body.homework || '').trim() || null,
           status: 'scheduled'
         });
