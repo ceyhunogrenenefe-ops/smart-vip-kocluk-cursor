@@ -5,7 +5,7 @@ import { useApp } from '../context/AppContext';
 import { apiFetch } from '../lib/session';
 import { detectPlatform } from '../lib/detectMeetingPlatform';
 import type { TeacherLesson, TeacherStudentLessonSummaryRow, UserRole } from '../types';
-import LiveLessonCard from '../components/liveLessons/LiveLessonCard';
+import BbbAutoLinkFieldHint from '../components/liveLessons/BbbAutoLinkFieldHint';
 import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShell';
 import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
 import { lessonJoinUrl } from '../lib/liveLessonUtils';
@@ -447,6 +447,8 @@ export default function LiveLessons() {
           setError(
             'Paket birimi yetersiz (ders süresine göre gerekli birim kotayı aşıyor). Öğrenciler sayfasından paket üst limitini artırın veya daha kısa süreli ders planlayın.'
           );
+        } else if (j.code === 'meeting_link_required' || j.code === 'bbb_create_failed') {
+          setError(String(j.error || 'Toplantı bağlantısı oluşturulamadı'));
         } else {
           const errParts = [j.error, j.details, j.hint].filter(Boolean);
           setError(errParts.length ? errParts.map(String).join(' — ') : 'Kayıt oluşturulamadı');
@@ -505,16 +507,19 @@ export default function LiveLessons() {
   };
 
   const saveEdit = async () => {
-    if (!editingLesson || !editTitle.trim() || !editMeetingLink.trim()) return;
+    if (!editingLesson || !editTitle.trim()) return;
     setEditBusy(true);
     setError(null);
     try {
+      const trimmedLink = editMeetingLink.trim();
       const body: Record<string, unknown> = {
         id: editingLesson.id,
         title: editTitle.trim(),
-        meeting_link: editMeetingLink.trim(),
-        platform: detectPlatform(editMeetingLink.trim())
+        meeting_link: trimmedLink
       };
+      if (trimmedLink) {
+        body.platform = detectPlatform(trimmedLink);
+      }
       if (editingLesson.status === 'scheduled') {
         body.date = editDateStr;
         body.start_time = editStart.length === 5 ? `${editStart}:00` : editStart;
@@ -533,7 +538,11 @@ export default function LiveLessons() {
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(String(j.error || 'Kaydedilemedi'));
+        if (j.code === 'meeting_link_required' || j.code === 'bbb_create_failed') {
+          setError(String(j.error || 'Toplantı bağlantısı oluşturulamadı'));
+        } else {
+          setError(String(j.error || 'Kaydedilemedi'));
+        }
         return;
       }
       setEditingLesson(null);
@@ -991,20 +1000,11 @@ export default function LiveLessons() {
               />
             </label>
           </div>
-          <label className="block text-sm">
-            <span className="text-slate-600">
-              Toplantı bağlantısı <span className="font-normal text-slate-400">(isteğe bağlı)</span>
-            </span>
-            <span className="block text-xs text-slate-500 mt-0.5 font-normal">
-              Meet/Zoom/BBB linki yazabilirsiniz; BBB API tanımlıysa boş bırakınca otomatik oda oluşturulur.
-            </span>
-            <input
-              value={meetingLink}
-              onChange={(e) => setMeetingLink(e.target.value)}
-              className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2"
-              placeholder="https://zoom.us/j/… veya boş bırakın (BBB otomatik)"
-            />
-          </label>
+          <BbbAutoLinkFieldHint
+            id="live-lesson-meeting-link"
+            value={meetingLink}
+            onChange={setMeetingLink}
+          />
           <p className="text-sm text-slate-600">
             {meetingLink.trim() ? (
               <>
@@ -1325,14 +1325,11 @@ export default function LiveLessons() {
                 />
               </label>
             </div>
-            <label className="block text-sm">
-              <span className="text-slate-600">Toplantı bağlantısı</span>
-              <input
-                value={editMeetingLink}
-                onChange={(e) => setEditMeetingLink(e.target.value)}
-                className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2"
-              />
-            </label>
+            <BbbAutoLinkFieldHint
+              id="live-lesson-edit-meeting-link"
+              value={editMeetingLink}
+              onChange={setEditMeetingLink}
+            />
             <div className="flex gap-2 pt-2">
               <button
                 type="button"

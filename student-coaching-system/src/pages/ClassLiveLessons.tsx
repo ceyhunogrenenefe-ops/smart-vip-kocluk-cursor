@@ -11,7 +11,7 @@ import { useStudentMobileShell } from '../hooks/useStudentMobileShell';
 import { turkishFold } from '../lib/userBulkImport';
 import type { Student } from '../types';
 import { GripVertical, KeyRound, Loader2, Pencil, PlayCircle, Trash2, FileDown, Bell } from 'lucide-react';
-import { downloadCalendarPdfWithSnapshot } from '../lib/pdfLiveWeekGrid';
+import BbbAutoLinkFieldHint from '../components/liveLessons/BbbAutoLinkFieldHint';
 
 type ClassRow = {
   id: string;
@@ -1206,21 +1206,11 @@ export default function ClassLiveLessons() {
               ))}
             </select>
           </div>
-          <div>
-            <label className="block text-xs text-slate-500 mb-0.5">
-              Ders bağlantısı <span className="font-normal text-slate-400">(isteğe bağlı)</span>
-            </label>
-            <p className="text-xs text-slate-500 mb-1">
-              Meet/Zoom/BBB linki yazabilirsiniz; BBB API tanımlıysa boş bırakınca otomatik oda oluşturulur.
-            </p>
-            <input
-              type="url"
-              value={slotMeetingLink}
-              onChange={(e) => setSlotMeetingLink(e.target.value)}
-              placeholder="https://… (boş bırakılabilir — BBB otomatik)"
-              className="w-full border border-slate-200 rounded px-3 py-2 text-sm"
-            />
-          </div>
+          <BbbAutoLinkFieldHint
+            id="class-slot-meeting-link"
+            value={slotMeetingLink}
+            onChange={setSlotMeetingLink}
+          />
           {scheduleKind === 'template' && (
             <div className="max-w-xs">
               <label className="block text-xs text-slate-500 mb-0.5">Şablon süre (dk)</label>
@@ -1673,19 +1663,15 @@ export default function ClassLiveLessons() {
                 Liste, sınıfa atanmış öğretmenlerden gelir; yeni öğretmen için önce sınıf atamalarını güncelleyin.
               </span>
             </label>
-            <label className="block text-sm">
-              <span className="text-slate-600">Toplantı veya kayıt bağlantısı</span>
-              <span className="block text-xs text-slate-500 mt-0.5 font-normal">
-                Canlı ders için Meet/Zoom/BBB linki; ders bittikten sonra aynı alana kayıt URL’sini yapıştırabilirsiniz — öğrenci «Kaydı izle» ile açar. Boş bırakırsanız ve BBB API tanımlıysa yeni oturumda otomatik oda oluşturulur.
-              </span>
-              <input
-                type="url"
-                value={esLink}
-                onChange={(e) => setEsLink(e.target.value)}
-                placeholder="https://…"
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
-              />
-            </label>
+            <BbbAutoLinkFieldHint
+              id="class-session-edit-link"
+              value={esLink}
+              onChange={setEsLink}
+              placeholder="Canlı ders linki veya kayıt URL’si"
+            />
+            <p className="text-xs text-slate-500 -mt-1">
+              Ders bittikten sonra aynı alana kayıt URL’sini yapıştırabilirsiniz — öğrenci «Kaydı izle» ile açar.
+            </p>
             <label className="block text-sm">
               <span className="text-slate-600">Ödev (isteğe bağlı)</span>
               <textarea
@@ -1792,14 +1778,7 @@ export default function ClassLiveLessons() {
                 ))}
               </select>
             </label>
-            <label className="block text-sm">
-              <span className="text-slate-600">Bağlantı</span>
-              <input
-                value={slLink}
-                onChange={(e) => setSlLink(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
-              />
-            </label>
+            <BbbAutoLinkFieldHint id="class-slot-edit-link" value={slLink} onChange={setSlLink} />
             <label className="block text-sm">
               <span className="text-slate-600">Ödev (isteğe bağlı)</span>
               <textarea

@@ -1,11 +1,7 @@
-import crypto from 'crypto';
 import { requireAuthenticatedActor, hasInstitutionAccess } from '../api/_lib/auth.js';
-import {
-  createBbbMeetingAndJoinLink,
-  isBbbConfigured,
-  enrichMeetingRowsJoinLink,
-  sanitizeBbbMeetingId
-} from '../api/_lib/bbb.js';
+import { enrichMeetingRowsJoinLink } from '../api/_lib/bbb.js';
+import { resolveBbbOrManualMeetingLink } from '../api/_lib/resolve-bbb-meeting-link.js';
+import { insertOneOptionalModerator, insertManyOptionalModerator } from '../api/_lib/supabase-optional-moderator.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { detectPlatform } from '../api/_lib/detect-meeting-platform.js';
@@ -123,7 +119,6 @@ async function userDisplayName(userId, fallback = 'Kullanıcı') {
   return data?.name || data?.email || fallback;
 }
 
-/** Manuel link yoksa BBB API tanımlıysa otomatik katılımcı join URL üretir. */
 async function resolveTeacherLessonMeetingLink({
   manualLink,
   title,
@@ -132,28 +127,15 @@ async function resolveTeacherLessonMeetingLink({
   durationMinutes,
   meetingKeyPrefix
 }) {
-  const trimmed = String(manualLink || '').trim();
-  if (trimmed) {
-    return { meetingLink: trimmed, meetingLinkModerator: null, platform: detectPlatform(trimmed), autoBbb: null };
-  }
-  if (!isBbbConfigured()) return null;
-
   const teacherName = await userDisplayName(teacherId, 'Öğretmen');
-  const attendeeName = String(studentName || '').trim() || 'Öğrenci';
-  const meetingId = sanitizeBbbMeetingId(`${meetingKeyPrefix}${Date.now()}${crypto.randomBytes(4).toString('hex')}`);
-  const bbb = await createBbbMeetingAndJoinLink({
-    meetingId,
+  return resolveBbbOrManualMeetingLink({
+    manualLink,
     meetingName: title || 'Canlı özel ders',
-    attendeeName,
+    attendeeName: String(studentName || '').trim() || 'Öğrenci',
     moderatorName: teacherName,
-    durationMinutes
+    durationMinutes,
+    meetingKeyPrefix
   });
-  return {
-    meetingLink: bbb.attendeeJoinLink,
-    meetingLinkModerator: bbb.moderatorJoinLink,
-    platform: 'bbb',
-    autoBbb: { ok: true, provider: 'bbb', meetingId: bbb.meetingId }
-  };
 }
 
 async function hasTeacherConflict({ teacherId, lessonDate, startTime, endTime, excludeId = null }) {
@@ -516,30 +498,23 @@ async function handleCreate(req, res) {
     let meetingLinkModerator = null;
     let platform;
     let autoBbb = null;
-    try {
-      const resolved = await resolveTeacherLessonMeetingLink({
-        manualLink: manualMeetingLink,
-        title,
-        studentName: student.name,
-        teacherId,
-        durationMinutes: plannedMinutes,
-        meetingKeyPrefix: `teacher-lesson-${studentId}`
+    const resolved = await resolveTeacherLessonMeetingLink({
+      manualLink: manualMeetingLink,
+      title,
+      studentName: student.name,
+      teacherId,
+      durationMinutes: plannedMinutes,
+      meetingKeyPrefix: `teacherlesson${studentId}`
+    });
+    if (!resolved.ok) {
+      return jsonError(res, resolved.code === 'bbb_create_failed' ? 502 : 400, resolved.error, {
+        code: resolved.code
       });
-      if (!resolved) {
-        return jsonError(
-          res,
-          400,
-          'Toplantı bağlantısı gerekli. Meet/Zoom/BBB linki girin veya BBB API ayarlarını tanımlayın.',
-          { code: 'meeting_link_required' }
-        );
-      }
-      meetingLink = resolved.meetingLink;
-      meetingLinkModerator = resolved.meetingLinkModerator;
-      platform = platformBody || resolved.platform;
-      autoBbb = resolved.autoBbb;
-    } catch (e) {
-      return jsonError(res, 502, errorMessage(e), { code: 'bbb_create_failed' });
     }
+    meetingLink = resolved.meetingLink;
+    meetingLinkModerator = resolved.meetingLinkModerator;
+    platform = platformBody || resolved.platform;
+    autoBbb = resolved.autoBbb;
 
     if (quotaCap != null) {
       const usedUnits = await sumLessonUnitsUsed(studentId, teacherId);
@@ -581,11 +556,7 @@ async function handleCreate(req, res) {
     };
     if (body.id) insertPayload.id = normalizeUuidOrGenerate(body.id);
 
-    const { data: row, error: insErr } = await supabaseAdmin
-      .from('teacher_lessons')
-      .insert(insertPayload)
-      .select('*')
-      .single();
+    const { data: row, error: insErr } = await insertOneOptionalModerator('teacher_lessons', insertPayload);
     if (insErr) {
       if (isTeacherLessonsRelationMissingError(insErr)) {
         return res.status(503).json(teacherLessonsMissingBody());
@@ -682,30 +653,23 @@ async function handleCreateLessonSeries(req, res) {
     let meetingLinkModerator = null;
     let platform;
     let autoBbb = null;
-    try {
-      const resolved = await resolveTeacherLessonMeetingLink({
-        manualLink: manualMeetingLink,
-        title,
-        studentName: student.name,
-        teacherId,
-        durationMinutes: plannedMinutes,
-        meetingKeyPrefix: `teacher-lesson-series-${studentId}`
+    const resolved = await resolveTeacherLessonMeetingLink({
+      manualLink: manualMeetingLink,
+      title,
+      studentName: student.name,
+      teacherId,
+      durationMinutes: plannedMinutes,
+      meetingKeyPrefix: `teacherlessonseries${studentId}`
+    });
+    if (!resolved.ok) {
+      return jsonError(res, resolved.code === 'bbb_create_failed' ? 502 : 400, resolved.error, {
+        code: resolved.code
       });
-      if (!resolved) {
-        return jsonError(
-          res,
-          400,
-          'Toplantı bağlantısı gerekli. Meet/Zoom/BBB linki girin veya BBB API ayarlarını tanımlayın.',
-          { code: 'meeting_link_required' }
-        );
-      }
-      meetingLink = resolved.meetingLink;
-      meetingLinkModerator = resolved.meetingLinkModerator;
-      platform = platformBody || resolved.platform;
-      autoBbb = resolved.autoBbb;
-    } catch (e) {
-      return jsonError(res, 502, errorMessage(e), { code: 'bbb_create_failed' });
     }
+    meetingLink = resolved.meetingLink;
+    meetingLinkModerator = resolved.meetingLinkModerator;
+    platform = platformBody || resolved.platform;
+    autoBbb = resolved.autoBbb;
 
     const { data: quotaRow, error: qErr } = await supabaseAdmin
       .from('student_teacher_lesson_quota')
@@ -825,10 +789,7 @@ async function handleCreateLessonSeries(req, res) {
       });
     }
 
-    const { data: insRows, error: insE } = await supabaseAdmin
-      .from('teacher_lessons')
-      .insert(payloads)
-      .select('*');
+    const { data: insRows, error: insE } = await insertManyOptionalModerator('teacher_lessons', payloads);
     if (insE) {
       await supabaseAdmin.from('teacher_lesson_series').delete().eq('id', seriesId);
       if (isTeacherLessonsRelationMissingError(insE)) {
@@ -996,12 +957,45 @@ async function handlePatch(req, res) {
     }
     if (typeof body.title === 'string') patch.title = body.title.trim();
     if (typeof body.meeting_link === 'string') {
-      patch.meeting_link = String(body.meeting_link).trim();
-      if (body.platform) {
-        const p = String(body.platform).toLowerCase();
-        if (['bbb', 'zoom', 'meet', 'other'].includes(p)) patch.platform = p;
-      } else {
-        patch.platform = detectPlatform(patch.meeting_link);
+      const manual = String(body.meeting_link || '').trim();
+      const existing = String(row.meeting_link || '').trim();
+      if (manual) {
+        patch.meeting_link = manual;
+        if (body.platform) {
+          const p = String(body.platform).toLowerCase();
+          if (['bbb', 'zoom', 'meet', 'other'].includes(p)) patch.platform = p;
+        } else {
+          patch.platform = detectPlatform(manual);
+        }
+      } else if (!existing) {
+        const { data: studentRow } = await supabaseAdmin
+          .from('students')
+          .select('name')
+          .eq('id', row.student_id)
+          .maybeSingle();
+        const resolved = await resolveTeacherLessonMeetingLink({
+          manualLink: '',
+          title: String((patch.title ?? row.title) || 'Canlı özel ders'),
+          studentName: studentRow?.name,
+          teacherId: String((patch.teacher_id ?? row.teacher_id) || ''),
+          durationMinutes:
+            durationMinutesPatch !== null
+              ? durationMinutesPatch
+              : row.duration_minutes != null
+                ? Number(row.duration_minutes)
+                : 60,
+          meetingKeyPrefix: `teacherlessonpatch${row.id}`
+        });
+        if (!resolved.ok) {
+          return jsonError(res, resolved.code === 'bbb_create_failed' ? 502 : 400, resolved.error, {
+            code: resolved.code
+          });
+        }
+        patch.meeting_link = resolved.meetingLink;
+        if (resolved.meetingLinkModerator) {
+          patch.meeting_link_moderator = resolved.meetingLinkModerator;
+        }
+        patch.platform = resolved.platform;
       }
     }
     if (typeof body.date === 'string' || typeof body.lesson_date === 'string') {

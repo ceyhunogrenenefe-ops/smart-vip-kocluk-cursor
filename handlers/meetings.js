@@ -868,6 +868,9 @@ export default async function handler(req, res) {
   const op = raw || (req.method === 'GET' ? 'list' : '');
 
   if (op === 'list') return handleList(req, res);
+  if (op === 'bbb-status') {
+    return res.status(200).json({ configured: isBbbConfigured() });
+  }
   if (op === 'create') return handleCreate(req, res);
   if (op === 'create-series') return handleCreateSeries(req, res);
   if (op === 'delete-series') return handleDeleteSeries(req, res);

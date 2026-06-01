@@ -3,6 +3,10 @@ import { Video, Link2, Copy, ExternalLink, Presentation, PlayCircle } from 'luci
 import type { TeacherLesson, TeacherLessonPlatform } from '../../types';
 import { isApproaching, isOngoing, PLATFORM_LABEL, lessonJoinUrl } from '../../lib/liveLessonUtils';
 
+function joinUrlForLesson(lesson: { join_link?: string | null; meeting_link?: string | null }) {
+  return lessonJoinUrl(lesson);
+}
+
 type Props = {
   lesson: TeacherLesson;
   /** Öğrenci adı (öğretmen listesinde) */
