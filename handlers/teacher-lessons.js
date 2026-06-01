@@ -1,4 +1,6 @@
+import crypto from 'crypto';
 import { requireAuthenticatedActor, hasInstitutionAccess } from '../api/_lib/auth.js';
+import { createBbbMeetingAndJoinLink, isBbbConfigured, enrichMeetingRowsJoinLink } from '../api/_lib/bbb.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { detectPlatform } from '../api/_lib/detect-meeting-platform.js';
@@ -108,6 +110,45 @@ async function attachTeacherNamesToLessons(mapped) {
     ...r,
     teacher_name: names[String(r.teacher_id || '')] || ''
   }));
+}
+
+async function userDisplayName(userId, fallback = 'Kullanıcı') {
+  if (!userId) return fallback;
+  const { data } = await supabaseAdmin.from('users').select('name,email').eq('id', userId).maybeSingle();
+  return data?.name || data?.email || fallback;
+}
+
+/** Manuel link yoksa BBB API tanımlıysa otomatik katılımcı join URL üretir. */
+async function resolveTeacherLessonMeetingLink({
+  manualLink,
+  title,
+  studentName,
+  teacherId,
+  durationMinutes,
+  meetingKeyPrefix
+}) {
+  const trimmed = String(manualLink || '').trim();
+  if (trimmed) {
+    return { meetingLink: trimmed, meetingLinkModerator: null, platform: detectPlatform(trimmed), autoBbb: null };
+  }
+  if (!isBbbConfigured()) return null;
+
+  const teacherName = await userDisplayName(teacherId, 'Öğretmen');
+  const attendeeName = String(studentName || '').trim() || 'Öğrenci';
+  const meetingId = `${meetingKeyPrefix}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+  const bbb = await createBbbMeetingAndJoinLink({
+    meetingId,
+    meetingName: title || 'Canlı özel ders',
+    attendeeName,
+    moderatorName: teacherName,
+    durationMinutes
+  });
+  return {
+    meetingLink: bbb.attendeeJoinLink,
+    meetingLinkModerator: bbb.moderatorJoinLink,
+    platform: 'bbb',
+    autoBbb: { ok: true, provider: 'bbb', meetingId: bbb.meetingId }
+  };
 }
 
 async function hasTeacherConflict({ teacherId, lessonDate, startTime, endTime, excludeId = null }) {
@@ -223,7 +264,7 @@ async function handleList(req, res) {
         return String(a.start_time || '').localeCompare(String(b.start_time || ''));
       });
       const mapped = merged.map(mapRowToApi);
-      return res.status(200).json({ data: await attachTeacherNamesToLessons(mapped) });
+      return res.status(200).json({ data: enrichMeetingRowsJoinLink(await attachTeacherNamesToLessons(mapped), actor.role) });
     }
 
     let q = teacherLessonsBaseSelect();
@@ -271,7 +312,7 @@ async function handleList(req, res) {
     }
 
     const mapped = (data || []).map(mapRowToApi);
-    return res.status(200).json({ data: await attachTeacherNamesToLessons(mapped) });
+    return res.status(200).json({ data: enrichMeetingRowsJoinLink(await attachTeacherNamesToLessons(mapped), actor.role) });
   } catch (e) {
     const msg = errorMessage(e);
     if (isAuthFailureMessage(msg)) return jsonError(res, 401, msg);
@@ -422,15 +463,14 @@ async function handleCreate(req, res) {
     const lessonDate = String(body.date || body.lesson_date || '').trim();
     const startTime = body.start_time || body.startTime;
     const durationMinutes = Number(body.duration_minutes || body.durationMinutes || 60);
-    const meetingLink = String(body.meeting_link || body.meetingLink || '').trim();
-    let platform = body.platform ? String(body.platform).toLowerCase() : '';
-    if (platform && !['bbb', 'zoom', 'meet', 'other'].includes(platform)) {
+    const manualMeetingLink = String(body.meeting_link || body.meetingLink || '').trim();
+    const platformBody = body.platform ? String(body.platform).toLowerCase() : '';
+    if (platformBody && !['bbb', 'zoom', 'meet', 'other'].includes(platformBody)) {
       return jsonError(res, 400, 'Geçersiz platform.');
     }
-    if (!platform) platform = detectPlatform(meetingLink);
 
-    if (!studentId || !title || !lessonDate || !startTime || !meetingLink) {
-      return jsonError(res, 400, 'student_id, title, date, start_time ve meeting_link zorunludur.');
+    if (!studentId || !title || !lessonDate || !startTime) {
+      return jsonError(res, 400, 'student_id, title, date ve start_time zorunludur.');
     }
 
     const { data: student, error: stErr } = await supabaseAdmin
@@ -466,6 +506,36 @@ async function handleCreate(req, res) {
     const quotaCap = quotaRow?.credits_total;
     const plannedMinutes = Math.max(15, Math.round(Number(durationMinutes) || 60));
     const newUnits = lessonUnitsFromDurationMinutes(plannedMinutes);
+
+    let meetingLink;
+    let meetingLinkModerator = null;
+    let platform;
+    let autoBbb = null;
+    try {
+      const resolved = await resolveTeacherLessonMeetingLink({
+        manualLink: manualMeetingLink,
+        title,
+        studentName: student.name,
+        teacherId,
+        durationMinutes: plannedMinutes,
+        meetingKeyPrefix: `teacher-lesson-${studentId}`
+      });
+      if (!resolved) {
+        return jsonError(
+          res,
+          400,
+          'Toplantı bağlantısı gerekli. Meet/Zoom/BBB linki girin veya BBB API ayarlarını tanımlayın.',
+          { code: 'meeting_link_required' }
+        );
+      }
+      meetingLink = resolved.meetingLink;
+      meetingLinkModerator = resolved.meetingLinkModerator;
+      platform = platformBody || resolved.platform;
+      autoBbb = resolved.autoBbb;
+    } catch (e) {
+      return jsonError(res, 502, errorMessage(e), { code: 'bbb_create_failed' });
+    }
+
     if (quotaCap != null) {
       const usedUnits = await sumLessonUnitsUsed(studentId, teacherId);
       if (usedUnits + newUnits > quotaCap) {
@@ -499,6 +569,7 @@ async function handleCreate(req, res) {
       start_time: win.start_time,
       end_time: win.end_time,
       meeting_link: meetingLink,
+      ...(meetingLinkModerator ? { meeting_link_moderator: meetingLinkModerator } : {}),
       platform,
       status: 'scheduled',
       duration_minutes: win.duration_minutes
@@ -527,7 +598,7 @@ async function handleCreate(req, res) {
     }
 
     await syncTeacherLessonsScheduledToCompleted();
-    return res.status(200).json({ data: mapRowToApi(row) });
+    return res.status(200).json({ data: mapRowToApi(row), auto_bbb: autoBbb });
   } catch (e) {
     const msg = errorMessage(e);
     if (isAuthFailureMessage(msg)) return jsonError(res, 401, msg);
@@ -565,15 +636,14 @@ async function handleCreateLessonSeries(req, res) {
     const lessonDate = String(body.date || body.lesson_date || '').trim();
     const startTime = body.start_time || body.startTime;
     const durationMinutes = Number(body.duration_minutes || body.durationMinutes || 60);
-    const meetingLink = String(body.meeting_link || body.meetingLink || '').trim();
-    let platform = body.platform ? String(body.platform).toLowerCase() : '';
-    if (platform && !['bbb', 'zoom', 'meet', 'other'].includes(platform)) {
+    const manualMeetingLink = String(body.meeting_link || body.meetingLink || '').trim();
+    const platformBody = body.platform ? String(body.platform).toLowerCase() : '';
+    if (platformBody && !['bbb', 'zoom', 'meet', 'other'].includes(platformBody)) {
       return jsonError(res, 400, 'Geçersiz platform.');
     }
-    if (!platform) platform = detectPlatform(meetingLink);
 
-    if (!studentId || !title || !lessonDate || !startTime || !meetingLink) {
-      return jsonError(res, 400, 'student_id, title, date, start_time ve meeting_link zorunludur.');
+    if (!studentId || !title || !lessonDate || !startTime) {
+      return jsonError(res, 400, 'student_id, title, date ve start_time zorunludur.');
     }
     if (recurrenceUntil < lessonDate) {
       return jsonError(res, 400, 'Bitiş tarihi ilk dersten önce olamaz.');
@@ -602,6 +672,36 @@ async function handleCreateLessonSeries(req, res) {
     }
 
     const plannedMinutes = Math.max(15, Math.round(Number(durationMinutes) || 60));
+
+    let meetingLink;
+    let meetingLinkModerator = null;
+    let platform;
+    let autoBbb = null;
+    try {
+      const resolved = await resolveTeacherLessonMeetingLink({
+        manualLink: manualMeetingLink,
+        title,
+        studentName: student.name,
+        teacherId,
+        durationMinutes: plannedMinutes,
+        meetingKeyPrefix: `teacher-lesson-series-${studentId}`
+      });
+      if (!resolved) {
+        return jsonError(
+          res,
+          400,
+          'Toplantı bağlantısı gerekli. Meet/Zoom/BBB linki girin veya BBB API ayarlarını tanımlayın.',
+          { code: 'meeting_link_required' }
+        );
+      }
+      meetingLink = resolved.meetingLink;
+      meetingLinkModerator = resolved.meetingLinkModerator;
+      platform = platformBody || resolved.platform;
+      autoBbb = resolved.autoBbb;
+    } catch (e) {
+      return jsonError(res, 502, errorMessage(e), { code: 'bbb_create_failed' });
+    }
+
     const { data: quotaRow, error: qErr } = await supabaseAdmin
       .from('student_teacher_lesson_quota')
       .select('credits_total')
@@ -660,6 +760,7 @@ async function handleCreateLessonSeries(req, res) {
         student_id: studentId,
         title,
         meeting_link: meetingLink,
+        ...(meetingLinkModerator ? { meeting_link_moderator: meetingLinkModerator } : {}),
         platform,
         interval_days: intervalDays,
         duration_minutes: plannedMinutes,
@@ -710,6 +811,7 @@ async function handleCreateLessonSeries(req, res) {
         start_time: win.start_time,
         end_time: win.end_time,
         meeting_link: meetingLink,
+        ...(meetingLinkModerator ? { meeting_link_moderator: meetingLinkModerator } : {}),
         platform,
         status: 'scheduled',
         duration_minutes: win.duration_minutes,
@@ -736,7 +838,8 @@ async function handleCreateLessonSeries(req, res) {
         series_id: seriesId,
         count: (insRows || []).length,
         lessons: (insRows || []).map(mapRowToApi)
-      }
+      },
+      auto_bbb: autoBbb
     });
   } catch (e) {
     const msg = errorMessage(e);

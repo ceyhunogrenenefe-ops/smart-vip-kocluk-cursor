@@ -1,4 +1,6 @@
+import crypto from 'crypto';
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
+import { createBbbMeetingAndJoinLink, isBbbConfigured, enrichMeetingRowsJoinLink } from '../api/_lib/bbb.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { renderMessageTemplate } from '../api/_lib/template-engine.js';
@@ -16,6 +18,11 @@ import {
   sendClassLessonReminderForSession,
   markClassSessionReminderSent
 } from '../api/_lib/class-lesson-reminder-send.js';
+import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
+import {
+  insertOneOptionalModerator,
+  insertManyOptionalModerator
+} from '../api/_lib/supabase-optional-moderator.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -34,6 +41,42 @@ function normalizeRole(role) {
   return String(role || '')
     .toLowerCase()
     .trim();
+}
+
+async function teacherDisplayName(teacherId) {
+  if (!teacherId) return 'Öğretmen';
+  const { data } = await supabaseAdmin.from('users').select('name,email').eq('id', teacherId).maybeSingle();
+  return data?.name || data?.email || 'Öğretmen';
+}
+
+/** Manuel link yoksa BBB API tanımlıysa otomatik katılımcı join URL üretir. */
+async function resolveClassLessonMeetingLink({
+  manualLink,
+  subject,
+  className,
+  teacherId,
+  durationMinutes,
+  meetingKeyPrefix
+}) {
+  const trimmed = String(manualLink || '').trim();
+  if (trimmed) return { meetingLink: trimmed, meetingLinkModerator: null, autoBbb: null };
+
+  if (!isBbbConfigured()) return null;
+
+  const teacherName = await teacherDisplayName(teacherId);
+  const meetingId = `${meetingKeyPrefix}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+  const bbb = await createBbbMeetingAndJoinLink({
+    meetingId,
+    meetingName: `${subject} — ${className || 'Grup dersi'}`,
+    attendeeName: 'Öğrenci',
+    moderatorName: teacherName,
+    durationMinutes
+  });
+  return {
+    meetingLink: bbb.attendeeJoinLink,
+    meetingLinkModerator: bbb.moderatorJoinLink,
+    autoBbb: { ok: true, provider: 'bbb', meetingId: bbb.meetingId }
+  };
 }
 
 /** Öğrenci gibi /api/users erişemeyen roller için slot/oturum satırlarına öğretmen adı ekler */
@@ -189,38 +232,59 @@ function mapClassesInsertError(error) {
 
 async function getManagedClassIds(actor) {
   const role = normalizeRole(actor.role);
+  const roleTags = await normalizedUserRolesFromDb(actor.sub);
 
-  if (role === 'admin' || role === 'super_admin') {
+  if (
+    role === 'admin' ||
+    role === 'super_admin' ||
+    roleTags.includes('admin') ||
+    roleTags.includes('super_admin')
+  ) {
     return null;
   }
 
-  /** Koç: yalnızca kendi öğrencilerinin kayıtlı olduğu sınıflar */
-  if (role === 'coach') {
-    const cid = actor.coach_id ? String(actor.coach_id).trim() : '';
-    if (!cid) return [];
-    const { data: studs, error: se } = await supabaseAdmin
-      .from('students')
-      .select('id')
-      .eq('coach_id', cid);
-    if (se) throw se;
-    const studentIds = [...new Set((studs || []).map((s) => String(s.id).trim()).filter(Boolean))];
-    if (!studentIds.length) return [];
-    const { data: cs, error: ce } = await supabaseAdmin
-      .from('class_students')
-      .select('class_id')
-      .in('student_id', studentIds);
-    if (ce) throw ce;
-    return [...new Set((cs || []).map((r) => r.class_id).filter(Boolean))];
-  }
+  const classIds = new Set();
 
-  if (isTeacherRole(actor.role)) {
-    const { data } = await supabaseAdmin
+  /** Öğretmen: class_teachers atamaları (koç+öğretmen birlikte olsa da geçerli) */
+  if (roleTags.includes('teacher') || isTeacherRole(actor.role)) {
+    const { data, error } = await supabaseAdmin
       .from('class_teachers')
       .select('class_id')
       .eq('teacher_id', actor.sub);
-    return (data || []).map((r) => r.class_id).filter(Boolean);
+    if (error) throw error;
+    for (const row of data || []) {
+      if (row.class_id) classIds.add(row.class_id);
+    }
   }
-  if (role === 'student') {
+
+  /** Koç: yalnızca kendi öğrencilerinin kayıtlı olduğu sınıflar */
+  if (roleTags.includes('coach') || role === 'coach') {
+    const cid = actor.coach_id ? String(actor.coach_id).trim() : '';
+    if (cid) {
+      const { data: studs, error: se } = await supabaseAdmin
+        .from('students')
+        .select('id')
+        .eq('coach_id', cid);
+      if (se) throw se;
+      const studentIds = [...new Set((studs || []).map((s) => String(s.id).trim()).filter(Boolean))];
+      if (studentIds.length) {
+        const { data: cs, error: ce } = await supabaseAdmin
+          .from('class_students')
+          .select('class_id')
+          .in('student_id', studentIds);
+        if (ce) throw ce;
+        for (const row of cs || []) {
+          if (row.class_id) classIds.add(row.class_id);
+        }
+      }
+    }
+  }
+
+  if (roleTags.includes('teacher') || roleTags.includes('coach')) {
+    return [...classIds];
+  }
+
+  if (role === 'student' || roleTags.includes('student')) {
     let sid = actor.student_id ? String(actor.student_id).trim() : '';
     if (!sid && actor.sub) {
       const { data: userRow } = await supabaseAdmin
@@ -438,7 +502,7 @@ export default async function handler(req, res) {
       }
       const { data, error } = await q;
       if (error) return res.status(500).json({ error: error.message });
-      const enriched = await attachTeacherNameField(data || []);
+      const enriched = enrichMeetingRowsJoinLink(await attachTeacherNameField(data || []), role);
       return res.status(200).json({ data: enriched });
     }
 
@@ -541,7 +605,7 @@ export default async function handler(req, res) {
       }
       const { data, error } = await q;
       if (error) return res.status(500).json({ error: error.message });
-      const enriched = await attachTeacherNameField(data || []);
+      const enriched = enrichMeetingRowsJoinLink(await attachTeacherNameField(data || []), role);
       return res.status(200).json({ data: enriched });
     }
 
@@ -831,12 +895,14 @@ export default async function handler(req, res) {
           .from('class_students')
           .insert(studentIds.map((studentId) => ({ class_id: classId, student_id: studentId })));
       }
-      if (Object.prototype.hasOwnProperty.call(body, 'class_level') || Object.prototype.hasOwnProperty.call(body, 'branch')) {
+      if (Object.prototype.hasOwnProperty.call(body, 'class_level') || Object.prototype.hasOwnProperty.call(body, 'branch') || Object.prototype.hasOwnProperty.call(body, 'name')) {
         const clsPatch = {};
         if (Object.prototype.hasOwnProperty.call(body, 'class_level'))
           clsPatch.class_level = String(body.class_level || '').trim() || null;
         if (Object.prototype.hasOwnProperty.call(body, 'branch'))
           clsPatch.branch = String(body.branch || '').trim() || null;
+        if (Object.prototype.hasOwnProperty.call(body, 'name'))
+          clsPatch.name = String(body.name || '').trim() || null;
         await supabaseAdmin.from('classes').update(clsPatch).eq('id', classId);
       }
       return res.status(200).json({ ok: true });
@@ -858,13 +924,36 @@ export default async function handler(req, res) {
       const duration = Math.max(15, Number(body.duration_minutes || 40));
       const end = hhmmss(body.end_time, addMinutesToTime(start, duration));
       const subject = String(body.subject || '').trim();
-      const meetingLink = String(body.meeting_link || '').trim();
-      if (!date || !subject || !meetingLink) {
+      const manualMeetingLink = String(body.meeting_link || '').trim();
+      if (!date || !subject) {
         return res.status(400).json({ error: 'lesson_date_subject_meeting_link_required' });
       }
-      const { data, error } = await supabaseAdmin
-        .from('class_sessions')
-        .insert({
+      let meetingLink;
+      let meetingLinkModerator = null;
+      let autoBbb = null;
+      try {
+        const resolved = await resolveClassLessonMeetingLink({
+          manualLink: manualMeetingLink,
+          subject,
+          className: details.class?.name || '',
+          teacherId,
+          durationMinutes: duration,
+          meetingKeyPrefix: `class-session-${classId}`
+        });
+        if (!resolved) {
+          return res.status(400).json({
+            error: 'Ders bağlantısı gerekli. Meet/Zoom/BBB linki girin veya BBB API ayarlarını tanımlayın.',
+            code: 'subject_meeting_link_required'
+          });
+        }
+        meetingLink = resolved.meetingLink;
+        meetingLinkModerator = resolved.meetingLinkModerator;
+        autoBbb = resolved.autoBbb;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'bbb_create_failed';
+        return res.status(502).json({ error: msg, code: 'bbb_create_failed' });
+      }
+      const { data, error } = await insertOneOptionalModerator('class_sessions', {
           class_id: classId,
           institution_id: details.class.institution_id || institutionId,
           lesson_date: date,
@@ -873,13 +962,12 @@ export default async function handler(req, res) {
           subject,
           teacher_id: teacherId,
           meeting_link: meetingLink,
+          ...(meetingLinkModerator ? { meeting_link_moderator: meetingLinkModerator } : {}),
           homework: String(body.homework || '').trim() || null,
           status: 'scheduled'
-        })
-        .select('*')
-        .maybeSingle();
+        });
       if (error) return res.status(500).json({ error: error.message });
-      return res.status(201).json({ data });
+      return res.status(201).json({ data, auto_bbb: autoBbb });
     }
 
     if (op === 'send-lesson-reminder') {
@@ -1072,8 +1160,35 @@ export default async function handler(req, res) {
       const start = hhmmss(body.start_time, '10:00:00');
       const end = hhmmss(body.end_time, addMinutesToTime(start, Math.max(15, Number(body.duration_minutes || 40))));
       const subject = String(body.subject || '').trim();
-      const meetingLink = String(body.meeting_link || '').trim();
-      if (!subject || !meetingLink) return res.status(400).json({ error: 'subject_meeting_link_required' });
+      const manualMeetingLink = String(body.meeting_link || '').trim();
+      const duration = Math.max(15, Number(body.duration_minutes || 40));
+      if (!subject) return res.status(400).json({ error: 'subject_meeting_link_required' });
+
+      let meetingLink;
+      let meetingLinkModerator = null;
+      let autoBbb = null;
+      try {
+        const resolved = await resolveClassLessonMeetingLink({
+          manualLink: manualMeetingLink,
+          subject,
+          className: details.class?.name || '',
+          teacherId,
+          durationMinutes: duration,
+          meetingKeyPrefix: `class-slot-${classId}`
+        });
+        if (!resolved) {
+          return res.status(400).json({
+            error: 'Ders bağlantısı gerekli. Meet/Zoom/BBB linki girin veya BBB API ayarlarını tanımlayın.',
+            code: 'subject_meeting_link_required'
+          });
+        }
+        meetingLink = resolved.meetingLink;
+        meetingLinkModerator = resolved.meetingLinkModerator;
+        autoBbb = resolved.autoBbb;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'bbb_create_failed';
+        return res.status(502).json({ error: msg, code: 'bbb_create_failed' });
+      }
 
       const { data: sameTeacherSlots, error: cErr } = await supabaseAdmin
         .from('class_weekly_slots')
@@ -1085,9 +1200,7 @@ export default async function handler(req, res) {
         return res.status(409).json({ error: 'Aynı öğretmen aynı saatte ders alamaz.', code: 'teacher_time_conflict' });
       }
 
-      const { data, error } = await supabaseAdmin
-        .from('class_weekly_slots')
-        .insert({
+      const { data, error } = await insertOneOptionalModerator('class_weekly_slots', {
           class_id: classId,
           institution_id: details.class.institution_id || institutionId,
           day_of_week: dayOfWeek,
@@ -1096,12 +1209,11 @@ export default async function handler(req, res) {
           subject,
           teacher_id: teacherId,
           meeting_link: meetingLink,
+          ...(meetingLinkModerator ? { meeting_link_moderator: meetingLinkModerator } : {}),
           homework: String(body.homework || '').trim() || null
-        })
-        .select('*')
-        .maybeSingle();
+        });
       if (error) return res.status(500).json({ error: error.message });
-      return res.status(201).json({ data });
+      return res.status(201).json({ data, auto_bbb: autoBbb });
     }
 
     /**
@@ -1139,8 +1251,34 @@ export default async function handler(req, res) {
       const duration = Math.max(15, Number(body.duration_minutes || 40));
       const end = hhmmss(body.end_time, addMinutesToTime(start, duration));
       const subject = String(body.subject || '').trim();
-      const meetingLink = String(body.meeting_link || '').trim();
-      if (!subject || !meetingLink) return res.status(400).json({ error: 'subject_meeting_link_required' });
+      const manualMeetingLink = String(body.meeting_link || '').trim();
+      if (!subject) return res.status(400).json({ error: 'subject_meeting_link_required' });
+
+      let meetingLink;
+      let meetingLinkModerator = null;
+      let autoBbb = null;
+      try {
+        const resolved = await resolveClassLessonMeetingLink({
+          manualLink: manualMeetingLink,
+          subject,
+          className: details.class?.name || '',
+          teacherId,
+          durationMinutes: duration,
+          meetingKeyPrefix: `class-bulk-${classId}`
+        });
+        if (!resolved) {
+          return res.status(400).json({
+            error: 'Ders bağlantısı gerekli. Meet/Zoom/BBB linki girin veya BBB API ayarlarını tanımlayın.',
+            code: 'subject_meeting_link_required'
+          });
+        }
+        meetingLink = resolved.meetingLink;
+        meetingLinkModerator = resolved.meetingLinkModerator;
+        autoBbb = resolved.autoBbb;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'bbb_create_failed';
+        return res.status(502).json({ error: msg, code: 'bbb_create_failed' });
+      }
 
       const rowsToInsert = [];
       for (let i = 0; i < occurrences; i++) {
@@ -1166,17 +1304,18 @@ export default async function handler(req, res) {
           subject,
           teacher_id: teacherId,
           meeting_link: meetingLink,
+          ...(meetingLinkModerator ? { meeting_link_moderator: meetingLinkModerator } : {}),
           homework: String(body.homework || '').trim() || null,
           status: 'scheduled'
         });
       }
 
-      const { data: created, error: insErr } = await supabaseAdmin
-        .from('class_sessions')
-        .insert(rowsToInsert)
-        .select('*');
+      const { data: created, error: insErr } = await insertManyOptionalModerator(
+        'class_sessions',
+        rowsToInsert
+      );
       if (insErr) return res.status(500).json({ error: insErr.message });
-      return res.status(201).json({ data: created || [] });
+      return res.status(201).json({ data: created || [], auto_bbb: autoBbb });
     }
   }
 

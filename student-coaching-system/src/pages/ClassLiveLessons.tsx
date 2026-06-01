@@ -60,6 +60,7 @@ type SlotRow = {
   /** API: users tablosundan (öğrenci /api/users kullanmadan gösterim için) */
   teacher_name?: string;
   meeting_link: string;
+  join_link?: string;
   homework?: string | null;
 };
 type TeacherOption = { id: string; name: string };
@@ -82,6 +83,7 @@ type SessionRow = {
   teacher_id: string;
   teacher_name?: string;
   meeting_link: string;
+  join_link?: string;
   status: string;
   homework?: string | null;
   reminder_sent?: boolean;
@@ -478,7 +480,7 @@ export default function ClassLiveLessons() {
   const effectiveSlotTeacherId = role === 'teacher' ? actorUserId : slotTeacherId || selectedClass?.teacher_ids?.[0] || '';
 
   const createSlot = async () => {
-    if (!selectedClassId || !slotSubject.trim() || !slotMeetingLink.trim()) return;
+    if (!selectedClassId || !slotSubject.trim()) return;
     const teacherId = effectiveSlotTeacherId;
     const start = `${String(slotHour).padStart(2, '0')}:${String(slotMinute).padStart(2, '0')}`;
     const res = await apiFetch('/api/class-live-lessons?op=create-slot', {
@@ -490,12 +492,13 @@ export default function ClassLiveLessons() {
         duration_minutes: slotDurationMinutes,
         subject: slotSubject.trim(),
         teacher_id: teacherId || undefined,
-        meeting_link: slotMeetingLink.trim()
+        meeting_link: slotMeetingLink.trim() || undefined
       })
     });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) {
-      setError(String(j.error || 'Ders şablonu eklenemedi'));
+      const errText = [j.error, j.code === 'bbb_create_failed' ? 'BBB sunucusu yanıt vermedi.' : '', j.code === 'subject_meeting_link_required' ? 'BBB API tanımlı değil veya link zorunlu.' : ''].filter(Boolean).join(' ');
+      setError(errText || 'Ders şablonu eklenemedi');
       return;
     }
     setSlotSubject('');
@@ -505,7 +508,7 @@ export default function ClassLiveLessons() {
   };
 
   const bulkScheduleSessions = async () => {
-    if (!selectedClassId || !slotSubject.trim() || !slotMeetingLink.trim()) return;
+    if (!selectedClassId || !slotSubject.trim()) return;
     const teacherId = effectiveSlotTeacherId;
     if (!teacherId) {
       alert('Öğretmen seçin.');
@@ -523,12 +526,13 @@ export default function ClassLiveLessons() {
         duration_minutes: slotDurationMinutes,
         subject: slotSubject.trim(),
         teacher_id: teacherId,
-        meeting_link: slotMeetingLink.trim()
+        meeting_link: slotMeetingLink.trim() || undefined
       })
     });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) {
-      setError(String(j.error || j.reason || 'Oturumlar oluşturulamadı'));
+      const errText = [j.error, j.reason, j.code === 'bbb_create_failed' ? 'BBB sunucusu yanıt vermedi.' : '', j.code === 'subject_meeting_link_required' ? 'BBB API (Vercel) tanımlı değil; link girin veya BBB_API_ENDPOINT + BBB_API_SECRET ekleyin.' : ''].filter(Boolean).map(String).join(' — ');
+      setError(errText || 'Oturumlar oluşturulamadı');
       return;
     }
     const n = Array.isArray(j.data) ? j.data.length : 0;
@@ -1198,13 +1202,21 @@ export default function ClassLiveLessons() {
               ))}
             </select>
           </div>
-          <input
-            type="url"
-            value={slotMeetingLink}
-            onChange={(e) => setSlotMeetingLink(e.target.value)}
-            placeholder="Ders bağlantısı"
-            className="w-full border border-slate-200 rounded px-3 py-2 text-sm"
-          />
+          <div>
+            <label className="block text-xs text-slate-500 mb-0.5">
+              Ders bağlantısı <span className="font-normal text-slate-400">(isteğe bağlı)</span>
+            </label>
+            <p className="text-xs text-slate-500 mb-1">
+              Meet/Zoom/BBB linki yazabilirsiniz; BBB API tanımlıysa boş bırakınca otomatik oda oluşturulur.
+            </p>
+            <input
+              type="url"
+              value={slotMeetingLink}
+              onChange={(e) => setSlotMeetingLink(e.target.value)}
+              placeholder="https://… (boş bırakılabilir — BBB otomatik)"
+              className="w-full border border-slate-200 rounded px-3 py-2 text-sm"
+            />
+          </div>
           {scheduleKind === 'template' && (
             <div className="max-w-xs">
               <label className="block text-xs text-slate-500 mb-0.5">Şablon süre (dk)</label>
@@ -1411,7 +1423,7 @@ export default function ClassLiveLessons() {
                                 : s.status === 'cancelled'
                                   ? 'opacity-75 ring-red-200'
                                   : 'ring-emerald-300/50 shadow-md';
-                            const sessionLink = String(s.meeting_link || '').trim();
+                            const sessionLink = String(s.join_link || s.meeting_link || '').trim();
                             const hasSessionLink = Boolean(sessionLink);
                             const canJoin = s.status === 'scheduled' && hasSessionLink;
                             const canWatchRecording = s.status === 'completed' && hasSessionLink;
@@ -1531,7 +1543,7 @@ export default function ClassLiveLessons() {
                                 <div className="mt-1.5 flex flex-wrap gap-1 calendar-pdf-hide-ui">
                                   <button
                                     type="button"
-                                    onClick={() => window.open(s.meeting_link, '_blank', 'noopener,noreferrer')}
+                                    onClick={() => window.open(String(s.join_link || s.meeting_link || ''), '_blank', 'noopener,noreferrer')}
                                     className="rounded-lg bg-indigo-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-indigo-700"
                                   >
                                     Link
@@ -1660,7 +1672,7 @@ export default function ClassLiveLessons() {
             <label className="block text-sm">
               <span className="text-slate-600">Toplantı veya kayıt bağlantısı</span>
               <span className="block text-xs text-slate-500 mt-0.5 font-normal">
-                Canlı ders için Meet/Zoom/BBB linki; ders bittikten sonra aynı alana kayıt URL’sini yapıştırabilirsiniz — öğrenci «Kaydı izle» ile açar.
+                Canlı ders için Meet/Zoom/BBB linki; ders bittikten sonra aynı alana kayıt URL’sini yapıştırabilirsiniz — öğrenci «Kaydı izle» ile açar. Boş bırakırsanız ve BBB API tanımlıysa yeni oturumda otomatik oda oluşturulur.
               </span>
               <input
                 type="url"

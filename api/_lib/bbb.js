@@ -50,6 +50,39 @@ export function isBbbConfigured() {
   return Boolean(apiBase && secret);
 }
 
+/** BBB create: kayıt özelliği açık, otomatik başlangıç kapalı (öğretmen manuel başlatır). */
+export function bbbRecordingCreateParams() {
+  const record = String(process.env.BBB_RECORD ?? 'true').toLowerCase() !== 'false';
+  const autoStartRecording =
+    String(process.env.BBB_AUTO_START_RECORDING || 'false').toLowerCase() === 'true';
+  const allowStartStopRecording =
+    String(process.env.BBB_ALLOW_START_STOP_RECORDING ?? 'true').toLowerCase() !== 'false';
+  return {
+    record,
+    autoStartRecording,
+    allowStartStopRecording: record && allowStartStopRecording
+  };
+}
+
+/** Öğrenciye moderator linki göstermeden join URL seçer. */
+export function enrichMeetingRowJoinLink(row, actorRole) {
+  if (!row || typeof row !== 'object') return row;
+  const isStudent = String(actorRole || '').toLowerCase() === 'student';
+  const moderator = String(row.meeting_link_moderator || '').trim();
+  const attendee = String(row.meeting_link || '').trim();
+  const joinLink = !isStudent && moderator ? moderator : attendee;
+  if (isStudent) {
+    const { meeting_link_moderator: _drop, ...rest } = row;
+    return { ...rest, join_link: joinLink };
+  }
+  return { ...row, join_link: joinLink };
+}
+
+export function enrichMeetingRowsJoinLink(rows, actorRole) {
+  const list = Array.isArray(rows) ? rows : [];
+  return list.map((row) => enrichMeetingRowJoinLink(row, actorRole));
+}
+
 export async function createBbbMeetingAndJoinLink({
   meetingId,
   meetingName,
@@ -67,6 +100,7 @@ export async function createBbbMeetingAndJoinLink({
 
   const attendeePW = `a-${crypto.randomBytes(5).toString('hex')}`;
   const moderatorPW = `m-${crypto.randomBytes(5).toString('hex')}`;
+  const recording = bbbRecordingCreateParams();
 
   const createQuery = asQuery({
     name: meetingName || 'Koçluk görüşmesi',
@@ -74,9 +108,9 @@ export async function createBbbMeetingAndJoinLink({
     attendeePW,
     moderatorPW,
     duration: Math.max(15, Number(durationMinutes) || 60),
-    record: true,
-    allowStartStopRecording: true,
-    autoStartRecording: false
+    record: recording.record,
+    allowStartStopRecording: recording.allowStartStopRecording,
+    autoStartRecording: recording.autoStartRecording
   });
   const createChecksum = bbbChecksum('create', createQuery, secret);
   const createUrl = `${apiBase}create?${createQuery}&checksum=${createChecksum}`;

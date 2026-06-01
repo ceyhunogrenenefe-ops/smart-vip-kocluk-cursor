@@ -8,6 +8,7 @@ import type { TeacherLesson, TeacherStudentLessonSummaryRow, UserRole } from '..
 import LiveLessonCard from '../components/liveLessons/LiveLessonCard';
 import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShell';
 import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
+import { lessonJoinUrl } from '../lib/liveLessonUtils';
 import { Radio, Plus, Loader2, Filter, Clock, Pencil, Move, GripVertical, Trash2, FileDown } from 'lucide-react';
 import {
   WEEKDAY_SHORT_MON_FIRST,
@@ -406,7 +407,7 @@ export default function LiveLessons() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!studentId || !title.trim() || !meetingLink.trim()) return;
+    if (!studentId || !title.trim()) return;
     if (lessonRecurrence) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(lessonRecurrenceUntil.trim())) {
         setError('Tekrar için son tarih (YYYY-AA-GG) girin.');
@@ -421,10 +422,13 @@ export default function LiveLessons() {
         title: title.trim(),
         date: dateStr,
         start_time: startTime.length === 5 ? `${startTime}:00` : startTime,
-        duration_minutes: durationMin,
-        meeting_link: meetingLink.trim(),
-        platform: platformDraft
+        duration_minutes: durationMin
       };
+      const trimmedLink = meetingLink.trim();
+      if (trimmedLink) {
+        body.meeting_link = trimmedLink;
+        body.platform = platformDraft;
+      }
       if (showTeacherPicker && adminTeacherId.trim()) {
         body.teacher_id = adminTeacherId.trim();
       }
@@ -988,18 +992,31 @@ export default function LiveLessons() {
             </label>
           </div>
           <label className="block text-sm">
-            <span className="text-slate-600">Toplantı bağlantısı (zorunlu)</span>
+            <span className="text-slate-600">
+              Toplantı bağlantısı <span className="font-normal text-slate-400">(isteğe bağlı)</span>
+            </span>
+            <span className="block text-xs text-slate-500 mt-0.5 font-normal">
+              Meet/Zoom/BBB linki yazabilirsiniz; BBB API tanımlıysa boş bırakınca otomatik oda oluşturulur.
+            </span>
             <input
-              required
               value={meetingLink}
               onChange={(e) => setMeetingLink(e.target.value)}
               className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2"
-              placeholder="https://zoom.us/j/... veya meet.google.com/..."
+              placeholder="https://zoom.us/j/… veya boş bırakın (BBB otomatik)"
             />
           </label>
           <p className="text-sm text-slate-600">
-            Algılanan platform:{' '}
-            <strong className="text-indigo-700">{platformDraft}</strong>
+            {meetingLink.trim() ? (
+              <>
+                Algılanan platform:{' '}
+                <strong className="text-indigo-700">{platformDraft}</strong>
+              </>
+            ) : (
+              <>
+                Bağlantı boş — BBB API etkinse platform:{' '}
+                <strong className="text-indigo-700">bbb</strong> (otomatik)
+              </>
+            )}
           </p>
           <div className="rounded-lg border border-violet-100 bg-violet-50/50 p-4 space-y-3">
             <label className="flex items-center gap-2 text-sm font-medium text-slate-800">
@@ -1135,7 +1152,7 @@ export default function LiveLessons() {
                           <div className="flex flex-col gap-1.5">
                             {hourItems.map((lesson) => {
                               const accent = liveSubjectAccent(lesson.title);
-                              const canJoin = lesson.status === 'scheduled' && Boolean(lesson.meeting_link?.trim());
+                              const canJoin = lesson.status === 'scheduled' && Boolean(lessonJoinUrl(lesson));
                               return (
                                 <div
                                   key={lesson.id}
@@ -1168,7 +1185,7 @@ export default function LiveLessons() {
                                       <button
                                         type="button"
                                         onClick={() =>
-                                          window.open(lesson.meeting_link, '_blank', 'noopener,noreferrer')
+                                          window.open(lessonJoinUrl(lesson), '_blank', 'noopener,noreferrer')
                                         }
                                         className="rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-2 py-1 text-[10px] font-semibold text-white shadow-sm hover:brightness-110"
                                       >
@@ -1379,9 +1396,9 @@ export default function LiveLessons() {
                     lesson={lesson}
                     studentName={studentName(lesson.student_id)}
                     onCopy={() => {
-                      void navigator.clipboard.writeText(lesson.meeting_link);
+                      void navigator.clipboard.writeText(lessonJoinUrl(lesson));
                     }}
-                    onJoin={() => window.open(lesson.meeting_link, '_blank', 'noopener,noreferrer')}
+                    onJoin={() => window.open(lessonJoinUrl(lesson), '_blank', 'noopener,noreferrer')}
                     onMarkComplete={
                       lesson.status === 'scheduled'
                         ? () => void patchStatus(lesson.id, 'completed')
@@ -1427,9 +1444,9 @@ export default function LiveLessons() {
               lesson={lesson}
               studentName={studentName(lesson.student_id)}
               onCopy={() => {
-                void navigator.clipboard.writeText(lesson.meeting_link);
+                void navigator.clipboard.writeText(lessonJoinUrl(lesson));
               }}
-              onJoin={() => window.open(lesson.meeting_link, '_blank', 'noopener,noreferrer')}
+              onJoin={() => window.open(lessonJoinUrl(lesson), '_blank', 'noopener,noreferrer')}
               onMarkComplete={
                 lesson.status === 'scheduled'
                   ? () => void patchStatus(lesson.id, 'completed')

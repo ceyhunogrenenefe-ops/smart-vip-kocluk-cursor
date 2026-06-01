@@ -521,6 +521,10 @@ export interface TeacherLesson {
   duration_minutes?: number;
   /** Tekrarlayan seri (aynı ID = aynı şablon) */
   series_id?: string | null;
+  /** BBB moderator join (yalnızca öğretmen/koç API yanıtında) */
+  meeting_link_moderator?: string | null;
+  /** Rol bazlı Katıl URL (öğretmen: moderator, öğrenci: attendee) */
+  join_link?: string;
 }
 
 /** GET /api/teacher-lessons?op=summary — tamamlanan canlı derslerden öğretmen×öğrenci toplam süre */

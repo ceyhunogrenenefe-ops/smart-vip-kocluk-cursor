@@ -39,3 +39,8 @@ export const PLATFORM_LABEL: Record<string, string> = {
   bbb: 'BigBlueButton',
   other: 'Diğer'
 };
+
+/** API join_link veya meeting_link — Katıl / kopyala için. */
+export function lessonJoinUrl(lesson: { join_link?: string | null; meeting_link?: string | null }): string {
+  return String(lesson.join_link || lesson.meeting_link || '').trim();
+}

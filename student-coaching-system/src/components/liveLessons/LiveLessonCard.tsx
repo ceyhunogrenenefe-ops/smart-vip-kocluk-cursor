@@ -1,7 +1,7 @@
 import React from 'react';
 import { Video, Link2, Copy, ExternalLink, Presentation, PlayCircle } from 'lucide-react';
 import type { TeacherLesson, TeacherLessonPlatform } from '../../types';
-import { isApproaching, isOngoing, PLATFORM_LABEL } from '../../lib/liveLessonUtils';
+import { isApproaching, isOngoing, PLATFORM_LABEL, lessonJoinUrl } from '../../lib/liveLessonUtils';
 
 type Props = {
   lesson: TeacherLesson;

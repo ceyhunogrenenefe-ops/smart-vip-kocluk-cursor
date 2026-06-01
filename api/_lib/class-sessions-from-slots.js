@@ -17,7 +17,7 @@ export async function ensureClassSessionsFromWeeklySlots(lessonDate) {
 
   const { data: slots, error: slotErr } = await supabaseAdmin
     .from('class_weekly_slots')
-    .select('class_id,institution_id,day_of_week,start_time,end_time,subject,teacher_id,meeting_link,homework')
+    .select('*')
     .eq('day_of_week', dow);
   if (slotErr) throw slotErr;
   const slotList = slots || [];
@@ -65,6 +65,9 @@ export async function ensureClassSessionsFromWeeklySlots(lessonDate) {
       subject: String(slot.subject || '').trim() || 'Ders',
       teacher_id: slot.teacher_id,
       meeting_link: String(slot.meeting_link || '').trim(),
+      ...(String(slot.meeting_link_moderator || '').trim()
+        ? { meeting_link_moderator: String(slot.meeting_link_moderator).trim() }
+        : {}),
       homework: slot.homework ?? null,
       status: 'scheduled',
       reminder_sent: false,
