@@ -12,6 +12,8 @@ import { turkishFold } from '../lib/userBulkImport';
 import type { Student } from '../types';
 import { GripVertical, KeyRound, Loader2, Pencil, PlayCircle, Trash2, FileDown, Bell } from 'lucide-react';
 import BbbAutoLinkFieldHint from '../components/liveLessons/BbbAutoLinkFieldHint';
+import { isBbbJoinUrl } from '../lib/liveLessonUtils';
+import { openBbbJoin } from '../lib/bbbJoin';
 
 type ClassRow = {
   id: string;
@@ -279,6 +281,23 @@ export default function ClassLiveLessons() {
       setReminderBusyId(null);
     }
   };
+
+  const joinClassSession = useCallback(async (s: { id: string; join_link?: string; meeting_link?: string }) => {
+    const url = String(s.join_link || s.meeting_link || '').trim();
+    if (!url) {
+      setError('Toplantı bağlantısı yok.');
+      return;
+    }
+    try {
+      if (isBbbJoinUrl(url)) {
+        await openBbbJoin('class-live-lessons', s.id);
+      } else {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
 
   const [attendanceSession, setAttendanceSession] = useState<SessionRow | null>(null);
   const [attendanceDraft, setAttendanceDraft] = useState<
@@ -1537,7 +1556,7 @@ export default function ClassLiveLessons() {
                                 <div className="mt-1.5 flex flex-wrap gap-1 calendar-pdf-hide-ui">
                                   <button
                                     type="button"
-                                    onClick={() => window.open(String(s.join_link || s.meeting_link || ''), '_blank', 'noopener,noreferrer')}
+                                    onClick={() => void joinClassSession(s)}
                                     className="rounded-lg bg-indigo-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-indigo-700"
                                   >
                                     Link
@@ -1585,6 +1604,7 @@ export default function ClassLiveLessons() {
             formatDateDots={formatDdMmYyyyDots}
             dowFromIso={dowSlotFromIso}
             todayIso={todayIso()}
+            onJoinSession={(s) => void joinClassSession(s)}
           />
         )}
       </WeeklyLiveGridShell>

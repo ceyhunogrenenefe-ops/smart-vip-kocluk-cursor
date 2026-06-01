@@ -23,6 +23,7 @@ import {
   insertOneOptionalModerator,
   insertManyOptionalModerator
 } from '../api/_lib/supabase-optional-moderator.js';
+import { handleBbbJoinGet, patchRowMeetingLinks } from '../api/_lib/bbb-join-handler.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -408,6 +409,74 @@ function buildAttendanceNotifyText(preset, custom, vars) {
   return `${student} bugün (${date}) ${subj} dersine (${time}) katılım sağlamamıştır. Öğretmen: ${teacher}`;
 }
 
+async function canAccessClassLiveRow(actor, role, row) {
+  const details = await getClassDetails(String(row.class_id || ''));
+  if (role === 'student') {
+    let sid = actor.student_id ? String(actor.student_id).trim() : '';
+    if (!sid && actor.sub) {
+      const { data: userRow } = await supabaseAdmin
+        .from('users')
+        .select('email, institution_id')
+        .eq('id', actor.sub)
+        .maybeSingle();
+      const resolved = await resolveStudentRowForUser({
+        userId: actor.sub,
+        email: userRow?.email,
+        institutionId: userRow?.institution_id ?? actor.institution_id ?? null
+      });
+      if (resolved?.id) sid = String(resolved.id).trim();
+    }
+    return sid && details.student_ids.includes(sid);
+  }
+  if (isAdminRole(role)) return true;
+  return (
+    String(row.teacher_id || '') === String(actor.sub || '') ||
+    details.teacher_ids.includes(String(actor.sub || ''))
+  );
+}
+
+async function handleClassLiveBbbJoin(req, res, actor, role) {
+  const slotMode = String(req.query?.kind || 'session').trim() === 'slot';
+  const table = slotMode ? 'class_weekly_slots' : 'class_sessions';
+
+  return handleBbbJoinGet(req, res, {
+    loadRow: async (id) => {
+      const { data, error } = await supabaseAdmin.from(table).select('*').eq('id', id).maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    canAccess: (act, row) => canAccessClassLiveRow(act, role, row),
+    getLinks: (row) => ({
+      attendeeLink: String(row.meeting_link || ''),
+      moderatorLink: row.meeting_link_moderator ? String(row.meeting_link_moderator) : null
+    }),
+    buildContext: async (row) => {
+      const details = await getClassDetails(String(row.class_id || ''));
+      const subject = String(row.subject || 'Ders');
+      const className = details.class?.name || '';
+      let durationMinutes = 40;
+      if (row.start_time && row.end_time) {
+        const [sh, sm] = String(row.start_time).split(':').map(Number);
+        const [eh, em] = String(row.end_time).split(':').map(Number);
+        const mins = (eh * 60 + em) - (sh * 60 + sm);
+        if (mins > 0) durationMinutes = mins;
+      }
+      return {
+        meetingName: `${subject} — ${className || 'Grup dersi'}`,
+        attendeeName: 'Öğrenci',
+        moderatorName: await teacherDisplayName(String(row.teacher_id || '')),
+        durationMinutes,
+        meetingKeyPrefix: `cljoin${String(row.id || '').replace(/-/g, '')}`
+      };
+    },
+    patchLinks: (id, links) =>
+      patchRowMeetingLinks(table, id, {
+        meeting_link: links.meeting_link,
+        meeting_link_moderator: links.meeting_link_moderator
+      })
+  });
+}
+
 export default async function handler(req, res) {
   let actor;
   try {
@@ -424,6 +493,10 @@ export default async function handler(req, res) {
   const institutionId = actor.institution_id || null;
 
   if (req.method === 'GET') {
+    const getOp = String(req.query?.op || '').trim();
+    if (getOp === 'bbb-join') {
+      return handleClassLiveBbbJoin(req, res, actor, role);
+    }
     await syncClassSessionsScheduledToCompleted();
     const scope = String(req.query.scope || 'classes');
     if (scope === 'classes') {

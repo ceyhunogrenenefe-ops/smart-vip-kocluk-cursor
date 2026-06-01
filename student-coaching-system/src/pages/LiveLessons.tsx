@@ -8,7 +8,8 @@ import type { TeacherLesson, TeacherStudentLessonSummaryRow, UserRole } from '..
 import BbbAutoLinkFieldHint from '../components/liveLessons/BbbAutoLinkFieldHint';
 import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShell';
 import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
-import { lessonJoinUrl } from '../lib/liveLessonUtils';
+import { lessonJoinUrl, isBbbJoinUrl } from '../lib/liveLessonUtils';
+import { openBbbJoin } from '../lib/bbbJoin';
 import { Radio, Plus, Loader2, Filter, Clock, Pencil, Move, GripVertical, Trash2, FileDown } from 'lucide-react';
 import {
   WEEKDAY_SHORT_MON_FIRST,
@@ -145,6 +146,26 @@ export default function LiveLessons() {
   const loadStaffDirectory = showTeacherPicker || role === 'coach';
   /** Liste / PDF / öğrenci filtresi: tüm yetkili roller */
   const showScopeFilters = canManage;
+
+  const joinLiveLesson = useCallback(
+    async (lesson: TeacherLesson) => {
+      const url = lessonJoinUrl(lesson);
+      if (!url) {
+        setError('Toplantı bağlantısı yok.');
+        return;
+      }
+      try {
+        if (isBbbJoinUrl(url)) {
+          await openBbbJoin('teacher-lessons', lesson.id);
+        } else {
+          window.open(url, '_blank', 'noopener,noreferrer');
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    []
+  );
 
   const sortedStudents = useMemo(
     () => [...students].sort((a, b) => a.name.localeCompare(b.name, 'tr')),
@@ -1185,7 +1206,7 @@ export default function LiveLessons() {
                                       <button
                                         type="button"
                                         onClick={() =>
-                                          window.open(lessonJoinUrl(lesson), '_blank', 'noopener,noreferrer')
+                                        onClick={() => void joinLiveLesson(lesson)}
                                         }
                                         className="rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-2 py-1 text-[10px] font-semibold text-white shadow-sm hover:brightness-110"
                                       >
@@ -1395,7 +1416,7 @@ export default function LiveLessons() {
                     onCopy={() => {
                       void navigator.clipboard.writeText(lessonJoinUrl(lesson));
                     }}
-                    onJoin={() => window.open(lessonJoinUrl(lesson), '_blank', 'noopener,noreferrer')}
+                    onJoin={() => void joinLiveLesson(lesson)}
                     onMarkComplete={
                       lesson.status === 'scheduled'
                         ? () => void patchStatus(lesson.id, 'completed')
@@ -1443,7 +1464,7 @@ export default function LiveLessons() {
               onCopy={() => {
                 void navigator.clipboard.writeText(lessonJoinUrl(lesson));
               }}
-              onJoin={() => window.open(lessonJoinUrl(lesson), '_blank', 'noopener,noreferrer')}
+              onJoin={() => void joinLiveLesson(lesson)}
               onMarkComplete={
                 lesson.status === 'scheduled'
                   ? () => void patchStatus(lesson.id, 'completed')

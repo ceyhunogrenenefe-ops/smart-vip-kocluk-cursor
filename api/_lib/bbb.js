@@ -117,6 +117,100 @@ export function applyAutoBbbMeetingLinks(bbb) {
   };
 }
 
+export function isBbbJoinUrl(url) {
+  const s = String(url || '').trim();
+  return /meetingID=/i.test(s) && /\/join/i.test(s);
+}
+
+/** Kayıtlı BBB join URL'sinden meetingID çıkarır. */
+export function parseBbbMeetingIdFromJoinUrl(joinUrl) {
+  const s = String(joinUrl || '').trim();
+  if (!s) return null;
+  try {
+    const u = new URL(s);
+    const id = u.searchParams.get('meetingID');
+    return id ? String(id).trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function bbbMeetingExists(meetingId) {
+  const { apiBase, secret } = bbbApiConfig();
+  if (!apiBase || !secret) return false;
+  const safeMeetingId = sanitizeBbbMeetingId(meetingId);
+  if (!safeMeetingId) return false;
+
+  const query = asQuery({ meetingID: safeMeetingId });
+  const checksum = bbbChecksum('getMeetingInfo', query, secret);
+  const url = `${apiBase}getMeetingInfo?${query}&checksum=${checksum}`;
+
+  try {
+    const res = await fetch(url);
+    const text = await res.text();
+    return res.ok && text.includes('<returncode>SUCCESS</returncode>');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * BBB join linki varsa odanın sunucuda hâlâ var olduğunu doğrular; yoksa yeni oda açar.
+ * @returns {Promise<{ refreshed: boolean, attendeeLink: string, moderatorLink: string | null, meetingId?: string }>}
+ */
+export async function ensureBbbMeetingAlive({
+  attendeeLink,
+  moderatorLink,
+  meetingName,
+  attendeeName,
+  moderatorName,
+  durationMinutes,
+  meetingKeyPrefix
+}) {
+  const attendee = String(attendeeLink || '').trim();
+  const moderator = String(moderatorLink || '').trim();
+  const probeUrl = moderator || attendee;
+
+  if (!isBbbJoinUrl(probeUrl)) {
+    return { refreshed: false, attendeeLink: attendee, moderatorLink: moderator || null };
+  }
+
+  const rawMeetingId =
+    parseBbbMeetingIdFromJoinUrl(moderator) || parseBbbMeetingIdFromJoinUrl(attendee);
+  let exists = false;
+  if (rawMeetingId) {
+    exists = await bbbMeetingExists(rawMeetingId);
+    if (!exists && rawMeetingId !== sanitizeBbbMeetingId(rawMeetingId)) {
+      exists = await bbbMeetingExists(sanitizeBbbMeetingId(rawMeetingId));
+    }
+  }
+
+  if (exists) {
+    return { refreshed: false, attendeeLink: attendee, moderatorLink: moderator || null };
+  }
+
+  if (!isBbbConfigured()) {
+    throw new Error(
+      'BBB toplantısı sunucuda bulunamadı (süresi dolmuş veya silinmiş). BBB_API_ENDPOINT ayarlarını kontrol edin.'
+    );
+  }
+
+  const bbb = await createBbbMeetingAndJoinLink({
+    meetingId: sanitizeBbbMeetingId(`${meetingKeyPrefix}${Date.now()}`),
+    meetingName,
+    attendeeName,
+    moderatorName,
+    durationMinutes
+  });
+
+  return {
+    refreshed: true,
+    attendeeLink: bbb.attendeeJoinLink,
+    moderatorLink: bbb.moderatorJoinLink,
+    meetingId: bbb.meetingId
+  };
+}
+
 export async function createBbbMeetingAndJoinLink({
   meetingId,
   meetingName,

@@ -13,6 +13,7 @@ type SessionRow = {
   teacher_name?: string;
   status: string;
   meeting_link?: string;
+  join_link?: string;
 };
 
 type SlotRow = {
@@ -38,6 +39,7 @@ export type ClassLiveStudentMobileCalendarProps = {
   formatDateDots: (iso: string) => string;
   dowFromIso: (iso: string) => number;
   todayIso: string;
+  onJoinSession?: (s: SessionRow) => void;
 };
 
 /** Öğrenci mobil — haftalık grid yerine gün seçimi + ders listesi */
@@ -48,7 +50,8 @@ export function ClassLiveStudentMobileCalendar({
   teacherCandidates,
   formatDateDots,
   dowFromIso,
-  todayIso
+  todayIso,
+  onJoinSession
 }: ClassLiveStudentMobileCalendarProps) {
   const [dayIdx, setDayIdx] = useState(() => {
     const idx = weekColumnDates.indexOf(todayIso);
@@ -154,7 +157,11 @@ export function ClassLiveStudentMobileCalendar({
                   {canJoin ? (
                     <button
                       type="button"
-                      onClick={() => window.open(sessionLink, '_blank', 'noopener,noreferrer')}
+                      onClick={() =>
+                        onJoinSession
+                          ? onJoinSession(s)
+                          : window.open(sessionLink, '_blank', 'noopener,noreferrer')
+                      }
                       className="rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-3 py-1.5 text-xs font-semibold text-white"
                     >
                       Katıl

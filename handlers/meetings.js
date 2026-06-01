@@ -12,6 +12,7 @@ import {
   applyAutoBbbMeetingLinks,
   sanitizeBbbMeetingId
 } from '../api/_lib/bbb.js';
+import { handleBbbJoinGet, patchCoachingMeetingLinks } from '../api/_lib/bbb-join-handler.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
 
@@ -862,6 +863,75 @@ async function handleUpdateStatus(req, res) {
   }
 }
 
+async function handleMeetingBbbJoin(req, res) {
+  return handleBbbJoinGet(req, res, {
+    idParam: 'meeting_id',
+    loadRow: async (id) => {
+      const { data, error } = await supabaseAdmin.from('meetings').select('*').eq('id', id).maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    canAccess: async (actor, row) => {
+      if (actor.role === 'super_admin') return true;
+      if (actor.role === 'student') {
+        let sid = actor.student_id || null;
+        if (!sid && actor.sub) {
+          const { data: u } = await supabaseAdmin.from('users').select('email, institution_id').eq('id', actor.sub).maybeSingle();
+          const srow = await resolveStudentRowForUser({
+            userId: actor.sub,
+            email: u?.email,
+            institutionId: u?.institution_id ?? actor.institution_id
+          });
+          sid = srow?.id ?? null;
+        }
+        return sid && String(row.student_id) === String(sid);
+      }
+      if (actor.role === 'coach') {
+        let cid = actor.coach_id || null;
+        if (!cid && actor.sub) cid = await resolveCoachIdByUserSub(actor.sub);
+        return cid && String(row.coach_id) === String(cid);
+      }
+      if (actor.role === 'teacher') {
+        let cid = actor.coach_id || null;
+        if (!cid && actor.sub) cid = await resolveCoachIdByUserSub(actor.sub);
+        return cid && String(row.coach_id) === String(cid);
+      }
+      if (actor.role === 'admin') {
+        return actor.institution_id && String(row.institution_id) === String(actor.institution_id);
+      }
+      return false;
+    },
+    getLinks: (row) => ({
+      attendeeLink: String(row.meet_link || ''),
+      moderatorLink: row.link_bbb ? String(row.link_bbb) : null
+    }),
+    buildContext: async (row) => {
+      const [{ data: student }, { data: coach }] = await Promise.all([
+        supabaseAdmin.from('students').select('name').eq('id', row.student_id).maybeSingle(),
+        supabaseAdmin.from('coaches').select('name,email').eq('id', row.coach_id).maybeSingle()
+      ]);
+      const start = row.start_time ? new Date(row.start_time) : null;
+      const end = row.end_time ? new Date(row.end_time) : null;
+      let durationMinutes = 60;
+      if (start && end && !Number.isNaN(+start) && !Number.isNaN(+end)) {
+        durationMinutes = Math.max(15, Math.round((+end - +start) / 60_000));
+      }
+      return {
+        meetingName: String(row.title || row.notes || 'Online görüşme'),
+        attendeeName: String(student?.name || 'Öğrenci'),
+        moderatorName: String(coach?.name || coach?.email || 'Koç'),
+        durationMinutes,
+        meetingKeyPrefix: `mtgjoin${String(row.id || '').replace(/-/g, '')}`
+      };
+    },
+    patchLinks: (id, links) =>
+      patchCoachingMeetingLinks(id, {
+        meeting_link: links.meeting_link,
+        meeting_link_moderator: links.meeting_link_moderator
+      })
+  });
+}
+
 /** Hobby plan: tek serverless dosyasında toplantı uçları (12 fonksiyon sınırı). */
 export default async function handler(req, res) {
   const raw = typeof req.query?.op === 'string' ? req.query.op : '';
@@ -871,6 +941,7 @@ export default async function handler(req, res) {
   if (op === 'bbb-status') {
     return res.status(200).json({ configured: isBbbConfigured() });
   }
+  if (op === 'bbb-join') return handleMeetingBbbJoin(req, res);
   if (op === 'create') return handleCreate(req, res);
   if (op === 'create-series') return handleCreateSeries(req, res);
   if (op === 'delete-series') return handleDeleteSeries(req, res);

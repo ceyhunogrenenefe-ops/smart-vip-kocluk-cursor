@@ -5,7 +5,8 @@ import { useApp } from '../context/AppContext';
 import { apiFetch } from '../lib/session';
 import { isNativeApp } from '../lib/nativeApp';
 import { resolveCoachRecordId } from '../lib/coachResolve';
-import { coachingMeetingJoinUrl } from '../lib/liveLessonUtils';
+import { coachingMeetingJoinUrl, isBbbJoinUrl } from '../lib/liveLessonUtils';
+import { openBbbJoin } from '../lib/bbbJoin';
 import type { CoachingMeetingRecord, MeetingStatus } from '../types';
 import {
   Video,
@@ -65,6 +66,26 @@ export default function Meetings() {
   const [meetingRecurrenceUntil, setMeetingRecurrenceUntil] = useState('');
 
   const role = effectiveUser?.role || '';
+
+  const joinCoachingMeeting = useCallback(
+    async (m: CoachingMeetingRecord) => {
+      const url = coachingMeetingJoinUrl(m, role || 'student');
+      if (!url) {
+        setError('Toplantı bağlantısı yok.');
+        return;
+      }
+      try {
+        if (isBbbJoinUrl(url)) {
+          await openBbbJoin('meetings', m.id);
+        } else {
+          window.open(url, '_blank', 'noopener,noreferrer');
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [role]
+  );
 
   const hasManualMeetingLinks =
     linkZoomDraft.trim().length > 0 || linkBbbDraft.trim().length > 0;
@@ -796,14 +817,13 @@ export default function Meetings() {
                         {m.status}
                       </span>
                     </span>
-                    <a
-                      href={coachingMeetingJoinUrl(m, effectiveUser?.role || 'student')}
-                      target="_blank"
-                      rel="noreferrer noopener"
+                    <button
+                      type="button"
+                      onClick={() => void joinCoachingMeeting(m)}
                       className="text-emerald-700 font-medium hover:underline"
                     >
                       Bağlantı
-                    </a>
+                    </button>
                   </div>
                 ))}
               </div>
@@ -891,15 +911,14 @@ export default function Meetings() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {coachingMeetingJoinUrl(m, effectiveUser?.role || 'student') ? (
-                  <a
-                    href={coachingMeetingJoinUrl(m, effectiveUser?.role || 'student')}
-                    target="_blank"
-                    rel="noreferrer noopener"
+                  <button
+                    type="button"
+                    onClick={() => void joinCoachingMeeting(m)}
                     className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium"
                   >
                     <ExternalLink className="w-4 h-4" />
                     {m.link_bbb && !isStudent ? 'Görüşmeye katıl (moderatör)' : 'Görüşmeye katıl'}
-                  </a>
+                  </button>
                   ) : null}
                   {m.link_zoom ? (
                     <a

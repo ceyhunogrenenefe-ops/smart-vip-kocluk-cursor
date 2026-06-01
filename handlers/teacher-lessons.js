@@ -1,6 +1,7 @@
 import { requireAuthenticatedActor, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { enrichMeetingRowsJoinLink } from '../api/_lib/bbb.js';
 import { resolveBbbOrManualMeetingLink } from '../api/_lib/resolve-bbb-meeting-link.js';
+import { handleBbbJoinGet, patchRowMeetingLinks } from '../api/_lib/bbb-join-handler.js';
 import { insertOneOptionalModerator, insertManyOptionalModerator } from '../api/_lib/supabase-optional-moderator.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
@@ -1201,10 +1202,63 @@ async function handleDelete(req, res) {
   }
 }
 
+async function canAccessTeacherLesson(actor, row) {
+  if (actor.role === 'super_admin') return true;
+  if (actor.role === 'teacher' || actor.role === 'coach') {
+    return String(row.teacher_id || '') === String(actor.sub || '');
+  }
+  if (actor.role === 'student') {
+    const sid = actor.student_id || null;
+    if (!sid && actor.sub) {
+      const resolved = await resolveStudentRowForUser(actor.sub, actor.institution_id);
+      if (resolved?.id) return String(row.student_id) === String(resolved.id);
+    }
+    return sid && String(row.student_id) === String(sid);
+  }
+  if (actor.role === 'admin') return hasInstitutionAccess(actor, row.institution_id);
+  return false;
+}
+
+async function handleTeacherLessonBbbJoin(req, res) {
+  return handleBbbJoinGet(req, res, {
+    loadRow: async (id) => {
+      const { data, error } = await supabaseAdmin.from('teacher_lessons').select('*').eq('id', id).maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    canAccess: canAccessTeacherLesson,
+    getLinks: (row) => ({
+      attendeeLink: String(row.meeting_link || ''),
+      moderatorLink: row.meeting_link_moderator ? String(row.meeting_link_moderator) : null
+    }),
+    buildContext: async (row) => {
+      const { data: student } = await supabaseAdmin
+        .from('students')
+        .select('name')
+        .eq('id', row.student_id)
+        .maybeSingle();
+      const teacherName = await userDisplayName(String(row.teacher_id || ''), 'Öğretmen');
+      return {
+        meetingName: String(row.title || 'Canlı özel ders'),
+        attendeeName: String(student?.name || 'Öğrenci'),
+        moderatorName: teacherName,
+        durationMinutes: Number(row.duration_minutes) || 60,
+        meetingKeyPrefix: `tljoin${String(row.id || '').replace(/-/g, '')}`
+      };
+    },
+    patchLinks: (id, links) =>
+      patchRowMeetingLinks('teacher_lessons', id, {
+        meeting_link: links.meeting_link,
+        meeting_link_moderator: links.meeting_link_moderator
+      })
+  });
+}
+
 export default async function handler(req, res) {
   const op = typeof req.query?.op === 'string' ? req.query.op.trim() : '';
   if (req.method === 'GET') {
     if (op === 'summary') return handleSummary(req, res);
+    if (op === 'bbb-join') return handleTeacherLessonBbbJoin(req, res);
     return handleList(req, res);
   }
   if (req.method === 'POST') {

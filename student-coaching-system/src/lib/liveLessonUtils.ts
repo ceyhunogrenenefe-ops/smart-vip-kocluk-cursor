@@ -45,6 +45,11 @@ export function lessonJoinUrl(lesson: { join_link?: string | null; meeting_link?
   return String(lesson.join_link || lesson.meeting_link || '').trim();
 }
 
+export function isBbbJoinUrl(url: string): boolean {
+  const s = String(url || '').trim();
+  return /meetingID=/i.test(s) && /\/join/i.test(s);
+}
+
 /** Online görüşme: öğrenci meet_link, koç/yönetici link_bbb (BBB moderatör). */
 export function coachingMeetingJoinUrl(
   m: {

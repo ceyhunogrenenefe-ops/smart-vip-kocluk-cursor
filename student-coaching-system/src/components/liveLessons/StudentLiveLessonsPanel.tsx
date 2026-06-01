@@ -3,7 +3,8 @@ import { useAuth } from '../../context/AuthContext';
 import { apiFetch } from '../../lib/session';
 import type { StudentTeacherLessonQuota, TeacherLesson } from '../../types';
 import LiveLessonCard from './LiveLessonCard';
-import { lessonJoinUrl } from '../../lib/liveLessonUtils';
+import { lessonJoinUrl, isBbbJoinUrl } from '../../lib/liveLessonUtils';
+import { openBbbJoin } from '../../lib/bbbJoin';
 import { Loader2, Radio, AlertTriangle, CalendarRange } from 'lucide-react';
 
 function isoDate(d: Date): string {
@@ -287,7 +288,18 @@ export default function StudentLiveLessonsPanel() {
               lesson={lesson}
               lockCompletedLink
               onCopy={() => void navigator.clipboard.writeText(lessonJoinUrl(lesson))}
-              onJoin={() => window.open(lessonJoinUrl(lesson), '_blank', 'noopener,noreferrer')}
+              onJoin={() => {
+                void (async () => {
+                  const url = lessonJoinUrl(lesson);
+                  if (!url) return;
+                  try {
+                    if (isBbbJoinUrl(url)) await openBbbJoin('teacher-lessons', lesson.id);
+                    else window.open(url, '_blank', 'noopener,noreferrer');
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : String(e));
+                  }
+                })();
+              }}
             />
           </div>
         ))}
