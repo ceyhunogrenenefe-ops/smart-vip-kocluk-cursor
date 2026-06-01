@@ -213,9 +213,9 @@ export default function AdminPanel() {
     setWaSending(true);
     setWaResult(null);
     try {
-      const res = await apiFetch('/api/whatsapp/send', {
+      const res = await apiFetch('/api/meta/whatsapp', {
         method: 'POST',
-        body: JSON.stringify({ phone: p, message: m })
+        body: JSON.stringify({ to: p, message: m })
       });
       const payload = (await res.json().catch(() => ({}))) as { ok?: boolean; sid?: string; error?: string };
       if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);

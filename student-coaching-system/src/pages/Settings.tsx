@@ -343,7 +343,7 @@ export default function SettingsPage() {
     }
   };
 
-  /** Meta test — admin/süper admin `/api/whatsapp/send` (log + Meta) */
+  /** Meta test — admin/süper admin `/api/meta/whatsapp` */
   const testMetaWaMessage = async () => {
     const trimmed = metaWaTestPhone.trim();
     const digits = trimmed.replace(/\D/g, '');
@@ -362,9 +362,9 @@ export default function SettingsPage() {
     setTestingMetaWa(true);
     setMetaWaTestResult(null);
     try {
-      const res = await apiFetch('/api/whatsapp/send', {
+      const res = await apiFetch('/api/meta/whatsapp', {
         method: 'POST',
-        body: JSON.stringify({ phone: trimmed, message: msg })
+        body: JSON.stringify({ to: trimmed, message: msg })
       });
       const payload = (await res.json().catch(() => ({}))) as { ok?: boolean; sid?: string; error?: string };
       if (!res.ok) {
@@ -1039,6 +1039,7 @@ export default function SettingsPage() {
                     — kalıcı token, telefon numarası kimliği ve WABA
                   </li>
                   <li>Değişkenleri Vercel’e kaydedin; <strong>Redeploy</strong> gerekebilir.</li>
+                  <li>Serbest metin testi yalnızca alıcı son 24 saatte size yazdıysa gider; aksi halde WhatsApp Merkezi’nden onaylı şablon testi kullanın.</li>
                   <li>Şablon mesajları için Business Manager’da onaylı şablon ve WA şablonları ekranında eşleştirme yapın.</li>
                 </ol>
               </div>

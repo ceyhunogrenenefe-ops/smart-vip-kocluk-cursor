@@ -14,9 +14,9 @@ export function normalizePhone(phone: string): string {
 }
 
 export async function sendWhatsAppMessage(params: { to: string; body: string }): Promise<{ ok: boolean; sid?: string; error?: string }> {
-  const res = await apiFetch('/api/whatsapp/send', {
+  const res = await apiFetch('/api/meta/whatsapp', {
     method: 'POST',
-    body: JSON.stringify({ phone: params.to, message: params.body })
+    body: JSON.stringify({ to: params.to, message: params.body })
   });
   const payload = (await res.json().catch(() => ({}))) as { ok?: boolean; sid?: string; error?: string };
   if (!res.ok) {
