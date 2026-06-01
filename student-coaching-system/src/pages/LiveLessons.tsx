@@ -6,6 +6,7 @@ import { apiFetch } from '../lib/session';
 import { detectPlatform } from '../lib/detectMeetingPlatform';
 import type { TeacherLesson, TeacherStudentLessonSummaryRow, UserRole } from '../types';
 import BbbAutoLinkFieldHint from '../components/liveLessons/BbbAutoLinkFieldHint';
+import LiveLessonCard from '../components/liveLessons/LiveLessonCard';
 import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShell';
 import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
 import { lessonJoinUrl, isBbbJoinUrl } from '../lib/liveLessonUtils';
