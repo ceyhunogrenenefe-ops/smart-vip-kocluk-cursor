@@ -50,6 +50,14 @@ export function isBbbConfigured() {
   return Boolean(apiBase && secret);
 }
 
+/** BBB oda süresi (dk): ders planından uzun tutulur; Vercel'de BBB_MEETING_DURATION_MINUTES ile ayarlanır. */
+export function resolveBbbMeetingDurationMinutes(plannedMinutes) {
+  const configured = Number(process.env.BBB_MEETING_DURATION_MINUTES || 120);
+  const floor = Math.max(15, Number.isFinite(configured) && configured > 0 ? configured : 120);
+  const planned = Math.max(0, Number(plannedMinutes) || 0);
+  return Math.max(floor, planned);
+}
+
 /** BBB create: kayıt özelliği açık, otomatik başlangıç kapalı (öğretmen manuel başlatır). */
 export function bbbRecordingCreateParams() {
   const record = String(process.env.BBB_RECORD ?? 'true').toLowerCase() !== 'false';
@@ -333,7 +341,7 @@ export async function createBbbMeetingAndJoinLink({
     meetingID: safeMeetingId,
     attendeePW,
     moderatorPW,
-    duration: Math.max(15, Number(durationMinutes) || 60),
+    duration: resolveBbbMeetingDurationMinutes(durationMinutes),
     record: recording.record,
     allowStartStopRecording: recording.allowStartStopRecording,
     autoStartRecording: recording.autoStartRecording

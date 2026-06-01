@@ -1,4 +1,4 @@
-import { isBbbConfigured } from './_lib/bbb.js';
+import { isBbbConfigured, resolveBbbMeetingDurationMinutes } from './_lib/bbb.js';
 
 /**
  * BBB ortam değişkenleri tanımlı mı? (giriş gerekmez — Vercel teşhisi)
@@ -19,6 +19,7 @@ export default async function handler(req, res) {
     configured,
     has_endpoint: hasEndpoint,
     has_secret: hasSecret,
+    meeting_duration_minutes: resolveBbbMeetingDurationMinutes(0),
     hint: configured
       ? 'BBB API env OK — otomatik oda açılabilir.'
       : 'Vercel → Settings → Environment Variables → Production: BBB_API_ENDPOINT + BBB_API_SECRET ekleyin ve Redeploy.'

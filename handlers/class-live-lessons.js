@@ -1,5 +1,5 @@
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
-import { enrichMeetingRowsJoinLink } from '../api/_lib/bbb.js';
+import { enrichMeetingRowsJoinLink, resolveBbbMeetingDurationMinutes } from '../api/_lib/bbb.js';
 import { resolveBbbOrManualMeetingLink } from '../api/_lib/resolve-bbb-meeting-link.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
@@ -426,12 +426,12 @@ async function handleClassLiveBbbJoin(req, res, actor, role) {
       const details = await getClassDetails(String(row.class_id || ''));
       const subject = String(row.subject || 'Ders');
       const className = details.class?.name || '';
-      let durationMinutes = 40;
+      let durationMinutes = resolveBbbMeetingDurationMinutes(0);
       if (row.start_time && row.end_time) {
         const [sh, sm] = String(row.start_time).split(':').map(Number);
         const [eh, em] = String(row.end_time).split(':').map(Number);
         const mins = (eh * 60 + em) - (sh * 60 + sm);
-        if (mins > 0) durationMinutes = mins;
+        if (mins > 0) durationMinutes = resolveBbbMeetingDurationMinutes(mins);
       }
       return {
         meetingName: `${subject} — ${className || 'Grup dersi'}`,
@@ -973,7 +973,7 @@ export default async function handler(req, res) {
         subject,
         className: details.class?.name || '',
         teacherId,
-        durationMinutes: duration,
+        durationMinutes: resolveBbbMeetingDurationMinutes(duration),
         meetingKeyPrefix: `classsession${classId}`
       });
       if (!resolved.ok) {
@@ -1241,7 +1241,7 @@ export default async function handler(req, res) {
         subject,
         className: details.class?.name || '',
         teacherId,
-        durationMinutes: duration,
+        durationMinutes: resolveBbbMeetingDurationMinutes(duration),
         meetingKeyPrefix: `classslot${classId}`
       });
       if (!resolved.ok) {
@@ -1327,7 +1327,7 @@ export default async function handler(req, res) {
         subject,
         className: details.class?.name || '',
         teacherId,
-        durationMinutes: duration,
+        durationMinutes: resolveBbbMeetingDurationMinutes(duration),
         meetingKeyPrefix: `classbulk${classId}`
       });
       if (!resolved.ok) {
