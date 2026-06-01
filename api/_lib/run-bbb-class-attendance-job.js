@@ -1,6 +1,7 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import { isBbbJoinUrl } from './bbb.js';
 import { pollBbbPresenceForSession, applyAutoAttendanceForClassSession } from './bbb-attendance.js';
+import { applyEarlyBbbAbsentCheck } from './bbb-early-absent.js';
 import { sessionEndUtcMs, wallTimeToUtcMs } from './class-session-end-ms.js';
 import { recordCronRun } from './cron-run-log.js';
 import { errorMessage } from './error-msg.js';
@@ -22,7 +23,7 @@ export async function runBbbClassAttendanceJob() {
     .limit(500);
   if (error) throw error;
 
-  const log = { polled: 0, auto_attendance: 0, errors: [] };
+  const log = { polled: 0, early_absent: 0, auto_attendance: 0, errors: [] };
 
   for (const session of sessions || []) {
     const link = String(session.meeting_link || '').trim();
@@ -37,6 +38,28 @@ export async function runBbbClassAttendanceJob() {
         if (windowStart != null && windowEnd != null && now >= windowStart && now <= windowEnd) {
           await pollBbbPresenceForSession(session);
           log.polled += 1;
+
+          const { data: classStudents } = await supabaseAdmin
+            .from('class_students')
+            .select('student_id')
+            .eq('class_id', session.class_id);
+          const studentIds = (classStudents || []).map((r) => String(r.student_id)).filter(Boolean);
+          if (studentIds.length) {
+            const { data: cls } = await supabaseAdmin
+              .from('classes')
+              .select('name')
+              .eq('id', session.class_id)
+              .maybeSingle();
+            const early = await applyEarlyBbbAbsentCheck(
+              session,
+              studentIds,
+              cls?.name || 'Sınıf',
+              now
+            );
+            if (early.ok && (early.marked_absent || early.notified)) {
+              log.early_absent += Number(early.marked_absent || 0) + Number(early.notified || 0);
+            }
+          }
         }
       }
 

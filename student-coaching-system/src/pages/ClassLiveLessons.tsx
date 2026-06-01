@@ -195,6 +195,7 @@ export default function ClassLiveLessons() {
   const [slots, setSlots] = useState<SlotRow[]>([]);
   const [selectedClassId, setSelectedClassId] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [teacherOptions, setTeacherOptions] = useState<TeacherOption[]>([]);
 
@@ -299,6 +300,11 @@ export default function ClassLiveLessons() {
     }
   }, []);
 
+  const isBbbSession = useCallback((s: { meeting_link?: string; join_link?: string }) => {
+    const url = String(s.join_link || s.meeting_link || '').trim();
+    return isBbbJoinUrl(url);
+  }, []);
+
   const [attendanceSession, setAttendanceSession] = useState<SessionRow | null>(null);
   const [attendanceDraft, setAttendanceDraft] = useState<
     { student_id: string; status: 'present' | 'absent' | 'late' }[]
@@ -311,6 +317,7 @@ export default function ClassLiveLessons() {
   const [sessionEditBusy, setSessionEditBusy] = useState(false);
   const [slotEditBusy, setSlotEditBusy] = useState(false);
   const [reminderBusyId, setReminderBusyId] = useState<string | null>(null);
+  const [bbbSyncBusyId, setBbbSyncBusyId] = useState<string | null>(null);
   const [esSubject, setEsSubject] = useState('');
   const [esDate, setEsDate] = useState('');
   const [esStart, setEsStart] = useState('');
@@ -401,6 +408,41 @@ export default function ClassLiveLessons() {
       setCalendarLoading(false);
     }
   }, [selectedClassId, weekColumnDates]);
+
+  const pullBbbAttendance = useCallback(
+    async (s: SessionRow) => {
+      setBbbSyncBusyId(s.id);
+      setError(null);
+      setNotice(null);
+      try {
+        const res = await apiFetch('/api/class-live-lessons?op=bbb-sync-attendance', {
+          method: 'POST',
+          body: JSON.stringify({ session_id: s.id })
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(String(j.error || 'BBB yoklaması alınamadı'));
+
+        const early = j.early_absent || {};
+        const fin = j.final_attendance || {};
+        const parts = [
+          early.marked_absent != null && early.marked_absent > 0
+            ? `${early.marked_absent} öğrenci (10 dk içinde gelmedi)`
+            : null,
+          early.notified != null && early.notified > 0 ? `${early.notified} veli WhatsApp` : null,
+          fin.present != null ? `${fin.present} katıldı` : null,
+          fin.absent != null ? `${fin.absent} gelmedi` : null,
+          fin.skipped === 'already_auto' ? 'Ders sonu yoklaması zaten alınmış' : null
+        ].filter(Boolean);
+        setNotice(parts.length ? parts.join(' · ') : 'BBB yoklama güncellendi.');
+        await loadWeekSessions();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBbbSyncBusyId(null);
+      }
+    },
+    [loadWeekSessions]
+  );
 
   useEffect(() => {
     void loadWeekSessions();
@@ -915,6 +957,11 @@ export default function ClassLiveLessons() {
       </div>
 
       {error && <div className="rounded-lg border border-red-100 bg-red-50 text-red-700 px-3 py-2 text-sm">{error}</div>}
+      {notice && (
+        <div className="rounded-lg border border-emerald-100 bg-emerald-50 text-emerald-800 px-3 py-2 text-sm">
+          {notice}
+        </div>
+      )}
       {loading && <div className="text-sm text-slate-500">Yükleniyor...</div>}
 
       {canViewPaymentSummary && (
@@ -1291,7 +1338,7 @@ export default function ClassLiveLessons() {
         hint={
           showMobileCalendar
             ? undefined
-            : 'Yeşil kartlar gerçek oturumdur (planlı: Katıl; tamamlanınca kayıt linki varsa Kaydı izle). Kesik çizgili kartlar şablondur. «PDF görüntü + ders listesi» önce takvim görüntüsü, sonra metin listesi üretir.'
+            : 'Yeşil kartlar gerçek oturumdur (planlı: Katıl; BBB derslerde «BBB yoklama» ile otomatik yoklama; tamamlanınca kayıt linki varsa Kaydı izle). Kesik çizgili kartlar şablondur. «PDF görüntü + ders listesi» önce takvim görüntüsü, sonra metin listesi üretir.'
         }
       >
         {!showMobileCalendar ? (
@@ -1505,6 +1552,20 @@ export default function ClassLiveLessons() {
                                         <Bell className="h-3 w-3 shrink-0" aria-hidden />
                                       )}
                                       Hatırlat
+                                    </button>
+                                  ) : null}
+                                  {canMarkAttendance && isBbbSession(s) && (s.status === 'scheduled' || s.status === 'completed') ? (
+                                    <button
+                                      type="button"
+                                      disabled={bbbSyncBusyId === s.id}
+                                      title="BBB katılımcı listesinden yoklama; ilk 10 dk gelmeyenlere veli bildirimi"
+                                      className="inline-flex items-center gap-0.5 rounded-lg bg-gradient-to-r from-violet-600 to-purple-600 px-2 py-1 text-[10px] font-semibold text-white shadow-sm hover:brightness-110 disabled:cursor-wait disabled:opacity-60"
+                                      onClick={() => void pullBbbAttendance(s)}
+                                    >
+                                      {bbbSyncBusyId === s.id ? (
+                                        <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                                      ) : null}
+                                      BBB yoklama
                                     </button>
                                   ) : null}
                                   {canMarkAttendance && s.status === 'scheduled' ? (

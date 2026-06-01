@@ -26,6 +26,7 @@ import {
 import { handleBbbJoinGet, patchRowMeetingLinks } from '../api/_lib/bbb-join-handler.js';
 import { buildBbbAttendeeJoinUrl, parseBbbJoinCredentials, parseBbbMeetingIdFromJoinUrl } from '../api/_lib/bbb.js';
 import { pollBbbPresenceForSession, applyAutoAttendanceForClassSession } from '../api/_lib/bbb-attendance.js';
+import { applyEarlyBbbAbsentCheck } from '../api/_lib/bbb-early-absent.js';
 import { sendAbsentNoticeForStudent } from '../api/_lib/class-attendance-notify.js';
 
 function parseBody(req) {
@@ -1093,13 +1094,24 @@ export default async function handler(req, res) {
         .select('*')
         .eq('id', sessionId)
         .maybeSingle();
-      const result = await applyAutoAttendanceForClassSession(
-        fresh || session,
-        details.student_ids || [],
-        details.class?.name || 'Sınıf',
-        { force: true }
-      );
-      return res.status(200).json({ ok: true, ...result });
+      const row = fresh || session;
+      const className = details.class?.name || 'Sınıf';
+      const studentIds = details.student_ids || [];
+
+      let early = { ok: true, skipped: 'not_scheduled' };
+      if (String(row.status) === 'scheduled') {
+        early = await applyEarlyBbbAbsentCheck(row, studentIds, className);
+      }
+
+      const result = await applyAutoAttendanceForClassSession(row, studentIds, className, {
+        force: String(row.status) === 'completed'
+      });
+
+      return res.status(200).json({
+        ok: true,
+        early_absent: early,
+        final_attendance: result
+      });
     }
 
     if (op === 'mark-attendance') {
