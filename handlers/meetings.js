@@ -5,7 +5,13 @@ import { resolveStudentRowForUser } from '../api/_lib/resolve-student-id.js';
 import { coachRowToPlatformUserId, getStudentPhones } from '../api/_lib/meetings-resolve.js';
 import { createMeetCalendarEvent } from '../api/_lib/google-calendar-meet.js';
 import { deliverWhatsAppWithLog } from '../api/_lib/meeting-notify.js';
-import { createBbbMeetingAndJoinLink, isBbbConfigured } from '../api/_lib/bbb.js';
+import {
+  createBbbMeetingAndJoinLink,
+  isBbbConfigured,
+  enrichCoachingMeetingRows,
+  applyAutoBbbMeetingLinks,
+  sanitizeBbbMeetingId
+} from '../api/_lib/bbb.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
 
@@ -146,7 +152,8 @@ async function handleList(req, res) {
       });
     }
 
-    return res.status(200).json({ data: data || [] });
+    const rows = enrichCoachingMeetingRows(data || [], actor.role);
+    return res.status(200).json({ data: rows });
   } catch (e) {
     console.error('[meetings list]', errorMessage(e));
     const msg = errorMessage(e);
@@ -281,9 +288,10 @@ async function handleCreate(req, res) {
             moderatorName: coachRow?.name || 'Koç',
             durationMinutes
           });
-          autoBbbLink = bbb.attendeeJoinLink;
-          meetLinkResult = bbb.attendeeJoinLink;
-          linkBbb = bbb.attendeeJoinLink;
+          const applied = applyAutoBbbMeetingLinks(bbb);
+          autoBbbLink = applied.autoBbb;
+          meetLinkResult = applied.meetLink;
+          linkBbb = applied.linkBbb;
           googleEventId = null;
           console.warn('[meetings create] Google Takvim hatası, otomatik BBB fallback kullanıldı.');
         } else {
@@ -301,9 +309,10 @@ async function handleCreate(req, res) {
             moderatorName: coachRow?.name || 'Koç',
             durationMinutes
           });
-          autoBbbLink = bbb.attendeeJoinLink;
-          meetLinkResult = bbb.attendeeJoinLink;
-          linkBbb = bbb.attendeeJoinLink;
+          const applied = applyAutoBbbMeetingLinks(bbb);
+          autoBbbLink = applied.autoBbb;
+          meetLinkResult = applied.meetLink;
+          linkBbb = applied.linkBbb;
         } else {
           return jsonError(res, 502, 'Google Meet bağlantısı oluşturulamadı. Zoom veya BBB adresi ekleyip tekrar deneyin.');
         }
@@ -319,9 +328,10 @@ async function handleCreate(req, res) {
           moderatorName: coachRow?.name || 'Koç',
           durationMinutes
         });
-        autoBbbLink = bbb.attendeeJoinLink;
-        meetLinkResult = bbb.attendeeJoinLink;
-        linkBbb = bbb.attendeeJoinLink;
+        const applied = applyAutoBbbMeetingLinks(bbb);
+        autoBbbLink = applied.autoBbb;
+        meetLinkResult = applied.meetLink;
+        linkBbb = applied.linkBbb;
       }
     }
 
@@ -536,9 +546,10 @@ async function handleCreateSeries(req, res) {
             moderatorName: coachRow?.name || 'Koç',
             durationMinutes
           });
-          autoBbbLink = bbb.attendeeJoinLink;
-          meetLinkResult = bbb.attendeeJoinLink;
-          linkBbb = bbb.attendeeJoinLink;
+          const applied = applyAutoBbbMeetingLinks(bbb);
+          autoBbbLink = applied.autoBbb;
+          meetLinkResult = applied.meetLink;
+          linkBbb = applied.linkBbb;
           googleEventId = null;
         } else {
           return jsonError(res, 502, msg);
@@ -554,9 +565,10 @@ async function handleCreateSeries(req, res) {
             moderatorName: coachRow?.name || 'Koç',
             durationMinutes
           });
-          autoBbbLink = bbb.attendeeJoinLink;
-          meetLinkResult = bbb.attendeeJoinLink;
-          linkBbb = bbb.attendeeJoinLink;
+          const applied = applyAutoBbbMeetingLinks(bbb);
+          autoBbbLink = applied.autoBbb;
+          meetLinkResult = applied.meetLink;
+          linkBbb = applied.linkBbb;
         }
         if (!meetLinkResult) {
           return jsonError(res, 502, 'Google Meet oluşturulamadı; Zoom veya BBB girin.');
@@ -573,9 +585,10 @@ async function handleCreateSeries(req, res) {
           moderatorName: coachRow?.name || 'Koç',
           durationMinutes
         });
-        autoBbbLink = bbb.attendeeJoinLink;
-        meetLinkResult = bbb.attendeeJoinLink;
-        linkBbb = bbb.attendeeJoinLink;
+        const applied = applyAutoBbbMeetingLinks(bbb);
+        autoBbbLink = applied.autoBbb;
+        meetLinkResult = applied.meetLink;
+        linkBbb = applied.linkBbb;
       }
     }
 

@@ -568,7 +568,10 @@ export interface CoachingMeetingRecord {
   meet_link: string;
   /** İsteğe bağlı ek katılım bağlantısı (Meet’e ek) */
   link_zoom?: string | null;
+  /** BBB otomatik odada moderatör join URL; öğrenci meet_link kullanır */
   link_bbb?: string | null;
+  /** Rol bazlı Katıl URL (liste API) */
+  join_link?: string;
   google_calendar_event_id?: string | null;
   status: MeetingStatus;
   notes?: string | null;

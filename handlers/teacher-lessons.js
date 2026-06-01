@@ -1,6 +1,11 @@
 import crypto from 'crypto';
 import { requireAuthenticatedActor, hasInstitutionAccess } from '../api/_lib/auth.js';
-import { createBbbMeetingAndJoinLink, isBbbConfigured, enrichMeetingRowsJoinLink } from '../api/_lib/bbb.js';
+import {
+  createBbbMeetingAndJoinLink,
+  isBbbConfigured,
+  enrichMeetingRowsJoinLink,
+  sanitizeBbbMeetingId
+} from '../api/_lib/bbb.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { detectPlatform } from '../api/_lib/detect-meeting-platform.js';
@@ -135,7 +140,7 @@ async function resolveTeacherLessonMeetingLink({
 
   const teacherName = await userDisplayName(teacherId, 'Öğretmen');
   const attendeeName = String(studentName || '').trim() || 'Öğrenci';
-  const meetingId = `${meetingKeyPrefix}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+  const meetingId = sanitizeBbbMeetingId(`${meetingKeyPrefix}${Date.now()}${crypto.randomBytes(4).toString('hex')}`);
   const bbb = await createBbbMeetingAndJoinLink({
     meetingId,
     meetingName: title || 'Canlı özel ders',

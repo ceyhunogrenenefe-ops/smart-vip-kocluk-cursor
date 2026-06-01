@@ -83,6 +83,40 @@ export function enrichMeetingRowsJoinLink(rows, actorRole) {
   return list.map((row) => enrichMeetingRowJoinLink(row, actorRole));
 }
 
+/** BBB meetingID: yalnızca harf/rakam (UUID tireleri bazı sunucularda hata verir). */
+export function sanitizeBbbMeetingId(raw) {
+  const cleaned = String(raw || '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .slice(0, 80);
+  return cleaned || `m${Date.now()}`;
+}
+
+/** Online görüşme (meetings tablosu): öğrenci meet_link, personel link_bbb (moderatör). */
+export function enrichCoachingMeetingRow(row, actorRole) {
+  if (!row || typeof row !== 'object') return row;
+  const isStudent = String(actorRole || '').toLowerCase() === 'student';
+  const attendee = String(row.meet_link || '').trim();
+  const moderator = String(row.link_bbb || '').trim();
+  const joinLink = !isStudent && moderator ? moderator : attendee;
+  if (isStudent) {
+    return { ...row, join_link: attendee };
+  }
+  return { ...row, join_link: joinLink };
+}
+
+export function enrichCoachingMeetingRows(rows, actorRole) {
+  const list = Array.isArray(rows) ? rows : [];
+  return list.map((row) => enrichCoachingMeetingRow(row, actorRole));
+}
+
+export function applyAutoBbbMeetingLinks(bbb) {
+  return {
+    meetLink: bbb.attendeeJoinLink,
+    linkBbb: bbb.moderatorJoinLink,
+    autoBbb: { ok: true, provider: 'bbb', meetingId: bbb.meetingId }
+  };
+}
+
 export async function createBbbMeetingAndJoinLink({
   meetingId,
   meetingName,
@@ -95,7 +129,7 @@ export async function createBbbMeetingAndJoinLink({
     throw new Error('BBB API ayarları eksik (BBB_API_ENDPOINT ve BBB_API_SECRET).');
   }
 
-  const safeMeetingId = String(meetingId || '').trim();
+  const safeMeetingId = sanitizeBbbMeetingId(meetingId);
   if (!safeMeetingId) throw new Error('BBB meeting ID boş olamaz.');
 
   const attendeePW = `a-${crypto.randomBytes(5).toString('hex')}`;

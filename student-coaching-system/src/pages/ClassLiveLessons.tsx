@@ -482,6 +482,10 @@ export default function ClassLiveLessons() {
   const createSlot = async () => {
     if (!selectedClassId || !slotSubject.trim()) return;
     const teacherId = effectiveSlotTeacherId;
+    if (!teacherId) {
+      alert('Öğretmen seçin.');
+      return;
+    }
     const start = `${String(slotHour).padStart(2, '0')}:${String(slotMinute).padStart(2, '0')}`;
     const res = await apiFetch('/api/class-live-lessons?op=create-slot', {
       method: 'POST',

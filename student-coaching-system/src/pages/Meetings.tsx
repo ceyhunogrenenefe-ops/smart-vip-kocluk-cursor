@@ -5,6 +5,7 @@ import { useApp } from '../context/AppContext';
 import { apiFetch } from '../lib/session';
 import { isNativeApp } from '../lib/nativeApp';
 import { resolveCoachRecordId } from '../lib/coachResolve';
+import { coachingMeetingJoinUrl } from '../lib/liveLessonUtils';
 import type { CoachingMeetingRecord, MeetingStatus } from '../types';
 import {
   Video,
@@ -796,7 +797,7 @@ export default function Meetings() {
                       </span>
                     </span>
                     <a
-                      href={m.meet_link}
+                      href={coachingMeetingJoinUrl(m, effectiveUser?.role || 'student')}
                       target="_blank"
                       rel="noreferrer noopener"
                       className="text-emerald-700 font-medium hover:underline"
@@ -889,15 +890,17 @@ export default function Meetings() {
                   ) : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {coachingMeetingJoinUrl(m, effectiveUser?.role || 'student') ? (
                   <a
-                    href={m.meet_link}
+                    href={coachingMeetingJoinUrl(m, effectiveUser?.role || 'student')}
                     target="_blank"
                     rel="noreferrer noopener"
                     className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium"
                   >
                     <ExternalLink className="w-4 h-4" />
-                    Meet’e katıl
+                    {m.link_bbb && !isStudent ? 'Görüşmeye katıl (moderatör)' : 'Görüşmeye katıl'}
                   </a>
+                  ) : null}
                   {m.link_zoom ? (
                     <a
                       href={m.link_zoom}
@@ -909,7 +912,7 @@ export default function Meetings() {
                       Zoom
                     </a>
                   ) : null}
-                  {m.link_bbb ? (
+                  {isStudent && m.link_bbb && m.link_bbb !== m.meet_link ? (
                     <a
                       href={m.link_bbb}
                       target="_blank"

@@ -44,3 +44,18 @@ export const PLATFORM_LABEL: Record<string, string> = {
 export function lessonJoinUrl(lesson: { join_link?: string | null; meeting_link?: string | null }): string {
   return String(lesson.join_link || lesson.meeting_link || '').trim();
 }
+
+/** Online görüşme: öğrenci meet_link, koç/yönetici link_bbb (BBB moderatör). */
+export function coachingMeetingJoinUrl(
+  m: {
+    meet_link?: string | null;
+    link_bbb?: string | null;
+    join_link?: string | null;
+  },
+  role: string
+): string {
+  if (m.join_link) return String(m.join_link).trim();
+  const r = String(role || '').toLowerCase();
+  if (r === 'student') return String(m.meet_link || '').trim();
+  return String(m.link_bbb || m.meet_link || '').trim();
+}

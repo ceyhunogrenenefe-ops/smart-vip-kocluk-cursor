@@ -122,7 +122,7 @@ export function ClassLiveStudentMobileCalendar({
           {sessions.map((s) => {
             const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
             const accent = liveSubjectAccent(s.subject);
-            const sessionLink = String(s.meeting_link || '').trim();
+            const sessionLink = String(s.join_link || s.meeting_link || '').trim();
             const canJoin = s.status === 'scheduled' && Boolean(sessionLink);
             const canWatch = s.status === 'completed' && Boolean(sessionLink);
             return (
@@ -187,10 +187,10 @@ export function ClassLiveStudentMobileCalendar({
                 <p className="text-xs text-slate-600">
                   {teacher?.name || s.teacher_name || 'Öğretmen'} · {String(s.start_time).slice(0, 5)}
                 </p>
-                {s.meeting_link ? (
+                {(s.join_link || s.meeting_link) ? (
                   <button
                     type="button"
-                    onClick={() => window.open(s.meeting_link, '_blank', 'noopener,noreferrer')}
+                    onClick={() => window.open(String(s.join_link || s.meeting_link || ''), '_blank', 'noopener,noreferrer')}
                     className="mt-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white"
                   >
                     Derse git

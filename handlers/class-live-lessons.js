@@ -1,6 +1,11 @@
 import crypto from 'crypto';
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
-import { createBbbMeetingAndJoinLink, isBbbConfigured, enrichMeetingRowsJoinLink } from '../api/_lib/bbb.js';
+import {
+  createBbbMeetingAndJoinLink,
+  isBbbConfigured,
+  enrichMeetingRowsJoinLink,
+  sanitizeBbbMeetingId
+} from '../api/_lib/bbb.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { renderMessageTemplate } from '../api/_lib/template-engine.js';
@@ -64,7 +69,7 @@ async function resolveClassLessonMeetingLink({
   if (!isBbbConfigured()) return null;
 
   const teacherName = await teacherDisplayName(teacherId);
-  const meetingId = `${meetingKeyPrefix}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+  const meetingId = sanitizeBbbMeetingId(`${meetingKeyPrefix}${Date.now()}${crypto.randomBytes(4).toString('hex')}`);
   const bbb = await createBbbMeetingAndJoinLink({
     meetingId,
     meetingName: `${subject} — ${className || 'Grup dersi'}`,

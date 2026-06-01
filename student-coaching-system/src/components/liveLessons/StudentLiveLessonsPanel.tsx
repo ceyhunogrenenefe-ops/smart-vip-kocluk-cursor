@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { apiFetch } from '../../lib/session';
 import type { StudentTeacherLessonQuota, TeacherLesson } from '../../types';
 import LiveLessonCard from './LiveLessonCard';
+import { lessonJoinUrl } from '../../lib/liveLessonUtils';
 import { Loader2, Radio, AlertTriangle, CalendarRange } from 'lucide-react';
 
 function isoDate(d: Date): string {
@@ -285,8 +286,8 @@ export default function StudentLiveLessonsPanel() {
             <LiveLessonCard
               lesson={lesson}
               lockCompletedLink
-              onCopy={() => void navigator.clipboard.writeText(lesson.meeting_link)}
-              onJoin={() => window.open(lesson.meeting_link, '_blank', 'noopener,noreferrer')}
+              onCopy={() => void navigator.clipboard.writeText(lessonJoinUrl(lesson))}
+              onJoin={() => window.open(lessonJoinUrl(lesson), '_blank', 'noopener,noreferrer')}
             />
           </div>
         ))}
