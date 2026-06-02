@@ -938,9 +938,18 @@ export default async function handler(req, res) {
           clsPatch.class_level = String(body.class_level || '').trim() || null;
         if (Object.prototype.hasOwnProperty.call(body, 'branch'))
           clsPatch.branch = String(body.branch || '').trim() || null;
-        if (Object.prototype.hasOwnProperty.call(body, 'name'))
-          clsPatch.name = String(body.name || '').trim() || null;
-        await supabaseAdmin.from('classes').update(clsPatch).eq('id', classId);
+        if (Object.prototype.hasOwnProperty.call(body, 'name')) {
+          const nextName = String(body.name || '').trim();
+          if (!nextName) {
+            return res.status(400).json({ error: 'name_required', hint: 'Sınıf adı boş olamaz.' });
+          }
+          clsPatch.name = nextName;
+        }
+        const { error: clsErr } = await supabaseAdmin.from('classes').update(clsPatch).eq('id', classId);
+        if (clsErr) {
+          const mapped = mapClassesInsertError(clsErr);
+          return res.status(mapped.status).json(mapped.body);
+        }
       }
       return res.status(200).json({ ok: true });
     }

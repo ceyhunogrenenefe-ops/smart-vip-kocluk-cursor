@@ -206,6 +206,8 @@ export default function ClassLiveLessons() {
   const [newClassBranch, setNewClassBranch] = useState('');
   /** Seçili sınıfta atanacak şube (students.school ile eşleşir); üyeler API'siyle kaydedilir */
   const [assignmentBranchDraft, setAssignmentBranchDraft] = useState('');
+  const [classNameDraft, setClassNameDraft] = useState('');
+  const [classNameSaving, setClassNameSaving] = useState(false);
 
   const [slotDay, setSlotDay] = useState(1);
   const [slotHour, setSlotHour] = useState(10);
@@ -363,6 +365,10 @@ export default function ClassLiveLessons() {
   useEffect(() => {
     setAssignmentBranchDraft(selectedClass?.branch?.trim() ?? '');
   }, [selectedClass?.id, selectedClass?.branch]);
+
+  useEffect(() => {
+    setClassNameDraft(selectedClass?.name?.trim() ?? '');
+  }, [selectedClass?.id, selectedClass?.name]);
 
   const studentsForAssignments = useMemo(() => {
     if (!selectedClass) return [];
@@ -721,7 +727,7 @@ export default function ClassLiveLessons() {
   const updateClassMembers = async (
     teacherIds: string[],
     studentIds: string[],
-    classMeta?: Partial<{ class_level: string | null; branch: string | null }>
+    classMeta?: Partial<{ class_level: string | null; branch: string | null; name: string }>
   ) => {
     if (!selectedClassId) return;
     const body: Record<string, unknown> = {
@@ -733,6 +739,7 @@ export default function ClassLiveLessons() {
       if (Object.prototype.hasOwnProperty.call(classMeta, 'class_level'))
         body.class_level = classMeta.class_level;
       if (Object.prototype.hasOwnProperty.call(classMeta, 'branch')) body.branch = classMeta.branch;
+      if (Object.prototype.hasOwnProperty.call(classMeta, 'name')) body.name = classMeta.name;
     }
     const res = await apiFetch('/api/class-live-lessons?op=update-class-members', {
       method: 'POST',
@@ -744,6 +751,24 @@ export default function ClassLiveLessons() {
       return;
     }
     await loadAll();
+  };
+
+  const saveClassName = async () => {
+    if (!selectedClass) return;
+    const nextName = classNameDraft.trim();
+    if (!nextName) {
+      setError('Sınıf adı boş olamaz.');
+      return;
+    }
+    if (nextName === selectedClass.name.trim()) return;
+    setClassNameSaving(true);
+    try {
+      await updateClassMembers(selectedClass.teacher_ids || [], selectedClass.student_ids || [], {
+        name: nextName
+      });
+    } finally {
+      setClassNameSaving(false);
+    }
   };
 
   const deleteSlot = async (id: string) => {
@@ -1087,7 +1112,26 @@ export default function ClassLiveLessons() {
 
       {selectedClass && canManageClasses && (
         <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-          <h2 className="font-semibold text-slate-800">Öğretmen/Öğrenci atamaları - {selectedClass.name}</h2>
+          <h2 className="font-semibold text-slate-800">Sınıf ayarları — {selectedClass.name}</h2>
+          <div className="flex flex-wrap items-end gap-2 text-sm border border-slate-100 rounded-lg p-3 bg-slate-50/80">
+            <div className="min-w-[200px] flex-1">
+              <label className="block text-xs text-slate-500 mb-0.5">Sınıf adı</label>
+              <input
+                value={classNameDraft}
+                onChange={(e) => setClassNameDraft(e.target.value)}
+                placeholder="Örn: 9-A Haftaiçi"
+                className="w-full border border-slate-200 rounded px-3 py-1.5"
+              />
+            </div>
+            <button
+              type="button"
+              disabled={classNameSaving || classNameDraft.trim() === selectedClass.name.trim()}
+              className="px-3 py-1.5 rounded bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50"
+              onClick={() => void saveClassName()}
+            >
+              {classNameSaving ? 'Kaydediliyor…' : 'Adı kaydet'}
+            </button>
+          </div>
           <div className="flex flex-wrap items-end gap-2 text-sm border border-slate-100 rounded-lg p-3 bg-slate-50/80">
             <div className="min-w-[120px]">
               <label className="block text-xs text-slate-500 mb-0.5">Liste şubesi (öğrenci kaydıyla eşleşir)</label>
