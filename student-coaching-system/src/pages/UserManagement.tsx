@@ -32,6 +32,7 @@ import {
 import { UserRole, ClassLevel, Coach, Student } from '../types';
 import { userRoleTags } from '../config/rolePermissions';
 import { db, QuotaSnapshot } from '../lib/database';
+import { QuotaManagementPanel } from '../components/quota/QuotaManagementPanel';
 import { getAuthToken } from '../lib/session';
 import {
   userRowToSystemUser,
@@ -80,6 +81,23 @@ const toClassLevel = (raw: string): ClassLevel => {
   if (!Number.isNaN(n)) return n as ClassLevel;
   return 9;
 };
+
+function quotaBlockMessage(
+  quota: QuotaSnapshot | null,
+  role: UserRole,
+  actorRole: UserRole | undefined
+): string | null {
+  if (!quota || quota.quota_exempt || actorRole === 'super_admin') return null;
+  const limits = quota.admin_limits;
+  if (!limits) return null;
+  if (role === 'student' && quota.counts.students >= limits.max_students) {
+    return `Öğrenci kotası doldu (${quota.counts.students}/${limits.max_students}). Önce kotayı artırın veya mevcut kayıtları temizleyin.`;
+  }
+  if (role === 'coach' && quota.counts.coaches >= limits.max_coaches) {
+    return `Koç kotası doldu (${quota.counts.coaches}/${limits.max_coaches}). Önce kotayı artırın.`;
+  }
+  return null;
+}
 
 const coachProfilesWithoutLoginUser = (coachList: Coach[], userRows: UserRow[]): SystemUser[] => {
   const emailsWithUser = new Set(
@@ -193,6 +211,7 @@ export default function UserManagement() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [quota, setQuota] = useState<QuotaSnapshot | null>(null);
+  const [quotaRefreshKey, setQuotaRefreshKey] = useState(0);
   const [importBusy, setImportBusy] = useState(false);
   /** Satır içi koç ataması PATCH sırasında */
   const [coachAssignBusy, setCoachAssignBusy] = useState<string | null>(null);
@@ -337,7 +356,7 @@ export default function UserManagement() {
       !showModal ||
       modalMode !== 'edit' ||
       !selectedUser ||
-      selectedUser.role !== 'admin' ||
+      !userRoleTags(selectedUser).includes('admin') ||
       currentUser?.role !== 'super_admin' ||
       !getAuthToken()
     ) {
@@ -391,7 +410,56 @@ export default function UserManagement() {
     return () => {
       cancelled = true;
     };
-  }, [currentUser, activeInstitutionId, institution?.id]);
+  }, [currentUser, activeInstitutionId, institution?.id, quotaRefreshKey]);
+
+  const quotaInstitutionId =
+    currentUser?.role === 'super_admin'
+      ? activeInstitutionId || institution?.id || undefined
+      : currentUser?.institutionId || activeInstitutionId || institution?.id || undefined;
+
+  const quotaInstitutionName = useMemo(() => {
+    if (!quotaInstitutionId) return undefined;
+    return (
+      institutions.find((i) => i.id === quotaInstitutionId)?.name ||
+      (institution?.id === quotaInstitutionId ? institution.name : undefined)
+    );
+  }, [quotaInstitutionId, institutions, institution?.id, institution?.name]);
+
+  const institutionAdmins = useMemo(() => {
+    const inst = quotaInstitutionId;
+    if (!inst) return [];
+    const seen = new Set<string>();
+    const pick: { id: string; name: string; email: string }[] = [];
+    const push = (id: string, name: string, email: string) => {
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      pick.push({ id, name: name || email, email });
+    };
+    for (const row of rawUserRows) {
+      const tags = userRoleTags(row as { role: UserRole; roles?: UserRole[] });
+      if (!tags.includes('admin')) continue;
+      if (row.institution_id && String(row.institution_id) !== String(inst)) continue;
+      push(row.id, row.name || row.email, row.email);
+    }
+    for (const u of users) {
+      const tags = userRoleTags(u as SystemUser);
+      if (!tags.includes('admin')) continue;
+      if (u.institutionId && String(u.institutionId) !== String(inst)) continue;
+      push(u.id, u.name, u.email);
+    }
+    if (quota?.admin_user_id) {
+      const hit = pick.find((p) => p.id === quota.admin_user_id);
+      if (!hit) {
+        const fromUsers = users.find((u) => u.id === quota.admin_user_id);
+        if (fromUsers) push(fromUsers.id, fromUsers.name, fromUsers.email);
+      }
+    }
+    return pick;
+  }, [users, rawUserRows, quotaInstitutionId, quota?.admin_user_id]);
+
+  const refreshQuotaSnapshot = useCallback(() => {
+    setQuotaRefreshKey((k) => k + 1);
+  }, []);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -525,7 +593,7 @@ export default function UserManagement() {
       const opts = {
         platformUserId: user.id,
         email: user.email,
-        studentId: user.studentId
+        studentId: user.studentId || user.id
       };
       let link = findStudentForPlatformUser(opts, students);
       if (link) return link;
@@ -899,7 +967,8 @@ export default function UserManagement() {
         if (
           result.success &&
           currentUser?.role === 'super_admin' &&
-          selectedUser.role === 'admin'
+          selectedUser &&
+          userRoleTags(selectedUser).includes('admin')
         ) {
           try {
             await db.patchAdminQuota(selectedUser.id, {
@@ -916,28 +985,56 @@ export default function UserManagement() {
         let studentCardNote = '';
         if (result.success) {
           const tags = userRoleTags(selectedUser as SystemUser);
-          if (tags.includes('student')) {
-            const st = await resolveStudentLinkForUser(selectedUser);
-            if (st) {
-              try {
-                await updateStudent(st.id, {
-                  birthDate: formData.birthDate || undefined,
-                  classLevel: toClassLevel(formData.classLevel),
-                  school: formData.branch.trim() || undefined,
-                  parentName: formData.parentName.trim() || undefined,
-                  parentPhone: formData.parentPhone.trim() || undefined,
-                  coachId: formData.assignCoachId.trim() || undefined,
-                  institutionId: formData.studentInstitutionId.trim() || undefined,
-                  whatsappAutomationEnabled: formData.whatsappAutomationEnabled
-                });
-              } catch (se) {
+          const syncStudentCard =
+            formData.role === 'student' || tags.includes('student');
+          if (syncStudentCard) {
+            const linkEmail = formData.email.toLowerCase().trim();
+            const studentPayload = {
+              id: selectedUser.id,
+              name: fullName,
+              email: linkEmail,
+              phone: formData.phone || '',
+              birthDate: formData.birthDate || undefined,
+              classLevel: toClassLevel(formData.classLevel),
+              school: formData.branch.trim() || undefined,
+              parentName: formData.parentName.trim() || undefined,
+              parentPhone: formData.parentPhone.trim() || undefined,
+              coachId: formData.assignCoachId.trim() || undefined,
+              institutionId:
+                formData.studentInstitutionId.trim() ||
+                selectedUser.institutionId ||
+                undefined,
+              whatsappAutomationEnabled: formData.whatsappAutomationEnabled,
+              createdAt: new Date().toISOString()
+            };
+            let st =
+              findStudentForPlatformUser(
+                {
+                  platformUserId: selectedUser.id,
+                  email: linkEmail,
+                  studentId: selectedUser.studentId || selectedUser.id
+                },
+                students
+              ) ?? null;
+            if (!st) {
+              st = await resolveStudentLinkForUser({
+                id: selectedUser.id,
+                email: linkEmail,
+                studentId: selectedUser.studentId
+              });
+            }
+            try {
+              if (st) {
+                await updateStudent(st.id, studentPayload);
+              } else {
+                await addStudent(studentPayload);
                 studentCardNote =
-                  ' Öğrenci kartı alanları kaydedilemedi: ' +
-                  (se instanceof Error ? se.message : 'bilinmeyen hata');
+                  ' Öğrenci kartı oluşturuldu ve kullanıcıya bağlandı.';
               }
-            } else {
+            } catch (se) {
               studentCardNote =
-                ' Öğrenci kartı güncellenemedi: kullanıcıyla eşleşen öğrenci kaydı bulunamadı (e-posta veya platform bağlantısı).';
+                ' Öğrenci kartı alanları kaydedilemedi: ' +
+                (se instanceof Error ? se.message : 'bilinmeyen hata');
             }
           }
           const editTags = userRoleTags(selectedUser as SystemUser);
@@ -994,7 +1091,8 @@ export default function UserManagement() {
           type:
             !result.success
               ? 'error'
-              : studentCardNote.startsWith(' Öğrenci kartı alanları kaydedilemedi')
+              : studentCardNote.includes('kaydedilemedi') ||
+                  studentCardNote.includes('güncellenemedi')
                 ? 'error'
                 : 'success',
           text: result.message + quotaNote + (result.success ? studentCardNote : '')
@@ -1110,6 +1208,13 @@ export default function UserManagement() {
           instFallback ||
           currentUser?.institutionId;
 
+        const quotaBlocked = quotaBlockMessage(quota, formData.role, currentUser?.role);
+        if (quotaBlocked) {
+          setMessage({ type: 'error', text: quotaBlocked });
+          setLoading(false);
+          return;
+        }
+
         if (getAuthToken()) {
           try {
             const row = await db.createUser(
@@ -1172,7 +1277,7 @@ export default function UserManagement() {
             }
             try {
               if (formData.role === 'student') {
-                await addStudent({
+                const studentPayload = {
                   id: newUserId,
                   name: fullName,
                   email: formData.email,
@@ -1187,9 +1292,18 @@ export default function UserManagement() {
                   institutionId: studentInstForAdd || undefined,
                   whatsappAutomationEnabled: formData.whatsappAutomationEnabled,
                   createdAt: new Date().toISOString()
-                });
+                };
+                const existingSt = findStudentForPlatformUser(
+                  { platformUserId: newUserId, email: createdEmail },
+                  students
+                );
+                if (existingSt) {
+                  await updateStudent(existingSt.id, studentPayload);
+                } else {
+                  await addStudent(studentPayload);
+                }
               } else if (formData.role === 'coach' || (staffRolesNew?.roles || []).includes('coach')) {
-                await addCoach({
+                const coachPayload = {
                   id: newUserId,
                   name: fullName,
                   email: formData.email,
@@ -1198,13 +1312,28 @@ export default function UserManagement() {
                   studentIds: [],
                   institutionId: instId || undefined,
                   createdAt: new Date().toISOString()
-                });
+                };
+                const existingCoach = coaches.find(
+                  (c) => (c.email || '').toLowerCase().trim() === createdEmail
+                );
+                if (existingCoach) {
+                  await updateCoach(existingCoach.id, {
+                    name: coachPayload.name,
+                    email: coachPayload.email,
+                    phone: coachPayload.phone,
+                    institutionId: coachPayload.institutionId
+                  });
+                } else {
+                  await addCoach(coachPayload);
+                }
               }
             } catch (syncErr) {
               console.error('Öğrenci/koç listesi senkron hatası:', syncErr);
+              const detail =
+                syncErr instanceof Error ? syncErr.message : 'Bilinmeyen hata';
               setMessage({
                 type: 'error',
-                text: 'Kullanıcı oluşturuldu ancak öğrenci/koç listesine eklenirken sorun oluştu. Öğrenci/Koç sayfasından tekrar deneyin.'
+                text: `Kullanıcı oluşturuldu ancak öğrenci/koç listesine eklenirken sorun oluştu: ${detail}. Öğrenci/Koç sayfasından tekrar deneyin.`
               });
             }
           } catch (err) {
@@ -1899,15 +2028,44 @@ export default function UserManagement() {
         </div>
       </div>
 
-      {quota?.admin_limits && (
+      {(currentUser?.role === 'super_admin' || currentUser?.role === 'admin') &&
+        !quotaInstitutionId &&
+        currentUser?.role === 'super_admin' && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            Kota yönetimi için önce üst menüden veya Kurum Yönetimi ekranından bir kurum seçin.
+          </div>
+        )}
+
+      {(currentUser?.role === 'super_admin' || currentUser?.role === 'admin') && (
+        <QuotaManagementPanel
+          actorRole={currentUser!.role}
+          actorUserId={currentUser!.id}
+          institutionId={quotaInstitutionId}
+          institutionName={quotaInstitutionName}
+          quota={quota}
+          coaches={coaches}
+          students={students}
+          institutionAdmins={institutionAdmins}
+          onQuotaUpdated={refreshQuotaSnapshot}
+        />
+      )}
+
+      {quota?.admin_limits &&
+        currentUser?.role !== 'super_admin' &&
+        currentUser?.role !== 'admin' && (
         <div
           className={`rounded-xl border p-4 ${
-            (quota.usage_pct?.students ?? 0) >= 90 || (quota.usage_pct?.coaches ?? 0) >= 90
-              ? 'border-amber-300 bg-amber-50 text-amber-950'
-              : 'border-emerald-200 bg-emerald-50 text-emerald-900'
+            quota.quota_exempt
+              ? 'border-slate-200 bg-slate-50 text-slate-800'
+              : (quota.usage_pct?.students ?? 0) >= 90 || (quota.usage_pct?.coaches ?? 0) >= 90
+                ? 'border-amber-300 bg-amber-50 text-amber-950'
+                : 'border-emerald-200 bg-emerald-50 text-emerald-900'
           }`}
         >
           <p className="font-medium mb-2">Plan kotası özeti</p>
+          {quota.quota_exempt ? (
+            <p className="text-sm">Ana platform kurumu — kurum öğrenci/koç kotası uygulanmaz.</p>
+          ) : null}
           <p className="text-sm">
             Öğrenci:{' '}
             <span className="font-semibold">
@@ -1933,6 +2091,12 @@ export default function UserManagement() {
           {(quota.usage_pct?.students ?? 0) >= 90 || (quota.usage_pct?.coaches ?? 0) >= 90 ? (
             <p className="text-sm mt-2">
               Kota limitine yaklaşılıyor; ek kapasite veya yükseltme için yöneticinize danışın.
+            </p>
+          ) : null}
+          {!quota.quota_exempt &&
+          quota.counts.students >= (quota.admin_limits?.max_students ?? Infinity) ? (
+            <p className="text-sm mt-2 font-medium text-red-700">
+              Öğrenci kotası dolu — yeni öğrenci eklenemez.
             </p>
           ) : null}
         </div>
@@ -2460,7 +2624,9 @@ export default function UserManagement() {
                 )}
 
               {modalMode === 'edit' &&
-                formData.role === 'admin' &&
+                userRoleTags(
+                  (selectedUser || { role: formData.role }) as SystemUser
+                ).includes('admin') &&
                 currentUser?.role === 'super_admin' && (
                   <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-4">
                     <p className="text-sm font-medium text-amber-900">

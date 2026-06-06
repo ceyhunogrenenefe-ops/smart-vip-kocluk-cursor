@@ -3,7 +3,8 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import {
   getInstitutionAdminUserId,
   getAdminLimits,
-  getCoachLimitRow
+  getCoachLimitRow,
+  shouldSkipInstitutionQuota
 } from '../api/_lib/quota-enforce.js';
 
 async function countWhere(table, filters) {
@@ -21,11 +22,12 @@ function pct(current, max) {
   return Math.min(100, Math.round((current / max) * 1000) / 10);
 }
 
-async function institutionSnapshot(institutionId) {
+async function institutionSnapshot(institutionId, actorRole) {
   const adminUserId = await getInstitutionAdminUserId(institutionId);
   const limits = adminUserId ? await getAdminLimits(adminUserId) : null;
   const students = await countWhere('students', { institution_id: institutionId });
   const coaches = await countWhere('coaches', { institution_id: institutionId });
+  const quotaExempt = shouldSkipInstitutionQuota({ institutionId, actorRole });
   return {
     institution_id: institutionId,
     admin_user_id: adminUserId,
@@ -34,7 +36,8 @@ async function institutionSnapshot(institutionId) {
     usage_pct: {
       students: pct(students, limits?.max_students ?? null),
       coaches: pct(coaches, limits?.max_coaches ?? null)
-    }
+    },
+    quota_exempt: quotaExempt
   };
 }
 
@@ -105,7 +108,7 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: 'forbidden' });
       }
 
-      const base = await institutionSnapshot(institutionId);
+      const base = await institutionSnapshot(institutionId, actor.role);
 
       if (actor.role === 'coach' && actor.coach_id) {
         const assigned = await countWhere('students', { coach_id: actor.coach_id });

@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { supabaseAdmin } from './supabase-admin.js';
-import { linkStudentToUser } from './link-student-user.js';
+import { linkStudentToUser, claimStudentForUser } from './link-student-user.js';
 import { resolveStudentRowForUser } from './resolve-student-id.js';
 import { normalizedUserRolesFromDb } from './user-roles-fetch.js';
 import { isUuid } from './uuid.js';
@@ -66,7 +66,7 @@ export async function ensureStudentProfileForActor(actor) {
   const resolved = await resolveStudentRowForUser({
     userId: sub,
     email: userRow?.email,
-    institutionId: userRow?.institution_id ?? actor.institution_id ?? null
+    institutionId: null
   });
   if (resolved?.id) {
     const { data } = await supabaseAdmin.from('students').select('*').eq('id', resolved.id).maybeSingle();
@@ -104,20 +104,25 @@ export async function ensureStudentProfileForActor(actor) {
     if (!error && inserted) {
       row = inserted;
     } else if (error) {
-      const again = await resolveStudentRowForUser({
-        userId: sub,
-        email: userRow.email,
-        institutionId: userRow?.institution_id ?? actor.institution_id ?? null
-      });
-      if (again?.id) {
-        const { data } = await supabaseAdmin.from('students').select('*').eq('id', again.id).maybeSingle();
-        row = data;
+      const loose = await findStudentRowLoose(userRow.email);
+      if (loose) {
+        row = await claimStudentForUser(loose, sub, userRow.email, true);
+      } else {
+        const again = await resolveStudentRowForUser({
+          userId: sub,
+          email: userRow.email,
+          institutionId: null
+        });
+        if (again?.id) {
+          const { data } = await supabaseAdmin.from('students').select('*').eq('id', again.id).maybeSingle();
+          row = data;
+        }
       }
     }
   }
 
   if (row?.id) {
-    row = await linkStudentToUser(row, sub);
+    row = await claimStudentForUser(row, sub, userRow?.email, true);
     const studentId = String(row.id);
     return {
       actor: {

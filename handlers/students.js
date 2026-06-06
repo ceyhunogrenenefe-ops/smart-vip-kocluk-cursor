@@ -303,96 +303,200 @@ export default async function handler(req, res) {
       let resolvedCoachId =
         actor.role === 'coach' ? actor.coach_id : body.coach_id != null ? body.coach_id : null;
 
-      await enforceStudentInsertQuotas({
-        institutionId,
-        coachId: resolvedCoachId || null
-      });
+      if (resolvedCoachId) {
+        const { data: coachRow, error: coachErr } = await supabaseAdmin
+          .from('coaches')
+          .select('id')
+          .eq('id', String(resolvedCoachId))
+          .maybeSingle();
+        if (coachErr) throw coachErr;
+        if (!coachRow?.id) {
+          return res.status(400).json({
+            error: 'coach_id_invalid',
+            hint: 'Seçilen koç bulunamadı. Koç atamasını boş bırakın veya geçerli bir koç seçin.'
+          });
+        }
+      }
 
-      const payload = {
-        id: normalizeUuidOrGenerate(body.id),
-        name: body.name,
-        email: body.email,
-        phone: body.phone ?? null,
-        birth_date: body.birth_date ?? null,
-        class_level: body.class_level,
-        school: body.school ?? null,
-        parent_name: body.parent_name ?? null,
-        parent_phone: body.parent_phone ?? null,
-        coach_id: resolvedCoachId,
-        program_id: body.program_id ?? null,
-        institution_id: institutionId,
-        created_at: body.created_at || new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      let { data, error } = await supabaseAdmin.from('students').insert(payload).select().single();
-      if (error) throw error;
+      const emailNorm = String(body.email || '')
+        .toLowerCase()
+        .trim();
+      const resolvedId = normalizeUuidOrGenerate(body.id);
+      const classLevel =
+        body.class_level != null && String(body.class_level).trim() !== ''
+          ? String(body.class_level)
+          : '9';
 
-      const authPw =
-        body.auth_password != null ? String(body.auth_password).trim() : '';
-      const syncAuth =
-        body.sync_supabase_auth === true &&
-        authPw.length >= 6 &&
-        hasSupabaseServiceRoleKey();
+      const loginPwdForPlatform = String(
+        body.password ?? body.password_hash ?? body.auth_password ?? ''
+      ).trim();
 
-      if (syncAuth && data?.id) {
-        try {
-          const sb = getSupabaseAdmin();
-          const em = String(payload.email || '')
-            .toLowerCase()
-            .trim();
-          const { data: authExisting } = await sb.auth.admin.getUserById(String(data.id));
-          if (authExisting?.user?.id) {
-            const { data: patched, error: pe } = await supabaseAdmin
-              .from('students')
-              .update({
-                auth_user_id: authExisting.user.id,
-                updated_at: new Date().toISOString()
-              })
-              .eq('id', data.id)
-              .select()
-              .single();
-            if (!pe && patched) data = patched;
-          } else {
-            const { data: auData, error: auErr } = await sb.auth.admin.createUser({
-              id: String(data.id),
-              email: em,
-              password: authPw,
-              email_confirm: true
-            });
-            if (!auErr && auData?.user?.id) {
+      async function finalizeStudentRow(studentRow, payloadForLink) {
+        let data = studentRow;
+        const authPw = body.auth_password != null ? String(body.auth_password).trim() : '';
+        const syncAuth =
+          body.sync_supabase_auth === true && authPw.length >= 6 && hasSupabaseServiceRoleKey();
+
+        if (syncAuth && data?.id) {
+          try {
+            const sb = getSupabaseAdmin();
+            const em = String(payloadForLink.email || '')
+              .toLowerCase()
+              .trim();
+            const linkUserId = String(resolvedId || data.id);
+            const { data: authExisting } = await sb.auth.admin.getUserById(linkUserId);
+            if (authExisting?.user?.id) {
               const { data: patched, error: pe } = await supabaseAdmin
                 .from('students')
                 .update({
-                  auth_user_id: auData.user.id,
+                  auth_user_id: authExisting.user.id,
                   updated_at: new Date().toISOString()
                 })
                 .eq('id', data.id)
                 .select()
                 .single();
               if (!pe && patched) data = patched;
-            } else if (auErr) {
-              console.warn('[students POST] Supabase Auth provision:', auErr.message || String(auErr));
+            } else {
+              const { data: auData, error: auErr } = await sb.auth.admin.createUser({
+                id: linkUserId,
+                email: em,
+                password: authPw,
+                email_confirm: true
+              });
+              if (!auErr && auData?.user?.id) {
+                const { data: patched, error: pe } = await supabaseAdmin
+                  .from('students')
+                  .update({
+                    auth_user_id: auData.user.id,
+                    updated_at: new Date().toISOString()
+                  })
+                  .eq('id', data.id)
+                  .select()
+                  .single();
+                if (!pe && patched) data = patched;
+              } else if (auErr) {
+                console.warn('[students POST] Supabase Auth provision:', auErr.message || String(auErr));
+              }
             }
+          } catch (e) {
+            console.warn('[students POST] Supabase Auth provision:', e);
           }
-        } catch (e) {
-          console.warn('[students POST] Supabase Auth provision:', e);
+        }
+
+        if (data?.id) {
+          data = await linkStudentToPlatformUser(actor, {
+            studentRow: data,
+            payload: payloadForLink,
+            institutionId,
+            loginPwd: loginPwdForPlatform
+          });
+        }
+
+        const cidNew = payloadForLink.coach_id || null;
+        if (cidNew) await rebuildCoachStudentIdsFromFk(cidNew);
+        return data;
+      }
+
+      async function mergeExistingStudent(existing) {
+        const canMerge =
+          (await assertStudentVisibilityResolved(actor, existing)) ||
+          (actor.role === 'admin' &&
+            actor.institution_id &&
+            (existing.institution_id == null ||
+              String(existing.institution_id) === String(actor.institution_id)) &&
+            (!institutionId || String(institutionId) === String(actor.institution_id))) ||
+          actor.role === 'super_admin';
+        if (!canMerge) {
+          return res.status(409).json({
+            error: 'student_email_exists',
+            hint: 'Bu e-posta ile kayıtlı öğrenci zaten var.'
+          });
+        }
+
+        const patch = {
+          name: String(body.name || existing.name || '').trim() || existing.name,
+          email: emailNorm || existing.email,
+          phone: body.phone !== undefined ? body.phone : existing.phone,
+          birth_date: body.birth_date !== undefined ? body.birth_date : existing.birth_date,
+          class_level: classLevel || existing.class_level,
+          school: body.school !== undefined ? body.school : existing.school,
+          parent_name: body.parent_name !== undefined ? body.parent_name : existing.parent_name,
+          parent_phone: body.parent_phone !== undefined ? body.parent_phone : existing.parent_phone,
+          coach_id: resolvedCoachId !== undefined ? resolvedCoachId : existing.coach_id,
+          program_id: body.program_id !== undefined ? body.program_id : existing.program_id,
+          institution_id: institutionId || existing.institution_id,
+          platform_user_id: resolvedId,
+          user_id: resolvedId,
+          updated_at: new Date().toISOString()
+        };
+
+        const { data: merged, error: mergeErr } = await supabaseAdmin
+          .from('students')
+          .update(patch)
+          .eq('id', existing.id)
+          .select()
+          .single();
+        if (mergeErr) throw mergeErr;
+
+        const payloadForLink = {
+          ...patch,
+          id: merged.id,
+          email: patch.email,
+          name: patch.name,
+          coach_id: patch.coach_id
+        };
+        const data = await finalizeStudentRow(merged, payloadForLink);
+        return res.status(200).json({ data, merged_existing: true });
+      }
+
+      const { data: existingById } = await supabaseAdmin
+        .from('students')
+        .select('*')
+        .eq('id', resolvedId)
+        .maybeSingle();
+      if (existingById) {
+        return await mergeExistingStudent(existingById);
+      }
+
+      if (emailNorm) {
+        const { data: existingByEmail } = await supabaseAdmin
+          .from('students')
+          .select('*')
+          .eq('email', emailNorm)
+          .maybeSingle();
+        if (existingByEmail) {
+          return await mergeExistingStudent(existingByEmail);
         }
       }
 
-      const loginPwdForPlatform = String(
-        body.password ?? body.password_hash ?? body.auth_password ?? ''
-      ).trim();
-      if (data?.id) {
-        data = await linkStudentToPlatformUser(actor, {
-          studentRow: data,
-          payload,
-          institutionId,
-          loginPwd: loginPwdForPlatform
-        });
-      }
+      await enforceStudentInsertQuotas({
+        institutionId,
+        coachId: resolvedCoachId || null,
+        actorRole: actor.role
+      });
 
-      const cidNew = payload.coach_id || null;
-      if (cidNew) await rebuildCoachStudentIdsFromFk(cidNew);
+      const payload = {
+        id: resolvedId,
+        name: body.name,
+        email: body.email,
+        phone: body.phone ?? null,
+        birth_date: body.birth_date ?? null,
+        class_level: classLevel,
+        school: body.school ?? null,
+        parent_name: body.parent_name ?? null,
+        parent_phone: body.parent_phone ?? null,
+        coach_id: resolvedCoachId,
+        program_id: body.program_id ?? null,
+        institution_id: institutionId,
+        platform_user_id: resolvedId,
+        user_id: resolvedId,
+        created_at: body.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      let { data, error } = await supabaseAdmin.from('students').insert(payload).select().single();
+      if (error) throw error;
+
+      data = await finalizeStudentRow(data, payload);
       return res.status(200).json({ data });
     }
 
@@ -411,7 +515,10 @@ export default async function handler(req, res) {
       const nextCoachId = patchBody.coach_id !== undefined ? patchBody.coach_id : existing.coach_id;
 
       if (String(prevCoachId || '') !== String(nextCoachId || '') && nextCoachId) {
-        await enforceCoachStudentQuota(nextCoachId);
+        await enforceCoachStudentQuota(nextCoachId, {
+          institutionId: existing.institution_id,
+          actorRole: actor.role
+        });
       }
 
       if (actor.role === 'teacher') {
@@ -463,7 +570,11 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'method_not_allowed' });
   } catch (e) {
     if (e instanceof QuotaError) {
-      return res.status(403).json({ error: e.userMessage || 'Kullanıcı limitiniz doldu' });
+      return res.status(403).json({
+        error: e.userMessage || 'Kullanıcı limitiniz doldu',
+        hint: e.userMessage || undefined,
+        quota: e.detail || undefined
+      });
     }
     if (e && typeof e === 'object') {
       const maybe = e;

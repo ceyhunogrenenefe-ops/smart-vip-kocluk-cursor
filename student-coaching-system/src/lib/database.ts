@@ -32,6 +32,8 @@ export interface QuotaSnapshot {
   } | null;
   counts: { students: number; coaches: number };
   usage_pct: { students: number | null; coaches: number | null };
+  /** Ana platform kurumu veya süper admin — kurum kotası uygulanmaz */
+  quota_exempt?: boolean;
   coach?: {
     coach_id: string;
     max_students: number | null;
@@ -71,7 +73,15 @@ class DatabaseService {
     const res = await apiFetch(path, options);
     const payload = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(payload?.error || `API error (${res.status})`);
+      const hint =
+        payload && typeof payload === 'object' && 'hint' in payload
+          ? String((payload as { hint?: string }).hint || '')
+          : '';
+      const err =
+        payload && typeof payload === 'object' && 'error' in payload
+          ? String((payload as { error?: string }).error || '')
+          : '';
+      throw new Error(hint || err || `API error (${res.status})`);
     }
     return this.unwrapData<T>(payload) as T;
   }
@@ -286,17 +296,27 @@ class DatabaseService {
 
   /** Oturum açmış öğrencinin tek canonical kartı (GET /api/my-student) */
   async getMyStudent(): Promise<StudentRow | null> {
-    const res = await apiFetch('/api/my-student');
-    const payload = await res.json().catch(() => ({}));
+    let res = await apiFetch('/api/my-student');
+    let payload = await res.json().catch(() => ({}));
     if (res.status === 404) return null;
     if (!res.ok) {
-      const p = payload as { message?: string; error?: string };
-      throw new Error(p.message || p.error || `API error (${res.status})`);
+      const p = payload as { message?: string; error?: string; hint?: string };
+      throw new Error(p.hint || p.message || p.error || `API error (${res.status})`);
     }
-    const data = this.unwrapData<StudentRow>(payload);
+    let data = this.unwrapData<StudentRow>(payload);
     if (data) return data;
+
     const reason = (payload as { reason?: string }).reason;
-    if (reason === 'student_profile_missing' || reason === 'not_found') return null;
+    if (reason === 'student_profile_missing' || reason === 'not_found') {
+      res = await apiFetch('/api/my-student', { method: 'POST', body: JSON.stringify({}) });
+      payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const p = payload as { hint?: string; error?: string };
+        throw new Error(p.hint || p.error || `API error (${res.status})`);
+      }
+      data = this.unwrapData<StudentRow>(payload);
+      return data || null;
+    }
     return null;
   }
 

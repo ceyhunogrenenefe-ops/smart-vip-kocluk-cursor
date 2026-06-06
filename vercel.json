@@ -83,6 +83,10 @@
       "schedule": "0 19 * * *"
     },
     {
+      "path": "/api/cron/institution-events",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/edesis-sync",
       "schedule": "0 6,18 * * *"
     }

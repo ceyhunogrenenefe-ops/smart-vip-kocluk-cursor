@@ -28,6 +28,7 @@ import {
   Bell,
   Presentation,
   User,
+  CalendarDays,
   Bot
 } from 'lucide-react';
 import type { UserRole } from '../../../types';
@@ -190,7 +191,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/super-admin', icon: Server, label: 'Kurum Yönetimi' },
       { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
       { path: '/notifications', icon: Bell, label: 'Bildirimler' },
-      { path: '/message-templates', icon: MessageSquareText, label: 'Mesaj şablonları' },
+      { path: '/events', icon: CalendarDays, label: 'Etkinlikler' },
       { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
       { path: '/subscription', icon: CreditCard, label: 'Abonelik / Paketler' },
       { path: '/topics', icon: BookOpen, label: 'Konu Havuzu' },
@@ -236,6 +237,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
     { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
     { path: '/notifications', icon: Bell, label: 'Bildirimler' },
+    { path: '/events', icon: CalendarDays, label: 'Etkinlikler' },
     { path: '/system-management', icon: Server, label: 'Sistem Yönetimi' },
     { path: '/veli-onay', icon: FileText, label: 'Veli onayı & e-imza' },
     { path: '/tahsilat-muhasebe', icon: Wallet, label: 'Tahsilat & taksit' },
@@ -273,6 +275,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/soru-analitik', icon: CircleHelp, label: 'Soru Analitiği' },
     { path: '/soru-havuzu', icon: CircleHelp, label: 'Soru Havuzu' },
     { path: '/notifications', icon: Bell, label: 'Bildirimler' },
+    { path: '/events', icon: CalendarDays, label: 'Etkinlikler' },
     { path: '/ai-coach', icon: Brain, label: 'AI KOÇ' },
     { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
     { path: '/webhooks', icon: Webhook, label: 'Webhook Ayarları' },

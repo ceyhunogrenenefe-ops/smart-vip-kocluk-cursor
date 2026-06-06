@@ -10,7 +10,7 @@ import { cn } from '../lib/utils';
 
 export default function WeeklyPlannerPage() {
   const { students } = useApp();
-  const { effectiveUser, linkedStudent } = useAuth();
+  const { effectiveUser, linkedStudent, linkedStudentError, linkedStudentLoading, refreshLinkedStudent } = useAuth();
   const tags = userRoleTags(effectiveUser);
   const [selectedId, setSelectedId] = useState('');
 
@@ -19,10 +19,12 @@ export default function WeeklyPlannerPage() {
   const resolvedStudentId = useMemo(
     () =>
       linkedStudent?.id?.trim() ||
-      resolveStudentRecordId(effectiveUser?.role, effectiveUser?.studentId, effectiveUser?.email, students)?.trim() ||
       effectiveUser?.studentId?.trim() ||
+      resolveStudentRecordId(effectiveUser?.role, effectiveUser?.studentId, effectiveUser?.email, students, {
+        roles: tags
+      })?.trim() ||
       '',
-    [linkedStudent?.id, effectiveUser?.role, effectiveUser?.studentId, effectiveUser?.email, students]
+    [linkedStudent?.id, effectiveUser?.role, effectiveUser?.studentId, effectiveUser?.email, students, tags]
   );
 
   /** Öğrenci: API / JWT ile çözülen kart id; koç/admin: seçilen liste öğesi */
@@ -138,11 +140,32 @@ export default function WeeklyPlannerPage() {
       )}
 
       {!activeStudentId ? (
-        <div className="flex items-center gap-2 text-amber-800 bg-amber-50 border border-amber-100 rounded-lg p-4 text-sm">
-          <AlertCircle className="w-5 h-5 flex-shrink-0" />
-          {isStudentUi
-            ? 'Öğrenci profiliniz yükleniyor. Birkaç saniye bekleyin veya sayfayı yenileyin — hesabınız otomatik oluşturuluyor.'
-            : 'Planı görmek için bir öğrenci seçin.'}
+        <div className="flex flex-col gap-3 text-amber-800 bg-amber-50 border border-amber-100 rounded-lg p-4 text-sm">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+            <div>
+              {isStudentUi ? (
+                linkedStudentLoading ? (
+                  <p>Öğrenci profiliniz yükleniyor…</p>
+                ) : linkedStudentError ? (
+                  <p>{linkedStudentError}</p>
+                ) : (
+                  <p>Öğrenci profiliniz hazırlanıyor…</p>
+                )
+              ) : (
+                <p>Planı görmek için bir öğrenci seçin.</p>
+              )}
+            </div>
+          </div>
+          {isStudentUi && !linkedStudentLoading ? (
+            <button
+              type="button"
+              onClick={() => void refreshLinkedStudent()}
+              className="self-start rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+            >
+              Yeniden dene
+            </button>
+          ) : null}
         </div>
       ) : (
         <WeeklyPlannerCalendar

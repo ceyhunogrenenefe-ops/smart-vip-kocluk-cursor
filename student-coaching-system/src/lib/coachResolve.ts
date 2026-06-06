@@ -23,9 +23,13 @@ export function resolveStudentRecordId(
   role: string | undefined,
   studentId: string | undefined,
   email: string | undefined,
-  students: Student[]
+  students: Student[],
+  opts?: { roles?: string[] }
 ): string | undefined {
-  if (String(role || '').toLowerCase() !== 'student') return undefined;
+  const roles = opts?.roles ?? [];
+  const isStudent =
+    String(role || '').toLowerCase() === 'student' || roles.includes('student');
+  if (!isStudent) return undefined;
   const id = studentId?.trim();
   if (id) return id;
   const em = email?.trim().toLowerCase();

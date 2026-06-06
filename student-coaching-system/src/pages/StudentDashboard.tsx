@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { userRoleTags } from '../config/rolePermissions';
 import { useApp } from '../context/AppContext';
 import { resolveStudentRecordId } from '../lib/coachResolve';
 import type { WrittenExamScore } from '../types';
@@ -56,6 +57,7 @@ export default function StudentDashboard() {
   const { tabKey } = useParams<{ tabKey?: string }>();
   const navigate = useNavigate();
   const { user, effectiveUser, linkedStudent, linkedStudentError, linkedStudentLoading } = useAuth();
+  const studentTags = userRoleTags(effectiveUser);
   const {
     getStudentStats,
     students,
@@ -82,14 +84,16 @@ export default function StudentDashboard() {
   const resolvedStudentId = useMemo(
     () =>
       linkedStudent?.id ||
+      effectiveUser?.studentId ||
       resolveStudentRecordId(
         effectiveUser?.role,
         effectiveUser?.studentId,
         effectiveUser?.email,
-        students
+        students,
+        { roles: studentTags }
       ) ||
       undefined,
-    [linkedStudent?.id, effectiveUser?.role, effectiveUser?.studentId, effectiveUser?.email, students]
+    [linkedStudent?.id, effectiveUser?.role, effectiveUser?.studentId, effectiveUser?.email, students, studentTags]
   );
 
   // Tab state — URL: /student-dashboard/:denemeler | yazili | kitaplar

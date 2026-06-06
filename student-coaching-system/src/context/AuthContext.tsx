@@ -38,6 +38,7 @@ interface AuthContextType {
   linkedStudent: Student | null;
   linkedStudentError: string | null;
   linkedStudentLoading: boolean;
+  refreshLinkedStudent: () => Promise<void>;
   isImpersonating: boolean;
   /** Taklidi sonlandırır; varsa dönülecek rota yolunu döner (ör. /students). */
   stopImpersonation: () => string | null;
@@ -205,7 +206,16 @@ async function resolveStudentTableIdForUserLogin(dbUser: {
   if (dbUser.institution_id) {
     q = q.eq('institution_id', dbUser.institution_id);
   }
-  const { data: rows } = await withTimeout(q);
+  let { data: rows } = await withTimeout(q);
+  if ((!rows || rows.length === 0) && dbUser.institution_id) {
+    ({ data: rows } = await withTimeout(
+      supabase
+        .from('students')
+        .select('id, user_id, updated_at')
+        .eq('email', normalizedEmail)
+        .order('updated_at', { ascending: false })
+    ));
+  }
   if (rows?.length === 1 && rows[0]?.id) return rows[0].id;
   if (rows && rows.length > 1) {
     const linked = rows.find((r) => r.user_id && String(r.user_id) === String(dbUser.id));
@@ -312,22 +322,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLinkedStudentLoading(true);
     setLinkedStudentError(null);
     try {
-      const row = await db.getMyStudent();
+      let row = await db.getMyStudent();
       if (row) {
         const st = studentRowToStudent(row);
         setLinkedStudent(st);
-        if (!u.studentId && st.id) {
-          const next = { ...u, studentId: st.id };
-          if (impersonationTarget) setImpersonationTarget(next);
-          else {
-            setUser(next);
-            localStorage.setItem('coaching_user', JSON.stringify(next));
-          }
+        const next = { ...u, studentId: st.id };
+        if (impersonationTarget) setImpersonationTarget(next);
+        else {
+          setUser(next);
+          localStorage.setItem('coaching_user', JSON.stringify(next));
         }
       } else {
         setLinkedStudent(null);
         setLinkedStudentError(
-          'Öğrenci profiliniz henüz hazır değil. Sayfayı yenileyin — hesabınız otomatik oluşturulacaktır.'
+          'Öğrenci profili oluşturulamadı. Çıkış yapıp tekrar giriş yapın veya yöneticinize başvurun.'
         );
       }
     } catch (e) {
@@ -341,6 +349,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refreshLinkedStudent();
   }, [refreshLinkedStudent]);
+
+  /** Profil henüz yoksa birkaç kez otomatik dene (sunucu kart oluştururken gecikme) */
+  useEffect(() => {
+    const u = impersonationTarget ?? user;
+    if (!u || !getAuthToken()) return;
+    const tags = u.roles?.length ? u.roles : [u.role];
+    if (!tags.includes('student')) return;
+    if (linkedStudent || linkedStudentLoading) return;
+
+    let cancelled = false;
+    let attempt = 0;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+
+    const schedule = () => {
+      if (cancelled || attempt >= 4) return;
+      attempt += 1;
+      const t = setTimeout(() => {
+        if (!cancelled) void refreshLinkedStudent();
+      }, attempt * 1500);
+      timers.push(t);
+    };
+
+    schedule();
+    return () => {
+      cancelled = true;
+      timers.forEach(clearTimeout);
+    };
+  }, [user, impersonationTarget, linkedStudent, linkedStudentLoading, refreshLinkedStudent]);
 
   // Sayfa yüklendiğinde oturum kontrolü
   useEffect(() => {
@@ -1007,6 +1043,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         linkedStudent,
         linkedStudentError,
         linkedStudentLoading,
+        refreshLinkedStudent,
         isImpersonating,
         stopImpersonation,
         impersonate,

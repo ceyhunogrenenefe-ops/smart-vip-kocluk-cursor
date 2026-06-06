@@ -7,22 +7,24 @@ export type UserRow = Database['public']['Tables']['users']['Row'];
 /** users ↔ students eşlemesi için minimum alanlar. */
 export type StudentPlatformLink = Pick<Student, 'id' | 'email' | 'platformUserId'>;
 
-/** `users` satırı ile `students` kartını eşler: önce platform_user_id, sonra e-posta, en son studentId. */
+/** `users` satırı ile `students` kartını eşler: platform_user_id, aynı id, e-posta, studentId. */
 export function findStudentForPlatformUser<T extends StudentPlatformLink>(
   opts: { platformUserId: string; email?: string; studentId?: string },
   students: ReadonlyArray<T>
 ): T | undefined {
   const uid = String(opts.platformUserId || '').trim();
   const em = (opts.email || '').toLowerCase().trim();
-  const byPlat = uid
-    ? students.find((s) => String(s.platformUserId || '').trim() === uid)
-    : undefined;
-  if (byPlat) return byPlat;
+  if (uid) {
+    const byPlat = students.find((s) => String(s.platformUserId || '').trim() === uid);
+    if (byPlat) return byPlat;
+    const bySameId = students.find((s) => String(s.id || '').trim() === uid);
+    if (bySameId) return bySameId;
+  }
   const byEmail = em
     ? students.find((s) => (s.email || '').toLowerCase().trim() === em)
     : undefined;
   if (byEmail) return byEmail;
-  const sid = String(opts.studentId || '').trim();
+  const sid = String(opts.studentId || opts.platformUserId || '').trim();
   return sid ? students.find((s) => s.id === sid) : undefined;
 }
 

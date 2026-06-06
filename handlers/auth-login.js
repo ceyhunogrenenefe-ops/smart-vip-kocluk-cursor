@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { signAuthToken } from '../api/_lib/auth.js';
 import { resolveStudentRowForUser } from '../api/_lib/resolve-student-id.js';
+import { ensureStudentProfileForActor } from '../api/_lib/ensure-student-profile.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 
 /**
@@ -163,12 +164,20 @@ export default async function handler(req, res) {
     let studentId;
     let coachId;
     if (user.role === 'student') {
-      const resolved = await resolveStudentRowForUser({
-        userId: user.id,
-        email: user.email,
-        institutionId: null
+      const ensured = await ensureStudentProfileForActor({
+        sub: user.id,
+        role: 'student',
+        institution_id: user.institution_id || null
       });
-      studentId = resolved?.id;
+      studentId = ensured.studentId || undefined;
+      if (!studentId) {
+        const resolved = await resolveStudentRowForUser({
+          userId: user.id,
+          email: user.email,
+          institutionId: null
+        });
+        studentId = resolved?.id;
+      }
     } else if (user.role === 'coach' || user.role === 'teacher') {
       let { data: co } = await supabaseAdmin
         .from('coaches')

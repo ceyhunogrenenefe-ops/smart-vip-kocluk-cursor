@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, Copy } from 'lucide-react';
 import { AppModal } from '../ui/AppModal';
 
@@ -84,31 +84,38 @@ function CopyableRow({
   );
 }
 
+export function formatLoginCredentialsText(data: LoginCredentialsData): string {
+  const loginUrl =
+    data.loginUrl?.trim() ||
+    (typeof window !== 'undefined' ? window.location.origin : 'https://www.dersonlinevipkocluk.com');
+  const lines = [
+    data.title ? `${data.title}` : 'Giriş bilgileri',
+    data.institutionName ? `Kurum: ${data.institutionName}` : null,
+    data.roleLabel ? `Rol: ${data.roleLabel}` : null,
+    `Giriş adresi: ${loginUrl}`,
+    `E-posta: ${data.email}`,
+    `Şifre: ${data.password}`,
+    data.extraNote || null
+  ].filter(Boolean);
+  return lines.join('\n');
+}
+
 export function CopyableLoginCredentialsPanel({
   data,
   onDismiss,
-  dismissLabel = 'Tamam'
+  dismissLabel = 'Tamam',
+  autoCopyAll = false
 }: {
   data: LoginCredentialsData;
   onDismiss?: () => void;
   dismissLabel?: string;
+  autoCopyAll?: boolean;
 }) {
   const loginUrl =
     data.loginUrl?.trim() ||
     (typeof window !== 'undefined' ? window.location.origin : 'https://www.dersonlinevipkocluk.com');
 
-  const allText = useMemo(() => {
-    const lines = [
-      data.title ? `${data.title}` : 'Giriş bilgileri',
-      data.institutionName ? `Kurum: ${data.institutionName}` : null,
-      data.roleLabel ? `Rol: ${data.roleLabel}` : null,
-      `Giriş adresi: ${loginUrl}`,
-      `E-posta: ${data.email}`,
-      `Şifre: ${data.password}`,
-      data.extraNote || null
-    ].filter(Boolean);
-    return lines.join('\n');
-  }, [data, loginUrl]);
+  const allText = useMemo(() => formatLoginCredentialsText({ ...data, loginUrl }), [data, loginUrl]);
 
   const [allCopied, setAllCopied] = useState(false);
 
@@ -118,7 +125,13 @@ export function CopyableLoginCredentialsPanel({
       setAllCopied(true);
       window.setTimeout(() => setAllCopied(false), 2000);
     }
+    return ok;
   }, [allText]);
+
+  useEffect(() => {
+    if (!autoCopyAll) return;
+    void copyAll();
+  }, [autoCopyAll, copyAll]);
 
   return (
     <div className="space-y-4 p-6">
@@ -128,6 +141,9 @@ export function CopyableLoginCredentialsPanel({
         </div>
         <h3 className="text-lg font-bold text-slate-900">{data.title || 'Giriş bilgileri'}</h3>
         {data.subtitle ? <p className="mt-1 text-sm text-slate-600">{data.subtitle}</p> : null}
+        {autoCopyAll && allCopied ? (
+          <p className="mt-2 text-xs font-medium text-emerald-700">Giriş bilgileri panoya kopyalandı.</p>
+        ) : null}
       </div>
 
       {(data.institutionName || data.roleLabel) && (
@@ -178,16 +194,18 @@ export function CopyableLoginCredentialsPanel({
 export function CopyableLoginCredentialsModal({
   open,
   onClose,
-  data
+  data,
+  autoCopyAll = false
 }: {
   open: boolean;
   onClose: () => void;
   data: LoginCredentialsData | null;
+  autoCopyAll?: boolean;
 }) {
   if (!data) return null;
   return (
     <AppModal open={open} onClose={onClose} panelClassName="max-w-md">
-      <CopyableLoginCredentialsPanel data={data} onDismiss={onClose} />
+      <CopyableLoginCredentialsPanel data={data} onDismiss={onClose} autoCopyAll={autoCopyAll} />
     </AppModal>
   );
 }

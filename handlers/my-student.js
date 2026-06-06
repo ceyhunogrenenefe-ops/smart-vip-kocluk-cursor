@@ -1,19 +1,60 @@
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { ensureStudentProfileForActor } from '../api/_lib/ensure-student-profile.js';
-import { linkStudentToUser } from '../api/_lib/link-student-user.js';
+import { claimStudentForUser } from '../api/_lib/link-student-user.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
-import { resolveStudentRowForUser } from '../api/_lib/resolve-student-id.js';
+
+async function loadUserRow(uid) {
+  const { data } = await supabaseAdmin
+    .from('users')
+    .select('email, institution_id, role, name')
+    .eq('id', uid)
+    .maybeSingle();
+  return data || null;
+}
+
+function isStudentActor(actor, urow, roleTags) {
+  const dbRole = String(urow?.role || '').trim().toLowerCase();
+  return (
+    roleTags.includes('student') ||
+    dbRole === 'student' ||
+    String(actor.role || '').trim().toLowerCase() === 'student'
+  );
+}
+
+async function respondWithStudentProfile(res, actor, uid, userEmail) {
+  const ensured = await ensureStudentProfileForActor(actor);
+  const studentId = ensured.studentId ? String(ensured.studentId).trim() : '';
+  if (!studentId) {
+    return res.status(200).json({
+      data: null,
+      reason: 'not_found',
+      hint:
+        'Öğrenci kartı oluşturulamadı. Çıkış yapıp tekrar giriş yapın; sorun sürerse kurum yöneticinize başvurun.'
+    });
+  }
+
+  const { data: row, error } = await supabaseAdmin
+    .from('students')
+    .select('*')
+    .eq('id', studentId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!row) {
+    return res.status(200).json({ data: null, reason: 'not_found' });
+  }
+
+  const linked = await claimStudentForUser(row, uid, userEmail, true);
+  return res.status(200).json({ data: linked, student_id: String(linked.id) });
+}
 
 /**
- * GET — Oturum açmış kullanıcının kendi `students` satırı (panel / analitik).
- * Bazı hesaplarda JWT `role` alanı `student` dışında veya eksik kalabiliyor; bu yüzden
- * yetkilendirme yalnızca rol string'ine değil, `students.user_id` / `platform_user_id` /
- * kullanıcı e-postası ile sahiplik doğrulamasına dayanır.
+ * GET / POST — Oturum açmış öğrencinin kendi `students` satırı.
+ * POST: profil yoksa oluştur / bağla (idempotent).
  */
 export default async function handler(req, res) {
-  if (req.method !== 'GET') {
+  if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
   try {
@@ -25,123 +66,16 @@ export default async function handler(req, res) {
       return res.status(401).json({ error: 'Invalid token' });
     }
 
-    const { data: urow } = await supabaseAdmin
-      .from('users')
-      .select('email, institution_id, role')
-      .eq('id', uid)
-      .maybeSingle();
-
+    const urow = await loadUserRow(uid);
     const userEmail = String(urow?.email || '').trim().toLowerCase();
-    const inst = actor.institution_id ?? urow?.institution_id ?? null;
     const roleTags = await normalizedUserRolesFromDb(uid);
-    const dbRole = String(urow?.role || '').trim().toLowerCase();
-    const isStudentActor =
-      roleTags.includes('student') ||
-      dbRole === 'student' ||
-      String(actor.role || '').trim().toLowerCase() === 'student';
+    const studentActor = isStudentActor(actor, urow, roleTags);
 
-    /** Öğrenci oturumunda kurum filtresi e-posta eşleşmesini bozabiliyor */
-    const resolveInstitutionId = isStudentActor ? null : inst;
-
-    const resolved = await resolveStudentRowForUser({
-      userId: uid,
-      email: userEmail || undefined,
-      institutionId: resolveInstitutionId
-    });
-    const resolvedId = resolved?.id ? String(resolved.id).trim() : '';
-    const jwtSid = String(actor.student_id || '').trim();
-
-    /** Önce çözümlenen kart (JWT’deki student_id silinmiş / yanlış id için yedek) */
-    const candidates = [];
-    if (resolvedId) candidates.push(resolvedId);
-    if (jwtSid && jwtSid !== resolvedId) candidates.push(jwtSid);
-
-    const isLinkedToActor = (row) => {
-      const rowUser = row.user_id != null ? String(row.user_id).trim() : '';
-      const rowPlat = row.platform_user_id != null ? String(row.platform_user_id).trim() : '';
-      const rowAuth = row.auth_user_id != null ? String(row.auth_user_id).trim() : '';
-      const rowEmail = String(row.email || '').trim().toLowerCase();
-      const linkedByFk =
-        (rowUser && rowUser === uid) ||
-        (rowPlat && rowPlat === uid) ||
-        (rowAuth && rowAuth === uid);
-      const linkedByEmail =
-        Boolean(userEmail) &&
-        Boolean(rowEmail) &&
-        rowEmail === userEmail &&
-        !rowUser &&
-        !rowPlat &&
-        !rowAuth;
-      /** users / JWT öğrenci + resolve ile bulunan kart (FK henüz yazılmamış olabilir) */
-      const linkedByResolvedProfile =
-        isStudentActor && Boolean(resolvedId) && String(row.id) === String(resolvedId);
-      /** JWT student_id + aynı e-posta (eski token / geçici kart) */
-      const linkedByJwtAndEmail =
-        isStudentActor &&
-        Boolean(jwtSid) &&
-        String(row.id) === String(jwtSid) &&
-        Boolean(userEmail) &&
-        rowEmail === userEmail;
-      return linkedByFk || linkedByEmail || linkedByResolvedProfile || linkedByJwtAndEmail;
-    };
-
-    let data = null;
-    let sawRow = false;
-    let sawUnlinked = false;
-    for (const sid of candidates) {
-      const { data: row, error } = await supabaseAdmin.from('students').select('*').eq('id', sid).maybeSingle();
-      if (error) throw error;
-      if (!row) continue;
-      sawRow = true;
-      if (isLinkedToActor(row)) {
-        data = row;
-        break;
-      }
-      sawUnlinked = true;
+    if (studentActor) {
+      return respondWithStudentProfile(res, actor, uid, userEmail);
     }
 
-    if (!data && userEmail && isStudentActor) {
-      const { data: loose } = await supabaseAdmin
-        .from('students')
-        .select('*')
-        .ilike('email', userEmail)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (loose?.id) {
-        data = await linkStudentToUser(loose, uid);
-      }
-    }
-
-    if (!data) {
-      if (!candidates.length && !isStudentActor) {
-        return res.status(200).json({ data: null, reason: 'student_profile_missing' });
-      }
-      if (!candidates.length && isStudentActor) {
-        const ensured = await ensureStudentProfileForActor(actor);
-        if (ensured.hasStudentId && ensured.studentId) {
-          const { data: row, error: rowErr } = await supabaseAdmin
-            .from('students')
-            .select('*')
-            .eq('id', ensured.studentId)
-            .maybeSingle();
-          if (rowErr) throw rowErr;
-          if (row) data = await linkStudentToUser(row, uid);
-        }
-      }
-      if (!data) {
-        if (!sawUnlinked && !sawRow) {
-          return res.status(200).json({ data: null, reason: 'not_found' });
-        }
-        return res.status(403).json({ error: 'forbidden' });
-      }
-    }
-
-    if (isStudentActor) {
-      data = await linkStudentToUser(data, uid);
-    }
-
-    return res.status(200).json({ data });
+    return res.status(200).json({ data: null, reason: 'student_profile_missing' });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (

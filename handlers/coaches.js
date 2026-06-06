@@ -187,7 +187,7 @@ export default async function handler(req, res) {
         return res.status(200).json({ data: merged, merged_existing: true });
       }
 
-      await enforceOrganizationCoachQuota(institutionId);
+      await enforceOrganizationCoachQuota(institutionId, { actorRole: actor.role });
 
       let managedBy = null;
       if (actor.role === 'admin' && actor.sub && isUuid(actor.sub)) {
@@ -267,7 +267,11 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'method_not_allowed' });
   } catch (e) {
     if (e instanceof QuotaError) {
-      return res.status(403).json({ error: e.userMessage || 'Kullanıcı limitiniz doldu' });
+      return res.status(403).json({
+        error: e.userMessage || 'Kullanıcı limitiniz doldu',
+        hint: e.userMessage || undefined,
+        quota: e.detail || undefined
+      });
     }
     let message = 'coaches_api_failed';
     if (e instanceof Error) message = e.message;
