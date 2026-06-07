@@ -53,6 +53,30 @@ export function normalizeParaBirimi(raw) {
   return PARA_BIRIMLERI.includes(u) ? u : 'TRY';
 }
 
+/** Sözleşme satırından para birimi — kolon, kayıt JSON veya belge metninden */
+export function resolveRowParaBirimi(row) {
+  const rawCol = row?.para_birimi;
+  if (rawCol != null && String(rawCol).trim()) {
+    const n = normalizeParaBirimi(rawCol);
+    if (n !== 'TRY' || String(rawCol).trim().toUpperCase() === 'TRY') return n;
+  }
+  const kj = row?.kayit_formu_json;
+  if (kj && typeof kj === 'object' && !Array.isArray(kj)) {
+    const jpb = kj.para_birimi;
+    if (jpb != null && String(jpb).trim()) return normalizeParaBirimi(jpb);
+    const ozet = String(kj.muhasebe_ozet || '');
+    if (/\bEUR\b/.test(ozet)) return 'EUR';
+    if (/\bUSD\b/.test(ozet)) return 'USD';
+    if (/\bGBP\b/.test(ozet)) return 'GBP';
+  }
+  const html = String(row?.merged_html || '');
+  if (/\d[\d.,\s]*\s*EUR\b/i.test(html) || /\bEUR\s*€/.test(html)) return 'EUR';
+  if (/\d[\d.,\s]*\s*USD\b/i.test(html) || /\bUSD\s*\$/.test(html)) return 'USD';
+  if (/\d[\d.,\s]*\s*GBP\b/i.test(html) || /\bGBP\s*£/.test(html)) return 'GBP';
+  if (rawCol != null && String(rawCol).trim()) return normalizeParaBirimi(rawCol);
+  return 'TRY';
+}
+
 export function paraBirimiLabel(code) {
   const c = normalizeParaBirimi(code);
   if (c === 'EUR') return 'EUR';

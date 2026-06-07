@@ -1,5 +1,25 @@
 import type { ParentSignContractRow } from './parentSignApi';
-import { formatUcretWithCurrency } from './parentSignApi';
+import { formatUcretWithCurrency, PARA_BIRIMI_OPTIONS } from './parentSignApi';
+
+function resolveContractParaBirimi(r: ParentSignContractRow): string {
+  const col = String(r.para_birimi || '').trim().toUpperCase();
+  if (col && PARA_BIRIMI_OPTIONS.some((o) => o.value === col)) return col;
+  const kj = r.kayit_formu_json;
+  if (kj && typeof kj === 'object' && !Array.isArray(kj)) {
+    const j = kj as Record<string, unknown>;
+    const jpb = String(j.para_birimi || '').trim().toUpperCase();
+    if (jpb && PARA_BIRIMI_OPTIONS.some((o) => o.value === jpb)) return jpb;
+    const ozet = String(j.muhasebe_ozet || '');
+    if (/\bEUR\b/.test(ozet)) return 'EUR';
+    if (/\bUSD\b/.test(ozet)) return 'USD';
+    if (/\bGBP\b/.test(ozet)) return 'GBP';
+  }
+  const html = String(r.merged_html || '');
+  if (/\d[\d.,\s]*\s*EUR\b/i.test(html) || /\bEUR\s*€/.test(html)) return 'EUR';
+  if (/\d[\d.,\s]*\s*USD\b/i.test(html) || /\bUSD\s*\$/.test(html)) return 'USD';
+  if (/\d[\d.,\s]*\s*GBP\b/i.test(html) || /\bGBP\s*£/.test(html)) return 'GBP';
+  return 'TRY';
+}
 
 /** Kayıt JSON’daki taksit satırı (API ile uyumlu) */
 export type TaksitKartMuhasebe = {
@@ -205,6 +225,7 @@ export function flattenTaksitRows(contracts: ParentSignContractRow[]): TaksitFla
     const signed = rowSigned(r);
     const label = `${String(r.ogrenci_ad || '').trim()} ${String(r.ogrenci_soyad || '').trim()}`.trim() || '—';
     const bas = r.baslangic_tarihi != null ? String(r.baslangic_tarihi) : '';
+    const paraBirimi = resolveContractParaBirimi(r);
     cards.forEach((c, idx) => {
       const vade = effectiveVadeYmd(c, bas, idx);
       const tutar = Number.isFinite(Number(c.tutar_tl)) ? Number(c.tutar_tl) : 0;
@@ -216,6 +237,7 @@ export function flattenTaksitRows(contracts: ParentSignContractRow[]): TaksitFla
         ogrenciLabel: label,
         programAdi: String(r.program_adi || '').trim(),
         ucretToplam: Number(r.ucret) || 0,
+        paraBirimi,
         taksitIndex: idx,
         taksitNo: typeof c.no === 'number' && Number.isFinite(c.no) ? c.no : idx + 1,
         tutarTl: tutar,

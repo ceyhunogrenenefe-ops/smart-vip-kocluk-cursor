@@ -18,7 +18,8 @@ import {
   suggestHoursAndFeeFromSinif,
   sumDersHours,
   normalizeParaBirimi,
-  paraBirimiLabel
+  paraBirimiLabel,
+  resolveRowParaBirimi
 } from '../api/_lib/parent-sign-defaults.js';
 import { institutionLegalHtmlForContract } from '../api/_lib/parent-sign-legal.js';
 
@@ -139,7 +140,7 @@ export default async function handler(req, res) {
       const { data: row, error } = await supabaseAdmin
         .from('parent_sign_contracts')
         .select(
-          'id,merged_html,contract_number,status,signed_at,institution_id,signature_png_base64,kayit_formu_json,program_adi,sinif,baslangic_tarihi,bitis_tarihi,ucret,taksit_sayisi'
+          'id,merged_html,contract_number,status,signed_at,institution_id,signature_png_base64,kayit_formu_json,program_adi,sinif,baslangic_tarihi,bitis_tarihi,ucret,taksit_sayisi,para_birimi'
         )
         .eq('signing_token', signingToken)
         .maybeSingle();
@@ -180,7 +181,7 @@ export default async function handler(req, res) {
             baslangic_tarihi: row.baslangic_tarihi,
             bitis_tarihi: row.bitis_tarihi,
             ucret: row.ucret,
-            para_birimi: row.para_birimi || 'TRY',
+            para_birimi: resolveRowParaBirimi(row),
             taksit_sayisi: row.taksit_sayisi
           }
         }
@@ -423,7 +424,11 @@ export default async function handler(req, res) {
         }
         throw error;
       }
-      return res.status(200).json({ data: data || [] });
+      const enriched = (data || []).map((row) => ({
+        ...row,
+        para_birimi: resolveRowParaBirimi(row)
+      }));
+      return res.status(200).json({ data: enriched });
     }
 
     if (req.method === 'DELETE') {
@@ -660,6 +665,7 @@ export default async function handler(req, res) {
           nextKayitJson = {
             ...kj0,
             phase: 'ready_to_sign',
+            para_birimi: pb,
             admin_priced_at: new Date().toISOString(),
             taksit_kartlari,
             muhasebe_ozet: muhasebe_ozet2
@@ -672,7 +678,8 @@ export default async function handler(req, res) {
         ) {
           const fresh = buildTaksitPlan(feeNum, taksit_sayisi, bas, taksitVadeleriBody, taksitTutarlariBody);
           const taksit_kartlari = mergeTaksitPlans(existingTaksit, fresh);
-          nextKayitJson = { ...kj0, taksit_kartlari };
+          const pbUpd = normalizeParaBirimi(body.para_birimi ?? existing.para_birimi);
+          nextKayitJson = { ...kj0, taksit_kartlari, para_birimi: pbUpd };
         }
         const para_birimi = normalizeParaBirimi(body.para_birimi ?? existing.para_birimi);
         const institution_legal_html = await institutionLegalHtmlForContract(institutionId, sozlesme_turu);
@@ -942,7 +949,7 @@ export default async function handler(req, res) {
           institution_legal_html
         });
         if (postTaksitKartlari.length) {
-          kayit_formu_json = { taksit_kartlari: postTaksitKartlari };
+          kayit_formu_json = { taksit_kartlari: postTaksitKartlari, para_birimi };
         }
       }
 
