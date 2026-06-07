@@ -22,6 +22,7 @@ import {
   resolveRowParaBirimi
 } from '../api/_lib/parent-sign-defaults.js';
 import { institutionLegalHtmlForContract } from '../api/_lib/parent-sign-legal.js';
+import { notifyTaksitMarkedPaid } from '../api/_lib/taksit-whatsapp-notify.js';
 
 const VELI_KAYIT_PROGRAM_SET = new Set([
   '3. Sınıf dönem programı',
@@ -493,6 +494,7 @@ export default async function handler(req, res) {
         const idx = Math.max(0, Math.round(Number(mergeTak.index)));
         if (idx < 0 || idx >= tk.length) return res.status(400).json({ error: 'taksit_index_invalid' });
         const cur = tk[idx] && typeof tk[idx] === 'object' ? { ...tk[idx] } : { no: idx + 1 };
+        const wasPaidBefore = Boolean(cur.odendi);
         const paid = Boolean(mergeTak.odendi);
         const todayStr = new Date().toISOString().slice(0, 10);
         tk[idx] = {
@@ -510,6 +512,11 @@ export default async function handler(req, res) {
           .select()
           .single();
         if (uErrM) throw uErrM;
+        if (paid && !wasPaidBefore) {
+          void notifyTaksitMarkedPaid({ ...existing, kayit_formu_json: kjM }, idx, wasPaidBefore).catch((e) => {
+            console.warn('[parent-sign-contracts] taksit paid whatsapp', e instanceof Error ? e.message : String(e));
+          });
+        }
         return res.status(200).json({ data: updM });
       }
 

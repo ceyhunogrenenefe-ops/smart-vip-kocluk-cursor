@@ -62,6 +62,7 @@ export const routeLoaders = {
   'question-help/webhook': () => import('../handlers/question-help-webhook.js'),
   notifications: () => import('../handlers/notifications.js'),
   'cron/institution-events': () => import('../handlers/cron-institution-events.js'),
+  'cron/taksit-reminders': () => import('../handlers/cron-taksit-reminders.js'),
   'institution-events': () => import('../handlers/institution-events.js'),
   'edu-panel': () => import('../handlers/edu-panel.js'),
   'edesis-sync': () => import('../handlers/edesis-sync.js'),
