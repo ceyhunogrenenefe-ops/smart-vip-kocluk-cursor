@@ -312,14 +312,11 @@ export function normalizeTaksitVadeleri(rawVadeler, taksitN, baslangicYmd) {
   return out;
 }
 
-/** Elden / taksitli ödeme takibi — vade listesi verilirse kullanılır, yoksa başlangıçtan aylık */
-export function buildTaksitPlan(ucret, taksitN, baslangicYmd, vadeDates) {
+function autoSplitTutarlar(ucret, n) {
   const u = Number(ucret);
-  const n = Math.max(1, Math.min(48, Math.round(Number(taksitN) || 1)));
   if (!Number.isFinite(u) || u <= 0 || n <= 0) return [];
   const base = Math.floor(u / n);
   let rem = u - base * n;
-  const vadeler = normalizeTaksitVadeleri(vadeDates, n, baslangicYmd);
   const out = [];
   for (let i = 0; i < n; i++) {
     let t = base;
@@ -327,9 +324,36 @@ export function buildTaksitPlan(ucret, taksitN, baslangicYmd, vadeDates) {
       t++;
       rem--;
     }
+    out.push(t);
+  }
+  return out;
+}
+
+/** İstenen taksit tutarları; eksikse ücretten eşit bölünür */
+export function normalizeTaksitTutarlari(rawTutarlar, ucret, taksitN) {
+  const n = Math.max(1, Math.min(48, Math.round(Number(taksitN) || 1)));
+  const fromBody = Array.isArray(rawTutarlar)
+    ? rawTutarlar.slice(0, n).map((t) => {
+        const x = Math.round(Number(t));
+        return Number.isFinite(x) && x >= 0 ? x : null;
+      })
+    : [];
+  if (fromBody.length === n && fromBody.every((t) => t != null)) return fromBody;
+  return autoSplitTutarlar(ucret, n);
+}
+
+/** Elden / taksitli ödeme takibi — vade ve tutar listesi verilirse kullanılır */
+export function buildTaksitPlan(ucret, taksitN, baslangicYmd, vadeDates, tutarlar) {
+  const u = Number(ucret);
+  const n = Math.max(1, Math.min(48, Math.round(Number(taksitN) || 1)));
+  if (!Number.isFinite(u) || u <= 0 || n <= 0) return [];
+  const vadeler = normalizeTaksitVadeleri(vadeDates, n, baslangicYmd);
+  const tutarList = normalizeTaksitTutarlari(tutarlar, u, n);
+  const out = [];
+  for (let i = 0; i < n; i++) {
     out.push({
       no: i + 1,
-      tutar_tl: t,
+      tutar_tl: tutarList[i],
       odendi: false,
       odeme_notu: '',
       vade_tarihi: vadeler[i],

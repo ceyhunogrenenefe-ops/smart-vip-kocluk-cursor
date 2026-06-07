@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import {
+  formatUcretWithCurrency,
   listInstitutionsForPicker,
   listParentSignContracts,
   patchParentSignKayitOnly,
@@ -11,7 +12,9 @@ import {
 } from '../lib/parentSignApi';
 import {
   flattenTaksitRows,
+  formatMultiCurrencySums,
   formatTrShortDate,
+  sumTaksitByCurrency,
   type TaksitDurum,
   type TaksitFlatRow
 } from '../lib/taksitMuhasebe';
@@ -113,7 +116,6 @@ export default function TahsilatMuhasebePage() {
     const unpaid = flat.filter((x) => !x.odendi);
     const overdue = unpaid.filter((x) => x.durum === 'overdue');
     const dueWeek = unpaid.filter((x) => x.durum === 'overdue' || x.durum === 'due_week');
-    const sum = (arr: TaksitFlatRow[]) => arr.reduce((s, x) => s + (Number.isFinite(x.tutarTl) ? x.tutarTl : 0), 0);
     const thisMonthPrefix = filterMonth.trim();
     const thisMonthUnpaid =
       thisMonthPrefix.length === 7
@@ -125,12 +127,12 @@ export default function TahsilatMuhasebePage() {
           });
     return {
       overdueCount: overdue.length,
-      overdueTl: sum(overdue),
+      overdueSums: sumTaksitByCurrency(flat, (x) => !x.odendi && x.durum === 'overdue'),
       dueWeekCount: dueWeek.length,
-      dueWeekTl: sum(dueWeek),
+      dueWeekSums: sumTaksitByCurrency(flat, (x) => !x.odendi && (x.durum === 'overdue' || x.durum === 'due_week')),
       thisMonthCount: thisMonthUnpaid.length,
-      thisMonthTl: sum(thisMonthUnpaid),
-      totalOpenTl: sum(unpaid)
+      thisMonthSums: sumTaksitByCurrency(thisMonthUnpaid),
+      totalOpenSums: sumTaksitByCurrency(unpaid)
     };
   }, [flat, filterMonth]);
 
@@ -233,7 +235,7 @@ export default function TahsilatMuhasebePage() {
           <AlertTriangle className="w-6 h-6 shrink-0 text-red-600 dark:text-red-400" />
           <div>
             <p className="font-bold">
-              {stats.overdueCount} taksitin vadesi geçti ({stats.overdueTl.toLocaleString('tr-TR')} TL tahsil edilmedi)
+              {stats.overdueCount} taksitin vadesi geçti ({formatMultiCurrencySums(stats.overdueSums)} tahsil edilmedi)
             </p>
             <p className="text-xs opacity-90 mt-0.5">
               Aşağıdan ödeme alındıkça «Ödendi» kutusunu işaretleyin; böylece aylık takipte borç kalmaz.
@@ -253,19 +255,19 @@ export default function TahsilatMuhasebePage() {
             <CalendarDays className="w-4 h-4" /> Bu hafta içinde / geciken (ödenmemiş)
           </p>
           <p className="text-2xl font-bold text-slate-900 dark:text-white mt-1">{stats.dueWeekCount}</p>
-          <p className="text-sm text-slate-600 dark:text-slate-400">{stats.dueWeekTl.toLocaleString('tr-TR')} TL</p>
+          <p className="text-sm text-slate-600 dark:text-slate-400">{formatMultiCurrencySums(stats.dueWeekSums)}</p>
         </div>
         <div className="rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white p-4 dark:from-sky-950/25 dark:to-slate-900 dark:border-sky-900/40">
           <p className="text-xs font-semibold text-sky-900 dark:text-sky-200">Seçili ay vadesi (ödenmemiş)</p>
           <p className="text-2xl font-bold text-slate-900 dark:text-white mt-1">{stats.thisMonthCount}</p>
-          <p className="text-sm text-slate-600 dark:text-slate-400">{stats.thisMonthTl.toLocaleString('tr-TR')} TL</p>
+          <p className="text-sm text-slate-600 dark:text-slate-400">{formatMultiCurrencySums(stats.thisMonthSums)}</p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:bg-slate-900 dark:border-slate-700">
           <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Toplam açık borç (taksit)</p>
           <p className="text-2xl font-bold text-slate-900 dark:text-white mt-1">
             {flat.filter((x) => !x.odendi).length} satır
           </p>
-          <p className="text-sm text-slate-600 dark:text-slate-400">{stats.totalOpenTl.toLocaleString('tr-TR')} TL</p>
+          <p className="text-sm text-slate-600 dark:text-slate-400">{formatMultiCurrencySums(stats.totalOpenSums)}</p>
         </div>
       </div>
 
@@ -323,7 +325,7 @@ export default function TahsilatMuhasebePage() {
                 <th className="px-3 py-2">Vade</th>
                 <th className="px-3 py-2">Öğrenci</th>
                 <th className="px-3 py-2">Program</th>
-                <th className="px-3 py-2 text-right">Tutar</th>
+                <th className="px-3 py-2 text-right">Tutar (para birimi)</th>
                 <th className="px-3 py-2">Durum</th>
                 <th className="px-3 py-2">Ödendi</th>
                 <th className="px-3 py-2">Belge</th>
@@ -347,7 +349,9 @@ export default function TahsilatMuhasebePage() {
                     <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{formatTrShortDate(x.vadeYmd)}</td>
                     <td className="px-3 py-2 font-medium text-slate-900 dark:text-slate-100">{x.ogrenciLabel}</td>
                     <td className="px-3 py-2 text-slate-600 dark:text-slate-400 max-w-[180px] truncate">{x.programAdi || '—'}</td>
-                    <td className="px-3 py-2 text-right font-semibold tabular-nums">{x.tutarTl.toLocaleString('tr-TR')} TL</td>
+                    <td className="px-3 py-2 text-right font-semibold tabular-nums whitespace-nowrap">
+                      {formatUcretWithCurrency(x.tutarTl, x.paraBirimi)}
+                    </td>
                     <td className="px-3 py-2">
                       <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${st.cls}`}>{st.text}</span>
                     </td>

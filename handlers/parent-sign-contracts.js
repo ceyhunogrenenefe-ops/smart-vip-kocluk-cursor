@@ -636,6 +636,7 @@ export default async function handler(req, res) {
         merged_html = customMergedRaw.slice(0, MAX_MERGED_HTML);
       } else {
         const taksitVadeleriBody = Array.isArray(body.taksit_vadeleri) ? body.taksit_vadeleri : null;
+        const taksitTutarlariBody = Array.isArray(body.taksit_tutarlari) ? body.taksit_tutarlari : null;
         const existingTaksit = Array.isArray(kj0.taksit_kartlari) ? kj0.taksit_kartlari : [];
         const feeNum = Number(fee);
         const tN = Math.max(1, Math.min(48, Math.round(Number(taksit_sayisi) || 1)));
@@ -651,7 +652,7 @@ export default async function handler(req, res) {
           if (!(feeNum > 0)) {
             return res.status(400).json({ error: 'ucret_required_before_signature_release' });
           }
-          const taksit_kartlari = buildTaksitPlan(feeNum, taksit_sayisi, bas, taksitVadeleriBody);
+          const taksit_kartlari = buildTaksitPlan(feeNum, taksit_sayisi, bas, taksitVadeleriBody, taksitTutarlariBody);
           const ort = tN > 0 ? Math.round(feeNum / tN) : 0;
           const pb = normalizeParaBirimi(body.para_birimi ?? existing.para_birimi);
           const pbLbl = paraBirimiLabel(pb);
@@ -666,9 +667,10 @@ export default async function handler(req, res) {
         } else if (
           feeNum > 0 &&
           (taksitVadeleriBody ||
+            taksitTutarlariBody ||
             (existingTaksit.length > 0 && (feeChanged || taksitChanged || basChanged)))
         ) {
-          const fresh = buildTaksitPlan(feeNum, taksit_sayisi, bas, taksitVadeleriBody);
+          const fresh = buildTaksitPlan(feeNum, taksit_sayisi, bas, taksitVadeleriBody, taksitTutarlariBody);
           const taksit_kartlari = mergeTaksitPlans(existingTaksit, fresh);
           nextKayitJson = { ...kj0, taksit_kartlari };
         }
@@ -892,10 +894,13 @@ export default async function handler(req, res) {
       const institution_legal_html = await institutionLegalHtmlForContract(institutionId, sozlesme_turu);
 
       const taksitVadeleriPost = Array.isArray(body.taksit_vadeleri) ? body.taksit_vadeleri : null;
+      const taksitTutarlariPost = Array.isArray(body.taksit_tutarlari) ? body.taksit_tutarlari : null;
       let merged_html;
       let kayit_formu_json = {};
       const postTaksitKartlari =
-        !regFormFirst && fee > 0 ? buildTaksitPlan(fee, taksit_sayisi, bas, taksitVadeleriPost) : [];
+        !regFormFirst && fee > 0
+          ? buildTaksitPlan(fee, taksit_sayisi, bas, taksitVadeleriPost, taksitTutarlariPost)
+          : [];
       if (regFormFirst) {
         merged_html = buildRegistrationPlaceholderHtml({
           kurum_adi: inst?.name || '',

@@ -1,4 +1,5 @@
 import type { ParentSignContractRow } from './parentSignApi';
+import { formatUcretWithCurrency } from './parentSignApi';
 
 /** Kayıt JSON’daki taksit satırı (API ile uyumlu) */
 export type TaksitKartMuhasebe = {
@@ -70,6 +71,18 @@ export function splitTaksitTutarlari(ucret: number, count: number): number[] {
   return out;
 }
 
+export function resizeTaksitTutarlari(prev: number[], ucret: number, count: number): number[] {
+  const n = Math.max(1, Math.min(48, Math.round(count) || 1));
+  if (n <= 1) return n === 1 && Number(ucret) > 0 ? [Math.round(Number(ucret))] : [];
+  const defaults = splitTaksitTutarlari(ucret, n);
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const p = prev[i];
+    out.push(Number.isFinite(p) && p >= 0 ? Math.round(p) : defaults[i] ?? 0);
+  }
+  return out;
+}
+
 /** Kartta vade yoksa sözleşme başlangıcı + (taksit no - 1) ay */
 export function effectiveVadeYmd(
   card: TaksitKartMuhasebe,
@@ -121,6 +134,7 @@ export type TaksitFlatRow = {
   ogrenciLabel: string;
   programAdi: string;
   ucretToplam: number;
+  paraBirimi: string;
   taksitIndex: number;
   taksitNo: number;
   tutarTl: number;
@@ -130,6 +144,29 @@ export type TaksitFlatRow = {
   durum: TaksitDurum;
   signed: boolean;
 };
+
+/** Para birimine göre toplam (TRY/EUR/USD/GBP ayrı) */
+export function sumTaksitByCurrency(
+  rows: TaksitFlatRow[],
+  filter?: (x: TaksitFlatRow) => boolean
+): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const x of rows) {
+    if (filter && !filter(x)) continue;
+    const c = String(x.paraBirimi || 'TRY').trim().toUpperCase() || 'TRY';
+    const amt = Number.isFinite(x.tutarTl) ? x.tutarTl : 0;
+    m.set(c, (m.get(c) || 0) + amt);
+  }
+  return m;
+}
+
+export function formatMultiCurrencySums(sums: Map<string, number>): string {
+  if (!sums.size) return formatUcretWithCurrency(0, 'TRY');
+  return [...sums.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([c, v]) => formatUcretWithCurrency(v, c))
+    .join(' · ');
+}
 
 function kayitJson(r: ParentSignContractRow): Record<string, unknown> {
   const j = r.kayit_formu_json;

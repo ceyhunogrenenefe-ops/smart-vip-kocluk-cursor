@@ -29,6 +29,7 @@ import {
   fetchParentSignInstitutionLegal,
   saveParentSignInstitutionLegal,
   PARA_BIRIMI_OPTIONS,
+  formatParaBirimiLabel,
   formatUcretWithCurrency,
   type ParaBirimi
 } from '../lib/parentSignApi';
@@ -36,6 +37,7 @@ import {
   classifyTaksit,
   defaultTaksitVadeleri,
   effectiveVadeYmd,
+  resizeTaksitTutarlari,
   splitTaksitTutarlari,
   type TaksitKartMuhasebe
 } from '../lib/taksitMuhasebe';
@@ -170,33 +172,99 @@ function resizeTaksitVadeleri(prev: string[], baslangic: string, count: number):
   return out;
 }
 
-function TaksitVadeEditor(props: {
+type PriceSetupDraft = {
+  ucret: number;
+  paraBirimi: ParaBirimi;
+  taksitSayisi: number;
+  vadeler: string[];
+  tutarlar: number[];
+};
+
+function defaultPriceSetupDraft(r: ParentSignContractRow): PriceSetupDraft {
+  const suggested = suggestHoursAndFeeFromSinif(r.sinif);
+  const n = Math.max(1, Math.min(48, Math.round(Number(r.taksit_sayisi) || 1)));
+  const bas = String(r.baslangic_tarihi || '').slice(0, 10);
+  const ucret = Number(r.ucret) > 0 ? Number(r.ucret) : suggested.fee;
+  const rawPb = String(r.para_birimi || 'TRY').trim().toUpperCase();
+  const paraBirimi = (PARA_BIRIMI_OPTIONS.some((o) => o.value === rawPb) ? rawPb : 'TRY') as ParaBirimi;
+  const cards = taksitKartlariFromRow(r);
+  if (n <= 1) {
+    return { ucret, paraBirimi, taksitSayisi: n, vadeler: [], tutarlar: [] };
+  }
+  if (cards.length > 0) {
+    return {
+      ucret,
+      paraBirimi,
+      taksitSayisi: n,
+      vadeler: resizeTaksitVadeleri(
+        cards.map((c, i) => effectiveVadeYmd(c, r.baslangic_tarihi, i)),
+        bas,
+        n
+      ),
+      tutarlar: resizeTaksitTutarlari(
+        cards.map((c) => Number(c.tutar_tl) || 0),
+        ucret,
+        n
+      )
+    };
+  }
+  return {
+    ucret,
+    paraBirimi,
+    taksitSayisi: n,
+    vadeler: defaultTaksitVadeleri(bas, n),
+    tutarlar: splitTaksitTutarlari(ucret, n)
+  };
+}
+
+function TaksitPlanEditor(props: {
   taksitSayisi: number;
   ucret: number;
   paraBirimi: ParaBirimi;
   baslangic: string;
   vadeler: string[];
+  tutarlar: number[];
   onVadelerChange: (next: string[]) => void;
+  onTutarlarChange: (next: number[]) => void;
   onResetMonthly: () => void;
+  onResetEqualSplit: () => void;
+  compact?: boolean;
 }) {
   const n = Math.max(1, Math.min(48, Math.round(props.taksitSayisi) || 1));
   if (n <= 1) return null;
-  const tutarlar = splitTaksitTutarlari(props.ucret, n);
+  const tutarToplam = props.tutarlar.reduce((s, t) => s + (Number.isFinite(t) ? t : 0), 0);
+  const ucretRounded = Math.round(Number(props.ucret) || 0);
+  const toplamUyusmuyor = ucretRounded > 0 && tutarToplam !== ucretRounded;
+  const boxCls = props.compact
+    ? 'rounded-lg border border-violet-200 bg-violet-50/50 p-2 dark:border-violet-900 dark:bg-violet-950/20'
+    : 'sm:col-span-2 rounded-xl border border-dashed border-blue-200 bg-blue-50/40 p-3 dark:border-blue-900 dark:bg-blue-950/20';
   return (
-    <div className="sm:col-span-2 rounded-xl border border-dashed border-blue-200 bg-blue-50/40 p-3 dark:border-blue-900 dark:bg-blue-950/20">
+    <div className={boxCls}>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-        <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">Taksit vade tarihleri</span>
-        <button
-          type="button"
-          className="text-[11px] font-semibold text-blue-700 hover:underline dark:text-blue-300"
-          onClick={props.onResetMonthly}
-        >
-          Başlangıçtan aylık yenile
-        </button>
+        <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">Taksit planı (vade + tutar)</span>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="text-[11px] font-semibold text-blue-700 hover:underline dark:text-blue-300"
+            onClick={props.onResetEqualSplit}
+          >
+            Ücretten eşit böl
+          </button>
+          <button
+            type="button"
+            className="text-[11px] font-semibold text-blue-700 hover:underline dark:text-blue-300"
+            onClick={props.onResetMonthly}
+          >
+            Vadeleri aylık yenile
+          </button>
+        </div>
       </div>
-      <p className="text-[10px] text-slate-500 mb-2">
-        Her taksitin vade gününü ayrı ayarlayabilirsiniz. Tutarlar ücret ve taksit sayısına göre otomatik bölünür.
-      </p>
+      {toplamUyusmuyor ? (
+        <p className="text-[10px] text-amber-800 dark:text-amber-200 mb-2">
+          Taksit toplamı ({formatUcretWithCurrency(tutarToplam, props.paraBirimi)}) ücretten (
+          {formatUcretWithCurrency(ucretRounded, props.paraBirimi)}) farklı — kayıtta bu tutarlar aynen kullanılır.
+        </p>
+      ) : null}
       <ul className="space-y-1.5">
         {props.vadeler.map((vade, idx) => (
           <li key={idx} className="flex flex-wrap items-center gap-2 text-xs">
@@ -211,9 +279,18 @@ function TaksitVadeEditor(props: {
                 props.onVadelerChange(next);
               }}
             />
-            <span className="text-slate-500">
-              {tutarlar[idx] != null ? formatUcretWithCurrency(tutarlar[idx], props.paraBirimi) : '—'}
-            </span>
+            <input
+              type="number"
+              min={0}
+              className="w-24 rounded-lg border border-slate-200 px-2 py-1 text-xs dark:bg-slate-950 dark:border-slate-600"
+              value={props.tutarlar[idx] ?? 0}
+              onChange={(e) => {
+                const next = [...props.tutarlar];
+                next[idx] = Math.max(0, Math.round(Number(e.target.value) || 0));
+                props.onTutarlarChange(next);
+              }}
+            />
+            <span className="text-slate-500">{formatParaBirimiLabel(props.paraBirimi)}</span>
           </li>
         ))}
       </ul>
@@ -308,6 +385,8 @@ export default function ParentSignFlowPage() {
   const [paraBirimi, setParaBirimi] = useState<ParaBirimi>('TRY');
   const [taksitSayisi, setTaksitSayisi] = useState<number>(1);
   const [taksitVadeleri, setTaksitVadeleri] = useState<string[]>([]);
+  const [taksitTutarlari, setTaksitTutarlari] = useState<number[]>([]);
+  const [priceDrafts, setPriceDrafts] = useState<Record<string, PriceSetupDraft>>({});
   const [lastCreatedLink, setLastCreatedLink] = useState<string | null>(null);
   const [legalSatis, setLegalSatis] = useState('');
   const [legalKullanici, setLegalKullanici] = useState('');
@@ -357,6 +436,7 @@ export default function ParentSignFlowPage() {
   const [editParaBirimi, setEditParaBirimi] = useState<ParaBirimi>('TRY');
   const [editTaksitSayisi, setEditTaksitSayisi] = useState(1);
   const [editTaksitVadeleri, setEditTaksitVadeleri] = useState<string[]>([]);
+  const [editTaksitTutarlari, setEditTaksitTutarlari] = useState<number[]>([]);
   const [editSozlesmeTuru, setEditSozlesmeTuru] = useState<SozlesmeTuruKey>('satis_sozlesmesi');
   const [editSozlesmeBasligi, setEditSozlesmeBasligi] = useState('');
   const [editEkSatirlar, setEditEkSatirlar] = useState('');
@@ -384,20 +464,39 @@ export default function ParentSignFlowPage() {
     const n = Math.max(1, Math.min(48, Math.round(taksitSayisi) || 1));
     if (n <= 1) {
       setTaksitVadeleri([]);
+      setTaksitTutarlari([]);
       return;
     }
     setTaksitVadeleri((prev) => resizeTaksitVadeleri(prev, baslangic, n));
-  }, [taksitSayisi, baslangic]);
+    setTaksitTutarlari((prev) => resizeTaksitTutarlari(prev, ucret, n));
+  }, [taksitSayisi, baslangic, ucret]);
 
   useEffect(() => {
     if (!editOpen) return;
     const n = Math.max(1, Math.min(48, Math.round(editTaksitSayisi) || 1));
     if (n <= 1) {
       setEditTaksitVadeleri([]);
+      setEditTaksitTutarlari([]);
       return;
     }
     setEditTaksitVadeleri((prev) => resizeTaksitVadeleri(prev, editBaslangic, n));
-  }, [editOpen, editTaksitSayisi, editBaslangic]);
+    setEditTaksitTutarlari((prev) => resizeTaksitTutarlari(prev, editUcret, n));
+  }, [editOpen, editTaksitSayisi, editBaslangic, editUcret]);
+
+  useEffect(() => {
+    setPriceDrafts((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const r of rows) {
+        if (kayitFormPhase(r) !== 'awaiting_admin_price') continue;
+        if (!next[r.id]) {
+          next[r.id] = defaultPriceSetupDraft(r);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [rows]);
 
   const programs = useMemo(() => {
     const fromPresets = uniquePrograms(presets);
@@ -666,6 +765,7 @@ export default function ParentSignFlowPage() {
         ...(fillPick.startsWith('u:') ? { ogrenci_user_id: fillPick.slice(2) } : {}),
         ...(ogrenciOnceKayitFormu ? { registration_student_form: true } : {}),
         ...(taksitSayisi > 1 && taksitVadeleri.length > 0 ? { taksit_vadeleri: taksitVadeleri } : {}),
+        ...(taksitSayisi > 1 && taksitTutarlari.length > 0 ? { taksit_tutarlari: taksitTutarlari } : {}),
         institution_id: effectiveInstitutionId
       };
       const created = await createParentSignContract(body);
@@ -801,6 +901,70 @@ export default function ParentSignFlowPage() {
     }
   };
 
+  const patchPriceDraft = (id: string, patch: Partial<PriceSetupDraft>) => {
+    setPriceDrafts((prev) => {
+      const cur = prev[id];
+      if (!cur) return prev;
+      const merged = { ...cur, ...patch };
+      const n = Math.max(1, Math.min(48, Math.round(merged.taksitSayisi) || 1));
+      const bas =
+        rows.find((x) => x.id === id)?.baslangic_tarihi != null
+          ? String(rows.find((x) => x.id === id)!.baslangic_tarihi).slice(0, 10)
+          : todayPlus(0);
+      if (patch.taksitSayisi != null || patch.ucret != null) {
+        if (n <= 1) {
+          merged.vadeler = [];
+          merged.tutarlar = [];
+        } else {
+          merged.vadeler = resizeTaksitVadeleri(merged.vadeler, bas, n);
+          merged.tutarlar = resizeTaksitTutarlari(merged.tutarlar, merged.ucret, n);
+        }
+      }
+      return { ...prev, [id]: merged };
+    });
+  };
+
+  const saveAwaitingAdminPrice = async (r: ParentSignContractRow) => {
+    const d = priceDrafts[r.id];
+    if (!d || !(Number(d.ucret) > 0)) {
+      setMsg('Ücret 0’dan büyük olmalıdır.');
+      return;
+    }
+    setParentSignRowBusy(`${r.id}:price`);
+    setMsg(null);
+    try {
+      await updateParentSignContract({
+        id: r.id,
+        ogrenci_ad: String(r.ogrenci_ad || '').trim(),
+        ogrenci_soyad: String(r.ogrenci_soyad || '').trim(),
+        veli_ad: String(r.veli_ad || '').trim(),
+        veli_soyad: String(r.veli_soyad || '').trim(),
+        telefon: String(r.telefon || '').trim(),
+        adres: String(r.adres || '').trim(),
+        sinif: String(r.sinif || '').trim(),
+        program_adi: String(r.program_adi || '').trim(),
+        baslangic_tarihi: String(r.baslangic_tarihi || '').slice(0, 10),
+        bitis_tarihi: String(r.bitis_tarihi || '').slice(0, 10),
+        ucret: d.ucret,
+        para_birimi: d.paraBirimi,
+        taksit_sayisi: d.taksitSayisi,
+        ...(d.taksitSayisi > 1 && d.vadeler.length > 0 ? { taksit_vadeleri: d.vadeler } : {}),
+        ...(d.taksitSayisi > 1 && d.tutarlar.length > 0 ? { taksit_tutarlari: d.tutarlar } : {})
+      });
+      setPriceDrafts((prev) => {
+        const next = { ...prev };
+        delete next[r.id];
+        return next;
+      });
+      setMsg('Ücret ve taksit planı kaydedildi; veli e-sözleşmeyi imzalayabilir (aynı link).');
+      void load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Kaydedilemedi');
+    } finally {
+      setParentSignRowBusy(null);
+    }
+  };
+
   const updateTaksitVade = async (r: ParentSignContractRow, index: number, vade_tarihi: string) => {
     if (!YMD_RE.test(vade_tarihi)) return;
     setParentSignRowBusy(`${r.id}:v${index}`);
@@ -877,11 +1041,20 @@ export default function ParentSignFlowPage() {
             editTaksitN
           )
         );
+        setEditTaksitTutarlari(
+          resizeTaksitTutarlari(
+            editCards.map((c) => Number(c.tutar_tl) || 0),
+            Number(r.ucret) || 0,
+            editTaksitN
+          )
+        );
       } else {
         setEditTaksitVadeleri(defaultTaksitVadeleri(editBas, editTaksitN));
+        setEditTaksitTutarlari(splitTaksitTutarlari(Number(r.ucret) || 0, editTaksitN));
       }
     } else {
       setEditTaksitVadeleri([]);
+      setEditTaksitTutarlari([]);
     }
     const tur = (r.sozlesme_turu || 'satis_sozlesmesi') as SozlesmeTuruKey;
     setEditSozlesmeTuru(['kullanici_sozlesmesi', 'satis_sozlesmesi', 'diger'].includes(tur) ? tur : 'satis_sozlesmesi');
@@ -944,7 +1117,8 @@ export default function ParentSignFlowPage() {
         sablon_ek_detay_snapshot: editEkSatirlar.trim(),
         ders_satirlari: vd,
         ...(editCustomHtmlMode ? { custom_merged_html: editMergedHtml.trim() } : {}),
-        ...(editTaksitSayisi > 1 && editTaksitVadeleri.length > 0 ? { taksit_vadeleri: editTaksitVadeleri } : {})
+        ...(editTaksitSayisi > 1 && editTaksitVadeleri.length > 0 ? { taksit_vadeleri: editTaksitVadeleri } : {}),
+        ...(editTaksitSayisi > 1 && editTaksitTutarlari.length > 0 ? { taksit_tutarlari: editTaksitTutarlari } : {})
       });
       setMsg(
         editCustomHtmlMode
@@ -1766,14 +1940,17 @@ export default function ParentSignFlowPage() {
                 onChange={(e) => setBitis(e.target.value)}
               />
             </div>
-            <TaksitVadeEditor
+            <TaksitPlanEditor
               taksitSayisi={taksitSayisi}
               ucret={ucret}
               paraBirimi={paraBirimi}
               baslangic={baslangic}
               vadeler={taksitVadeleri}
+              tutarlar={taksitTutarlari}
               onVadelerChange={setTaksitVadeleri}
+              onTutarlarChange={setTaksitTutarlari}
               onResetMonthly={() => setTaksitVadeleri(defaultTaksitVadeleri(baslangic, taksitSayisi))}
+              onResetEqualSplit={() => setTaksitTutarlari(splitTaksitTutarlari(ucret, taksitSayisi))}
             />
           </div>
           <button
@@ -1915,6 +2092,98 @@ export default function ParentSignFlowPage() {
                             })()
                           )}
                         </div>
+                      </div>
+                    ) : null}
+                    {kayitFormPhase(r) === 'awaiting_admin_price' && priceDrafts[r.id] ? (
+                      <div className="mt-2 rounded-lg border border-violet-300 bg-violet-50/80 p-3 text-[11px] dark:border-violet-800 dark:bg-violet-950/30">
+                        <p className="font-semibold text-violet-950 dark:text-violet-100 mb-2">
+                          Kayıt formu tamam — ücret ve taksit planını girin
+                        </p>
+                        <div className="grid gap-2 sm:grid-cols-3 mb-2">
+                          <div>
+                            <label className="text-[10px] text-slate-500">Para birimi</label>
+                            <select
+                              className="mt-0.5 w-full rounded border px-2 py-1 text-xs dark:bg-slate-950 dark:border-slate-600"
+                              value={priceDrafts[r.id].paraBirimi}
+                              onChange={(e) =>
+                                patchPriceDraft(r.id, { paraBirimi: e.target.value as ParaBirimi })
+                              }
+                            >
+                              {PARA_BIRIMI_OPTIONS.map((o) => (
+                                <option key={o.value} value={o.value}>
+                                  {o.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-slate-500">Toplam ücret</label>
+                            <input
+                              type="number"
+                              min={1}
+                              className="mt-0.5 w-full rounded border px-2 py-1 text-xs dark:bg-slate-950 dark:border-slate-600"
+                              value={priceDrafts[r.id].ucret}
+                              onChange={(e) =>
+                                patchPriceDraft(r.id, { ucret: Math.max(0, Number(e.target.value) || 0) })
+                              }
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-slate-500">Taksit sayısı</label>
+                            <input
+                              type="number"
+                              min={1}
+                              max={48}
+                              className="mt-0.5 w-full rounded border px-2 py-1 text-xs dark:bg-slate-950 dark:border-slate-600"
+                              value={priceDrafts[r.id].taksitSayisi}
+                              onChange={(e) =>
+                                patchPriceDraft(r.id, {
+                                  taksitSayisi: Math.max(1, Math.min(48, Math.round(Number(e.target.value) || 1)))
+                                })
+                              }
+                            />
+                          </div>
+                        </div>
+                        <TaksitPlanEditor
+                          compact
+                          taksitSayisi={priceDrafts[r.id].taksitSayisi}
+                          ucret={priceDrafts[r.id].ucret}
+                          paraBirimi={priceDrafts[r.id].paraBirimi}
+                          baslangic={String(r.baslangic_tarihi || '').slice(0, 10)}
+                          vadeler={priceDrafts[r.id].vadeler}
+                          tutarlar={priceDrafts[r.id].tutarlar}
+                          onVadelerChange={(vadeler) => patchPriceDraft(r.id, { vadeler })}
+                          onTutarlarChange={(tutarlar) => patchPriceDraft(r.id, { tutarlar })}
+                          onResetMonthly={() =>
+                            patchPriceDraft(r.id, {
+                              vadeler: defaultTaksitVadeleri(
+                                String(r.baslangic_tarihi || '').slice(0, 10),
+                                priceDrafts[r.id].taksitSayisi
+                              )
+                            })
+                          }
+                          onResetEqualSplit={() =>
+                            patchPriceDraft(r.id, {
+                              tutarlar: splitTaksitTutarlari(
+                                priceDrafts[r.id].ucret,
+                                priceDrafts[r.id].taksitSayisi
+                              )
+                            })
+                          }
+                        />
+                        <button
+                          type="button"
+                          disabled={parentSignRowBusy === `${r.id}:price`}
+                          onClick={() => void saveAwaitingAdminPrice(r)}
+                          className="mt-2 inline-flex items-center gap-1 rounded-lg bg-violet-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-violet-600 disabled:opacity-50"
+                        >
+                          {parentSignRowBusy === `${r.id}:price` ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          )}
+                          Kaydet ve veliye imzaya aç
+                        </button>
                       </div>
                     ) : null}
                     {taksitKartlariFromRow(r).length > 0 ? (
@@ -2432,14 +2701,17 @@ export default function ParentSignFlowPage() {
                   onChange={(e) => setEditBitis(e.target.value)}
                 />
               </div>
-              <TaksitVadeEditor
+              <TaksitPlanEditor
                 taksitSayisi={editTaksitSayisi}
                 ucret={editUcret}
                 paraBirimi={editParaBirimi}
                 baslangic={editBaslangic}
                 vadeler={editTaksitVadeleri}
+                tutarlar={editTaksitTutarlari}
                 onVadelerChange={setEditTaksitVadeleri}
+                onTutarlarChange={setEditTaksitTutarlari}
                 onResetMonthly={() => setEditTaksitVadeleri(defaultTaksitVadeleri(editBaslangic, editTaksitSayisi))}
+                onResetEqualSplit={() => setEditTaksitTutarlari(splitTaksitTutarlari(editUcret, editTaksitSayisi))}
               />
             </div>
             <div className="mt-5 flex flex-wrap gap-2 justify-end border-t border-slate-100 pt-4 dark:border-slate-700">

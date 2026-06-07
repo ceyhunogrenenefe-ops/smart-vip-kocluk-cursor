@@ -321,6 +321,8 @@ export async function createParentSignContract(body: {
   registration_student_form?: boolean;
   /** Taksit vade tarihleri (YYYY-MM-DD); eksikse başlangıçtan aylık üretilir */
   taksit_vadeleri?: string[];
+  /** Taksit tutarları; eksikse ücretten eşit bölünür */
+  taksit_tutarlari?: number[];
 }): Promise<ParentSignContractRow> {
   const res = await apiFetch('/api/parent-sign-contracts', { method: 'POST', headers: JSON_HDR, body: JSON.stringify(body) });
   const j = await res.json().catch(() => ({}));
@@ -355,6 +357,8 @@ export async function updateParentSignContract(body: {
   taksit_odeme_update?: { index: number; odendi: boolean; not?: string; odendi_tarihi?: string };
   /** Taksit vade tarihleri (YYYY-MM-DD) — ücret/taksit güncellemesinde kullanılır */
   taksit_vadeleri?: string[];
+  /** Taksit tutarları — ücret/taksit güncellemesinde kullanılır */
+  taksit_tutarlari?: number[];
   /** `kayit_formu_json` ile sığ birleştirme (ör. platform_user_id). */
   kayit_json_merge?: Record<string, unknown>;
 }): Promise<ParentSignContractRow> {
