@@ -5,7 +5,8 @@ import { useAuth } from '../context/AuthContext';
 import { userRoleTags } from '../config/rolePermissions';
 import { useApp } from '../context/AppContext';
 import { WeeklyEntry, Book, formatClassLevelLabel } from '../types';
-import { topicPool } from '../data/mockData';
+import { MAARIF_SUBJECT_ORDER } from '../data/tytMaarifTopicPool';
+import { sortSubjectsWithStudyTracks } from '../lib/studyTrackSubjects';
 import {
   Calendar,
   Plus,
@@ -110,7 +111,19 @@ export default function Tracking() {
   const navigate = useNavigate();
   const { effectiveUser } = useAuth();
   const tags = userRoleTags(effectiveUser);
-  const { students, weeklyEntries, addWeeklyEntry, updateWeeklyEntry, deleteWeeklyEntry, getStudentStats, getTopics, books, addBook, getStudentBooks } = useApp();
+  const {
+    students,
+    weeklyEntries,
+    addWeeklyEntry,
+    updateWeeklyEntry,
+    deleteWeeklyEntry,
+    getStudentStats,
+    getTopics,
+    getTopicsByClass,
+    books,
+    addBook,
+    getStudentBooks
+  } = useApp();
 
   useEffect(() => {
     if (tags.includes('coach') && !tags.includes('admin') && !tags.includes('super_admin')) {
@@ -153,18 +166,35 @@ export default function Tracking() {
 
   // Dersleri seçili öğrencinin sınıfına göre filtrele
   const subjects = useMemo(() => {
-    if (!selectedStudent) return Object.keys(topicPool);
-
+    if (!selectedStudent?.classLevel) return [] as string[];
     const classLevel = selectedStudent.classLevel;
-
-    // YKS sınıfları için sadece ilgili dersleri göster
     if (typeof classLevel === 'string' && YKS_SUBJECTS[classLevel]) {
       return YKS_SUBJECTS[classLevel];
     }
-
-    // Normal sınıflar için tüm dersleri göster
-    return Object.keys(topicPool);
-  }, [selectedStudent]);
+    const tb = getTopicsByClass(classLevel);
+    if (tb.isYKS) {
+      return [
+        ...Object.keys(tb.tytSubjects),
+        ...Object.keys(tb.aytSubjects),
+        ...Object.keys(tb.regular)
+      ];
+    }
+    if (classLevel === 'TYT-Maarif') {
+      const order = MAARIF_SUBJECT_ORDER as readonly string[];
+      const keys = Object.keys(tb.regular).filter((s) => s.startsWith('TYT MAARİF '));
+      return sortSubjectsWithStudyTracks(
+        [...keys].sort((a, b) => {
+          const ia = order.indexOf(a);
+          const ib = order.indexOf(b);
+          if (ia === -1 && ib === -1) return a.localeCompare(b, 'tr');
+          if (ia === -1) return 1;
+          if (ib === -1) return -1;
+          return ia - ib;
+        })
+      );
+    }
+    return sortSubjectsWithStudyTracks(Object.keys(tb.regular));
+  }, [selectedStudent, getTopicsByClass]);
 
   // Konuları al - Ders seçimine göre sadece o derse ait konuları göster
   const getTopicsForStudent = () => {
@@ -172,17 +202,12 @@ export default function Tracking() {
 
     const classLevel = selectedStudent.classLevel;
 
-    // YKS sınıfları için - konuyu doğrudan derse göre al
     if (typeof classLevel === 'string' && classLevel.startsWith('YKS-')) {
-      // TYT ve AYT konularını doğrudan subject key'inde ara
-      return topicPool[formData.subject]?.[classLevel] || [];
-    }
-
-    // Normal sınıflar (9, 10, 11, 12)
-    if (typeof classLevel === 'number') {
       return getTopics(formData.subject, classLevel);
     }
-
+    if (classLevel !== undefined && classLevel !== null) {
+      return getTopics(formData.subject, classLevel);
+    }
     return [];
   };
 

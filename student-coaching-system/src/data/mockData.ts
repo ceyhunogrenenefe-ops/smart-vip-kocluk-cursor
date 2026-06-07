@@ -1,9 +1,12 @@
 // Türkçe: Mock veri ve örnek içerikler - Smart VIP Koçluk (Eğitim Koçu Sistemi)
 
 import { Student, Coach, Subject, WeeklyEntry, TopicPool } from '../types';
+import { yosTopicPool } from './yosTopicPool';
+import { tytMaarifTopicPool } from './tytMaarifTopicPool';
+import { mergeTopicPools } from '../lib/mergeTopicPools';
 
 // Konu Havuzu - 3. Sınıf, 4. Sınıf, 5. Sınıf, 6. Sınıf, 7. Sınıf, LGS Tüm Dersler ve Konular
-export const topicPool: TopicPool = {
+const baseTopicPool: TopicPool = {
   'ALMANCA': {
     3: [
       'Selbstvorstellung / Kendini Tanıtma',
@@ -2597,6 +2600,11 @@ export const topicPool: TopicPool = {
     ],
   },
 };
+
+export const topicPool: TopicPool = mergeTopicPools(
+  mergeTopicPools(baseTopicPool, yosTopicPool),
+  tytMaarifTopicPool
+);
 
 // Örnek Öğrenciler
 export const mockStudents: Student[] = [

@@ -1,9 +1,8 @@
 // Türkçe: Konu Havuzu Sayfası
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { topicPool } from '../data/mockData';
-import { yosTopicPool } from '../data/yosTopicPool';
-import { tytMaarifTopicPool } from '../data/tytMaarifTopicPool';
+import { formatMaarifSubjectLabel, MAARIF_CLASS_KEY } from '../data/tytMaarifTopicPool';
 import { parseClassLevelFromForm, TOPIC_CLASS_OPTIONS } from '../types';
 import {
   BookOpen,
@@ -23,20 +22,29 @@ export default function Topics() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newTopic, setNewTopic] = useState('');
 
-  const mergedTopicPool = useMemo(() => {
-    const next = { ...topicPool } as Record<string, Record<string, string[]>>;
-    [yosTopicPool, tytMaarifTopicPool].forEach((pool) => {
-      Object.entries(pool).forEach(([subject, levels]) => {
-        next[subject] = {
-          ...(next[subject] || {}),
-          ...(levels as Record<string, string[]>)
-        };
-      });
-    });
-    return next;
-  }, []);
+  const mergedTopicPool = useMemo(() => topicPool, []);
 
-  const subjects = Object.keys(mergedTopicPool);
+  const isMaarifSubject = (s: string) => s.startsWith('TYT MAARİF ');
+
+  const subjects = useMemo(() => {
+    const all = Object.keys(mergedTopicPool);
+    if (selectedClassKey === MAARIF_CLASS_KEY) {
+      return all.filter(isMaarifSubject);
+    }
+    return all;
+  }, [mergedTopicPool, selectedClassKey]);
+
+  useEffect(() => {
+    if (selectedSubject && isMaarifSubject(selectedSubject)) {
+      setSelectedClassKey(MAARIF_CLASS_KEY);
+    }
+  }, [selectedSubject]);
+
+  useEffect(() => {
+    if (selectedClassKey === MAARIF_CLASS_KEY && selectedSubject && !isMaarifSubject(selectedSubject)) {
+      setSelectedSubject('');
+    }
+  }, [selectedClassKey, selectedSubject]);
 
   const resolvedClass = useMemo(
     () => parseClassLevelFromForm(selectedClassKey),
@@ -89,7 +97,7 @@ export default function Topics() {
               <option value="">Ders Seçin</option>
               {subjects.map((subject) => (
                 <option key={subject} value={subject}>
-                  {subject}
+                  {isMaarifSubject(subject) ? formatMaarifSubjectLabel(subject) : subject}
                 </option>
               ))}
             </select>
@@ -168,7 +176,9 @@ export default function Topics() {
                 <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center">
                   <BookOpen className="w-6 h-6 text-white" />
                 </div>
-                <h3 className="font-semibold text-slate-800">{subject}</h3>
+                <h3 className="font-semibold text-slate-800">
+                  {isMaarifSubject(subject) ? formatMaarifSubjectLabel(subject) : subject}
+                </h3>
               </div>
               <p className="text-sm text-gray-500">
                 {Object.values(mergedTopicPool[subject]).flat().length} konu

@@ -52,8 +52,7 @@ import { useAuth } from './AuthContext';
 import { useOrganization } from './OrganizationContext';
 import { userRoleTags } from '../config/rolePermissions';
 import { topicPool as defaultTopicPool } from '../data/mockData';
-import { yosTopicPool } from '../data/yosTopicPool';
-import { tytMaarifTopicPool } from '../data/tytMaarifTopicPool';
+import { mergeTopicPools } from '../lib/mergeTopicPools';
 import { mergeStudyTracksIntoSubjects, studyTracksForClassLevel } from '../lib/studyTrackSubjects';
 import {
   clearStudentCoachQuestionStatsCache,
@@ -88,20 +87,6 @@ const DEFAULT_WRITTEN_EXAM_SUBJECTS = [
   'İngilizce',
   'Din Kültürü'
 ];
-
-const mergeTopicPools = (base: TopicPool, overrides: TopicPool): TopicPool => {
-  const merged: TopicPool = { ...base };
-  Object.entries(overrides).forEach(([subject, levels]) => {
-    const baseLevels = (base[subject] || {}) as Record<string, string[]>;
-    const nextLevels = { ...baseLevels };
-    Object.entries(levels || {}).forEach(([levelKey, incoming]) => {
-      const current = nextLevels[levelKey] || [];
-      nextLevels[levelKey] = Array.from(new Set([...(current || []), ...((incoming as string[]) || [])]));
-    });
-    merged[subject] = nextLevels;
-  });
-  return merged;
-};
 
 /** DB listesi ile localStorage birleştir — aynı e-posta için DB öncelikli */
 const mergeStudentsByEmail = (fromDb: Student[], fromLocal: Student[]): Student[] => {
@@ -383,18 +368,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Topic pool - varsayılan mockData + kullanıcı ekleri (localStorage)
   const [customTopics, setCustomTopics] = useState<TopicPool>(() => {
     const stored = loadFromStorage<TopicPool>(STORAGE_KEYS.customTopics, {});
-    return mergeTopicPools(
-      mergeTopicPools(mergeTopicPools(defaultTopicPool, yosTopicPool), tytMaarifTopicPool),
-      stored
-    );
+    return mergeTopicPools(defaultTopicPool, stored);
   });
   /** getTopics/getTopicsByClass: customTopics bazen kısmi kalabiliyor; her zaman varsayılan havuzla birleştir */
   const effectiveTopicPool = React.useMemo(
-    () =>
-      mergeTopicPools(
-        mergeTopicPools(mergeTopicPools(defaultTopicPool, yosTopicPool), tytMaarifTopicPool),
-        customTopics
-      ),
+    () => mergeTopicPools(defaultTopicPool, customTopics),
     [customTopics]
   );
   const [topicProgress, setTopicProgress] = useState<TopicProgress[]>(() =>
