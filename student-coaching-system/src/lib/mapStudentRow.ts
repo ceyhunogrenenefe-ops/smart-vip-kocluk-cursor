@@ -20,7 +20,14 @@ export function normalizeClassLevel(raw: unknown): ClassLevel | undefined {
   if (typeof raw === 'string') {
     const trimmed = raw.trim();
     if (!trimmed) return undefined;
-    if (trimmed === 'LGS' || trimmed === 'YOS' || trimmed.startsWith('YKS-')) return trimmed as ClassLevel;
+    if (
+      trimmed === 'LGS' ||
+      trimmed === 'YOS' ||
+      trimmed === 'TYT-Maarif' ||
+      trimmed.startsWith('YKS-')
+    ) {
+      return trimmed as ClassLevel;
+    }
     const parsed = parseInt(trimmed, 10);
     if (!Number.isNaN(parsed) && parsed >= 3 && parsed <= 12) return parsed as ClassLevel;
   }

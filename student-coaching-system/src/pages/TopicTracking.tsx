@@ -7,6 +7,10 @@ import { resolveStudentRecordId } from '../lib/coachResolve';
 import { formatClassLevelLabel } from '../types';
 import { isTopicMarkedCompleted } from '../lib/topicProgressSync';
 import { isStudyTrackSubject, STUDY_TRACK_SUBJECTS } from '../lib/studyTrackSubjects';
+import {
+  formatMaarifSubjectLabel,
+  MAARIF_SUBJECT_ORDER
+} from '../data/tytMaarifTopicPool';
 import { TapCheckbox } from '../components/ui/TapCheckbox';
 import {
   BookOpen,
@@ -81,6 +85,24 @@ export default function TopicTracking() {
   const isRegularStudent = !topicsData.isYKS;
   const isLgsStudent = studentClassLevel === 'LGS';
   const isYosStudent = studentClassLevel === 'YOS';
+  const isMaarifStudent = studentClassLevel === 'TYT-Maarif';
+
+  const formatSubjectDisplay = (subject: string) =>
+    isMaarifStudent && subject.startsWith('TYT MAARİF ')
+      ? formatMaarifSubjectLabel(subject)
+      : subject;
+
+  const sortMaarifSubjects = (list: string[]) => {
+    const order = MAARIF_SUBJECT_ORDER as readonly string[];
+    return [...list].sort((a, b) => {
+      const ia = order.indexOf(a as (typeof MAARIF_SUBJECT_ORDER)[number]);
+      const ib = order.indexOf(b as (typeof MAARIF_SUBJECT_ORDER)[number]);
+      if (ia === -1 && ib === -1) return a.localeCompare(b, 'tr');
+      if (ia === -1) return 1;
+      if (ib === -1) return -1;
+      return ia - ib;
+    });
+  };
   const missingClassLevel = Boolean(
     selectedStudentId && selectedStudent && studentClassLevel === undefined
   );
@@ -196,7 +218,8 @@ export default function TopicTracking() {
       Object.keys(filteredStudyTrackTopics).forEach((s) => subjects.push(s));
       return subjects;
     }
-    return Object.keys(filteredRegularTopics || {});
+    const keys = Object.keys(filteredRegularTopics || {});
+    return isMaarifStudent ? sortMaarifSubjects(keys) : keys;
   };
 
   const subjects = getSubjectList();
@@ -295,10 +318,22 @@ export default function TopicTracking() {
               : 'Öğrencilerin konu tamamlama durumlarını takip edin'}
           </p>
         </div>
-        {(isYKSStudent || isYosStudent) && (
-          <div className="bg-gradient-to-r from-blue-500 to-purple-500 text-white px-4 py-2 rounded-lg flex items-center gap-2">
+        {(isYKSStudent || isYosStudent || isMaarifStudent) && (
+          <div
+            className={`text-white px-4 py-2 rounded-lg flex items-center gap-2 ${
+              isMaarifStudent
+                ? 'bg-gradient-to-r from-emerald-500 to-teal-600'
+                : 'bg-gradient-to-r from-blue-500 to-purple-500'
+            }`}
+          >
             <Layers className="w-5 h-5" />
-            <span className="font-medium">{isYosStudent ? 'YÖS Öğrencisi' : `${getClassLabel()} Öğrencisi`}</span>
+            <span className="font-medium">
+              {isYosStudent
+                ? 'YÖS Öğrencisi'
+                : isMaarifStudent
+                  ? 'TYT Maarif Model Öğrencisi'
+                  : `${getClassLabel()} Öğrencisi`}
+            </span>
           </div>
         )}
       </div>
@@ -371,7 +406,8 @@ export default function TopicTracking() {
                   <option value="all">Tüm Dersler</option>
                   {subjects.map((subject) => (
                     <option key={subject} value={subject}>
-                      {subject} ({getSubjectStats(subject).completed}/{getSubjectStats(subject).total})
+                      {formatSubjectDisplay(subject)} ({getSubjectStats(subject).completed}/
+                      {getSubjectStats(subject).total})
                     </option>
                   ))}
                 </select>
@@ -515,7 +551,9 @@ export default function TopicTracking() {
                         : 'bg-gray-50 border-gray-100 opacity-50'
                     }`}
                   >
-                    <p className="text-sm font-medium text-slate-700 truncate">{subject}</p>
+                    <p className="text-sm font-medium text-slate-700 truncate">
+                      {formatSubjectDisplay(subject)}
+                    </p>
                     <p className="text-xs text-gray-500 mt-1">
                       {stats.completed}/{stats.total} (%{stats.percentage})
                     </p>
@@ -783,9 +821,14 @@ export default function TopicTracking() {
             </div>
           )}
 
-          {/* Normal Sınıf Konuları (9, 10, 11, 12) */}
+          {/* Normal Sınıf Konuları (9, 10, 11, 12, YÖS, TYT Maarif) */}
           {!isYKSStudent && (
             <div className="space-y-4">
+              {isMaarifStudent && (
+                <p className="text-sm font-medium text-emerald-800 px-1">
+                  TYT Maarif Model — 9. ve 10. sınıf müfredatı (yaz kampı hedef listesi)
+                </p>
+              )}
               {(selectedSubject === 'all' ? subjects : [selectedSubject]).map((subject) => {
                 const topics = getTopicsForSubject(subject);
                 const completedInSubject = getCompletedTopicsBySubject(selectedStudentId, subject);
@@ -798,7 +841,9 @@ export default function TopicTracking() {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <BookOpen className="w-5 h-5 text-slate-600" />
-                          <h3 className="font-semibold text-slate-800">{subject}</h3>
+                          <h3 className="font-semibold text-slate-800">
+                            {formatSubjectDisplay(subject)}
+                          </h3>
                         </div>
                         <span className="text-sm text-gray-500">
                           {completedInSubject.length}/{topics.length} konu tamamlandı

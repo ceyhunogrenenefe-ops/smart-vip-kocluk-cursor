@@ -57,10 +57,12 @@ export function studyTracksForClassLevel(
   const isLgs = key === 'LGS';
   const isYks = key.startsWith('YKS-');
   const isYos = key === 'YOS';
+  const isMaarif = key === 'TYT-Maarif';
   const isUpper =
     isLgs ||
     isYks ||
     isYos ||
+    isMaarif ||
     (n != null && n >= 5) ||
     key === '5' ||
     key === '6' ||

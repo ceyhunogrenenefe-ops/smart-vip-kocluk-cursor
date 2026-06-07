@@ -16,6 +16,7 @@ export type ClassLevel =
   | 12
   | 'LGS'
   | 'YOS'
+  | 'TYT-Maarif'
   | 'YKS-Sayısal'
   | 'YKS-Eşit Ağırlık'
   | 'YKS-Sözel';
@@ -287,6 +288,7 @@ export const CLASS_LEVELS: { value: ClassLevel; label: string }[] = [
   { value: 7, label: '7. Sınıf' },
   { value: 'LGS', label: 'LGS (8. Sınıf)' },
   { value: 'YOS', label: 'YÖS' },
+  { value: 'TYT-Maarif', label: 'TYT Maarif Model' },
   { value: 9, label: '9. Sınıf' },
   { value: 10, label: '10. Sınıf' },
   { value: 11, label: '11. Sınıf' },
@@ -300,6 +302,7 @@ export const CLASS_LEVELS: { value: ClassLevel; label: string }[] = [
 export function parseClassLevelFromForm(value: string): ClassLevel {
   if (value === 'LGS') return 'LGS';
   if (value === 'YOS') return 'YOS';
+  if (value === 'TYT-Maarif') return 'TYT-Maarif';
   if (value.startsWith('YKS-')) return value as ClassLevel;
   const n = parseInt(value, 10);
   return n as ClassLevel;
@@ -317,6 +320,7 @@ export const TOPIC_CLASS_OPTIONS: { value: string; label: string }[] = [
   ...([3, 4, 5, 6, 7] as const).map(n => ({ value: String(n), label: `${n}. Sınıf` })),
   { value: 'LGS', label: 'LGS (8. Sınıf)' },
   { value: 'YOS', label: 'YÖS' },
+  { value: 'TYT-Maarif', label: 'TYT Maarif Model' },
   ...([9, 10, 11, 12] as const).map(n => ({ value: String(n), label: `${n}. Sınıf` })),
   { value: 'YKS-Sayısal', label: 'YKS Sayısal' },
   { value: 'YKS-Eşit Ağırlık', label: 'YKS Eşit Ağırlık' },
@@ -333,6 +337,7 @@ export const PROGRAM_OPTIONS: { value: ProgramName; label: string }[] = [
 
 export const inferProgramName = (classLevel: ClassLevel | string | number | undefined): ProgramName => {
   if (classLevel === 'YOS') return 'yos';
+  if (classLevel === 'TYT-Maarif') return 'tyt';
   if (classLevel === 'LGS') return 'lgs';
   if (String(classLevel).startsWith('YKS-')) return 'ayt';
   const n = Number(classLevel);

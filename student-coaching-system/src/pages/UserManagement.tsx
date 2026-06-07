@@ -76,7 +76,7 @@ function userHasTeacherQuestionRole(user: SystemUser): boolean {
 const toClassLevel = (raw: string): ClassLevel => {
   const v = String(raw || '').trim();
   if (!v) return 9;
-  if (v === 'LGS' || v === 'YOS' || v.startsWith('YKS-')) return v as ClassLevel;
+  if (v === 'LGS' || v === 'YOS' || v === 'TYT-Maarif' || v.startsWith('YKS-')) return v as ClassLevel;
   const n = Number(v);
   if (!Number.isNaN(n)) return n as ClassLevel;
   return 9;

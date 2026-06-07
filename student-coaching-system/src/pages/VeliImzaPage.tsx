@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { fetchVeliImzaPayload, submitVeliImza, submitVeliRegistrationForm, type VeliImzaRegistrationHint } from '../lib/parentSignApi';
 import { downloadParentSignContractPdf } from '../lib/parentSignPdfDownload';
 import { VELI_KAYIT_PROGRAM_SECENEKLERI } from '../lib/veliKayitConstants';
+import { isMaarifVeliProgram } from '../lib/veliKayitClassLevel';
 import { formatUcretWithCurrency } from '../lib/parentSignApi';
 import { VELI_KAYIT_KVKK_DOC_HREF, VELI_KAYIT_SATIS_ONBILGI_DOC_HREF } from '../lib/veliKayitLegalLinks';
 import { CheckCircle2, Download, FileText, Loader2 } from 'lucide-react';
@@ -473,7 +474,16 @@ export default function VeliImzaPage() {
                     <select
                       className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm bg-white"
                       value={rf.program_form}
-                      onChange={(e) => setRf((p) => ({ ...p, program_form: e.target.value }))}
+                      onChange={(e) => {
+                        const program = e.target.value;
+                        setRf((p) => ({
+                          ...p,
+                          program_form: program,
+                          sinif_form: isMaarifVeliProgram(program)
+                            ? 'TYT-Maarif'
+                            : p.sinif_form
+                        }));
+                      }}
                     >
                       <option value="">Seçiniz…</option>
                       {VELI_KAYIT_PROGRAM_SECENEKLERI.map((p) => (

@@ -12,6 +12,7 @@ export function suggestHoursAndFeeFromSinif(sinifRaw: string): { hours: number; 
   if (n === 9 || t.includes('9.')) return { hours: 8, fee: 42000 };
   if (n === 10) return { hours: 10, fee: 48000 };
   if (n === 11) return { hours: 12, fee: 52000 };
+  if (t.includes('maarif') || t === 'tyt-maarif') return { hours: 14, fee: 58000 };
   if (n === 12 || t.includes('tyt') || t.includes('ayt')) return { hours: 14, fee: 58000 };
   if (t.includes('lgs')) return { hours: 10, fee: 45000 };
   return { hours: 6, fee: 25000 };

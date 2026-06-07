@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
+import { isMaarifVeliProgram, resolveSinifFromVeliKayit } from '../lib/veliKayitClassLevel';
 import {
   createParentSignClassPreset,
   createParentSignContract,
@@ -727,6 +728,8 @@ export default function ParentSignFlowPage() {
       setMsg('Program adı seçin veya yazın.');
       return;
     }
+    const sinifOut =
+      resolveSinifFromVeliKayit(program_adi, sinif.trim()) || sinif.trim();
     if (!ogrenciOnceKayitFormu) {
       if (!ogrenciAd.trim() || !ogrenciSoyad.trim() || !veliAd.trim() || !veliSoyad.trim() || !telefon.trim()) {
         setMsg(
@@ -734,7 +737,7 @@ export default function ParentSignFlowPage() {
         );
         return;
       }
-    } else if (!sinif.trim()) {
+    } else if (!sinifOut) {
       setMsg('Sınıf alanı zorunludur (veli formunda varsayılan olarak gösterilir).');
       return;
     }
@@ -748,7 +751,7 @@ export default function ParentSignFlowPage() {
         veli_soyad: veliSoyad.trim(),
         telefon: telefon.trim(),
         adres: adres.trim(),
-        sinif: sinif.trim(),
+        sinif: sinifOut,
         program_adi,
         baslangic_tarihi: baslangic,
         bitis_tarihi: bitis,
@@ -1771,6 +1774,7 @@ export default function ParentSignFlowPage() {
                       } else {
                         setProgramSource('list');
                         setProgramSelectValue(v);
+                        if (isMaarifVeliProgram(v)) setSinif('TYT-Maarif');
                       }
                     }}
                   >
@@ -1786,7 +1790,11 @@ export default function ParentSignFlowPage() {
                     <input
                       className="w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
                       value={programCustom}
-                      onChange={(e) => setProgramCustom(e.target.value)}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setProgramCustom(v);
+                        if (isMaarifVeliProgram(v)) setSinif('TYT-Maarif');
+                      }}
                       placeholder="Program adı"
                     />
                   ) : null}

@@ -53,6 +53,7 @@ import { useOrganization } from './OrganizationContext';
 import { userRoleTags } from '../config/rolePermissions';
 import { topicPool as defaultTopicPool } from '../data/mockData';
 import { yosTopicPool } from '../data/yosTopicPool';
+import { tytMaarifTopicPool } from '../data/tytMaarifTopicPool';
 import { mergeStudyTracksIntoSubjects, studyTracksForClassLevel } from '../lib/studyTrackSubjects';
 import {
   clearStudentCoachQuestionStatsCache,
@@ -382,11 +383,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Topic pool - varsayılan mockData + kullanıcı ekleri (localStorage)
   const [customTopics, setCustomTopics] = useState<TopicPool>(() => {
     const stored = loadFromStorage<TopicPool>(STORAGE_KEYS.customTopics, {});
-    return mergeTopicPools(mergeTopicPools(defaultTopicPool, yosTopicPool), stored);
+    return mergeTopicPools(
+      mergeTopicPools(mergeTopicPools(defaultTopicPool, yosTopicPool), tytMaarifTopicPool),
+      stored
+    );
   });
   /** getTopics/getTopicsByClass: customTopics bazen kısmi kalabiliyor; her zaman varsayılan havuzla birleştir */
   const effectiveTopicPool = React.useMemo(
-    () => mergeTopicPools(mergeTopicPools(defaultTopicPool, yosTopicPool), customTopics),
+    () =>
+      mergeTopicPools(
+        mergeTopicPools(mergeTopicPools(defaultTopicPool, yosTopicPool), tytMaarifTopicPool),
+        customTopics
+      ),
     [customTopics]
   );
   const [topicProgress, setTopicProgress] = useState<TopicProgress[]>(() =>
@@ -1466,6 +1474,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const tytSubjects: Record<string, string[]> = {};
     const aytSubjects: Record<string, string[]> = {};
     let isYKS = false;
+
+    if (classLevel === 'TYT-Maarif') {
+      Object.keys(effectiveTopicPool).forEach(subject => {
+        if (subject.startsWith('TYT MAARİF ') && effectiveTopicPool[subject]?.['TYT-Maarif']) {
+          result[subject] = effectiveTopicPool[subject]['TYT-Maarif'];
+        }
+      });
+      return {
+        regular: mergeStudyTracksIntoSubjects(classLevel, result),
+        tytSubjects: {},
+        aytSubjects: {},
+        isYKS: false
+      };
+    }
 
     // YKS sınıfları için özel işlem
     if (typeof classLevel === 'string' && classLevel.startsWith('YKS-')) {

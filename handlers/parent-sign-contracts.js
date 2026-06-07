@@ -23,16 +23,19 @@ import {
 } from '../api/_lib/parent-sign-defaults.js';
 import { institutionLegalHtmlForContract } from '../api/_lib/parent-sign-legal.js';
 import { notifyTaksitMarkedPaid } from '../api/_lib/taksit-whatsapp-notify.js';
+import { resolveSinifFromVeliKayit } from '../api/_lib/veli-kayit-class-level.js';
 
 const VELI_KAYIT_PROGRAM_SET = new Set([
   '3. Sınıf dönem programı',
   '4. Sınıf dönem programı',
   '5, 6, 7. Sınıf dönem programı',
   'LGS dönem programı',
+  'YÖS dönem programı',
   '9, 10, 11. Sınıf dönem programı',
   'TYT dönem programı',
   'AYT dönem programı',
   'TYT + AYT dönem programı',
+  'TYT Maarif Model yaz kampı',
   'TYT yaz kampı',
   'LGS yaz kampı',
   '5 ve 6. Sınıf yaz kampı',
@@ -245,8 +248,10 @@ export default async function handler(req, res) {
         if (!il) return res.status(400).json({ error: 'il_required' });
         if (!ilce) return res.status(400).json({ error: 'ilce_required' });
 
-        const sinif = pickFirstNonEmpty(sinif_form, row.sinif);
         const program_adi = pickFirstNonEmpty(program_form, row.program_adi);
+        let sinif =
+          resolveSinifFromVeliKayit(program_adi, pickFirstNonEmpty(sinif_form, row.sinif)) ||
+          pickFirstNonEmpty(sinif_form, row.sinif);
         if (!sinif || !program_adi) return res.status(400).json({ error: 'sinif_program_required' });
 
         const adres = [il, ilce, adres_aciklama].map((x) => String(x || '').trim()).join(' · ');
@@ -558,8 +563,10 @@ export default async function handler(req, res) {
       const veli_soyad = pickFirstNonEmpty(body.veli_soyad, existing.veli_soyad);
       const telefon = pickFirstNonEmpty(body.telefon, existing.telefon);
       const adres = body.adres !== undefined ? String(body.adres || '').trim() : String(existing.adres || '').trim();
-      const sinif = pickFirstNonEmpty(body.sinif, existing.sinif);
       const program_adi = pickFirstNonEmpty(body.program_adi, existing.program_adi);
+      let sinif =
+        resolveSinifFromVeliKayit(program_adi, pickFirstNonEmpty(body.sinif, existing.sinif)) ||
+        pickFirstNonEmpty(body.sinif, existing.sinif);
       const bas = String(pickFirstNonEmpty(body.baslangic_tarihi, existing.baslangic_tarihi) || '')
         .trim()
         .slice(0, 10);
@@ -817,14 +824,25 @@ export default async function handler(req, res) {
       let veli_soyad = pickFirstNonEmpty(body.veli_soyad, velParts.soyad);
       let telefon = pickFirstNonEmpty(body.telefon, studentRow?.parent_phone, studentRow?.phone, userRow?.phone);
       let adres = String(body.adres || '').trim();
-      const sinif = pickFirstNonEmpty(
-        body.sinif,
-        studentRow && studentRow.class_level != null && studentRow.class_level !== ''
-          ? String(studentRow.class_level)
-          : '',
-        presetRow?.sinif
-      );
       const program_adi = pickFirstNonEmpty(body.program_adi, presetRow?.program_adi);
+      let sinif =
+        resolveSinifFromVeliKayit(
+          program_adi,
+          pickFirstNonEmpty(
+            body.sinif,
+            studentRow && studentRow.class_level != null && studentRow.class_level !== ''
+              ? String(studentRow.class_level)
+              : '',
+            presetRow?.sinif
+          )
+        ) ||
+        pickFirstNonEmpty(
+          body.sinif,
+          studentRow && studentRow.class_level != null && studentRow.class_level !== ''
+            ? String(studentRow.class_level)
+            : '',
+          presetRow?.sinif
+        );
       const bas = String(body.baslangic_tarihi || '').trim().slice(0, 10);
       const bit = String(body.bitis_tarihi || '').trim().slice(0, 10);
 

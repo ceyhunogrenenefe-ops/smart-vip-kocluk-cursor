@@ -3,6 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { topicPool } from '../data/mockData';
 import { yosTopicPool } from '../data/yosTopicPool';
+import { tytMaarifTopicPool } from '../data/tytMaarifTopicPool';
 import { parseClassLevelFromForm, TOPIC_CLASS_OPTIONS } from '../types';
 import {
   BookOpen,
@@ -24,11 +25,13 @@ export default function Topics() {
 
   const mergedTopicPool = useMemo(() => {
     const next = { ...topicPool } as Record<string, Record<string, string[]>>;
-    Object.entries(yosTopicPool).forEach(([subject, levels]) => {
-      next[subject] = {
-        ...(next[subject] || {}),
-        ...(levels as Record<string, string[]>)
-      };
+    [yosTopicPool, tytMaarifTopicPool].forEach((pool) => {
+      Object.entries(pool).forEach(([subject, levels]) => {
+        next[subject] = {
+          ...(next[subject] || {}),
+          ...(levels as Record<string, string[]>)
+        };
+      });
     });
     return next;
   }, []);
