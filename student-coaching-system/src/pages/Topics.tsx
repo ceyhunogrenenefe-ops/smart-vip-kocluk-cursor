@@ -18,7 +18,7 @@ import {
 export default function Topics() {
   const { addTopic } = useApp();
   const [selectedSubject, setSelectedSubject] = useState<string>('');
-  const [selectedClassKey, setSelectedClassKey] = useState('12');
+  const [selectedClassKey, setSelectedClassKey] = useState('11');
   const [showAddModal, setShowAddModal] = useState(false);
   const [newTopic, setNewTopic] = useState('');
 

@@ -29,7 +29,7 @@ import {
   ChevronDown,
   LogIn
 } from 'lucide-react';
-import { UserRole, ClassLevel, Coach, Student } from '../types';
+import { UserRole, ClassLevel, Coach, Student, CLASS_LEVELS, formatClassLevelLabel } from '../types';
 import { userRoleTags } from '../config/rolePermissions';
 import { db, QuotaSnapshot } from '../lib/database';
 import { QuotaManagementPanel } from '../components/quota/QuotaManagementPanel';
@@ -215,6 +215,7 @@ export default function UserManagement() {
   const [importBusy, setImportBusy] = useState(false);
   /** Satır içi koç ataması PATCH sırasında */
   const [coachAssignBusy, setCoachAssignBusy] = useState<string | null>(null);
+  const [classAssignBusy, setClassAssignBusy] = useState<string | null>(null);
   const [loginAsBusyId, setLoginAsBusyId] = useState<string | null>(null);
   const [loginCredentialsModal, setLoginCredentialsModal] = useState<LoginCredentialsData | null>(null);
 
@@ -633,6 +634,28 @@ export default function UserManagement() {
       });
     } finally {
       setCoachAssignBusy(null);
+    }
+  };
+
+  const handleInlineClassLevelChange = async (user: SystemUser, classLevelRaw: string) => {
+    const tags = userRoleTags(user as SystemUser);
+    if (!tags.includes('student')) return;
+    const st = await resolveStudentLinkForUser(user);
+    if (!st) return;
+    const next = toClassLevel(classLevelRaw);
+    if (st.classLevel === next) return;
+    setClassAssignBusy(user.id);
+    setMessage(null);
+    try {
+      await updateStudent(st.id, { classLevel: next });
+      await refreshUsers();
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Sınıf güncellenemedi.'
+      });
+    } finally {
+      setClassAssignBusy(null);
     }
   };
 
@@ -2238,8 +2261,38 @@ export default function UserManagement() {
                       {user.email}
                     </td>
                     <td className="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">{user.phone || '—'}</td>
-                    <td className="px-3 py-3 text-sm text-gray-600 tabular-nums">
-                      {studentMatch ? String(studentMatch.classLevel ?? '—') : '—'}
+                    <td className="px-3 py-3 align-middle">
+                      {studentMatch ? (
+                        <div className="relative min-w-[7.5rem] max-w-[11rem]">
+                          <select
+                            value={
+                              studentMatch.classLevel != null && studentMatch.classLevel !== ''
+                                ? String(studentMatch.classLevel)
+                                : ''
+                            }
+                            disabled={classAssignBusy === user.id}
+                            onChange={(e) => void handleInlineClassLevelChange(user, e.target.value)}
+                            className="w-full appearance-none rounded-lg border border-slate-200 bg-white py-1.5 pl-2 pr-8 text-xs font-medium text-slate-800 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-60"
+                          >
+                            <option value="">—</option>
+                            {studentMatch.classLevel != null &&
+                            studentMatch.classLevel !== '' &&
+                            !CLASS_LEVELS.some((l) => String(l.value) === String(studentMatch.classLevel)) ? (
+                              <option value={String(studentMatch.classLevel)}>
+                                {formatClassLevelLabel(studentMatch.classLevel)} (mevcut)
+                              </option>
+                            ) : null}
+                            {CLASS_LEVELS.map((level) => (
+                              <option key={String(level.value)} value={String(level.value)}>
+                                {level.label}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        </div>
+                      ) : (
+                        <span className="text-sm text-gray-400">—</span>
+                      )}
                     </td>
                     <td className="px-3 py-3 text-sm text-gray-600 uppercase">
                       {studentMatch?.school?.trim() ? studentMatch.school : '—'}
@@ -2450,13 +2503,23 @@ export default function UserManagement() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Sınıfı</label>
-                      <input
-                        type="text"
+                      <select
                         value={formData.classLevel}
                         onChange={(e) => setFormData({ ...formData, classLevel: e.target.value })}
-                        className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-                        placeholder="9, 10, 11..."
-                      />
+                        className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 bg-white"
+                      >
+                        {formData.classLevel &&
+                        !CLASS_LEVELS.some((l) => String(l.value) === formData.classLevel) ? (
+                          <option value={formData.classLevel}>
+                            {formatClassLevelLabel(formData.classLevel)} (mevcut)
+                          </option>
+                        ) : null}
+                        {CLASS_LEVELS.map((level) => (
+                          <option key={String(level.value)} value={String(level.value)}>
+                            {level.label}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Şubesi</label>
