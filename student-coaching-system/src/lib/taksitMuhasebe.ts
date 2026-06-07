@@ -37,6 +37,39 @@ export function todayYmdLocal(): string {
   return `${yy}-${mm}-${dd}`;
 }
 
+/** Sözleşme başlangıcından itibaren aylık taksit vadeleri */
+export function defaultTaksitVadeleri(baslangicYmd: string, count: number): string[] {
+  const n = Math.max(1, Math.min(48, Math.round(count) || 1));
+  const raw = String(baslangicYmd || '')
+    .trim()
+    .slice(0, 10);
+  const start = YMD.test(raw) ? raw : todayYmdLocal();
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    out.push(shiftYmdByMonths(start, i) || start);
+  }
+  return out;
+}
+
+/** Toplam ücreti taksit sayısına böl (API buildTaksitPlan ile aynı) */
+export function splitTaksitTutarlari(ucret: number, count: number): number[] {
+  const u = Number(ucret);
+  const n = Math.max(1, Math.min(48, Math.round(count) || 1));
+  if (!Number.isFinite(u) || u <= 0) return [];
+  const base = Math.floor(u / n);
+  let rem = u - base * n;
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) {
+    let t = base;
+    if (rem > 0) {
+      t++;
+      rem--;
+    }
+    out.push(t);
+  }
+  return out;
+}
+
 /** Kartta vade yoksa sözleşme başlangıcı + (taksit no - 1) ay */
 export function effectiveVadeYmd(
   card: TaksitKartMuhasebe,

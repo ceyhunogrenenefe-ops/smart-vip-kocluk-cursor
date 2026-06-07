@@ -6,6 +6,7 @@ import {
   buildParentContractHtml,
   buildRegistrationPlaceholderHtml,
   buildTaksitPlan,
+  mergeTaksitPlans,
   contractNumber,
   institutionCodeFromRow,
   kayitDetayForHtml,
@@ -458,6 +459,28 @@ export default async function handler(req, res) {
       const existingSigned =
         String(existing.status || '').toLowerCase() === 'signed' || Boolean(existing.signed_at);
 
+      const mergeVade = body.taksit_vade_update;
+      if (mergeVade && mergeVade !== null && typeof mergeVade === 'object' && mergeVade.index != null) {
+        const kjV = existing.kayit_formu_json && typeof existing.kayit_formu_json === 'object' ? { ...existing.kayit_formu_json } : {};
+        const tkV = Array.isArray(kjV.taksit_kartlari) ? [...kjV.taksit_kartlari] : [];
+        const idxV = Math.max(0, Math.round(Number(mergeVade.index)));
+        if (idxV < 0 || idxV >= tkV.length) return res.status(400).json({ error: 'taksit_index_invalid' });
+        const vadeRaw = String(mergeVade.vade_tarihi || '').trim().slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(vadeRaw)) return res.status(400).json({ error: 'vade_tarihi_invalid' });
+        const curV = tkV[idxV] && typeof tkV[idxV] === 'object' ? { ...tkV[idxV] } : { no: idxV + 1 };
+        tkV[idxV] = { ...curV, vade_tarihi: vadeRaw };
+        kjV.taksit_kartlari = tkV;
+        const nowV = new Date().toISOString();
+        const { data: updV, error: uErrV } = await supabaseAdmin
+          .from('parent_sign_contracts')
+          .update({ kayit_formu_json: kjV, updated_at: nowV })
+          .eq('id', id)
+          .select()
+          .single();
+        if (uErrV) throw uErrV;
+        return res.status(200).json({ data: updV });
+      }
+
       const mergeTak = body.taksit_odeme_update;
       if (mergeTak && mergeTak !== null && typeof mergeTak === 'object' && mergeTak.index != null) {
         const kjM = existing.kayit_formu_json && typeof existing.kayit_formu_json === 'object' ? { ...existing.kayit_formu_json } : {};
@@ -612,16 +635,27 @@ export default async function handler(req, res) {
         }
         merged_html = customMergedRaw.slice(0, MAX_MERGED_HTML);
       } else {
+        const taksitVadeleriBody = Array.isArray(body.taksit_vadeleri) ? body.taksit_vadeleri : null;
+        const existingTaksit = Array.isArray(kj0.taksit_kartlari) ? kj0.taksit_kartlari : [];
+        const feeNum = Number(fee);
+        const tN = Math.max(1, Math.min(48, Math.round(Number(taksit_sayisi) || 1)));
+        const feeChanged =
+          feeRaw !== undefined && feeRaw !== null && String(feeRaw).trim() !== '' && feeNum !== Number(existing.ucret);
+        const taksitChanged =
+          taksitRaw !== undefined && taksitRaw !== null && String(taksitRaw).trim() !== '' && tN !== Number(existing.taksit_sayisi);
+        const basChanged =
+          body.baslangic_tarihi !== undefined &&
+          String(body.baslangic_tarihi || '').trim().slice(0, 10) !== String(existing.baslangic_tarihi || '').trim().slice(0, 10);
+
         if (phase0 === 'awaiting_admin_price') {
-          if (!(Number(fee) > 0)) {
+          if (!(feeNum > 0)) {
             return res.status(400).json({ error: 'ucret_required_before_signature_release' });
           }
-          const taksit_kartlari = buildTaksitPlan(fee, taksit_sayisi, bas);
-          const tN = Math.max(1, Math.min(48, Math.round(Number(taksit_sayisi) || 1)));
-          const ort = tN > 0 ? Math.round(fee / tN) : 0;
+          const taksit_kartlari = buildTaksitPlan(feeNum, taksit_sayisi, bas, taksitVadeleriBody);
+          const ort = tN > 0 ? Math.round(feeNum / tN) : 0;
           const pb = normalizeParaBirimi(body.para_birimi ?? existing.para_birimi);
           const pbLbl = paraBirimiLabel(pb);
-          const muhasebe_ozet2 = `Öğrenci: ${ogrenci_ad} ${ogrenci_soyad} | Program: ${program_adi} | Sınıf: ${sinif} | Toplam: ${fee} ${pbLbl} | ${tN} taksit | ~${ort} ${pbLbl}/taksit | E-posta: ${String(kj0.eposta || '')}`;
+          const muhasebe_ozet2 = `Öğrenci: ${ogrenci_ad} ${ogrenci_soyad} | Program: ${program_adi} | Sınıf: ${sinif} | Toplam: ${feeNum} ${pbLbl} | ${tN} taksit | ~${ort} ${pbLbl}/taksit | E-posta: ${String(kj0.eposta || '')}`;
           nextKayitJson = {
             ...kj0,
             phase: 'ready_to_sign',
@@ -629,9 +663,18 @@ export default async function handler(req, res) {
             taksit_kartlari,
             muhasebe_ozet: muhasebe_ozet2
           };
+        } else if (
+          feeNum > 0 &&
+          (taksitVadeleriBody ||
+            (existingTaksit.length > 0 && (feeChanged || taksitChanged || basChanged)))
+        ) {
+          const fresh = buildTaksitPlan(feeNum, taksit_sayisi, bas, taksitVadeleriBody);
+          const taksit_kartlari = mergeTaksitPlans(existingTaksit, fresh);
+          nextKayitJson = { ...kj0, taksit_kartlari };
         }
         const para_birimi = normalizeParaBirimi(body.para_birimi ?? existing.para_birimi);
         const institution_legal_html = await institutionLegalHtmlForContract(institutionId, sozlesme_turu);
+        const kayitDetayForBuild = nextKayitJson != null ? nextKayitJson : kj0;
         merged_html = buildParentContractHtml({
           ogrenci_ad,
           ogrenci_soyad,
@@ -654,7 +697,8 @@ export default async function handler(req, res) {
           document_title: sozlesme_basligi,
           extra_detail_plain: sablon_ek_detay_snapshot,
           ders_satirlari: dersSnapshot,
-          kayit_formu_detay: nextKayitJson != null ? nextKayitJson : existing.kayit_formu_json || {},
+          kayit_formu_detay: kayitDetayForBuild,
+          taksit_kartlari: kayitDetayForBuild.taksit_kartlari,
           institution_legal_html
         });
       }
@@ -847,8 +891,11 @@ export default async function handler(req, res) {
       const para_birimi = normalizeParaBirimi(body.para_birimi);
       const institution_legal_html = await institutionLegalHtmlForContract(institutionId, sozlesme_turu);
 
+      const taksitVadeleriPost = Array.isArray(body.taksit_vadeleri) ? body.taksit_vadeleri : null;
       let merged_html;
       let kayit_formu_json = {};
+      const postTaksitKartlari =
+        !regFormFirst && fee > 0 ? buildTaksitPlan(fee, taksit_sayisi, bas, taksitVadeleriPost) : [];
       if (regFormFirst) {
         merged_html = buildRegistrationPlaceholderHtml({
           kurum_adi: inst?.name || '',
@@ -885,9 +932,13 @@ export default async function handler(req, res) {
           document_title: sozlesme_basligi,
           extra_detail_plain: sablon_ek_detay_snapshot,
           ders_satirlari: dersSnapshot,
-          kayit_formu_detay: {},
+          kayit_formu_detay: postTaksitKartlari.length ? { taksit_kartlari: postTaksitKartlari } : {},
+          taksit_kartlari: postTaksitKartlari,
           institution_legal_html
         });
+        if (postTaksitKartlari.length) {
+          kayit_formu_json = { taksit_kartlari: postTaksitKartlari };
+        }
       }
 
       const row = {

@@ -319,6 +319,8 @@ export async function createParentSignContract(body: {
   ders_satirlari?: DersSatiri[];
   /** true ise veli linkinde önce kayıt formu; isim/telefon kurumda boş bırakılabilir */
   registration_student_form?: boolean;
+  /** Taksit vade tarihleri (YYYY-MM-DD); eksikse başlangıçtan aylık üretilir */
+  taksit_vadeleri?: string[];
 }): Promise<ParentSignContractRow> {
   const res = await apiFetch('/api/parent-sign-contracts', { method: 'POST', headers: JSON_HDR, body: JSON.stringify(body) });
   const j = await res.json().catch(() => ({}));
@@ -351,6 +353,8 @@ export async function updateParentSignContract(body: {
   custom_merged_html?: string;
   /** Taksit satırı ödeme işareti (imzalı veya fiyat sonrası kartlar). */
   taksit_odeme_update?: { index: number; odendi: boolean; not?: string; odendi_tarihi?: string };
+  /** Taksit vade tarihleri (YYYY-MM-DD) — ücret/taksit güncellemesinde kullanılır */
+  taksit_vadeleri?: string[];
   /** `kayit_formu_json` ile sığ birleştirme (ör. platform_user_id). */
   kayit_json_merge?: Record<string, unknown>;
 }): Promise<ParentSignContractRow> {
@@ -370,11 +374,12 @@ export async function deleteParentSignContract(id: string): Promise<void> {
   if (!res.ok) throw new Error((j as { error?: string }).error || `API ${res.status}`);
 }
 
-/** Sadece `kayit_json_merge` veya `taksit_odeme_update` (tam form PATCH’i gerekmez). */
+/** Sadece `kayit_json_merge`, `taksit_odeme_update` veya `taksit_vade_update` (tam form PATCH’i gerekmez). */
 export async function patchParentSignKayitOnly(body: {
   id: string;
   kayit_json_merge?: Record<string, unknown>;
   taksit_odeme_update?: { index: number; odendi: boolean; not?: string; odendi_tarihi?: string };
+  taksit_vade_update?: { index: number; vade_tarihi: string };
 }): Promise<ParentSignContractRow> {
   const res = await apiFetch('/api/parent-sign-contracts', {
     method: 'PATCH',

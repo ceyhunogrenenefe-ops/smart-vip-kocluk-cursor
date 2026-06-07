@@ -289,17 +289,37 @@ function todayYmdLocal() {
   return `${yy}-${mm}-${dd}`;
 }
 
-/** Elden / taksitli ödeme takibi — her taksit için vade (sözleşme başlangıcından aylık) */
-export function buildTaksitPlan(ucret, taksitN, baslangicYmd) {
+const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** İstenen vade listesini doğrular; eksikse başlangıçtan aylık üretir */
+export function normalizeTaksitVadeleri(rawVadeler, taksitN, baslangicYmd) {
+  const n = Math.max(1, Math.min(48, Math.round(Number(taksitN) || 1)));
+  const rawStart = String(baslangicYmd || '')
+    .trim()
+    .slice(0, 10);
+  const start = YMD_RE.test(rawStart) ? rawStart : todayYmdLocal();
+  const fromBody = Array.isArray(rawVadeler)
+    ? rawVadeler.map((v) => String(v || '').trim().slice(0, 10)).filter((v) => YMD_RE.test(v))
+    : [];
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    if (fromBody[i] && YMD_RE.test(fromBody[i])) {
+      out.push(fromBody[i]);
+      continue;
+    }
+    out.push(shiftYmdByMonths(start, i) || start);
+  }
+  return out;
+}
+
+/** Elden / taksitli ödeme takibi — vade listesi verilirse kullanılır, yoksa başlangıçtan aylık */
+export function buildTaksitPlan(ucret, taksitN, baslangicYmd, vadeDates) {
   const u = Number(ucret);
   const n = Math.max(1, Math.min(48, Math.round(Number(taksitN) || 1)));
   if (!Number.isFinite(u) || u <= 0 || n <= 0) return [];
   const base = Math.floor(u / n);
   let rem = u - base * n;
-  const rawStart = String(baslangicYmd || '')
-    .trim()
-    .slice(0, 10);
-  const start = /^\d{4}-\d{2}-\d{2}$/.test(rawStart) ? rawStart : todayYmdLocal();
+  const vadeler = normalizeTaksitVadeleri(vadeDates, n, baslangicYmd);
   const out = [];
   for (let i = 0; i < n; i++) {
     let t = base;
@@ -307,17 +327,49 @@ export function buildTaksitPlan(ucret, taksitN, baslangicYmd) {
       t++;
       rem--;
     }
-    const vade = shiftYmdByMonths(start, i) || start;
     out.push({
       no: i + 1,
       tutar_tl: t,
       odendi: false,
       odeme_notu: '',
-      vade_tarihi: vade,
+      vade_tarihi: vadeler[i],
       odendi_tarihi: ''
     });
   }
   return out;
+}
+
+/** Ücret/taksit güncellenince ödenmiş taksit durumunu korur */
+export function mergeTaksitPlans(oldCards, newCards) {
+  const old = Array.isArray(oldCards) ? oldCards : [];
+  const neu = Array.isArray(newCards) ? newCards : [];
+  return neu.map((card, i) => {
+    const prev = old[i] && typeof old[i] === 'object' ? old[i] : null;
+    if (!prev) return card;
+    return {
+      ...card,
+      odendi: Boolean(prev.odendi),
+      odeme_notu: String(prev.odeme_notu || card.odeme_notu || '').slice(0, 200),
+      odendi_tarihi: prev.odendi ? String(prev.odendi_tarihi || card.odendi_tarihi || '').slice(0, 10) : ''
+    };
+  });
+}
+
+export function taksitPlanTableHtml(cards, para_birimi) {
+  const list = Array.isArray(cards) ? cards : [];
+  if (!list.length) return '';
+  const pb = paraBirimiLabel(para_birimi);
+  const sym = paraBirimiSymbol(para_birimi);
+  const rows = list
+    .map((c, i) => {
+      const no = c?.no ?? i + 1;
+      const tutar = Number(c?.tutar_tl);
+      const vade = String(c?.vade_tarihi || '').slice(0, 10);
+      const tutarStr = Number.isFinite(tutar) ? `${tutar} ${pb}${sym && pb !== 'TL' ? ` ${sym}` : ''}` : '—';
+      return `<tr><td>${esc(String(no))}</td><td>${esc(tutarStr)}</td><td>${esc(vade || '—')}</td></tr>`;
+    })
+    .join('');
+  return `<div class="taksitprog"><h2>Ödeme planı (taksit vadeleri)</h2><table class="dersmini"><thead><tr><th>Taksit</th><th>Tutar</th><th>Vade</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 export function buildParentContractHtml(fields) {
@@ -344,7 +396,8 @@ export function buildParentContractHtml(fields) {
     ders_satirlari,
     kayit_formu_detay,
     para_birimi,
-    institution_legal_html
+    institution_legal_html,
+    taksit_kartlari
   } = fields;
 
   const h1 = String(document_title || '').trim() || 'Ön kayıt / bilgilendirme özeti';
@@ -352,6 +405,10 @@ export function buildParentContractHtml(fields) {
   const dersBlock = dersProgramTableHtml(ders_satirlari);
   const kayitBlock = kayitFormuTableRowsHtml(kayitDetayForHtml(kayit_formu_detay || {}));
   const legalBlock = String(institution_legal_html || '').trim();
+  const taksitBlock = taksitPlanTableHtml(
+    taksit_kartlari || (kayit_formu_detay && kayit_formu_detay.taksit_kartlari),
+    para_birimi
+  );
   const pb = paraBirimiLabel(para_birimi);
   const sym = paraBirimiSymbol(para_birimi);
 
@@ -406,6 +463,7 @@ ${
 </table>
 ${kayitBlock}
 ${dersBlock}
+${taksitBlock}
 ${extraBlock}
 ${legalBlock}
 <div class="note">

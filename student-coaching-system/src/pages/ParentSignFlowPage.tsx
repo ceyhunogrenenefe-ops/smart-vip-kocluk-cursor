@@ -34,8 +34,9 @@ import {
 } from '../lib/parentSignApi';
 import {
   classifyTaksit,
+  defaultTaksitVadeleri,
   effectiveVadeYmd,
-  formatTrShortDate,
+  splitTaksitTutarlari,
   type TaksitKartMuhasebe
 } from '../lib/taksitMuhasebe';
 import { rolesForProtectedRoute, userHasAnyRole } from '../config/rolePermissions';
@@ -155,6 +156,71 @@ function taksitKartlariFromRow(r: ParentSignContractRow): TaksitKart[] {
   return out;
 }
 
+const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function resizeTaksitVadeleri(prev: string[], baslangic: string, count: number): string[] {
+  const n = Math.max(1, Math.min(48, Math.round(count) || 1));
+  if (n <= 1) return [];
+  const defaults = defaultTaksitVadeleri(baslangic, n);
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const p = prev[i];
+    out.push(p && YMD_RE.test(p) ? p : defaults[i]);
+  }
+  return out;
+}
+
+function TaksitVadeEditor(props: {
+  taksitSayisi: number;
+  ucret: number;
+  paraBirimi: ParaBirimi;
+  baslangic: string;
+  vadeler: string[];
+  onVadelerChange: (next: string[]) => void;
+  onResetMonthly: () => void;
+}) {
+  const n = Math.max(1, Math.min(48, Math.round(props.taksitSayisi) || 1));
+  if (n <= 1) return null;
+  const tutarlar = splitTaksitTutarlari(props.ucret, n);
+  return (
+    <div className="sm:col-span-2 rounded-xl border border-dashed border-blue-200 bg-blue-50/40 p-3 dark:border-blue-900 dark:bg-blue-950/20">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+        <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">Taksit vade tarihleri</span>
+        <button
+          type="button"
+          className="text-[11px] font-semibold text-blue-700 hover:underline dark:text-blue-300"
+          onClick={props.onResetMonthly}
+        >
+          Başlangıçtan aylık yenile
+        </button>
+      </div>
+      <p className="text-[10px] text-slate-500 mb-2">
+        Her taksitin vade gününü ayrı ayarlayabilirsiniz. Tutarlar ücret ve taksit sayısına göre otomatik bölünür.
+      </p>
+      <ul className="space-y-1.5">
+        {props.vadeler.map((vade, idx) => (
+          <li key={idx} className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="w-16 font-semibold text-slate-600 dark:text-slate-300">{idx + 1}. taksit</span>
+            <input
+              type="date"
+              className="rounded-lg border border-slate-200 px-2 py-1 text-xs dark:bg-slate-950 dark:border-slate-600"
+              value={vade}
+              onChange={(e) => {
+                const next = [...props.vadeler];
+                next[idx] = e.target.value;
+                props.onVadelerChange(next);
+              }}
+            />
+            <span className="text-slate-500">
+              {tutarlar[idx] != null ? formatUcretWithCurrency(tutarlar[idx], props.paraBirimi) : '—'}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** İmzalı kayıt + e-posta: `/user-management` modalını veli/öğrenci bilgileriyle doldurmak için bağlantı. */
 function buildVeliSignedUserManagementPrefillUrl(r: ParentSignContractRow, origin: string): string | null {
   if (!parentContractRowSigned(r)) return null;
@@ -241,6 +307,7 @@ export default function ParentSignFlowPage() {
   const [ucret, setUcret] = useState<number>(25000);
   const [paraBirimi, setParaBirimi] = useState<ParaBirimi>('TRY');
   const [taksitSayisi, setTaksitSayisi] = useState<number>(1);
+  const [taksitVadeleri, setTaksitVadeleri] = useState<string[]>([]);
   const [lastCreatedLink, setLastCreatedLink] = useState<string | null>(null);
   const [legalSatis, setLegalSatis] = useState('');
   const [legalKullanici, setLegalKullanici] = useState('');
@@ -289,6 +356,7 @@ export default function ParentSignFlowPage() {
   const [editUcret, setEditUcret] = useState(0);
   const [editParaBirimi, setEditParaBirimi] = useState<ParaBirimi>('TRY');
   const [editTaksitSayisi, setEditTaksitSayisi] = useState(1);
+  const [editTaksitVadeleri, setEditTaksitVadeleri] = useState<string[]>([]);
   const [editSozlesmeTuru, setEditSozlesmeTuru] = useState<SozlesmeTuruKey>('satis_sozlesmesi');
   const [editSozlesmeBasligi, setEditSozlesmeBasligi] = useState('');
   const [editEkSatirlar, setEditEkSatirlar] = useState('');
@@ -311,6 +379,25 @@ export default function ParentSignFlowPage() {
       /* ignore */
     }
   }, []);
+
+  useEffect(() => {
+    const n = Math.max(1, Math.min(48, Math.round(taksitSayisi) || 1));
+    if (n <= 1) {
+      setTaksitVadeleri([]);
+      return;
+    }
+    setTaksitVadeleri((prev) => resizeTaksitVadeleri(prev, baslangic, n));
+  }, [taksitSayisi, baslangic]);
+
+  useEffect(() => {
+    if (!editOpen) return;
+    const n = Math.max(1, Math.min(48, Math.round(editTaksitSayisi) || 1));
+    if (n <= 1) {
+      setEditTaksitVadeleri([]);
+      return;
+    }
+    setEditTaksitVadeleri((prev) => resizeTaksitVadeleri(prev, editBaslangic, n));
+  }, [editOpen, editTaksitSayisi, editBaslangic]);
 
   const programs = useMemo(() => {
     const fromPresets = uniquePrograms(presets);
@@ -578,6 +665,7 @@ export default function ParentSignFlowPage() {
         ...(fillPick.startsWith('s:') ? { student_id: fillPick.slice(2) } : {}),
         ...(fillPick.startsWith('u:') ? { ogrenci_user_id: fillPick.slice(2) } : {}),
         ...(ogrenciOnceKayitFormu ? { registration_student_form: true } : {}),
+        ...(taksitSayisi > 1 && taksitVadeleri.length > 0 ? { taksit_vadeleri: taksitVadeleri } : {}),
         institution_id: effectiveInstitutionId
       };
       const created = await createParentSignContract(body);
@@ -713,6 +801,20 @@ export default function ParentSignFlowPage() {
     }
   };
 
+  const updateTaksitVade = async (r: ParentSignContractRow, index: number, vade_tarihi: string) => {
+    if (!YMD_RE.test(vade_tarihi)) return;
+    setParentSignRowBusy(`${r.id}:v${index}`);
+    setMsg(null);
+    try {
+      await patchParentSignKayitOnly({ id: r.id, taksit_vade_update: { index, vade_tarihi } });
+      void load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Vade güncellenemedi');
+    } finally {
+      setParentSignRowBusy(null);
+    }
+  };
+
   const createStudentAccountFromRow = async (r: ParentSignContractRow) => {
     const email = epostaFromKayitJson(r);
     if (!email || !email.includes('@')) {
@@ -763,6 +865,24 @@ export default function ParentSignFlowPage() {
     setEditUcret(Number(r.ucret) || 0);
     setEditParaBirimi((String(r.para_birimi || 'TRY').toUpperCase() as ParaBirimi) || 'TRY');
     setEditTaksitSayisi(Number(r.taksit_sayisi) || 1);
+    const editTaksitN = Math.max(1, Math.min(48, Math.round(Number(r.taksit_sayisi) || 1)));
+    const editCards = taksitKartlariFromRow(r);
+    const editBas = String(r.baslangic_tarihi || '').slice(0, 10);
+    if (editTaksitN > 1) {
+      if (editCards.length > 0) {
+        setEditTaksitVadeleri(
+          resizeTaksitVadeleri(
+            editCards.map((c, i) => effectiveVadeYmd(c, r.baslangic_tarihi, i)),
+            editBas,
+            editTaksitN
+          )
+        );
+      } else {
+        setEditTaksitVadeleri(defaultTaksitVadeleri(editBas, editTaksitN));
+      }
+    } else {
+      setEditTaksitVadeleri([]);
+    }
     const tur = (r.sozlesme_turu || 'satis_sozlesmesi') as SozlesmeTuruKey;
     setEditSozlesmeTuru(['kullanici_sozlesmesi', 'satis_sozlesmesi', 'diger'].includes(tur) ? tur : 'satis_sozlesmesi');
     setEditSozlesmeBasligi(String(r.sozlesme_basligi || ''));
@@ -823,7 +943,8 @@ export default function ParentSignFlowPage() {
         sozlesme_basligi: editSozlesmeBasligi.trim(),
         sablon_ek_detay_snapshot: editEkSatirlar.trim(),
         ders_satirlari: vd,
-        ...(editCustomHtmlMode ? { custom_merged_html: editMergedHtml.trim() } : {})
+        ...(editCustomHtmlMode ? { custom_merged_html: editMergedHtml.trim() } : {}),
+        ...(editTaksitSayisi > 1 && editTaksitVadeleri.length > 0 ? { taksit_vadeleri: editTaksitVadeleri } : {})
       });
       setMsg(
         editCustomHtmlMode
@@ -1645,6 +1766,15 @@ export default function ParentSignFlowPage() {
                 onChange={(e) => setBitis(e.target.value)}
               />
             </div>
+            <TaksitVadeEditor
+              taksitSayisi={taksitSayisi}
+              ucret={ucret}
+              paraBirimi={paraBirimi}
+              baslangic={baslangic}
+              vadeler={taksitVadeleri}
+              onVadelerChange={setTaksitVadeleri}
+              onResetMonthly={() => setTaksitVadeleri(defaultTaksitVadeleri(baslangic, taksitSayisi))}
+            />
           </div>
           <button
             type="button"
@@ -1814,8 +1944,10 @@ export default function ParentSignFlowPage() {
                                 className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-1 last:border-0 dark:border-slate-700"
                               >
                                 <span className={vurgu}>
-                                  {tk.no ?? idx + 1}. taksit · {tk.tutar_tl != null && Number.isFinite(tk.tutar_tl) ? `${tk.tutar_tl} TL` : '—'} · vade{' '}
-                                  {formatTrShortDate(vade)}
+                                  {tk.no ?? idx + 1}. taksit ·{' '}
+                                  {tk.tutar_tl != null && Number.isFinite(tk.tutar_tl)
+                                    ? formatUcretWithCurrency(tk.tutar_tl, r.para_birimi)
+                                    : '—'}
                                   {tk.odendi ? (
                                     <span className="ml-1 text-emerald-600 font-semibold dark:text-emerald-400">(tahsil)</span>
                                   ) : dur === 'overdue' ? (
@@ -1824,6 +1956,17 @@ export default function ParentSignFlowPage() {
                                     <span className="ml-1 text-amber-700 dark:text-amber-300">(bekliyor)</span>
                                   )}
                                 </span>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <label className="inline-flex items-center gap-1 text-slate-500 dark:text-slate-400">
+                                    <span className="text-[10px]">Vade</span>
+                                    <input
+                                      type="date"
+                                      className="rounded border border-slate-200 px-1.5 py-0.5 text-[10px] dark:bg-slate-950 dark:border-slate-600"
+                                      value={vade}
+                                      disabled={parentSignRowBusy === `${r.id}:v${idx}`}
+                                      onChange={(e) => void updateTaksitVade(r, idx, e.target.value)}
+                                    />
+                                  </label>
                                 <label className="inline-flex items-center gap-1.5 cursor-pointer text-slate-600 dark:text-slate-300">
                                   <input
                                     type="checkbox"
@@ -1833,6 +1976,7 @@ export default function ParentSignFlowPage() {
                                   />
                                   Ödendi
                                 </label>
+                                </div>
                               </li>
                             );
                           })}
@@ -2288,6 +2432,15 @@ export default function ParentSignFlowPage() {
                   onChange={(e) => setEditBitis(e.target.value)}
                 />
               </div>
+              <TaksitVadeEditor
+                taksitSayisi={editTaksitSayisi}
+                ucret={editUcret}
+                paraBirimi={editParaBirimi}
+                baslangic={editBaslangic}
+                vadeler={editTaksitVadeleri}
+                onVadelerChange={setEditTaksitVadeleri}
+                onResetMonthly={() => setEditTaksitVadeleri(defaultTaksitVadeleri(editBaslangic, editTaksitSayisi))}
+              />
             </div>
             <div className="mt-5 flex flex-wrap gap-2 justify-end border-t border-slate-100 pt-4 dark:border-slate-700">
               <button
