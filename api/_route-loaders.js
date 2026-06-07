@@ -52,6 +52,7 @@ export const routeLoaders = {
   'academic-center-links': () => import('../handlers/academic-center-links.js'),
   'parent-sign-contracts': () => import('../handlers/parent-sign-contracts.js'),
   'parent-sign-class-presets': () => import('../handlers/parent-sign-class-presets.js'),
+  'parent-sign-legal': () => import('../handlers/parent-sign-legal.js'),
   'institutions-list': () => import('../handlers/institutions-list.js'),
   institutions: () => import('../handlers/institutions.js'),
   'institutions/purge': () => import('../handlers/institutions-purge.js'),

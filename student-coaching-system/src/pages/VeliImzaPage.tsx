@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { fetchVeliImzaPayload, submitVeliImza, submitVeliRegistrationForm, type VeliImzaRegistrationHint } from '../lib/parentSignApi';
 import { downloadParentSignContractPdf } from '../lib/parentSignPdfDownload';
 import { VELI_KAYIT_PROGRAM_SECENEKLERI } from '../lib/veliKayitConstants';
+import { formatUcretWithCurrency } from '../lib/parentSignApi';
 import { VELI_KAYIT_KVKK_DOC_HREF, VELI_KAYIT_SATIS_ONBILGI_DOC_HREF } from '../lib/veliKayitLegalLinks';
 import { CheckCircle2, Download, FileText, Loader2 } from 'lucide-react';
 
@@ -366,7 +367,11 @@ export default function VeliImzaPage() {
                       {String(regHint.bitis_tarihi || '').slice(0, 10)}
                     </p>
                     <p>
-                      <strong>Ücret (kurum girecek):</strong> {hintMoney(regHint.ucret)} TL · <strong>Taksit:</strong>{' '}
+                      <strong>Ücret (kurum girecek):</strong>{' '}
+                      {Number(regHint.ucret) > 0
+                        ? formatUcretWithCurrency(regHint.ucret!, regHint.para_birimi)
+                        : '—'}{' '}
+                      · <strong>Taksit:</strong>{' '}
                       {String(regHint.taksit_sayisi ?? '—')}
                     </p>
                   </div>

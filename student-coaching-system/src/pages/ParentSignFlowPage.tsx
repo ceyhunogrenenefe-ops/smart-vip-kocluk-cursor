@@ -25,7 +25,12 @@ import {
   type ParentSignContractRow,
   type SozlesmeTuruKey,
   type StudentFillRow,
-  type UserStudentFillRow
+  type UserStudentFillRow,
+  fetchParentSignInstitutionLegal,
+  saveParentSignInstitutionLegal,
+  PARA_BIRIMI_OPTIONS,
+  formatUcretWithCurrency,
+  type ParaBirimi
 } from '../lib/parentSignApi';
 import {
   classifyTaksit,
@@ -234,7 +239,15 @@ export default function ParentSignFlowPage() {
   const [programCustom, setProgramCustom] = useState('');
   const [haftalikDersSaati, setHaftalikDersSaati] = useState<number>(6);
   const [ucret, setUcret] = useState<number>(25000);
+  const [paraBirimi, setParaBirimi] = useState<ParaBirimi>('TRY');
   const [taksitSayisi, setTaksitSayisi] = useState<number>(1);
+  const [lastCreatedLink, setLastCreatedLink] = useState<string | null>(null);
+  const [legalSatis, setLegalSatis] = useState('');
+  const [legalKullanici, setLegalKullanici] = useState('');
+  const [legalGizlilik, setLegalGizlilik] = useState('');
+  const [legalKvkk, setLegalKvkk] = useState('');
+  const [legalLoading, setLegalLoading] = useState(false);
+  const [legalSaving, setLegalSaving] = useState(false);
   const [baslangic, setBaslangic] = useState(todayPlus(0));
   const [bitis, setBitis] = useState(todayPlus(365));
 
@@ -274,6 +287,7 @@ export default function ParentSignFlowPage() {
   const [editBitis, setEditBitis] = useState('');
   const [editHaftalikDersSaati, setEditHaftalikDersSaati] = useState(6);
   const [editUcret, setEditUcret] = useState(0);
+  const [editParaBirimi, setEditParaBirimi] = useState<ParaBirimi>('TRY');
   const [editTaksitSayisi, setEditTaksitSayisi] = useState(1);
   const [editSozlesmeTuru, setEditSozlesmeTuru] = useState<SozlesmeTuruKey>('satis_sozlesmesi');
   const [editSozlesmeBasligi, setEditSozlesmeBasligi] = useState('');
@@ -353,6 +367,65 @@ export default function ParentSignFlowPage() {
   useEffect(() => {
     void loadPresets();
   }, [loadPresets]);
+
+  const loadInstitutionLegal = useCallback(async () => {
+    if (!effectiveInstitutionId) {
+      setLegalSatis('');
+      setLegalKullanici('');
+      setLegalGizlilik('');
+      setLegalKvkk('');
+      return;
+    }
+    setLegalLoading(true);
+    try {
+      const row = await fetchParentSignInstitutionLegal(effectiveInstitutionId);
+      setLegalSatis(row.satis_sozlesmesi || '');
+      setLegalKullanici(row.kullanici_sozlesmesi || '');
+      setLegalGizlilik(row.gizlilik_politikasi || '');
+      setLegalKvkk(row.kvkk_aydinlatma || '');
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Kurum metinleri yüklenemedi');
+    } finally {
+      setLegalLoading(false);
+    }
+  }, [effectiveInstitutionId]);
+
+  useEffect(() => {
+    void loadInstitutionLegal();
+  }, [loadInstitutionLegal]);
+
+  const saveInstitutionLegal = async () => {
+    if (!effectiveInstitutionId) {
+      setMsg('Kurum seçin.');
+      return;
+    }
+    setLegalSaving(true);
+    setMsg(null);
+    try {
+      await saveParentSignInstitutionLegal({
+        institution_id: effectiveInstitutionId,
+        satis_sozlesmesi: legalSatis.trim(),
+        kullanici_sozlesmesi: legalKullanici.trim(),
+        gizlilik_politikasi: legalGizlilik.trim(),
+        kvkk_aydinlatma: legalKvkk.trim()
+      });
+      setMsg('Kurum sözleşme metinleri kaydedildi — yeni veli kayıtlarında otomatik kullanılır.');
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Metinler kaydedilemedi');
+    } finally {
+      setLegalSaving(false);
+    }
+  };
+
+  const copyText = async (text: string, okMsg?: string) => {
+    if (!text) return;
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
+      setMsg(okMsg || 'Panoya kopyalandı.');
+    } catch {
+      setMsg('Kopyalanamadı — metni elle seçin.');
+    }
+  };
 
   const loadFillStudents = useCallback(async () => {
     if (!effectiveInstitutionId) {
@@ -495,6 +568,7 @@ export default function ParentSignFlowPage() {
         bitis_tarihi: bitis,
         haftalik_ders_saati: haftalikOut,
         ucret,
+        para_birimi: paraBirimi,
         taksit_sayisi: taksitSayisi,
         sozlesme_turu: sozlesmeTuru,
         ...(vd.length ? { ders_satirlari: vd } : {}),
@@ -507,9 +581,17 @@ export default function ParentSignFlowPage() {
         institution_id: effectiveInstitutionId
       };
       const created = await createParentSignContract(body);
-      const url = created.sign_url || '';
-      setMsg(`Oluşturuldu. Veli linki kopyalanabilir (aşağıda da listelenir).`);
-      if (url && navigator.clipboard?.writeText) await navigator.clipboard.writeText(url);
+      const url =
+        created.sign_url ||
+        (typeof window !== 'undefined' && created.signing_token
+          ? `${window.location.origin}/veli-imza/${encodeURIComponent(created.signing_token)}`
+          : '');
+      setLastCreatedLink(url || null);
+      if (url) {
+        await copyText(url, 'Veli linki oluşturuldu ve panoya kopyalandı.');
+      } else {
+        setMsg('Kayıt oluşturuldu; link için Kayıtlar listesindeki Link düğmesini kullanın.');
+      }
       void load();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Kayıt oluşturulamadı');
@@ -679,6 +761,7 @@ export default function ParentSignFlowPage() {
     setEditBitis(String(r.bitis_tarihi || '').slice(0, 10));
     setEditHaftalikDersSaati(Number(r.haftalik_ders_saati) || 0);
     setEditUcret(Number(r.ucret) || 0);
+    setEditParaBirimi((String(r.para_birimi || 'TRY').toUpperCase() as ParaBirimi) || 'TRY');
     setEditTaksitSayisi(Number(r.taksit_sayisi) || 1);
     const tur = (r.sozlesme_turu || 'satis_sozlesmesi') as SozlesmeTuruKey;
     setEditSozlesmeTuru(['kullanici_sozlesmesi', 'satis_sozlesmesi', 'diger'].includes(tur) ? tur : 'satis_sozlesmesi');
@@ -734,6 +817,7 @@ export default function ParentSignFlowPage() {
         bitis_tarihi: editBitis,
         haftalik_ders_saati: haftalikOut,
         ucret: editUcret,
+        para_birimi: editParaBirimi,
         taksit_sayisi: editTaksitSayisi,
         sozlesme_turu: editSozlesmeTuru,
         sozlesme_basligi: editSozlesmeBasligi.trim(),
@@ -851,6 +935,70 @@ export default function ParentSignFlowPage() {
             ) : null}
           </section>
         ) : null}
+
+        <section className="rounded-2xl border border-violet-200 bg-white p-5 shadow-sm dark:border-violet-900 dark:bg-slate-900">
+          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-1">Kurum sözleşme metinleri (bir kez)</h2>
+          <p className="text-xs text-slate-500 mb-4">
+            Satış sözleşmesi, kullanıcı sözleşmesi, gizlilik ve KVKK metinlerini <strong>kurum başına bir kez</strong> kaydedin.
+            Her yeni veli kaydında otomatik eklenir; kayıt formunda tekrar yazmanız gerekmez.
+          </p>
+          {!effectiveInstitutionId ? (
+            <p className="text-sm text-slate-500">Önce kurum seçin.</p>
+          ) : legalLoading ? (
+            <Loader2 className="w-6 h-6 animate-spin text-violet-600" />
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <label className="text-xs text-slate-500">Satış sözleşmesi metni</label>
+                <textarea
+                  rows={5}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono dark:bg-slate-950 dark:border-slate-600"
+                  value={legalSatis}
+                  onChange={(e) => setLegalSatis(e.target.value)}
+                  placeholder="Mesafeli satış, ücret, cayma hakkı…"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="text-xs text-slate-500">Kullanıcı / üyelik sözleşmesi</label>
+                <textarea
+                  rows={4}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono dark:bg-slate-950 dark:border-slate-600"
+                  value={legalKullanici}
+                  onChange={(e) => setLegalKullanici(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Gizlilik politikası</label>
+                <textarea
+                  rows={4}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono dark:bg-slate-950 dark:border-slate-600"
+                  value={legalGizlilik}
+                  onChange={(e) => setLegalGizlilik(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">KVKK aydınlatma metni</label>
+                <textarea
+                  rows={4}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono dark:bg-slate-950 dark:border-slate-600"
+                  value={legalKvkk}
+                  onChange={(e) => setLegalKvkk(e.target.value)}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <button
+                  type="button"
+                  disabled={legalSaving}
+                  onClick={() => void saveInstitutionLegal()}
+                  className="inline-flex items-center gap-2 rounded-xl bg-violet-700 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-600 disabled:opacity-60"
+                >
+                  {legalSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  Kurum metinlerini kaydet
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-1 flex items-center gap-2">
@@ -1218,13 +1366,13 @@ export default function ParentSignFlowPage() {
               />
             </div>
             <div className="sm:col-span-2">
-              <label className="text-xs text-slate-500">Bu kayda özel ek satırlar (şablondakine eklenir)</label>
+              <label className="text-xs text-slate-500">Bu kayda özel ek not (isteğe bağlı)</label>
               <textarea
-                rows={3}
+                rows={2}
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
                 value={contractEkSatirlar}
                 onChange={(e) => setContractEkSatirlar(e.target.value)}
-                placeholder="Tek seferlik not; şablondaki ek metnin altına eklenir."
+                placeholder="Kampanya veya tek seferlik açıklama. Sözleşme/KVKK metinleri yukarıdaki kurum ayarından gelir."
               />
             </div>
 
@@ -1444,7 +1592,21 @@ export default function ParentSignFlowPage() {
               <p className="mt-0.5 text-[10px] text-slate-400">Ders listesi dolduğunda kayıtta otomatik güncellenir.</p>
             </div>
             <div>
-              <label className="text-xs text-slate-500">Ücret (TL)</label>
+              <label className="text-xs text-slate-500">Para birimi</label>
+              <select
+                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                value={paraBirimi}
+                onChange={(e) => setParaBirimi(e.target.value as ParaBirimi)}
+              >
+                {PARA_BIRIMI_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500">Ücret</label>
               <input
                 type="number"
                 min={0}
@@ -1452,6 +1614,7 @@ export default function ParentSignFlowPage() {
                 value={ucret}
                 onChange={(e) => setUcret(Number(e.target.value))}
               />
+              <p className="mt-0.5 text-[10px] text-slate-400">Yurtdışı öğrenciler için EUR, USD veya GBP seçebilirsiniz.</p>
             </div>
             <div>
               <label className="text-xs text-slate-500">Taksit sayısı</label>
@@ -1490,6 +1653,39 @@ export default function ParentSignFlowPage() {
           >
             Oluştur ve veli linkini kopyala
           </button>
+
+          {lastCreatedLink ? (
+            <div className="mt-4 rounded-xl border border-emerald-300 bg-emerald-50/90 p-4 dark:border-emerald-800 dark:bg-emerald-950/30">
+              <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100 flex items-center gap-2">
+                <Link2 className="w-4 h-4" />
+                Veli linki (veliye bunu gönderin)
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2 items-stretch">
+                <input
+                  readOnly
+                  value={lastCreatedLink}
+                  className="min-w-0 flex-1 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-mono text-slate-800 dark:bg-slate-950 dark:border-emerald-900"
+                  onFocus={(e) => e.target.select()}
+                />
+                <button
+                  type="button"
+                  onClick={() => void copyText(lastCreatedLink, 'Link panoya kopyalandı.')}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400 bg-white px-3 py-2 text-xs font-semibold text-emerald-900 hover:bg-emerald-100 dark:bg-slate-900 dark:hover:bg-emerald-950"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  Kopyala
+                </button>
+                <a
+                  href={lastCreatedLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-600"
+                >
+                  Aç
+                </a>
+              </div>
+            </div>
+          ) : null}
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
@@ -1520,7 +1716,7 @@ export default function ParentSignFlowPage() {
                         <span className="font-medium text-slate-700 dark:text-slate-300">{r.sozlesme_basligi} · </span>
                       ) : null}
                       {r.program_adi ? `${r.program_adi} · ` : ''}Sınıf: {r.sinif} · {r.haftalik_ders_saati} sa/hafta ·{' '}
-                      {r.ucret} TL · {r.taksit_sayisi ?? 1} taksit · Kod: {r.kurum_kodu}
+                      {formatUcretWithCurrency(r.ucret, r.para_birimi)} · {r.taksit_sayisi ?? 1} taksit · Kod: {r.kurum_kodu}
                       {r.student_id ? (
                         <span className="block mt-0.5 text-[11px] font-mono text-slate-500">
                           Öğrenci kartı: {r.student_id.slice(0, 8)}…
@@ -2040,7 +2236,21 @@ export default function ParentSignFlowPage() {
                 />
               </div>
               <div>
-                <label className="text-xs text-slate-500">Ücret (TL)</label>
+                <label className="text-xs text-slate-500">Para birimi</label>
+                <select
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                  value={editParaBirimi}
+                  onChange={(e) => setEditParaBirimi(e.target.value as ParaBirimi)}
+                >
+                  {PARA_BIRIMI_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Ücret</label>
                 <input
                   type="number"
                   min={0}

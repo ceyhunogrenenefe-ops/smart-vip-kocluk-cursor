@@ -15,8 +15,11 @@ import {
   resolveSozlesmeBasligi,
   splitAdSoyad,
   suggestHoursAndFeeFromSinif,
-  sumDersHours
+  sumDersHours,
+  normalizeParaBirimi,
+  paraBirimiLabel
 } from '../api/_lib/parent-sign-defaults.js';
+import { institutionLegalHtmlForContract } from '../api/_lib/parent-sign-legal.js';
 
 const VELI_KAYIT_PROGRAM_SET = new Set([
   '3. Sınıf dönem programı',
@@ -176,6 +179,7 @@ export default async function handler(req, res) {
             baslangic_tarihi: row.baslangic_tarihi,
             bitis_tarihi: row.bitis_tarihi,
             ucret: row.ucret,
+            para_birimi: row.para_birimi || 'TRY',
             taksit_sayisi: row.taksit_sayisi
           }
         }
@@ -615,7 +619,9 @@ export default async function handler(req, res) {
           const taksit_kartlari = buildTaksitPlan(fee, taksit_sayisi, bas);
           const tN = Math.max(1, Math.min(48, Math.round(Number(taksit_sayisi) || 1)));
           const ort = tN > 0 ? Math.round(fee / tN) : 0;
-          const muhasebe_ozet2 = `Öğrenci: ${ogrenci_ad} ${ogrenci_soyad} | Program: ${program_adi} | Sınıf: ${sinif} | Toplam: ${fee} TL | ${tN} taksit | ~${ort} TL/taksit | E-posta: ${String(kj0.eposta || '')}`;
+          const pb = normalizeParaBirimi(body.para_birimi ?? existing.para_birimi);
+          const pbLbl = paraBirimiLabel(pb);
+          const muhasebe_ozet2 = `Öğrenci: ${ogrenci_ad} ${ogrenci_soyad} | Program: ${program_adi} | Sınıf: ${sinif} | Toplam: ${fee} ${pbLbl} | ${tN} taksit | ~${ort} ${pbLbl}/taksit | E-posta: ${String(kj0.eposta || '')}`;
           nextKayitJson = {
             ...kj0,
             phase: 'ready_to_sign',
@@ -624,6 +630,8 @@ export default async function handler(req, res) {
             muhasebe_ozet: muhasebe_ozet2
           };
         }
+        const para_birimi = normalizeParaBirimi(body.para_birimi ?? existing.para_birimi);
+        const institution_legal_html = await institutionLegalHtmlForContract(institutionId, sozlesme_turu);
         merged_html = buildParentContractHtml({
           ogrenci_ad,
           ogrenci_soyad,
@@ -638,6 +646,7 @@ export default async function handler(req, res) {
           haftalik_ders_saati: hours,
           ucret: fee,
           taksit_sayisi,
+          para_birimi,
           kurum_kodu,
           contract_number: String(existing.contract_number || ''),
           kurum_adi: inst?.name || '',
@@ -645,7 +654,8 @@ export default async function handler(req, res) {
           document_title: sozlesme_basligi,
           extra_detail_plain: sablon_ek_detay_snapshot,
           ders_satirlari: dersSnapshot,
-          kayit_formu_detay: nextKayitJson != null ? nextKayitJson : existing.kayit_formu_json || {}
+          kayit_formu_detay: nextKayitJson != null ? nextKayitJson : existing.kayit_formu_json || {},
+          institution_legal_html
         });
       }
 
@@ -664,6 +674,7 @@ export default async function handler(req, res) {
         haftalik_ders_saati: hours,
         ucret: fee,
         taksit_sayisi,
+        para_birimi: normalizeParaBirimi(body.para_birimi ?? existing.para_birimi),
         kurum_kodu,
         merged_html,
         sozlesme_turu,
@@ -833,6 +844,9 @@ export default async function handler(req, res) {
       const base = publicBaseUrl();
       const verifyUrl = base ? `${base}/verify-document?t=${encodeURIComponent(verifyToken)}` : '';
 
+      const para_birimi = normalizeParaBirimi(body.para_birimi);
+      const institution_legal_html = await institutionLegalHtmlForContract(institutionId, sozlesme_turu);
+
       let merged_html;
       let kayit_formu_json = {};
       if (regFormFirst) {
@@ -844,7 +858,8 @@ export default async function handler(req, res) {
           baslangic_tarihi: bas,
           bitis_tarihi: bit,
           ucret: fee,
-          taksit_sayisi
+          taksit_sayisi,
+          para_birimi
         });
         kayit_formu_json = { phase: 'needs_form' };
       } else {
@@ -862,6 +877,7 @@ export default async function handler(req, res) {
           haftalik_ders_saati: hours,
           ucret: fee,
           taksit_sayisi,
+          para_birimi,
           kurum_kodu,
           contract_number: cnum,
           kurum_adi: inst?.name || '',
@@ -869,7 +885,8 @@ export default async function handler(req, res) {
           document_title: sozlesme_basligi,
           extra_detail_plain: sablon_ek_detay_snapshot,
           ders_satirlari: dersSnapshot,
-          kayit_formu_detay: {}
+          kayit_formu_detay: {},
+          institution_legal_html
         });
       }
 
@@ -889,6 +906,7 @@ export default async function handler(req, res) {
         haftalik_ders_saati: hours,
         ucret: fee,
         taksit_sayisi,
+        para_birimi,
         kurum_kodu,
         contract_number: cnum,
         verify_token: verifyToken,

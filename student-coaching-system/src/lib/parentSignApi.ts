@@ -18,6 +18,38 @@ export function suggestHoursAndFeeFromSinif(sinifRaw: string): { hours: number; 
 }
 
 export type SozlesmeTuruKey = 'kullanici_sozlesmesi' | 'satis_sozlesmesi' | 'diger';
+export type ParaBirimi = 'TRY' | 'EUR' | 'USD' | 'GBP';
+
+export const PARA_BIRIMI_OPTIONS: { value: ParaBirimi; label: string }[] = [
+  { value: 'TRY', label: 'TL — Türk Lirası' },
+  { value: 'EUR', label: 'EUR — Euro' },
+  { value: 'USD', label: 'USD — Dolar' },
+  { value: 'GBP', label: 'GBP — Sterlin' }
+];
+
+export function formatParaBirimiLabel(code?: string | null): string {
+  const c = String(code || 'TRY').trim().toUpperCase();
+  if (c === 'TRY') return 'TL';
+  if (PARA_BIRIMI_OPTIONS.some((o) => o.value === c)) return c;
+  return 'TL';
+}
+
+export function formatUcretWithCurrency(amount: number | string, code?: string | null): string {
+  const raw = String(code || 'TRY').trim().toUpperCase();
+  const c = raw === 'TRY' ? 'TL' : PARA_BIRIMI_OPTIONS.some((o) => o.value === raw) ? raw : 'TL';
+  if (c === 'TL') return `${amount} TL`;
+  const sym = c === 'EUR' ? '€' : c === 'USD' ? '$' : c === 'GBP' ? '£' : '';
+  return sym ? `${amount} ${c} ${sym}` : `${amount} ${c}`;
+}
+
+export type ParentSignInstitutionLegal = {
+  institution_id?: string;
+  satis_sozlesmesi: string;
+  kullanici_sozlesmesi: string;
+  gizlilik_politikasi: string;
+  kvkk_aydinlatma: string;
+  updated_at?: string;
+};
 
 /** Şablon / sözleşme ders satırı */
 export interface DersSatiri {
@@ -57,6 +89,7 @@ export interface ParentSignContractRow {
   bitis_tarihi: string;
   haftalik_ders_saati: number;
   ucret: number;
+  para_birimi?: ParaBirimi | string;
   taksit_sayisi?: number;
   kurum_kodu: string;
   contract_number: string;
@@ -178,6 +211,37 @@ export async function listParentSignFillCandidates(institutionId: string): Promi
   };
 }
 
+export async function fetchParentSignInstitutionLegal(institutionId: string): Promise<ParentSignInstitutionLegal> {
+  const q = institutionId ? `?institution_id=${encodeURIComponent(institutionId)}` : '';
+  const res = await apiFetch(`/api/parent-sign-legal${q}`);
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((j as { error?: string }).error || `API ${res.status}`);
+  const d = (j as { data?: ParentSignInstitutionLegal }).data;
+  return {
+    satis_sozlesmesi: String(d?.satis_sozlesmesi || ''),
+    kullanici_sozlesmesi: String(d?.kullanici_sozlesmesi || ''),
+    gizlilik_politikasi: String(d?.gizlilik_politikasi || ''),
+    kvkk_aydinlatma: String(d?.kvkk_aydinlatma || '')
+  };
+}
+
+export async function saveParentSignInstitutionLegal(body: {
+  institution_id?: string;
+  satis_sozlesmesi: string;
+  kullanici_sozlesmesi: string;
+  gizlilik_politikasi: string;
+  kvkk_aydinlatma: string;
+}): Promise<ParentSignInstitutionLegal> {
+  const res = await apiFetch('/api/parent-sign-legal', {
+    method: 'PATCH',
+    headers: JSON_HDR,
+    body: JSON.stringify(body)
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((j as { error?: string; hint?: string }).hint || (j as { error?: string }).error || `API ${res.status}`);
+  return (j as { data: ParentSignInstitutionLegal }).data;
+}
+
 export async function listParentSignClassPresets(institutionId: string): Promise<ParentSignClassPresetRow[]> {
   const q = institutionId ? `?institution_id=${encodeURIComponent(institutionId)}` : '';
   const res = await apiFetch(`/api/parent-sign-class-presets${q}`);
@@ -244,6 +308,7 @@ export async function createParentSignContract(body: {
   bitis_tarihi: string;
   haftalik_ders_saati?: number;
   ucret?: number;
+  para_birimi?: ParaBirimi | string;
   taksit_sayisi?: number;
   preset_id?: string;
   student_id?: string;
@@ -276,6 +341,7 @@ export async function updateParentSignContract(body: {
   bitis_tarihi: string;
   haftalik_ders_saati?: number;
   ucret?: number;
+  para_birimi?: ParaBirimi | string;
   taksit_sayisi?: number;
   sozlesme_turu?: SozlesmeTuruKey | string;
   sozlesme_basligi?: string;
@@ -326,6 +392,7 @@ export type VeliImzaRegistrationHint = {
   baslangic_tarihi?: string | null;
   bitis_tarihi?: string | null;
   ucret?: number | null;
+  para_birimi?: ParaBirimi | string | null;
   taksit_sayisi?: number | null;
 };
 

@@ -44,6 +44,59 @@ function esc(s) {
 }
 
 export const SOZLESME_TURLARI = ['kullanici_sozlesmesi', 'satis_sozlesmesi', 'diger'];
+export const PARA_BIRIMLERI = ['TRY', 'EUR', 'USD', 'GBP'];
+
+export function normalizeParaBirimi(raw) {
+  const u = String(raw || 'TRY')
+    .trim()
+    .toUpperCase();
+  return PARA_BIRIMLERI.includes(u) ? u : 'TRY';
+}
+
+export function paraBirimiLabel(code) {
+  const c = normalizeParaBirimi(code);
+  if (c === 'EUR') return 'EUR';
+  if (c === 'USD') return 'USD';
+  if (c === 'GBP') return 'GBP';
+  return 'TL';
+}
+
+export function paraBirimiSymbol(code) {
+  const c = normalizeParaBirimi(code);
+  if (c === 'EUR') return '€';
+  if (c === 'USD') return '$';
+  if (c === 'GBP') return '£';
+  return '₺';
+}
+
+function plainTextToHtmlParagraphs(plain) {
+  const lines = String(plain || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (!lines.length) return '';
+  return lines.map((l) => `<p>${esc(l)}</p>`).join('');
+}
+
+/** Kurumda bir kez kaydedilen sözleşme / gizlilik / KVKK metinleri */
+export function institutionLegalSectionsHtml(legal, sozlesme_turu) {
+  if (!legal || typeof legal !== 'object') return '';
+  const tur = normalizeSozlesmeTuru(sozlesme_turu);
+  const parts = [];
+  const push = (title, plain) => {
+    const body = plainTextToHtmlParagraphs(plain);
+    if (!body) return;
+    parts.push(`<div class="legal-block"><h2>${esc(title)}</h2>${body}</div>`);
+  };
+  if (tur === 'satis_sozlesmesi') push('Satış sözleşmesi', legal.satis_sozlesmesi);
+  if (tur === 'kullanici_sozlesmesi') push('Kullanıcı sözleşmesi', legal.kullanici_sozlesmesi);
+  if (tur === 'diger') {
+    push('Sözleşme metni', legal.satis_sozlesmesi || legal.kullanici_sozlesmesi);
+  }
+  push('Gizlilik politikası', legal.gizlilik_politikasi);
+  push('KVKK aydınlatma metni', legal.kvkk_aydinlatma);
+  return parts.join('');
+}
 
 export function normalizeSozlesmeTuru(raw) {
   const t = String(raw || '').trim();
@@ -162,7 +215,19 @@ export function kayitFormuTableRowsHtml(detay) {
 
 /** Veli linki açıldığında form henüz doldurulmadıysa gösterilen kısa bilgilendirme (tam sözleşme form sonrası üretilir) */
 export function buildRegistrationPlaceholderHtml(opts) {
-  const { kurum_adi, contract_number, program_adi, sinif, baslangic_tarihi, bitis_tarihi, ucret, taksit_sayisi } = opts;
+  const {
+    kurum_adi,
+    contract_number,
+    program_adi,
+    sinif,
+    baslangic_tarihi,
+    bitis_tarihi,
+    ucret,
+    taksit_sayisi,
+    para_birimi
+  } = opts;
+  const pb = paraBirimiLabel(para_birimi);
+  const sym = paraBirimiSymbol(para_birimi);
   const taksitN = Math.max(1, Math.min(48, Math.round(Number(taksit_sayisi) || 1)));
   const ucretNum = Number(ucret);
   const taksitTutar =
@@ -176,11 +241,11 @@ export function buildRegistrationPlaceholderHtml(opts) {
 <tr><td style="border:1px solid #e2e8f0;padding:8px;width:38%;background:#f8fafc;font-weight:600">Program</td><td style="border:1px solid #e2e8f0;padding:8px">${esc(program_adi)}</td></tr>
 <tr><td style="border:1px solid #e2e8f0;padding:8px;background:#f8fafc;font-weight:600">Sınıf</td><td style="border:1px solid #e2e8f0;padding:8px">${esc(sinif)}</td></tr>
 <tr><td style="border:1px solid #e2e8f0;padding:8px;background:#f8fafc;font-weight:600">Dönem</td><td style="border:1px solid #e2e8f0;padding:8px">${esc(String(baslangic_tarihi))} – ${esc(String(bitis_tarihi))}</td></tr>
-<tr><td style="border:1px solid #e2e8f0;padding:8px;background:#f8fafc;font-weight:600">Ücret (TL)</td><td style="border:1px solid #e2e8f0;padding:8px">${
-    Number(ucret) > 0 ? esc(String(ucret)) : 'Kurum tarafından girilecek'
+<tr><td style="border:1px solid #e2e8f0;padding:8px;background:#f8fafc;font-weight:600">Ücret (${esc(pb)})</td><td style="border:1px solid #e2e8f0;padding:8px">${
+    Number(ucret) > 0 ? `${esc(String(ucret))} ${esc(sym)}` : 'Kurum tarafından girilecek'
   }</td></tr>
 <tr><td style="border:1px solid #e2e8f0;padding:8px;background:#f8fafc;font-weight:600">Taksit</td><td style="border:1px solid #e2e8f0;padding:8px">${esc(String(taksitN))}${
-    taksitTutar != null ? ` · Yaklaşık ${esc(String(taksitTutar))} TL/taksit` : ''
+    taksitTutar != null ? ` · Yaklaşık ${esc(String(taksitTutar))} ${esc(pb)}/taksit` : ''
   }</td></tr>
 </table>
 </body></html>`;
@@ -277,13 +342,18 @@ export function buildParentContractHtml(fields) {
     document_title,
     extra_detail_plain,
     ders_satirlari,
-    kayit_formu_detay
+    kayit_formu_detay,
+    para_birimi,
+    institution_legal_html
   } = fields;
 
   const h1 = String(document_title || '').trim() || 'Ön kayıt / bilgilendirme özeti';
   const extraBlock = extraDetailHtmlFromPlain(extra_detail_plain || '');
   const dersBlock = dersProgramTableHtml(ders_satirlari);
   const kayitBlock = kayitFormuTableRowsHtml(kayitDetayForHtml(kayit_formu_detay || {}));
+  const legalBlock = String(institution_legal_html || '').trim();
+  const pb = paraBirimiLabel(para_birimi);
+  const sym = paraBirimiSymbol(para_birimi);
 
   const taksitN = Math.max(1, Math.min(48, Math.round(Number(taksit_sayisi) || 1)));
   const ucretNum = Number(ucret);
@@ -304,6 +374,9 @@ td:first-child{width:38%;background:#f8fafc;font-weight:600;color:#475569}
 .extra{margin-top:20px;font-size:14px;color:#0f172a}
 .extra h2{font-size:1rem;color:#1e3a8a;margin:0 0 8px}
 .extra p{margin:6px 0}
+.legal-block{margin-top:20px;font-size:13px;color:#0f172a;padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0}
+.legal-block h2{font-size:1rem;color:#1e3a8a;margin:0 0 8px}
+.legal-block p{margin:6px 0}
 .dersprog{margin-top:18px;font-size:14px}
 .dersprog h2{font-size:1rem;color:#1e3a8a;margin:0 0 8px}
 table.dersmini{width:100%;border-collapse:collapse;margin:8px 0;font-size:13px}
@@ -323,17 +396,18 @@ a{color:#1d4ed8}
 <tr><td>Başlangıç</td><td>${esc(baslangic_tarihi)}</td></tr>
 <tr><td>Bitiş</td><td>${esc(bitis_tarihi)}</td></tr>
 <tr><td>Haftalık ders saati</td><td>${esc(String(haftalik_ders_saati))} saat</td></tr>
-<tr><td>Ücret (TL)</td><td>${esc(String(ucret))}</td></tr>
+<tr><td>Ücret (${esc(pb)})</td><td>${esc(String(ucret))} ${esc(sym)}</td></tr>
 <tr><td>Taksit sayısı</td><td>${esc(String(taksitN))}</td></tr>
 ${
   taksitTutar != null
-    ? `<tr><td>Ortalama taksit tutarı (TL)</td><td>${esc(String(taksitTutar))} (yaklaşık)</td></tr>`
+    ? `<tr><td>Ortalama taksit tutarı (${esc(pb)})</td><td>${esc(String(taksitTutar))} ${esc(sym)} (yaklaşık)</td></tr>`
     : ''
 }
 </table>
 ${kayitBlock}
 ${dersBlock}
 ${extraBlock}
+${legalBlock}
 <div class="note">
   <strong>6698 sayılı KVKK</strong> kapsamında kişisel verileriniz; eğitim hizmetinin sunulması, sözleşmenin kurulması ve ifası amacıyla işlenebilir.
   Veli olarak bu metni okuduğunuzu ve elektronik onayınızın geçerli olduğunu kabul etmiş olursunuz.
