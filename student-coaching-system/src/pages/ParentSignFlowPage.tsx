@@ -378,6 +378,13 @@ export default function ParentSignFlowPage() {
   const [loadingFillStudents, setLoadingFillStudents] = useState(false);
   /** '' | s:studentRowId | u:userId */
   const [fillPick, setFillPick] = useState('');
+  /** Veli linkinde önce kayıt formu; kapalıysa doğrudan e-sözleşme + imza */
+  const [ogrenciOnceKayitFormu, setOgrenciOnceKayitFormu] = useState(true);
+  const [ucret, setUcret] = useState<number>(25000);
+  const [paraBirimi, setParaBirimi] = useState<ParaBirimi>('TRY');
+  const [taksitSayisi, setTaksitSayisi] = useState<number>(1);
+  const [taksitVadeleri, setTaksitVadeleri] = useState<string[]>([]);
+  const [taksitTutarlari, setTaksitTutarlari] = useState<number[]>([]);
 
   const [editOpen, setEditOpen] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
@@ -392,6 +399,7 @@ export default function ParentSignFlowPage() {
   const [editProgramAdi, setEditProgramAdi] = useState('');
   const [editBaslangic, setEditBaslangic] = useState('');
   const [editBitis, setEditBitis] = useState('');
+  const [editHaftalikDersSaati, setEditHaftalikDersSaati] = useState(0);
   const [editUcret, setEditUcret] = useState(0);
   const [editParaBirimi, setEditParaBirimi] = useState<ParaBirimi>('TRY');
   const [editTaksitSayisi, setEditTaksitSayisi] = useState(1);
@@ -404,6 +412,18 @@ export default function ParentSignFlowPage() {
   const [pdfRowId, setPdfRowId] = useState<string | null>(null);
   /** `contractId:suffix` — taksit / hesap oluşturma */
   const [parentSignRowBusy, setParentSignRowBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (ogrenciOnceKayitFormu) return;
+    const n = Math.max(1, Math.min(48, Math.round(taksitSayisi) || 1));
+    if (n <= 1) {
+      setTaksitVadeleri([]);
+      setTaksitTutarlari([]);
+      return;
+    }
+    setTaksitVadeleri((prev) => resizeTaksitVadeleri(prev, baslangic, n));
+    setTaksitTutarlari((prev) => resizeTaksitTutarlari(prev, ucret, n));
+  }, [ogrenciOnceKayitFormu, taksitSayisi, baslangic, ucret]);
 
   useEffect(() => {
     if (!editOpen) return;
@@ -586,12 +606,28 @@ export default function ParentSignFlowPage() {
     }
     const sinifOut =
       resolveSinifFromVeliKayit(program_adi, sinif.trim()) || sinif.trim();
-    if (!sinifOut) {
-      setMsg('Sınıf seçin.');
+    if (!ogrenciOnceKayitFormu) {
+      if (!ogrenciAd.trim() || !ogrenciSoyad.trim() || !veliAd.trim() || !veliSoyad.trim() || !telefon.trim()) {
+        setMsg(
+          'Öğrenci, veli ve telefon alanları zorunludur — ya da «Önce veli kayıt formunu doldursun» seçeneğini işaretleyin.'
+        );
+        return;
+      }
+      if (!sinifOut) {
+        setMsg('Sınıf seçin.');
+        return;
+      }
+      if (!(Number(ucret) > 0)) {
+        setMsg('Doğrudan e-imza için ücret girin.');
+        return;
+      }
+    } else if (!sinifOut) {
+      setMsg('Sınıf seçin (veli formunda varsayılan olarak gösterilir).');
       return;
     }
     try {
       const primaryPresetId = selectedPresetIds[0]?.trim() || '';
+      const suggested = suggestHoursAndFeeFromSinif(sinifOut);
       const body = {
         ogrenci_ad: ogrenciAd.trim(),
         ogrenci_soyad: ogrenciSoyad.trim(),
@@ -603,15 +639,21 @@ export default function ParentSignFlowPage() {
         program_adi,
         baslangic_tarihi: baslangic,
         bitis_tarihi: bitis,
-        haftalik_ders_saati: 0,
-        ucret: 0,
-        para_birimi: 'TRY' as ParaBirimi,
-        taksit_sayisi: 1,
+        haftalik_ders_saati: ogrenciOnceKayitFormu ? 0 : suggested.hours,
+        ucret: ogrenciOnceKayitFormu ? 0 : ucret,
+        para_birimi: ogrenciOnceKayitFormu ? ('TRY' as ParaBirimi) : paraBirimi,
+        taksit_sayisi: ogrenciOnceKayitFormu ? 1 : taksitSayisi,
         sozlesme_turu: 'satis_sozlesmesi' as SozlesmeTuruKey,
         ...(primaryPresetId ? { preset_id: primaryPresetId } : {}),
         ...(fillPick.startsWith('s:') ? { student_id: fillPick.slice(2) } : {}),
         ...(fillPick.startsWith('u:') ? { ogrenci_user_id: fillPick.slice(2) } : {}),
-        registration_student_form: true,
+        ...(ogrenciOnceKayitFormu ? { registration_student_form: true } : {}),
+        ...(!ogrenciOnceKayitFormu && taksitSayisi > 1 && taksitVadeleri.length > 0
+          ? { taksit_vadeleri: taksitVadeleri }
+          : {}),
+        ...(!ogrenciOnceKayitFormu && taksitSayisi > 1 && taksitTutarlari.length > 0
+          ? { taksit_tutarlari: taksitTutarlari }
+          : {}),
         institution_id: effectiveInstitutionId
       };
       const created = await createParentSignContract(body);
@@ -622,7 +664,12 @@ export default function ParentSignFlowPage() {
           : '');
       setLastCreatedLink(url || null);
       if (url) {
-        await copyText(url, 'Veli linki oluşturuldu ve panoya kopyalandı.');
+        await copyText(
+          url,
+          ogrenciOnceKayitFormu
+            ? 'Kayıt formu linki oluşturuldu ve panoya kopyalandı.'
+            : 'Veli e-imza linki oluşturuldu ve panoya kopyalandı.'
+        );
       } else {
         setMsg('Kayıt oluşturuldu; link için Kayıtlar listesindeki Link düğmesini kullanın.');
       }
@@ -853,6 +900,7 @@ export default function ParentSignFlowPage() {
     setEditProgramAdi(String(r.program_adi || ''));
     setEditBaslangic(String(r.baslangic_tarihi || '').slice(0, 10));
     setEditBitis(String(r.bitis_tarihi || '').slice(0, 10));
+    setEditHaftalikDersSaati(Number(r.haftalik_ders_saati) || 0);
     setEditUcret(Number(r.ucret) || 0);
     setEditParaBirimi((String(r.para_birimi || 'TRY').toUpperCase() as ParaBirimi) || 'TRY');
     setEditTaksitSayisi(Number(r.taksit_sayisi) || 1);
@@ -917,12 +965,11 @@ export default function ParentSignFlowPage() {
         program_adi: editProgramAdi.trim(),
         baslangic_tarihi: editBaslangic,
         bitis_tarihi: editBitis,
-        haftalik_ders_saati: 0,
+        haftalik_ders_saati: editHaftalikDersSaati,
         ucret: editUcret,
         para_birimi: editParaBirimi,
         taksit_sayisi: editTaksitSayisi,
         sozlesme_turu: 'satis_sozlesmesi',
-        ders_satirlari: [],
         ...(editCustomHtmlMode ? { custom_merged_html: editMergedHtml.trim() } : {}),
         ...(editTaksitSayisi > 1 && editTaksitVadeleri.length > 0 ? { taksit_vadeleri: editTaksitVadeleri } : {}),
         ...(editTaksitSayisi > 1 && editTaksitTutarlari.length > 0 ? { taksit_tutarlari: editTaksitTutarlari } : {})
@@ -983,13 +1030,8 @@ export default function ParentSignFlowPage() {
               …/veli-imza/uzun-kod
             </code>{' '}
             adresini açar (veya <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-800">/sign-contract/…</code>
-            ). Öğrenci kayıt formu velinin bu linkte açılan sayfada, «Önce veli kayıt formunu doldursun» işaretli kayıtlarda
-            gösterilir.
-          </p>
-          <p className="text-sm text-slate-600 dark:text-slate-400 mt-2 max-w-2xl">
-            <strong>Program listesi:</strong> aşağıda <em>Sınıf &amp; sözleşme şablonları</em> bölümünde her şablona verdiğiniz{' '}
-            <strong>Program adı</strong> benzersiz olarak seçim listesine düşer; isterseniz <em>Yeni kayıt</em> içindeki{' '}
-            <strong>Ek program isimleri</strong> kutusuna satır satır kendi programlarınızı yazıp kaydedebilirsiniz.
+            ). İşaretli kayıtlarda veli önce <strong>kayıt formunu</strong> gönderir; kurum ücreti girince aynı linkte{' '}
+            <strong>e-sözleşmeyi imzalar</strong>. İşaretsiz kayıtlarda veli doğrudan sözleşmeyi görür ve imzalar.
           </p>
           <p className="text-xs text-slate-500 dark:text-slate-500 mt-2 max-w-2xl border-l-2 border-blue-200 pl-3">
             <strong>Kurum</strong> süper yöneticide bu sayfadaki liste veya <strong>Ayarlar → aktif kurum</strong> ile
@@ -1213,9 +1255,27 @@ export default function ParentSignFlowPage() {
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-2">Yeni kayıt</h2>
           <p className="text-xs text-slate-500 mb-4">
-            Veli önce kayıt formunu doldurur (KVKK + satış onayı otomatik gelir). Ücret veli formundan sonra{' '}
-            <strong>Kayıtlar</strong> listesinde girilir.
+            Veli linki oluşturun. Kayıt formu modunda veli bilgilerini gönderir; ücreti siz{' '}
+            <strong>Kayıtlar</strong> listesinde girip imzaya açarsınız. Doğrudan imza modunda ücreti burada girersiniz.
           </p>
+
+          <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50/90 p-3 dark:border-blue-900 dark:bg-blue-950/40">
+            <label className="flex items-start gap-2 text-sm text-slate-800 dark:text-slate-100 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 shrink-0 rounded border-slate-400"
+                checked={ogrenciOnceKayitFormu}
+                onChange={(e) => setOgrenciOnceKayitFormu(e.target.checked)}
+              />
+              <span>
+                <strong>Önce veli kayıt formunu doldursun</strong> — veli linkinde öğrenci/veli bilgileri, program,
+                KVKK ve satış onayı istenir. Veli gönderdikten sonra kayıt kurumda görünür; listeden ücret ve taksiti
+                girip <strong>Kaydet ve veliye imzaya aç</strong> ile e-sözleşme açılır (aynı link). Öğrenci/veli adını
+                burada boş bırakabilirsiniz. İşareti kaldırırsanız veli doğrudan sözleşmeyi görür ve imzalar; ücreti
+                aşağıda girmeniz gerekir.
+              </span>
+            </label>
+          </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="sm:col-span-2">
@@ -1426,13 +1486,67 @@ export default function ParentSignFlowPage() {
                 onChange={(e) => setBitis(e.target.value)}
               />
             </div>
+
+            {!ogrenciOnceKayitFormu ? (
+              <>
+                <div>
+                  <label className="text-xs text-slate-500">Para birimi</label>
+                  <select
+                    className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                    value={paraBirimi}
+                    onChange={(e) => setParaBirimi(e.target.value as ParaBirimi)}
+                  >
+                    {PARA_BIRIMI_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500">Ücret (zorunlu)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                    value={ucret}
+                    onChange={(e) => setUcret(Number(e.target.value))}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500">Taksit sayısı</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={48}
+                    className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                    value={taksitSayisi}
+                    onChange={(e) => setTaksitSayisi(Number(e.target.value))}
+                  />
+                </div>
+                <TaksitPlanEditor
+                  taksitSayisi={taksitSayisi}
+                  ucret={ucret}
+                  paraBirimi={paraBirimi}
+                  baslangic={baslangic}
+                  vadeler={taksitVadeleri}
+                  tutarlar={taksitTutarlari}
+                  onVadelerChange={setTaksitVadeleri}
+                  onTutarlarChange={setTaksitTutarlari}
+                  onResetMonthly={() => setTaksitVadeleri(defaultTaksitVadeleri(baslangic, taksitSayisi))}
+                  onResetEqualSplit={() => setTaksitTutarlari(splitTaksitTutarlari(ucret, taksitSayisi))}
+                />
+              </>
+            ) : null}
           </div>
           <button
             type="button"
             onClick={() => void submit()}
             className="mt-5 w-full sm:w-auto rounded-xl bg-gradient-to-r from-blue-700 to-red-600 px-6 py-3 text-sm font-bold text-white shadow-md hover:opacity-95"
           >
-            Oluştur ve veli linkini kopyala
+            {ogrenciOnceKayitFormu
+              ? 'Kayıt formu linkini oluştur ve kopyala'
+              : 'E-imza linkini oluştur ve kopyala'}
           </button>
 
           {lastCreatedLink ? (
