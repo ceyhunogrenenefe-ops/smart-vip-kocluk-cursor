@@ -40,6 +40,10 @@ function clampNum(n, min, max, fallback) {
   return Math.min(max, Math.max(min, v));
 }
 
+function normalizeDocUrl(v) {
+  return String(v ?? '').trim().slice(0, 2000);
+}
+
 export default async function handler(req, res) {
   let actor;
   try {
@@ -49,8 +53,9 @@ export default async function handler(req, res) {
   }
 
   const role = String(actor.role || '');
-  const canManage = role === 'super_admin' || role === 'admin' || role === 'coach';
-  if (!canManage) return res.status(403).json({ error: 'forbidden' });
+  const canRead = role === 'super_admin' || role === 'admin' || role === 'coach';
+  const canWritePresets = role === 'super_admin' || role === 'admin';
+  if (!canRead) return res.status(403).json({ error: 'forbidden' });
 
   try {
     if (req.method === 'GET') {
@@ -83,6 +88,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
+      if (!canWritePresets) return res.status(403).json({ error: 'forbidden' });
       const body = parseBody(req);
       const institutionId = resolveWriteInstitutionId(actor, body.institution_id);
       if (!institutionId) return res.status(400).json({ error: 'institution_required' });
@@ -115,6 +121,9 @@ export default async function handler(req, res) {
         sozlesme_turu,
         sozlesme_ozel_baslik,
         sablon_ek_detay,
+        kvkk_doc_url: normalizeDocUrl(body.kvkk_doc_url),
+        satis_doc_url: normalizeDocUrl(body.satis_doc_url),
+        share_url: normalizeDocUrl(body.share_url),
         created_at: now,
         updated_at: now
       };
@@ -131,6 +140,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'PATCH') {
+      if (!canWritePresets) return res.status(403).json({ error: 'forbidden' });
       const body = parseBody(req);
       const id = String(body.id || '').trim();
       if (!id) return res.status(400).json({ error: 'id_required' });
@@ -171,6 +181,12 @@ export default async function handler(req, res) {
       else patch.sozlesme_ozel_baslik = String(existing.sozlesme_ozel_baslik || '');
       if (body.sablon_ek_detay !== undefined) patch.sablon_ek_detay = String(body.sablon_ek_detay || '').trim().slice(0, 20000);
       else patch.sablon_ek_detay = String(existing.sablon_ek_detay || '');
+      if (body.kvkk_doc_url !== undefined) patch.kvkk_doc_url = normalizeDocUrl(body.kvkk_doc_url);
+      else patch.kvkk_doc_url = normalizeDocUrl(existing.kvkk_doc_url);
+      if (body.satis_doc_url !== undefined) patch.satis_doc_url = normalizeDocUrl(body.satis_doc_url);
+      else patch.satis_doc_url = normalizeDocUrl(existing.satis_doc_url);
+      if (body.share_url !== undefined) patch.share_url = normalizeDocUrl(body.share_url);
+      else patch.share_url = normalizeDocUrl(existing.share_url);
 
       const { data: updated, error: uErr } = await supabaseAdmin
         .from('parent_sign_class_presets')
@@ -183,6 +199,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'DELETE') {
+      if (!canWritePresets) return res.status(403).json({ error: 'forbidden' });
       const id = String(req.query.id || '').trim();
       if (!id) return res.status(400).json({ error: 'id_required' });
 

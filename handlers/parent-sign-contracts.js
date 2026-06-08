@@ -22,7 +22,7 @@ import {
   resolveRowParaBirimi
 } from '../api/_lib/parent-sign-defaults.js';
 import { institutionLegalHtmlForContract, loadInstitutionLegal } from '../api/_lib/parent-sign-legal.js';
-import { resolveKvkkDocUrl, resolveSatisDocUrl } from '../api/_lib/veli-kayit-legal-url.js';
+import { resolveLegalDocHrefs } from '../api/_lib/veli-kayit-legal-url.js';
 import { notifyTaksitMarkedPaid } from '../api/_lib/taksit-whatsapp-notify.js';
 import { resolveSinifFromVeliKayit } from '../api/_lib/veli-kayit-class-level.js';
 
@@ -145,7 +145,7 @@ export default async function handler(req, res) {
       const { data: row, error } = await supabaseAdmin
         .from('parent_sign_contracts')
         .select(
-          'id,merged_html,contract_number,status,signed_at,institution_id,signature_png_base64,kayit_formu_json,program_adi,sinif,baslangic_tarihi,bitis_tarihi,ucret,taksit_sayisi,para_birimi'
+          'id,merged_html,contract_number,status,signed_at,institution_id,preset_id,signature_png_base64,kayit_formu_json,program_adi,sinif,baslangic_tarihi,bitis_tarihi,ucret,taksit_sayisi,para_birimi'
         )
         .eq('signing_token', signingToken)
         .maybeSingle();
@@ -166,8 +166,17 @@ export default async function handler(req, res) {
       const needs_student_form = String(j.phase || '') === 'needs_form';
       const awaiting_admin_price = String(j.phase || '') === 'awaiting_admin_price';
       const legalRow = row.institution_id ? await loadInstitutionLegal(row.institution_id) : null;
-      const kvkk_doc_href = resolveKvkkDocUrl(legalRow?.kvkk_doc_url);
-      const satis_doc_href = resolveSatisDocUrl(legalRow?.satis_doc_url);
+      let presetRow = null;
+      const presetIdVeli = String(row.preset_id || '').trim();
+      if (presetIdVeli) {
+        const { data: pr } = await supabaseAdmin
+          .from('parent_sign_class_presets')
+          .select('kvkk_doc_url,satis_doc_url,institution_id')
+          .eq('id', presetIdVeli)
+          .maybeSingle();
+        if (pr && String(pr.institution_id) === String(row.institution_id || '')) presetRow = pr;
+      }
+      const { kvkk_doc_href, satis_doc_href } = resolveLegalDocHrefs(legalRow, presetRow);
       // Veli sayfası ücret sonrası güncellensin; CDN/tarayıcı GET önbelleği imzayı geciktirmesin.
       res.setHeader('Cache-Control', 'private, no-store, no-cache, must-revalidate, max-age=0');
       res.setHeader('Pragma', 'no-cache');

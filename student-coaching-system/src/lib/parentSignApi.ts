@@ -72,6 +72,9 @@ export interface ParentSignClassPresetRow {
   sozlesme_turu?: SozlesmeTuruKey | string;
   sozlesme_ozel_baslik?: string;
   sablon_ek_detay?: string;
+  kvkk_doc_url?: string;
+  satis_doc_url?: string;
+  share_url?: string;
   created_at: string;
   updated_at: string;
 }
@@ -265,6 +268,9 @@ export async function createParentSignClassPreset(body: {
   sozlesme_turu?: SozlesmeTuruKey | string;
   sozlesme_ozel_baslik?: string;
   sablon_ek_detay?: string;
+  kvkk_doc_url?: string;
+  satis_doc_url?: string;
+  share_url?: string;
 }): Promise<ParentSignClassPresetRow> {
   const res = await apiFetch('/api/parent-sign-class-presets', {
     method: 'POST',
@@ -284,6 +290,9 @@ export async function updateParentSignClassPreset(body: {
   sozlesme_turu?: SozlesmeTuruKey | string;
   sozlesme_ozel_baslik?: string;
   sablon_ek_detay?: string;
+  kvkk_doc_url?: string;
+  satis_doc_url?: string;
+  share_url?: string;
 }): Promise<ParentSignClassPresetRow> {
   const res = await apiFetch('/api/parent-sign-class-presets', {
     method: 'PATCH',

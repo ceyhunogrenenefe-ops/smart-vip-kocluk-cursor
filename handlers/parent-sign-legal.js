@@ -76,6 +76,9 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'PATCH' || req.method === 'POST') {
+      if (role !== 'super_admin' && role !== 'admin') {
+        return res.status(403).json({ error: 'forbidden' });
+      }
       const body = parseBody(req);
       const { data: prev } = await supabaseAdmin
         .from('parent_sign_institution_legal')

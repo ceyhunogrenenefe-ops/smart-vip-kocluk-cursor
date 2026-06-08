@@ -62,7 +62,9 @@ import {
   Pencil,
   Plus,
   Sparkles,
-  UserCog
+  UserCog,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 function todayPlus(days: number) {
@@ -312,12 +314,42 @@ function buildVeliSignedUserManagementPrefillUrl(r: ParentSignContractRow, origi
   return `${base}/user-management?${q.toString()}`;
 }
 
-function buildPresetShareUrl(presetId: string): string {
-  const path = `/veli-onay?preset=${encodeURIComponent(presetId)}`;
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    return `${window.location.origin}${path}`;
+function buildPresetShareUrl(preset: ParentSignClassPresetRow): string {
+  const defaultPath = `/veli-onay?preset=${encodeURIComponent(preset.id)}`;
+  const custom = String(preset.share_url || '').trim();
+  if (!custom) {
+    return absoluteVeliLegalDocUrl('', defaultPath);
   }
-  return path;
+  return absoluteVeliLegalDocUrl(custom, defaultPath);
+}
+
+function kayitRowStatusBadge(r: ParentSignContractRow) {
+  if (parentContractRowSigned(r)) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5 text-[11px] font-semibold dark:bg-emerald-900/40 dark:text-emerald-200">
+        <CheckCircle2 className="w-3 h-3" /> İmzalı
+      </span>
+    );
+  }
+  if (kayitFormPhase(r) === 'needs_form') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 text-sky-900 px-2 py-0.5 text-[11px] font-semibold dark:bg-sky-900/40 dark:text-sky-100">
+        <Clock className="w-3 h-3" /> Kayıt formu
+      </span>
+    );
+  }
+  if (kayitFormPhase(r) === 'awaiting_admin_price') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 text-violet-900 px-2 py-0.5 text-[11px] font-semibold dark:bg-violet-900/40 dark:text-violet-100">
+        <Clock className="w-3 h-3" /> Ücret bekliyor
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-900 px-2 py-0.5 text-[11px] font-semibold dark:bg-amber-900/30 dark:text-amber-100">
+      <Clock className="w-3 h-3" /> Bekliyor
+    </span>
+  );
 }
 
 export default function ParentSignFlowPage() {
@@ -325,6 +357,7 @@ export default function ParentSignFlowPage() {
   const { effectiveUser } = useAuth();
   const { activeInstitutionId, institution } = useApp();
   const isSuper = effectiveUser?.role === 'super_admin';
+  const isInstitutionAdmin = isSuper || effectiveUser?.role === 'admin';
   const [rows, setRows] = useState<ParentSignContractRow[]>([]);
   const [presets, setPresets] = useState<ParentSignClassPresetRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -369,7 +402,13 @@ export default function ParentSignFlowPage() {
 
   const [presetSinif, setPresetSinif] = useState('');
   const [presetProgram, setPresetProgram] = useState('');
+  const [presetKvkkUrl, setPresetKvkkUrl] = useState('');
+  const [presetSatisUrl, setPresetSatisUrl] = useState('');
+  const [presetShareUrl, setPresetShareUrl] = useState('');
   const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
+  const [legalSectionOpen, setLegalSectionOpen] = useState(false);
+  const [presetsSectionOpen, setPresetsSectionOpen] = useState(false);
+  const [expandedKayitId, setExpandedKayitId] = useState<string | null>(null);
 
   const [fillStudents, setFillStudents] = useState<StudentFillRow[]>([]);
   const [fillUserStudents, setFillUserStudents] = useState<UserStudentFillRow[]>([]);
@@ -500,7 +539,7 @@ export default function ParentSignFlowPage() {
   }, [loadPresets]);
 
   const loadInstitutionLegal = useCallback(async () => {
-    if (!effectiveInstitutionId) {
+    if (!isInstitutionAdmin || !effectiveInstitutionId) {
       setLegalKvkkUrl('');
       setLegalSatisUrl('');
       return;
@@ -515,7 +554,7 @@ export default function ParentSignFlowPage() {
     } finally {
       setLegalLoading(false);
     }
-  }, [effectiveInstitutionId]);
+  }, [isInstitutionAdmin, effectiveInstitutionId]);
 
   useEffect(() => {
     void loadInstitutionLegal();
@@ -757,7 +796,10 @@ export default function ParentSignFlowPage() {
         ders_satirlari: [] as DersSatiri[],
         sozlesme_turu: 'satis_sozlesmesi' as SozlesmeTuruKey,
         sozlesme_ozel_baslik: '',
-        sablon_ek_detay: ''
+        sablon_ek_detay: '',
+        kvkk_doc_url: presetKvkkUrl.trim(),
+        satis_doc_url: presetSatisUrl.trim(),
+        share_url: presetShareUrl.trim()
       };
       if (editingPresetId) {
         await updateParentSignClassPreset({ id: editingPresetId, ...base });
@@ -772,6 +814,9 @@ export default function ParentSignFlowPage() {
       setEditingPresetId(null);
       setPresetSinif('');
       setPresetProgram('');
+      setPresetKvkkUrl('');
+      setPresetSatisUrl('');
+      setPresetShareUrl('');
       void loadPresets();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Şablon kaydedilemedi');
@@ -782,13 +827,29 @@ export default function ParentSignFlowPage() {
     setEditingPresetId(p.id);
     setPresetSinif(p.sinif);
     setPresetProgram(p.program_adi);
+    setPresetKvkkUrl(p.kvkk_doc_url || '');
+    setPresetSatisUrl(p.satis_doc_url || '');
+    setPresetShareUrl(p.share_url || '');
+    setPresetsSectionOpen(true);
   };
 
   const cancelEditPreset = () => {
     setEditingPresetId(null);
     setPresetSinif('');
     setPresetProgram('');
+    setPresetKvkkUrl('');
+    setPresetSatisUrl('');
+    setPresetShareUrl('');
   };
+
+  const presetKvkkHref = useMemo(() => resolveKvkkDocUrl(presetKvkkUrl), [presetKvkkUrl]);
+  const presetSatisHref = useMemo(() => resolveSatisDocUrl(presetSatisUrl), [presetSatisUrl]);
+  const presetShareHref = useMemo(() => {
+    const defaultPath = editingPresetId
+      ? `/veli-onay?preset=${encodeURIComponent(editingPresetId)}`
+      : '/veli-onay?preset=…';
+    return absoluteVeliLegalDocUrl(presetShareUrl, defaultPath);
+  }, [presetShareUrl, editingPresetId]);
 
   const removeContractRow = async (id: string) => {
     if (!window.confirm('Bu sözleşme kaydını silmek istediğinize emin misiniz?')) return;
@@ -1135,14 +1196,27 @@ export default function ParentSignFlowPage() {
           </section>
         ) : null}
 
-        <section className="rounded-2xl border border-violet-200 bg-white p-5 shadow-sm dark:border-violet-900 dark:bg-slate-900">
-          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-1">KVKK ve satış metni linkleri</h2>
-          <p className="text-xs text-slate-500 mb-4">
-            Veli kayıt formundaki mavi bağlantılar buradan gelir. Harici PDF veya web sayfası için tam adres yapıştırın
-            (ör. <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">https://…</code>). Boş bırakırsanız site
-            içi varsayılan sayfa kullanılır; gövde metnini kodda{' '}
-            <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">veliKayitLegalDocs.tsx</code> dosyasından
-            düzenleyebilirsiniz.
+        {isInstitutionAdmin ? (
+        <section className="rounded-2xl border border-violet-200 bg-white shadow-sm dark:border-violet-900 dark:bg-slate-900 overflow-hidden">
+          <button
+            type="button"
+            className="w-full flex items-center justify-between gap-3 p-5 text-left hover:bg-violet-50/50 dark:hover:bg-violet-950/20"
+            onClick={() => setLegalSectionOpen((o) => !o)}
+          >
+            <div>
+              <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">KVKK ve satış metni linkleri</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Kurum varsayılanı — veli kayıt formundaki mavi bağlantılar</p>
+            </div>
+            {legalSectionOpen ? (
+              <ChevronUp className="w-5 h-5 shrink-0 text-violet-700" />
+            ) : (
+              <ChevronDown className="w-5 h-5 shrink-0 text-violet-700" />
+            )}
+          </button>
+          {legalSectionOpen ? (
+          <div className="px-5 pb-5 border-t border-violet-100 dark:border-violet-900/50">
+          <p className="text-xs text-slate-500 mb-4 mt-4">
+            Harici PDF veya web sayfası için tam adres yapıştırın. Boş bırakırsanız site içi varsayılan sayfa kullanılır.
           </p>
           {!effectiveInstitutionId ? (
             <p className="text-sm text-slate-500">Önce kurum seçin.</p>
@@ -1229,22 +1303,39 @@ export default function ParentSignFlowPage() {
               </div>
             </div>
           )}
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-1 flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-amber-600" />
-            Sınıf &amp; sözleşme şablonları
-          </h2>
-          <p className="text-xs text-slate-500 mb-4">
-            Sınıf ve program şablonları tanımlayın. Yeni kayıtta birden fazla program seçilebilir; her şablon için link
-            kopyalayarak veli formunu önceden doldurabilirsiniz.
-          </p>
-          {!isSuper && effectiveInstitutionId ? (
-            <p className="text-xs text-emerald-800 dark:text-emerald-200/90 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 rounded-lg px-3 py-2 mb-3">
-              Hesabınız bir kuruma bağlı; kurum seçmeniz gerekmez. Şablonları doğrudan bu bölümden yönetin.
-            </p>
+          </div>
           ) : null}
+        </section>
+        ) : null}
+
+        {isInstitutionAdmin ? (
+        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 overflow-hidden">
+          <button
+            type="button"
+            className="w-full flex items-center justify-between gap-3 p-5 text-left hover:bg-slate-50 dark:hover:bg-slate-800/50"
+            onClick={() => setPresetsSectionOpen((o) => !o)}
+          >
+            <div>
+              <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-amber-600" />
+                Sınıf &amp; sözleşme şablonları
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {presets.length} şablon · program, link ve KVKK/satış ayarları
+              </p>
+            </div>
+            {presetsSectionOpen ? (
+              <ChevronUp className="w-5 h-5 shrink-0 text-slate-600" />
+            ) : (
+              <ChevronDown className="w-5 h-5 shrink-0 text-slate-600" />
+            )}
+          </button>
+          {presetsSectionOpen ? (
+          <div className="px-5 pb-5 border-t border-slate-100 dark:border-slate-700">
+          <p className="text-xs text-slate-500 mb-4 mt-4">
+            Her şablon için paylaşım linki ve isteğe bağlı KVKK/satış linkleri tanımlayın. Boş link alanları kurum
+            varsayılanını kullanır.
+          </p>
           {!effectiveInstitutionId ? (
             <p className="text-sm text-slate-600 dark:text-slate-400">
               {isSuper
@@ -1282,7 +1373,7 @@ export default function ParentSignFlowPage() {
                               type="button"
                               className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
                               onClick={() =>
-                                void copyText(buildPresetShareUrl(p.id), 'Şablon linki kopyalandı.')
+                                void copyText(buildPresetShareUrl(p), 'Şablon linki kopyalandı.')
                               }
                             >
                               <Copy className="w-3 h-3" />
@@ -1348,6 +1439,38 @@ export default function ParentSignFlowPage() {
                   </datalist>
                 </div>
               </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 rounded-xl border border-violet-100 bg-violet-50/40 p-3 dark:border-violet-900/50 dark:bg-violet-950/20">
+                <div className="sm:col-span-2">
+                  <label className="text-xs text-slate-500">Paylaşım linki (şablon)</label>
+                  <input
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono dark:bg-slate-950 dark:border-slate-600"
+                    value={presetShareUrl}
+                    onChange={(e) => setPresetShareUrl(e.target.value)}
+                    placeholder="Boş = /veli-onay?preset=…"
+                  />
+                  <p className="mt-0.5 text-[10px] text-slate-400">Açılacak: {presetShareHref}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500">KVKK metni linki (şablon)</label>
+                  <input
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono dark:bg-slate-950 dark:border-slate-600"
+                    value={presetKvkkUrl}
+                    onChange={(e) => setPresetKvkkUrl(e.target.value)}
+                    placeholder={`Boş = kurum / ${VELI_KAYIT_KVKK_DOC_HREF}`}
+                  />
+                  <p className="mt-0.5 text-[10px] text-slate-400">{presetKvkkHref}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500">Satış metni linki (şablon)</label>
+                  <input
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono dark:bg-slate-950 dark:border-slate-600"
+                    value={presetSatisUrl}
+                    onChange={(e) => setPresetSatisUrl(e.target.value)}
+                    placeholder={`Boş = kurum / ${VELI_KAYIT_SATIS_ONBILGI_DOC_HREF}`}
+                  />
+                  <p className="mt-0.5 text-[10px] text-slate-400">{presetSatisHref}</p>
+                </div>
+              </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -1365,7 +1488,10 @@ export default function ParentSignFlowPage() {
               </div>
             </>
           )}
+          </div>
+          ) : null}
         </section>
+        ) : null}
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-2">Yeni kayıt</h2>
@@ -1700,23 +1826,52 @@ export default function ParentSignFlowPage() {
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Kayıtlar</h2>
+            <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+              Kayıtlar {rows.length > 0 ? <span className="text-sm font-normal text-slate-500">({rows.length})</span> : null}
+            </h2>
             <button type="button" onClick={() => void load()} className="text-xs text-blue-700 font-semibold hover:underline">
               Yenile
             </button>
           </div>
+          <p className="text-xs text-slate-500 mb-3">Satıra tıklayarak detayları ve işlemleri açın.</p>
           {loading ? <Loader2 className="w-6 h-6 animate-spin text-blue-600" /> : null}
+          {!loading && rows.length === 0 ? (
+            <p className="text-sm text-slate-500 py-6 text-center">Henüz kayıt yok.</p>
+          ) : null}
           <ul className="space-y-3">
-            {rows.map((r) => (
+            {rows.map((r) => {
+              const expanded = expandedKayitId === r.id;
+              return (
               <li
                 key={r.id}
-                className="rounded-xl border border-slate-100 bg-slate-50/80 p-4 text-sm dark:border-slate-700 dark:bg-slate-800/50"
+                className="rounded-xl border border-slate-100 bg-slate-50/80 text-sm dark:border-slate-700 dark:bg-slate-800/50 overflow-hidden"
               >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <p className="font-semibold text-slate-900 dark:text-slate-100">
+                <button
+                  type="button"
+                  className="w-full flex items-center justify-between gap-3 p-4 text-left hover:bg-slate-100/80 dark:hover:bg-slate-800/80"
+                  onClick={() => setExpandedKayitId(expanded ? null : r.id)}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-slate-900 dark:text-slate-100 truncate">
                       {r.ogrenci_ad} {r.ogrenci_soyad}
                     </p>
+                    <p className="text-xs text-slate-500 truncate">
+                      {[r.program_adi, r.sinif && `Sınıf ${r.sinif}`, r.contract_number].filter(Boolean).join(' · ')}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {kayitRowStatusBadge(r)}
+                    {expanded ? (
+                      <ChevronUp className="w-4 h-4 text-slate-500" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4 text-slate-500" />
+                    )}
+                  </div>
+                </button>
+                {expanded ? (
+                <div className="px-4 pb-4 border-t border-slate-200/80 dark:border-slate-700">
+                <div className="flex flex-wrap items-start justify-between gap-2 pt-3">
+                  <div>
                     <p className="text-xs text-slate-500">
                       Veli: {r.veli_ad} {r.veli_soyad} · {r.telefon}
                     </p>
@@ -2016,23 +2171,6 @@ export default function ParentSignFlowPage() {
                     ) : null}
                   </div>
                   <div className="flex flex-col items-stretch gap-2 w-full sm:w-auto sm:min-w-[200px]">
-                    {parentContractRowSigned(r) ? (
-                      <span className="inline-flex items-center justify-center gap-1 rounded-full bg-emerald-100 text-emerald-800 px-2 py-1 text-xs font-semibold dark:bg-emerald-900/40 dark:text-emerald-200">
-                        <CheckCircle2 className="w-3.5 h-3.5" /> İmzalı
-                      </span>
-                    ) : kayitFormPhase(r) === 'needs_form' ? (
-                      <span className="inline-flex items-center justify-center gap-1 rounded-full bg-sky-100 text-sky-900 px-2 py-1 text-xs font-semibold dark:bg-sky-900/40 dark:text-sky-100">
-                        <Clock className="w-3.5 h-3.5" /> Kayıt formu bekleniyor
-                      </span>
-                    ) : kayitFormPhase(r) === 'awaiting_admin_price' ? (
-                      <span className="inline-flex items-center justify-center gap-1 rounded-full bg-violet-100 text-violet-900 px-2 py-1 text-xs font-semibold dark:bg-violet-900/40 dark:text-violet-100">
-                        <Clock className="w-3.5 h-3.5" /> Ücret / taksit girilmeli
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center justify-center gap-1 rounded-full bg-amber-100 text-amber-900 px-2 py-1 text-xs font-semibold dark:bg-amber-900/30 dark:text-amber-100">
-                        <Clock className="w-3.5 h-3.5" /> Bekliyor
-                      </span>
-                    )}
                     <div className="flex flex-wrap gap-2 justify-end">
                       <button
                         type="button"
@@ -2100,8 +2238,11 @@ export default function ParentSignFlowPage() {
                     </div>
                   </div>
                 </div>
+                </div>
+                ) : null}
               </li>
-            ))}
+            );
+            })}
           </ul>
         </section>
       </div>
