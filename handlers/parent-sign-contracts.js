@@ -21,7 +21,8 @@ import {
   paraBirimiLabel,
   resolveRowParaBirimi
 } from '../api/_lib/parent-sign-defaults.js';
-import { institutionLegalHtmlForContract } from '../api/_lib/parent-sign-legal.js';
+import { institutionLegalHtmlForContract, loadInstitutionLegal } from '../api/_lib/parent-sign-legal.js';
+import { resolveKvkkDocUrl, resolveSatisDocUrl } from '../api/_lib/veli-kayit-legal-url.js';
 import { notifyTaksitMarkedPaid } from '../api/_lib/taksit-whatsapp-notify.js';
 import { resolveSinifFromVeliKayit } from '../api/_lib/veli-kayit-class-level.js';
 
@@ -164,6 +165,9 @@ export default async function handler(req, res) {
       const j = kj && typeof kj === 'object' ? kj : {};
       const needs_student_form = String(j.phase || '') === 'needs_form';
       const awaiting_admin_price = String(j.phase || '') === 'awaiting_admin_price';
+      const legalRow = row.institution_id ? await loadInstitutionLegal(row.institution_id) : null;
+      const kvkk_doc_href = resolveKvkkDocUrl(legalRow?.kvkk_doc_url);
+      const satis_doc_href = resolveSatisDocUrl(legalRow?.satis_doc_url);
       // Veli sayfası ücret sonrası güncellensin; CDN/tarayıcı GET önbelleği imzayı geciktirmesin.
       res.setHeader('Cache-Control', 'private, no-store, no-cache, must-revalidate, max-age=0');
       res.setHeader('Pragma', 'no-cache');
@@ -178,6 +182,8 @@ export default async function handler(req, res) {
           signature_png_base64,
           needs_student_form,
           awaiting_admin_price,
+          kvkk_doc_href,
+          satis_doc_href,
           registration_phase: String(j.phase || '') || null,
           registration_hint: {
             program_adi: row.program_adi,

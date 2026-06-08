@@ -9,7 +9,9 @@ export async function loadInstitutionLegal(institutionId) {
   try {
     const { data, error } = await supabaseAdmin
       .from('parent_sign_institution_legal')
-      .select('satis_sozlesmesi,kullanici_sozlesmesi,gizlilik_politikasi,kvkk_aydinlatma')
+      .select(
+        'satis_sozlesmesi,kullanici_sozlesmesi,gizlilik_politikasi,kvkk_aydinlatma,kvkk_doc_url,satis_doc_url'
+      )
       .eq('institution_id', id)
       .maybeSingle();
     if (error) {

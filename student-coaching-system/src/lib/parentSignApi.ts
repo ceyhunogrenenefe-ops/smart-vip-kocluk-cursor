@@ -49,6 +49,8 @@ export type ParentSignInstitutionLegal = {
   kullanici_sozlesmesi: string;
   gizlilik_politikasi: string;
   kvkk_aydinlatma: string;
+  kvkk_doc_url?: string;
+  satis_doc_url?: string;
   updated_at?: string;
 };
 
@@ -222,16 +224,20 @@ export async function fetchParentSignInstitutionLegal(institutionId: string): Pr
     satis_sozlesmesi: String(d?.satis_sozlesmesi || ''),
     kullanici_sozlesmesi: String(d?.kullanici_sozlesmesi || ''),
     gizlilik_politikasi: String(d?.gizlilik_politikasi || ''),
-    kvkk_aydinlatma: String(d?.kvkk_aydinlatma || '')
+    kvkk_aydinlatma: String(d?.kvkk_aydinlatma || ''),
+    kvkk_doc_url: String(d?.kvkk_doc_url || ''),
+    satis_doc_url: String(d?.satis_doc_url || '')
   };
 }
 
 export async function saveParentSignInstitutionLegal(body: {
   institution_id?: string;
-  satis_sozlesmesi: string;
-  kullanici_sozlesmesi: string;
-  gizlilik_politikasi: string;
-  kvkk_aydinlatma: string;
+  satis_sozlesmesi?: string;
+  kullanici_sozlesmesi?: string;
+  gizlilik_politikasi?: string;
+  kvkk_aydinlatma?: string;
+  kvkk_doc_url?: string;
+  satis_doc_url?: string;
 }): Promise<ParentSignInstitutionLegal> {
   const res = await apiFetch('/api/parent-sign-legal', {
     method: 'PATCH',
@@ -418,6 +424,8 @@ export type VeliImzaPayload = {
   awaiting_admin_price?: boolean;
   registration_phase?: string | null;
   registration_hint?: VeliImzaRegistrationHint;
+  kvkk_doc_href?: string;
+  satis_doc_href?: string;
 };
 
 export async function fetchVeliImzaPayload(token: string): Promise<VeliImzaPayload> {

@@ -4,7 +4,10 @@ import { CLASS_LEVELS } from '../types';
 import { VELI_KAYIT_PROGRAM_SECENEKLERI } from '../lib/veliKayitConstants';
 import {
   VELI_KAYIT_KVKK_DOC_HREF,
-  VELI_KAYIT_SATIS_ONBILGI_DOC_HREF
+  VELI_KAYIT_SATIS_ONBILGI_DOC_HREF,
+  absoluteVeliLegalDocUrl,
+  resolveKvkkDocUrl,
+  resolveSatisDocUrl
 } from '../lib/veliKayitLegalLinks';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
@@ -21,6 +24,8 @@ import {
   listParentSignClassPresets,
   listParentSignContracts,
   listParentSignFillCandidates,
+  fetchParentSignInstitutionLegal,
+  saveParentSignInstitutionLegal,
   splitAdSoyad,
   suggestHoursAndFeeFromSinif,
   updateParentSignClassPreset,
@@ -315,13 +320,6 @@ function buildPresetShareUrl(presetId: string): string {
   return path;
 }
 
-function buildAppDocUrl(path: string): string {
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    return `${window.location.origin}${path}`;
-  }
-  return path;
-}
-
 export default function ParentSignFlowPage() {
   const [searchParams] = useSearchParams();
   const { effectiveUser } = useAuth();
@@ -413,6 +411,20 @@ export default function ParentSignFlowPage() {
   /** `contractId:suffix` — taksit / hesap oluşturma */
   const [parentSignRowBusy, setParentSignRowBusy] = useState<string | null>(null);
 
+  const [legalKvkkUrl, setLegalKvkkUrl] = useState('');
+  const [legalSatisUrl, setLegalSatisUrl] = useState('');
+  const [legalLoading, setLegalLoading] = useState(false);
+  const [legalSaving, setLegalSaving] = useState(false);
+
+  const kvkkDocHref = useMemo(
+    () => resolveKvkkDocUrl(legalKvkkUrl),
+    [legalKvkkUrl]
+  );
+  const satisDocHref = useMemo(
+    () => resolveSatisDocUrl(legalSatisUrl),
+    [legalSatisUrl]
+  );
+
   useEffect(() => {
     if (ogrenciOnceKayitFormu) return;
     const n = Math.max(1, Math.min(48, Math.round(taksitSayisi) || 1));
@@ -486,6 +498,49 @@ export default function ParentSignFlowPage() {
   useEffect(() => {
     void loadPresets();
   }, [loadPresets]);
+
+  const loadInstitutionLegal = useCallback(async () => {
+    if (!effectiveInstitutionId) {
+      setLegalKvkkUrl('');
+      setLegalSatisUrl('');
+      return;
+    }
+    setLegalLoading(true);
+    try {
+      const row = await fetchParentSignInstitutionLegal(effectiveInstitutionId);
+      setLegalKvkkUrl(row.kvkk_doc_url || '');
+      setLegalSatisUrl(row.satis_doc_url || '');
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Metin linkleri yüklenemedi');
+    } finally {
+      setLegalLoading(false);
+    }
+  }, [effectiveInstitutionId]);
+
+  useEffect(() => {
+    void loadInstitutionLegal();
+  }, [loadInstitutionLegal]);
+
+  const saveInstitutionLegalLinks = async () => {
+    if (!effectiveInstitutionId) {
+      setMsg('Kurum seçin.');
+      return;
+    }
+    setLegalSaving(true);
+    setMsg(null);
+    try {
+      await saveParentSignInstitutionLegal({
+        institution_id: effectiveInstitutionId,
+        kvkk_doc_url: legalKvkkUrl.trim(),
+        satis_doc_url: legalSatisUrl.trim()
+      });
+      setMsg('KVKK ve satış metni linkleri kaydedildi — veli kayıt formunda bu adresler kullanılır.');
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Linkler kaydedilemedi');
+    } finally {
+      setLegalSaving(false);
+    }
+  };
 
   useEffect(() => {
     const pid = searchParams.get('preset')?.trim();
@@ -1081,39 +1136,99 @@ export default function ParentSignFlowPage() {
         ) : null}
 
         <section className="rounded-2xl border border-violet-200 bg-white p-5 shadow-sm dark:border-violet-900 dark:bg-slate-900">
-          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-1">Sözleşme metinleri</h2>
+          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-1">KVKK ve satış metni linkleri</h2>
           <p className="text-xs text-slate-500 mb-4">
-            Veli kayıt formunda satış sözleşmesi ve KVKK metinleri otomatik gelir. Metin linklerini veliye veya ekibe
-            kopyalayabilirsiniz.
+            Veli kayıt formundaki mavi bağlantılar buradan gelir. Harici PDF veya web sayfası için tam adres yapıştırın
+            (ör. <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">https://…</code>). Boş bırakırsanız site
+            içi varsayılan sayfa kullanılır; gövde metnini kodda{' '}
+            <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">veliKayitLegalDocs.tsx</code> dosyasından
+            düzenleyebilirsiniz.
           </p>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() =>
-                void copyText(buildAppDocUrl(VELI_KAYIT_SATIS_ONBILGI_DOC_HREF), 'Satış / ön bilgilendirme linki kopyalandı.')
-              }
-              className="inline-flex items-center gap-2 rounded-xl border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-900 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-100"
-            >
-              <Copy className="w-4 h-4" />
-              Satış sözleşmesi linki
-            </button>
-            <button
-              type="button"
-              onClick={() => void copyText(buildAppDocUrl(VELI_KAYIT_KVKK_DOC_HREF), 'KVKK linki kopyalandı.')}
-              className="inline-flex items-center gap-2 rounded-xl border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-900 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-100"
-            >
-              <Copy className="w-4 h-4" />
-              KVKK linki
-            </button>
-            <a
-              href={VELI_KAYIT_SATIS_ONBILGI_DOC_HREF}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold text-violet-800 underline dark:text-violet-200"
-            >
-              Metni önizle
-            </a>
-          </div>
+          {!effectiveInstitutionId ? (
+            <p className="text-sm text-slate-500">Önce kurum seçin.</p>
+          ) : legalLoading ? (
+            <Loader2 className="w-6 h-6 animate-spin text-violet-600" />
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-slate-500">KVKK metni linki</label>
+                <input
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono dark:bg-slate-950 dark:border-slate-600"
+                  value={legalKvkkUrl}
+                  onChange={(e) => setLegalKvkkUrl(e.target.value)}
+                  placeholder={`Boş = ${VELI_KAYIT_KVKK_DOC_HREF}`}
+                />
+                <p className="mt-0.5 text-[10px] text-slate-400">
+                  Velide açılacak: {kvkkDocHref}
+                </p>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Satış sözleşmesi / ön bilgilendirme linki</label>
+                <input
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono dark:bg-slate-950 dark:border-slate-600"
+                  value={legalSatisUrl}
+                  onChange={(e) => setLegalSatisUrl(e.target.value)}
+                  placeholder={`Boş = ${VELI_KAYIT_SATIS_ONBILGI_DOC_HREF}`}
+                />
+                <p className="mt-0.5 text-[10px] text-slate-400">
+                  Velide açılacak: {satisDocHref}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={legalSaving}
+                  onClick={() => void saveInstitutionLegalLinks()}
+                  className="inline-flex items-center gap-2 rounded-xl bg-violet-700 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-600 disabled:opacity-60"
+                >
+                  {legalSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  Linkleri kaydet
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void copyText(
+                      absoluteVeliLegalDocUrl(legalSatisUrl, VELI_KAYIT_SATIS_ONBILGI_DOC_HREF),
+                      'Satış linki kopyalandı.'
+                    )
+                  }
+                  className="inline-flex items-center gap-2 rounded-xl border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-900 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-100"
+                >
+                  <Copy className="w-4 h-4" />
+                  Satış linkini kopyala
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void copyText(
+                      absoluteVeliLegalDocUrl(legalKvkkUrl, VELI_KAYIT_KVKK_DOC_HREF),
+                      'KVKK linki kopyalandı.'
+                    )
+                  }
+                  className="inline-flex items-center gap-2 rounded-xl border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-900 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-100"
+                >
+                  <Copy className="w-4 h-4" />
+                  KVKK linkini kopyala
+                </button>
+                <a
+                  href={satisDocHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold text-violet-800 underline dark:text-violet-200"
+                >
+                  Satış metnini önizle
+                </a>
+                <a
+                  href={kvkkDocHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold text-violet-800 underline dark:text-violet-200"
+                >
+                  KVKK metnini önizle
+                </a>
+              </div>
+            </div>
+          )}
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">

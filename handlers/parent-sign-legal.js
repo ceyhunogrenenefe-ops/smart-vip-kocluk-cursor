@@ -28,7 +28,9 @@ const EMPTY = {
   satis_sozlesmesi: '',
   kullanici_sozlesmesi: '',
   gizlilik_politikasi: '',
-  kvkk_aydinlatma: ''
+  kvkk_aydinlatma: '',
+  kvkk_doc_url: '',
+  satis_doc_url: ''
 };
 
 export default async function handler(req, res) {
@@ -75,12 +77,38 @@ export default async function handler(req, res) {
 
     if (req.method === 'PATCH' || req.method === 'POST') {
       const body = parseBody(req);
+      const { data: prev } = await supabaseAdmin
+        .from('parent_sign_institution_legal')
+        .select('*')
+        .eq('institution_id', institutionId)
+        .maybeSingle();
+      const base = prev || { institution_id: institutionId, ...EMPTY };
       const row = {
         institution_id: institutionId,
-        satis_sozlesmesi: String(body.satis_sozlesmesi ?? '').trim(),
-        kullanici_sozlesmesi: String(body.kullanici_sozlesmesi ?? '').trim(),
-        gizlilik_politikasi: String(body.gizlilik_politikasi ?? '').trim(),
-        kvkk_aydinlatma: String(body.kvkk_aydinlatma ?? '').trim(),
+        satis_sozlesmesi:
+          body.satis_sozlesmesi !== undefined
+            ? String(body.satis_sozlesmesi ?? '').trim()
+            : String(base.satis_sozlesmesi || '').trim(),
+        kullanici_sozlesmesi:
+          body.kullanici_sozlesmesi !== undefined
+            ? String(body.kullanici_sozlesmesi ?? '').trim()
+            : String(base.kullanici_sozlesmesi || '').trim(),
+        gizlilik_politikasi:
+          body.gizlilik_politikasi !== undefined
+            ? String(body.gizlilik_politikasi ?? '').trim()
+            : String(base.gizlilik_politikasi || '').trim(),
+        kvkk_aydinlatma:
+          body.kvkk_aydinlatma !== undefined
+            ? String(body.kvkk_aydinlatma ?? '').trim()
+            : String(base.kvkk_aydinlatma || '').trim(),
+        kvkk_doc_url:
+          body.kvkk_doc_url !== undefined
+            ? String(body.kvkk_doc_url ?? '').trim().slice(0, 2000)
+            : String(base.kvkk_doc_url || '').trim().slice(0, 2000),
+        satis_doc_url:
+          body.satis_doc_url !== undefined
+            ? String(body.satis_doc_url ?? '').trim().slice(0, 2000)
+            : String(base.satis_doc_url || '').trim().slice(0, 2000),
         updated_at: new Date().toISOString(),
         updated_by: actor.sub || null
       };

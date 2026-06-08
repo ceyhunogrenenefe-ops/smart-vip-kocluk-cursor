@@ -5,7 +5,12 @@ import { downloadParentSignContractPdf } from '../lib/parentSignPdfDownload';
 import { VELI_KAYIT_PROGRAM_SECENEKLERI } from '../lib/veliKayitConstants';
 import { isMaarifVeliProgram } from '../lib/veliKayitClassLevel';
 import { formatUcretWithCurrency } from '../lib/parentSignApi';
-import { VELI_KAYIT_KVKK_DOC_HREF, VELI_KAYIT_SATIS_ONBILGI_DOC_HREF } from '../lib/veliKayitLegalLinks';
+import {
+  VELI_KAYIT_KVKK_DOC_HREF,
+  VELI_KAYIT_SATIS_ONBILGI_DOC_HREF,
+  resolveKvkkDocUrl,
+  resolveSatisDocUrl
+} from '../lib/veliKayitLegalLinks';
 import { CheckCircle2, Download, FileText, Loader2 } from 'lucide-react';
 
 type RegFields = {
@@ -73,6 +78,8 @@ export default function VeliImzaPage() {
   const [rf, setRf] = useState<RegFields>(emptyReg);
   const [regSaving, setRegSaving] = useState(false);
   const [awaitingAdminPrice, setAwaitingAdminPrice] = useState(false);
+  const [kvkkDocHref, setKvkkDocHref] = useState(VELI_KAYIT_KVKK_DOC_HREF);
+  const [satisDocHref, setSatisDocHref] = useState(VELI_KAYIT_SATIS_ONBILGI_DOC_HREF);
 
   const loadPayload = useCallback(async () => {
     if (!token) throw new Error('Geçersiz bağlantı');
@@ -86,6 +93,8 @@ export default function VeliImzaPage() {
     setNeedsStudentForm(Boolean(d.needs_student_form));
     setAwaitingAdminPrice(Boolean(d.awaiting_admin_price));
     setRegHint(d.registration_hint || null);
+    setKvkkDocHref(resolveKvkkDocUrl(d.kvkk_doc_href || VELI_KAYIT_KVKK_DOC_HREF));
+    setSatisDocHref(resolveSatisDocUrl(d.satis_doc_href || VELI_KAYIT_SATIS_ONBILGI_DOC_HREF));
     return d;
   }, [token]);
 
@@ -542,7 +551,7 @@ export default function VeliImzaPage() {
                   />
                   <span className="leading-relaxed">
                     <a
-                      href={VELI_KAYIT_KVKK_DOC_HREF}
+                      href={kvkkDocHref}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="font-semibold text-blue-700 underline decoration-blue-400/70 underline-offset-2 hover:text-blue-900"
@@ -563,7 +572,7 @@ export default function VeliImzaPage() {
                   />
                   <span className="leading-relaxed">
                     <a
-                      href={VELI_KAYIT_SATIS_ONBILGI_DOC_HREF}
+                      href={satisDocHref}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="font-semibold text-blue-700 underline decoration-blue-400/70 underline-offset-2 hover:text-blue-900"
