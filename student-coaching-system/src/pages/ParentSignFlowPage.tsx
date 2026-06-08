@@ -1,5 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { CLASS_LEVELS } from '../types';
+import { VELI_KAYIT_PROGRAM_SECENEKLERI } from '../lib/veliKayitConstants';
+import {
+  VELI_KAYIT_KVKK_DOC_HREF,
+  VELI_KAYIT_SATIS_ONBILGI_DOC_HREF
+} from '../lib/veliKayitLegalLinks';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { isMaarifVeliProgram, resolveSinifFromVeliKayit } from '../lib/veliKayitClassLevel';
@@ -15,10 +21,8 @@ import {
   listParentSignClassPresets,
   listParentSignContracts,
   listParentSignFillCandidates,
-  parseDersSatirlariFromPreset,
   splitAdSoyad,
   suggestHoursAndFeeFromSinif,
-  sumDersSatirlari,
   updateParentSignClassPreset,
   type DersSatiri,
   type InstitutionPickRow,
@@ -27,8 +31,6 @@ import {
   type SozlesmeTuruKey,
   type StudentFillRow,
   type UserStudentFillRow,
-  fetchParentSignInstitutionLegal,
-  saveParentSignInstitutionLegal,
   PARA_BIRIMI_OPTIONS,
   formatParaBirimiLabel,
   formatUcretWithCurrency,
@@ -62,36 +64,6 @@ function todayPlus(days: number) {
   const d = new Date();
   d.setDate(d.getDate() + days);
   return d.toISOString().slice(0, 10);
-}
-
-function uniquePrograms(presets: ParentSignClassPresetRow[]): string[] {
-  const s = new Set<string>();
-  for (const p of presets) {
-    const n = String(p.program_adi || '').trim();
-    if (n) s.add(n);
-  }
-  return [...s].sort((a, b) => a.localeCompare(b, 'tr'));
-}
-
-function turKisaEtiket(t?: string) {
-  if (t === 'kullanici_sozlesmesi') return 'Kullanıcı';
-  if (t === 'diger') return 'Diğer';
-  return 'Satış';
-}
-
-function presetDersOzeti(p: ParentSignClassPresetRow): string {
-  const rows = parseDersSatirlariFromPreset(p).filter((r) => r.ders_adi.trim());
-  if (!rows.length) return '';
-  return rows.map((r) => `${r.ders_adi} ${r.haftalik_saat}s`).join(', ');
-}
-
-function validDersRows(rows: DersSatiri[]): DersSatiri[] {
-  return rows
-    .map((r) => ({
-      ders_adi: String(r.ders_adi || '').trim().slice(0, 120),
-      haftalik_saat: Math.min(40, Math.max(0.25, Number(r.haftalik_saat) || 0))
-    }))
-    .filter((r) => r.ders_adi.length > 0 && r.haftalik_saat > 0);
 }
 
 /** Liste / UI: imzalı kabul (status veya signed_at) */
@@ -335,10 +307,23 @@ function buildVeliSignedUserManagementPrefillUrl(r: ParentSignContractRow, origi
   return `${base}/user-management?${q.toString()}`;
 }
 
-/** Tarayıcıda saklanan ek program isimleri (şablonda olmasa da seçicide listelenir) */
-const LS_EXTRA_PROGRAM_NAMES = 'veli_onay_extra_program_names_v1';
+function buildPresetShareUrl(presetId: string): string {
+  const path = `/veli-onay?preset=${encodeURIComponent(presetId)}`;
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return `${window.location.origin}${path}`;
+  }
+  return path;
+}
+
+function buildAppDocUrl(path: string): string {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return `${window.location.origin}${path}`;
+  }
+  return path;
+}
 
 export default function ParentSignFlowPage() {
+  const [searchParams] = useSearchParams();
   const { effectiveUser } = useAuth();
   const { activeInstitutionId, institution } = useApp();
   const isSuper = effectiveUser?.role === 'super_admin';
@@ -377,33 +362,15 @@ export default function ParentSignFlowPage() {
   const [telefon, setTelefon] = useState('');
   const [adres, setAdres] = useState('');
   const [sinif, setSinif] = useState('');
-  const [selectedPresetId, setSelectedPresetId] = useState('');
-  const [programSource, setProgramSource] = useState<'list' | 'custom'>('custom');
-  const [programSelectValue, setProgramSelectValue] = useState('');
-  const [programCustom, setProgramCustom] = useState('');
-  const [haftalikDersSaati, setHaftalikDersSaati] = useState<number>(6);
-  const [ucret, setUcret] = useState<number>(25000);
-  const [paraBirimi, setParaBirimi] = useState<ParaBirimi>('TRY');
-  const [taksitSayisi, setTaksitSayisi] = useState<number>(1);
-  const [taksitVadeleri, setTaksitVadeleri] = useState<string[]>([]);
-  const [taksitTutarlari, setTaksitTutarlari] = useState<number[]>([]);
+  const [selectedPresetIds, setSelectedPresetIds] = useState<string[]>([]);
+  const [veliProgramCustom, setVeliProgramCustom] = useState('');
   const [priceDrafts, setPriceDrafts] = useState<Record<string, PriceSetupDraft>>({});
   const [lastCreatedLink, setLastCreatedLink] = useState<string | null>(null);
-  const [legalSatis, setLegalSatis] = useState('');
-  const [legalKullanici, setLegalKullanici] = useState('');
-  const [legalGizlilik, setLegalGizlilik] = useState('');
-  const [legalKvkk, setLegalKvkk] = useState('');
-  const [legalLoading, setLegalLoading] = useState(false);
-  const [legalSaving, setLegalSaving] = useState(false);
   const [baslangic, setBaslangic] = useState(todayPlus(0));
   const [bitis, setBitis] = useState(todayPlus(365));
 
   const [presetSinif, setPresetSinif] = useState('');
   const [presetProgram, setPresetProgram] = useState('');
-  const [presetDersler, setPresetDersler] = useState<DersSatiri[]>([{ ders_adi: '', haftalik_saat: 2 }]);
-  const [presetSozlesmeTuru, setPresetSozlesmeTuru] = useState<SozlesmeTuruKey>('satis_sozlesmesi');
-  const [presetOzelBaslik, setPresetOzelBaslik] = useState('');
-  const [presetEkDetay, setPresetEkDetay] = useState('');
   const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
 
   const [fillStudents, setFillStudents] = useState<StudentFillRow[]>([]);
@@ -411,13 +378,6 @@ export default function ParentSignFlowPage() {
   const [loadingFillStudents, setLoadingFillStudents] = useState(false);
   /** '' | s:studentRowId | u:userId */
   const [fillPick, setFillPick] = useState('');
-  const [sozlesmeTuru, setSozlesmeTuru] = useState<SozlesmeTuruKey>('satis_sozlesmesi');
-  const [sozlesmeBasligiOverride, setSozlesmeBasligiOverride] = useState('');
-  const [contractEkSatirlar, setContractEkSatirlar] = useState('');
-  /** Veli kaydı: şablondan kopyalanır veya elle düzenlenir; doluysa APIye gönderilir */
-  const [contractDersler, setContractDersler] = useState<DersSatiri[]>([]);
-  /** Veli linkinde önce kayıt formu; kurumda öğrenci/veli adı boş bırakılabilir */
-  const [ogrenciOnceKayitFormu, setOgrenciOnceKayitFormu] = useState(false);
 
   const [editOpen, setEditOpen] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
@@ -432,16 +392,11 @@ export default function ParentSignFlowPage() {
   const [editProgramAdi, setEditProgramAdi] = useState('');
   const [editBaslangic, setEditBaslangic] = useState('');
   const [editBitis, setEditBitis] = useState('');
-  const [editHaftalikDersSaati, setEditHaftalikDersSaati] = useState(6);
   const [editUcret, setEditUcret] = useState(0);
   const [editParaBirimi, setEditParaBirimi] = useState<ParaBirimi>('TRY');
   const [editTaksitSayisi, setEditTaksitSayisi] = useState(1);
   const [editTaksitVadeleri, setEditTaksitVadeleri] = useState<string[]>([]);
   const [editTaksitTutarlari, setEditTaksitTutarlari] = useState<number[]>([]);
-  const [editSozlesmeTuru, setEditSozlesmeTuru] = useState<SozlesmeTuruKey>('satis_sozlesmesi');
-  const [editSozlesmeBasligi, setEditSozlesmeBasligi] = useState('');
-  const [editEkSatirlar, setEditEkSatirlar] = useState('');
-  const [editContractDersler, setEditContractDersler] = useState<DersSatiri[]>([]);
   /** Doğrudan HTML düzenleme (koç/admin/süper admin; yalnız imza öncesi) */
   const [editCustomHtmlMode, setEditCustomHtmlMode] = useState(false);
   const [editMergedHtml, setEditMergedHtml] = useState('');
@@ -449,28 +404,6 @@ export default function ParentSignFlowPage() {
   const [pdfRowId, setPdfRowId] = useState<string | null>(null);
   /** `contractId:suffix` — taksit / hesap oluşturma */
   const [parentSignRowBusy, setParentSignRowBusy] = useState<string | null>(null);
-
-  const [extraProgramLines, setExtraProgramLines] = useState('');
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LS_EXTRA_PROGRAM_NAMES);
-      if (typeof raw === 'string') setExtraProgramLines(raw);
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  useEffect(() => {
-    const n = Math.max(1, Math.min(48, Math.round(taksitSayisi) || 1));
-    if (n <= 1) {
-      setTaksitVadeleri([]);
-      setTaksitTutarlari([]);
-      return;
-    }
-    setTaksitVadeleri((prev) => resizeTaksitVadeleri(prev, baslangic, n));
-    setTaksitTutarlari((prev) => resizeTaksitTutarlari(prev, ucret, n));
-  }, [taksitSayisi, baslangic, ucret]);
 
   useEffect(() => {
     if (!editOpen) return;
@@ -498,27 +431,6 @@ export default function ParentSignFlowPage() {
       return changed ? next : prev;
     });
   }, [rows]);
-
-  const programs = useMemo(() => {
-    const fromPresets = uniquePrograms(presets);
-    const fromLines = extraProgramLines
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0);
-    const s = new Set<string>([...fromPresets, ...fromLines]);
-    return [...s].sort((a, b) => a.localeCompare(b, 'tr'));
-  }, [presets, extraProgramLines]);
-
-  const saveExtraProgramNames = () => {
-    try {
-      localStorage.setItem(LS_EXTRA_PROGRAM_NAMES, extraProgramLines);
-      setMsg(
-        'Ek program isimleri bu tarayıcıda kaydedildi. Aşağıdaki «Program adı» açılır listesinde her satır bir seçenek olarak görünür.'
-      );
-    } catch {
-      setMsg('Program listesi kaydedilemedi.');
-    }
-  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -555,54 +467,18 @@ export default function ParentSignFlowPage() {
     void loadPresets();
   }, [loadPresets]);
 
-  const loadInstitutionLegal = useCallback(async () => {
-    if (!effectiveInstitutionId) {
-      setLegalSatis('');
-      setLegalKullanici('');
-      setLegalGizlilik('');
-      setLegalKvkk('');
-      return;
-    }
-    setLegalLoading(true);
-    try {
-      const row = await fetchParentSignInstitutionLegal(effectiveInstitutionId);
-      setLegalSatis(row.satis_sozlesmesi || '');
-      setLegalKullanici(row.kullanici_sozlesmesi || '');
-      setLegalGizlilik(row.gizlilik_politikasi || '');
-      setLegalKvkk(row.kvkk_aydinlatma || '');
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : 'Kurum metinleri yüklenemedi');
-    } finally {
-      setLegalLoading(false);
-    }
-  }, [effectiveInstitutionId]);
-
   useEffect(() => {
-    void loadInstitutionLegal();
-  }, [loadInstitutionLegal]);
-
-  const saveInstitutionLegal = async () => {
-    if (!effectiveInstitutionId) {
-      setMsg('Kurum seçin.');
-      return;
-    }
-    setLegalSaving(true);
-    setMsg(null);
-    try {
-      await saveParentSignInstitutionLegal({
-        institution_id: effectiveInstitutionId,
-        satis_sozlesmesi: legalSatis.trim(),
-        kullanici_sozlesmesi: legalKullanici.trim(),
-        gizlilik_politikasi: legalGizlilik.trim(),
-        kvkk_aydinlatma: legalKvkk.trim()
-      });
-      setMsg('Kurum sözleşme metinleri kaydedildi — yeni veli kayıtlarında otomatik kullanılır.');
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : 'Metinler kaydedilemedi');
-    } finally {
-      setLegalSaving(false);
-    }
-  };
+    const pid = searchParams.get('preset')?.trim();
+    if (!pid || !presets.length) return;
+    const p = presets.find((x) => x.id === pid);
+    if (!p) return;
+    setSelectedPresetIds((prev) => (prev.includes(pid) ? prev : [pid]));
+    setSinif((prev) => {
+      if (prev.trim()) return prev;
+      if (isMaarifVeliProgram(p.program_adi)) return 'TYT-Maarif';
+      return p.sinif;
+    });
+  }, [presets, searchParams]);
 
   const copyText = async (text: string, okMsg?: string) => {
     if (!text) return;
@@ -642,17 +518,6 @@ export default function ParentSignFlowPage() {
   }, [effectiveInstitutionId]);
 
   useEffect(() => {
-    const vd = validDersRows(contractDersler);
-    if (vd.length) setHaftalikDersSaati(sumDersSatirlari(vd));
-  }, [contractDersler]);
-
-  useEffect(() => {
-    if (!editOpen) return;
-    const vd = validDersRows(editContractDersler);
-    if (vd.length) setEditHaftalikDersSaati(sumDersSatirlari(vd));
-  }, [editOpen, editContractDersler]);
-
-  useEffect(() => {
     if (!isSuper) {
       setInstitutionOptions([]);
       return;
@@ -682,35 +547,26 @@ export default function ParentSignFlowPage() {
     setInstitutionId(activeInstitutionId);
   }, [isSuper, activeInstitutionId, institutionId, institutionOptions]);
 
-  const applyPresetToForm = (p: ParentSignClassPresetRow) => {
-    setSinif(p.sinif);
-    setProgramSource('list');
-    setProgramSelectValue(p.program_adi);
-    setProgramCustom('');
-    const rows = parseDersSatirlariFromPreset(p);
-    setContractDersler(rows.map((r) => ({ ...r })));
-    const vd = validDersRows(rows);
-    setHaftalikDersSaati(vd.length ? sumDersSatirlari(vd) : Number(p.haftalik_ders_saati) || 0);
-    const tur = (p.sozlesme_turu || 'satis_sozlesmesi') as SozlesmeTuruKey;
-    setSozlesmeTuru(['kullanici_sozlesmesi', 'satis_sozlesmesi', 'diger'].includes(tur) ? tur : 'satis_sozlesmesi');
-    setSozlesmeBasligiOverride('');
-  };
-
-  const applySuggestFromSinif = () => {
-    const { hours, fee } = suggestHoursAndFeeFromSinif(sinif);
-    setHaftalikDersSaati(hours);
-    setUcret(fee);
-  };
-
-  const applyEditSuggestFromSinif = () => {
-    const { hours, fee } = suggestHoursAndFeeFromSinif(editSinif);
-    setEditHaftalikDersSaati(hours);
-    setEditUcret(fee);
+  const togglePresetSelection = (id: string) => {
+    setSelectedPresetIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      const added = presets.find((p) => p.id === id);
+      if (added && !prev.includes(id)) {
+        if (isMaarifVeliProgram(added.program_adi)) setSinif('TYT-Maarif');
+        else setSinif((s) => (s.trim() ? s : added.sinif));
+      }
+      return next;
+    });
   };
 
   const resolvedProgramAdi = () => {
-    if (programSource === 'custom') return programCustom.trim();
-    return programSelectValue.trim();
+    const fromPresets = selectedPresetIds
+      .map((id) => presets.find((p) => p.id === id)?.program_adi?.trim())
+      .filter((n): n is string => Boolean(n));
+    const custom = veliProgramCustom.trim();
+    const names = [...fromPresets];
+    if (custom && !names.includes(custom)) names.push(custom);
+    return names.join(' + ');
   };
 
   const submit = async () => {
@@ -730,20 +586,12 @@ export default function ParentSignFlowPage() {
     }
     const sinifOut =
       resolveSinifFromVeliKayit(program_adi, sinif.trim()) || sinif.trim();
-    if (!ogrenciOnceKayitFormu) {
-      if (!ogrenciAd.trim() || !ogrenciSoyad.trim() || !veliAd.trim() || !veliSoyad.trim() || !telefon.trim()) {
-        setMsg(
-          'Öğrenci, veli ve telefon alanları zorunludur — ya da «Önce veli kayıt formunu doldursun» seçeneğini işaretleyin.'
-        );
-        return;
-      }
-    } else if (!sinifOut) {
-      setMsg('Sınıf alanı zorunludur (veli formunda varsayılan olarak gösterilir).');
+    if (!sinifOut) {
+      setMsg('Sınıf seçin.');
       return;
     }
     try {
-      const vd = validDersRows(contractDersler);
-      const haftalikOut = vd.length ? sumDersSatirlari(vd) : haftalikDersSaati;
+      const primaryPresetId = selectedPresetIds[0]?.trim() || '';
       const body = {
         ogrenci_ad: ogrenciAd.trim(),
         ogrenci_soyad: ogrenciSoyad.trim(),
@@ -755,20 +603,15 @@ export default function ParentSignFlowPage() {
         program_adi,
         baslangic_tarihi: baslangic,
         bitis_tarihi: bitis,
-        haftalik_ders_saati: haftalikOut,
-        ucret,
-        para_birimi: paraBirimi,
-        taksit_sayisi: taksitSayisi,
-        sozlesme_turu: sozlesmeTuru,
-        ...(vd.length ? { ders_satirlari: vd } : {}),
-        ...(sozlesmeBasligiOverride.trim() ? { sozlesme_basligi: sozlesmeBasligiOverride.trim() } : {}),
-        ...(contractEkSatirlar.trim() ? { sablon_ek_detay_snapshot: contractEkSatirlar.trim() } : {}),
-        ...(selectedPresetId.trim() ? { preset_id: selectedPresetId.trim() } : {}),
+        haftalik_ders_saati: 0,
+        ucret: 0,
+        para_birimi: 'TRY' as ParaBirimi,
+        taksit_sayisi: 1,
+        sozlesme_turu: 'satis_sozlesmesi' as SozlesmeTuruKey,
+        ...(primaryPresetId ? { preset_id: primaryPresetId } : {}),
         ...(fillPick.startsWith('s:') ? { student_id: fillPick.slice(2) } : {}),
         ...(fillPick.startsWith('u:') ? { ogrenci_user_id: fillPick.slice(2) } : {}),
-        ...(ogrenciOnceKayitFormu ? { registration_student_form: true } : {}),
-        ...(taksitSayisi > 1 && taksitVadeleri.length > 0 ? { taksit_vadeleri: taksitVadeleri } : {}),
-        ...(taksitSayisi > 1 && taksitTutarlari.length > 0 ? { taksit_tutarlari: taksitTutarlari } : {}),
+        registration_student_form: true,
         institution_id: effectiveInstitutionId
       };
       const created = await createParentSignContract(body);
@@ -805,19 +648,14 @@ export default function ParentSignFlowPage() {
       setMsg('Şablon için sınıf ve program adı zorunlu.');
       return;
     }
-    const dersOk = validDersRows(presetDersler);
-    if (!dersOk.length) {
-      setMsg('En az bir ders satırı girin (ders adı ve haftalık saat > 0).');
-      return;
-    }
     try {
       const base = {
         sinif: sinifT,
         program_adi: progT,
-        ders_satirlari: dersOk,
-        sozlesme_turu: presetSozlesmeTuru,
-        sozlesme_ozel_baslik: presetOzelBaslik.trim(),
-        sablon_ek_detay: presetEkDetay.trim()
+        ders_satirlari: [] as DersSatiri[],
+        sozlesme_turu: 'satis_sozlesmesi' as SozlesmeTuruKey,
+        sozlesme_ozel_baslik: '',
+        sablon_ek_detay: ''
       };
       if (editingPresetId) {
         await updateParentSignClassPreset({ id: editingPresetId, ...base });
@@ -832,10 +670,6 @@ export default function ParentSignFlowPage() {
       setEditingPresetId(null);
       setPresetSinif('');
       setPresetProgram('');
-      setPresetDersler([{ ders_adi: '', haftalik_saat: 2 }]);
-      setPresetSozlesmeTuru('satis_sozlesmesi');
-      setPresetOzelBaslik('');
-      setPresetEkDetay('');
       void loadPresets();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Şablon kaydedilemedi');
@@ -846,21 +680,12 @@ export default function ParentSignFlowPage() {
     setEditingPresetId(p.id);
     setPresetSinif(p.sinif);
     setPresetProgram(p.program_adi);
-    setPresetDersler(parseDersSatirlariFromPreset(p));
-    const tur = (p.sozlesme_turu || 'satis_sozlesmesi') as SozlesmeTuruKey;
-    setPresetSozlesmeTuru(['kullanici_sozlesmesi', 'satis_sozlesmesi', 'diger'].includes(tur) ? tur : 'satis_sozlesmesi');
-    setPresetOzelBaslik(String(p.sozlesme_ozel_baslik || ''));
-    setPresetEkDetay(String(p.sablon_ek_detay || ''));
   };
 
   const cancelEditPreset = () => {
     setEditingPresetId(null);
     setPresetSinif('');
     setPresetProgram('');
-    setPresetDersler([{ ders_adi: '', haftalik_saat: 2 }]);
-    setPresetSozlesmeTuru('satis_sozlesmesi');
-    setPresetOzelBaslik('');
-    setPresetEkDetay('');
   };
 
   const removeContractRow = async (id: string) => {
@@ -1028,7 +853,6 @@ export default function ParentSignFlowPage() {
     setEditProgramAdi(String(r.program_adi || ''));
     setEditBaslangic(String(r.baslangic_tarihi || '').slice(0, 10));
     setEditBitis(String(r.bitis_tarihi || '').slice(0, 10));
-    setEditHaftalikDersSaati(Number(r.haftalik_ders_saati) || 0);
     setEditUcret(Number(r.ucret) || 0);
     setEditParaBirimi((String(r.para_birimi || 'TRY').toUpperCase() as ParaBirimi) || 'TRY');
     setEditTaksitSayisi(Number(r.taksit_sayisi) || 1);
@@ -1059,22 +883,6 @@ export default function ParentSignFlowPage() {
       setEditTaksitVadeleri([]);
       setEditTaksitTutarlari([]);
     }
-    const tur = (r.sozlesme_turu || 'satis_sozlesmesi') as SozlesmeTuruKey;
-    setEditSozlesmeTuru(['kullanici_sozlesmesi', 'satis_sozlesmesi', 'diger'].includes(tur) ? tur : 'satis_sozlesmesi');
-    setEditSozlesmeBasligi(String(r.sozlesme_basligi || ''));
-    setEditEkSatirlar(String(r.sablon_ek_detay_snapshot || ''));
-    const parsed = parseDersSatirlariFromPreset({
-      id: '',
-      institution_id: '',
-      sinif: r.sinif,
-      program_adi: r.program_adi,
-      haftalik_ders_saati: r.haftalik_ders_saati,
-      ders_satirlari: r.ders_programi_snapshot,
-      created_at: '',
-      updated_at: ''
-    } as ParentSignClassPresetRow);
-    const ev = validDersRows(parsed);
-    setEditContractDersler(ev.length ? ev.map((x) => ({ ...x })) : []);
     setEditCustomHtmlMode(false);
     setEditMergedHtml(String(r.merged_html || ''));
     setEditOpen(true);
@@ -1097,8 +905,6 @@ export default function ParentSignFlowPage() {
     setEditSaving(true);
     setMsg(null);
     try {
-      const vd = validDersRows(editContractDersler);
-      const haftalikOut = vd.length ? sumDersSatirlari(vd) : editHaftalikDersSaati;
       await updateParentSignContract({
         id: editId,
         ogrenci_ad: editOgrenciAd.trim(),
@@ -1111,14 +917,12 @@ export default function ParentSignFlowPage() {
         program_adi: editProgramAdi.trim(),
         baslangic_tarihi: editBaslangic,
         bitis_tarihi: editBitis,
-        haftalik_ders_saati: haftalikOut,
+        haftalik_ders_saati: 0,
         ucret: editUcret,
         para_birimi: editParaBirimi,
         taksit_sayisi: editTaksitSayisi,
-        sozlesme_turu: editSozlesmeTuru,
-        sozlesme_basligi: editSozlesmeBasligi.trim(),
-        sablon_ek_detay_snapshot: editEkSatirlar.trim(),
-        ders_satirlari: vd,
+        sozlesme_turu: 'satis_sozlesmesi',
+        ders_satirlari: [],
         ...(editCustomHtmlMode ? { custom_merged_html: editMergedHtml.trim() } : {}),
         ...(editTaksitSayisi > 1 && editTaksitVadeleri.length > 0 ? { taksit_vadeleri: editTaksitVadeleri } : {}),
         ...(editTaksitSayisi > 1 && editTaksitTutarlari.length > 0 ? { taksit_tutarlari: editTaksitTutarlari } : {})
@@ -1235,67 +1039,39 @@ export default function ParentSignFlowPage() {
         ) : null}
 
         <section className="rounded-2xl border border-violet-200 bg-white p-5 shadow-sm dark:border-violet-900 dark:bg-slate-900">
-          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-1">Kurum sözleşme metinleri (bir kez)</h2>
+          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-1">Sözleşme metinleri</h2>
           <p className="text-xs text-slate-500 mb-4">
-            Satış sözleşmesi, kullanıcı sözleşmesi, gizlilik ve KVKK metinlerini <strong>kurum başına bir kez</strong> kaydedin.
-            Her yeni veli kaydında otomatik eklenir; kayıt formunda tekrar yazmanız gerekmez.
+            Veli kayıt formunda satış sözleşmesi ve KVKK metinleri otomatik gelir. Metin linklerini veliye veya ekibe
+            kopyalayabilirsiniz.
           </p>
-          {!effectiveInstitutionId ? (
-            <p className="text-sm text-slate-500">Önce kurum seçin.</p>
-          ) : legalLoading ? (
-            <Loader2 className="w-6 h-6 animate-spin text-violet-600" />
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="sm:col-span-2">
-                <label className="text-xs text-slate-500">Satış sözleşmesi metni</label>
-                <textarea
-                  rows={5}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono dark:bg-slate-950 dark:border-slate-600"
-                  value={legalSatis}
-                  onChange={(e) => setLegalSatis(e.target.value)}
-                  placeholder="Mesafeli satış, ücret, cayma hakkı…"
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <label className="text-xs text-slate-500">Kullanıcı / üyelik sözleşmesi</label>
-                <textarea
-                  rows={4}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono dark:bg-slate-950 dark:border-slate-600"
-                  value={legalKullanici}
-                  onChange={(e) => setLegalKullanici(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500">Gizlilik politikası</label>
-                <textarea
-                  rows={4}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono dark:bg-slate-950 dark:border-slate-600"
-                  value={legalGizlilik}
-                  onChange={(e) => setLegalGizlilik(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500">KVKK aydınlatma metni</label>
-                <textarea
-                  rows={4}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono dark:bg-slate-950 dark:border-slate-600"
-                  value={legalKvkk}
-                  onChange={(e) => setLegalKvkk(e.target.value)}
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <button
-                  type="button"
-                  disabled={legalSaving}
-                  onClick={() => void saveInstitutionLegal()}
-                  className="inline-flex items-center gap-2 rounded-xl bg-violet-700 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-600 disabled:opacity-60"
-                >
-                  {legalSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                  Kurum metinlerini kaydet
-                </button>
-              </div>
-            </div>
-          )}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                void copyText(buildAppDocUrl(VELI_KAYIT_SATIS_ONBILGI_DOC_HREF), 'Satış / ön bilgilendirme linki kopyalandı.')
+              }
+              className="inline-flex items-center gap-2 rounded-xl border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-900 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-100"
+            >
+              <Copy className="w-4 h-4" />
+              Satış sözleşmesi linki
+            </button>
+            <button
+              type="button"
+              onClick={() => void copyText(buildAppDocUrl(VELI_KAYIT_KVKK_DOC_HREF), 'KVKK linki kopyalandı.')}
+              className="inline-flex items-center gap-2 rounded-xl border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-900 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-100"
+            >
+              <Copy className="w-4 h-4" />
+              KVKK linki
+            </button>
+            <a
+              href={VELI_KAYIT_SATIS_ONBILGI_DOC_HREF}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold text-violet-800 underline dark:text-violet-200"
+            >
+              Metni önizle
+            </a>
+          </div>
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
@@ -1304,10 +1080,8 @@ export default function ParentSignFlowPage() {
             Sınıf &amp; sözleşme şablonları
           </h2>
           <p className="text-xs text-slate-500 mb-4">
-            Şablonda <strong>sınıf, program</strong> ve <strong>ders bazlı haftalık saat</strong> tanımlayın (satır ekleyip
-            çıkarabilirsiniz). <strong>Program adı</strong> alanı, <em>Yeni kayıt</em> bölümündeki program açılır listesinde
-            seçenek olarak görünür (aynı adı farklı sınıflarda tekrar kullanabilirsiniz). Ücret ve taksit şablonda yok;
-            veli kaydı oluştururken girilir.
+            Sınıf ve program şablonları tanımlayın. Yeni kayıtta birden fazla program seçilebilir; her şablon için link
+            kopyalayarak veli formunu önceden doldurabilirsiniz.
           </p>
           {!isSuper && effectiveInstitutionId ? (
             <p className="text-xs text-emerald-800 dark:text-emerald-200/90 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 rounded-lg px-3 py-2 mb-3">
@@ -1330,16 +1104,14 @@ export default function ParentSignFlowPage() {
                     <tr className="bg-slate-50 dark:bg-slate-800/80 text-left text-xs text-slate-500 uppercase tracking-wide">
                       <th className="px-3 py-2 font-semibold">Sınıf</th>
                       <th className="px-3 py-2 font-semibold">Program</th>
-                      <th className="px-3 py-2 font-semibold w-20">Tür</th>
-                      <th className="px-3 py-2 font-semibold w-16">Toplam saat</th>
-                      <th className="px-3 py-2 font-semibold min-w-[140px]">Dersler</th>
-                      <th className="px-3 py-2 w-24" />
+                      <th className="px-3 py-2 font-semibold min-w-[120px]">Link</th>
+                      <th className="px-3 py-2 w-28" />
                     </tr>
                   </thead>
                   <tbody>
                     {presets.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-3 py-6 text-center text-slate-500">
+                        <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
                           Henüz şablon yok. Aşağıdan ekleyin.
                         </td>
                       </tr>
@@ -1348,10 +1120,17 @@ export default function ParentSignFlowPage() {
                         <tr key={p.id} className="border-t border-slate-100 dark:border-slate-700">
                           <td className="px-3 py-2 font-medium text-slate-800 dark:text-slate-100">{p.sinif}</td>
                           <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{p.program_adi}</td>
-                          <td className="px-3 py-2 text-xs text-slate-600">{turKisaEtiket(p.sozlesme_turu)}</td>
-                          <td className="px-3 py-2 font-medium">{p.haftalik_ders_saati}</td>
-                          <td className="px-3 py-2 text-xs text-slate-600 max-w-[220px] truncate" title={presetDersOzeti(p)}>
-                            {presetDersOzeti(p) || '—'}
+                          <td className="px-3 py-2">
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+                              onClick={() =>
+                                void copyText(buildPresetShareUrl(p.id), 'Şablon linki kopyalandı.')
+                              }
+                            >
+                              <Copy className="w-3 h-3" />
+                              Kopyala
+                            </button>
                           </td>
                           <td className="px-3 py-2">
                             <div className="flex gap-1 justify-end">
@@ -1380,114 +1159,36 @@ export default function ParentSignFlowPage() {
                 </table>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 items-end">
+              <div className="grid gap-3 sm:grid-cols-2 items-end">
                 <div>
                   <label className="text-xs text-slate-500">Sınıf</label>
-                  <input
+                  <select
                     className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
                     value={presetSinif}
                     onChange={(e) => setPresetSinif(e.target.value)}
-                    placeholder="ör. 9 veya TYT"
-                  />
+                  >
+                    <option value="">— Seçin —</option>
+                    {CLASS_LEVELS.map((lvl) => (
+                      <option key={String(lvl.value)} value={String(lvl.value)}>
+                        {lvl.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-                <div className="lg:col-span-2">
+                <div>
                   <label className="text-xs text-slate-500">Program adı</label>
                   <input
                     className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
                     value={presetProgram}
                     onChange={(e) => setPresetProgram(e.target.value)}
                     placeholder="ör. LGS Hazırlık Paketi"
+                    list="veli-preset-program-suggestions"
                   />
-                </div>
-                <div className="sm:col-span-3">
-                  <div className="flex items-center justify-between gap-2 mb-1">
-                    <label className="text-xs text-slate-500 font-semibold">Haftalık dersler (ders adı + saat)</label>
-                    <button
-                      type="button"
-                      className="text-xs font-semibold text-blue-700 hover:underline inline-flex items-center gap-1"
-                      onClick={() => setPresetDersler((prev) => [...prev, { ders_adi: '', haftalik_saat: 2 }])}
-                    >
-                      <Plus className="w-3.5 h-3.5" /> Satır ekle
-                    </button>
-                  </div>
-                  <div className="space-y-2 rounded-lg border border-slate-200 p-3 dark:border-slate-600">
-                    {presetDersler.map((row, idx) => (
-                      <div key={idx} className="flex flex-wrap gap-2 items-end">
-                        <div className="flex-1 min-w-[120px]">
-                          <label className="text-[10px] text-slate-400">Ders</label>
-                          <input
-                            className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm dark:bg-slate-950 dark:border-slate-600"
-                            value={row.ders_adi}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              setPresetDersler((prev) => prev.map((r, i) => (i === idx ? { ...r, ders_adi: v } : r)));
-                            }}
-                            placeholder="ör. Matematik"
-                          />
-                        </div>
-                        <div className="w-24">
-                          <label className="text-[10px] text-slate-400">Saat/hafta</label>
-                          <input
-                            type="number"
-                            min={0.25}
-                            step={0.5}
-                            max={40}
-                            className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm dark:bg-slate-950 dark:border-slate-600"
-                            value={row.haftalik_saat}
-                            onChange={(e) => {
-                              const v = Number(e.target.value);
-                              setPresetDersler((prev) =>
-                                prev.map((r, i) => (i === idx ? { ...r, haftalik_saat: v } : r))
-                              );
-                            }}
-                          />
-                        </div>
-                        <button
-                          type="button"
-                          disabled={presetDersler.length <= 1}
-                          className="mb-0.5 p-2 rounded-lg text-red-600 hover:bg-red-50 disabled:opacity-30 dark:hover:bg-red-950/30"
-                          title="Satırı sil"
-                          onClick={() => setPresetDersler((prev) => prev.filter((_, i) => i !== idx))}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
+                  <datalist id="veli-preset-program-suggestions">
+                    {VELI_KAYIT_PROGRAM_SECENEKLERI.map((name) => (
+                      <option key={name} value={name} />
                     ))}
-                  </div>
-                  <p className="mt-1 text-[11px] text-slate-500">
-                    Toplam: <strong>{sumDersSatirlari(validDersRows(presetDersler))}</strong> saat/hafta (geçerli satırların toplamı)
-                  </p>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500">Sözleşme türü</label>
-                  <select
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                    value={presetSozlesmeTuru}
-                    onChange={(e) => setPresetSozlesmeTuru(e.target.value as SozlesmeTuruKey)}
-                  >
-                    <option value="satis_sozlesmesi">Satış sözleşmesi</option>
-                    <option value="kullanici_sozlesmesi">Kullanıcı / üyelik sözleşmesi</option>
-                    <option value="diger">Diğer (özel başlık)</option>
-                  </select>
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="text-xs text-slate-500">Özel belge başlığı (yalnızca &quot;Diğer&quot; veya başlığı ezmek için)</label>
-                  <input
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                    value={presetOzelBaslik}
-                    onChange={(e) => setPresetOzelBaslik(e.target.value)}
-                    placeholder="ör. Mesafeli eğitim hizmeti sözleşmesi"
-                  />
-                </div>
-                <div className="sm:col-span-3">
-                  <label className="text-xs text-slate-500">Ek şartlar / ayrıntı metni (düz metin, satırlar paragraf olur)</label>
-                  <textarea
-                    rows={5}
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600 font-mono"
-                    value={presetEkDetay}
-                    onChange={(e) => setPresetEkDetay(e.target.value)}
-                    placeholder="İade koşulları, fesih, kampanya notu…"
-                  />
+                  </datalist>
                 </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
@@ -1511,66 +1212,83 @@ export default function ParentSignFlowPage() {
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-2">Yeni kayıt</h2>
-          <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50/90 p-3 text-sm text-slate-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-slate-100">
-            <p className="font-semibold text-blue-900 dark:text-blue-100 mb-1">Veliye hangi linki göndereceğim?</p>
-            <ol className="list-decimal list-inside space-y-1 text-slate-700 dark:text-slate-300 text-xs sm:text-sm">
-              <li>Aşağıdan kaydı doldurup «Oluştur ve veli linkini kopyala»ya basın — tam veli adresi panoya kopyalanır.</li>
-              <li>Linki tekrar almak için sayfanın altındaki <strong>Kayıtlar</strong> listesinde ilgili satırda <strong>Link</strong> düğmesine basın.</li>
-              <li>Veli bu linki açar; «Önce veli kayıt formunu doldursun» seçtiyseniz önce kayıt formunu, sonra sözleşmeyi ve imzayı görür.</li>
-            </ol>
-            <p className="mt-2 text-xs text-slate-600 dark:text-slate-400">
-              Not: <code className="rounded bg-white/80 px-1 dark:bg-slate-900">/veli-onay</code> sizin kurum panelinizdir;
-              veli <code className="rounded bg-white/80 px-1 dark:bg-slate-900">/veli-imza/…</code> linkini kullanır.
-            </p>
-          </div>
-
-          <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-600 dark:bg-slate-800/40">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-200">Ek program isimleri (isteğe bağlı)</label>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 mb-2">
-              Şablonda tanımlamadan da program seçmek için: her satıra bir program adı yazın. Kaydedince bu tarayıcıda
-              saklanır ve aşağıdaki «Program adı» listesinde şablon adlarıyla birlikte görünür.
-            </p>
-            <textarea
-              rows={4}
-              className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm font-mono dark:bg-slate-950 dark:border-slate-600"
-              value={extraProgramLines}
-              onChange={(e) => setExtraProgramLines(e.target.value)}
-              placeholder={'ör.\nLGS Yoğun Paket\nTYT Matematik Kampı'}
-              spellCheck={false}
-            />
-            <button
-              type="button"
-              onClick={() => saveExtraProgramNames()}
-              className="mt-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-            >
-              Program listesini kaydet (bu cihaz)
-            </button>
-          </div>
+          <p className="text-xs text-slate-500 mb-4">
+            Veli önce kayıt formunu doldurur (KVKK + satış onayı otomatik gelir). Ücret veli formundan sonra{' '}
+            <strong>Kayıtlar</strong> listesinde girilir.
+          </p>
 
           <div className="grid gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <label className="text-xs text-slate-500">Sınıf</label>
+              <select
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                value={sinif}
+                onChange={(e) => setSinif(e.target.value)}
+              >
+                <option value="">— Seçin —</option>
+                {CLASS_LEVELS.map((lvl) => (
+                  <option key={String(lvl.value)} value={String(lvl.value)}>
+                    {lvl.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             {presets.length > 0 ? (
               <div className="sm:col-span-2">
-                <label className="text-xs text-slate-500">Şablon uygula (isteğe bağlı)</label>
-                <select
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                  value={selectedPresetId}
-                  onChange={(e) => {
-                    const id = e.target.value;
-                    setSelectedPresetId(id);
-                    if (!id) return;
-                    const p = presets.find((x) => x.id === id);
-                    if (p) applyPresetToForm(p);
-                  }}
-                >
-                  <option value="">— Seçin —</option>
-                  {presets.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      [{turKisaEtiket(p.sozlesme_turu)}] {p.sinif} — {p.program_adi} · {p.haftalik_ders_saati} sa/hafta
-                    </option>
-                  ))}
-                </select>
+                <label className="text-xs text-slate-500">Programlar (şablondan, birden fazla seçilebilir)</label>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {presets.map((p) => {
+                    const checked = selectedPresetIds.includes(p.id);
+                    return (
+                      <label
+                        key={p.id}
+                        className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs cursor-pointer ${
+                          checked
+                            ? 'border-blue-400 bg-blue-50 text-blue-900 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-100'
+                            : 'border-slate-200 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 rounded"
+                          checked={checked}
+                          onChange={() => togglePresetSelection(p.id)}
+                        />
+                        <span>
+                          {p.sinif} — {p.program_adi}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
             ) : null}
+
+            <div className="sm:col-span-2">
+              <label className="text-xs text-slate-500">Ek program adı (isteğe bağlı)</label>
+              <input
+                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                value={veliProgramCustom}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setVeliProgramCustom(v);
+                  if (isMaarifVeliProgram(v)) setSinif('TYT-Maarif');
+                }}
+                placeholder="Şablonda yoksa tek satır program adı"
+                list="veli-kayit-program-suggestions"
+              />
+              <datalist id="veli-kayit-program-suggestions">
+                {VELI_KAYIT_PROGRAM_SECENEKLERI.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+              {resolvedProgramAdi() ? (
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Kayıtta görünecek program: <strong>{resolvedProgramAdi()}</strong>
+                </p>
+              ) : null}
+            </div>
 
             <div className="sm:col-span-2">
               <label className="text-xs text-slate-500">Öğrenci / kullanıcıdan doldur</label>
@@ -1643,58 +1361,7 @@ export default function ParentSignFlowPage() {
             </div>
 
             <div>
-              <label className="text-xs text-slate-500">Bu kayıt için sözleşme türü</label>
-              <select
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                value={sozlesmeTuru}
-                onChange={(e) => setSozlesmeTuru(e.target.value as SozlesmeTuruKey)}
-              >
-                <option value="satis_sozlesmesi">Satış sözleşmesi</option>
-                <option value="kullanici_sozlesmesi">Kullanıcı / üyelik sözleşmesi</option>
-                <option value="diger">Diğer</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-slate-500">Belge başlığı (isteğe bağlı)</label>
-              <input
-                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                value={sozlesmeBasligiOverride}
-                onChange={(e) => setSozlesmeBasligiOverride(e.target.value)}
-                placeholder="Boşsa türe göre otomatik"
-              />
-            </div>
-            <div className="sm:col-span-2">
-              <label className="text-xs text-slate-500">Bu kayda özel ek not (isteğe bağlı)</label>
-              <textarea
-                rows={2}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                value={contractEkSatirlar}
-                onChange={(e) => setContractEkSatirlar(e.target.value)}
-                placeholder="Kampanya veya tek seferlik açıklama. Sözleşme/KVKK metinleri yukarıdaki kurum ayarından gelir."
-              />
-            </div>
-
-            <div className="sm:col-span-2 rounded-xl border border-blue-100 bg-blue-50/90 p-3 dark:border-blue-900 dark:bg-blue-950/35">
-              <label className="flex items-start gap-2 text-sm text-slate-800 dark:text-slate-100 cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="mt-1 h-4 w-4 shrink-0 rounded border-slate-400"
-                  checked={ogrenciOnceKayitFormu}
-                  onChange={(e) => setOgrenciOnceKayitFormu(e.target.checked)}
-                />
-                <span>
-                  <strong>Önce veli kayıt formunu doldursun</strong> — veli linkinde öğrenci/veli bilgileri, program
-                  (sabit liste), KVKK ve satış / ön bilgilendirme onayları istenir. Veli gönderdikten sonra kayıt
-                  kurumda görünür; <strong>Düzenle</strong> ile ücreti 0 TL&apos;den büyük ve taksiti girince e-sözleşme
-                  veliye açılır (aynı link). İmzadan sonra taksit tahsilatını listeden işaretleyebilir, e-posta ile
-                  öğrenci girişi oluşturabilirsiniz. Muhasebe özeti kayda yazılır. Öğrenci/veli adını burada boş
-                  bırakabilirsiniz (yer tutucu kaydedilir).
-                </span>
-              </label>
-            </div>
-
-            <div>
-              <label className="text-xs text-slate-500">Öğrenci adı</label>
+              <label className="text-xs text-slate-500">Öğrenci adı (isteğe bağlı)</label>
               <input
                 className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
                 value={ogrenciAd}
@@ -1742,195 +1409,6 @@ export default function ParentSignFlowPage() {
               />
             </div>
             <div>
-              <label className="text-xs text-slate-500">Sınıf (ör. 9 veya LGS)</label>
-              <div className="mt-1 flex gap-2">
-                <input
-                  className="flex-1 rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                  value={sinif}
-                  onChange={(e) => setSinif(e.target.value)}
-                />
-                <button
-                  type="button"
-                  title="Sınıfa göre saat ve ücret öner"
-                  onClick={applySuggestFromSinif}
-                  className="shrink-0 rounded-lg border border-slate-200 px-2 py-2 text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-800"
-                >
-                  <Sparkles className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            <div className="sm:col-span-2">
-              <label className="text-xs text-slate-500">Program adı (şablonlardan + ek program listesinden)</label>
-              {programs.length > 0 ? (
-                <div className="mt-1 space-y-2">
-                  <select
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                    value={programSource === 'custom' ? '__custom__' : programSelectValue}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (v === '__custom__') {
-                        setProgramSource('custom');
-                      } else {
-                        setProgramSource('list');
-                        setProgramSelectValue(v);
-                        if (isMaarifVeliProgram(v)) setSinif('TYT-Maarif');
-                      }
-                    }}
-                  >
-                    <option value="">— Program seçin —</option>
-                    {programs.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                    <option value="__custom__">Diğer (elle yazın)</option>
-                  </select>
-                  {programSource === 'custom' ? (
-                    <input
-                      className="w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                      value={programCustom}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setProgramCustom(v);
-                        if (isMaarifVeliProgram(v)) setSinif('TYT-Maarif');
-                      }}
-                      placeholder="Program adı"
-                    />
-                  ) : null}
-                </div>
-              ) : (
-                <input
-                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                  value={programCustom}
-                  onChange={(e) => {
-                    setProgramCustom(e.target.value);
-                    setProgramSource('custom');
-                  }}
-                  placeholder="Önce şablon ekleyin veya program adını yazın"
-                />
-              )}
-            </div>
-
-            <div className="sm:col-span-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-4 dark:border-slate-600 dark:bg-slate-800/30">
-              <div className="flex items-center justify-between gap-2 mb-2">
-                <label className="text-xs text-slate-600 dark:text-slate-300 font-semibold">
-                  Veli kaydı — haftalık ders dağılımı (isteğe bağlı)
-                </label>
-                <button
-                  type="button"
-                  className="text-xs font-semibold text-blue-700 hover:underline inline-flex items-center gap-1"
-                  onClick={() =>
-                    setContractDersler((prev) =>
-                      prev.length ? [...prev, { ders_adi: '', haftalik_saat: 2 }] : [{ ders_adi: '', haftalik_saat: 2 }]
-                    )
-                  }
-                >
-                  <Plus className="w-3.5 h-3.5" /> Ders satırı ekle
-                </button>
-              </div>
-              {contractDersler.length === 0 ? (
-                <p className="text-xs text-slate-500">
-                  Boş bırakırsanız şablondaki ders listesi kullanılır. Kendi listenizi yazmak için &quot;Ders satırı ekle&quot;ye
-                  basın.
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {contractDersler.map((row, idx) => (
-                    <div key={idx} className="flex flex-wrap gap-2 items-end">
-                      <div className="flex-1 min-w-[120px]">
-                        <input
-                          className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm dark:bg-slate-950 dark:border-slate-600"
-                          value={row.ders_adi}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setContractDersler((prev) => prev.map((r, i) => (i === idx ? { ...r, ders_adi: v } : r)));
-                          }}
-                          placeholder="Ders adı"
-                        />
-                      </div>
-                      <div className="w-24">
-                        <input
-                          type="number"
-                          min={0.25}
-                          step={0.5}
-                          max={40}
-                          className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm dark:bg-slate-950 dark:border-slate-600"
-                          value={row.haftalik_saat}
-                          onChange={(e) => {
-                            const v = Number(e.target.value);
-                            setContractDersler((prev) =>
-                              prev.map((r, i) => (i === idx ? { ...r, haftalik_saat: v } : r))
-                            );
-                          }}
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        className="p-2 rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
-                        onClick={() => setContractDersler((prev) => prev.filter((_, i) => i !== idx))}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ))}
-                  <p className="text-[11px] text-slate-500">
-                    Bu liste doluysa belgede bu satırlar kullanılır ve toplam saat buna göre ayarlanır (
-                    {sumDersSatirlari(validDersRows(contractDersler)) || '—'} saat).
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label className="text-xs text-slate-500">Haftalık ders saati (toplam)</label>
-              <input
-                type="number"
-                min={0}
-                max={80}
-                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                value={haftalikDersSaati}
-                onChange={(e) => setHaftalikDersSaati(Number(e.target.value))}
-              />
-              <p className="mt-0.5 text-[10px] text-slate-400">Ders listesi dolduğunda kayıtta otomatik güncellenir.</p>
-            </div>
-            <div>
-              <label className="text-xs text-slate-500">Para birimi</label>
-              <select
-                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                value={paraBirimi}
-                onChange={(e) => setParaBirimi(e.target.value as ParaBirimi)}
-              >
-                {PARA_BIRIMI_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-slate-500">Ücret</label>
-              <input
-                type="number"
-                min={0}
-                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                value={ucret}
-                onChange={(e) => setUcret(Number(e.target.value))}
-              />
-              <p className="mt-0.5 text-[10px] text-slate-400">Yurtdışı öğrenciler için EUR, USD veya GBP seçebilirsiniz.</p>
-            </div>
-            <div>
-              <label className="text-xs text-slate-500">Taksit sayısı</label>
-              <input
-                type="number"
-                min={1}
-                max={48}
-                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                value={taksitSayisi}
-                onChange={(e) => setTaksitSayisi(Number(e.target.value))}
-              />
-            </div>
-            <div>
               <label className="text-xs text-slate-500">Başlangıç</label>
               <input
                 type="date"
@@ -1948,18 +1426,6 @@ export default function ParentSignFlowPage() {
                 onChange={(e) => setBitis(e.target.value)}
               />
             </div>
-            <TaksitPlanEditor
-              taksitSayisi={taksitSayisi}
-              ucret={ucret}
-              paraBirimi={paraBirimi}
-              baslangic={baslangic}
-              vadeler={taksitVadeleri}
-              tutarlar={taksitTutarlari}
-              onVadelerChange={setTaksitVadeleri}
-              onTutarlarChange={setTaksitTutarlari}
-              onResetMonthly={() => setTaksitVadeleri(defaultTaksitVadeleri(baslangic, taksitSayisi))}
-              onResetEqualSplit={() => setTaksitTutarlari(splitTaksitTutarlari(ucret, taksitSayisi))}
-            />
           </div>
           <button
             type="button"
@@ -2476,35 +1942,6 @@ export default function ParentSignFlowPage() {
             </div>
             <div className="grid gap-3 sm:grid-cols-2 max-h-[min(70vh,720px)] overflow-y-auto pr-1">
               <div>
-                <label className="text-xs text-slate-500">Sözleşme türü</label>
-                <select
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                  value={editSozlesmeTuru}
-                  onChange={(e) => setEditSozlesmeTuru(e.target.value as SozlesmeTuruKey)}
-                >
-                  <option value="satis_sozlesmesi">Satış sözleşmesi</option>
-                  <option value="kullanici_sozlesmesi">Kullanıcı / üyelik sözleşmesi</option>
-                  <option value="diger">Diğer</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-slate-500">Belge başlığı (boşsa türe göre otomatik)</label>
-                <input
-                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                  value={editSozlesmeBasligi}
-                  onChange={(e) => setEditSozlesmeBasligi(e.target.value)}
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <label className="text-xs text-slate-500">Ek şartlar / ayrıntı (belgede gösterilen tam metin)</label>
-                <textarea
-                  rows={4}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                  value={editEkSatirlar}
-                  onChange={(e) => setEditEkSatirlar(e.target.value)}
-                />
-              </div>
-              <div>
                 <label className="text-xs text-slate-500">Öğrenci adı</label>
                 <input
                   className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
@@ -2554,21 +1991,18 @@ export default function ParentSignFlowPage() {
               </div>
               <div>
                 <label className="text-xs text-slate-500">Sınıf</label>
-                <div className="mt-1 flex gap-2">
-                  <input
-                    className="flex-1 rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                    value={editSinif}
-                    onChange={(e) => setEditSinif(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    title="Sınıfa göre saat ve ücret öner"
-                    onClick={applyEditSuggestFromSinif}
-                    className="shrink-0 rounded-lg border border-slate-200 px-2 py-2 text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-800"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                  </button>
-                </div>
+                <select
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                  value={editSinif}
+                  onChange={(e) => setEditSinif(e.target.value)}
+                >
+                  <option value="">— Seçin —</option>
+                  {CLASS_LEVELS.map((lvl) => (
+                    <option key={String(lvl.value)} value={String(lvl.value)}>
+                      {lvl.label}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="sm:col-span-2">
                 <label className="text-xs text-slate-500">Program adı</label>
@@ -2579,83 +2013,6 @@ export default function ParentSignFlowPage() {
                 />
               </div>
 
-              <div className="sm:col-span-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-3 dark:border-slate-600 dark:bg-slate-800/30">
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Haftalık ders satırları</span>
-                  <button
-                    type="button"
-                    className="text-xs font-semibold text-blue-700 hover:underline inline-flex items-center gap-1"
-                    onClick={() =>
-                      setEditContractDersler((prev) =>
-                        prev.length ? [...prev, { ders_adi: '', haftalik_saat: 2 }] : [{ ders_adi: '', haftalik_saat: 2 }]
-                      )
-                    }
-                  >
-                    <Plus className="w-3.5 h-3.5" /> Satır ekle
-                  </button>
-                </div>
-                {editContractDersler.length === 0 ? (
-                  <p className="text-xs text-slate-500">
-                    Boşsa kayıtta şablondaki ders listesi kullanılır (varsa). Kendi listenizi yazmak için satır ekleyin.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {editContractDersler.map((row, idx) => (
-                      <div key={idx} className="flex flex-wrap gap-2 items-end">
-                        <div className="flex-1 min-w-[120px]">
-                          <input
-                            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm dark:bg-slate-950 dark:border-slate-600"
-                            value={row.ders_adi}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              setEditContractDersler((prev) => prev.map((r, i) => (i === idx ? { ...r, ders_adi: v } : r)));
-                            }}
-                            placeholder="Ders adı"
-                          />
-                        </div>
-                        <div className="w-24">
-                          <input
-                            type="number"
-                            min={0.25}
-                            step={0.5}
-                            max={40}
-                            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm dark:bg-slate-950 dark:border-slate-600"
-                            value={row.haftalik_saat}
-                            onChange={(e) => {
-                              const v = Number(e.target.value);
-                              setEditContractDersler((prev) =>
-                                prev.map((r, i) => (i === idx ? { ...r, haftalik_saat: v } : r))
-                              );
-                            }}
-                          />
-                        </div>
-                        <button
-                          type="button"
-                          className="p-2 rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
-                          onClick={() => setEditContractDersler((prev) => prev.filter((_, i) => i !== idx))}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ))}
-                    <p className="text-[11px] text-slate-500">
-                      Toplam: {sumDersSatirlari(validDersRows(editContractDersler)) || '—'} saat
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-500">Haftalık ders saati (toplam)</label>
-                <input
-                  type="number"
-                  min={0}
-                  max={80}
-                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
-                  value={editHaftalikDersSaati}
-                  onChange={(e) => setEditHaftalikDersSaati(Number(e.target.value))}
-                />
-              </div>
               <div>
                 <label className="text-xs text-slate-500">Para birimi</label>
                 <select

@@ -95,10 +95,9 @@ export default async function handler(req, res) {
       if (!sinif || !program_adi) return res.status(400).json({ error: 'sinif_program_required' });
 
       const ders_satirlari = normalizeDersSatirlari(body.ders_satirlari);
-      if (!ders_satirlari.length) return res.status(400).json({ error: 'ders_satirlari_required' });
-
-      const sumHours = sumDersHours(ders_satirlari);
-      const haftalik_ders_saati = Math.min(80, Math.max(0, sumHours));
+      const haftalik_ders_saati = ders_satirlari.length
+        ? Math.min(80, Math.max(0, sumDersHours(ders_satirlari)))
+        : 0;
 
       const sozlesme_turu = normalizeSozlesmeTuru(body.sozlesme_turu);
       const sozlesme_ozel_baslik = String(body.sozlesme_ozel_baslik || '').trim().slice(0, 200);
@@ -154,7 +153,6 @@ export default async function handler(req, res) {
       }
       if (body.ders_satirlari !== undefined) {
         ders_satirlari = normalizeDersSatirlari(body.ders_satirlari);
-        if (!ders_satirlari.length) return res.status(400).json({ error: 'ders_satirlari_required' });
       }
 
       const patch = {
