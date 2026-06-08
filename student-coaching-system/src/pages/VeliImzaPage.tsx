@@ -80,6 +80,7 @@ export default function VeliImzaPage() {
   const [awaitingAdminPrice, setAwaitingAdminPrice] = useState(false);
   const [kvkkDocHref, setKvkkDocHref] = useState(VELI_KAYIT_KVKK_DOC_HREF);
   const [satisDocHref, setSatisDocHref] = useState(VELI_KAYIT_SATIS_ONBILGI_DOC_HREF);
+  const [programIcerikHref, setProgramIcerikHref] = useState<string | null>(null);
 
   const loadPayload = useCallback(async () => {
     if (!token) throw new Error('Geçersiz bağlantı');
@@ -95,6 +96,8 @@ export default function VeliImzaPage() {
     setRegHint(d.registration_hint || null);
     setKvkkDocHref(resolveKvkkDocUrl(d.kvkk_doc_href || VELI_KAYIT_KVKK_DOC_HREF));
     setSatisDocHref(resolveSatisDocUrl(d.satis_doc_href || VELI_KAYIT_SATIS_ONBILGI_DOC_HREF));
+    const pic = d.program_icerik_href != null ? String(d.program_icerik_href).trim() : '';
+    setProgramIcerikHref(pic || null);
     return d;
   }, [token]);
 
@@ -384,6 +387,18 @@ export default function VeliImzaPage() {
                       · <strong>Taksit:</strong>{' '}
                       {String(regHint.taksit_sayisi ?? '—')}
                     </p>
+                    {programIcerikHref ? (
+                      <p className="pt-1">
+                        <a
+                          href={programIcerikHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 font-semibold text-blue-700 underline decoration-blue-400/70 underline-offset-2 hover:text-blue-900"
+                        >
+                          Program içeriğini incele
+                        </a>
+                      </p>
+                    ) : null}
                   </div>
                 ) : null}
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -501,6 +516,20 @@ export default function VeliImzaPage() {
                         </option>
                       ))}
                     </select>
+                    {programIcerikHref ? (
+                      <p className="mt-1.5 text-[11px] text-slate-600">
+                        <a
+                          href={programIcerikHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-semibold text-blue-700 underline decoration-blue-400/70 underline-offset-2 hover:text-blue-900"
+                        >
+                          Program içeriğini incele
+                        </a>
+                        {' '}
+                        — kayıt olmadan önce program detaylarına bakabilirsiniz.
+                      </p>
+                    ) : null}
                   </div>
                   <div className="sm:col-span-2">
                     <label className="text-[11px] text-slate-500">E-posta adresi (zorunlu)</label>

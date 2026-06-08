@@ -29,6 +29,14 @@ export function resolveSatisDocUrl(custom?: string | null): string {
   return resolveVeliLegalDocUrl(custom, VELI_KAYIT_SATIS_ONBILGI_DOC_HREF);
 }
 
+/** Boşsa null; site içi yol veya https://… */
+export function resolveOptionalDocUrl(custom?: string | null): string | null {
+  const t = String(custom || '').trim();
+  if (!t) return null;
+  if (/^https?:\/\//i.test(t)) return t;
+  return t.startsWith('/') ? t : `/${t}`;
+}
+
 export function absoluteVeliLegalDocUrl(
   custom: string | null | undefined,
   defaultPath: string,

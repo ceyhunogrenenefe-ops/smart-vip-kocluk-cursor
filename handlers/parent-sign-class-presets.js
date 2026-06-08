@@ -121,9 +121,7 @@ export default async function handler(req, res) {
         sozlesme_turu,
         sozlesme_ozel_baslik,
         sablon_ek_detay,
-        kvkk_doc_url: normalizeDocUrl(body.kvkk_doc_url),
-        satis_doc_url: normalizeDocUrl(body.satis_doc_url),
-        share_url: normalizeDocUrl(body.share_url),
+        program_icerik_url: normalizeDocUrl(body.program_icerik_url),
         created_at: now,
         updated_at: now
       };
@@ -181,12 +179,8 @@ export default async function handler(req, res) {
       else patch.sozlesme_ozel_baslik = String(existing.sozlesme_ozel_baslik || '');
       if (body.sablon_ek_detay !== undefined) patch.sablon_ek_detay = String(body.sablon_ek_detay || '').trim().slice(0, 20000);
       else patch.sablon_ek_detay = String(existing.sablon_ek_detay || '');
-      if (body.kvkk_doc_url !== undefined) patch.kvkk_doc_url = normalizeDocUrl(body.kvkk_doc_url);
-      else patch.kvkk_doc_url = normalizeDocUrl(existing.kvkk_doc_url);
-      if (body.satis_doc_url !== undefined) patch.satis_doc_url = normalizeDocUrl(body.satis_doc_url);
-      else patch.satis_doc_url = normalizeDocUrl(existing.satis_doc_url);
-      if (body.share_url !== undefined) patch.share_url = normalizeDocUrl(body.share_url);
-      else patch.share_url = normalizeDocUrl(existing.share_url);
+      if (body.program_icerik_url !== undefined) patch.program_icerik_url = normalizeDocUrl(body.program_icerik_url);
+      else patch.program_icerik_url = normalizeDocUrl(existing.program_icerik_url);
 
       const { data: updated, error: uErr } = await supabaseAdmin
         .from('parent_sign_class_presets')

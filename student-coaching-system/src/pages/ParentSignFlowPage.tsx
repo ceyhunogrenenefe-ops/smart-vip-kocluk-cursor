@@ -7,6 +7,7 @@ import {
   VELI_KAYIT_SATIS_ONBILGI_DOC_HREF,
   absoluteVeliLegalDocUrl,
   resolveKvkkDocUrl,
+  resolveOptionalDocUrl,
   resolveSatisDocUrl
 } from '../lib/veliKayitLegalLinks';
 import { useAuth } from '../context/AuthContext';
@@ -314,15 +315,6 @@ function buildVeliSignedUserManagementPrefillUrl(r: ParentSignContractRow, origi
   return `${base}/user-management?${q.toString()}`;
 }
 
-function buildPresetShareUrl(preset: ParentSignClassPresetRow): string {
-  const defaultPath = `/veli-onay?preset=${encodeURIComponent(preset.id)}`;
-  const custom = String(preset.share_url || '').trim();
-  if (!custom) {
-    return absoluteVeliLegalDocUrl('', defaultPath);
-  }
-  return absoluteVeliLegalDocUrl(custom, defaultPath);
-}
-
 function kayitRowStatusBadge(r: ParentSignContractRow) {
   if (parentContractRowSigned(r)) {
     return (
@@ -402,9 +394,7 @@ export default function ParentSignFlowPage() {
 
   const [presetSinif, setPresetSinif] = useState('');
   const [presetProgram, setPresetProgram] = useState('');
-  const [presetKvkkUrl, setPresetKvkkUrl] = useState('');
-  const [presetSatisUrl, setPresetSatisUrl] = useState('');
-  const [presetShareUrl, setPresetShareUrl] = useState('');
+  const [presetProgramIcerikUrl, setPresetProgramIcerikUrl] = useState('');
   const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
   const [legalSectionOpen, setLegalSectionOpen] = useState(false);
   const [presetsSectionOpen, setPresetsSectionOpen] = useState(false);
@@ -797,9 +787,7 @@ export default function ParentSignFlowPage() {
         sozlesme_turu: 'satis_sozlesmesi' as SozlesmeTuruKey,
         sozlesme_ozel_baslik: '',
         sablon_ek_detay: '',
-        kvkk_doc_url: presetKvkkUrl.trim(),
-        satis_doc_url: presetSatisUrl.trim(),
-        share_url: presetShareUrl.trim()
+        program_icerik_url: presetProgramIcerikUrl.trim()
       };
       if (editingPresetId) {
         await updateParentSignClassPreset({ id: editingPresetId, ...base });
@@ -814,9 +802,7 @@ export default function ParentSignFlowPage() {
       setEditingPresetId(null);
       setPresetSinif('');
       setPresetProgram('');
-      setPresetKvkkUrl('');
-      setPresetSatisUrl('');
-      setPresetShareUrl('');
+      setPresetProgramIcerikUrl('');
       void loadPresets();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Şablon kaydedilemedi');
@@ -827,9 +813,7 @@ export default function ParentSignFlowPage() {
     setEditingPresetId(p.id);
     setPresetSinif(p.sinif);
     setPresetProgram(p.program_adi);
-    setPresetKvkkUrl(p.kvkk_doc_url || '');
-    setPresetSatisUrl(p.satis_doc_url || '');
-    setPresetShareUrl(p.share_url || '');
+    setPresetProgramIcerikUrl(p.program_icerik_url || '');
     setPresetsSectionOpen(true);
   };
 
@@ -837,19 +821,13 @@ export default function ParentSignFlowPage() {
     setEditingPresetId(null);
     setPresetSinif('');
     setPresetProgram('');
-    setPresetKvkkUrl('');
-    setPresetSatisUrl('');
-    setPresetShareUrl('');
+    setPresetProgramIcerikUrl('');
   };
 
-  const presetKvkkHref = useMemo(() => resolveKvkkDocUrl(presetKvkkUrl), [presetKvkkUrl]);
-  const presetSatisHref = useMemo(() => resolveSatisDocUrl(presetSatisUrl), [presetSatisUrl]);
-  const presetShareHref = useMemo(() => {
-    const defaultPath = editingPresetId
-      ? `/veli-onay?preset=${encodeURIComponent(editingPresetId)}`
-      : '/veli-onay?preset=…';
-    return absoluteVeliLegalDocUrl(presetShareUrl, defaultPath);
-  }, [presetShareUrl, editingPresetId]);
+  const presetProgramIcerikHref = useMemo(
+    () => resolveOptionalDocUrl(presetProgramIcerikUrl),
+    [presetProgramIcerikUrl]
+  );
 
   const removeContractRow = async (id: string) => {
     if (!window.confirm('Bu sözleşme kaydını silmek istediğinize emin misiniz?')) return;
@@ -1321,7 +1299,7 @@ export default function ParentSignFlowPage() {
                 Sınıf &amp; sözleşme şablonları
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                {presets.length} şablon · program, link ve KVKK/satış ayarları
+                {presets.length} şablon · program içeriği linki
               </p>
             </div>
             {presetsSectionOpen ? (
@@ -1333,8 +1311,8 @@ export default function ParentSignFlowPage() {
           {presetsSectionOpen ? (
           <div className="px-5 pb-5 border-t border-slate-100 dark:border-slate-700">
           <p className="text-xs text-slate-500 mb-4 mt-4">
-            Her şablon için paylaşım linki ve isteğe bağlı KVKK/satış linkleri tanımlayın. Boş link alanları kurum
-            varsayılanını kullanır.
+            Sitede zaten yayınladığınız program içeriğinin adresini yapıştırın. Veli kayıt formunda programı
+            incelemek isteyen veli bu linke tıklar. KVKK ve satış metinleri üstteki kurum ayarından gelir.
           </p>
           {!effectiveInstitutionId ? (
             <p className="text-sm text-slate-600 dark:text-slate-400">
@@ -1352,7 +1330,7 @@ export default function ParentSignFlowPage() {
                     <tr className="bg-slate-50 dark:bg-slate-800/80 text-left text-xs text-slate-500 uppercase tracking-wide">
                       <th className="px-3 py-2 font-semibold">Sınıf</th>
                       <th className="px-3 py-2 font-semibold">Program</th>
-                      <th className="px-3 py-2 font-semibold min-w-[120px]">Link</th>
+                      <th className="px-3 py-2 font-semibold min-w-[120px]">Program içeriği</th>
                       <th className="px-3 py-2 w-28" />
                     </tr>
                   </thead>
@@ -1369,16 +1347,26 @@ export default function ParentSignFlowPage() {
                           <td className="px-3 py-2 font-medium text-slate-800 dark:text-slate-100">{p.sinif}</td>
                           <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{p.program_adi}</td>
                           <td className="px-3 py-2">
-                            <button
-                              type="button"
-                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
-                              onClick={() =>
-                                void copyText(buildPresetShareUrl(p), 'Şablon linki kopyalandı.')
-                              }
-                            >
-                              <Copy className="w-3 h-3" />
-                              Kopyala
-                            </button>
+                            {resolveOptionalDocUrl(p.program_icerik_url) ? (
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+                                onClick={() =>
+                                  void copyText(
+                                    absoluteVeliLegalDocUrl(
+                                      p.program_icerik_url || '',
+                                      resolveOptionalDocUrl(p.program_icerik_url) || ''
+                                    ),
+                                    'Program içeriği linki kopyalandı.'
+                                  )
+                                }
+                              >
+                                <Copy className="w-3 h-3" />
+                                Kopyala
+                              </button>
+                            ) : (
+                              <span className="text-[11px] text-slate-400">—</span>
+                            )}
                           </td>
                           <td className="px-3 py-2">
                             <div className="flex gap-1 justify-end">
@@ -1439,37 +1427,31 @@ export default function ParentSignFlowPage() {
                   </datalist>
                 </div>
               </div>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 rounded-xl border border-violet-100 bg-violet-50/40 p-3 dark:border-violet-900/50 dark:bg-violet-950/20">
-                <div className="sm:col-span-2">
-                  <label className="text-xs text-slate-500">Paylaşım linki (şablon)</label>
-                  <input
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono dark:bg-slate-950 dark:border-slate-600"
-                    value={presetShareUrl}
-                    onChange={(e) => setPresetShareUrl(e.target.value)}
-                    placeholder="Boş = /veli-onay?preset=…"
-                  />
-                  <p className="mt-0.5 text-[10px] text-slate-400">Açılacak: {presetShareHref}</p>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500">KVKK metni linki (şablon)</label>
-                  <input
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono dark:bg-slate-950 dark:border-slate-600"
-                    value={presetKvkkUrl}
-                    onChange={(e) => setPresetKvkkUrl(e.target.value)}
-                    placeholder={`Boş = kurum / ${VELI_KAYIT_KVKK_DOC_HREF}`}
-                  />
-                  <p className="mt-0.5 text-[10px] text-slate-400">{presetKvkkHref}</p>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500">Satış metni linki (şablon)</label>
-                  <input
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono dark:bg-slate-950 dark:border-slate-600"
-                    value={presetSatisUrl}
-                    onChange={(e) => setPresetSatisUrl(e.target.value)}
-                    placeholder={`Boş = kurum / ${VELI_KAYIT_SATIS_ONBILGI_DOC_HREF}`}
-                  />
-                  <p className="mt-0.5 text-[10px] text-slate-400">{presetSatisHref}</p>
-                </div>
+              <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/40 p-3 dark:border-blue-900/50 dark:bg-blue-950/20">
+                <label className="text-xs text-slate-500">Program içeriği linki</label>
+                <input
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono dark:bg-slate-950 dark:border-slate-600"
+                  value={presetProgramIcerikUrl}
+                  onChange={(e) => setPresetProgramIcerikUrl(e.target.value)}
+                  placeholder="ör. https://siteniz.com/programlar/lgs veya /programlar/lgs"
+                />
+                <p className="mt-1 text-[10px] text-slate-400">
+                  Veli kayıt formunda gösterilir. Boş bırakırsanız link çıkmaz.
+                  {presetProgramIcerikHref ? (
+                    <>
+                      {' '}
+                      Önizle:{' '}
+                      <a
+                        href={presetProgramIcerikHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-700 underline dark:text-blue-300"
+                      >
+                        {presetProgramIcerikHref}
+                      </a>
+                    </>
+                  ) : null}
+                </p>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
