@@ -26,6 +26,44 @@ import { resolveLegalDocHrefs, resolveOptionalDocUrl } from '../api/_lib/veli-ka
 import { notifyTaksitMarkedPaid } from '../api/_lib/taksit-whatsapp-notify.js';
 import { resolveSinifFromVeliKayit } from '../api/_lib/veli-kayit-class-level.js';
 
+const ODEME_SEKLI_SET = new Set(['aylik_taksit', 'kredi_karti_tek', 'kredi_karti_otomatik']);
+const ODEME_TERCİHİ_VELİ_SET = new Set(['henuz_odemedi', 'kredi_karti_odendi', 'aylik_taksit_istiyorum']);
+
+function normalizeOdemeSekli(v) {
+  const s = String(v || '').trim();
+  return ODEME_SEKLI_SET.has(s) ? s : 'aylik_taksit';
+}
+
+function normalizeOdemeTercihiVeli(v) {
+  const s = String(v || '').trim();
+  return ODEME_TERCİHİ_VELİ_SET.has(s) ? s : 'henuz_odemedi';
+}
+
+function odemeSekliLabelTr(sekli) {
+  if (sekli === 'kredi_karti_tek') return 'KK tek çekim';
+  if (sekli === 'kredi_karti_otomatik') return 'KK aylık otomatik';
+  return 'Aylık taksit';
+}
+
+function odemeTercihiVeliLabelTr(tercih) {
+  if (tercih === 'kredi_karti_odendi') return 'Veli: KK ile ödedim';
+  if (tercih === 'aylik_taksit_istiyorum') return 'Veli: aylık taksit istiyor';
+  return 'Veli: henüz ödemedi';
+}
+
+function applyKkTahsilToPlan(cards, odeme_sekli, kkTahsil) {
+  const list = Array.isArray(cards) ? [...cards] : [];
+  if (odeme_sekli === 'kredi_karti_tek' && kkTahsil && list[0]) {
+    list[0] = {
+      ...list[0],
+      odendi: true,
+      odeme_notu: String(list[0].odeme_notu || 'KK tek çekim').slice(0, 200) || 'KK tek çekim',
+      odendi_tarihi: new Date().toISOString().slice(0, 10)
+    };
+  }
+  return list;
+}
+
 const VELI_KAYIT_PROGRAM_SET = new Set([
   '3. Sınıf dönem programı',
   '4. Sınıf dönem programı',
@@ -273,8 +311,9 @@ export default async function handler(req, res) {
         if (!sinif || !program_adi) return res.status(400).json({ error: 'sinif_program_required' });
 
         const adres = [il, ilce, adres_aciklama].map((x) => String(x || '').trim()).join(' · ');
+        const odeme_tercihi_veli = normalizeOdemeTercihiVeli(body.odeme_tercihi_veli);
 
-        const muhasebe_ozet = `Kayıt | ${ogrenci_ad} ${ogrenci_soyad} | Program: ${program_adi} | Sınıf: ${sinif} | Ücret: kurum tarafından girilecek | E-posta: ${eposta} | Veli tel: ${veli_tel} | Öğr. tel: ${ogrenci_tel}`;
+        const muhasebe_ozet = `Kayıt | ${ogrenci_ad} ${ogrenci_soyad} | Program: ${program_adi} | Sınıf: ${sinif} | Ücret: kurum tarafından girilecek | ${odemeTercihiVeliLabelTr(odeme_tercihi_veli)} | E-posta: ${eposta} | Veli tel: ${veli_tel} | Öğr. tel: ${ogrenci_tel}`;
 
         const nextJson = {
           phase: 'awaiting_admin_price',
@@ -286,6 +325,7 @@ export default async function handler(req, res) {
           ilce: ilce || '',
           veli_tel,
           ogrenci_tel,
+          odeme_tercihi_veli,
           muhasebe_ozet,
           form_submitted_at: new Date().toISOString()
         };
@@ -685,19 +725,27 @@ export default async function handler(req, res) {
           body.baslangic_tarihi !== undefined &&
           String(body.baslangic_tarihi || '').trim().slice(0, 10) !== String(existing.baslangic_tarihi || '').trim().slice(0, 10);
 
+        let contractTaksitSayisi = taksit_sayisi;
         if (phase0 === 'awaiting_admin_price') {
           if (!(feeNum > 0)) {
             return res.status(400).json({ error: 'ucret_required_before_signature_release' });
           }
-          const taksit_kartlari = buildTaksitPlan(feeNum, taksit_sayisi, bas, taksitVadeleriBody, taksitTutarlariBody);
-          const ort = tN > 0 ? Math.round(feeNum / tN) : 0;
+          const odeme_sekli = normalizeOdemeSekli(body.odeme_sekli ?? kj0.odeme_sekli);
+          const kkTahsil = Boolean(body.kk_tahsil_edildi);
+          const planTaksitN = odeme_sekli === 'kredi_karti_tek' ? 1 : taksit_sayisi;
+          let taksit_kartlari = buildTaksitPlan(feeNum, planTaksitN, bas, taksitVadeleriBody, taksitTutarlariBody);
+          taksit_kartlari = applyKkTahsilToPlan(taksit_kartlari, odeme_sekli, kkTahsil);
+          const planN = Math.max(1, taksit_kartlari.length);
+          contractTaksitSayisi = planN;
+          const ort = planN > 0 ? Math.round(feeNum / planN) : 0;
           const pb = normalizeParaBirimi(body.para_birimi ?? existing.para_birimi);
           const pbLbl = paraBirimiLabel(pb);
-          const muhasebe_ozet2 = `Öğrenci: ${ogrenci_ad} ${ogrenci_soyad} | Program: ${program_adi} | Sınıf: ${sinif} | Toplam: ${feeNum} ${pbLbl} | ${tN} taksit | ~${ort} ${pbLbl}/taksit | E-posta: ${String(kj0.eposta || '')}`;
+          const muhasebe_ozet2 = `Öğrenci: ${ogrenci_ad} ${ogrenci_soyad} | Program: ${program_adi} | Sınıf: ${sinif} | Toplam: ${feeNum} ${pbLbl} | ${odemeSekliLabelTr(odeme_sekli)} | ${planN} taksit | ~${ort} ${pbLbl}/taksit | E-posta: ${String(kj0.eposta || '')}`;
           nextKayitJson = {
             ...kj0,
             phase: 'ready_to_sign',
             para_birimi: pb,
+            odeme_sekli,
             admin_priced_at: new Date().toISOString(),
             taksit_kartlari,
             muhasebe_ozet: muhasebe_ozet2
@@ -729,7 +777,7 @@ export default async function handler(req, res) {
           bitis_tarihi: bit,
           haftalik_ders_saati: hours,
           ucret: fee,
-          taksit_sayisi,
+          taksit_sayisi: contractTaksitSayisi,
           para_birimi,
           kurum_kodu,
           contract_number: String(existing.contract_number || ''),
@@ -758,7 +806,7 @@ export default async function handler(req, res) {
         bitis_tarihi: bit,
         haftalik_ders_saati: hours,
         ucret: fee,
-        taksit_sayisi,
+        taksit_sayisi: contractTaksitSayisi,
         para_birimi: normalizeParaBirimi(body.para_birimi ?? existing.para_birimi),
         kurum_kodu,
         merged_html,

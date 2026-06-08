@@ -52,6 +52,16 @@ import {
 } from '../lib/taksitMuhasebe';
 import { rolesForProtectedRoute, userHasAnyRole } from '../config/rolePermissions';
 import {
+  ODEME_SEKLI_OPTIONS,
+  odemeSekliBadgeClass,
+  odemeSekliFromKayitJson,
+  odemeSekliLabel,
+  odemeTercihiVeliFromKayitJson,
+  odemeTercihiVeliLabel,
+  suggestOdemeSekliFromVeliTercihi,
+  type OdemeSekli
+} from '../lib/odemeSekli';
+import {
   Copy,
   Loader2,
   Link2,
@@ -159,18 +169,26 @@ type PriceSetupDraft = {
   taksitSayisi: number;
   vadeler: string[];
   tutarlar: number[];
+  odemeSekli: OdemeSekli;
+  kkTahsilEdildi: boolean;
 };
 
 function defaultPriceSetupDraft(r: ParentSignContractRow): PriceSetupDraft {
+  const kj = kayitJsonRecord(r);
+  const veliSuggest = suggestOdemeSekliFromVeliTercihi(odemeTercihiVeliFromKayitJson(kj));
+  const odemeSekli = kj.odeme_sekli ? odemeSekliFromKayitJson(kj) : veliSuggest.odemeSekli;
+  const kkTahsilEdildi = veliSuggest.kkTahsilEdildi;
   const suggested = suggestHoursAndFeeFromSinif(r.sinif);
-  const n = Math.max(1, Math.min(48, Math.round(Number(r.taksit_sayisi) || 1)));
+  let n = Math.max(1, Math.min(48, Math.round(Number(r.taksit_sayisi) || 1)));
+  if (odemeSekli === 'kredi_karti_tek') n = 1;
   const bas = String(r.baslangic_tarihi || '').slice(0, 10);
   const ucret = Number(r.ucret) > 0 ? Number(r.ucret) : suggested.fee;
   const rawPb = String(r.para_birimi || 'TRY').trim().toUpperCase();
   const paraBirimi = (PARA_BIRIMI_OPTIONS.some((o) => o.value === rawPb) ? rawPb : 'TRY') as ParaBirimi;
   const cards = taksitKartlariFromRow(r);
+  const base = { odemeSekli, kkTahsilEdildi };
   if (n <= 1) {
-    return { ucret, paraBirimi, taksitSayisi: n, vadeler: [], tutarlar: [] };
+    return { ucret, paraBirimi, taksitSayisi: n, vadeler: [], tutarlar: [], ...base };
   }
   if (cards.length > 0) {
     return {
@@ -186,7 +204,8 @@ function defaultPriceSetupDraft(r: ParentSignContractRow): PriceSetupDraft {
         cards.map((c) => Number(c.tutar_tl) || 0),
         ucret,
         n
-      )
+      ),
+      ...base
     };
   }
   return {
@@ -194,7 +213,8 @@ function defaultPriceSetupDraft(r: ParentSignContractRow): PriceSetupDraft {
     paraBirimi,
     taksitSayisi: n,
     vadeler: defaultTaksitVadeleri(bas, n),
-    tutarlar: splitTaksitTutarlari(ucret, n)
+    tutarlar: splitTaksitTutarlari(ucret, n),
+    ...base
   };
 }
 
@@ -880,13 +900,19 @@ export default function ParentSignFlowPage() {
         rows.find((x) => x.id === id)?.baslangic_tarihi != null
           ? String(rows.find((x) => x.id === id)!.baslangic_tarihi).slice(0, 10)
           : todayPlus(0);
-      if (patch.taksitSayisi != null || patch.ucret != null) {
-        if (n <= 1) {
+      if (patch.odemeSekli === 'kredi_karti_tek') {
+        merged.taksitSayisi = 1;
+        merged.vadeler = [];
+        merged.tutarlar = [];
+      }
+      const n2 = Math.max(1, Math.min(48, Math.round(merged.taksitSayisi) || 1));
+      if (patch.taksitSayisi != null || patch.ucret != null || patch.odemeSekli != null) {
+        if (n2 <= 1) {
           merged.vadeler = [];
           merged.tutarlar = [];
         } else {
-          merged.vadeler = resizeTaksitVadeleri(merged.vadeler, bas, n);
-          merged.tutarlar = resizeTaksitTutarlari(merged.tutarlar, merged.ucret, n);
+          merged.vadeler = resizeTaksitVadeleri(merged.vadeler, bas, n2);
+          merged.tutarlar = resizeTaksitTutarlari(merged.tutarlar, merged.ucret, n2);
         }
       }
       return { ...prev, [id]: merged };
@@ -916,9 +942,15 @@ export default function ParentSignFlowPage() {
         bitis_tarihi: String(r.bitis_tarihi || '').slice(0, 10),
         ucret: d.ucret,
         para_birimi: d.paraBirimi,
-        taksit_sayisi: d.taksitSayisi,
-        ...(d.taksitSayisi > 1 && d.vadeler.length > 0 ? { taksit_vadeleri: d.vadeler } : {}),
-        ...(d.taksitSayisi > 1 && d.tutarlar.length > 0 ? { taksit_tutarlari: d.tutarlar } : {})
+        taksit_sayisi: d.odemeSekli === 'kredi_karti_tek' ? 1 : d.taksitSayisi,
+        odeme_sekli: d.odemeSekli,
+        kk_tahsil_edildi: d.odemeSekli === 'kredi_karti_tek' ? d.kkTahsilEdildi : false,
+        ...(d.taksitSayisi > 1 && d.odemeSekli !== 'kredi_karti_tek' && d.vadeler.length > 0
+          ? { taksit_vadeleri: d.vadeler }
+          : {}),
+        ...(d.taksitSayisi > 1 && d.odemeSekli !== 'kredi_karti_tek' && d.tutarlar.length > 0
+          ? { taksit_tutarlari: d.tutarlar }
+          : {})
       });
       setPriceDrafts((prev) => {
         const next = { ...prev };
@@ -1937,8 +1969,43 @@ export default function ParentSignFlowPage() {
                     {kayitFormPhase(r) === 'awaiting_admin_price' && priceDrafts[r.id] ? (
                       <div className="mt-2 rounded-lg border border-violet-300 bg-violet-50/80 p-3 text-[11px] dark:border-violet-800 dark:bg-violet-950/30">
                         <p className="font-semibold text-violet-950 dark:text-violet-100 mb-2">
-                          Kayıt formu tamam — ücret ve taksit planını girin
+                          Kayıt formu tamam — ücret ve ödeme şeklini girin
                         </p>
+                        <p className="text-[10px] text-violet-800/90 dark:text-violet-200/90 mb-2">
+                          Veli beyanı:{' '}
+                          <strong>{odemeTercihiVeliLabel(odemeTercihiVeliFromKayitJson(kayitJsonRecord(r)))}</strong>
+                        </p>
+                        <div className="mb-2">
+                          <label className="text-[10px] text-slate-500">Ödeme şekli</label>
+                          <select
+                            className="mt-0.5 w-full rounded border px-2 py-1 text-xs dark:bg-slate-950 dark:border-slate-600"
+                            value={priceDrafts[r.id].odemeSekli}
+                            onChange={(e) =>
+                              patchPriceDraft(r.id, { odemeSekli: e.target.value as OdemeSekli })
+                            }
+                          >
+                            {ODEME_SEKLI_OPTIONS.map((o) => (
+                              <option key={o.value} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="mt-0.5 text-[10px] text-slate-500">
+                            {ODEME_SEKLI_OPTIONS.find((o) => o.value === priceDrafts[r.id].odemeSekli)?.hint}
+                          </p>
+                        </div>
+                        {priceDrafts[r.id].odemeSekli === 'kredi_karti_tek' ? (
+                          <label className="flex items-center gap-2 mb-2 text-xs text-slate-700 dark:text-slate-200 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={priceDrafts[r.id].kkTahsilEdildi}
+                              onChange={(e) =>
+                                patchPriceDraft(r.id, { kkTahsilEdildi: e.target.checked })
+                              }
+                            />
+                            Kredi kartından tahsil edildi
+                          </label>
+                        ) : null}
                         <div className="grid gap-2 sm:grid-cols-3 mb-2">
                           <div>
                             <label className="text-[10px] text-slate-500">Para birimi</label>
@@ -1968,6 +2035,7 @@ export default function ParentSignFlowPage() {
                               }
                             />
                           </div>
+                          {priceDrafts[r.id].odemeSekli !== 'kredi_karti_tek' ? (
                           <div>
                             <label className="text-[10px] text-slate-500">Taksit sayısı</label>
                             <input
@@ -1983,7 +2051,9 @@ export default function ParentSignFlowPage() {
                               }
                             />
                           </div>
+                          ) : null}
                         </div>
+                        {priceDrafts[r.id].odemeSekli !== 'kredi_karti_tek' ? (
                         <TaksitPlanEditor
                           compact
                           taksitSayisi={priceDrafts[r.id].taksitSayisi}
@@ -2011,6 +2081,7 @@ export default function ParentSignFlowPage() {
                             })
                           }
                         />
+                        ) : null}
                         <button
                           type="button"
                           disabled={parentSignRowBusy === `${r.id}:price`}
@@ -2029,7 +2100,14 @@ export default function ParentSignFlowPage() {
                     {taksitKartlariFromRow(r).length > 0 ? (
                       <div className="mt-2 rounded-lg border border-slate-200 bg-white/90 p-2 text-[11px] dark:border-slate-600 dark:bg-slate-900/60">
                         <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
-                          <p className="font-semibold text-slate-800 dark:text-slate-100">Taksit / tahsilat</p>
+                          <p className="font-semibold text-slate-800 dark:text-slate-100 flex flex-wrap items-center gap-2">
+                            Taksit / tahsilat
+                            <span
+                              className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${odemeSekliBadgeClass(odemeSekliFromKayitJson(kayitJsonRecord(r)))}`}
+                            >
+                              {odemeSekliLabel(odemeSekliFromKayitJson(kayitJsonRecord(r)))}
+                            </span>
+                          </p>
                           <Link
                             to="/tahsilat-muhasebe"
                             className="text-[10px] font-semibold text-blue-700 hover:underline dark:text-blue-300"

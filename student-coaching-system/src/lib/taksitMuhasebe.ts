@@ -1,5 +1,6 @@
 import type { ParentSignContractRow } from './parentSignApi';
 import { formatUcretWithCurrency, PARA_BIRIMI_OPTIONS } from './parentSignApi';
+import { odemeSekliFromKayitJson, type OdemeSekli } from './odemeSekli';
 
 function resolveContractParaBirimi(r: ParentSignContractRow): string {
   const col = String(r.para_birimi || '').trim().toUpperCase();
@@ -163,6 +164,7 @@ export type TaksitFlatRow = {
   odendiTarihi: string;
   durum: TaksitDurum;
   signed: boolean;
+  odemeSekli: OdemeSekli;
 };
 
 /** Para birimine göre toplam (TRY/EUR/USD/GBP ayrı) */
@@ -226,6 +228,7 @@ export function flattenTaksitRows(contracts: ParentSignContractRow[]): TaksitFla
     const label = `${String(r.ogrenci_ad || '').trim()} ${String(r.ogrenci_soyad || '').trim()}`.trim() || '—';
     const bas = r.baslangic_tarihi != null ? String(r.baslangic_tarihi) : '';
     const paraBirimi = resolveContractParaBirimi(r);
+    const odemeSekli = odemeSekliFromKayitJson(kayitJson(r));
     cards.forEach((c, idx) => {
       const vade = effectiveVadeYmd(c, bas, idx);
       const tutar = Number.isFinite(Number(c.tutar_tl)) ? Number(c.tutar_tl) : 0;
@@ -245,7 +248,8 @@ export function flattenTaksitRows(contracts: ParentSignContractRow[]): TaksitFla
         odendi,
         odendiTarihi: String(c.odendi_tarihi || '').slice(0, 10),
         durum: classifyTaksit(vade, odendi),
-        signed
+        signed,
+        odemeSekli
       });
     });
   }

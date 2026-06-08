@@ -369,6 +369,10 @@ export async function updateParentSignContract(body: {
   taksit_vadeleri?: string[];
   /** Taksit tutarları — ücret/taksit güncellemesinde kullanılır */
   taksit_tutarlari?: number[];
+  /** Tahsilat şekli: aylik_taksit | kredi_karti_tek | kredi_karti_otomatik */
+  odeme_sekli?: string;
+  /** KK tek çekimde tahsil edildi işareti */
+  kk_tahsil_edildi?: boolean;
   /** `kayit_formu_json` ile sığ birleştirme (ör. platform_user_id). */
   kayit_json_merge?: Record<string, unknown>;
 }): Promise<ParentSignContractRow> {
@@ -483,6 +487,7 @@ export async function submitVeliRegistrationForm(payload: {
   ogrenci_tel: string;
   kvkk_form_ok: boolean;
   satis_kvkk_form_ok: boolean;
+  odeme_tercihi_veli?: string;
 }): Promise<void> {
   const { signing_token, kvkk_form_ok, satis_kvkk_form_ok, ...rest } = payload;
   const res = await fetch('/api/parent-sign-contracts', {

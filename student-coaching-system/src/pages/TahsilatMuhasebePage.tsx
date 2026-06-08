@@ -18,6 +18,7 @@ import {
   type TaksitDurum,
   type TaksitFlatRow
 } from '../lib/taksitMuhasebe';
+import { odemeSekliBadgeClass, odemeSekliLabel } from '../lib/odemeSekli';
 import {
   AlertTriangle,
   CalendarDays,
@@ -324,7 +325,7 @@ export default function TahsilatMuhasebePage() {
               <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300">
                 <th className="px-3 py-2">Vade</th>
                 <th className="px-3 py-2">Öğrenci</th>
-                <th className="px-3 py-2">Program</th>
+                <th className="px-3 py-2">Program / ödeme</th>
                 <th className="px-3 py-2 text-right">Tutar (para birimi)</th>
                 <th className="px-3 py-2">Durum</th>
                 <th className="px-3 py-2">Ödendi</th>
@@ -348,7 +349,14 @@ export default function TahsilatMuhasebePage() {
                   >
                     <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{formatTrShortDate(x.vadeYmd)}</td>
                     <td className="px-3 py-2 font-medium text-slate-900 dark:text-slate-100">{x.ogrenciLabel}</td>
-                    <td className="px-3 py-2 text-slate-600 dark:text-slate-400 max-w-[180px] truncate">{x.programAdi || '—'}</td>
+                    <td className="px-3 py-2 text-slate-600 dark:text-slate-400 max-w-[200px]">
+                      <span className="block truncate">{x.programAdi || '—'}</span>
+                      <span
+                        className={`inline-flex mt-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${odemeSekliBadgeClass(x.odemeSekli)}`}
+                      >
+                        {odemeSekliLabel(x.odemeSekli)}
+                      </span>
+                    </td>
                     <td className="px-3 py-2 text-right font-semibold tabular-nums whitespace-nowrap">
                       {formatUcretWithCurrency(x.tutarTl, x.paraBirimi)}
                     </td>

@@ -11,6 +11,7 @@ import {
   resolveKvkkDocUrl,
   resolveSatisDocUrl
 } from '../lib/veliKayitLegalLinks';
+import { ODEME_TERCIHI_VELI_OPTIONS, type OdemeTercihiVeli } from '../lib/odemeSekli';
 import { CheckCircle2, Download, FileText, Loader2 } from 'lucide-react';
 
 type RegFields = {
@@ -31,6 +32,7 @@ type RegFields = {
   ogrenci_tel: string;
   kvkk_form_ok: boolean;
   satis_kvkk_form_ok: boolean;
+  odeme_tercihi_veli: string;
 };
 
 const emptyReg = (): RegFields => ({
@@ -50,7 +52,8 @@ const emptyReg = (): RegFields => ({
   veli_tel: '',
   ogrenci_tel: '',
   kvkk_form_ok: false,
-  satis_kvkk_form_ok: false
+  satis_kvkk_form_ok: false,
+  odeme_tercihi_veli: 'henuz_odemedi'
 });
 
 function hintMoney(n: unknown): string {
@@ -265,7 +268,8 @@ export default function VeliImzaPage() {
         ilce: rf.ilce.trim(),
         adres_aciklama: rf.adres_aciklama.trim(),
         veli_tel: rf.veli_tel.trim(),
-        ogrenci_tel: rf.ogrenci_tel.trim()
+        ogrenci_tel: rf.ogrenci_tel.trim(),
+        odeme_tercihi_veli: rf.odeme_tercihi_veli
       });
       await loadPayload();
       setKvkk(false);
@@ -570,6 +574,29 @@ export default function VeliImzaPage() {
                       placeholder="İl adı"
                     />
                   </div>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
+                  <p className="text-[11px] font-semibold text-slate-700">Ödeme durumu / tercihi</p>
+                  {ODEME_TERCIHI_VELI_OPTIONS.map((opt) => (
+                    <label
+                      key={opt.value}
+                      className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer"
+                    >
+                      <input
+                        type="radio"
+                        name="odeme_tercihi_veli"
+                        className="mt-0.5 h-4 w-4 shrink-0 border-slate-400"
+                        checked={rf.odeme_tercihi_veli === opt.value}
+                        onChange={() =>
+                          setRf((p) => ({ ...p, odeme_tercihi_veli: opt.value as OdemeTercihiVeli }))
+                        }
+                      />
+                      <span>{opt.label}</span>
+                    </label>
+                  ))}
+                  <p className="text-[10px] text-slate-500">
+                    Bu bilgi kuruma iletilir; kesin ödeme planını kurum belirler.
+                  </p>
                 </div>
                 <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
                   <input
