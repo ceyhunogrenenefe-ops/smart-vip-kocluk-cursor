@@ -513,14 +513,14 @@ export default function ParentSignFlowPage() {
     });
   }, [rows]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     try {
       setRows(await listParentSignContracts());
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : 'Liste yüklenemedi');
+      if (!opts?.silent) setMsg(e instanceof Error ? e.message : 'Liste yüklenemedi');
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   }, []);
 
@@ -543,6 +543,30 @@ export default function ParentSignFlowPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  /** Veli formu gönderince liste kendiliğinden güncellensin (manuel yenileme gerekmez). */
+  useEffect(() => {
+    const needsPoll = rows.some((r) => {
+      const ph = kayitFormPhase(r);
+      return ph === 'needs_form' || ph === 'awaiting_admin_price';
+    });
+    if (!needsPoll) return;
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      void load({ silent: true });
+    };
+    const id = window.setInterval(tick, 12000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void load({ silent: true });
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [rows, load]);
 
   useEffect(() => {
     void loadPresets();
@@ -1855,6 +1879,11 @@ export default function ParentSignFlowPage() {
           <ul className="space-y-3">
             {rows.map((r) => {
               const expanded = expandedKayitId === r.id;
+              const phase = kayitFormPhase(r);
+              const displayAd = [r.ogrenci_ad, r.ogrenci_soyad].map((x) => String(x || '').trim()).filter(Boolean).join(' ');
+              const displayLabel =
+                displayAd ||
+                (phase === 'needs_form' ? 'Kayıt formu bekleniyor' : '(İsim henüz yok)');
               return (
               <li
                 key={r.id}
@@ -1867,10 +1896,17 @@ export default function ParentSignFlowPage() {
                 >
                   <div className="min-w-0 flex-1">
                     <p className="font-semibold text-slate-900 dark:text-slate-100 truncate">
-                      {r.ogrenci_ad} {r.ogrenci_soyad}
+                      {displayLabel}
                     </p>
                     <p className="text-xs text-slate-500 truncate">
-                      {[r.program_adi, r.sinif && `Sınıf ${r.sinif}`, r.contract_number].filter(Boolean).join(' · ')}
+                      {[
+                        r.program_adi,
+                        r.sinif && `Sınıf ${r.sinif}`,
+                        phase === 'awaiting_admin_price' ? 'Form gönderildi' : null,
+                        r.contract_number
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">

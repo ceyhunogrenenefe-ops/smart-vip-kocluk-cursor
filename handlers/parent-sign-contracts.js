@@ -706,6 +706,7 @@ export default async function handler(req, res) {
           ? String(body.custom_merged_html).trim()
           : '';
       let merged_html;
+      let contractTaksitSayisi = taksit_sayisi;
       if (customMergedRaw.length > 0) {
         if (customMergedRaw.length < 30) {
           return res.status(400).json({ error: 'custom_merged_html_too_short' });
@@ -725,7 +726,6 @@ export default async function handler(req, res) {
           body.baslangic_tarihi !== undefined &&
           String(body.baslangic_tarihi || '').trim().slice(0, 10) !== String(existing.baslangic_tarihi || '').trim().slice(0, 10);
 
-        let contractTaksitSayisi = taksit_sayisi;
         if (phase0 === 'awaiting_admin_price') {
           if (!(feeNum > 0)) {
             return res.status(400).json({ error: 'ucret_required_before_signature_release' });
