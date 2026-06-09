@@ -20,6 +20,7 @@ import {
   validateEventFormForBindings,
   type EventFormValues
 } from '../lib/eventTemplateFields';
+import { resolveTenantScopeInstitutionId } from '../lib/activeInstitutionScope';
 import { CLASS_LEVELS, formatClassLevelLabel } from '../types';
 
 type WaTemplate = {
@@ -135,12 +136,20 @@ function scheduleLabel(ev: InstitutionEvent): string | null {
 
 export default function EventsPage() {
   const { effectiveUser } = useAuth();
-  const { activeInstitutionId, institution } = useApp();
+  const { activeInstitutionId, institutions } = useApp();
   const tags = userRoleTags(effectiveUser);
   const canManage = tags.includes('super_admin') || tags.includes('admin') || tags.includes('coach');
 
-  const scopedInstitutionId =
-    activeInstitutionId || effectiveUser?.institutionId || institution?.id || null;
+  const scopedInstitutionId = useMemo(
+    () =>
+      resolveTenantScopeInstitutionId({
+        role: effectiveUser?.role,
+        userInstitutionId: effectiveUser?.institutionId,
+        selectedInstitutionId: activeInstitutionId,
+        fallbackInstitutionId: institutions[0]?.id ?? null
+      }),
+    [effectiveUser?.role, effectiveUser?.institutionId, activeInstitutionId, institutions]
+  );
 
   const institutionQuery = scopedInstitutionId
     ? `institution_id=${encodeURIComponent(scopedInstitutionId)}`

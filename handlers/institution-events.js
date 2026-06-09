@@ -65,14 +65,49 @@ async function resolveInstitutionId(actor) {
   return null;
 }
 
+function sanitizeInstitutionId(raw) {
+  const id = String(raw || '').trim();
+  if (!id || id === 'default') return null;
+  return id;
+}
+
 function resolveEffectiveInstitutionId(actor, institutionId, req, body) {
-  const fromBody = body && typeof body === 'object' ? String(body.institution_id || '').trim() : '';
-  const fromQuery = String(req.query?.institution_id || '').trim();
-  if (institutionId) return institutionId;
+  const fromBody =
+    body && typeof body === 'object' ? sanitizeInstitutionId(body.institution_id) : null;
+  const fromQuery = sanitizeInstitutionId(req.query?.institution_id);
+  const resolvedActorInst = sanitizeInstitutionId(institutionId);
+  if (resolvedActorInst) return resolvedActorInst;
   if (fromBody) return fromBody;
   if (fromQuery) return fromQuery;
   if (actor.role === 'super_admin') return PLATFORM_PRIMARY_INSTITUTION_ID;
   return null;
+}
+
+function isMissingClassesColumnError(error) {
+  const msg = String(error?.message || '').toLowerCase();
+  const code = String(error?.code || '');
+  return (
+    code === 'PGRST204' ||
+    code === '42703' ||
+    msg.includes('class_level') ||
+    (msg.includes('column') && msg.includes('does not exist')) ||
+    (msg.includes('could not find') && msg.includes('column'))
+  );
+}
+
+async function loadClassesForEvents(instFilter) {
+  let q = supabaseAdmin.from('classes').select('id, name, class_level').order('name');
+  if (instFilter) q = q.eq('institution_id', instFilter);
+  const { data, error } = await q.limit(200);
+  if (!error) return data || [];
+  if (isMissingClassesColumnError(error)) {
+    let q2 = supabaseAdmin.from('classes').select('id, name').order('name');
+    if (instFilter) q2 = q2.eq('institution_id', instFilter);
+    const { data: data2, error: error2 } = await q2.limit(200);
+    if (error2) throw error2;
+    return (data2 || []).map((c) => ({ ...c, class_level: null }));
+  }
+  throw error;
 }
 
 function normalizeTrParticipantPhone(raw) {
@@ -297,15 +332,13 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'GET' && scope === 'classes') {
-    const instFilter = effectiveInstitutionId || undefined;
-    let q = supabaseAdmin.from('classes').select('id, name, class_level').order('name');
-    if (instFilter) q = q.eq('institution_id', instFilter);
-    const { data, error } = await q.limit(200);
-    if (error) {
+    try {
+      const rows = await loadClassesForEvents(effectiveInstitutionId || undefined);
+      return res.status(200).json({ data: rows });
+    } catch (error) {
       if (isEventsSchemaError(error)) return schemaHintResponse(res, 503, error);
       return res.status(500).json({ error: error.message });
     }
-    return res.status(200).json({ data: data || [] });
   }
 
   if (req.method === 'GET' && scope === 'people') {
@@ -460,7 +493,7 @@ export default async function handler(req, res) {
       eventTemplate = tpl;
     }
 
-    const instId = effectiveInstitutionId || String(body.institution_id || '').trim();
+    const instId = effectiveInstitutionId || sanitizeInstitutionId(body.institution_id);
     if (!instId) {
       return res.status(400).json({
         error: 'institution_required',
