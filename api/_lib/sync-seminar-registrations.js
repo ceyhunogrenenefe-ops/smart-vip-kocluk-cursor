@@ -147,6 +147,7 @@ function extractNameFromRow(row) {
 function normKey(s) {
   return String(s || '')
     .trim()
+    .replace(/^[!?.\s…]+|[!?.\s…]+$/g, '')
     .toLocaleLowerCase('tr')
     .replace(/\s+/g, ' ');
 }
@@ -279,19 +280,27 @@ function buildEventMatchContext(events) {
   return { eligible, syncKeys };
 }
 
+function eventSyncKeys(event) {
+  const keys = new Set();
+  const sk = String(event.seminar_sync_key || '').trim();
+  const title = String(event.title || '').trim();
+  if (sk) keys.add(sk);
+  if (title && (!sk || !seminarKeysMatch(sk, title))) keys.add(title);
+  return Array.from(keys);
+}
+
 /** Etkinlik ↔ kayıt: event_id, seminer anahtarı veya dış formdaki seminer/form alanı. */
 function eventMatchesRegistration(event, reg, rawRow) {
   if (reg.event_id && String(event.id) === String(reg.event_id)) return true;
 
-  const syncKey = String(event.seminar_sync_key || '').trim();
-  if (!syncKey) return false;
+  const syncKeys = eventSyncKeys(event);
+  if (!syncKeys.length) return false;
 
   const regKey = String(reg.seminar_key || '').trim();
-  if (regKey && seminarKeysMatch(syncKey, regKey)) return true;
-  if (rowSeminarFieldMatches(rawRow, syncKey)) return true;
-
-  const titleKey = String(event.title || '').trim();
-  if (titleKey && regKey && seminarKeysMatch(titleKey, regKey)) return true;
+  for (const syncKey of syncKeys) {
+    if (regKey && seminarKeysMatch(syncKey, regKey)) return true;
+    if (rowSeminarFieldMatches(rawRow, syncKey)) return true;
+  }
 
   return false;
 }

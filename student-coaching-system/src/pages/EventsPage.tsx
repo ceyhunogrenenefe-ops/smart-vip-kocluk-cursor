@@ -553,11 +553,12 @@ export default function EventsPage() {
     }
     const rawParticipants = buildParticipantsPayload();
     const participants = rawParticipants.filter((p) => isValidTrParticipantPhone(p.phone));
-    if (!participants.length && !seminarSyncKey.trim()) {
+    const effectiveSeminarKey = seminarSyncKey.trim() || resolvedTitle;
+    if (!participants.length && !effectiveSeminarKey) {
       if (rawParticipants.length > 0) {
         toast.error('Seçilen katılımcıların telefon numaraları geçersiz. 05xxxxxxxxx formatında olmalı.');
       } else {
-        toast.error('Katılımcı seçin veya seminer eşleme anahtarı girin');
+        toast.error('Katılımcı seçin veya seminer eşleme anahtarı / etkinlik başlığı girin');
       }
       return;
     }
@@ -595,7 +596,7 @@ export default function EventsPage() {
           schedule_time: sendMode === 'once' ? scheduleTime : sendMode === 'daily' ? dailySendTime : null,
           daily_send_time: sendMode === 'daily' ? dailySendTime : null,
           institution_id: scopedInstitutionId || undefined,
-          seminar_sync_key: seminarSyncKey.trim() || null,
+          seminar_sync_key: effectiveSeminarKey || null,
           seminar_auto_send: seminarAutoSend,
           participants
         })
@@ -998,7 +999,7 @@ export default function EventsPage() {
               <code className="rounded bg-white/80 px-1">seminer_key</code> /{' '}
               <code className="rounded bg-white/80 px-1">seminer_adi</code> /{' '}
               <code className="rounded bg-white/80 px-1">form_adi</code> ile aynı olmalı (ör.{' '}
-              <span className="font-mono">yks-stresi-basari-etkilemesin</span>).
+              <span className="font-mono">YKS Sınav Stresi Başarını Etkilemesin!</span>).
             </p>
             <label className="block text-xs">
               <span className="text-slate-600">Seminer eşleme anahtarı *</span>
@@ -1006,7 +1007,7 @@ export default function EventsPage() {
                 value={seminarSyncKey}
                 onChange={(e) => setSeminarSyncKey(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-                placeholder="seminer_kayitlari.seminer_adi ile birebir (örn. yks stresi başarı etkilemesin)"
+                placeholder="YKS Sınav Stresi Başarını Etkilemesin!"
               />
             </label>
             <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
