@@ -54,7 +54,20 @@ const KEY_KEYS = [
   'etkinlik_key',
   'event_key',
   'seminer_baslik',
-  'baslik'
+  'baslik',
+  'form_adi',
+  'form_name',
+  'form_slug',
+  'form_id',
+  'form_key',
+  'etkinlik_adi',
+  'etkinlik',
+  'kaynak',
+  'source',
+  'utm_campaign',
+  'campaign',
+  'landing_page',
+  'sayfa'
 ];
 const EVENT_ID_KEYS = ['event_id', 'etkinlik_id', 'institution_event_id'];
 const INSTITUTION_KEYS = ['institution_id', 'kurum_id'];
@@ -132,10 +145,49 @@ function normKey(s) {
     .replace(/\s+/g, ' ');
 }
 
+function normKeySlug(s) {
+  return normKey(s)
+    .replace(/[ıİ]/g, 'i')
+    .replace(/[ğĞ]/g, 'g')
+    .replace(/[üÜ]/g, 'u')
+    .replace(/[şŞ]/g, 's')
+    .replace(/[öÖ]/g, 'o')
+    .replace(/[çÇ]/g, 'c')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function extractSeminarKeyFromRow(row) {
+  const direct = pickField(row, KEY_KEYS);
+  if (direct) return direct;
+  for (const [k, v] of Object.entries(row || {})) {
+    if (v == null || typeof v === 'object') continue;
+    const val = String(v).trim();
+    if (!val) continue;
+    if (/seminer|seminar|form|etkinlik|campaign|kaynak|landing|sayfa|utm/i.test(k)) {
+      return val;
+    }
+  }
+  return '';
+}
+
+function seminarKeysMatch(eventKey, regKey) {
+  const syncKey = normKey(eventKey);
+  const rk = normKey(regKey);
+  if (!syncKey || !rk) return false;
+  if (syncKey === rk) return true;
+  const syncSlug = normKeySlug(eventKey);
+  const regSlug = normKeySlug(regKey);
+  if (syncSlug && regSlug && syncSlug === regSlug) return true;
+  if (rk.includes(syncKey) || syncKey.includes(rk)) return true;
+  if (regSlug && syncSlug && (regSlug.includes(syncSlug) || syncSlug.includes(regSlug))) return true;
+  return false;
+}
+
 function parseSeminarRegistration(row) {
   const phone = extractPhoneFromRow(row);
   const email = pickField(row, EMAIL_KEYS).toLowerCase();
-  const seminar_key = pickField(row, KEY_KEYS);
+  const seminar_key = extractSeminarKeyFromRow(row);
   const event_id = pickField(row, EVENT_ID_KEYS);
   let institution_id = pickField(row, INSTITUTION_KEYS);
   if (!institution_id) institution_id = PLATFORM_PRIMARY_INSTITUTION_ID;
@@ -185,67 +237,32 @@ function isMissingColumn(error, col) {
   return msg.includes(String(col).toLowerCase()) && (msg.includes('column') || msg.includes('does not exist'));
 }
 
-/** Planlanmış / seminer otomatik mesaj açık etkinlikler */
+/** Yalnızca seminer eşleme anahtarı tanımlı etkinlikler havuzdan çeker (genel havuz yok). */
 export function eventEligibleForSeminarSync(event) {
-  if (String(event.seminar_sync_key || '').trim() && event.seminar_auto_send !== false) {
-    return true;
-  }
-  const mode = String(event.send_mode || 'manual');
-  if (mode === 'manual') return false;
-  if (mode === 'immediate') return true;
-  const st = String(event.schedule_status || 'idle');
-  if (st === 'scheduled' || st === 'completed') return true;
-  if (event.last_schedule_run_at) return true;
-  if (event.scheduled_send_at || event.daily_send_time) return true;
-  return false;
+  if (!String(event.seminar_sync_key || '').trim()) return false;
+  if (event.seminar_auto_send === false) return false;
+  return true;
 }
 
 function buildEventMatchContext(events) {
   const eligible = (events || []).filter(eventEligibleForSeminarSync);
-  const singleKeyedByInst = new Map();
-  const singleEligibleByInst = new Map();
-
-  const byInst = new Map();
-  for (const ev of eligible) {
-    const inst = String(ev.institution_id || PLATFORM_PRIMARY_INSTITUTION_ID);
-    if (!byInst.has(inst)) byInst.set(inst, []);
-    byInst.get(inst).push(ev);
-  }
-
-  for (const [inst, list] of byInst) {
-    const keyed = list.filter((e) => String(e.seminar_sync_key || '').trim());
-    if (keyed.length === 1) singleKeyedByInst.set(inst, keyed[0].id);
-    if (list.length === 1) singleEligibleByInst.set(inst, list[0].id);
-  }
-
-  return { eligible, singleKeyedByInst, singleEligibleByInst };
+  const syncKeys = new Set(
+    eligible.map((e) => normKey(e.seminar_sync_key)).filter(Boolean)
+  );
+  return { eligible, syncKeys };
 }
 
-function eventMatchesRegistration(event, reg, ctx) {
+/** Etkinlik ↔ kayıt: yalnızca açık event_id veya eşleşen seminer anahtarı. */
+function eventMatchesRegistration(event, reg) {
   if (reg.event_id && String(event.id) === String(reg.event_id)) return true;
 
-  const inst = String(event.institution_id || PLATFORM_PRIMARY_INSTITUTION_ID);
-  const regInst = String(reg.institution_id || PLATFORM_PRIMARY_INSTITUTION_ID);
+  const syncKey = String(event.seminar_sync_key || '').trim();
+  if (!syncKey) return false;
 
-  const syncKey = normKey(event.seminar_sync_key);
-  const regKey = normKey(reg.seminar_key);
-  const titleKey = normKey(event.title);
+  const regKey = String(reg.seminar_key || '').trim();
+  if (!regKey) return false;
 
-  if (syncKey && regKey && (syncKey === regKey || regKey.includes(syncKey) || syncKey.includes(regKey))) {
-    return true;
-  }
-  if (regKey && titleKey && regKey === titleKey) return true;
-  if (syncKey && titleKey && syncKey === titleKey && !regKey) return true;
-
-  if (syncKey && !regKey && ctx.singleKeyedByInst.get(inst) === event.id) return true;
-
-  if (!reg.event_id && !reg.seminar_key && ctx.singleEligibleByInst.get(inst) === event.id) {
-    return regInst === inst || !reg.institution_id;
-  }
-
-  if (regInst === inst && ctx.singleEligibleByInst.get(inst) === event.id) return true;
-
-  return false;
+  return seminarKeysMatch(syncKey, regKey);
 }
 
 async function loadLinkedRegistrationIds() {
@@ -453,7 +470,7 @@ export async function syncSeminarRegistrationsToEvents({ limit = 200, log = [] }
       continue;
     }
 
-    const targets = ctx.eligible.filter((ev) => eventMatchesRegistration(ev, reg, ctx));
+    const targets = ctx.eligible.filter((ev) => eventMatchesRegistration(ev, reg));
     if (!targets.length) {
       skips.no_matching_event++;
       log.push({

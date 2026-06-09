@@ -531,7 +531,7 @@ export default async function handler(req, res) {
         hint:
           skippedParticipants.length > 0
             ? 'Katılımcı telefon numaraları geçersiz. 05xx veya +90 formatında girin.'
-            : 'En az bir katılımcı seçin veya seminer eşleme anahtarı girin (kayıtlar otomatik eklenir).',
+            : 'En az bir katılımcı seçin veya seminer eşleme anahtarı girin (yalnızca o seminerin kayıtları eklenir).',
         skipped: skippedParticipants
       });
     }

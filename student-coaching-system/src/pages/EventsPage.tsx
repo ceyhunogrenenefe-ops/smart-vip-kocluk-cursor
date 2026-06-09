@@ -712,6 +712,10 @@ export default function EventsPage() {
         toast.warning(
           `Seminer tablosunda ${d.total_in_table} kayıt var; eklenecek yeni kayıt yok (zaten bağlı: ${d.already_linked ?? '?'})`
         );
+      } else if ((d.synced ?? 0) === 0 && (d.skips?.no_matching_event ?? 0) > 0) {
+        toast.warning(
+          `Eşleşen seminer kaydı yok. Etkinlikteki seminer anahtarı ile seminer_kayitlari satırındaki seminer_adi/form_adi aynı olmalı. ${summary}`
+        );
       } else if ((d.synced ?? 0) === 0 && skipParts) {
         toast.warning(`Seminer eşitleme: ${summary}`);
       } else {
@@ -941,17 +945,20 @@ export default function EventsPage() {
           <div className="sm:col-span-2 rounded-lg border border-teal-200 bg-teal-50/50 p-3 space-y-2">
             <p className="text-sm font-semibold text-teal-900">Seminer kayıtları (seminer_kayitlari)</p>
             <p className="text-[11px] text-teal-800">
-              Supabase&apos;deki yeni seminer kayıtları planlı etkinliklere otomatik eklenir. Seminer anahtarı
-              boş bırakılırsa kurumdaki tek planlı etkinliğe yazılır. İsim yoksa &quot;Katılımcı&quot; adıyla
-              mesaj gider.
+              Yalnızca <strong>bu anahtarla eşleşen</strong> seminer kayıtları eklenir; genel havuzun tamamı
+              çekilmez. Anahtar, <code className="rounded bg-white/80 px-1">seminer_kayitlari</code> satırındaki{' '}
+              <code className="rounded bg-white/80 px-1">seminer_key</code> /{' '}
+              <code className="rounded bg-white/80 px-1">seminer_adi</code> /{' '}
+              <code className="rounded bg-white/80 px-1">form_adi</code> ile aynı olmalı (ör.{' '}
+              <span className="font-mono">yks-stresi-basari-etkilemesin</span>).
             </p>
             <label className="block text-xs">
-              <span className="text-slate-600">Seminer eşleme anahtarı</span>
+              <span className="text-slate-600">Seminer eşleme anahtarı *</span>
               <input
                 value={seminarSyncKey}
                 onChange={(e) => setSeminarSyncKey(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-                placeholder="seminer_key / seminer_adi ile aynı (örn. mart-online-seminer)"
+                placeholder="seminer_kayitlari.seminer_adi ile birebir (örn. yks stresi başarı etkilemesin)"
               />
             </label>
             <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">

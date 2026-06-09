@@ -8,7 +8,7 @@ ALTER TABLE institution_events
   ADD COLUMN IF NOT EXISTS seminar_auto_send BOOLEAN NOT NULL DEFAULT true;
 
 COMMENT ON COLUMN institution_events.seminar_sync_key IS
-  'seminer_kayitlari.seminer_key / seminer_adi / seminer_id ile eşleşir; boşsa kurumdaki tüm planlı etkinliklere yazılır';
+  'seminer_kayitlari.seminer_key / seminer_adi / form_adi ile eşleşir; yalnızca bu anahtarlı kayıtlar çekilir';
 
 ALTER TABLE institution_event_participants
   ADD COLUMN IF NOT EXISTS seminar_registration_id TEXT;
