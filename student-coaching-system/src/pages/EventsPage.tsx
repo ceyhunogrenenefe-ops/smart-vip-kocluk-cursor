@@ -109,6 +109,15 @@ function sourceTypeLabel(source?: string | null): string {
   return 'Öğrenci';
 }
 
+function isValidTrParticipantPhone(phone: string): boolean {
+  const digits = normalizeImportedPhone(phone).replace(/\D/g, '');
+  if (!digits) return false;
+  if (digits.length === 11 && digits.startsWith('05')) return true;
+  if (digits.length === 12 && digits.startsWith('90')) return true;
+  if (digits.length === 10 && digits.startsWith('5')) return true;
+  return false;
+}
+
 function scheduleLabel(ev: InstitutionEvent): string | null {
   const mode = String(ev.send_mode || 'manual');
   if (mode === 'once' && ev.scheduled_send_at) {
@@ -144,6 +153,7 @@ export default function EventsPage() {
   };
 
   const [schemaWarning, setSchemaWarning] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [templates, setTemplates] = useState<WaTemplate[]>([]);
   const [classes, setClasses] = useState<ClassOption[]>([]);
@@ -315,6 +325,7 @@ export default function EventsPage() {
     if (!canManage) return;
     setLoading(true);
     setSchemaWarning(null);
+    setLoadError(null);
     try {
       const [tRes, cRes, pRes, eRes] = await Promise.all([
         apiFetch(apiEventsPath('scope=templates')),
@@ -326,6 +337,15 @@ export default function EventsPage() {
       const cj = await cRes.json().catch(() => ({}));
       const pj = await pRes.json().catch(() => ({}));
       const ej = await eRes.json().catch(() => ({}));
+      const failed = [
+        [tRes, tj],
+        [cRes, cj],
+        [pRes, pj],
+        [eRes, ej]
+      ].find(([res]) => !res.ok);
+      if (failed) {
+        setLoadError(eventCreateErrorMessage(failed[1] as Record<string, unknown>));
+      }
       const warn = [tj, cj, pj, ej].find((j) => j?.warning === 'events_schema_missing' || j?.error === 'events_schema_missing');
       if (warn?.hint) setSchemaWarning(String(warn.hint));
       else if (ej.warning === 'events_schema_missing' && ej.hint) setSchemaWarning(String(ej.hint));
@@ -458,10 +478,15 @@ export default function EventsPage() {
       return 'Geçerli telefon numarası olan en az bir katılımcı gerekli (05xx…).';
     }
     if (err === 'events_schema_missing' || err.includes('schema')) {
-      return 'Veritabanı kurulumu eksik — Supabase\'de 2026-06-08-institution-events-full-setup.sql çalıştırın.';
+      return (
+        hint ||
+        'Veritabanı kurulumu eksik — Supabase\'de 2026-06-08-institution-events-full-setup.sql ve 2026-06-15-institution-events-migrations-bundle.sql çalıştırın.'
+      );
     }
     if (err === 'template_not_found') return 'WhatsApp şablonu bulunamadı.';
-    if (err === 'institution_required') return 'Kurum bilgisi bulunamadı.';
+    if (err === 'institution_required') {
+      return hint || 'Kurum bilgisi bulunamadı. Üst menüden kurum seçin veya yöneticinize başvurun.';
+    }
     if (err === 'title_required') return 'Etkinlik başlığı gerekli.';
     return err || 'Etkinlik oluşturulamadı';
   };
@@ -477,9 +502,14 @@ export default function EventsPage() {
       toast.error('Etkinlik başlığı gerekli');
       return;
     }
-    const participants = buildParticipantsPayload();
+    const rawParticipants = buildParticipantsPayload();
+    const participants = rawParticipants.filter((p) => isValidTrParticipantPhone(p.phone));
     if (!participants.length && !seminarSyncKey.trim()) {
-      toast.error('Katılımcı seçin veya seminer eşleme anahtarı girin');
+      if (rawParticipants.length > 0) {
+        toast.error('Seçilen katılımcıların telefon numaraları geçersiz. 05xxxxxxxxx formatında olmalı.');
+      } else {
+        toast.error('Katılımcı seçin veya seminer eşleme anahtarı girin');
+      }
       return;
     }
     const needsLink =
@@ -701,11 +731,19 @@ export default function EventsPage() {
         </p>
       </div>
 
+      {loadError ? (
+        <div className="rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-950">
+          <p className="font-semibold">Etkinlik verileri yüklenemedi</p>
+          <p className="mt-1 text-xs">{loadError}</p>
+        </div>
+      ) : null}
+
       {schemaWarning ? (
         <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
           <p className="font-semibold">Veritabanı kurulumu gerekli</p>
           <p className="mt-1 text-xs">{schemaWarning}</p>
           <p className="mt-1 text-xs font-mono">2026-06-08-institution-events-full-setup.sql</p>
+          <p className="mt-1 text-xs font-mono">2026-06-15-institution-events-migrations-bundle.sql</p>
         </div>
       ) : null}
 

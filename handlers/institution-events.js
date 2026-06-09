@@ -39,17 +39,28 @@ async function resolveInstitutionId(actor) {
   if (actor.institution_id) return String(actor.institution_id);
   const { data: u } = await supabaseAdmin
     .from('users')
-    .select('institution_id')
+    .select('institution_id, email, role')
     .eq('id', actor.sub)
     .maybeSingle();
   if (u?.institution_id) return String(u.institution_id);
-  if (actor.coach_id) {
+  const coachLookupId = actor.coach_id ? String(actor.coach_id) : null;
+  if (coachLookupId) {
     const { data: c } = await supabaseAdmin
       .from('coaches')
       .select('institution_id')
-      .eq('id', String(actor.coach_id))
+      .eq('id', coachLookupId)
       .maybeSingle();
     if (c?.institution_id) return String(c.institution_id);
+  }
+  const role = String(actor.role || u?.role || '').trim();
+  const email = String(u?.email || '').trim().toLowerCase();
+  if (email && (role === 'coach' || role === 'teacher')) {
+    const { data: co } = await supabaseAdmin
+      .from('coaches')
+      .select('institution_id')
+      .ilike('email', email)
+      .maybeSingle();
+    if (co?.institution_id) return String(co.institution_id);
   }
   return null;
 }
@@ -76,27 +87,33 @@ function normalizeTrParticipantPhone(raw) {
   return null;
 }
 
+const EVENTS_SCHEMA_HINT =
+  'Supabase SQL Editor\'da sırayla: 2026-06-08-institution-events-full-setup.sql, ardından 2026-06-15-institution-events-migrations-bundle.sql';
+
 function isEventsSchemaError(error) {
   const msg = String(error?.message || error || '').toLowerCase();
   const code = String(error?.code || '');
   return (
     code === '42P01' ||
     code === 'PGRST205' ||
+    code === 'PGRST204' ||
+    code === '42703' ||
     code === '22P02' ||
     msg.includes('institution_events') ||
     msg.includes('institution_event_participants') ||
     msg.includes('invalid input syntax for type uuid') ||
-    (msg.includes('does not exist') && msg.includes('relation'))
+    msg.includes('schema cache') ||
+    (msg.includes('column') && msg.includes('does not exist')) ||
+    (msg.includes('does not exist') && (msg.includes('relation') || msg.includes('table')))
   );
 }
 
 function schemaHintResponse(res, statusCode, error) {
-  const hint =
-    'Supabase SQL Editor\'da bir kez çalıştırın: sql/2026-06-08-institution-events-full-setup.sql';
   return res.status(statusCode).json({
-    error: String(error?.message || error || 'schema_error'),
+    error: 'events_schema_missing',
     warning: 'events_schema_missing',
-    hint
+    detail: String(error?.message || error || 'schema_error'),
+    hint: EVENTS_SCHEMA_HINT
   });
 }
 
@@ -355,7 +372,7 @@ export default async function handler(req, res) {
         return res.status(200).json({
           data: [],
           warning: 'events_schema_missing',
-          hint: 'Supabase SQL Editor: sql/2026-06-08-institution-events-full-setup.sql'
+          hint: EVENTS_SCHEMA_HINT
         });
       }
       return res.status(500).json({
@@ -518,7 +535,8 @@ export default async function handler(req, res) {
       if (isEventsSchemaError(insErr)) {
         return res.status(400).json({
           error: 'events_schema_missing',
-          hint: 'Supabase SQL Editor\'da çalıştırın: sql/2026-06-08-institution-events-full-setup.sql'
+          detail: insErr?.message || 'insert_failed',
+          hint: EVENTS_SCHEMA_HINT
         });
       }
       return res.status(500).json({ error: insErr?.message || 'insert_failed' });
@@ -539,7 +557,8 @@ export default async function handler(req, res) {
         if (isEventsSchemaError(pErr)) {
           return res.status(400).json({
             error: 'events_schema_missing',
-            hint: 'Supabase SQL Editor\'da çalıştırın: sql/2026-06-08-institution-events-full-setup.sql'
+            detail: pErr?.message || 'participants_insert_failed',
+            hint: EVENTS_SCHEMA_HINT
           });
         }
         return res.status(500).json({ error: pErr.message });
