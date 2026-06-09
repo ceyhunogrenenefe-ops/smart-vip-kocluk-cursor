@@ -2,7 +2,7 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { authorizeVercelOrCronSecret } from '../api/_lib/cron-auth.js';
 import { getIstanbulDateString, getIstanbulHour, getIstanbulMinute } from '../api/_lib/istanbul-time.js';
 import { recordCronRun } from '../api/_lib/cron-run-log.js';
-import { sendEventInvites } from '../api/_lib/institution-event-send.js';
+import { resolveEventMeetingLink, sendEventInvites } from '../api/_lib/institution-event-send.js';
 import { syncSeminarRegistrationsToEvents } from '../api/_lib/sync-seminar-registrations.js';
 
 function parseHm(timeVal) {
@@ -22,7 +22,7 @@ async function countPendingParticipants(eventId) {
 }
 
 async function processEvent(event, now, todayIstanbul, log) {
-  if (!String(event.meeting_link || '').trim()) {
+  if (!resolveEventMeetingLink(event)) {
     log.push({ event_id: event.id, skip: 'no_meeting_link' });
     return;
   }

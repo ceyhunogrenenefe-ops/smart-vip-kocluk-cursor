@@ -1,6 +1,6 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import { normalizePhoneToE164 } from './phone-whatsapp.js';
-import { sendEventInvites } from './institution-event-send.js';
+import { resolveEventMeetingLink, sendEventInvites } from './institution-event-send.js';
 import { getIstanbulDateString, getIstanbulHour, getIstanbulMinute } from './istanbul-time.js';
 
 const PLATFORM_PRIMARY_INSTITUTION_ID = '73323d75-eea1-4552-8bba-d50555423589';
@@ -67,7 +67,13 @@ const KEY_KEYS = [
   'utm_campaign',
   'campaign',
   'landing_page',
-  'sayfa'
+  'sayfa',
+  'kayit_tipi',
+  'tur',
+  'tip',
+  'deneme',
+  'funnel',
+  'kategori'
 ];
 const EVENT_ID_KEYS = ['event_id', 'etkinlik_id', 'institution_event_id'];
 const INSTITUTION_KEYS = ['institution_id', 'kurum_id'];
@@ -161,14 +167,35 @@ function extractSeminarKeyFromRow(row) {
   const direct = pickField(row, KEY_KEYS);
   if (direct) return direct;
   for (const [k, v] of Object.entries(row || {})) {
-    if (v == null || typeof v === 'object') continue;
+    if (v == null) continue;
+    if (typeof v === 'object') {
+      if (!Array.isArray(v)) {
+        const nested = extractSeminarKeyFromRow(v);
+        if (nested) return nested;
+      }
+      continue;
+    }
     const val = String(v).trim();
     if (!val) continue;
-    if (/seminer|seminar|form|etkinlik|campaign|kaynak|landing|sayfa|utm/i.test(k)) {
+    if (/seminer|seminar|form|etkinlik|campaign|kaynak|landing|sayfa|utm|deneme|funnel|kategori|tur|tip/i.test(k)) {
       return val;
     }
   }
   return '';
+}
+
+const SEMINAR_FIELD_NAME_RE =
+  /seminer|seminar|form|etkinlik|campaign|kaynak|landing|sayfa|utm|deneme|funnel|kategori|tur|tip/i;
+
+function rowSeminarFieldMatches(rawRow, eventSyncKey) {
+  if (!rawRow || !eventSyncKey) return false;
+  for (const [k, v] of Object.entries(rawRow)) {
+    if (v == null || typeof v === 'object') continue;
+    if (!SEMINAR_FIELD_NAME_RE.test(k)) continue;
+    const val = String(v).trim();
+    if (val && seminarKeysMatch(eventSyncKey, val)) return true;
+  }
+  return false;
 }
 
 function seminarKeysMatch(eventKey, regKey) {
@@ -252,17 +279,21 @@ function buildEventMatchContext(events) {
   return { eligible, syncKeys };
 }
 
-/** Etkinlik ↔ kayıt: yalnızca açık event_id veya eşleşen seminer anahtarı. */
-function eventMatchesRegistration(event, reg) {
+/** Etkinlik ↔ kayıt: event_id, seminer anahtarı veya dış formdaki seminer/form alanı. */
+function eventMatchesRegistration(event, reg, rawRow) {
   if (reg.event_id && String(event.id) === String(reg.event_id)) return true;
 
   const syncKey = String(event.seminar_sync_key || '').trim();
   if (!syncKey) return false;
 
   const regKey = String(reg.seminar_key || '').trim();
-  if (!regKey) return false;
+  if (regKey && seminarKeysMatch(syncKey, regKey)) return true;
+  if (rowSeminarFieldMatches(rawRow, syncKey)) return true;
 
-  return seminarKeysMatch(syncKey, regKey);
+  const titleKey = String(event.title || '').trim();
+  if (titleKey && regKey && seminarKeysMatch(titleKey, regKey)) return true;
+
+  return false;
 }
 
 async function loadLinkedRegistrationIds() {
@@ -293,8 +324,8 @@ async function loadPendingSeminarRegistrations(limit, linkedIds) {
     .order('created_at', { ascending: false })
     .limit(limit);
 
-  if (!filterErr && filtered?.length) {
-    return filtered.filter((r) => !linkedIds.has(String(r.id ?? '')));
+  if (!filterErr) {
+    return (filtered || []).filter((r) => !linkedIds.has(String(r.id ?? '')));
   }
 
   if (filterErr && !isMissingColumn(filterErr, 'synced_at')) {
@@ -374,11 +405,12 @@ function hasScheduledSendTimePassed(event, now = new Date()) {
 
 function shouldAutoSendOnRegister(event) {
   if (event.seminar_auto_send === false) return false;
-  if (!String(event.meeting_link || '').trim()) return false;
+  if (!resolveEventMeetingLink(event)) return false;
   if (!String(event.template_type || '').trim()) return false;
   const mode = String(event.send_mode || 'manual');
   if (mode === 'immediate') return true;
-  // Planlı etkinlik: saat gelmeden kuyruğa al; geç kalan seminer kayıtlarına hemen gönder
+  // Yeni seminer kaydı: otomatik mesaj açıksa hemen WhatsApp (manuel/planlı moddan bağımsız)
+  if (String(event.seminar_sync_key || '').trim()) return true;
   if (mode === 'once' || mode === 'daily') return hasScheduledSendTimePassed(event);
   return false;
 }
@@ -470,7 +502,7 @@ export async function syncSeminarRegistrationsToEvents({ limit = 200, log = [] }
       continue;
     }
 
-    const targets = ctx.eligible.filter((ev) => eventMatchesRegistration(ev, reg));
+    const targets = ctx.eligible.filter((ev) => eventMatchesRegistration(ev, reg, raw));
     if (!targets.length) {
       skips.no_matching_event++;
       log.push({

@@ -377,6 +377,46 @@ export default function EventsPage() {
     void loadAll();
   }, [loadAll]);
 
+  const hasSeminarAutoEvents = useMemo(
+    () =>
+      events.some(
+        (e) => String(e.seminar_sync_key || '').trim() && e.seminar_auto_send !== false
+      ),
+    [events]
+  );
+
+  useEffect(() => {
+    if (!canManage || !hasSeminarAutoEvents) return;
+    let cancelled = false;
+    const runSync = async (silent: boolean) => {
+      try {
+        const res = await apiFetch('/api/institution-events?op=sync-seminar');
+        const j = await res.json().catch(() => ({}));
+        if (cancelled || !res.ok) return;
+        const d = (j.data || j) as { synced?: number; sent?: number };
+        if ((d.synced ?? 0) > 0 || (d.sent ?? 0) > 0) {
+          if (!silent) {
+            toast.success(`Seminer kaydı: ${d.synced ?? 0} eklendi, ${d.sent ?? 0} WhatsApp`);
+          }
+          await loadAll();
+        }
+      } catch {
+        /* silent poll */
+      }
+    };
+    void runSync(true);
+    const id = window.setInterval(() => void runSync(true), 45000);
+    const onFocus = () => void runSync(true);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
+  }, [canManage, hasSeminarAutoEvents, loadAll]);
+
   const toggleRecipient = (studentId: string, kind: RecipientKind) => {
     const key = recipientKey(studentId, kind);
     setSelectedRecipients((prev) => {
@@ -572,6 +612,7 @@ export default function EventsPage() {
         hint?: string;
       } | null;
       const skipped = Array.isArray(j.skipped_participants) ? j.skipped_participants.length : 0;
+      const semSync = j.seminar_sync as { synced?: number; sent?: number; skips?: Record<string, number> } | null;
       if (sendMode === 'immediate' && wa?.skipped) {
         toast.warning(String(wa.hint || 'Etkinlik oluşturuldu; WhatsApp gönderilmedi.'));
       } else if (sendMode === 'immediate' && wa) {
@@ -580,6 +621,13 @@ export default function EventsPage() {
         toast.success('Etkinlik planlandı — mesajlar belirlenen saatte gönderilecek');
       } else {
         toast.success(skipped ? `Etkinlik oluşturuldu (${skipped} geçersiz numara atlandı)` : 'Etkinlik oluşturuldu');
+      }
+      if (semSync && (semSync.synced ?? 0) > 0) {
+        toast.success(`Seminer havuzu: ${semSync.synced} katılımcı eklendi, ${semSync.sent ?? 0} WhatsApp`);
+      } else if (semSync?.skips?.no_matching_event) {
+        toast.info(
+          'Seminer kaydı henüz eşleşmedi — formda seminer_adi/form_adi alanı etkinlik anahtarıyla aynı olmalı.'
+        );
       }
       setTitle('');
       setDescription('');
@@ -967,8 +1015,12 @@ export default function EventsPage() {
                 checked={seminarAutoSend}
                 onChange={(e) => setSeminarAutoSend(e.target.checked)}
               />
-              Yeni seminer kaydı → listeye ekle (planlı etkinlikte mesaj plan saatinde gider)
+              Yeni seminer kaydı → listeye ekle ve WhatsApp hatırlatma gönder (katılım linki gerekli)
             </label>
+            <p className="text-[10px] text-teal-700">
+              Dış formda gizli alan önerisi: <span className="font-mono">seminer_adi</span> = yukarıdaki anahtar.
+              Sayfa açıkken veya cron ile ~1 dk içinde otomatik eşitlenir.
+            </p>
           </div>
         </div>
 

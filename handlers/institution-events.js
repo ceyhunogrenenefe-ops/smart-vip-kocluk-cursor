@@ -620,8 +620,22 @@ export default async function handler(req, res) {
       }
     }
 
+    let seminarSyncResult = null;
+    if (String(body.seminar_sync_key || '').trim()) {
+      try {
+        seminarSyncResult = await syncSeminarRegistrationsToEvents({ limit: 100 });
+      } catch (syncErr) {
+        seminarSyncResult = { ok: false, error: errorMessage(syncErr) || 'seminar_sync_failed' };
+      }
+    }
+
     const full = await loadEventWithStats(event.id, null);
-    return res.status(201).json({ data: full, whatsapp: sendResult, skipped_participants: skippedParticipants });
+    return res.status(201).json({
+      data: full,
+      whatsapp: sendResult,
+      skipped_participants: skippedParticipants,
+      seminar_sync: seminarSyncResult
+    });
   }
 
   if (req.method === 'PATCH') {
