@@ -10,6 +10,7 @@ import {
   resolveOptionalDocUrl,
   resolveSatisDocUrl
 } from '../lib/veliKayitLegalLinks';
+import { formatVeliKayitShareMessage } from '../lib/veliKayitShareMessage';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { isMaarifVeliProgram, resolveSinifFromVeliKayit } from '../lib/veliKayitClassLevel';
@@ -792,8 +793,14 @@ export default function ParentSignFlowPage() {
           : '');
       setLastCreatedLink(url || null);
       if (url) {
-        await copyText(
+        const shareText = formatVeliKayitShareMessage({
+          kurumAdi: headerKurumAdi || institution?.name?.trim() || 'Kurum',
           url,
+          kayitFormuMu: ogrenciOnceKayitFormu,
+          ogrenciAdi: `${ogrenciAd.trim()} ${ogrenciSoyad.trim()}`.trim()
+        });
+        await copyText(
+          shareText,
           ogrenciOnceKayitFormu
             ? 'Kayıt formu linki oluşturuldu ve panoya kopyalandı.'
             : 'Veli e-imza linki oluşturuldu ve panoya kopyalandı.'
@@ -900,6 +907,19 @@ export default function ParentSignFlowPage() {
     if (typeof window !== 'undefined' && window.location?.origin) return `${window.location.origin}${path}`;
     return path;
   };
+
+  const kurumAdiForContract = (r: ParentSignContractRow) => {
+    const fromRow = institutionOptions.find((o) => o.id === r.institution_id)?.name?.trim();
+    return fromRow || headerKurumAdi || institution?.name?.trim() || 'Kurum';
+  };
+
+  const shareMessageForContract = (r: ParentSignContractRow) =>
+    formatVeliKayitShareMessage({
+      kurumAdi: kurumAdiForContract(r),
+      url: fullLink(r),
+      kayitFormuMu: kayitFormPhase(r) === 'needs_form' && !parentContractRowSigned(r),
+      ogrenciAdi: `${r.ogrenci_ad || ''} ${r.ogrenci_soyad || ''}`.trim()
+    });
 
   const toggleTaksitOdeme = async (r: ParentSignContractRow, index: number, odendi: boolean) => {
     setParentSignRowBusy(`${r.id}:t${index}`);
@@ -1832,18 +1852,34 @@ export default function ParentSignFlowPage() {
             <div className="mt-4 rounded-xl border border-emerald-300 bg-emerald-50/90 p-4 dark:border-emerald-800 dark:bg-emerald-950/30">
               <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100 flex items-center gap-2">
                 <Link2 className="w-4 h-4" />
-                Veli linki (veliye bunu gönderin)
+                Veli mesajı (kurum adı + link — veliye bunu gönderin)
               </p>
               <div className="mt-2 flex flex-wrap gap-2 items-stretch">
-                <input
+                <textarea
                   readOnly
-                  value={lastCreatedLink}
-                  className="min-w-0 flex-1 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-mono text-slate-800 dark:bg-slate-950 dark:border-emerald-900"
+                  rows={4}
+                  value={formatVeliKayitShareMessage({
+                    kurumAdi: headerKurumAdi || institution?.name?.trim() || 'Kurum',
+                    url: lastCreatedLink,
+                    kayitFormuMu: ogrenciOnceKayitFormu,
+                    ogrenciAdi: `${ogrenciAd.trim()} ${ogrenciSoyad.trim()}`.trim()
+                  })}
+                  className="min-w-0 flex-1 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs text-slate-800 dark:bg-slate-950 dark:border-emerald-900 whitespace-pre-wrap"
                   onFocus={(e) => e.target.select()}
                 />
                 <button
                   type="button"
-                  onClick={() => void copyText(lastCreatedLink, 'Link panoya kopyalandı.')}
+                  onClick={() =>
+                    void copyText(
+                      formatVeliKayitShareMessage({
+                        kurumAdi: headerKurumAdi || institution?.name?.trim() || 'Kurum',
+                        url: lastCreatedLink,
+                        kayitFormuMu: ogrenciOnceKayitFormu,
+                        ogrenciAdi: `${ogrenciAd.trim()} ${ogrenciSoyad.trim()}`.trim()
+                      }),
+                      'Veli mesajı panoya kopyalandı.'
+                    )
+                  }
                   className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400 bg-white px-3 py-2 text-xs font-semibold text-emerald-900 hover:bg-emerald-100 dark:bg-slate-900 dark:hover:bg-emerald-950"
                 >
                   <Copy className="w-3.5 h-3.5" />
@@ -2271,7 +2307,9 @@ export default function ParentSignFlowPage() {
                       <button
                         type="button"
                         className="inline-flex items-center justify-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-semibold text-blue-800 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-100"
-                        onClick={() => void navigator.clipboard.writeText(fullLink(r))}
+                        onClick={() =>
+                          void copyText(shareMessageForContract(r), 'Veli mesajı panoya kopyalandı.')
+                        }
                       >
                         <Copy className="w-3.5 h-3.5" /> Link
                       </button>

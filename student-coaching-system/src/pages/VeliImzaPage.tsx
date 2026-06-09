@@ -85,6 +85,16 @@ export default function VeliImzaPage() {
   const [satisDocHref, setSatisDocHref] = useState(VELI_KAYIT_SATIS_ONBILGI_DOC_HREF);
   const [programIcerikHref, setProgramIcerikHref] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!institutionName) return;
+    const label = needsStudentForm && !signed ? 'Kayıt formu' : signed ? 'Veli onayı' : 'Sözleşme';
+    const prev = document.title;
+    document.title = `${institutionName} — ${label}`;
+    return () => {
+      document.title = prev;
+    };
+  }, [institutionName, needsStudentForm, signed]);
+
   const loadPayload = useCallback(async () => {
     if (!token) throw new Error('Geçersiz bağlantı');
     const d = await fetchVeliImzaPayload(token);

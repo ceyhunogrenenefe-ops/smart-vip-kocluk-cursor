@@ -140,6 +140,28 @@
 
     {
 
+      "source": "/veli-imza/:token",
+
+      "has": [
+
+        {
+
+          "type": "header",
+
+          "key": "User-Agent",
+
+          "value": "(?i).*(facebookexternalhit|WhatsApp|Twitterbot|LinkedInBot|Slackbot|TelegramBot|Discordbot).*"
+
+        }
+
+      ],
+
+      "destination": "/api/veli-imza-preview?signing_token=:token"
+
+    },
+
+    {
+
       "source": "/",
 
       "destination": "/index.html"
