@@ -1,3 +1,14 @@
+/** Veli kayıt / e-imza sayfasının tam URL’si (tarayıcıda açık olan kök alan adı). */
+export function buildVeliImzaPublicUrl(signingToken: string, origin?: string): string {
+  const token = String(signingToken || '').trim();
+  if (!token) return '';
+  const path = `/veli-imza/${encodeURIComponent(token)}`;
+  const base =
+    origin?.trim() ||
+    (typeof window !== 'undefined' && window.location?.origin ? window.location.origin : '');
+  return base ? `${base.replace(/\/$/, '')}${path}` : path;
+}
+
 /** Veliye gönderilecek kayıt / e-imza linki — kurum adı mesajda görünsün. */
 export function formatVeliKayitShareMessage(opts: {
   kurumAdi: string;

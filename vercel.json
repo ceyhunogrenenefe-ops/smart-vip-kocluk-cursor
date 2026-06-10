@@ -150,7 +150,7 @@
 
           "key": "User-Agent",
 
-          "value": "(?i).*(facebookexternalhit|WhatsApp|Twitterbot|LinkedInBot|Slackbot|TelegramBot|Discordbot).*"
+          "value": "(?i)(^WhatsApp/|.*(facebookexternalhit|Twitterbot|LinkedInBot|Slackbot|TelegramBot|Discordbot).*)"
 
         }
 

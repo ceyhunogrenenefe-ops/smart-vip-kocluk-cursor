@@ -1,3 +1,18 @@
+/** Veli kayıt formunda aynı anda seçilebilecek en fazla program sayısı. */
+export const VELI_KAYIT_MAX_PROGRAMS = 2;
+
+/** "TYT yaz kampı + TYT dönem programı" gibi birleşik program adını parçalar. */
+export function splitVeliProgramAdi(raw: string): string[] {
+  return String(raw || '')
+    .split(/\s*\+\s*/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+export function joinVeliProgramAdlari(programs: string[]): string {
+  return programs.map((x) => x.trim()).filter(Boolean).join(' + ');
+}
+
 /** Veli kayıt formunda seçilecek program listesi (sabit). */
 export const VELI_KAYIT_PROGRAM_SECENEKLERI: string[] = [
   '3. Sınıf dönem programı',

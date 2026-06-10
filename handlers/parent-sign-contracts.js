@@ -64,6 +64,25 @@ function applyKkTahsilToPlan(cards, odeme_sekli, kkTahsil) {
   return list;
 }
 
+const VELI_KAYIT_MAX_PROGRAMS = 2;
+
+function splitVeliProgramAdi(s) {
+  return String(s || '')
+    .split(/\s*\+\s*/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function parseVeliProgramForms(body) {
+  const rawArr = body.program_formlar;
+  if (Array.isArray(rawArr) && rawArr.length) {
+    return rawArr.map((x) => String(x || '').trim()).filter(Boolean);
+  }
+  const single = String(body.program_form || '').trim();
+  if (!single) return [];
+  return splitVeliProgramAdi(single);
+}
+
 const VELI_KAYIT_PROGRAM_SET = new Set([
   '3. Sınıf dönem programı',
   '4. Sınıf dönem programı',
@@ -138,7 +157,7 @@ function parseBody(req) {
 }
 
 function publicBaseUrl() {
-  const u = process.env.PUBLIC_APP_URL || process.env.VITE_APP_URL;
+  const u = process.env.PUBLIC_APP_URL || process.env.VITE_APP_URL || process.env.APP_PUBLIC_URL;
   if (u && String(u).trim()) return String(u).replace(/\/+$/, '');
   if (process.env.VERCEL_URL) return `https://${String(process.env.VERCEL_URL).replace(/^https?:\/\//, '')}`;
   return '';
@@ -287,16 +306,19 @@ export default async function handler(req, res) {
         let veli_tel = T('veli_tel').replace(/\D/g, '');
         let ogrenci_tel = T('ogrenci_tel').replace(/\D/g, '');
         const sinif_form = T('sinif_form');
-        const program_form = T('program_form');
         const adres_aciklama = T('adres_aciklama');
+        const programs = parseVeliProgramForms(body);
 
         if (!ogrenci_ad || !ogrenci_soyad || !veli_ad || !veli_soyad) {
           return res.status(400).json({ error: 'names_required' });
         }
         if (tcDigits.length > 0 && tcDigits.length !== 11) return res.status(400).json({ error: 'tc_invalid' });
         if (!eposta || !eposta.includes('@')) return res.status(400).json({ error: 'eposta_invalid' });
-        if (!program_form || !VELI_KAYIT_PROGRAM_SET.has(program_form)) {
+        if (programs.length < 1 || programs.length > VELI_KAYIT_MAX_PROGRAMS) {
           return res.status(400).json({ error: 'program_invalid' });
+        }
+        for (const p of programs) {
+          if (!VELI_KAYIT_PROGRAM_SET.has(p)) return res.status(400).json({ error: 'program_invalid' });
         }
         if (!veli_tel || veli_tel.length < 10) return res.status(400).json({ error: 'veli_tel_invalid' });
         if (!ogrenci_tel || ogrenci_tel.length < 10) return res.status(400).json({ error: 'ogrenci_tel_invalid' });
@@ -304,10 +326,11 @@ export default async function handler(req, res) {
         if (!il) return res.status(400).json({ error: 'il_required' });
         if (!ilce) return res.status(400).json({ error: 'ilce_required' });
 
-        const program_adi = pickFirstNonEmpty(program_form, row.program_adi);
-        let sinif =
-          resolveSinifFromVeliKayit(program_adi, pickFirstNonEmpty(sinif_form, row.sinif)) ||
-          pickFirstNonEmpty(sinif_form, row.sinif);
+        const program_adi = programs.join(' + ') || pickFirstNonEmpty(row.program_adi);
+        let sinif = pickFirstNonEmpty(sinif_form, row.sinif);
+        for (const p of programs) {
+          sinif = resolveSinifFromVeliKayit(p, sinif) || sinif;
+        }
         if (!sinif || !program_adi) return res.status(400).json({ error: 'sinif_program_required' });
 
         const adres = [il, ilce, adres_aciklama].map((x) => String(x || '').trim()).join(' · ');
@@ -317,6 +340,7 @@ export default async function handler(req, res) {
 
         const nextJson = {
           phase: 'awaiting_admin_price',
+          programlar: programs,
           tc_kimlik: tcDigits.length === 11 ? tcDigits : '',
           dogum_tarihi: dogum_tarihi || '',
           okul_adi: okul_adi || '',

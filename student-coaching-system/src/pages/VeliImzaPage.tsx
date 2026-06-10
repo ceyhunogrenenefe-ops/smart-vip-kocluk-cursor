@@ -2,7 +2,12 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { fetchVeliImzaPayload, submitVeliImza, submitVeliRegistrationForm, type VeliImzaRegistrationHint } from '../lib/parentSignApi';
 import { downloadParentSignContractPdf } from '../lib/parentSignPdfDownload';
-import { VELI_KAYIT_PROGRAM_SECENEKLERI } from '../lib/veliKayitConstants';
+import {
+  VELI_KAYIT_MAX_PROGRAMS,
+  VELI_KAYIT_PROGRAM_SECENEKLERI,
+  joinVeliProgramAdlari,
+  splitVeliProgramAdi
+} from '../lib/veliKayitConstants';
 import { isMaarifVeliProgram } from '../lib/veliKayitClassLevel';
 import { formatUcretWithCurrency } from '../lib/parentSignApi';
 import {
@@ -23,7 +28,7 @@ type RegFields = {
   dogum_tarihi: string;
   okul_adi: string;
   sinif_form: string;
-  program_form: string;
+  program_forms: string[];
   eposta: string;
   il: string;
   ilce: string;
@@ -44,7 +49,7 @@ const emptyReg = (): RegFields => ({
   dogum_tarihi: '',
   okul_adi: '',
   sinif_form: '',
-  program_form: '',
+  program_forms: [],
   eposta: '',
   il: '',
   ilce: '',
@@ -137,12 +142,39 @@ export default function VeliImzaPage() {
 
   useEffect(() => {
     if (!needsStudentForm || !regHint) return;
+    const hintedPrograms = (regHint.programlar?.length
+      ? regHint.programlar
+      : splitVeliProgramAdi(String(regHint.program_adi || ''))
+    )
+      .map((p) => String(p || '').trim())
+      .filter((p) => VELI_KAYIT_PROGRAM_SECENEKLERI.includes(p))
+      .slice(0, VELI_KAYIT_MAX_PROGRAMS);
     setRf((f) => ({
       ...f,
-      program_form: f.program_form.trim() ? f.program_form : String(regHint.program_adi || ''),
+      program_forms: f.program_forms.length ? f.program_forms : hintedPrograms,
       sinif_form: f.sinif_form.trim() ? f.sinif_form : String(regHint.sinif || '')
     }));
   }, [needsStudentForm, regHint]);
+
+  const toggleVeliProgram = (name: string) => {
+    setRf((p) => {
+      const cur = p.program_forms;
+      if (cur.includes(name)) {
+        return { ...p, program_forms: cur.filter((x) => x !== name) };
+      }
+      if (cur.length >= VELI_KAYIT_MAX_PROGRAMS) {
+        setErr(`En fazla ${VELI_KAYIT_MAX_PROGRAMS} program seçebilirsiniz.`);
+        return p;
+      }
+      const next = [...cur, name];
+      return {
+        ...p,
+        program_forms: next,
+        sinif_form: isMaarifVeliProgram(name) ? 'TYT-Maarif' : p.sinif_form
+      };
+    });
+    setErr(null);
+  };
 
   useEffect(() => {
     if (!awaitingAdminPrice || signed || !token) return;
@@ -231,8 +263,13 @@ export default function VeliImzaPage() {
       setErr('KVKK ve satış sözleşmesi bilgilendirme onaylarını işaretleyin.');
       return;
     }
-    if (!VELI_KAYIT_PROGRAM_SECENEKLERI.includes(rf.program_form.trim())) {
-      setErr('Lütfen listeden bir program seçin.');
+    const selectedPrograms = rf.program_forms.filter((p) => VELI_KAYIT_PROGRAM_SECENEKLERI.includes(p));
+    if (selectedPrograms.length < 1) {
+      setErr(`Lütfen listeden en az bir program seçin (en fazla ${VELI_KAYIT_MAX_PROGRAMS}).`);
+      return;
+    }
+    if (selectedPrograms.length > VELI_KAYIT_MAX_PROGRAMS) {
+      setErr(`En fazla ${VELI_KAYIT_MAX_PROGRAMS} program seçebilirsiniz.`);
       return;
     }
     const veliDigits = rf.veli_tel.replace(/\D/g, '');
@@ -272,7 +309,8 @@ export default function VeliImzaPage() {
         dogum_tarihi: rf.dogum_tarihi.trim(),
         okul_adi: rf.okul_adi.trim(),
         sinif_form: rf.sinif_form.trim(),
-        program_form: rf.program_form.trim(),
+        program_form: joinVeliProgramAdlari(selectedPrograms),
+        program_formlar: selectedPrograms,
         eposta: rf.eposta.trim(),
         il: rf.il.trim(),
         ilce: rf.ilce.trim(),
@@ -377,7 +415,7 @@ export default function VeliImzaPage() {
                 <p className="text-xs text-slate-500">
                   Bilgilerinizi iletin; kurum ücret ve taksiti girdikten sonra bu bağlantıda e-sözleşme görünür ve
                   imzalayabilirsiniz. <strong>Zorunlu alanlar:</strong> öğrenci adı/soyadı, veli adı/soyadı, öğrenci ve
-                  veli telefonu (en az 10 rakam), e-posta, program seçimi, adres, ilçe ve il. Bu alanlar doldurulmadan
+                  veli telefonu (en az 10 rakam), e-posta, program seçimi (en fazla 2), adres, ilçe ve il. Bu alanlar doldurulmadan
                   form gönderilmez. Aşağıdaki onay satırlarındaki <span className="text-blue-700">mavi bağlantılar</span> ile
                   KVKK ve satış / ön bilgilendirme metinlerini sitemizde ayrı sayfada (çoğu tarayıcıda yeni sekmede) açabilirsiniz.
                 </p>
@@ -508,28 +546,40 @@ export default function VeliImzaPage() {
                     />
                   </div>
                   <div className="sm:col-span-2">
-                    <label className="text-[11px] text-slate-500">Kayıt olmak istediği program (zorunlu — listeden)</label>
-                    <select
-                      className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm bg-white"
-                      value={rf.program_form}
-                      onChange={(e) => {
-                        const program = e.target.value;
-                        setRf((p) => ({
-                          ...p,
-                          program_form: program,
-                          sinif_form: isMaarifVeliProgram(program)
-                            ? 'TYT-Maarif'
-                            : p.sinif_form
-                        }));
-                      }}
-                    >
-                      <option value="">Seçiniz…</option>
-                      {VELI_KAYIT_PROGRAM_SECENEKLERI.map((p) => (
-                        <option key={p} value={p}>
-                          {p}
-                        </option>
-                      ))}
-                    </select>
+                    <label className="text-[11px] text-slate-500">
+                      Kayıt olmak istediği program (zorunlu — en fazla {VELI_KAYIT_MAX_PROGRAMS} seçim)
+                    </label>
+                    <p className="mt-0.5 text-[10px] text-slate-500">
+                      Örneğin hem yaz kampı hem dönem programına kayıt için iki programı işaretleyebilirsiniz.
+                      {rf.program_forms.length > 0 ? (
+                        <span className="block mt-0.5 font-medium text-slate-700">
+                          Seçilen: {joinVeliProgramAdlari(rf.program_forms)}
+                        </span>
+                      ) : null}
+                    </p>
+                    <div className="mt-1.5 max-h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 space-y-1">
+                      {VELI_KAYIT_PROGRAM_SECENEKLERI.map((p) => {
+                        const checked = rf.program_forms.includes(p);
+                        const disabled = !checked && rf.program_forms.length >= VELI_KAYIT_MAX_PROGRAMS;
+                        return (
+                          <label
+                            key={p}
+                            className={`flex items-start gap-2 rounded-md px-2 py-1.5 text-sm cursor-pointer ${
+                              disabled ? 'opacity-45 cursor-not-allowed' : 'hover:bg-slate-50'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              className="mt-0.5 shrink-0"
+                              checked={checked}
+                              disabled={disabled}
+                              onChange={() => toggleVeliProgram(p)}
+                            />
+                            <span>{p}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
                     {programIcerikHref ? (
                       <p className="mt-1.5 text-[11px] text-slate-600">
                         <a

@@ -72,9 +72,9 @@ export default async function handler(req, res) {
   <meta property="og:title" content="${escapeHtml(title)}" />
   <meta property="og:description" content="${escapeHtml(description)}" />
   <meta property="og:url" content="${escapeHtml(pageUrl)}" />
-  <meta http-equiv="refresh" content="0;url=${escapeHtml(pageUrl)}" />
 </head>
 <body>
+  <p>${escapeHtml(description)}</p>
   <p><a href="${escapeHtml(pageUrl)}">${escapeHtml(title)}</a></p>
 </body>
 </html>`;

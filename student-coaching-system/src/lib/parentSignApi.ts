@@ -411,6 +411,7 @@ export async function patchParentSignKayitOnly(body: {
 
 export type VeliImzaRegistrationHint = {
   program_adi?: string | null;
+  programlar?: string[] | null;
   sinif?: string | null;
   baslangic_tarihi?: string | null;
   bitis_tarihi?: string | null;
@@ -464,7 +465,7 @@ const REG_FORM_ERR: Record<string, string> = {
   registration_form_not_expected: 'Bu bağlantı için kayıt formu adımı beklenmiyor.',
   already_processed: 'Bu belge zaten işlenmiş.',
   not_found: 'Bağlantı bulunamadı veya süresi dolmuş.',
-  program_invalid: 'Listeden geçerli bir program seçin.',
+  program_invalid: 'Listeden en az 1, en fazla 2 geçerli program seçin.',
   satis_kvkk_form_required: 'Satış sözleşmesi / bilgilendirme onayı gereklidir.'
 };
 
@@ -478,7 +479,10 @@ export async function submitVeliRegistrationForm(payload: {
   dogum_tarihi: string;
   okul_adi: string;
   sinif_form: string;
+  /** Birleşik metin (geriye dönük uyumluluk). */
   program_form: string;
+  /** 1–2 program. */
+  program_formlar?: string[];
   eposta: string;
   il: string;
   ilce: string;

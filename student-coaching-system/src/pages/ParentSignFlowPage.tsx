@@ -10,7 +10,7 @@ import {
   resolveOptionalDocUrl,
   resolveSatisDocUrl
 } from '../lib/veliKayitLegalLinks';
-import { formatVeliKayitShareMessage } from '../lib/veliKayitShareMessage';
+import { buildVeliImzaPublicUrl, formatVeliKayitShareMessage } from '../lib/veliKayitShareMessage';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { isMaarifVeliProgram, resolveSinifFromVeliKayit } from '../lib/veliKayitClassLevel';
@@ -786,11 +786,7 @@ export default function ParentSignFlowPage() {
         institution_id: effectiveInstitutionId
       };
       const created = await createParentSignContract(body);
-      const url =
-        created.sign_url ||
-        (typeof window !== 'undefined' && created.signing_token
-          ? `${window.location.origin}/veli-imza/${encodeURIComponent(created.signing_token)}`
-          : '');
+      const url = buildVeliImzaPublicUrl(created.signing_token);
       setLastCreatedLink(url || null);
       if (url) {
         const shareText = formatVeliKayitShareMessage({
@@ -902,11 +898,7 @@ export default function ParentSignFlowPage() {
     }
   };
 
-  const fullLink = (r: ParentSignContractRow) => {
-    const path = `/veli-imza/${encodeURIComponent(r.signing_token)}`;
-    if (typeof window !== 'undefined' && window.location?.origin) return `${window.location.origin}${path}`;
-    return path;
-  };
+  const fullLink = (r: ParentSignContractRow) => buildVeliImzaPublicUrl(r.signing_token);
 
   const kurumAdiForContract = (r: ParentSignContractRow) => {
     const fromRow = institutionOptions.find((o) => o.id === r.institution_id)?.name?.trim();
