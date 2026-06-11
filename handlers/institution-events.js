@@ -12,6 +12,10 @@ import {
   templateBindingsNeedLink
 } from '../api/_lib/institution-event-send.js';
 import { syncSeminarRegistrationsToEvents } from '../api/_lib/sync-seminar-registrations.js';
+import {
+  importMetaTemplateForEvents,
+  listMetaTemplatesForEventsImport
+} from '../api/_lib/meta-template-import.js';
 
 export { buildEventTemplateVars };
 
@@ -331,6 +335,21 @@ export default async function handler(req, res) {
     return res.status(200).json({ data: templates });
   }
 
+  if (req.method === 'GET' && scope === 'meta-templates') {
+    try {
+      const out = await listMetaTemplatesForEventsImport();
+      if (!out.ok) {
+        return res.status(400).json({
+          error: out.error || 'meta_fetch_failed',
+          hint: 'Vercel’de META_WHATSAPP_TOKEN ve META_WABA_ID (veya META_PHONE_NUMBER_ID) tanımlı olmalı.'
+        });
+      }
+      return res.status(200).json({ data: out.templates, waba_ids: out.waba_ids });
+    } catch (e) {
+      return res.status(500).json({ error: errorMessage(e) || 'meta_list_failed' });
+    }
+  }
+
   if (req.method === 'GET' && scope === 'classes') {
     try {
       const rows = await loadClassesForEvents(effectiveInstitutionId || undefined);
@@ -416,6 +435,35 @@ export default async function handler(req, res) {
     const rows = data || [];
     const withStats = await attachEventStats(rows);
     return res.status(200).json({ data: withStats });
+  }
+
+  if (req.method === 'POST' && op === 'import-meta-template') {
+    const body = parseBody(req);
+    const metaName = String(body.meta_template_name || '').trim();
+    const metaLang = String(body.meta_template_language || 'tr').trim() || 'tr';
+    const displayName = String(body.display_name || '').trim();
+    if (!metaName) return res.status(400).json({ error: 'meta_template_name_required' });
+    try {
+      const out = await importMetaTemplateForEvents({
+        meta_template_name: metaName,
+        meta_template_language: metaLang,
+        display_name: displayName || undefined
+      });
+      if (!out.ok) {
+        return res.status(400).json({ error: out.error || 'import_failed' });
+      }
+      return res.status(200).json({
+        ok: true,
+        data: {
+          type: out.template?.type,
+          name: out.template?.name,
+          meta_template_name: out.template?.meta_template_name,
+          variables: out.variables
+        }
+      });
+    } catch (e) {
+      return res.status(500).json({ error: errorMessage(e) || 'import_failed' });
+    }
   }
 
   if (req.method === 'POST' && op === 'cancel-schedule') {

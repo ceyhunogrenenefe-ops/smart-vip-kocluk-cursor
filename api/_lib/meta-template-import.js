@@ -1,0 +1,242 @@
+import { supabaseAdmin } from './supabase-admin.js';
+import {
+  fetchAllMetaMessageTemplates,
+  fetchMetaTemplatesForName,
+  resolveWabaIds
+} from './meta-templates-sync.js';
+
+const GRAPH = () => String(process.env.META_GRAPH_API_VERSION || 'v21.0').trim() || 'v21.0';
+
+const NUM_VAR_ALIASES = ['ad', 'isim', 'name', 'ogrenci', 'student_name', 'veli'];
+
+function authHeaders(tok) {
+  return { Authorization: `Bearer ${tok}` };
+}
+
+async function graphGet(url, tok) {
+  const res = await fetch(url, { headers: authHeaders(tok) });
+  const json = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, json };
+}
+
+/** Meta BODY metnindeki {{ad}} veya {{1}} değişkenlerini sırayla çıkarır. */
+export function parseBodyVariablesFromText(text) {
+  const vars = [];
+  const seen = new Set();
+  const add = (v) => {
+    const k = String(v || '').trim().toLowerCase();
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    vars.push(k);
+  };
+
+  const t = String(text || '');
+  for (const m of t.matchAll(/\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}/g)) {
+    add(m[1]);
+  }
+
+  const nums = [...t.matchAll(/\{\{(\d+)\}\}/g)]
+    .map((m) => parseInt(m[1], 10))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  if (nums.length && vars.length === 0) {
+    const max = Math.max(...nums);
+    for (let i = 1; i <= max; i++) {
+      add(NUM_VAR_ALIASES[i - 1] || `param_${i}`);
+    }
+  }
+  return vars;
+}
+
+export function extractBodyFromComponents(components) {
+  const body = (components || []).find((c) => String(c.type || '').toUpperCase() === 'BODY');
+  return String(body?.text || '').trim();
+}
+
+export function slugTypeFromMetaName(name) {
+  const slug = String(name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return slug || 'meta_template';
+}
+
+function langMatches(wantLang, haveLang) {
+  const a = String(wantLang || '')
+    .trim()
+    .replace(/-/g, '_')
+    .toLowerCase();
+  const b = String(haveLang || '')
+    .trim()
+    .replace(/-/g, '_')
+    .toLowerCase();
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return a.split('_')[0] === b.split('_')[0];
+}
+
+/** Meta WABA'dan components dahil şablon detayı. */
+export async function fetchMetaTemplateWithComponents(templateName, languageCode = 'tr') {
+  const tok = process.env.META_WHATSAPP_TOKEN?.trim();
+  const name = String(templateName || '').trim();
+  if (!tok || !name) {
+    return { ok: false, error: 'missing_meta_token_or_name', template: null };
+  }
+
+  const wabaIds = await resolveWabaIds();
+  const wantLang = String(languageCode || 'tr').trim() || 'tr';
+
+  for (const waba of wabaIds) {
+    const q = new URLSearchParams({
+      fields: 'name,status,language,components',
+      limit: '50',
+      name
+    });
+    const url = `https://graph.facebook.com/${GRAPH()}/${encodeURIComponent(waba)}/message_templates?${q}`;
+    const { ok, json } = await graphGet(url, tok);
+    if (!ok) continue;
+    const rows = json.data || [];
+    const hit =
+      rows.find((r) => langMatches(wantLang, r.language)) ||
+      rows.find((r) => String(r.status || '').toUpperCase() === 'APPROVED') ||
+      rows[0];
+    if (hit) return { ok: true, template: hit, waba_id: waba };
+  }
+
+  const list = await fetchMetaTemplatesForName(name);
+  if (!list.ok) {
+    return { ok: false, error: list.error || 'template_not_found', template: null };
+  }
+  const matches = list.matches || [];
+  const hit =
+    matches.find((r) => langMatches(wantLang, r.language)) ||
+    matches.find((r) => String(r.status || '').toUpperCase() === 'APPROVED') ||
+    matches[0];
+  if (!hit) {
+    return { ok: false, error: 'template_not_found', template: null, similar: list.templates?.slice(0, 20) };
+  }
+  return { ok: true, template: hit, waba_id: (list.waba_ids || [])[0] || null };
+}
+
+/** Meta onaylı şablonları listele; Supabase'de olanları işaretle. */
+export async function listMetaTemplatesForEventsImport() {
+  const list = await fetchAllMetaMessageTemplates();
+  if (!list.ok) {
+    return { ok: false, error: list.error || 'meta_fetch_failed', templates: [], waba_ids: list.waba_ids };
+  }
+
+  const { data: existing, error } = await supabaseAdmin
+    .from('message_templates')
+    .select('type, meta_template_name, meta_template_language');
+  if (error) throw error;
+
+  const imported = new Set(
+    (existing || [])
+      .map((r) => `${String(r.meta_template_name || r.type || '').trim().toLowerCase()}|${String(r.meta_template_language || 'tr').trim().toLowerCase()}`)
+      .filter((k) => k && !k.startsWith('|'))
+  );
+
+  const templates = (list.templates || [])
+    .filter((t) => String(t.status || '').toUpperCase() === 'APPROVED')
+    .map((t) => {
+      const name = String(t.name || '').trim();
+      const lang = String(t.language || 'tr').trim();
+      const key = `${name.toLowerCase()}|${lang.toLowerCase()}`;
+      return {
+        meta_template_name: name,
+        meta_template_language: lang,
+        status: t.status,
+        imported: imported.has(key)
+      };
+    })
+    .sort((a, b) => a.meta_template_name.localeCompare(b.meta_template_name, 'tr'));
+
+  return { ok: true, templates, waba_ids: list.waba_ids, waba_errors: list.waba_errors };
+}
+
+/**
+ * Meta şablonunu message_templates'e ekler — Etkinlikler dropdown'ında görünür.
+ * @param {{ meta_template_name: string, meta_template_language?: string, display_name?: string }} opts
+ */
+export async function importMetaTemplateForEvents(opts) {
+  const metaName = String(opts.meta_template_name || '').trim();
+  const lang = String(opts.meta_template_language || 'tr').trim() || 'tr';
+  if (!metaName) return { ok: false, error: 'meta_template_name_required' };
+
+  const detail = await fetchMetaTemplateWithComponents(metaName, lang);
+  if (!detail.ok || !detail.template) {
+    return { ok: false, error: detail.error || 'template_not_found' };
+  }
+
+  const row = detail.template;
+  const bodyText = extractBodyFromComponents(row.components);
+  const variables = parseBodyVariablesFromText(bodyText);
+  const namedParams = variables.some((v) => !/^param_\d+$/.test(v));
+  const type = slugTypeFromMetaName(metaName);
+  const displayName = String(opts.display_name || '').trim() || metaName.replace(/_/g, ' ');
+
+  const payload = {
+    type,
+    name: displayName,
+    content: bodyText || `[Meta şablon: ${metaName}]`,
+    variables,
+    twilio_variable_bindings: variables,
+    channel: 'whatsapp',
+    is_active: true,
+    meta_template_name: metaName,
+    meta_template_language: String(row.language || lang).trim() || lang,
+    meta_named_body_parameters: namedParams,
+    whatsapp_template_status: String(row.status || 'APPROVED'),
+    whatsapp_template_synced_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+
+  const { data: existing } = await supabaseAdmin
+    .from('message_templates')
+    .select('id, type')
+    .eq('meta_template_name', metaName)
+    .maybeSingle();
+
+  let saved;
+  if (existing?.id) {
+    const { data, error } = await supabaseAdmin
+      .from('message_templates')
+      .update(payload)
+      .eq('id', existing.id)
+      .select('*')
+      .single();
+    if (error) throw error;
+    saved = data;
+  } else {
+    const { data: byType } = await supabaseAdmin
+      .from('message_templates')
+      .select('id')
+      .eq('type', type)
+      .maybeSingle();
+    if (byType?.id) {
+      const { data, error } = await supabaseAdmin
+        .from('message_templates')
+        .update(payload)
+        .eq('id', byType.id)
+        .select('*')
+        .single();
+      if (error) throw error;
+      saved = data;
+    } else {
+      const { data, error } = await supabaseAdmin
+        .from('message_templates')
+        .insert({ ...payload, created_at: new Date().toISOString() })
+        .select('*')
+        .single();
+      if (error) throw error;
+      saved = data;
+    }
+  }
+
+  return {
+    ok: true,
+    template: saved,
+    variables,
+    body_preview: bodyText
+  };
+}

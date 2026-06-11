@@ -57,7 +57,13 @@ const FIELD_BY_VAR: Record<string, EventTemplateFieldDef> = {
   subject: { variable: 'subject', label: 'Ders / konu', placeholder: 'Matematik', kind: 'text', storage: 'template_vars' },
   homework: { variable: 'homework', label: 'Ödev', kind: 'textarea', storage: 'template_vars' },
   odev: { variable: 'odev', label: 'Ödev', kind: 'textarea', storage: 'template_vars' },
-  lesson_name: { variable: 'lesson_name', label: 'Ders adı', kind: 'text', storage: 'template_vars' }
+  lesson_name: { variable: 'lesson_name', label: 'Ders adı', kind: 'text', storage: 'template_vars' },
+
+  deneme_adi: { variable: 'deneme_adi', label: 'Deneme adı', kind: 'text', storage: 'title' },
+  sinav_adi: { variable: 'sinav_adi', label: 'Sınav adı', kind: 'text', storage: 'title' },
+  sinav_tarihi: { variable: 'sinav_tarihi', label: 'Sınav tarihi', kind: 'date', storage: 'event_date' },
+  sinav_saati: { variable: 'sinav_saati', label: 'Sınav saati', kind: 'time', storage: 'event_time' },
+  kurum_adi: { variable: 'kurum_adi', label: 'Kurum adı', kind: 'text', storage: 'template_vars' }
 };
 
 export function normalizeTemplateVarName(raw: string): string {

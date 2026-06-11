@@ -1,6 +1,10 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import { normalizePhoneToE164 } from './phone-whatsapp.js';
-import { resolveEventMeetingLink, sendEventInvites } from './institution-event-send.js';
+import {
+  resolveEventMeetingLink,
+  sendEventInvites,
+  templateBindingsNeedLink
+} from './institution-event-send.js';
 import { getIstanbulDateString, getIstanbulHour, getIstanbulMinute } from './istanbul-time.js';
 
 const PLATFORM_PRIMARY_INSTITUTION_ID = '73323d75-eea1-4552-8bba-d50555423589';
@@ -412,10 +416,18 @@ function hasScheduledSendTimePassed(event, now = new Date()) {
   return false;
 }
 
-function shouldAutoSendOnRegister(event) {
+async function shouldAutoSendOnRegister(event) {
   if (event.seminar_auto_send === false) return false;
-  if (!resolveEventMeetingLink(event)) return false;
-  if (!String(event.template_type || '').trim()) return false;
+  const templateType = String(event.template_type || '').trim();
+  if (!templateType) return false;
+
+  const { data: tpl } = await supabaseAdmin
+    .from('message_templates')
+    .select('variables, twilio_variable_bindings')
+    .eq('type', templateType)
+    .maybeSingle();
+  if (templateBindingsNeedLink(tpl) && !resolveEventMeetingLink(event)) return false;
+
   const mode = String(event.send_mode || 'manual');
   if (mode === 'immediate') return true;
   // Yeni seminer kaydı: otomatik mesaj açıksa hemen WhatsApp (manuel/planlı moddan bağımsız)
@@ -605,7 +617,7 @@ export async function syncSeminarRegistrationsToEvents({ limit = 200, log = [] }
         firstEventId = event.id;
       }
 
-      if (shouldAutoSendOnRegister(event)) {
+      if (await shouldAutoSendOnRegister(event)) {
         try {
           const out = await sendEventInvites(event, { participantIds: [inserted.id] });
           sentCount += out.sent || 0;

@@ -49,6 +49,8 @@ export function buildEventTemplateVars(event, participant) {
     student_name: ad,
     etkinlik,
     etkinlik_adi: etkinlik,
+    deneme_adi: etkinlik,
+    sinav_adi: etkinlik,
     baslik: etkinlik,
     title: etkinlik,
     tarih,

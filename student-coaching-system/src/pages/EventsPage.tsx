@@ -32,6 +32,13 @@ type WaTemplate = {
   twilio_variable_bindings?: unknown;
 };
 
+type MetaTemplateOption = {
+  meta_template_name: string;
+  meta_template_language: string;
+  status?: string;
+  imported?: boolean;
+};
+
 type ClassOption = {
   id: string;
   name: string;
@@ -197,6 +204,10 @@ export default function EventsPage() {
   const excelInputRef = useRef<HTMLInputElement>(null);
   const [peopleSearch, setPeopleSearch] = useState('');
   const [templateVars, setTemplateVars] = useState<Record<string, string>>({});
+  const [metaTemplates, setMetaTemplates] = useState<MetaTemplateOption[]>([]);
+  const [metaTemplatesOpen, setMetaTemplatesOpen] = useState(false);
+  const [metaTemplatesBusy, setMetaTemplatesBusy] = useState(false);
+  const [metaImportBusy, setMetaImportBusy] = useState<string | null>(null);
 
   const selectedTemplate = useMemo(
     () => templates.find((t) => t.type === templateType) || null,
@@ -376,6 +387,60 @@ export default function EventsPage() {
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  const loadMetaTemplates = useCallback(async () => {
+    if (!canManage) return;
+    setMetaTemplatesBusy(true);
+    try {
+      const res = await apiFetch(apiEventsPath('scope=meta-templates'));
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error((j as { hint?: string; error?: string }).hint || (j as { error?: string }).error || 'Meta şablonları alınamadı');
+        return;
+      }
+      setMetaTemplates(Array.isArray(j.data) ? (j.data as MetaTemplateOption[]) : []);
+      setMetaTemplatesOpen(true);
+    } catch {
+      toast.error('Meta şablonları yüklenemedi');
+    } finally {
+      setMetaTemplatesBusy(false);
+    }
+  }, [canManage, scopedInstitutionId]);
+
+  const importMetaTemplate = async (row: MetaTemplateOption) => {
+    const key = `${row.meta_template_name}:${row.meta_template_language}`;
+    setMetaImportBusy(key);
+    try {
+      const res = await apiFetch('/api/institution-events?op=import-meta-template', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          meta_template_name: row.meta_template_name,
+          meta_template_language: row.meta_template_language
+        })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error((j as { error?: string }).error || 'Şablon eklenemedi');
+        return;
+      }
+      const importedType = String((j as { data?: { type?: string } }).data?.type || '').trim();
+      toast.success(`Şablon eklendi: ${row.meta_template_name}`);
+      await loadAll();
+      if (importedType) setTemplateType(importedType);
+      setMetaTemplates((prev) =>
+        prev.map((t) =>
+          t.meta_template_name === row.meta_template_name && t.meta_template_language === row.meta_template_language
+            ? { ...t, imported: true }
+            : t
+        )
+      );
+    } catch {
+      toast.error('Şablon eklenemedi');
+    } finally {
+      setMetaImportBusy(null);
+    }
+  };
 
   const hasSeminarAutoEvents = useMemo(
     () =>
@@ -847,9 +912,58 @@ export default function EventsPage() {
             </>
           ) : (
             <p className="mt-1 text-xs text-amber-700">
-              Aktif Meta şablonu bulunamadı — Supabase&apos;de message_templates kontrol edin.
+              Aktif Meta şablonu bulunamadı — aşağıdan Meta&apos;daki onaylı şablonu içe aktarın.
             </p>
           )}
+          <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50/60 p-2.5 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[11px] text-violet-900">
+                Meta Business&apos;ta yeni eklediğiniz şablon (ör. deneme sınavı) burada görünmüyorsa içe aktarın.
+              </p>
+              <button
+                type="button"
+                disabled={metaTemplatesBusy}
+                onClick={() => void loadMetaTemplates()}
+                className="inline-flex items-center gap-1 rounded-lg border border-violet-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-violet-900 hover:bg-violet-100 disabled:opacity-50"
+              >
+                {metaTemplatesBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                Meta şablonlarını listele
+              </button>
+            </div>
+            {metaTemplatesOpen ? (
+              metaTemplates.length ? (
+                <ul className="max-h-40 overflow-y-auto space-y-1 text-xs">
+                  {metaTemplates.map((mt) => {
+                    const key = `${mt.meta_template_name}:${mt.meta_template_language}`;
+                    return (
+                      <li
+                        key={key}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-violet-100 bg-white px-2 py-1.5"
+                      >
+                        <span className="font-mono text-[10px] text-slate-700">
+                          {mt.meta_template_name}{' '}
+                          <span className="text-slate-400">({mt.meta_template_language})</span>
+                          {mt.imported ? <span className="ml-1 text-emerald-700">· eklendi</span> : null}
+                        </span>
+                        {!mt.imported ? (
+                          <button
+                            type="button"
+                            disabled={metaImportBusy === key}
+                            onClick={() => void importMetaTemplate(mt)}
+                            className="rounded border border-violet-300 px-2 py-0.5 text-[10px] font-semibold text-violet-900 hover:bg-violet-50 disabled:opacity-50"
+                          >
+                            {metaImportBusy === key ? 'Ekleniyor…' : 'Etkinliklere ekle'}
+                          </button>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="text-[11px] text-violet-800">Onaylı Meta şablonu bulunamadı.</p>
+              )
+            ) : null}
+          </div>
         </label>
 
         <div className="grid gap-3 sm:grid-cols-2">
@@ -1016,7 +1130,7 @@ export default function EventsPage() {
                 checked={seminarAutoSend}
                 onChange={(e) => setSeminarAutoSend(e.target.checked)}
               />
-              Yeni seminer kaydı → listeye ekle ve WhatsApp hatırlatma gönder (katılım linki gerekli)
+              Yeni form kaydı → listeye ekle ve WhatsApp gönder (şablonda link varsa bağlantı alanı doldurulmalı)
             </label>
             <p className="text-[10px] text-teal-700">
               Dış formda gizli alan önerisi: <span className="font-mono">seminer_adi</span> = yukarıdaki anahtar.
