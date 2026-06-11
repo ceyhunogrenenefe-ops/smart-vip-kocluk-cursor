@@ -2,15 +2,8 @@ import { supabaseAdmin } from './supabase-admin.js';
 import { normalizePhoneToE164 } from './phone-whatsapp.js';
 import { sendWhatsAppUsingTemplateRow } from './whatsapp-outbound.js';
 import { getIstanbulDateString } from './istanbul-time.js';
-import {
-  fetchMetaTemplatesForName,
-  findMetaTemplatesByNameLoose
-} from './meta-templates-sync.js';
-import {
-  extractBodyFromComponents,
-  fetchMetaTemplateWithComponents,
-  parseBodyVariablesFromText
-} from './meta-template-import.js';
+import { fetchMetaTemplatesFromPhoneWaba } from './meta-templates-sync.js';
+import { extractBodyFromComponents, parseBodyVariablesFromText } from './meta-template-import.js';
 
 /** Supabase message_templates.type — Meta BM adı: kitap_siparisi */
 export const BOOK_ORDER_TEMPLATE_TYPE = 'kitap_siparis_bildirim';
@@ -138,50 +131,34 @@ function pickBookOrderMetaRow(matches) {
   return pool[0] || null;
 }
 
-const BOOK_ORDER_META_LANG_TRY = ['tr', 'tr_TR', 'Turkish'];
-
-function bookOrderMetaFallback() {
-  return {
-    meta_template_name: BOOK_ORDER_META_NAME,
-    meta_template_language: 'tr',
-    whatsapp_template_status: 'APPROVED',
-    fallback: true
-  };
-}
-
 async function resolveBookOrderMetaFromApi() {
-  const list = await fetchMetaTemplatesForName(BOOK_ORDER_META_NAME);
-  let matches = (list.matches || []).filter((r) => isExactBookOrderMetaName(r.name));
-  if (!matches.length && list.templates?.length) {
-    matches = (list.templates || []).filter((r) => isExactBookOrderMetaName(r.name));
-  }
-  if (!matches.length && list.templates?.length) {
-    matches = findMetaTemplatesByNameLoose(list.templates, BOOK_ORDER_META_NAME).filter((r) =>
-      isExactBookOrderMetaName(r.name)
-    );
-  }
-
-  const hit = pickBookOrderMetaRow(matches);
-  if (hit?.name && hit?.language) {
+  const phone = await fetchMetaTemplatesFromPhoneWaba(BOOK_ORDER_META_NAME, { includeComponents: true });
+  if (!phone.ok) {
     return {
-      meta_template_name: String(hit.name).trim(),
-      meta_template_language: String(hit.language).trim(),
-      whatsapp_template_status: String(hit.status || 'APPROVED')
+      error: 'phone_waba_unresolved',
+      hint:
+        'META_PHONE_NUMBER_ID ve META_WHATSAPP_TOKEN ile gönderim numarasının WABA kimliği alınamadı. Vercel env kontrol edin.'
     };
   }
 
-  for (const lang of BOOK_ORDER_META_LANG_TRY) {
-    const detail = await fetchMetaTemplateWithComponents(BOOK_ORDER_META_NAME, lang);
-    if (detail.ok && detail.template?.name && detail.template?.language) {
-      return {
-        meta_template_name: String(detail.template.name).trim(),
-        meta_template_language: String(detail.template.language).trim(),
-        whatsapp_template_status: String(detail.template.status || 'APPROVED')
-      };
-    }
+  const hit = pickBookOrderMetaRow(phone.matches || []);
+  if (!hit?.name || !hit?.language) {
+    const wabaSuffix = phone.waba_id ? String(phone.waba_id).slice(-8) : '?';
+    return {
+      error: 'template_not_on_phone_waba',
+      hint:
+        `kitap_siparisi şablonu gönderim numaranızın WABA'sında (…${wabaSuffix}) bulunamadı. ` +
+        'Meta BM\'de şablonu bu WhatsApp Business hesabına ekleyin (META_WABA_ID farklı hesap olabilir).'
+    };
   }
 
-  return bookOrderMetaFallback();
+  return {
+    meta_template_name: String(hit.name).trim(),
+    meta_template_language: String(hit.language).trim(),
+    whatsapp_template_status: String(hit.status || 'APPROVED'),
+    meta_template_row: hit,
+    waba_id: phone.waba_id
+  };
 }
 
 function bindingsFromMetaBody(bodyText) {
@@ -202,18 +179,13 @@ async function loadBookOrderTemplateRow() {
   }
 
   const metaResolved = await resolveBookOrderMetaFromApi();
+  if (metaResolved.error) {
+    return { error: metaResolved.hint || metaResolved.error };
+  }
+
   const metaName = metaResolved.meta_template_name;
   const metaLang = metaResolved.meta_template_language;
-
-  let detail = await fetchMetaTemplateWithComponents(metaName, metaLang);
-  if (!detail.ok) {
-    for (const lang of BOOK_ORDER_META_LANG_TRY) {
-      if (lang === metaLang) continue;
-      detail = await fetchMetaTemplateWithComponents(metaName, lang);
-      if (detail.ok) break;
-    }
-  }
-  const bodyText = detail.ok ? extractBodyFromComponents(detail.template?.components) : '';
+  const bodyText = extractBodyFromComponents(metaResolved.meta_template_row?.components);
   const { bindings, named } = bindingsFromMetaBody(bodyText);
 
   const now = new Date().toISOString();

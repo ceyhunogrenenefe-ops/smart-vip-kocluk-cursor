@@ -199,8 +199,13 @@ export async function sendMetaTemplateMessage({
     );
   }
 
+  const seenLang = new Set();
   for (const baseLang of candidateLangs) {
-    lang = normalizeMetaLanguageCode(baseLang);
+    const rawLang = String(baseLang || '').trim();
+    if (!rawLang || seenLang.has(rawLang.toLowerCase())) continue;
+    seenLang.add(rawLang.toLowerCase());
+
+    lang = normalizeMetaLanguageCode(rawLang);
     for (let attempt = 0; attempt < 2; attempt++) {
       const res = await fetch(url, {
         method: 'POST',

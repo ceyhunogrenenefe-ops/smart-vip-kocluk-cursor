@@ -144,11 +144,12 @@ async function fetchTemplatesForWaba(waba, tok, { includeComponents = false } = 
 }
 
 /** Meta ad filtresi — listede görünmeyen şablonlar için. */
-async function fetchTemplateByNameFromWaba(waba, templateName, tok) {
+async function fetchTemplateByNameFromWaba(waba, templateName, tok, { includeComponents = false } = {}) {
   const name = String(templateName || '').trim();
   if (!waba || !name || !tok) return [];
+  const fields = includeComponents ? 'name,status,language,components' : 'name,status,language';
   const q = new URLSearchParams({
-    fields: 'name,status,language',
+    fields,
     limit: '50',
     name
   });
@@ -156,6 +157,53 @@ async function fetchTemplateByNameFromWaba(waba, templateName, tok) {
   const { ok, json } = await graphGet(url, tok);
   if (!ok) return [];
   return json.data || [];
+}
+
+/** Gönderim numarasının (META_PHONE_NUMBER_ID) bağlı olduğu WABA. */
+export async function getPhoneWabaId() {
+  return resolveWabaIdFromPhone(process.env.META_WHATSAPP_TOKEN?.trim());
+}
+
+/**
+ * Şablonu yalnızca gönderim numarasının WABA'sında arar (#132001 önlemi).
+ * Şablon başka WABA'da olsa bile Cloud API gönderimi phone WABA şablonlarını kullanır.
+ */
+export async function fetchMetaTemplatesFromPhoneWaba(templateName, opts = {}) {
+  const tok = process.env.META_WHATSAPP_TOKEN?.trim();
+  const waba = await resolveWabaIdFromPhone(tok);
+  const name = String(templateName || '').trim();
+  if (!tok || !waba) {
+    return {
+      ok: false,
+      error: 'phone_waba_unresolved',
+      waba_id: waba,
+      matches: [],
+      templates: [],
+      searched_name: name
+    };
+  }
+
+  let matches = await fetchTemplateByNameFromWaba(waba, name, tok, {
+    includeComponents: opts.includeComponents === true
+  });
+  matches = matches.filter((r) => String(r.name || '').trim() === name);
+
+  if (!matches.length) {
+    const full = await fetchTemplatesForWaba(waba, tok, {
+      includeComponents: opts.includeComponents === true
+    });
+    if (full.ok) {
+      matches = findMetaTemplatesByName(full.templates, name);
+    }
+  }
+
+  return {
+    ok: true,
+    waba_id: waba,
+    matches,
+    templates: matches,
+    searched_name: name
+  };
 }
 
 function templateKey(row) {
@@ -335,21 +383,25 @@ export function buildLanguageTryOrder(templates, templateName, preferredLang) {
     out.push(raw);
   };
 
-  add(preferredLang);
-  add('tr');
-  add('tr_TR');
-  add('Turkish');
-
   for (const row of rows) {
     if (String(row.status || '').toUpperCase() === 'APPROVED') add(row.language);
   }
   for (const row of rows) add(row.language);
 
+  add(preferredLang);
+  add('tr');
+  add('tr_TR');
+  add('Turkish');
+
   return out;
 }
 
-/** WABA listesinden gönderim için dil sırası. */
+/** WABA listesinden gönderim için dil sırası — önce gönderim numarasının WABA'sı. */
 export async function resolveLanguageTryOrderForSend(templateName, preferredLang) {
+  const phone = await fetchMetaTemplatesFromPhoneWaba(templateName);
+  if (phone.ok && phone.matches?.length) {
+    return buildLanguageTryOrder(phone.matches, templateName, preferredLang);
+  }
   const list = await fetchMetaTemplatesForName(templateName);
   if (!list.ok) {
     return buildLanguageTryOrder([], templateName, preferredLang);
