@@ -24,7 +24,7 @@ VALUES (
   'whatsapp',
   true,
   'kitap_siparisi',
-  'tr',
+  'tr_TR',
   true,
   'APPROVED',
   NOW()

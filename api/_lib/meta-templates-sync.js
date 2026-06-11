@@ -338,6 +338,7 @@ export function buildLanguageTryOrder(templates, templateName, preferredLang) {
   add(preferredLang);
   add('tr');
   add('tr_TR');
+  add('Turkish');
 
   for (const row of rows) {
     if (String(row.status || '').toUpperCase() === 'APPROVED') add(row.language);
