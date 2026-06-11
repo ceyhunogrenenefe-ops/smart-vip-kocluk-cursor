@@ -2,6 +2,9 @@ import { supabaseAdmin } from './supabase-admin.js';
 import {
   fetchAllMetaMessageTemplates,
   fetchMetaTemplatesForName,
+  findMetaTemplatesByName,
+  findMetaTemplatesByNameLoose,
+  findSimilarMetaTemplateNames,
   resolveWabaIds
 } from './meta-templates-sync.js';
 
@@ -75,6 +78,28 @@ function langMatches(wantLang, haveLang) {
   return a.split('_')[0] === b.split('_')[0];
 }
 
+function pickTemplateRow(rows, wantLang) {
+  const list = rows || [];
+  if (!list.length) return null;
+  return (
+    list.find((r) => langMatches(wantLang, r.language)) ||
+    list.find((r) => String(r.status || '').toUpperCase() === 'APPROVED') ||
+    list[0]
+  );
+}
+
+async function fetchTemplateRowByNameFromWaba(waba, name, tok) {
+  const q = new URLSearchParams({
+    fields: 'name,status,language,components',
+    limit: '50',
+    name
+  });
+  const url = `https://graph.facebook.com/${GRAPH()}/${encodeURIComponent(waba)}/message_templates?${q}`;
+  const { ok, json } = await graphGet(url, tok);
+  if (!ok) return [];
+  return json.data || [];
+}
+
 /** Meta WABA'dan components dahil şablon detayı. */
 export async function fetchMetaTemplateWithComponents(templateName, languageCode = 'tr') {
   const tok = process.env.META_WHATSAPP_TOKEN?.trim();
@@ -87,34 +112,61 @@ export async function fetchMetaTemplateWithComponents(templateName, languageCode
   const wantLang = String(languageCode || 'tr').trim() || 'tr';
 
   for (const waba of wabaIds) {
-    const q = new URLSearchParams({
-      fields: 'name,status,language,components',
-      limit: '50',
-      name
-    });
-    const url = `https://graph.facebook.com/${GRAPH()}/${encodeURIComponent(waba)}/message_templates?${q}`;
-    const { ok, json } = await graphGet(url, tok);
-    if (!ok) continue;
-    const rows = json.data || [];
-    const hit =
-      rows.find((r) => langMatches(wantLang, r.language)) ||
-      rows.find((r) => String(r.status || '').toUpperCase() === 'APPROVED') ||
-      rows[0];
-    if (hit) return { ok: true, template: hit, waba_id: waba };
+    const rows = await fetchTemplateRowByNameFromWaba(waba, name, tok);
+    const hit = pickTemplateRow(rows, wantLang);
+    if (hit?.components) return { ok: true, template: hit, waba_id: waba };
+    if (hit && !hit.components) {
+      const retry = await fetchTemplateRowByNameFromWaba(waba, hit.name || name, tok);
+      const hit2 = pickTemplateRow(retry, wantLang);
+      if (hit2) return { ok: true, template: hit2, waba_id: waba };
+    }
   }
 
   const list = await fetchMetaTemplatesForName(name);
-  if (!list.ok) {
-    return { ok: false, error: list.error || 'template_not_found', template: null };
+  let matches = list.matches?.length ? list.matches : findMetaTemplatesByNameLoose(list.templates, name);
+
+  if (!matches.length && list.ok) {
+    const full = await fetchAllMetaMessageTemplates({ includeComponents: true });
+    matches = findMetaTemplatesByNameLoose(full.templates, name);
+    if (matches.length) {
+      const hit = pickTemplateRow(matches, wantLang);
+      if (hit?.components) {
+        return { ok: true, template: hit, waba_id: (full.waba_ids || [])[0] || null };
+      }
+    }
   }
-  const matches = list.matches || [];
-  const hit =
-    matches.find((r) => langMatches(wantLang, r.language)) ||
-    matches.find((r) => String(r.status || '').toUpperCase() === 'APPROVED') ||
-    matches[0];
+
+  if (!list.ok && !matches.length) {
+    return {
+      ok: false,
+      error: list.error || 'template_not_found',
+      template: null,
+      waba_errors: list.waba_errors
+    };
+  }
+
+  const hit = pickTemplateRow(matches, wantLang);
   if (!hit) {
-    return { ok: false, error: 'template_not_found', template: null, similar: list.templates?.slice(0, 20) };
+    const similar = findSimilarMetaTemplateNames(list.templates, name.split('_')[0] || name);
+    return {
+      ok: false,
+      error: 'template_not_found',
+      template: null,
+      similar_names: similar,
+      template_count: (list.templates || []).length
+    };
   }
+
+  if (!hit.components) {
+    for (const waba of wabaIds) {
+      const rows = await fetchTemplateRowByNameFromWaba(waba, hit.name || name, tok);
+      const withComponents = pickTemplateRow(rows, wantLang);
+      if (withComponents?.components) {
+        return { ok: true, template: withComponents, waba_id: waba };
+      }
+    }
+  }
+
   return { ok: true, template: hit, waba_id: (list.waba_ids || [])[0] || null };
 }
 
@@ -137,21 +189,28 @@ export async function listMetaTemplatesForEventsImport() {
   );
 
   const templates = (list.templates || [])
-    .filter((t) => String(t.status || '').toUpperCase() === 'APPROVED')
     .map((t) => {
       const name = String(t.name || '').trim();
       const lang = String(t.language || 'tr').trim();
+      const status = String(t.status || 'unknown').toUpperCase();
       const key = `${name.toLowerCase()}|${lang.toLowerCase()}`;
       return {
         meta_template_name: name,
         meta_template_language: lang,
-        status: t.status,
+        status,
+        can_import: status === 'APPROVED',
         imported: imported.has(key)
       };
     })
     .sort((a, b) => a.meta_template_name.localeCompare(b.meta_template_name, 'tr'));
 
-  return { ok: true, templates, waba_ids: list.waba_ids, waba_errors: list.waba_errors };
+  return {
+    ok: true,
+    templates,
+    template_count: templates.length,
+    waba_ids: list.waba_ids,
+    waba_errors: list.waba_errors
+  };
 }
 
 /**
@@ -165,7 +224,17 @@ export async function importMetaTemplateForEvents(opts) {
 
   const detail = await fetchMetaTemplateWithComponents(metaName, lang);
   if (!detail.ok || !detail.template) {
-    return { ok: false, error: detail.error || 'template_not_found' };
+    return {
+      ok: false,
+      error: detail.error || 'template_not_found',
+      similar_names: detail.similar_names,
+      template_count: detail.template_count,
+      waba_errors: detail.waba_errors,
+      hint:
+        detail.error === 'missing_meta_token_or_name'
+          ? 'Vercel META_WHATSAPP_TOKEN tanımlı değil.'
+          : 'Meta BM şablon adını birebir yazın (ör. yos_deneme_snav). WABA kimliği META_WABA_ID ile aynı hesap olmalı.'
+    };
   }
 
   const row = detail.template;

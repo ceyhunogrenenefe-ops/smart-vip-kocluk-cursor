@@ -344,7 +344,12 @@ export default async function handler(req, res) {
           hint: 'Vercel’de META_WHATSAPP_TOKEN ve META_WABA_ID (veya META_PHONE_NUMBER_ID) tanımlı olmalı.'
         });
       }
-      return res.status(200).json({ data: out.templates, waba_ids: out.waba_ids });
+      return res.status(200).json({
+        data: out.templates,
+        waba_ids: out.waba_ids,
+        template_count: out.template_count,
+        waba_errors: out.waba_errors
+      });
     } catch (e) {
       return res.status(500).json({ error: errorMessage(e) || 'meta_list_failed' });
     }
@@ -450,7 +455,13 @@ export default async function handler(req, res) {
         display_name: displayName || undefined
       });
       if (!out.ok) {
-        return res.status(400).json({ error: out.error || 'import_failed' });
+        return res.status(400).json({
+          error: out.error || 'import_failed',
+          hint: out.hint,
+          similar_names: out.similar_names,
+          template_count: out.template_count,
+          waba_errors: out.waba_errors
+        });
       }
       return res.status(200).json({
         ok: true,

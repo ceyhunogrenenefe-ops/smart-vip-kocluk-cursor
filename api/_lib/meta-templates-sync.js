@@ -124,9 +124,10 @@ export async function resolveWabaIds() {
   return out;
 }
 
-async function fetchTemplatesForWaba(waba, tok) {
+async function fetchTemplatesForWaba(waba, tok, { includeComponents = false } = {}) {
+  const fields = includeComponents ? 'name,status,language,components' : 'name,status,language';
   const rows = [];
-  let url = `https://graph.facebook.com/${GRAPH()}/${encodeURIComponent(waba)}/message_templates?fields=name,status,language&limit=100`;
+  let url = `https://graph.facebook.com/${GRAPH()}/${encodeURIComponent(waba)}/message_templates?fields=${fields}&limit=250`;
   while (url) {
     const { ok, json } = await graphGet(url, tok);
     if (!ok) {
@@ -161,7 +162,8 @@ function templateKey(row) {
   return `${String(row.name || '').trim().toLowerCase()}|${normalizeLangKey(row.language || '')}`;
 }
 
-export async function fetchAllMetaMessageTemplates() {
+export async function fetchAllMetaMessageTemplates(opts = {}) {
+  const includeComponents = opts.includeComponents === true;
   const tok = process.env.META_WHATSAPP_TOKEN?.trim();
   const wabaIds = await resolveWabaIds();
   if (!wabaIds.length || !tok) {
@@ -180,7 +182,7 @@ export async function fetchAllMetaMessageTemplates() {
   const waba_errors = {};
 
   for (const waba of wabaIds) {
-    const r = await fetchTemplatesForWaba(waba, tok);
+    const r = await fetchTemplatesForWaba(waba, tok, { includeComponents });
     if (!r.ok) {
       waba_errors[waba] = r.error || 'fetch_failed';
       continue;
@@ -285,6 +287,26 @@ export function findMetaTemplatesByName(templates, templateName) {
   const wantName = String(templateName || '').trim().toLowerCase();
   if (!wantName) return [];
   return (templates || []).filter((t) => String(t.name || '').trim().toLowerCase() === wantName);
+}
+
+/** Ad tam eşleşmezse yos_deneme_snav ↔ yos_deneme_sinav gibi benzerleri bulur. */
+export function findMetaTemplatesByNameLoose(templates, templateName) {
+  const want = String(templateName || '').trim().toLowerCase();
+  if (!want) return [];
+  const exact = findMetaTemplatesByName(templates, want);
+  if (exact.length) return exact;
+  return (templates || []).filter((t) => {
+    const n = String(t.name || '').trim().toLowerCase();
+    if (!n) return false;
+    return n.includes(want) || want.includes(n);
+  });
+}
+
+export function findSimilarMetaTemplateNames(templates, fragment, limit = 15) {
+  const q = String(fragment || '').trim().toLowerCase();
+  if (!q) return [];
+  const names = [...new Set((templates || []).map((t) => String(t.name || '').trim()).filter(Boolean))];
+  return names.filter((n) => n.toLowerCase().includes(q)).slice(0, limit);
 }
 
 /**

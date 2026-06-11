@@ -1,6 +1,5 @@
--- Deneme sınavı WhatsApp şablonu → Etkinlikler dropdown (isteğe bağlı)
--- Meta BM'deki şablon adı ile birebir aynı olmalı. Panelden "Meta şablonlarını listele" ile de eklenebilir.
--- meta_template_name değerini Meta Business → WhatsApp → Şablonlar'daki API adıyla değiştirin.
+-- YÖS deneme sınavı WhatsApp şablonu → Etkinlikler (Meta API adı: yos_deneme_snav, dil: tr)
+-- Panel: Etkinlikler → «Ad ile içe aktar» veya bu SQL (Meta gövde metnini BM ile aynı yapın).
 
 ALTER TABLE message_templates ADD COLUMN IF NOT EXISTS channel TEXT;
 ALTER TABLE message_templates ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
@@ -22,14 +21,14 @@ INSERT INTO message_templates (
   updated_at
 )
 VALUES (
-  'Deneme sınavı kayıt onayı',
-  'deneme_sinavi_kayit',
-  E'Merhaba {{ad}}, deneme sınavı kaydınız alınmıştır. Detaylar için kurumumuz sizinle iletişime geçecektir.',
+  'YÖS deneme sınavı kayıt',
+  'yos_deneme_snav',
+  E'Merhaba {{ad}}, YÖS deneme sınavı kaydınız alınmıştır.',
   '["ad"]'::jsonb,
   '["ad"]'::jsonb,
   'whatsapp',
   true,
-  'deneme_sinavi_kayit',
+  'yos_deneme_snav',
   'tr',
   true,
   'APPROVED',
