@@ -121,60 +121,67 @@ function isTurkishMetaLang(lang) {
   return k === 'tr' || k === 'tr_tr' || k === 'turkish' || k.startsWith('tr_');
 }
 
+function isExactBookOrderMetaName(name) {
+  return String(name || '').trim() === BOOK_ORDER_META_NAME;
+}
+
 function pickBookOrderMetaRow(matches) {
   const list = matches || [];
-  const approvedTr = list.filter(
+  const exact = list.filter((r) => isExactBookOrderMetaName(r.name));
+  const pool = exact.length ? exact : list;
+  const approvedTr = pool.filter(
     (r) => String(r.status || '').toUpperCase() === 'APPROVED' && isTurkishMetaLang(r.language)
   );
   if (approvedTr.length) return approvedTr[0];
-  const approved = list.filter((r) => String(r.status || '').toUpperCase() === 'APPROVED');
+  const approved = pool.filter((r) => String(r.status || '').toUpperCase() === 'APPROVED');
   if (approved.length) return approved[0];
-  return list[0] || null;
+  return pool[0] || null;
 }
 
-async function resolveBookOrderMetaFromApi(preferredName) {
-  const namesToTry = [
-    String(preferredName || '').trim(),
-    BOOK_ORDER_META_NAME,
-    'kitap_siparisi',
-    'kitap_siparis'
-  ].filter(Boolean);
+const BOOK_ORDER_META_LANG_TRY = ['tr', 'tr_TR', 'Turkish'];
 
-  for (const name of [...new Set(namesToTry)]) {
-    const list = await fetchMetaTemplatesForName(name);
-    let matches = list.matches?.length ? list.matches : [];
-    if (!matches.length && list.templates?.length) {
-      matches = findMetaTemplatesByNameLoose(list.templates, name);
-    }
-    const hit = pickBookOrderMetaRow(matches);
-    if (hit?.name && hit?.language) {
+function bookOrderMetaFallback() {
+  return {
+    meta_template_name: BOOK_ORDER_META_NAME,
+    meta_template_language: 'tr',
+    whatsapp_template_status: 'APPROVED',
+    fallback: true
+  };
+}
+
+async function resolveBookOrderMetaFromApi() {
+  const list = await fetchMetaTemplatesForName(BOOK_ORDER_META_NAME);
+  let matches = (list.matches || []).filter((r) => isExactBookOrderMetaName(r.name));
+  if (!matches.length && list.templates?.length) {
+    matches = (list.templates || []).filter((r) => isExactBookOrderMetaName(r.name));
+  }
+  if (!matches.length && list.templates?.length) {
+    matches = findMetaTemplatesByNameLoose(list.templates, BOOK_ORDER_META_NAME).filter((r) =>
+      isExactBookOrderMetaName(r.name)
+    );
+  }
+
+  const hit = pickBookOrderMetaRow(matches);
+  if (hit?.name && hit?.language) {
+    return {
+      meta_template_name: String(hit.name).trim(),
+      meta_template_language: String(hit.language).trim(),
+      whatsapp_template_status: String(hit.status || 'APPROVED')
+    };
+  }
+
+  for (const lang of BOOK_ORDER_META_LANG_TRY) {
+    const detail = await fetchMetaTemplateWithComponents(BOOK_ORDER_META_NAME, lang);
+    if (detail.ok && detail.template?.name && detail.template?.language) {
       return {
-        meta_template_name: String(hit.name).trim(),
-        meta_template_language: String(hit.language).trim(),
-        whatsapp_template_status: String(hit.status || 'APPROVED')
+        meta_template_name: String(detail.template.name).trim(),
+        meta_template_language: String(detail.template.language).trim(),
+        whatsapp_template_status: String(detail.template.status || 'APPROVED')
       };
     }
   }
 
-  const detail = await fetchMetaTemplateWithComponents(BOOK_ORDER_META_NAME, 'tr');
-  if (detail.ok && detail.template?.name && detail.template?.language) {
-    return {
-      meta_template_name: String(detail.template.name).trim(),
-      meta_template_language: String(detail.template.language).trim(),
-      whatsapp_template_status: String(detail.template.status || 'APPROVED')
-    };
-  }
-
-  const list = await fetchMetaTemplatesForName(BOOK_ORDER_META_NAME);
-  const similar = findMetaTemplatesByNameLoose(list.templates || [], 'kitap');
-  const names = [...new Set(similar.map((t) => String(t.name || '').trim()).filter(Boolean))];
-  return {
-    error: 'meta_template_not_found',
-    hint:
-      names.length > 0
-        ? `Meta BM'de kitap_siparisi bulunamadı. Benzer şablonlar: ${names.slice(0, 5).join(', ')}`
-        : 'Meta BM onaylı kitap_siparisi şablonu bulunamadı. META_WABA_ID ve META_WHATSAPP_TOKEN kontrol edin.'
-  };
+  return bookOrderMetaFallback();
 }
 
 function bindingsFromMetaBody(bodyText) {
@@ -194,15 +201,18 @@ async function loadBookOrderTemplateRow() {
     return { error: error?.message || 'template_not_found' };
   }
 
-  const metaResolved = await resolveBookOrderMetaFromApi(templateRow.meta_template_name);
-  if (metaResolved.error) {
-    return { error: metaResolved.hint || metaResolved.error };
-  }
-
+  const metaResolved = await resolveBookOrderMetaFromApi();
   const metaName = metaResolved.meta_template_name;
   const metaLang = metaResolved.meta_template_language;
 
-  const detail = await fetchMetaTemplateWithComponents(metaName, metaLang);
+  let detail = await fetchMetaTemplateWithComponents(metaName, metaLang);
+  if (!detail.ok) {
+    for (const lang of BOOK_ORDER_META_LANG_TRY) {
+      if (lang === metaLang) continue;
+      detail = await fetchMetaTemplateWithComponents(metaName, lang);
+      if (detail.ok) break;
+    }
+  }
   const bodyText = detail.ok ? extractBodyFromComponents(detail.template?.components) : '';
   const { bindings, named } = bindingsFromMetaBody(bodyText);
 
