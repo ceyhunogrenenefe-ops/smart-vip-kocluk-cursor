@@ -3,35 +3,26 @@ import { normalizePhoneToE164 } from './phone-whatsapp.js';
 import { sendAutomatedWhatsApp } from './whatsapp-outbound.js';
 import { getIstanbulDateString } from './istanbul-time.js';
 
+/** Supabase message_templates.type — Meta BM adı: kitap_siparisi */
 export const BOOK_ORDER_TEMPLATE_TYPE = 'kitap_siparis_bildirim';
 
-export function shortOrderNo(orderId) {
-  const s = String(orderId || '').replace(/-/g, '');
-  return s.slice(0, 8).toUpperCase();
-}
-
-export function buildBookOrderTemplateVars(order, booksellerName) {
+/** Meta kitap_siparisi şablonu — 7 adlandırılmış gövde parametresi */
+export function buildBookOrderTemplateVars(order) {
   const ogrenci = String(order.ogrenci_ad_soyad || order.ogrenci_adi || '').trim();
   const veli = String(order.veli_ad_soyad || order.veli_adi || '').trim() || '—';
   const sinif = String(order.sinif || '').trim() || '—';
-  const ucret = String(order.ucret_durumu || '').trim() || '—';
-  const telefon = String(order.telefon || '').trim();
+  const telefon = String(order.telefon || '').trim() || '—';
   const adres = String(order.adres || '').trim() || '—';
   const ilce = String(order.ilce || '').trim() || '—';
   const il = String(order.il || '').trim() || '—';
-  const not = String(order.siparis_notu || order.notlar || '').trim() || '—';
   return {
-    kitapci_adi: String(booksellerName || order.kitapci_adi || 'Kitapçı').trim(),
-    siparis_no: shortOrderNo(order.id),
     veli_ad_soyad: veli,
     ogrenci_ad_soyad: ogrenci,
     sinif,
-    ucret_durumu: ucret,
     telefon,
     adres,
     ilce,
-    il,
-    siparis_notu: not
+    il
   };
 }
 
@@ -119,7 +110,7 @@ export async function notifyBooksellerForOrder(order) {
     return { ok: false, error: 'invalid_bookseller_phone' };
   }
 
-  const vars = buildBookOrderTemplateVars(order, resolved.bookseller.name);
+  const vars = buildBookOrderTemplateVars(order);
   const sent = await sendAutomatedWhatsApp({
     phone,
     templateType: BOOK_ORDER_TEMPLATE_TYPE,

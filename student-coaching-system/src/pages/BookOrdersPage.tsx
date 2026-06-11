@@ -281,7 +281,7 @@ export default function BookOrdersPage() {
           </h1>
           <p className="mt-1 text-sm text-slate-600">
             Veli formu doldurur → sipariş tabloya düşer → siz onaylarsınız → kitapçıya WhatsApp gider.
-            Şablon: <span className="font-mono text-xs">kitap_siparis_bildirim</span>
+            Meta şablon: <span className="font-mono text-xs">kitap_siparisi</span>
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

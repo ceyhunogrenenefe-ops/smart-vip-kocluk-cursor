@@ -1,17 +1,5 @@
--- Eski kitap_siparisleri şemasını form alanlarına günceller (önceki SQL çalıştırıldıysa)
--- Güvenli: yalnızca eksik sütunları ekler ve şablonu günceller
-
-ALTER TABLE kitap_siparisleri ADD COLUMN IF NOT EXISTS veli_ad_soyad TEXT;
-ALTER TABLE kitap_siparisleri ADD COLUMN IF NOT EXISTS ogrenci_ad_soyad TEXT;
-ALTER TABLE kitap_siparisleri ADD COLUMN IF NOT EXISTS ucret_durumu TEXT;
-ALTER TABLE kitap_siparisleri ADD COLUMN IF NOT EXISTS ilce TEXT;
-ALTER TABLE kitap_siparisleri ADD COLUMN IF NOT EXISTS il TEXT;
-ALTER TABLE kitap_siparisleri ADD COLUMN IF NOT EXISTS siparis_notu TEXT;
-
--- Eski sütunlardan veri taşı
-UPDATE kitap_siparisleri SET veli_ad_soyad = veli_adi WHERE veli_ad_soyad IS NULL AND veli_adi IS NOT NULL;
-UPDATE kitap_siparisleri SET ogrenci_ad_soyad = ogrenci_adi WHERE ogrenci_ad_soyad IS NULL AND ogrenci_adi IS NOT NULL;
-UPDATE kitap_siparisleri SET siparis_notu = notlar WHERE siparis_notu IS NULL AND notlar IS NOT NULL;
+-- Meta BM şablonu: kitap_siparisi (Turkish / tr)
+-- Kitap siparişi onayı → kitapçıya WhatsApp (type: kitap_siparis_bildirim)
 
 INSERT INTO message_templates (
   name,
@@ -53,11 +41,5 @@ ON CONFLICT (type) DO UPDATE SET
   meta_named_body_parameters = COALESCE(EXCLUDED.meta_named_body_parameters, message_templates.meta_named_body_parameters),
   whatsapp_template_status = COALESCE(EXCLUDED.whatsapp_template_status, message_templates.whatsapp_template_status),
   updated_at = NOW();
-
--- Eski kayıtlar: onay bekleyen siparişler otomatik gönderilmesin
-UPDATE kitap_siparisleri
-SET whatsapp_status = 'awaiting_approval'
-WHERE status = 'pending'
-  AND whatsapp_status = 'pending';
 
 NOTIFY pgrst, 'reload schema';

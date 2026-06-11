@@ -1,6 +1,6 @@
 -- Kitap sipariş formu → Supabase tabloları + WhatsApp şablonu
 -- institutions.id = TEXT (uuid değil)
--- Meta BM şablon adı: kitap_siparis_bildirim · dil: tr
+-- Meta BM şablon adı: kitap_siparisi · dil: tr (iç type: kitap_siparis_bildirim)
 
 CREATE TABLE IF NOT EXISTS kitapcilar (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -76,12 +76,12 @@ INSERT INTO message_templates (
 VALUES (
   'Kitap siparişi — kitapçı bildirimi',
   'kitap_siparis_bildirim',
-  E'📚 KİTAP SİPARİŞ FORMU\nSipariş No: {{siparis_no}}\n\nVeli Ad Soyad: {{veli_ad_soyad}}\nÖğrenci Ad Soyad: {{ogrenci_ad_soyad}}\nSınıf: {{sinif}}\nÜcret Durumu: {{ucret_durumu}}\n\nTelefon: {{telefon}}\nAdres: {{adres}}\nİlçe: {{ilce}}\nİl: {{il}}\n\nSipariş Notu: {{siparis_notu}}\n\nOnline VIP Dershane öğrencisi için kitap siparişi oluşturulmuştur. Kargo işlemleri tamamlandığında takip numarasının tarafımıza iletilmesini rica ederiz.',
-  '["kitapci_adi","siparis_no","veli_ad_soyad","ogrenci_ad_soyad","sinif","ucret_durumu","telefon","adres","ilce","il","siparis_notu"]'::jsonb,
-  '["kitapci_adi","siparis_no","veli_ad_soyad","ogrenci_ad_soyad","sinif","ucret_durumu","telefon","adres","ilce","il","siparis_notu"]'::jsonb,
+  E'📚 KİTAP SİPARİŞ FORMU\nVeli Ad Soyad:\n{{veli_ad_soyad}}\nÖğrenci Ad Soyad:\n{{ogrenci_ad_soyad}}\nSınıf:\n{{sinif}}\nÜcret Durumu:\n☐ Ödendi\n☐ Kapıda Ödeme\n☐ Havale Bekleniyor\nTelefon:\n{{telefon}}\nAdres:\n{{adres}}\nİlçe:\n{{ilce}}\nİl:\n{{il}}\n──────────────────\nOnline VIP Dershane öğrencisi için kitap siparişi oluşturulmuştur. Kargo işlemleri tamamlandığında takip numarasının tarafımıza iletilmesini rica ederiz.',
+  '["veli_ad_soyad","ogrenci_ad_soyad","sinif","telefon","adres","ilce","il"]'::jsonb,
+  '["veli_ad_soyad","ogrenci_ad_soyad","sinif","telefon","adres","ilce","il"]'::jsonb,
   'whatsapp',
   true,
-  'kitap_siparis_bildirim',
+  'kitap_siparisi',
   'tr',
   true,
   'APPROVED',

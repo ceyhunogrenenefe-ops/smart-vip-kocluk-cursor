@@ -129,7 +129,6 @@ export default async function handler(req, res) {
     }
     if (!parsed.ogrenci_ad_soyad) return res.status(400).json({ error: 'ogrenci_ad_soyad_required' });
     if (!parsed.veli_ad_soyad) return res.status(400).json({ error: 'veli_ad_soyad_required' });
-    if (!parsed.telefon) return res.status(400).json({ error: 'telefon_required' });
 
     try {
       const order = await insertBookOrder({
