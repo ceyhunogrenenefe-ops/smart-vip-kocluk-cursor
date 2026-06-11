@@ -376,8 +376,43 @@ export default function EventsPage() {
       else if (ej.warning === 'events_schema_missing' && ej.hint) setSchemaWarning(String(ej.hint));
       const tpls = Array.isArray(tj.data) ? (tj.data as WaTemplate[]) : [];
       setTemplates(tpls);
+      const metaSync = (tj as { meta_sync?: {
+        ok?: boolean;
+        synced?: number;
+        error?: string;
+        approved_count?: number;
+        meta_total?: number;
+        waba_errors?: Record<string, string>;
+        errors?: { name?: string; error?: string }[];
+      } }).meta_sync;
+      if (metaSync) {
+        if (metaSync.ok === false && metaSync.error) {
+          const wabaNote =
+            metaSync.waba_errors && Object.keys(metaSync.waba_errors).length
+              ? ` WABA: ${Object.entries(metaSync.waba_errors)
+                  .map(([k, v]) => `${k}=${v}`)
+                  .join('; ')}`
+              : '';
+          setMetaListInfo(
+            `Meta şablonları otomatik çekilemedi (${metaSync.error}).${wabaNote} Vercel META_WHATSAPP_TOKEN ve META_WABA_ID kontrol edin.`
+          );
+        } else if ((metaSync.synced ?? 0) > 0) {
+          toast.success(`Meta'dan ${metaSync.synced} onaylı şablon eklendi.`);
+        } else if ((metaSync.meta_total ?? 0) === 0 && metaSync.ok !== false) {
+          setMetaListInfo('Meta API şablon döndürmedi; onaylı şablonlar zaten Supabase’de olabilir.');
+        } else if (metaSync.error === 'no_templates_from_meta') {
+          setMetaListInfo(
+            'Meta bağlantısı var ama şablon listesi boş — Vercel’de META_WABA_ID, WhatsApp Manager’daki WABA kimliği ile aynı olmalı (işletme kimliği değil).'
+          );
+        }
+        const importErr = metaSync.errors?.find((e) => e.name?.includes('yos_deneme'));
+        if (importErr) {
+          setMetaListInfo(`yos_deneme_snav eklenemedi: ${importErr.error || 'bilinmeyen hata'}`);
+        }
+      }
       if (tpls.length && !tpls.some((t) => t.type === templateType)) {
-        setTemplateType(tpls[0].type);
+        const yos = tpls.find((t) => t.meta_template_name === 'yos_deneme_snav' || t.type === 'yos_deneme_snav');
+        setTemplateType(yos?.type || tpls[0].type);
       }
       setClasses(Array.isArray(cj.data) ? (cj.data as ClassOption[]) : []);
       setPeople(Array.isArray(pj.data) ? (pj.data as PersonOption[]) : []);

@@ -195,14 +195,24 @@ export async function fetchAllMetaMessageTemplates(opts = {}) {
     }
   }
 
-  if (!merged.length && Object.keys(waba_errors).length === wabaIds.length) {
+  if (!merged.length) {
     const firstErr = Object.values(waba_errors)[0];
+    if (Object.keys(waba_errors).length === wabaIds.length) {
+      return {
+        ok: false,
+        error: firstErr || 'all_waba_fetch_failed',
+        templates: [],
+        waba_ids: wabaIds,
+        waba_errors
+      };
+    }
     return {
       ok: false,
-      error: firstErr || 'all_waba_fetch_failed',
+      error: 'no_templates_from_meta',
       templates: [],
       waba_ids: wabaIds,
-      waba_errors
+      waba_errors,
+      hint: 'WABA erişildi ama şablon listesi boş — META_WABA_ID doğru WhatsApp Business hesabı mı?'
     };
   }
 

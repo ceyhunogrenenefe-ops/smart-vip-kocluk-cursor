@@ -14,7 +14,8 @@ import {
 import { syncSeminarRegistrationsToEvents } from '../api/_lib/sync-seminar-registrations.js';
 import {
   importMetaTemplateForEvents,
-  listMetaTemplatesForEventsImport
+  listMetaTemplatesForEventsImport,
+  syncApprovedMetaTemplatesForEvents
 } from '../api/_lib/meta-template-import.js';
 
 export { buildEventTemplateVars };
@@ -321,6 +322,13 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'GET' && scope === 'templates') {
+    let metaSync = null;
+    try {
+      metaSync = await syncApprovedMetaTemplatesForEvents();
+    } catch (syncErr) {
+      metaSync = { ok: false, synced: 0, error: errorMessage(syncErr) || 'meta_sync_failed' };
+    }
+
     const { data, error } = await supabaseAdmin
       .from('message_templates')
       .select('type, name, content, variables, twilio_variable_bindings, meta_template_name, meta_template_language, whatsapp_template_status, is_active, channel')
@@ -328,11 +336,11 @@ export default async function handler(req, res) {
       .order('name', { ascending: true });
     if (error) return res.status(500).json({ error: error.message });
     const templates = (data || []).filter((t) => {
-      const meta = String(t.meta_template_name || '').trim();
+      const meta = String(t.meta_template_name || t.type || '').trim();
       const ch = String(t.channel || '').trim().toLowerCase();
       return meta && (ch === 'whatsapp' || ch === '' || !t.channel);
     });
-    return res.status(200).json({ data: templates });
+    return res.status(200).json({ data: templates, meta_sync: metaSync });
   }
 
   if (req.method === 'GET' && scope === 'meta-templates') {

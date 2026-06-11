@@ -260,11 +260,13 @@ export async function importMetaTemplateForEvents(opts) {
     updated_at: new Date().toISOString()
   };
 
-  const { data: existing } = await supabaseAdmin
+  const { data: existingRows } = await supabaseAdmin
     .from('message_templates')
-    .select('id, type')
-    .eq('meta_template_name', metaName)
-    .maybeSingle();
+    .select('id, type, meta_template_name');
+  const existing =
+    (existingRows || []).find(
+      (r) => String(r.meta_template_name || '').trim().toLowerCase() === metaName.toLowerCase()
+    ) || null;
 
   let saved;
   if (existing?.id) {
@@ -307,5 +309,73 @@ export async function importMetaTemplateForEvents(opts) {
     template: saved,
     variables,
     body_preview: bodyText
+  };
+}
+
+function templateRegistryKey(name, lang) {
+  return `${String(name || '').trim().toLowerCase()}|${String(lang || 'tr').trim().toLowerCase()}`;
+}
+
+/**
+ * Meta'daki onaylı şablonları message_templates'e otomatik ekler.
+ * Etkinlikler dropdown yalnızca Supabase'den okur; yeni Meta şablonları burada senkronlanır.
+ */
+export async function syncApprovedMetaTemplatesForEvents() {
+  const list = await fetchAllMetaMessageTemplates();
+  if (!list.ok) {
+    return {
+      ok: false,
+      synced: 0,
+      error: list.error || 'meta_fetch_failed',
+      waba_ids: list.waba_ids || [],
+      waba_errors: list.waba_errors || {}
+    };
+  }
+
+  const { data: existing, error: exErr } = await supabaseAdmin
+    .from('message_templates')
+    .select('meta_template_name, meta_template_language, type');
+  if (exErr) throw exErr;
+
+  const known = new Set();
+  for (const r of existing || []) {
+    const n = String(r.meta_template_name || r.type || '').trim();
+    const l = String(r.meta_template_language || 'tr').trim();
+    if (n) known.add(templateRegistryKey(n, l));
+  }
+
+  const approved = (list.templates || []).filter(
+    (t) => String(t.status || '').toUpperCase() === 'APPROVED'
+  );
+
+  let synced = 0;
+  const errors = [];
+  for (const t of approved) {
+    const name = String(t.name || '').trim();
+    const lang = String(t.language || 'tr').trim();
+    if (!name) continue;
+    const key = templateRegistryKey(name, lang);
+    if (known.has(key)) continue;
+
+    const out = await importMetaTemplateForEvents({
+      meta_template_name: name,
+      meta_template_language: lang
+    });
+    if (out.ok) {
+      synced++;
+      known.add(key);
+    } else {
+      errors.push({ name, lang, error: out.error, hint: out.hint });
+    }
+  }
+
+  return {
+    ok: true,
+    synced,
+    approved_count: approved.length,
+    meta_total: (list.templates || []).length,
+    waba_ids: list.waba_ids || [],
+    waba_errors: list.waba_errors || {},
+    errors: errors.slice(0, 8)
   };
 }
