@@ -58,6 +58,7 @@ import TeacherSoruHavuzuPage from './pages/questionHelp/TeacherSoruHavuzuPage';
 import CoachSoruAnalitikPage from './pages/questionHelp/CoachSoruAnalitikPage';
 import NotificationsPage from './pages/NotificationsPage';
 import EventsPage from './pages/EventsPage';
+import BookOrdersPage from './pages/BookOrdersPage';
 import TeacherEduPanelPage from './pages/eduPanel/TeacherEduPanelPage';
 import StudentEduPanelPage from './pages/eduPanel/StudentEduPanelPage';
 import AdminAgentsPage from './pages/aiAgents/AdminAgentsPage';
@@ -292,6 +293,14 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/events')}>
                 <Layout>
                   <EventsPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/kitap-siparisleri" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/kitap-siparisleri')}>
+                <Layout>
+                  <BookOrdersPage />
                 </Layout>
               </ProtectedRoute>
             } />

@@ -87,6 +87,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/book-orders",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/edesis-sync",
       "schedule": "0 6,18 * * *"
     },

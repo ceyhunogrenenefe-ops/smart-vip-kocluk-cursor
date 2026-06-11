@@ -65,6 +65,7 @@ export default function TopBar({ onMenuClick, drawerOpen = false, hideMenuButton
       '/user-management': 'Kullanıcı Yönetimi',
       '/veli-onay': 'Veli onayı & e-imza',
       '/tahsilat-muhasebe': 'Tahsilat & taksit',
+      '/kitap-siparisleri': 'Kitap siparişleri',
       '/login': 'Giriş',
       '/notifications': 'Bildirimler',
       '/my-profile': 'Profilim',

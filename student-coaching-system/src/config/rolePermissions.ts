@@ -57,6 +57,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/soru-analitik': ['super_admin', 'admin', 'coach'],
   '/notifications': ['super_admin', 'admin', 'coach'],
   '/events': ['super_admin', 'admin', 'coach'],
+  '/kitap-siparisleri': ['super_admin', 'admin'],
   '/edu-panel': ['super_admin', 'admin', 'coach', 'teacher'],
   '/edu-derslerim': ['student'],
   '/ai-agents-admin': ['super_admin', 'admin', 'teacher', 'coach'],

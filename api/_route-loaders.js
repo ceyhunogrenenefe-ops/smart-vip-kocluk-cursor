@@ -67,5 +67,7 @@ export const routeLoaders = {
   'institution-events': () => import('../handlers/institution-events.js'),
   'edu-panel': () => import('../handlers/edu-panel.js'),
   'edesis-sync': () => import('../handlers/edesis-sync.js'),
-  'cron/edesis-sync': () => import('../handlers/cron-edesis-sync.js')
+  'cron/edesis-sync': () => import('../handlers/cron-edesis-sync.js'),
+  'book-orders': () => import('../handlers/book-orders.js'),
+  'cron/book-orders': () => import('../handlers/cron-book-orders.js')
 };
