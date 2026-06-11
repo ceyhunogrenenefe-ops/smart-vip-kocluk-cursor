@@ -211,6 +211,25 @@ export function bindingsNeedMeetingLink(bindings: string[]): boolean {
   });
 }
 
+/** Kullanıcı girdisi veya şablon adından etkinlik başlığı */
+export function resolveEventTitleFromForm(
+  values: EventFormValues,
+  templateName?: string | null,
+  templateType?: string
+): { title: string; userTitle: string } {
+  const userTitle =
+    values.title.trim() ||
+    values.templateVars.etkinlik?.trim() ||
+    values.templateVars.etkinlik_adi?.trim() ||
+    values.templateVars.deneme_adi?.trim() ||
+    values.templateVars.sinav_adi?.trim() ||
+    values.templateVars.baslik?.trim() ||
+    values.templateVars.class_name?.trim() ||
+    '';
+  const title = userTitle || String(templateName || '').trim() || String(templateType || '').trim();
+  return { title, userTitle };
+}
+
 export function validateEventFormForBindings(
   bindings: string[],
   values: EventFormValues

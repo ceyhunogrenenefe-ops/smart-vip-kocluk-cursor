@@ -2,7 +2,11 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { authorizeVercelOrCronSecret } from '../api/_lib/cron-auth.js';
 import { getIstanbulDateString, getIstanbulHour, getIstanbulMinute } from '../api/_lib/istanbul-time.js';
 import { recordCronRun } from '../api/_lib/cron-run-log.js';
-import { resolveEventMeetingLink, sendEventInvites } from '../api/_lib/institution-event-send.js';
+import {
+  resolveEventMeetingLink,
+  sendEventInvites,
+  templateBindingsNeedLink
+} from '../api/_lib/institution-event-send.js';
 import { syncSeminarRegistrationsToEvents } from '../api/_lib/sync-seminar-registrations.js';
 
 function parseHm(timeVal) {
@@ -22,8 +26,21 @@ async function countPendingParticipants(eventId) {
 }
 
 async function processEvent(event, now, todayIstanbul, log) {
-  if (!resolveEventMeetingLink(event)) {
+  const templateType = String(event.template_type || '').trim();
+  const { data: tpl } = templateType
+    ? await supabaseAdmin
+        .from('message_templates')
+        .select('variables, twilio_variable_bindings, content')
+        .eq('type', templateType)
+        .maybeSingle()
+    : { data: null };
+
+  if (templateBindingsNeedLink(tpl) && !resolveEventMeetingLink(event)) {
     log.push({ event_id: event.id, skip: 'no_meeting_link' });
+    return;
+  }
+  if (!tpl?.content) {
+    log.push({ event_id: event.id, skip: 'template_not_found' });
     return;
   }
 

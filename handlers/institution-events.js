@@ -568,6 +568,19 @@ export default async function handler(req, res) {
       });
     }
 
+    if (schedule.send_mode === 'once' && !schedule.scheduled_send_at) {
+      return res.status(400).json({
+        error: 'schedule_invalid',
+        hint: 'Planlı gönderim için geçerli bir tarih ve saat seçin.'
+      });
+    }
+    if (schedule.send_mode === 'daily' && !schedule.daily_send_time) {
+      return res.status(400).json({
+        error: 'schedule_invalid',
+        hint: 'Günlük plan için gönderim saati seçin.'
+      });
+    }
+
     const participantsRaw = Array.isArray(body.participants) ? body.participants : [];
     const resolvedParticipants = [];
     const skippedParticipants = [];

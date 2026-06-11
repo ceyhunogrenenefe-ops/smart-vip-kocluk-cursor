@@ -16,6 +16,7 @@ import {
   bindingsNeedMeetingLink,
   getEditableFieldsForBindings,
   getFormValueForField,
+  resolveEventTitleFromForm,
   setFormValueForField,
   validateEventFormForBindings,
   type EventFormValues
@@ -536,6 +537,7 @@ export default function EventsPage() {
       return hint || 'Kurum bilgisi bulunamadı. Üst menüden kurum seçin veya yöneticinize başvurun.';
     }
     if (err === 'title_required') return 'Etkinlik başlığı gerekli.';
+    if (err === 'schedule_invalid') return hint || 'Plan tarihi veya saati geçersiz.';
     return err || 'Etkinlik oluşturulamadı';
   };
 
@@ -545,14 +547,18 @@ export default function EventsPage() {
       toast.error(formErr);
       return;
     }
-    const resolvedTitle = title.trim() || templateVars.etkinlik?.trim() || templateVars.class_name?.trim();
+    const { title: resolvedTitle, userTitle } = resolveEventTitleFromForm(
+      formValues,
+      selectedTemplate?.name,
+      templateType
+    );
     if (!resolvedTitle) {
       toast.error('Etkinlik başlığı gerekli');
       return;
     }
     const rawParticipants = buildParticipantsPayload();
     const participants = rawParticipants.filter((p) => isValidTrParticipantPhone(p.phone));
-    const effectiveSeminarKey = seminarSyncKey.trim() || resolvedTitle;
+    const effectiveSeminarKey = seminarSyncKey.trim() || userTitle;
     if (!participants.length && !effectiveSeminarKey) {
       if (rawParticipants.length > 0) {
         toast.error('Seçilen katılımcıların telefon numaraları geçersiz. 05xxxxxxxxx formatında olmalı.');
