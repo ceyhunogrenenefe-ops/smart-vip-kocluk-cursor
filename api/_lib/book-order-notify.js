@@ -1,10 +1,20 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import { normalizePhoneToE164 } from './phone-whatsapp.js';
-import { sendAutomatedWhatsApp } from './whatsapp-outbound.js';
+import { sendWhatsAppUsingTemplateRow } from './whatsapp-outbound.js';
 import { getIstanbulDateString } from './istanbul-time.js';
 
 /** Supabase message_templates.type — Meta BM adı: kitap_siparisi */
 export const BOOK_ORDER_TEMPLATE_TYPE = 'kitap_siparis_bildirim';
+export const BOOK_ORDER_META_NAME = 'kitap_siparisi';
+export const BOOK_ORDER_META_BINDINGS = [
+  'veli_ad_soyad',
+  'ogrenci_ad_soyad',
+  'sinif',
+  'telefon',
+  'adres',
+  'ilce',
+  'il'
+];
 
 /** Meta kitap_siparisi şablonu — 7 adlandırılmış gövde parametresi */
 export function buildBookOrderTemplateVars(order) {
@@ -82,6 +92,59 @@ export async function resolveBooksellerForOrder(order) {
   return { error: 'no_active_bookseller' };
 }
 
+function bookOrderBindingsStale(templateRow) {
+  const raw = templateRow?.twilio_variable_bindings ?? templateRow?.variables;
+  const bindings = Array.isArray(raw) ? raw.map((x) => String(x || '').trim()) : [];
+  if (!bindings.length) return true;
+  if (bindings.length !== BOOK_ORDER_META_BINDINGS.length) return true;
+  return bindings.some((key, i) => key !== BOOK_ORDER_META_BINDINGS[i]);
+}
+
+async function loadBookOrderTemplateRow() {
+  const { data: templateRow, error } = await supabaseAdmin
+    .from('message_templates')
+    .select('*')
+    .eq('type', BOOK_ORDER_TEMPLATE_TYPE)
+    .maybeSingle();
+  if (error || !templateRow?.content) {
+    return { error: error?.message || 'template_not_found' };
+  }
+
+  if (bookOrderBindingsStale(templateRow)) {
+    const now = new Date().toISOString();
+    await supabaseAdmin
+      .from('message_templates')
+      .update({
+        variables: BOOK_ORDER_META_BINDINGS,
+        twilio_variable_bindings: BOOK_ORDER_META_BINDINGS,
+        meta_template_name: BOOK_ORDER_META_NAME,
+        meta_template_language: templateRow.meta_template_language || 'tr',
+        meta_named_body_parameters: true,
+        updated_at: now
+      })
+      .eq('type', BOOK_ORDER_TEMPLATE_TYPE);
+    return {
+      templateRow: {
+        ...templateRow,
+        variables: BOOK_ORDER_META_BINDINGS,
+        twilio_variable_bindings: BOOK_ORDER_META_BINDINGS,
+        meta_template_name: BOOK_ORDER_META_NAME,
+        meta_named_body_parameters: true
+      }
+    };
+  }
+
+  return {
+    templateRow: {
+      ...templateRow,
+      meta_template_name: String(templateRow.meta_template_name || '').trim() || BOOK_ORDER_META_NAME,
+      twilio_variable_bindings: BOOK_ORDER_META_BINDINGS,
+      variables: BOOK_ORDER_META_BINDINGS,
+      meta_named_body_parameters: templateRow.meta_named_body_parameters !== false
+    }
+  };
+}
+
 /** @returns {{ ok: boolean, skipped?: boolean, error?: string, meta_message_id?: string|null }} */
 export async function notifyBooksellerForOrder(order) {
   const resolved = await resolveBooksellerForOrder(order);
@@ -110,11 +173,25 @@ export async function notifyBooksellerForOrder(order) {
     return { ok: false, error: 'invalid_bookseller_phone' };
   }
 
+  const loaded = await loadBookOrderTemplateRow();
+  if (!loaded.templateRow) {
+    await supabaseAdmin
+      .from('kitap_siparisleri')
+      .update({
+        whatsapp_status: 'failed',
+        whatsapp_error: String(loaded.error || 'template_not_found').slice(0, 500),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', order.id);
+    return { ok: false, error: loaded.error || 'template_not_found' };
+  }
+
   const vars = buildBookOrderTemplateVars(order);
-  const sent = await sendAutomatedWhatsApp({
+  const sent = await sendWhatsAppUsingTemplateRow({
     phone,
-    templateType: BOOK_ORDER_TEMPLATE_TYPE,
-    vars
+    templateRow: loaded.templateRow,
+    vars,
+    templateType: BOOK_ORDER_TEMPLATE_TYPE
   });
 
   const now = new Date().toISOString();
