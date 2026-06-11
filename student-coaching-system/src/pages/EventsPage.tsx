@@ -32,14 +32,6 @@ type WaTemplate = {
   twilio_variable_bindings?: unknown;
 };
 
-type MetaTemplateOption = {
-  meta_template_name: string;
-  meta_template_language: string;
-  status?: string;
-  can_import?: boolean;
-  imported?: boolean;
-};
-
 type ClassOption = {
   id: string;
   name: string;
@@ -205,15 +197,6 @@ export default function EventsPage() {
   const excelInputRef = useRef<HTMLInputElement>(null);
   const [peopleSearch, setPeopleSearch] = useState('');
   const [templateVars, setTemplateVars] = useState<Record<string, string>>({});
-  const [metaTemplates, setMetaTemplates] = useState<MetaTemplateOption[]>([]);
-  const [metaTemplatesOpen, setMetaTemplatesOpen] = useState(false);
-  const [metaTemplatesBusy, setMetaTemplatesBusy] = useState(false);
-  const [metaImportBusy, setMetaImportBusy] = useState<string | null>(null);
-  const [metaTemplateSearch, setMetaTemplateSearch] = useState('');
-  const [metaManualName, setMetaManualName] = useState('yos_deneme_snav');
-  const [metaManualLang, setMetaManualLang] = useState('tr');
-  const [metaListInfo, setMetaListInfo] = useState<string | null>(null);
-
   const selectedTemplate = useMemo(
     () => templates.find((t) => t.type === templateType) || null,
     [templates, templateType]
@@ -376,43 +359,8 @@ export default function EventsPage() {
       else if (ej.warning === 'events_schema_missing' && ej.hint) setSchemaWarning(String(ej.hint));
       const tpls = Array.isArray(tj.data) ? (tj.data as WaTemplate[]) : [];
       setTemplates(tpls);
-      const metaSync = (tj as { meta_sync?: {
-        ok?: boolean;
-        synced?: number;
-        error?: string;
-        approved_count?: number;
-        meta_total?: number;
-        waba_errors?: Record<string, string>;
-        errors?: { name?: string; error?: string }[];
-      } }).meta_sync;
-      if (metaSync) {
-        if (metaSync.ok === false && metaSync.error) {
-          const wabaNote =
-            metaSync.waba_errors && Object.keys(metaSync.waba_errors).length
-              ? ` WABA: ${Object.entries(metaSync.waba_errors)
-                  .map(([k, v]) => `${k}=${v}`)
-                  .join('; ')}`
-              : '';
-          setMetaListInfo(
-            `Meta şablonları otomatik çekilemedi (${metaSync.error}).${wabaNote} Vercel META_WHATSAPP_TOKEN ve META_WABA_ID kontrol edin.`
-          );
-        } else if ((metaSync.synced ?? 0) > 0) {
-          toast.success(`Meta'dan ${metaSync.synced} onaylı şablon eklendi.`);
-        } else if ((metaSync.meta_total ?? 0) === 0 && metaSync.ok !== false) {
-          setMetaListInfo('Meta API şablon döndürmedi; onaylı şablonlar zaten Supabase’de olabilir.');
-        } else if (metaSync.error === 'no_templates_from_meta') {
-          setMetaListInfo(
-            'Meta bağlantısı var ama şablon listesi boş — Vercel’de META_WABA_ID, WhatsApp Manager’daki WABA kimliği ile aynı olmalı (işletme kimliği değil).'
-          );
-        }
-        const importErr = metaSync.errors?.find((e) => e.name?.includes('yos_deneme'));
-        if (importErr) {
-          setMetaListInfo(`yos_deneme_snav eklenemedi: ${importErr.error || 'bilinmeyen hata'}`);
-        }
-      }
       if (tpls.length && !tpls.some((t) => t.type === templateType)) {
-        const yos = tpls.find((t) => t.meta_template_name === 'yos_deneme_snav' || t.type === 'yos_deneme_snav');
-        setTemplateType(yos?.type || tpls[0].type);
+        setTemplateType(tpls[0].type);
       }
       setClasses(Array.isArray(cj.data) ? (cj.data as ClassOption[]) : []);
       setPeople(Array.isArray(pj.data) ? (pj.data as PersonOption[]) : []);
@@ -427,81 +375,6 @@ export default function EventsPage() {
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
-
-  const loadMetaTemplates = useCallback(async () => {
-    if (!canManage) return;
-    setMetaTemplatesBusy(true);
-    try {
-      const res = await apiFetch(apiEventsPath('scope=meta-templates'));
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error((j as { hint?: string; error?: string }).hint || (j as { error?: string }).error || 'Meta şablonları alınamadı');
-        return;
-      }
-      const rows = Array.isArray(j.data) ? (j.data as MetaTemplateOption[]) : [];
-      setMetaTemplates(rows);
-      setMetaTemplatesOpen(true);
-      const count = Number((j as { template_count?: number }).template_count ?? rows.length);
-      const wabaErr = (j as { waba_errors?: Record<string, string> }).waba_errors;
-      const errNote =
-        wabaErr && Object.keys(wabaErr).length
-          ? ` WABA uyarısı: ${Object.entries(wabaErr)
-              .map(([k, v]) => `${k}: ${v}`)
-              .join('; ')}`
-          : '';
-      setMetaListInfo(`${count} şablon Meta API'den alındı.${errNote}`);
-    } catch {
-      toast.error('Meta şablonları yüklenemedi');
-    } finally {
-      setMetaTemplatesBusy(false);
-    }
-  }, [canManage, scopedInstitutionId]);
-
-  const importMetaTemplate = async (row: MetaTemplateOption, opts?: { manual?: boolean }) => {
-    const key = opts?.manual ? 'manual' : `${row.meta_template_name}:${row.meta_template_language}`;
-    setMetaImportBusy(key);
-    try {
-      const res = await apiFetch('/api/institution-events?op=import-meta-template', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          meta_template_name: row.meta_template_name,
-          meta_template_language: row.meta_template_language
-        })
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const errJ = j as {
-          error?: string;
-          hint?: string;
-          similar_names?: string[];
-          template_count?: number;
-        };
-        const similar = errJ.similar_names?.length ? ` Benzer: ${errJ.similar_names.join(', ')}` : '';
-        const count =
-          errJ.template_count != null ? ` (API'de ${errJ.template_count} şablon tarandı)` : '';
-        toast.error(`${errJ.error || 'Şablon eklenemedi'}${count}${similar}`, {
-          description: errJ.hint
-        });
-        return;
-      }
-      const importedType = String((j as { data?: { type?: string } }).data?.type || '').trim();
-      toast.success(`Şablon eklendi: ${row.meta_template_name}`);
-      await loadAll();
-      if (importedType) setTemplateType(importedType);
-      setMetaTemplates((prev) =>
-        prev.map((t) =>
-          t.meta_template_name === row.meta_template_name && t.meta_template_language === row.meta_template_language
-            ? { ...t, imported: true }
-            : t
-        )
-      );
-    } catch {
-      toast.error('Şablon eklenemedi');
-    } finally {
-      setMetaImportBusy(null);
-    }
-  };
 
   const hasSeminarAutoEvents = useMemo(
     () =>
@@ -973,123 +846,10 @@ export default function EventsPage() {
             </>
           ) : (
             <p className="mt-1 text-xs text-amber-700">
-              Aktif Meta şablonu bulunamadı — aşağıdan Meta&apos;daki onaylı şablonu içe aktarın.
+              WhatsApp şablonu bulunamadı. Supabase&apos;de message_templates kaydı veya Mesaj Şablonları sayfasını
+              kontrol edin.
             </p>
           )}
-          <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50/60 p-2.5 space-y-2">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-[11px] text-violet-900">
-                Meta Business&apos;ta yeni eklediğiniz şablon (ör. deneme sınavı) burada görünmüyorsa içe aktarın.
-              </p>
-              <button
-                type="button"
-                disabled={metaTemplatesBusy}
-                onClick={() => void loadMetaTemplates()}
-                className="inline-flex items-center gap-1 rounded-lg border border-violet-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-violet-900 hover:bg-violet-100 disabled:opacity-50"
-              >
-                {metaTemplatesBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-                Meta şablonlarını listele
-              </button>
-            </div>
-            <div className="flex flex-wrap gap-2 items-end">
-              <label className="flex-1 min-w-[140px] text-[11px]">
-                <span className="text-violet-900">Meta şablon adı (birebir)</span>
-                <input
-                  value={metaManualName}
-                  onChange={(e) => setMetaManualName(e.target.value)}
-                  className="mt-0.5 w-full rounded border border-violet-200 bg-white px-2 py-1 font-mono text-[11px]"
-                  placeholder="yos_deneme_snav"
-                />
-              </label>
-              <label className="w-20 text-[11px]">
-                <span className="text-violet-900">Dil</span>
-                <input
-                  value={metaManualLang}
-                  onChange={(e) => setMetaManualLang(e.target.value)}
-                  className="mt-0.5 w-full rounded border border-violet-200 bg-white px-2 py-1 font-mono text-[11px]"
-                  placeholder="tr"
-                />
-              </label>
-              <button
-                type="button"
-                disabled={!metaManualName.trim() || metaImportBusy === 'manual'}
-                onClick={() =>
-                  void importMetaTemplate(
-                    {
-                      meta_template_name: metaManualName.trim(),
-                      meta_template_language: metaManualLang.trim() || 'tr'
-                    },
-                    { manual: true }
-                  )
-                }
-                className="rounded-lg border border-violet-400 bg-violet-700 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-violet-800 disabled:opacity-50"
-              >
-                {metaImportBusy === 'manual' ? 'Ekleniyor…' : 'Ad ile içe aktar'}
-              </button>
-            </div>
-            {metaListInfo ? <p className="text-[10px] text-violet-800">{metaListInfo}</p> : null}
-            {metaTemplatesOpen ? (
-              metaTemplates.length ? (
-                <>
-                  <input
-                    value={metaTemplateSearch}
-                    onChange={(e) => setMetaTemplateSearch(e.target.value)}
-                    placeholder="Listede ara (ör. yos_deneme)"
-                    className="w-full rounded border border-violet-200 bg-white px-2 py-1 text-[11px]"
-                  />
-                  <ul className="max-h-40 overflow-y-auto space-y-1 text-xs">
-                    {metaTemplates
-                      .filter((mt) => {
-                        const q = metaTemplateSearch.trim().toLowerCase();
-                        if (!q) return true;
-                        return (
-                          mt.meta_template_name.toLowerCase().includes(q) ||
-                          mt.meta_template_language.toLowerCase().includes(q)
-                        );
-                      })
-                      .map((mt) => {
-                        const key = `${mt.meta_template_name}:${mt.meta_template_language}`;
-                        return (
-                          <li
-                            key={key}
-                            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-violet-100 bg-white px-2 py-1.5"
-                          >
-                            <span className="font-mono text-[10px] text-slate-700">
-                              {mt.meta_template_name}{' '}
-                              <span className="text-slate-400">({mt.meta_template_language})</span>
-                              {mt.status ? (
-                                <span
-                                  className={`ml-1 ${
-                                    mt.status === 'APPROVED' ? 'text-emerald-700' : 'text-amber-700'
-                                  }`}
-                                >
-                                  · {mt.status}
-                                </span>
-                              ) : null}
-                              {mt.imported ? <span className="ml-1 text-emerald-700">· eklendi</span> : null}
-                            </span>
-                            {!mt.imported && mt.can_import !== false ? (
-                              <button
-                                type="button"
-                                disabled={metaImportBusy === key}
-                                onClick={() => void importMetaTemplate(mt)}
-                                className="rounded border border-violet-300 px-2 py-0.5 text-[10px] font-semibold text-violet-900 hover:bg-violet-50 disabled:opacity-50"
-                              >
-                                {metaImportBusy === key ? 'Ekleniyor…' : 'Etkinliklere ekle'}
-                              </button>
-                            ) : null}
-                          </li>
-                        );
-                      })}
-                  </ul>
-                </>
-              ) : (
-                <p className="text-[11px] text-violet-800">
-                  Meta API boş döndü — yukarıdan şablon adını yazıp «Ad ile içe aktar» deneyin.
-                </p>
-              )
-            ) : null}
-          </div>
         </label>
 
         <div className="grid gap-3 sm:grid-cols-2">

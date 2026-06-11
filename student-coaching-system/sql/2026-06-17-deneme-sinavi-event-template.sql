@@ -1,5 +1,6 @@
--- YÖS deneme sınavı WhatsApp şablonu → Etkinlikler (Meta API adı: yos_deneme_snav, dil: tr)
--- Panel: Etkinlikler → «Ad ile içe aktar» veya bu SQL (Meta gövde metnini BM ile aynı yapın).
+-- YÖS deneme sınavı WhatsApp şablonu → Etkinlikler
+-- Meta API adı: yos_deneme_snav · dil: tr (Turkish)
+-- Meta BM'deki parametre adları farklıysa variables / twilio_variable_bindings dizisini birebir eşleştirin.
 
 ALTER TABLE message_templates ADD COLUMN IF NOT EXISTS channel TEXT;
 ALTER TABLE message_templates ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
@@ -21,11 +22,25 @@ INSERT INTO message_templates (
   updated_at
 )
 VALUES (
-  'YÖS deneme sınavı kayıt',
+  'YÖS Deneme Sınavı Kayıt',
   'yos_deneme_snav',
-  E'Merhaba {{ad}}, YÖS deneme sınavı kaydınız alınmıştır.',
-  '["ad"]'::jsonb,
-  '["ad"]'::jsonb,
+  E'Merhaba {{ad}},
+🎉 YÖS Deneme Sınavı kayıt işleminiz başarıyla tamamlanmıştır.
+Sınava katılım sağlayacağınız sistem bağlantısı:
+🔗 {{sinav_sistemi_linki}}
+Deneme PDF''ine aşağıdaki bağlantıdan ulaşabilirsiniz:
+📄 {{pdf_linki}}
+Sınava nasıl katılacağınızı anlatan video:
+🎥 {{katilim_video_linki}}
+📌 Lütfen sınav gününden önce sisteme giriş yaparak kontrol sağlayınız.
+Sınav sonrasında sonuçlarınız uzman eğitim danışmanlarımız tarafından değerlendirilerek sizinle paylaşılacaktır.
+Eğitim danışmanlarımız en kısa sürede sizinle iletişime geçecektir.
+Başarılar dileriz.
+Online VIP Dershane
+🌐 www.onlinevipdershane.com
+📞 0850 303 40 14',
+  '["ad","sinav_sistemi_linki","pdf_linki","katilim_video_linki"]'::jsonb,
+  '["ad","sinav_sistemi_linki","pdf_linki","katilim_video_linki"]'::jsonb,
   'whatsapp',
   true,
   'yos_deneme_snav',

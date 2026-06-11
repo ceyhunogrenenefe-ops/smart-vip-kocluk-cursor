@@ -63,7 +63,29 @@ const FIELD_BY_VAR: Record<string, EventTemplateFieldDef> = {
   sinav_adi: { variable: 'sinav_adi', label: 'Sınav adı', kind: 'text', storage: 'title' },
   sinav_tarihi: { variable: 'sinav_tarihi', label: 'Sınav tarihi', kind: 'date', storage: 'event_date' },
   sinav_saati: { variable: 'sinav_saati', label: 'Sınav saati', kind: 'time', storage: 'event_time' },
-  kurum_adi: { variable: 'kurum_adi', label: 'Kurum adı', kind: 'text', storage: 'template_vars' }
+  kurum_adi: { variable: 'kurum_adi', label: 'Kurum adı', kind: 'text', storage: 'template_vars' },
+
+  sinav_sistemi_linki: {
+    variable: 'sinav_sistemi_linki',
+    label: 'Sınav sistemi linki',
+    placeholder: 'https://…',
+    kind: 'url',
+    storage: 'template_vars'
+  },
+  pdf_linki: {
+    variable: 'pdf_linki',
+    label: 'Deneme PDF linki',
+    placeholder: 'https://…',
+    kind: 'url',
+    storage: 'template_vars'
+  },
+  katilim_video_linki: {
+    variable: 'katilim_video_linki',
+    label: 'Katılım videosu linki',
+    placeholder: 'https://…',
+    kind: 'url',
+    storage: 'template_vars'
+  }
 };
 
 export function normalizeTemplateVarName(raw: string): string {
