@@ -70,6 +70,10 @@ function normalizeUcretDurumu(body) {
   return null;
 }
 
+function kitapciIdFromRequest(req, body) {
+  return String(body?.kitapci_id || req.query?.kitapci_id || '').trim() || null;
+}
+
 function parsePublicOrderBody(body) {
   const veli_ad_soyad = String(
     body.veli_ad_soyad || body.veli_adi || body.veli || body.parent_name || ''
@@ -270,7 +274,7 @@ export default async function handler(req, res) {
   if (req.method === 'POST' && op === 'approve' && id) {
     try {
       const body = parseBody(req);
-      const kitapciId = String(body.kitapci_id || '').trim() || null;
+      const kitapciId = kitapciIdFromRequest(req, body);
       let q = supabaseAdmin.from('kitap_siparisleri').select('*').eq('id', id);
       if (!isSuper && institutionFilter) q = q.eq('institution_id', institutionFilter);
       const { data: order, error } = await q.maybeSingle();
@@ -297,7 +301,10 @@ export default async function handler(req, res) {
         .select('*')
         .maybeSingle();
       if (upErr) throw upErr;
-      const notify = await notifyBooksellerForOrder(approved || { ...order, ...approvePatch }, { kitapciId });
+      const notify = await notifyBooksellerForOrder(approved || { ...order, ...approvePatch }, {
+        kitapciId,
+        kitapciName: order.kitapci_adi
+      });
       const { data: fresh } = await supabaseAdmin.from('kitap_siparisleri').select('*').eq('id', id).maybeSingle();
       if (!notify.ok) {
         return res.status(400).json({
@@ -339,21 +346,19 @@ export default async function handler(req, res) {
   if (req.method === 'POST' && op === 'resend' && id) {
     try {
       const body = parseBody(req);
-      const kitapciId = String(body.kitapci_id || '').trim() || null;
+      const kitapciId = kitapciIdFromRequest(req, body);
       let q = supabaseAdmin.from('kitap_siparisleri').select('*').eq('id', id);
       if (!isSuper && institutionFilter) q = q.eq('institution_id', institutionFilter);
       const { data: order, error } = await q.maybeSingle();
       if (error) throw error;
       if (!order) return res.status(404).json({ error: 'not_found' });
-      if (kitapciId) {
-        await supabaseAdmin
-          .from('kitap_siparisleri')
-          .update({ kitapci_id: kitapciId, updated_at: new Date().toISOString() })
-          .eq('id', id);
-      }
+      const now = new Date().toISOString();
+      const prePatch = { whatsapp_status: 'pending', whatsapp_error: null, updated_at: now };
+      if (kitapciId) prePatch.kitapci_id = kitapciId;
+      await supabaseAdmin.from('kitap_siparisleri').update(prePatch).eq('id', id);
       const notify = await notifyBooksellerForOrder(
-        kitapciId ? { ...order, kitapci_id: kitapciId } : order,
-        { kitapciId }
+        { ...order, ...prePatch },
+        { kitapciId, kitapciName: order.kitapci_adi }
       );
       if (!notify.ok) {
         return res.status(400).json({

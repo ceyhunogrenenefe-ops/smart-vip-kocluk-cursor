@@ -17,6 +17,12 @@ export const BOOK_ORDER_META_BINDINGS = [
   'il'
 ];
 
+function normBooksellerName(name) {
+  return String(name || '')
+    .trim()
+    .toLocaleLowerCase('tr');
+}
+
 /** Meta kitap_siparisi şablonu — 7 gövde parametresi */
 export function buildBookOrderTemplateVars(order) {
   const ogrenci = String(order.ogrenci_ad_soyad || order.ogrenci_adi || '').trim();
@@ -78,32 +84,38 @@ async function logBookOrderMessage(order, phone, sent, preview) {
   }
 }
 
+function isValidBooksellerRow(row) {
+  return Boolean(row && row.is_active !== false && normalizePhoneToE164(row.phone));
+}
+
 async function listActiveBooksellers(instId) {
   const { data: rows } = await supabaseAdmin
     .from('kitapcilar')
     .select('*')
     .eq('institution_id', instId)
     .eq('is_active', true)
-    .order('created_at', { ascending: true });
-  return (rows || []).filter((r) => normalizePhoneToE164(r.phone));
+    .order('name', { ascending: true });
+  return (rows || []).filter((r) => isValidBooksellerRow(r));
 }
 
-async function fetchBooksellerById(instId, id) {
+/** UUID global benzersiz — kurum filtresi kitapçıyı yanlışlıkla dışarıda bırakabiliyordu. */
+async function fetchBooksellerById(id) {
   const booksellerId = String(id || '').trim();
   if (!booksellerId) return null;
-  const { data: row } = await supabaseAdmin
-    .from('kitapcilar')
-    .select('*')
-    .eq('id', booksellerId)
-    .eq('institution_id', instId)
-    .maybeSingle();
-  if (!row || row.is_active === false || !normalizePhoneToE164(row.phone)) return null;
-  return row;
+  const { data: row } = await supabaseAdmin.from('kitapcilar').select('*').eq('id', booksellerId).maybeSingle();
+  return isValidBooksellerRow(row) ? row : null;
+}
+
+async function fetchBooksellerByName(instId, name) {
+  const want = normBooksellerName(name);
+  if (!want) return null;
+  const active = await listActiveBooksellers(instId);
+  return active.find((r) => normBooksellerName(r.name) === want) || null;
 }
 
 /**
  * @param {Record<string, unknown>} order
- * @param {{ kitapciId?: string | null }} [opts] Onay/tekrar gönderimde panelden seçilen kitapçı
+ * @param {{ kitapciId?: string | null, kitapciName?: string | null }} [opts]
  */
 export async function resolveBooksellerForOrder(order, opts = {}) {
   const instId = String(order.institution_id || '').trim();
@@ -113,12 +125,23 @@ export async function resolveBooksellerForOrder(order, opts = {}) {
 
   const overrideId = String(opts.kitapciId || '').trim();
   if (overrideId) {
-    const row = await fetchBooksellerById(instId, overrideId);
-    if (row) return { bookseller: row };
+    const byId = await fetchBooksellerById(overrideId);
+    if (byId) return { bookseller: byId };
+    const byName = await fetchBooksellerByName(
+      instId,
+      opts.kitapciName || order.kitapci_adi || ''
+    );
+    if (byName) return { bookseller: byName };
     return {
       error: 'bookseller_not_found',
-      hint: 'Seçilen kitapçı bulunamadı, pasif veya telefonu geçersiz.'
+      hint: 'Seçilen kitapçı bulunamadı veya pasif. Listeden tekrar seçip deneyin.'
     };
+  }
+
+  const overrideName = String(opts.kitapciName || order.kitapci_adi || '').trim();
+  if (overrideName) {
+    const byName = await fetchBooksellerByName(instId, overrideName);
+    if (byName) return { bookseller: byName };
   }
 
   const directPhone = normalizePhoneToE164(order.kitapci_phone);
@@ -134,9 +157,8 @@ export async function resolveBooksellerForOrder(order, opts = {}) {
 
   const savedId = String(order.kitapci_id || '').trim();
   if (savedId) {
-    const row = await fetchBooksellerById(instId, savedId);
+    const row = await fetchBooksellerById(savedId);
     if (row) return { bookseller: row };
-    // Eski/geçersiz kitapci_id — aşağıdaki liste mantığına düş
   }
 
   const active = await listActiveBooksellers(instId);
@@ -154,7 +176,6 @@ export async function resolveBooksellerForOrder(order, opts = {}) {
   };
 }
 
-/** Meta senkronu dener; başarısızsa SQL ile yüklenmiş DB satırını kullanır. */
 async function ensureBookOrderTemplateRow() {
   const synced = await syncMessageTemplateRowFromPhoneWaba({
     type: BOOK_ORDER_TEMPLATE_TYPE,

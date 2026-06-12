@@ -67,6 +67,15 @@ function waLabel(status: string) {
   }
 }
 
+function waErrorText(error: string) {
+  const e = String(error || '').trim();
+  if (!e) return '';
+  if (e === 'bookseller_not_found') return 'Kitapçı bulunamadı — listeden seçip tekrar deneyin';
+  if (e === 'bookseller_selection_required') return 'Kitapçı seçin';
+  if (e === 'no_active_bookseller') return 'Aktif kitapçı yok';
+  return e;
+}
+
 function waBadge(status: string) {
   switch (status) {
     case 'sent':
@@ -155,17 +164,39 @@ export default function BookOrdersPage() {
     setSelectedBookseller((prev) => {
       const next = { ...prev };
       for (const o of orders) {
-        if (next[o.id]) continue;
-        const saved = o.kitapci_id && activeBooksellers.some((b) => b.id === o.kitapci_id);
-        if (saved && o.kitapci_id) {
-          next[o.id] = o.kitapci_id;
-        } else if (activeBooksellers.length === 1) {
+        if (next[o.id] && activeBooksellers.some((b) => b.id === next[o.id])) continue;
+        const savedId = o.kitapci_id && activeBooksellers.some((b) => b.id === o.kitapci_id) ? o.kitapci_id : null;
+        if (savedId) {
+          next[o.id] = savedId;
+          continue;
+        }
+        const ad = String(o.kitapci_adi || '').trim();
+        if (ad) {
+          const byName = activeBooksellers.find(
+            (b) => b.name.trim().toLocaleLowerCase('tr') === ad.toLocaleLowerCase('tr')
+          );
+          if (byName) {
+            next[o.id] = byName.id;
+            continue;
+          }
+        }
+        if (activeBooksellers.length === 1) {
           next[o.id] = activeBooksellers[0].id;
         }
       }
       return next;
     });
   }, [orders, activeBooksellers]);
+
+  const booksellerNameForOrder = useCallback(
+    (o: BookOrderRow) => {
+      const selId = selectedBookseller[o.id];
+      const fromSel = selId ? activeBooksellers.find((b) => b.id === selId) : null;
+      if (fromSel) return fromSel.name;
+      return o.kitapci_adi || '—';
+    },
+    [selectedBookseller, activeBooksellers]
+  );
 
   const filteredOrders = useMemo(() => {
     const q = search.trim().toLocaleLowerCase('tr');
@@ -478,10 +509,12 @@ export default function BookOrdersPage() {
                         <div className="mt-0.5 text-slate-500">{o.siparis_notu || o.notlar}</div>
                       ) : null}
                     </td>
-                    <td className="py-2 pr-2 text-xs">{o.kitapci_adi || '—'}</td>
+                    <td className="py-2 pr-2 text-xs">{booksellerNameForOrder(o)}</td>
                     <td className="py-2 pr-2">
                       <span className={`text-xs font-medium ${waBadge(o.whatsapp_status)}`}>{waLabel(o.whatsapp_status)}</span>
-                      {o.whatsapp_error ? <div className="text-[10px] text-red-600">{o.whatsapp_error}</div> : null}
+                      {o.whatsapp_error ? (
+                        <div className="text-[10px] text-red-600">{waErrorText(o.whatsapp_error)}</div>
+                      ) : null}
                     </td>
                     <td className="py-2">
                       <div className="flex flex-col gap-1">

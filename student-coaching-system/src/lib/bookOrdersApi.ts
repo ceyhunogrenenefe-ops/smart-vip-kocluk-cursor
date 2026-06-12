@@ -99,7 +99,8 @@ export async function deleteBookseller(id: string): Promise<void> {
 }
 
 export async function approveBookOrder(id: string, kitapciId?: string): Promise<BookOrderRow> {
-  const res = await apiFetch(`/api/book-orders?op=approve&id=${encodeURIComponent(id)}`, {
+  const kitapciQs = kitapciId ? `&kitapci_id=${encodeURIComponent(kitapciId)}` : '';
+  const res = await apiFetch(`/api/book-orders?op=approve&id=${encodeURIComponent(id)}${kitapciQs}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(kitapciId ? { kitapci_id: kitapciId } : {})
@@ -121,7 +122,8 @@ export async function cancelBookOrder(id: string): Promise<BookOrderRow> {
 }
 
 export async function resendBookOrderWhatsApp(id: string, kitapciId?: string): Promise<void> {
-  const res = await apiFetch(`/api/book-orders?op=resend&id=${encodeURIComponent(id)}`, {
+  const kitapciQs = kitapciId ? `&kitapci_id=${encodeURIComponent(kitapciId)}` : '';
+  const res = await apiFetch(`/api/book-orders?op=resend&id=${encodeURIComponent(id)}${kitapciQs}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(kitapciId ? { kitapci_id: kitapciId } : {})
