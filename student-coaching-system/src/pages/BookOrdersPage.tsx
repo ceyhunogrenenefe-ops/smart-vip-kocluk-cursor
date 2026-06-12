@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { BookOpen, Loader2, MessageCircle, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { BookOpen, Copy, ExternalLink, Loader2, MessageCircle, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
@@ -264,24 +264,59 @@ export default function BookOrdersPage() {
     }
   };
 
+  const resolvePortalUrl = async (b: BooksellerRow) => {
+    let token = String(b.portal_token || '').trim();
+    if (!token) {
+      const fresh = await ensureBooksellerPortalToken(b.id);
+      token = String(fresh.portal_token || '').trim();
+      await load();
+    }
+    if (!token) return null;
+    return kitapciPortalUrl(token);
+  };
+
   const copyPortalLink = async (b: BooksellerRow) => {
     setBusy(`pl-${b.id}`);
     try {
-      let token = String(b.portal_token || '').trim();
-      if (!token) {
-        const fresh = await ensureBooksellerPortalToken(b.id);
-        token = String(fresh.portal_token || '').trim();
-        await load();
-      }
-      if (!token) {
-        toast.error('Panel linki oluşturulamadı — Supabase SQL çalıştırıldı mı?');
+      const url = await resolvePortalUrl(b);
+      if (!url) {
+        toast.error('Panel linki oluşturulamadı — Supabase’de 2026-06-24-kitapci-portal.sql çalıştırın');
         return;
       }
-      const url = kitapciPortalUrl(token);
       await navigator.clipboard.writeText(url);
-      toast.success('Kitapçı panel linki kopyalandı');
+      toast.success('Panel linki kopyalandı — kitapçıya yapıştırıp gönderebilirsiniz');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Link kopyalanamadı');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const sendPortalLinkWhatsApp = async (b: BooksellerRow) => {
+    setBusy(`wa-pl-${b.id}`);
+    try {
+      const url = await resolvePortalUrl(b);
+      if (!url) {
+        toast.error('Panel linki oluşturulamadı');
+        return;
+      }
+      const digits = String(b.phone || '').replace(/\D/g, '');
+      if (!digits) {
+        toast.error('Kitapçı telefonu yok');
+        return;
+      }
+      const text = [
+        `Merhaba ${b.name},`,
+        '',
+        'Online VIP Dershane kitap sipariş paneliniz:',
+        url,
+        '',
+        'Bu linkten size iletilen öğrenci siparişlerini görebilir, onaylayıp kargo takip numarasını girebilirsiniz.'
+      ].join('\n');
+      const waPhone = digits.startsWith('90') ? digits : `90${digits.replace(/^0/, '')}`;
+      window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'WhatsApp açılamadı');
     } finally {
       setBusy(null);
     }
@@ -461,32 +496,73 @@ export default function BookOrdersPage() {
         ) : null}
         {booksellers.length ? (
           <ul className="mt-3 space-y-2">
-            {booksellers.map((b) => (
-              <li key={b.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2 text-sm">
-                <span>
-                  <span className="font-medium">{b.name}</span>
-                  <span className="ml-2 font-mono text-xs text-slate-500">{b.phone}</span>
-                  {b.city ? <span className="ml-2 text-xs text-slate-400">{b.city}</span> : null}
-                  {b.is_active === false ? <span className="ml-2 text-xs text-amber-700">(pasif)</span> : null}
-                </span>
-                <span className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={busy === `pl-${b.id}`}
-                    onClick={() => void copyPortalLink(b)}
-                    className="text-xs font-medium text-violet-700 hover:underline"
-                  >
-                    {busy === `pl-${b.id}` ? '…' : 'Panel linki'}
-                  </button>
-                  <button type="button" onClick={() => void toggleBookseller(b)} className="text-xs text-indigo-700 hover:underline">
-                    {b.is_active === false ? 'Aktifleştir' : 'Pasifleştir'}
-                  </button>
-                  <button type="button" onClick={() => void removeBookseller(b.id)} className="text-red-600 hover:text-red-800">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </span>
-              </li>
-            ))}
+            {booksellers.map((b) => {
+              const portalUrl = b.portal_token ? kitapciPortalUrl(b.portal_token) : null;
+              return (
+                <li key={b.id} className="rounded-lg border border-slate-100 px-3 py-3 text-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <span className="font-medium">{b.name}</span>
+                      <span className="ml-2 font-mono text-xs text-slate-500">{b.phone}</span>
+                      {b.city ? <span className="ml-2 text-xs text-slate-400">{b.city}</span> : null}
+                      {b.is_active === false ? <span className="ml-2 text-xs text-amber-700">(pasif)</span> : null}
+                    </div>
+                    <span className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={busy === `pl-${b.id}`}
+                        onClick={() => void copyPortalLink(b)}
+                        className="inline-flex items-center gap-1 rounded-md border border-violet-200 bg-violet-50 px-2 py-1 text-xs font-medium text-violet-800 hover:bg-violet-100"
+                      >
+                        {busy === `pl-${b.id}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <Copy className="h-3 w-3" />}
+                        Linki kopyala
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy === `wa-pl-${b.id}`}
+                        onClick={() => void sendPortalLinkWhatsApp(b)}
+                        className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800 hover:bg-emerald-100"
+                      >
+                        {busy === `wa-pl-${b.id}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <MessageCircle className="h-3 w-3" />}
+                        WhatsApp ile gönder
+                      </button>
+                      <button type="button" onClick={() => void toggleBookseller(b)} className="text-xs text-indigo-700 hover:underline">
+                        {b.is_active === false ? 'Aktifleştir' : 'Pasifleştir'}
+                      </button>
+                      <button type="button" onClick={() => void removeBookseller(b.id)} className="text-red-600 hover:text-red-800">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  </div>
+                  {portalUrl ? (
+                    <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md bg-slate-50 px-2 py-1.5">
+                      <span className="text-[10px] text-slate-500">Panel:</span>
+                      <a
+                        href={portalUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="min-w-0 flex-1 truncate font-mono text-[10px] text-indigo-700 hover:underline"
+                      >
+                        {portalUrl}
+                      </a>
+                      <a
+                        href={portalUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-indigo-600 hover:text-indigo-800"
+                        title="Paneli aç"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-[10px] text-slate-500">
+                      Panel linki yükleniyor veya oluşturulacak — &quot;Linki kopyala&quot; ile üretin.
+                    </p>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <p className="mt-2 text-xs text-amber-700">Henüz kitapçı yok — sipariş gelince WhatsApp gitmez. En az bir aktif kitapçı ekleyin.</p>

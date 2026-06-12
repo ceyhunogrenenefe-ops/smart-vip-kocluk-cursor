@@ -147,7 +147,8 @@ export default function KitapciPortalPage() {
 
         {orders.length === 0 ? (
           <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
-            Şu an bekleyen sipariş yok. Yeni sipariş WhatsApp ile iletildiğinde burada görünür.
+            Size henüz iletilmiş sipariş görünmüyor. Kurum siparişi onaylayıp size WhatsApp gönderdiğinde öğrenci
+            listesi burada çıkar.
           </div>
         ) : (
           <ul className="space-y-4">

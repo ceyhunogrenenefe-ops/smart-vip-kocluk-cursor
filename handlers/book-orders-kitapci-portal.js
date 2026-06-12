@@ -41,7 +41,7 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET') {
     try {
-      const orders = await listOrdersForKitapciPortal(bookseller.id);
+      const orders = await listOrdersForKitapciPortal(bookseller);
       return res.status(200).json({
         bookseller: { name: bookseller.name, city: bookseller.city },
         orders

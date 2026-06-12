@@ -176,7 +176,17 @@ export default async function handler(req, res) {
       if (institutionFilter) q = q.eq('institution_id', institutionFilter);
       const { data, error } = await q;
       if (error) throw error;
-      return res.status(200).json({ data: data || [] });
+      const rows = data || [];
+      for (const row of rows) {
+        if (!String(row.portal_token || '').trim()) {
+          try {
+            row.portal_token = await ensureBooksellerPortalToken(row.id);
+          } catch {
+            /* portal_token sütunu yoksa SQL migration gerekir */
+          }
+        }
+      }
+      return res.status(200).json({ data: rows });
     } catch (e) {
       if (isSchemaError(e)) return schemaHint(res);
       return res.status(500).json({ error: errorMessage(e) });
