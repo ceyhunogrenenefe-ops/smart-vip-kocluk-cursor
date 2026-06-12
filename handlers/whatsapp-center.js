@@ -26,7 +26,9 @@ export const TEMPLATE_TYPE_TO_CRON_JOB_KEY = {
   class_homework_notice: 'class_homework_notify',
   meeting_notification: 'meeting_reminders',
   /** Grup yoklaması devamsızlık — anlık gönderim mark-attendance; cron yalnızca başarısız yeniden deneme */
-  class_absent_notice_1: 'absent_student_notification'
+  class_absent_notice_1: 'absent_student_notification',
+  /** Kitap siparişi — onayda anlık gönderim; cron yalnızca pending yedek */
+  kitap_siparis_bildirim: 'book_orders'
 };
 
 export const KNOWN_CRON_JOBS = [
@@ -39,6 +41,7 @@ export const KNOWN_CRON_JOBS = [
   { key: 'coach_followup', label: 'Koç otomasyon (Meta şablon)', expectEveryMinutes: 15 },
   { key: 'study_evening_reminder', label: 'Akşam çalışma hatırlatması', expectEveryMinutes: 24 * 60 },
   { key: 'absent_student_notification', label: 'Devamsızlık bildirimi (anlık + başarısız yeniden deneme)', expectEveryMinutes: 15 },
+  { key: 'book_orders', label: 'Kitap siparişi kitapçı bildirimi (onayda anlık + pending yedek)', expectEveryMinutes: 1 },
 ];
 
 function templateTypesForCronJobKey(jobKey) {
