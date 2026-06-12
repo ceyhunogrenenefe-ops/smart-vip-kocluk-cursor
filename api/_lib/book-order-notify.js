@@ -78,23 +78,51 @@ async function logBookOrderMessage(order, phone, sent, preview) {
   }
 }
 
-export async function resolveBooksellerForOrder(order) {
-  const instId = String(order.institution_id || '').trim();
-  if (!instId) return { error: 'institution_required' };
+async function listActiveBooksellers(instId) {
+  const { data: rows } = await supabaseAdmin
+    .from('kitapcilar')
+    .select('*')
+    .eq('institution_id', instId)
+    .eq('is_active', true)
+    .order('created_at', { ascending: true });
+  return (rows || []).filter((r) => normalizePhoneToE164(r.phone));
+}
 
-  if (order.kitapci_id) {
-    const { data: row } = await supabaseAdmin
-      .from('kitapcilar')
-      .select('*')
-      .eq('id', order.kitapci_id)
-      .eq('institution_id', instId)
-      .maybeSingle();
-    if (row?.phone && row.is_active !== false) return { bookseller: row };
-    return { error: 'bookseller_not_found' };
+async function fetchBooksellerById(instId, id) {
+  const booksellerId = String(id || '').trim();
+  if (!booksellerId) return null;
+  const { data: row } = await supabaseAdmin
+    .from('kitapcilar')
+    .select('*')
+    .eq('id', booksellerId)
+    .eq('institution_id', instId)
+    .maybeSingle();
+  if (!row || row.is_active === false || !normalizePhoneToE164(row.phone)) return null;
+  return row;
+}
+
+/**
+ * @param {Record<string, unknown>} order
+ * @param {{ kitapciId?: string | null }} [opts] Onay/tekrar gönderimde panelden seçilen kitapçı
+ */
+export async function resolveBooksellerForOrder(order, opts = {}) {
+  const instId = String(order.institution_id || '').trim();
+  if (!instId) {
+    return { error: 'institution_required', hint: 'Kurum bilgisi eksik.' };
+  }
+
+  const overrideId = String(opts.kitapciId || '').trim();
+  if (overrideId) {
+    const row = await fetchBooksellerById(instId, overrideId);
+    if (row) return { bookseller: row };
+    return {
+      error: 'bookseller_not_found',
+      hint: 'Seçilen kitapçı bulunamadı, pasif veya telefonu geçersiz.'
+    };
   }
 
   const directPhone = normalizePhoneToE164(order.kitapci_phone);
-  if (directPhone) {
+  if (directPhone && !order.kitapci_id) {
     return {
       bookseller: {
         id: null,
@@ -104,18 +132,29 @@ export async function resolveBooksellerForOrder(order) {
     };
   }
 
-  const { data: rows } = await supabaseAdmin
-    .from('kitapcilar')
-    .select('*')
-    .eq('institution_id', instId)
-    .eq('is_active', true)
-    .order('created_at', { ascending: true })
-    .limit(1);
-  if (rows?.[0]?.phone) return { bookseller: rows[0] };
-  return { error: 'no_active_bookseller' };
+  const savedId = String(order.kitapci_id || '').trim();
+  if (savedId) {
+    const row = await fetchBooksellerById(instId, savedId);
+    if (row) return { bookseller: row };
+    // Eski/geçersiz kitapci_id — aşağıdaki liste mantığına düş
+  }
+
+  const active = await listActiveBooksellers(instId);
+  if (!active.length) {
+    return {
+      error: 'no_active_bookseller',
+      hint: 'Aktif kitapçı yok. Kitapçılar bölümünden en az bir aktif kitapçı ekleyin.'
+    };
+  }
+  if (active.length === 1) return { bookseller: active[0] };
+
+  return {
+    error: 'bookseller_selection_required',
+    hint: 'Birden fazla kitapçı var — gönderim öncesi listeden seçin.'
+  };
 }
 
-/** Meta senkronu dener; başarısızsa SQL ile yüklenmiş DB satırını kullanır (diğer otomasyonlar gibi). */
+/** Meta senkronu dener; başarısızsa SQL ile yüklenmiş DB satırını kullanır. */
 async function ensureBookOrderTemplateRow() {
   const synced = await syncMessageTemplateRowFromPhoneWaba({
     type: BOOK_ORDER_TEMPLATE_TYPE,
@@ -137,19 +176,30 @@ async function ensureBookOrderTemplateRow() {
   return { error: synced.hint || synced.error || 'template_sync_failed' };
 }
 
-/** @returns {{ ok: boolean, skipped?: boolean, error?: string, meta_message_id?: string|null }} */
-export async function notifyBooksellerForOrder(order) {
-  const resolved = await resolveBooksellerForOrder(order);
+function booksellerFailureStatus(errorCode) {
+  if (errorCode === 'no_active_bookseller') return 'skipped';
+  return 'failed';
+}
+
+/** @returns {{ ok: boolean, skipped?: boolean, error?: string, hint?: string, meta_message_id?: string|null }} */
+export async function notifyBooksellerForOrder(order, opts = {}) {
+  const resolved = await resolveBooksellerForOrder(order, opts);
   if (!resolved.bookseller) {
+    const errCode = resolved.error || 'no_bookseller';
     await supabaseAdmin
       .from('kitap_siparisleri')
       .update({
-        whatsapp_status: 'skipped',
-        whatsapp_error: resolved.error || 'no_bookseller',
+        whatsapp_status: booksellerFailureStatus(errCode),
+        whatsapp_error: String(resolved.hint || errCode).slice(0, 500),
         updated_at: new Date().toISOString()
       })
       .eq('id', order.id);
-    return { ok: false, skipped: true, error: resolved.error || 'no_bookseller' };
+    return {
+      ok: false,
+      skipped: errCode === 'no_active_bookseller',
+      error: errCode,
+      hint: resolved.hint
+    };
   }
 
   const phone = normalizePhoneToE164(resolved.bookseller.phone);
@@ -158,11 +208,11 @@ export async function notifyBooksellerForOrder(order) {
       .from('kitap_siparisleri')
       .update({
         whatsapp_status: 'failed',
-        whatsapp_error: 'invalid_bookseller_phone',
+        whatsapp_error: 'Kitapçı telefonu geçersiz',
         updated_at: new Date().toISOString()
       })
       .eq('id', order.id);
-    return { ok: false, error: 'invalid_bookseller_phone' };
+    return { ok: false, error: 'invalid_bookseller_phone', hint: 'Kitapçı telefonu geçersiz.' };
   }
 
   const loaded = await ensureBookOrderTemplateRow();

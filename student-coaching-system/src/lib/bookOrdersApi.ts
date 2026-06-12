@@ -98,8 +98,12 @@ export async function deleteBookseller(id: string): Promise<void> {
   }
 }
 
-export async function approveBookOrder(id: string): Promise<BookOrderRow> {
-  const res = await apiFetch(`/api/book-orders?op=approve&id=${encodeURIComponent(id)}`, { method: 'POST' });
+export async function approveBookOrder(id: string, kitapciId?: string): Promise<BookOrderRow> {
+  const res = await apiFetch(`/api/book-orders?op=approve&id=${encodeURIComponent(id)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(kitapciId ? { kitapci_id: kitapciId } : {})
+  });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(
@@ -116,10 +120,16 @@ export async function cancelBookOrder(id: string): Promise<BookOrderRow> {
   return (j as { data: BookOrderRow }).data;
 }
 
-export async function resendBookOrderWhatsApp(id: string): Promise<void> {
-  const res = await apiFetch(`/api/book-orders?op=resend&id=${encodeURIComponent(id)}`, { method: 'POST' });
+export async function resendBookOrderWhatsApp(id: string, kitapciId?: string): Promise<void> {
+  const res = await apiFetch(`/api/book-orders?op=resend&id=${encodeURIComponent(id)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(kitapciId ? { kitapci_id: kitapciId } : {})
+  });
   const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((j as { error?: string }).error || 'WhatsApp gönderilemedi');
+  if (!res.ok) {
+    throw new Error((j as { hint?: string; error?: string }).hint || (j as { error?: string }).error || 'WhatsApp gönderilemedi');
+  }
 }
 
 export async function processPendingBookOrders(): Promise<{ processed: number }> {

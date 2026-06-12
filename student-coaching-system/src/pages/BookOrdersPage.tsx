@@ -105,6 +105,12 @@ export default function BookOrdersPage() {
   const [bsPhone, setBsPhone] = useState('');
   const [bsCity, setBsCity] = useState('');
   const [bsBolge, setBsBolge] = useState('');
+  const [selectedBookseller, setSelectedBookseller] = useState<Record<string, string>>({});
+
+  const activeBooksellers = useMemo(
+    () => booksellers.filter((b) => b.is_active !== false),
+    [booksellers]
+  );
 
   const effectiveInstitutionId = useMemo(() => {
     if (isSuper) return institutionId.trim() || String(activeInstitutionId || '').trim();
@@ -143,6 +149,23 @@ export default function BookOrdersPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!activeBooksellers.length) return;
+    setSelectedBookseller((prev) => {
+      const next = { ...prev };
+      for (const o of orders) {
+        if (next[o.id]) continue;
+        const saved = o.kitapci_id && activeBooksellers.some((b) => b.id === o.kitapci_id);
+        if (saved && o.kitapci_id) {
+          next[o.id] = o.kitapci_id;
+        } else if (activeBooksellers.length === 1) {
+          next[o.id] = activeBooksellers[0].id;
+        }
+      }
+      return next;
+    });
+  }, [orders, activeBooksellers]);
 
   const filteredOrders = useMemo(() => {
     const q = search.trim().toLocaleLowerCase('tr');
@@ -218,10 +241,22 @@ export default function BookOrdersPage() {
     }
   };
 
+  const pickBooksellerId = (orderId: string) => {
+    const id = selectedBookseller[orderId]?.trim();
+    if (id) return id;
+    if (activeBooksellers.length === 1) return activeBooksellers[0].id;
+    return null;
+  };
+
   const resendWa = async (id: string) => {
+    const kitapciId = pickBooksellerId(id);
+    if (!kitapciId && activeBooksellers.length > 1) {
+      toast.error('Önce kitapçı seçin');
+      return;
+    }
     setBusy(`wa-${id}`);
     try {
-      await resendBookOrderWhatsApp(id);
+      await resendBookOrderWhatsApp(id, kitapciId || undefined);
       toast.success('WhatsApp gönderildi');
       await load();
     } catch (e) {
@@ -232,9 +267,18 @@ export default function BookOrdersPage() {
   };
 
   const approveOrder = async (id: string) => {
+    const kitapciId = pickBooksellerId(id);
+    if (!kitapciId && activeBooksellers.length > 1) {
+      toast.error('Onaylamadan önce kitapçı seçin');
+      return;
+    }
+    if (!activeBooksellers.length) {
+      toast.error('Aktif kitapçı yok — önce kitapçı ekleyin');
+      return;
+    }
     setBusy(`ap-${id}`);
     try {
-      await approveBookOrder(id);
+      await approveBookOrder(id, kitapciId || undefined);
       toast.success('Onaylandı — kitapçıya WhatsApp gönderildi');
       await load();
     } catch (e) {
@@ -444,13 +488,35 @@ export default function BookOrdersPage() {
                         <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge(o.status)}`}>
                           {statusLabel(o.status)}
                         </span>
+                        {activeBooksellers.length > 0 ? (
+                          <label className="text-[10px] text-slate-500">
+                            Kitapçı
+                            <select
+                              value={selectedBookseller[o.id] || ''}
+                              onChange={(e) =>
+                                setSelectedBookseller((prev) => ({ ...prev, [o.id]: e.target.value }))
+                              }
+                              className="mt-0.5 block w-full max-w-[180px] rounded border border-slate-200 bg-white px-1.5 py-1 text-[11px] text-slate-800"
+                            >
+                              {activeBooksellers.length > 1 ? (
+                                <option value="">— Seçin —</option>
+                              ) : null}
+                              {activeBooksellers.map((b) => (
+                                <option key={b.id} value={b.id}>
+                                  {b.name}
+                                  {b.city ? ` (${b.city})` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ) : null}
                         {o.status === 'pending' ? (
                           <>
                             <button
                               type="button"
-                              disabled={busy === `ap-${o.id}`}
+                              disabled={busy === `ap-${o.id}` || !activeBooksellers.length}
                               onClick={() => void approveOrder(o.id)}
-                              className="text-left text-[11px] font-semibold text-emerald-700 hover:underline"
+                              className="text-left text-[11px] font-semibold text-emerald-700 hover:underline disabled:text-slate-400"
                             >
                               {busy === `ap-${o.id}` ? 'Gönderiliyor…' : 'Onayla ve kitapçıya gönder'}
                             </button>
@@ -467,9 +533,9 @@ export default function BookOrdersPage() {
                         {o.status !== 'pending' && o.whatsapp_status !== 'awaiting_approval' ? (
                           <button
                             type="button"
-                            disabled={busy === `wa-${o.id}`}
+                            disabled={busy === `wa-${o.id}` || !activeBooksellers.length}
                             onClick={() => void resendWa(o.id)}
-                            className="text-left text-[11px] text-indigo-700 hover:underline"
+                            className="text-left text-[11px] text-indigo-700 hover:underline disabled:text-slate-400"
                           >
                             WhatsApp tekrar
                           </button>

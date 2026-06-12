@@ -269,6 +269,8 @@ export default async function handler(req, res) {
 
   if (req.method === 'POST' && op === 'approve' && id) {
     try {
+      const body = parseBody(req);
+      const kitapciId = String(body.kitapci_id || '').trim() || null;
       let q = supabaseAdmin.from('kitap_siparisleri').select('*').eq('id', id);
       if (!isSuper && institutionFilter) q = q.eq('institution_id', institutionFilter);
       const { data: order, error } = await q.maybeSingle();
@@ -281,20 +283,32 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'already_sent', hint: 'WhatsApp zaten gönderildi.' });
       }
       const now = new Date().toISOString();
+      const approvePatch = {
+        status: 'approved',
+        whatsapp_status: 'pending',
+        whatsapp_error: null,
+        updated_at: now
+      };
+      if (kitapciId) approvePatch.kitapci_id = kitapciId;
       const { data: approved, error: upErr } = await supabaseAdmin
         .from('kitap_siparisleri')
-        .update({
-          status: 'approved',
-          whatsapp_status: 'pending',
-          updated_at: now
-        })
+        .update(approvePatch)
         .eq('id', id)
         .select('*')
         .maybeSingle();
       if (upErr) throw upErr;
-      const notify = await notifyBooksellerForOrder(approved || { ...order, status: 'approved', whatsapp_status: 'pending' });
+      const notify = await notifyBooksellerForOrder(approved || { ...order, ...approvePatch }, { kitapciId });
       const { data: fresh } = await supabaseAdmin.from('kitap_siparisleri').select('*').eq('id', id).maybeSingle();
-      return res.status(200).json({ ok: notify.ok, data: fresh || approved, whatsapp: notify });
+      if (!notify.ok) {
+        return res.status(400).json({
+          ok: false,
+          error: notify.error,
+          hint: notify.hint || notify.error,
+          data: fresh || approved,
+          whatsapp: notify
+        });
+      }
+      return res.status(200).json({ ok: true, data: fresh || approved, whatsapp: notify });
     } catch (e) {
       if (isSchemaError(e)) return schemaHint(res);
       return res.status(500).json({ error: errorMessage(e) });
@@ -324,13 +338,32 @@ export default async function handler(req, res) {
 
   if (req.method === 'POST' && op === 'resend' && id) {
     try {
+      const body = parseBody(req);
+      const kitapciId = String(body.kitapci_id || '').trim() || null;
       let q = supabaseAdmin.from('kitap_siparisleri').select('*').eq('id', id);
       if (!isSuper && institutionFilter) q = q.eq('institution_id', institutionFilter);
       const { data: order, error } = await q.maybeSingle();
       if (error) throw error;
       if (!order) return res.status(404).json({ error: 'not_found' });
-      const notify = await notifyBooksellerForOrder(order);
-      return res.status(200).json({ ok: notify.ok, whatsapp: notify });
+      if (kitapciId) {
+        await supabaseAdmin
+          .from('kitap_siparisleri')
+          .update({ kitapci_id: kitapciId, updated_at: new Date().toISOString() })
+          .eq('id', id);
+      }
+      const notify = await notifyBooksellerForOrder(
+        kitapciId ? { ...order, kitapci_id: kitapciId } : order,
+        { kitapciId }
+      );
+      if (!notify.ok) {
+        return res.status(400).json({
+          ok: false,
+          error: notify.error,
+          hint: notify.hint || notify.error,
+          whatsapp: notify
+        });
+      }
+      return res.status(200).json({ ok: true, whatsapp: notify });
     } catch (e) {
       if (isSchemaError(e)) return schemaHint(res);
       return res.status(500).json({ error: errorMessage(e) });
