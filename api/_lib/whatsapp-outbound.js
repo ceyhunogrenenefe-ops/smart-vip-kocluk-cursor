@@ -175,28 +175,33 @@ export async function sendWhatsAppUsingTemplateRow({ phone, templateRow, vars, t
   const useNamedMetaBody = templateRow?.meta_named_body_parameters === true;
   const languageCandidates = await resolveLanguageTryOrderForSend(metaName, lang);
 
-  try {
-    const r = await sendMetaTemplateMessage({
+  async function attemptSend(useNamed) {
+    return sendMetaTemplateMessage({
       toE164: e164,
       templateName: metaName,
       languageCode: lang,
       languageCandidates,
       bodyParameterTexts,
-      bodyParameterNames: useNamedMetaBody ? bindings : null
+      bodyParameterNames: useNamed ? bindings : null
     });
+  }
+
+  function successResult(r, useNamed) {
     const mid = r.messageId || null;
     return {
       ok: true,
       sid: mid,
       channel: 'template',
-      bodyPreview: `[template:${metaName}]`,
+      bodyPreview: `[template:${metaName};named:${useNamed}]`,
       templateType: templateType || null,
       meta_template_name: metaName,
       meta_message_id: mid,
       twilio_content_sid: null,
       content_variables_json: JSON.stringify(bodyParameterTexts)
     };
-  } catch (e) {
+  }
+
+  function failureResult(e) {
     const parsed = parseMetaSendError(e);
     return {
       ok: false,
@@ -207,6 +212,18 @@ export async function sendWhatsAppUsingTemplateRow({ phone, templateRow, vars, t
       meta_template_name: metaName,
       twilio_content_sid: null
     };
+  }
+
+  try {
+    const r = await attemptSend(useNamedMetaBody);
+    return successResult(r, useNamedMetaBody);
+  } catch (e1) {
+    try {
+      const r2 = await attemptSend(!useNamedMetaBody);
+      return successResult(r2, !useNamedMetaBody);
+    } catch (e2) {
+      return failureResult(e2);
+    }
   }
 }
 

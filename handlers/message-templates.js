@@ -1,6 +1,7 @@
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { fetchAllMetaMessageTemplates, findMetaTemplateStatus, findMetaTemplatesByName, fetchMetaTemplatesForName, getMetaTemplateSyncDiagnostics } from '../api/_lib/meta-templates-sync.js';
+import { syncMessageTemplateRowFromPhoneWaba } from '../api/_lib/meta-template-import.js';
 import { buildTemplatePreview } from '../api/_lib/whatsapp-outbound.js';
 
 function parseBody(req) {
@@ -174,13 +175,33 @@ export default async function handler(req, res) {
       if (!id) return res.status(400).json({ error: 'id_required' });
       const { data: row, error: oneErr } = await supabaseAdmin
         .from('message_templates')
-        .select('id,meta_template_name,meta_template_language,type')
+        .select('id,meta_template_name,meta_template_language,type,name')
         .eq('id', id)
         .maybeSingle();
       if (oneErr) return res.status(500).json({ error: oneErr.message });
       const name = String(row?.meta_template_name || row?.type || '').trim();
       if (!name) return res.status(400).json({ error: 'meta_template_name_missing' });
       const lang = String(row?.meta_template_language || 'tr').trim() || 'tr';
+
+      const fullSync = await syncMessageTemplateRowFromPhoneWaba({
+        type: String(row?.type || '').trim(),
+        metaName: name,
+        preferredLang: lang
+      });
+      if (fullSync.ok && fullSync.template) {
+        return res.status(200).json({
+          ok: true,
+          template_id: row.id,
+          template: fullSync.template,
+          status: fullSync.template.whatsapp_template_status,
+          meta_template_language: fullSync.template.meta_template_language,
+          bindings: fullSync.bindings,
+          meta_named_body_parameters: fullSync.meta_named_body_parameters,
+          available_languages: fullSync.available_languages,
+          waba_id: fullSync.waba_id,
+          sync_mode: 'phone_waba_full'
+        });
+      }
 
       const diag = await getMetaTemplateSyncDiagnostics(name, lang);
       if (!diag.ok) {

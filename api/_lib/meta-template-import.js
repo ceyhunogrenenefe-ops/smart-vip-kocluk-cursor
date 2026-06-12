@@ -2,6 +2,7 @@ import { supabaseAdmin } from './supabase-admin.js';
 import {
   fetchAllMetaMessageTemplates,
   fetchMetaTemplatesForName,
+  fetchMetaTemplatesFromPhoneWaba,
   findMetaTemplatesByName,
   findMetaTemplatesByNameLoose,
   findSimilarMetaTemplateNames,
@@ -86,6 +87,111 @@ function pickTemplateRow(rows, wantLang) {
     list.find((r) => String(r.status || '').toUpperCase() === 'APPROVED') ||
     list[0]
   );
+}
+
+function pickApprovedPhoneWabaRow(matches, preferredLang) {
+  const list = matches || [];
+  const approved = list.filter((r) => String(r.status || '').toUpperCase() === 'APPROVED');
+  const pool = approved.length ? approved : list;
+  if (preferredLang) {
+    const hit = pool.find((r) => langMatches(preferredLang, r.language));
+    if (hit) return hit;
+  }
+  const tr = pool.find((r) => {
+    const l = String(r.language || '')
+      .trim()
+      .replace(/-/g, '_')
+      .toLowerCase();
+    return l === 'tr' || l === 'tr_tr' || l.startsWith('tr_');
+  });
+  return tr || pool[0] || null;
+}
+
+/**
+ * Gönderim numarasının WABA'sından message_templates satırını günceller.
+ * sendAutomatedWhatsApp ile aynı dil/bağlama kaynağını kullanır (#132001 önlemi).
+ * @param {{ type: string, metaName: string, displayName?: string, preferredLang?: string, canonicalBindings?: string[] | null }} opts
+ */
+export async function syncMessageTemplateRowFromPhoneWaba(opts) {
+  const type = String(opts?.type || '').trim();
+  const metaName = String(opts?.metaName || '').trim();
+  const preferredLang = String(opts?.preferredLang || 'tr').trim() || 'tr';
+  if (!type || !metaName) {
+    return { ok: false, error: 'type_and_meta_name_required' };
+  }
+
+  const phone = await fetchMetaTemplatesFromPhoneWaba(metaName, { includeComponents: true });
+  if (!phone.ok) {
+    return {
+      ok: false,
+      error: phone.error || 'phone_waba_unresolved',
+      hint:
+        'META_PHONE_NUMBER_ID ve META_WHATSAPP_TOKEN ile gönderim numarasının WABA kimliği alınamadı.'
+    };
+  }
+
+  const hit = pickApprovedPhoneWabaRow(phone.matches, preferredLang);
+  if (!hit?.name) {
+    return {
+      ok: false,
+      error: 'template_not_found_on_phone_waba',
+      waba_id: phone.waba_id,
+      searched_name: metaName,
+      hint: `Gönderim numarasının WABA'sında "${metaName}" şablonu yok. Meta BM'de aynı WABA'ya bağlı olduğundan emin olun.`
+    };
+  }
+
+  const bodyText = extractBodyFromComponents(hit.components);
+  const parsedVars = parseBodyVariablesFromText(bodyText);
+  const canonical = Array.isArray(opts?.canonicalBindings)
+    ? opts.canonicalBindings.map((x) => String(x || '').trim()).filter(Boolean)
+    : null;
+  const bindings = canonical?.length ? canonical : parsedVars;
+  const namedParams = parsedVars.some((v) => !/^param_\d+$/.test(v));
+
+  const now = new Date().toISOString();
+  const patch = {
+    content: bodyText || `[Meta: ${metaName}]`,
+    variables: bindings,
+    twilio_variable_bindings: bindings,
+    meta_template_name: String(hit.name).trim(),
+    meta_template_language: String(hit.language || preferredLang).trim() || preferredLang,
+    meta_named_body_parameters: namedParams,
+    channel: 'whatsapp',
+    is_active: true,
+    whatsapp_template_status: String(hit.status || 'APPROVED'),
+    whatsapp_template_synced_at: now,
+    updated_at: now
+  };
+  const displayName = String(opts?.displayName || '').trim();
+  if (displayName) patch.name = displayName;
+
+  const { data: existing } = await supabaseAdmin
+    .from('message_templates')
+    .select('id, name')
+    .eq('type', type)
+    .maybeSingle();
+  if (!patch.name && existing?.name) patch.name = existing.name;
+  if (!patch.name) patch.name = metaName.replace(/_/g, ' ');
+
+  const { data: saved, error } = await supabaseAdmin
+    .from('message_templates')
+    .upsert({ type, ...patch }, { onConflict: 'type' })
+    .select('*')
+    .single();
+  if (error) throw error;
+
+  return {
+    ok: true,
+    template: saved,
+    bindings,
+    meta_named_body_parameters: namedParams,
+    waba_id: phone.waba_id,
+    available_languages: (phone.matches || []).map((m) => ({
+      language: m.language,
+      status: m.status
+    }))
+  };
 }
 
 async function fetchTemplateRowByNameFromWaba(waba, name, tok) {
