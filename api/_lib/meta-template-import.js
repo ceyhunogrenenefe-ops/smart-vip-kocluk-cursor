@@ -120,24 +120,37 @@ export async function syncMessageTemplateRowFromPhoneWaba(opts) {
     return { ok: false, error: 'type_and_meta_name_required' };
   }
 
+  let hit = null;
+  let wabaId = null;
+  let wabaSource = null;
+
   const phone = await fetchMetaTemplatesFromPhoneWaba(metaName, { includeComponents: true });
-  if (!phone.ok) {
-    return {
-      ok: false,
-      error: phone.error || 'phone_waba_unresolved',
-      hint:
-        'META_PHONE_NUMBER_ID ve META_WHATSAPP_TOKEN ile gönderim numarasının WABA kimliği alınamadı.'
-    };
+  if (phone.ok) {
+    wabaId = phone.waba_id;
+    wabaSource = phone.waba_source;
+    hit = pickApprovedPhoneWabaRow(phone.matches, preferredLang);
   }
 
-  const hit = pickApprovedPhoneWabaRow(phone.matches, preferredLang);
+  if (!hit?.name) {
+    const detail = await fetchMetaTemplateWithComponents(metaName, preferredLang);
+    if (detail.ok && detail.template) {
+      hit = detail.template;
+      wabaId = detail.waba_id || wabaId;
+      wabaSource = wabaSource || 'waba_scan';
+    }
+  }
+
   if (!hit?.name) {
     return {
       ok: false,
-      error: 'template_not_found_on_phone_waba',
-      waba_id: phone.waba_id,
+      error: phone.ok ? 'template_not_found_on_waba' : phone.error || 'phone_waba_unresolved',
+      waba_id: wabaId,
       searched_name: metaName,
-      hint: `Gönderim numarasının WABA'sında "${metaName}" şablonu yok. Meta BM'de aynı WABA'ya bağlı olduğundan emin olun.`
+      hint:
+        phone.hint ||
+        (phone.ok
+          ? `WABA'da "${metaName}" şablonu bulunamadı. Meta BM'de onaylı olduğundan emin olun.`
+          : 'META_WABA_ID ekleyin (WhatsApp Manager → Hesap kimliği) veya token ile phone number aynı uygulamadan olsun.')
     };
   }
 
@@ -186,8 +199,9 @@ export async function syncMessageTemplateRowFromPhoneWaba(opts) {
     template: saved,
     bindings,
     meta_named_body_parameters: namedParams,
-    waba_id: phone.waba_id,
-    available_languages: (phone.matches || []).map((m) => ({
+    waba_id: wabaId,
+    waba_source: wabaSource,
+    available_languages: (phone.ok ? phone.matches : [hit]).map((m) => ({
       language: m.language,
       status: m.status
     }))

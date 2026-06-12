@@ -14,20 +14,52 @@ async function graphGet(url, tok) {
   return { ok: res.ok, status: res.status, json };
 }
 
+function parseWabaFromGraphField(waba) {
+  if (typeof waba === 'string' && waba.trim()) return waba.trim();
+  if (waba && typeof waba === 'object' && waba.id) return String(waba.id).trim();
+  return null;
+}
+
 async function resolveWabaIdFromPhone(tok) {
   const pid = process.env.META_PHONE_NUMBER_ID?.trim();
   if (!pid || !tok) return null;
-  try {
-    const url = `https://graph.facebook.com/${GRAPH()}/${encodeURIComponent(pid)}?fields=whatsapp_business_account`;
-    const { ok, json } = await graphGet(url, tok);
-    if (!ok) return null;
-    const waba = json?.whatsapp_business_account;
-    if (typeof waba === 'string' && waba.trim()) return waba.trim();
-    if (waba && typeof waba === 'object' && waba.id) return String(waba.id).trim();
-    return null;
-  } catch {
-    return null;
+  const fieldVariants = ['whatsapp_business_account{id}', 'whatsapp_business_account'];
+  for (const fields of fieldVariants) {
+    try {
+      const url = `https://graph.facebook.com/${GRAPH()}/${encodeURIComponent(pid)}?fields=${encodeURIComponent(fields)}`;
+      const { ok, json } = await graphGet(url, tok);
+      if (!ok) continue;
+      const parsed = parseWabaFromGraphField(json?.whatsapp_business_account);
+      if (parsed) return parsed;
+    } catch {
+      /* try next */
+    }
   }
+  return null;
+}
+
+/** Phone WABA → META_WABA_ID → işletme keşfi (gönderim + şablon senkronu için). */
+export async function resolvePrimaryWabaId(tok = process.env.META_WHATSAPP_TOKEN?.trim()) {
+  const fromPhone = await resolveWabaIdFromPhone(tok);
+  if (fromPhone) return { waba_id: fromPhone, source: 'phone' };
+
+  const envWaba = process.env.META_WABA_ID?.trim();
+  if (envWaba) {
+    if (tok) {
+      for (const w of await expandWabaCandidates(envWaba, tok)) {
+        return { waba_id: w, source: 'meta_waba_id' };
+      }
+    }
+    return { waba_id: envWaba, source: 'meta_waba_id' };
+  }
+
+  if (tok) {
+    for (const w of await discoverWabaIdsFromBusinesses(tok)) {
+      return { waba_id: w, source: 'business_discovery' };
+    }
+  }
+
+  return { waba_id: null, source: null };
 }
 
 /** Token ile erişilebilir işletmelerdeki tüm WABA kimlikleri. */
@@ -170,16 +202,33 @@ export async function getPhoneWabaId() {
  */
 export async function fetchMetaTemplatesFromPhoneWaba(templateName, opts = {}) {
   const tok = process.env.META_WHATSAPP_TOKEN?.trim();
-  const waba = await resolveWabaIdFromPhone(tok);
   const name = String(templateName || '').trim();
-  if (!tok || !waba) {
+  if (!tok) {
+    return {
+      ok: false,
+      error: 'missing_meta_token',
+      waba_id: null,
+      waba_source: null,
+      matches: [],
+      templates: [],
+      searched_name: name,
+      hint: 'META_WHATSAPP_TOKEN tanımlı değil.'
+    };
+  }
+
+  const primary = await resolvePrimaryWabaId(tok);
+  const waba = primary.waba_id;
+  if (!waba) {
     return {
       ok: false,
       error: 'phone_waba_unresolved',
-      waba_id: waba,
+      waba_id: null,
+      waba_source: null,
       matches: [],
       templates: [],
-      searched_name: name
+      searched_name: name,
+      hint:
+        'Gönderim numarasından WABA alınamadı. Vercel Production’da META_WABA_ID ekleyin (WhatsApp Manager → Hesap araçları → Hesap kimliği). META_PHONE_NUMBER_ID ve token aynı Meta uygulamasından olmalı.'
     };
   }
 
@@ -200,6 +249,7 @@ export async function fetchMetaTemplatesFromPhoneWaba(templateName, opts = {}) {
   return {
     ok: true,
     waba_id: waba,
+    waba_source: primary.source,
     matches,
     templates: matches,
     searched_name: name

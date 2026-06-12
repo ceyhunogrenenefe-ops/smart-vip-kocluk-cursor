@@ -49,6 +49,16 @@ function varsForTemplateRow(order, templateRow) {
   return out;
 }
 
+async function loadBookOrderTemplateFromDb() {
+  const { data: row } = await supabaseAdmin
+    .from('message_templates')
+    .select('*')
+    .eq('type', BOOK_ORDER_TEMPLATE_TYPE)
+    .maybeSingle();
+  if (!row?.content || !String(row.meta_template_name || '').trim()) return null;
+  return row;
+}
+
 async function logBookOrderMessage(order, phone, sent, preview) {
   try {
     await supabaseAdmin.from('message_logs').insert({
@@ -105,7 +115,7 @@ export async function resolveBooksellerForOrder(order) {
   return { error: 'no_active_bookseller' };
 }
 
-/** Gönderim öncesi: phone WABA → message_templates (diğer otomasyonlarla aynı yol). */
+/** Meta senkronu dener; başarısızsa SQL ile yüklenmiş DB satırını kullanır (diğer otomasyonlar gibi). */
 async function ensureBookOrderTemplateRow() {
   const synced = await syncMessageTemplateRowFromPhoneWaba({
     type: BOOK_ORDER_TEMPLATE_TYPE,
@@ -114,13 +124,17 @@ async function ensureBookOrderTemplateRow() {
     preferredLang: 'tr',
     canonicalBindings: BOOK_ORDER_META_BINDINGS
   });
-  if (!synced.ok) {
-    return { error: synced.hint || synced.error || 'template_sync_failed' };
+  if (synced.ok && synced.template?.content) {
+    return { template: synced.template, sync_mode: 'meta_api' };
   }
-  if (!synced.template?.content) {
-    return { error: 'template_content_missing' };
+
+  const dbRow = await loadBookOrderTemplateFromDb();
+  if (dbRow) {
+    console.warn('[book-order-notify] meta sync skipped, using DB row:', synced.error || synced.hint);
+    return { template: dbRow, sync_mode: 'db_fallback' };
   }
-  return { template: synced.template };
+
+  return { error: synced.hint || synced.error || 'template_sync_failed' };
 }
 
 /** @returns {{ ok: boolean, skipped?: boolean, error?: string, meta_message_id?: string|null }} */
