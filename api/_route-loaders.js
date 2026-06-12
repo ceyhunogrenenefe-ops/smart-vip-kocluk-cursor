@@ -69,5 +69,6 @@ export const routeLoaders = {
   'edesis-sync': () => import('../handlers/edesis-sync.js'),
   'cron/edesis-sync': () => import('../handlers/cron-edesis-sync.js'),
   'book-orders': () => import('../handlers/book-orders.js'),
+  'book-orders-kitapci-portal': () => import('../handlers/book-orders-kitapci-portal.js'),
   'cron/book-orders': () => import('../handlers/cron-book-orders.js')
 };

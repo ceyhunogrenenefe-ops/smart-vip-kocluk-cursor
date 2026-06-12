@@ -9,6 +9,7 @@ export type BooksellerRow = {
   bolge?: string | null;
   is_active: boolean;
   notes?: string | null;
+  portal_token?: string | null;
   created_at?: string;
 };
 
@@ -31,6 +32,10 @@ export type BookOrderRow = {
   kitapci_id?: string | null;
   kitapci_adi?: string | null;
   kitapci_phone?: string | null;
+  kargo_takip_no?: string | null;
+  kitapci_notu?: string | null;
+  kitapci_confirmed_at?: string | null;
+  shipped_at?: string | null;
   status: string;
   whatsapp_status: string;
   whatsapp_sent_at?: string | null;
@@ -87,6 +92,15 @@ export async function patchBookseller(id: string, patch: Partial<BooksellerRow>)
   });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((j as { error?: string }).error || 'Güncellenemedi');
+  return (j as { data: BooksellerRow }).data;
+}
+
+export async function ensureBooksellerPortalToken(id: string): Promise<BooksellerRow> {
+  const res = await apiFetch(`/api/book-orders?op=bookseller-portal-token&id=${encodeURIComponent(id)}`, {
+    method: 'POST'
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((j as { error?: string }).error || 'Panel linki oluşturulamadı');
   return (j as { data: BooksellerRow }).data;
 }
 

@@ -59,6 +59,7 @@ import CoachSoruAnalitikPage from './pages/questionHelp/CoachSoruAnalitikPage';
 import NotificationsPage from './pages/NotificationsPage';
 import EventsPage from './pages/EventsPage';
 import BookOrdersPage from './pages/BookOrdersPage';
+import KitapciPortalPage from './pages/KitapciPortalPage';
 import TeacherEduPanelPage from './pages/eduPanel/TeacherEduPanelPage';
 import StudentEduPanelPage from './pages/eduPanel/StudentEduPanelPage';
 import AdminAgentsPage from './pages/aiAgents/AdminAgentsPage';
@@ -435,6 +436,7 @@ function App() {
               </ProtectedRoute>
             } />
 
+            <Route path="/kitapci/:token" element={<KitapciPortalPage />} />
             <Route path="/veli-imza/:token" element={<VeliImzaPage />} />
             <Route path="/sign-contract/:token" element={<VeliImzaPage />} />
             <Route path="/veli-kayit-metin/:slug" element={<VeliKayitLegalDocPage />} />

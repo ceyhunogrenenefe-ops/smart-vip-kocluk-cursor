@@ -9,6 +9,7 @@ import {
   cancelBookOrder,
   createBookseller,
   deleteBookseller,
+  ensureBooksellerPortalToken,
   listBookOrders,
   listBooksellers,
   patchBookseller,
@@ -17,6 +18,7 @@ import {
   type BookOrderRow,
   type BooksellerRow
 } from '../lib/bookOrdersApi';
+import { kitapciPortalUrl } from '../lib/kitapciPortalApi';
 
 function statusLabel(status: string) {
   switch (status) {
@@ -27,7 +29,9 @@ function statusLabel(status: string) {
     case 'notified':
       return 'Kitapçıya iletildi';
     case 'confirmed':
-      return 'Tamamlandı';
+      return 'Kitapçı onayladı';
+    case 'shipped':
+      return 'Kargoda';
     case 'cancelled':
       return 'İptal';
     default:
@@ -43,6 +47,8 @@ function statusBadge(status: string) {
       return 'bg-sky-100 text-sky-900';
     case 'confirmed':
       return 'bg-indigo-100 text-indigo-900';
+    case 'shipped':
+      return 'bg-violet-100 text-violet-900';
     case 'cancelled':
       return 'bg-slate-200 text-slate-700';
     default:
@@ -258,6 +264,29 @@ export default function BookOrdersPage() {
     }
   };
 
+  const copyPortalLink = async (b: BooksellerRow) => {
+    setBusy(`pl-${b.id}`);
+    try {
+      let token = String(b.portal_token || '').trim();
+      if (!token) {
+        const fresh = await ensureBooksellerPortalToken(b.id);
+        token = String(fresh.portal_token || '').trim();
+        await load();
+      }
+      if (!token) {
+        toast.error('Panel linki oluşturulamadı — Supabase SQL çalıştırıldı mı?');
+        return;
+      }
+      const url = kitapciPortalUrl(token);
+      await navigator.clipboard.writeText(url);
+      toast.success('Kitapçı panel linki kopyalandı');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Link kopyalanamadı');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const removeBookseller = async (id: string) => {
     if (!window.confirm('Kitapçı silinsin mi?')) return;
     setBusy(`del-${id}`);
@@ -357,7 +386,7 @@ export default function BookOrdersPage() {
           <p className="mt-1 text-sm text-slate-600">
             Veli formu doldurur → sipariş tabloya düşer → siz onaylarsınız → kitapçıya WhatsApp gider.
             Meta şablon: <span className="font-mono text-xs">kitap_siparisi</span>
-            <span className="text-slate-500"> · Turkish</span>
+            <span className="text-slate-500"> · Kitapçı paneli: onay + kargo takibi</span>
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -440,7 +469,15 @@ export default function BookOrdersPage() {
                   {b.city ? <span className="ml-2 text-xs text-slate-400">{b.city}</span> : null}
                   {b.is_active === false ? <span className="ml-2 text-xs text-amber-700">(pasif)</span> : null}
                 </span>
-                <span className="flex gap-2">
+                <span className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={busy === `pl-${b.id}`}
+                    onClick={() => void copyPortalLink(b)}
+                    className="text-xs font-medium text-violet-700 hover:underline"
+                  >
+                    {busy === `pl-${b.id}` ? '…' : 'Panel linki'}
+                  </button>
                   <button type="button" onClick={() => void toggleBookseller(b)} className="text-xs text-indigo-700 hover:underline">
                     {b.is_active === false ? 'Aktifleştir' : 'Pasifleştir'}
                   </button>
@@ -481,6 +518,7 @@ export default function BookOrdersPage() {
                   <th className="py-2 pr-2">Öğrenci / Veli</th>
                   <th className="py-2 pr-2">Adres / Ücret</th>
                   <th className="py-2 pr-2">Kitapçı</th>
+                  <th className="py-2 pr-2">Kargo</th>
                   <th className="py-2 pr-2">WA</th>
                   <th className="py-2">İşlem</th>
                 </tr>
@@ -510,6 +548,10 @@ export default function BookOrdersPage() {
                       ) : null}
                     </td>
                     <td className="py-2 pr-2 text-xs">{booksellerNameForOrder(o)}</td>
+                    <td className="py-2 pr-2 text-xs font-mono">
+                      {o.kargo_takip_no || '—'}
+                      {o.kitapci_notu ? <div className="font-sans text-[10px] text-slate-500">{o.kitapci_notu}</div> : null}
+                    </td>
                     <td className="py-2 pr-2">
                       <span className={`text-xs font-medium ${waBadge(o.whatsapp_status)}`}>{waLabel(o.whatsapp_status)}</span>
                       {o.whatsapp_error ? (

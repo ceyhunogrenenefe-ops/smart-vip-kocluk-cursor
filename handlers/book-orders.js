@@ -3,9 +3,10 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { normalizePhoneToE164 } from '../api/_lib/phone-whatsapp.js';
 import { notifyBooksellerForOrder, processPendingBookOrderNotifications } from '../api/_lib/book-order-notify.js';
+import { ensureBooksellerPortalToken, newKitapciPortalToken } from '../api/_lib/kitapci-portal.js';
 
 const ADMIN_ROLES = new Set(['super_admin', 'admin']);
-const ORDER_STATUSES = new Set(['pending', 'approved', 'notified', 'confirmed', 'cancelled']);
+const ORDER_STATUSES = new Set(['pending', 'approved', 'notified', 'confirmed', 'shipped', 'cancelled']);
 
 function parseBody(req) {
   const b = req.body;
@@ -219,6 +220,7 @@ export default async function handler(req, res) {
           bolge: String(body.bolge || '').trim() || null,
           is_active: body.is_active !== false,
           notes: String(body.notes || '').trim() || null,
+          portal_token: newKitapciPortalToken(),
           created_at: now,
           updated_at: now
         })
@@ -252,6 +254,22 @@ export default async function handler(req, res) {
       if (error) throw error;
       if (!data) return res.status(404).json({ error: 'not_found' });
       return res.status(200).json({ data });
+    } catch (e) {
+      if (isSchemaError(e)) return schemaHint(res);
+      return res.status(500).json({ error: errorMessage(e) });
+    }
+  }
+
+  if (req.method === 'POST' && op === 'bookseller-portal-token' && id) {
+    try {
+      let q = supabaseAdmin.from('kitapcilar').select('id').eq('id', id);
+      if (!isSuper && institutionFilter) q = q.eq('institution_id', institutionFilter);
+      const { data: row, error } = await q.maybeSingle();
+      if (error) throw error;
+      if (!row) return res.status(404).json({ error: 'not_found' });
+      const token = await ensureBooksellerPortalToken(id);
+      const { data: fresh } = await supabaseAdmin.from('kitapcilar').select('*').eq('id', id).maybeSingle();
+      return res.status(200).json({ ok: true, portal_token: token, data: fresh });
     } catch (e) {
       if (isSchemaError(e)) return schemaHint(res);
       return res.status(500).json({ error: errorMessage(e) });
