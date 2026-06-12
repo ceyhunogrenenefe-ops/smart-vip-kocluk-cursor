@@ -1,9 +1,12 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import { normalizePhoneToE164 } from './phone-whatsapp.js';
-import { sendWhatsAppUsingTemplateRow } from './whatsapp-outbound.js';
+import { buildTemplateBodyParameters } from './whatsapp-outbound.js';
+import { sendMetaTemplateMessage, parseMetaSendError } from './meta-whatsapp.js';
 import { getIstanbulDateString } from './istanbul-time.js';
 import { fetchMetaTemplatesFromPhoneWaba } from './meta-templates-sync.js';
 import { extractBodyFromComponents, parseBodyVariablesFromText } from './meta-template-import.js';
+
+const BOOK_ORDER_LANG_FALLBACK = ['tr', 'tr_TR'];
 
 /** Supabase message_templates.type — Meta BM adı: kitap_siparisi */
 export const BOOK_ORDER_TEMPLATE_TYPE = 'kitap_siparis_bildirim';
@@ -62,7 +65,7 @@ async function logBookOrderMessage(order, phone, sent, preview) {
       error: sent.ok ? null : sent.error || null,
       phone,
       meta_message_id: sent.sid || sent.meta_message_id || null,
-      meta_template_name: sent.meta_template_name || BOOK_ORDER_TEMPLATE_TYPE
+      meta_template_name: sent.meta_template_name || BOOK_ORDER_META_NAME
     });
   } catch (e) {
     console.warn('[book-order-notify] message_log', e?.message || e);
@@ -142,23 +145,43 @@ async function resolveBookOrderMetaFromApi() {
   }
 
   const hit = pickBookOrderMetaRow(phone.matches || []);
-  if (!hit?.name || !hit?.language) {
-    const wabaSuffix = phone.waba_id ? String(phone.waba_id).slice(-8) : '?';
+  if (hit?.name && hit?.language) {
     return {
-      error: 'template_not_on_phone_waba',
-      hint:
-        `kitap_siparisi şablonu gönderim numaranızın WABA'sında (…${wabaSuffix}) bulunamadı. ` +
-        'Meta BM\'de şablonu bu WhatsApp Business hesabına ekleyin (META_WABA_ID farklı hesap olabilir).'
+      meta_template_name: String(hit.name).trim(),
+      meta_template_language: String(hit.language).trim(),
+      whatsapp_template_status: String(hit.status || 'APPROVED'),
+      meta_template_row: hit,
+      waba_id: phone.waba_id,
+      language_variants: collectBookOrderLanguages(phone.matches, hit.language)
     };
   }
 
   return {
-    meta_template_name: String(hit.name).trim(),
-    meta_template_language: String(hit.language).trim(),
-    whatsapp_template_status: String(hit.status || 'APPROVED'),
-    meta_template_row: hit,
-    waba_id: phone.waba_id
+    meta_template_name: BOOK_ORDER_META_NAME,
+    meta_template_language: 'tr',
+    whatsapp_template_status: 'APPROVED',
+    meta_template_row: null,
+    waba_id: phone.waba_id,
+    language_variants: BOOK_ORDER_LANG_FALLBACK,
+    fallback: true
   };
+}
+
+function collectBookOrderLanguages(matches, preferred) {
+  const out = [];
+  const seen = new Set();
+  const add = (code) => {
+    const raw = String(code || '').trim();
+    if (!raw) return;
+    const key = raw.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(raw);
+  };
+  add(preferred);
+  for (const row of matches || []) add(row.language);
+  for (const code of BOOK_ORDER_LANG_FALLBACK) add(code);
+  return out;
 }
 
 function bindingsFromMetaBody(bodyText) {
@@ -169,15 +192,6 @@ function bindingsFromMetaBody(bodyText) {
 }
 
 async function loadBookOrderTemplateRow() {
-  const { data: templateRow, error } = await supabaseAdmin
-    .from('message_templates')
-    .select('*')
-    .eq('type', BOOK_ORDER_TEMPLATE_TYPE)
-    .maybeSingle();
-  if (error || !templateRow?.content) {
-    return { error: error?.message || 'template_not_found' };
-  }
-
   const metaResolved = await resolveBookOrderMetaFromApi();
   if (metaResolved.error) {
     return { error: metaResolved.hint || metaResolved.error };
@@ -190,24 +204,73 @@ async function loadBookOrderTemplateRow() {
 
   const now = new Date().toISOString();
   const patch = {
+    name: 'Kitap siparişi — kitapçı bildirimi',
+    content: bodyText || `[Meta: ${metaName}]`,
     variables: bindings,
     twilio_variable_bindings: bindings,
     meta_template_name: metaName,
     meta_template_language: metaLang,
     meta_named_body_parameters: named,
+    channel: 'whatsapp',
+    is_active: true,
     whatsapp_template_status: metaResolved.whatsapp_template_status || 'APPROVED',
     updated_at: now
   };
-  await supabaseAdmin.from('message_templates').update(patch).eq('type', BOOK_ORDER_TEMPLATE_TYPE);
+
+  await supabaseAdmin.from('message_templates').upsert(
+    { type: BOOK_ORDER_TEMPLATE_TYPE, ...patch },
+    { onConflict: 'type' }
+  );
 
   return {
-    templateRow: {
-      ...templateRow,
-      ...patch,
-      content: bodyText || templateRow.content
-    },
+    metaResolved,
+    bindings,
+    named,
     meta_template_name: metaName,
     meta_template_language: metaLang
+  };
+}
+
+async function sendBookOrderWhatsApp(phoneE164, loaded, vars) {
+  const { metaResolved, bindings, named } = loaded;
+  const metaName = metaResolved.meta_template_name;
+  const langs = metaResolved.language_variants || [metaResolved.meta_template_language];
+  const bodyParameterTexts = buildTemplateBodyParameters(bindings, vars);
+  const modes = named ? [false, true] : [false];
+
+  let lastErr = null;
+  for (const lang of langs) {
+    const langCode = String(lang || '').trim();
+    if (!langCode) continue;
+    for (const useNamed of modes) {
+      try {
+        const r = await sendMetaTemplateMessage({
+          toE164: phoneE164,
+          templateName: metaName,
+          languageCode: langCode,
+          languageCandidates: [langCode],
+          bodyParameterTexts,
+          bodyParameterNames: useNamed ? bindings : null
+        });
+        return {
+          ok: true,
+          sid: r.messageId,
+          meta_message_id: r.messageId,
+          meta_template_name: metaName,
+          bodyPreview: `[template:${metaName};lang:${r.languageUsed};named:${useNamed}]`
+        };
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+  }
+
+  const parsed = parseMetaSendError(lastErr);
+  return {
+    ok: false,
+    error: parsed.message || String(lastErr?.message || 'send_failed'),
+    meta_template_name: metaName,
+    bodyPreview: null
   };
 }
 
@@ -240,7 +303,7 @@ export async function notifyBooksellerForOrder(order) {
   }
 
   const loaded = await loadBookOrderTemplateRow();
-  if (!loaded.templateRow) {
+  if (loaded.error) {
     await supabaseAdmin
       .from('kitap_siparisleri')
       .update({
@@ -252,17 +315,9 @@ export async function notifyBooksellerForOrder(order) {
     return { ok: false, error: loaded.error || 'template_not_found' };
   }
 
-  const bindings =
-    loaded.templateRow.twilio_variable_bindings ||
-    loaded.templateRow.variables ||
-    BOOK_ORDER_META_BINDINGS;
+  const bindings = loaded.bindings || BOOK_ORDER_META_BINDINGS;
   const vars = pickVarsForBindings(order, bindings);
-  const sent = await sendWhatsAppUsingTemplateRow({
-    phone,
-    templateRow: loaded.templateRow,
-    vars,
-    templateType: BOOK_ORDER_TEMPLATE_TYPE
-  });
+  const sent = await sendBookOrderWhatsApp(phone, loaded, vars);
 
   const now = new Date().toISOString();
   const patch = {
