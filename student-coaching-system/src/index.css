@@ -85,16 +85,18 @@
     --sidebar-ring: 217.2 91.2% 59.8%;
   }
 
-  /* Layout kabuğu: sidebar sabit, scroll yalnızca main içinde */
-  html.app-shell,
-  html.app-shell body,
-  html.app-shell #root,
-  html.native-app,
-  html.native-app body,
-  html.native-app #root {
-    height: 100%;
-    max-height: 100dvh;
-    overflow: hidden;
+  /* Layout kabuğu: masaüstünde sidebar sabit, scroll yalnızca main içinde */
+  @media (min-width: 1024px) {
+    html.app-shell,
+    html.app-shell body,
+    html.app-shell #root,
+    html.native-app,
+    html.native-app body,
+    html.native-app #root {
+      height: 100%;
+      max-height: 100dvh;
+      overflow: hidden;
+    }
   }
 }
 

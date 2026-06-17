@@ -22,6 +22,9 @@ interface LayoutProps {
 export default function Layout({ children }: LayoutProps) {
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [desktopWide, setDesktopWide] = useState(readDesktopWideInitial);
+  const [desktopShell, setDesktopShell] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(min-width: 1024px)').matches : false
+  );
   const studentMobileShell = useStudentMobileShell();
 
   useEffect(() => {
@@ -33,13 +36,21 @@ export default function Layout({ children }: LayoutProps) {
     return () => mq.removeEventListener('change', onChange);
   }, []);
 
-  /** Kabuk: body scroll kapalı, kaydırma yalnızca main içinde (mobil + masaüstü) */
   useEffect(() => {
-    document.documentElement.classList.add('app-shell');
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const sync = () => setDesktopShell(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+
+  /** Masaüstü: body scroll kapalı, kaydırma yalnızca main içinde */
+  useEffect(() => {
+    document.documentElement.classList.toggle('app-shell', desktopShell);
     return () => {
       document.documentElement.classList.remove('app-shell');
     };
-  }, []);
+  }, [desktopShell]);
 
   useEffect(() => {
     if (!mobileDrawerOpen) return;
@@ -55,7 +66,13 @@ export default function Layout({ children }: LayoutProps) {
   }, []);
 
   return (
-    <div className="flex h-[100dvh] max-h-[100dvh] min-h-0 overflow-hidden bg-slate-50">
+    <div
+      className={cn(
+        'flex bg-slate-50',
+        'max-lg:min-h-[100dvh] max-lg:flex-col',
+        'lg:h-[100dvh] lg:max-h-[100dvh] lg:min-h-0 lg:overflow-hidden'
+      )}
+    >
       {!studentMobileShell ? (
         <Sidebar
           mobileOpen={mobileDrawerOpen}
@@ -67,7 +84,9 @@ export default function Layout({ children }: LayoutProps) {
 
       <div
         className={cn(
-          'relative z-10 flex h-full min-h-0 min-w-0 flex-col bg-slate-50 lg:transition-[padding] lg:duration-300',
+          'relative z-10 flex min-w-0 flex-col bg-slate-50',
+          'max-lg:min-h-[100dvh]',
+          'lg:h-full lg:min-h-0 lg:transition-[padding] lg:duration-300',
           !studentMobileShell && (desktopWide ? 'lg:pl-64' : 'lg:pl-[4.5rem]')
         )}
       >
@@ -78,8 +97,9 @@ export default function Layout({ children }: LayoutProps) {
         />
         <main
           className={cn(
-            'max-w-[100vw] min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 sm:px-5 sm:py-6 lg:px-6 lg:py-6',
-            '[webkit-overflow-scrolling:touch]',
+            'max-w-[100vw] px-3 py-4 sm:px-5 sm:py-6 lg:px-6 lg:py-6',
+            'max-lg:flex-none max-lg:touch-pan-y',
+            'lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:overscroll-contain lg:[webkit-overflow-scrolling:touch]',
             studentMobileShell ? 'pb-24' : 'pb-safe'
           )}
         >
