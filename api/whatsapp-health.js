@@ -1,6 +1,11 @@
 import { getMetaWhatsAppEnvStatus, metaWhatsAppConfigured } from './_lib/meta-whatsapp.js';
 import { getTwilioEnvStatus } from './_lib/whatsapp-twilio.js';
 import { resolvePrimaryWabaId } from './_lib/meta-templates-sync.js';
+import {
+  reportReminderIstHour,
+  reportReminderSendChannel
+} from './_lib/daily-report-reminder-job.js';
+import { CRON_DAILY_REPORT_REMINDERS_UTC } from './_lib/vercel-cron-contract.js';
 
 /**
  * WhatsApp teşhis — giriş gerekmez.
@@ -47,6 +52,19 @@ export default async function handler(req, res) {
     waba_id_suffix: waba_diag.waba_id_suffix,
     twilio_configured: twilioReady,
     automation_provider: metaReady ? 'meta_cloud_api' : twilioReady ? 'twilio' : null,
+    report_reminder: {
+      channel: reportReminderSendChannel(),
+      ist_hour: reportReminderIstHour(),
+      cron_utc: CRON_DAILY_REPORT_REMINDERS_UTC,
+      template_type: 'report_reminder',
+      env_channel: String(process.env.REPORT_REMINDER_CHANNEL ?? 'meta').trim() || 'meta',
+      hint:
+        reportReminderSendChannel() === 'meta'
+          ? 'Günlük rapor hatırlatması Meta şablonu ile gider (22:00 TR). Supabase message_templates.report_reminder aktif olmalı.'
+          : reportReminderSendChannel() === 'gateway'
+            ? 'Gateway modu — REPORT_REMINDER_CHANNEL=gateway. Meta için env boş bırakın veya meta yazın.'
+            : 'Meta env eksik veya gateway yapılandırılmamış — mesaj gitmez.'
+    },
     meta,
     twilio: {
       configured: twilio.configured,
