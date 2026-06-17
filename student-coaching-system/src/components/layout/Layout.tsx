@@ -33,16 +33,10 @@ export default function Layout({ children }: LayoutProps) {
     return () => mq.removeEventListener('change', onChange);
   }, []);
 
-  /** Masaüstü: yalnızca main kayar; body/html scroll etmesin (sidebar altında boş şerit oluşmasın) */
+  /** Kabuk: body scroll kapalı, kaydırma yalnızca main içinde (mobil + masaüstü) */
   useEffect(() => {
-    const mq = window.matchMedia('(min-width: 1024px)');
-    const sync = () => {
-      document.documentElement.classList.toggle('app-shell', mq.matches);
-    };
-    sync();
-    mq.addEventListener('change', sync);
+    document.documentElement.classList.add('app-shell');
     return () => {
-      mq.removeEventListener('change', sync);
       document.documentElement.classList.remove('app-shell');
     };
   }, []);
@@ -61,7 +55,7 @@ export default function Layout({ children }: LayoutProps) {
   }, []);
 
   return (
-    <div className="min-h-screen min-h-[100dvh] bg-slate-50 lg:h-screen lg:max-h-[100dvh] lg:overflow-hidden">
+    <div className="flex h-[100dvh] max-h-[100dvh] min-h-0 overflow-hidden bg-slate-50">
       {!studentMobileShell ? (
         <Sidebar
           mobileOpen={mobileDrawerOpen}
@@ -73,8 +67,7 @@ export default function Layout({ children }: LayoutProps) {
 
       <div
         className={cn(
-          'relative z-10 flex min-h-[100dvh] min-w-0 flex-col bg-slate-50',
-          'lg:min-h-0 lg:h-full lg:overflow-hidden lg:transition-[padding] lg:duration-300',
+          'relative z-10 flex h-full min-h-0 min-w-0 flex-col bg-slate-50 lg:transition-[padding] lg:duration-300',
           !studentMobileShell && (desktopWide ? 'lg:pl-64' : 'lg:pl-[4.5rem]')
         )}
       >
@@ -85,10 +78,9 @@ export default function Layout({ children }: LayoutProps) {
         />
         <main
           className={cn(
-            'max-w-[100vw] flex-1 px-3 py-4 sm:px-5 sm:py-6 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:px-6 lg:py-6',
-            studentMobileShell
-              ? 'min-h-0 flex-1 overflow-y-auto overscroll-contain pb-24'
-              : 'pb-safe'
+            'max-w-[100vw] min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 sm:px-5 sm:py-6 lg:px-6 lg:py-6',
+            '[webkit-overflow-scrolling:touch]',
+            studentMobileShell ? 'pb-24' : 'pb-safe'
           )}
         >
           {children}
