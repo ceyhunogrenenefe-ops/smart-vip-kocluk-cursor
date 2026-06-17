@@ -61,6 +61,13 @@ import {
   loadCoachQuestionStatsBatch,
 } from '../lib/studentCoachQuestionStats';
 
+export type StudentProfileUpdate = Partial<Student> & {
+  package?: 'trial' | 'starter' | 'professional' | 'enterprise';
+  startDate?: string;
+  endDate?: string;
+  isActive?: boolean;
+};
+
 // LocalStorage anahtarları
 const STORAGE_KEYS = {
   students: 'coaching_students',
@@ -158,7 +165,7 @@ interface AppState {
   // Öğrenciler
   students: Student[];
   addStudent: (student: Student) => Promise<{ student: Student; persisted: boolean }>;
-  updateStudent: (id: string, student: Partial<Student>) => Promise<void>;
+  updateStudent: (id: string, student: StudentProfileUpdate) => Promise<void>;
   deleteStudent: (id: string) => void;
 
   // Eğitim Koçları
@@ -948,7 +955,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const updateStudent = async (id: string, updatedStudent: Partial<Student>) => {
+  const updateStudent = async (id: string, updatedStudent: StudentProfileUpdate) => {
     const prevRow = students.find(s => s.id === id);
     const lookupEmail = (prevRow?.email || '').toLowerCase().trim();
 
@@ -1023,6 +1030,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
             updatedStudent.email.trim().toLowerCase() !== u.email.trim().toLowerCase()
           ) {
             userPatch.email = updatedStudent.email.trim().toLowerCase();
+          }
+          if (updatedStudent.package !== undefined) userPatch.package = updatedStudent.package;
+          if (updatedStudent.startDate !== undefined) {
+            userPatch.start_date = new Date(updatedStudent.startDate).toISOString();
+          }
+          if (updatedStudent.endDate !== undefined) {
+            userPatch.end_date = updatedStudent.endDate
+              ? new Date(updatedStudent.endDate).toISOString()
+              : null;
+          }
+          if (updatedStudent.isActive !== undefined) {
+            userPatch.is_active = Boolean(updatedStudent.isActive);
           }
           await db.updateUser(u.id, userPatch as Parameters<(typeof db)['updateUser']>[1]);
         }

@@ -32,8 +32,19 @@ import {
   Eye,
   Plus,
   Loader2,
-  LogIn
+  LogIn,
+  Calendar,
+  Briefcase
 } from 'lucide-react';
+
+const PACKAGES = {
+  trial: { name: 'Deneme', days: 14 },
+  starter: { name: 'Başlangıç', days: 30 },
+  professional: { name: 'Profesyonel', days: 365 },
+  enterprise: { name: 'Kurumsal', days: 365 }
+} as const;
+
+type PackageKey = keyof typeof PACKAGES;
 
 export default function Students() {
   const { user, effectiveUser, impersonate, canImpersonate } = useAuth();
@@ -48,6 +59,7 @@ export default function Students() {
     deleteStudent,
     getStudentStats,
     institution,
+    institutions,
     activeInstitutionId
   } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
@@ -87,17 +99,31 @@ export default function Students() {
     password: '',
     phone: '',
     parentPhone: '',
+    parentName: '',
+    birthDate: '',
+    school: '',
     classLevel: 9 as ClassLevel,
     programName: 'tyt' as ProgramName,
     coachId: '',
     groupName: '',
-    institutionId: ''
+    institutionId: '',
+    whatsappAutomationEnabled: true,
+    package: 'trial' as PackageKey,
+    startDate: new Date().toISOString().split('T')[0],
+    endDate: '',
+    isActive: true
   });
 
   // Yeni kayıt sonrası gösterilecek şifre
   const canEditStudents =
     !!effectiveUser &&
     (effectiveUser.role === 'super_admin' || effectiveUser.role === 'admin' || effectiveUser.role === 'coach');
+
+  const canAssignCoach =
+    !!effectiveUser &&
+    (effectiveUser.role === 'super_admin' || effectiveUser.role === 'admin');
+
+  const canPickInstitution = effectiveUser?.role === 'super_admin';
 
   const canEnterStudentAccount = (student: Student) => {
     if (!user || !student.email?.trim()) return false;
@@ -175,11 +201,19 @@ export default function Students() {
       password: '',
       phone: '',
       parentPhone: '',
+      parentName: '',
+      birthDate: '',
+      school: '',
       classLevel: 9 as ClassLevel,
       programName: 'tyt' as ProgramName,
       coachId: '',
       groupName: '',
-      institutionId: ''
+      institutionId: '',
+      whatsappAutomationEnabled: true,
+      package: 'trial',
+      startDate: new Date().toISOString().split('T')[0],
+      endDate: '',
+      isActive: true
     });
     setEditingStudent(null);
     setShowAddModal(true);
@@ -205,11 +239,19 @@ export default function Students() {
       password: '',
       phone: '',
       parentPhone: '',
+      parentName: '',
+      birthDate: '',
+      school: '',
       classLevel: 9 as ClassLevel,
       programName: 'tyt' as ProgramName,
       coachId: '',
       groupName: '',
-      institutionId: ''
+      institutionId: '',
+      whatsappAutomationEnabled: true,
+      package: 'trial',
+      startDate: new Date().toISOString().split('T')[0],
+      endDate: '',
+      isActive: true
     });
   };
 
@@ -235,6 +277,17 @@ export default function Students() {
     return 'Beklenmeyen bir hata oluştu.';
   };
 
+  const handlePackageChange = (pkg: PackageKey) => {
+    const days = PACKAGES[pkg].days;
+    const end = new Date(formData.startDate || new Date().toISOString().split('T')[0]);
+    end.setDate(end.getDate() + days);
+    setFormData({
+      ...formData,
+      package: pkg,
+      endDate: end.toISOString().split('T')[0]
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -254,11 +307,18 @@ export default function Students() {
           email: normalizedEmail,
           phone: formData.phone.trim(),
           parentPhone: formData.parentPhone.trim(),
+          parentName: formData.parentName.trim() || undefined,
+          birthDate: formData.birthDate.trim() || undefined,
+          school: formData.school.trim() || undefined,
           classLevel: formData.classLevel,
-          coachId: formData.coachId.trim() || undefined,
-          institutionId: formData.institutionId.trim() || undefined,
+          coachId: canAssignCoach ? formData.coachId.trim() || undefined : editingStudent.coachId,
+          institutionId: canPickInstitution ? formData.institutionId.trim() || undefined : editingStudent.institutionId,
           programId: formData.programName,
-          groupName: formData.groupName.trim() || undefined,
+          whatsappAutomationEnabled: formData.whatsappAutomationEnabled,
+          package: formData.package,
+          startDate: formData.startDate,
+          endDate: formData.endDate || undefined,
+          isActive: formData.isActive,
           ...(formData.password.trim().length >= 6 ? { password: formData.password.trim() } : {})
         });
         setEditingStudent(null);
@@ -302,11 +362,14 @@ export default function Students() {
           password: formData.password.trim(),
           phone: formData.phone.trim(),
           parentPhone: formData.parentPhone.trim(),
+          parentName: formData.parentName.trim() || undefined,
+          birthDate: formData.birthDate.trim() || undefined,
+          school: formData.school.trim() || undefined,
           classLevel: formData.classLevel,
           coachId: resolvedCoach || undefined,
           institutionId: resolvedInstitution,
           programId: formData.programName,
-          groupName: formData.groupName.trim() || undefined,
+          whatsappAutomationEnabled: formData.whatsappAutomationEnabled,
           createdAt: new Date().toISOString()
         });
         alert(
@@ -322,19 +385,43 @@ export default function Students() {
     }
   };
 
-  const handleEdit = (student: Student) => {
+  const handleEdit = async (student: Student) => {
     if (!canEditStudents) return;
+    let pkg: PackageKey = 'trial';
+    let startDate = new Date().toISOString().split('T')[0];
+    let endDate = '';
+    let isActive = true;
+    try {
+      const u = await db.getUserByEmail(student.email.trim().toLowerCase());
+      if (u) {
+        const rawPkg = String(u.package || 'trial') as PackageKey;
+        pkg = rawPkg in PACKAGES ? rawPkg : 'trial';
+        startDate = u.start_date?.split('T')[0] || startDate;
+        endDate = u.end_date?.split('T')[0] || '';
+        isActive = u.is_active !== false;
+      }
+    } catch {
+      /* kullanıcı kaydı yoksa varsayılan abonelik alanları */
+    }
     setFormData({
       name: student.name,
       email: student.email,
       password: student.password || '',
       phone: student.phone,
       parentPhone: student.parentPhone,
-      classLevel: student.classLevel,
+      parentName: student.parentName || '',
+      birthDate: student.birthDate?.split('T')[0] || '',
+      school: student.school || '',
+      classLevel: student.classLevel ?? (9 as ClassLevel),
       programName: student.programName || inferProgramName(student.classLevel),
       coachId: student.coachId || '',
       groupName: student.groupName || '',
-      institutionId: student.institutionId || ''
+      institutionId: student.institutionId || '',
+      whatsappAutomationEnabled: student.whatsappAutomationEnabled !== false,
+      package: pkg,
+      startDate,
+      endDate,
+      isActive
     });
     setEditingStudent(student);
     setShowAddModal(true);
@@ -607,7 +694,7 @@ export default function Students() {
       {/* Add/Edit Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4">
-          <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-6 border-b border-gray-100">
               <h3 className="text-xl font-bold text-slate-800">
                 {editingStudent ? 'Öğrenci düzenle' : 'Öğrenci ekle'}
@@ -697,6 +784,38 @@ export default function Students() {
                   />
                 </div>
 
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Veli Adı</label>
+                  <input
+                    type="text"
+                    value={formData.parentName}
+                    onChange={(e) => setFormData({ ...formData, parentName: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                    placeholder="Veli adı soyadı"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Doğum Tarihi</label>
+                  <input
+                    type="date"
+                    value={formData.birthDate}
+                    onChange={(e) => setFormData({ ...formData, birthDate: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Okul / Şube</label>
+                  <input
+                    type="text"
+                    value={formData.school}
+                    onChange={(e) => setFormData({ ...formData, school: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                    placeholder="Okul adı veya şube"
+                  />
+                </div>
+
                 {/* Sınıf */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Sınıf *</label>
@@ -733,8 +852,8 @@ export default function Students() {
                   </select>
                 </div>
 
-                {/* Öğretmen */}
-                {effectiveUser?.role === 'coach' ? (
+                {/* Öğretmen / Koç */}
+                {!canAssignCoach ? (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Koç</label>
                     <input
@@ -791,38 +910,121 @@ export default function Students() {
                   </div>
                 )}
 
-                {/* Grup */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Grup Adı</label>
-                  <input
-                    type="text"
-                    value={formData.groupName}
-                    onChange={(e) => setFormData({ ...formData, groupName: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-                    placeholder="Sayısal A"
-                  />
-                </div>
-
-                {/* Kurum — yöneticiler doğrudan id girebilir; koçta oturum kurumu kullanılır */}
-                {effectiveUser?.role !== 'coach' && (
+                {/* Kurum */}
+                {canPickInstitution ? (
                   <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Kurum ID (isteğe bağlı)
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Kurum</label>
+                    <select
+                      value={formData.institutionId}
+                      onChange={(e) => setFormData({ ...formData, institutionId: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 bg-white"
+                    >
+                      <option value="">Kurum seçin</option>
+                      {institutions.map((i) => (
+                        <option key={i.id} value={i.id}>
+                          {i.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Kurum</label>
                     <input
                       type="text"
-                      value={formData.institutionId}
-                      onChange={e => setFormData({ ...formData, institutionId: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-                      placeholder={
-                        activeInstitutionId ||
-                        institution?.id ||
-                        effectiveUser?.institutionId ||
-                        'Boş bırakırsanız oturumdaki kurum kullanılır'
+                      readOnly
+                      value={
+                        institutions.find((i) => i.id === (formData.institutionId || institution?.id))?.name ||
+                        institution?.name ||
+                        '—'
                       }
+                      className="w-full px-4 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-700"
                     />
                   </div>
                 )}
+              </div>
+
+              <div className="rounded-lg border border-gray-200 bg-gray-50/90 p-4 space-y-3">
+                <label className="flex items-start gap-2 text-sm text-gray-800 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.whatsappAutomationEnabled}
+                    onChange={(e) =>
+                      setFormData({ ...formData, whatsappAutomationEnabled: e.target.checked })
+                    }
+                    className="mt-0.5 rounded border-gray-300"
+                  />
+                  <span>
+                    Otomatik WhatsApp mesajları
+                    <span className="block text-xs text-gray-500 mt-0.5">
+                      Kapalıysa günlük rapor ve otomasyon mesajları bu öğrenciye gitmez.
+                    </span>
+                  </span>
+                </label>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <Briefcase className="w-4 h-4 inline mr-1" />
+                  Abonelik Paketi
+                </label>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {(Object.entries(PACKAGES) as [PackageKey, (typeof PACKAGES)[PackageKey]][]).map(
+                    ([key, pkg]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => handlePackageChange(key)}
+                        className={`p-3 rounded-lg border-2 text-left transition-all ${
+                          formData.package === key
+                            ? 'border-red-500 bg-red-50'
+                            : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                      >
+                        <div className="font-medium text-sm">{pkg.name}</div>
+                        <div className="text-xs text-gray-500">{pkg.days} gün</div>
+                      </button>
+                    )
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <Calendar className="w-4 h-4 inline mr-1" />
+                    Başlangıç
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.startDate}
+                    onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <Calendar className="w-4 h-4 inline mr-1" />
+                    Bitiş
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.endDate}
+                    onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
+                <div className="flex items-end pb-2">
+                  <label className="flex items-center gap-2 text-sm text-gray-800 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.isActive}
+                      onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
+                      className="rounded border-gray-300"
+                    />
+                    Hesap aktif
+                  </label>
+                </div>
               </div>
 
               <div className="flex justify-end gap-3 pt-4">
@@ -884,10 +1086,28 @@ export default function Students() {
                 <Phone className="w-5 h-5" />
                 <span>{selectedStudent.phone}</span>
               </div>
+              {selectedStudent.parentName && (
+                <div className="flex items-center gap-3 text-gray-600">
+                  <Users className="w-5 h-5" />
+                  <span>Veli: {selectedStudent.parentName}</span>
+                </div>
+              )}
               {selectedStudent.parentPhone && (
                 <div className="flex items-center gap-3 text-gray-600">
                   <Phone className="w-5 h-5" />
-                  <span>Veli: {selectedStudent.parentPhone}</span>
+                  <span>Veli tel: {selectedStudent.parentPhone}</span>
+                </div>
+              )}
+              {selectedStudent.school && (
+                <div className="flex items-center gap-3 text-gray-600">
+                  <GraduationCap className="w-5 h-5" />
+                  <span>Okul/şube: {selectedStudent.school}</span>
+                </div>
+              )}
+              {selectedStudent.birthDate && (
+                <div className="flex items-center gap-3 text-gray-600">
+                  <Calendar className="w-5 h-5" />
+                  <span>Doğum: {selectedStudent.birthDate.split('T')[0]}</span>
                 </div>
               )}
               <div className="flex items-center gap-3 text-gray-600">

@@ -217,6 +217,37 @@ export default async function handler(req, res) {
 
     if (req.method === 'GET') {
       const rs = await actorRoleSet(actor);
+      const platformUserId = req.query.platform_user_id
+        ? String(req.query.platform_user_id).trim()
+        : null;
+      const emailQ = req.query.email ? String(req.query.email).toLowerCase().trim() : null;
+
+      if (platformUserId || emailQ) {
+        let row = null;
+        if (platformUserId) {
+          const { data, error } = await supabaseAdmin
+            .from('students')
+            .select('*')
+            .or(`platform_user_id.eq.${platformUserId},user_id.eq.${platformUserId}`)
+            .maybeSingle();
+          if (error) throw error;
+          row = data;
+        }
+        if (!row && emailQ) {
+          const { data, error } = await supabaseAdmin
+            .from('students')
+            .select('*')
+            .eq('email', emailQ)
+            .maybeSingle();
+          if (error) throw error;
+          row = data;
+        }
+        if (!row) return res.status(200).json({ data: [] });
+        if (!(await assertStudentVisibilityResolved(actor, row))) {
+          return res.status(200).json({ data: [] });
+        }
+        return res.status(200).json({ data: [row] });
+      }
 
       if (rs.has('super_admin')) {
         const { data, error } = await supabaseAdmin
@@ -507,9 +538,30 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: 'forbidden' });
 
       const body = req.body || {};
-      const patchBody = { ...body };
+      const allowedKeys = new Set([
+        'name',
+        'email',
+        'phone',
+        'birth_date',
+        'class_level',
+        'school',
+        'parent_name',
+        'parent_phone',
+        'coach_id',
+        'program_id',
+        'whatsapp_automation_enabled',
+        'institution_id',
+      ]);
+      const patchBody = {};
+      for (const [key, value] of Object.entries(body)) {
+        if (allowedKeys.has(key)) patchBody[key] = value;
+      }
       if (actor.role === 'coach') {
         delete patchBody.coach_id;
+        delete patchBody.institution_id;
+      }
+      if (actor.role === 'admin' || actor.role === 'teacher') {
+        delete patchBody.institution_id;
       }
       const prevCoachId = existing.coach_id || null;
       const nextCoachId = patchBody.coach_id !== undefined ? patchBody.coach_id : existing.coach_id;
