@@ -63,8 +63,58 @@ export async function ensureBooksellerPortalToken(booksellerId) {
   return String(updated?.portal_token || token);
 }
 
-const PORTAL_ORDER_FIELDS =
-  'id, ogrenci_ad_soyad, veli_ad_soyad, sinif, telefon, adres, ilce, il, ucret_durumu, siparis_notu, kitaplar, kitap_set_id, kitap_set_ids, status, whatsapp_status, whatsapp_sent_at, kitapci_id, kitapci_adi, kitapci_phone, kitapci_confirmed_at, shipped_at, kargo_takip_no, kitapci_notu, created_at, updated_at';
+const PORTAL_ORDER_FIELDS_BASE =
+  'id, ogrenci_ad_soyad, veli_ad_soyad, sinif, telefon, adres, ilce, il, ucret_durumu, siparis_notu, status, whatsapp_status, whatsapp_sent_at, kitapci_id, kitapci_adi, kitapci_phone, kitapci_confirmed_at, shipped_at, kargo_takip_no, kitapci_notu, created_at, updated_at';
+const PORTAL_ORDER_FIELDS_WITH_SET =
+  `${PORTAL_ORDER_FIELDS_BASE}, kitaplar, kitap_set_id, form_payload`;
+const PORTAL_ORDER_FIELDS_WITH_SET_NO_PAYLOAD = `${PORTAL_ORDER_FIELDS_BASE}, kitaplar, kitap_set_id`;
+const PORTAL_ORDER_FIELDS_FULL = `${PORTAL_ORDER_FIELDS_WITH_SET_NO_PAYLOAD}, kitap_set_ids`;
+
+function isMissingColumnError(err, column) {
+  const msg = String(err?.message || err || '').toLowerCase();
+  const code = String(err?.code || '');
+  if (!msg.includes(String(column || '').toLowerCase())) return false;
+  return code === '42703' || code === 'PGRST204' || code === 'PGRST205' || msg.includes('does not exist');
+}
+
+function isMissingRelationError(err, relation) {
+  const msg = String(err?.message || err || '').toLowerCase();
+  const code = String(err?.code || '');
+  if (!msg.includes(String(relation || '').toLowerCase())) return false;
+  return code === '42P01' || code === 'PGRST205' || msg.includes('does not exist');
+}
+
+async function fetchPortalOrders(instId) {
+  const attempts = [
+    PORTAL_ORDER_FIELDS_FULL,
+    PORTAL_ORDER_FIELDS_WITH_SET,
+    PORTAL_ORDER_FIELDS_WITH_SET_NO_PAYLOAD,
+    PORTAL_ORDER_FIELDS_BASE,
+  ];
+  let lastError = null;
+  for (const fields of attempts) {
+    const { data, error } = await supabaseAdmin
+      .from('kitap_siparisleri')
+      .select(fields)
+      .eq('institution_id', instId)
+      .in('status', ['notified', 'confirmed', 'shipped', 'approved'])
+      .order('created_at', { ascending: false })
+      .limit(400);
+    if (!error) return data || [];
+    lastError = error;
+    if (
+      isMissingColumnError(error, 'kitap_set_ids') ||
+      isMissingColumnError(error, 'kitap_set_id') ||
+      isMissingColumnError(error, 'kitaplar') ||
+      isMissingColumnError(error, 'form_payload')
+    ) {
+      continue;
+    }
+    throw error;
+  }
+  if (lastError) throw lastError;
+  return [];
+}
 
 function normalizeIdArray(raw) {
   if (Array.isArray(raw)) {
@@ -90,17 +140,25 @@ function formatSetRowLabel(row) {
 async function loadSetLabelsById(setIds) {
   const ids = [...new Set(normalizeIdArray(setIds))];
   if (!ids.length) return new Map();
-  const { data: rows, error } = await supabaseAdmin
-    .from('kitap_siparis_setleri')
-    .select('id,name,kitap_icerigi')
-    .in('id', ids);
-  if (error) throw error;
-  const map = new Map();
-  for (const row of rows || []) {
-    const label = formatSetRowLabel(row);
-    if (label) map.set(String(row.id), label);
+  try {
+    const { data: rows, error } = await supabaseAdmin
+      .from('kitap_siparis_setleri')
+      .select('id,name,kitap_icerigi')
+      .in('id', ids);
+    if (error) {
+      if (isMissingRelationError(error, 'kitap_siparis_setleri')) return new Map();
+      throw error;
+    }
+    const map = new Map();
+    for (const row of rows || []) {
+      const label = formatSetRowLabel(row);
+      if (label) map.set(String(row.id), label);
+    }
+    return map;
+  } catch (err) {
+    if (isMissingRelationError(err, 'kitap_siparis_setleri')) return new Map();
+    throw err;
   }
-  return map;
 }
 
 function kitaplarFromSetIds(order, setLabelById) {
@@ -110,16 +168,29 @@ function kitaplarFromSetIds(order, setLabelById) {
   return parts.length ? parts.join(' | ') : null;
 }
 
+function kitaplarFromFormPayload(order) {
+  const payload = order?.form_payload;
+  if (!payload || typeof payload !== 'object') return null;
+  const direct = String(payload.kitaplar || payload.kitap_seti || payload.set_adi || '').trim();
+  if (direct) return direct;
+  return null;
+}
+
 async function enrichPortalOrdersKitaplar(orders) {
   const allSetIds = [];
   for (const order of orders || []) {
     if (String(order?.kitaplar || '').trim()) continue;
+    const fromForm = kitaplarFromFormPayload(order);
+    if (fromForm) {
+      order.kitaplar = fromForm;
+      continue;
+    }
     allSetIds.push(...orderSetIds(order));
   }
   const setLabelById = await loadSetLabelsById(allSetIds);
   for (const order of orders || []) {
     if (!String(order?.kitaplar || '').trim()) {
-      const resolved = kitaplarFromSetIds(order, setLabelById);
+      const resolved = kitaplarFromSetIds(order, setLabelById) || kitaplarFromFormPayload(order);
       if (resolved) order.kitaplar = resolved;
     }
     const ids = orderSetIds(order);
@@ -134,14 +205,7 @@ export async function listOrdersForKitapciPortal(bookseller) {
   const instId = String(bookseller.institution_id || '').trim();
   if (!instId) return [];
 
-  const { data, error } = await supabaseAdmin
-    .from('kitap_siparisleri')
-    .select(PORTAL_ORDER_FIELDS)
-    .eq('institution_id', instId)
-    .in('status', ['notified', 'confirmed', 'shipped', 'approved'])
-    .order('created_at', { ascending: false })
-    .limit(400);
-  if (error) throw error;
+  const data = await fetchPortalOrders(instId);
 
   const matched = (data || []).filter((row) => orderBelongsToBookseller(row, bookseller));
 
@@ -163,7 +227,12 @@ export async function listOrdersForKitapciPortal(bookseller) {
     }
   }
 
-  await enrichPortalOrdersKitaplar(matched);
+  try {
+    await enrichPortalOrdersKitaplar(matched);
+  } catch (err) {
+    // Set tablosu / kolon eksik olsa bile panel açılsın.
+    console.warn('enrichPortalOrdersKitaplar failed', err?.message || err);
+  }
 
   return matched;
 }
