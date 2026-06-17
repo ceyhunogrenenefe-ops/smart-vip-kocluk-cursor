@@ -41,6 +41,10 @@
     overscroll-behavior-y: contain;
     touch-action: pan-y;
   }
+  .student-mobile-scroll-port {
+    /* Alt sekme çubuğu için kaydırma alanı; içerik pb-24 ile tamamlanır */
+    scroll-padding-bottom: max(4.5rem, calc(3.5rem + env(safe-area-inset-bottom, 0px)));
+  }
 }
 
 @layer base {

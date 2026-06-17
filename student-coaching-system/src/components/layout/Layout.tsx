@@ -103,19 +103,15 @@ export default function Layout({ children }: LayoutProps) {
           />
         ) : null}
 
-        {studentMobileShell ? (
-          <div className="fixed inset-0 z-0 flex flex-col overflow-hidden bg-slate-50">
-            <div className="mobile-scroll-port min-h-0 flex-1">
-              {topBar}
-              {mainContent}
-            </div>
-          </div>
-        ) : (
-          <div className="mobile-scroll-port fixed inset-0 z-0 bg-slate-50">
-            {topBar}
-            {mainContent}
-          </div>
-        )}
+        <div
+          className={cn(
+            'mobile-scroll-port fixed inset-0 z-0 bg-slate-50',
+            studentMobileShell && 'student-mobile-scroll-port'
+          )}
+        >
+          {topBar}
+          {mainContent}
+        </div>
 
         {studentMobileShell ? <StudentMobileTabBar /> : null}
 
