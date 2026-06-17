@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { BookOpen, CheckCircle2, Loader2, Package, Truck } from 'lucide-react';
+import { BookOpen, CheckCircle2, Download, Loader2, Package, Truck } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   confirmKitapciPortalOrder,
@@ -8,7 +8,7 @@ import {
   shipKitapciPortalOrder,
   type KitapciPortalOrder
 } from '../lib/kitapciPortalApi';
-
+import { exportKitapciOrdersToExcel } from '../lib/kitapciPortalExport';
 function statusLabel(status: string) {
   switch (status) {
     case 'notified':
@@ -49,6 +49,9 @@ export default function KitapciPortalPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [tracking, setTracking] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const panelTitle = booksellerName
+    ? `${booksellerName.toLocaleUpperCase('tr-TR')} KİTAP SİPARİŞ PANELİ`
+    : 'KİTAP SİPARİŞ PANELİ';
 
   const load = useCallback(async () => {
     const t = String(token || '').trim();
@@ -111,6 +114,19 @@ export default function KitapciPortalPage() {
     }
   };
 
+  const downloadExcel = () => {
+    if (!orders.length) {
+      toast.error('İndirilecek sipariş yok');
+      return;
+    }
+    try {
+      exportKitapciOrdersToExcel(orders, booksellerName);
+      toast.success(`${orders.length} sipariş Excel olarak indirildi`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Excel oluşturulamadı');
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
@@ -134,17 +150,28 @@ export default function KitapciPortalPage() {
     <div className="min-h-screen bg-gradient-to-b from-indigo-50 to-slate-50 px-4 py-6 sm:px-6">
       <div className="mx-auto max-w-2xl space-y-5">
         <header className="rounded-2xl border border-indigo-100 bg-white p-5 shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="rounded-xl bg-indigo-600 p-2.5 text-white">
-              <BookOpen className="h-6 w-6" />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="rounded-xl bg-indigo-600 p-2.5 text-white">
+                <BookOpen className="h-6 w-6" />
+              </div>
+              <div>
+                <h1 className="text-lg font-bold text-slate-900">{panelTitle}</h1>
+                <p className="text-sm text-slate-600">Kitap sipariş paneli — onaylayın, kargo takibini girin</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-lg font-bold text-slate-900">{booksellerName}</h1>
-              <p className="text-sm text-slate-600">Kitap sipariş paneli — onaylayın, kargo takibini girin</p>
-            </div>
+            {orders.length > 0 ? (
+              <button
+                type="button"
+                onClick={downloadExcel}
+                className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900 hover:bg-emerald-100"
+              >
+                <Download className="h-4 w-4" />
+                Excel indir ({orders.length})
+              </button>
+            ) : null}
           </div>
         </header>
-
         {orders.length === 0 ? (
           <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
             Size henüz iletilmiş sipariş görünmüyor. Kurum siparişi onaylayıp size WhatsApp gönderdiğinde öğrenci
@@ -159,6 +186,10 @@ export default function KitapciPortalPage() {
                     <p className="font-semibold text-slate-900">{o.ogrenci_ad_soyad}</p>
                     <p className="text-sm text-slate-600">Veli: {o.veli_ad_soyad}</p>
                     {o.sinif ? <p className="text-xs text-slate-500">Sınıf: {o.sinif}</p> : null}
+                    <p className="mt-1 text-sm font-medium text-indigo-900">
+                      <span className="font-normal text-slate-500">Kitap seti:</span>{' '}
+                      {o.kitaplar?.trim() || '—'}
+                    </p>
                   </div>
                   <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${statusClass(o.status)}`}>
                     {statusLabel(o.status)}

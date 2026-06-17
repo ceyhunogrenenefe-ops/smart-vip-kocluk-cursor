@@ -64,7 +64,70 @@ export async function ensureBooksellerPortalToken(booksellerId) {
 }
 
 const PORTAL_ORDER_FIELDS =
-  'id, ogrenci_ad_soyad, veli_ad_soyad, sinif, telefon, adres, ilce, il, ucret_durumu, siparis_notu, status, whatsapp_status, whatsapp_sent_at, kitapci_id, kitapci_adi, kitapci_phone, kitapci_confirmed_at, shipped_at, kargo_takip_no, kitapci_notu, created_at, updated_at';
+  'id, ogrenci_ad_soyad, veli_ad_soyad, sinif, telefon, adres, ilce, il, ucret_durumu, siparis_notu, kitaplar, kitap_set_id, kitap_set_ids, status, whatsapp_status, whatsapp_sent_at, kitapci_id, kitapci_adi, kitapci_phone, kitapci_confirmed_at, shipped_at, kargo_takip_no, kitapci_notu, created_at, updated_at';
+
+function normalizeIdArray(raw) {
+  if (Array.isArray(raw)) {
+    return raw.map((x) => String(x || '').trim()).filter(Boolean);
+  }
+  const one = String(raw || '').trim();
+  return one ? [one] : [];
+}
+
+function orderSetIds(order) {
+  const fromArray = normalizeIdArray(order?.kitap_set_ids);
+  if (fromArray.length) return fromArray;
+  const one = String(order?.kitap_set_id || '').trim();
+  return one ? [one] : [];
+}
+
+function formatSetRowLabel(row) {
+  if (!row?.name) return '';
+  const detail = String(row.kitap_icerigi || '').trim();
+  return detail ? `${row.name} — ${detail}` : String(row.name).trim();
+}
+
+async function loadSetLabelsById(setIds) {
+  const ids = [...new Set(normalizeIdArray(setIds))];
+  if (!ids.length) return new Map();
+  const { data: rows, error } = await supabaseAdmin
+    .from('kitap_siparis_setleri')
+    .select('id,name,kitap_icerigi')
+    .in('id', ids);
+  if (error) throw error;
+  const map = new Map();
+  for (const row of rows || []) {
+    const label = formatSetRowLabel(row);
+    if (label) map.set(String(row.id), label);
+  }
+  return map;
+}
+
+function kitaplarFromSetIds(order, setLabelById) {
+  const ids = orderSetIds(order);
+  if (!ids.length) return null;
+  const parts = ids.map((id) => setLabelById.get(String(id))).filter(Boolean);
+  return parts.length ? parts.join(' | ') : null;
+}
+
+async function enrichPortalOrdersKitaplar(orders) {
+  const allSetIds = [];
+  for (const order of orders || []) {
+    if (String(order?.kitaplar || '').trim()) continue;
+    allSetIds.push(...orderSetIds(order));
+  }
+  const setLabelById = await loadSetLabelsById(allSetIds);
+  for (const order of orders || []) {
+    if (!String(order?.kitaplar || '').trim()) {
+      const resolved = kitaplarFromSetIds(order, setLabelById);
+      if (resolved) order.kitaplar = resolved;
+    }
+    const ids = orderSetIds(order);
+    if (!Array.isArray(order.kitap_set_ids)) order.kitap_set_ids = ids;
+    if (!String(order.kitap_set_id || '').trim() && ids.length) order.kitap_set_id = ids[0];
+  }
+  return orders;
+}
 
 /** Kitapçıya WhatsApp ile giden tüm siparişler (id, telefon veya isim eşleşmesi). */
 export async function listOrdersForKitapciPortal(bookseller) {
@@ -99,6 +162,8 @@ export async function listOrdersForKitapciPortal(bookseller) {
       row.status = 'notified';
     }
   }
+
+  await enrichPortalOrdersKitaplar(matched);
 
   return matched;
 }
