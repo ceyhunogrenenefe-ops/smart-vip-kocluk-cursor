@@ -44,11 +44,17 @@ export default function Layout({ children }: LayoutProps) {
     return () => mq.removeEventListener('change', sync);
   }, []);
 
-  /** Masaüstü: body scroll kapalı, kaydırma yalnızca main içinde */
+  /** Masaüstü: body scroll kapalı; mobil: belge scroll (Android Chrome uyumu) */
   useEffect(() => {
     document.documentElement.classList.toggle('app-shell', desktopShell);
+    document.documentElement.classList.toggle('mobile-document-scroll', !desktopShell);
+    if (!desktopShell) {
+      document.body.style.overflow = '';
+      document.documentElement.style.overflow = '';
+    }
     return () => {
       document.documentElement.classList.remove('app-shell');
+      document.documentElement.classList.remove('mobile-document-scroll');
     };
   }, [desktopShell]);
 
@@ -68,9 +74,10 @@ export default function Layout({ children }: LayoutProps) {
   return (
     <div
       className={cn(
-        'flex bg-slate-50',
-        'max-lg:min-h-[100dvh] max-lg:flex-col',
-        'lg:h-[100dvh] lg:max-h-[100dvh] lg:min-h-0 lg:overflow-hidden'
+        'bg-slate-50',
+        desktopShell
+          ? 'flex h-[100dvh] max-h-[100dvh] min-h-0 overflow-hidden'
+          : 'w-full'
       )}
     >
       {!studentMobileShell ? (
@@ -84,9 +91,10 @@ export default function Layout({ children }: LayoutProps) {
 
       <div
         className={cn(
-          'relative z-10 flex min-w-0 flex-col bg-slate-50',
-          'max-lg:min-h-[100dvh]',
-          'lg:h-full lg:min-h-0 lg:transition-[padding] lg:duration-300',
+          'relative z-10 w-full min-w-0 bg-slate-50',
+          desktopShell
+            ? 'flex h-full min-h-0 flex-col transition-[padding] duration-300'
+            : 'block',
           !studentMobileShell && (desktopWide ? 'lg:pl-64' : 'lg:pl-[4.5rem]')
         )}
       >
@@ -97,9 +105,9 @@ export default function Layout({ children }: LayoutProps) {
         />
         <main
           className={cn(
-            'max-w-[100vw] px-3 py-4 sm:px-5 sm:py-6 lg:px-6 lg:py-6',
-            'max-lg:flex-none max-lg:touch-pan-y',
-            'lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:overscroll-contain lg:[webkit-overflow-scrolling:touch]',
+            'w-full max-w-[100vw] px-3 py-4 sm:px-5 sm:py-6 lg:px-6 lg:py-6',
+            !desktopShell && 'touch-pan-y',
+            desktopShell && 'min-h-0 flex-1 overflow-y-auto overscroll-contain [webkit-overflow-scrolling:touch]',
             studentMobileShell ? 'pb-24' : 'pb-safe'
           )}
         >

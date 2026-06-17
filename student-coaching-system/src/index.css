@@ -98,6 +98,37 @@
       overflow: hidden;
     }
   }
+
+  /* Mobil belge scroll — Android Chrome'da iç içe overflow yerine body kayar */
+  @media (max-width: 1023px) {
+    html.mobile-document-scroll,
+    html.mobile-document-scroll body {
+      height: auto !important;
+      min-height: 100%;
+      max-height: none !important;
+      overflow-x: clip;
+      overflow-y: auto !important;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-y: auto;
+      touch-action: pan-y pinch-zoom;
+    }
+
+    html.mobile-document-scroll #root {
+      height: auto !important;
+      min-height: 100%;
+      max-height: none !important;
+      overflow: visible !important;
+    }
+
+    html.mobile-document-scroll .recharts-wrapper,
+    html.mobile-document-scroll .recharts-surface {
+      touch-action: pan-y !important;
+    }
+
+    html.mobile-document-scroll .overflow-x-auto {
+      touch-action: pan-x pan-y;
+    }
+  }
 }
 
 img {

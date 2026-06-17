@@ -119,8 +119,10 @@ export default function Sidebar({
       className={cn(
         'flex min-h-0 h-screen max-h-[100dvh] flex-col overflow-hidden',
         'max-lg:fixed max-lg:left-0 max-lg:top-0',
-        mobileOpen ? 'max-lg:z-[160] max-lg:pointer-events-auto max-lg:visible' : 'max-lg:z-[110] max-lg:pointer-events-none max-lg:invisible',
-        'lg:fixed lg:inset-y-0 lg:left-0 lg:z-40 lg:visible lg:pointer-events-auto',
+        mobileOpen
+          ? 'max-lg:z-[160] max-lg:flex'
+          : 'max-lg:hidden',
+        'lg:fixed lg:inset-y-0 lg:left-0 lg:z-40 lg:flex',
         'border-r border-slate-400/25 text-white',
         'bg-gradient-to-b from-slate-800 via-slate-800 to-slate-950',
         '[box-shadow:inset_1px_0_0_0_rgba(255,255,255,0.045)]',
