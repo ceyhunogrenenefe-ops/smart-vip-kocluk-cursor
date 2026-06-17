@@ -44,17 +44,17 @@ export default function Layout({ children }: LayoutProps) {
     return () => mq.removeEventListener('change', sync);
   }, []);
 
-  /** Masaüstü: body scroll kapalı; mobil: belge scroll (Android Chrome uyumu) */
+  /** Masaüstü: main kayar; mobil: tek scroll port (Android Chrome) */
   useEffect(() => {
     document.documentElement.classList.toggle('app-shell', desktopShell);
-    document.documentElement.classList.toggle('mobile-document-scroll', !desktopShell);
+    document.documentElement.classList.toggle('mobile-app-viewport', !desktopShell);
     if (!desktopShell) {
       document.body.style.overflow = '';
       document.documentElement.style.overflow = '';
     }
     return () => {
       document.documentElement.classList.remove('app-shell');
-      document.documentElement.classList.remove('mobile-document-scroll');
+      document.documentElement.classList.remove('mobile-app-viewport');
     };
   }, [desktopShell]);
 
@@ -71,15 +71,68 @@ export default function Layout({ children }: LayoutProps) {
     setMobileDrawerOpen((o) => !o);
   }, []);
 
-  return (
-    <div
+  const topBar = (
+    <TopBar
+      drawerOpen={mobileDrawerOpen}
+      onMenuClick={toggleMobileDrawer}
+      hideMenuButton={studentMobileShell}
+    />
+  );
+
+  const mainContent = (
+    <main
       className={cn(
-        'bg-slate-50',
-        desktopShell
-          ? 'flex h-[100dvh] max-h-[100dvh] min-h-0 overflow-hidden'
-          : 'w-full'
+        'w-full max-w-[100vw] px-3 py-4 sm:px-5 sm:py-6 lg:px-6 lg:py-6',
+        desktopShell && 'min-h-0 flex-1 overflow-y-auto overscroll-contain [webkit-overflow-scrolling:touch]',
+        studentMobileShell ? 'pb-24' : 'pb-safe'
       )}
     >
+      {children}
+    </main>
+  );
+
+  if (!desktopShell) {
+    return (
+      <>
+        {!studentMobileShell ? (
+          <Sidebar
+            mobileOpen={mobileDrawerOpen}
+            onMobileOpenChange={setMobileDrawerOpen}
+            desktopWide={desktopWide}
+            onDesktopWideChange={setDesktopWide}
+          />
+        ) : null}
+
+        {studentMobileShell ? (
+          <div className="fixed inset-0 z-0 flex flex-col overflow-hidden bg-slate-50">
+            <div className="mobile-scroll-port min-h-0 flex-1">
+              {topBar}
+              {mainContent}
+            </div>
+          </div>
+        ) : (
+          <div className="mobile-scroll-port fixed inset-0 z-0 bg-slate-50">
+            {topBar}
+            {mainContent}
+          </div>
+        )}
+
+        {studentMobileShell ? <StudentMobileTabBar /> : null}
+
+        {!studentMobileShell && mobileDrawerOpen ? (
+          <button
+            type="button"
+            className="fixed inset-0 z-[140] bg-slate-950/55 backdrop-blur-sm"
+            aria-label="Menüyü kapat"
+            onClick={() => setMobileDrawerOpen(false)}
+          />
+        ) : null}
+      </>
+    );
+  }
+
+  return (
+    <div className="flex h-[100dvh] max-h-[100dvh] min-h-0 overflow-hidden bg-slate-50">
       {!studentMobileShell ? (
         <Sidebar
           mobileOpen={mobileDrawerOpen}
@@ -91,28 +144,12 @@ export default function Layout({ children }: LayoutProps) {
 
       <div
         className={cn(
-          'relative z-10 w-full min-w-0 bg-slate-50',
-          desktopShell
-            ? 'flex h-full min-h-0 flex-col transition-[padding] duration-300'
-            : 'block',
+          'relative z-10 flex h-full min-h-0 w-full min-w-0 flex-col bg-slate-50 transition-[padding] duration-300',
           !studentMobileShell && (desktopWide ? 'lg:pl-64' : 'lg:pl-[4.5rem]')
         )}
       >
-        <TopBar
-          drawerOpen={mobileDrawerOpen}
-          onMenuClick={toggleMobileDrawer}
-          hideMenuButton={studentMobileShell}
-        />
-        <main
-          className={cn(
-            'w-full max-w-[100vw] px-3 py-4 sm:px-5 sm:py-6 lg:px-6 lg:py-6',
-            !desktopShell && 'touch-pan-y',
-            desktopShell && 'min-h-0 flex-1 overflow-y-auto overscroll-contain [webkit-overflow-scrolling:touch]',
-            studentMobileShell ? 'pb-24' : 'pb-safe'
-          )}
-        >
-          {children}
-        </main>
+        {topBar}
+        {mainContent}
       </div>
 
       {studentMobileShell ? <StudentMobileTabBar /> : null}

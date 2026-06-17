@@ -34,6 +34,13 @@
   .icon-tap-btn {
     @apply inline-flex h-11 w-11 min-h-[44px] min-w-[44px] shrink-0 touch-manipulation select-none items-center justify-center rounded-lg;
   }
+  .mobile-scroll-port {
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+  }
 }
 
 @layer base {
@@ -99,33 +106,29 @@
     }
   }
 
-  /* Mobil belge scroll — Android Chrome'da iç içe overflow yerine body kayar */
+  /* Mobil: body kilitli, kaydırma yalnızca .mobile-scroll-port içinde (Android) */
   @media (max-width: 1023px) {
-    html.mobile-document-scroll,
-    html.mobile-document-scroll body {
-      height: auto !important;
-      min-height: 100%;
-      max-height: none !important;
-      overflow-x: clip;
-      overflow-y: auto !important;
-      -webkit-overflow-scrolling: touch;
-      overscroll-behavior-y: auto;
-      touch-action: pan-y pinch-zoom;
+    html.mobile-app-viewport,
+    html.mobile-app-viewport body {
+      height: 100%;
+      width: 100%;
+      max-height: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
     }
 
-    html.mobile-document-scroll #root {
-      height: auto !important;
-      min-height: 100%;
-      max-height: none !important;
-      overflow: visible !important;
+    html.mobile-app-viewport #root {
+      height: 100%;
+      max-height: 100%;
+      overflow: hidden;
     }
 
-    html.mobile-document-scroll .recharts-wrapper,
-    html.mobile-document-scroll .recharts-surface {
+    html.mobile-app-viewport .recharts-wrapper,
+    html.mobile-app-viewport .recharts-surface {
       touch-action: pan-y !important;
     }
 
-    html.mobile-document-scroll .overflow-x-auto {
+    html.mobile-app-viewport .overflow-x-auto {
       touch-action: pan-x pan-y;
     }
   }
