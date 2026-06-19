@@ -10,11 +10,15 @@ import {
 } from '../api/_lib/book-order-notify.js';
 import { getMetaWhatsAppEnvStatus, getMetaWebhookEnvStatus } from '../api/_lib/meta-whatsapp.js';
 import { fetchMetaTemplatesFromPhoneWaba } from '../api/_lib/meta-templates-sync.js';
-import { getGatewaySendEnvStatus, getGatewaySessionStatus, bookOrderGatewaySessionId, probeGatewayHealth } from '../api/_lib/whatsapp-gateway-send.js';
+import { getGatewaySendEnvStatus, getGatewaySessionStatus, bookOrderGatewaySessionId, resolveBookOrderGatewaySessionId, probeGatewayHealth } from '../api/_lib/whatsapp-gateway-send.js';
 import { ensureBooksellerPortalToken } from '../api/_lib/kitapci-portal.js';
 
 const ADMIN_ROLES = new Set(['super_admin', 'admin']);
 const ORDER_STATUSES = new Set(['pending', 'approved', 'notified', 'confirmed', 'shipped', 'cancelled']);
+
+function actorGatewaySessionId(actor) {
+  return resolveBookOrderGatewaySessionId(String(actor?.sub || actor?.id || '').trim());
+}
 
 function parseBody(req) {
   const b = req.body;
@@ -487,9 +491,9 @@ export default async function handler(req, res) {
       const gateway = getGatewaySendEnvStatus();
       const gatewayHealth = await probeGatewayHealth();
       let gatewayLive = null;
-      const actorId = String(actor.id || '').trim();
+      const actorId = String(actor.sub || actor.id || '').trim();
       const uiSessionId = actorId;
-      const sendSessionId = envSessionId || actorId;
+      const sendSessionId = actorGatewaySessionId(actor);
       if (gateway.configured || sendSessionId) {
         try {
           gatewayLive = await getGatewaySessionStatus(sendSessionId);
@@ -900,7 +904,8 @@ export default async function handler(req, res) {
       if (upErr) throw upErr;
       const notify = await notifyBooksellerForOrder(approved || { ...order, ...approvePatch }, {
         kitapciId,
-        kitapciName: order.kitapci_adi
+        kitapciName: order.kitapci_adi,
+        gatewaySessionId: actorGatewaySessionId(actor)
       });
       const { data: fresh } = await supabaseAdmin.from('kitap_siparisleri').select('*').eq('id', id).maybeSingle();
       if (!notify.ok) {
@@ -997,7 +1002,11 @@ export default async function handler(req, res) {
       await supabaseAdmin.from('kitap_siparisleri').update(prePatch).eq('id', id);
       const notify = await notifyBooksellerForOrder(
         { ...order, ...prePatch },
-        { kitapciId, kitapciName: order.kitapci_adi }
+        {
+          kitapciId,
+          kitapciName: order.kitapci_adi,
+          gatewaySessionId: actorGatewaySessionId(actor)
+        }
       );
       if (!notify.ok) {
         return res.status(400).json({

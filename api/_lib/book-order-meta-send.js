@@ -11,7 +11,8 @@ import {
   gatewaySendConfigured,
   sendGatewayTextMessage,
   getGatewaySendEnvStatus,
-  bookOrderGatewaySessionId
+  bookOrderGatewaySessionId,
+  resolveBookOrderGatewaySessionId
 } from './whatsapp-gateway-send.js';
 
 export const BOOK_ORDER_TEMPLATE_TYPE = 'kitap_siparis_bildirim';
@@ -120,16 +121,20 @@ export function renderBookOrderWhatsAppBody(order) {
   return renderMessageTemplate(BOOK_ORDER_TEMPLATE_CONTENT, buildBookOrderTemplateVars(order)).trim();
 }
 
-function bookOrderSendChannel() {
+function bookOrderSendChannel(fallbackUserId) {
   const forced = String(process.env.BOOK_ORDER_WHATSAPP_CHANNEL || 'gateway').trim().toLowerCase();
   if (forced === 'meta') return 'meta';
   if (forced === 'gateway') return 'gateway';
-  return gatewaySendConfigured() ? 'gateway' : 'meta';
+  return gatewaySendConfigured(fallbackUserId) ? 'gateway' : 'meta';
 }
 
-export async function sendBookOrderViaGateway(phone, order) {
+export async function sendBookOrderViaGateway(phone, order, gatewaySessionId) {
   const message = renderBookOrderWhatsAppBody(order);
-  return sendGatewayTextMessage({ phone, message });
+  return sendGatewayTextMessage({
+    phone,
+    message,
+    sessionId: resolveBookOrderGatewaySessionId(gatewaySessionId)
+  });
 }
 
 export async function upsertBookOrderTemplateDefaults() {
@@ -194,10 +199,11 @@ function mapSendResult(sent) {
 }
 
 /** Varsayılan: gateway. Meta yalnızca BOOK_ORDER_WHATSAPP_CHANNEL=meta veya fallback açıksa. */
-export async function sendBookOrderWhatsApp(phone, order) {
-  const channel = bookOrderSendChannel();
+export async function sendBookOrderWhatsApp(phone, order, opts = {}) {
+  const gatewaySessionId = resolveBookOrderGatewaySessionId(opts.gatewaySessionId);
+  const channel = bookOrderSendChannel(opts.gatewaySessionId);
   if (channel === 'gateway') {
-    const gw = await sendBookOrderViaGateway(phone, order);
+    const gw = await sendBookOrderViaGateway(phone, order, gatewaySessionId);
     if (gw.ok) return gw;
     if (String(process.env.BOOK_ORDER_WHATSAPP_FALLBACK_META || '').trim() === '1') {
       const meta = await sendBookOrderMetaWhatsApp(phone, order);

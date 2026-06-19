@@ -341,7 +341,14 @@ export async function resendBookOrderWhatsApp(
   });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error((j as { hint?: string; error?: string }).hint || (j as { error?: string }).error || 'WhatsApp gönderilemedi');
+    const wa = (j as { whatsapp?: { hint?: string; error?: string } }).whatsapp;
+    throw new Error(
+      (j as { hint?: string; error?: string }).hint ||
+        wa?.hint ||
+        wa?.error ||
+        (j as { error?: string }).error ||
+        'WhatsApp gönderilemedi'
+    );
   }
   const row = (j as { data?: BookOrderRow }).data;
   const wa = (j as { whatsapp?: BookOrderWhatsAppSendResult }).whatsapp || {};

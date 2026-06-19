@@ -23,6 +23,11 @@ export function bookOrderGatewaySessionId() {
   ).trim();
 }
 
+/** Env yoksa giriş yapan admin/koç oturumu (QR bağlı users.id). */
+export function resolveBookOrderGatewaySessionId(fallbackUserId) {
+  return bookOrderGatewaySessionId() || String(fallbackUserId || '').trim();
+}
+
 /** Günlük rapor hatırlatması — aynı QR oturumu (kitap siparişi ile paylaşılabilir). */
 export function reportReminderGatewaySessionId() {
   return String(
@@ -41,12 +46,8 @@ export function gatewayConfiguredForSession(sessionId) {
   );
 }
 
-export function gatewaySendConfigured() {
-  return Boolean(
-    resolveGatewayUpstream() &&
-      bookOrderGatewaySessionId() &&
-      String(process.env.APP_JWT_SECRET || '').trim()
-  );
+export function gatewaySendConfigured(fallbackUserId) {
+  return gatewayConfiguredForSession(resolveBookOrderGatewaySessionId(fallbackUserId));
 }
 
 export function getGatewaySendEnvStatus() {
@@ -73,7 +74,7 @@ function serviceGatewayJwt(sessionId) {
   });
 }
 
-async function gatewayFetch(path, { method = 'GET', body } = {}) {
+async function gatewayFetch(path, { method = 'GET', body, sessionId } = {}) {
   const upstream = resolveGatewayUpstream();
   if (!upstream) {
     return {
@@ -82,8 +83,14 @@ async function gatewayFetch(path, { method = 'GET', body } = {}) {
       data: { error: 'whatsapp_gateway_upstream_missing' }
     };
   }
+  const sid =
+    String(sessionId || '').trim() ||
+    (() => {
+      const m = String(path || '').match(/\/sessions\/([^/]+)/);
+      return m ? decodeURIComponent(m[1]) : bookOrderGatewaySessionId();
+    })();
   const headers = {
-    Authorization: `Bearer ${serviceGatewayJwt(bookOrderGatewaySessionId())}`
+    Authorization: `Bearer ${serviceGatewayJwt(sid)}`
   };
   const key = gatewayApiKey();
   if (key) headers['x-gateway-key'] = key;
@@ -133,7 +140,7 @@ export async function getGatewaySessionStatus(sessionId = bookOrderGatewaySessio
     };
   }
 
-  const r = await gatewayFetch(`/sessions/${encodeURIComponent(id)}/status`);
+  const r = await gatewayFetch(`/sessions/${encodeURIComponent(id)}/status`, { sessionId: id });
   const errCode = String(r.data?.error || '').trim();
   const st = String(r.data?.status || '').trim().toLowerCase();
 
@@ -145,6 +152,7 @@ export async function getGatewaySessionStatus(sessionId = bookOrderGatewaySessio
       invalid_signature:
         'APP_JWT_SECRET uyuşmuyor — VPS gateway .env içindeki APP_JWT_SECRET, Vercel ile aynı olmalı.',
       jwt_secret_missing: 'VPS’te APP_JWT_SECRET tanımlı değil.',
+      coach_scope_mismatch: 'Gateway oturum id uyuşmazlığı — BOOK_ORDER_GATEWAY_SESSION_ID QR bağlı kullanıcı id ile aynı olmalı.',
       unauthorized: 'Gateway yetkilendirme hatası.'
     };
     return {
@@ -176,16 +184,17 @@ export { probeGatewayHealth };
  * Gateway üzerinden düz metin WhatsApp gönderir.
  * @returns {Promise<{ ok: boolean, sid?: string|null, channel: string, error?: string, errorCode?: string, bodyPreview?: string }>}
  */
-export async function sendGatewayTextMessage({ phone, message, sessionId = bookOrderGatewaySessionId() }) {
+export async function sendGatewayTextMessage({ phone, message, sessionId }) {
   const e164 = normalizePhoneToE164(phone);
   const text = String(message || '').trim();
-  const sid = String(sessionId || '').trim();
+  const sid = resolveBookOrderGatewaySessionId(sessionId);
 
-  if (!gatewaySendConfigured()) {
+  if (!gatewayConfiguredForSession(sid)) {
     return {
       ok: false,
       channel: 'gateway',
-      error: 'Gateway yapılandırılmamış: WHATSAPP_GATEWAY_UPSTREAM, BOOK_ORDER_GATEWAY_SESSION_ID, APP_JWT_SECRET.',
+      error:
+        'Gateway yapılandırılmamış: WHATSAPP_GATEWAY_UPSTREAM, APP_JWT_SECRET ve QR bağlı oturum id (BOOK_ORDER_GATEWAY_SESSION_ID veya giriş yapan kullanıcı).',
       errorCode: 'GATEWAY_ENV'
     };
   }
@@ -212,7 +221,8 @@ export async function sendGatewayTextMessage({ phone, message, sessionId = bookO
 
   const r = await gatewayFetch(`/sessions/${encodeURIComponent(sid)}/send`, {
     method: 'POST',
-    body: { phone: e164.replace(/^\+/, ''), message: text }
+    body: { phone: e164.replace(/^\+/, ''), message: text },
+    sessionId: sid
   });
 
   if (!r.ok) {

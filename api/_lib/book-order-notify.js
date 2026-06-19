@@ -230,7 +230,9 @@ export async function notifyBooksellerForOrder(order, opts = {}) {
   }
 
   const enrichedOrder = await enrichOrderForNotify(order);
-  const sent = await sendBookOrderWhatsApp(phone, enrichedOrder);
+  const sent = await sendBookOrderWhatsApp(phone, enrichedOrder, {
+    gatewaySessionId: opts.gatewaySessionId
+  });
   const isGateway = sent.channel === 'gateway';
 
   const now = new Date().toISOString();
