@@ -27,6 +27,7 @@ export const VELI_KAYIT_PROGRAM_SECENEKLERI: string[] = [
   'TYT Maarif Model yaz kampı',
   'TYT yaz kampı',
   'LGS yaz kampı',
-  '5 ve 6. Sınıf yaz kampı',
+  '5, 6, 7. Sınıf yaz kampı',
+  'Kitap Okuma Atölyesi',
   '3 ve 4. Sınıf yaz kampı'
 ];

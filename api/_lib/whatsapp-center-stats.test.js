@@ -3,7 +3,8 @@ import {
   logRowOnIstanbulDay,
   templateTelemetry,
   cronVisualState,
-  isOperationalFailure
+  isOperationalFailure,
+  isConfigurationFailure
 } from './whatsapp-center-stats.js';
 
 const today = '2026-05-20';
@@ -18,6 +19,7 @@ assert.equal(logRowOnIstanbulDay({ log_date: today, sent_at: null }, today), tru
 
 assert.equal(isOperationalFailure({ error: 'invalid_phone' }), true);
 assert.equal(isOperationalFailure({ error: 'Meta API (#132001)' }), false);
+assert.equal(isConfigurationFailure({ error: '(#3) Application does not have the API granular permission' }), true);
 
 const tpl = {
   id: '1',
@@ -37,6 +39,36 @@ assert.equal(tel.success_today, 1);
 assert.equal(tel.failed_today, 2);
 assert.equal(tel.failed_today_operational, 1);
 assert.equal(tel.badge, 'active');
+
+const kitapTpl = {
+  id: '2',
+  type: 'kitap_siparis_bildirim',
+  name: 'kitap_siparisi (Meta)',
+  meta_template_name: 'kitap_siparisi',
+  is_active: true
+};
+const kitapLogs = [
+  {
+    kind: 'book_order_notify',
+    status: 'failed',
+    sent_at: `${today}T11:00:00+03:00`,
+    log_date: today,
+    error: '(#3) Application does not have the API granular permission',
+    meta_template_name: 'kitap_siparisi'
+  },
+  {
+    kind: 'kitap_siparis_bildirim',
+    status: 'failed',
+    sent_at: `${today}T10:00:00+03:00`,
+    log_date: today,
+    error: '(#3) granular permission',
+    meta_template_name: 'kitap_siparisi'
+  }
+];
+const kitapTel = templateTelemetry(kitapTpl, kitapLogs, today);
+assert.equal(kitapTel.failed_today, 2);
+assert.equal(kitapTel.failed_today_configuration, 2);
+assert.equal(kitapTel.badge, 'active');
 
 const dailyDef = { expectEveryMinutes: 24 * 60, awaiting_first_run: false };
 const lastDaily = { ran_at: `${today}T19:00:00.000Z`, ok: true, skipped: null };

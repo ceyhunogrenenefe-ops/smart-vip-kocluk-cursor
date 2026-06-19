@@ -75,10 +75,6 @@
       "schedule": "*/10 * * * *"
     },
     {
-      "path": "/api/cron/bbb-class-attendance",
-      "schedule": "*/10 * * * *"
-    },
-    {
       "path": "/api/cron/daily-report-reminders",
       "schedule": "0 19 * * *"
     },
@@ -88,7 +84,7 @@
     },
     {
       "path": "/api/cron/book-orders",
-      "schedule": "* * * * *"
+      "schedule": "*/15 * * * *"
     },
     {
       "path": "/api/cron/edesis-sync",

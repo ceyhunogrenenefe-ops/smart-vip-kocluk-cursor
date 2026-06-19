@@ -12,7 +12,12 @@ export default async function handler(req, res) {
 
   try {
     const detail = await runBbbClassAttendanceJob();
-    await recordCronRun({ jobKey: 'bbb_class_attendance', ok: true, detail });
+    const skipped = detail.skipped === 'bbb_auto_attendance_disabled';
+    await recordCronRun({
+      jobKey: 'bbb_class_attendance',
+      ok: true,
+      detail: skipped ? { skipped: detail.skipped } : detail
+    });
     return res.status(200).json({ ok: true, ...detail });
   } catch (e) {
     const msg = errorMessage(e);

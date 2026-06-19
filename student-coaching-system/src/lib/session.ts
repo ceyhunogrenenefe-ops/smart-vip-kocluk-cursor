@@ -43,6 +43,16 @@ export const clearAuthToken = () => {
   localStorage.removeItem(TOKEN_KEY);
 };
 
+/**
+ * WhatsApp gateway URL'lerindeki oturum id = JWT `sub` (users.id) olmalıdır.
+ * effectiveUser (taklit) veya eski localStorage ile uyuşmazlık 403 coach_scope_mismatch üretir.
+ */
+export function getGatewaySessionUserId(fallbackUserId?: string): string {
+  const sub = peekJwtClaims(getAuthToken())?.sub;
+  if (sub && sub !== 'anonymous') return String(sub).trim();
+  return String(fallbackUserId || '').trim();
+}
+
 /** JWT göndermez: /api/auth-login gibi oturumsuz istekleri eski Bearer ile bozmamak için. */
 export async function fetchPublicPost(pathOrUrl: string, body: Record<string, unknown>): Promise<Response> {
   try {

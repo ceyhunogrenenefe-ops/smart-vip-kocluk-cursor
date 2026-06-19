@@ -1,3 +1,4 @@
+import { isBbbAutoAttendanceEnabled } from './bbb-auto-attendance-enabled.js';
 import { supabaseAdmin } from './supabase-admin.js';
 import { isBbbJoinUrl } from './bbb.js';
 import { pollBbbPresenceForSession, applyAutoAttendanceForClassSession } from './bbb-attendance.js';
@@ -10,6 +11,10 @@ import { errorMessage } from './error-msg.js';
  * Planlı grup dersleri: BBB katılımcı takibi + ders bitince otomatik yoklama.
  */
 export async function runBbbClassAttendanceJob() {
+  if (!isBbbAutoAttendanceEnabled()) {
+    return { skipped: 'bbb_auto_attendance_disabled', polled: 0, early_absent: 0, auto_attendance: 0, errors: [] };
+  }
+
   const now = Date.now();
   const since = new Date(now - 3 * 24 * 3600_000).toISOString().slice(0, 10);
   const until = new Date(now + 2 * 24 * 3600_000).toISOString().slice(0, 10);

@@ -4,17 +4,11 @@
  *
  * Ortam: WHATSAPP_GATEWAY_UPSTREAM=http://SUNUCU:4010 (sonunda / yok)
  */
-function resolveGatewayUpstream() {
-  const primary = String(process.env.WHATSAPP_GATEWAY_UPSTREAM || '').trim().replace(/\/$/, '');
-  if (primary) return primary;
-  /** Tek değişkenle kurulum: doğrudan VPS http(s) adresi (Vercel alan adı değil). */
-  const alt = String(process.env.WHATSAPP_GATEWAY_URL || '').trim().replace(/\/$/, '');
-  if (alt && /^https?:\/\//i.test(alt) && !/vercel\.app/i.test(alt)) return alt;
-  return '';
-}
+import { resolveGatewayUpstream } from './_lib/gateway-upstream.js';
 
 export default async function handler(req, res) {
   const upstream = resolveGatewayUpstream();
+  const upstreamHost = upstream.replace(/^https?:\/\//i, '');
   const tailRaw = req.query?.tail;
   const tail =
     tailRaw === undefined || tailRaw === null
@@ -34,7 +28,9 @@ export default async function handler(req, res) {
     return;
   }
 
-  const qs = new URL(req.url || '/', 'http://localhost.local').search || '';
+  const urlObj = new URL(req.url || '/', 'http://localhost.local');
+  urlObj.searchParams.delete('tail');
+  const qs = urlObj.search || '';
   const target = `${upstream}/${pathPart}${qs}`;
 
   /** @type {Record<string, string>} */
@@ -43,8 +39,14 @@ export default async function handler(req, res) {
   if (auth) fwd.Authorization = Array.isArray(auth) ? auth[0] : auth;
   const ct = req.headers['content-type'];
   if (ct) fwd['Content-Type'] = Array.isArray(ct) ? ct[0] : ct;
-  const gk = req.headers['x-gateway-key'];
-  if (gk) fwd['x-gateway-key'] = Array.isArray(gk) ? gk[0] : String(gk);
+  const gk =
+    req.headers['x-gateway-key'] ||
+    process.env.GATEWAY_API_KEY ||
+    process.env.WHATSAPP_GATEWAY_KEY ||
+    process.env.VITE_WHATSAPP_GATEWAY_KEY ||
+    '';
+  const gatewayKey = String(Array.isArray(gk) ? gk[0] : gk).trim();
+  if (gatewayKey) fwd['x-gateway-key'] = gatewayKey;
 
   const method = String(req.method || 'GET').toUpperCase();
   /** @type {RequestInit} */
@@ -63,21 +65,33 @@ export default async function handler(req, res) {
   }
 
   const isSendRoute = /\/send\/?$/i.test(pathPart);
+  const isStatusRoute = /\/status\/?$/i.test(pathPart);
   const timeoutMs = isSendRoute
-    ? Math.min(55000, Math.max(15000, Number(process.env.WA_GATEWAY_SEND_TIMEOUT_MS) || 48000))
-    : Math.min(25000, Math.max(8000, Number(process.env.WA_GATEWAY_STATUS_TIMEOUT_MS) || 20000));
-  const controller = new AbortController();
-  const tid = setTimeout(() => controller.abort(), timeoutMs);
+    ? Math.min(59000, Math.max(20000, Number(process.env.WA_GATEWAY_SEND_TIMEOUT_MS) || 55000))
+    : Math.min(45000, Math.max(10000, Number(process.env.WA_GATEWAY_STATUS_TIMEOUT_MS) || 30000));
+
+  const fetchOnce = async () => {
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(target, { ...init, signal: controller.signal });
+    } finally {
+      clearTimeout(tid);
+    }
+  };
 
   try {
-    const r = await fetch(target, { ...init, signal: controller.signal });
-    clearTimeout(tid);
+    let r = await fetchOnce();
+    const canRetry = method === 'GET' || method === 'HEAD' || isStatusRoute;
+    if (r.status === 502 && canRetry) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      r = await fetchOnce();
+    }
     const buf = Buffer.from(await r.arrayBuffer());
     const outCt = r.headers.get('content-type');
     if (outCt) res.setHeader('Content-Type', outCt);
     res.status(r.status).send(buf);
   } catch (e) {
-    clearTimeout(tid);
     const aborted =
       (e instanceof Error && e.name === 'AbortError') ||
       (typeof e === 'object' &&
@@ -87,17 +101,21 @@ export default async function handler(req, res) {
       res.status(504).json({
         ok: false,
         error: 'gateway_upstream_timeout',
+        upstream: upstreamHost,
         detail: `${timeoutMs}ms`,
         hint:
           'VPS/WhatsApp gateway bu sürede yanıt vermedi. Sunucu erişimi (WHATSAPP_GATEWAY_UPSTREAM), pm2, firewall ve gateway sürecini kontrol edin; Vercel Pro’da wa-gateway maxDuration artırılabilir.'
       });
       return;
     }
-    const msg = e instanceof Error ? e.message : 'proxy_failed';
+    const msg = e instanceof Error && e.message ? e.message.slice(0, 180) : 'proxy_failed';
     res.status(502).json({
       ok: false,
-      error: msg,
-      hint: 'Upstream’a bağlanılamadı (ağ/DNS). WHATSAPP_GATEWAY_UPSTREAM adresini doğrulayın.'
+      error: 'gateway_upstream_unreachable',
+      upstream: upstreamHost,
+      detail: msg,
+      hint:
+        'Upstream’a bağlanılamadı (ağ/DNS/firewall). WHATSAPP_GATEWAY_UPSTREAM adresini, gateway sürecinin o makinede çalıştığını ve 4010 erişimini doğrulayın.'
     });
   }
 }

@@ -447,7 +447,8 @@ export default function SettingsPage() {
     if (
       !confirm(
         `Veritabanından ${orphanPurgeCount} yetim kurumu kalıcı olarak silmek istiyor musunuz?\n\n` +
-          'Yalnızca öğrenci/koç/kullanıcı kaydına bağlı olmayan kurumlar silinir. Online VIP (ad veya 0850 303 40 14) korunur.'
+          'Yalnızca öğrenci/koç/kullanıcı/kitap siparişi kaydına bağlı olmayan kurumlar silinir. Online VIP (ad veya 0850 303 40 14) korunur.\n\n' +
+          'UYARI: Kurum silinirse o kuruma ait tüm kitap siparişleri ve kitapçılar da silinir.'
       )
     ) {
       return;
@@ -1063,7 +1064,7 @@ export default function SettingsPage() {
                 <code className="rounded bg-white/90 px-1">*/5 * * * *</code>; günlük rapor{' '}
                 <code className="rounded bg-white/90 px-1">/api/cron/daily-report-reminders</code> —{' '}
                 <code className="rounded bg-white/90 px-1">0 19 * * *</code> UTC = her gün saat{' '}
-                <strong>22:00 İstanbul</strong> (TR sabit UTC+3).{' '}
+                <strong>22:00 İstanbul</strong> (Meta şablon · TR UTC+3).{' '}
                 <span className="text-amber-900">
                   UTC için <code className="rounded bg-white/80 px-1">0 22 * * *</code> kullanmayın; İstanbul’da 01:00 tetiklenir.
                 </span>{' '}

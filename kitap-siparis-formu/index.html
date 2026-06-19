@@ -34,6 +34,15 @@
   button.submit{width:100%;margin-top:6px;font-family:'Archivo',sans-serif;font-size:16px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:#fff;background:var(--red);border:none;border-radius:12px;padding:16px;cursor:pointer;transition:background .15s,transform .08s;}
   button.submit:hover{background:var(--red-dark)}
   button.submit:active{transform:translateY(1px)}
+  .set-box{margin-top:4px;background:#f6f8fc;border:1.5px solid var(--line);border-radius:12px;padding:14px}
+  .set-box.loading{opacity:.85}
+  .set-hint{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.45}
+  .set-list{margin-top:8px;display:flex;flex-direction:column;gap:8px}
+  .set-item{display:flex;align-items:flex-start;gap:8px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  .set-item input{width:auto;margin-top:2px}
+  .set-item .set-title{font-weight:700;color:var(--navy)}
+  .set-preview{margin-top:8px;font-size:13px;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px 12px;line-height:1.5}
+  .set-preview .set-name{font-weight:700;color:var(--navy)}
   .priv{margin-top:13px;text-align:center;font-size:12px;color:var(--muted)}
   .success{display:none;padding:34px 32px 36px;text-align:center}
   .success.show{display:block}
@@ -67,6 +76,7 @@
           <div class="field" id="f-soyad"><label for="soyad">Soyadı <span class="req">*</span></label><input type="text" id="soyad" placeholder="Soyadınız"><div class="err-msg">Lütfen soyadınızı girin.</div></div>
         </div>
         <div class="field" id="f-ogr"><label for="ogrenci">Öğrencinin Adı <span class="req">*</span></label><input type="text" id="ogrenci" placeholder="Öğrencinin adı soyadı"><div class="err-msg">Lütfen öğrencinin adını girin.</div></div>
+        <div class="field" id="f-telefon"><label for="telefon">Veli Telefonu <span class="req">*</span></label><input type="tel" id="telefon" inputmode="tel" autocomplete="tel" placeholder="05xx xxx xx xx" required><div class="err-msg">Geçerli bir cep telefonu girin (05xx).</div></div>
         <div class="row">
           <div class="field" id="f-sinif"><label for="sinif">Sınıfı <span class="req">*</span></label>
             <select id="sinif"><option value="">Seçiniz…</option>
@@ -78,6 +88,15 @@
           <div class="field" id="f-odeme"><label for="odeme">Ücret Durumu <span class="req">*</span></label>
             <select id="odeme"><option value="">Seçiniz…</option><option>Ödendi</option><option>Ödenmedi</option></select>
             <div class="err-msg">Lütfen seçim yapın.</div></div>
+        </div>
+        <div class="field" id="f-kitapset">
+          <label>Gönderilecek VIP Kitap Setleri <span class="req">*</span></label>
+          <div class="set-box" id="setBox">
+            <div id="kitapset-list" class="set-list"></div>
+            <p class="set-hint" id="setHint">Sınıfı seçtikten sonra size uygun VIP setler listelenir. Birden fazla seçim yapabilirsiniz.</p>
+            <div class="set-preview" id="setPreview" style="display:none"></div>
+          </div>
+          <div class="err-msg">Lütfen en az bir kitap seti seçin.</div>
         </div>
         <div class="field" id="f-adres"><label for="adres">Adres <span class="req">*</span></label><textarea id="adres" placeholder="Mahalle, sokak, kapı no…"></textarea><div class="err-msg">Lütfen adresinizi girin.</div></div>
         <div class="row">
@@ -103,20 +122,180 @@
 <script>
   const SUPABASE_URL = "https://qwbckutxfmhnwfkljjpd.supabase.co";
   const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF3YmNrdXR4Zm1obndma2xqanBkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczODIzMTIsImV4cCI6MjA5Mjk1ODMxMn0.tPAuqU4w2WrxhXnOGbmbCAydGLzszg1BtjkTVDPwfKU";
+  const INSTITUTION_ID = '73323d75-eea1-4552-8bba-d50555423589';
+  const SETS_API = 'https://www.dersonlinevipkocluk.com/api/book-orders?scope=public-kitap-sets&institution_id=' + INSTITUTION_ID;
+  const SUBMIT_API = 'https://www.dersonlinevipkocluk.com/api/book-orders?op=public-submit';
 
   const form = document.getElementById('orderForm');
+  const kitapSetWrap = document.getElementById('f-kitapset');
+  const kitapSetListEl = document.getElementById('kitapset-list');
+  const setBox = document.getElementById('setBox');
+  const setHint = document.getElementById('setHint');
+  const setPreview = document.getElementById('setPreview');
+  let allBookSets = [];
+  let setsRequireSelection = false;
+  let setsLoading = true;
+
+  function escapeHtml(s) {
+    return String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function sinifKey(val) {
+    const m = String(val || '').match(/^(\d+)/);
+    return m ? m[1] : null;
+  }
+
+  function setsForSinif(val) {
+    const k = sinifKey(val);
+    if (!k) return [];
+    return allBookSets.filter(s => Array.isArray(s.siniflar) && s.siniflar.map(String).includes(k));
+  }
+
+  function selectedBookSets() {
+    const checked = kitapSetListEl.querySelectorAll('input[name="kitapset-item"]:checked');
+    const ids = Array.from(checked).map(x => String(x.value || ''));
+    return allBookSets.filter(s => ids.includes(String(s.id)));
+  }
+
+  function selectedBookSetIds() {
+    return selectedBookSets().map(s => String(s.id));
+  }
+
+  function refreshKitapSetOptions() {
+    const sinifVal = document.getElementById('sinif').value;
+    const grade = sinifKey(sinifVal);
+    const matches = setsForSinif(sinifVal);
+    setsRequireSelection = Boolean(grade && matches.length > 0);
+    kitapSetWrap.style.display = (sinifVal && !grade) ? 'none' : '';
+    kitapSetListEl.innerHTML = '';
+    setPreview.style.display = 'none';
+    setBox.classList.toggle('loading', setsLoading);
+
+    if (sinifVal && !grade) {
+      kitapSetWrap.classList.remove('invalid');
+      return;
+    }
+
+    if (!grade) {
+      setHint.textContent = 'Sınıfı seçtikten sonra size uygun VIP setler listelenir. Birden fazla seçim yapabilirsiniz.';
+    } else if (setsLoading) {
+      setHint.textContent = 'Kitap setleri yükleniyor, lütfen bekleyin.';
+    } else if (!matches.length) {
+      setHint.textContent = 'Bu sınıf için henüz kitap seti yok. Kurumla iletişime geçin.';
+      setsRequireSelection = false;
+    } else {
+      matches.forEach(s => {
+        const row = document.createElement('label');
+        row.className = 'set-item';
+        row.innerHTML =
+          '<input type="checkbox" name="kitapset-item" value="' + escapeHtml(String(s.id)) + '">' +
+          '<span><span class="set-title">' + escapeHtml(s.name) + '</span><br><span>' + escapeHtml(s.kitap_icerigi || '') + '</span></span>';
+        kitapSetListEl.appendChild(row);
+      });
+      if (matches.length === 1) {
+        const first = kitapSetListEl.querySelector('input[name="kitapset-item"]');
+        if (first) first.checked = true;
+      }
+      const boxes = kitapSetListEl.querySelectorAll('input[name="kitapset-item"]');
+      boxes.forEach((box) => {
+        box.addEventListener('change', () => { updateSetPreview(); check('kitapset'); });
+      });
+      setHint.textContent = matches.length > 1
+        ? 'Sınıfınıza uygun ' + matches.length + ' set var — birden fazla seçim yapabilirsiniz.'
+        : 'Sınıfınıza uygun tek set otomatik seçildi.';
+    }
+    updateSetPreview();
+    if (!setsRequireSelection) document.getElementById('f-kitapset').classList.remove('invalid');
+  }
+
+  function updateSetPreview() {
+    const sets = selectedBookSets();
+    if (!sets.length) {
+      setPreview.style.display = 'none';
+      setPreview.innerHTML = '';
+      return;
+    }
+    const lines = sets.map((s) => '<li><b>' + escapeHtml(s.name) + '</b> — ' + escapeHtml(s.kitap_icerigi || '') + '</li>');
+    setPreview.style.display = 'block';
+    setPreview.innerHTML =
+      '<div class="set-name">Seçilen setler (' + sets.length + ')</div>' +
+      '<ul style="margin:6px 0 0 16px;padding:0">' + lines.join('') + '</ul>';
+  }
+
+  async function loadBookSetsFromSupabase() {
+    const q = 'institution_id=eq.' + INSTITUTION_ID + '&is_active=eq.true&order=sort_order.asc,name.asc&select=id,name,kitap_icerigi,siniflar,sort_order';
+    const res = await fetch(SUPABASE_URL + '/rest/v1/kitap_siparis_setleri?' + q, {
+      headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY }
+    });
+    if (!res.ok) throw new Error('supabase_sets_failed');
+    return res.json();
+  }
+
+  async function loadBookSets() {
+    setsLoading = true;
+    refreshKitapSetOptions();
+    try {
+      allBookSets = await loadBookSetsFromSupabase();
+    } catch (_) {
+      try {
+        const res = await fetch(SETS_API);
+        if (res.ok) {
+          const j = await res.json();
+          allBookSets = Array.isArray(j.data) ? j.data : [];
+        }
+      } catch (_) { allBookSets = []; }
+    }
+    setsLoading = false;
+    refreshKitapSetOptions();
+  }
+
+  function isValidTrPhone(v) {
+    const d = String(v || '').replace(/\D/g, '');
+    if (d.length === 10 && d.startsWith('5')) return true;
+    if (d.length === 11 && d.startsWith('05')) return true;
+    if (d.length === 12 && d.startsWith('90') && d[2] === '5') return true;
+    return false;
+  }
+
+  function formatTrPhoneInput(raw) {
+    let d = String(raw || '').replace(/\D/g, '');
+    if (d.startsWith('90')) d = '0' + d.slice(2);
+    if (d.length && !d.startsWith('0')) d = d.startsWith('5') ? '0' + d : d;
+    d = d.slice(0, 11);
+    if (d.length <= 4) return d;
+    if (d.length <= 7) return d.slice(0, 4) + ' ' + d.slice(4);
+    if (d.length <= 9) return d.slice(0, 4) + ' ' + d.slice(4, 7) + ' ' + d.slice(7);
+    return d.slice(0, 4) + ' ' + d.slice(4, 7) + ' ' + d.slice(7, 9) + ' ' + d.slice(9);
+  }
+
   const fields = {
     ad:     {wrap:'f-ad',    el:'ad',      test:v=>v.trim().length>=2},
     soyad:  {wrap:'f-soyad', el:'soyad',   test:v=>v.trim().length>=2},
     ogr:    {wrap:'f-ogr',   el:'ogrenci', test:v=>v.trim().length>=2},
     sinif:  {wrap:'f-sinif', el:'sinif',   test:v=>v!==''},
     odeme:  {wrap:'f-odeme', el:'odeme',   test:v=>v!==''},
+    kitapset:{wrap:'f-kitapset', el:'sinif', test:v=>!setsRequireSelection||selectedBookSets().length>0},
+    telefon:{wrap:'f-telefon', el:'telefon', test:v=>isValidTrPhone(v)},
     adres:  {wrap:'f-adres', el:'adres',   test:v=>v.trim().length>=5},
     ilce:   {wrap:'f-ilce',  el:'ilce',    test:v=>v.trim().length>=2},
     il:     {wrap:'f-il',    el:'il',      test:v=>v.trim().length>=2},
   };
   function check(k){const f=fields[k];const ok=f.test(document.getElementById(f.el).value);document.getElementById(f.wrap).classList.toggle('invalid',!ok);return ok;}
   Object.keys(fields).forEach(k=>{const i=document.getElementById(fields[k].el);i.addEventListener('blur',()=>check(k));i.addEventListener('input',()=>{if(document.getElementById(fields[k].wrap).classList.contains('invalid'))check(k);});});
+  document.getElementById('telefon').addEventListener('input', e=>{
+    const el = e.target;
+    const pos = el.selectionStart;
+    const before = el.value.length;
+    el.value = formatTrPhoneInput(el.value);
+    const delta = el.value.length - before;
+    el.setSelectionRange(Math.max(0, pos + delta), Math.max(0, pos + delta));
+  });
+  document.getElementById('sinif').addEventListener('change', refreshKitapSetOptions);
+  void loadBookSets();
 
   const submitBtn = form.querySelector('button.submit');
   const errBox = document.getElementById('formError');
@@ -132,16 +311,30 @@
     const ogrenci = document.getElementById('ogrenci').value.trim();
     const odeme = document.getElementById('odeme').value;
     const veliAdSoyad = (ad + ' ' + soyad).trim();
+    const selectedSets = selectedBookSets();
+    const selectedSetIds = selectedBookSetIds();
+    const kitaplarText = selectedSets.length
+      ? selectedSets.map((s) => s.name + ' — ' + (s.kitap_icerigi || '')).join(' | ')
+      : (setsRequireSelection ? '' : 'Kitap siparişi');
+    if (setsRequireSelection && !selectedSets.length) {
+      check('kitapset');
+      const firstBox = kitapSetListEl.querySelector('input[name="kitapset-item"]');
+      if (firstBox) firstBox.focus();
+      return;
+    }
+    const telefon = document.getElementById('telefon').value.trim();
     const data = {
-      institution_id: '73323d75-eea1-4552-8bba-d50555423589',
+      institution_id: INSTITUTION_ID,
       veli_ad_soyad: veliAdSoyad,
       veli_adi: veliAdSoyad,
       ogrenci_ad_soyad: ogrenci,
       ogrenci_adi: ogrenci,
-      kitaplar: 'Kitap siparişi',
+      kitaplar: kitaplarText,
+      kitap_set_ids: selectedSetIds,
+      kitap_set_id: selectedSetIds[0] || null,
       sinif: document.getElementById('sinif').value,
       ucret_durumu: odeme,
-      telefon: 'Belirtilmedi',
+      telefon,
       adres: document.getElementById('adres').value.trim(),
       ilce: document.getElementById('ilce').value.trim(),
       il: document.getElementById('il').value.trim(),
@@ -154,14 +347,40 @@
 
     submitBtn.disabled=true; const old=submitBtn.textContent; submitBtn.textContent='Gönderiliyor…';
     try{
-      const res = await fetch(SUPABASE_URL+'/rest/v1/kitap_siparisleri',{
-        method:'POST',
-        headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Content-Type':'application/json','Prefer':'return=minimal'},
-        body: JSON.stringify(data)
+      const payload = {
+        institution_id: INSTITUTION_ID,
+        veli_ad_soyad: veliAdSoyad,
+        ogrenci_ad_soyad: ogrenci,
+        kitaplar: kitaplarText,
+        kitap_set_ids: selectedSetIds,
+        kitap_set_id: selectedSetIds[0] || null,
+        sinif: document.getElementById('sinif').value,
+        ucret_durumu: odeme,
+        telefon,
+        adres: document.getElementById('adres').value.trim(),
+        ilce: document.getElementById('ilce').value.trim(),
+        il: document.getElementById('il').value.trim(),
+        siparis_notu: null,
+        form_payload: { ad, soyad, ogrenci_adi: ogrenci, odeme_durumu: odeme }
+      };
+      let res = await fetch(SUBMIT_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
       });
-      if(!res.ok){
+      if (!res.ok) {
         const errText = await res.text().catch(()=>'');
-        console.error('kitap_siparisleri insert failed', res.status, errText);
+        console.error('public-submit failed', res.status, errText);
+        let msg = 'Gönderim sırasında bir sorun oluştu. Lütfen tekrar deneyin.';
+        try {
+          const j = JSON.parse(errText);
+          if (j.error === 'telefon_required' || j.error === 'invalid_telefon') {
+            msg = j.hint || 'Geçerli veli telefonu gerekli (05xx xxx xx xx).';
+            document.getElementById('f-telefon').classList.add('invalid');
+            document.getElementById('telefon').focus();
+          }
+        } catch (_) {}
+        errBox.textContent = msg;
         throw new Error(errText || 'fail');
       }
     }catch(err){ submitBtn.disabled=false; submitBtn.textContent=old; errBox.style.display='block'; return; }
@@ -169,13 +388,25 @@
 
     document.getElementById('okName').textContent = ad+' '+soyad;
     document.getElementById('summary').innerHTML =
-      '<div><span class="lbl">Öğrenci:</span> <b>'+ogrenci+'</b></div>'+
-      '<div><span class="lbl">Sınıf:</span> <b>'+data.sinif+'</b></div>'+
-      '<div><span class="lbl">Adres:</span> <b>'+data.adres+'</b></div>'+
-      '<div><span class="lbl">İlçe / İl:</span> <b>'+data.ilce+' / '+data.il+'</b></div>';
+      '<div><span class="lbl">Öğrenci:</span> <b>'+escapeHtml(ogrenci)+'</b></div>'+
+      '<div><span class="lbl">Sınıf:</span> <b>'+escapeHtml(data.sinif)+'</b></div>'+
+      (selectedSets.length
+        ? '<div><span class="lbl">Kitap setleri:</span> <b>' + selectedSets.map(s => escapeHtml(s.name)).join(', ') + '</b></div>'
+        : '')+
+      '<div><span class="lbl">Telefon:</span> <b>'+escapeHtml(telefon)+'</b></div>'+
+      '<div><span class="lbl">Adres:</span> <b>'+escapeHtml(data.adres)+'</b></div>'+
+      '<div><span class="lbl">İlçe / İl:</span> <b>'+escapeHtml(data.ilce)+' / '+escapeHtml(data.il)+'</b></div>';
     const pn = document.getElementById('paynote');
-    if(odeme==='Ödendi'){ pn.className='paynote paid'; pn.textContent='✓ Ödeme alındı olarak işaretlendi.'; }
-    else { pn.className='paynote unpaid'; pn.textContent='● Ödeme bekleniyor — ödeme için sizinle iletişime geçilecektir.'; }
+    if (odeme === 'Ödendi') {
+      pn.className = 'paynote paid';
+      pn.textContent = '✓ Ödeme alındı olarak kaydedildi. Siparişiniz onaylandıktan sonra kargoya verilecektir.';
+    } else if (odeme === 'Ödenmedi') {
+      pn.className = 'paynote unpaid';
+      pn.textContent = '● Ödenmedi — ödeme tamamlandığında siparişiniz işleme alınacaktır.';
+    } else {
+      pn.className = 'paynote unpaid';
+      pn.textContent = '● Ödeme durumu kaydedildi.';
+    }
 
     document.getElementById('formWrap').style.display='none';
     document.getElementById('success').classList.add('show');
@@ -184,6 +415,9 @@
 
   document.getElementById('restart').addEventListener('click', ()=>{
     form.reset();
+    errBox.style.display = 'none';
+    errBox.textContent = 'Gönderim sırasında bir sorun oluştu. Lütfen tekrar deneyin.';
+    refreshKitapSetOptions();
     Object.values(fields).forEach(f=>document.getElementById(f.wrap).classList.remove('invalid'));
     document.getElementById('success').classList.remove('show');
     document.getElementById('formWrap').style.display='block';

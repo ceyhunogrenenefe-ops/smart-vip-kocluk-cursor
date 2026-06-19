@@ -22,6 +22,9 @@ function humanizeGatewayError(status: number, data: { error?: string; detail?: s
   if (code === 'send_message_timeout') {
     return 'WhatsApp sunucusu zaman aşımına uğradı. VPS’te gateway (pm2) çalışıyor mu kontrol edin; tekrar deneyin.';
   }
+  if (code === 'send_precheck_timeout') {
+    return 'WhatsApp ön kontrolü (numara doğrulama) zaman aşımına uğradı. Bağlantı yeni açıldıysa 2-3 sn bekleyip tekrar deneyin.';
+  }
   if (code === 'number_not_on_whatsapp') {
     return 'Bu numara WhatsApp’ta kayıtlı görünmüyor. Veli numarasını 05… veya 905… formatında güncelleyin.';
   }
@@ -30,6 +33,15 @@ function humanizeGatewayError(status: number, data: { error?: string; detail?: s
   }
   if (code === 'phone_and_message_required') {
     return 'Telefon veya mesaj eksik (proxy gövdesi ulaşmamış olabilir). Sayfayı yenileyip tekrar deneyin.';
+  }
+  if (code === 'invalid_gateway_key') {
+    return 'GATEWAY_API_KEY uyuşmuyor — VPS whatsapp-gateway .env dosyasına Vercel’deki aynı anahtarı yazın: pm2 restart whatsapp-gateway';
+  }
+  if (code === 'missing_token' || code === 'invalid_signature' || code === 'jwt_secret_missing') {
+    return 'JWT/APP_JWT_SECRET uyuşmuyor — çıkış yapıp tekrar giriş yapın; VPS gateway .env içinde APP_JWT_SECRET Vercel ile aynı olmalı.';
+  }
+  if (status === 502 || code === 'fetch failed' || code === 'proxy_failed') {
+    return 'VPS gateway kapalı veya erişilemiyor (502). Sunucuda: pm2 status → whatsapp-gateway çalıştırın; firewall 4010.';
   }
   const parts = [data.error, data.detail, data.hint].filter(
     (x): x is string => typeof x === 'string' && x.length > 0

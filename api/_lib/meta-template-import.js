@@ -3,10 +3,13 @@ import {
   fetchAllMetaMessageTemplates,
   fetchMetaTemplatesForName,
   fetchMetaTemplatesFromPhoneWaba,
+  fetchTemplatesForWaba,
   findMetaTemplatesByName,
   findMetaTemplatesByNameLoose,
   findSimilarMetaTemplateNames,
-  resolveWabaIds
+  isMetaTemplateSendableStatus,
+  resolveWabaIds,
+  templateBodyUsesNamedParams
 } from './meta-templates-sync.js';
 
 const GRAPH = () => String(process.env.META_GRAPH_API_VERSION || 'v21.0').trim() || 'v21.0';
@@ -56,6 +59,14 @@ export function extractBodyFromComponents(components) {
   return String(body?.text || '').trim();
 }
 
+/** Meta gövdesi yalnızca {{1}}, {{2}} … kullanıyorsa adlandırılmış parametre gönderilmemeli. */
+export function bodyUsesOnlyNumericPlaceholders(text) {
+  const t = String(text || '');
+  const hasNamed = /\{\{[a-zA-Z_][a-zA-Z0-9_]*\}\}/.test(t);
+  const hasNumeric = /\{\{\d+\}\}/.test(t);
+  return hasNumeric && !hasNamed;
+}
+
 export function slugTypeFromMetaName(name) {
   const slug = String(name || '')
     .trim()
@@ -91,8 +102,9 @@ function pickTemplateRow(rows, wantLang) {
 
 function pickApprovedPhoneWabaRow(matches, preferredLang) {
   const list = matches || [];
-  const approved = list.filter((r) => String(r.status || '').toUpperCase() === 'APPROVED');
-  const pool = approved.length ? approved : list;
+  const approved = list.filter((r) => isMetaTemplateSendableStatus(r.status));
+  const pool = approved;
+  if (!pool.length) return null;
   if (preferredLang) {
     const hit = pool.find((r) => langMatches(preferredLang, r.language));
     if (hit) return hit;
@@ -110,12 +122,13 @@ function pickApprovedPhoneWabaRow(matches, preferredLang) {
 /**
  * Gönderim numarasının WABA'sından message_templates satırını günceller.
  * sendAutomatedWhatsApp ile aynı dil/bağlama kaynağını kullanır (#132001 önlemi).
- * @param {{ type: string, metaName: string, displayName?: string, preferredLang?: string, canonicalBindings?: string[] | null }} opts
+ * @param {{ type: string, metaName: string, displayName?: string, preferredLang?: string, canonicalBindings?: string[] | null, phoneWabaOnly?: boolean }} opts
  */
 export async function syncMessageTemplateRowFromPhoneWaba(opts) {
   const type = String(opts?.type || '').trim();
   const metaName = String(opts?.metaName || '').trim();
   const preferredLang = String(opts?.preferredLang || 'tr').trim() || 'tr';
+  const phoneWabaOnly = opts?.phoneWabaOnly === true;
   if (!type || !metaName) {
     return { ok: false, error: 'type_and_meta_name_required' };
   }
@@ -131,7 +144,7 @@ export async function syncMessageTemplateRowFromPhoneWaba(opts) {
     hit = pickApprovedPhoneWabaRow(phone.matches, preferredLang);
   }
 
-  if (!hit?.name) {
+  if (!hit?.name && !phoneWabaOnly) {
     const detail = await fetchMetaTemplateWithComponents(metaName, preferredLang);
     if (detail.ok && detail.template) {
       hit = detail.template;
@@ -140,27 +153,77 @@ export async function syncMessageTemplateRowFromPhoneWaba(opts) {
     }
   }
 
+  if (!hit?.name && phone.ok && phone.matches?.length) {
+    const pending = phone.matches
+      .map((m) => `${m.language || '?'}: ${m.status || '?'}`)
+      .join(', ');
+    return {
+      ok: false,
+      error: 'template_not_approved',
+      waba_id: wabaId,
+      searched_name: metaName,
+      hint: `Gönderim numarasının WABA'sında "${metaName}" var ancak henüz onaylı değil (${pending}). Meta Business Manager'da şablonu onaylayın.`,
+      available_languages: phone.matches.map((m) => ({
+        language: m.language,
+        status: m.status
+      }))
+    };
+  }
+
   if (!hit?.name) {
+    let hint = phone.hint || '';
+    if (!hint && phone.ok) {
+      hint = `Gönderim numaranızın WABA'sında onaylı "${metaName}" şablonu yok. Meta BM'de aynı WhatsApp hesabında oluşturup onaylayın (dil: tr veya tr_TR).`;
+    }
+    if (!hint) {
+      hint =
+        'META_WABA_ID ekleyin (WhatsApp Manager → Hesap kimliği) veya token ile phone number aynı uygulamadan olsun.';
+    }
+    if (phone.ok && wabaId) {
+      const tok = process.env.META_WHATSAPP_TOKEN?.trim();
+      const full = await fetchTemplatesForWaba(wabaId, tok);
+      if (full.ok) {
+        const kitapLike = (full.templates || [])
+          .filter((t) => /kitap/i.test(String(t.name || '')))
+          .slice(0, 8)
+          .map((t) => `${t.name} [${t.language}, ${t.status}]`);
+        if (kitapLike.length) {
+          hint += ` WABA'daki kitap şablonları: ${kitapLike.join('; ')}.`;
+        }
+      }
+    }
     return {
       ok: false,
       error: phone.ok ? 'template_not_found_on_waba' : phone.error || 'phone_waba_unresolved',
       waba_id: wabaId,
       searched_name: metaName,
-      hint:
-        phone.hint ||
-        (phone.ok
-          ? `WABA'da "${metaName}" şablonu bulunamadı. Meta BM'de onaylı olduğundan emin olun.`
-          : 'META_WABA_ID ekleyin (WhatsApp Manager → Hesap kimliği) veya token ile phone number aynı uygulamadan olsun.')
+      hint
     };
   }
 
   const bodyText = extractBodyFromComponents(hit.components);
   const parsedVars = parseBodyVariablesFromText(bodyText);
+  const numericOnly = bodyUsesOnlyNumericPlaceholders(bodyText);
   const canonical = Array.isArray(opts?.canonicalBindings)
     ? opts.canonicalBindings.map((x) => String(x || '').trim()).filter(Boolean)
     : null;
-  const bindings = canonical?.length ? canonical : parsedVars;
-  const namedParams = parsedVars.some((v) => !/^param_\d+$/.test(v));
+  let bindings = parsedVars;
+  if (canonical?.length && canonical.length === parsedVars.length) {
+    if (numericOnly) {
+      bindings = canonical;
+    } else {
+      const parsedLc = parsedVars.map((v) => String(v || '').toLowerCase());
+      const canonLc = canonical.map((v) => String(v || '').toLowerCase());
+      const sameSet =
+        parsedLc.length === canonLc.length && parsedLc.every((v) => canonLc.includes(v));
+      bindings = sameSet ? parsedVars : canonical;
+    }
+  }
+  const namedParams = numericOnly
+    ? false
+    : String(hit.parameter_format || '').toUpperCase() === 'NAMED' ||
+      templateBodyUsesNamedParams(hit.components) ||
+      parsedVars.some((v) => !/^param_\d+$/.test(v));
 
   const now = new Date().toISOString();
   const patch = {

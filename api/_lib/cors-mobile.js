@@ -7,7 +7,9 @@ const DEFAULT_ALLOWED = [
   'https://dersonlinevipkocluk.com',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
-  'https://smart-kocluk-ceyhu.vercel.app'
+  'https://smart-kocluk-ceyhu.vercel.app',
+  'https://kitap-siparis-formu.vercel.app',
+  'https://kocluk-kayit-formu.vercel.app'
 ];
 
 function allowedOrigins() {

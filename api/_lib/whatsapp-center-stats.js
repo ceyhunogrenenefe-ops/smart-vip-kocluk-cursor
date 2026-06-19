@@ -16,6 +16,8 @@ export const KIND_LABELS_TR = {
   report_reminder: 'Günlük rapor hatırlatma',
   report_reminder_parent: 'Veli rapor hatırlatma',
   meeting_notification: 'Görüşme hatırlatma',
+  kitap_siparis_bildirim: 'Kitap siparişi — kitapçı',
+  book_order_notify: 'Kitap siparişi — kitapçı',
   template_test: 'Şablon testi',
   coach_whatsapp_auto: 'Koç otomasyon'
 };
@@ -29,7 +31,8 @@ export const TEMPLATE_TYPE_TO_LOG_KINDS = {
   lesson_reminder: ['lesson_reminder'],
   lesson_reminder_parent: ['lesson_reminder_parent'],
   report_reminder: ['report_reminder', 'report_reminder_parent'],
-  meeting_notification: ['meeting_notification', 'whatsapp_created', 'whatsapp_reminder_10m']
+  meeting_notification: ['meeting_notification', 'whatsapp_created', 'whatsapp_reminder_10m'],
+  kitap_siparis_bildirim: ['kitap_siparis_bildirim', 'book_order_notify']
 };
 
 export function istanbulDayUtcRange(ymd) {
@@ -65,6 +68,23 @@ export function isOperationalFailure(row) {
     err.includes('no_valid_phone') ||
     err.includes('parent_phone_missing') ||
     err.includes('phone_missing')
+  );
+}
+
+/** Token / izin / şablon yapılandırması — şablon sağlık rozetini kirletmez */
+export function isConfigurationFailure(row) {
+  const err = String(row?.error || row?.twilio_error_code || '').toLowerCase();
+  if (!err) return false;
+  return (
+    err.includes('(#3)') ||
+    err.includes('granular permission') ||
+    err.includes('missing_meta_whatsapp') ||
+    err.includes('meta_whatsapp') ||
+    err.includes('meta_send_failed') ||
+    err.includes('meta_template_name_required') ||
+    err.includes('template_not_found') ||
+    err.includes('132001') ||
+    err.includes('permission')
   );
 }
 
@@ -124,6 +144,7 @@ export function templateTelemetry(tpl, logsPool, todayYmd) {
   let okToday = 0;
   let failToday = 0;
   let failTodayOperational = 0;
+  let failTodayConfiguration = 0;
   let lastSent = null;
 
   for (const row of logsPool || []) {
@@ -144,6 +165,7 @@ export function templateTelemetry(tpl, logsPool, todayYmd) {
       else if (row.status === 'failed') {
         failToday += 1;
         if (isOperationalFailure(row)) failTodayOperational += 1;
+        else if (isConfigurationFailure(row)) failTodayConfiguration += 1;
       }
     }
     if (row.status === 'sent' && sentMs && (!lastSent || sentMs > new Date(lastSent).getTime())) {
@@ -153,7 +175,7 @@ export function templateTelemetry(tpl, logsPool, todayYmd) {
 
   const isActive = tpl.is_active !== false;
   const metaMissing = !metaName;
-  const failTodayReal = failToday - failTodayOperational;
+  const failTodayReal = failToday - failTodayOperational - failTodayConfiguration;
 
   let badge = 'active';
   if (!isActive) badge = 'inactive';
@@ -173,6 +195,7 @@ export function templateTelemetry(tpl, logsPool, todayYmd) {
     success_today: okToday,
     failed_today: failToday,
     failed_today_operational: failTodayOperational,
+    failed_today_configuration: failTodayConfiguration,
     total_sent_window: total7d,
     success_count: ok7d,
     failed_count: fail7d,

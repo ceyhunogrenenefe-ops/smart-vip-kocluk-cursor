@@ -44,6 +44,29 @@ export interface QuotaSnapshot {
 type TopicRow = Database['public']['Tables']['topics']['Row'];
 type TopicProgressRow = Database['public']['Tables']['topic_progress']['Row'];
 
+export type PendingRegistrationRow = {
+  id: string;
+  institution_id: string | null;
+  first_name: string;
+  last_name: string;
+  tc_identity_no: string;
+  email: string;
+  phone_e164: string;
+  class_level: string | null;
+  branch: string | null;
+  parent_name: string | null;
+  parent_phone_e164: string | null;
+  birth_date: string | null;
+  requested_role: UserRow['role'];
+  status: 'pending' | 'approved' | 'rejected';
+  rejection_reason: string | null;
+  approved_user_id: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 const LOOKS_LIKE_UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -62,6 +85,19 @@ function newInstitutionUuid(): string {
 
 // Veritabanı Servisi
 class DatabaseService {
+  /** Aynı anda yapılan tekrarlı GET isteklerini birleştirir (sayfa yenileme / çift context yükü). */
+  private inflightGets = new Map<string, Promise<unknown>>();
+
+  private dedupeGet<T>(key: string, run: () => Promise<T>): Promise<T> {
+    const hit = this.inflightGets.get(key);
+    if (hit) return hit as Promise<T>;
+    const p = run().finally(() => {
+      this.inflightGets.delete(key);
+    });
+    this.inflightGets.set(key, p);
+    return p;
+  }
+
   /** Sunucu { data } veya doğrudan dizi/obje döndürebilir; hatalı yanlış rewrite (SPA 405/200) güvenliği */
   private unwrapData<T>(payload: unknown): T | undefined {
     if (payload == null || typeof payload !== 'object') return undefined;
@@ -114,7 +150,7 @@ class DatabaseService {
 
   // Tüm kullanıcıları getir
   async getUsers(): Promise<UserRow[]> {
-    return this.fetchUsersPayload();
+    return this.dedupeGet('users', () => this.fetchUsersPayload());
   }
 
   // E-posta ile kullanıcı getir
@@ -172,6 +208,29 @@ class DatabaseService {
   // Kullanıcı sil
   async deleteUser(id: string): Promise<void> {
     await this.apiJson<{ ok: boolean }>(`/api/users?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  async getPendingRegistrations(): Promise<PendingRegistrationRow[]> {
+    return this.dedupeGet('pending-registrations', () =>
+      this.apiListJson<PendingRegistrationRow>(
+        '/api/registration-approvals',
+        '/api/registration-approvals'
+      )
+    );
+  }
+
+  async approvePendingRegistration(id: string): Promise<{ pending: PendingRegistrationRow; user: UserRow }> {
+    return this.apiJson<{ pending: PendingRegistrationRow; user: UserRow }>('/api/registration-approvals', {
+      method: 'POST',
+      body: JSON.stringify({ op: 'approve', id })
+    });
+  }
+
+  async rejectPendingRegistration(id: string, reason?: string): Promise<PendingRegistrationRow> {
+    return this.apiJson<PendingRegistrationRow>('/api/registration-approvals', {
+      method: 'POST',
+      body: JSON.stringify({ op: 'reject', id, rejection_reason: reason || null })
+    });
   }
 
   async getQuotaSnapshot(institutionId?: string | null): Promise<QuotaSnapshot> {
@@ -265,9 +324,25 @@ class DatabaseService {
 
   // Tüm öğrencileri getir
   async getStudents(institutionId?: string): Promise<StudentRow[]> {
-    const rows = await this.apiListJson<StudentRow>('/api/students', '/api/students');
-    if (!institutionId) return rows;
-    return rows.filter((s) => s.institution_id === institutionId);
+    const key = `students:${institutionId || '*'}`;
+    return this.dedupeGet(key, async () => {
+      const rows = await this.apiListJson<StudentRow>('/api/students', '/api/students');
+      if (!institutionId) return rows;
+      return rows.filter((s) => s.institution_id === institutionId);
+    });
+  }
+
+  /** Tek öğrenci profili (platform kullanıcı id / e-posta ile) — tam liste çekmeden. */
+  async getStudentForPlatformUser(
+    platformUserId: string,
+    email?: string
+  ): Promise<StudentRow | null> {
+    const q = new URLSearchParams();
+    if (platformUserId) q.set('platform_user_id', platformUserId);
+    if (email) q.set('email', email.trim().toLowerCase());
+    const path = `/api/students?${q.toString()}`;
+    const rows = await this.apiListJson<StudentRow>(path, path);
+    return rows[0] ?? null;
   }
 
   // Öğrenci oluştur (preferredId: kullanıcı yönetimi / yerel kimlik ile eşleşme için)
@@ -337,9 +412,12 @@ class DatabaseService {
 
   // Tüm koçları getir
   async getCoaches(institutionId?: string): Promise<CoachRow[]> {
-    const rows = await this.apiListJson<CoachRow>('/api/coaches', '/api/coaches');
-    if (!institutionId) return rows;
-    return rows.filter((c) => c.institution_id === institutionId);
+    const key = `coaches:${institutionId || '*'}`;
+    return this.dedupeGet(key, async () => {
+      const rows = await this.apiListJson<CoachRow>('/api/coaches', '/api/coaches');
+      if (!institutionId) return rows;
+      return rows.filter((c) => c.institution_id === institutionId);
+    });
   }
 
   // Koç oluştur

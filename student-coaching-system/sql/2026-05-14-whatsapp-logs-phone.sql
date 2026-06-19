@@ -32,7 +32,7 @@ UPDATE message_templates SET
 WHERE type = 'lesson_reminder';
 
 UPDATE message_templates SET
-  content = 'Merhaba {{student_name}}, bugün günlük çalışma raporunu henüz doldurmadın. Lütfen paneline girerek raporunu tamamla.',
+  content = 'Merhaba {{student_name}}, bugün günlük çalışma raporunu henüz doldurmadın. Lütfen Online Vip Ders Koçluk üzerinden haftalık takibinizi tamamlayın.',
   variables = '["student_name"]'::jsonb,
   twilio_variable_bindings = '["student_name"]'::jsonb,
   updated_at = NOW()

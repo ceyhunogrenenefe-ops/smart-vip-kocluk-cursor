@@ -50,5 +50,5 @@ npm run dev
 
 - CORS allowlist dışında origin kabul edilmez.
 - Tüm session endpointleri JWT ister (`Authorization: Bearer ...`).
-- Koç kendi `:coachId` dışındaki oturumları yönetemez (`coach_scope_mismatch`).
+- Koç kendi `:coachId` dışındaki oturumları yönetemez (`coach_scope_mismatch`). Admin ve süper admin de yalnızca JWT `sub` ile eşleşen oturuma erişir.
 - Opsiyonel ikinci katman: `x-gateway-key` header (`GATEWAY_API_KEY`).

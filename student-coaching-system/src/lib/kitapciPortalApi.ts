@@ -15,6 +15,7 @@ export type KitapciPortalOrder = {
   ilce?: string | null;
   il?: string | null;
   ucret_durumu?: string | null;
+  kitaplar?: string | null;
   siparis_notu?: string | null;
   status: string;
   whatsapp_sent_at?: string | null;

@@ -52,6 +52,20 @@ export function getMetaWhatsAppEnvStatus() {
   };
 }
 
+/** Meta webhook doğrulama token’ı — teslimat (delivered/failed) güncellemesi için zorunlu. */
+export function getMetaWebhookEnvStatus() {
+  const verifyToken = String(
+    process.env.META_WEBHOOK_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || ''
+  ).trim();
+  return {
+    configured: Boolean(verifyToken),
+    webhook_url: 'https://www.dersonlinevipkocluk.com/api/meta/webhook',
+    hint: verifyToken
+      ? 'Meta BM → Webhook URL bu adres + aynı Verify Token; messages alanına abone olun.'
+      : 'Vercel Production’da META_WEBHOOK_VERIFY_TOKEN eksik — Meta kabul (wamid) görünür ama teslim/failed panelde güncellenmez.'
+  };
+}
+
 function graphUserMessage(json, httpStatus) {
   const err = json?.error;
   const msg = err?.message || json?.message;
@@ -82,6 +96,9 @@ function metaGraphHint(graphErr) {
   const msg = String(graphErr?.message || '').toLowerCase();
   const sc = Number(graphErr?.error_subcode);
   const c = Number(graphErr?.code);
+  if (msg.includes('unexpected error') || msg.includes('retry your request')) {
+    return 'Meta geçici hata — birkaç saniye sonra tekrar deneyin.';
+  }
   if (msg.includes('24 hour') || msg.includes('24-hour') || sc === 2534037) {
     return 'Alıcı için oturum penceresi yok; onaylı şablon kullanın.';
   }
@@ -94,8 +111,20 @@ function metaGraphHint(graphErr) {
   if (c === 190 || msg.includes('oauth')) {
     return 'META_WHATSAPP_TOKEN süresi dolmuş veya geçersiz olabilir.';
   }
+  if (c === 3 || msg.includes('granular permission')) {
+    return 'Meta uygulama izni eksik (whatsapp_business_messaging). System User token + WABA/numara bağlantısını kontrol edin.';
+  }
+  if (c === 132018 || msg.includes('132018')) {
+    return 'Meta #132018: şablon parametre sayısı veya adlandırma uyuşmuyor (pozisyonel {{1}} vs named parameter_name).';
+  }
   if (c === 100 || msg.includes('invalid parameter') || msg.includes('(#100)')) {
     return 'Şablon dil kodu (tr vs tr_TR), gövde parametre sayısı veya Meta adlandırılmış değişken (parameter_name) uyumsuzluğu olabilir.';
+  }
+  if (msg.includes('meta_accepted_without_message_id') || msg.includes('meta_no_wamid')) {
+    return 'Meta isteği kabul etti ama wamid dönmedi — gerçek gönderim olmayabilir.';
+  }
+  if (msg.includes('recipient_not_on_whatsapp') || c === 131026) {
+    return 'Alıcı numarası WhatsApp\'ta kayıtlı değil veya geçersiz — kitapçı telefonunu kontrol edin.';
   }
   return '';
 }
@@ -139,9 +168,12 @@ export async function sendMetaTemplateMessage({
   }
 
   let lang = normalizeMetaLanguageCode(languageCode);
-  const candidateLangs = Array.isArray(languageCandidates) && languageCandidates.length
-    ? languageCandidates.map((c) => normalizeMetaLanguageCode(c)).filter(Boolean)
-    : [lang];
+  const candidateLangs = (Array.isArray(languageCandidates) && languageCandidates.length
+    ? languageCandidates
+    : [lang]
+  )
+    .map((c) => normalizeMetaLanguageCode(c))
+    .filter(Boolean);
   const texts = Array.isArray(bodyParameterTexts) ? bodyParameterTexts : [];
   const names = Array.isArray(bodyParameterNames) ? bodyParameterNames : null;
   const useNamed =
@@ -219,7 +251,24 @@ export async function sendMetaTemplateMessage({
       const json = await res.json().catch(() => ({}));
       if (res.ok) {
         const mid = json?.messages?.[0]?.id || null;
-        return { messageId: mid, raw: json, languageUsed: lang };
+        if (!mid) {
+          const err = new Error('meta_accepted_without_message_id');
+          err.status = res.status;
+          err.meta = json;
+          throw err;
+        }
+        const messageStatus = String(json?.messages?.[0]?.message_status || '').trim() || null;
+        const contact = Array.isArray(json?.contacts) ? json.contacts[0] : null;
+        const contactWaId = contact?.wa_id ? String(contact.wa_id) : null;
+        const contactInput = contact?.input ? String(contact.input) : null;
+        return {
+          messageId: mid,
+          messageStatus,
+          contactWaId,
+          contactInput,
+          raw: json,
+          languageUsed: lang
+        };
       }
       const err = /** @type {Error & { status?: number; meta?: unknown }} */ (
         new Error(graphUserMessage(json, res.status))
@@ -228,9 +277,15 @@ export async function sendMetaTemplateMessage({
       err.meta = json;
       lastErr = err;
 
-      const retryTrToTrTr = attempt === 0 && lang.toLowerCase() === 'tr' && isTranslationError(json);
+      const langLower = lang.toLowerCase();
+      const retryTrToTrTr = attempt === 0 && langLower === 'tr' && isTranslationError(json);
       if (retryTrToTrTr) {
         lang = 'tr_TR';
+        continue;
+      }
+      const retryTrTrToTr = attempt === 0 && langLower === 'tr_tr' && isTranslationError(json);
+      if (retryTrTrToTr) {
+        lang = 'tr';
         continue;
       }
       if (!isTranslationError(json)) throw err;

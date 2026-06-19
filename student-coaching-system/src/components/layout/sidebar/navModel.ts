@@ -120,6 +120,7 @@ const ORG_SYSTEM_PATHS = new Set([
   '/super-admin',
   '/user-management',
   '/notifications',
+  '/kitap-siparisleri',
   '/system-management',
   '/veli-onay',
   '/tahsilat-muhasebe'
@@ -128,6 +129,7 @@ const ORG_SYSTEM_ORDER = [
   '/super-admin',
   '/user-management',
   '/notifications',
+  '/kitap-siparisleri',
   '/system-management',
   '/veli-onay',
   '/tahsilat-muhasebe'

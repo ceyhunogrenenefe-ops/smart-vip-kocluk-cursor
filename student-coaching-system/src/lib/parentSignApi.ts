@@ -550,43 +550,37 @@ export async function verifyParentDocumentPublic(token: string): Promise<{
   return res.json().catch(() => ({ ok: false }));
 }
 
-function randomStudentPassword(length = 10): string {
-  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
-  let s = '';
-  for (let i = 0; i < length; i++) s += chars[Math.floor(Math.random() * chars.length)];
-  return `${s}A1`;
-}
-
-/** İmzalı veli kaydından `users` öğrencisi oluşturur; şifreyi döner (kullanıcı yönetiminde değiştirebilirsiniz). */
+/** İmzalı veli kaydından tam profilli `users` + `students` oluşturur. */
 export async function createStudentUserFromParentSign(opts: {
   contractId: string;
   institution_id: string;
   studentName: string;
   email: string;
   phone: string | null;
-}): Promise<{ passwordPlain: string; userId: string }> {
-  const passwordPlain = randomStudentPassword(10);
-  const res = await apiFetch('/api/users', {
+}): Promise<{ passwordPlain: string; userId: string; studentId?: string }> {
+  const res = await apiFetch('/api/parent-sign-contracts', {
     method: 'POST',
     headers: JSON_HDR,
     body: JSON.stringify({
-      role: 'student',
-      email: opts.email.trim().toLowerCase(),
-      name: opts.studentName.trim(),
-      phone: opts.phone?.trim() || null,
-      password: passwordPlain,
-      institution_id: opts.institution_id,
-      is_active: true,
-      package: 'trial',
-      start_date: new Date().toISOString(),
-      end_date: null
+      action: 'provision_student_account',
+      id: opts.contractId,
+      force: false
     })
   });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((j as { error?: string }).error || `API ${res.status}`);
-  const user = (j as { data: { id: string } }).data;
-  const uid = String(user?.id || '');
-  if (!uid) throw new Error('Kullanıcı oluşturulamadı');
-  await patchParentSignKayitOnly({ id: opts.contractId, kayit_json_merge: { platform_user_id: uid } });
-  return { passwordPlain, userId: uid };
+  const data = (j as { data?: Record<string, unknown> }).data || {};
+  const userId = String(data.userId || '');
+  if (!userId) throw new Error('Kullanıcı oluşturulamadı veya e-posta eksik.');
+  const passwordPlain =
+    data.passwordPlain != null && String(data.passwordPlain).trim()
+      ? String(data.passwordPlain)
+      : data.skipped
+        ? '(hesap zaten bağlı — şifre değiştirilmedi)'
+        : '';
+  return {
+    passwordPlain: passwordPlain || '(mevcut hesap)',
+    userId,
+    studentId: data.studentId != null ? String(data.studentId) : undefined
+  };
 }

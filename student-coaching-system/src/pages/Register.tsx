@@ -1,27 +1,69 @@
-// Türkçe: Ücretsiz deneme kayıt sayfası
-import React, { useState } from 'react';
+// Türkçe: Kayıt ol sayfası (yönetici onaylı)
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom';
 import { GraduationCap, Lock, Mail, Phone, ArrowLeft, CheckCircle, AlertCircle } from 'lucide-react';
+import { fetchPublicPost } from '../lib/session';
+import { db } from '../lib/database';
+
+type InstitutionOption = { id: string; name: string };
+
+const ROLE_OPTIONS = [
+  { value: 'student', label: 'Öğrenci' },
+  { value: 'coach', label: 'Koç' },
+  { value: 'teacher', label: 'Öğretmen' },
+  { value: 'admin', label: 'Yönetici' }
+] as const;
 
 export default function Register() {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
-    name: '',
+    firstName: '',
+    lastName: '',
+    tcIdentityNo: '',
     email: '',
     phone: '',
+    classLevel: '',
+    branch: '',
+    parentName: '',
+    parentPhone: '',
+    birthDate: '',
     password: '',
-    confirmPassword: ''
+    confirmPassword: '',
+    role: 'student',
+    institutionId: ''
   });
+  const [institutions, setInstitutions] = useState<InstitutionOption[]>([]);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await db.getInstitutions();
+        if (cancelled) return;
+        setInstitutions((list || []).map((i) => ({ id: String(i.id), name: i.name })));
+      } catch {
+        if (!cancelled) setInstitutions([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccess('');
 
+    const tc = formData.tcIdentityNo.replace(/\D/g, '');
+    if (tc.length !== 11) {
+      setError('TC kimlik numarası 11 haneli olmalıdır.');
+      return;
+    }
     if (formData.password.length < 6) {
       setError('Şifre en az 6 karakter olmalıdır.');
       return;
@@ -33,33 +75,38 @@ export default function Register() {
 
     setLoading(true);
     try {
-      const key = 'coaching_trial_users';
-      const raw = localStorage.getItem(key);
-      const users = raw ? JSON.parse(raw) : [];
-      const exists = users.some((u: { email: string }) => u.email?.toLowerCase() === formData.email.toLowerCase());
-      if (exists) {
-        setError('Bu e-posta ile daha önce kayıt oluşturulmuş.');
-        setLoading(false);
-        return;
+      const res = await fetchPublicPost('/api/auth-register', {
+        first_name: formData.firstName,
+        last_name: formData.lastName,
+        tc_identity_no: tc,
+        email: formData.email,
+        phone: formData.phone,
+        class_level: formData.classLevel || null,
+        branch: formData.branch || null,
+        parent_name: formData.parentName || null,
+        parent_phone: formData.parentPhone || null,
+        birth_date: formData.birthDate || null,
+        password: formData.password,
+        role: formData.role,
+        institution_id: formData.institutionId || null
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const serverError = String(payload?.error || '').trim();
+        if (serverError === 'tc_11_hane_olmali') throw new Error('TC kimlik numarası 11 haneli olmalıdır.');
+        if (serverError === 'gecersiz_email') throw new Error('Geçerli bir e-posta adresi girin.');
+        if (serverError === 'gecersiz_telefon_e164') throw new Error('Telefon numarasını geçerli formatta girin. (05xx... veya +90...)');
+        if (serverError === 'bu_email_icin_bekleyen_kayit_var') throw new Error('Bu e-posta için bekleyen bir kayıt zaten var.');
+        if (serverError === 'bu_tc_icin_bekleyen_kayit_var') throw new Error('Bu TC için bekleyen bir kayıt zaten var.');
+        if (serverError === 'email_zaten_kullanimda') throw new Error('Bu e-posta zaten kullanımda.');
+        if (serverError === 'too_many_requests') throw new Error('Çok fazla deneme yapıldı. Lütfen biraz sonra tekrar deneyin.');
+        throw new Error(String(payload?.hint || payload?.error || 'Kayıt sırasında bir hata oluştu.'));
       }
 
-      const newUser = {
-        id: `trial-${Date.now()}`,
-        name: formData.name,
-        email: formData.email.toLowerCase().trim(),
-        phone: formData.phone,
-        password: formData.password,
-        role: 'admin',
-        package: 'trial',
-        createdAt: new Date().toISOString()
-      };
-
-      users.push(newUser);
-      localStorage.setItem(key, JSON.stringify(users));
-      setSuccess('Deneme hesabınız oluşturuldu! Giriş sayfasına yönlendiriliyorsunuz...');
+      setSuccess('Kaydınız alındı. Yönetici onayından sonra hesabınız aktif olacaktır.');
       setTimeout(() => navigate('/login'), 1200);
-    } catch {
-      setError('Kayıt sırasında bir hata oluştu. Lütfen tekrar deneyin.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Kayıt sırasında bir hata oluştu. Lütfen tekrar deneyin.');
     } finally {
       setLoading(false);
     }
@@ -89,8 +136,8 @@ export default function Register() {
             <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6 text-green-800 text-sm flex items-start gap-2">
               <CheckCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
               <div>
-                <p className="font-medium">14 Gün Ücretsiz Deneme</p>
-                <p>Yönetici hesabınız oluşturulur ve tüm panelleri test edebilirsiniz.</p>
+                <p className="font-medium">Yönetici Onaylı Kayıt</p>
+                <p>Formu gönderdikten sonra kayıt talebiniz kullanıcı yönetimi ekranında onaya düşer.</p>
               </div>
             </div>
 
@@ -107,18 +154,42 @@ export default function Register() {
             )}
 
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Ad Soyad</label>
-                <div className="relative">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Ad</label>
                   <input
                     type="text"
                     required
-                    value={formData.name}
-                    onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                    value={formData.firstName}
+                    onChange={(e) => setFormData(prev => ({ ...prev, firstName: e.target.value }))}
                     className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500"
-                    placeholder="Adınız Soyadınız"
+                    placeholder="Adınız"
                   />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Soyad</label>
+                  <input
+                    type="text"
+                    required
+                    value={formData.lastName}
+                    onChange={(e) => setFormData(prev => ({ ...prev, lastName: e.target.value }))}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500"
+                    placeholder="Soyadınız"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">TC Kimlik No</label>
+                <input
+                  type="text"
+                  required
+                  maxLength={11}
+                  value={formData.tcIdentityNo}
+                  onChange={(e) => setFormData(prev => ({ ...prev, tcIdentityNo: e.target.value.replace(/\D/g, '') }))}
+                  className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500"
+                  placeholder="11 haneli TC kimlik numarası"
+                />
               </div>
 
               <div>
@@ -147,8 +218,96 @@ export default function Register() {
                   value={formData.phone}
                   onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
                   className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500"
-                  placeholder="05xx xxx xx xx"
+                  placeholder="05xx xxx xx xx veya +90..."
                 />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Sınıf</label>
+                  <input
+                    type="text"
+                    value={formData.classLevel}
+                    onChange={(e) => setFormData(prev => ({ ...prev, classLevel: e.target.value }))}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500"
+                    placeholder="Örn: 11, TYT, YKS-12"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Şube</label>
+                  <input
+                    type="text"
+                    value={formData.branch}
+                    onChange={(e) => setFormData(prev => ({ ...prev, branch: e.target.value }))}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500"
+                    placeholder="Örn: A, B"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Veli Adı</label>
+                  <input
+                    type="text"
+                    value={formData.parentName}
+                    onChange={(e) => setFormData(prev => ({ ...prev, parentName: e.target.value }))}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500"
+                    placeholder="Veli adı soyadı"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Veli Telefon</label>
+                  <input
+                    type="tel"
+                    value={formData.parentPhone}
+                    onChange={(e) => setFormData(prev => ({ ...prev, parentPhone: e.target.value }))}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500"
+                    placeholder="05xx xxx xx xx veya +90..."
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Doğum Tarihi</label>
+                  <input
+                    type="date"
+                    value={formData.birthDate}
+                    onChange={(e) => setFormData(prev => ({ ...prev, birthDate: e.target.value }))}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Rol</label>
+                  <select
+                    value={formData.role}
+                    onChange={(e) => setFormData(prev => ({ ...prev, role: e.target.value }))}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500"
+                  >
+                    {ROLE_OPTIONS.map((r) => (
+                      <option key={r.value} value={r.value}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Kurum (opsiyonel)</label>
+                <select
+                  value={formData.institutionId}
+                  onChange={(e) => setFormData(prev => ({ ...prev, institutionId: e.target.value }))}
+                  className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500"
+                >
+                  <option value="">Kurum seçilmedi</option>
+                  {institutions.map((inst) => (
+                    <option key={inst.id} value={inst.id}>
+                      {inst.name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -183,7 +342,7 @@ export default function Register() {
                 disabled={loading}
                 className="w-full py-3 bg-red-500 text-white rounded-xl font-semibold hover:bg-red-600 transition-colors disabled:opacity-50"
               >
-                {loading ? 'Hesap oluşturuluyor...' : 'Ücretsiz Deneme Hesabı Oluştur'}
+                {loading ? 'Kayıt gönderiliyor...' : 'Kayıt Talebi Gönder'}
               </button>
             </form>
 
@@ -202,7 +361,7 @@ export default function Register() {
           {/* Footer */}
           <div className="bg-gray-50 px-8 py-4 text-center">
             <p className="text-sm text-gray-500">
-              Deneme hesabı yerel olarak oluşturulur. Üretimde kalıcı hesaplar admin panelinden yönetilmelidir.
+              Hesabınız yönetici tarafından onaylandığında aktif olur ve giriş yapabilirsiniz.
             </p>
           </div>
         </div>

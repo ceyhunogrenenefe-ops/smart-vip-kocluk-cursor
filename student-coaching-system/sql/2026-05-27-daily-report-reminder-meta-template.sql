@@ -43,7 +43,7 @@ VALUES (
 
 {{student_name}} adlı öğrencinizin bugünkü günlük çalışma kaydı henüz sistemde görünmüyor.
 
-Lütfen Smart Koçluk üzerinden haftalık takip / günlük girişini tamamlayınız.
+Lütfen Online Vip Ders Koçluk üzerinden haftalık takibinizi tamamlayın.
 
 Online VIP Dershane',
   '["student_name"]'::jsonb,

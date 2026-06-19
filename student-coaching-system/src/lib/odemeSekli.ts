@@ -24,12 +24,11 @@ export const ODEME_SEKLI_OPTIONS: { value: OdemeSekli; label: string; hint: stri
 
 export const ODEME_TERCIHI_VELI_OPTIONS: { value: OdemeTercihiVeli; label: string }[] = [
   { value: 'henuz_odemedi', label: 'Henüz ödemedim — kurum benimle iletişime geçsin' },
-  { value: 'kredi_karti_odendi', label: 'Kredi kartı ile ödedim' },
-  { value: 'aylik_taksit_istiyorum', label: 'Aylık taksit ile ödemek istiyorum' }
+  { value: 'kredi_karti_odendi', label: 'Kredi kartı ile ödedim' }
 ];
 
+const TERCIHI_VALID = new Set<string>(['henuz_odemedi', 'kredi_karti_odendi', 'aylik_taksit_istiyorum']);
 const SEKLI_SET = new Set<string>(ODEME_SEKLI_OPTIONS.map((o) => o.value));
-const TERCIHI_SET = new Set<string>(ODEME_TERCIHI_VELI_OPTIONS.map((o) => o.value));
 
 export function normalizeOdemeSekli(v: unknown): OdemeSekli {
   const s = String(v || '').trim();
@@ -38,7 +37,7 @@ export function normalizeOdemeSekli(v: unknown): OdemeSekli {
 
 export function normalizeOdemeTercihiVeli(v: unknown): OdemeTercihiVeli {
   const s = String(v || '').trim();
-  return TERCIHI_SET.has(s) ? (s as OdemeTercihiVeli) : 'henuz_odemedi';
+  return TERCIHI_VALID.has(s) ? (s as OdemeTercihiVeli) : 'henuz_odemedi';
 }
 
 export function odemeSekliLabel(sekli: OdemeSekli | string | null | undefined): string {
@@ -48,7 +47,9 @@ export function odemeSekliLabel(sekli: OdemeSekli | string | null | undefined): 
 
 export function odemeTercihiVeliLabel(tercih: OdemeTercihiVeli | string | null | undefined): string {
   const o = ODEME_TERCIHI_VELI_OPTIONS.find((x) => x.value === tercih);
-  return o?.label ?? '—';
+  if (o) return o.label;
+  if (tercih === 'aylik_taksit_istiyorum') return 'Aylık taksit ile ödemek istiyorum';
+  return '—';
 }
 
 export function odemeSekliFromKayitJson(j: Record<string, unknown> | null | undefined): OdemeSekli {

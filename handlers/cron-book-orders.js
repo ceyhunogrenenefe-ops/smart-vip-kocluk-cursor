@@ -10,8 +10,15 @@ export default async function handler(req, res) {
   if (!auth.ok) return res.status(401).json({ error: 'Unauthorized cron' });
 
   try {
-    const out = await processPendingBookOrderNotifications({ limit: 100 });
-    await recordCronRun({ jobKey: 'book_orders', ok: true, processed: out.processed });
+    const out = await processPendingBookOrderNotifications({ limit: 30 });
+    await recordCronRun({
+      jobKey: 'book_orders',
+      ok: true,
+      processed: out.processed,
+      messages_sent: out.sent ?? 0,
+      messages_failed: out.failed ?? 0,
+      detail: { mode: out.mode || 'retry_failed_only' }
+    });
     return res.status(200).json({ ok: true, ...out });
   } catch (e) {
     await recordCronRun({ jobKey: 'book_orders', ok: false, error: String(e?.message || e) });

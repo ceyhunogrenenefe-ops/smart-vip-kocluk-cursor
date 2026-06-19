@@ -31,8 +31,9 @@ import {
 } from 'lucide-react';
 import { UserRole, ClassLevel, Coach, Student, CLASS_LEVELS, formatClassLevelLabel } from '../types';
 import { userRoleTags } from '../config/rolePermissions';
-import { db, QuotaSnapshot } from '../lib/database';
+import { db, PendingRegistrationRow, QuotaSnapshot } from '../lib/database';
 import { QuotaManagementPanel } from '../components/quota/QuotaManagementPanel';
+import { PageCollapsibleSection } from '../components/ui/PageCollapsibleSection';
 import { getAuthToken } from '../lib/session';
 import {
   userRowToSystemUser,
@@ -40,6 +41,7 @@ import {
   type StudentPlatformLink,
   type UserRow
 } from '../lib/userRowToSystemUser';
+import { studentRowToStudent } from '../lib/mapStudentRow';
 import {
   CopyableLoginCredentialsModal,
   type LoginCredentialsData
@@ -201,10 +203,16 @@ export default function UserManagement() {
   const [users, setUsers] = useState<SystemUser[]>([]);
   /** Çoklu rol (ör. öğretmen+koç) eşlemesi için ham API kullanıcı satırları */
   const [rawUserRows, setRawUserRows] = useState<UserRow[]>([]);
+  /** Sayfa özel öğrenci/koç listesi — users ile aynı anda yüklenir (gecikmeli context beklemez). */
+  const [pageStudents, setPageStudents] = useState<Student[]>([]);
+  const [pageCoaches, setPageCoaches] = useState<Coach[]>([]);
+  const [listLoading, setListLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterRole, setFilterRole] = useState<UserRole | 'all'>('all');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'expired' | 'inactive'>('all');
   const [filterInstitutionId, setFilterInstitutionId] = useState<string>('all');
+  const [filterClassLevel, setFilterClassLevel] = useState<string>('all');
+  const [filterCoachId, setFilterCoachId] = useState<string>('all');
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<'add' | 'edit'>('add');
   const [selectedUser, setSelectedUser] = useState<SystemUser | null>(null);
@@ -218,6 +226,8 @@ export default function UserManagement() {
   const [classAssignBusy, setClassAssignBusy] = useState<string | null>(null);
   const [loginAsBusyId, setLoginAsBusyId] = useState<string | null>(null);
   const [loginCredentialsModal, setLoginCredentialsModal] = useState<LoginCredentialsData | null>(null);
+  const [pendingRegistrations, setPendingRegistrations] = useState<PendingRegistrationRow[]>([]);
+  const [pendingBusyId, setPendingBusyId] = useState<string | null>(null);
 
   const openCreatedLoginCredentials = useCallback(
     (opts: {
@@ -284,24 +294,57 @@ export default function UserManagement() {
     return ROLES.filter((x) => x.value !== 'super_admin');
   }, [currentUser]);
 
+  const linkedStudents = pageStudents.length > 0 ? pageStudents : students;
+  const linkedCoaches = pageCoaches.length > 0 ? pageCoaches : coaches;
+
+  useEffect(() => {
+    if (currentUser?.role !== 'super_admin' || !activeInstitutionId) return;
+    setFilterInstitutionId((prev) => (prev === 'all' ? activeInstitutionId : prev));
+  }, [currentUser?.role, activeInstitutionId]);
+
+  const coachesForFilter = useMemo(() => {
+    let list = [...linkedCoaches].sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+    if (currentUser?.role === 'super_admin' && filterInstitutionId !== 'all') {
+      list = list.filter((c) => !c.institutionId || c.institutionId === filterInstitutionId);
+    }
+    return list;
+  }, [linkedCoaches, filterInstitutionId, currentUser?.role]);
+
+  useEffect(() => {
+    if (filterCoachId === 'all') return;
+    if (!coachesForFilter.some((c) => c.id === filterCoachId)) {
+      setFilterCoachId('all');
+    }
+  }, [coachesForFilter, filterCoachId]);
+
   const refreshUsers = useCallback(async () => {
+    if (authLoading) return;
     if (getAuthToken()) {
+      setListLoading(true);
       try {
-        const rows = await db.getUsers();
-        setRawUserRows(rows as UserRow[]);
         const scope =
           currentUser?.role === 'super_admin'
             ? undefined
             : activeInstitutionId || institution?.id || undefined;
-        let joinStudents = students;
-        let joinCoaches = coaches;
-        try {
-          const [stRows, coRows] = await Promise.all([db.getStudents(scope), db.getCoaches(scope)]);
-          joinStudents = stRows.map(studentRowToStudent);
-          joinCoaches = coRows.map(coachRowToCoach);
-        } catch {
-          /* AppContext listesiyle devam */
-        }
+        const isAdminish =
+          currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
+
+        const [rows, stRows, coRows, pendingRows] = await Promise.all([
+          db.getUsers(),
+          db.getStudents(scope),
+          db.getCoaches(scope),
+          isAdminish
+            ? db.getPendingRegistrations().catch(() => [] as PendingRegistrationRow[])
+            : Promise.resolve([] as PendingRegistrationRow[])
+        ]);
+
+        const joinStudents = stRows.map(studentRowToStudent);
+        const joinCoaches = coRows.map(coachRowToCoach);
+        setPageStudents(joinStudents);
+        setPageCoaches(joinCoaches);
+        setRawUserRows(rows as UserRow[]);
+        if (isAdminish) setPendingRegistrations(pendingRows);
+
         const fromApi = rows.map((row) =>
           userRowToSystemUser(row, { coaches: joinCoaches, students: joinStudents })
         );
@@ -321,15 +364,63 @@ export default function UserManagement() {
                   (e instanceof Error ? e.message : '')
               }
         );
+      } finally {
+        setListLoading(false);
       }
+    } else {
+      setUsers(getAllUsers());
+      setRawUserRows([]);
+      setPageStudents([]);
+      setPageCoaches([]);
+      setListLoading(false);
     }
-    setUsers(getAllUsers());
-    setRawUserRows([]);
-  }, [getAllUsers, coaches, students, currentUser?.role, activeInstitutionId, institution?.id]);
+  }, [
+    getAllUsers,
+    currentUser?.role,
+    activeInstitutionId,
+    institution?.id,
+    authLoading
+  ]);
 
   useEffect(() => {
+    if (authLoading) return;
     void refreshUsers();
-  }, [refreshUsers]);
+  }, [refreshUsers, authLoading]);
+
+  const handleApprovePending = async (row: PendingRegistrationRow) => {
+    setPendingBusyId(row.id);
+    setMessage(null);
+    try {
+      await db.approvePendingRegistration(row.id);
+      setMessage({ type: 'success', text: 'Kayıt onaylandı ve hesap aktif edildi.' });
+      await refreshUsers();
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Kayıt onaylanamadı.'
+      });
+    } finally {
+      setPendingBusyId(null);
+    }
+  };
+
+  const handleRejectPending = async (row: PendingRegistrationRow) => {
+    const reason = window.prompt('Red nedeni (opsiyonel):', '') || '';
+    setPendingBusyId(row.id);
+    setMessage(null);
+    try {
+      await db.rejectPendingRegistration(row.id, reason);
+      setMessage({ type: 'success', text: 'Kayıt talebi reddedildi.' });
+      await refreshUsers();
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Kayıt reddedilemedi.'
+      });
+    } finally {
+      setPendingBusyId(null);
+    }
+  };
 
   useEffect(() => {
     if (!showModal || modalMode !== 'edit' || !selectedUser?.id) return;
@@ -511,7 +602,7 @@ export default function UserManagement() {
               email: user.email,
               studentId: user.studentId
             },
-            students
+            linkedStudents
           )
         : undefined;
     if (
@@ -539,6 +630,24 @@ export default function UserManagement() {
       if (filterStatus === 'active' && !isUserActiveAccount(user)) return false;
       if (filterStatus === 'expired' && !isUserExpiredAccount(user)) return false;
       if (filterStatus === 'inactive' && user.isActive !== false) return false;
+    }
+
+    if (filterClassLevel !== 'all') {
+      if (!studentMatchForFilter) return false;
+      if (String(studentMatchForFilter.classLevel ?? '') !== filterClassLevel) return false;
+    }
+
+    if (filterCoachId !== 'all') {
+      const coachRow = coachesForFilter.find((c) => c.id === filterCoachId);
+      const studentCoach = studentMatchForFilter?.coachId ? String(studentMatchForFilter.coachId) : '';
+      const userCoachId = user.coachId ? String(user.coachId) : '';
+      const coachEmail = coachRow?.email?.toLowerCase().trim();
+      const userEmail = user.email?.toLowerCase().trim();
+      const matchesCoach =
+        studentCoach === filterCoachId ||
+        userCoachId === filterCoachId ||
+        Boolean(coachEmail && userEmail && userEmail === coachEmail);
+      if (!matchesCoach) return false;
     }
 
     return true;
@@ -582,39 +691,53 @@ export default function UserManagement() {
 
   const coachesForStudentRow = useCallback(
     (studentInstitutionId: string | undefined) => {
-      if (!studentInstitutionId) return coaches;
-      return coaches.filter((c) => !c.institutionId || c.institutionId === studentInstitutionId);
+      if (!studentInstitutionId) return linkedCoaches;
+      return linkedCoaches.filter((c) => !c.institutionId || c.institutionId === studentInstitutionId);
     },
-    [coaches]
+    [linkedCoaches]
   );
 
-  /** Bellekteki listede yoksa API’den tam liste ile eşle (kurum filtresi / gecikmiş state). */
-  const resolveStudentLinkForUser = useCallback(
-    async (user: Pick<SystemUser, 'id' | 'email' | 'studentId'>): Promise<StudentPlatformLink | null> => {
+  const mergePageStudent = useCallback((mapped: Student) => {
+    setPageStudents((prev) => {
+      const ix = prev.findIndex((s) => s.id === mapped.id);
+      if (ix === -1) return [...prev, mapped];
+      const copy = [...prev];
+      copy[ix] = { ...copy[ix], ...mapped };
+      return copy;
+    });
+  }, []);
+
+  /** Düzenleme modalı için veli/doğum tarihi dahil tam öğrenci profili. */
+  const resolveStudentProfileForUser = useCallback(
+    async (user: Pick<SystemUser, 'id' | 'email' | 'studentId'>): Promise<Student | null> => {
       const opts = {
         platformUserId: user.id,
         email: user.email,
         studentId: user.studentId || user.id
       };
-      let link = findStudentForPlatformUser(opts, students);
-      if (link) return link;
+      let profile = findStudentForPlatformUser(opts, linkedStudents) as Student | undefined;
+      if (profile) return profile;
       if (!getAuthToken()) return null;
       try {
-        const rows = await db.getStudents(undefined);
-        link = findStudentForPlatformUser(
-          opts,
-          rows.map((r) => ({
-            id: r.id,
-            email: r.email,
-            platformUserId: r.platform_user_id ?? undefined
-          }))
-        );
-        return link ?? null;
+        const row = await db.getStudentForPlatformUser(user.id, user.email);
+        if (!row) return null;
+        profile = studentRowToStudent(row);
+        mergePageStudent(profile);
+        return profile;
       } catch {
         return null;
       }
     },
-    [students]
+    [linkedStudents, mergePageStudent]
+  );
+
+  /** Bellekteki listede yoksa API’den tam liste ile eşle (kurum filtresi / gecikmiş state). */
+  const resolveStudentLinkForUser = useCallback(
+    async (user: Pick<SystemUser, 'id' | 'email' | 'studentId'>): Promise<StudentPlatformLink | null> => {
+      const profile = await resolveStudentProfileForUser(user);
+      return profile;
+    },
+    [resolveStudentProfileForUser]
   );
 
   const handleInlineCoachChange = async (user: SystemUser, coachId: string) => {
@@ -675,7 +798,7 @@ export default function UserManagement() {
                 email: user.email,
                 studentId: user.studentId
               },
-              students
+              linkedStudents
             )
           : undefined;
       const instDraft =
@@ -722,6 +845,33 @@ export default function UserManagement() {
             }));
           })
           .catch(() => {});
+      }
+      if (rt.includes('student') || user.role === 'student') {
+        const profileIncomplete =
+          !studentMatch?.birthDate &&
+          !studentMatch?.parentName?.trim() &&
+          !studentMatch?.parentPhone?.trim();
+        if (!studentMatch || profileIncomplete) {
+          void resolveStudentProfileForUser(user)
+            .then((profile) => {
+              if (!profile) return;
+              setFormData((prev) => ({
+                ...prev,
+                birthDate: profile.birthDate || '',
+                classLevel:
+                  profile.classLevel != null ? String(profile.classLevel) : prev.classLevel,
+                branch: profile.school || prev.branch,
+                parentName: profile.parentName || '',
+                parentPhone: profile.parentPhone || '',
+                assignCoachId: profile.coachId ? String(profile.coachId) : prev.assignCoachId,
+                studentInstitutionId: profile.institutionId
+                  ? String(profile.institutionId)
+                  : prev.studentInstitutionId,
+                whatsappAutomationEnabled: profile.whatsappAutomationEnabled !== false
+              }));
+            })
+            .catch(() => {});
+        }
       }
     } else {
       // Yeni kullanıcı için
@@ -798,6 +948,9 @@ export default function UserManagement() {
     const endDate = new Date();
     endDate.setDate(endDate.getDate() + days);
     const sozlesmeNo = (searchParams.get('sozlesme') || '').trim();
+    const tcFromQuery = (searchParams.get('tc') || '').replace(/\D/g, '').slice(0, 11);
+    const programNote = (searchParams.get('program') || '').trim();
+    const adresNote = (searchParams.get('adres') || '').trim();
 
     setModalMode('add');
     setSelectedUser(null);
@@ -809,7 +962,7 @@ export default function UserManagement() {
       phone: (searchParams.get('tel') || '').trim(),
       birthDate: (searchParams.get('dogum') || '').trim().slice(0, 10),
       classLevel: String(toClassLevel(sinifRaw)),
-      branch: (searchParams.get('okul') || '').trim(),
+      branch: [searchParams.get('okul') || '', programNote].map((x) => String(x || '').trim()).filter(Boolean).join(' · ') || (searchParams.get('okul') || '').trim(),
       parentName: (searchParams.get('veli_adsoyad') || '').trim(),
       parentPhone: (searchParams.get('veli_tel') || '').trim(),
       password: '',
@@ -833,8 +986,8 @@ export default function UserManagement() {
     setMessage({
       type: 'success',
       text: sozlesmeNo
-        ? `Veli imzası (${sozlesmeNo}): bilgiler yüklendi. Şifre (en az 6 karakter) girip kaydedin.`
-        : 'Veli imzası bilgileri yüklendi. Şifre (en az 6 karakter) girip kaydedin.'
+        ? `Veli imzası (${sozlesmeNo}): bilgiler yüklendi.${adresNote ? ` Adres: ${adresNote.slice(0, 80)}${adresNote.length > 80 ? '…' : ''}.` : ''}${tcFromQuery ? ` TC: ${tcFromQuery}.` : ''} Şifre (en az 6 karakter) girip kaydedin.`
+        : `Veli imzası bilgileri yüklendi.${adresNote ? ` Adres kayıtta mevcut.` : ''} Şifre (en az 6 karakter) girip kaydedin.`
     });
     navigate('/user-management', { replace: true });
   }, [
@@ -846,6 +999,125 @@ export default function UserManagement() {
     currentUser?.role,
     currentUser?.institutionId
   ]);
+
+  /** Öğretmenler sayfasından: `/user-management?ogretmen_ekle=1` ile yeni öğretmen formunu açar. */
+  useEffect(() => {
+    if (authLoading) return;
+    if (searchParams.get('ogretmen_ekle') !== '1') return;
+
+    if (!(currentUser?.role === 'admin' || currentUser?.role === 'super_admin')) {
+      setMessage({ type: 'error', text: 'Öğretmen ekleme yetkisi yalnızca yönetici rollerinde açıktır.' });
+      navigate('/user-management', { replace: true });
+      return;
+    }
+
+    const days = PACKAGES.trial.days;
+    const endDate = new Date();
+    endDate.setDate(endDate.getDate() + days);
+
+    setModalMode('add');
+    setSelectedUser(null);
+    setMessage(null);
+    setFormData({
+      firstName: '',
+      lastName: '',
+      email: '',
+      phone: '',
+      birthDate: '',
+      classLevel: '9',
+      branch: '',
+      parentName: '',
+      parentPhone: '',
+      password: '',
+      role: 'teacher',
+      alsoCoach: false,
+      alsoTeacher: false,
+      assignCoachId: '',
+      studentInstitutionId:
+        institution?.id ||
+        activeInstitutionId ||
+        currentUser?.institutionId ||
+        '',
+      bootstrap_max_students: '50',
+      bootstrap_max_coaches: '10',
+      bootstrap_package_label: 'professional',
+      package: 'trial',
+      startDate: new Date().toISOString().split('T')[0],
+      endDate: endDate.toISOString().split('T')[0],
+      isActive: true,
+      whatsappAutomationEnabled: true,
+      questionBranches: [],
+      questionGrades: []
+    });
+    setShowPassword(false);
+    setShowModal(true);
+    navigate('/user-management', { replace: true });
+  }, [
+    authLoading,
+    searchParams,
+    navigate,
+    activeInstitutionId,
+    institution?.id,
+    currentUser?.role,
+    currentUser?.institutionId
+  ]);
+
+  /** Öğretmenler / kullanıcı listesinden: `/user-management?kullanici_duzenle=<id>` */
+  useEffect(() => {
+    if (authLoading || listLoading) return;
+    const editId = (searchParams.get('kullanici_duzenle') || '').trim();
+    if (!editId) return;
+    if (!(currentUser?.role === 'admin' || currentUser?.role === 'super_admin')) {
+      navigate('/user-management', { replace: true });
+      return;
+    }
+    const user = users.find((u) => u.id === editId);
+    if (!user) return;
+    openModal('edit', user);
+    navigate('/user-management', { replace: true });
+  }, [authLoading, listLoading, searchParams, users, currentUser?.role, navigate]);
+
+  /** Koçlar sayfasından: giriş hesabı yoksa `/user-management?koc_giris=<coachId>` */
+  useEffect(() => {
+    if (authLoading || listLoading) return;
+    const coachId = (searchParams.get('koc_giris') || '').trim();
+    if (!coachId) return;
+    if (!(currentUser?.role === 'admin' || currentUser?.role === 'super_admin')) {
+      navigate('/user-management', { replace: true });
+      return;
+    }
+    const syntheticId = `${COACH_PROFILE_ONLY_PREFIX}${coachId}`;
+    let user = users.find((u) => u.id === syntheticId);
+    if (!user) {
+      const coachRow = coaches.find((c) => c.id === coachId);
+      const byEmail = coachRow?.email
+        ? users.find(
+            (u) => u.email.toLowerCase().trim() === coachRow.email.toLowerCase().trim()
+          )
+        : undefined;
+      if (byEmail) user = byEmail;
+      else if (coachRow) {
+        const end = new Date();
+        end.setFullYear(end.getFullYear() + 1);
+        user = {
+          id: syntheticId,
+          name: coachRow.name,
+          email: coachRow.email,
+          phone: coachRow.phone,
+          role: 'coach',
+          institutionId: coachRow.institutionId,
+          coachId: coachRow.id,
+          package: 'trial',
+          isActive: true,
+          startDate: coachRow.createdAt || new Date().toISOString(),
+          endDate: end.toISOString(),
+          createdAt: coachRow.createdAt
+        };
+      }
+    }
+    if (user) openModal('edit', user);
+    navigate('/user-management', { replace: true });
+  }, [authLoading, listLoading, searchParams, users, coaches, currentUser?.role, navigate]);
 
   // Paket değiştiğinde bitiş tarihini güncelle
   const handlePackageChange = (pkg: typeof formData.package) => {
@@ -1037,7 +1309,7 @@ export default function UserManagement() {
                   email: linkEmail,
                   studentId: selectedUser.studentId || selectedUser.id
                 },
-                students
+                linkedStudents
               ) ?? null;
             if (!st) {
               st = await resolveStudentLinkForUser({
@@ -1318,7 +1590,7 @@ export default function UserManagement() {
                 };
                 const existingSt = findStudentForPlatformUser(
                   { platformUserId: newUserId, email: createdEmail },
-                  students
+                  linkedStudents
                 );
                 if (existingSt) {
                   await updateStudent(existingSt.id, studentPayload);
@@ -1436,9 +1708,9 @@ export default function UserManagement() {
           email: target.email,
           studentId: target.studentId
         },
-        students
+        linkedStudents
       );
-      const ch = coaches.find((c) => c.email.toLowerCase() === target.email.toLowerCase());
+      const ch = linkedCoaches.find((c) => c.email.toLowerCase() === target.email.toLowerCase());
       if (st) await deleteStudent(st.id);
       if (ch) await deleteCoach(ch.id);
     }
@@ -1589,7 +1861,7 @@ export default function UserManagement() {
                   email: existing.email || undefined,
                   studentId: undefined
                 },
-                students
+                linkedStudents
               ) || nameMatchStudent;
             if (st) {
               await updateStudent(st.id, {
@@ -1658,7 +1930,7 @@ export default function UserManagement() {
             }
 
             if (!existing && pr.roles.includes('student')) {
-              const cand = students.filter(
+              const cand = linkedStudents.filter(
                 (st) =>
                   normalizeImportedFullNameKey(st.name) === nameKey &&
                   matchesInstitution(st.institutionId, instId)
@@ -1708,7 +1980,7 @@ export default function UserManagement() {
             if (!existing && pr.roles.includes('teacher')) {
               const cand = rawUserRows
                 .filter((rw) => normalizeRolesFromApiUser(rw).includes('teacher'))
-                .map((rw) => userRowToSystemUser(rw, { coaches, students }))
+                .map((rw) => userRowToSystemUser(rw, { coaches: linkedCoaches, students: linkedStudents }))
                 .filter(
                   (u) =>
                     !u.id.startsWith(COACH_PROFILE_ONLY_PREFIX) &&
@@ -1790,7 +2062,7 @@ export default function UserManagement() {
               getAllUsers().find((u) => u.email.toLowerCase().trim() === emailLower) || null;
 
             if (!existingLocal && pr.roles.includes('student')) {
-              const cand = students.filter(
+              const cand = linkedStudents.filter(
                 (st) =>
                   normalizeImportedFullNameKey(st.name) === nameKey &&
                   matchesInstitution(st.institutionId, instId)
@@ -1839,7 +2111,7 @@ export default function UserManagement() {
               const cand = rawUserRows.length
                 ? rawUserRows
                     .filter((rw) => normalizeRolesFromApiUser(rw).includes('teacher'))
-                    .map((rw) => userRowToSystemUser(rw, { coaches, students }))
+                    .map((rw) => userRowToSystemUser(rw, { coaches: linkedCoaches, students: linkedStudents }))
                     .filter(
                       (u) =>
                         !u.id.startsWith(COACH_PROFILE_ONLY_PREFIX) &&
@@ -1980,41 +2252,49 @@ export default function UserManagement() {
           Yeni Kullanıcı
         </button>
       </div>
-      <div className="bg-white rounded-xl border border-gray-100 p-4 flex flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="text-sm font-medium text-slate-700">Excel / CSV ile kullanıcı ekle</label>
-          <button
-            type="button"
-            onClick={() => downloadUserImportTemplateXlsx()}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
-          >
-            <Download className="h-4 w-4" />
-            Örnek Excel indir
-          </button>
-          <input
-            type="file"
-            accept=".xlsx,.xls,.csv,.txt"
-            disabled={importBusy}
-            onChange={(e) => void handleBulkUserImport(e.target.files?.[0] || null)}
-            className="text-sm"
-          />
+      <PageCollapsibleSection
+        title="Excel / CSV ile toplu kullanıcı ekle"
+        description="Dosya yükleme ve örnek şablon"
+      >
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => downloadUserImportTemplateXlsx()}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+            >
+              <Download className="h-4 w-4" />
+              Örnek Excel indir
+            </button>
+            <input
+              type="file"
+              accept=".xlsx,.xls,.csv,.txt"
+              disabled={importBusy}
+              onChange={(e) => void handleBulkUserImport(e.target.files?.[0] || null)}
+              className="text-sm"
+            />
+          </div>
+          <p className="text-xs text-slate-500">
+            Önerilen başlık sırası: {USER_IMPORT_TEMPLATE_HEADERS.join(' · ')}. Başlıklar Türkçe veya İngilizce
+            eşlenir; veli telefonu ile öğrenci telefonu farklı sütunlarda olmalıdır. GSM numaraları Excelde sayı olsa bile
+            okunur (gerekirse başa 0 eklenir). Sınıf ve şube iki sütunda olabileceği gibi tek hücrede{' '}
+            <span className="font-mono">11-A</span>, <span className="font-mono">11 / B</span> veya{' '}
+            <span className="font-mono">12C</span> biçiminde de olabilir. Aynı e-posta ile tekrar yüklerseniz veya
+            kurumda yalnızca bir kişiyle eşleşen aynı ad-soyad bulunursa kayıt güncellenir (yeni satır açılmaz). Rol
+            için: öğrenci, öğretmen
+            {currentUser?.role === 'admin' || currentUser?.role === 'super_admin' ? ', koç' : ''}; birden fazla rol için
+            virgül, noktalı virgül veya <span className="font-mono">ve</span> ile ayırın (örn. öğretmen, koç). Şifre tekrarı
+            doluysa birinciyle aynı olmalıdır.
+          </p>
         </div>
-        <p className="text-xs text-slate-500">
-          Önerilen başlık sırası: {USER_IMPORT_TEMPLATE_HEADERS.join(' · ')}. Başlıklar Türkçe veya İngilizce
-          eşlenir; veli telefonu ile öğrenci telefonu farklı sütunlarda olmalıdır. GSM numaraları Excelde sayı olsa bile
-          okunur (gerekirse başa 0 eklenir). Sınıf ve şube iki sütunda olabileceği gibi tek hücrede{' '}
-          <span className="font-mono">11-A</span>, <span className="font-mono">11 / B</span> veya{' '}
-          <span className="font-mono">12C</span> biçiminde de olabilir. Aynı e-posta ile tekrar yüklerseniz veya
-          kurumda yalnızca bir kişiyle eşleşen aynı ad-soyad bulunursa kayıt güncellenir (yeni satır açılmaz). Rol
-          için: öğrenci, öğretmen
-          {currentUser?.role === 'admin' || currentUser?.role === 'super_admin' ? ', koç' : ''}; birden fazla rol için
-          virgül, noktalı virgül veya <span className="font-mono">ve</span> ile ayırın (örn. öğretmen, koç). Şifre tekrarı
-          doluysa birinciyle aynı olmalıdır.
-        </p>
-      </div>
+      </PageCollapsibleSection>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+      <PageCollapsibleSection
+        title="Özet istatistikler"
+        description={`${stats.totalListed} kayıt · ${stats.students} öğrenci · ${stats.coaches} koç`}
+        contentClassName="p-4"
+      >
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
         <div className="bg-white rounded-xl p-4 border border-gray-100">
           <div className="text-2xl font-bold text-slate-800">{stats.totalListed}</div>
           <div className="text-sm text-gray-500">Liste kaydı</div>
@@ -2039,7 +2319,7 @@ export default function UserManagement() {
         <div className="bg-white rounded-xl p-4 border border-gray-100">
           <div className="text-2xl font-bold text-green-600">{stats.students}</div>
           <div className="text-sm text-gray-500">Öğrenci hesabı</div>
-          <p className="text-xs text-slate-400 mt-1">Profil: {students.length}</p>
+          <p className="text-xs text-slate-400 mt-1">Profil: {linkedStudents.length}</p>
         </div>
         <div className="bg-white rounded-xl p-4 border border-gray-100">
           <div className="text-2xl font-bold text-green-600">{stats.active}</div>
@@ -2049,7 +2329,8 @@ export default function UserManagement() {
           <div className="text-2xl font-bold text-red-600">{stats.expired}</div>
           <div className="text-sm text-gray-500">Süresi Dolmuş</div>
         </div>
-      </div>
+        </div>
+      </PageCollapsibleSection>
 
       {(currentUser?.role === 'super_admin' || currentUser?.role === 'admin') &&
         !quotaInstitutionId &&
@@ -2060,17 +2341,117 @@ export default function UserManagement() {
         )}
 
       {(currentUser?.role === 'super_admin' || currentUser?.role === 'admin') && (
-        <QuotaManagementPanel
-          actorRole={currentUser!.role}
-          actorUserId={currentUser!.id}
-          institutionId={quotaInstitutionId}
-          institutionName={quotaInstitutionName}
-          quota={quota}
-          coaches={coaches}
-          students={students}
-          institutionAdmins={institutionAdmins}
-          onQuotaUpdated={refreshQuotaSnapshot}
-        />
+        <PageCollapsibleSection
+          title="Onay bekleyen kayıtlar"
+          description={
+            pendingRegistrations.length
+              ? `${pendingRegistrations.length} kayıt onayınızı bekliyor`
+              : 'Bekleyen kayıt yok'
+          }
+          defaultOpen={pendingRegistrations.length > 0}
+          badge={
+            pendingRegistrations.length > 0 ? (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                {pendingRegistrations.length}
+              </span>
+            ) : null
+          }
+          contentClassName="p-0"
+        >
+          {pendingRegistrations.length === 0 ? (
+            <div className="px-4 py-6 text-sm text-slate-500">Bekleyen kayıt bulunmuyor.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[900px] table-fixed">
+                <thead className="bg-gray-50/90 border-b border-gray-100">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 w-[14%]">Ad Soyad</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 w-[16%]">E-posta</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 w-[10%]">Telefon</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 w-[8%]">TC</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 w-[8%]">Rol</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 w-[8%]">Sınıf/Şube</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 w-[12%]">Veli</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 w-[10%]">Doğum</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 w-[14%]">İşlem</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {pendingRegistrations.map((r) => (
+                    <tr key={r.id} className="hover:bg-slate-50/80">
+                      <td className="px-3 py-2 text-sm text-slate-800">{r.first_name} {r.last_name}</td>
+                      <td className="px-3 py-2 text-sm text-slate-700">{r.email}</td>
+                      <td className="px-3 py-2 text-sm text-slate-700">{r.phone_e164}</td>
+                      <td className="px-3 py-2 text-sm text-slate-700">{r.tc_identity_no}</td>
+                      <td className="px-3 py-2 text-sm text-slate-700">{roleLabelFromRoles(r.requested_role as UserRole)}</td>
+                      <td className="px-3 py-2 text-sm text-slate-700">
+                        {[r.class_level, r.branch].filter(Boolean).join(' / ') || '—'}
+                      </td>
+                      <td className="px-3 py-2 text-sm text-slate-700">
+                        {r.parent_name || '—'}
+                        {r.parent_phone_e164 ? ` · ${r.parent_phone_e164}` : ''}
+                      </td>
+                      <td className="px-3 py-2 text-sm text-slate-700">{r.birth_date || '—'}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void handleApprovePending(r)}
+                            disabled={pendingBusyId === r.id}
+                            className="px-2.5 py-1.5 rounded-md bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 disabled:opacity-60"
+                          >
+                            {pendingBusyId === r.id ? 'İşleniyor...' : 'Onayla'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleRejectPending(r)}
+                            disabled={pendingBusyId === r.id}
+                            className="px-2.5 py-1.5 rounded-md bg-slate-200 text-slate-800 text-xs font-medium hover:bg-slate-300 disabled:opacity-60"
+                          >
+                            Reddet
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </PageCollapsibleSection>
+      )}
+
+      {(currentUser?.role === 'super_admin' || currentUser?.role === 'admin') && (
+        <PageCollapsibleSection
+          title="Koç / öğrenci kotası"
+          description={
+            quota?.admin_limits
+              ? `Öğrenci ${quota.counts.students}/${quota.admin_limits.max_students} · Koç ${quota.counts.coaches}/${quota.admin_limits.max_coaches}`
+              : quotaInstitutionName
+                ? `${quotaInstitutionName} — kurum ve koç limitleri`
+                : 'Kurum seçin ve kota limitlerini düzenleyin'
+          }
+          badge={
+            quota && !quota.quota_exempt && quota.admin_limits ? (
+              <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-900">
+                Kota
+              </span>
+            ) : null
+          }
+          contentClassName="p-0"
+        >
+          <QuotaManagementPanel
+            actorRole={currentUser!.role}
+            actorUserId={currentUser!.id}
+            institutionId={quotaInstitutionId}
+            institutionName={quotaInstitutionName}
+            quota={quota}
+            coaches={coaches}
+            students={linkedStudents}
+            institutionAdmins={institutionAdmins}
+            onQuotaUpdated={refreshQuotaSnapshot}
+          />
+        </PageCollapsibleSection>
       )}
 
       {quota?.admin_limits &&
@@ -2109,7 +2490,7 @@ export default function UserManagement() {
           </p>
           <p className="text-xs mt-2 opacity-90">
             Kota öğrenci/koç profil kayıtlarını sayar (Öğrenciler / Koçlar sayfaları ile aynı:{' '}
-            {students.length} öğrenci, {coaches.length} koç).
+            {linkedStudents.length} öğrenci, {linkedCoaches.length} koç).
           </p>
           {(quota.usage_pct?.students ?? 0) >= 90 || (quota.usage_pct?.coaches ?? 0) >= 90 ? (
             <p className="text-sm mt-2">
@@ -2127,57 +2508,89 @@ export default function UserManagement() {
 
       {/* Filters */}
       <div className="bg-white rounded-xl p-4 border border-gray-100">
-        <div className="flex flex-col md:flex-row gap-4">
-          {/* Search */}
+        <div className="flex flex-col gap-3">
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
               type="text"
-              placeholder="Ad veya e-posta ile ara..."
+              placeholder="Ad, e-posta veya telefon ile ara..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
             />
           </div>
 
-          {/* Role Filter */}
-          <select
-            value={filterRole}
-            onChange={(e) => setFilterRole(e.target.value as UserRole | 'all')}
-            className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-          >
-            <option value="all">Tüm Roller</option>
-            {ROLES.map(role => (
-              <option key={role.value} value={role.value}>{role.label}</option>
-            ))}
-          </select>
-
-          {/* Status Filter */}
-          <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value as typeof filterStatus)}
-            className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-          >
-            <option value="all">Tüm Durumlar</option>
-            <option value="active">Aktif</option>
-            <option value="expired">Süresi Dolmuş</option>
-            <option value="inactive">Pasif</option>
-          </select>
-
-          {currentUser?.role === 'super_admin' && (
+          <div className="flex flex-col sm:flex-row flex-wrap gap-3">
             <select
-              value={filterInstitutionId}
-              onChange={(e) => setFilterInstitutionId(e.target.value)}
-              className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-w-[12rem]"
+              value={filterRole}
+              onChange={(e) => setFilterRole(e.target.value as UserRole | 'all')}
+              className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-w-[10rem]"
+              aria-label="Rol filtresi"
             >
-              <option value="all">Tüm kurumlar</option>
-              {institutions.map((i) => (
-                <option key={i.id} value={i.id}>
-                  {i.name}
+              <option value="all">Tüm roller</option>
+              {ROLES.map((role) => (
+                <option key={role.value} value={role.value}>
+                  {role.label}
                 </option>
               ))}
             </select>
-          )}
+
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value as typeof filterStatus)}
+              className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-w-[10rem]"
+              aria-label="Durum filtresi"
+            >
+              <option value="all">Tüm durumlar</option>
+              <option value="active">Aktif</option>
+              <option value="expired">Süresi dolmuş</option>
+              <option value="inactive">Pasif</option>
+            </select>
+
+            {currentUser?.role === 'super_admin' && (
+              <select
+                value={filterInstitutionId}
+                onChange={(e) => setFilterInstitutionId(e.target.value)}
+                className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-w-[12rem]"
+                aria-label="Kurum filtresi"
+              >
+                <option value="all">Tüm kurumlar</option>
+                {institutions.map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {i.name}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            <select
+              value={filterClassLevel}
+              onChange={(e) => setFilterClassLevel(e.target.value)}
+              className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-w-[10rem]"
+              aria-label="Sınıf filtresi"
+            >
+              <option value="all">Tüm sınıflar</option>
+              {CLASS_LEVELS.map((level) => (
+                <option key={String(level.value)} value={String(level.value)}>
+                  {level.label}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={filterCoachId}
+              onChange={(e) => setFilterCoachId(e.target.value)}
+              className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-w-[12rem]"
+              aria-label="Koç filtresi"
+            >
+              <option value="all">Tüm koçlar</option>
+              {coachesForFilter.map((coach) => (
+                <option key={coach.id} value={coach.id}>
+                  {coach.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -2222,7 +2635,17 @@ export default function UserManagement() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filteredUsers.map(user => {
+              {listLoading || authLoading ? (
+                <tr>
+                  <td colSpan={13} className="px-4 py-12 text-center text-sm text-slate-500">
+                    <span className="inline-flex items-center justify-center gap-2">
+                      <Loader2 className="h-5 w-5 animate-spin text-red-500" />
+                      Kullanıcılar ve öğrenci profilleri yükleniyor…
+                    </span>
+                  </td>
+                </tr>
+              ) : (
+              filteredUsers.map(user => {
                 const subStatus = getSubscriptionStatus(user);
                 const em = user.email.toLowerCase().trim();
                 const tags = userRoleTags(user as SystemUser);
@@ -2234,7 +2657,7 @@ export default function UserManagement() {
                           email: user.email,
                           studentId: user.studentId
                         },
-                        students
+                        linkedStudents
                       )
                     : undefined;
                 const roleBadge = roleBadgeForUser(user);
@@ -2390,12 +2813,13 @@ export default function UserManagement() {
                     </td>
                   </tr>
                 );
-              })}
+              })
+              )}
             </tbody>
           </table>
         </div>
 
-        {filteredUsers.length === 0 && (
+        {!listLoading && !authLoading && filteredUsers.length === 0 && (
           <div className="p-8 text-center text-gray-500">
             <Users className="w-12 h-12 mx-auto mb-3 text-gray-300" />
             <p>Kullanıcı bulunamadı</p>
@@ -2496,6 +2920,7 @@ export default function UserManagement() {
                       <label className="block text-sm font-medium text-gray-700 mb-1">Doğum tarihi</label>
                       <input
                         type="date"
+                        autoComplete="off"
                         value={formData.birthDate}
                         onChange={(e) => setFormData({ ...formData, birthDate: e.target.value })}
                         className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
@@ -2538,6 +2963,7 @@ export default function UserManagement() {
                       <label className="block text-sm font-medium text-gray-700 mb-1">Veli adı</label>
                       <input
                         type="text"
+                        autoComplete="off"
                         value={formData.parentName}
                         onChange={(e) => setFormData({ ...formData, parentName: e.target.value })}
                         className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
@@ -2548,6 +2974,7 @@ export default function UserManagement() {
                       <label className="block text-sm font-medium text-gray-700 mb-1">Veli telefon numarası</label>
                       <input
                         type="tel"
+                        autoComplete="off"
                         value={formData.parentPhone}
                         onChange={(e) => setFormData({ ...formData, parentPhone: e.target.value })}
                         className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"

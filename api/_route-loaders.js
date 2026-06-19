@@ -2,6 +2,7 @@
 
 export const routeLoaders = {
   'auth-login': () => import('../handlers/auth-login.js'),
+  'auth-register': () => import('../handlers/auth-register.js'),
   'auth-forgot-password': () => import('../handlers/auth-forgot-password.js'),
   'auth-reset-password': () => import('../handlers/auth-reset-password.js'),
   'setup-password-reset-table': () => import('../handlers/setup-password-reset-table.js'),
@@ -25,6 +26,7 @@ export const routeLoaders = {
   'ai-exams': () => import('../handlers/ai-exams.js'),
   meetings: () => import('../handlers/meetings.js'),
   'meta/whatsapp': () => import('../handlers/meta-whatsapp.js'),
+  'meta/webhook': () => import('../handlers/meta-whatsapp-webhook.js'),
   'whatsapp/send': () => import('../handlers/whatsapp-send.js'),
   'whatsapp/template-test': () => import('../handlers/whatsapp-template-test.js'),
   'message-templates': () => import('../handlers/message-templates.js'),
@@ -70,5 +72,6 @@ export const routeLoaders = {
   'cron/edesis-sync': () => import('../handlers/cron-edesis-sync.js'),
   'book-orders': () => import('../handlers/book-orders.js'),
   'book-orders-kitapci-portal': () => import('../handlers/book-orders-kitapci-portal.js'),
+  'registration-approvals': () => import('../handlers/registration-approvals.js'),
   'cron/book-orders': () => import('../handlers/cron-book-orders.js')
 };

@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Gauge, Loader2, Save, Users } from 'lucide-react';
+import { Gauge, Loader2, Save } from 'lucide-react';
 import { db, QuotaSnapshot } from '../../lib/database';
 import { getAuthToken } from '../../lib/session';
 import { isSupabaseReady } from '../../lib/supabase';
 import type { Coach } from '../../types';
 import type { UserRole } from '../../context/AuthContext';
+import { PageCollapsibleSection } from '../ui/PageCollapsibleSection';
 
 type AdminPick = { id: string; name: string; email: string };
 
@@ -147,7 +148,7 @@ export function QuotaManagementPanel({
   };
 
   return (
-    <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4 space-y-4">
+    <div className="space-y-4 bg-indigo-50/60 p-4">
       <div className="flex items-start gap-3">
         <Gauge className="w-5 h-5 text-indigo-700 mt-0.5 shrink-0" />
         <div>
@@ -258,11 +259,16 @@ export function QuotaManagementPanel({
         </div>
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
-        <div className="flex items-center gap-2">
-          <Users className="w-4 h-4 text-slate-600" />
-          <p className="text-sm font-medium text-slate-800">Koç öğrenci kotası</p>
-        </div>
+      <PageCollapsibleSection
+        title="Koç öğrenci kotası"
+        description={
+          institutionCoaches.length
+            ? `${institutionCoaches.length} koç için öğrenci üst sınırı`
+            : 'Bu kurumda koç yok'
+        }
+        className="border-indigo-100"
+        contentClassName="p-4"
+      >
         {institutionCoaches.length === 0 ? (
           <p className="text-sm text-gray-500">Bu kurumda koç bulunamadı.</p>
         ) : (
@@ -322,7 +328,7 @@ export function QuotaManagementPanel({
             </table>
           </div>
         )}
-      </div>
+      </PageCollapsibleSection>
     </div>
   );
 }

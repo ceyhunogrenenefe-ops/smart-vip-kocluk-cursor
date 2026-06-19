@@ -58,6 +58,7 @@ interface TemplateRow {
   success_today?: number;
   failed_today?: number;
   failed_today_operational?: number;
+  failed_today_configuration?: number;
   total_sent_window: number;
   success_count: number;
   failed_count: number;
@@ -557,6 +558,11 @@ export default function WhatsAppMerkeziPanel() {
                         {(t.failed_today_operational ?? 0) > 0 ? (
                           <span className="block text-[10px] text-slate-400">
                             ({t.failed_today_operational} telefon)
+                          </span>
+                        ) : null}
+                        {(t.failed_today_configuration ?? 0) > 0 ? (
+                          <span className="block text-[10px] text-amber-700">
+                            ({t.failed_today_configuration} yapılandırma)
                           </span>
                         ) : null}
                       </td>

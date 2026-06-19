@@ -14,6 +14,13 @@ export default function Login() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
+  const demoEmails = new Set([
+    'admin@smartkocluk.com',
+    'admin@smartvip.com',
+    'ogretmen@smartvip.com',
+    'ogrenci@smartvip.com'
+  ]);
+  const isDemoEmail = demoEmails.has(String(email || '').toLowerCase().trim());
 
   // Zaten oturum varsa veya giriş başarılı olduktan sonra tek seferlik yönlendirme (çift navigate / throttling önlenir)
   useEffect(() => {
@@ -167,13 +174,16 @@ export default function Login() {
 
             {/* Info */}
             <div className="text-center text-sm text-gray-600 pt-2 space-y-2">
-              <p>
-                Hesabınız yok mu? Ücretsiz deneme hesabı oluşturabilirsiniz.
-              </p>
+              <p>Hesabınız yok mu? Kayıt talebi oluşturabilirsiniz.</p>
+              {isDemoEmail ? (
+                <p className="text-xs text-amber-700">
+                  Demo hesaplar için kayıt gerekmez, doğrudan giriş yapabilirsiniz.
+                </p>
+              ) : null}
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
                 <Link to="/register" className="text-amber-700 text-xs inline-flex items-center gap-2 hover:text-amber-800">
                   <AlertTriangle className="w-4 h-4" />
-                  14 gün ücretsiz deneme hesabı oluştur
+                  Kayıt Ol (Yönetici Onayı Gereklidir)
                 </Link>
               </div>
             </div>

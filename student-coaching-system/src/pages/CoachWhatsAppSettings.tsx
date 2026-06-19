@@ -14,9 +14,12 @@ import {
   User,
   Users
 } from 'lucide-react';
-import { apiFetch, getAuthToken } from '../lib/session';
+import { apiFetch, getAuthToken, getGatewaySessionUserId } from '../lib/session';
 import { normalizeWhatsAppPhoneForSend } from '../lib/whatsappOutbound';
 import WhatsAppMerkeziPanel from '../components/whatsapp/WhatsAppMerkeziPanel';
+import { resolveWhatsAppGatewayBase } from '../lib/whatsappGatewayClient';
+
+type GatewayStatus = 'idle' | 'connecting' | 'qr_ready' | 'connected' | 'logged_out' | 'reconnecting';
 
 const formatPhone = (value: string) => normalizeWhatsAppPhoneForSend(value);
 
@@ -24,28 +27,6 @@ function isValidGatewayEnvUrl(s: string): boolean {
   const t = s.trim();
   return /^https?:\/\/[^\s]+/i.test(t);
 }
-
-/**
- * HTTPS panel + HTTP VPS: tarayıcı mixed content engeller; aynı origin Vercel proxy kullan.
- * Yalnızca gerçek URL kabul edilir (örn. http://27.x.x.x:4010). Placeholder veya boşluklu değer reddedilir.
- */
-function resolveWhatsAppGatewayBase(): string {
-  const raw = String(import.meta.env.VITE_WHATSAPP_GATEWAY_URL || '').trim();
-  const gv = raw.replace(/\/$/, '');
-  if (!gv || !isValidGatewayEnvUrl(gv)) return '';
-  if (typeof window === 'undefined') return gv;
-  try {
-    const pageHttps = window.location.protocol === 'https:';
-    if (pageHttps && gv.startsWith('http://')) {
-      return `${window.location.origin.replace(/\/$/, '')}/api/whatsapp-gateway`;
-    }
-  } catch {
-    /* noop */
-  }
-  return gv;
-}
-
-type GatewayStatus = 'idle' | 'connecting' | 'qr_ready' | 'connected' | 'logged_out' | 'reconnecting';
 
 interface WaScheduleDTO {
   coach_id: string;
@@ -62,12 +43,14 @@ interface WaScheduleDTO {
 
 export default function CoachWhatsAppSettings() {
   const hook = useAuth();
-  /** Bazı bileşenler effectiveUser bekler; AuthContext bazen yalnızca user döndürür. Gateway JWT'deki sub = users.id olduğundan kullanıcı id kullanılmalıdır. */
+  const { user, isImpersonating } = hook;
+  /** Gateway JWT sub = giriş yapan users.id; taklit (effectiveUser) kullanılmaz — 403 önlenir. */
+  const coachId = getGatewaySessionUserId(user?.id);
   const actor =
     (hook as unknown as { effectiveUser?: typeof hook.user | null }).effectiveUser ??
     hook.user ??
     null;
-  const coachId = actor?.id || '';
+  const isAdminActor = actor?.role === 'super_admin' || actor?.role === 'admin';
   const { students } = useApp();
   const gatewayEnvRaw = String(import.meta.env.VITE_WHATSAPP_GATEWAY_URL || '').trim();
   const gatewayEnvInvalid = Boolean(gatewayEnvRaw && !isValidGatewayEnvUrl(gatewayEnvRaw));
@@ -94,7 +77,6 @@ export default function CoachWhatsAppSettings() {
   const [templateSendBusy, setTemplateSendBusy] = useState(false);
   const [templateNotice, setTemplateNotice] = useState('');
   const [templateWaUrl, setTemplateWaUrl] = useState<string | null>(null);
-
   const selectedStudent = students.find((s) => s.id === selectedStudentId);
   const isConnected = status === 'connected';
   const hasServerJwt = Boolean(getAuthToken());
@@ -189,8 +171,26 @@ export default function CoachWhatsAppSettings() {
     if (status === 'connected') return 'Bağlı';
     if (status === 'qr_ready') return 'QR hazır';
     if (status === 'connecting' || status === 'reconnecting') return 'Bağlanıyor…';
+    if (status === 'logged_out') return 'Oturum kapalı — QR gerekli';
     return 'Bağlı değil';
   }, [status]);
+
+  const formatGatewaySessionError = (raw: string) => {
+    const e = raw.trim().toLowerCase();
+    if (e.includes('connection failure')) {
+      return 'WhatsApp sunucusuna bağlanılamadı (Connection Failure). Telefonda WhatsApp → Bağlı cihazlar’dan eski «Online VIP Coach» oturumunu kaldırın, sonra «Oturumu sıfırla ve QR al» butonuna basın.';
+    }
+    if (e.includes('conflict') || e.includes('connection replaced')) {
+      return 'Aynı numara başka yerde bağlı. Telefondan diğer WhatsApp Web oturumlarını kapatın ve QR ile yeniden bağlanın.';
+    }
+    return raw.trim();
+  };
+
+  const buildGatewayUnreachableHint = (raw: string) => {
+    const t = raw.toLowerCase();
+    if (!t.includes('gateway_upstream_unreachable') && !t.includes('gateway_upstream_timeout')) return '';
+    return ' Proxy upstream erişilemiyor: Gateway hangi makinede çalışıyorsa Vercel WHATSAPP_GATEWAY_UPSTREAM o makineye işaret etmeli (örn. http://VPS_IP:4010). Eğer gateway yalnızca Windows PC’de açıksa ve public IP yoksa Vercel oraya erişemez.';
+  };
 
   const prettyDate = (iso?: string | null) => {
     if (!iso) return '—';
@@ -204,20 +204,29 @@ export default function CoachWhatsAppSettings() {
     qr: string | null;
     connectedAt?: string | null;
     lastError?: string | null;
+    restoreBlocked?: boolean;
+    authOnDisk?: boolean;
+    hint?: string | null;
   };
 
   const applyGatewayStatusPayload = (data: GatewayStatusPayload) => {
     setStatus(data.status || 'idle');
     setQrDataUrl(data.qr || null);
     setLastConnectedAt(data.connectedAt || null);
-    setGatewaySessionError(
+    const err =
       data.status === 'connected'
         ? null
         : typeof data.lastError === 'string' && data.lastError.trim()
           ? data.lastError.trim()
-          : null
-    );
+          : data.restoreBlocked && data.hint
+            ? data.hint
+            : null;
+    setGatewaySessionError(err);
   };
+
+  const hasConnectionFailure =
+    Boolean(gatewaySessionError) &&
+    gatewaySessionError!.toLowerCase().includes('connection failure');
 
   const callGateway = async <T,>(endpoint: string, init?: RequestInit): Promise<T> => {
     if (!gatewayUrl || !coachId) throw new Error('whatsapp_gateway_url_missing');
@@ -251,20 +260,46 @@ export default function CoachWhatsAppSettings() {
           : `gateway_request_failed (HTTP ${res.status})`;
       const authHint =
         res.status === 401
-          ? ' Oturum (JWT) süresi dolmuş veya imza uyuşmuyor: çıkış yapıp tekrar giriş yapın. Panel ile gateway’de aynı APP_JWT_SECRET olmalı.'
-          : res.status === 403
+          ? data.error === 'invalid_gateway_key'
+            ? ' GATEWAY_API_KEY uyuşmuyor: VPS whatsapp-gateway .env dosyasına Vercel’deki GATEWAY_API_KEY değerini yazın, pm2 restart whatsapp-gateway.'
+            : ' Oturum (JWT) süresi dolmuş veya APP_JWT_SECRET uyuşmuyor: çıkış yapıp tekrar giriş yapın. VPS gateway .env ile Vercel aynı APP_JWT_SECRET olmalı.'
+          : res.status === 502
+            ? ' VPS gateway kapalı/erişilemiyor — sunucuda pm2 restart whatsapp-gateway, port 4010 açık mı kontrol edin.'
+            : res.status === 403
             ? ' URL’deki oturum id (JWT sub) ile eşleşme yok (coach_scope_mismatch) veya erişim reddedildi. Tarayıcıda açık olan kullanıcı = gateway’e giden id; Vercel’de WHATSAPP_GATEWAY_UPSTREAM / proxy çalışıyor olmalı.'
             : '';
-      throw new Error(`${base}${authHint}`);
+      const upstreamUnreachableHint = buildGatewayUnreachableHint(base);
+      const err = new Error(`${base}${authHint}${upstreamUnreachableHint}`) as Error & { httpStatus?: number };
+      err.httpStatus = res.status;
+      throw err;
     }
     return data as T;
   };
 
+  /** Eski VPS sürümünde POST /reset yok — /start?purge ile aynı işi yapar. */
+  const callGatewayReset = async (): Promise<GatewayStatusPayload & { purged?: boolean; reset?: boolean }> => {
+    try {
+      return await callGateway<GatewayStatusPayload & { reset?: boolean }>(`/sessions/${coachId}/reset`, {
+        method: 'POST'
+      });
+    } catch (e) {
+      const status = (e as Error & { httpStatus?: number }).httpStatus;
+      if (status === 404) {
+        return callGateway<GatewayStatusPayload & { purged?: boolean }>(`/sessions/${coachId}/start`, {
+          method: 'POST',
+          body: JSON.stringify({ purge: true })
+        });
+      }
+      throw e;
+    }
+  };
+
   const fetchStatus = async () => {
-    if (!canUseGateway || !hasServerJwt) return;
+    if (!canUseGateway || !hasServerJwt) return false;
     try {
       const data = await callGateway<GatewayStatusPayload>(`/sessions/${coachId}/status`);
       applyGatewayStatusPayload(data);
+      return true;
     } catch (e) {
       const msg = e instanceof Error && e.message ? e.message : 'gateway_request_failed';
       const upstreamHint = msg.includes('whatsapp_gateway_upstream_missing')
@@ -272,14 +307,28 @@ export default function CoachWhatsAppSettings() {
         : '';
       setGatewaySessionError(null);
       setStatusMessage(`Gateway durumu: ${msg}.${upstreamHint}`);
+      return false;
     }
   };
 
   useEffect(() => {
-    void fetchStatus();
     if (!canUseGateway) return;
-    const timer = setInterval(() => void fetchStatus(), 5000);
-    return () => clearInterval(timer);
+    let cancelled = false;
+    let delayMs = 5000;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const tick = async () => {
+      if (cancelled) return;
+      const ok = await fetchStatus();
+      delayMs = ok ? 5000 : Math.min(delayMs * 2, 30000);
+      if (!cancelled) timer = setTimeout(() => void tick(), delayMs);
+    };
+
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [canUseGateway, coachId, hasServerJwt]);
 
   const startConnection = async () => {
@@ -293,23 +342,28 @@ export default function CoachWhatsAppSettings() {
     }
     setIsBusy(true);
     setStatusMessage('');
+    setGatewaySessionError(null);
     try {
-      const started = await callGateway<{
-        status?: GatewayStatus;
-        qr?: string | null;
-        lastError?: string | null;
-      }>(`/sessions/${coachId}/start`, { method: 'POST' });
-      if (started?.qr) {
-        applyGatewayStatusPayload({
-          status: (started.status as GatewayStatus) || 'qr_ready',
-          qr: started.qr,
-          lastError: started.lastError ?? null
-        });
+      if (hasConnectionFailure || status === 'logged_out') {
+        const resetData = await callGatewayReset();
+        applyGatewayStatusPayload(resetData);
+        if (resetData.qr) {
+          setStatusMessage('Eski oturum silindi. Yeni QR hazır — telefonunuzdan okutun.');
+          return;
+        }
       }
-      if (started?.lastError && started.status !== 'connected') {
-        setGatewaySessionError(started.lastError);
+
+      const started = await callGateway<GatewayStatusPayload & { purged?: boolean }>(
+        `/sessions/${coachId}/start`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ purge: hasConnectionFailure || status === 'logged_out' })
+        }
+      );
+      applyGatewayStatusPayload(started);
+      if (started.purged) {
+        setStatusMessage('Bozuk oturum temizlendi. QR bekleniyor…');
       }
-      /** Baileys QR’sı genelde bir sonraki connection.update ile gelir; 5 sn aralık tek tur yetmez. */
       let sawQrOrConnected = Boolean(started?.qr) || started?.status === 'connected';
       for (let i = 0; i < 60; i++) {
         try {
@@ -317,6 +371,9 @@ export default function CoachWhatsAppSettings() {
           applyGatewayStatusPayload(snap);
           if (snap.qr || snap.status === 'connected') {
             sawQrOrConnected = true;
+            break;
+          }
+          if (snap.lastError && snap.lastError.toLowerCase().includes('connection failure')) {
             break;
           }
         } catch {
@@ -327,8 +384,8 @@ export default function CoachWhatsAppSettings() {
       await fetchStatus();
       setStatusMessage(
         sawQrOrConnected
-          ? 'QR oluşturuldu. WhatsApp ile tarayın.'
-          : 'İstek gönderildi ancak QR henüz gelmedi. Vercel’de WHATSAPP_GATEWAY_UPSTREAM, VPS’te gateway süreci (pm2), APP_JWT_SECRET eşleşmesi ve CORS_ALLOWED_ORIGINS (panel kökeni) kontrol edin.'
+          ? 'QR oluşturuldu. WhatsApp → Bağlı cihazlar’dan eski «Online VIP» oturumunu kaldırıp yeni QR’ı okutun.'
+          : 'QR henüz gelmedi. «Oturumu sıfırla ve QR al» deneyin; VPS’te pm2 restart whatsapp-gateway ve gateway kodunun güncel olduğundan emin olun.'
       );
     } catch (error) {
       setStatusMessage(`Bağlantı başlatılamadı: ${(error as Error).message}`);
@@ -344,9 +401,32 @@ export default function CoachWhatsAppSettings() {
       await callGateway(`/sessions/${coachId}/logout`, { method: 'POST' });
       setStatus('logged_out');
       setQrDataUrl(null);
-      setStatusMessage('WhatsApp bağlantısı kapatıldı.');
+      setGatewaySessionError(null);
+      setStatusMessage('WhatsApp oturumu sıfırlandı. QR ile yeniden bağlanabilirsiniz.');
     } catch (error) {
       setStatusMessage(`Çıkış yapılamadı: ${(error as Error).message}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const resetGatewaySession = async () => {
+    if (!canUseGateway) return;
+    setIsBusy(true);
+    setStatusMessage('');
+    setGatewaySessionError(null);
+    setQrDataUrl(null);
+    setStatus('connecting');
+    try {
+      const data = await callGatewayReset();
+      applyGatewayStatusPayload(data);
+      setStatusMessage(
+        data.qr
+          ? 'Eski oturum silindi. Yeni QR hazır — telefonda Bağlı cihazlardan eski oturumu kaldırıp okutun.'
+          : 'Oturum sıfırlandı. QR gelmezse «QR / Oturum başlat»a basın.'
+      );
+    } catch (error) {
+      setStatusMessage(`Sıfırlanamadı: ${(error as Error).message}`);
     } finally {
       setIsBusy(false);
     }
@@ -703,14 +783,30 @@ export default function CoachWhatsAppSettings() {
           <div className="min-w-0 flex-1">
             <h2 className="text-lg font-semibold text-slate-900">Kişisel WhatsApp oturumu (QR)</h2>
             <p className="text-sm text-slate-600">
-              Ayrı bir sunucuda çalışan gateway ile telefonunuzu tarayıp doğrudan mesaj gönderirsiniz.{' '}
-              <code className="rounded bg-slate-100 px-1 text-xs">VITE_WHATSAPP_GATEWAY_URL</code> tanımlı değilse bu bölüm
-              devre dışı kalır. HTTPS siteden HTTP gateway için istek otomatik olarak{' '}
-              <code className="rounded bg-slate-100 px-1 text-xs">/api/whatsapp-gateway</code> üzerinden iletilir.
+              Yalnızca <strong className="font-medium text-slate-800">sizin hesabınıza</strong> bağlı WhatsApp hattı —
+              başka yöneticiler veya koçlar bu oturumu göremez. İstekler{' '}
+              <code className="rounded bg-slate-100 px-1 text-xs">/api/whatsapp-gateway</code> üzerinden VPS’e gider.
+              {isAdminActor ? (
+                <>
+                  {' '}
+                  Kitap siparişi otomasyonu için ayrıca{' '}
+                  <strong className="font-medium text-slate-800">Kitap siparişleri</strong> sayfasındaki gateway bölümünü
+                  kullanın.
+                </>
+              ) : null}
             </p>
           </div>
         </div>
         <div className="space-y-6 p-6">
+          {isImpersonating && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+              <p className="font-medium">Başka kullanıcı adına görünüyorsunuz</p>
+              <p className="mt-2">
+                WhatsApp QR yalnızca <strong>giriş yaptığınız hesaba</strong> bağlanır. Taklit modunda gateway
+                istekleri reddedilebilir — QR için taklidi kapatın veya kendi hesabınızla giriş yapın.
+              </p>
+            </div>
+          )}
           {needsJwtForGateway && (
             <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-950">
               <p className="font-medium">WhatsApp için sunucu JWT’si gerekli (401 önler)</p>
@@ -737,28 +833,51 @@ export default function CoachWhatsAppSettings() {
                 </>
               ) : (
                 <>
-                  Gateway adresi yok: QR ve oturumdan gönderim kapalı. Hızlı şablonlar yine{' '}
-                  <strong>wa.me</strong> ile tarayıcıda açılabilir.
+                  Sunucu JWT veya oturum id eksik. Çıkış yapıp tekrar giriş yapın. Vercel’de{' '}
+                  <code className="rounded bg-amber-100 px-1 text-xs">WHATSAPP_GATEWAY_UPSTREAM</code> tanımlı olmalı.
                 </>
               )}
             </div>
           )}
 
-          {(status === 'reconnecting' || status === 'logged_out') && canUseGateway ? (
+          {(status === 'reconnecting' || status === 'logged_out') && canUseGateway && !gatewaySessionError ? (
             <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
               <p className="font-medium">WhatsApp oturumu düşebilir</p>
               <p className="mt-1 text-sky-900/90">
-                VPS yeniden başlayınca, telefondan çıkış yapılınca veya WhatsApp tarafı bağlantıyı kestiğinde QR yeniden
-                gerekebilir. Önce <strong>QR / Oturum başlat</strong>; birkaç dakika <strong>Bağlanıyor…</strong> kalırsa
-                VPS’te gateway sürecini (pm2 / docker) kontrol edin.
+                VPS yeniden başlayınca veya WhatsApp bağlantıyı kestiğinde QR yeniden gerekebilir.{' '}
+                <strong>QR / Oturum başlat</strong> veya <strong>Oturumu sıfırla ve QR al</strong> kullanın.
               </p>
             </div>
           ) : null}
 
           {gatewaySessionError && canUseGateway ? (
-            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
-              <p className="font-medium">Gateway (sunucu) mesajı</p>
-              <p className="mt-1 font-mono text-xs break-all">{gatewaySessionError}</p>
+            <div className="rounded-xl border border-rose-300 bg-rose-50 px-4 py-4 text-sm text-rose-950">
+              <p className="font-semibold">Bağlantı hatası</p>
+              <p className="mt-2 text-xs leading-relaxed">{formatGatewaySessionError(gatewaySessionError)}</p>
+              <ol className="mt-3 list-decimal space-y-1 pl-4 text-xs text-rose-900/90">
+                <li>Telefonda WhatsApp → <strong>Bağlı cihazlar</strong> → eski «Online VIP» oturumunu <strong>kaldırın</strong>.</li>
+                <li>Aşağıdaki butonla sunucudaki bozuk oturumu silin ve yeni QR alın.</li>
+                <li>QR gelince 60 sn içinde okutun; aynı numarayı başka WhatsApp Web’de açık bırakmayın.</li>
+              </ol>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void resetGatewaySession()}
+                  disabled={isBusy}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-700 disabled:opacity-50"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${isBusy ? 'animate-spin' : ''}`} />
+                  Oturumu sıfırla ve QR al
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void startConnection()}
+                  disabled={isBusy}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 bg-white px-3 py-2 text-xs font-medium text-rose-900 hover:bg-rose-100 disabled:opacity-50"
+                >
+                  QR / Oturum başlat
+                </button>
+              </div>
             </div>
           ) : null}
 

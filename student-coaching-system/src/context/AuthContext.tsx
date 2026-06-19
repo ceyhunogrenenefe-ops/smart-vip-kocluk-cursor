@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Student } from '../types';
-import { clearAuthToken, fetchPublicPost, setAuthToken, getAuthToken } from '../lib/session';
+import { clearAuthToken, fetchPublicPost, setAuthToken, getAuthToken, peekJwtClaims } from '../lib/session';
 import { db } from '../lib/database';
 import { studentRowToStudent } from '../lib/mapStudentRow';
 import type { UserRow } from '../lib/userRowToSystemUser';
@@ -388,7 +388,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (savedUser) {
           const parsed = JSON.parse(savedUser);
           if (parsed && parsed.id && parsed.email) {
-            const normalized = applyTrialAccountCoachOnly(parsed as SystemUser);
+            let normalized = applyTrialAccountCoachOnly(parsed as SystemUser);
+            const jwtSub = peekJwtClaims(getAuthToken())?.sub;
+            if (jwtSub && jwtSub !== 'anonymous' && normalized.id !== jwtSub) {
+              normalized = { ...normalized, id: jwtSub };
+            }
             /** Öğrenci API’leri JWT ister; token yoksa eski oturumu yükleme (my-student 403 / boş analiz) */
             if (String(normalized.role || '').toLowerCase() === 'student' && !getAuthToken()) {
               localStorage.removeItem('coaching_user');
@@ -433,6 +437,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Giriş yap
   const login = async (email: string, password: string): Promise<{ success: boolean; message: string }> => {
+    const getServerLoginErrorMessage = async (res: Response): Promise<string | null> => {
+      try {
+        const payload = await res.json();
+        const err = String(payload?.error || '').trim();
+        if (err === 'pending_approval') return 'Kaydınız alındı. Yönetici onayı sonrası giriş yapabilirsiniz.';
+        if (err === 'inactive_user') return 'Hesabınız pasif durumda. Lütfen yöneticinizle iletişime geçin.';
+      } catch {
+        /* ignore */
+      }
+      return null;
+    };
+
     setImpersonationTarget(null);
     localStorage.removeItem(IMPERSONATION_STORAGE_KEY);
     localStorage.removeItem(IMPERSONATION_RETURN_PATH_KEY);
@@ -557,6 +573,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(merged);
         return { success: true, message: 'Giriş başarılı!' };
       }
+      if (error) {
+        try {
+          const res = await fetchPublicPost('/api/auth-login', { email: normalizedEmail, password });
+          if (!res.ok) {
+            const serverMessage = await getServerLoginErrorMessage(res);
+            if (serverMessage) return { success: false, message: serverMessage };
+          }
+        } catch {
+          /* ignore */
+        }
+      }
     } catch (e) {
       supabaseFailed = true;
       if (e instanceof Error && e.message === 'AUTH_TIMEOUT') {
@@ -627,6 +654,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (supabaseFailed && USE_DEMO_MODE) {
+      try {
+        const res = await fetchPublicPost('/api/auth-login', { email: normalizedEmail, password });
+        if (!res.ok) {
+          const serverMessage = await getServerLoginErrorMessage(res);
+          if (serverMessage) return { success: false, message: serverMessage };
+        }
+      } catch {
+        /* ignore */
+      }
       return { success: false, message: 'Sunucuya ulaşılamadı. Demo/deneme hesabı ile giriş yapabilirsiniz.' };
     }
     return { success: false, message: 'E-posta veya şifre hatalı!' };

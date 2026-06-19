@@ -5,8 +5,22 @@ import {
   parseMetaSendError,
   normalizeMetaLanguageCode
 } from './meta-whatsapp.js';
-import { resolveLanguageTryOrderForSend } from './meta-templates-sync.js';
+import { resolvePhoneWabaTemplateSendConfig } from './meta-templates-sync.js';
 import { supabaseAdmin } from './supabase-admin.js';
+
+/** Üretim gönderimi — Meta WABA listesi API çağrılmaz (diğer şablonları bozmaz). */
+function localLanguageCandidates(preferredLang) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of [preferredLang, 'tr', 'tr_TR']) {
+    const code = normalizeMetaLanguageCode(raw);
+    const key = code.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(code);
+  }
+  return out;
+}
 
 function normalizeBindingList(templateRow) {
   const raw = templateRow?.twilio_variable_bindings;
@@ -119,7 +133,13 @@ export function buildTemplatePreview(templateRow, vars) {
 /**
  * `message_templates` satırını kullanarak Meta şablon gönderir.
  */
-export async function sendWhatsAppUsingTemplateRow({ phone, templateRow, vars, templateType }) {
+export async function sendWhatsAppUsingTemplateRow({
+  phone,
+  templateRow,
+  vars,
+  templateType,
+  requirePhoneWabaTemplate = false
+}) {
   const e164 = normalizePhoneToE164(phone);
   if (!e164) {
     return {
@@ -172,14 +192,37 @@ export async function sendWhatsAppUsingTemplateRow({ phone, templateRow, vars, t
   }
 
   const bodyParameterTexts = buildTemplateBodyParameters(bindings, vars);
-  const useNamedMetaBody = templateRow?.meta_named_body_parameters === true;
-  const languageCandidates = await resolveLanguageTryOrderForSend(metaName, lang);
+  let useNamedMetaBody = templateRow?.meta_named_body_parameters === true;
+
+  let metaNameToSend = metaName;
+  let langToSend = lang;
+  let languageCandidates = localLanguageCandidates(lang);
+
+  if (requirePhoneWabaTemplate) {
+    const live = await resolvePhoneWabaTemplateSendConfig(metaName, lang);
+    if (!live.ok) {
+      return {
+        ok: false,
+        channel: 'template',
+        error: live.hint || live.error || 'template_not_on_phone_waba',
+        errorCode: live.error || 'PHONE_WABA_TEMPLATE',
+        meta_template_name: metaName,
+        twilio_content_sid: null
+      };
+    }
+    metaNameToSend = live.template_name || metaName;
+    langToSend = live.language || lang;
+    languageCandidates = live.language_candidates || languageCandidates;
+    if (live.meta_named_body_parameters === true) {
+      useNamedMetaBody = true;
+    }
+  }
 
   async function attemptSend(useNamed) {
     return sendMetaTemplateMessage({
       toE164: e164,
-      templateName: metaName,
-      languageCode: lang,
+      templateName: metaNameToSend,
+      languageCode: langToSend,
       languageCandidates,
       bodyParameterTexts,
       bodyParameterNames: useNamed ? bindings : null
@@ -188,14 +231,27 @@ export async function sendWhatsAppUsingTemplateRow({ phone, templateRow, vars, t
 
   function successResult(r, useNamed) {
     const mid = r.messageId || null;
+    if (!mid) {
+      return {
+        ok: false,
+        channel: 'template',
+        error: 'Meta kabul etti ancak mesaj kimliği (wamid) dönmedi — teslimat doğrulanamadı.',
+        errorCode: 'META_NO_WAMID',
+        meta_template_name: metaName,
+        twilio_content_sid: null
+      };
+    }
     return {
       ok: true,
       sid: mid,
       channel: 'template',
-      bodyPreview: `[template:${metaName};named:${useNamed}]`,
+      bodyPreview: `[template:${metaName};named:${useNamed};lang:${r.languageUsed || langToSend}]`,
       templateType: templateType || null,
       meta_template_name: metaName,
       meta_message_id: mid,
+      meta_language_used: r.languageUsed || langToSend,
+      meta_message_status: r.messageStatus || null,
+      meta_contact_wa_id: r.contactWaId || null,
       twilio_content_sid: null,
       content_variables_json: JSON.stringify(bodyParameterTexts)
     };
@@ -214,16 +270,31 @@ export async function sendWhatsAppUsingTemplateRow({ phone, templateRow, vars, t
     };
   }
 
+  function isParameterMismatch(err) {
+    const parsed = parseMetaSendError(err);
+    const code = Number(parsed.code || 0);
+    const msg = String(parsed.message || err?.message || '').toLowerCase();
+    return code === 132018 || code === 100 || msg.includes('132018') || msg.includes('parameter');
+  }
+
   try {
     const r = await attemptSend(useNamedMetaBody);
-    return successResult(r, useNamedMetaBody);
+    const out = successResult(r, useNamedMetaBody);
+    if (out.ok) return out;
+    if (useNamedMetaBody) return out;
   } catch (e1) {
-    try {
-      const r2 = await attemptSend(!useNamedMetaBody);
-      return successResult(r2, !useNamedMetaBody);
-    } catch (e2) {
-      return failureResult(e2);
+    if (useNamedMetaBody && isParameterMismatch(e1)) {
+      /* named → pozisyonel dene (#132018) */
+    } else {
+      return failureResult(e1);
     }
+  }
+
+  try {
+    const r2 = await attemptSend(false);
+    return successResult(r2, false);
+  } catch (e2) {
+    return failureResult(e2);
   }
 }
 

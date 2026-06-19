@@ -1,11 +1,12 @@
 // Türkçe: Eğitim Koçu Yönetimi Sayfası
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, type SystemUser } from '../context/AuthContext';
 import { Coach } from '../types';
 import { db } from '../lib/database';
 import { isSupabaseReady } from '../lib/supabase';
-import { getAuthToken } from '../lib/session';
+import { apiFetch, getAuthToken } from '../lib/session';
 import {
   Users,
   Search,
@@ -19,14 +20,29 @@ import {
   BookOpen,
   ChevronDown,
   GraduationCap,
-  UserCircle
+  UserCircle,
+  LogIn,
+  Loader2,
+  ChevronDown
 } from 'lucide-react';
 import { CopyableLoginCredentialsPanel } from '../components/auth/CopyableLoginCredentials';
 
+type ApiUserRow = {
+  id: string;
+  name?: string;
+  email?: string;
+  phone?: string | null;
+  role?: string;
+  roles?: string[];
+  institution_id?: string | null;
+};
+
 export default function Coaches() {
-  const { effectiveUser } = useAuth();
+  const navigate = useNavigate();
+  const { effectiveUser, impersonate, canImpersonate } = useAuth();
   const canSetCoachQuota =
     effectiveUser?.role === 'super_admin' || effectiveUser?.role === 'admin';
+  const canManageLogin = canSetCoachQuota;
 
   const { coaches, students, addCoach, updateCoach, deleteCoach, institution, activeInstitutionId } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
@@ -36,6 +52,18 @@ export default function Coaches() {
     Record<string, { max: number | null; assigned: number }>
   >({});
   const [quotaInputs, setQuotaInputs] = useState<Record<string, string>>({});
+  const [apiUsers, setApiUsers] = useState<ApiUserRow[]>([]);
+  const [loginBusyId, setLoginBusyId] = useState<string | null>(null);
+  const [openQuotaCoachId, setOpenQuotaCoachId] = useState<string | null>(null);
+
+  const userByEmail = useMemo(() => {
+    const m = new Map<string, ApiUserRow>();
+    for (const u of apiUsers) {
+      const em = String(u.email || '').toLowerCase().trim();
+      if (em) m.set(em, u);
+    }
+    return m;
+  }, [apiUsers]);
 
   // Filtrelenmiş koçlar
   const filteredCoaches = coaches.filter(coach =>
@@ -154,6 +182,78 @@ export default function Coaches() {
   };
 
   useEffect(() => {
+    if (!canManageLogin || !getAuthToken()) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await apiFetch('/api/users');
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) return;
+        if (!cancelled) setApiUsers(Array.isArray(j.data) ? j.data : []);
+      } catch {
+        /* liste yüklenemezse giriş düğmesi oluşturma moduna düşer */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [canManageLogin, coaches.length]);
+
+  const coachToSystemUser = (coach: Coach, row?: ApiUserRow): SystemUser => {
+    const roles = Array.isArray(row?.roles)
+      ? (row.roles.filter(Boolean) as SystemUser['roles'])
+      : undefined;
+    return {
+      id: row?.id || coach.id,
+      name: row?.name || coach.name,
+      email: row?.email || coach.email,
+      phone: row?.phone || coach.phone,
+      role: 'coach',
+      roles: roles?.length ? roles : undefined,
+      coachId: coach.id,
+      institutionId: coach.institutionId,
+      package: 'trial',
+      isActive: true,
+      startDate: coach.createdAt || new Date().toISOString(),
+      endDate: new Date(Date.now() + 365 * 86400000).toISOString(),
+      createdAt: coach.createdAt
+    };
+  };
+
+  const findCoachLoginUser = (coach: Coach) => {
+    const em = coach.email.toLowerCase().trim();
+    return userByEmail.get(em);
+  };
+
+  const handleCoachLogin = async (coach: Coach) => {
+    const row = findCoachLoginUser(coach);
+    if (!row) {
+      navigate(`/user-management?koc_giris=${encodeURIComponent(coach.id)}`);
+      return;
+    }
+    const target = coachToSystemUser(coach, row);
+    if (target.email.toLowerCase().trim() === effectiveUser?.email?.toLowerCase().trim()) {
+      alert('Zaten bu hesapla oturum açmış durumdasınız.');
+      return;
+    }
+    if (!canImpersonate(target)) {
+      alert('Bu koç hesabına geçiş yetkiniz yok.');
+      return;
+    }
+    setLoginBusyId(coach.id);
+    try {
+      const r = await impersonate(target);
+      if (!r.success) {
+        alert(r.message);
+        return;
+      }
+      navigate('/coach-dashboard');
+    } finally {
+      setLoginBusyId(null);
+    }
+  };
+
+  useEffect(() => {
     if (!canSetCoachQuota || !getAuthToken() || !isSupabaseReady || coaches.length === 0) return;
     let cancelled = false;
     void (async () => {
@@ -237,13 +337,36 @@ export default function Coaches() {
                 </div>
               </div>
               <div className="flex items-center gap-1">
+                {canManageLogin ? (
+                  <button
+                    type="button"
+                    title={
+                      findCoachLoginUser(coach)
+                        ? 'Koç hesabına gir'
+                        : 'Giriş hesabı oluştur'
+                    }
+                    disabled={loginBusyId === coach.id}
+                    onClick={() => void handleCoachLogin(coach)}
+                    className="p-1.5 text-violet-600 hover:text-violet-800 hover:bg-violet-50 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {loginBusyId === coach.id ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <LogIn className="w-4 h-4" />
+                    )}
+                  </button>
+                ) : null}
                 <button
+                  type="button"
+                  title="Düzenle"
                   onClick={() => handleEdit(coach)}
                   className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
                 >
                   <Edit2 className="w-4 h-4" />
                 </button>
                 <button
+                  type="button"
+                  title="Sil"
                   onClick={() => handleDelete(coach.id)}
                   className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                 >
@@ -277,58 +400,72 @@ export default function Coaches() {
             </div>
 
             {canSetCoachQuota && (
-              <div className="mt-3 pt-3 border-t border-dashed border-gray-200 space-y-2">
-                <p className="text-xs font-semibold text-slate-700">Bu koça atanabilir öğrenci sınırı</p>
-                <p className="text-xs text-gray-600">
-                  Mevcut:{' '}
-                  <span className="font-medium">
-                    {coachQuotaById[coach.id]?.assigned ?? getStudentCount(coach.id)}
-                  </span>
-                  {coachQuotaById[coach.id]?.max != null && coachQuotaById[coach.id]!.max! >= 0 && (
-                    <>
-                      {' '}
-                      / <span className="font-medium">{coachQuotaById[coach.id]!.max}</span>
-                    </>
-                  )}
-                  {coachQuotaById[coach.id]?.max == null && (
-                    <span className="text-gray-400"> (üst kapasite tanımlanmamış)</span>
-                  )}
-                </p>
-                <div className="flex gap-2 items-center">
-                  <input
-                    type="number"
-                    min={0}
-                    className="flex-1 min-w-0 px-2 py-1.5 border border-gray-200 rounded-lg text-sm"
-                    placeholder="Max öğrenci sayısı"
-                    value={quotaInputs[coach.id] ?? ''}
-                    onChange={e =>
-                      setQuotaInputs(p => ({
-                        ...p,
-                        [coach.id]: e.target.value
-                      }))
-                    }
+              <div className="mt-3 border-t border-dashed border-gray-200 pt-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setOpenQuotaCoachId((id) => (id === coach.id ? null : coach.id))
+                  }
+                  className="flex w-full items-center gap-2 rounded-lg px-1 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  <ChevronDown
+                    className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${
+                      openQuotaCoachId === coach.id ? 'rotate-180' : ''
+                    }`}
                   />
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const raw = quotaInputs[coach.id];
-                      const n = Math.floor(Number(raw === '' || raw == null ? '0' : raw));
-                      try {
-                        await db.patchCoachStudentQuota(coach.id, Number.isFinite(n) && n >= 0 ? n : 0);
-                        const d = await db.getCoachQuota(coach.id);
-                        setCoachQuotaById(p => ({
-                          ...p,
-                          [coach.id]: { max: d.max_students, assigned: d.assigned_students }
-                        }));
-                      } catch (e) {
-                        alert(e instanceof Error ? e.message : 'Kota kaydedilemedi');
-                      }
-                    }}
-                    className="shrink-0 px-3 py-1.5 bg-slate-800 text-white text-xs rounded-lg hover:bg-slate-900"
-                  >
-                    Kaydet
-                  </button>
-                </div>
+                  <span>Öğrenci kotası</span>
+                  <span className="ml-auto font-normal text-gray-500">
+                    {coachQuotaById[coach.id]?.assigned ?? getStudentCount(coach.id)}
+                    {coachQuotaById[coach.id]?.max != null
+                      ? ` / ${coachQuotaById[coach.id]!.max}`
+                      : ''}
+                  </span>
+                </button>
+                {openQuotaCoachId === coach.id ? (
+                  <div className="space-y-2 px-1 pb-1">
+                    <p className="text-xs text-gray-600">
+                      Bu koça atanabilir öğrenci üst sınırı
+                    </p>
+                    <div className="flex gap-2 items-center">
+                      <input
+                        type="number"
+                        min={0}
+                        className="flex-1 min-w-0 px-2 py-1.5 border border-gray-200 rounded-lg text-sm"
+                        placeholder="Max öğrenci sayısı"
+                        value={quotaInputs[coach.id] ?? ''}
+                        onChange={(e) =>
+                          setQuotaInputs((p) => ({
+                            ...p,
+                            [coach.id]: e.target.value
+                          }))
+                        }
+                      />
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const raw = quotaInputs[coach.id];
+                          const n = Math.floor(Number(raw === '' || raw == null ? '0' : raw));
+                          try {
+                            await db.patchCoachStudentQuota(
+                              coach.id,
+                              Number.isFinite(n) && n >= 0 ? n : 0
+                            );
+                            const d = await db.getCoachQuota(coach.id);
+                            setCoachQuotaById((p) => ({
+                              ...p,
+                              [coach.id]: { max: d.max_students, assigned: d.assigned_students }
+                            }));
+                          } catch (e) {
+                            alert(e instanceof Error ? e.message : 'Kota kaydedilemedi');
+                          }
+                        }}
+                        className="shrink-0 px-3 py-1.5 bg-slate-800 text-white text-xs rounded-lg hover:bg-slate-900"
+                      >
+                        Kaydet
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             )}
           </div>

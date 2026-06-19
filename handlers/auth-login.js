@@ -159,6 +159,7 @@ export default async function handler(req, res) {
     }
     if (!user) return res.status(401).json({ error: 'invalid_credentials' });
     if (user.password_hash !== password) return res.status(401).json({ error: 'invalid_credentials' });
+    if (user.role === 'pending_approval') return res.status(403).json({ error: 'pending_approval' });
     if (user.is_active === false) return res.status(403).json({ error: 'inactive_user' });
 
     let studentId;

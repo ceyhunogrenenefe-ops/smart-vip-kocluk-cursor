@@ -26,6 +26,7 @@ import {
 import { handleBbbJoinGet, patchRowMeetingLinks } from '../api/_lib/bbb-join-handler.js';
 import { buildBbbAttendeeJoinUrl, parseBbbJoinCredentials, parseBbbMeetingIdFromJoinUrl } from '../api/_lib/bbb.js';
 import { pollBbbPresenceForSession, applyAutoAttendanceForClassSession } from '../api/_lib/bbb-attendance.js';
+import { isBbbAutoAttendanceEnabled } from '../api/_lib/bbb-auto-attendance-enabled.js';
 import { applyEarlyBbbAbsentCheck } from '../api/_lib/bbb-early-absent.js';
 import { sendAbsentNoticeForStudent } from '../api/_lib/class-attendance-notify.js';
 
@@ -1085,6 +1086,9 @@ export default async function handler(req, res) {
     }
 
     if (op === 'bbb-sync-attendance') {
+      if (!isBbbAutoAttendanceEnabled()) {
+        return res.status(403).json({ error: 'bbb_auto_attendance_disabled' });
+      }
       const sessionId = String(body.session_id || '').trim();
       if (!sessionId) return res.status(400).json({ error: 'session_id_required' });
       const { data: session } = await supabaseAdmin

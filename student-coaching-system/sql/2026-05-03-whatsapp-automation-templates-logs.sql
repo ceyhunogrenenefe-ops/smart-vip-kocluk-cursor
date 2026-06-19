@@ -55,7 +55,7 @@ VALUES
   (
     'Rapor hatırlatma',
     'report_reminder',
-    'Merhaba {{student_name}}, bugün günlük raporunuzu henüz girmediniz. Lütfen Smart Koçluk üzerinden haftalık takibinizi tamamlayın.',
+    'Merhaba {{student_name}}, bugün günlük raporunuzu henüz girmediniz. Lütfen Online Vip Ders Koçluk üzerinden haftalık takibinizi tamamlayın.',
     '["student_name"]'::jsonb
   )
 ON CONFLICT (type) DO NOTHING;

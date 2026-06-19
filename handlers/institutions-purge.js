@@ -7,11 +7,16 @@ function phoneDigits(phone) {
   return String(phone || '').replace(/\D/g, '');
 }
 
+const PLATFORM_PRIMARY_INSTITUTION_ID = '73323d75-eea1-4552-8bba-d50555423589';
+
 /** Silinmemesi gereken kurum (resmi VIP adı veya ana hat) */
 function isProtectedInstitution(row) {
+  const id = String(row.id || '').trim();
+  if (id === PLATFORM_PRIMARY_INSTITUTION_ID) return true;
   const name = String(row.name || '')
     .toLowerCase()
     .trim();
+  if (name.includes('online vip')) return true;
   if (name === 'online vip ders ve koçluk') return true;
   const d = phoneDigits(row.phone);
   return d === '08503034014' || d === '8503034014';
@@ -19,7 +24,7 @@ function isProtectedInstitution(row) {
 
 async function collectUsedInstitutionIds() {
   const used = new Set();
-  const tables = ['users', 'students', 'coaches'];
+  const tables = ['users', 'students', 'coaches', 'kitapcilar', 'kitap_siparisleri', 'kitap_siparis_setleri'];
   for (const t of tables) {
     const { data, error } = await supabaseAdmin.from(t).select('institution_id').not('institution_id', 'is', null);
     if (error) throw error;

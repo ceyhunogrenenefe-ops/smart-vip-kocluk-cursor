@@ -156,8 +156,18 @@ export async function resolveWabaIds() {
   return out;
 }
 
-async function fetchTemplatesForWaba(waba, tok, { includeComponents = false } = {}) {
-  const fields = includeComponents ? 'name,status,language,components' : 'name,status,language';
+export function isMetaTemplateSendableStatus(status) {
+  const s = String(status || '').trim().toUpperCase();
+  if (!s) return false;
+  if (s === 'APPROVED' || s === 'ACTIVE' || s === 'ENABLED') return true;
+  if (s.includes('APPROV') || s.includes('ACTIVE')) return true;
+  return false;
+}
+
+export async function fetchTemplatesForWaba(waba, tok, { includeComponents = false } = {}) {
+  const fields = includeComponents
+    ? 'name,status,language,category,components,parameter_format'
+    : 'name,status,language,category,parameter_format';
   const rows = [];
   let url = `https://graph.facebook.com/${GRAPH()}/${encodeURIComponent(waba)}/message_templates?fields=${fields}&limit=250`;
   while (url) {
@@ -179,7 +189,9 @@ async function fetchTemplatesForWaba(waba, tok, { includeComponents = false } = 
 async function fetchTemplateByNameFromWaba(waba, templateName, tok, { includeComponents = false } = {}) {
   const name = String(templateName || '').trim();
   if (!waba || !name || !tok) return [];
-  const fields = includeComponents ? 'name,status,language,components' : 'name,status,language';
+  const fields = includeComponents
+    ? 'name,status,language,category,components,parameter_format'
+    : 'name,status,language,category,parameter_format';
   const q = new URLSearchParams({
     fields,
     limit: '50',
@@ -243,6 +255,9 @@ export async function fetchMetaTemplatesFromPhoneWaba(templateName, opts = {}) {
     });
     if (full.ok) {
       matches = findMetaTemplatesByName(full.templates, name);
+      if (!matches.length) {
+        matches = findMetaTemplatesByNameLoose(full.templates, name);
+      }
     }
   }
 
@@ -252,7 +267,8 @@ export async function fetchMetaTemplatesFromPhoneWaba(templateName, opts = {}) {
     waba_source: primary.source,
     matches,
     templates: matches,
-    searched_name: name
+    searched_name: name,
+    hint: null
   };
 }
 
@@ -434,19 +450,136 @@ export function buildLanguageTryOrder(templates, templateName, preferredLang) {
   };
 
   for (const row of rows) {
-    if (String(row.status || '').toUpperCase() === 'APPROVED') add(row.language);
+    if (isMetaTemplateSendableStatus(row.status)) add(row.language);
   }
   for (const row of rows) add(row.language);
 
   add(preferredLang);
   add('tr');
   add('tr_TR');
+  add('tr_tr');
   add('Turkish');
 
   return out;
 }
 
-/** WABA listesinden gönderim için dil sırası — önce gönderim numarasının WABA'sı. */
+/** Meta gönderiminde tr / tr_TR varyantlarını sırayla dener. */
+export function expandMetaLanguageCandidates(codes) {
+  const out = [];
+  const seen = new Set();
+  const add = (code) => {
+    const raw = String(code || '').trim();
+    if (!raw) return;
+    const key = normalizeLangKey(raw);
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(raw);
+  };
+  for (const code of codes || []) {
+    add(code);
+    const base = normalizeLangKey(code).split('_')[0];
+    if (base === 'tr') {
+      add('tr');
+      add('tr_TR');
+      add('tr_tr');
+    }
+  }
+  return out;
+}
+
+/**
+ * Gönderim numarası WABA'sında onaylı şablon — Meta'dan birebir ad + dil.
+ * DB'deki tr/tr_TR tahmini yerine canlı WABA kaynağı (#132001 önlemi).
+ */
+export async function resolvePhoneWabaTemplateSendConfig(templateName, preferredLang = 'tr') {
+  const name = String(templateName || '').trim();
+  if (!name) {
+    return { ok: false, error: 'template_name_required', hint: 'Şablon adı eksik.' };
+  }
+
+  const phone = await fetchMetaTemplatesFromPhoneWaba(name, { includeComponents: true });
+  if (!phone.ok) {
+    return {
+      ok: false,
+      error: phone.error || 'phone_waba_unresolved',
+      hint: phone.hint || 'META_WHATSAPP_TOKEN / META_PHONE_NUMBER_ID / META_WABA_ID kontrol edin.',
+      waba_id: phone.waba_id || null
+    };
+  }
+
+  const matches = phone.matches || [];
+  const approved = matches.filter((m) => isMetaTemplateSendableStatus(m.status));
+  if (!approved.length) {
+    const statuses = matches.map((m) => `${m.language || '?'}: ${m.status || '?'}`).join(', ');
+    let hint = matches.length
+      ? `"${name}" şablonu WABA'da var ama onaylı değil (${statuses}). Meta Business Manager'da onaylayın.`
+      : `Gönderim numaranızın WABA'sında onaylı "${name}" şablonu yok. Şablonu aynı WhatsApp Business hesabında oluşturun.`;
+    const tok = process.env.META_WHATSAPP_TOKEN?.trim();
+    if (!matches.length && phone.waba_id && tok) {
+      const full = await fetchTemplatesForWaba(phone.waba_id, tok);
+      if (full.ok) {
+        const kitapLike = (full.templates || [])
+          .filter((t) => /kitap/i.test(String(t.name || '')))
+          .slice(0, 10)
+          .map((t) => `${t.name} [${t.language}, ${t.status}]`);
+        if (kitapLike.length) hint += ` WABA kitap şablonları: ${kitapLike.join('; ')}.`;
+      }
+    }
+    return {
+      ok: false,
+      error: matches.length ? 'template_not_approved' : 'template_not_found_on_waba',
+      hint,
+      waba_id: phone.waba_id,
+      matches
+    };
+  }
+
+  const wantLang = String(preferredLang || 'tr').trim() || 'tr';
+  const pick =
+    approved.find((m) => langMatches(wantLang, m.language)) ||
+    approved.find((m) => {
+      const l = String(m.language || '')
+        .trim()
+        .replace(/-/g, '_')
+        .toLowerCase();
+      return l === 'tr' || l === 'tr_tr' || l.startsWith('tr_');
+    }) ||
+    approved[0];
+
+  const resolvedName = String(pick.name || name).trim();
+  const resolvedLang = String(pick.language || '').trim();
+  const language_candidates = buildLanguageTryOrder(approved, resolvedName, resolvedLang || wantLang);
+  const parameterFormat = String(pick.parameter_format || '').trim().toUpperCase();
+  const namedBody =
+    parameterFormat === 'NAMED' ||
+    templateBodyUsesNamedParams(pick.components);
+
+  return {
+    ok: true,
+    template_name: resolvedName,
+    language: resolvedLang,
+    language_candidates,
+    parameter_format: parameterFormat || (namedBody ? 'NAMED' : 'POSITIONAL'),
+    meta_named_body_parameters: namedBody,
+    waba_id: phone.waba_id,
+    approved: approved.map((m) => ({
+      name: m.name,
+      language: m.language,
+      status: m.status,
+      parameter_format: m.parameter_format || null
+    }))
+  };
+}
+
+/** Meta BODY: {{veli_ad_soyad}} gibi adlandırılmış değişkenler */
+export function templateBodyUsesNamedParams(components) {
+  const body = (components || []).find((c) => String(c.type || '').toUpperCase() === 'BODY');
+  if (body?.example?.body_text_named_params?.length) return true;
+  const text = String(body?.text || '');
+  return /\{\{[a-zA-Z_][a-zA-Z0-9_]*\}\}/.test(text);
+}
+
+/** Panel / şablon senkronu — üretim gönderiminde çağrılmaz. */
 export async function resolveLanguageTryOrderForSend(templateName, preferredLang) {
   const phone = await fetchMetaTemplatesFromPhoneWaba(templateName);
   if (phone.ok && phone.matches?.length) {

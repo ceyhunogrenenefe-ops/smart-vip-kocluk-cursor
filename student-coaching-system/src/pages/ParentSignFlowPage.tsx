@@ -332,6 +332,13 @@ function buildVeliSignedUserManagementPrefillUrl(r: ParentSignContractRow, origi
   if (inst) q.set('kurum_id', inst);
   const cno = String(r.contract_number || '').trim();
   if (cno) q.set('sozlesme', cno);
+  const tc = String(kj.tc_kimlik || '')
+    .replace(/\D/g, '');
+  if (tc.length === 11) q.set('tc', tc);
+  const program = String(r.program_adi || '').trim();
+  if (program) q.set('program', program);
+  const adres = String(r.adres || '').trim();
+  if (adres) q.set('adres', adres.slice(0, 400));
   const base = origin.replace(/\/+$/, '');
   return `${base}/user-management?${q.toString()}`;
 }
@@ -1031,15 +1038,17 @@ export default function ParentSignFlowPage() {
     setMsg(null);
     try {
       const fullName = `${String(r.ogrenci_ad || '').trim()} ${String(r.ogrenci_soyad || '').trim()}`.trim() || 'Öğrenci';
+      const kj = kayitJsonRecord(r);
+      const ogTel = String(kj.ogrenci_tel || r.telefon || '').replace(/\D/g, '');
       const { passwordPlain } = await createStudentUserFromParentSign({
         contractId: r.id,
         institution_id: inst,
         studentName: fullName,
         email,
-        phone: r.telefon != null ? String(r.telefon).trim() : null
+        phone: ogTel.length >= 10 ? ogTel : r.telefon != null ? String(r.telefon).trim() : null
       });
       setMsg(
-        `Öğrenci girişi oluşturuldu. Kullanıcı yönetiminden e-posta ve şifreyi düzenleyebilirsiniz. Geçici şifre: ${passwordPlain}`
+        `Öğrenci hesabı ve öğrenci kartı oluşturuldu (tüm kayıt bilgileri aktarıldı). Kullanıcı yönetiminden düzenleyebilirsiniz. Geçici şifre: ${passwordPlain}`
       );
       void load();
     } catch (e) {

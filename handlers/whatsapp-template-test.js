@@ -4,6 +4,11 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { getIstanbulDateString } from '../api/_lib/istanbul-time.js';
 import { normalizePhoneToE164 } from '../api/_lib/phone-whatsapp.js';
 import { sendAutomatedWhatsApp } from '../api/_lib/whatsapp-outbound.js';
+import {
+  activateBookOrderMetaTemplate,
+  sendBookOrderWhatsApp,
+  BOOK_ORDER_TEMPLATE_TYPE
+} from '../api/_lib/book-order-meta-send.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -56,11 +61,29 @@ export default async function handler(req, res) {
     vars[String(k)] = v == null ? '' : String(v);
   }
 
-  const sent = await sendAutomatedWhatsApp({
-    phone: e164,
-    templateType,
-    vars
-  });
+  const sent =
+    templateType === BOOK_ORDER_TEMPLATE_TYPE
+      ? await (async () => {
+          await activateBookOrderMetaTemplate().catch(() => {});
+          const sampleOrder = {
+            veli_ad_soyad: vars.veli_ad_soyad || 'Test Veli',
+            ogrenci_ad_soyad: vars.ogrenci_ad_soyad || 'Test Öğrenci',
+            sinif: vars.sinif || '11',
+            kitap_seti: vars.kitap_seti || '11.sınıf Vip Set',
+            ucret_durumu: vars.ucret_durumu || 'Ödendi',
+            telefon: vars.telefon || '05013715302',
+            adres: vars.adres || 'Test Mah. No:1',
+            ilce: vars.ilce || 'Köşk',
+            il: vars.il || 'Aydın',
+            siparis_notu: vars.siparis_notu || 'Test siparişi'
+          };
+          return sendBookOrderWhatsApp(e164, sampleOrder);
+        })()
+      : await sendAutomatedWhatsApp({
+          phone: e164,
+          templateType,
+          vars
+        });
 
   const today = getIstanbulDateString();
   const preview =
