@@ -6,6 +6,19 @@ import {
   reportReminderSendChannel
 } from './_lib/daily-report-reminder-job.js';
 import { CRON_DAILY_REPORT_REMINDERS_UTC } from './_lib/vercel-cron-contract.js';
+import { probeGatewayHealth } from './_lib/gateway-upstream.js';
+import {
+  bookOrderGatewaySessionId,
+  getGatewaySendEnvStatus,
+  getGatewaySessionStatus,
+  listConnectedGatewaySessionIds
+} from './_lib/whatsapp-gateway-send.js';
+
+const maskId = (id) => {
+  const s = String(id || '').trim();
+  if (!s) return null;
+  return s.length > 12 ? `…${s.slice(-12)}` : s;
+};
 
 /**
  * WhatsApp teşhis — giriş gerekmez.
@@ -21,6 +34,35 @@ export default async function handler(req, res) {
   const metaReady = metaWhatsAppConfigured();
   const twilioReady = Boolean(twilio.configured);
 
+  const gatewayEnv = getGatewaySendEnvStatus();
+  const gatewayHealth = await probeGatewayHealth();
+  const envSessionId = bookOrderGatewaySessionId();
+  const connectedLive = gatewayHealth.ok ? await listConnectedGatewaySessionIds() : [];
+
+  const sessionChecks = [];
+  const candidates = [...new Set([envSessionId, ...connectedLive].filter(Boolean))];
+  for (const sid of candidates.slice(0, 5)) {
+    try {
+      const st = await getGatewaySessionStatus(sid);
+      sessionChecks.push({
+        session_id_suffix: maskId(sid),
+        ok: st.ok === true,
+        status: st.status || null,
+        error: st.error || null
+      });
+    } catch (e) {
+      sessionChecks.push({
+        session_id_suffix: maskId(sid),
+        ok: false,
+        status: 'check_failed',
+        error: e instanceof Error ? e.message : String(e)
+      });
+    }
+  }
+
+  const gatewayConnected = sessionChecks.some((s) => s.ok && s.status === 'connected');
+  const bookOrderChannel = String(process.env.BOOK_ORDER_WHATSAPP_CHANNEL || 'auto').trim() || 'auto';
+
   let waba_diag = { resolved: false, source: null, waba_id_suffix: null };
   if (metaReady) {
     const primary = await resolvePrimaryWabaId();
@@ -35,15 +77,23 @@ export default async function handler(req, res) {
   }
 
   let hint;
-  if (metaReady) {
-    hint =
-      'Meta Cloud API hazır. Otomasyon şablon mesajı kullanır; serbest metin testi yalnızca 24 saat penceresinde çalışır.';
+  if (gatewayConnected && metaReady) {
+    hint = 'Gateway (QR) bağlı + Meta hazır — kitap siparişi auto modda her iki kanal da kullanılabilir.';
+  } else if (gatewayConnected) {
+    hint = 'Gateway (Baileys) bağlı — kitap siparişi gateway ile gidebilir.';
+  } else if (metaReady) {
+    hint = 'Gateway bağlı değil; Meta Cloud API hazır — kitap siparişi Meta yedek ile gidebilir.';
   } else if (twilioReady) {
     hint = 'Twilio yapılandırılmış (eski yol). Otomasyon için Meta env önerilir.';
   } else {
     hint =
-      'Vercel Production: META_WHATSAPP_TOKEN + META_PHONE_NUMBER_ID değerlerini doldurun (boş satır bırakmayın) ve Redeploy yapın.';
+      'Vercel Production: META_WHATSAPP_TOKEN + META_PHONE_NUMBER_ID ve/veya WHATSAPP_GATEWAY_UPSTREAM + QR bağlantısı gerekli.';
   }
+
+  const envMismatch =
+    envSessionId &&
+    connectedLive.length > 0 &&
+    !connectedLive.includes(envSessionId);
 
   return res.status(200).json({
     meta_configured: metaReady,
@@ -52,6 +102,19 @@ export default async function handler(req, res) {
     waba_id_suffix: waba_diag.waba_id_suffix,
     twilio_configured: twilioReady,
     automation_provider: metaReady ? 'meta_cloud_api' : twilioReady ? 'twilio' : null,
+    gateway: {
+      upstream_reachable: gatewayHealth.ok === true,
+      upstream_error: gatewayHealth.error || null,
+      upstream_host: gatewayHealth.upstream || gatewayEnv.upstream_suffix || null,
+      env_session_id_suffix: maskId(envSessionId),
+      connected_live_count: connectedLive.length,
+      connected_live_suffixes: connectedLive.map(maskId),
+      env_session_mismatch: envMismatch,
+      session_checks: sessionChecks,
+      gateway_connected: gatewayConnected,
+      book_order_channel: bookOrderChannel,
+      send_env: gatewayEnv
+    },
     report_reminder: {
       channel: reportReminderSendChannel(),
       ist_hour: reportReminderIstHour(),
