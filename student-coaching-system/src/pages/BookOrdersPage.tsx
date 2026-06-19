@@ -223,6 +223,8 @@ export default function BookOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [filterSinif, setFilterSinif] = useState('');
+  const [filterKitapciId, setFilterKitapciId] = useState('');
   const [showBooksellerForm, setShowBooksellerForm] = useState(false);
   const [showSetForm, setShowSetForm] = useState(false);
   const [bookSetsSectionOpen, setBookSetsSectionOpen] = useState(false);
@@ -401,10 +403,46 @@ export default function BookOrdersPage() {
     [selectedBookseller, activeBooksellers]
   );
 
+  const orderBooksellerId = useCallback(
+    (o: BookOrderRow) => {
+      const picked = selectedBookseller[o.id]?.trim();
+      if (picked) return picked;
+      const saved = String(o.kitapci_id || '').trim();
+      if (saved) return saved;
+      const ad = String(o.kitapci_adi || '').trim();
+      if (!ad) return '';
+      const byName = booksellers.find(
+        (b) => String(b.name || '').trim().toLocaleLowerCase('tr') === ad.toLocaleLowerCase('tr')
+      );
+      return byName?.id || '';
+    },
+    [selectedBookseller, booksellers]
+  );
+
+  const sinifFilterOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const o of orders) {
+      const s = String(o.sinif || '').trim();
+      if (s) set.add(s);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, 'tr', { numeric: true }));
+  }, [orders]);
+
   const filteredOrders = useMemo(() => {
+    let list = orders;
+    if (filterSinif) {
+      list = list.filter((o) => String(o.sinif || '').trim() === filterSinif);
+    }
+    if (filterKitapciId) {
+      if (filterKitapciId === '__none__') {
+        list = list.filter((o) => !orderBooksellerId(o));
+      } else {
+        list = list.filter((o) => orderBooksellerId(o) === filterKitapciId);
+      }
+    }
     const q = search.trim().toLocaleLowerCase('tr');
-    if (!q) return orders;
-    return orders.filter((o) => {
+    if (!q) return list;
+    return list.filter((o) => {
       const ogrenci = o.ogrenci_ad_soyad || o.ogrenci_adi || '';
       const veli = o.veli_ad_soyad || o.veli_adi || '';
       return (
@@ -415,7 +453,9 @@ export default function BookOrdersPage() {
         String(o.ilce || '').toLocaleLowerCase('tr').includes(q)
       );
     });
-  }, [orders, search]);
+  }, [orders, search, filterSinif, filterKitapciId, orderBooksellerId]);
+
+  const hasOrderFilters = Boolean(filterSinif || filterKitapciId || search.trim());
 
   const downloadOrdersExcel = () => {
     if (!filteredOrders.length) {
@@ -1302,6 +1342,13 @@ export default function BookOrdersPage() {
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <h2 className="text-sm font-semibold text-slate-800">Siparişler</h2>
+          {orders.length > 0 ? (
+            <span className="text-xs text-slate-500">
+              {filteredOrders.length === orders.length
+                ? `${orders.length} kayıt`
+                : `${filteredOrders.length} / ${orders.length} kayıt`}
+            </span>
+          ) : null}
           {filteredOrders.length > 0 ? (
             <button
               type="button"
@@ -1322,12 +1369,62 @@ export default function BookOrdersPage() {
               {showCreateOrder ? 'İptal' : 'Sipariş ekle'}
             </button>
           ) : null}
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Ara: öğrenci, veli, il…"
-            className="ml-auto max-w-xs flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
-          />
+        </div>
+        <div className="mb-3 flex flex-wrap items-end gap-2 rounded-lg border border-slate-100 bg-slate-50/80 p-2.5">
+          <label className="min-w-[7rem] flex-1 text-xs text-slate-600 sm:max-w-[10rem]">
+            Sınıf
+            <select
+              value={filterSinif}
+              onChange={(e) => setFilterSinif(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-800"
+            >
+              <option value="">Tüm sınıflar</option>
+              {sinifFilterOptions.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="min-w-[9rem] flex-[1.4] text-xs text-slate-600 sm:max-w-[14rem]">
+            Kırtasiyeci
+            <select
+              value={filterKitapciId}
+              onChange={(e) => setFilterKitapciId(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-800"
+            >
+              <option value="">Tüm kırtasiyeciler</option>
+              <option value="__none__">Atanmamış</option>
+              {booksellers.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                  {b.is_active === false ? ' (pasif)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="min-w-[10rem] flex-[2] text-xs text-slate-600">
+            Ara
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Öğrenci, veli, il…"
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm"
+            />
+          </label>
+          {hasOrderFilters ? (
+            <button
+              type="button"
+              onClick={() => {
+                setFilterSinif('');
+                setFilterKitapciId('');
+                setSearch('');
+              }}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+            >
+              Filtreleri temizle
+            </button>
+          ) : null}
         </div>
         {showCreateOrder ? (
           <div ref={orderEditPanelRef} className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50/50 p-4">
@@ -1600,7 +1697,13 @@ export default function BookOrdersPage() {
         ) : !effectiveInstitutionId ? (
           <p className="text-sm text-amber-700">Liste için kurum seçin.</p>
         ) : filteredOrders.length === 0 ? (
-          <p className="text-sm text-slate-500">Henüz sipariş yok.</p>
+          <p className="text-sm text-slate-500">
+            {orders.length === 0
+              ? 'Henüz sipariş yok.'
+              : hasOrderFilters
+                ? 'Filtreye uyan sipariş yok — filtreleri temizleyip tekrar deneyin.'
+                : 'Sipariş bulunamadı.'}
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-left text-sm">
