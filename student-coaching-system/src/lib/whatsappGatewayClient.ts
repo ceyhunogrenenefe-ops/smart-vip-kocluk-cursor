@@ -42,6 +42,9 @@ export function gatewayApiKeyHeader(): string {
 
 export function formatGatewaySessionError(raw: string) {
   const e = raw.trim().toLowerCase();
+  if (e.includes('stream errored')) {
+    return 'Geçici bağlantı kesintisi — otomatik yeniden bağlanılıyor. QR gerekmez.';
+  }
   if (e.includes('connection failure')) {
     return 'WhatsApp sunucusuna geçici bağlantı hatası. «Oturumu sıfırla ve QR al» deneyin; telefonda Bağlı cihazlardan eski oturumu kaldırın.';
   }

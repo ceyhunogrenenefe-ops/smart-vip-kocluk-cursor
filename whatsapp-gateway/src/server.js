@@ -148,7 +148,17 @@ function isRestartRequiredDisconnect(statusCode, message) {
   return false;
 }
 
+/** WhatsApp XMPP stream hatası — genelde geçici; oturumu silmeyin, yeniden bağlanın. */
+function isTransientStreamDisconnect(statusCode, message) {
+  const msg = String(message || '').toLowerCase();
+  if (msg.includes('stream errored')) return true;
+  if (statusCode === DisconnectReason.timedOut) return true;
+  if (statusCode === DisconnectReason.connectionLost) return true;
+  return false;
+}
+
 function isFatalDisconnect(statusCode, message) {
+  if (isTransientStreamDisconnect(statusCode, message)) return false;
   const msg = String(message || '').toLowerCase();
   if (statusCode === DisconnectReason.loggedOut) return true;
   if (statusCode === DisconnectReason.badSession) return true;
@@ -161,6 +171,9 @@ function isFatalDisconnect(statusCode, message) {
 function humanizeDisconnectError(errMsg) {
   const msg = String(errMsg || '').trim();
   if (!msg) return null;
+  if (msg.toLowerCase().includes('stream errored')) {
+    return 'Geçici bağlantı kesintisi — otomatik yeniden bağlanılıyor.';
+  }
   if (msg.toLowerCase().includes('connection failure')) {
     return 'Connection Failure — telefonda Bağlı cihazlardan eski oturumu kaldırın, sonra «Oturumu sıfırla ve QR al».';
   }
@@ -168,6 +181,15 @@ function humanizeDisconnectError(errMsg) {
     return 'Aynı numara başka yerde bağlı. Telefondan diğer WhatsApp Web oturumlarını kapatın.';
   }
   return msg;
+}
+
+async function maybeClearTransientRestoreBlock(coachId, meta) {
+  if (!isRestoreBlocked(meta)) return meta;
+  const reason = String(meta?.lastFatalReason || '').toLowerCase();
+  if (!reason.includes('stream errored')) return meta;
+  logger.info({ coachId, reason: meta.lastFatalReason }, 'clearing transient stream restore block');
+  await clearSessionMeta(coachId);
+  return {};
 }
 
 /**
@@ -576,7 +598,7 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
       logger: pino({ level: 'silent' }),
       browser: ['Online VIP Ders', 'Chrome', '120.0.0'],
       syncFullHistory: false,
-      markOnlineOnConnect: true,
+      markOnlineOnConnect: false,
       generateHighQualityLinkPreview: false,
       shouldIgnoreJid: () => false,
       connectTimeoutMs: 60_000,
@@ -620,6 +642,13 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
         if (isRestartRequiredDisconnect(code, errMsg)) {
           logger.info({ coachId, code, errMsg }, 'WhatsApp restart required — reconnecting with same auth');
           scheduleReconnect(coachId, sessionState, generation, 'restart_required');
+          return;
+        }
+
+        if (isTransientStreamDisconnect(code, errMsg)) {
+          sessionState.lastError = null;
+          logger.warn({ coachId, code, errMsg }, 'WhatsApp transient stream error — auto reconnect');
+          scheduleReconnect(coachId, sessionState, generation, errMsg || 'stream_error');
           return;
         }
 
@@ -760,7 +789,8 @@ app.post('/sessions/:coachId/start', requireGatewayAuth, requireCoachScope, asyn
 app.get('/sessions/:coachId/status', requireGatewayAuth, requireCoachScope, async (req, res) => {
   const coachId = getCoachId(req);
   let session = sessions.get(coachId);
-  const meta = await readSessionMeta(coachId);
+  let meta = await readSessionMeta(coachId);
+  meta = await maybeClearTransientRestoreBlock(coachId, meta);
   const authOnDisk = await hasGatewayAuthOnDisk(coachId);
   const restoreBlocked = isRestoreBlocked(meta);
 
@@ -837,8 +867,8 @@ async function sendTextWithTimeout(sock, jid, message) {
 }
 
 app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async (req, res) => {
+  const coachId = getCoachId(req);
   try {
-    const coachId = getCoachId(req);
     const digits = normalizeDigitsForWhatsApp(req.body?.phone);
     const jid = ensurePhoneJid(digits);
     const message = String(req.body?.message || '').trim();
@@ -895,11 +925,16 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
       lower.includes('socket closed') ||
       lower.includes('not connected') ||
       lower.includes('timed out waiting for this socket') ||
-      lower.includes('stream errored out')
+      lower.includes('stream errored out') ||
+      lower.includes('stream errored (')
     ) {
       status = 409;
       outError = 'session_not_connected';
       hint = 'Bağlantı yeniden kurulurken gönderim denendi. 2-3 saniye sonra tekrar gönderin.';
+      const cur = sessions.get(coachId);
+      if (cur && cur.status === 'connected') {
+        scheduleReconnect(coachId, cur, cur.generation, 'send_stream_error');
+      }
     }
     if (outError === 'on_whatsapp_timeout') {
       status = 504;
@@ -939,7 +974,8 @@ app.listen(port, async () => {
       logger.warn({ err }, 'restorePersistedSessions readdir failed');
     }
     for (const coachId of ids) {
-      const meta = await readSessionMeta(coachId);
+      let meta = await readSessionMeta(coachId);
+      meta = await maybeClearTransientRestoreBlock(coachId, meta);
       if (isRestoreBlocked(meta)) continue;
       const hasAuth = await hasGatewayAuthOnDisk(coachId);
       if (!hasAuth) continue;
@@ -967,7 +1003,8 @@ app.listen(port, async () => {
         if (!ent.isDirectory() || !ent.name || ent.name.startsWith('.')) continue;
         const coachId = ent.name;
         if (sessions.has(coachId)) continue;
-        const meta = await readSessionMeta(coachId);
+        let meta = await readSessionMeta(coachId);
+        meta = await maybeClearTransientRestoreBlock(coachId, meta);
         if (isRestoreBlocked(meta)) continue;
         const hasAuth = await hasGatewayAuthOnDisk(coachId);
         if (!hasAuth) continue;

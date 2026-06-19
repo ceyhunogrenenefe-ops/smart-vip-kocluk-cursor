@@ -59,11 +59,37 @@ export default function WhatsAppGatewaySessionPanel({
     setGatewaySessionError(err);
   }, []);
 
+  const autoReconnectIfNeeded = useCallback(
+    async (data: GatewayStatusPayload) => {
+      if (!canUse) return;
+      const st = data.status || 'idle';
+      const transientErr = String(data.lastError || '').toLowerCase().includes('stream errored');
+      const canAutoRestore =
+        data.authOnDisk &&
+        !data.restoreBlocked &&
+        (st === 'idle' ||
+          st === 'reconnecting' ||
+          (st === 'logged_out' && transientErr));
+      if (!canAutoRestore) return;
+      if (st === 'reconnecting' || st === 'connecting') return;
+      try {
+        await callWhatsAppGateway<GatewayStatusPayload>(sid, `/sessions/${sid}/start`, {
+          method: 'POST',
+          body: JSON.stringify({ purge: false })
+        });
+      } catch {
+        /* status poll will retry */
+      }
+    },
+    [canUse, sid]
+  );
+
   const fetchStatus = useCallback(async () => {
     if (!canUse) return false;
     try {
       const data = await callWhatsAppGateway<GatewayStatusPayload>(sid, `/sessions/${sid}/status`);
       applyPayload(data);
+      void autoReconnectIfNeeded(data);
       return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'gateway_request_failed';
@@ -71,7 +97,7 @@ export default function WhatsAppGatewaySessionPanel({
       setStatusMessage(`Durum alınamadı: ${msg}`);
       return false;
     }
-  }, [applyPayload, canUse, sid]);
+  }, [applyPayload, autoReconnectIfNeeded, canUse, sid]);
 
   useEffect(() => {
     if (!canUse) return;
@@ -107,9 +133,10 @@ export default function WhatsAppGatewaySessionPanel({
     setStatusMessage('');
     setGatewaySessionError(null);
     try {
+      const errLower = String(gatewaySessionError || '').toLowerCase();
       const needsReset =
-        status === 'logged_out' ||
-        Boolean(gatewaySessionError?.toLowerCase().includes('connection failure'));
+        errLower.includes('connection failure') ||
+        (status === 'logged_out' && errLower.includes('bağlantı birçok kez'));
       if (needsReset) {
         const resetData = await gatewayResetSession(sid);
         applyPayload(resetData);
