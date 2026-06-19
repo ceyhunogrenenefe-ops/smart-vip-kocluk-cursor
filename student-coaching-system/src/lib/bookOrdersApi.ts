@@ -327,6 +327,9 @@ export type BookOrderWhatsAppSendResult = {
   phone?: string;
   bookseller_name?: string | null;
   meta_message_id?: string | null;
+  whatsapp_status?: string | null;
+  hint?: string | null;
+  channel?: string;
 };
 
 export async function resendBookOrderWhatsApp(
@@ -352,13 +355,23 @@ export async function resendBookOrderWhatsApp(
   }
   const row = (j as { data?: BookOrderRow }).data;
   const wa = (j as { whatsapp?: BookOrderWhatsAppSendResult }).whatsapp || {};
-  return {
+  const out: BookOrderWhatsAppSendResult = {
     phone: wa.phone || row?.kitapci_phone,
     bookseller_name: wa.bookseller_name,
     meta_message_id: wa.meta_message_id || row?.meta_message_id,
     whatsapp_status: row?.whatsapp_status || wa.whatsapp_status,
-    hint: wa.hint
+    hint: wa.hint,
+    channel: (wa as { channel?: string }).channel
   };
+  if ((j as { whatsapp_ok?: boolean }).whatsapp_ok === false) {
+    throw new Error(
+      (j as { hint?: string }).hint ||
+        wa.hint ||
+        (j as { error?: string }).error ||
+        'WhatsApp gönderilemedi'
+    );
+  }
+  return out;
 }
 
 export type BookOrderWhatsAppTemplateDiag = {

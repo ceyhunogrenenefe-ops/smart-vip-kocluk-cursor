@@ -701,21 +701,32 @@ async function ensureConnectedForSend(coachId) {
   return null;
 }
 
-app.get('/health', (_req, res) => {
+app.get('/health', (req, res) => {
   let connected = 0;
   let reconnecting = 0;
-  for (const session of sessions.values()) {
-    if (session.status === 'connected') connected += 1;
+  const connectedSessionIds = [];
+  for (const [coachId, session] of sessions.entries()) {
+    if (session.status === 'connected') {
+      connected += 1;
+      connectedSessionIds.push(coachId);
+    }
     if (session.status === 'reconnecting') reconnecting += 1;
   }
-  res.json({
+  const payload = {
     ok: true,
     service: 'whatsapp-gateway',
     sessions: sessions.size,
     connected,
     reconnecting,
     watchdogMs: SESSION_WATCHDOG_MS,
-  });
+  };
+  if (gatewayApiKey) {
+    const provided = String(req.headers['x-gateway-key'] || '').trim();
+    if (provided && provided === gatewayApiKey) {
+      payload.connected_session_ids = connectedSessionIds;
+    }
+  }
+  res.json(payload);
 });
 
 app.get('/ready', (_req, res) => {

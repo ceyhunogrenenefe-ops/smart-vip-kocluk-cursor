@@ -8,11 +8,11 @@ import { metaWhatsAppConfigured, parseMetaSendError } from './meta-whatsapp.js';
 import { sendWhatsAppUsingTemplateRow } from './whatsapp-outbound.js';
 import { renderMessageTemplate } from './template-engine.js';
 import {
-  gatewaySendConfigured,
   sendGatewayTextMessage,
   getGatewaySendEnvStatus,
   bookOrderGatewaySessionId,
-  resolveBookOrderGatewaySessionId
+  resolveBookOrderGatewaySessionId,
+  reportReminderGatewaySessionId
 } from './whatsapp-gateway-send.js';
 
 export const BOOK_ORDER_TEMPLATE_TYPE = 'kitap_siparis_bildirim';
@@ -121,11 +121,24 @@ export function renderBookOrderWhatsAppBody(order) {
   return renderMessageTemplate(BOOK_ORDER_TEMPLATE_CONTENT, buildBookOrderTemplateVars(order)).trim();
 }
 
+function bookOrderSendChannelPreference() {
+  return String(process.env.BOOK_ORDER_WHATSAPP_CHANNEL || 'auto').trim().toLowerCase();
+}
+
+function metaFallbackEnabled() {
+  const pref = bookOrderSendChannelPreference();
+  if (pref === 'meta') return false;
+  if (pref === 'gateway') {
+    return String(process.env.BOOK_ORDER_WHATSAPP_FALLBACK_META || '1').trim() !== '0';
+  }
+  return true;
+}
+
 function bookOrderSendChannel(fallbackUserId) {
-  const forced = String(process.env.BOOK_ORDER_WHATSAPP_CHANNEL || 'gateway').trim().toLowerCase();
+  const forced = bookOrderSendChannelPreference();
   if (forced === 'meta') return 'meta';
   if (forced === 'gateway') return 'gateway';
-  return gatewaySendConfigured(fallbackUserId) ? 'gateway' : 'meta';
+  return 'auto';
 }
 
 export async function sendBookOrderViaGateway(phone, order, gatewaySessionId) {
@@ -133,7 +146,12 @@ export async function sendBookOrderViaGateway(phone, order, gatewaySessionId) {
   return sendGatewayTextMessage({
     phone,
     message,
-    sessionId: resolveBookOrderGatewaySessionId(gatewaySessionId)
+    sessionId: resolveBookOrderGatewaySessionId(gatewaySessionId),
+    sessionCandidates: [
+      gatewaySessionId,
+      bookOrderGatewaySessionId(),
+      reportReminderGatewaySessionId()
+    ]
   });
 }
 
@@ -198,23 +216,40 @@ function mapSendResult(sent) {
   };
 }
 
-/** Varsayılan: gateway. Meta yalnızca BOOK_ORDER_WHATSAPP_CHANNEL=meta veya fallback açıksa. */
+/** auto: gateway (QR) dener, olmazsa Meta. gateway-only + fallback=0 hariç Meta yedek açık. */
 export async function sendBookOrderWhatsApp(phone, order, opts = {}) {
-  const gatewaySessionId = resolveBookOrderGatewaySessionId(opts.gatewaySessionId);
   const channel = bookOrderSendChannel(opts.gatewaySessionId);
-  if (channel === 'gateway') {
-    const gw = await sendBookOrderViaGateway(phone, order, gatewaySessionId);
+  const tryGateway = channel === 'gateway' || channel === 'auto';
+  const tryMeta = channel === 'meta' || channel === 'auto' || metaFallbackEnabled();
+  let lastGw = null;
+
+  if (tryGateway) {
+    const gw = await sendBookOrderViaGateway(phone, order, opts.gatewaySessionId);
     if (gw.ok) return gw;
-    if (String(process.env.BOOK_ORDER_WHATSAPP_FALLBACK_META || '').trim() === '1') {
-      const meta = await sendBookOrderMetaWhatsApp(phone, order);
-      if (!meta.ok) {
-        meta.error = `${gw.error || 'gateway_failed'} · Meta fallback: ${meta.error || 'failed'}`;
-      }
-      return meta;
-    }
-    return gw;
+    lastGw = gw;
+    if (!tryMeta || !metaWhatsAppConfigured()) return gw;
   }
-  return sendBookOrderMetaWhatsApp(phone, order);
+
+  if (tryMeta && metaWhatsAppConfigured()) {
+    const meta = await sendBookOrderMetaWhatsApp(phone, order);
+    if (!meta.ok && lastGw) {
+      meta.error = `${lastGw.error || 'gateway_failed'} · Meta: ${meta.error || 'failed'}`;
+      meta.gateway_attempt = lastGw.errorCode || null;
+    } else if (meta.ok && lastGw) {
+      meta.fallback_from = 'gateway';
+    }
+    return meta;
+  }
+
+  if (lastGw) return lastGw;
+
+  return {
+    ok: false,
+    error: metaWhatsAppConfigured()
+      ? 'Gönderim kanalı seçilemedi.'
+      : 'WhatsApp yapılandırılmamış: gateway QR bağlayın veya META_WHATSAPP_TOKEN + META_PHONE_NUMBER_ID tanımlayın.',
+    errorCode: 'NO_CHANNEL'
+  };
 }
 
 /** Ders hatırlatma / taksit ile aynı Meta gönderim yolu. */

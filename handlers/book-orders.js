@@ -10,7 +10,7 @@ import {
 } from '../api/_lib/book-order-notify.js';
 import { getMetaWhatsAppEnvStatus, getMetaWebhookEnvStatus } from '../api/_lib/meta-whatsapp.js';
 import { fetchMetaTemplatesFromPhoneWaba } from '../api/_lib/meta-templates-sync.js';
-import { getGatewaySendEnvStatus, getGatewaySessionStatus, bookOrderGatewaySessionId, resolveBookOrderGatewaySessionId, probeGatewayHealth } from '../api/_lib/whatsapp-gateway-send.js';
+import { getGatewaySendEnvStatus, getGatewaySessionStatus, bookOrderGatewaySessionId, resolveBookOrderGatewaySessionId, listConnectedGatewaySessionIds, probeGatewayHealth } from '../api/_lib/whatsapp-gateway-send.js';
 import { ensureBooksellerPortalToken } from '../api/_lib/kitapci-portal.js';
 
 const ADMIN_ROLES = new Set(['super_admin', 'admin']);
@@ -494,7 +494,8 @@ export default async function handler(req, res) {
       const actorId = String(actor.sub || actor.id || '').trim();
       const uiSessionId = actorId;
       const sendSessionId = actorGatewaySessionId(actor);
-      if (gateway.configured || sendSessionId) {
+      const connectedLive = await listConnectedGatewaySessionIds();
+      if (gateway.upstream_ready || sendSessionId || connectedLive.length) {
         try {
           gatewayLive = await getGatewaySessionStatus(sendSessionId);
         } catch {
@@ -510,15 +511,22 @@ export default async function handler(req, res) {
           gateway,
           gateway_health: gatewayHealth,
           gateway_session: gatewayLive,
-          hint: !envSessionId
-            ? `QR bu hesabınızın oturumuna bağlanır (id: ${uiSessionId || '—'}). Otomatik kitap siparişi gönderimi için bağladıktan sonra Vercel BOOK_ORDER_GATEWAY_SESSION_ID=${uiSessionId || 'KULLANICI_ID'} yazın.`
-            : envSessionId !== actorId
-              ? `Otomatik gönderim Vercel env oturumunu kullanıyor (…${envSessionId.slice(-8)}). QR yalnızca sizin hesabınıza bağlanır.`
-              : !gateway.configured
-                ? gateway.hint
-                : gatewayLive?.ok
-                  ? 'Kitap siparişi WhatsApp gateway bağlı.'
-                  : gatewayLive?.error || 'QR ile bağlayın.'
+          connected_live_session_ids: connectedLive.length ? connectedLive.map((x) => `…${x.slice(-8)}`) : [],
+          hint: !gatewayHealth.ok
+            ? `VPS erişilemiyor (${gatewayHealth.error || 'fetch_failed'}) — pm2 restart whatsapp-gateway`
+            : connectedLive.length && envSessionId && !connectedLive.includes(envSessionId)
+              ? `Env oturumu (…${envSessionId.slice(-8)}) bağlı değil; VPS'te bağlı: ${connectedLive.map((x) => `…${x.slice(-8)}`).join(', ')}. BOOK_ORDER_GATEWAY_SESSION_ID güncelleyin veya QR ile env id'ye bağlanın.`
+              : !envSessionId
+                ? connectedLive.length
+                  ? `BOOK_ORDER_GATEWAY_SESSION_ID boş; VPS'te bağlı oturum: ${connectedLive.map((x) => `…${x.slice(-8)}`).join(', ')} — cron için env'e yazın.`
+                  : `QR bu hesabınızın oturumuna bağlanır (id: ${uiSessionId || '—'}). Kitap siparişleri sayfasından QR okutun.`
+                : envSessionId !== actorId
+                  ? `Otomatik gönderim env oturumunu kullanıyor (…${envSessionId.slice(-8)}). QR yalnızca sizin hesabınıza bağlanır.`
+                  : !gateway.configured
+                    ? gateway.hint
+                    : gatewayLive?.ok
+                      ? 'Kitap siparişi WhatsApp gateway bağlı.'
+                      : gatewayLive?.error || 'QR ile bağlayın.'
         }
       });
     } catch (e) {
@@ -1008,16 +1016,21 @@ export default async function handler(req, res) {
           gatewaySessionId: actorGatewaySessionId(actor)
         }
       );
+      const { data: freshResend } = await supabaseAdmin.from('kitap_siparisleri').select('*').eq('id', id).maybeSingle();
       if (!notify.ok) {
-        return res.status(400).json({
-          ok: false,
+        return res.status(200).json({
+          ok: true,
+          whatsapp_ok: false,
           error: notify.error,
-          hint: notify.hint || notify.error,
+          hint:
+            notify.hint ||
+            notify.error ||
+            'WhatsApp gönderilemedi — gateway QR veya Meta yapılandırmasını kontrol edin.',
+          data: freshResend,
           whatsapp: notify
         });
       }
-      const { data: freshResend } = await supabaseAdmin.from('kitap_siparisleri').select('*').eq('id', id).maybeSingle();
-      return res.status(200).json({ ok: true, data: freshResend, whatsapp: notify });
+      return res.status(200).json({ ok: true, whatsapp_ok: true, data: freshResend, whatsapp: notify });
     } catch (e) {
       if (isSchemaError(e)) return schemaHint(res);
       return res.status(500).json({ error: errorMessage(e) });

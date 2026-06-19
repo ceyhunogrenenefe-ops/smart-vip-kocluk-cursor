@@ -54,16 +54,57 @@ export function getGatewaySendEnvStatus() {
   const upstream = resolveGatewayUpstream();
   const sessionId = bookOrderGatewaySessionId();
   const hasJwt = Boolean(String(process.env.APP_JWT_SECRET || '').trim());
-  const configured = Boolean(upstream && sessionId && hasJwt);
+  const configured = Boolean(upstream && hasJwt);
   return {
-    configured,
+    configured: Boolean(configured && sessionId),
+    upstream_ready: Boolean(upstream && hasJwt),
     upstream_suffix: upstream ? upstream.replace(/^https?:\/\//, '').slice(-24) : null,
     session_id_suffix: sessionId && sessionId.length > 8 ? sessionId.slice(-8) : sessionId || null,
     has_api_key: Boolean(gatewayApiKey()),
-    hint: configured
-      ? 'Kitap siparişleri bağlı WhatsApp gateway oturumu üzerinden gider (Meta şablonu değil).'
-      : 'Vercel: WHATSAPP_GATEWAY_UPSTREAM, BOOK_ORDER_GATEWAY_SESSION_ID (QR bağlı kullanıcı id), APP_JWT_SECRET.'
+    hint: !upstream || !hasJwt
+      ? 'Vercel: WHATSAPP_GATEWAY_UPSTREAM, APP_JWT_SECRET (ve isteğe bağlı BOOK_ORDER_GATEWAY_SESSION_ID).'
+      : !sessionId
+        ? 'BOOK_ORDER_GATEWAY_SESSION_ID boş — QR bağlı kullanıcı id otomatik aranır; cron için env önerilir.'
+        : 'Kitap siparişleri gateway (Baileys) veya Meta yedek kanalı ile gider.'
   };
+}
+
+/** VPS /health + gateway key → bağlı oturum id listesi */
+export async function listConnectedGatewaySessionIds() {
+  const upstream = resolveGatewayUpstream();
+  if (!upstream) return [];
+  const key = gatewayApiKey();
+  const headers = key ? { 'x-gateway-key': key } : {};
+  const timeoutMs = Math.min(12000, Math.max(4000, Number(process.env.WA_GATEWAY_HEALTH_TIMEOUT_MS) || 8000));
+  try {
+    const res = await fetch(`${upstream}/health`, { headers, signal: AbortSignal.timeout(timeoutMs) });
+    const data = await res.json().catch(() => ({}));
+    const ids = data?.connected_session_ids;
+    return Array.isArray(ids) ? ids.map((x) => String(x || '').trim()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Önce aday id'ler, sonra VPS'teki bağlı oturumlar — QR hangi hesaptaysa onu bulur. */
+export async function pickConnectedGatewaySessionId(candidates = []) {
+  const uniq = [
+    ...new Set(
+      (Array.isArray(candidates) ? candidates : [candidates])
+        .map((x) => String(x || '').trim())
+        .filter(Boolean)
+    )
+  ];
+  for (const id of uniq) {
+    if (!gatewayConfiguredForSession(id)) continue;
+    const st = await getGatewaySessionStatus(id);
+    if (st.ok && st.status === 'connected') return id;
+  }
+  const live = await listConnectedGatewaySessionIds();
+  for (const id of live) {
+    if (gatewayConfiguredForSession(id)) return id;
+  }
+  return uniq[0] || live[0] || '';
 }
 
 function serviceGatewayJwt(sessionId) {
@@ -184,18 +225,32 @@ export { probeGatewayHealth };
  * Gateway üzerinden düz metin WhatsApp gönderir.
  * @returns {Promise<{ ok: boolean, sid?: string|null, channel: string, error?: string, errorCode?: string, bodyPreview?: string }>}
  */
-export async function sendGatewayTextMessage({ phone, message, sessionId }) {
+export async function sendGatewayTextMessage({ phone, message, sessionId, sessionCandidates }) {
   const e164 = normalizePhoneToE164(phone);
   const text = String(message || '').trim();
-  const sid = resolveBookOrderGatewaySessionId(sessionId);
+  const candidates = [
+    ...(Array.isArray(sessionCandidates) ? sessionCandidates : []),
+    sessionId,
+    bookOrderGatewaySessionId(),
+    reportReminderGatewaySessionId()
+  ];
+  const sid = await pickConnectedGatewaySessionId(candidates);
 
-  if (!gatewayConfiguredForSession(sid)) {
+  if (!resolveGatewayUpstream() || !String(process.env.APP_JWT_SECRET || '').trim()) {
+    return {
+      ok: false,
+      channel: 'gateway',
+      error: 'Gateway yapılandırılmamış: WHATSAPP_GATEWAY_UPSTREAM ve APP_JWT_SECRET gerekli.',
+      errorCode: 'GATEWAY_ENV'
+    };
+  }
+  if (!sid) {
     return {
       ok: false,
       channel: 'gateway',
       error:
-        'Gateway yapılandırılmamış: WHATSAPP_GATEWAY_UPSTREAM, APP_JWT_SECRET ve QR bağlı oturum id (BOOK_ORDER_GATEWAY_SESSION_ID veya giriş yapan kullanıcı).',
-      errorCode: 'GATEWAY_ENV'
+        'Bağlı WhatsApp oturumu yok. Kitap siparişleri veya Koç WhatsApp sayfasından QR okutun; ardından BOOK_ORDER_GATEWAY_SESSION_ID olarak kullanıcı id yazın.',
+      errorCode: 'GATEWAY_NOT_CONNECTED'
     };
   }
   if (!e164) {
@@ -211,11 +266,9 @@ export async function sendGatewayTextMessage({ phone, message, sessionId }) {
     return {
       ok: false,
       channel: 'gateway',
-      error:
-        st === 'missing_session_id'
-          ? 'BOOK_ORDER_GATEWAY_SESSION_ID tanımlı değil.'
-          : `WhatsApp gateway oturumu bağlı değil (${st}). Koç WhatsApp ayarlarından QR ile bağlayın.`,
-      errorCode: st === 'missing_session_id' ? 'GATEWAY_SESSION' : 'GATEWAY_NOT_CONNECTED'
+      error: status.error || `WhatsApp gateway bağlı değil (${st}). QR ile bağlayın.`,
+      errorCode: st === 'missing_session_id' ? 'GATEWAY_SESSION' : 'GATEWAY_NOT_CONNECTED',
+      gateway_session_id: sid
     };
   }
 
@@ -247,6 +300,7 @@ export async function sendGatewayTextMessage({ phone, message, sessionId }) {
     sid: r.data?.id || null,
     meta_message_id: null,
     bodyPreview: text.slice(0, 200),
-    gateway_message_id: r.data?.id || null
+    gateway_message_id: r.data?.id || null,
+    gateway_session_id: sid
   };
 }

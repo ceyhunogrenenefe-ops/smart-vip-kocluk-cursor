@@ -320,7 +320,9 @@ export async function notifyBooksellerForOrder(order, opts = {}) {
     meta_message_id: wamid,
     meta_language_used: sent.meta_language_used || null,
     meta_contact_wa_id: sent.meta_contact_wa_id || null,
-    whatsapp_status: waStatus
+    whatsapp_status: waStatus,
+    channel: sent.channel || null,
+    gateway_session_id: sent.gateway_session_id || null
   };
 }
 
