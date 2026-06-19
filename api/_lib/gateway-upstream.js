@@ -43,6 +43,11 @@ export async function probeGatewayHealth() {
       status: res.status,
       upstream: upstream.replace(/^https?:\/\//, ''),
       service: data?.service || null,
+      sessions: Number(data?.sessions) || 0,
+      connected: Number(data?.connected) || 0,
+      connected_session_ids: Array.isArray(data?.connected_session_ids)
+        ? data.connected_session_ids.map((x) => String(x || '').trim()).filter(Boolean)
+        : [],
       error: res.ok ? null : String(data?.error || `http_${res.status}`)
     };
   } catch (e) {

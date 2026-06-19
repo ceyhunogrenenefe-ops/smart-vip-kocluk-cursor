@@ -11,7 +11,8 @@ import {
   bookOrderGatewaySessionId,
   getGatewaySendEnvStatus,
   getGatewaySessionStatus,
-  listConnectedGatewaySessionIds
+  listConnectedGatewaySessionIds,
+  probeConnectedGatewaySessionIds
 } from './_lib/whatsapp-gateway-send.js';
 
 const maskId = (id) => {
@@ -37,7 +38,13 @@ export default async function handler(req, res) {
   const gatewayEnv = getGatewaySendEnvStatus();
   const gatewayHealth = await probeGatewayHealth();
   const envSessionId = bookOrderGatewaySessionId();
-  const connectedLive = gatewayHealth.ok ? await listConnectedGatewaySessionIds() : [];
+  let connectedLive = [];
+  if (gatewayHealth.ok) {
+    connectedLive = await listConnectedGatewaySessionIds();
+    if (!connectedLive.length && Number(gatewayHealth.connected) > 0) {
+      connectedLive = await probeConnectedGatewaySessionIds([envSessionId]);
+    }
+  }
 
   const sessionChecks = [];
   const candidates = [...new Set([envSessionId, ...connectedLive].filter(Boolean))];
@@ -60,7 +67,8 @@ export default async function handler(req, res) {
     }
   }
 
-  const gatewayConnected = sessionChecks.some((s) => s.ok && s.status === 'connected');
+  const gatewayConnected =
+    sessionChecks.some((s) => s.ok && s.status === 'connected') || connectedLive.length > 0;
   const bookOrderChannel = String(process.env.BOOK_ORDER_WHATSAPP_CHANNEL || 'auto').trim() || 'auto';
 
   let waba_diag = { resolved: false, source: null, waba_id_suffix: null };

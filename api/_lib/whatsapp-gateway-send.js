@@ -80,10 +80,55 @@ export async function listConnectedGatewaySessionIds() {
     const res = await fetch(`${upstream}/health`, { headers, signal: AbortSignal.timeout(timeoutMs) });
     const data = await res.json().catch(() => ({}));
     const ids = data?.connected_session_ids;
-    return Array.isArray(ids) ? ids.map((x) => String(x || '').trim()).filter(Boolean) : [];
+    if (Array.isArray(ids) && ids.length) {
+      return ids.map((x) => String(x || '').trim()).filter(Boolean);
+    }
+    if (Number(data?.connected) > 0) {
+      return probeConnectedGatewaySessionIds([]);
+    }
+    return [];
   } catch {
     return [];
   }
+}
+
+async function adminUserIdsForGatewayProbe() {
+  try {
+    const { supabaseAdmin } = await import('./supabase-admin.js');
+    const { data } = await supabaseAdmin
+      .from('users')
+      .select('id')
+      .in('role', ['super_admin', 'admin'])
+      .eq('is_active', true)
+      .limit(30);
+    return (data || []).map((r) => String(r.id || '').trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/** VPS health connected>0 ama id listesi yoksa admin hesaplarını tarar. */
+export async function probeConnectedGatewaySessionIds(extraCandidates = []) {
+  const health = await probeGatewayHealth();
+  if (!health.ok || Number(health.connected) <= 0) return [];
+
+  const fromHealth = health.connected_session_ids || [];
+  if (fromHealth.length) return fromHealth;
+
+  const candidates = [
+    ...extraCandidates,
+    bookOrderGatewaySessionId(),
+    reportReminderGatewaySessionId(),
+    ...(await adminUserIdsForGatewayProbe())
+  ];
+  const uniq = [...new Set(candidates.map((x) => String(x || '').trim()).filter(Boolean))];
+  const connected = [];
+  for (const id of uniq) {
+    if (!gatewayConfiguredForSession(id)) continue;
+    const st = await getGatewaySessionStatus(id);
+    if (st.ok && st.status === 'connected') connected.push(id);
+  }
+  return connected;
 }
 
 /** Önce aday id'ler, sonra VPS'teki bağlı oturumlar — QR hangi hesaptaysa onu bulur. */
@@ -100,7 +145,10 @@ export async function pickConnectedGatewaySessionId(candidates = []) {
     const st = await getGatewaySessionStatus(id);
     if (st.ok && st.status === 'connected') return id;
   }
-  const live = await listConnectedGatewaySessionIds();
+  let live = await listConnectedGatewaySessionIds();
+  if (!live.length) {
+    live = await probeConnectedGatewaySessionIds(uniq);
+  }
   for (const id of live) {
     if (gatewayConfiguredForSession(id)) return id;
   }
