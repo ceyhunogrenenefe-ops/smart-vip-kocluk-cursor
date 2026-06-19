@@ -116,10 +116,7 @@
       "destination": "/api/veli-imza-preview?signing_token=:token"
     },
     {
-      "handle": "filesystem"
-    },
-    {
-      "source": "/((?!api/).*)",
+      "source": "/((?!api/|assets/).*)",
       "destination": "/index.html"
     }
   ]
