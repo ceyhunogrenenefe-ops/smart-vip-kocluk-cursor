@@ -1,25 +1,14 @@
 {
-
   "$schema": "https://openapi.vercel.sh/vercel.json",
-
   "functions": {
-
     "api/wa-gateway.js": {
-
       "maxDuration": 120
-
     }
-
   },
-
   "installCommand": "npm install && cd student-coaching-system && npm install",
-
   "buildCommand": "cd student-coaching-system && npm run build",
-
   "outputDirectory": "student-coaching-system/dist",
-
   "framework": null,
-
   "headers": [
     {
       "source": "/(.*)",
@@ -40,7 +29,6 @@
       ]
     }
   ],
-
   "crons": [
     {
       "path": "/api/cron/meeting-reminders",
@@ -95,89 +83,44 @@
       "schedule": "0 6 * * *"
     }
   ],
-
   "rewrites": [
-
     {
-
       "source": "/api/whatsapp-gateway/(.*)",
-
       "destination": "/api/wa-gateway?tail=$1"
-
     },
-
     {
-
       "source": "/api/google/(.*)",
-
       "destination": "/api/deep-api?path=google/$1"
-
     },
-
     {
-
       "source": "/api/meta/(.*)",
-
       "destination": "/api/deep-api?path=meta/$1"
-
     },
-
     {
-
       "source": "/api/whatsapp/(.*)",
-
       "destination": "/api/deep-api?path=whatsapp/$1"
-
     },
-
     {
-
       "source": "/api/question-help/webhook",
-
       "destination": "/api/deep-api?path=question-help/webhook"
-
     },
-
     {
-
       "source": "/veli-imza/:token",
-
       "has": [
-
         {
-
           "type": "header",
-
           "key": "User-Agent",
-
           "value": "(?i)(^WhatsApp/|.*(facebookexternalhit|Twitterbot|LinkedInBot|Slackbot|TelegramBot|Discordbot).*)"
-
         }
-
       ],
-
       "destination": "/api/veli-imza-preview?signing_token=:token"
-
     },
-
     {
-
-      "source": "/",
-
-      "destination": "/index.html"
-
+      "handle": "filesystem"
     },
-
     {
-
-      "source": "/((?!api/).+)",
-
+      "source": "/((?!api/).*)",
       "destination": "/index.html"
-
     }
-
   ]
-
 }
-
-
