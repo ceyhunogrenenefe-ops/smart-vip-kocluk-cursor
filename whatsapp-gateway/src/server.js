@@ -157,8 +157,48 @@ function isTransientStreamDisconnect(statusCode, message) {
   return false;
 }
 
+function isQrScanTimeoutDisconnect(statusCode, message) {
+  const msg = String(message || '').toLowerCase();
+  if (msg.includes('qr refs attempts ended')) return true;
+  if (statusCode === 408 && msg.includes('qr')) return true;
+  return false;
+}
+
+function isIntentionalLogoutDisconnect(statusCode, message) {
+  const msg = String(message || '').toLowerCase();
+  return statusCode === DisconnectReason.loggedOut && msg.includes('intentional logout');
+}
+
+function shouldAutoRestoreSession(coachId) {
+  const priority = String(
+    process.env.BOOK_ORDER_GATEWAY_SESSION_ID || process.env.WHATSAPP_GATEWAY_SESSION_ID || ''
+  ).trim();
+  if (priority && coachId !== priority) return false;
+  return true;
+}
+
+function parkSessionWaitingForQr(coachId, lastError) {
+  /** @type {SessionState} */
+  const parked = {
+    sock: null,
+    status: 'logged_out',
+    qr: null,
+    lastError: lastError || 'QR okutulmadı — «QR / Oturum başlat» ile yeni QR alın.',
+    connectedAt: null,
+    generation: 0,
+    startedAt: Date.now(),
+    readyAt: 0,
+    reconnectAttempts: 0,
+    connectingTimer: null,
+  };
+  sessions.set(coachId, parked);
+  return parked;
+}
+
 function isFatalDisconnect(statusCode, message) {
   if (isTransientStreamDisconnect(statusCode, message)) return false;
+  if (isQrScanTimeoutDisconnect(statusCode, message)) return false;
+  if (isIntentionalLogoutDisconnect(statusCode, message)) return false;
   const msg = String(message || '').toLowerCase();
   if (statusCode === DisconnectReason.loggedOut) return true;
   if (statusCode === DisconnectReason.badSession) return true;
@@ -173,6 +213,9 @@ function humanizeDisconnectError(errMsg) {
   if (!msg) return null;
   if (msg.toLowerCase().includes('stream errored')) {
     return 'Geçici bağlantı kesintisi — otomatik yeniden bağlanılıyor.';
+  }
+  if (msg.toLowerCase().includes('qr refs attempts ended')) {
+    return 'QR okutulmadı — «QR / Oturum başlat» ile yeni QR alın.';
   }
   if (msg.toLowerCase().includes('connection failure')) {
     return 'Connection Failure — telefonda Bağlı cihazlardan eski oturumu kaldırın, sonra «Oturumu sıfırla ve QR al».';
@@ -250,15 +293,6 @@ function requireGatewayAuth(req, res, next) {
   return next();
 }
 
-function privilegedGatewaySessionIds() {
-  return [
-    process.env.BOOK_ORDER_GATEWAY_SESSION_ID,
-    process.env.WHATSAPP_GATEWAY_SESSION_ID
-  ]
-    .map((s) => String(s || '').trim())
-    .filter(Boolean);
-}
-
 function requireCoachScope(req, res, next) {
   try {
     const auth = String(req.headers.authorization || '');
@@ -269,22 +303,10 @@ function requireCoachScope(req, res, next) {
     const payload = verifyJwt(token);
     const coachId = getCoachId(req);
     const tokenUserId = String(payload.sub || '');
-    const role = String(payload.role || '');
-    const isAdmin = role === 'super_admin' || role === 'admin';
-    const sharedIds = privilegedGatewaySessionIds();
-
-    // Kendi oturumu veya (admin) paylaşımlı kurumsal gateway oturumu.
-    const allowed =
-      tokenUserId &&
-      (tokenUserId === coachId || (isAdmin && sharedIds.includes(coachId)));
-
-    if (!allowed) {
-      return res.status(403).json({
-        ok: false,
-        error: 'coach_scope_mismatch',
-        hint:
-          'URL oturum id ile JWT sub eşleşmiyor. Çıkış yapıp tekrar giriş yapın; başka kullanıcı adına görünümde WhatsApp bağlanamaz.'
-      });
+    // Her kullanıcı (admin, süper admin, koç, öğretmen) yalnızca kendi oturum id'sine erişir.
+    // Sunucu tarafı gönderim JWT'si sub = hedef oturum id ile imzalanır (kitap siparişi cron vb.).
+    if (!tokenUserId || tokenUserId !== coachId) {
+      return res.status(403).json({ ok: false, error: 'coach_scope_mismatch' });
     }
     req.actor = payload;
     return next();
@@ -378,6 +400,21 @@ function isSocketOpen(sock) {
 }
 
 function scheduleReconnect(coachId, session, generation, reason) {
+  const reasonLower = String(reason || '').toLowerCase();
+  if (reasonLower.includes('qr refs')) {
+    void hasGatewayAuthOnDisk(coachId).then((hasAuth) => {
+      if (!hasAuth) {
+        parkSessionWaitingForQr(coachId);
+        return;
+      }
+      continueScheduleReconnect(coachId, session, generation, reason);
+    });
+    return;
+  }
+  continueScheduleReconnect(coachId, session, generation, reason);
+}
+
+function continueScheduleReconnect(coachId, session, generation, reason) {
   const attempts = Number(session.reconnectAttempts || 0) + 1;
   session.reconnectAttempts = attempts;
   if (attempts > MAX_RECONNECT_ATTEMPTS) {
@@ -497,7 +534,7 @@ async function stopSession(coachId, opts = {}) {
 async function stopStuckSessionIfNeeded(coachId) {
   const session = sessions.get(coachId);
   if (!session) return;
-  if (session.status === 'connected') return;
+  if (session.status === 'connected' || session.status === 'qr_ready') return;
   const elapsed = Date.now() - session.startedAt;
   if (session.status === 'reconnecting' && elapsed < RECONNECT_TIMEOUT_MS) return;
   if (session.status === 'connecting' && elapsed < CONNECTING_TIMEOUT_MS) return;
@@ -530,12 +567,25 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
   const work = (async () => {
     await stopStuckSessionIfNeeded(coachId);
 
-    const meta = await readSessionMeta(coachId);
+    let meta = await readSessionMeta(coachId);
+    meta = await maybeClearTransientRestoreBlock(coachId, meta);
+    const hasAuthOnDisk = await hasGatewayAuthOnDisk(coachId);
     if (!allowDiskAuth || isRestoreBlocked(meta)) {
-      const hasAuth = await hasGatewayAuthOnDisk(coachId);
-      if (hasAuth && isRestoreBlocked(meta)) {
+      if (hasAuthOnDisk && isRestoreBlocked(meta)) {
         await clearCoachAuth(coachId);
       }
+    }
+    if (!allowDiskAuth && !hasAuthOnDisk) {
+      const parked = sessions.get(coachId);
+      if (parked && (parked.status === 'logged_out' || parked.status === 'qr_ready') && !parked.sock) {
+        return parked;
+      }
+    }
+    if (isRestoreBlocked(meta) && !(await hasGatewayAuthOnDisk(coachId))) {
+      return parkSessionWaitingForQr(
+        coachId,
+        'Önceki oturum hatalı — «Oturumu sıfırla ve QR al» ile temiz başlayın.'
+      );
     }
 
     const existing = sessions.get(coachId);
@@ -652,6 +702,30 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
           return;
         }
 
+        if (isQrScanTimeoutDisconnect(code, errMsg)) {
+          sessionState.reconnectAttempts = 0;
+          const hasAuth = await hasGatewayAuthOnDisk(coachId);
+          if (hasAuth) {
+            logger.warn({ coachId, code, errMsg }, 'QR timeout with saved auth — reconnect');
+            scheduleReconnect(coachId, sessionState, generation, 'qr_refs_retry');
+          } else {
+            parkSessionWaitingForQr(coachId);
+            logger.warn({ coachId, code, errMsg }, 'QR scan timeout — parked until user starts');
+          }
+          return;
+        }
+
+        if (isIntentionalLogoutDisconnect(code, errMsg)) {
+          await clearCoachAuth(coachId);
+          await clearSessionMeta(coachId);
+          sessionState.status = 'logged_out';
+          sessionState.qr = null;
+          sessionState.reconnectAttempts = 0;
+          sessionState.lastError = 'Oturum kapatıldı — yeniden bağlanmak için QR okutun.';
+          logger.info({ coachId, code, errMsg }, 'WhatsApp intentional logout');
+          return;
+        }
+
         const fatal = isFatalDisconnect(code, errMsg);
         if (fatal) {
           await clearCoachAuth(coachId);
@@ -730,32 +804,21 @@ async function ensureConnectedForSend(coachId) {
   return null;
 }
 
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
   let connected = 0;
   let reconnecting = 0;
-  const connectedSessionIds = [];
-  for (const [coachId, session] of sessions.entries()) {
-    if (session.status === 'connected') {
-      connected += 1;
-      connectedSessionIds.push(coachId);
-    }
+  for (const session of sessions.values()) {
+    if (session.status === 'connected') connected += 1;
     if (session.status === 'reconnecting') reconnecting += 1;
   }
-  const payload = {
+  res.json({
     ok: true,
     service: 'whatsapp-gateway',
     sessions: sessions.size,
     connected,
     reconnecting,
     watchdogMs: SESSION_WATCHDOG_MS,
-  };
-  if (gatewayApiKey) {
-    const provided = String(req.headers['x-gateway-key'] || '').trim();
-    if (provided && provided === gatewayApiKey) {
-      payload.connected_session_ids = connectedSessionIds;
-    }
-  }
-  res.json(payload);
+  });
 });
 
 app.get('/ready', (_req, res) => {
@@ -793,8 +856,9 @@ app.get('/sessions/:coachId/status', requireGatewayAuth, requireCoachScope, asyn
   meta = await maybeClearTransientRestoreBlock(coachId, meta);
   const authOnDisk = await hasGatewayAuthOnDisk(coachId);
   const restoreBlocked = isRestoreBlocked(meta);
+  const canAutoRestore = shouldAutoRestoreSession(coachId) && authOnDisk && !restoreBlocked;
 
-  if (!session && authOnDisk && !restoreBlocked) {
+  if (!session && canAutoRestore) {
     void setupSession(coachId, { allowDiskAuth: true }).catch((err) => {
       logger.warn({ err, coachId }, 'auto-restore session on status');
     });
@@ -802,9 +866,8 @@ app.get('/sessions/:coachId/status', requireGatewayAuth, requireCoachScope, asyn
   } else if (
     session &&
     !session.sock &&
-    authOnDisk &&
-    !restoreBlocked &&
-    (session.status === 'idle' || session.status === 'logged_out' || session.status === 'reconnecting')
+    canAutoRestore &&
+    (session.status === 'idle' || session.status === 'reconnecting')
   ) {
     void setupSession(coachId, { allowDiskAuth: true }).catch((err) => {
       logger.warn({ err, coachId }, 'auto-restore stale session on status');
@@ -942,7 +1005,7 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
       hint = 'Numara doğrulama aşaması zaman aşımına uğradı; yeniden deneyin.';
     }
 
-    logger.error({ err: error, coachId: getCoachId(req) }, 'send message failed');
+    logger.error({ err: error, coachId }, 'send message failed');
     res.status(status).json({
       ok: false,
       error: outError,
@@ -974,6 +1037,7 @@ app.listen(port, async () => {
       logger.warn({ err }, 'restorePersistedSessions readdir failed');
     }
     for (const coachId of ids) {
+      if (!shouldAutoRestoreSession(coachId)) continue;
       let meta = await readSessionMeta(coachId);
       meta = await maybeClearTransientRestoreBlock(coachId, meta);
       if (isRestoreBlocked(meta)) continue;
@@ -1003,6 +1067,7 @@ app.listen(port, async () => {
         if (!ent.isDirectory() || !ent.name || ent.name.startsWith('.')) continue;
         const coachId = ent.name;
         if (sessions.has(coachId)) continue;
+        if (!shouldAutoRestoreSession(coachId)) continue;
         let meta = await readSessionMeta(coachId);
         meta = await maybeClearTransientRestoreBlock(coachId, meta);
         if (isRestoreBlocked(meta)) continue;
