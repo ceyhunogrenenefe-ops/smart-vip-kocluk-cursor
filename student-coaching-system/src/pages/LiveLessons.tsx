@@ -9,8 +9,9 @@ import BbbAutoLinkFieldHint from '../components/liveLessons/BbbAutoLinkFieldHint
 import LiveLessonCard from '../components/liveLessons/LiveLessonCard';
 import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShell';
 import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
-import { lessonJoinUrl, isBbbJoinUrl } from '../lib/liveLessonUtils';
+import { lessonJoinUrl, needsBbbJoinFlow } from '../lib/liveLessonUtils';
 import { openBbbJoin } from '../lib/bbbJoin';
+import { copyGuestJoinShareText } from '../lib/bbbGuestJoin';
 import { Radio, Plus, Loader2, Filter, Clock, Pencil, Move, GripVertical, Trash2, FileDown } from 'lucide-react';
 import {
   WEEKDAY_SHORT_MON_FIRST,
@@ -136,6 +137,7 @@ export default function LiveLessons() {
   const [editDuration, setEditDuration] = useState(60);
   const [editMeetingLink, setEditMeetingLink] = useState('');
   const [editTeacherId, setEditTeacherId] = useState('');
+  const [editApplyScope, setEditApplyScope] = useState<'single' | 'series'>('single');
 
   const canManage =
     role === 'super_admin' || role === 'admin' || role === 'teacher' || role === 'coach';
@@ -156,7 +158,7 @@ export default function LiveLessons() {
         return;
       }
       try {
-        if (isBbbJoinUrl(url)) {
+        if (needsBbbJoinFlow(url)) {
           await openBbbJoin('teacher-lessons', lesson.id);
         } else {
           window.open(url, '_blank', 'noopener,noreferrer');
@@ -167,6 +169,29 @@ export default function LiveLessons() {
     },
     []
   );
+
+  const copyLessonShareLink = useCallback(async (lesson: TeacherLesson) => {
+    const when = lesson.date
+      ? `${new Date(lesson.date + 'T12:00:00').toLocaleDateString('tr-TR')} ${String(lesson.start_time || '').slice(0, 5)}`
+      : '';
+    const isBbb = lesson.platform === 'bbb' || needsBbbJoinFlow(lessonJoinUrl(lesson));
+    try {
+      if (isBbb) {
+        await copyGuestJoinShareText('private', lesson.id);
+        return;
+      }
+      const url = lessonJoinUrl(lesson);
+      if (!url) {
+        setError('Toplantı bağlantısı yok.');
+        return;
+      }
+      await navigator.clipboard.writeText(
+        [lesson.title, when ? `Tarih: ${when}` : '', '', `Katılım: ${url}`].filter(Boolean).join('\n')
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
 
   const sortedStudents = useMemo(
     () => [...students].sort((a, b) => a.name.localeCompare(b.name, 'tr')),
@@ -318,6 +343,13 @@ export default function LiveLessons() {
       ...mergedStaff
     ];
   }, [mergedStaff, editingLesson]);
+
+  const editingSeriesPeerCount = useMemo(() => {
+    if (!editingLesson?.series_id) return 0;
+    return lessons.filter(
+      (l) => l.series_id === editingLesson.series_id && l.status === 'scheduled'
+    ).length;
+  }, [editingLesson, lessons]);
 
   useEffect(() => {
     if (!loadStaffDirectory) return;
@@ -518,6 +550,7 @@ export default function LiveLessons() {
 
   const openEdit = (lesson: TeacherLesson) => {
     setEditingLesson(lesson);
+    setEditApplyScope('single');
     setEditTitle(lesson.title);
     setEditDateStr(lesson.date);
     const st = lesson.start_time || '09:00:00';
@@ -554,6 +587,9 @@ export default function LiveLessons() {
       ) {
         body.teacher_id = editTeacherId.trim();
       }
+      if (editApplyScope === 'series' && editingSeriesPeerCount > 1) {
+        body.apply_scope = 'series';
+      }
       const res = await apiFetch('/api/teacher-lessons', {
         method: 'PATCH',
         body: JSON.stringify(body)
@@ -577,11 +613,28 @@ export default function LiveLessons() {
     }
   };
 
-  const deleteLesson = async (id: string) => {
-    if (!window.confirm('Bu ders kaydını kalıcı olarak silmek istediğinize emin misiniz?')) return;
+  const deleteLesson = async (lesson: TeacherLesson, scopeOverride?: 'single' | 'series') => {
+    const seriesPeers = lesson.series_id
+      ? lessons.filter((l) => l.series_id === lesson.series_id && l.status === 'scheduled')
+      : [];
+    let scope = scopeOverride || 'single';
+    if (!scopeOverride && seriesPeers.length > 1) {
+      const deleteAll = window.confirm(
+        `Bu ders tekrarlayan serinin parçası (${seriesPeers.length} planlı oturum).\n\nTamam → Tüm planlı oturumları sil\nİptal → Sadece ${lesson.date} dersini sil`
+      );
+      scope = deleteAll ? 'series' : 'single';
+    } else if (scopeOverride === 'series' && seriesPeers.length > 1) {
+      if (!window.confirm(`${seriesPeers.length} planlı ders silinsin mi?`)) return;
+    } else if (!window.confirm('Bu ders kaydını kalıcı olarak silmek istediğinize emin misiniz?')) {
+      return;
+    }
     setError(null);
     try {
-      const res = await apiFetch(`/api/teacher-lessons?id=${encodeURIComponent(id)}`, {
+      const qs =
+        scope === 'series' && seriesPeers.length > 1
+          ? `id=${encodeURIComponent(lesson.id)}&apply_scope=series`
+          : `id=${encodeURIComponent(lesson.id)}`;
+      const res = await apiFetch(`/api/teacher-lessons?${qs}`, {
         method: 'DELETE'
       });
       const j = await res.json().catch(() => ({}));
@@ -589,7 +642,7 @@ export default function LiveLessons() {
         setError(String(j.error || 'Silinemedi'));
         return;
       }
-      setEditingLesson((cur) => (cur?.id === id ? null : cur));
+      setEditingLesson((cur) => (cur?.id === lesson.id ? null : cur));
       await loadLessons();
       if (showAdminExtras) void loadSummary();
     } catch (e) {
@@ -1223,7 +1276,7 @@ export default function LiveLessons() {
                                     {lesson.status === 'scheduled' ? (
                                       <button
                                         type="button"
-                                        onClick={() => void deleteLesson(lesson.id)}
+                                        onClick={() => void deleteLesson(lesson)}
                                         className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-50"
                                       >
                                         <Trash2 className="h-3 w-3" />
@@ -1276,6 +1329,43 @@ export default function LiveLessons() {
                 Planlanmış ders: tarih, saat, süre, öğretmen ve bağlantıyı değiştirebilirsiniz.
               </p>
             )}
+            {editingLesson.series_id && editingSeriesPeerCount > 1 ? (
+              <fieldset className="space-y-2 rounded-lg border border-violet-200 bg-violet-50/50 p-3">
+                <legend className="px-1 text-sm font-medium text-violet-900">Düzenleme kapsamı</legend>
+                <label className="flex cursor-pointer items-start gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="lessonEditScope"
+                    checked={editApplyScope === 'single'}
+                    onChange={() => setEditApplyScope('single')}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="font-medium text-slate-800">Yalnızca bu ders</span>
+                    <span className="block text-xs text-slate-500">
+                      {new Date(editingLesson.date + 'T12:00:00').toLocaleDateString('tr-TR')} tarihli oturum
+                    </span>
+                  </span>
+                </label>
+                <label className="flex cursor-pointer items-start gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="lessonEditScope"
+                    checked={editApplyScope === 'series'}
+                    onChange={() => setEditApplyScope('series')}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="font-medium text-slate-800">
+                      Tüm planlı seri ({editingSeriesPeerCount} ders)
+                    </span>
+                    <span className="block text-xs text-slate-500">
+                      Başlık, saat, süre, öğretmen ve bağlantı tüm planlı oturumlara uygulanır; her dersin tarihi ayrı kalır.
+                    </span>
+                  </span>
+                </label>
+              </fieldset>
+            ) : null}
             {showEditTeacherPicker ? (
               <label className="block text-sm">
                 <span className="text-slate-600">Öğretmen (platform kullanıcısı)</span>
@@ -1412,9 +1502,7 @@ export default function LiveLessons() {
                     key={lesson.id}
                     lesson={lesson}
                     studentName={studentName(lesson.student_id)}
-                    onCopy={() => {
-                      void navigator.clipboard.writeText(lessonJoinUrl(lesson));
-                    }}
+                    onCopy={() => void copyLessonShareLink(lesson)}
                     onJoin={() => void joinLiveLesson(lesson)}
                     onMarkComplete={
                       lesson.status === 'scheduled'
@@ -1433,7 +1521,7 @@ export default function LiveLessons() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => void deleteLesson(lesson.id)}
+                            onClick={() => void deleteLesson(lesson)}
                             className="text-xs font-medium text-red-600 hover:underline"
                           >
                             Sil
@@ -1460,9 +1548,7 @@ export default function LiveLessons() {
               key={lesson.id}
               lesson={lesson}
               studentName={studentName(lesson.student_id)}
-              onCopy={() => {
-                void navigator.clipboard.writeText(lessonJoinUrl(lesson));
-              }}
+              onCopy={() => void copyLessonShareLink(lesson)}
               onJoin={() => void joinLiveLesson(lesson)}
               onMarkComplete={
                 lesson.status === 'scheduled'
@@ -1481,7 +1567,7 @@ export default function LiveLessons() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => void deleteLesson(lesson.id)}
+                      onClick={() => void deleteLesson(lesson)}
                       className="text-xs font-medium text-red-600 hover:underline"
                     >
                       Sil

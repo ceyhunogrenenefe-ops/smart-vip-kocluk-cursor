@@ -1,6 +1,9 @@
 /** Ortak: `[[...segments]].js` ve çok segment rewrite (`deep-api.js`) aynı haritayı kullanır. */
 
 export const routeLoaders = {
+  'bbb-guest-join': () => import('../handlers/bbb-guest-join.js'),
+  'guest-join-preview': () => import('../handlers/guest-join-preview.js'),
+  'guest-join-resolve': () => import('../handlers/guest-join-resolve.js'),
   'auth-login': () => import('../handlers/auth-login.js'),
   'auth-register': () => import('../handlers/auth-register.js'),
   'auth-forgot-password': () => import('../handlers/auth-forgot-password.js'),
@@ -32,6 +35,7 @@ export const routeLoaders = {
   'message-templates': () => import('../handlers/message-templates.js'),
   'message-logs': () => import('../handlers/message-logs.js'),
   'coach-whatsapp-schedule': () => import('../handlers/coach-whatsapp-schedule.js'),
+  'coach-whatsapp-gateway-schedules': () => import('../handlers/coach-whatsapp-gateway-schedules.js'),
   'google/oauth': () => import('../handlers/google-oauth.js'),
   'google/callback': () => import('../handlers/google-callback.js'),
   'cron/meeting-reminders': () => import('../handlers/cron-meeting-reminders.js'),
@@ -40,6 +44,7 @@ export const routeLoaders = {
   'cron/lesson-reminder': () => import('../handlers/cron-lesson-reminder.js'),
   'cron/lesson-reminders': () => import('../handlers/cron-lesson-reminder.js'),
   'cron/class-lesson-reminders': () => import('../handlers/cron-class-lesson-reminders.js'),
+  'cron/teacher-lesson-reminders': () => import('../handlers/cron-teacher-lesson-reminders.js'),
   'cron/reminders-tick': () => import('../handlers/cron-reminders-tick.js'),
   'cron/class-homework-notify': () => import('../handlers/cron-class-homework-notify.js'),
   'cron/class-sessions': () => import('../handlers/cron-class-sessions.js'),

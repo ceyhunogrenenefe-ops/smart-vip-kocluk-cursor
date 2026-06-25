@@ -703,7 +703,9 @@ export default function EventsPage() {
         toast.error(String(j.error || 'Gönderim başarısız'));
         return;
       }
-      toast.success(`WhatsApp: ${j.sent ?? 0} gönderildi, ${j.failed ?? 0} hata`);
+      toast.success(
+        `WhatsApp: ${j.sent ?? 0} gönderildi, ${j.failed ?? 0} hata${j.channel ? ` (${j.channel})` : ''}`
+      );
       await loadAll();
     } finally {
       setSendBusyId(null);

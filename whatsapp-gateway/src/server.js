@@ -47,7 +47,15 @@ const RECONNECT_TIMEOUT_MS = Math.min(
 );
 const SESSION_WATCHDOG_MS = Math.min(
   300_000,
-  Math.max(15_000, Number(process.env.WA_SESSION_WATCHDOG_MS) || 45_000)
+  Math.max(15_000, Number(process.env.WA_SESSION_WATCHDOG_MS) || 30_000)
+);
+const SESSION_KEEPALIVE_MS = Math.min(
+  120_000,
+  Math.max(20_000, Number(process.env.WA_SESSION_KEEPALIVE_MS) || 45_000)
+);
+const RECONNECT_COOLDOWN_MS = Math.min(
+  600_000,
+  Math.max(60_000, Number(process.env.WA_RECONNECT_COOLDOWN_MS) || 120_000)
 );
 const MAX_RECONNECT_ATTEMPTS = Math.min(
   50,
@@ -59,19 +67,29 @@ const RESTORE_BLOCK_MS = Math.min(
 );
 const SEND_MESSAGE_TIMEOUT_MS = Math.min(
   60_000,
-  Math.max(10_000, Number(process.env.SEND_MESSAGE_TIMEOUT_MS) || 35_000)
+  Math.max(10_000, Number(process.env.SEND_MESSAGE_TIMEOUT_MS) || 45_000)
 );
 const SEND_READY_DELAY_MS = Math.min(
   5_000,
-  Math.max(0, Number(process.env.WA_SEND_READY_DELAY_MS) || 1_200)
+  Math.max(0, Number(process.env.WA_SEND_READY_DELAY_MS) || 500)
 );
 const SEND_WAIT_READY_MS = Math.min(
-  20_000,
-  Math.max(2_000, Number(process.env.WA_SEND_WAIT_READY_MS) || 9_000)
+  25_000,
+  Math.max(2_000, Number(process.env.WA_SEND_WAIT_READY_MS) || 12_000)
 );
 const SEND_WAIT_POLL_MS = Math.min(
   500,
   Math.max(80, Number(process.env.WA_SEND_WAIT_POLL_MS) || 200)
+);
+/** Varsayılan kapalı — yavaş onWhatsApp ön kontrolü gönderimi 15 sn geciktirip proxy timeout üretir. */
+const SKIP_ON_WHATSAPP_CHECK = String(process.env.WA_SKIP_ON_WHATSAPP_CHECK ?? '1') !== '0';
+const ON_WHATSAPP_TIMEOUT_MS = Math.min(
+  8_000,
+  Math.max(1_500, Number(process.env.WA_ON_WHATSAPP_TIMEOUT_MS) || 3_500)
+);
+const SEND_MESSAGE_RETRIES = Math.min(
+  2,
+  Math.max(0, Number(process.env.WA_SEND_MESSAGE_RETRIES) || 1)
 );
 
 app.use(
@@ -170,6 +188,10 @@ function isIntentionalLogoutDisconnect(statusCode, message) {
 }
 
 function shouldAutoRestoreSession(coachId) {
+  // Varsayılan: diskte oturumu olan tüm koçları otomatik bağla (kişisel QR oturumları dahil).
+  // WA_AUTO_RESTORE_ONLY_PRIORITY=1 → yalnızca BOOK_ORDER/WHATSAPP_GATEWAY_SESSION_ID (eski davranış).
+  const restrict = String(process.env.WA_AUTO_RESTORE_ONLY_PRIORITY || '').trim() === '1';
+  if (!restrict) return true;
   const priority = String(
     process.env.BOOK_ORDER_GATEWAY_SESSION_ID || process.env.WHATSAPP_GATEWAY_SESSION_ID || ''
   ).trim();
@@ -189,6 +211,8 @@ function parkSessionWaitingForQr(coachId, lastError) {
     startedAt: Date.now(),
     readyAt: 0,
     reconnectAttempts: 0,
+    lastKeepaliveAt: 0,
+    reconnectCooldownUntil: 0,
     connectingTimer: null,
   };
   sessions.set(coachId, parked);
@@ -246,6 +270,8 @@ async function maybeClearTransientRestoreBlock(coachId, meta) {
  * @property {number} startedAt
  * @property {number} readyAt
  * @property {number} reconnectAttempts
+ * @property {number} lastKeepaliveAt
+ * @property {number} reconnectCooldownUntil
  * @property {ReturnType<typeof setTimeout>|null} connectingTimer
  */
 
@@ -322,6 +348,10 @@ function getCoachId(req) {
 function normalizeDigitsForWhatsApp(phone) {
   let d = String(phone || '').replace(/\D/g, '');
   if (!d) return '';
+  // Yanlışlıkla +1 ile birleşmiş TR cep: 1520xxxxxxx (11 hane) → 90520xxxxxxx
+  if (d.length === 11 && d.startsWith('1') && /^5\d{9}$/.test(d.slice(1))) {
+    d = d.slice(1);
+  }
   if (d.startsWith('90') && d.length >= 12) return d;
   if (d.startsWith('0') && d.length === 11) return `90${d.slice(1)}`;
   if (d.length === 10 && d.startsWith('5')) return `90${d}`;
@@ -415,13 +445,26 @@ function scheduleReconnect(coachId, session, generation, reason) {
 }
 
 function continueScheduleReconnect(coachId, session, generation, reason) {
+  const now = Date.now();
+  if (Number(session.reconnectCooldownUntil || 0) > now) return;
+
   const attempts = Number(session.reconnectAttempts || 0) + 1;
   session.reconnectAttempts = attempts;
+  session.startedAt = now;
   if (attempts > MAX_RECONNECT_ATTEMPTS) {
-    logger.warn({ coachId, attempts, reason }, 'max reconnect attempts — session parked');
-    session.status = 'logged_out';
-    session.lastError =
-      'Bağlantı birçok kez koptu. Telefonda Bağlı cihazları kontrol edip «Oturumu sıfırla ve QR al» deneyin.';
+    logger.warn({ coachId, attempts, reason }, 'max reconnect attempts — cooldown then retry');
+    session.status = 'reconnecting';
+    session.lastError = 'Bağlantı kesildi — otomatik yeniden bağlanılıyor (QR gerekmez).';
+    session.reconnectAttempts = 0;
+    session.reconnectCooldownUntil = now + RECONNECT_COOLDOWN_MS;
+    setTimeout(() => {
+      const cur = sessions.get(coachId);
+      if (!cur || cur.generation !== generation) return;
+      cur.reconnectCooldownUntil = 0;
+      setupSession(coachId, { allowDiskAuth: true }).catch((err) => {
+        logger.error({ err, coachId }, 'cooldown reconnect failed');
+      });
+    }, RECONNECT_COOLDOWN_MS);
     return;
   }
   const delay = Math.min(30_000, 1500 + attempts * 1500);
@@ -497,6 +540,7 @@ async function stopSession(coachId, opts = {}) {
 
   const session = sessions.get(id);
   if (session) {
+    clearLinkedJidOwner(id, session);
     clearConnectingTimer(session);
     await endSocket(session.sock);
     sessions.delete(id);
@@ -535,26 +579,65 @@ async function stopStuckSessionIfNeeded(coachId) {
   const session = sessions.get(coachId);
   if (!session) return;
   if (session.status === 'connected' || session.status === 'qr_ready') return;
-  const elapsed = Date.now() - session.startedAt;
+  if (setupInFlight.has(coachId)) return;
+  const elapsed = Date.now() - Number(session.startedAt || 0);
   if (session.status === 'reconnecting' && elapsed < RECONNECT_TIMEOUT_MS) return;
   if (session.status === 'connecting' && elapsed < CONNECTING_TIMEOUT_MS) return;
   if (session.status === 'reconnecting' || session.status === 'connecting') {
-    logger.warn({ coachId, status: session.status, elapsed }, 'stuck session — scheduling reconnect');
-    scheduleReconnect(coachId, session, session.generation, 'stuck_session');
-    return;
+    logger.warn({ coachId, status: session.status, elapsed }, 'stuck session — forcing reconnect');
+    clearConnectingTimer(session);
+    if (session.sock) {
+      await endSocket(session.sock);
+      session.sock = null;
+    }
+    session.startedAt = Date.now();
+    session.generation = Number(session.generation || 0) + 1;
+    void setupSession(coachId, { allowDiskAuth: true }).catch((err) => {
+      logger.error({ err, coachId }, 'stuck session reconnect failed');
+    });
   }
 }
 
+function linkedPhoneFromSession(session) {
+  const jid = session?.sock?.user?.id;
+  if (!jid) return null;
+  const digits = String(jid).replace(/@.+$/, '').replace(/\D/g, '');
+  return digits || null;
+}
+
 function sessionPayload(coachId, session, extra = {}) {
+  const st = session?.status || 'idle';
+  const linkedPhone = st === 'connected' ? linkedPhoneFromSession(session) : null;
   return {
     ok: true,
     coachId,
-    status: session?.status || 'idle',
+    sessionCoachId: coachId,
+    status: st,
     qr: session?.qr || null,
     connectedAt: session?.connectedAt || null,
     lastError: session?.lastError || null,
+    linkedPhone,
     ...extra,
   };
+}
+
+/** Aynı WhatsApp numarasının birden fazla panel kullanıcısına bağlanmasını engeller. */
+/** @type {Map<string, string>} */
+const linkedJidOwner = new Map();
+
+function clearLinkedJidOwner(coachId, session) {
+  const jid = session?.sock?.user?.id;
+  if (!jid) return;
+  if (linkedJidOwner.get(jid) === coachId) linkedJidOwner.delete(jid);
+}
+
+function registerLinkedJidOwner(coachId, sock) {
+  const jid = sock?.user?.id;
+  if (!jid) return null;
+  const existing = linkedJidOwner.get(jid);
+  if (existing && existing !== coachId) return existing;
+  linkedJidOwner.set(jid, coachId);
+  return null;
 }
 
 async function setupSession(coachId, { allowDiskAuth = true } = {}) {
@@ -630,6 +713,8 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
       startedAt: Date.now(),
       readyAt: 0,
       reconnectAttempts: priorReconnectAttempts,
+      lastKeepaliveAt: existing?.lastKeepaliveAt || 0,
+      reconnectCooldownUntil: existing?.reconnectCooldownUntil || 0,
       connectingTimer: null,
     };
     sessions.set(coachId, sessionState);
@@ -653,7 +738,7 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
       shouldIgnoreJid: () => false,
       connectTimeoutMs: 60_000,
       defaultQueryTimeoutMs: 60_000,
-      keepAliveIntervalMs: 15_000,
+      keepAliveIntervalMs: 10_000,
       retryRequestDelayMs: 250,
       getMessage: async () => undefined,
     });
@@ -673,18 +758,37 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
 
       if (connection === 'open') {
         clearConnectingTimer(sessionState);
+        const conflictCoach = registerLinkedJidOwner(coachId, sock);
+        if (conflictCoach) {
+          logger.warn({ coachId, conflictCoach, jid: sock.user?.id }, 'WhatsApp number already linked to another user');
+          sessionState.sock = null;
+          sessionState.status = 'logged_out';
+          sessionState.qr = null;
+          sessionState.lastError =
+            'Bu WhatsApp numarası başka bir kullanıcı hesabına bağlı. O hesaptan çıkış yapın veya kendi numaranızı QR ile bağlayın.';
+          try {
+            await endSocket(sock);
+          } catch {
+            /* noop */
+          }
+          return;
+        }
         sessionState.status = 'connected';
         sessionState.qr = null;
         sessionState.connectedAt = new Date().toISOString();
+        sessionState.startedAt = Date.now();
         sessionState.readyAt = Date.now() + SEND_READY_DELAY_MS;
         sessionState.lastError = null;
         sessionState.reconnectAttempts = 0;
+        sessionState.reconnectCooldownUntil = 0;
+        sessionState.lastKeepaliveAt = Date.now();
         await clearSessionMeta(coachId);
         logger.info({ coachId }, 'WhatsApp connected');
       }
 
       if (connection === 'close') {
         clearConnectingTimer(sessionState);
+        clearLinkedJidOwner(coachId, sessionState);
         const code = lastDisconnect?.error?.output?.statusCode;
         const errMsg = lastDisconnect?.error?.message || null;
         sessionState.sock = null;
@@ -759,6 +863,14 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
 }
 
 async function ensureConnectedForSend(coachId) {
+  if (setupInFlight.has(coachId)) {
+    try {
+      await setupInFlight.get(coachId);
+    } catch {
+      /* setup failed — fall through */
+    }
+  }
+
   const waitUntilReady = async (ms) => {
     const deadline = Date.now() + Math.max(200, ms);
     while (Date.now() < deadline) {
@@ -804,11 +916,41 @@ async function ensureConnectedForSend(coachId) {
   return null;
 }
 
+async function pingSessionKeepalive(coachId, session) {
+  if (!session?.sock || session.status !== 'connected') return;
+  if (!isSocketOpen(session.sock)) return;
+  const now = Date.now();
+  if (now - Number(session.lastKeepaliveAt || 0) < SESSION_KEEPALIVE_MS) return;
+  try {
+    await Promise.race([
+      session.sock.query({
+        tag: 'iq',
+        attrs: { to: '@s.whatsapp.net', type: 'get', xmlns: 'w:p' },
+        content: [{ tag: 'ping', attrs: {} }],
+      }),
+      sleep(8000),
+    ]);
+    session.lastKeepaliveAt = now;
+  } catch (err) {
+    logger.warn({ err, coachId }, 'keepalive ping failed');
+    if (!isSocketOpen(session.sock)) {
+      await endSocket(session.sock);
+      session.sock = null;
+      scheduleReconnect(coachId, session, session.generation, 'keepalive_ping_failed');
+    }
+  }
+}
+
 app.get('/health', (_req, res) => {
   let connected = 0;
   let reconnecting = 0;
-  for (const session of sessions.values()) {
-    if (session.status === 'connected') connected += 1;
+  /** @type {string[]} */
+  const connectedSessionIds = [];
+  for (const [coachId, session] of sessions.entries()) {
+    if (session.status === 'connected') {
+      connected += 1;
+      connectedSessionIds.push(coachId);
+    }
     if (session.status === 'reconnecting') reconnecting += 1;
   }
   res.json({
@@ -817,7 +959,9 @@ app.get('/health', (_req, res) => {
     sessions: sessions.size,
     connected,
     reconnecting,
+    connected_session_ids: connectedSessionIds,
     watchdogMs: SESSION_WATCHDOG_MS,
+    keepaliveMs: SESSION_KEEPALIVE_MS,
   });
 });
 
@@ -867,7 +1011,10 @@ app.get('/sessions/:coachId/status', requireGatewayAuth, requireCoachScope, asyn
     session &&
     !session.sock &&
     canAutoRestore &&
-    (session.status === 'idle' || session.status === 'reconnecting')
+    (session.status === 'idle' ||
+      session.status === 'reconnecting' ||
+      session.status === 'logged_out' ||
+      session.status === 'connecting')
   ) {
     void setupSession(coachId, { allowDiskAuth: true }).catch((err) => {
       logger.warn({ err, coachId }, 'auto-restore stale session on status');
@@ -901,6 +1048,7 @@ app.post('/sessions/:coachId/logout', requireGatewayAuth, requireCoachScope, asy
   const coachId = getCoachId(req);
   const session = sessions.get(coachId);
   if (session?.sock) {
+    clearLinkedJidOwner(coachId, session);
     try {
       await session.sock.logout();
     } catch (err) {
@@ -924,15 +1072,27 @@ app.post('/sessions/:coachId/reset', requireGatewayAuth, requireCoachScope, asyn
   }
 });
 
-async function sendTextWithTimeout(sock, jid, message) {
-  // Presence update, reconnect penceresinde takılabildiği için gönderim öncesi kullanılmıyor.
-  return withTimeout(() => sock.sendMessage(jid, { text: message }), SEND_MESSAGE_TIMEOUT_MS, 'send_message_timeout');
+async function sendTextWithTimeout(sock, jid, message, retriesLeft = SEND_MESSAGE_RETRIES) {
+  try {
+    return await withTimeout(
+      () => sock.sendMessage(jid, { text: message }),
+      SEND_MESSAGE_TIMEOUT_MS,
+      'send_message_timeout'
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (retriesLeft > 0 && msg === 'send_message_timeout') {
+      await sleep(600);
+      return sendTextWithTimeout(sock, jid, message, retriesLeft - 1);
+    }
+    throw err;
+  }
 }
 
 app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async (req, res) => {
   const coachId = getCoachId(req);
+  const digits = normalizeDigitsForWhatsApp(req.body?.phone);
   try {
-    const digits = normalizeDigitsForWhatsApp(req.body?.phone);
     const jid = ensurePhoneJid(digits);
     const message = String(req.body?.message || '').trim();
     if (!jid || !message) {
@@ -949,22 +1109,19 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
       }
 
       try {
-        const onWa = await withTimeout(
-          () => session.sock.onWhatsApp(digits),
-          Math.min(15_000, SEND_MESSAGE_TIMEOUT_MS),
-          'on_whatsapp_timeout'
-        );
-        const exists = Array.isArray(onWa) && onWa.some((r) => r?.exists);
-        if (!exists) {
-          const err = new Error('number_not_on_whatsapp');
-          err.httpStatus = 404;
-          err.phone = digits;
-          throw err;
+        if (!SKIP_ON_WHATSAPP_CHECK) {
+          const onWa = await withTimeout(
+            () => session.sock.onWhatsApp(digits),
+            ON_WHATSAPP_TIMEOUT_MS,
+            'on_whatsapp_timeout'
+          );
+          const exists = Array.isArray(onWa) && onWa.some((r) => r?.exists);
+          if (!exists) {
+            logger.warn({ coachId, digits }, 'onWhatsApp precheck negative — trying send anyway');
+          }
         }
       } catch (checkErr) {
-        const code = checkErr instanceof Error ? String(checkErr.message || '') : '';
-        if (code === 'number_not_on_whatsapp') throw checkErr;
-        logger.warn({ err: checkErr, coachId, digits }, 'onWhatsApp check skipped');
+        logger.warn({ err: checkErr, coachId, digits }, 'onWhatsApp check skipped — trying send anyway');
       }
 
       return sendTextWithTimeout(session.sock, jid, message);
@@ -1005,7 +1162,13 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
       hint = 'Numara doğrulama aşaması zaman aşımına uğradı; yeniden deneyin.';
     }
 
-    logger.error({ err: error, coachId }, 'send message failed');
+    const logLevel = outError === 'number_not_on_whatsapp' ? 'warn' : 'error';
+    logger[logLevel]({ err: error, coachId, phone: digits }, 'send message failed');
+    if (outError === 'number_not_on_whatsapp') {
+      hint =
+        hint ||
+        'Numara WhatsApp\'ta kayıtlı görünmüyor veya format hatalı. TR cep için 05xx veya 905xx kullanın.';
+    }
     res.status(status).json({
       ok: false,
       error: outError,
@@ -1053,11 +1216,34 @@ app.listen(port, async () => {
 
   async function runSessionWatchdog() {
     for (const [coachId, session] of sessions.entries()) {
-      if (session.status === 'connected' && session.sock && !isSocketOpen(session.sock)) {
-        logger.warn({ coachId }, 'watchdog: socket closed while connected — reconnecting');
-        await endSocket(session.sock);
-        session.sock = null;
-        scheduleReconnect(coachId, session, session.generation, 'watchdog_socket_closed');
+      if (session.status === 'connected' && session.sock) {
+        if (!isSocketOpen(session.sock)) {
+          logger.warn({ coachId }, 'watchdog: socket closed while connected — reconnecting');
+          await endSocket(session.sock);
+          session.sock = null;
+          scheduleReconnect(coachId, session, session.generation, 'watchdog_socket_closed');
+          continue;
+        }
+        await pingSessionKeepalive(coachId, session);
+        continue;
+      }
+      if (
+        !session.sock &&
+        shouldAutoRestoreSession(coachId) &&
+        (session.status === 'reconnecting' ||
+          session.status === 'idle' ||
+          session.status === 'logged_out' ||
+          session.status === 'connecting')
+      ) {
+        const hasAuth = await hasGatewayAuthOnDisk(coachId);
+        let meta = await readSessionMeta(coachId);
+        meta = await maybeClearTransientRestoreBlock(coachId, meta);
+        if (hasAuth && !isRestoreBlocked(meta) && !setupInFlight.has(coachId)) {
+          logger.info({ coachId, status: session.status }, 'watchdog: reviving dropped session');
+          void setupSession(coachId, { allowDiskAuth: true }).catch((err) => {
+            logger.warn({ err, coachId }, 'watchdog revive failed');
+          });
+        }
       }
     }
 
@@ -1097,6 +1283,8 @@ app.listen(port, async () => {
       connectingTimeoutMs: CONNECTING_TIMEOUT_MS,
       reconnectTimeoutMs: RECONNECT_TIMEOUT_MS,
       sessionWatchdogMs: SESSION_WATCHDOG_MS,
+      sessionKeepaliveMs: SESSION_KEEPALIVE_MS,
+      autoRestoreAll: String(process.env.WA_AUTO_RESTORE_ONLY_PRIORITY || '').trim() !== '1',
     },
     'whatsapp-gateway started'
   );

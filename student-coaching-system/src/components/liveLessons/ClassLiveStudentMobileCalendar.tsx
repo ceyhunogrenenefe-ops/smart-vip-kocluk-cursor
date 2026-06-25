@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { PlayCircle } from 'lucide-react';
 import { liveSubjectAccent } from './liveSubjectAccent';
+import { hasClassSessionRecordingAccess } from '../../lib/liveLessonUtils';
 import { cn } from '../../lib/utils';
 
 type SessionRow = {
@@ -14,6 +15,8 @@ type SessionRow = {
   status: string;
   meeting_link?: string;
   join_link?: string;
+  recording_link?: string | null;
+  bbb_meeting_id?: string | null;
 };
 
 type SlotRow = {
@@ -40,6 +43,7 @@ export type ClassLiveStudentMobileCalendarProps = {
   dowFromIso: (iso: string) => number;
   todayIso: string;
   onJoinSession?: (s: SessionRow) => void;
+  onWatchSession?: (s: SessionRow) => void;
 };
 
 /** Öğrenci mobil — haftalık grid yerine gün seçimi + ders listesi */
@@ -51,7 +55,8 @@ export function ClassLiveStudentMobileCalendar({
   formatDateDots,
   dowFromIso,
   todayIso,
-  onJoinSession
+  onJoinSession,
+  onWatchSession
 }: ClassLiveStudentMobileCalendarProps) {
   const [dayIdx, setDayIdx] = useState(() => {
     const idx = weekColumnDates.indexOf(todayIso);
@@ -127,7 +132,7 @@ export function ClassLiveStudentMobileCalendar({
             const accent = liveSubjectAccent(s.subject);
             const sessionLink = String(s.join_link || s.meeting_link || '').trim();
             const canJoin = s.status === 'scheduled' && Boolean(sessionLink);
-            const canWatch = s.status === 'completed' && Boolean(sessionLink);
+            const canWatch = hasClassSessionRecordingAccess(s);
             return (
               <li
                 key={s.id}
@@ -170,7 +175,11 @@ export function ClassLiveStudentMobileCalendar({
                   {canWatch ? (
                     <button
                       type="button"
-                      onClick={() => window.open(sessionLink, '_blank', 'noopener,noreferrer')}
+                      onClick={() =>
+                        onWatchSession
+                          ? onWatchSession(s)
+                          : window.open(sessionLink, '_blank', 'noopener,noreferrer')
+                      }
                       className="inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-3 py-1.5 text-xs font-semibold text-white"
                     >
                       <PlayCircle className="h-3.5 w-3.5" aria-hidden />

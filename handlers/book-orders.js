@@ -20,6 +20,28 @@ function actorGatewaySessionId(actor) {
   return resolveBookOrderGatewaySessionId(String(actor?.sub || actor?.id || '').trim());
 }
 
+async function safeNotifyBooksellerForOrder(order, opts) {
+  try {
+    return await notifyBooksellerForOrder(order, opts);
+  } catch (e) {
+    const msg = errorMessage(e);
+    console.error('[book-orders] WhatsApp notify exception', order?.id, msg);
+    try {
+      await supabaseAdmin
+        .from('kitap_siparisleri')
+        .update({
+          whatsapp_status: 'failed',
+          whatsapp_error: msg.slice(0, 500),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', order.id);
+    } catch {
+      /* ignore secondary failure */
+    }
+    return { ok: false, error: 'notify_exception', hint: msg };
+  }
+}
+
 function parseBody(req) {
   const b = req.body;
   if (b && typeof b === 'object') return b;
@@ -381,7 +403,8 @@ export default async function handler(req, res) {
 
   const institutionFilter = isSuper
     ? String(req.query?.institution_id || '').trim() || null
-    : String(actor.institution_id || '').trim() || null;
+    : String(req.query?.institution_id || actor.institution_id || PLATFORM_BOOK_ORDER_INSTITUTION_ID || '').trim() ||
+      null;
 
   if (req.method === 'POST' && op === 'create') {
     const body = parseBody(req);
@@ -487,13 +510,13 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET' && scope === 'gateway-config') {
     try {
-      const envSessionId = bookOrderGatewaySessionId();
       const gateway = getGatewaySendEnvStatus();
       const gatewayHealth = await probeGatewayHealth();
       let gatewayLive = null;
       const actorId = String(actor.sub || actor.id || '').trim();
       const uiSessionId = actorId;
-      const sendSessionId = actorGatewaySessionId(actor);
+      const sendSessionId = actorId;
+      const envSendSessionId = bookOrderGatewaySessionId();
       const connectedLive = await listConnectedGatewaySessionIds();
       if (gateway.upstream_ready || sendSessionId || connectedLive.length) {
         try {
@@ -506,27 +529,19 @@ export default async function handler(req, res) {
         data: {
           session_id: uiSessionId || null,
           send_session_id: sendSessionId || null,
-          env_session_id: envSessionId || null,
-          env_configured: Boolean(envSessionId),
+          env_session_id: envSendSessionId || null,
+          env_configured: Boolean(envSendSessionId),
           gateway,
           gateway_health: gatewayHealth,
           gateway_session: gatewayLive,
           connected_live_session_ids: connectedLive.length ? connectedLive.map((x) => `…${x.slice(-8)}`) : [],
           hint: !gatewayHealth.ok
             ? `VPS erişilemiyor (${gatewayHealth.error || 'fetch_failed'}) — pm2 restart whatsapp-gateway`
-            : connectedLive.length && envSessionId && !connectedLive.includes(envSessionId)
-              ? `Env oturumu (…${envSessionId.slice(-8)}) bağlı değil; VPS'te bağlı: ${connectedLive.map((x) => `…${x.slice(-8)}`).join(', ')}. BOOK_ORDER_GATEWAY_SESSION_ID güncelleyin veya QR ile env id'ye bağlanın.`
-              : !envSessionId
-                ? connectedLive.length
-                  ? `BOOK_ORDER_GATEWAY_SESSION_ID boş; VPS'te bağlı oturum: ${connectedLive.map((x) => `…${x.slice(-8)}`).join(', ')} — cron için env'e yazın.`
-                  : `QR bu hesabınızın oturumuna bağlanır (id: ${uiSessionId || '—'}). Kitap siparişleri sayfasından QR okutun.`
-                : envSessionId !== actorId
-                  ? `Otomatik gönderim env oturumunu kullanıyor (…${envSessionId.slice(-8)}). QR yalnızca sizin hesabınıza bağlanır.`
-                  : !gateway.configured
-                    ? gateway.hint
-                    : gatewayLive?.ok
-                      ? 'Kitap siparişi WhatsApp gateway bağlı.'
-                      : gatewayLive?.error || 'QR ile bağlayın.'
+            : !gatewayLive?.ok
+              ? `Sizin WhatsApp oturumunuz bağlı değil — aşağıdan kendi numaranızı QR ile bağlayın.`
+              : envSendSessionId && envSendSessionId !== actorId
+                ? `Sizin hattınız bağlı. Cron otomasyonu env oturumunu (…${envSendSessionId.slice(-8)}) kullanabilir — farklıysa env güncelleyin.`
+                : 'Kitap siparişi WhatsApp gateway — sizin hesabınız bağlı.'
         }
       });
     } catch (e) {
@@ -910,7 +925,7 @@ export default async function handler(req, res) {
         .select('*')
         .maybeSingle();
       if (upErr) throw upErr;
-      const notify = await notifyBooksellerForOrder(approved || { ...order, ...approvePatch }, {
+      const notify = await safeNotifyBooksellerForOrder(approved || { ...order, ...approvePatch }, {
         kitapciId,
         kitapciName: order.kitapci_adi,
         gatewaySessionId: actorGatewaySessionId(actor)
@@ -944,15 +959,9 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'DELETE' && op === 'order' && id) {
-    if (!isSuper) {
-      return res.status(403).json({
-        error: 'super_admin_required',
-        hint: 'Sipariş silme yalnızca süper admin tarafından yapılır.'
-      });
-    }
     try {
-      let fetchQ = supabaseAdmin.from('kitap_siparisleri').select('id').eq('id', id);
-      if (institutionFilter) fetchQ = fetchQ.eq('institution_id', institutionFilter);
+      let fetchQ = supabaseAdmin.from('kitap_siparisleri').select('id, institution_id').eq('id', id);
+      if (!isSuper && institutionFilter) fetchQ = fetchQ.eq('institution_id', institutionFilter);
       const { data: row, error: fetchErr } = await fetchQ.maybeSingle();
       if (fetchErr) throw fetchErr;
       if (!row) return res.status(404).json({ error: 'not_found' });
@@ -1008,7 +1017,7 @@ export default async function handler(req, res) {
       const prePatch = { whatsapp_status: 'sending', whatsapp_error: null, updated_at: now };
       if (kitapciId) prePatch.kitapci_id = kitapciId;
       await supabaseAdmin.from('kitap_siparisleri').update(prePatch).eq('id', id);
-      const notify = await notifyBooksellerForOrder(
+      const notify = await safeNotifyBooksellerForOrder(
         { ...order, ...prePatch },
         {
           kitapciId,

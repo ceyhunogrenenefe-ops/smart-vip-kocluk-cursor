@@ -44,10 +44,16 @@ export default async function handler(req, res) {
       const orders = await listOrdersForKitapciPortal(bookseller);
       return res.status(200).json({
         bookseller: { name: bookseller.name, city: bookseller.city },
-        orders
+        orders: orders || []
       });
     } catch (e) {
-      return res.status(500).json({ error: errorMessage(e) });
+      const msg = errorMessage(e);
+      console.error('kitapci portal list failed', msg);
+      return res.status(500).json({
+        error: 'portal_load_failed',
+        hint: 'Sipariş listesi yüklenemedi. Birkaç saniye sonra tekrar deneyin.',
+        detail: msg
+      });
     }
   }
 

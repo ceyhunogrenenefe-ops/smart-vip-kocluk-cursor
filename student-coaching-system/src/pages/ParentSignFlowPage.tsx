@@ -2181,12 +2181,14 @@ export default function ParentSignFlowPage() {
                               {odemeSekliLabel(odemeSekliFromKayitJson(kayitJsonRecord(r)))}
                             </span>
                           </p>
+                          {isInstitutionAdmin ? (
                           <Link
-                            to="/tahsilat-muhasebe"
+                            to="/muhasebe?tab=tahsilat"
                             className="text-[10px] font-semibold text-blue-700 hover:underline dark:text-blue-300"
                           >
                             Aylık tahsilat panosu →
                           </Link>
+                          ) : null}
                         </div>
                         <ul className="space-y-1">
                           {taksitKartlariFromRow(r).map((tk, idx) => {

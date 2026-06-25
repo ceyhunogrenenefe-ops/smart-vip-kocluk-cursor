@@ -10,6 +10,8 @@ export type GatewayStatusPayload = {
   restoreBlocked?: boolean;
   authOnDisk?: boolean;
   hint?: string | null;
+  linkedPhone?: string | null;
+  sessionCoachId?: string | null;
 };
 
 function isValidGatewayEnvUrl(s: string): boolean {
@@ -78,7 +80,27 @@ export async function callWhatsAppGateway<T>(
   const gk = gatewayApiKeyHeader();
   if (gk) headers.set('x-gateway-key', gk);
 
-  const res = await fetch(`${gatewayUrl}${endpoint}`, { headers, ...init });
+  const isSend = /\/send\/?$/i.test(endpoint);
+  const timeoutMs = isSend ? 115000 : 28000;
+  const controller = new AbortController();
+  const tid = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res: Response;
+  try {
+    res = await fetch(`${gatewayUrl}${endpoint}`, { headers, ...init, signal: controller.signal });
+  } catch (e) {
+    clearTimeout(tid);
+    if (e instanceof Error && e.name === 'AbortError') {
+      throw new Error(
+        isSend
+          ? 'Mesaj gönderimi zaman aşımına uğradı (110 sn). VPS gateway yavaş veya kopuk — pm2 restart whatsapp-gateway deneyin.'
+          : 'Gateway durumu alınamadı (zaman aşımı).'
+      );
+    }
+    throw e;
+  }
+  clearTimeout(tid);
+
   const rawText = await res.text();
   let data: { error?: string; detail?: string; hint?: string } = {};
   try {
@@ -102,7 +124,9 @@ export async function callWhatsAppGateway<T>(
           : ' JWT süresi dolmuş veya APP_JWT_SECRET uyuşmuyor — çıkış yapıp tekrar giriş yapın.'
         : res.status === 502
           ? ' VPS gateway kapalı — pm2 restart whatsapp-gateway.'
-          : res.status === 403
+          : res.status === 504
+            ? ' Mesaj gönderimi zaman aşımına uğradı — VPS gateway yavaş veya kopuk.'
+            : res.status === 403
             ? data.error === 'coach_scope_mismatch'
               ? ' Oturum id ile giriş JWT’si uyuşmuyor — çıkış yapıp tekrar giriş yapın. Başka kullanıcı adına görünümdeyken WhatsApp bağlanamaz.'
               : ' Erişim reddedildi (403).'

@@ -19,6 +19,7 @@ import Tracking from './pages/Tracking';
 import Topics from './pages/Topics';
 import TopicTracking from './pages/TopicTracking';
 import ExamTracking from './pages/ExamTracking';
+import EdesisPage from './pages/EdesisPage';
 import PDFImport from './pages/PDFImport';
 import Analytics from './pages/Analytics';
 import AICoach from './pages/AICoach';
@@ -43,9 +44,15 @@ import MessageTemplates from './pages/MessageTemplates';
 import Meetings from './pages/Meetings';
 import LiveLessons from './pages/LiveLessons';
 import ClassLiveLessons from './pages/ClassLiveLessons';
+import AttendanceReportPage from './pages/AttendanceReportPage';
+import BbbPortalJoinPage from './pages/BbbPortalJoinPage';
+import BbbGuestJoinPage from './pages/BbbGuestJoinPage';
 import TeacherPanel from './pages/TeacherPanel';
 import WeeklyPlannerPage from './pages/WeeklyPlannerPage';
 import MyProfilePage from './pages/MyProfilePage';
+import MobileLessonsHubPage from './pages/MobileLessonsHubPage';
+import MobileAcademicHubPage from './pages/MobileAcademicHubPage';
+import MobileAdminHubPage from './pages/MobileAdminHubPage';
 import AcademicCenter from './pages/AcademicCenter';
 import ParentSignFlowPage from './pages/ParentSignFlowPage';
 import TahsilatMuhasebePage from './pages/TahsilatMuhasebePage';
@@ -113,6 +120,9 @@ function App() {
               <Route path="/register" element={<Register />} />
               <Route path="/forgot-password" element={<ForgotPassword />} />
               <Route path="/reset-password" element={<ResetPassword />} />
+              <Route path="/d/:code" element={<BbbGuestJoinPage />} />
+              <Route path="/misafir-katil/:slug" element={<BbbGuestJoinPage />} />
+              <Route path="/misafir-katil" element={<BbbGuestJoinPage />} />
 
             {/* Ana sayfa yönlendirmesi */}
             <Route path="/" element={<HomeRedirect />} />
@@ -164,6 +174,13 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/exam-tracking')}>
                 <Layout>
                   <ExamTracking />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            <Route path="/edesis" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/edesis')}>
+                <Layout>
+                  <EdesisPage />
                 </Layout>
               </ProtectedRoute>
             } />
@@ -260,6 +277,30 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/my-profile')}>
                 <Layout>
                   <MyProfilePage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/mobile/dersler" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/mobile/dersler')}>
+                <Layout>
+                  <MobileLessonsHubPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/mobile/akademik" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/mobile/akademik')}>
+                <Layout>
+                  <MobileAcademicHubPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/mobile/yonetim" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/mobile/yonetim')}>
+                <Layout>
+                  <MobileAdminHubPage />
                 </Layout>
               </ProtectedRoute>
             } />
@@ -420,6 +461,26 @@ function App() {
               </ProtectedRoute>
             } />
 
+            <Route path="/attendance-report" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/attendance-report')}>
+                <Layout>
+                  <AttendanceReportPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/katil/grup/:sessionId" element={
+              <ProtectedRoute allowedRoles={['super_admin', 'admin', 'teacher', 'coach', 'student']}>
+                <BbbPortalJoinPage kind="class" />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/katil/ozel/:lessonId" element={
+              <ProtectedRoute allowedRoles={['super_admin', 'admin', 'teacher', 'coach', 'student']}>
+                <BbbPortalJoinPage kind="private" />
+              </ProtectedRoute>
+            } />
+
             <Route path="/class-schedule" element={
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/class-schedule')}>
                 <Layout>
@@ -450,8 +511,10 @@ function App() {
               </ProtectedRoute>
             } />
 
-            <Route path="/tahsilat-muhasebe" element={
-              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/tahsilat-muhasebe')}>
+            <Route path="/tahsilat-muhasebe" element={<Navigate to="/muhasebe?tab=tahsilat" replace />} />
+
+            <Route path="/muhasebe" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/muhasebe')}>
                 <Layout>
                   <TahsilatMuhasebePage />
                 </Layout>

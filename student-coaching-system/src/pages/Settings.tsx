@@ -26,19 +26,16 @@ import {
   EyeOff,
   Loader2,
   AlertTriangle,
-  ExternalLink,
-  ClipboardList
+  ExternalLink
 } from 'lucide-react';
 import { apiFetch, getAuthToken } from '../lib/session';
 import { db } from '../lib/database';
 import { createInstitutionAdminUser } from '../lib/provisionInstitutionAdmin';
-import { AttendanceReportHub } from '../components/attendance/AttendanceReportHub';
 import EdesisSyncPanel from '../components/settings/EdesisSyncPanel';
 import {
   CopyableLoginCredentialsModal,
   type LoginCredentialsData
 } from '../components/auth/CopyableLoginCredentials';
-import { userHasAnyRole } from '../config/rolePermissions';
 import { isPrimaryOnlineVipInstitution } from '../lib/activeInstitutionScope';
 
 /** GET /api/meta/whatsapp yanıtı — sırlar içermez */
@@ -59,7 +56,6 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'general' | 'attendance'>('general');
   const [newInstSale, setNewInstSale] = useState({
     plan: 'professional' as OrganizationPlan,
     adminName: '',
@@ -71,7 +67,6 @@ export default function SettingsPage() {
 
   // Super Admin mi kontrol et
   const isSuperAdmin = user?.role === 'super_admin';
-  const showAttendanceTab = userHasAnyRole(user, ['super_admin', 'admin', 'coach', 'teacher']);
   const canManageTwilio = user?.role === 'super_admin' || user?.role === 'admin';
 
   /** Meta WhatsApp Cloud API — GET /api/meta/whatsapp */
@@ -484,38 +479,6 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {showAttendanceTab && (
-        <div className="flex flex-wrap gap-2 rounded-xl border border-gray-100 bg-white p-2 shadow-sm">
-          <button
-            type="button"
-            onClick={() => setSettingsTab('general')}
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-              settingsTab === 'general'
-                ? 'bg-slate-800 text-white shadow'
-                : 'text-slate-600 hover:bg-slate-50'
-            }`}
-          >
-            Genel ayarlar
-          </button>
-          <button
-            type="button"
-            onClick={() => setSettingsTab('attendance')}
-            className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-              settingsTab === 'attendance'
-                ? 'bg-slate-800 text-white shadow'
-                : 'text-slate-600 hover:bg-slate-50'
-            }`}
-          >
-            <ClipboardList className="h-4 w-4" />
-            Yoklama raporu
-          </button>
-        </div>
-      )}
-
-      {settingsTab === 'attendance' && showAttendanceTab ? (
-        <AttendanceReportHub institutions={institutions} activeInstitutionId={activeInstitutionId} />
-      ) : (
-      <>
       {/* Kurum: liste + seçili kurum bilgisi + logo (tek kart) */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <div className="flex items-center justify-between mb-6">
@@ -1255,8 +1218,6 @@ export default function SettingsPage() {
         <p>Öğrenci Koçluk ve Takip Sistemi v1.1.0</p>
         <p className="mt-1">© 2024 {footerInstitution?.name || 'Sistem'}. Tüm hakları saklıdır.</p>
       </div>
-    </>
-      )}
 
       <CopyableLoginCredentialsModal
         open={loginCredentialsModal != null}

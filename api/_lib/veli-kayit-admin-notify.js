@@ -242,7 +242,17 @@ export async function notifyAdminsOnVeliKayitForm({ contract, reg, institution, 
   for (const r of recipients) {
     const phone = normalizePhoneToE164(r.phone);
     if (!phone) continue;
-    const sent = await sendGatewayTextMessage({ phone, message: waText });
+    const sid =
+      String(process.env.VELI_KAYIT_GATEWAY_SESSION_ID || '').trim() ||
+      String(process.env.REPORT_REMINDER_GATEWAY_SESSION_ID || '').trim() ||
+      String(process.env.BOOK_ORDER_GATEWAY_SESSION_ID || '').trim();
+    const sent = await sendGatewayTextMessage({
+      phone,
+      message: waText,
+      sessionId: sid,
+      sessionCandidates: sid ? [sid] : [],
+      allowSharedFallback: Boolean(sid)
+    });
     await insertWhatsAppAutomationLog({
       studentId: null,
       relatedId: contractId,

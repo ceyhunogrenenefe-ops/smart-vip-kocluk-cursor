@@ -456,8 +456,6 @@ export default async function handler(req, res) {
           coach_id: resolvedCoachId !== undefined ? resolvedCoachId : existing.coach_id,
           program_id: body.program_id !== undefined ? body.program_id : existing.program_id,
           institution_id: institutionId || existing.institution_id,
-          platform_user_id: resolvedId,
-          user_id: resolvedId,
           updated_at: new Date().toISOString()
         };
 
@@ -519,8 +517,6 @@ export default async function handler(req, res) {
         coach_id: resolvedCoachId,
         program_id: body.program_id ?? null,
         institution_id: institutionId,
-        platform_user_id: resolvedId,
-        user_id: resolvedId,
         created_at: body.created_at || new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
@@ -632,6 +628,12 @@ export default async function handler(req, res) {
       const maybe = e;
       if (maybe.code === '23505' && String(maybe.message || '').includes('students_email_key')) {
         return res.status(409).json({ error: 'Bu e-posta ile kayıtlı öğrenci zaten var.' });
+      }
+      if (maybe.code === '23503' && String(maybe.message || '').includes('students_user_id_fkey')) {
+        return res.status(400).json({
+          error: 'student_user_link_failed',
+          hint: 'Öğrenci giriş hesabı bağlanamadı. Şifre en az 6 karakter olmalı ve e-posta geçerli olmalıdır.'
+        });
       }
     }
     const message =

@@ -73,6 +73,44 @@ export async function alreadySentLessonReminder(lessonId, phoneE164) {
   return Boolean(data);
 }
 
+/** Öğretmen ders hatırlatması — aynı ders + aynı öğretmen telefonu */
+export async function alreadySentTeacherLessonReminder(relatedId, phoneE164) {
+  const e164 = normalizePhoneToE164(phoneE164);
+  if (!e164 || !relatedId) return true;
+  const { data, error } = await supabaseAdmin
+    .from('message_logs')
+    .select('id')
+    .eq('kind', 'teacher_lesson_reminder')
+    .eq('related_id', relatedId)
+    .eq('status', 'sent')
+    .eq('phone', e164)
+    .maybeSingle();
+  if (error) {
+    console.warn('[message-log] alreadySentTeacherLessonReminder', error.message);
+    return false;
+  }
+  return Boolean(data);
+}
+
+/** Grup dersi hatırlatması — aynı oturum + aynı telefon */
+export async function alreadySentClassLessonReminder(sessionId, phoneE164) {
+  const e164 = normalizePhoneToE164(phoneE164);
+  if (!e164 || !sessionId) return true;
+  const { data, error } = await supabaseAdmin
+    .from('message_logs')
+    .select('id')
+    .eq('kind', 'class_lesson_reminder')
+    .eq('related_id', sessionId)
+    .eq('status', 'sent')
+    .eq('phone', e164)
+    .maybeSingle();
+  if (error) {
+    console.warn('[message-log] alreadySentClassLessonReminder', error.message);
+    return false;
+  }
+  return Boolean(data);
+}
+
 /**
  * Rapor hatırlatması bugün bu öğrenciye (bu telefona) gitti mi
  */

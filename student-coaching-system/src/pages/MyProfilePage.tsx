@@ -3,7 +3,7 @@ import { Save, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '../lib/session';
 import { useAuth } from '../context/AuthContext';
-import { useStudentMobileShell } from '../hooks/useStudentMobileShell';
+import { useMobileAppShell } from '../hooks/useMobileAppShell';
 import { isNativeApp } from '../lib/nativeApp';
 
 type ProfilePayload = {
@@ -14,7 +14,7 @@ type ProfilePayload = {
 
 export default function MyProfilePage() {
   const { user, effectiveUser } = useAuth();
-  const studentMobileShell = useStudentMobileShell();
+  const mobileAppShell = useMobileAppShell();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState('');
@@ -102,9 +102,9 @@ export default function MyProfilePage() {
   const displayName = effectiveUser?.name || user?.name || 'Kullanıcı';
 
   return (
-    <div className={`mx-auto max-w-lg space-y-6 ${studentMobileShell ? 'pb-6' : 'pb-10'}`}>
+    <div className={`mx-auto max-w-lg space-y-6 ${mobileAppShell ? 'pb-6' : 'pb-10'}`}>
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-6">
-        {!studentMobileShell ? (
+        {!mobileAppShell ? (
         <div className="mb-6 flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-lg font-bold text-white">
             {displayName.charAt(0).toUpperCase()}

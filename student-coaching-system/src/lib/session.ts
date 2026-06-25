@@ -53,6 +53,16 @@ export function getGatewaySessionUserId(fallbackUserId?: string): string {
   return String(fallbackUserId || '').trim();
 }
 
+/** auth-login 404: yanlış domain, eski Vercel preview veya API'siz statik host. */
+export function authLoginUnavailableMessage(status: number): string | null {
+  if (status !== 404) return null;
+  return (
+    'Giriş sunucusu bu adreste bulunamadı (404). ' +
+    'Lütfen https://www.dersonlinevipkocluk.com adresini kullanın. ' +
+    'Yerel geliştirmede `npm run dev` ile çalıştırın (Vite /api proxy).'
+  );
+}
+
 /** JWT göndermez: /api/auth-login gibi oturumsuz istekleri eski Bearer ile bozmamak için. */
 export async function fetchPublicPost(pathOrUrl: string, body: Record<string, unknown>): Promise<Response> {
   try {

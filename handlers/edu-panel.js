@@ -114,7 +114,25 @@ async function teacherCanAccessClass(actor, classId, tags) {
     .eq('class_id', classId)
     .eq('teacher_id', actor.sub)
     .maybeSingle();
-  return Boolean(link);
+  if (link) return true;
+  const tid = String(actor.sub || '').trim();
+  const [{ data: slotHit }, { data: sessionHit }] = await Promise.all([
+    supabaseAdmin
+      .from('class_weekly_slots')
+      .select('id')
+      .eq('class_id', classId)
+      .eq('teacher_id', tid)
+      .limit(1)
+      .maybeSingle(),
+    supabaseAdmin
+      .from('class_sessions')
+      .select('id')
+      .eq('class_id', classId)
+      .eq('teacher_id', tid)
+      .limit(1)
+      .maybeSingle()
+  ]);
+  return Boolean(slotHit || sessionHit);
 }
 
 async function loadRow(id) {

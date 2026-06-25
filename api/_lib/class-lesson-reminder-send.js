@@ -1,25 +1,15 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import { normalizePhoneToE164 } from './phone-whatsapp.js';
-import { sendWhatsAppUsingTemplateRow, OUTBOUND_LOG_CODE } from './whatsapp-outbound.js';
-import { insertWhatsAppAutomationLog } from './message-log.js';
+import { insertWhatsAppAutomationLog, alreadySentClassLessonReminder } from './message-log.js';
 import { getIstanbulDateString } from './istanbul-time.js';
 import { shouldSkipConsecutiveSameLesson } from './class-lesson-reminder-logic.js';
+import { resolveGuestShareUrlForClassSession } from './guest-join-share-url.js';
+import { sendAutomationTemplateMessage } from './whatsapp-automation-channel.js';
+import { OUTBOUND_LOG_CODE } from './whatsapp-outbound.js';
+import { getClassLessonReminderPhone } from './meetings-resolve.js';
 
 export const CLASS_LESSON_REMINDER_KIND = 'class_lesson_reminder';
 export const CLASS_LESSON_REMINDER_TEMPLATE = 'class_lesson_reminder';
-
-function uniqPhones(phoneList) {
-  const seen = new Set();
-  const out = [];
-  for (const p of phoneList) {
-    const e = normalizePhoneToE164(p);
-    if (e && !seen.has(e)) {
-      seen.add(e);
-      out.push(e);
-    }
-  }
-  return out;
-}
 
 export async function loadClassLessonReminderTemplate() {
   const { data, error } = await supabaseAdmin
@@ -34,12 +24,33 @@ export async function loadClassLessonReminderTemplate() {
 export function validateClassLessonReminderTemplate(row) {
   if (!row?.content) return { ok: false, code: 'template_not_found' };
   if (row.is_active === false) return { ok: false, code: 'template_inactive' };
-  if (!String(row.meta_template_name || '').trim()) return { ok: false, code: 'meta_template_name_required' };
-  return { ok: true, metaName: String(row.meta_template_name).trim() };
+  return { ok: true, metaName: String(row.meta_template_name || '').trim() || null };
+}
+
+/** Cron yarışını önler: reminder_sent=false iken atomik işaretle */
+export async function claimClassSessionReminder(sessionId) {
+  const id = String(sessionId || '').trim();
+  if (!id) return false;
+  const { data, error } = await supabaseAdmin
+    .from('class_sessions')
+    .update({ reminder_sent: true })
+    .eq('id', id)
+    .eq('reminder_sent', false)
+    .select('id')
+    .maybeSingle();
+  if (error) throw error;
+  return Boolean(data?.id);
+}
+
+export async function releaseClassSessionReminderClaim(sessionId) {
+  const id = String(sessionId || '').trim();
+  if (!id) return;
+  await supabaseAdmin.from('class_sessions').update({ reminder_sent: false }).eq('id', id);
 }
 
 /**
  * Tek oturum için grup dersi hatırlatması (cron + manuel aynı şablon / log).
+ * Her öğrenci için yalnızca bir numaraya (veli öncelikli) gateway/Meta üzerinden tek mesaj.
  */
 export async function sendClassLessonReminderForSession(p) {
   const session = p.session;
@@ -105,12 +116,11 @@ export async function sendClassLessonReminderForSession(p) {
       class_name: className,
       subject: session.subject || 'Ders',
       lesson_time: String(session.start_time || '').slice(0, 5),
-      meeting_link:
-        String(session.meeting_link || '').trim() ||
-        String(process.env.APP_PUBLIC_URL || process.env.APP_BASE_URL || 'https://www.dersonlinevipkocluk.com').trim()
+      meeting_link: await resolveGuestShareUrlForClassSession(session)
     };
-    const phones = uniqPhones([st.parent_phone, st.phone]);
-    if (!phones.length) {
+
+    const ph = getClassLessonReminderPhone(st);
+    if (!ph) {
       evaluatedAny = true;
       const code = OUTBOUND_LOG_CODE.INVALID_PHONE;
       await insertWhatsAppAutomationLog({
@@ -127,59 +137,73 @@ export async function sendClassLessonReminderForSession(p) {
       continue;
     }
 
-    for (const ph of phones) {
-      evaluatedAny = true;
-      let sent;
-      try {
-        sent = await sendWhatsAppUsingTemplateRow({
-          phone: ph,
-          templateRow,
-          vars,
-          templateType: CLASS_LESSON_REMINDER_TEMPLATE
-        });
-      } catch (e) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-        sent = {
-          ok: false,
-          logCode: OUTBOUND_LOG_CODE.META_SEND_FAILED,
-          error: errMsg,
-          sid: null,
-          meta_template_name: metaNameDb,
-          errorCode: null
-        };
-      }
+    evaluatedAny = true;
 
-      const lc = sent.logCode || (sent.ok ? null : OUTBOUND_LOG_CODE.META_SEND_FAILED);
-      if (!sent.ok) hadSendFailure = true;
-      else anySucceeded = true;
-
-      await insertWhatsAppAutomationLog({
-        studentId: st.id,
-        relatedId: session.id,
-        kind: CLASS_LESSON_REMINDER_KIND,
-        message: `[${CLASS_LESSON_REMINDER_KIND}] session=${session.id} source=${source}`,
-        status: sent.ok ? 'sent' : 'failed',
-        logCode: lc || undefined,
-        error: sent.ok ? null : sent.error || null,
-        phone: ph,
-        logDate,
-        twilio_error_code: sent.errorCode != null ? String(sent.errorCode) : null,
-        meta_message_id: sent.sid || null,
-        meta_template_name: sent.meta_template_name || metaNameDb
-      });
-
+    if (await alreadySentClassLessonReminder(session.id, ph)) {
       log.push({
         session_id: session.id,
         student_id: st.id,
         phone: ph,
-        ok: sent.ok,
-        channel: sent.channel,
-        meta_message_id: sent.sid,
-        twilio_error_code: sent.errorCode,
-        error: sent.ok ? undefined : sent.error,
-        log_code: lc
+        ok: true,
+        skipped: 'already_sent',
+        note: 'Bu oturum için bu numaraya hatırlatma zaten gönderilmiş'
       });
+      anySucceeded = true;
+      continue;
     }
+
+    let sent;
+    try {
+      sent = await sendAutomationTemplateMessage({
+        phone: ph,
+        templateRow,
+        vars,
+        templateType: CLASS_LESSON_REMINDER_TEMPLATE
+      });
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      sent = {
+        ok: false,
+        logCode: OUTBOUND_LOG_CODE.META_SEND_FAILED,
+        error: errMsg,
+        sid: null,
+        gateway_message_id: null,
+        meta_template_name: metaNameDb,
+        errorCode: null,
+        channel: 'unknown'
+      };
+    }
+
+    const lc = sent.logCode || (sent.ok ? null : OUTBOUND_LOG_CODE.META_SEND_FAILED);
+    if (!sent.ok) hadSendFailure = true;
+    else anySucceeded = true;
+
+    await insertWhatsAppAutomationLog({
+      studentId: st.id,
+      relatedId: session.id,
+      kind: CLASS_LESSON_REMINDER_KIND,
+      message: `[${CLASS_LESSON_REMINDER_KIND}] session=${session.id} source=${source}`,
+      status: sent.ok ? 'sent' : 'failed',
+      logCode: lc || undefined,
+      error: sent.ok ? null : sent.error || null,
+      phone: ph,
+      logDate,
+      twilio_error_code: sent.errorCode != null ? String(sent.errorCode) : null,
+      meta_message_id: sent.sid || sent.gateway_message_id || null,
+      meta_template_name: sent.meta_template_name || metaNameDb
+    });
+
+    log.push({
+      session_id: session.id,
+      student_id: st.id,
+      phone: ph,
+      ok: sent.ok,
+      channel: sent.channel,
+      meta_message_id: sent.sid,
+      twilio_error_code: sent.errorCode,
+      error: sent.ok ? undefined : sent.error,
+      log_code: lc
+    });
   }
 
   return { log, anySucceeded, hadSendFailure, evaluatedAny, source };

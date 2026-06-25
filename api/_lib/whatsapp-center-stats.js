@@ -8,6 +8,7 @@ export const EXCLUDE_FROM_SUMMARY_KINDS = new Set(['template_test']);
 
 export const KIND_LABELS_TR = {
   class_lesson_reminder: 'Grup dersi hatırlatma',
+  teacher_lesson_reminder: 'Öğretmen ders hatırlatması',
   class_homework_notice: 'Grup ödev bildirimi',
   class_absent_notice_1: 'Devamsızlık (veli)',
   class_absent_notice: 'Devamsızlık',
@@ -25,6 +26,7 @@ export const KIND_LABELS_TR = {
 /** message_templates.type → message_logs.kind eşleşmeleri */
 export const TEMPLATE_TYPE_TO_LOG_KINDS = {
   class_lesson_reminder: ['class_lesson_reminder'],
+  teacher_lesson_reminder: ['teacher_lesson_reminder'],
   class_homework_notice: ['class_homework_notice'],
   class_absent_notice_1: ['class_absent_notice_1', 'class_absent_notice'],
   class_absent_notice: ['class_absent_notice', 'class_absent_notice_1'],

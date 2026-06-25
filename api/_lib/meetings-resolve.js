@@ -52,6 +52,18 @@ export async function getStudentPhones(studentRow) {
   return candidates;
 }
 
+/** Otomasyon hatırlatmaları: veli hattı öncelikli, yoksa öğrenci — tek WhatsApp mesajı */
+export function getPrimaryAutomationPhone(studentRow) {
+  const pr = normalizePhoneToE164(studentRow?.parent_phone || '');
+  const st = normalizePhoneToE164(studentRow?.phone || '');
+  return pr || st || null;
+}
+
+/** Grup dersi hatırlatması — tek alıcı (veli öncelikli) */
+export function getClassLessonReminderPhone(studentRow) {
+  return getPrimaryAutomationPhone(studentRow);
+}
+
 /** Günlük rapor hatırlatması: öğrenci + veli (aynı numarada tek mesaj, veli satırı öncelikli) */
 export function getReportReminderRecipients(studentRow) {
   const st = normalizePhoneToE164(studentRow.phone || '');

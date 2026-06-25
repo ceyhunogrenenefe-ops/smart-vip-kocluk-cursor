@@ -1,5 +1,7 @@
-import crypto from 'crypto';
-import { createBbbMeetingAndJoinLink, isBbbConfigured, sanitizeBbbMeetingId } from './bbb.js';
+import {
+  BBB_AUTO_MEETING_LINK,
+  isBbbConfigured
+} from './bbb.js';
 import { detectPlatform } from './detect-meeting-platform.js';
 
 export function manualLinkFromBody(body) {
@@ -38,33 +40,16 @@ export async function resolveBbbOrManualMeetingLink({
     };
   }
 
-  try {
-    const meetingId = sanitizeBbbMeetingId(
-      `${meetingKeyPrefix}${Date.now()}${crypto.randomBytes(4).toString('hex')}`
-    );
-    const bbb = await createBbbMeetingAndJoinLink({
-      meetingId,
-      meetingName: meetingName || 'Canlı ders',
-      attendeeName: attendeeName || 'Öğrenci',
-      moderatorName: moderatorName || 'Öğretmen',
-      durationMinutes
-    });
-    return {
-      ok: true,
-      meetingLink: bbb.attendeeJoinLink,
-      meetingLinkModerator: bbb.moderatorJoinLink,
-      platform: 'bbb',
-      bbbMeetingId: bbb.meetingId,
-      bbbAttendeePw: bbb.attendeePW,
-      autoBbb: { ok: true, provider: 'bbb', meetingId: bbb.meetingId }
-    };
-  } catch (e) {
-    return {
-      ok: false,
-      code: 'bbb_create_failed',
-      error: e instanceof Error ? e.message : 'BBB oda oluşturulamadı'
-    };
-  }
+  /** Odayı planlama anında açma — ilk katılımda oluşturulur; ham BBB linki tarayıcıda hemen süresi dolmaz. */
+  return {
+    ok: true,
+    meetingLink: BBB_AUTO_MEETING_LINK,
+    meetingLinkModerator: null,
+    platform: 'bbb',
+    bbbMeetingId: null,
+    bbbAttendeePw: null,
+    autoBbb: { ok: true, provider: 'bbb', deferred: true }
+  };
 }
 
 export function applyResolvedMeetingLinkToRow(resolved) {

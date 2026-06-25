@@ -2611,9 +2611,175 @@ export default function UserManagement() {
         </div>
       )}
 
-      {/* Users Table — referans sütun düzeni */}
+      {/* Users — mobil kartlar / masaüstü tablo */}
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Mobil: yatay kaydırma yok, düzenle her zaman görünür */}
+        <div className="lg:hidden divide-y divide-gray-100">
+          {listLoading || authLoading ? (
+            <div className="px-4 py-12 text-center text-sm text-slate-500">
+              <span className="inline-flex items-center justify-center gap-2">
+                <Loader2 className="h-5 w-5 animate-spin text-red-500" />
+                Kullanıcılar yükleniyor…
+              </span>
+            </div>
+          ) : (
+            filteredUsers.map((user) => {
+              const subStatus = getSubscriptionStatus(user);
+              const tags = userRoleTags(user as SystemUser);
+              const studentMatch =
+                tags.includes('student')
+                  ? findStudentForPlatformUser(
+                      {
+                        platformUserId: user.id,
+                        email: user.email,
+                        studentId: user.studentId
+                      },
+                      linkedStudents
+                    )
+                  : undefined;
+              const roleBadge = roleBadgeForUser(user);
+              const coachOptions = coachesForStudentRow(studentMatch?.institutionId);
+              const coachOptIds = new Set(coachOptions.map((c) => c.id));
+              const orphanCoachId =
+                studentMatch?.coachId && !coachOptIds.has(String(studentMatch.coachId))
+                  ? String(studentMatch.coachId)
+                  : '';
+              const coachName =
+                coachOptions.find((c) => c.id === studentMatch?.coachId)?.name ||
+                (orphanCoachId ? 'Mevcut koç' : '—');
+
+              return (
+                <article key={user.id} className="p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-base font-semibold text-slate-900 break-words">{user.name}</p>
+                      <p className="mt-0.5 text-sm text-gray-600 break-all">{user.email}</p>
+                      {user.phone ? (
+                        <p className="mt-0.5 text-sm text-gray-500">{user.phone}</p>
+                      ) : null}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-0.5">
+                      {canImpersonate(user) && !user.id.startsWith('demo-seed-') ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleLoginAsUser(user)}
+                          disabled={loginAsBusyId === user.id}
+                          className="rounded-lg p-2 text-violet-600 hover:bg-violet-50 disabled:opacity-50"
+                          title="Bu hesaba gir"
+                        >
+                          {loginAsBusyId === user.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <LogIn className="h-4 w-4" />
+                          )}
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => openModal('edit', user)}
+                        className="rounded-lg p-2 text-blue-600 hover:bg-blue-50"
+                        title="Düzenle"
+                      >
+                        <Edit className="h-4 w-4" />
+                      </button>
+                      {!user.id.startsWith('demo-seed-') && currentUser?.role !== 'teacher' ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleDelete(user.id)}
+                          className="rounded-lg p-2 text-red-600 hover:bg-red-50"
+                          title="Sil"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${roleBadge.className}`}
+                    >
+                      {roleBadge.label}
+                    </span>
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${PACKAGES[(user.package || 'trial') as keyof typeof PACKAGES].color}`}
+                    >
+                      {PACKAGES[(user.package || 'trial') as keyof typeof PACKAGES].name}
+                    </span>
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${subStatus.className}`}
+                    >
+                      {subStatus.status}
+                    </span>
+                  </div>
+
+                  {studentMatch ? (
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <label className="block text-xs">
+                        <span className="font-medium text-slate-500">Sınıf</span>
+                        <div className="relative mt-1">
+                          <select
+                            value={
+                              studentMatch.classLevel != null && studentMatch.classLevel !== ''
+                                ? String(studentMatch.classLevel)
+                                : ''
+                            }
+                            disabled={classAssignBusy === user.id}
+                            onChange={(e) => void handleInlineClassLevelChange(user, e.target.value)}
+                            className="w-full appearance-none rounded-lg border border-slate-200 bg-white py-2 pl-2 pr-8 text-sm text-slate-800"
+                          >
+                            <option value="">—</option>
+                            {CLASS_LEVELS.map((level) => (
+                              <option key={String(level.value)} value={String(level.value)}>
+                                {level.label}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        </div>
+                      </label>
+                      <label className="block text-xs">
+                        <span className="font-medium text-slate-500">Koç</span>
+                        <div className="relative mt-1">
+                          <select
+                            value={studentMatch.coachId || ''}
+                            disabled={coachAssignBusy === user.id}
+                            onChange={(e) => void handleInlineCoachChange(user, e.target.value)}
+                            className="w-full appearance-none rounded-lg border border-slate-200 bg-white py-2 pl-2 pr-8 text-sm text-slate-800"
+                          >
+                            <option value="">—</option>
+                            {orphanCoachId ? <option value={orphanCoachId}>{coachName}</option> : null}
+                            {coachOptions.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        </div>
+                      </label>
+                      {studentMatch.parentName?.trim() ? (
+                        <p className="text-xs text-slate-600 sm:col-span-2">
+                          <span className="font-medium text-slate-500">Veli:</span>{' '}
+                          {studentMatch.parentName}
+                          {studentMatch.parentPhone?.trim() ? ` · ${studentMatch.parentPhone}` : ''}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })
+          )}
+          {!listLoading && !authLoading && filteredUsers.length === 0 ? (
+            <div className="p-8 text-center text-gray-500">
+              <Users className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+              <p>Kullanıcı bulunamadı</p>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="hidden lg:block overflow-x-auto">
           <table className="w-full min-w-[1100px] table-fixed">
             <thead className="bg-gray-50/90 border-b border-gray-100">
               <tr>
@@ -2819,12 +2985,12 @@ export default function UserManagement() {
           </table>
         </div>
 
-        {!listLoading && !authLoading && filteredUsers.length === 0 && (
-          <div className="p-8 text-center text-gray-500">
+        {!listLoading && !authLoading && filteredUsers.length === 0 ? (
+          <div className="hidden lg:block p-8 text-center text-gray-500">
             <Users className="w-12 h-12 mx-auto mb-3 text-gray-300" />
             <p>Kullanıcı bulunamadı</p>
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* Modal */}

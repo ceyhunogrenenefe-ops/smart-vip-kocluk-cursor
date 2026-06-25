@@ -1,11 +1,11 @@
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { authorizeVercelOrCronSecret } from '../api/_lib/cron-auth.js';
-import { normalizePhoneToE164 } from '../api/_lib/phone-whatsapp.js';
 import { metaWhatsAppConfigured } from '../api/_lib/meta-whatsapp.js';
 import { sendAutomatedWhatsApp, OUTBOUND_LOG_CODE } from '../api/_lib/whatsapp-outbound.js';
 import { insertWhatsAppAutomationLog } from '../api/_lib/message-log.js';
 import { getIstanbulDateString } from '../api/_lib/istanbul-time.js';
 import { recordCronRun } from '../api/_lib/cron-run-log.js';
+import { getPrimaryAutomationPhone } from '../api/_lib/meetings-resolve.js';
 
 const KIND = 'class_homework_notice';
 const TEMPLATE_TYPE = 'class_homework_notice';
@@ -13,19 +13,6 @@ const TEMPLATE_TYPE = 'class_homework_notice';
 function toUtcMs(dateStr, timeStr) {
   const safeTime = String(timeStr || '00:00:00').slice(0, 8);
   return new Date(`${dateStr}T${safeTime}+03:00`).getTime();
-}
-
-function uniqPhones(phoneList) {
-  const seen = new Set();
-  const out = [];
-  for (const p of phoneList) {
-    const e = normalizePhoneToE164(p);
-    if (e && !seen.has(e)) {
-      seen.add(e);
-      out.push(e);
-    }
-  }
-  return out;
 }
 
 export default async function handler(req, res) {
@@ -93,8 +80,8 @@ export default async function handler(req, res) {
           subject: s.subject || 'Ders',
           homework: s.homework || '-'
         };
-        const phones = uniqPhones([st.phone, st.parent_phone]);
-        if (!phones.length) {
+        const ph = getPrimaryAutomationPhone(st);
+        if (!ph) {
           allOutboundOk = false;
           await insertWhatsAppAutomationLog({
             studentId: st.id,
@@ -110,41 +97,39 @@ export default async function handler(req, res) {
           continue;
         }
 
-        for (const ph of phones) {
-          anyOutboundAttempt = true;
-          const sent = await sendAutomatedWhatsApp({
-            phone: ph,
-            templateType: TEMPLATE_TYPE,
-            vars
-          });
-          const lc = sent.logCode || (sent.ok ? null : OUTBOUND_LOG_CODE.META_SEND_FAILED);
-          if (!sent.ok) allOutboundOk = false;
+        anyOutboundAttempt = true;
+        const sent = await sendAutomatedWhatsApp({
+          phone: ph,
+          templateType: TEMPLATE_TYPE,
+          vars
+        });
+        const lc = sent.logCode || (sent.ok ? null : OUTBOUND_LOG_CODE.META_SEND_FAILED);
+        if (!sent.ok) allOutboundOk = false;
 
-          await insertWhatsAppAutomationLog({
-            studentId: st.id,
-            relatedId: s.id,
-            kind: KIND,
-            message: `[${KIND}] session=${s.id}`,
-            status: sent.ok ? 'sent' : 'failed',
-            logCode: lc || undefined,
-            error: sent.ok ? null : sent.error || null,
-            phone: ph,
-            logDate,
-            twilio_error_code: sent.errorCode != null ? String(sent.errorCode) : null,
-            meta_message_id: sent.sid || null,
-            meta_template_name: sent.meta_template_name || null
-          });
+        await insertWhatsAppAutomationLog({
+          studentId: st.id,
+          relatedId: s.id,
+          kind: KIND,
+          message: `[${KIND}] session=${s.id}`,
+          status: sent.ok ? 'sent' : 'failed',
+          logCode: lc || undefined,
+          error: sent.ok ? null : sent.error || null,
+          phone: ph,
+          logDate,
+          twilio_error_code: sent.errorCode != null ? String(sent.errorCode) : null,
+          meta_message_id: sent.sid || null,
+          meta_template_name: sent.meta_template_name || null
+        });
 
-          log.push({
-            session_id: s.id,
-            student_id: st.id,
-            phone: ph,
-            ok: sent.ok,
-            meta_message_id: sent.sid,
-            error: sent.ok ? undefined : sent.error,
-            log_code: lc
-          });
-        }
+        log.push({
+          session_id: s.id,
+          student_id: st.id,
+          phone: ph,
+          ok: sent.ok,
+          meta_message_id: sent.sid,
+          error: sent.ok ? undefined : sent.error,
+          log_code: lc
+        });
       }
 
       if (anyOutboundAttempt && allOutboundOk) {

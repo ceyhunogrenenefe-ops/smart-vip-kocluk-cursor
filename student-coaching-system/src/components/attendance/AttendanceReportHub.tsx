@@ -2,7 +2,12 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch, getAuthToken } from '../../lib/session';
 import { useAuth } from '../../context/AuthContext';
 import { userHasAnyRole } from '../../config/rolePermissions';
-import { isUuid } from '../../utils/uuid';
+import { useMobileAppShell } from '../../hooks/useMobileAppShell';
+import { cn } from '../../lib/utils';
+
+function institutionScopeId(value: unknown): string {
+  return String(value ?? '').trim();
+}
 import {
   ClipboardList,
   Loader2,
@@ -76,16 +81,23 @@ function daysAgo(n: number): string {
 
 export function AttendanceReportHub({ institutions, activeInstitutionId }: Props) {
   const { user, effectiveUser } = useAuth();
-  const isSuper = user?.role === 'super_admin';
-  const isAdmin = user?.role === 'admin';
+  const mobileAppShell = useMobileAppShell();
+  const isSuper =
+    effectiveUser?.role === 'super_admin' ||
+    user?.role === 'super_admin' ||
+    userHasAnyRole(effectiveUser, ['super_admin']);
+  const isAdmin = userHasAnyRole(effectiveUser, ['admin']);
   const canEditPrefs = isSuper || isAdmin;
   const tags = userHasAnyRole(effectiveUser, ['super_admin', 'admin', 'coach', 'teacher']);
 
-  const [instFilter, setInstFilter] = useState(() =>
-    isSuper ? '' : activeInstitutionId || institutions[0]?.id || ''
-  );
+  const [instFilter, setInstFilter] = useState(() => {
+    const scoped = institutionScopeId(activeInstitutionId);
+    if (scoped) return scoped;
+    if (isSuper) return '';
+    return institutionScopeId(institutions[0]?.id);
+  });
   const [from, setFrom] = useState(() => daysAgo(30));
-  const [to, setTo] = useState(isoToday);
+  const [to, setTo] = useState(() => isoToday());
   const [classId, setClassId] = useState('');
   const [studentId, setStudentId] = useState('');
   const [sessionId, setSessionId] = useState('');
@@ -114,7 +126,10 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
   const loadMeta = useCallback(async () => {
     if (!getAuthToken() || !tags) return;
     try {
-      const res = await apiFetch('/api/class-live-lessons?scope=classes');
+      const qs = new URLSearchParams({ scope: 'classes' });
+      const instId = institutionScopeId(instFilter);
+      if (instId) qs.set('institution_id', instId);
+      const res = await apiFetch(`/api/class-live-lessons?${qs.toString()}`);
       const j = await res.json().catch(() => ({}));
       if (res.ok && Array.isArray(j.data)) {
         setClasses(j.data.map((c: { id: string; name: string }) => ({ id: c.id, name: c.name || c.id })));
@@ -122,25 +137,25 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
     } catch {
       setClasses([]);
     }
-  }, [tags]);
+  }, [tags, instFilter]);
 
   useEffect(() => {
     void loadMeta();
   }, [loadMeta]);
 
-  /** Eski localStorage `inst-...` / geçersiz seçim: API UUID bekliyor */
   useEffect(() => {
-    const v = instFilter.trim();
-    if (!v) return;
-    if (!isUuid(v)) {
-      setInstFilter(isSuper ? '' : institutions.find((x) => isUuid(x.id))?.id || '');
-      return;
-    }
-    if (institutions.length > 0) {
-      const known = new Set(institutions.map((x) => String(x.id)));
-      if (!known.has(v)) {
-        setInstFilter(isSuper ? '' : institutions.find((x) => isUuid(x.id))?.id || '');
-      }
+    const scoped = institutionScopeId(activeInstitutionId);
+    if (!scoped) return;
+    setInstFilter((prev) => (prev === scoped ? prev : scoped));
+  }, [activeInstitutionId]);
+
+  /** Geçersiz / listede olmayan kurum seçimini sıfırla */
+  useEffect(() => {
+    const v = institutionScopeId(instFilter);
+    if (!v || !institutions.length) return;
+    const known = new Set(institutions.map((x) => String(x.id)));
+    if (!known.has(v)) {
+      setInstFilter(isSuper ? '' : institutionScopeId(institutions[0]?.id));
     }
   }, [institutions, instFilter, isSuper]);
 
@@ -149,7 +164,7 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
     setPrefsLoading(true);
     try {
       const q = new URLSearchParams({ scope: 'attendance-prefs' });
-      if (isSuper && instFilter && isUuid(instFilter.trim())) q.set('institution_id', instFilter.trim());
+      if (isSuper && institutionScopeId(instFilter)) q.set('institution_id', institutionScopeId(instFilter));
       const res = await apiFetch(`/api/class-live-lessons?${q}`);
       const j = await res.json().catch(() => ({}));
       if (res.ok && j.data) setAutoWa(j.data.auto_whatsapp_absent !== false);
@@ -169,7 +184,7 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
     setPrefsLoading(true);
     try {
       const body: Record<string, unknown> = { auto_whatsapp_absent: next };
-      if (isSuper && instFilter && isUuid(instFilter.trim())) body.institution_id = instFilter.trim();
+      if (isSuper && institutionScopeId(instFilter)) body.institution_id = institutionScopeId(instFilter);
       const res = await apiFetch('/api/class-live-lessons?op=set-attendance-prefs', {
         method: 'POST',
         body: JSON.stringify(body)
@@ -202,7 +217,8 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
       if (status !== 'all') q.set('status', status);
       q.set('lesson_type', lessonType);
       if (absentToday) q.set('absent_today', '1');
-      if (isSuper && instFilter.trim() && isUuid(instFilter.trim())) q.set('institution_id', instFilter.trim());
+      const instId = institutionScopeId(instFilter);
+      if (instId) q.set('institution_id', instId);
 
       const res = await apiFetch(`/api/class-live-lessons?${q}`);
       const j = (await res.json().catch(() => ({}))) as {
@@ -247,7 +263,6 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
     lessonType,
     absentToday,
     includeStats,
-    isSuper,
     instFilter
   ]);
 
@@ -363,13 +378,125 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
 
   if (!tags) return null;
 
+  const filterFields = (
+    <>
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+        <label className="w-full text-xs sm:w-auto">
+          <span className="font-medium text-slate-500">Başlangıç</span>
+          <input
+            type="date"
+            disabled={absentToday}
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            className="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-2 text-sm disabled:opacity-50"
+          />
+        </label>
+        <label className="w-full text-xs sm:w-auto">
+          <span className="font-medium text-slate-500">Bitiş</span>
+          <input
+            type="date"
+            disabled={absentToday}
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            className="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-2 text-sm disabled:opacity-50"
+          />
+        </label>
+        <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" checked={absentToday} onChange={(e) => setAbsentToday(e.target.checked)} />
+          <Calendar className="h-4 w-4 shrink-0 text-amber-600" />
+          Bugün katılmayanlar
+        </label>
+        <label className="w-full text-xs sm:w-auto">
+          <span className="font-medium text-slate-500">Durum</span>
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value as typeof status)}
+            className="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-2 text-sm"
+          >
+            <option value="all">Tümü</option>
+            <option value="absent">Katılmadı</option>
+            <option value="present">Katıldı</option>
+            <option value="late">Geç katıldı</option>
+          </select>
+        </label>
+        <label className="w-full text-xs sm:w-auto">
+          <span className="font-medium text-slate-500">Ders türü</span>
+          <select
+            value={lessonType}
+            onChange={(e) => setLessonType(e.target.value as typeof lessonType)}
+            className="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-2 text-sm"
+          >
+            <option value="group">Grup dersi</option>
+            <option value="private">Özel ders (veri yok)</option>
+            <option value="all">Tümü</option>
+          </select>
+        </label>
+      </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+        <label className="w-full text-xs sm:min-w-[140px] sm:flex-1">
+          <span className="font-medium text-slate-500">Sınıf</span>
+          <select
+            value={classId}
+            onChange={(e) => setClassId(e.target.value)}
+            className="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-2 text-sm"
+          >
+            <option value="">Tümü</option>
+            {classes.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="w-full text-xs sm:min-w-[160px] sm:flex-1">
+          <span className="font-medium text-slate-500">Öğretmen (kullanıcı id)</span>
+          <input
+            value={teacherId}
+            onChange={(e) => setTeacherId(e.target.value)}
+            placeholder="İsteğe bağlı"
+            className="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-2 font-mono text-xs"
+          />
+        </label>
+        <label className="w-full text-xs sm:min-w-[140px] sm:flex-1">
+          <span className="font-medium text-slate-500">Öğrenci ID</span>
+          <input
+            value={studentId}
+            onChange={(e) => setStudentId(e.target.value)}
+            placeholder="İsteğe bağlı"
+            className="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-2 text-sm"
+          />
+        </label>
+        {!mobileAppShell ? (
+          <label className="w-full text-xs sm:min-w-[200px] sm:flex-1">
+            <span className="font-medium text-slate-500">Oturum ID</span>
+            <input
+              value={sessionId}
+              onChange={(e) => setSessionId(e.target.value)}
+              placeholder="UUID"
+              className="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-2 font-mono text-xs"
+            />
+          </label>
+        ) : null}
+        <label className="inline-flex items-center gap-2 self-end text-xs text-slate-600">
+          <input type="checkbox" checked={includeStats} onChange={(e) => setIncludeStats(e.target.checked)} />
+          İstatistikleri yükle
+        </label>
+      </div>
+    </>
+  );
+
   return (
-    <div className="space-y-6">
-      <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-indigo-50/40 p-5">
+    <div className={cn('space-y-4', mobileAppShell ? 'space-y-3' : 'space-y-6')}>
+      <div
+        className={cn(
+          'rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-indigo-50/40',
+          mobileAppShell ? 'p-3' : 'p-5'
+        )}
+      >
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2">
-            <ClipboardList className="h-6 w-6 text-indigo-600" />
-            <h3 className="text-lg font-semibold text-slate-900">Yoklama raporu</h3>
+          <div className="flex items-center gap-2 min-w-0">
+            <ClipboardList className="h-5 w-5 shrink-0 text-indigo-600 sm:h-6 sm:w-6" />
+            <h3 className="truncate text-base font-semibold text-slate-900 sm:text-lg">Yoklama raporu</h3>
           </div>
           <div className="flex flex-wrap gap-2">
             <button
@@ -392,9 +519,11 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
             </button>
           </div>
         </div>
-        <p className="mt-2 text-sm text-slate-600">
-          Grup canlı ders yoklaması; filtreleyin, devamsızlık analizini görün, seçili öğrencilere WhatsApp gönderin.
-        </p>
+        {!mobileAppShell ? (
+          <p className="mt-2 text-sm text-slate-600">
+            Grup canlı ders yoklaması; filtreleyin, devamsızlık analizini görün, seçili öğrencilere WhatsApp gönderin.
+          </p>
+        ) : null}
       </div>
 
       {canEditPrefs ? (
@@ -438,108 +567,21 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
         </label>
       ) : null}
 
-      <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 lg:grid-cols-12">
-        <div className="flex flex-wrap items-end gap-3 lg:col-span-12">
-          <label className="text-xs">
-            <span className="font-medium text-slate-500">Başlangıç</span>
-            <input
-              type="date"
-              disabled={absentToday}
-              value={from}
-              onChange={(e) => setFrom(e.target.value)}
-              className="mt-1 block rounded-lg border border-slate-200 px-2 py-1.5 text-sm disabled:opacity-50"
-            />
-          </label>
-          <label className="text-xs">
-            <span className="font-medium text-slate-500">Bitiş</span>
-            <input
-              type="date"
-              disabled={absentToday}
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              className="mt-1 block rounded-lg border border-slate-200 px-2 py-1.5 text-sm disabled:opacity-50"
-            />
-          </label>
-          <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-slate-700">
-            <input type="checkbox" checked={absentToday} onChange={(e) => setAbsentToday(e.target.checked)} />
-            <Calendar className="h-4 w-4 text-amber-600" />
-            Bugün derse katılmayanlar
-          </label>
-          <label className="text-xs">
-            <span className="font-medium text-slate-500">Durum</span>
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value as typeof status)}
-              className="mt-1 block rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-            >
-              <option value="all">Tümü</option>
-              <option value="absent">Katılmadı</option>
-              <option value="present">Katıldı</option>
-              <option value="late">Geç katıldı</option>
-            </select>
-          </label>
-          <label className="text-xs">
-            <span className="font-medium text-slate-500">Ders türü</span>
-            <select
-              value={lessonType}
-              onChange={(e) => setLessonType(e.target.value as typeof lessonType)}
-              className="mt-1 block rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-            >
-              <option value="group">Grup dersi</option>
-              <option value="private">Özel ders (veri yok)</option>
-              <option value="all">Tümü</option>
-            </select>
-          </label>
+      {mobileAppShell ? (
+        <details className="rounded-xl border border-slate-200 bg-white open:shadow-sm">
+          <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-slate-800 marker:content-none [&::-webkit-details-marker]:hidden">
+            <span className="inline-flex items-center gap-2">
+              <Filter className="h-4 w-4 text-indigo-600" />
+              Filtreler
+            </span>
+          </summary>
+          <div className="space-y-3 border-t border-slate-100 px-4 py-3">{filterFields}</div>
+        </details>
+      ) : (
+        <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 lg:grid-cols-12">
+          <div className="lg:col-span-12 space-y-3">{filterFields}</div>
         </div>
-        <div className="flex flex-wrap items-end gap-3 lg:col-span-12">
-          <label className="min-w-[140px] text-xs">
-            <span className="font-medium text-slate-500">Sınıf</span>
-            <select
-              value={classId}
-              onChange={(e) => setClassId(e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-            >
-              <option value="">Tümü</option>
-              {classes.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="min-w-[200px] text-xs">
-            <span className="font-medium text-slate-500">Öğretmen (kullanıcı id)</span>
-            <input
-              value={teacherId}
-              onChange={(e) => setTeacherId(e.target.value)}
-              placeholder="İsteğe bağlı"
-              className="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1.5 font-mono text-xs"
-            />
-          </label>
-          <label className="min-w-[160px] text-xs">
-            <span className="font-medium text-slate-500">Öğrenci ID</span>
-            <input
-              value={studentId}
-              onChange={(e) => setStudentId(e.target.value)}
-              placeholder="İsteğe bağlı"
-              className="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-            />
-          </label>
-          <label className="min-w-[200px] text-xs">
-            <span className="font-medium text-slate-500">Oturum ID</span>
-            <input
-              value={sessionId}
-              onChange={(e) => setSessionId(e.target.value)}
-              placeholder="UUID"
-              className="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1.5 font-mono text-xs"
-            />
-          </label>
-          <label className="inline-flex items-center gap-2 text-xs text-slate-600">
-            <input type="checkbox" checked={includeStats} onChange={(e) => setIncludeStats(e.target.checked)} />
-            İstatistikleri yükle
-          </label>
-        </div>
-      </div>
+      )}
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
@@ -602,7 +644,23 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-4 lg:col-span-2">
             <p className="mb-2 font-semibold text-slate-800">Öğretmen bazlı yoklama</p>
-            <div className="overflow-x-auto">
+            <div className="lg:hidden space-y-2">
+              {stats.teacher_yoklama.map((t) => (
+                <div
+                  key={t.teacher_id}
+                  className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-sm"
+                >
+                  <p className="font-medium text-slate-900">{t.teacher_name}</p>
+                  <p className="mt-1 text-xs text-slate-600">
+                    Kayıt {t.marked} ·{' '}
+                    <span className="text-emerald-700">{t.present} katıldı</span> ·{' '}
+                    <span className="text-amber-700">{t.late} geç</span> ·{' '}
+                    <span className="text-rose-700">{t.absent} katılmadı</span>
+                  </p>
+                </div>
+              ))}
+            </div>
+            <div className="hidden overflow-x-auto lg:block">
               <table className="w-full min-w-[480px] text-left text-sm">
                 <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
                   <tr>
@@ -681,7 +739,67 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
       </div>
       {bulkMsg ? <p className="text-sm text-slate-700">{bulkMsg}</p> : null}
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+      {/* Mobil kart listesi */}
+      <div className="lg:hidden space-y-2">
+        {loading && !rows.length ? (
+          <div className="rounded-xl border border-slate-200 bg-white px-4 py-10 text-center text-sm text-slate-500">
+            <Loader2 className="mr-2 inline h-5 w-5 animate-spin" />
+            Yükleniyor…
+          </div>
+        ) : !rows.length ? (
+          <div className="rounded-xl border border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-500">
+            Kayıt yok veya filtrelere uyan sonuç yok.
+          </div>
+        ) : (
+          rows.map((r) => {
+            const key = `${r.session_id}|${r.student_id}`;
+            const canSelect = r.status === 'absent';
+            return (
+              <article
+                key={key}
+                className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
+              >
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    disabled={!canSelect}
+                    checked={selected.has(key)}
+                    onChange={() => toggleSel(key)}
+                    className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-semibold text-slate-900 break-words">{r.student_name}</p>
+                      <span
+                        className={cn(
+                          'shrink-0 rounded px-2 py-0.5 text-[10px] font-semibold',
+                          statusStyle(r.status)
+                        )}
+                      >
+                        {r.status === 'present' ? 'Katıldı' : r.status === 'late' ? 'Geç' : 'Katılmadı'}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-slate-700">
+                      {r.lesson_date} · {String(r.start_time).slice(0, 5)}
+                    </p>
+                    <p className="mt-0.5 text-sm text-slate-600 break-words">
+                      {r.class_name} · {r.subject}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500">{r.teacher_name}</p>
+                    {r.marked_at ? (
+                      <p className="mt-1 text-[10px] text-slate-400">
+                        Yoklama: {new Date(r.marked_at).toLocaleString('tr-TR')}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              </article>
+            );
+          })
+        )}
+      </div>
+
+      <div className="hidden lg:block overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
         <table className="w-full min-w-[720px] text-left text-sm">
           <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
             <tr>

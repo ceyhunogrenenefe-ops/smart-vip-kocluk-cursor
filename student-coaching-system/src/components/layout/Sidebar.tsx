@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
-import { userRoleTags } from '../../config/rolePermissions';
+import { userRoleTags, userHasAnyRole } from '../../config/rolePermissions';
 import { cn } from '../../lib/utils';
 import {
   getFlatMenuForRoles,
@@ -25,6 +25,7 @@ import {
   STUDENT_NAV_ACADEMIC_CENTER,
   STUDENT_NAV_SORU_SOR,
   NAV_MY_PROFILE,
+  NAV_KITAP_SIPARISLERI,
   type FlatNavItem
 } from './sidebar/navModel';
 import { SidebarNavLink } from './sidebar/SidebarNavLink';
@@ -53,6 +54,11 @@ export default function Sidebar({
   const tags = userRoleTags(effectiveUser);
   const flat = useMemo(() => getFlatMenuForRoles(tags), [tags]);
   const nav = useMemo(() => structureNavFromFlat(flat), [flat]);
+  const showBookOrdersNav = userHasAnyRole(effectiveUser, ['super_admin', 'admin']);
+  const restNav = useMemo(
+    () => (showBookOrdersNav ? nav.rest.filter((it) => it.path !== NAV_KITAP_SIPARISLERI.path) : nav.rest),
+    [nav.rest, showBookOrdersNav]
+  );
   const isStudentOnlyNav =
     tags.includes('student') &&
     !tags.some((t) => ['super_admin', 'admin', 'coach', 'teacher'].includes(t));
@@ -230,6 +236,19 @@ export default function Sidebar({
           );
         })}
 
+        {showBookOrdersNav ? (
+          <SidebarNavLink
+            label={NAV_KITAP_SIPARISLERI.label}
+            icon={NAV_KITAP_SIPARISLERI.icon}
+            active={
+              location.pathname === NAV_KITAP_SIPARISLERI.path ||
+              location.pathname.startsWith(`${NAV_KITAP_SIPARISLERI.path}/`)
+            }
+            collapsed={railCollapsed}
+            onNavigate={() => go(NAV_KITAP_SIPARISLERI.path)}
+          />
+        ) : null}
+
         {hasGroupedSection ? (
           <>
             <div className="my-2 h-px bg-gradient-to-r from-transparent via-slate-400/35 to-transparent" />
@@ -304,10 +323,10 @@ export default function Sidebar({
           </>
         ) : null}
 
-        {nav.rest.length > 0 ? (
+        {restNav.length > 0 ? (
           <>
             <div className="my-2 h-px bg-gradient-to-r from-transparent via-slate-400/35 to-transparent" />
-            <div className="flex flex-col gap-0.5">{nav.rest.map(renderRestLink)}</div>
+            <div className="flex flex-col gap-0.5">{restNav.map(renderRestLink)}</div>
           </>
         ) : null}
       </nav>

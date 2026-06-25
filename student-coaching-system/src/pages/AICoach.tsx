@@ -6,7 +6,10 @@ import { useApp } from '../context/AppContext';
 import { apiFetch, getAuthToken } from '../lib/session';
 import { userHasAnyRole } from '../config/rolePermissions';
 import type { ClassAttendanceReportRow } from '../components/liveLessons/ClassAttendanceReportSection';
-import { formatClassLevelLabel } from '../types';
+import { formatClassLevelLabel, type AICoachSuggestion } from '../types';
+import type { ExamResult } from '../types';
+import { analyzeEdesisWithAiCoach } from '../lib/edesis/edesisApi';
+import { buildHataKarnesi, isEdesisExam } from '../lib/edesis/edesisSubjectAnalysis';
 import {
   Brain,
   MessageSquare,
@@ -30,7 +33,8 @@ import {
   Share2,
   Settings,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  BarChart2
 } from 'lucide-react';
 
 interface AIMessage {
@@ -40,29 +44,11 @@ interface AIMessage {
   timestamp: Date;
 }
 
-interface ExamResult {
-  id: string;
-  studentId: string;
-  examType: 'TYT' | 'AYT' | '9' | '10' | '11' | '12';
-  examDate: string;
-  source: 'webhook' | 'manual' | 'pdf';
-  totalNet: number;
-  subjects: {
-    name: string;
-    net: number;
-    correct: number;
-    wrong: number;
-    blank: number;
-  }[];
-  notes?: string;
-  createdAt: string;
-}
-
 export default function AICoach() {
   const { user } = useAuth();
   /** Sunucu OPENAI_API_KEY veya tarayıcı BYOK */
   const [openaiMode, setOpenaiMode] = useState<'unknown' | 'live' | 'limited'>('unknown');
-  const { students, weeklyEntries, getStudentStats, coaches, examResults } = useApp();
+  const { students, weeklyEntries, getStudentStats, coaches, examResults, addAISuggestion, getStudentAISuggestions } = useApp();
   const [searchParams, setSearchParams] = useSearchParams();
   const classAttendanceSeedRef = useRef<string | null>(null);
   const [selectedStudent, setSelectedStudent] = useState<string>(() =>
@@ -73,6 +59,15 @@ export default function AICoach() {
   const [isLoading, setIsLoading] = useState(false);
   const [showExamData, setShowExamData] = useState(false);
   const [analysisExpanded, setAnalysisExpanded] = useState<string | null>(null);
+  const [edesisReportUrl, setEdesisReportUrl] = useState<string | null>(null);
+  const [selectedEdesisExamIds, setSelectedEdesisExamIds] = useState<string[]>([]);
+  const [includeWeeklyReport, setIncludeWeeklyReport] = useState(true);
+  const [publishNotice, setPublishNotice] = useState('');
+  const edesisSelectionSeedRef = useRef<string>('');
+
+  const urlExamId = (searchParams.get('examId') || '').trim();
+  const urlEdesisExamId = (searchParams.get('edesisExamId') || '').trim();
+  const fromEdesis = searchParams.get('from') === 'edesis';
 
   useEffect(() => {
     const sid = (searchParams.get('student') || '').trim();
@@ -230,8 +225,220 @@ export default function AICoach() {
     };
   }, [studentExamResults]);
 
-  // Kapsamlı öğrenci analizi yap
+  const edesisExams = useMemo(
+    () => studentExamResults.filter((e) => isEdesisExam(e) || Boolean(e.edesisExamId)),
+    [studentExamResults]
+  );
+
+  /** URL veya öğrenci değişince varsayılan deneme seçimini ayarla */
+  useEffect(() => {
+    const seedKey = `${selectedStudent}|${urlExamId}|${urlEdesisExamId}|${edesisExams.map((e) => e.id).join(',')}`;
+    if (edesisSelectionSeedRef.current === seedKey) return;
+    edesisSelectionSeedRef.current = seedKey;
+
+    if (!edesisExams.length) {
+      setSelectedEdesisExamIds([]);
+      return;
+    }
+
+    const picks: string[] = [];
+    if (urlExamId && edesisExams.some((e) => e.id === urlExamId)) {
+      picks.push(urlExamId);
+    } else if (urlEdesisExamId) {
+      const hit = edesisExams.find((e) => String(e.edesisExamId || '') === urlEdesisExamId);
+      if (hit) picks.push(hit.id);
+    }
+    if (!picks.length) picks.push(edesisExams[0].id);
+    setSelectedEdesisExamIds(picks);
+  }, [selectedStudent, edesisExams, urlExamId, urlEdesisExamId]);
+
+  const selectedEdesisExams = useMemo(
+    () => edesisExams.filter((e) => selectedEdesisExamIds.includes(e.id)),
+    [edesisExams, selectedEdesisExamIds]
+  );
+
+  const focusExam = useMemo(() => {
+    if (selectedEdesisExams[0]) return selectedEdesisExams[0];
+    if (urlExamId) {
+      const hit = studentExamResults.find((e) => e.id === urlExamId);
+      if (hit) return hit;
+    }
+    return edesisExams[0] || studentExamResults[0] || null;
+  }, [selectedEdesisExams, urlExamId, studentExamResults, edesisExams]);
+
+  const toggleEdesisExamSelection = (examId: string) => {
+    setSelectedEdesisExamIds((prev) =>
+      prev.includes(examId) ? prev.filter((id) => id !== examId) : [...prev, examId]
+    );
+  };
+
+  const buildEdesisContextForChat = (): string => {
+    const targets = selectedEdesisExams.length ? selectedEdesisExams : focusExam ? [focusExam] : [];
+    if (!targets.length) return '';
+    return targets
+      .map((exam) => {
+        const hata = buildHataKarnesi(exam);
+        const topicLines = hata
+          .filter((row) => row.topics.length > 0)
+          .map(
+            (row) =>
+              `${row.subject}: ${row.topics.map((t) => `${t.name}(Y${t.wrong}${t.blank ? `/B${t.blank}` : ''})`).join(', ')}`
+          );
+        return [
+          `Edesis deneme: ${exam.examTitle || exam.examType} · ${exam.examDate} · ${exam.totalNet} net`,
+          topicLines.length ? `Konu hataları: ${topicLines.join(' | ')}` : 'Konu kırılımı henüz yok'
+        ].join('\n');
+      })
+      .join('\n\n');
+  };
+
+  const analyzeEdesisDeneme = async (params: {
+    studentId: string;
+    examIds?: string[];
+    edesisStudentId?: string;
+    includeWeekly?: boolean;
+  }) => {
+    const examIds = (params.examIds?.length ? params.examIds : selectedEdesisExamIds).filter(Boolean);
+    const weeklyOn = params.includeWeekly ?? includeWeeklyReport;
+
+    if (!examIds.length && !weeklyOn) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `edesis-empty-${Date.now()}`,
+          role: 'assistant',
+          content: 'Analiz için en az bir Edesis denemesi seçin veya haftalık raporu etkinleştirin.',
+          timestamp: new Date()
+        }
+      ]);
+      return;
+    }
+
+    if (!examIds.length && weeklyOn && !studentEntries.length) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `edesis-empty-${Date.now()}`,
+          role: 'assistant',
+          content: 'Bu hafta günlük çalışma kaydı bulunamadı. Deneme seçerek yalnızca deneme analizi yapabilirsiniz.',
+          timestamp: new Date()
+        }
+      ]);
+      return;
+    }
+
+    setIsLoading(true);
+    setShowExamData(true);
+
+    const targetStudent = students.find((s) => s.id === params.studentId);
+    const selectedLabels = edesisExams
+      .filter((e) => examIds.includes(e.id))
+      .map((e) => `${e.examTitle || e.examType} (${e.examDate})`);
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `edesis-user-${Date.now()}`,
+        role: 'user',
+        content: `${targetStudent?.name || 'Öğrenci'} — ${weeklyOn ? 'Haftalık rapor + ' : ''}${examIds.length ? `${examIds.length} Edesis denemesi` : 'deneme yok'} analizi: ${selectedLabels.join(', ') || 'haftalık odak'}. Karne PDF metni ve konu karnesi dahil.`,
+        timestamp: new Date()
+      }
+    ]);
+
+    try {
+      const edesisStudentId =
+        params.edesisStudentId ||
+        searchParams.get('edesisStudentId') ||
+        selectedEdesisExams[0]?.edesisStudentId ||
+        undefined;
+
+      const result = await analyzeEdesisWithAiCoach({
+        studentId: params.studentId,
+        examIds: examIds.length ? examIds : undefined,
+        edesisStudentId: edesisStudentId ? String(edesisStudentId) : undefined,
+        includeWeekly: weeklyOn
+      });
+      if (!result.ok || !result.content) {
+        const errText = [
+          '**Edesis AI analizi tamamlanamadı**',
+          result.error ? `Hata: ${result.error}` : '',
+          result.hint ? `İpucu: ${result.hint}` : '',
+          result.message || ''
+        ]
+          .filter(Boolean)
+          .join('\n\n');
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `edesis-err-${Date.now()}`,
+            role: 'assistant',
+            content: errText,
+            timestamp: new Date()
+          }
+        ]);
+        return;
+      }
+
+      if (result.reportUrl) setEdesisReportUrl(result.reportUrl);
+
+      let content = result.content;
+      if (result.reportUrls?.length) {
+        content += `\n\n📄 **Edesis karne PDF:**\n${result.reportUrls.map((u, i) => `${i + 1}. ${u}`).join('\n')}`;
+      } else if (result.reportUrl) {
+        content += `\n\n📄 **Edesis karne PDF:** ${result.reportUrl}`;
+      }
+      if (result.examCount != null && result.examCount > 1) {
+        content += `\n\n_${result.examCount} deneme birlikte analiz edildi._`;
+      } else if (result.exam?.topicCount != null) {
+        content += `\n\n_Konu satırı: ${result.exam.topicCount} · Ders: ${result.exam.subjectCount}_`;
+      }
+      if (result.pdfParsed) {
+        content += `\n\n_Karne PDF metni okundu ve hata karnesi analize dahil edildi._`;
+      }
+      if (result.weeklyIncluded) {
+        content += `\n\n_Haftalık çalışma raporu ve koç hedefleri analize dahil edildi._`;
+      }
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `edesis-ai-${Date.now()}`,
+          role: 'assistant',
+          content,
+          timestamp: new Date()
+        }
+      ]);
+      setOpenaiMode('live');
+    } catch (e) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `edesis-catch-${Date.now()}`,
+          role: 'assistant',
+          content: `Edesis analizi sırasında hata: ${e instanceof Error ? e.message : 'bilinmeyen'}`,
+          timestamp: new Date()
+        }
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Kapsamlı öğrenci analizi — haftalık + seçili Edesis denemeleri (sunucu AI)
   const analyzeStudent = async (studentId: string) => {
+    const hasWeekly = studentEntries.length > 0 || includeWeeklyReport;
+    if (edesisExams.length || fromEdesis || hasWeekly) {
+      await analyzeEdesisDeneme({
+        studentId,
+        includeWeekly: includeWeeklyReport,
+        edesisStudentId:
+          searchParams.get('edesisStudentId') ||
+          selectedEdesisExams[0]?.edesisStudentId ||
+          undefined
+      });
+      return;
+    }
+
     setIsLoading(true);
 
     const targetStudent = students.find(s => s.id === studentId);
@@ -437,10 +644,13 @@ ${studentTeacher ? `\n👨‍🏫 **Öğretmen Koç:** ${studentTeacher.name}` :
           `Sınıf: ${formatClassLevelLabel(student.classLevel)}`,
           `Haftalık kayıt sayısı: ${studentEntries.length}`,
           `Deneme sınavı sayısı: ${studentExamResults.length}`,
+          edesisExams.length ? `Edesis deneme sayısı: ${edesisExams.length}` : '',
           weeklyStats
             ? `Haftalık başarı %: ${weeklyStats.successRate}, gerçekleşme %: ${weeklyStats.realizationRate}`
             : '',
-          examStats?.latestTYT ? `Son TYT net (yaklaşık): ${examStats.latestTYT}` : ''
+          examStats?.latestTYT ? `Son TYT net (yaklaşık): ${examStats.latestTYT}` : '',
+          buildEdesisContextForChat(),
+          edesisReportUrl ? `Karne PDF: ${edesisReportUrl}` : ''
         ]
           .filter(Boolean)
           .join('\n')
@@ -508,6 +718,43 @@ ${studentTeacher ? `\n👨‍🏫 **Öğretmen Koç:** ${studentTeacher.name}` :
     window.open(`https://wa.me/?text=${text}`, '_blank');
   };
 
+  const publishAnalysisToStudent = async (content: string) => {
+    setPublishNotice('');
+    if (!selectedStudent || !student) {
+      setPublishNotice('Önce bir öğrenci seçin.');
+      return;
+    }
+    const trimmed = content.trim();
+    if (!trimmed) {
+      setPublishNotice('Paylaşılacak analiz metni yok.');
+      return;
+    }
+    const suggestion: AICoachSuggestion = {
+      id: `ai-report-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      studentId: selectedStudent,
+      type: 'improvement',
+      priority: 'medium',
+      title: `AI Koç Analizi — ${new Date().toLocaleString('tr-TR')}`,
+      description: trimmed.length > 480 ? `${trimmed.slice(0, 477)}…` : trimmed,
+      analysisMarkdown: trimmed,
+      sharedWithStudent: true,
+      source: 'ai_report',
+      createdAt: new Date().toISOString(),
+      isRead: false,
+    };
+    try {
+      await addAISuggestion(suggestion);
+      setPublishNotice(`${student.name} için analiz Analizlerim sayfasına eklendi.`);
+    } catch (e) {
+      setPublishNotice(e instanceof Error ? e.message : 'Analiz paylaşılamadı');
+    }
+  };
+
+  const studentSharedReports = useMemo(() => {
+    if (!selectedStudent) return [];
+    return getStudentAISuggestions(selectedStudent).filter((s) => s.sharedWithStudent);
+  }, [selectedStudent, getStudentAISuggestions]);
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -547,18 +794,110 @@ ${studentTeacher ? `\n👨‍🏫 **Öğretmen Koç:** ${studentTeacher.name}` :
             </select>
 
             {selectedStudent && (
-              <button
-                onClick={() => analyzeStudent(selectedStudent)}
-                disabled={isLoading}
-                className="w-full px-4 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:opacity-90 transition-opacity flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {isLoading ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <Sparkles className="w-5 h-5" />
-                )}
-                Tam Analiz Başlat
-              </button>
+              <label className="mb-4 flex cursor-pointer items-center gap-2 rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-sm text-emerald-900">
+                <input
+                  type="checkbox"
+                  checked={includeWeeklyReport}
+                  onChange={(e) => setIncludeWeeklyReport(e.target.checked)}
+                  className="rounded"
+                />
+                Haftalık rapor dahil (koç hedefleri + günlük kayıtlar)
+              </label>
+            )}
+
+            {selectedStudent && edesisExams.length > 0 && (
+              <div className="mb-4 rounded-lg border border-indigo-100 bg-indigo-50/50 p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-indigo-900">Edesis deneme seçimi</p>
+                  <span className="text-xs text-indigo-700">{selectedEdesisExamIds.length} seçili</span>
+                </div>
+                <div className="mb-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedEdesisExamIds(edesisExams.map((e) => e.id))}
+                    className="rounded bg-white px-2 py-1 text-xs text-indigo-700 ring-1 ring-indigo-200 hover:bg-indigo-100"
+                  >
+                    Tümünü seç
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedEdesisExamIds([])}
+                    className="rounded bg-white px-2 py-1 text-xs text-slate-600 ring-1 ring-slate-200 hover:bg-slate-100"
+                  >
+                    Temizle
+                  </button>
+                </div>
+                <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
+                  {edesisExams.map((exam) => {
+                    const topicCount = (exam.subjects || []).reduce(
+                      (n, s) => n + (s.topics?.length ?? 0),
+                      0
+                    );
+                    const checked = selectedEdesisExamIds.includes(exam.id);
+                    return (
+                      <label
+                        key={exam.id}
+                        className={`flex cursor-pointer items-start gap-2 rounded-lg border px-2 py-2 text-sm ${
+                          checked
+                            ? 'border-indigo-300 bg-white'
+                            : 'border-transparent bg-white/60 hover:bg-white'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="mt-1"
+                          checked={checked}
+                          onChange={() => toggleEdesisExamSelection(exam.id)}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block font-medium text-slate-800">
+                            {exam.examTitle || exam.examType}
+                          </span>
+                          <span className="block text-xs text-slate-500">
+                            {exam.examDate} · {exam.totalNet} net
+                            {topicCount ? ` · ${topicCount} konu` : ' · konu yok'}
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {selectedStudent && (
+              <div className="space-y-2">
+                <button
+                  onClick={() => analyzeStudent(selectedStudent)}
+                  disabled={isLoading || ((edesisExams.length > 0 && selectedEdesisExamIds.length === 0) && !includeWeeklyReport)}
+                  className="w-full px-4 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:opacity-90 transition-opacity flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {isLoading ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-5 h-5" />
+                  )}
+                  Tam Analiz
+                  {includeWeeklyReport ? ' (Haftalık' : ''}
+                  {includeWeeklyReport && (selectedEdesisExamIds.length || edesisExams.length)
+                    ? ` + ${selectedEdesisExamIds.length || 0} deneme)`
+                    : includeWeeklyReport
+                      ? ')'
+                      : selectedEdesisExamIds.length
+                        ? ` (${selectedEdesisExamIds.length} deneme)`
+                        : ''}
+                </button>
+                {fromEdesis && edesisReportUrl ? (
+                  <a
+                    href={edesisReportUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-center text-xs text-indigo-600 underline"
+                  >
+                    Edesis karne PDF&apos;yi aç
+                  </a>
+                ) : null}
+              </div>
             )}
           </div>
 
@@ -609,6 +948,32 @@ ${studentTeacher ? `\n👨‍🏫 **Öğretmen Koç:** ${studentTeacher.name}` :
                 <BookOpen className="w-4 h-4" />
                 Çalışma Planı Oluştur
               </button>
+              {(edesisExams.length > 0 || fromEdesis || includeWeeklyReport) &&
+              (selectedEdesisExamIds.length > 0 || includeWeeklyReport) ? (
+                <button
+                  onClick={() => {
+                    if (!selectedStudent) return;
+                    void analyzeEdesisDeneme({
+                      studentId: selectedStudent,
+                      includeWeekly: includeWeeklyReport,
+                      edesisStudentId:
+                        searchParams.get('edesisStudentId') ||
+                        selectedEdesisExams[0]?.edesisStudentId ||
+                        undefined
+                    });
+                  }}
+                  disabled={!selectedStudent || isLoading}
+                  className="w-full px-4 py-2 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 transition-colors flex items-center gap-2 disabled:opacity-50"
+                >
+                  <Target className="w-4 h-4" />
+                  Seçili analizi çalıştır
+                  {includeWeeklyReport ? ' (haftalık' : ''}
+                  {selectedEdesisExamIds.length
+                    ? `${includeWeeklyReport ? ' + ' : ''}${selectedEdesisExamIds.length} deneme`
+                    : ''}
+                  {includeWeeklyReport || selectedEdesisExamIds.length ? ')' : ''}
+                </button>
+              ) : null}
               <button
                 onClick={() => {
                   if (!selectedStudent) return;
@@ -711,9 +1076,13 @@ ${studentTeacher ? `\n👨‍🏫 **Öğretmen Koç:** ${studentTeacher.name}` :
                               </span>
                               <span className={`px-1 py-0.5 rounded text-xs ${
                                 exam.source === 'webhook' ? 'bg-green-100 text-green-700' :
+                                exam.source === 'edesis' ? 'bg-indigo-100 text-indigo-700' :
+                                exam.source === 'pdf' ? 'bg-amber-100 text-amber-700' :
                                 'bg-orange-100 text-orange-700'
                               }`}>
-                                {exam.source === 'webhook' ? 'Otomatik' : 'Manuel'}
+                                {exam.source === 'webhook' ? 'Otomatik' :
+                                 exam.source === 'edesis' ? 'Edesis' :
+                                 exam.source === 'pdf' ? 'PDF' : 'Manuel'}
                               </span>
                             </div>
                             <span className="text-xl font-bold text-orange-600">{exam.totalNet} net</span>
@@ -761,15 +1130,38 @@ ${studentTeacher ? `\n👨‍🏫 **Öğretmen Koç:** ${studentTeacher.name}` :
                   </div>
                 </div>
                 {messages.length > 0 && (
-                  <button
-                    onClick={shareViaWhatsApp}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors text-sm"
-                  >
-                    <Share2 className="w-4 h-4" />
-                    WhatsApp
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {messages[messages.length - 1]?.role === 'assistant' ? (
+                      <button
+                        type="button"
+                        onClick={() => void publishAnalysisToStudent(messages[messages.length - 1].content)}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm"
+                      >
+                        <BarChart2 className="w-4 h-4" />
+                        Analizlerim&apos;e ekle
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={shareViaWhatsApp}
+                      className="flex items-center gap-2 px-3 py-1.5 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors text-sm"
+                    >
+                      <Share2 className="w-4 h-4" />
+                      WhatsApp
+                    </button>
+                  </div>
                 )}
               </div>
+              {publishNotice ? (
+                <p className="mt-3 text-sm text-indigo-800 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
+                  {publishNotice}
+                </p>
+              ) : null}
+              {studentSharedReports.length > 0 ? (
+                <p className="mt-2 text-xs text-slate-500">
+                  Bu öğrenci için {studentSharedReports.length} analiz Analizlerim sayfasında paylaşıldı.
+                </p>
+              ) : null}
             </div>
 
             {/* Messages */}
@@ -829,6 +1221,16 @@ ${studentTeacher ? `\n👨‍🏫 **Öğretmen Koç:** ${studentTeacher.name}` :
                         return line ? <p key={i} className="mb-1">{line}</p> : null;
                       })}
                     </div>
+                    {msg.role === 'assistant' && selectedStudent ? (
+                      <button
+                        type="button"
+                        onClick={() => void publishAnalysisToStudent(msg.content)}
+                        className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-2.5 py-1.5 text-xs font-medium text-indigo-800 hover:bg-indigo-50"
+                      >
+                        <BarChart2 className="h-3.5 w-3.5" />
+                        Analizlerim&apos;e ekle
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               ))}

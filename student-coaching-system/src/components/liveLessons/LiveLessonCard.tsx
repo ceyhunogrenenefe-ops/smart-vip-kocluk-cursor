@@ -1,11 +1,7 @@
 import React from 'react';
 import { Video, Link2, Copy, ExternalLink, Presentation, PlayCircle } from 'lucide-react';
 import type { TeacherLesson, TeacherLessonPlatform } from '../../types';
-import { isApproaching, isOngoing, PLATFORM_LABEL, lessonJoinUrl } from '../../lib/liveLessonUtils';
-
-function joinUrlForLesson(lesson: { join_link?: string | null; meeting_link?: string | null }) {
-  return lessonJoinUrl(lesson);
-}
+import { isApproaching, isOngoing, PLATFORM_LABEL, hasBbbRecordingAccess } from '../../lib/liveLessonUtils';
 
 type Props = {
   lesson: TeacherLesson;
@@ -14,6 +10,7 @@ type Props = {
   showApproaching?: boolean;
   onCopy?: () => void;
   onJoin?: () => void;
+  onWatchRecording?: () => void;
   /** Planlı dersi tamamlandı işaretle (öğretmen/koç) */
   onMarkComplete?: () => void;
   extraActions?: React.ReactNode;
@@ -43,6 +40,7 @@ export default function LiveLessonCard({
   showApproaching = true,
   onCopy,
   onJoin,
+  onWatchRecording,
   onMarkComplete,
   extraActions,
   lockCompletedLink = false
@@ -53,13 +51,9 @@ export default function LiveLessonCard({
   const joinInactive =
     lesson.status === 'cancelled' || (lockCompletedLink && lesson.status === 'completed');
 
-  const bbbRecordingAvailable =
-    lockCompletedLink &&
-    lesson.status === 'completed' &&
-    lesson.platform === 'bbb' &&
-    Boolean(lesson.meeting_link?.trim());
+  const bbbRecordingAvailable = lockCompletedLink && hasBbbRecordingAccess(lesson);
 
-  /** Öğrenci paneli: BBB tamamlanınca aynı URL kayıt için de kullanılabilir; kopyalamayı açık bırak */
+  /** Öğrenci paneli: BBB tamamlanınca kayıt panel üzerinden; kopyalamayı açık bırak */
   const copyInactive =
     lesson.status === 'cancelled' ||
     (lockCompletedLink && lesson.status === 'completed' && !bbbRecordingAvailable);
@@ -133,7 +127,7 @@ export default function LiveLessonCard({
           {joinInactive && lesson.status === 'completed' && lockCompletedLink ? (
             bbbRecordingAvailable ? (
               <span className="text-[11px] text-slate-500 text-right max-w-[240px]">
-                Ders tamamlandı; BigBlueButton kaydına aynı oturum bağlantısından ulaşabilirsiniz.
+                Ders tamamlandı; kaydı izlemek için «Ders kaydını izle» düğmesini kullanın.
               </span>
             ) : (
               <span className="text-[11px] text-slate-500 text-right max-w-[220px]">
@@ -154,7 +148,7 @@ export default function LiveLessonCard({
             {bbbRecordingAvailable ? (
               <button
                 type="button"
-                onClick={() => window.open(lesson.meeting_link, '_blank', 'noopener,noreferrer')}
+                onClick={onWatchRecording}
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700"
               >
                 <PlayCircle className="w-4 h-4" />

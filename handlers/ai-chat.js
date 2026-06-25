@@ -1,5 +1,6 @@
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { handleAiExamAnalyze } from '../api/_lib/ai-exam-analyze.js';
+import { handleEdesisAiAnalyze } from '../api/_lib/edesis-ai-analyze.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -133,6 +134,16 @@ export default async function handler(req, res) {
     const body = parseBody(req);
     if (body.op === 'analyze_exam' || body.analyze_exam === true) {
       return handleAiExamAnalyze(req, res);
+    }
+
+    if (body.op === 'analyze_edesis') {
+      let actor;
+      try {
+        actor = requireAuthenticatedActor(req);
+      } catch {
+        return res.status(401).json({ error: 'Missing token' });
+      }
+      return handleEdesisAiAnalyze(req, res, actor);
     }
 
     let actor;

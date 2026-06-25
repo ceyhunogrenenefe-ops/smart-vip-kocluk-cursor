@@ -3,9 +3,10 @@ import { useAuth } from '../../context/AuthContext';
 import { apiFetch } from '../../lib/session';
 import type { StudentTeacherLessonQuota, TeacherLesson } from '../../types';
 import LiveLessonCard from './LiveLessonCard';
-import { lessonJoinUrl, isBbbJoinUrl } from '../../lib/liveLessonUtils';
-import { openBbbJoin } from '../../lib/bbbJoin';
+import { copyLessonAccessMessage, lessonJoinUrl, needsBbbJoinFlow } from '../../lib/liveLessonUtils';
+import { openBbbJoin, openBbbRecording } from '../../lib/bbbJoin';
 import { Loader2, Radio, AlertTriangle, CalendarRange } from 'lucide-react';
+import { useRecordingUnavailableAlert, recordingUnavailableText } from '../../hooks/useRecordingUnavailableAlert';
 
 function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -35,6 +36,7 @@ export default function StudentLiveLessonsPanel() {
   const [quotas, setQuotas] = useState<StudentTeacherLessonQuota[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { showRecordingUnavailable, recordingAlertModal } = useRecordingUnavailableAlert();
   const [uiTick, setUiTick] = useState(0);
 
   useEffect(() => {
@@ -162,7 +164,7 @@ export default function StudentLiveLessonsPanel() {
           <h3 className="text-lg font-bold">📡 Canlı Özel Derslerim</h3>
           <p className="text-sky-100 text-sm">
             Yalnızca size atanmış özel canlı özel dersler. Tamamlanan oturumlarda &quot;Derse katıl&quot; pasiftir; BBB
-            derslerinde kayıt için aynı bağlantı kullanılır.
+            kayıtları panelde «Ders kaydını izle» ile açılır.
           </p>
         </div>
         {loading && <Loader2 className="w-5 h-5 animate-spin text-sky-200 ml-auto" />}
@@ -287,13 +289,26 @@ export default function StudentLiveLessonsPanel() {
             <LiveLessonCard
               lesson={lesson}
               lockCompletedLink
-              onCopy={() => void navigator.clipboard.writeText(lessonJoinUrl(lesson))}
+              onCopy={() =>
+                void navigator.clipboard.writeText(copyLessonAccessMessage(lesson, window.location.origin))
+              }
+              onWatchRecording={() => {
+                void (async () => {
+                  const cached = String(lesson.recording_link || '').trim();
+                  try {
+                    if (cached) window.open(cached, '_blank', 'noopener,noreferrer');
+                    else await openBbbRecording('teacher-lessons', lesson.id);
+                  } catch (e) {
+                    showRecordingUnavailable(recordingUnavailableText(e));
+                  }
+                })();
+              }}
               onJoin={() => {
                 void (async () => {
                   const url = lessonJoinUrl(lesson);
                   if (!url) return;
                   try {
-                    if (isBbbJoinUrl(url)) await openBbbJoin('teacher-lessons', lesson.id);
+                    if (needsBbbJoinFlow(url)) await openBbbJoin('teacher-lessons', lesson.id);
                     else window.open(url, '_blank', 'noopener,noreferrer');
                   } catch (e) {
                     setError(e instanceof Error ? e.message : String(e));
@@ -304,6 +319,7 @@ export default function StudentLiveLessonsPanel() {
           </div>
         ))}
       </div>
+      {recordingAlertModal}
     </div>
   );
 }

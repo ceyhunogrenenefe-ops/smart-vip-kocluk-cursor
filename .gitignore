@@ -30,8 +30,11 @@ dist-ssr
 # Yerel sırlar (Vercel push script çıktısı — commit etmeyin)
 .local-deploy-secrets.txt
 .env.production
+.env.prod.live
 .env.vercel
 .env.vercel.pull
+.env.probe.*
+.env.vercel.*
 .env.local
 .env.mobile
 student-coaching-system/.env.mobile

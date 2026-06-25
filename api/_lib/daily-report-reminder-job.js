@@ -1,12 +1,10 @@
 /**
  * Günlük rapor hatırlatması — rapor girmeyen öğrencilere WhatsApp.
- * Kanal: Meta şablonu (varsayılan, 22:00 TR) veya gateway.
+ * Kanal: varsayılan gateway (ücretsiz Baileys); Meta yedek. WHATSAPP_AUTOMATION_CHANNEL=gateway|meta
  */
 import { supabaseAdmin } from './supabase-admin.js';
 import { getIstanbulDateString, getIstanbulHour } from './istanbul-time.js';
 import { renderMessageTemplate } from './template-engine.js';
-import { sendAutomatedWhatsApp } from './whatsapp-outbound.js';
-import { metaWhatsAppConfigured } from './meta-whatsapp.js';
 import { getReportReminderRecipients } from './meetings-resolve.js';
 import { studentNeedsReportReminder } from './report-reminder-eligibility.js';
 import {
@@ -18,15 +16,11 @@ import {
   reportReminderGatewaySessionId,
   sendGatewayTextMessage
 } from './whatsapp-gateway-send.js';
+import { sendAutomatedWhatsApp } from './whatsapp-outbound.js';
+import { reportReminderSendChannel as resolveReportChannel } from './whatsapp-automation-channel.js';
 
 export function reportReminderSendChannel() {
-  const raw = String(process.env.REPORT_REMINDER_CHANNEL ?? 'meta').trim().toLowerCase();
-  const mode = !raw || raw === 'meta' || raw === 'cloud' || raw === 'meta_cloud_api' ? 'meta' : raw;
-  if (mode === 'gateway') {
-    const sid = reportReminderGatewaySessionId();
-    return gatewayConfiguredForSession(sid) ? 'gateway' : 'none';
-  }
-  return metaWhatsAppConfigured() ? 'meta' : 'none';
+  return resolveReportChannel();
 }
 
 export function reportReminderIstHour() {
@@ -84,7 +78,7 @@ export async function runDailyReportReminderJob(opts = {}) {
       ok: true,
       skipped: 'meta_template_name_missing',
       channel,
-      hint: 'message_templates.meta_template_name veya REPORT_REMINDER_CHANNEL=gateway',
+      hint: 'message_templates.meta_template_name veya WHATSAPP_AUTOMATION_CHANNEL=gateway',
       log
     };
   }
@@ -171,7 +165,13 @@ export async function runDailyReportReminderJob(opts = {}) {
             ? await sendGatewayTextMessage({
                 phone,
                 message: body,
-                sessionId: gatewaySessionId
+                sessionId: gatewaySessionId,
+                sessionCandidates: [
+                  gatewaySessionId,
+                  reportReminderGatewaySessionId(),
+                  String(process.env.BOOK_ORDER_GATEWAY_SESSION_ID || '').trim()
+                ].filter(Boolean),
+                allowSharedFallback: true
               })
             : await sendAutomatedWhatsApp({
                 phone,

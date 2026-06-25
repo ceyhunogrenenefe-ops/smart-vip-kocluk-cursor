@@ -1,8 +1,12 @@
 // Türkçe: Deneme Sınavları Takip Sayfası - AI Koç entegrasyonu
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { IconTapButton } from '../components/ui/IconTapButton';
+import { ScoresLoadingPlaceholder } from '../components/ui/ScoresLoadingPlaceholder';
 import { useApp } from '../context/AppContext';
 import { mergeYosMatematikGenelSubjects } from '../lib/mergeYosExamSubjects';
+import { buildHataKarnesi } from '../lib/edesis/edesisSubjectAnalysis';
+import { refreshEdesisExamDetail } from '../lib/edesis/edesisApi';
+import type { ExamResult as AppExamResult } from '../types';
 import {
   ClipboardList,
   Plus,
@@ -71,7 +75,7 @@ interface ExamResult {
   studentId: string;
   examType: '3' | '4' | '5' | '6' | '7' | 'LGS' | 'YOS' | 'TYT' | 'YKS-EA' | 'YKS-SAY' | 'AYT';
   examDate: string;
-  source: 'webhook' | 'manual' | 'edesis';
+  source: 'webhook' | 'manual' | 'edesis' | 'pdf';
   totalNet: number;
   subjects: {
     name: string;
@@ -79,9 +83,19 @@ interface ExamResult {
     correct: number;
     wrong: number;
     blank: number;
+    topics?: {
+      name: string;
+      net: number;
+      correct: number;
+      wrong: number;
+      blank: number;
+    }[];
   }[];
   notes?: string;
   createdAt: string;
+  edesisExamId?: string;
+  edesisStudentId?: string;
+  examTitle?: string;
 }
 
 type ExamType = ExamResult['examType'];
@@ -182,13 +196,15 @@ const createDraftResult = (label: string) => ({
 });
 
 export default function ExamTracking() {
-  const { students, examResults, addExamResult, deleteExamResult } = useApp();
+  const { students, examResults, addExamResult, updateExamResult, deleteExamResult, appDataLoading, scoresDataReady } = useApp();
   const [selectedStudent, setSelectedStudent] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState('');
   const [examTypeFilter, setExamTypeFilter] = useState<string>('all');
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedExam, setExpandedExam] = useState<string | null>(null);
+  const [edesisBusyId, setEdesisBusyId] = useState<string | null>(null);
+  const [edesisNotice, setEdesisNotice] = useState<string | null>(null);
 
   // PDF Import states
   const [showPdfImport, setShowPdfImport] = useState(false);
@@ -892,13 +908,89 @@ export default function ExamTracking() {
     }
   };
 
-  // AI Koç'a gönder
-  const sendToAICoach = (studentId: string) => {
-    window.location.href = `/ai-coach?student=${studentId}`;
+  // AI Koç'a gönder (Edesis denemesi varsa konu analizi + PDF bağlamıyla)
+  const sendToAICoach = (studentId: string, exam?: ExamResult) => {
+    const qs = new URLSearchParams({ student: studentId });
+    if (exam && (exam.source === 'edesis' || exam.edesisExamId)) {
+      qs.set('from', 'edesis');
+      qs.set('examId', exam.id);
+      if (exam.edesisExamId) qs.set('edesisExamId', String(exam.edesisExamId));
+      if (exam.edesisStudentId) qs.set('edesisStudentId', String(exam.edesisStudentId));
+    }
+    window.location.href = `/ai-coach?${qs.toString()}`;
   };
+
+  const examHasTopicBreakdown = useCallback(
+    (result: ExamResult) => (result.subjects || []).some((s) => (s.topics?.length ?? 0) > 0),
+    []
+  );
+
+  const pullEdesisDetail = useCallback(
+    async (result: ExamResult) => {
+      if (!result.edesisExamId) {
+        setEdesisNotice('Bu kayıtta Edesis sınav ID yok — Ayarlar → Edesis → senkron çalıştırın.');
+        return;
+      }
+      setEdesisBusyId(result.id);
+      setEdesisNotice(null);
+      try {
+        const r = await refreshEdesisExamDetail({
+          examId: result.edesisExamId,
+          studentId: result.studentId,
+          edesisStudentId: result.edesisStudentId
+        });
+        const exam = r.exam as AppExamResult | undefined;
+        if (!exam?.subjects?.length) {
+          setEdesisNotice('Edesis detay döndü ama ders/konu listesi boş.');
+          return;
+        }
+        await updateExamResult(result.id, {
+          subjects: exam.subjects,
+          totalNet: exam.totalNet ?? result.totalNet,
+          examTitle: exam.examTitle ?? result.examTitle,
+          edesisExamId: exam.edesisExamId ?? result.edesisExamId,
+          edesisStudentId: exam.edesisStudentId ?? result.edesisStudentId
+        });
+        const topicCount = (exam.subjects || []).reduce((n, s) => n + (s.topics?.length ?? 0), 0);
+        if (topicCount === 0) {
+          setEdesisNotice(
+            `Ders özeti güncellendi (${exam.subjects.length} ders) ancak konu kırılımı Edesis'ten gelmedi. Birkaç dakika sonra tekrar deneyin veya Edesis panelinden karne PDF kontrol edin.`
+          );
+        } else {
+          setEdesisNotice(
+            `Edesis detay güncellendi — ${exam.subjects.length} ders, ${topicCount} konu satırı.`
+          );
+        }
+      } catch (e) {
+        setEdesisNotice(e instanceof Error ? e.message : 'Edesis detayı alınamadı');
+      } finally {
+        setEdesisBusyId(null);
+      }
+    },
+    [updateExamResult]
+  );
 
 
   const totalStats = getTotalStats();
+
+  if (appDataLoading && !scoresDataReady) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-gradient-to-r from-orange-500 to-red-500 rounded-xl shadow-lg p-6 text-white">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 bg-white/20 rounded-xl flex items-center justify-center">
+              <ClipboardList className="w-8 h-8" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold">Deneme Sınavları</h2>
+              <p className="text-orange-100">TYT, AYT, YÖS ve sınıf denemelerinin takibi</p>
+            </div>
+          </div>
+        </div>
+        <ScoresLoadingPlaceholder message="Deneme sınavları yükleniyor…" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -912,7 +1004,7 @@ export default function ExamTracking() {
             <h2 className="text-2xl font-bold">Deneme Sınavları</h2>
             <p className="text-orange-100">TYT, AYT, YÖS ve sınıf denemelerinin takibi</p>
           </div>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-2 flex-wrap justify-end">
             <span className="px-3 py-1 bg-white/20 rounded-full text-sm">
               {totalStats.totalExams} Deneme
             </span>
@@ -1050,7 +1142,14 @@ export default function ExamTracking() {
                   {students.find(s => s.id === selectedStudent)?.name}
                 </h3>
                 <button
-                  onClick={() => sendToAICoach(selectedStudent)}
+                  onClick={() => {
+                    const latestEdesis = filteredResults.find(
+                      (r) =>
+                        r.studentId === selectedStudent &&
+                        (r.source === 'edesis' || r.edesisExamId)
+                    );
+                    sendToAICoach(selectedStudent, latestEdesis);
+                  }}
                   className="px-3 py-1 bg-purple-100 text-purple-600 rounded-lg hover:bg-purple-200 transition-colors text-sm flex items-center gap-1"
                 >
                   <Brain className="w-4 h-4" />
@@ -1104,6 +1203,11 @@ export default function ExamTracking() {
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="p-4 border-b border-gray-100 bg-gray-50">
               <h3 className="font-semibold text-slate-800">Deneme Sonuçları ({filteredResults.length})</h3>
+              {edesisNotice ? (
+                <p className="mt-2 text-xs text-indigo-800 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
+                  {edesisNotice}
+                </p>
+              ) : null}
             </div>
 
             <div className="divide-y divide-gray-100">
@@ -1158,32 +1262,95 @@ export default function ExamTracking() {
 
                           {/* Ders Bazlı Sonuçlar (Genişletilmiş) */}
                           {isExpanded && (
-                            <div className="mt-3 space-y-2">
-                              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                                {result.subjects.map((subject, i) => (
-                                  <div key={i} className="bg-gray-50 rounded-lg p-3 text-sm">
-                                    <div className="flex justify-between items-center mb-1">
-                                      <span className="text-gray-600 font-medium">{subject.name}</span>
-                                      <span className={`font-bold ${
-                                        subject.net >= 8 ? 'text-green-600' :
-                                        subject.net >= 5 ? 'text-yellow-600' : 'text-red-600'
-                                      }`}>
-                                        {subject.net} net
-                                      </span>
-                                    </div>
-                                    <div className="text-xs text-gray-500 flex gap-2">
-                                      <span className="text-green-600">✓{subject.correct}</span>
-                                      <span className="text-red-600">✗{subject.wrong}</span>
-                                      <span className="text-gray-400">—{subject.blank}</span>
-                                    </div>
-                                  </div>
-                                ))}
+                            <div className="mt-3 space-y-4">
+                              {result.examTitle ? (
+                                <p className="text-sm font-medium text-slate-700">{result.examTitle}</p>
+                              ) : null}
+
+                              <div className="overflow-x-auto rounded-lg border border-gray-200">
+                                <table className="min-w-full text-sm">
+                                  <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
+                                    <tr>
+                                      <th className="px-3 py-2">Ders</th>
+                                      <th className="px-3 py-2 text-center">D</th>
+                                      <th className="px-3 py-2 text-center">Y</th>
+                                      <th className="px-3 py-2 text-center">B</th>
+                                      <th className="px-3 py-2 text-right">Net</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {result.subjects.map((subject, i) => (
+                                      <tr key={i} className="border-t border-gray-100">
+                                        <td className="px-3 py-2 font-medium text-slate-800">{subject.name}</td>
+                                        <td className="px-3 py-2 text-center text-green-700">{subject.correct}</td>
+                                        <td className="px-3 py-2 text-center text-red-700">{subject.wrong}</td>
+                                        <td className="px-3 py-2 text-center text-gray-500">{subject.blank}</td>
+                                        <td className={`px-3 py-2 text-right font-semibold ${
+                                          subject.net >= 8 ? 'text-green-600' :
+                                          subject.net >= 5 ? 'text-yellow-600' : 'text-red-600'
+                                        }`}>
+                                          {subject.net}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
                               </div>
 
-                              {/* Eylemler */}
-                              <div className="flex gap-2 mt-3">
+                              {examHasTopicBreakdown(result) ? (
+                                <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-3">
+                                  <h4 className="text-sm font-semibold text-amber-950 mb-2">Konu bazlı hatalar</h4>
+                                  <div className="space-y-3">
+                                    {buildHataKarnesi(result as AppExamResult)
+                                      .filter((row) => row.topics.length > 0)
+                                      .map((row) => (
+                                        <div key={row.subject}>
+                                          <p className="text-sm font-medium text-slate-800">
+                                            {row.subject}
+                                            <span className="ml-2 text-xs font-normal text-gray-500">
+                                              D {row.correct} · Y {row.wrong} · B {row.blank}
+                                            </span>
+                                          </p>
+                                          <ul className="mt-1 space-y-1 pl-3">
+                                            {row.topics.map((topic) => (
+                                              <li key={`${row.subject}-${topic.name}`} className="text-xs text-slate-700">
+                                                <span className="font-medium">{topic.name}</span>
+                                                {' — '}
+                                                <span className="text-red-700">Y {topic.wrong}</span>
+                                                {topic.blank > 0 ? (
+                                                  <span className="text-gray-500"> · B {topic.blank}</span>
+                                                ) : null}
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      ))}
+                                  </div>
+                                </div>
+                              ) : result.source === 'edesis' ? (
+                                <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                                  Konu detayı yok. Edesis&apos;ten ders/konu kırılımını çekmek için aşağıdaki butonu kullanın.
+                                </p>
+                              ) : null}
+
+                              <div className="flex flex-wrap gap-2">
+                                {result.source === 'edesis' ? (
+                                  <button
+                                    type="button"
+                                    disabled={edesisBusyId === result.id}
+                                    onClick={() => void pullEdesisDetail(result)}
+                                    className="px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors text-sm flex items-center gap-1 disabled:opacity-50"
+                                  >
+                                    {edesisBusyId === result.id ? (
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                      <RefreshCw className="w-4 h-4" />
+                                    )}
+                                    Edesis detayını çek
+                                  </button>
+                                ) : null}
                                 <button
-                                  onClick={() => sendToAICoach(result.studentId)}
+                                  onClick={() => sendToAICoach(result.studentId, result)}
                                   className="px-3 py-1.5 bg-purple-100 text-purple-600 rounded-lg hover:bg-purple-200 transition-colors text-sm flex items-center gap-1"
                                 >
                                   <Brain className="w-4 h-4" />

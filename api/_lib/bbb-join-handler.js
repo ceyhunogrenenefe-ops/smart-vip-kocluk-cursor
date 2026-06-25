@@ -1,7 +1,21 @@
 import { requireAuthenticatedActor } from './auth.js';
 import { supabaseAdmin } from './supabase-admin.js';
 import { errorMessage } from './error-msg.js';
-import { ensureBbbMeetingAlive, isBbbJoinUrl, buildBbbAttendeeJoinUrl, parseBbbJoinCredentials, parseBbbMeetingIdFromJoinUrl } from './bbb.js';
+import {
+  ensureBbbMeetingAlive,
+  isBbbJoinUrl,
+  isBbbAutoMeetingLink,
+  isBbbConfigured,
+  isBbbPlaybackUrl,
+  isBbbAudioOnlyPlaybackUrl,
+  buildBbbAttendeeJoinUrl,
+  buildBbbModeratorJoinUrl,
+  parseBbbJoinCredentials,
+  parseBbbPasswordFromJoinUrl,
+  parseBbbMeetingIdFromJoinUrl,
+  getBbbRecordingPlaybackUrlForMeetingIds,
+  collectBbbMeetingIdsForRecording
+} from './bbb.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
 
@@ -61,11 +75,15 @@ export async function handleBbbJoinGet(req, res, config) {
   });
 
   if (!directUrl) {
-    return jsonError(res, 400, 'Bu kayıtta toplantı bağlantısı yok.', { code: 'meeting_link_missing' });
+    if (!isBbbConfigured()) {
+      return jsonError(res, 400, 'Bu kayıtta toplantı bağlantısı yok.', { code: 'meeting_link_missing' });
+    }
+  } else if (!isBbbJoinUrl(directUrl) && !isBbbAutoMeetingLink(directUrl)) {
+    return res.status(200).json({ url: directUrl, refreshed: false, provider: 'external' });
   }
 
-  if (!isBbbJoinUrl(directUrl)) {
-    return res.status(200).json({ url: directUrl, refreshed: false, provider: 'external' });
+  if (!isBbbConfigured()) {
+    return jsonError(res, 503, 'BBB API ayarları eksik.', { code: 'bbb_not_configured' });
   }
 
   try {
@@ -77,7 +95,8 @@ export async function handleBbbJoinGet(req, res, config) {
       attendeeName: ctx.attendeeName,
       moderatorName: ctx.moderatorName,
       durationMinutes: ctx.durationMinutes,
-      meetingKeyPrefix: ctx.meetingKeyPrefix
+      meetingKeyPrefix: ctx.meetingKeyPrefix,
+      storedMeetingId: row.bbb_meeting_id
     });
 
     if (ensured.refreshed) {
@@ -86,6 +105,12 @@ export async function handleBbbJoinGet(req, res, config) {
         ...(ensured.moderatorLink ? { meeting_link_moderator: ensured.moderatorLink } : {}),
         ...(ensured.meetingId ? { bbb_meeting_id: ensured.meetingId } : {}),
         ...(ensured.attendeePW ? { bbb_attendee_pw: ensured.attendeePW } : {})
+      });
+    } else if (ensured.meetingId && !String(row.bbb_meeting_id || '').trim()) {
+      await config.patchLinks(id, {
+        meeting_link: ensured.attendeeLink,
+        ...(ensured.moderatorLink ? { meeting_link_moderator: ensured.moderatorLink } : {}),
+        bbb_meeting_id: ensured.meetingId
       });
     }
 
@@ -99,6 +124,25 @@ export async function handleBbbJoinGet(req, res, config) {
     if (isStudent && config.resolveStudentJoinUrl) {
       const studentUrl = await config.resolveStudentJoinUrl(actor, row, ensured);
       if (studentUrl) url = studentUrl;
+    } else if (!isStudent) {
+      const meetingId =
+        String(ensured.meetingId || row.bbb_meeting_id || '').trim() ||
+        parseBbbMeetingIdFromJoinUrl(ensured.moderatorLink || '') ||
+        parseBbbMeetingIdFromJoinUrl(ensured.attendeeLink || '');
+      const modPw =
+        parseBbbPasswordFromJoinUrl(ensured.moderatorLink || '') ||
+        String(ensured.moderatorPW || '').trim() ||
+        null;
+      const actorName = String(actor.name || actor.email || ctx.moderatorName || 'Öğretmen')
+        .trim()
+        .slice(0, 64);
+      if (meetingId && modPw) {
+        url = buildBbbModeratorJoinUrl({
+          meetingId,
+          moderatorPassword: modPw,
+          fullName: actorName || 'Öğretmen'
+        });
+      }
     }
 
     return res.status(200).json({
@@ -130,6 +174,106 @@ export async function patchRowMeetingLinks(table, id, links) {
       if (e2) throw e2;
       return;
     }
+    throw error;
+  }
+}
+
+/**
+ * @param {import('http').IncomingMessage} req
+ * @param {import('http').ServerResponse} res
+ * @param {{
+ *   idParam?: string,
+ *   loadRow: (id: string) => Promise<Record<string, unknown> | null>,
+ *   canAccess: (actor: object, row: Record<string, unknown>) => boolean | Promise<boolean>,
+ *   patchRecordingLink?: (id: string, playbackUrl: string) => Promise<void>,
+ *   getMeetingKeyPrefix?: (row: Record<string, unknown>) => string,
+ * }} config
+ */
+export async function handleBbbRecordingGet(req, res, config) {
+  if (req.method !== 'GET') return jsonError(res, 405, 'Method not allowed');
+
+  let actor;
+  try {
+    actor = requireAuthenticatedActor(req);
+  } catch (e) {
+    return jsonError(res, 401, errorMessage(e) || 'Missing token');
+  }
+
+  const id = String(req.query?.[config.idParam || 'id'] || req.query?.meeting_id || '').trim();
+  if (!id) return jsonError(res, 400, 'id gerekli');
+
+  const row = await config.loadRow(id);
+  if (!row) {
+    return jsonError(res, 404, 'Oturum bulunamadı.', { code: 'session_not_found' });
+  }
+
+  const allowed = await config.canAccess(actor, row);
+  if (!allowed) return jsonError(res, 403, 'Yetkiniz yok');
+
+  const cached = String(row.recording_link || '').trim();
+  if (cached && (isBbbPlaybackUrl(cached) || !isBbbJoinUrl(cached))) {
+    return res.status(200).json({ ok: true, playbackUrl: cached, cached: true });
+  }
+
+  const meetingId =
+    String(row.bbb_meeting_id || '').trim() ||
+    parseBbbMeetingIdFromJoinUrl(String(row.meeting_link || '')) ||
+    parseBbbMeetingIdFromJoinUrl(String(row.meeting_link_moderator || '')) ||
+    '';
+
+  const keyPrefix = config.getMeetingKeyPrefix ? String(config.getMeetingKeyPrefix(row) || '').trim() : '';
+  const meetingIds = collectBbbMeetingIdsForRecording(row, keyPrefix);
+  if (!meetingIds.length && !meetingId) {
+    return jsonError(res, 400, 'BBB toplantı kimliği bulunamadı.', { code: 'bbb_meeting_id_missing' });
+  }
+
+  try {
+    const playbackUrl = await getBbbRecordingPlaybackUrlForMeetingIds(
+      meetingIds.length ? meetingIds : [meetingId]
+    );
+    if (!playbackUrl) {
+      return jsonError(res, 404, 'Ders kaydı henüz hazır değil. BBB\'de kayıt başlatıldığından emin olun; ders bitince 5–15 dk bekleyin veya BBB yönetiminden kayıt URL\'sini oturuma yapıştırın.', {
+        code: 'recording_not_found'
+      });
+    }
+    if (isBbbAudioOnlyPlaybackUrl(playbackUrl)) {
+      return jsonError(res, 404, 'Video kaydı henüz hazır değil (yalnızca ses kaydı bulundu). Birkaç dakika sonra tekrar deneyin.', {
+        code: 'recording_audio_only'
+      });
+    }
+
+    if (config.patchRecordingLink) {
+      try {
+        await config.patchRecordingLink(id, playbackUrl);
+      } catch {
+        /* recording_link sütunu yoksa sessizce devam */
+      }
+    }
+
+    return res.status(200).json({ ok: true, playbackUrl, cached: false });
+  } catch (e) {
+    const code = String(e?.code || e?.name || '');
+    if (code === 'bbb_timeout' || code === 'BbbApiTimeoutError') {
+      return jsonError(
+        res,
+        504,
+        'BBB sunucusu kayıt listesine zamanında yanıt vermedi. Birkaç dakika sonra tekrar deneyin veya BBB yönetiminden kayıt URL\'sini oturuma yapıştırın.',
+        { code: 'bbb_recording_timeout' }
+      );
+    }
+    return jsonError(res, 502, errorMessage(e), { code: 'bbb_recording_failed' });
+  }
+}
+
+export async function patchRowRecordingLink(table, id, recordingLink) {
+  const patch = {
+    recording_link: recordingLink,
+    updated_at: new Date().toISOString()
+  };
+  const { error } = await supabaseAdmin.from(table).update(patch).eq('id', id);
+  if (error) {
+    const msg = errorMessage(error);
+    if (/recording_link|PGRST204|schema cache/i.test(msg)) return;
     throw error;
   }
 }

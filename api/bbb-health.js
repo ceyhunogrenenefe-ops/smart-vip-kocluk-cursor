@@ -1,8 +1,9 @@
-import { isBbbConfigured, resolveBbbMeetingDurationMinutes } from './_lib/bbb.js';
+import { isBbbConfigured, probeBbbApiReachable, resolveBbbMeetingDurationMinutes } from './_lib/bbb.js';
 
 /**
  * BBB ortam değişkenleri tanımlı mı? (giriş gerekmez — Vercel teşhisi)
  * GET /api/bbb-health
+ * GET /api/bbb-health?probe=1 — BBB API'ye getMeetings ile canlı ping
  */
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -15,13 +16,24 @@ export default async function handler(req, res) {
   const hasSecret = Boolean(
     process.env.BBB_API_SECRET || process.env.BBB_SECRET || process.env.BIGBLUEBUTTON_SECRET
   );
-  return res.status(200).json({
+  const wantProbe = ['1', 'true', 'yes'].includes(String(req.query?.probe || '').toLowerCase());
+  let api_probe = null;
+  if (wantProbe && configured) {
+    api_probe = await probeBbbApiReachable();
+  }
+
+  const healthy = configured && (!wantProbe || api_probe?.ok === true);
+  return res.status(healthy ? 200 : wantProbe && configured ? 503 : 200).json({
     configured,
     has_endpoint: hasEndpoint,
     has_secret: hasSecret,
     meeting_duration_minutes: resolveBbbMeetingDurationMinutes(0),
+    api_probe,
+    healthy,
     hint: configured
-      ? 'BBB API env OK — otomatik oda açılabilir.'
+      ? wantProbe && api_probe && !api_probe.ok
+        ? 'BBB env tanımlı ama sunucu yanıt vermiyor — BBB_API_ENDPOINT, firewall veya BBB sunucu yükünü kontrol edin.'
+        : 'BBB API env OK — otomatik oda açılabilir. Kayıt testi için ?probe=1 ekleyin.'
       : 'Vercel → Settings → Environment Variables → Production: BBB_API_ENDPOINT + BBB_API_SECRET ekleyin ve Redeploy.'
   });
 }

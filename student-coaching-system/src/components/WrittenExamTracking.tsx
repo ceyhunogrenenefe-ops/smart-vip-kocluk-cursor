@@ -1,5 +1,6 @@
 // Türkçe: Yazılı Takip Modülü - Tablo Görünümü
 import React, { useState, useMemo } from 'react';
+import { ScoresLoadingPlaceholder } from '../components/ui/ScoresLoadingPlaceholder';
 import { useApp } from '../context/AppContext';
 import { formatClassLevelLabel } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -52,7 +53,9 @@ export default function WrittenExamTracking() {
     addWrittenExamScore,
     updateWrittenExamScore,
     deleteWrittenExamScore,
-    getWrittenExamStats
+    getWrittenExamStats,
+    appDataLoading,
+    scoresDataReady
   } = useApp();
 
   // State
@@ -248,6 +251,27 @@ export default function WrittenExamTracking() {
       deleteWrittenExamScore(id);
     }
   };
+
+  if (appDataLoading && !scoresDataReady) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 rounded-2xl p-6 text-white">
+          <div className="flex items-center gap-4">
+            <div className="w-16 h-16 bg-white/20 rounded-xl flex items-center justify-center">
+              <FileText className="w-8 h-8" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold">Yazılı Takip</h2>
+              <p className="text-purple-100">
+                {user?.role === 'student' ? 'Kendi sınav notlarınızı takip edin' : 'Öğrenci yazılı sınav notlarını takip edin'}
+              </p>
+            </div>
+          </div>
+        </div>
+        <ScoresLoadingPlaceholder message="Yazılı notları yükleniyor…" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

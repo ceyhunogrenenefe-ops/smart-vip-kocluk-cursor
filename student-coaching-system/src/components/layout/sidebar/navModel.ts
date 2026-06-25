@@ -29,11 +29,19 @@ import {
   Presentation,
   User,
   CalendarDays,
-  Bot
+  Bot,
+  CloudDownload
 } from 'lucide-react';
 import type { UserRole } from '../../../types';
 
 export type FlatNavItem = { path: string; label: string; icon: LucideIcon };
+
+/** Admin / süper admin — kitap siparişleri (sidebar’da üst düzey link) */
+export const NAV_KITAP_SIPARISLERI: FlatNavItem = {
+  path: '/kitap-siparisleri',
+  icon: BookOpen,
+  label: 'Kitap siparişleri'
+};
 
 /** Öğrenci — Akademik Merkez (Öğrenci Paneli üstünde, tek link) */
 export const STUDENT_NAV_ACADEMIC_CENTER: FlatNavItem = {
@@ -89,8 +97,33 @@ const LESSON_PATHS = new Set([
   '/edu-panel',
   '/edu-derslerim',
   '/ai-agents',
+  '/ai-agents-admin',
   '/exams'
 ]);
+
+/** Mobil alt sekme — Ders & Görüşmeler aktif eşleşmesi */
+export const MOBILE_LESSON_MATCH_PATHS = [...LESSON_PATHS] as const;
+
+/** Mobil alt sekme — Akademik takip aktif eşleşmesi */
+export const MOBILE_ACADEMIC_MATCH_PATHS = [
+  '/mobile/akademik',
+  '/academic-center',
+  '/weekly-planner',
+  '/tracking',
+  '/book-tracking',
+  '/exam-tracking',
+  '/edesis',
+  '/written-exam',
+  '/topic-tracking',
+  '/analytics',
+  '/attendance-report',
+  '/soru-sor',
+  '/soru-havuzu',
+  '/soru-analitik',
+  '/student-dashboard',
+  '/student-analytics',
+  '/exam-tracking'
+] as const;
 
 const ACADEMIC_CENTER_PATH = '/academic-center';
 
@@ -99,9 +132,11 @@ const ACADEMIC_PATHS = new Set([
   '/tracking',
   '/book-tracking',
   '/exam-tracking',
+  '/edesis',
   '/written-exam',
   '/topic-tracking',
   '/analytics',
+  '/attendance-report',
   '/soru-sor',
   '/soru-havuzu',
   '/soru-analitik'
@@ -120,19 +155,17 @@ const ORG_SYSTEM_PATHS = new Set([
   '/super-admin',
   '/user-management',
   '/notifications',
-  '/kitap-siparisleri',
   '/system-management',
   '/veli-onay',
-  '/tahsilat-muhasebe'
+  '/muhasebe'
 ]);
 const ORG_SYSTEM_ORDER = [
   '/super-admin',
   '/user-management',
   '/notifications',
-  '/kitap-siparisleri',
   '/system-management',
   '/veli-onay',
-  '/tahsilat-muhasebe'
+  '/muhasebe'
 ] as const;
 
 const SETTINGS_PATHS = new Set(['/settings', '/webhooks', '/my-profile']);
@@ -147,6 +180,7 @@ const LESSON_LABELS: Record<string, string> = {
   '/edu-panel': 'Ders içerik paneli',
   '/edu-derslerim': 'Derslerim',
   '/ai-agents': 'AI Koçlarım',
+  '/ai-agents-admin': 'AI Ders Ajanları',
   '/exams': 'AI Denemelerim'
 };
 
@@ -155,10 +189,12 @@ const ACADEMIC_LABELS: Record<string, string> = {
   '/tracking': 'Haftalık Takip',
   '/book-tracking': 'Kitap Takibi',
   '/exam-tracking': 'Sınav Takibi',
+  '/edesis': 'Edesis',
   '/written-exam': 'Yazılı Takibi',
   '/topic-tracking': 'Konu Takibi',
   '/academic-center': 'Akademik Merkez',
   '/analytics': 'Analiz Paneli',
+  '/attendance-report': 'Yoklama raporu',
   '/soru-sor': 'Soru Sor',
   '/soru-havuzu': 'Soru Havuzu',
   '/soru-analitik': 'Soru Analitiği'
@@ -185,6 +221,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     return [
       { path: '/dashboard', icon: LayoutDashboard, label: 'Ana Panel' },
       { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
+      { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
       { path: '/academic-center', icon: Sparkles, label: 'Akademik Merkez' },
       { path: '/live-lessons', icon: Radio, label: 'Canlı özel dersler' },
       { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
@@ -194,13 +231,14 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
       { path: '/notifications', icon: Bell, label: 'Bildirimler' },
       { path: '/events', icon: CalendarDays, label: 'Etkinlikler' },
-      { path: '/kitap-siparisleri', icon: BookOpen, label: 'Kitap siparişleri' },
+      NAV_KITAP_SIPARISLERI,
+      { path: '/edesis', icon: CloudDownload, label: 'Edesis' },
       { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
       { path: '/subscription', icon: CreditCard, label: 'Abonelik / Paketler' },
       { path: '/topics', icon: BookOpen, label: 'Konu Havuzu' },
       { path: '/system-management', icon: Server, label: 'Sistem Yönetimi' },
       { path: '/veli-onay', icon: FileText, label: 'Veli onayı & e-imza' },
-      { path: '/tahsilat-muhasebe', icon: Wallet, label: 'Tahsilat & taksit' },
+      { path: '/muhasebe', icon: Wallet, label: 'Muhasebe' },
       { path: '/ai-coach', icon: Brain, label: 'AI KOÇ' },
       { path: '/settings', icon: Settings, label: 'Ayarlar' }
     ].concat([NAV_MY_PROFILE]);
@@ -211,7 +249,8 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     !tags.some((t) => ['super_admin', 'admin', 'coach', 'teacher'].includes(t));
   if (isStudentOnlyNav) {
     /** Akademik Merkez, Ders&Görüşme, panel ve Soru Sor Sidebar.tsx’te ayrı */
-    return [{ path: '/student-analytics', icon: BarChart3, label: 'Analizlerim' }];
+    return [{ path: '/student-analytics', icon: BarChart3, label: 'Analizlerim' },
+      { path: '/exam-tracking', icon: ClipboardList, label: 'Deneme analizi' }];
   }
 
   const MENU_ADMIN: FlatNavItem[] = [
@@ -227,24 +266,26 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/academic-center', icon: Sparkles, label: 'Akademik Merkez' },
     { path: '/book-tracking', icon: BookMarked, label: 'Kitap Takibi' },
     { path: '/exam-tracking', icon: ClipboardList, label: 'Sınav Takibi (Denemelerim)' },
+    { path: '/edesis', icon: CloudDownload, label: 'Edesis' },
     { path: '/reports', icon: FileCheck, label: 'Raporlar' },
     { path: '/ai-coach', icon: Brain, label: 'AI KOÇ' },
     { path: '/whatsapp', icon: MessageCircle, label: 'Mesaj gönder' },
     { path: '/message-templates', icon: MessageSquareText, label: 'Mesaj şablonları' },
     { path: '/topics', icon: BookOpen, label: 'Konu Havuzu' },
     { path: '/topic-tracking', icon: CheckSquare, label: 'Konu Takibi' },
-    { path: '/written-exam', icon: FileCheck, label: 'Yazılı Takip' },
-    { path: '/analytics', icon: BarChart3, label: 'Analiz Paneli' },
+      { path: '/written-exam', icon: FileCheck, label: 'Yazılı Takip' },
+      { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
+      { path: '/analytics', icon: BarChart3, label: 'Analiz Paneli' },
     { path: '/soru-havuzu', icon: CircleHelp, label: 'Soru Havuzu' },
     { path: '/webhooks', icon: Webhook, label: 'Webhook Ayarları' },
     { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
     { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
     { path: '/notifications', icon: Bell, label: 'Bildirimler' },
     { path: '/events', icon: CalendarDays, label: 'Etkinlikler' },
-    { path: '/kitap-siparisleri', icon: BookMarked, label: 'Kitap siparişleri' },
+    NAV_KITAP_SIPARISLERI,
     { path: '/system-management', icon: Server, label: 'Sistem Yönetimi' },
     { path: '/veli-onay', icon: FileText, label: 'Veli onayı & e-imza' },
-    { path: '/tahsilat-muhasebe', icon: Wallet, label: 'Tahsilat & taksit' },
+    { path: '/muhasebe', icon: Wallet, label: 'Muhasebe' },
     { path: '/settings', icon: Settings, label: 'Ayarlar' }
   ];
 
@@ -256,6 +297,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/academic-center', icon: Sparkles, label: 'Akademik Merkez' },
     { path: '/live-lessons', icon: Radio, label: 'Canlı özel dersler' },
     { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
+    { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
     { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
     { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
     { path: '/settings', icon: Settings, label: 'Ayarlar' }
@@ -274,6 +316,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/academic-center', icon: Sparkles, label: 'Akademik Merkez' },
     { path: '/book-tracking', icon: BookMarked, label: 'Kitap Takibi' },
     { path: '/exam-tracking', icon: ClipboardList, label: 'Sınav Takibi (Denemelerim)' },
+    { path: '/edesis', icon: CloudDownload, label: 'Edesis' },
     { path: '/topic-tracking', icon: CheckSquare, label: 'Konu Takibi' },
     { path: '/analytics', icon: BarChart3, label: 'Analiz Paneli' },
     { path: '/soru-analitik', icon: CircleHelp, label: 'Soru Analitiği' },
@@ -282,30 +325,29 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/events', icon: CalendarDays, label: 'Etkinlikler' },
     { path: '/ai-coach', icon: Brain, label: 'AI KOÇ' },
     { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
-    { path: '/webhooks', icon: Webhook, label: 'Webhook Ayarları' },
     { path: '/written-exam', icon: FileCheck, label: 'Yazılı Takip' },
-    { path: '/veli-onay', icon: FileText, label: 'Veli onayı & e-imza' },
-    { path: '/tahsilat-muhasebe', icon: Wallet, label: 'Tahsilat & taksit' },
-    { path: '/settings', icon: Settings, label: 'Ayarlar' }
+    { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
+    { path: '/veli-onay', icon: FileText, label: 'Veli onayı & e-imza' }
   ];
+
+  const isCoachPanelUser =
+    tags.includes('coach') && !tags.includes('admin') && !tags.includes('super_admin');
 
   const chunks: FlatNavItem[][] = [];
   if (tags.includes('admin')) chunks.push(MENU_ADMIN);
   if (tags.includes('coach')) chunks.push(MENU_COACH);
-  if (tags.includes('teacher')) chunks.push(MENU_TEACHER);
+  /** Koç paneli varken öğretmen paneli menüsü birleştirilmez */
+  if (tags.includes('teacher') && !tags.includes('coach')) chunks.push(MENU_TEACHER);
 
   if (chunks.length === 0) return [];
 
   let merged = mergeSideMenus(chunks);
-  if (tags.includes('coach') && tags.includes('teacher') && !tags.includes('admin')) {
-    const coachDash = merged.find((m) => m.path === '/coach-dashboard');
-    const teachPanel = merged.find((m) => m.path === '/teacher-panel');
-    if (coachDash && teachPanel) {
-      const rest = merged.filter(
-        (m) => m.path !== '/coach-dashboard' && m.path !== '/teacher-panel'
-      );
-      merged = [coachDash, teachPanel, ...rest];
-    }
+  if (tags.includes('coach')) {
+    merged = merged.filter((m) => m.path !== '/teacher-panel');
+  }
+  if (isCoachPanelUser) {
+    merged = merged.filter((m) => !SETTINGS_PATHS.has(m.path));
+    return merged;
   }
   return withProfileNav(merged);
 }
@@ -422,10 +464,11 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
     '/weekly-planner',
     '/tracking',
     '/book-tracking',
-    '/exam-tracking',
-    '/analytics',
+  '/exam-tracking',
+  '/analytics',
     '/topic-tracking',
-    '/written-exam'
+    '/written-exam',
+    '/attendance-report'
   ] as const;
   const acRank = (p: string) => {
     const i = (academicOrder as readonly string[]).indexOf(p);
@@ -449,4 +492,18 @@ export function pathnameMatchesGroup(pathname: string, kind: NavGroupKind, items
     );
   }
   return items.some((it) => pathname === it.path || pathname.startsWith(`${it.path}/`));
+}
+
+export function getStructuredNavForRoles(tags: UserRole[]): StructuredNav {
+  return structureNavFromFlat(getFlatMenuForRoles(tags));
+}
+
+export function pathnameMatchesMobileTab(
+  pathname: string,
+  tabPath: string,
+  matchPaths?: readonly string[]
+): boolean {
+  if (pathname === tabPath || pathname.startsWith(`${tabPath}/`)) return true;
+  if (!matchPaths?.length) return false;
+  return matchPaths.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }

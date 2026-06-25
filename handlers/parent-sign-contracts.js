@@ -1,6 +1,7 @@
 import { requireAuthenticatedActor, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
+import { normalizePhoneToE164 } from '../api/_lib/phone-whatsapp.js';
 import {
   buildAwaitingAdminPriceHtml,
   buildParentContractHtml,
@@ -166,6 +167,61 @@ function publicBaseUrl() {
   return '';
 }
 
+/** Veli sözleşme HTML'ini mevcut satır + güncel kayıt JSON ile yeniden üretir (taksit vade düzenlemesi vb.). */
+async function rebuildContractMergedHtml(existing, kayitJson) {
+  const institutionId = String(existing.institution_id || '').trim();
+  const { data: inst, error: iErr } = await supabaseAdmin
+    .from('institutions')
+    .select('id,name')
+    .eq('id', institutionId)
+    .maybeSingle();
+  if (iErr) throw iErr;
+
+  const verifyToken = String(existing.verify_token || '');
+  const base = publicBaseUrl();
+  const verifyUrl = verifyToken && base ? `${base}/verify-document?t=${encodeURIComponent(verifyToken)}` : '#';
+  const kurum_kodu = institutionCodeFromRow(inst || { id: institutionId });
+  const sozlesme_turu = normalizeSozlesmeTuru(existing.sozlesme_turu);
+  const sozlesme_basligi =
+    String(existing.sozlesme_basligi || '').trim() || resolveSozlesmeBasligi(sozlesme_turu, '', '');
+  const institution_legal_html = await institutionLegalHtmlForContract(institutionId, sozlesme_turu);
+  const dersSnapshot = normalizeDersSatirlari(existing.ders_programi_snapshot);
+  const para_birimi = normalizeParaBirimi(existing.para_birimi);
+  const kj = kayitJson && typeof kayitJson === 'object' ? kayitJson : {};
+  const taksit_kartlari = Array.isArray(kj.taksit_kartlari) ? kj.taksit_kartlari : [];
+  const taksit_sayisi = Math.max(
+    1,
+    Math.min(48, Math.round(Number(existing.taksit_sayisi) || taksit_kartlari.length || 1))
+  );
+
+  return buildParentContractHtml({
+    ogrenci_ad: String(existing.ogrenci_ad || ''),
+    ogrenci_soyad: String(existing.ogrenci_soyad || ''),
+    veli_ad: String(existing.veli_ad || ''),
+    veli_soyad: String(existing.veli_soyad || ''),
+    telefon: String(existing.telefon || ''),
+    adres: String(existing.adres || ''),
+    sinif: String(existing.sinif || ''),
+    program_adi: String(existing.program_adi || ''),
+    baslangic_tarihi: String(existing.baslangic_tarihi || '').slice(0, 10),
+    bitis_tarihi: String(existing.bitis_tarihi || '').slice(0, 10),
+    haftalik_ders_saati: Number(existing.haftalik_ders_saati) || 0,
+    ucret: Number(existing.ucret) || 0,
+    taksit_sayisi,
+    para_birimi,
+    kurum_kodu,
+    contract_number: String(existing.contract_number || ''),
+    kurum_adi: inst?.name || '',
+    verify_url: verifyUrl || '#',
+    document_title: sozlesme_basligi,
+    extra_detail_plain: String(existing.sablon_ek_detay_snapshot || ''),
+    ders_satirlari: dersSnapshot,
+    kayit_formu_detay: kj,
+    taksit_kartlari,
+    institution_legal_html
+  });
+}
+
 const PLATFORM_INSTITUTION_ID = '73323d75-eea1-4552-8bba-d50555423589';
 
 function verifyPublicFormKey(req) {
@@ -213,8 +269,10 @@ function parsePublicRegistrationFields(body) {
   const eposta = T('eposta');
   const il = T('il');
   const ilce = T('ilce');
-  let veli_tel = T('veli_tel').replace(/\D/g, '');
-  let ogrenci_tel = T('ogrenci_tel').replace(/\D/g, '');
+  let veli_tel = normalizePhoneToE164(T('veli_tel'));
+  veli_tel = veli_tel ? veli_tel.replace(/\D/g, '') : '';
+  let ogrenci_tel = normalizePhoneToE164(T('ogrenci_tel'));
+  ogrenci_tel = ogrenci_tel ? ogrenci_tel.replace(/\D/g, '') : '';
   const sinif_form = T('sinif_form');
   const adres_aciklama = T('adres_aciklama');
   const programs = parseVeliProgramForms(body);
@@ -230,8 +288,8 @@ function parsePublicRegistrationFields(body) {
   for (const p of programs) {
     if (!VELI_KAYIT_PROGRAM_SET.has(p)) return { error: 'program_invalid', status: 400 };
   }
-  if (!veli_tel || veli_tel.length < 10) return { error: 'veli_tel_invalid', status: 400 };
-  if (!ogrenci_tel || ogrenci_tel.length < 10) return { error: 'ogrenci_tel_invalid', status: 400 };
+  if (!veli_tel || veli_tel.length < 10 || veli_tel.length > 15) return { error: 'veli_tel_invalid', status: 400 };
+  if (!ogrenci_tel || ogrenci_tel.length < 10 || ogrenci_tel.length > 15) return { error: 'ogrenci_tel_invalid', status: 400 };
   if (!adres_aciklama) return { error: 'adres_required', status: 400 };
   if (!il) return { error: 'il_required', status: 400 };
   if (!ilce) return { error: 'ilce_required', status: 400 };
@@ -821,9 +879,22 @@ export default async function handler(req, res) {
         tkV[idxV] = { ...curV, vade_tarihi: vadeRaw };
         kjV.taksit_kartlari = tkV;
         const nowV = new Date().toISOString();
+        const isSignedV =
+          String(existing.status || '').toLowerCase() === 'signed' || Boolean(existing.signed_at);
+        const updateV = { kayit_formu_json: kjV, updated_at: nowV };
+        if (!isSignedV && Number(existing.ucret) > 0) {
+          try {
+            updateV.merged_html = await rebuildContractMergedHtml(existing, kjV);
+          } catch (rebuildErr) {
+            console.warn(
+              '[parent-sign-contracts] merged_html rebuild on taksit_vade_update',
+              rebuildErr instanceof Error ? rebuildErr.message : String(rebuildErr)
+            );
+          }
+        }
         const { data: updV, error: uErrV } = await supabaseAdmin
           .from('parent_sign_contracts')
-          .update({ kayit_formu_json: kjV, updated_at: nowV })
+          .update(updateV)
           .eq('id', id)
           .select()
           .single();

@@ -67,7 +67,7 @@ export default async function handler(req, res) {
   const isSendRoute = /\/send\/?$/i.test(pathPart);
   const isStatusRoute = /\/status\/?$/i.test(pathPart);
   const timeoutMs = isSendRoute
-    ? Math.min(59000, Math.max(20000, Number(process.env.WA_GATEWAY_SEND_TIMEOUT_MS) || 55000))
+    ? Math.min(115000, Math.max(25000, Number(process.env.WA_GATEWAY_SEND_TIMEOUT_MS) || 110000))
     : Math.min(45000, Math.max(10000, Number(process.env.WA_GATEWAY_STATUS_TIMEOUT_MS) || 30000));
 
   const fetchOnce = async () => {
@@ -82,9 +82,13 @@ export default async function handler(req, res) {
 
   try {
     let r = await fetchOnce();
-    const canRetry = method === 'GET' || method === 'HEAD' || isStatusRoute;
-    if (r.status === 502 && canRetry) {
-      await new Promise((resolve) => setTimeout(resolve, 250));
+    const canRetry =
+      method === 'GET' ||
+      method === 'HEAD' ||
+      isStatusRoute ||
+      (isSendRoute && (r.status === 502 || r.status === 504));
+    if (canRetry && (r.status === 502 || r.status === 504)) {
+      await new Promise((resolve) => setTimeout(resolve, isSendRoute ? 400 : 250));
       r = await fetchOnce();
     }
     const buf = Buffer.from(await r.arrayBuffer());

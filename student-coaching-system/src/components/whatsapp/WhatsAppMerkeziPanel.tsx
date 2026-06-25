@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Loader2, RefreshCw, Send } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Loader2, RefreshCw, Send } from 'lucide-react';
 import { apiFetch } from '../../lib/session';
+import { cn } from '../../lib/utils';
 
 interface CenterSummary {
   sent_today: number;
@@ -201,6 +202,7 @@ export default function WhatsAppMerkeziPanel() {
   const [testPhone, setTestPhone] = useState('');
   const [testingType, setTestingType] = useState<string | null>(null);
   const [testMsg, setTestMsg] = useState('');
+  const [cronErrorsOpen, setCronErrorsOpen] = useState(false);
 
   const isAdmin = payload?.mode === 'admin';
 
@@ -468,20 +470,41 @@ export default function WhatsAppMerkeziPanel() {
           ) : null}
 
           {(payload.cron_recent_errors || []).length > 0 ? (
-            <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
-              <p className="font-semibold text-red-950">Son cron / otomasyon hataları</p>
-              <ul className="mt-2 space-y-2 text-sm text-red-900">
-                {payload.cron_recent_errors.map((e, i) => (
-                  <li key={`${e.job_key}-${i}`} className="rounded-lg bg-white/80 px-3 py-2">
-                    <span className="font-mono text-xs">{e.job_key}</span>
-                    <span className="text-slate-600">
-                      {' '}
-                      · {e.at ? new Date(e.at).toLocaleString('tr-TR') : ''}
-                    </span>
-                    <div className="mt-1 text-xs break-words">{e.error || e.skipped || '—'}</div>
-                  </li>
-                ))}
-              </ul>
+            <div className="overflow-hidden rounded-2xl border border-red-200 bg-red-50">
+              <button
+                type="button"
+                onClick={() => setCronErrorsOpen((open) => !open)}
+                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-red-100/60"
+                aria-expanded={cronErrorsOpen}
+              >
+                <div>
+                  <p className="font-semibold text-red-950">Son cron / otomasyon hataları</p>
+                  <p className="text-xs text-red-800">
+                    {payload.cron_recent_errors.length} kayıt — detay için genişletin
+                  </p>
+                </div>
+                <ChevronDown
+                  className={cn(
+                    'h-5 w-5 shrink-0 text-red-900 transition-transform duration-200',
+                    cronErrorsOpen && 'rotate-180'
+                  )}
+                  aria-hidden
+                />
+              </button>
+              {cronErrorsOpen ? (
+                <ul className="max-h-72 space-y-2 overflow-auto border-t border-red-200 px-4 py-3 text-sm text-red-900">
+                  {payload.cron_recent_errors.map((e, i) => (
+                    <li key={`${e.job_key}-${i}`} className="rounded-lg bg-white/80 px-3 py-2">
+                      <span className="font-mono text-xs">{e.job_key}</span>
+                      <span className="text-slate-600">
+                        {' '}
+                        · {e.at ? new Date(e.at).toLocaleString('tr-TR') : ''}
+                      </span>
+                      <div className="mt-1 text-xs break-words">{e.error || e.skipped || '—'}</div>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           ) : null}
 

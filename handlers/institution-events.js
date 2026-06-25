@@ -9,7 +9,8 @@ import {
   sendEventInvites,
   aggregateParticipantStats,
   resolveEventMeetingLink,
-  templateBindingsNeedLink
+  templateBindingsNeedLink,
+  reconcileEventParticipantStatuses
 } from '../api/_lib/institution-event-send.js';
 import { syncSeminarRegistrationsToEvents } from '../api/_lib/sync-seminar-registrations.js';
 import {
@@ -230,6 +231,15 @@ async function loadEvent(id, institutionId) {
 async function loadEventWithStats(id, institutionId) {
   const row = await loadEvent(id, institutionId);
   if (!row) return null;
+  try {
+    await reconcileEventParticipantStatuses(id);
+    const refreshed = await loadEvent(id, institutionId);
+    if (refreshed) {
+      return { ...refreshed, whatsapp_stats: aggregateParticipantStats(refreshed.participants) };
+    }
+  } catch (e) {
+    console.warn('[institution-events] reconcile', e?.message || e);
+  }
   return { ...row, whatsapp_stats: aggregateParticipantStats(row.participants) };
 }
 

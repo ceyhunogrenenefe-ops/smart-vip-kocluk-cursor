@@ -29,7 +29,7 @@ function humanizeGatewayError(status: number, data: { error?: string; detail?: s
     return 'Bu numara WhatsApp’ta kayıtlı görünmüyor. Veli numarasını 05… veya 905… formatında güncelleyin.';
   }
   if (code === 'gateway_upstream_timeout') {
-    return `VPS gateway yanıt vermedi (${data.detail || 'zaman aşımı'}). WHATSAPP_GATEWAY_UPSTREAM ve pm2 kontrol edin.`;
+    return 'Mesaj gönderimi zaman aşımına uğradı. VPS gateway yanıt vermedi — pm2 restart whatsapp-gateway; WHATSAPP_GATEWAY_UPSTREAM doğru mu kontrol edin.';
   }
   if (code === 'phone_and_message_required') {
     return 'Telefon veya mesaj eksik (proxy gövdesi ulaşmamış olabilir). Sayfayı yenileyip tekrar deneyin.';

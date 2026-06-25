@@ -26,15 +26,24 @@ export type KitapciPortalOrder = {
   created_at: string;
 };
 
-export async function fetchKitapciPortal(token: string) {
-  const res = await fetch(
-    `${apiBase()}/api/book-orders-kitapci-portal?token=${encodeURIComponent(token)}`
-  );
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error((j as { hint?: string; error?: string }).hint || (j as { error?: string }).error || 'Panel yüklenemedi');
+export async function fetchKitapciPortal(token: string, opts?: { retry?: boolean }) {
+  const url = `${apiBase()}/api/book-orders-kitapci-portal?token=${encodeURIComponent(token)}`;
+  const attempt = async () => {
+    const res = await fetch(url);
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const body = j as { hint?: string; error?: string; detail?: string };
+      throw new Error(body.hint || body.detail || body.error || `Panel yüklenemedi (${res.status})`);
+    }
+    return j as { bookseller: { name: string; city?: string | null }; orders: KitapciPortalOrder[] };
+  };
+  try {
+    return await attempt();
+  } catch (e) {
+    if (opts?.retry === false) throw e;
+    await new Promise((r) => setTimeout(r, 800));
+    return attempt();
   }
-  return j as { bookseller: { name: string; city?: string | null }; orders: KitapciPortalOrder[] };
 }
 
 export async function confirmKitapciPortalOrder(token: string, orderId: string) {

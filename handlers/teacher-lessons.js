@@ -1,7 +1,8 @@
 import { requireAuthenticatedActor, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { enrichMeetingRowsJoinLink } from '../api/_lib/bbb.js';
 import { resolveBbbOrManualMeetingLink } from '../api/_lib/resolve-bbb-meeting-link.js';
-import { handleBbbJoinGet, patchRowMeetingLinks } from '../api/_lib/bbb-join-handler.js';
+import { handleBbbJoinGet, handleBbbRecordingGet, patchRowMeetingLinks, patchRowRecordingLink } from '../api/_lib/bbb-join-handler.js';
+import { createGuestJoinShareLink } from '../api/_lib/bbb-guest-join-core.js';
 import { insertOneOptionalModerator, insertManyOptionalModerator } from '../api/_lib/supabase-optional-moderator.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
@@ -1087,6 +1088,81 @@ async function handlePatch(req, res) {
 
     if (Object.keys(patch).length === 0) return jsonError(res, 400, 'Güncellenecek alan yok.');
 
+    const applyScope = String(body.apply_scope || body.applyScope || 'single').trim().toLowerCase();
+    const seriesId = row.series_id ? String(row.series_id) : '';
+
+    if (applyScope === 'series' && seriesId) {
+      const seriesPatch = { ...patch };
+      delete seriesPatch.lesson_date;
+
+      const { data: peerRows, error: prErr } = await supabaseAdmin
+        .from('teacher_lessons')
+        .select('id,lesson_date,student_id,teacher_id,duration_minutes,start_time,end_time,status')
+        .eq('series_id', seriesId)
+        .eq('status', 'scheduled');
+      if (prErr) {
+        if (isTeacherLessonsRelationMissingError(prErr)) {
+          return res.status(503).json(teacherLessonsMissingBody());
+        }
+        throw prErr;
+      }
+      const peers = peerRows || [];
+      if (peers.length > 1) {
+        if (seriesPatch.start_time || seriesPatch.end_time || seriesPatch.teacher_id || seriesPatch.duration_minutes) {
+          for (const peer of peers) {
+            const teacherForConflict = String(
+              (seriesPatch.teacher_id ?? peer.teacher_id ?? row.teacher_id) || ''
+            );
+            const lessonDate = String(peer.lesson_date || '').trim();
+            const startRaw =
+              seriesPatch.start_time !== undefined ? body.start_time ?? peer.start_time : peer.start_time;
+            const dur =
+              seriesPatch.duration_minutes != null
+                ? Number(seriesPatch.duration_minutes)
+                : peer.duration_minutes != null
+                  ? Number(peer.duration_minutes)
+                  : 60;
+            const win = computeScheduledWindow(lessonDate, startRaw, dur);
+            if ('error' in win) return jsonError(res, 400, win.error);
+            const conflict = await hasTeacherConflict({
+              teacherId: teacherForConflict,
+              lessonDate: win.lesson_date,
+              startTime: win.start_time,
+              endTime: win.end_time,
+              excludeId: String(peer.id)
+            });
+            if (conflict) {
+              return jsonError(res, 409, 'Aynı öğretmen aynı saatte canlı özel ders alamaz.', {
+                code: 'teacher_time_conflict',
+                lesson_date: win.lesson_date
+              });
+            }
+          }
+        }
+
+        const peerIds = peers.map((p) => String(p.id)).filter(Boolean);
+        const { data: batchUpdated, error: batchErr } = await supabaseAdmin
+          .from('teacher_lessons')
+          .update(seriesPatch)
+          .in('id', peerIds)
+          .select('*');
+        if (batchErr) {
+          if (isTeacherLessonsRelationMissingError(batchErr)) {
+            return res.status(503).json(teacherLessonsMissingBody());
+          }
+          return respondSupabaseError(res, batchErr);
+        }
+        await syncTeacherLessonsScheduledToCompleted();
+        const primary =
+          (batchUpdated || []).find((r) => String(r.id) === id) || batchUpdated?.[0] || row;
+        return res.status(200).json({
+          data: mapRowToApi(primary),
+          updated_count: batchUpdated?.length ?? peerIds.length,
+          batch: true
+        });
+      }
+    }
+
     const nextStatus = patch.status !== undefined ? String(patch.status) : row.status;
     const wasActive = ['scheduled', 'completed'].includes(row.status);
     const willBeActive = ['scheduled', 'completed'].includes(nextStatus);
@@ -1185,6 +1261,36 @@ async function handleDelete(req, res) {
       return jsonError(res, 403, 'forbidden');
     }
 
+    const applyScope = String(req.query.apply_scope || req.query.applyScope || 'single')
+      .trim()
+      .toLowerCase();
+    const seriesId = row.series_id ? String(row.series_id) : '';
+    if (applyScope === 'series' && seriesId) {
+      const { data: peerRows, error: prErr } = await supabaseAdmin
+        .from('teacher_lessons')
+        .select('id')
+        .eq('series_id', seriesId)
+        .eq('status', 'scheduled');
+      if (prErr) {
+        if (isTeacherLessonsRelationMissingError(prErr)) {
+          return res.status(503).json(teacherLessonsMissingBody());
+        }
+        throw prErr;
+      }
+      const peerIds = (peerRows || []).map((p) => String(p.id)).filter(Boolean);
+      if (peerIds.length > 1) {
+        const { error: batchDelErr } = await supabaseAdmin.from('teacher_lessons').delete().in('id', peerIds);
+        if (batchDelErr) {
+          if (isTeacherLessonsRelationMissingError(batchDelErr)) {
+            return res.status(503).json(teacherLessonsMissingBody());
+          }
+          return respondSupabaseError(res, batchDelErr);
+        }
+        await syncTeacherLessonsScheduledToCompleted();
+        return res.status(200).json({ ok: true, deleted_count: peerIds.length, batch: true });
+      }
+    }
+
     const { error: delErr } = await supabaseAdmin.from('teacher_lessons').delete().eq('id', id);
     if (delErr) {
       if (isTeacherLessonsRelationMissingError(delErr)) {
@@ -1249,9 +1355,46 @@ async function handleTeacherLessonBbbJoin(req, res) {
     patchLinks: (id, links) =>
       patchRowMeetingLinks('teacher_lessons', id, {
         meeting_link: links.meeting_link,
-        meeting_link_moderator: links.meeting_link_moderator
+        meeting_link_moderator: links.meeting_link_moderator,
+        bbb_meeting_id: links.bbb_meeting_id,
+        bbb_attendee_pw: links.bbb_attendee_pw
       })
   });
+}
+
+async function handleTeacherLessonBbbRecording(req, res) {
+  return handleBbbRecordingGet(req, res, {
+    loadRow: async (id) => {
+      const { data, error } = await supabaseAdmin.from('teacher_lessons').select('*').eq('id', id).maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    canAccess: canAccessTeacherLesson,
+    patchRecordingLink: (id, playbackUrl) => patchRowRecordingLink('teacher_lessons', id, playbackUrl),
+    getMeetingKeyPrefix: (row) => `tljoin${String(row.id || '').replace(/-/g, '')}`
+  });
+}
+
+async function handleTeacherGuestJoinLink(req, res) {
+  let actor;
+  try {
+    actor = requireAuthenticatedActor(req);
+  } catch (e) {
+    return jsonError(res, 401, errorMessage(e) || 'Missing token');
+  }
+  if (actor.role === 'student') return jsonError(res, 403, 'Yetkiniz yok');
+  const id = String(req.query?.id || '').trim();
+  if (!id) return jsonError(res, 400, 'id gerekli');
+  const { data: row, error } = await supabaseAdmin.from('teacher_lessons').select('*').eq('id', id).maybeSingle();
+  if (error) return jsonError(res, 500, errorMessage(error));
+  if (!row) return jsonError(res, 404, 'Kayıt bulunamadı');
+  if (!(await canAccessTeacherLesson(actor, row))) return jsonError(res, 403, 'Yetkiniz yok');
+  try {
+    const link = await createGuestJoinShareLink({ kind: 'private', id });
+    return res.status(200).json({ ok: true, ...link });
+  } catch (e) {
+    return jsonError(res, 400, errorMessage(e));
+  }
 }
 
 export default async function handler(req, res) {
@@ -1259,6 +1402,8 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     if (op === 'summary') return handleSummary(req, res);
     if (op === 'bbb-join') return handleTeacherLessonBbbJoin(req, res);
+    if (op === 'bbb-recording') return handleTeacherLessonBbbRecording(req, res);
+    if (op === 'guest-join-link') return handleTeacherGuestJoinLink(req, res);
     return handleList(req, res);
   }
   if (req.method === 'POST') {

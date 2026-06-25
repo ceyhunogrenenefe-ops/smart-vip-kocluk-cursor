@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { apiFetch } from '../lib/session';
@@ -8,12 +9,15 @@ import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShe
 import { ClassLiveStudentMobileCalendar } from '../components/liveLessons/ClassLiveStudentMobileCalendar';
 import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
 import { useStudentMobileShell } from '../hooks/useStudentMobileShell';
-import { turkishFold } from '../lib/userBulkImport';
+import { useMobileAppShell } from '../hooks/useMobileAppShell';
 import type { Student } from '../types';
 import { GripVertical, KeyRound, Loader2, Pencil, PlayCircle, Trash2, FileDown, Bell } from 'lucide-react';
 import BbbAutoLinkFieldHint from '../components/liveLessons/BbbAutoLinkFieldHint';
-import { isBbbJoinUrl } from '../lib/liveLessonUtils';
-import { openBbbJoin } from '../lib/bbbJoin';
+import { isBbbJoinUrl, hasClassSessionRecordingAccess, isBbbPlaybackUrl, needsBbbJoinFlow, displayMeetingLinkForRow, meetingLinkForSave } from '../lib/liveLessonUtils';
+import { openBbbJoin, openBbbRecording } from '../lib/bbbJoin';
+import ClassLiveClassManager from '../components/liveLessons/ClassLiveClassManager';
+import { copyGuestJoinShareText } from '../lib/bbbGuestJoin';
+import { useRecordingUnavailableAlert, recordingUnavailableText } from '../hooks/useRecordingUnavailableAlert';
 
 type ClassRow = {
   id: string;
@@ -26,31 +30,6 @@ type ClassRow = {
   student_ids: string[];
 };
 
-function compactLevelKey(s: string): string {
-  return turkishFold(String(s)).replace(/[\s\-_/]/g, '');
-}
-
-/** Grup sınıfı seviye + şubesi seçiliyken yalnızca eşleşen öğrencileri göster */
-function studentMatchesClassLevelAndBranch(
-  s: Student,
-  classLevel: string | null | undefined,
-  classBranch: string | null | undefined
-): boolean {
-  const lv = String(classLevel || '').trim();
-  if (!lv) return true;
-  const stLev = String(s.classLevel ?? '').trim();
-  if (!stLev) return false;
-  const levelOk =
-    compactLevelKey(stLev) === compactLevelKey(lv) ||
-    compactLevelKey(stLev).includes(compactLevelKey(lv)) ||
-    compactLevelKey(lv).includes(compactLevelKey(stLev));
-  if (!levelOk) return false;
-  const br = String(classBranch || '').trim();
-  if (!br) return true;
-  const sch = String(s.school ?? '').trim();
-  if (!sch) return false;
-  return compactLevelKey(sch) === compactLevelKey(br);
-}
 type SlotRow = {
   id: string;
   class_id: string;
@@ -66,15 +45,6 @@ type SlotRow = {
   homework?: string | null;
 };
 type TeacherOption = { id: string; name: string };
-type GroupLessonSummaryRow = {
-  teacher_id: string;
-  class_id: string;
-  teacher_name: string;
-  class_name: string;
-  completed_lesson_count: number;
-  total_minutes: number;
-  total_hours: number;
-};
 type SessionRow = {
   id: string;
   class_id: string;
@@ -86,29 +56,40 @@ type SessionRow = {
   teacher_name?: string;
   meeting_link: string;
   join_link?: string;
+  recording_link?: string | null;
+  bbb_meeting_id?: string | null;
   status: string;
   homework?: string | null;
   reminder_sent?: boolean;
+  schedule_batch_id?: string | null;
 };
 
-/** Canlı grup dersi sınıf oluştur: sınıf seviye / programa göre seçenekler */
-const CLASS_LEVEL_OPTIONS: { value: string; label: string }[] = [
-  { value: '3', label: '3' },
-  { value: '4', label: '4' },
-  { value: '5', label: '5' },
-  { value: '6', label: '6' },
-  { value: '7', label: '7' },
-  { value: 'LGS', label: 'LGS' },
-  { value: '9', label: '9' },
-  { value: '10', label: '10' },
-  { value: '11', label: '11' },
-  { value: 'TYT', label: 'TYT' },
-  { value: 'YKS EŞİTAĞIRLIK', label: 'YKS Eşit Ağırlık' },
-  { value: 'YKS SAYISAL', label: 'YKS Sayısal' },
-  { value: 'AP', label: 'AP' },
-  { value: 'IB', label: 'IB' },
-  { value: 'YÖS', label: 'YÖS' }
-];
+function normalizeSessionTime(t: string): string {
+  return String(t || '').slice(0, 8);
+}
+
+function sessionBatchSignature(session: SessionRow): string {
+  return [
+    String(session.class_id || ''),
+    String(session.subject || '').trim(),
+    String(session.teacher_id || ''),
+    normalizeSessionTime(session.start_time),
+    normalizeSessionTime(session.end_time)
+  ].join('|');
+}
+
+/** Toplu planlanmış oturum eşleri (schedule_batch_id veya aynı şablon imzası). */
+function inferSessionBatchPeers(session: SessionRow, pool: SessionRow[]): SessionRow[] {
+  const scheduled = pool.filter((s) => s.status === 'scheduled');
+  if (session.schedule_batch_id) {
+    const peers = scheduled.filter((s) => s.schedule_batch_id === session.schedule_batch_id);
+    if (peers.length > 1) return peers;
+  }
+  const sig = sessionBatchSignature(session);
+  const peers = scheduled.filter((s) => sessionBatchSignature(s) === sig);
+  return peers.length > 1 ? peers : [session];
+}
+
 const DAY_LABELS = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
 
 function isoFromLocalDate(d: Date): string {
@@ -152,7 +133,6 @@ function dowSlotFromIso(iso: string): number {
 }
 
 const todayIso = () => isoFromLocalDate(new Date());
-const monthStartIso = () => isoFromLocalDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
 
 export default function ClassLiveLessons() {
   const { effectiveUser } = useAuth();
@@ -162,9 +142,10 @@ export default function ClassLiveLessons() {
   const actorUserId = String(effectiveUser?.id || '');
   const canManageClasses = role === 'admin' || role === 'super_admin' || role === 'coach';
   const canManageSlots = canManageClasses || role === 'teacher';
-  const canViewPaymentSummary = role === 'super_admin';
+  const canViewPaymentSummary = role === 'admin' || role === 'super_admin';
   const isStudentView = role.toLowerCase() === 'student';
   const studentMobileShell = useStudentMobileShell();
+  const mobileAppShell = useMobileAppShell();
   const [isCompactMobile, setIsCompactMobile] = useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false
   );
@@ -177,7 +158,9 @@ export default function ClassLiveLessons() {
     return () => mq.removeEventListener('change', sync);
   }, []);
 
-  const showMobileCalendar = isStudentView && (studentMobileShell || isCompactMobile);
+  const showMobileCalendar =
+    (isStudentView && (studentMobileShell || isCompactMobile)) ||
+    (!isStudentView && mobileAppShell);
 
   const resolvedStudentId = useMemo(() => {
     const sid =
@@ -196,18 +179,10 @@ export default function ClassLiveLessons() {
   const [selectedClassId, setSelectedClassId] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const { showRecordingUnavailable, recordingAlertModal } = useRecordingUnavailableAlert();
   const [loading, setLoading] = useState(false);
+  const [scheduleBusy, setScheduleBusy] = useState(false);
   const [teacherOptions, setTeacherOptions] = useState<TeacherOption[]>([]);
-
-  const [newClassName, setNewClassName] = useState('');
-  const [newClassLevel, setNewClassLevel] = useState('9');
-  const [newClassTeacherIds, setNewClassTeacherIds] = useState<string[]>([]);
-  const [newClassStudentIds, setNewClassStudentIds] = useState<string[]>([]);
-  const [newClassBranch, setNewClassBranch] = useState('');
-  /** Seçili sınıfta atanacak şube (students.school ile eşleşir); üyeler API'siyle kaydedilir */
-  const [assignmentBranchDraft, setAssignmentBranchDraft] = useState('');
-  const [classNameDraft, setClassNameDraft] = useState('');
-  const [classNameSaving, setClassNameSaving] = useState(false);
 
   const [slotDay, setSlotDay] = useState(1);
   const [slotHour, setSlotHour] = useState(10);
@@ -215,15 +190,10 @@ export default function ClassLiveLessons() {
   const [slotSubject, setSlotSubject] = useState('');
   const [slotTeacherId, setSlotTeacherId] = useState('');
   const [slotMeetingLink, setSlotMeetingLink] = useState('');
-  const [summaryFrom, setSummaryFrom] = useState(monthStartIso());
-  const [summaryTo, setSummaryTo] = useState(todayIso());
-  const [summaryTeacherId, setSummaryTeacherId] = useState('');
-  const [summaryClassId, setSummaryClassId] = useState('');
-  const [summaryRows, setSummaryRows] = useState<GroupLessonSummaryRow[]>([]);
-  const [summaryLoading, setSummaryLoading] = useState(false);
 
   const [calendarWeekMondayIso, setCalendarWeekMondayIso] = useState(() => mondayIsoContaining());
   const [weekSessions, setWeekSessions] = useState<SessionRow[]>([]);
+  const [batchSessionsPool, setBatchSessionsPool] = useState<SessionRow[]>([]);
   const [calendarLoading, setCalendarLoading] = useState(false);
   const classCalendarPdfRef = useRef<HTMLDivElement>(null);
   const [classPdfSnapBusy, setClassPdfSnapBusy] = useState(false);
@@ -285,6 +255,15 @@ export default function ClassLiveLessons() {
     }
   };
 
+  const copySessionGuestLink = useCallback(async (s: SessionRow) => {
+    try {
+      await copyGuestJoinShareText('class', s.id);
+      setNotice('Davet metni panoya kopyalandı (WhatsApp için kısa link + ders bilgisi).');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
   const joinClassSession = useCallback(async (s: { id: string; join_link?: string; meeting_link?: string }) => {
     const url = String(s.join_link || s.meeting_link || '').trim();
     if (!url) {
@@ -292,7 +271,7 @@ export default function ClassLiveLessons() {
       return;
     }
     try {
-      if (isBbbJoinUrl(url)) {
+      if (needsBbbJoinFlow(url)) {
         await openBbbJoin('class-live-lessons', s.id);
       } else {
         window.open(url, '_blank', 'noopener,noreferrer');
@@ -301,6 +280,33 @@ export default function ClassLiveLessons() {
       setError(e instanceof Error ? e.message : String(e));
     }
   }, []);
+
+  const watchClassSessionRecording = useCallback(
+    async (s: {
+      id: string;
+      join_link?: string;
+      meeting_link?: string;
+      recording_link?: string | null;
+    }) => {
+      const cached = String(s.recording_link || '').trim();
+      const sessionLink = String(s.join_link || s.meeting_link || '').trim();
+      try {
+        if (cached && (isBbbPlaybackUrl(cached) || !isBbbJoinUrl(cached))) {
+          window.open(cached, '_blank', 'noopener,noreferrer');
+          return;
+        }
+        if (needsBbbJoinFlow(sessionLink)) {
+          await openBbbRecording('class-live-lessons', s.id);
+          return;
+        }
+        if (sessionLink) window.open(sessionLink, '_blank', 'noopener,noreferrer');
+        else showRecordingUnavailable('Kayıt bağlantısı yok.');
+      } catch (e) {
+        showRecordingUnavailable(recordingUnavailableText(e));
+      }
+    },
+    [showRecordingUnavailable]
+  );
 
   const [attendanceSession, setAttendanceSession] = useState<SessionRow | null>(null);
   const [attendanceDraft, setAttendanceDraft] = useState<
@@ -311,6 +317,7 @@ export default function ClassLiveLessons() {
 
   const [editingSession, setEditingSession] = useState<SessionRow | null>(null);
   const [editingSlotRow, setEditingSlotRow] = useState<SlotRow | null>(null);
+  const [sessionEditScope, setSessionEditScope] = useState<'single' | 'batch'>('single');
   const [sessionEditBusy, setSessionEditBusy] = useState(false);
   const [slotEditBusy, setSlotEditBusy] = useState(false);
   const [reminderBusyId, setReminderBusyId] = useState<string | null>(null);
@@ -356,20 +363,6 @@ export default function ClassLiveLessons() {
     return list;
   }, [teacherCandidates, selectedClass?.teacher_ids, editingSession?.teacher_id, editingSlotRow?.teacher_id]);
 
-  useEffect(() => {
-    setAssignmentBranchDraft(selectedClass?.branch?.trim() ?? '');
-  }, [selectedClass?.id, selectedClass?.branch]);
-
-  useEffect(() => {
-    setClassNameDraft(selectedClass?.name?.trim() ?? '');
-  }, [selectedClass?.id, selectedClass?.name]);
-
-  const studentsForAssignments = useMemo(() => {
-    if (!selectedClass) return [];
-    return safeStudents.filter((s) =>
-      studentMatchesClassLevelAndBranch(s, selectedClass.class_level, selectedClass.branch)
-    );
-  }, [safeStudents, selectedClass]);
   const classSlots = useMemo(() => slots.filter((s) => s.class_id === selectedClassId), [slots, selectedClassId]);
 
   const weekColumnDates = useMemo(() => Array.from({ length: 7 }, (_, i) => addDaysIso(calendarWeekMondayIso, i)), [calendarWeekMondayIso]);
@@ -408,6 +401,36 @@ export default function ClassLiveLessons() {
       setCalendarLoading(false);
     }
   }, [selectedClassId, weekColumnDates]);
+
+  const loadBatchSessionsPool = useCallback(async () => {
+    if (!selectedClassId) {
+      setBatchSessionsPool([]);
+      return;
+    }
+    try {
+      const qs = new URLSearchParams({ scope: 'sessions', class_id: selectedClassId });
+      const res = await apiFetch(`/api/class-live-lessons?${qs.toString()}`);
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBatchSessionsPool([]);
+        return;
+      }
+      const rows = (Array.isArray(j.data) ? j.data : []) as SessionRow[];
+      setBatchSessionsPool(rows.filter((s) => s.status === 'scheduled'));
+    } catch {
+      setBatchSessionsPool([]);
+    }
+  }, [selectedClassId]);
+
+  useEffect(() => {
+    void loadBatchSessionsPool();
+  }, [loadBatchSessionsPool]);
+
+  const sessionEditPeerCount = useMemo(() => {
+    if (!editingSession) return 0;
+    const pool = batchSessionsPool.length ? batchSessionsPool : weekSessions;
+    return inferSessionBatchPeers(editingSession, pool).length;
+  }, [editingSession, batchSessionsPool, weekSessions]);
 
   useEffect(() => {
     void loadWeekSessions();
@@ -481,97 +504,166 @@ export default function ClassLiveLessons() {
     };
   }, [isStudentView]);
 
-  const createClass = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newClassName.trim()) return;
+  const handleCreateClass = async (payload: {
+    name: string;
+    class_level: string;
+    branch?: string;
+    teacher_ids: string[];
+    student_ids: string[];
+  }): Promise<boolean> => {
     const res = await apiFetch('/api/class-live-lessons?op=create-class', {
       method: 'POST',
       body: JSON.stringify({
-        name: newClassName.trim(),
-        class_level: newClassLevel,
-        branch: newClassBranch.trim() || undefined,
-        teacher_ids: newClassTeacherIds,
-        student_ids: newClassStudentIds
+        name: payload.name.trim(),
+        class_level: payload.class_level,
+        branch: payload.branch?.trim() || undefined,
+        teacher_ids: payload.teacher_ids,
+        student_ids: payload.student_ids
       })
     });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) {
       setError(String(j.error || 'Sınıf oluşturulamadı'));
-      return;
+      return false;
     }
-    setNewClassName('');
+    setError(null);
     await loadAll();
+    return true;
+  };
+
+  const handleUpdateClass = async (
+    classId: string,
+    payload: {
+      name: string;
+      class_level: string;
+      branch: string | null;
+      teacher_ids: string[];
+      student_ids: string[];
+    }
+  ): Promise<boolean> => {
+    const res = await apiFetch('/api/class-live-lessons?op=update-class-members', {
+      method: 'POST',
+      body: JSON.stringify({
+        class_id: classId,
+        name: payload.name.trim(),
+        class_level: payload.class_level,
+        branch: payload.branch,
+        teacher_ids: payload.teacher_ids,
+        student_ids: payload.student_ids
+      })
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(String(j.error || 'Sınıf güncellenemedi'));
+      return false;
+    }
+    setError(null);
+    await loadAll();
+    return true;
+  };
+
+  const handleDeleteClass = async (classId: string, className: string): Promise<boolean> => {
+    if (!window.confirm(`«${className}» sınıfını silmek istediğinize emin misiniz?`)) return false;
+    const res = await apiFetch(`/api/class-live-lessons?class_id=${encodeURIComponent(classId)}`, {
+      method: 'DELETE'
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(String(j.error || 'Sınıf silinemedi'));
+      return false;
+    }
+    if (selectedClassId === classId) setSelectedClassId('');
+    setError(null);
+    await loadAll();
+    return true;
   };
 
   const effectiveSlotTeacherId = role === 'teacher' ? actorUserId : slotTeacherId || selectedClass?.teacher_ids?.[0] || '';
 
   const createSlot = async () => {
-    if (!selectedClassId || !slotSubject.trim()) return;
+    if (!selectedClassId || !slotSubject.trim() || scheduleBusy) return;
     const teacherId = effectiveSlotTeacherId;
     if (!teacherId) {
       alert('Öğretmen seçin.');
       return;
     }
-    const start = `${String(slotHour).padStart(2, '0')}:${String(slotMinute).padStart(2, '0')}`;
-    const res = await apiFetch('/api/class-live-lessons?op=create-slot', {
-      method: 'POST',
-      body: JSON.stringify({
-        class_id: selectedClassId,
-        day_of_week: slotDay,
-        start_time: start,
-        duration_minutes: slotDurationMinutes,
-        subject: slotSubject.trim(),
-        teacher_id: teacherId || undefined,
-        meeting_link: slotMeetingLink.trim() || undefined
-      })
-    });
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const errText = [j.error, j.code === 'bbb_create_failed' ? 'BBB sunucusu yanıt vermedi.' : '', j.code === 'subject_meeting_link_required' ? 'BBB API tanımlı değil veya link zorunlu.' : ''].filter(Boolean).join(' ');
-      setError(errText || 'Ders şablonu eklenemedi');
-      return;
+    setScheduleBusy(true);
+    try {
+      const start = `${String(slotHour).padStart(2, '0')}:${String(slotMinute).padStart(2, '0')}`;
+      const res = await apiFetch('/api/class-live-lessons?op=create-slot', {
+        method: 'POST',
+        body: JSON.stringify({
+          class_id: selectedClassId,
+          day_of_week: slotDay,
+          start_time: start,
+          duration_minutes: slotDurationMinutes,
+          subject: slotSubject.trim(),
+          teacher_id: teacherId || undefined,
+          meeting_link: slotMeetingLink.trim() || undefined
+        })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const errText = [j.error, j.code === 'bbb_create_failed' ? 'BBB sunucusu yanıt vermedi.' : '', j.code === 'subject_meeting_link_required' ? 'BBB API tanımlı değil veya link zorunlu.' : '', j.code === 'teacher_time_conflict' ? 'Aynı gün/saatte başka ders veya şablon var.' : ''].filter(Boolean).join(' ');
+        setError(errText || 'Ders şablonu eklenemedi');
+        return;
+      }
+      setSlotSubject('');
+      setSlotMeetingLink('');
+      await loadAll();
+      await loadWeekSessions();
+    } finally {
+      setScheduleBusy(false);
     }
-    setSlotSubject('');
-    setSlotMeetingLink('');
-    await loadAll();
-    await loadWeekSessions();
   };
 
   const bulkScheduleSessions = async () => {
-    if (!selectedClassId || !slotSubject.trim()) return;
+    if (!selectedClassId || !slotSubject.trim() || scheduleBusy) return;
     const teacherId = effectiveSlotTeacherId;
     if (!teacherId) {
       alert('Öğretmen seçin.');
       return;
     }
-    const start = `${String(slotHour).padStart(2, '0')}:${String(slotMinute).padStart(2, '0')}`;
-    const res = await apiFetch('/api/class-live-lessons?op=bulk-schedule-sessions', {
-      method: 'POST',
-      body: JSON.stringify({
-        class_id: selectedClassId,
-        lesson_date: lessonStartDate,
-        repeat_interval_days: repeatIntervalDays,
-        occurrences: repeatIntervalDays === 0 ? 1 : occurrencesCount,
-        start_time: start,
-        duration_minutes: slotDurationMinutes,
-        subject: slotSubject.trim(),
-        teacher_id: teacherId,
-        meeting_link: slotMeetingLink.trim() || undefined
-      })
-    });
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const errText = [j.error, j.reason, j.code === 'bbb_create_failed' ? 'BBB sunucusu yanıt vermedi.' : '', j.code === 'subject_meeting_link_required' ? 'BBB API (Vercel) tanımlı değil; link girin veya BBB_API_ENDPOINT + BBB_API_SECRET ekleyin.' : ''].filter(Boolean).map(String).join(' — ');
-      setError(errText || 'Oturumlar oluşturulamadı');
-      return;
+    setScheduleBusy(true);
+    try {
+      const start = `${String(slotHour).padStart(2, '0')}:${String(slotMinute).padStart(2, '0')}`;
+      const res = await apiFetch('/api/class-live-lessons?op=bulk-schedule-sessions', {
+        method: 'POST',
+        body: JSON.stringify({
+          class_id: selectedClassId,
+          lesson_date: lessonStartDate,
+          repeat_interval_days: repeatIntervalDays,
+          occurrences: repeatIntervalDays === 0 ? 1 : occurrencesCount,
+          start_time: start,
+          duration_minutes: slotDurationMinutes,
+          subject: slotSubject.trim(),
+          teacher_id: teacherId,
+          meeting_link: slotMeetingLink.trim() || undefined
+        })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const dateHint = j.lesson_date ? ` Tarih: ${j.lesson_date}.` : '';
+        const errText = [j.error, j.reason, dateHint, j.code === 'bbb_create_failed' ? 'BBB sunucusu yanıt vermedi.' : '', j.code === 'subject_meeting_link_required' ? 'BBB API (Vercel) tanımlı değil; link girin veya BBB_API_ENDPOINT + BBB_API_SECRET ekleyin.' : '', j.code === 'teacher_time_conflict' ? 'Öğretmenin aynı saatte başka oturumu veya haftalık şablonu olabilir.' : ''].filter(Boolean).map(String).join(' — ');
+        setError(errText || 'Oturumlar oluşturulamadı');
+        return;
+      }
+      const n = Array.isArray(j.data) ? j.data.length : 0;
+      const skipped = Array.isArray(j.skipped) ? j.skipped : [];
+      setError(null);
+      setSlotSubject('');
+      setSlotMeetingLink('');
+      await loadAll();
+      await loadWeekSessions();
+      await loadBatchSessionsPool();
+      const skipNote =
+        skipped.length > 0
+          ? ` ${skipped.length} tarih atlandı (çakışma): ${skipped.map((s: { lesson_date?: string }) => s.lesson_date).filter(Boolean).join(', ')}.`
+          : '';
+      alert(`${n} adet tarihli oturum kaydedildi.${skipNote} Hatırlatma ve tamamlanan ders özeti bu kayıtlara göre çalışır.`);
+    } finally {
+      setScheduleBusy(false);
     }
-    const n = Array.isArray(j.data) ? j.data.length : 0;
-    setError(null);
-    setSlotSubject('');
-    setSlotMeetingLink('');
-    await loadAll();
-    await loadWeekSessions();
-    alert(`${n} adet tarihli oturum kaydedildi. Hatırlatma ve tamamlanan ders özeti bu kayıtlara göre çalışır.`);
   };
 
   const closeAttendanceModal = () => {
@@ -670,9 +762,25 @@ export default function ClassLiveLessons() {
     }
   };
 
-  const deleteSessionRow = async (id: string) => {
-    if (!confirm('Bu tarihli oturumu silmek istediğinize emin misiniz?')) return;
-    const res = await apiFetch(`/api/class-live-lessons?session_id=${encodeURIComponent(id)}`, {
+  const deleteSessionRow = async (session: SessionRow, scopeOverride?: 'single' | 'batch') => {
+    const pool = batchSessionsPool.length ? batchSessionsPool : weekSessions;
+    const peers = inferSessionBatchPeers(session, pool);
+    let scope = scopeOverride || 'single';
+    if (!scopeOverride && peers.length > 1) {
+      const deleteAll = window.confirm(
+        `Bu oturum ${peers.length} periyotluk plandan.\n\nTamam → Tüm planlı periyotları sil\nİptal → Sadece ${session.lesson_date} oturumunu sil`
+      );
+      scope = deleteAll ? 'batch' : 'single';
+    } else if (scopeOverride === 'batch' && peers.length > 1) {
+      if (!window.confirm(`${peers.length} planlı oturum silinsin mi?`)) return;
+    } else if (!window.confirm(`Bu tarihli (${session.lesson_date}) oturumu silmek istediğinize emin misiniz?`)) {
+      return;
+    }
+    const qs =
+      scope === 'batch' && peers.length > 1
+        ? `session_id=${encodeURIComponent(session.id)}&apply_scope=batch`
+        : `session_id=${encodeURIComponent(session.id)}`;
+    const res = await apiFetch(`/api/class-live-lessons?${qs}`, {
       method: 'DELETE'
     });
     const j = await res.json().catch(() => ({}));
@@ -681,53 +789,7 @@ export default function ClassLiveLessons() {
       return;
     }
     await loadWeekSessions();
-  };
-
-  const updateClassMembers = async (
-    teacherIds: string[],
-    studentIds: string[],
-    classMeta?: Partial<{ class_level: string | null; branch: string | null; name: string }>
-  ) => {
-    if (!selectedClassId) return;
-    const body: Record<string, unknown> = {
-      class_id: selectedClassId,
-      teacher_ids: teacherIds,
-      student_ids: studentIds
-    };
-    if (classMeta) {
-      if (Object.prototype.hasOwnProperty.call(classMeta, 'class_level'))
-        body.class_level = classMeta.class_level;
-      if (Object.prototype.hasOwnProperty.call(classMeta, 'branch')) body.branch = classMeta.branch;
-      if (Object.prototype.hasOwnProperty.call(classMeta, 'name')) body.name = classMeta.name;
-    }
-    const res = await apiFetch('/api/class-live-lessons?op=update-class-members', {
-      method: 'POST',
-      body: JSON.stringify(body)
-    });
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setError(String(j.error || 'Atamalar kaydedilemedi'));
-      return;
-    }
-    await loadAll();
-  };
-
-  const saveClassName = async () => {
-    if (!selectedClass) return;
-    const nextName = classNameDraft.trim();
-    if (!nextName) {
-      setError('Sınıf adı boş olamaz.');
-      return;
-    }
-    if (nextName === selectedClass.name.trim()) return;
-    setClassNameSaving(true);
-    try {
-      await updateClassMembers(selectedClass.teacher_ids || [], selectedClass.student_ids || [], {
-        name: nextName
-      });
-    } finally {
-      setClassNameSaving(false);
-    }
+    await loadBatchSessionsPool();
   };
 
   const deleteSlot = async (id: string) => {
@@ -743,11 +805,12 @@ export default function ClassLiveLessons() {
 
   const openEditSession = (s: SessionRow) => {
     setEditingSession(s);
+    setSessionEditScope('single');
     setEsSubject(s.subject);
     setEsDate(s.lesson_date);
     setEsStart(String(s.start_time || '').slice(0, 5));
     setEsEnd(String(s.end_time || '').slice(0, 5));
-    setEsLink(s.meeting_link || '');
+    setEsLink(displayMeetingLinkForRow(s, 'class', window.location.origin) || s.meeting_link || '');
     setEsHomework(s.homework || '');
     setEsTeacherId(s.teacher_id);
     setError(null);
@@ -766,8 +829,9 @@ export default function ClassLiveLessons() {
           lesson_date: esDate,
           start_time: esStart.length === 5 ? `${esStart}:00` : esStart,
           end_time: esEnd.length === 5 ? `${esEnd}:00` : esEnd,
-          meeting_link: esLink.trim(),
+          meeting_link: meetingLinkForSave(esLink, editingSession, 'class', window.location.origin),
           homework: esHomework.trim() || null,
+          ...(sessionEditScope === 'batch' && sessionEditPeerCount > 1 ? { apply_scope: 'batch' } : {}),
           ...(esTeacherId.trim() && esTeacherId.trim() !== editingSession.teacher_id
             ? { teacher_id: esTeacherId.trim() }
             : {})
@@ -780,6 +844,10 @@ export default function ClassLiveLessons() {
       }
       setEditingSession(null);
       await loadWeekSessions();
+      await loadBatchSessionsPool();
+      if (Number(j.updated_count) > 1) {
+        setNotice(`${j.updated_count} planlı oturum güncellendi.`);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Hata');
     } finally {
@@ -834,36 +902,6 @@ export default function ClassLiveLessons() {
       setSlotEditBusy(false);
     }
   };
-
-  const loadPaymentSummary = useCallback(async () => {
-    if (!canViewPaymentSummary) return;
-    setSummaryLoading(true);
-    try {
-      const qs = new URLSearchParams({ scope: 'summary' });
-      if (summaryFrom) qs.set('from', summaryFrom);
-      if (summaryTo) qs.set('to', summaryTo);
-      if (summaryTeacherId) qs.set('teacher_id', summaryTeacherId);
-      if (summaryClassId) qs.set('class_id', summaryClassId);
-      const res = await apiFetch(`/api/class-live-lessons?${qs.toString()}`);
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setSummaryRows([]);
-        setError(String(j.error || 'Grup ders ödeme özeti alınamadı'));
-        return;
-      }
-      setSummaryRows(Array.isArray(j.data) ? (j.data as GroupLessonSummaryRow[]) : []);
-    } catch (e) {
-      setSummaryRows([]);
-      setError(e instanceof Error ? e.message : 'Grup ders ödeme özeti alınamadı');
-    } finally {
-      setSummaryLoading(false);
-    }
-  }, [canViewPaymentSummary, summaryFrom, summaryTo, summaryTeacherId, summaryClassId]);
-
-  useEffect(() => {
-    if (!canViewPaymentSummary) return;
-    void loadPaymentSummary();
-  }, [canViewPaymentSummary, loadPaymentSummary]);
 
   return (
     <div className="space-y-6">
@@ -949,225 +987,34 @@ export default function ClassLiveLessons() {
       {loading && <div className="text-sm text-slate-500">Yükleniyor...</div>}
 
       {canViewPaymentSummary && (
-        <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-          <h2 className="font-semibold text-slate-800">Grup dersi ödeme özeti (tamamlanan)</h2>
-          <p className="text-xs text-slate-500">
-            Tarih aralığına göre öğretmenin yaptığı tamamlanan grup ders sayısı ve toplam saat.
-          </p>
-          <div className="grid md:grid-cols-5 gap-2">
-            <input
-              type="date"
-              value={summaryFrom}
-              onChange={(e) => setSummaryFrom(e.target.value)}
-              className="border border-slate-200 rounded px-3 py-2"
-            />
-            <input
-              type="date"
-              value={summaryTo}
-              onChange={(e) => setSummaryTo(e.target.value)}
-              className="border border-slate-200 rounded px-3 py-2"
-            />
-            <select
-              value={summaryTeacherId}
-              onChange={(e) => setSummaryTeacherId(e.target.value)}
-              className="border border-slate-200 rounded px-3 py-2"
-            >
-              <option value="">Tüm öğretmenler</option>
-              {teacherCandidates.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-            <select
-              value={summaryClassId}
-              onChange={(e) => setSummaryClassId(e.target.value)}
-              className="border border-slate-200 rounded px-3 py-2"
-            >
-              <option value="">Tüm sınıflar</option>
-              {classes.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            <button
-              onClick={() => void loadPaymentSummary()}
-              className="px-4 py-2 rounded bg-indigo-600 text-white text-sm"
-            >
-              {summaryLoading ? 'Yükleniyor...' : 'Özeti getir'}
-            </button>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                  <th className="px-3 py-2">Öğretmen</th>
-                  <th className="px-3 py-2">Sınıf</th>
-                  <th className="px-3 py-2 text-right">Tamamlanan ders</th>
-                  <th className="px-3 py-2 text-right">Toplam saat</th>
-                  <th className="px-3 py-2 text-right">Dakika</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {summaryRows.length === 0 && !summaryLoading ? (
-                  <tr>
-                    <td colSpan={5} className="px-3 py-4 text-center text-slate-500">
-                      Seçilen tarih aralığında tamamlanan grup dersi bulunamadı.
-                    </td>
-                  </tr>
-                ) : (
-                  summaryRows.map((r) => (
-                    <tr key={`${r.teacher_id}-${r.class_id}`}>
-                      <td className="px-3 py-2">{r.teacher_name}</td>
-                      <td className="px-3 py-2">{r.class_name}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{r.completed_lesson_count}</td>
-                      <td className="px-3 py-2 text-right tabular-nums font-semibold text-indigo-700">
-                        {r.total_hours.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-slate-500">{r.total_minutes}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {canManageClasses && (
-        <form onSubmit={createClass} className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-          <h2 className="font-semibold text-slate-800">Yeni sınıf</h2>
-          <div className="grid md:grid-cols-3 gap-2">
-            <input value={newClassName} onChange={(e) => setNewClassName(e.target.value)} placeholder="Örn: 9-A Haftaiçi" className="border border-slate-200 rounded px-3 py-2" />
-            <select value={newClassLevel} onChange={(e) => setNewClassLevel(e.target.value)} className="border border-slate-200 rounded px-3 py-2">
-              {CLASS_LEVEL_OPTIONS.map(({ value, label }) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>
-            <input
-              value={newClassBranch}
-              onChange={(e) => setNewClassBranch(e.target.value)}
-              placeholder="Şube — öğrenci şubesine göre süzer (örn. A)"
-              className="border border-slate-200 rounded px-3 py-2"
-            />
-          </div>
-          <button className="px-4 py-2 rounded bg-indigo-600 text-white text-sm">Sınıf oluştur</button>
-        </form>
-      )}
-
-      <div className="bg-white rounded-xl border border-slate-200 p-4">
-        <h2 className="font-semibold text-slate-800 mb-2">{isStudentView ? 'Sınıflarım' : 'Sınıflar'}</h2>
-        <div className="flex flex-wrap gap-2">
-          {classes.map((c) => (
-            <button key={c.id} onClick={() => setSelectedClassId(c.id)} className={`px-3 py-1.5 rounded border text-sm ${selectedClassId === c.id ? 'bg-indigo-600 text-white border-indigo-600' : 'border-slate-200'}`}>
-              {c.name}
-              {c.class_level ? ` (${c.class_level})` : ''}
-              {c.branch ? ` — ${c.branch}` : ''}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {selectedClass && canManageClasses && (
-        <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-          <h2 className="font-semibold text-slate-800">Sınıf ayarları — {selectedClass.name}</h2>
-          <div className="flex flex-wrap items-end gap-2 text-sm border border-slate-100 rounded-lg p-3 bg-slate-50/80">
-            <div className="min-w-[200px] flex-1">
-              <label className="block text-xs text-slate-500 mb-0.5">Sınıf adı</label>
-              <input
-                value={classNameDraft}
-                onChange={(e) => setClassNameDraft(e.target.value)}
-                placeholder="Örn: 9-A Haftaiçi"
-                className="w-full border border-slate-200 rounded px-3 py-1.5"
-              />
-            </div>
-            <button
-              type="button"
-              disabled={classNameSaving || classNameDraft.trim() === selectedClass.name.trim()}
-              className="px-3 py-1.5 rounded bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50"
-              onClick={() => void saveClassName()}
-            >
-              {classNameSaving ? 'Kaydediliyor…' : 'Adı kaydet'}
-            </button>
-          </div>
-          <div className="flex flex-wrap items-end gap-2 text-sm border border-slate-100 rounded-lg p-3 bg-slate-50/80">
-            <div className="min-w-[120px]">
-              <label className="block text-xs text-slate-500 mb-0.5">Liste şubesi (öğrenci kaydıyla eşleşir)</label>
-              <input
-                value={assignmentBranchDraft}
-                onChange={(e) => setAssignmentBranchDraft(e.target.value)}
-                placeholder="Örn. A (boş: tüm şubeler)"
-                className="w-full md:w-40 border border-slate-200 rounded px-3 py-1.5"
-              />
-            </div>
-            <button
-              type="button"
-              className="px-3 py-1.5 rounded bg-slate-700 text-white text-xs font-medium hover:bg-slate-800"
-              onClick={() => {
-                void updateClassMembers(selectedClass.teacher_ids || [], selectedClass.student_ids || [], {
-                  branch: assignmentBranchDraft.trim() ? assignmentBranchDraft.trim() : null
-                });
-              }}
-            >
-              Şubeyi kaydet
-            </button>
-            <p className="text-xs text-slate-500 md:max-w-md">
-              Sınıfla seçilen programa ve şubesi belirliyse kullanıcı/öğrenci listesinde yalnızca uyumlu öğrenciler çıkar (başında boş ise o seviye için şube filtresiz).
+        <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="font-semibold text-indigo-900">Grup dersi ödeme özeti ve öğretmen ödemeleri</p>
+            <p className="text-sm text-indigo-800/80 mt-0.5">
+              Tahsilat, taksit ve öğretmen birim ücretleri artık Muhasebe panelinde birleştirildi.
             </p>
           </div>
-          <div className="grid md:grid-cols-2 gap-4">
-            <div>
-              <p className="text-sm text-slate-600 mb-1">Öğretmenler</p>
-              <div className="max-h-40 overflow-y-auto space-y-1">
-                {teacherCandidates.map((t) => (
-                  <label key={t.id} className="text-xs border rounded px-2 py-1 flex items-center gap-1">
-                    <input
-                      type="checkbox"
-                      checked={(selectedClass.teacher_ids || []).includes(t.id)}
-                      onChange={(e) => {
-                        const next = e.target.checked
-                          ? [...(selectedClass.teacher_ids || []), t.id]
-                          : (selectedClass.teacher_ids || []).filter((x) => x !== t.id);
-                        void updateClassMembers(next, selectedClass.student_ids || []);
-                      }}
-                    />
-                    {t.name}
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div>
-              <p className="text-sm text-slate-600 mb-1">
-                Öğrenciler
-                {selectedClass.class_level ? (
-                  <span className="text-slate-400 font-normal">
-                    {' '}
-                    ({studentsForAssignments.length} uyumlu)
-                  </span>
-                ) : null}
-              </p>
-              <div className="max-h-40 overflow-y-auto space-y-1">
-                {studentsForAssignments.map((s) => (
-                  <label key={s.id} className="text-xs border rounded px-2 py-1 flex items-center gap-1">
-                    <input
-                      type="checkbox"
-                      checked={(selectedClass.student_ids || []).includes(s.id)}
-                      onChange={(e) => {
-                        const next = e.target.checked
-                          ? [...(selectedClass.student_ids || []), s.id]
-                          : (selectedClass.student_ids || []).filter((x) => x !== s.id);
-                        void updateClassMembers(selectedClass.teacher_ids || [], next);
-                      }}
-                    />
-                    {s.name}
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
+          <Link
+            to="/muhasebe?tab=ogretmen"
+            className="inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+          >
+            Muhasebe → Öğretmen ödemeleri
+          </Link>
         </div>
       )}
+
+      <ClassLiveClassManager
+        classes={classes}
+        selectedClassId={selectedClassId}
+        onSelectClass={setSelectedClassId}
+        students={safeStudents}
+        teacherOptions={teacherCandidates}
+        canManageClasses={canManageClasses}
+        isStudentView={isStudentView}
+        onCreateClass={handleCreateClass}
+        onUpdateClass={handleUpdateClass}
+        onDeleteClass={handleDeleteClass}
+      />
 
       {selectedClass && canManageSlots && (
         <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
@@ -1240,40 +1087,55 @@ export default function ClassLiveLessons() {
             </div>
           )}
 
-          <div className="flex flex-wrap gap-2 items-end">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {scheduleKind === 'template' ? (
-              <select value={slotDay} onChange={(e) => setSlotDay(Number(e.target.value))} className="border border-slate-200 rounded px-3 py-2 flex-1 min-w-[140px]">
-                {DAY_LABELS.map((d, i) => (
-                  <option key={d} value={i + 1}>{d}</option>
-                ))}
-              </select>
+              <div>
+                <label className="block text-xs text-slate-500 mb-0.5">Gün</label>
+                <select value={slotDay} onChange={(e) => setSlotDay(Number(e.target.value))} className="w-full border border-slate-200 rounded px-3 py-2 text-sm">
+                  {DAY_LABELS.map((d, i) => (
+                    <option key={d} value={i + 1}>{d}</option>
+                  ))}
+                </select>
+              </div>
             ) : (
-              <div className="text-xs text-slate-600 border border-dashed border-slate-200 rounded px-3 py-2 flex-1 min-w-[160px]">
-                Saat aşağıda; <strong>tarih</strong> ilk ders tarihinden gelir (gün seçimi gereksizdir).
+              <div className="sm:col-span-2 lg:col-span-4 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                Saat ve ders bilgilerini aşağıdan seçin; <strong>tarih</strong> yukarıdaki «İlk ders tarihi» alanından gelir.
               </div>
             )}
-            <select value={slotHour} onChange={(e) => setSlotHour(Number(e.target.value))} className="border border-slate-200 rounded px-3 py-2 w-[100px]">
-              {Array.from({ length: 13 }, (_, i) => 10 + i).map((h) => (
-                <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>
-              ))}
-            </select>
-            <select value={slotMinute} onChange={(e) => setSlotMinute(Number(e.target.value))} className="border border-slate-200 rounded px-3 py-2 w-[100px]">
-              {Array.from({ length: 12 }, (_, i) => i * 5).map((m) => (
-                <option key={m} value={m}>{String(m).padStart(2, '0')} dk</option>
-              ))}
-            </select>
-            <input value={slotSubject} onChange={(e) => setSlotSubject(e.target.value)} placeholder="Ders adı" className="border border-slate-200 rounded px-3 py-2 flex-1 min-w-[120px]" />
-            <select
-              value={role === 'teacher' ? actorUserId : slotTeacherId}
-              onChange={(e) => setSlotTeacherId(e.target.value)}
-              className="border border-slate-200 rounded px-3 py-2 flex-1 min-w-[160px]"
-              disabled={role === 'teacher'}
-            >
-              <option value="">Öğretmen</option>
-              {(role === 'teacher' ? teacherCandidates.filter((t) => t.id === actorUserId) : teacherCandidates).map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-            </select>
+            <div>
+              <label className="block text-xs text-slate-500 mb-0.5">Saat</label>
+              <select value={slotHour} onChange={(e) => setSlotHour(Number(e.target.value))} className="w-full border border-slate-200 rounded px-3 py-2 text-sm">
+                {Array.from({ length: 13 }, (_, i) => 10 + i).map((h) => (
+                  <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 mb-0.5">Dakika</label>
+              <select value={slotMinute} onChange={(e) => setSlotMinute(Number(e.target.value))} className="w-full border border-slate-200 rounded px-3 py-2 text-sm">
+                {Array.from({ length: 12 }, (_, i) => i * 5).map((m) => (
+                  <option key={m} value={m}>{String(m).padStart(2, '0')}</option>
+                ))}
+              </select>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-xs text-slate-500 mb-0.5">Ders adı</label>
+              <input value={slotSubject} onChange={(e) => setSlotSubject(e.target.value)} placeholder="Örn. Matematik" className="w-full border border-slate-200 rounded px-3 py-2 text-sm" />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-xs text-slate-500 mb-0.5">Öğretmen</label>
+              <select
+                value={role === 'teacher' ? actorUserId : slotTeacherId}
+                onChange={(e) => setSlotTeacherId(e.target.value)}
+                className="w-full border border-slate-200 rounded px-3 py-2 text-sm"
+                disabled={role === 'teacher'}
+              >
+                <option value="">Öğretmen seçin</option>
+                {(role === 'teacher' ? teacherCandidates.filter((t) => t.id === actorUserId) : teacherCandidates).map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
           </div>
           <BbbAutoLinkFieldHint
             id="class-slot-meeting-link"
@@ -1298,14 +1160,20 @@ export default function ClassLiveLessons() {
             {scheduleKind === 'sessions' ? (
               <button
                 type="button"
+                disabled={scheduleBusy}
                 onClick={() => void bulkScheduleSessions()}
-                className="px-4 py-2 rounded bg-emerald-600 text-white text-sm"
+                className="px-4 py-2 rounded bg-emerald-600 text-white text-sm disabled:opacity-60 disabled:cursor-wait"
               >
-                Tarihli oturumları oluştur
+                {scheduleBusy ? 'Oluşturuluyor…' : 'Tarihli oturumları oluştur'}
               </button>
             ) : (
-              <button type="button" onClick={() => void createSlot()} className="px-4 py-2 rounded bg-teal-600 text-white text-sm">
-                Şablonu kaydet
+              <button
+                type="button"
+                disabled={scheduleBusy}
+                onClick={() => void createSlot()}
+                className="px-4 py-2 rounded bg-teal-600 text-white text-sm disabled:opacity-60 disabled:cursor-wait"
+              >
+                {scheduleBusy ? 'Kaydediliyor…' : 'Şablonu kaydet'}
               </button>
             )}
           </div>
@@ -1489,7 +1357,7 @@ export default function ClassLiveLessons() {
                             const sessionLink = String(s.join_link || s.meeting_link || '').trim();
                             const hasSessionLink = Boolean(sessionLink);
                             const canJoin = s.status === 'scheduled' && hasSessionLink;
-                            const canWatchRecording = s.status === 'completed' && hasSessionLink;
+                            const canWatchRecording = hasClassSessionRecordingAccess(s);
                             return (
                               <div
                                 key={s.id}
@@ -1521,6 +1389,16 @@ export default function ClassLiveLessons() {
                                   </div>
                                 </div>
                                 <div className="mt-2 flex flex-wrap gap-1 calendar-pdf-hide-ui">
+                                  {canJoin && !isStudentView ? (
+                                    <button
+                                      type="button"
+                                      title="WhatsApp için kısa davet linki ve ders bilgisi panoya kopyalanır"
+                                      onClick={() => void copySessionGuestLink(s)}
+                                      className="rounded-lg border border-violet-300 bg-white px-2 py-1 text-[10px] font-semibold text-violet-700 hover:bg-violet-50"
+                                    >
+                                      Davet linki
+                                    </button>
+                                  ) : null}
                                   {canJoin ? (
                                     <button
                                       type="button"
@@ -1534,7 +1412,7 @@ export default function ClassLiveLessons() {
                                     <button
                                       type="button"
                                       title="Ders kaydı / tekrar izleme bağlantısı"
-                                      onClick={() => window.open(sessionLink, '_blank', 'noopener,noreferrer')}
+                                      onClick={() => void watchClassSessionRecording(s)}
                                       className="inline-flex items-center gap-0.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-2 py-1 text-[10px] font-semibold text-white shadow-sm hover:brightness-110"
                                     >
                                       <PlayCircle className="h-3 w-3 shrink-0" aria-hidden />
@@ -1580,7 +1458,7 @@ export default function ClassLiveLessons() {
                                   {canManageSlots ? (
                                     <button
                                       type="button"
-                                      onClick={() => void deleteSessionRow(s.id)}
+                                      onClick={() => void deleteSessionRow(s)}
                                       className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-50"
                                     >
                                       <Trash2 className="h-3 w-3" />
@@ -1656,6 +1534,7 @@ export default function ClassLiveLessons() {
             dowFromIso={dowSlotFromIso}
             todayIso={todayIso()}
             onJoinSession={(s) => void joinClassSession(s)}
+            onWatchSession={(s) => void watchClassSessionRecording(s)}
           />
         )}
       </WeeklyLiveGridShell>
@@ -1680,6 +1559,41 @@ export default function ClassLiveLessons() {
                 Kapat
               </button>
             </div>
+            {sessionEditPeerCount > 1 ? (
+              <fieldset className="space-y-2 rounded-lg border border-violet-200 bg-violet-50/50 p-3">
+                <legend className="px-1 text-sm font-medium text-violet-900">Düzenleme kapsamı</legend>
+                <label className="flex cursor-pointer items-start gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="sessionEditScope"
+                    checked={sessionEditScope === 'single'}
+                    onChange={() => setSessionEditScope('single')}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="font-medium text-slate-800">Yalnızca bu oturum</span>
+                    <span className="block text-xs text-slate-500">
+                      {formatDdMmYyyyDots(editingSession.lesson_date)} tarihli ders
+                    </span>
+                  </span>
+                </label>
+                <label className="flex cursor-pointer items-start gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="sessionEditScope"
+                    checked={sessionEditScope === 'batch'}
+                    onChange={() => setSessionEditScope('batch')}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="font-medium text-slate-800">Tüm planlı periyotlar ({sessionEditPeerCount})</span>
+                    <span className="block text-xs text-slate-500">
+                      Ders adı, saat, öğretmen ve bağlantı tüm planlı oturumlara uygulanır; tarih oturuma özel kalır.
+                    </span>
+                  </span>
+                </label>
+              </fieldset>
+            ) : null}
             <label className="block text-sm">
               <span className="text-slate-600">Ders</span>
               <input
@@ -1741,7 +1655,8 @@ export default function ClassLiveLessons() {
               placeholder="Canlı ders linki veya kayıt URL’si"
             />
             <p className="text-xs text-slate-500 -mt-1">
-              Ders bittikten sonra aynı alana kayıt URL’sini yapıştırabilirsiniz — öğrenci «Kaydı izle» ile açar.
+              Kayıt otomatik gelmezse: BBB yönetiminden oynatma URL’sini kopyalayıp bu alana yapıştırın veya
+              «Kaydı izle» ile 5–15 dk sonra tekrar deneyin (derste kayıt başlatılmış olmalı).
             </p>
             <label className="block text-sm">
               <span className="text-slate-600">Ödev (isteğe bağlı)</span>
@@ -1964,6 +1879,7 @@ export default function ClassLiveLessons() {
       )}
         </>
       )}
+      {recordingAlertModal}
     </div>
   );
 }

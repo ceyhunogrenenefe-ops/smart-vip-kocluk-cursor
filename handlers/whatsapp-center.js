@@ -23,6 +23,7 @@ export const TEMPLATE_TYPE_TO_CRON_JOB_KEY = {
   report_reminder: 'daily_report_reminder',
   report_reminder_parent: 'daily_report_reminder',
   class_lesson_reminder: 'class_lesson_reminders',
+  teacher_lesson_reminder: 'teacher_lesson_reminders',
   class_homework_notice: 'class_homework_notify',
   meeting_notification: 'meeting_reminders',
   /** Grup yoklaması devamsızlık — anlık gönderim mark-attendance; cron yalnızca başarısız yeniden deneme */
@@ -32,10 +33,11 @@ export const TEMPLATE_TYPE_TO_CRON_JOB_KEY = {
 };
 
 export const KNOWN_CRON_JOBS = [
-  { key: 'class_lesson_reminders', label: 'Grup dersi hatırlatma (~10 dk önce, 7–13 dk pencere)', expectEveryMinutes: 5 },
-  { key: 'daily_report_reminder', label: 'Günlük rapor hatırlatması (22:00 TR · Meta şablon)', expectEveryMinutes: 24 * 60 },
-  { key: 'lesson_reminders', label: 'Birebir ders hatırlatma (~10 dk önce)', expectEveryMinutes: 5 },
-  { key: 'lesson_reminder_parent', label: 'Veli ders hatırlatma (Meta)', expectEveryMinutes: 5 },
+  { key: 'class_lesson_reminders', label: 'Grup dersi hatırlatma (~10 dk önce · gateway)', expectEveryMinutes: 5 },
+  { key: 'teacher_lesson_reminders', label: 'Öğretmen ders hatırlatması (~15 dk önce · gateway)', expectEveryMinutes: 5 },
+  { key: 'daily_report_reminder', label: 'Günlük rapor hatırlatması (22:00 TR · gateway)', expectEveryMinutes: 24 * 60 },
+  { key: 'lesson_reminders', label: 'Birebir ders hatırlatma (~10 dk önce · gateway)', expectEveryMinutes: 5 },
+  { key: 'lesson_reminder_parent', label: 'Veli ders hatırlatma (gateway)', expectEveryMinutes: 5 },
   { key: 'meeting_reminders', label: 'Görüşme 10 dk hatırlatma (Meta)', expectEveryMinutes: 5 },
   { key: 'class_homework_notify', label: 'Grup ödev bildirimi', expectEveryMinutes: 10 },
   { key: 'coach_followup', label: 'Koç otomasyon (Meta şablon)', expectEveryMinutes: 15 },

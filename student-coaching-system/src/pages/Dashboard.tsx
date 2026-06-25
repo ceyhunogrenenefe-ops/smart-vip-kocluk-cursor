@@ -1,7 +1,8 @@
 // Türkçe: Ana Panel (Dashboard) Sayfası
-import React, { useState, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import { DashboardStatsSkeleton } from '../components/ui/ScoresLoadingPlaceholder';
 import {
   GraduationCap,
   Users,
@@ -23,89 +24,103 @@ import { CLASS_LEVELS, formatClassLevelLabel } from '../types';
 import { DailyReportTrackingPanel } from '../components/dashboard/DailyReportTrackingPanel';
 
 export default function Dashboard() {
-  const { students, coaches, weeklyEntries, getStudentStats, institution } = useApp();
+  const { students, coaches, weeklyEntries, getStudentStats, institution, appDataLoading } = useApp();
   const navigate = useNavigate();
 
-  // Genel istatistikler
-  const totalStats = {
-    students: students.length,
-    coaches: coaches.length,
-    entries: weeklyEntries.length,
-  };
-
-  // Haftalık toplam istatistikler
-  const weeklyStats = weeklyEntries.reduce(
-    (acc, entry) => ({
-      totalTarget: acc.totalTarget + entry.targetQuestions,
-      totalSolved: acc.totalSolved + entry.solvedQuestions,
-      totalCorrect: acc.totalCorrect + entry.correctAnswers,
-      totalWrong: acc.totalWrong + entry.wrongAnswers,
-      totalBlank: acc.totalBlank + entry.blankAnswers,
-    }),
-    { totalTarget: 0, totalSolved: 0, totalCorrect: 0, totalWrong: 0, totalBlank: 0 }
+  const weeklyStats = useMemo(
+    () =>
+      weeklyEntries.reduce(
+        (acc, entry) => ({
+          totalTarget: acc.totalTarget + entry.targetQuestions,
+          totalSolved: acc.totalSolved + entry.solvedQuestions,
+          totalCorrect: acc.totalCorrect + entry.correctAnswers,
+          totalWrong: acc.totalWrong + entry.wrongAnswers,
+          totalBlank: acc.totalBlank + entry.blankAnswers
+        }),
+        { totalTarget: 0, totalSolved: 0, totalCorrect: 0, totalWrong: 0, totalBlank: 0 }
+      ),
+    [weeklyEntries]
   );
 
-  const realizationRate = weeklyStats.totalTarget > 0
-    ? Math.round((weeklyStats.totalSolved / weeklyStats.totalTarget) * 100)
-    : 0;
-  const successRate = weeklyStats.totalSolved > 0
-    ? Math.round((weeklyStats.totalCorrect / weeklyStats.totalSolved) * 100)
-    : 0;
+  const realizationRate =
+    weeklyStats.totalTarget > 0 ? Math.round((weeklyStats.totalSolved / weeklyStats.totalTarget) * 100) : 0;
+  const successRate =
+    weeklyStats.totalSolved > 0 ? Math.round((weeklyStats.totalCorrect / weeklyStats.totalSolved) * 100) : 0;
 
-  // Ders bazlı başarı verileri
-  const subjectStats = weeklyEntries.reduce((acc, entry) => {
-    if (!acc[entry.subject]) {
-      acc[entry.subject] = { correct: 0, solved: 0 };
-    }
-    acc[entry.subject].correct += entry.correctAnswers;
-    acc[entry.subject].solved += entry.solvedQuestions;
-    return acc;
-  }, {} as { [key: string]: { correct: number; solved: number } });
+  const subjectChartData = useMemo(() => {
+    const subjectStats = weeklyEntries.reduce(
+      (acc, entry) => {
+        if (!acc[entry.subject]) {
+          acc[entry.subject] = { correct: 0, solved: 0 };
+        }
+        acc[entry.subject].correct += entry.correctAnswers;
+        acc[entry.subject].solved += entry.solvedQuestions;
+        return acc;
+      },
+      {} as { [key: string]: { correct: number; solved: number } }
+    );
+    return Object.entries(subjectStats).map(([subject, stats]) => ({
+      name: subject,
+      başarı: stats.solved > 0 ? Math.round((stats.correct / stats.solved) * 100) : 0,
+      çözülen: stats.solved
+    }));
+  }, [weeklyEntries]);
 
-  const subjectChartData = Object.entries(subjectStats).map(([subject, stats]) => ({
-    name: subject,
-    başarı: stats.solved > 0 ? Math.round((stats.correct / stats.solved) * 100) : 0,
-    çözülen: stats.solved,
-  }));
+  const dailyPerformance = useMemo(() => {
+    const last7Days = Array.from({ length: 7 }, (_, i) => {
+      const date = new Date();
+      date.setDate(date.getDate() - (6 - i));
+      return date.toISOString().split('T')[0];
+    });
+    return last7Days.map((date) => {
+      const dayEntries = weeklyEntries.filter((e) => e.date === date);
+      return {
+        tarih: new Date(date).toLocaleDateString('tr-TR', { weekday: 'short', day: 'numeric' }),
+        doğru: dayEntries.reduce((sum, e) => sum + e.correctAnswers, 0),
+        yanlış: dayEntries.reduce((sum, e) => sum + e.wrongAnswers, 0)
+      };
+    });
+  }, [weeklyEntries]);
 
-  // Son 7 günlük performans
-  const last7Days = Array.from({ length: 7 }, (_, i) => {
-    const date = new Date();
-    date.setDate(date.getDate() - (6 - i));
-    return date.toISOString().split('T')[0];
-  });
+  const pieData = useMemo(
+    () => [
+      { name: 'Doğru', value: weeklyStats.totalCorrect, color: '#10B981' },
+      { name: 'Yanlış', value: weeklyStats.totalWrong, color: '#EF4444' },
+      { name: 'Boş', value: weeklyStats.totalBlank, color: '#6B7280' }
+    ],
+    [weeklyStats]
+  );
 
-  const dailyPerformance = last7Days.map(date => {
-    const dayEntries = weeklyEntries.filter(e => e.date === date);
-    return {
-      tarih: new Date(date).toLocaleDateString('tr-TR', { weekday: 'short', day: 'numeric' }),
-      doğru: dayEntries.reduce((sum, e) => sum + e.correctAnswers, 0),
-      yanlış: dayEntries.reduce((sum, e) => sum + e.wrongAnswers, 0),
-    };
-  });
+  const topStudents = useMemo(
+    () =>
+      students
+        .map((student) => ({
+          ...student,
+          stats: getStudentStats(student.id)
+        }))
+        .filter((s) => s.stats.totalSolved > 0)
+        .sort((a, b) => b.stats.successRate - a.stats.successRate)
+        .slice(0, 5),
+    [students, getStudentStats]
+  );
 
-  // Doğru/Yanlış dağılımı
-  const pieData = [
-    { name: 'Doğru', value: weeklyStats.totalCorrect, color: '#10B981' },
-    { name: 'Yanlış', value: weeklyStats.totalWrong, color: '#EF4444' },
-    { name: 'Boş', value: weeklyStats.totalBlank, color: '#6B7280' },
-  ];
+  const classDistribution = useMemo(
+    () =>
+      CLASS_LEVELS.map(({ value, label }) => ({
+        sınıf: label,
+        öğrenci: students.filter((s) => s.classLevel === value).length
+      })),
+    [students]
+  );
 
-  // En başarılı öğrenciler
-  const topStudents = students
-    .map(student => ({
-      ...student,
-      stats: getStudentStats(student.id),
-    }))
-    .filter(s => s.stats.totalSolved > 0)
-    .sort((a, b) => b.stats.successRate - a.stats.successRate)
-    .slice(0, 5);
-
-  // Sınıf bazlı dağılım
-  const classDistribution = CLASS_LEVELS.map(({ value, label }) => ({
-    sınıf: label,
-    öğrenci: students.filter(s => s.classLevel === value).length,
-  }));
+  const totalStats = useMemo(
+    () => ({
+      students: students.length,
+      coaches: coaches.length,
+      entries: weeklyEntries.length
+    }),
+    [students.length, coaches.length, weeklyEntries.length]
+  );
 
   const statCards = [
     {
@@ -183,6 +198,9 @@ export default function Dashboard() {
       </div>
 
       {/* İstatistik Kartları */}
+      {appDataLoading ? (
+        <DashboardStatsSkeleton />
+      ) : (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {statCards.map((card, index) => {
           const Icon = card.icon;
@@ -215,6 +233,7 @@ export default function Dashboard() {
           );
         })}
       </div>
+      )}
 
       <DailyReportTrackingPanel
         students={students}

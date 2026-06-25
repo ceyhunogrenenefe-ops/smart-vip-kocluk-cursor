@@ -164,9 +164,9 @@ export function findStudentMatchPreview(students, { name, email } = {}) {
 
 export const EDESIS_MATCHING_GUIDE = {
   tr: [
-    'Önce e-posta eşleşir (aynı mail yeterli — BELEN RODOPLU / Belen Rodoplu fark etmez)',
-    'Sonra ad soyad (büyük harf OK, sıra farkı OK)',
-    'fetched=0 ise API satır göndermiyor — JSON içe aktar',
-    'Öğrenci kartında e-posta boşsa users tablosundan da okunur'
+    'Edesis v1: studentId → edesis_ogrenci_id veya email eşleşmesi',
+    'Sonuç satırında studentName + studentId gelir (GET /exams/results)',
+    'fetched=0 ise tarih aralığında sınav yok veya key scope (exams paketi)',
+    'Öğrenci kartında e-posta dolu olmalı'
   ]
 };

@@ -1,5 +1,6 @@
 // Türkçe: Analiz Paneli Sayfası
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { ScoresLoadingPlaceholder } from '../components/ui/ScoresLoadingPlaceholder';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { formatClassLevelLabel, type WeeklyEntry } from '../types';
@@ -37,6 +38,9 @@ import {
   MessageCircle,
   Download,
   CalendarCheck,
+  Brain,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 import {
   BarChart,
@@ -79,9 +83,20 @@ export default function Analytics() {
   const {
     students, weeklyEntries, topicProgress, getReadingStats,
     writtenExamScores, getWrittenExamSubjectsForStudent, writtenExamSubjectsByStudent, getWrittenExamStats,
-    getStudentExamResults
+    getStudentExamResults,
+    getStudentAISuggestions,
+    markSuggestionRead,
+    updateAISuggestion,
+    deleteAISuggestion,
+    appDataLoading,
+    scoresDataReady,
   } = useApp();
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
+  const [editingReportId, setEditingReportId] = useState<string | null>(null);
+  const [editReportTitle, setEditReportTitle] = useState('');
+  const [editReportBody, setEditReportBody] = useState('');
+  const [reportActionBusy, setReportActionBusy] = useState(false);
+  const [reportActionNotice, setReportActionNotice] = useState('');
   const [rangeStart, setRangeStart] = useState(() => defaultRangeStart(7));
   const [rangeEnd, setRangeEnd] = useState(() => defaultRangeEnd());
   /** Tüm kayıtlar; grafikte tarih ekseni için son 90 gün kullanılır */
@@ -98,6 +113,8 @@ export default function Analytics() {
 
   const tags = useMemo(() => (effectiveUser ? userRoleTags(effectiveUser) : []), [effectiveUser]);
   const isStudentUi = tags.includes('student');
+  const canManageSharedAiReports =
+    tags.includes('coach') || tags.includes('admin') || tags.includes('super_admin');
 
   /** Öğrenci hesabı: JWT studentId / e-posta ile seçim; students.length===1 şartı çok kurumda bozuluyordu */
   useEffect(() => {
@@ -152,6 +169,66 @@ export default function Analytics() {
   }, [selectedStudentId, useAllTime, rangeStart, rangeEnd]);
 
   const selectedStudent = students.find(s => s.id === selectedStudentId);
+
+  const sharedAiCoachReports = useMemo(() => {
+    if (!selectedStudentId) return [];
+    return getStudentAISuggestions(selectedStudentId)
+      .filter((s) => s.sharedWithStudent)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [selectedStudentId, getStudentAISuggestions]);
+
+  const startEditSharedReport = (report: (typeof sharedAiCoachReports)[number]) => {
+    setEditingReportId(report.id);
+    setEditReportTitle(report.title);
+    setEditReportBody(report.analysisMarkdown || report.description);
+    setReportActionNotice('');
+  };
+
+  const cancelEditSharedReport = () => {
+    setEditingReportId(null);
+    setEditReportTitle('');
+    setEditReportBody('');
+  };
+
+  const saveEditSharedReport = async () => {
+    if (!editingReportId) return;
+    const title = editReportTitle.trim();
+    const body = editReportBody.trim();
+    if (!title || !body) {
+      setReportActionNotice('Başlık ve analiz metni boş olamaz.');
+      return;
+    }
+    setReportActionBusy(true);
+    setReportActionNotice('');
+    try {
+      await updateAISuggestion(editingReportId, {
+        title,
+        analysisMarkdown: body,
+        description: body.length > 480 ? `${body.slice(0, 477)}…` : body
+      });
+      cancelEditSharedReport();
+      setReportActionNotice('Analiz güncellendi.');
+    } catch (e) {
+      setReportActionNotice(e instanceof Error ? e.message : 'Kaydedilemedi');
+    } finally {
+      setReportActionBusy(false);
+    }
+  };
+
+  const removeSharedReport = async (reportId: string, title: string) => {
+    if (!window.confirm(`"${title}" analizini silmek istediğinize emin misiniz?`)) return;
+    setReportActionBusy(true);
+    setReportActionNotice('');
+    try {
+      if (editingReportId === reportId) cancelEditSharedReport();
+      await deleteAISuggestion(reportId);
+      setReportActionNotice('Analiz silindi.');
+    } catch (e) {
+      setReportActionNotice(e instanceof Error ? e.message : 'Silinemedi');
+    } finally {
+      setReportActionBusy(false);
+    }
+  };
 
   const applyRangeFilter = useCallback(
     (entries: typeof weeklyEntries) => {
@@ -728,13 +805,29 @@ export default function Analytics() {
     return '#EF4444'; // red-500
   };
 
+  if (appDataLoading && !scoresDataReady) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">{isStudentUi ? 'Analizlerim' : 'Analiz Paneli'}</h2>
+          <p className="text-gray-500">
+            {isStudentUi ? 'Koç analizleri ve haftalık performans özeti' : 'Haftalık performans ve başarı analizi'}
+          </p>
+        </div>
+        <ScoresLoadingPlaceholder message="Analiz verileri yükleniyor…" />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-slate-800">Analiz Paneli</h2>
-          <p className="text-gray-500">Haftalık performans ve başarı analizi</p>
+          <h2 className="text-2xl font-bold text-slate-800">{isStudentUi ? 'Analizlerim' : 'Analiz Paneli'}</h2>
+          <p className="text-gray-500">
+            {isStudentUi ? 'Koç analizleri ve haftalık performans özeti' : 'Haftalık performans ve başarı analizi'}
+          </p>
         </div>
 
         {/* Öğrenci ve tarih aralığı */}
@@ -909,6 +1002,122 @@ export default function Analytics() {
           oturumu / auth-login gerekir).
         </div>
       )}
+
+      {sharedAiCoachReports.length > 0 ? (
+        <div className="rounded-xl border border-purple-100 bg-white shadow-sm overflow-hidden">
+          <div className="border-b border-purple-50 bg-gradient-to-r from-purple-50 to-indigo-50 px-4 py-3">
+            <div className="flex items-center gap-2">
+              <Brain className="h-5 w-5 text-purple-600" />
+              <h3 className="font-semibold text-slate-900">AI Koç Analizleri</h3>
+            </div>
+            <p className="mt-1 text-xs text-slate-600">
+              {isStudentUi
+                ? 'Koçunuzun sizinle paylaştığı analiz raporları'
+                : 'Öğrencinin Analizlerim sayfasında görünen paylaşımlar — düzenleyebilir veya silebilirsiniz'}
+            </p>
+          </div>
+          {reportActionNotice ? (
+            <div className="border-b border-purple-50 bg-purple-50/60 px-4 py-2 text-sm text-purple-900">
+              {reportActionNotice}
+            </div>
+          ) : null}
+          <ul className="divide-y divide-slate-100">
+            {sharedAiCoachReports.map((report) => {
+              const body = report.analysisMarkdown || report.description;
+              const isEditing = editingReportId === report.id;
+              return (
+                <li key={report.id} className="px-4 py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      {isEditing ? (
+                        <input
+                          value={editReportTitle}
+                          onChange={(e) => setEditReportTitle(e.target.value)}
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-900"
+                          placeholder="Analiz başlığı"
+                        />
+                      ) : (
+                        <p className="font-medium text-slate-900">{report.title}</p>
+                      )}
+                      <p className="text-xs text-slate-500 mt-1">
+                        {report.createdAt
+                          ? new Date(report.createdAt).toLocaleString('tr-TR')
+                          : ''}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {isStudentUi && !report.isRead && !isEditing ? (
+                        <button
+                          type="button"
+                          onClick={() => void markSuggestionRead(report.id)}
+                          className="rounded-lg border border-purple-200 px-2 py-1 text-xs font-medium text-purple-800 hover:bg-purple-50"
+                        >
+                          Okundu işaretle
+                        </button>
+                      ) : null}
+                      {canManageSharedAiReports && !isEditing ? (
+                        <>
+                          <button
+                            type="button"
+                            disabled={reportActionBusy}
+                            onClick={() => startEditSharedReport(report)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                            Düzenle
+                          </button>
+                          <button
+                            type="button"
+                            disabled={reportActionBusy}
+                            onClick={() => void removeSharedReport(report.id, report.title)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Sil
+                          </button>
+                        </>
+                      ) : null}
+                      {canManageSharedAiReports && isEditing ? (
+                        <>
+                          <button
+                            type="button"
+                            disabled={reportActionBusy}
+                            onClick={() => void saveEditSharedReport()}
+                            className="rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                          >
+                            {reportActionBusy ? 'Kaydediliyor…' : 'Kaydet'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={reportActionBusy}
+                            onClick={cancelEditSharedReport}
+                            className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            İptal
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
+                  </div>
+                  {isEditing ? (
+                    <textarea
+                      value={editReportBody}
+                      onChange={(e) => setEditReportBody(e.target.value)}
+                      rows={12}
+                      className="mt-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm leading-relaxed text-slate-800"
+                      placeholder="Analiz metni"
+                    />
+                  ) : (
+                    <div className="mt-3 whitespace-pre-wrap rounded-lg bg-slate-50 px-3 py-3 text-sm leading-relaxed text-slate-800">
+                      {body}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
 
       <div ref={reportRef} className="space-y-6">
       {/* Seçili Öğrenci Özeti */}

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { CloudDownload, Loader2, Plug, RefreshCw, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -41,7 +42,7 @@ export default function EdesisSyncPanel() {
           toast.success(`Bağlantı OK — ${pr.rowCount ?? 0} kayıt (${pr.baseUrl}${pr.path})`);
         } else {
           toast.warning(
-            pr.warning || 'Bağlantı OK ama liste boş — JSON içe aktar veya EDESIS_RESULTS_PATH ekleyin'
+            pr.warning || 'Bağlantı OK ama liste boş — key scope (exams paketi) veya henüz sınav sonucu yok'
           );
         }
       } else {
@@ -64,7 +65,13 @@ export default function EdesisSyncPanel() {
       const r = await syncEdesis();
       setLastResult(r);
       if (r.ok && (r.imported ?? 0) > 0) {
-        toast.success(`${r.imported} deneme aktarıldı (${r.matched} eşleşme)`);
+        const detail =
+          (r.enrichedCount ?? 0) > 0
+            ? ` · ${r.enrichedCount} kayıt ders/konu detayı ile zenginleştirildi`
+            : (r.sampleSubjectCount ?? 0) > 1
+              ? ` · örnek: ${r.sampleSubjectCount} ders`
+              : '';
+        toast.success(`${r.imported} deneme aktarıldı (${r.matched} eşleşme)${detail}`);
       } else if (r.ok && (r.matched ?? 0) === 0) {
         toast.warning(r.diagnosis || 'Hiç öğrenci eşleşmedi — kurallara bakın');
       } else {
@@ -121,8 +128,11 @@ export default function EdesisSyncPanel() {
           <div>
             <h4 className="font-semibold text-indigo-950">Edesis entegrasyonu</h4>
             <p className="mt-1 text-sm text-indigo-800">
-              Webhook yok — API key ile sınav sonuçları çekilir. Vercel’de{' '}
-              <code className="rounded bg-white/80 px-1">EDESIS_API_KEY</code> tanımlı olmalı.
+              Edesis External API <strong>v1</strong> — tam panel için{' '}
+              <Link to="/edesis" className="font-medium underline hover:text-indigo-950">
+                Edesis sayfasına
+              </Link>{' '}
+              gidin.
             </p>
           </div>
 
@@ -150,40 +160,38 @@ export default function EdesisSyncPanel() {
           )}
 
           <div className="rounded-lg border border-red-200 bg-red-50/90 p-3 text-sm text-red-950">
-            <p className="mb-2 font-semibold">“Boş liste” mesajı — Edesis tarafı</p>
-            <p className="mb-2 text-xs">
-              API key çalışıyor ama Edesis <strong>0 sınav/sonuç</strong> veriyor. Smart Koçluk bunu aşamaz; veri
-              Edesis’te paylaşıma açılmalı veya export ile gelmeli.
-            </p>
-            <ol className="list-decimal space-y-1 pl-4 text-xs">
+            <p className="mb-2 font-semibold">Yaygın hatalar (v1 rehber)</p>
+            <ul className="list-disc space-y-1 pl-4 text-xs">
               <li>
-                Edesis → <strong>External Api</strong> / entegrasyon ayarında key’in kuruma bağlı olduğunu doğrulayın
+                Yanlış path: <code>/api/external/sinav-sonuclari</code> →{' '}
+                <code>/api/external/v1/exams/results</code>
               </li>
               <li>
-                Sınavlar ekranında denemelerde <strong>dış API / paylaşım</strong> seçeneği varsa işaretleyin (eski
-                sınavlar dahil)
+                <code>KurumKodu</code> header gerekmez — key kuruma özel
               </li>
               <li>
-                Vercel: <code>EDESIS_RESULTS_PATH=/api/external/sinav-sonuclari</code> → Redeploy
+                Key paketi <strong>exams</strong> veya <strong>student_dashboard</strong> (basic → 403)
               </li>
-              <li>
-                Edesis destek: hangi URL’nin öğrenci + net listesi döndürdüğünü yazılı isteyin
-              </li>
-              <li>
-                <strong>Hemen:</strong> Edesis sonuç export → aşağıdaki <strong>JSON içe aktar</strong>
-              </li>
-            </ol>
+            </ul>
           </div>
 
           <div className="rounded-lg border border-amber-200 bg-amber-50/90 p-3 text-sm text-amber-950">
+            <p className="mb-2 font-semibold">Sonuç boş geliyorsa</p>
+            <ol className="list-decimal space-y-1 pl-4 text-xs">
+              <li>Edesis’te son 2 yılda değerlendirilmiş sınav var mı?</li>
+              <li>Öğrenci eşleme: <code>studentId</code> veya e-posta</li>
+              <li>Hemen: JSON içe aktar (v1 alanları: studentName, score, examName)</li>
+            </ol>
+          </div>
+
+          <div className="rounded-lg border border-indigo-100 bg-white/80 p-3 text-sm text-indigo-950">
             <p className="mb-2 font-semibold">Öğrenci nasıl eşlenir?</p>
             <ol className="list-decimal space-y-1 pl-4 text-xs">
               <li>
-                <strong>Yeterli:</strong> <strong>Ad soyad</strong> — Smart Koçluk öğrenci kartındaki ad ile
-                Edesis’teki ad aynı olmalı (sıra farkı OK: &quot;Yılmaz Ahmet&quot; = &quot;Ahmet Yılmaz&quot;)
+                <strong>Öncelik:</strong> <code>studentId</code> → <code>edesis_ogrenci_id</code>, sonra e-posta, ad
               </li>
               <li>
-                <strong>İsteğe bağlı:</strong> <code>edesis_ogrenci_id</code>, e-posta veya telefon (daha kesin)
+                v1 sonuç satırı: <code>studentName</code>, <code>score</code>, <code>examName</code>
               </li>
             </ol>
             <p className="mt-2 text-xs">
@@ -282,10 +290,16 @@ export default function EdesisSyncPanel() {
                   )}
                 </p>
               ) : null}
-              <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-5">
+              <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-6">
                 <div className="rounded bg-white/80 p-2">
                   <span className="text-slate-500">Gelen</span>
                   <p className="font-bold text-slate-900">{lastResult.fetched ?? '—'}</p>
+                </div>
+                <div className="rounded bg-white/80 p-2">
+                  <span className="text-slate-500">Ders detayı</span>
+                  <p className="font-bold text-violet-700">
+                    {(lastResult as { enrichedCount?: number }).enrichedCount ?? '—'}
+                  </p>
                 </div>
                 <div className="rounded bg-white/80 p-2">
                   <span className="text-slate-500">İsimli satır</span>
@@ -327,9 +341,8 @@ export default function EdesisSyncPanel() {
           )}
 
           <p className="text-xs text-indigo-700">
-            Vercel değişkenleri: <code>EDESIS_API_KEY</code>,{' '}
-            <code>EDESIS_INSTITUTION_CODE=onlinevipdershane</code>, isteğe bağlı{' '}
-            <code>EDESIS_API_BASE_URL</code>, <code>EDESIS_EXAMS_PATH</code>. Kayıtlar Sınav Takibi’nde görünür.
+            Vercel: <code>EDESIS_API_KEY</code>, <code>EDESIS_API_BASE_URL=https://onlinevipdershane.api.edesis.com</code>,{' '}
+            <code>EDESIS_AUTH_MODE=x-api-key</code>. KurumKodu / RESULTS_PATH gerekmez (v1).
           </p>
         </div>
       </div>

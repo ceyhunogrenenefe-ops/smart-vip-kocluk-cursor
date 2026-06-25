@@ -7,11 +7,13 @@ import { AcademicCenterQuickLinks } from '../components/academic/AcademicCenterQ
 import { Users, AlertCircle } from 'lucide-react';
 import { resolveStudentRecordId } from '../lib/coachResolve';
 import { cn } from '../lib/utils';
+import { useMobileAppShell } from '../hooks/useMobileAppShell';
 
 export default function WeeklyPlannerPage() {
   const { students } = useApp();
   const { effectiveUser, linkedStudent, linkedStudentError, linkedStudentLoading, refreshLinkedStudent } = useAuth();
   const tags = userRoleTags(effectiveUser);
+  const mobileAppShell = useMobileAppShell();
   const [selectedId, setSelectedId] = useState('');
 
   const isStudentUi = tags.includes('student');
@@ -68,7 +70,12 @@ export default function WeeklyPlannerPage() {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-8 max-w-[1400px] mx-auto pb-4 sm:pb-10">
+    <div
+      className={cn(
+        mobileAppShell ? 'space-y-3 pb-2' : 'mx-auto max-w-[1400px] space-y-4 pb-4 sm:space-y-8 sm:pb-10'
+      )}
+    >
+      {!mobileAppShell ? (
       <div
         className={cn(
           'relative overflow-hidden rounded-2xl border p-4 sm:p-8 shadow-sm',
@@ -129,8 +136,27 @@ export default function WeeklyPlannerPage() {
           </div>
         </div>
       </div>
+      ) : !isStudentUi ? (
+        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+          <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+            Öğrenci
+          </label>
+          <select
+            value={selectedId}
+            onChange={(e) => setSelectedId(e.target.value)}
+            className="mt-1 w-full rounded-lg border-0 bg-transparent p-0 text-sm font-semibold text-slate-900 focus:outline-none focus:ring-0 dark:text-slate-100"
+          >
+            <option value="">Öğrenci seçin</option>
+            {students.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
 
-      {isStudentUi ? null : <AcademicCenterQuickLinks />}
+      {!mobileAppShell && isStudentUi ? null : !mobileAppShell ? <AcademicCenterQuickLinks /> : null}
 
       {selfCoachingMode && (
         <div className="rounded-xl border border-indigo-200 bg-indigo-50/80 px-4 py-3 text-sm text-indigo-950 dark:border-indigo-900/50 dark:bg-indigo-950/30 dark:text-indigo-100">

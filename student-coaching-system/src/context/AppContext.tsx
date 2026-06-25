@@ -162,8 +162,15 @@ interface AppState {
   userRole: UserRole;
   setUserRole: (role: UserRole) => void;
 
+  /** Supabase bootstrap devam ediyor */
+  appDataLoading: boolean;
+  /** Deneme + yazılı skorları yüklendi */
+  scoresDataReady: boolean;
+
   // Öğrenciler
   students: Student[];
+  /** Kurum kapsamındaki tüm öğrenciler (sınıf atama, kullanıcı yönetimi ile uyumlu) */
+  institutionStudents: Student[];
   addStudent: (student: Student) => Promise<{ student: Student; persisted: boolean }>;
   updateStudent: (id: string, student: StudentProfileUpdate) => Promise<void>;
   deleteStudent: (id: string) => void;
@@ -239,6 +246,7 @@ interface AppState {
   // AI Koç Önerileri
   aiSuggestions: AICoachSuggestion[];
   addAISuggestion: (suggestion: AICoachSuggestion) => Promise<void>;
+  updateAISuggestion: (id: string, updates: Partial<AICoachSuggestion>) => Promise<void>;
   markSuggestionRead: (id: string) => Promise<void>;
   deleteAISuggestion: (id: string) => Promise<void>;
   getStudentAISuggestions: (studentId: string) => AICoachSuggestion[];
@@ -297,6 +305,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const { syncOrganizationsFromInstitutions } = useOrganization();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userRole, setUserRole] = useState<UserRole>('admin');
+  const [appDataLoading, setAppDataLoading] = useState(true);
+  const [scoresDataReady, setScoresDataReady] = useState(false);
 
   // Öğrenci/koç listesi: tarayıcılar arası tutarlılık için ilk boyutta localStorage kullanma —
   // eski `coaching_students` önbelleği yanlış sınıf / hayalet kayıt gösterebiliyordu; kaynak Supabase.
@@ -424,6 +434,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setWrittenExamScores([]);
       setExamResults([]);
       setAISuggestions([]);
+      setAppDataLoading(false);
+      setScoresDataReady(false);
       return;
     }
 
@@ -434,18 +446,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const loadForUserId = effectiveUser.id;
 
     const loadDataFromDatabase = async () => {
+      setAppDataLoading(true);
+      setScoresDataReady(false);
       try {
         await ensureSupabaseReady();
 
-        // Initialize database first
-        await db.initializeDatabase();
-
-        // Öğrenci: kurum filtresi yok. Admin/süper admin: üst çubuktaki kurum = kiracı filtresi.
-        // Koç/öğretmen: API zaten atanan öğrencileri döndürür; aktif kurum ile istemci tarafında tekrar
-        // filtrelemek, başka tarayıcıda farklı kurum seçiliyken listeyi sıfırlıyordu.
-
-        // Kurumları önce yükle — aktif kurum yoksa ilk kayıt bu yükleme turunun kapsamı olur
-        const dbInstitutions = await db.getInstitutions();
+        const [, dbInstitutions] = await Promise.all([
+          db.initializeDatabase(),
+          db.getInstitutions()
+        ]);
         let loadedInstitutions: Institution[] = [];
         if (dbInstitutions.length > 0) {
           loadedInstitutions = dbInstitutions.map((i) => {
@@ -528,46 +537,244 @@ export function AppProvider({ children }: { children: ReactNode }) {
             ? resolvedActiveId || defaultInstitutionId || undefined
             : undefined;
 
-        const dbStudents = await db.getStudents(institutionScope);
+        const [dbStudents, myRow] = await Promise.all([
+          db.getStudents(institutionScope),
+          isStudentRole && getAuthToken()
+            ? db.getMyStudent().catch((e) => {
+                console.warn('[AppContext] getMyStudent birleştirme atlandı:', e);
+                return null;
+              })
+            : Promise.resolve(null)
+        ]);
+
         let loadedStudents: Student[] = dbStudents.map(studentRowToStudent);
 
-        if (isStudentRole && getAuthToken()) {
-          try {
-            const myRow = await db.getMyStudent();
-            if (myRow) {
-              const st = studentRowToStudent(myRow);
-              const ix = loadedStudents.findIndex((s) => s.id === st.id);
-              if (ix === -1) loadedStudents = [...loadedStudents, st];
-              else {
-                const copy = [...loadedStudents];
-                copy[ix] = { ...copy[ix], ...st };
-                loadedStudents = copy;
-              }
-            }
-          } catch (e) {
-            console.warn('[AppContext] getMyStudent birleştirme atlandı:', e);
+        if (myRow) {
+          const st = studentRowToStudent(myRow);
+          const ix = loadedStudents.findIndex((s) => s.id === st.id);
+          if (ix === -1) loadedStudents = [...loadedStudents, st];
+          else {
+            const copy = [...loadedStudents];
+            copy[ix] = { ...copy[ix], ...st };
+            loadedStudents = copy;
           }
         }
 
         setStudents(loadedStudents);
 
-        /** Konu takibi: `topic_progress` ile tarayıcılar arası senkron + tek seferlik localStorage migrate */
-        try {
-          if (getAuthToken()) {
-            if (loadedStudents.length === 0) {
-              setTopicProgress([]);
-            } else {
-            const ids = loadedStudents.map((s) => s.id);
-            const rows = await db.getTopicProgressForStudents(ids);
-            const map = new Map<string, TopicProgress>();
-            for (const row of rows) {
-              const app = topicProgressRowToApp(row as unknown as TopicProgressDbRow);
-              if (app) map.set(topicProgressDedupeKey(app.studentId, app.subject, app.topic), app);
-            }
-            const fromLocal = loadFromStorage<TopicProgress[]>(STORAGE_KEYS.topicProgress, []);
-            const localScoped = fromLocal.filter(
-              (p) => ids.includes(p.studentId) && !map.has(topicProgressDedupeKey(p.studentId, p.subject, p.topic))
+        const studentIdScope = new Set(loadedStudents.map((s) => s.id));
+        const restrictRelatedDataByStudents = !isStudentRole && Boolean(institutionScope);
+        const sidList = loadedStudents.map((s) => s.id);
+        const hasAuth = Boolean(getAuthToken());
+        const hasStudents = sidList.length > 0;
+        const legacyInstitutionId =
+          institutionScope || loadedInstitutions[0]?.id || createDefaultInstitution().id;
+        const prefsInstId = resolvedActiveId || defaultInstitutionId || null;
+
+        const [
+          coachesResult,
+          entriesResult,
+          booksResult,
+          writtenResult,
+          examResult,
+          logsResult,
+          sugResult,
+          topicResult,
+          prefsResult
+        ] = await Promise.allSettled([
+          db.getCoaches(institutionScope),
+          db.getWeeklyEntries(undefined, institutionScope),
+          db.getBookReadings(),
+          db.getWrittenExams(),
+          hasAuth && hasStudents ? db.getExamResultsForStudents(sidList) : Promise.resolve([]),
+          hasAuth && hasStudents ? db.getReadingLogsForStudents(sidList) : Promise.resolve([]),
+          hasAuth && hasStudents ? db.getAiCoachSuggestionsForStudents(sidList) : Promise.resolve([]),
+          hasAuth && hasStudents ? db.getTopicProgressForStudents(sidList) : Promise.resolve([]),
+          prefsInstId && hasAuth
+            ? db.getInstitutionWrittenExamPrefs(prefsInstId)
+            : Promise.resolve(null)
+        ]);
+
+        if (coachesResult.status === 'fulfilled') {
+          const loadedCoaches: Coach[] = coachesResult.value.map((c) => ({
+            id: c.id,
+            name: c.name,
+            email: c.email,
+            phone: c.phone || undefined,
+            subjects: c.specialties || [],
+            studentIds: c.student_ids || [],
+            institutionId: c.institution_id || undefined,
+            createdAt: c.created_at
+          }));
+          const localCoaches = loadFromStorage<Coach[]>(STORAGE_KEYS.coaches, []).map((c) => ({
+            ...c,
+            subjects: Array.isArray(c.subjects) ? c.subjects : [],
+            studentIds: Array.isArray(c.studentIds) ? c.studentIds : [],
+            institutionId: c.institutionId || legacyInstitutionId
+          }));
+          setCoaches(mergeCoachesByEmail(loadedCoaches, localCoaches));
+        } else {
+          console.warn('[AppContext] getCoaches (boş devam):', coachesResult.reason);
+        }
+
+        if (entriesResult.status === 'fulfilled') {
+          const loadedEntries: WeeklyEntry[] = entriesResult.value.map((e) => ({
+            id: e.id,
+            studentId: e.student_id,
+            date: e.date,
+            subject: e.subject,
+            topic: e.topic,
+            targetQuestions: e.target_questions,
+            solvedQuestions: e.solved_questions,
+            correctAnswers: e.correct,
+            wrongAnswers: e.wrong,
+            blankAnswers: e.blank,
+            coachComment: e.notes || undefined,
+            readingMinutes: e.reading_minutes || undefined,
+            pagesRead: (e as { pages_read?: number }).pages_read ?? undefined,
+            screenTimeMinutes: (e as { screen_time_minutes?: number }).screen_time_minutes ?? undefined,
+            bookId: e.book_id || undefined,
+            bookTitle: e.book_title || undefined,
+            createdAt: e.created_at
+          }));
+          setWeeklyEntries(loadedEntries);
+        } else {
+          console.warn('[AppContext] getWeeklyEntries:', entriesResult.reason);
+        }
+
+        if (booksResult.status === 'fulfilled') {
+          const mappedBooks: Book[] = booksResult.value.map((b) => ({
+            id: b.id,
+            studentId: b.student_id,
+            title: b.book_title,
+            author: b.author || undefined,
+            pagesRead: b.pages_read,
+            startDate: b.start_date || '',
+            endDate: b.end_date || undefined,
+            status: bookStatusFromRow(b),
+            notes: b.notes || undefined,
+            institutionId: b.institution_id || undefined,
+            createdAt: b.created_at
+          }));
+          setBooks(
+            restrictRelatedDataByStudents
+              ? mappedBooks.filter((b) => studentIdScope.has(b.studentId))
+              : mappedBooks
+          );
+        } else {
+          console.warn('[AppContext] getBookReadings:', booksResult.reason);
+        }
+
+        if (writtenResult.status === 'fulfilled') {
+          const mappedWritten: WrittenExamScore[] = writtenResult.value.map((w) => ({
+            id: w.id,
+            studentId: w.student_id,
+            subject: w.subject,
+            semester: w.semester,
+            examType: w.exam_type,
+            score: w.score,
+            date: w.date || new Date().toISOString().split('T')[0],
+            notes: w.notes || undefined,
+            createdAt: w.created_at
+          }));
+          setWrittenExamScores(
+            restrictRelatedDataByStudents
+              ? mappedWritten.filter((w) => studentIdScope.has(w.studentId))
+              : mappedWritten
+          );
+        } else {
+          console.warn('[AppContext] getWrittenExams:', writtenResult.reason);
+          setWrittenExamScores([]);
+        }
+
+        if (examResult.status === 'fulfilled') {
+          let exams = examResult.value
+            .map((r) => examResultFromRow(r as ExamResultRow))
+            .filter((e): e is ExamResult => Boolean(e));
+          if (restrictRelatedDataByStudents) {
+            exams = exams.filter((e) => studentIdScope.has(e.studentId));
+          }
+          setExamResults(
+            exams.sort((a, b) => new Date(b.examDate).getTime() - new Date(a.examDate).getTime())
+          );
+        } else {
+          console.warn('[AppContext] exam_results yükleme:', examResult.reason);
+          setExamResults([]);
+        }
+
+        setScoresDataReady(true);
+
+        if (logsResult.status === 'fulfilled') {
+          let logs = logsResult.value.map((r) => readingLogFromRow(r));
+          if (restrictRelatedDataByStudents) {
+            logs = logs.filter((l) => studentIdScope.has(l.studentId));
+          }
+          setReadingLogs(
+            logs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+          );
+        } else {
+          console.warn('[AppContext] reading_logs yükleme:', logsResult.reason);
+          setReadingLogs([]);
+        }
+
+        if (sugResult.status === 'fulfilled') {
+          let sugs = sugResult.value
+            .map((r) => aiSuggestionFromRow(r))
+            .filter((s): s is AICoachSuggestion => Boolean(s));
+          if (restrictRelatedDataByStudents) {
+            sugs = sugs.filter((s) => studentIdScope.has(s.studentId));
+          }
+          setAISuggestions(
+            sugs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          );
+        } else {
+          console.warn('[AppContext] ai_coach_suggestions yükleme:', sugResult.reason);
+          setAISuggestions([]);
+        }
+
+        if (topicResult.status === 'fulfilled') {
+          const map = new Map<string, TopicProgress>();
+          for (const row of topicResult.value) {
+            const app = topicProgressRowToApp(row as unknown as TopicProgressDbRow);
+            if (app) map.set(topicProgressDedupeKey(app.studentId, app.subject, app.topic), app);
+          }
+          setTopicProgress([...map.values()]);
+        } else if (hasAuth) {
+          console.warn('[AppContext] topic_progress sunucu yüklemesi:', topicResult.reason);
+          setTopicProgress(loadFromStorage<TopicProgress[]>(STORAGE_KEYS.topicProgress, []));
+        } else {
+          setTopicProgress([]);
+        }
+
+        if (prefsResult.status === 'fulfilled' && prefsInstId && hasAuth) {
+          const prefs = prefsResult.value;
+          if (prefs) {
+            setWrittenExamSubjects(
+              prefs.global_subjects.length > 0 ? prefs.global_subjects : [...DEFAULT_WRITTEN_EXAM_SUBJECTS]
             );
+            setWrittenExamSubjectsByStudent(prefs.per_student_subjects || {});
+          } else {
+            const locS = loadFromStorage<string[]>(STORAGE_KEYS.writtenExamSubjects, DEFAULT_WRITTEN_EXAM_SUBJECTS);
+            const locM = loadFromStorage<Record<string, string[]>>(STORAGE_KEYS.writtenExamSubjectsByStudent, {});
+            const seedGlobal = Array.from(new Set([...DEFAULT_WRITTEN_EXAM_SUBJECTS, ...locS]));
+            setWrittenExamSubjects(seedGlobal);
+            setWrittenExamSubjectsByStudent(locM);
+            void db
+              .upsertInstitutionWrittenExamPrefs(prefsInstId, {
+                global_subjects: seedGlobal,
+                per_student_subjects: locM
+              })
+              .catch((prefErr) => console.warn('[AppContext] institution_written_exam_prefs seed:', prefErr));
+          }
+        } else if (prefsResult.status === 'rejected' && prefsInstId && hasAuth) {
+          console.warn('[AppContext] institution_written_exam_prefs:', prefsResult.reason);
+        }
+
+        /** Yerel → sunucu migrate: ilk yükleme hızını bloklamaz */
+        if (hasAuth && hasStudents) {
+          void (async () => {
+            const fromLocal = loadFromStorage<TopicProgress[]>(STORAGE_KEYS.topicProgress, []);
+            const localScoped = fromLocal.filter((p) => sidList.includes(p.studentId));
             for (const p of localScoped) {
               try {
                 const topic_id = await stableTopicProgressTopicId(p.studentId, p.subject, p.topic);
@@ -584,235 +791,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
                   }),
                   institution_id: inst
                 });
-                map.set(topicProgressDedupeKey(p.studentId, p.subject, p.topic), p);
               } catch (migErr) {
                 console.warn('[AppContext] topic_progress yerel satır migrate edilemedi:', migErr);
               }
             }
-            setTopicProgress([...map.values()]);
-            }
-          }
-        } catch (tpErr) {
-          console.warn('[AppContext] topic_progress sunucu yüklemesi (yerel önbellek):', tpErr);
-          setTopicProgress(loadFromStorage<TopicProgress[]>(STORAGE_KEYS.topicProgress, []));
-        }
 
-        let dbCoaches: Awaited<ReturnType<typeof db.getCoaches>> = [];
-        try {
-          dbCoaches = await db.getCoaches(institutionScope);
-        } catch (coachErr) {
-          console.warn('[AppContext] getCoaches (boş devam):', coachErr);
-        }
-        const loadedCoaches: Coach[] = dbCoaches.map(c => ({
-          id: c.id,
-          name: c.name,
-          email: c.email,
-          phone: c.phone || undefined,
-          subjects: c.specialties || [],
-          studentIds: c.student_ids || [],
-          institutionId: c.institution_id || undefined,
-          createdAt: c.created_at
-        }));
-        const legacyInstitutionId =
-          institutionScope || loadedInstitutions[0]?.id || createDefaultInstitution().id;
-        const localCoaches = loadFromStorage<Coach[]>(STORAGE_KEYS.coaches, []).map(c => ({
-          ...c,
-          subjects: Array.isArray(c.subjects) ? c.subjects : [],
-          studentIds: Array.isArray(c.studentIds) ? c.studentIds : [],
-          institutionId: c.institutionId || legacyInstitutionId
-        }));
-        setCoaches(mergeCoachesByEmail(loadedCoaches, localCoaches));
-
-        const dbEntries = await db.getWeeklyEntries(undefined, institutionScope);
-        const loadedEntries: WeeklyEntry[] = dbEntries.map(e => ({
-          id: e.id,
-          studentId: e.student_id,
-          date: e.date,
-          subject: e.subject,
-          topic: e.topic,
-          targetQuestions: e.target_questions,
-          solvedQuestions: e.solved_questions,
-          correctAnswers: e.correct,
-          wrongAnswers: e.wrong,
-          blankAnswers: e.blank,
-          coachComment: e.notes || undefined,
-          readingMinutes: e.reading_minutes || undefined,
-          pagesRead: (e as { pages_read?: number }).pages_read ?? undefined,
-          screenTimeMinutes: (e as { screen_time_minutes?: number }).screen_time_minutes ?? undefined,
-          bookId: e.book_id || undefined,
-          bookTitle: e.book_title || undefined,
-          createdAt: e.created_at
-        }));
-        setWeeklyEntries(loadedEntries);
-
-        const studentIdScope = new Set(loadedStudents.map(s => s.id));
-        const restrictRelatedDataByStudents = !isStudentRole && Boolean(institutionScope);
-
-        const dbBooks = await db.getBookReadings();
-        const mappedBooks: Book[] = dbBooks.map((b) => ({
-          id: b.id,
-          studentId: b.student_id,
-          title: b.book_title,
-          author: b.author || undefined,
-          pagesRead: b.pages_read,
-          startDate: b.start_date || '',
-          endDate: b.end_date || undefined,
-          status: bookStatusFromRow(b),
-          notes: b.notes || undefined,
-          institutionId: b.institution_id || undefined,
-          createdAt: b.created_at
-        }));
-        const loadedBooks = restrictRelatedDataByStudents
-          ? mappedBooks.filter(b => studentIdScope.has(b.studentId))
-          : mappedBooks;
-        setBooks(loadedBooks);
-
-        const dbWrittenExams = await db.getWrittenExams();
-        const mappedWritten: WrittenExamScore[] = dbWrittenExams.map(w => ({
-          id: w.id,
-          studentId: w.student_id,
-          subject: w.subject,
-          semester: w.semester,
-          examType: w.exam_type,
-          score: w.score,
-          date: w.date || new Date().toISOString().split('T')[0],
-          notes: w.notes || undefined,
-          createdAt: w.created_at
-        }));
-        const loadedWrittenScores = restrictRelatedDataByStudents
-          ? mappedWritten.filter(w => studentIdScope.has(w.studentId))
-          : mappedWritten;
-        setWrittenExamScores(loadedWrittenScores);
-
-        /** Deneme sınavları: exam_results + app_payload; yerel `coaching_exam_results` tek seferlik migrate */
-        try {
-          if (getAuthToken() && loadedStudents.length > 0) {
-            const sidList = loadedStudents.map((s) => s.id);
-            const examRows = await db.getExamResultsForStudents(sidList);
-            let exams = examRows.map((r) => examResultFromRow(r as ExamResultRow)).filter((e): e is ExamResult => Boolean(e));
-            if (restrictRelatedDataByStudents) {
-              exams = exams.filter((e) => studentIdScope.has(e.studentId));
-            }
-            const examMap = new Map(exams.map((e) => [e.id, e]));
             const localExams = loadFromStorage<ExamResult[]>(STORAGE_KEYS.examResults, []);
             for (const e of localExams) {
               if (!studentIdScope.has(e.studentId)) continue;
-              if (examMap.has(e.id)) continue;
-              const inst = loadedStudents.find((s) => s.id === e.studentId)?.institutionId ?? null;
               try {
+                const inst = loadedStudents.find((s) => s.id === e.studentId)?.institutionId ?? null;
                 await db.upsertExamResultFromApp(e, inst);
-                examMap.set(e.id, e);
               } catch (migE) {
                 console.warn('[AppContext] exam_results yerel migrate edilemedi:', migE);
               }
             }
-            setExamResults(
-              [...examMap.values()].sort(
-                (a, b) => new Date(b.examDate).getTime() - new Date(a.examDate).getTime()
-              )
-            );
-          } else {
-            setExamResults([]);
-          }
-        } catch (examLoadErr) {
-          console.warn('[AppContext] exam_results yükleme (yerel önbellek):', examLoadErr);
-          setExamResults(loadFromStorage(STORAGE_KEYS.examResults, []));
-        }
 
-        /** Okuma günlükleri: reading_logs + yerel migrate */
-        try {
-          if (getAuthToken() && loadedStudents.length > 0) {
-            const sidList = loadedStudents.map((s) => s.id);
-            const logRows = await db.getReadingLogsForStudents(sidList);
-            let logs = logRows.map((r) => readingLogFromRow(r));
-            if (restrictRelatedDataByStudents) {
-              logs = logs.filter((l) => studentIdScope.has(l.studentId));
-            }
-            const logMap = new Map(logs.map((l) => [l.id, l]));
             const localLogs = loadFromStorage<ReadingLog[]>(STORAGE_KEYS.readingLogs, []);
             for (const l of localLogs) {
               if (!studentIdScope.has(l.studentId)) continue;
-              if (logMap.has(l.id)) continue;
-              const inst = loadedStudents.find((s) => s.id === l.studentId)?.institutionId ?? null;
               try {
+                const inst = loadedStudents.find((s) => s.id === l.studentId)?.institutionId ?? null;
                 await db.upsertReadingLogFromApp(l, inst);
-                logMap.set(l.id, l);
               } catch (migL) {
                 console.warn('[AppContext] reading_logs yerel migrate edilemedi:', migL);
               }
             }
-            setReadingLogs(
-              [...logMap.values()].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-            );
-          } else {
-            setReadingLogs([]);
-          }
-        } catch (logLoadErr) {
-          console.warn('[AppContext] reading_logs yükleme (yerel önbellek):', logLoadErr);
-          setReadingLogs(loadFromStorage(STORAGE_KEYS.readingLogs, []));
-        }
 
-        /** AI Koç önerileri */
-        try {
-          if (getAuthToken() && loadedStudents.length > 0) {
-            const sidList = loadedStudents.map((s) => s.id);
-            const sugRows = await db.getAiCoachSuggestionsForStudents(sidList);
-            let sugs = sugRows
-              .map((r) => aiSuggestionFromRow(r))
-              .filter((s): s is AICoachSuggestion => Boolean(s));
-            if (restrictRelatedDataByStudents) {
-              sugs = sugs.filter((s) => studentIdScope.has(s.studentId));
-            }
-            const sugMap = new Map(sugs.map((s) => [s.id, s]));
             const localSug = loadFromStorage<AICoachSuggestion[]>(STORAGE_KEYS.aiSuggestions, []);
             for (const s of localSug) {
               if (!studentIdScope.has(s.studentId)) continue;
-              if (sugMap.has(s.id)) continue;
-              const inst = loadedStudents.find((x) => x.id === s.studentId)?.institutionId ?? null;
               try {
+                const inst = loadedStudents.find((x) => x.id === s.studentId)?.institutionId ?? null;
                 await db.upsertAiCoachSuggestion(s, inst);
-                sugMap.set(s.id, s);
               } catch (migS) {
                 console.warn('[AppContext] ai_coach_suggestions yerel migrate edilemedi:', migS);
               }
             }
-            setAISuggestions(
-              [...sugMap.values()].sort(
-                (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-              )
-            );
-          } else {
-            setAISuggestions([]);
-          }
-        } catch (sugLoadErr) {
-          console.warn('[AppContext] ai_coach_suggestions yükleme (yerel önbellek):', sugLoadErr);
-          setAISuggestions(loadFromStorage(STORAGE_KEYS.aiSuggestions, []));
-        }
-
-        /** Kurum yazılı ders şablonları */
-        const prefsInstId = resolvedActiveId || defaultInstitutionId || null;
-        if (prefsInstId && getAuthToken()) {
-          try {
-            const prefs = await db.getInstitutionWrittenExamPrefs(prefsInstId);
-            if (prefs) {
-              setWrittenExamSubjects(
-                prefs.global_subjects.length > 0 ? prefs.global_subjects : [...DEFAULT_WRITTEN_EXAM_SUBJECTS]
-              );
-              setWrittenExamSubjectsByStudent(prefs.per_student_subjects || {});
-            } else {
-              const locS = loadFromStorage<string[]>(STORAGE_KEYS.writtenExamSubjects, DEFAULT_WRITTEN_EXAM_SUBJECTS);
-              const locM = loadFromStorage<Record<string, string[]>>(STORAGE_KEYS.writtenExamSubjectsByStudent, {});
-              const seedGlobal = Array.from(new Set([...DEFAULT_WRITTEN_EXAM_SUBJECTS, ...locS]));
-              setWrittenExamSubjects(seedGlobal);
-              setWrittenExamSubjectsByStudent(locM);
-              await db.upsertInstitutionWrittenExamPrefs(prefsInstId, {
-                global_subjects: seedGlobal,
-                per_student_subjects: locM
-              });
-            }
-          } catch (prefErr) {
-            console.warn('[AppContext] institution_written_exam_prefs:', prefErr);
-          }
+          })();
         }
 
         if (import.meta.env.DEV) {
@@ -830,6 +846,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setWrittenExamScores([]);
         setExamResults([]);
         setAISuggestions([]);
+        setScoresDataReady(false);
+      } finally {
+        if (effectiveUser?.id === loadForUserId) {
+          setAppDataLoading(false);
+        }
       }
     };
 
@@ -1873,6 +1894,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const updateAISuggestion = async (id: string, updates: Partial<AICoachSuggestion>) => {
+    const cur = aiSuggestions.find((s) => s.id === id);
+    if (!cur) return;
+    const nextBody =
+      updates.analysisMarkdown ??
+      (updates.description !== undefined ? updates.description : undefined);
+    const merged: AICoachSuggestion = {
+      ...cur,
+      ...updates,
+      id,
+      ...(nextBody !== undefined
+        ? {
+            analysisMarkdown: nextBody,
+            description: nextBody.length > 480 ? `${nextBody.slice(0, 477)}…` : nextBody
+          }
+        : {})
+    };
+    setAISuggestions((prev) => prev.map((s) => (s.id === id ? merged : s)));
+    if (!getAuthToken() || !isSupabaseReady) return;
+    try {
+      await db.updateAiCoachSuggestionPayload(id, merged);
+    } catch (e) {
+      console.warn('[AppContext] updateAISuggestion DB:', e);
+      throw e;
+    }
+  };
+
   const deleteAISuggestion = async (id: string) => {
     setAISuggestions((prev) => prev.filter((s) => s.id !== id));
     if (!getAuthToken() || !isSupabaseReady) return;
@@ -2869,6 +2917,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return students;
   }, [students, effectiveUser, coaches, tenantScopeInstitutionId]);
 
+  const institutionStudents = React.useMemo(() => {
+    if (!effectiveUser) return [];
+    const tags = userRoleTags(effectiveUser);
+    if (tags.includes('super_admin')) {
+      const iid = tenantScopeInstitutionId;
+      if (!iid) return students;
+      return students.filter((s) => s.institutionId === iid);
+    }
+    const iid = effectiveUser.institutionId;
+    if (iid) return students.filter((s) => s.institutionId === iid);
+    return students;
+  }, [students, effectiveUser, tenantScopeInstitutionId]);
+
   const scopedCoaches = React.useMemo(() => {
     if (!effectiveUser) return [];
     const tags = userRoleTags(effectiveUser);
@@ -3007,7 +3068,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setCurrentUser,
       userRole,
       setUserRole,
+      appDataLoading,
+      scoresDataReady,
       students: scopedStudents,
+      institutionStudents,
       addStudent,
       updateStudent,
       deleteStudent,
@@ -3051,6 +3115,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       getLatestExamResult,
       aiSuggestions: scopedAiSuggestions,
       addAISuggestion,
+      updateAISuggestion,
       markSuggestionRead,
       deleteAISuggestion,
       getStudentAISuggestions,

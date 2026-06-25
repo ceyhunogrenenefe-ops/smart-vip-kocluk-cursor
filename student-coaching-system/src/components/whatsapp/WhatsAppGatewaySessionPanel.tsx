@@ -17,6 +17,13 @@ type Props = {
   envHint?: string | null;
 };
 
+function formatLinkedPhone(digits: string | null | undefined): string | null {
+  const d = String(digits || '').replace(/\D/g, '');
+  if (!d) return null;
+  if (d.startsWith('90') && d.length >= 12) return `+${d.slice(0, 2)} ${d.slice(2, 5)} ${d.slice(5, 8)} ${d.slice(8)}`;
+  return `+${d}`;
+}
+
 export default function WhatsAppGatewaySessionPanel({
   sessionId,
   title = 'WhatsApp Gateway oturumu',
@@ -31,6 +38,7 @@ export default function WhatsAppGatewaySessionPanel({
   const [status, setStatus] = useState<GatewayStatus>('idle');
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [lastConnectedAt, setLastConnectedAt] = useState<string | null>(null);
+  const [linkedPhone, setLinkedPhone] = useState<string | null>(null);
   const [gatewaySessionError, setGatewaySessionError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState('');
   const [isBusy, setIsBusy] = useState(false);
@@ -48,6 +56,7 @@ export default function WhatsAppGatewaySessionPanel({
     setStatus(data.status || 'idle');
     setQrDataUrl(data.qr || null);
     setLastConnectedAt(data.connectedAt || null);
+    setLinkedPhone(formatLinkedPhone(data.linkedPhone));
     const err =
       data.status === 'connected' || data.status === 'reconnecting' || data.status === 'connecting'
         ? null
@@ -258,7 +267,17 @@ export default function WhatsAppGatewaySessionPanel({
         ) : null}
 
         {lastConnectedAt && isConnected ? (
-          <p className="text-xs text-emerald-800">Son bağlantı: {new Date(lastConnectedAt).toLocaleString('tr-TR')}</p>
+          <p className="text-xs text-emerald-800">
+            Son bağlantı: {new Date(lastConnectedAt).toLocaleString('tr-TR')}
+            {linkedPhone ? ` · Hat: ${linkedPhone}` : ''}
+          </p>
+        ) : null}
+
+        {!isConnected && canUse ? (
+          <p className="text-xs text-slate-500">
+            Bu panel yalnızca sizin kullanıcı hesabınıza bağlı WhatsApp hattını gösterir. Başka yöneticiler veya koçlar
+            kendi numaralarını ayrı ayrı bağlamalıdır.
+          </p>
         ) : null}
 
         <div className="flex flex-wrap gap-2">

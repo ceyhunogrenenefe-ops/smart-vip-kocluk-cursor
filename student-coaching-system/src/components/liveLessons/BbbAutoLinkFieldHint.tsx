@@ -19,8 +19,8 @@ export default function BbbAutoLinkFieldHint({ value, onChange, placeholder, id 
           Toplantı bağlantısı <span className="font-normal text-slate-400">(isteğe bağlı)</span>
         </span>
         <span className="block text-xs text-slate-500 mt-0.5 font-normal">
-          Zoom/Meet/BBB linki yazabilirsiniz. Boş bırakırsanız — tıpkı Online Görüşmelerde olduğu gibi — BBB
-          API tanımlıysa otomatik oda oluşturulur.
+          Zoom/Meet linki yazabilirsiniz. Boş bırakırsanız BBB API ile oda ilk «Katıl»da açılır — ham BBB sunucu
+          linki tarayıcıda kısa sürede geçersiz olur; paylaşım için kayıttan sonra gösterilen panel linkini kullanın.
         </span>
         <input
           id={id}
@@ -37,7 +37,8 @@ export default function BbbAutoLinkFieldHint({ value, onChange, placeholder, id 
       </label>
       {bbbReady === true && !value.trim() ? (
         <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-2.5 py-1.5">
-          BBB API bağlı — link alanını boş bırakıp kaydedebilirsiniz; sistem otomatik toplantı linki üretir.
+          BBB API bağlı — link alanını boş bırakıp kaydedin. Ders kaydından sonra «Katıl» veya panel katılım linki
+          (/katil/grup/…) ile girin; ham BBB URL’sini tarayıcıda açmayın.
         </p>
       ) : null}
       {bbbReady === false ? (

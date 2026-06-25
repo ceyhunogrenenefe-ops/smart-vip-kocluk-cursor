@@ -78,7 +78,7 @@
         </div>
         <div class="row">
           <div class="field" id="f-sinif"><label for="sinif">Sınıf <span class="req">*</span></label><input type="text" id="sinif" placeholder="Örn. 9, LGS, 12"><div class="err-msg">Sınıf girin.</div></div>
-          <div class="field" id="f-ogr-tel"><label for="ogr_tel">Öğrenci telefonu <span class="req">*</span></label><input type="tel" id="ogr_tel" inputmode="tel" placeholder="05xx xxx xx xx"><div class="err-msg">Geçerli telefon girin.</div></div>
+          <div class="field" id="f-ogr-tel"><label for="ogr_tel">Öğrenci telefonu <span class="req">*</span></label><input type="tel" id="ogr_tel" inputmode="tel" placeholder="05xx… veya +49 151…"><div class="err-msg">Geçerli telefon girin (TR veya yurt dışı, ülke kodu ile).</div></div>
         </div>
         <div class="row">
           <div class="field" id="f-dogum"><label for="dogum">Doğum tarihi</label><input type="date" id="dogum"></div>
@@ -91,7 +91,7 @@
           <div class="field" id="f-veli-ad"><label for="veli_ad">Veli adı <span class="req">*</span></label><input type="text" id="veli_ad"><div class="err-msg">Zorunlu alan.</div></div>
           <div class="field" id="f-veli-soyad"><label for="veli_soyad">Veli soyadı <span class="req">*</span></label><input type="text" id="veli_soyad"><div class="err-msg">Zorunlu alan.</div></div>
         </div>
-        <div class="field" id="f-veli-tel"><label for="veli_tel">Veli telefonu <span class="req">*</span></label><input type="tel" id="veli_tel" inputmode="tel" placeholder="05xx xxx xx xx"><div class="err-msg">Geçerli telefon girin.</div></div>
+        <div class="field" id="f-veli-tel"><label for="veli_tel">Veli telefonu <span class="req">*</span></label><input type="tel" id="veli_tel" inputmode="tel" placeholder="05xx… veya +49 151…"><div class="err-msg">Geçerli telefon girin (TR veya yurt dışı, ülke kodu ile).</div></div>
         <div class="field" id="f-eposta"><label for="eposta">E-posta <span class="req">*</span></label><input type="email" id="eposta" autocomplete="email" placeholder="ornek@email.com"><div class="err-msg">Geçerli e-posta girin.</div></div>
 
         <p class="section">Program seçimi</p>
@@ -182,18 +182,32 @@
     return Array.from(document.querySelectorAll('input[name="program"]:checked')).map((el) => el.value);
   }
 
-  function isValidTrPhone(v) {
-    const d = String(v || '').replace(/\D/g, '');
+  function phoneDigits(v) {
+    return String(v || '').replace(/\D/g, '');
+  }
+
+  /** TR cep veya uluslararası (E.164: 10–15 rakam, örn. +49 Almanya). */
+  function isValidPhone(v) {
+    const d = phoneDigits(v);
+    if (d.length < 10 || d.length > 15) return false;
     if (d.length === 10 && d.startsWith('5')) return true;
     if (d.length === 11 && d.startsWith('05')) return true;
     if (d.length === 12 && d.startsWith('90') && d[2] === '5') return true;
-    return false;
+    return d.length >= 10 && d.length <= 15;
   }
 
-  function formatTrPhoneInput(raw) {
-    let d = String(raw || '').replace(/\D/g, '');
+  function formatPhoneInput(raw) {
+    const s = String(raw || '');
+    const trimmed = s.trim();
+    if (trimmed.startsWith('+')) {
+      return ('+' + trimmed.slice(1).replace(/[^\d\s().-]/g, '')).slice(0, 22);
+    }
+    let d = s.replace(/\D/g, '');
+    if (d.startsWith('49') || d.startsWith('44') || d.startsWith('1')) {
+      return d.slice(0, 15);
+    }
     if (d.startsWith('90')) d = '0' + d.slice(2);
-    if (d.length && !d.startsWith('0')) d = d.startsWith('5') ? '0' + d : d;
+    if (d.length && !d.startsWith('0') && d.startsWith('5')) d = '0' + d;
     d = d.slice(0, 11);
     if (d.length <= 4) return d;
     if (d.length <= 7) return d.slice(0, 4) + ' ' + d.slice(4);
@@ -201,24 +215,19 @@
     return d.slice(0, 4) + ' ' + d.slice(4, 7) + ' ' + d.slice(7, 9) + ' ' + d.slice(9);
   }
 
-  function phoneDigits(v) {
-    return String(v || '').replace(/\D/g, '');
+  function bindPhoneInput(id) {
+    document.getElementById(id).addEventListener('input', (e) => {
+      const el = e.target;
+      const pos = el.selectionStart;
+      const before = el.value.length;
+      el.value = formatPhoneInput(el.value);
+      const delta = el.value.length - before;
+      const next = Math.max(0, Math.min(el.value.length, (pos || 0) + delta));
+      el.setSelectionRange(next, next);
+    });
   }
-
-  document.getElementById('veli_tel').addEventListener('input', (e) => {
-    const el = e.target;
-    const pos = el.selectionStart;
-    const before = el.value.length;
-    el.value = formatTrPhoneInput(el.value);
-    el.setSelectionRange(Math.max(0, pos + el.value.length - before), Math.max(0, pos + el.value.length - before));
-  });
-  document.getElementById('ogr_tel').addEventListener('input', (e) => {
-    const el = e.target;
-    const pos = el.selectionStart;
-    const before = el.value.length;
-    el.value = formatTrPhoneInput(el.value);
-    el.setSelectionRange(Math.max(0, pos + el.value.length - before), Math.max(0, pos + el.value.length - before));
-  });
+  bindPhoneInput('veli_tel');
+  bindPhoneInput('ogr_tel');
 
   progList.addEventListener('change', (e) => {
     if (e.target.name !== 'program') return;
@@ -234,10 +243,10 @@
     ogr_ad: { wrap: 'f-ogr-ad', el: 'ogr_ad', test: (v) => v.trim().length >= 2 },
     ogr_soyad: { wrap: 'f-ogr-soyad', el: 'ogr_soyad', test: (v) => v.trim().length >= 2 },
     sinif: { wrap: 'f-sinif', el: 'sinif', test: (v) => v.trim().length >= 1 },
-    ogr_tel: { wrap: 'f-ogr-tel', el: 'ogr_tel', test: isValidTrPhone },
+    ogr_tel: { wrap: 'f-ogr-tel', el: 'ogr_tel', test: isValidPhone },
     veli_ad: { wrap: 'f-veli-ad', el: 'veli_ad', test: (v) => v.trim().length >= 2 },
     veli_soyad: { wrap: 'f-veli-soyad', el: 'veli_soyad', test: (v) => v.trim().length >= 2 },
-    veli_tel: { wrap: 'f-veli-tel', el: 'veli_tel', test: isValidTrPhone },
+    veli_tel: { wrap: 'f-veli-tel', el: 'veli_tel', test: isValidPhone },
     eposta: { wrap: 'f-eposta', el: 'eposta', test: (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()) },
     adres: { wrap: 'f-adres', el: 'adres', test: (v) => v.trim().length >= 5 },
     ilce: { wrap: 'f-ilce', el: 'ilce', test: (v) => v.trim().length >= 2 },

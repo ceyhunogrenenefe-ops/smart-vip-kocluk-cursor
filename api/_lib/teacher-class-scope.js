@@ -13,13 +13,25 @@ export async function getTeacherGroupClassStudentScope(teacherUserId) {
     .select('class_id')
     .eq('teacher_id', tid);
   if (le) throw le;
-  const classIds = [...new Set((links || []).map((r) => r.class_id).filter(Boolean))];
-  if (classIds.length === 0) return { ids: [] };
+  const classIds = new Set((links || []).map((r) => r.class_id).filter(Boolean));
+
+  const [{ data: slotRows }, { data: sessionRows }] = await Promise.all([
+    supabaseAdmin.from('class_weekly_slots').select('class_id').eq('teacher_id', tid),
+    supabaseAdmin.from('class_sessions').select('class_id').eq('teacher_id', tid)
+  ]);
+  for (const row of slotRows || []) {
+    if (row.class_id) classIds.add(row.class_id);
+  }
+  for (const row of sessionRows || []) {
+    if (row.class_id) classIds.add(row.class_id);
+  }
+
+  if (classIds.size === 0) return { ids: [] };
 
   const { data: members, error: me } = await supabaseAdmin
     .from('class_students')
     .select('student_id')
-    .in('class_id', classIds);
+    .in('class_id', [...classIds]);
   if (me) throw me;
   const ids = [...new Set((members || []).map((r) => r.student_id).filter(Boolean))];
   return { ids };

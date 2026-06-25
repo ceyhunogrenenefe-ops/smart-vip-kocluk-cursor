@@ -35,6 +35,7 @@ import {
   Line
 } from 'recharts';
 import { DailyReportTrackingPanel } from '../components/dashboard/DailyReportTrackingPanel';
+import { ScoresLoadingPlaceholder } from '../components/ui/ScoresLoadingPlaceholder';
 
 export default function CoachDashboard() {
   const navigate = useNavigate();
@@ -48,6 +49,8 @@ export default function CoachDashboard() {
     writtenExamScores,
     getWrittenExamStats,
     coachQuestionStatsTick,
+    appDataLoading,
+    scoresDataReady,
   } = useApp();
 
   // Koçun kayıtlı öğrencileri
@@ -357,7 +360,9 @@ export default function CoachDashboard() {
       )}
 
       {/* 📝 Yazılı Sınav Analizi */}
-      {writtenExamStats.length > 0 && (
+      {appDataLoading && !scoresDataReady ? (
+        <ScoresLoadingPlaceholder message="Yazılı skorları yükleniyor…" compact />
+      ) : writtenExamStats.length > 0 && (
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-6 text-white">
           <div className="flex items-center gap-3 mb-4">
             <FileText className="w-6 h-6" />

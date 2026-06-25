@@ -5,16 +5,18 @@
  * Türkiye (Europe/Istanbul) için yaz/kış saati uygulanmıyor; yıl boyu **UTC+3** kabul edilir.
  *
  * --- Günlük rapor WhatsApp (handlers/cron-report-check.js) ---
- * Hedef: Her akşam **İstanbul 22:00** (Meta şablon — varsayılan).
+ * Hedef: Her akşam **İstanbul 22:00**.
  * vercel.json: **UTC `0 19 * * *`** (19:00 UTC + 3 saat = 22:00 TR).
- * Handler: `getIstanbulHour() === reportReminderIstHour()` (Bearer ile saat dışı testte filtre atlanır).
- * Kanal: Meta şablonu (varsayılan, 22:00 TR). Gateway yalnızca REPORT_REMINDER_CHANNEL=gateway ile.
+ * Kanal: varsayılan **gateway** (WHATSAPP_AUTOMATION_CHANNEL). Meta yedek: WHATSAPP_AUTOMATION_CHANNEL=meta
  *
  * --- Canlı ders hatırlatma (handlers/cron-lesson-reminder.js) ---
- * Her 5 dk UTC; pencere: ders başlamadan 7–13 dk (≈10 dk).
+ * Her 5 dk UTC; pencere: ders başlamadan 7–13 dk (≈10 dk). Kanal: gateway (varsayılan).
  *
  * --- Grup canlı ders hatırlatma (handlers/cron-class-lesson-reminders.js) ---
- * Her 5 dk UTC; aynı 7–13 dk penceresi. Ardışık aynı sınıf/konu/link oturumunda tekrar yok. */
+ * Her 5 dk UTC; aynı 7–13 dk penceresi. Ardışık aynı sınıf/konu/link oturumunda tekrar yok.
+ *
+ * --- Öğretmen ders hatırlatması (handlers/cron-teacher-lesson-reminders.js) ---
+ * Her 5 dk UTC; ders başlamadan 13–17 dk (≈15 dk). Süper admin gateway (BOOK_ORDER_GATEWAY_SESSION_ID). */
 
 /** vercel.json → crons → daily-report-reminders ile aynı olmalı (Meta 22:00 İstanbul) */
 export const CRON_DAILY_REPORT_REMINDERS_UTC = '0 19 * * *';

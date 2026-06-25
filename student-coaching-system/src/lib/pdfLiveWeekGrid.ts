@@ -69,7 +69,17 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-async function loadImageForPdf(url: string): Promise<HTMLImageElement | null> {
+/** Uzun görüntüyü dikey dilimlerle birden fazla sayfaya yay — dış modüller (haftalık plan PDF vb.) */
+export function addCanvasPaginatedToLandscapePdf(
+  doc: jsPDF,
+  canvas: HTMLCanvasElement,
+  margin: number,
+  maxWidthMm: number
+): void {
+  addCanvasPaginated(doc, canvas, margin, maxWidthMm);
+}
+
+async function loadImageForPdfExport(url: string): Promise<HTMLImageElement | null> {
   if (!url.trim()) return null;
   return new Promise((resolve) => {
     const img = new Image();
@@ -90,6 +100,10 @@ function mountOffscreen(el: HTMLElement): void {
 
 function unmountOffscreen(el: HTMLElement): void {
   if (el.parentNode) el.parentNode.removeChild(el);
+}
+
+export async function rasterizeHtmlElementForPdf(el: HTMLElement, scale = 2): Promise<HTMLCanvasElement> {
+  return rasterizeElement(el, scale);
 }
 
 async function rasterizeElement(el: HTMLElement, scale = 2): Promise<HTMLCanvasElement> {
@@ -223,7 +237,7 @@ function addCanvasPaginated(doc: jsPDF, canvas: HTMLCanvasElement, margin: numbe
   }
 }
 
-async function buildHeaderElement(
+export async function buildHeaderElement(
   titleLine: string,
   subtitleLines: string[],
   branding: PdfBranding | undefined
@@ -244,7 +258,7 @@ async function buildHeaderElement(
 
   const logoUrl = branding?.logoUrl?.trim();
   if (logoUrl) {
-    const img = await loadImageForPdf(logoUrl);
+    const img = await loadImageForPdfExport(logoUrl);
     if (img && img.naturalWidth > 0) {
       img.style.maxHeight = '52px';
       img.style.maxWidth = '160px';
@@ -534,6 +548,62 @@ export function downloadLiveWeekGridPdf(opts: {
   doc.save(filename);
 }
 
+function assertPdfCanvas(canvas: HTMLCanvasElement, label: string): void {
+  if (!canvas.width || !canvas.height) {
+    throw new Error(`${label} oluşturulamadı. Sayfayı yenileyip tekrar deneyin.`);
+  }
+}
+
+/** Yalnızca ders listesi PDF (Noto Sans + kurumsal başlık). */
+export async function downloadLessonListPdf(opts: {
+  filename: string;
+  titleLine: string;
+  subtitleLines?: string[];
+  listHeading: string;
+  lessonLines: string[];
+  footerNote?: string;
+  branding?: PdfBranding;
+}): Promise<void> {
+  const {
+    filename,
+    titleLine,
+    subtitleLines = [],
+    listHeading,
+    lessonLines,
+    footerNote,
+    branding
+  } = opts;
+
+  await ensureNotoSansForPdfCapture();
+
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 10;
+  const contentW = pageW - 2 * margin;
+
+  const headerEl = await buildHeaderElement(titleLine, subtitleLines, branding);
+  const headerCanvas = await rasterizeElement(headerEl, 2);
+  assertPdfCanvas(headerCanvas, 'PDF başlığı');
+  addCanvasFitWidth(doc, headerCanvas, margin, margin, contentW, 24);
+
+  doc.addPage();
+  const listEl = buildLessonListElement(listHeading, lessonLines);
+  const listCanvas = await rasterizeElement(listEl, 2);
+  assertPdfCanvas(listCanvas, 'Ders listesi');
+  addCanvasPaginated(doc, listCanvas, margin, contentW);
+
+  if (footerNote?.trim()) {
+    doc.addPage();
+    const footEl = buildFooterElement(footerNote);
+    const footCanvas = await rasterizeElement(footEl, 2);
+    assertPdfCanvas(footCanvas, 'PDF alt notu');
+    addCanvasFitWidth(doc, footCanvas, margin, margin, contentW, pageH - 2 * margin);
+  }
+
+  doc.save(filename);
+}
+
 /**
  * Profesyonel PDF: kurumsal başlık (logo + gradient), Türkçe uyumlu Noto Sans ile takvim görüntüsü,
  * ardından renkli tablo tarzında ders listesi (görüntü dilimleri).
@@ -569,6 +639,7 @@ export async function downloadCalendarPdfWithSnapshot(opts: {
 
   const headerEl = await buildHeaderElement(titleLine, subtitleLines, branding);
   const headerCanvas = await rasterizeElement(headerEl, 2);
+  assertPdfCanvas(headerCanvas, 'PDF başlığı');
   let y = margin;
   const headerMaxH = 24;
   const headerUsed = addCanvasFitWidth(doc, headerCanvas, margin, y, contentW, headerMaxH);
@@ -576,6 +647,7 @@ export async function downloadCalendarPdfWithSnapshot(opts: {
 
   const scale = Math.min(2, typeof window !== 'undefined' ? window.devicePixelRatio || 2 : 2);
   const calCanvas = await captureCalendarForPdfSnapshot(calendarElement, scale);
+  assertPdfCanvas(calCanvas, 'Takvim görüntüsü');
 
   const roomCal = pageH - margin - y;
   if (roomCal < 35) {
@@ -588,12 +660,14 @@ export async function downloadCalendarPdfWithSnapshot(opts: {
   doc.addPage();
   const listEl = buildLessonListElement(listHeading, lessonLines);
   const listCanvas = await rasterizeElement(listEl, 2);
+  assertPdfCanvas(listCanvas, 'Ders listesi');
   addCanvasPaginated(doc, listCanvas, margin, contentW);
 
   if (footerNote?.trim()) {
     doc.addPage();
     const footEl = buildFooterElement(footerNote);
     const footCanvas = await rasterizeElement(footEl, 2);
+    assertPdfCanvas(footCanvas, 'PDF alt notu');
     addCanvasFitWidth(doc, footCanvas, margin, margin, contentW, pageH - 2 * margin);
   }
 

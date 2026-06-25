@@ -134,6 +134,7 @@ const TYPE_LABELS: Record<string, string> = {
   lesson_reminder_parent: 'Ders hatırlatma — veli (cron)',
   report_reminder: 'Günlük rapor hatırlatma (cron)',
   class_lesson_reminder: 'Grup dersi hatırlatma (cron)',
+  teacher_lesson_reminder: 'Öğretmen ders hatırlatması — 15 dk önce (gateway cron)',
   class_homework_notice: 'Grup ödev bildirimi (cron)',
   class_absent_notice_1: 'Grup devamsızlık — veli (yoklama)',
   class_absent_notice: 'Grup devamsızlık — veli (yoklama, eski type)',

@@ -1,13 +1,19 @@
-/** TR telefon → +90… E.164 (Graph/Meta öncesi normalize). */
+/** TR / uluslararası telefon → +… E.164 (Graph/Meta öncesi normalize). */
 export function normalizePhoneToE164(phone) {
   const digits = String(phone || '')
     .replace(/^whatsapp:/i, '')
     .replace(/\D/g, '');
   if (!digits) return null;
-  if (digits.startsWith('90') && digits.length >= 12) return `+${digits}`;
-  if (digits.startsWith('0') && digits.length === 11) return `+90${digits.slice(1)}`;
-  if (digits.length === 10 && digits.startsWith('5')) return `+90${digits}`;
-  if (digits.length >= 10 && digits.length <= 15) return `+${digits}`;
+  let d = digits;
+  // Yanlışlıkla +1 ile birleşmiş TR cep: 1520xxxxxxx (11 hane) → 90520xxxxxxx
+  if (d.length === 11 && d.startsWith('1') && /^5\d{9}$/.test(d.slice(1))) {
+    d = d.slice(1);
+  }
+  if (d.startsWith('90') && d.length >= 12) return `+${d}`;
+  // Yalnızca TR cep (05xx…) — Almanya vb. 0 ile başlayan 11 hane yanlışlıkla +90 olmasın
+  if (d.startsWith('0') && d.length === 11 && d[1] === '5') return `+90${d.slice(1)}`;
+  if (d.length === 10 && d.startsWith('5')) return `+90${d}`;
+  if (d.length >= 10 && d.length <= 15) return `+${d}`;
   return null;
 }
 

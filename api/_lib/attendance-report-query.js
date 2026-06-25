@@ -3,16 +3,98 @@
  * Özel ders (teacher_lessons) yoklama tablosu olmadığı için lesson_type=private i boş döner.
  */
 
-import { isUuid } from './uuid.js';
+function institutionIdMatches(stored, requested) {
+  const a = String(stored ?? '').trim();
+  const b = String(requested ?? '').trim();
+  if (!a || !b) return false;
+  return a === b || a.toLowerCase() === b.toLowerCase();
+}
 
-export async function getVisibleStudentIdSet(supabaseAdmin, normalizeRole, actor, institutionId) {
+export async function getInstitutionStudentIds(supabaseAdmin, institutionId) {
+  const instId = String(institutionId || '').trim();
+  const set = new Set();
+  if (!instId) return set;
+
+  const { data: direct, error } = await supabaseAdmin
+    .from('students')
+    .select('id, institution_id')
+    .eq('institution_id', instId);
+  if (error) throw error;
+  for (const s of direct || []) set.add(String(s.id));
+
+  if (!set.size) {
+    const { data: all, error: allErr } = await supabaseAdmin.from('students').select('id, institution_id');
+    if (allErr) throw allErr;
+    for (const s of all || []) {
+      if (institutionIdMatches(s.institution_id, instId)) set.add(String(s.id));
+    }
+  }
+  return set;
+}
+
+export async function resolveInstitutionClassIds(supabaseAdmin, institutionId, studentIdsSet) {
+  const instId = String(institutionId || '').trim();
+  const classIds = new Set();
+  if (!instId) return [];
+
+  const { data: clsRows, error: clsErr } = await supabaseAdmin
+    .from('classes')
+    .select('id, institution_id')
+    .eq('institution_id', instId);
+  if (clsErr) throw clsErr;
+  for (const c of clsRows || []) classIds.add(String(c.id));
+
+  if (!classIds.size) {
+    const { data: allCls, error: allClsErr } = await supabaseAdmin.from('classes').select('id, institution_id');
+    if (allClsErr) throw allClsErr;
+    for (const c of allCls || []) {
+      if (institutionIdMatches(c.institution_id, instId)) classIds.add(String(c.id));
+    }
+  }
+
+  const { data: sessInstRows, error: sessInstErr } = await supabaseAdmin
+    .from('class_sessions')
+    .select('class_id')
+    .eq('institution_id', instId);
+  if (sessInstErr) throw sessInstErr;
+  for (const s of sessInstRows || []) {
+    if (s.class_id) classIds.add(String(s.class_id));
+  }
+
+  if (studentIdsSet?.size) {
+    const sidList = [...studentIdsSet];
+    for (let i = 0; i < sidList.length; i += 200) {
+      const chunk = sidList.slice(i, i + 200);
+      const { data: cs, error: csErr } = await supabaseAdmin
+        .from('class_students')
+        .select('class_id, student_id')
+        .in('student_id', chunk);
+      if (csErr) throw csErr;
+      for (const r of cs || []) {
+        if (r.class_id) classIds.add(String(r.class_id));
+      }
+    }
+  }
+
+  return [...classIds];
+}
+
+export async function getVisibleStudentIdSet(
+  supabaseAdmin,
+  normalizeRole,
+  actor,
+  institutionId,
+  scopedInstitutionId = ''
+) {
   const role = normalizeRole(actor.role);
-  if (role === 'super_admin') return null;
+  const instScope = String(scopedInstitutionId || '').trim();
+  if (role === 'super_admin') {
+    if (instScope) return getInstitutionStudentIds(supabaseAdmin, instScope);
+    return null;
+  }
   const set = new Set();
   if (role === 'admin' && institutionId) {
-    const { data: studs } = await supabaseAdmin.from('students').select('id').eq('institution_id', String(institutionId));
-    for (const s of studs || []) set.add(String(s.id));
-    return set;
+    return getInstitutionStudentIds(supabaseAdmin, institutionId);
   }
   if (role === 'coach' && actor.coach_id) {
     const { data: studs } = await supabaseAdmin
@@ -20,6 +102,10 @@ export async function getVisibleStudentIdSet(supabaseAdmin, normalizeRole, actor
       .select('id')
       .eq('coach_id', String(actor.coach_id).trim());
     for (const s of studs || []) set.add(String(s.id));
+    if (instScope) {
+      const instSet = await getInstitutionStudentIds(supabaseAdmin, instScope);
+      return new Set([...set].filter((id) => instSet.has(id)));
+    }
     return set;
   }
   if (role === 'teacher') {
@@ -28,6 +114,10 @@ export async function getVisibleStudentIdSet(supabaseAdmin, normalizeRole, actor
     if (!cids.length) return set;
     const { data: cs } = await supabaseAdmin.from('class_students').select('student_id').in('class_id', cids);
     for (const r of cs || []) set.add(String(r.student_id));
+    if (instScope) {
+      const instSet = await getInstitutionStudentIds(supabaseAdmin, instScope);
+      return new Set([...set].filter((id) => instSet.has(id)));
+    }
     return set;
   }
   return set;
@@ -36,6 +126,22 @@ export async function getVisibleStudentIdSet(supabaseAdmin, normalizeRole, actor
 function qstr(q, key) {
   const raw = q[key];
   return String(Array.isArray(raw) ? raw[0] : raw || '').trim();
+}
+
+function emptyReportPayload({ lessonType, wantStats, effectiveInst, note }) {
+  return {
+    data: {
+      rows: [],
+      rows_private: [],
+      summary: { present: 0, absent: 0, late: 0, records: 0, session_count: 0 },
+      stats: wantStats ? computeStats([]) : undefined,
+      meta: {
+        lesson_type_filter: lessonType,
+        institution_id: effectiveInst || undefined,
+        note
+      }
+    }
+  };
 }
 
 function computeStats(rows) {
@@ -144,17 +250,27 @@ export async function buildAttendanceReport({
   const lessonType = (qstr(query, 'lesson_type') || 'all').toLowerCase();
   const wantStats = qstr(query, 'stats') === '1';
   const scopedInst = qstr(query, 'institution_id');
+  const effectiveInst =
+    scopedInst ||
+    (seesAllInstitutionClasses(role) && institutionId ? String(institutionId).trim() : '');
 
-  if (normalizeRole(actor.role) === 'super_admin' && scopedInst && !isUuid(scopedInst)) {
-    return {
-      error: {
-        status: 400,
-        body: {
-          error: 'invalid_institution_uuid',
-          hint: 'class_sessions.institution_id UUID bekliyor; eski inst-... id geçersiz. Üst çubuktan veritabanındaki bir kurumu seçin.'
-        }
-      }
-    };
+  let institutionStudentIds = null;
+  let institutionClassIds = null;
+  if (effectiveInst) {
+    institutionStudentIds = await getInstitutionStudentIds(supabaseAdmin, effectiveInst);
+    if (!institutionStudentIds.size) {
+      return emptyReportPayload({
+        lessonType,
+        wantStats,
+        effectiveInst,
+        note: 'Seçilen kuruma bağlı öğrenci bulunamadı.'
+      });
+    }
+    institutionClassIds = await resolveInstitutionClassIds(
+      supabaseAdmin,
+      effectiveInst,
+      institutionStudentIds
+    );
   }
 
   const allowedClassIds = await getManagedClassIds(actor);
@@ -172,39 +288,63 @@ export async function buildAttendanceReport({
 
   if (!seesAllInstitutionClasses(role)) {
     if (!allowedClassIds || !allowedClassIds.length) {
-      return {
-        data: {
-          rows: [],
-          rows_private: [],
-          summary: { present: 0, absent: 0, late: 0, records: 0, session_count: 0 },
-          stats: wantStats ? computeStats([]) : undefined,
-          meta: { lesson_type_filter: lessonType, note_private: 'Özel ders yoklaması bu sürümde ayrı tabloda takip edilmiyor.' }
-        }
-      };
+      return emptyReportPayload({
+        lessonType,
+        wantStats,
+        effectiveInst,
+        note: 'Bu kullanıcı için erişilebilir sınıf yok.'
+      });
     }
-    sessQ = sessQ.in('class_id', allowedClassIds);
-  } else if (institutionId) {
-    sessQ = sessQ.eq('institution_id', institutionId);
-  } else if (normalizeRole(actor.role) === 'super_admin' && scopedInst) {
-    sessQ = sessQ.eq('institution_id', scopedInst);
+    let scopedClassIds = allowedClassIds.map(String);
+    if (effectiveInst && institutionClassIds?.length) {
+      const allowedSet = new Set(scopedClassIds);
+      const intersect = institutionClassIds.filter((id) => allowedSet.has(id));
+      if (intersect.length) scopedClassIds = intersect;
+    }
+    sessQ = sessQ.in('class_id', scopedClassIds);
+  } else if (effectiveInst && institutionClassIds?.length) {
+    sessQ = sessQ.in('class_id', institutionClassIds);
   }
 
   const { data: sessions, error: sErr } = await sessQ;
   if (sErr) return { error: { status: 500, body: { error: sErr.message } } };
-  const sessionList = sessions || [];
+  let sessionList = sessions || [];
 
-  const visibleStudentSet = await getVisibleStudentIdSet(supabaseAdmin, normalizeRole, actor, institutionId);
+  const visibleStudentSet = await getVisibleStudentIdSet(
+    supabaseAdmin,
+    normalizeRole,
+    actor,
+    institutionId,
+    scopedInst || effectiveInst
+  );
+
+  if (effectiveInst && !institutionClassIds?.length && sessionList.length) {
+    const allowedSessionIds = new Set();
+    const sessionIds = sessionList.map((s) => s.id);
+    const instStudentList = [...institutionStudentIds];
+    for (let i = 0; i < sessionIds.length; i += 80) {
+      const slice = sessionIds.slice(i, i + 80);
+      for (let j = 0; j < instStudentList.length; j += 200) {
+        const studSlice = instStudentList.slice(j, j + 200);
+        const { data: attHits, error: attHitErr } = await supabaseAdmin
+          .from('class_session_attendance')
+          .select('session_id')
+          .in('session_id', slice)
+          .in('student_id', studSlice);
+        if (attHitErr) return { error: { status: 500, body: { error: attHitErr.message } } };
+        for (const row of attHits || []) allowedSessionIds.add(row.session_id);
+      }
+    }
+    sessionList = sessionList.filter((s) => allowedSessionIds.has(s.id));
+  }
 
   if (!sessionList.length) {
-    return {
-      data: {
-        rows: [],
-        rows_private: [],
-        summary: { present: 0, absent: 0, late: 0, records: 0, session_count: 0 },
-        stats: wantStats ? computeStats([]) : undefined,
-        meta: { lesson_type_filter: lessonType }
-      }
-    };
+    return emptyReportPayload({
+      lessonType,
+      wantStats,
+      effectiveInst,
+      note: effectiveInst ? 'Seçilen kurum ve tarih aralığında yoklama oturumu bulunamadı.' : undefined
+    });
   }
 
   const sessionById = new Map(sessionList.map((s) => [s.id, s]));
@@ -229,9 +369,10 @@ export async function buildAttendanceReport({
   if (studentIds.length) {
     const { data: studs } = await supabaseAdmin
       .from('students')
-      .select('id,name,phone,parent_phone')
+      .select('id,name,phone,parent_phone,institution_id')
       .in('id', studentIds);
     for (const s of studs || []) {
+      if (effectiveInst && !institutionIdMatches(s.institution_id, effectiveInst)) continue;
       studentNames[s.id] = s.name || s.id;
       studentPhones[s.id] = { phone: s.phone || null, parent_phone: s.parent_phone || null };
     }
@@ -259,6 +400,7 @@ export async function buildAttendanceReport({
       if (!sess) return null;
       const sid = String(a.student_id || '').trim();
       if (visibleStudentSet && !visibleStudentSet.has(sid)) return null;
+      if (effectiveInst && institutionStudentIds && !institutionStudentIds.has(sid)) return null;
       const st = normalizeSt(a.status);
       const phones = studentPhones[sid] || {};
       return {
@@ -327,6 +469,8 @@ export async function buildAttendanceReport({
       meta: {
         lesson_type_filter: lessonType,
         absent_today: absentToday,
+        institution_id: effectiveInst || undefined,
+        institution_student_count: effectiveInst ? institutionStudentIds?.size || 0 : undefined,
         note_private:
           lessonType === 'all' || lessonType === 'private'
             ? 'Özel canlı ders yoklaması bu raporda yer almaz (yalnızca grup dersi).'

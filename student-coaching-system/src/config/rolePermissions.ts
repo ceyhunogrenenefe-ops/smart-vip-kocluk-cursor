@@ -5,7 +5,7 @@ import type { UserRole } from '../types';
  *
  * - super_admin: Tüm kurumlar + yönetici oluşturma (admin_limits bootstrap) + tam API/UI.
  * - admin: institution_id kapsamı — kullanıcı/koç/öğrenci, kota ayarı (PATCH /api/quota), raporlar, WhatsApp, sistem sayfaları.
- * - coach: Yalnızca coach_id ile eşleşen öğrenciler; haftalık/kitap/yazılı/AI vb.; görüşme oluşturma; Ayarlar (yoklama raporu dahil).
+ * - coach: Yalnızca coach_id ile eşleşen öğrenciler; haftalık/kitap/yazılı/AI vb.; görüşme oluşturma.
  * - teacher: Kurum içi — users’ta yalnızca student; öğrenci POST (koç zorunlu); kullanıcı silme yok; coaches salt okuma.
  *   Haftalık/kitap/yazılı API’de yalnızca GET (kurum filtresi); PATCH/POST yok. Görüşme oluşturma yok.
  * - student: Yalnızca kendi student_id verisi.
@@ -19,17 +19,19 @@ export const ROUTE_ALLOWED_ROLES = {
   '/coaches': ['super_admin', 'admin'],
   '/topics': ['super_admin', 'admin'],
   '/topic-tracking': ['admin', 'coach', 'student'],
-  '/exam-tracking': ['admin', 'coach'],
+  '/exam-tracking': ['admin', 'coach', 'student'],
+  '/edesis': ['super_admin', 'admin', 'coach'],
   '/book-tracking': ['admin', 'coach'],
   '/written-exam': ['admin', 'coach'],
   '/pdf-import': ['admin', 'coach'],
   '/analytics': ['admin', 'coach'],
+  '/attendance-report': ['super_admin', 'admin', 'coach', 'teacher'],
   '/ai-coach': ['super_admin', 'admin', 'coach'],
   '/reports': ['admin'],
   '/whatsapp': ['admin'],
   '/message-templates': ['admin', 'super_admin'],
-  '/webhooks': ['super_admin', 'admin', 'coach'],
-  '/settings': ['super_admin', 'admin', 'teacher', 'coach'],
+  '/webhooks': ['super_admin', 'admin'],
+  '/settings': ['super_admin', 'admin', 'teacher'],
   '/tracking': ['admin'],
   '/weekly-planner': ['super_admin', 'admin', 'coach', 'student'],
   '/my-profile': ['super_admin', 'admin', 'coach', 'student', 'teacher'],
@@ -51,7 +53,8 @@ export const ROUTE_ALLOWED_ROLES = {
   '/class-live-lessons': ['super_admin', 'admin', 'coach', 'teacher'],
   '/class-schedule': ['student'],
   '/veli-onay': ['super_admin', 'admin', 'coach'],
-  '/tahsilat-muhasebe': ['super_admin', 'admin', 'coach'],
+  '/tahsilat-muhasebe': ['super_admin', 'admin'],
+  '/muhasebe': ['super_admin', 'admin'],
   '/soru-sor': ['student'],
   '/soru-havuzu': ['super_admin', 'admin', 'teacher', 'coach'],
   '/soru-analitik': ['super_admin', 'admin', 'coach'],
@@ -65,7 +68,10 @@ export const ROUTE_ALLOWED_ROLES = {
   '/ai-agents/:id': ['super_admin', 'admin', 'teacher', 'coach', 'student'],
   '/exams': ['super_admin', 'admin', 'teacher', 'coach', 'student'],
   '/exams/take/:id': ['super_admin', 'admin', 'teacher', 'coach', 'student'],
-  '/exams/result/:id': ['super_admin', 'admin', 'teacher', 'coach', 'student']
+  '/exams/result/:id': ['super_admin', 'admin', 'teacher', 'coach', 'student'],
+  '/mobile/dersler': ['super_admin', 'admin', 'coach', 'teacher', 'student'],
+  '/mobile/akademik': ['super_admin', 'admin', 'coach', 'teacher', 'student'],
+  '/mobile/yonetim': ['super_admin', 'admin']
 } as const satisfies Record<string, readonly UserRole[]>;
 
 export type ProtectedAppPath = keyof typeof ROUTE_ALLOWED_ROLES;

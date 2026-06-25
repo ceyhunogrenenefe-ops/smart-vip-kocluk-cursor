@@ -12,11 +12,13 @@ function orderBelongsToBookseller(order, bookseller) {
   const sellerId = String(bookseller.id || '').trim();
   if (sellerId && String(order.kitapci_id || '').trim() === sellerId) return true;
 
-  const sent =
-    String(order.whatsapp_status || '') === 'sent' ||
-    ['notified', 'confirmed', 'shipped'].includes(String(order.status || ''));
+  const st = String(order.status || '');
+  if (!['notified', 'confirmed', 'shipped', 'approved'].includes(st)) return false;
 
-  if (!sent) return false;
+  const wa = String(order.whatsapp_status || '').toLowerCase();
+  const waSent = ['sent', 'delivered', 'read', 'accepted', 'sending'].includes(wa);
+  const statusSent = ['notified', 'confirmed', 'shipped'].includes(st);
+  if (!waSent && !statusSent) return false;
 
   const sellerPhone = normalizePhoneToE164(bookseller.phone);
   const orderPhone = normalizePhoneToE164(order.kitapci_phone);
@@ -200,6 +202,42 @@ async function enrichPortalOrdersKitaplar(orders) {
   return orders;
 }
 
+function sanitizePortalOrder(order) {
+  if (!order || typeof order !== 'object') return order;
+  const { form_payload: _formPayload, ...rest } = order;
+  return rest;
+}
+
+async function backfillKitapciIdOnOrders(matched, bookseller) {
+  const tasks = [];
+  for (const row of matched) {
+    if (!row.kitapci_id && bookseller.id) {
+      tasks.push(
+        supabaseAdmin
+          .from('kitap_siparisleri')
+          .update({
+            kitapci_id: bookseller.id,
+            kitapci_adi: bookseller.name,
+            kitapci_phone: normalizePhoneToE164(bookseller.phone) || row.kitapci_phone,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', row.id)
+          .then(({ error }) => {
+            if (error) console.warn('kitapci_id backfill failed', row.id, error.message);
+          })
+          .catch((err) => {
+            console.warn('kitapci_id backfill failed', row.id, err?.message || err);
+          })
+      );
+      row.kitapci_id = bookseller.id;
+    }
+    if (String(row.status) === 'approved' && String(row.whatsapp_status) === 'sent') {
+      row.status = 'notified';
+    }
+  }
+  if (tasks.length) void Promise.allSettled(tasks);
+}
+
 /** Kitapçıya WhatsApp ile giden tüm siparişler (id, telefon veya isim eşleşmesi). */
 export async function listOrdersForKitapciPortal(bookseller) {
   const instId = String(bookseller.institution_id || '').trim();
@@ -209,23 +247,7 @@ export async function listOrdersForKitapciPortal(bookseller) {
 
   const matched = (data || []).filter((row) => orderBelongsToBookseller(row, bookseller));
 
-  for (const row of matched) {
-    if (!row.kitapci_id && bookseller.id) {
-      await supabaseAdmin
-        .from('kitap_siparisleri')
-        .update({
-          kitapci_id: bookseller.id,
-          kitapci_adi: bookseller.name,
-          kitapci_phone: normalizePhoneToE164(bookseller.phone) || row.kitapci_phone,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', row.id);
-      row.kitapci_id = bookseller.id;
-    }
-    if (String(row.status) === 'approved' && String(row.whatsapp_status) === 'sent') {
-      row.status = 'notified';
-    }
-  }
+  await backfillKitapciIdOnOrders(matched, bookseller);
 
   try {
     await enrichPortalOrdersKitaplar(matched);
@@ -234,7 +256,7 @@ export async function listOrdersForKitapciPortal(bookseller) {
     console.warn('enrichPortalOrdersKitaplar failed', err?.message || err);
   }
 
-  return matched;
+  return matched.map(sanitizePortalOrder);
 }
 
 async function loadOrderForBookseller(orderId, booksellerId) {

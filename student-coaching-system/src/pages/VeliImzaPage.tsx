@@ -274,12 +274,12 @@ export default function VeliImzaPage() {
     }
     const veliDigits = rf.veli_tel.replace(/\D/g, '');
     const ogrDigits = rf.ogrenci_tel.replace(/\D/g, '');
-    if (veliDigits.length < 10) {
-      setErr('Veli telefonu zorunludur; en az 10 rakam girin.');
+    if (veliDigits.length < 10 || veliDigits.length > 15) {
+      setErr('Veli telefonu zorunludur; TR (05xx…) veya yurt dışı ülke kodu ile en az 10 rakam girin.');
       return;
     }
-    if (ogrDigits.length < 10) {
-      setErr('Öğrenci telefonu zorunludur; en az 10 rakam girin.');
+    if (ogrDigits.length < 10 || ogrDigits.length > 15) {
+      setErr('Öğrenci telefonu zorunludur; TR (05xx…) veya yurt dışı ülke kodu ile en az 10 rakam girin.');
       return;
     }
     if (!rf.adres_aciklama.trim()) {
@@ -487,7 +487,7 @@ export default function VeliImzaPage() {
                       className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
                       value={rf.ogrenci_tel}
                       onChange={(e) => setRf((p) => ({ ...p, ogrenci_tel: e.target.value }))}
-                      placeholder="Örn. 05xx xxx xx xx"
+                      placeholder="05xx… veya +49 151…"
                     />
                   </div>
                   <div>
@@ -514,7 +514,7 @@ export default function VeliImzaPage() {
                       className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
                       value={rf.veli_tel}
                       onChange={(e) => setRf((p) => ({ ...p, veli_tel: e.target.value }))}
-                      placeholder="Örn. 05xx xxx xx xx"
+                      placeholder="05xx… veya +49 151…"
                     />
                   </div>
                   <div className="sm:col-span-2">

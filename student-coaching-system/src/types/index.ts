@@ -200,12 +200,22 @@ export interface TopicProgress {
 }
 
 // Deneme Sınavı Sonucu
+export interface ExamTopicResult {
+  name: string;
+  net: number;
+  correct: number;
+  wrong: number;
+  blank: number;
+}
+
 export interface ExamSubjectResult {
   name: string;
   net: number;
   correct: number;
   wrong: number;
   blank: number;
+  /** Edesis konu/kazanım kırılımı (varsa) */
+  topics?: ExamTopicResult[];
 }
 
 export interface ExamResult {
@@ -218,6 +228,10 @@ export interface ExamResult {
   subjects: ExamSubjectResult[];
   notes?: string;
   createdAt: string;
+  /** Edesis senkron meta */
+  edesisExamId?: string;
+  edesisStudentId?: string;
+  examTitle?: string;
 }
 
 /** Sunucu `POST /api/ai-chat` ile `op: 'analyze_exam'` yanıt gövdesi (özet alanlar) */
@@ -253,9 +267,13 @@ export interface AICoachSuggestion {
   priority: 'high' | 'medium' | 'low';
   title: string;
   description: string;
-  source: 'weekly' | 'exam' | 'topic';
+  source: 'weekly' | 'exam' | 'topic' | 'ai_report';
   createdAt: string;
   isRead: boolean;
+  /** Koç AI analizini öğrencinin Analizlerim sayfasında göster */
+  sharedWithStudent?: boolean;
+  /** Tam analiz metni (Analizlerim kartında) */
+  analysisMarkdown?: string;
 }
 
 // PDF Raporu
@@ -519,6 +537,10 @@ export interface TeacherLesson {
   platform: TeacherLessonPlatform;
   status: TeacherLessonStatus;
   created_at?: string;
+  /** BBB kayıt oynatma URL (önbellek) */
+  recording_link?: string | null;
+  /** BBB meetingID */
+  bbb_meeting_id?: string | null;
   /** GET listesinde sunucunun users ile doldurduğu görünen ad */
   teacher_name?: string | null;
   /** Plan süresi (dk); paket kotası birimi bu süreye göre hesaplanır */

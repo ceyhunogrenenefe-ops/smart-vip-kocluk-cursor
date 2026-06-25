@@ -1,6 +1,16 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { BookOpen, CheckCircle2, Download, Loader2, Package, Truck } from 'lucide-react';
+import {
+  ArrowDownAZ,
+  ArrowUpAZ,
+  BookOpen,
+  CheckCircle2,
+  Download,
+  Loader2,
+  Package,
+  Search,
+  Truck
+} from 'lucide-react';
 import { toast } from 'sonner';
 import {
   confirmKitapciPortalOrder,
@@ -8,7 +18,6 @@ import {
   shipKitapciPortalOrder,
   type KitapciPortalOrder
 } from '../lib/kitapciPortalApi';
-import { exportKitapciOrdersToExcel } from '../lib/kitapciPortalExport';
 function statusLabel(status: string) {
   switch (status) {
     case 'notified':
@@ -40,6 +49,29 @@ function formatTrDate(iso: string | null | undefined) {
   return d.toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+function sinifSortKey(val: string) {
+  const m = String(val || '').match(/^(\d+)/);
+  return m ? Number(m[1]) : 999;
+}
+
+function orderSearchHaystack(o: KitapciPortalOrder) {
+  return [
+    o.ogrenci_ad_soyad,
+    o.veli_ad_soyad,
+    o.sinif,
+    o.telefon,
+    o.kitaplar,
+    o.adres,
+    o.ilce,
+    o.il,
+    o.siparis_notu
+  ]
+    .map((v) => String(v || '').trim())
+    .filter(Boolean)
+    .join(' ')
+    .toLocaleLowerCase('tr-TR');
+}
+
 export default function KitapciPortalPage() {
   const { token } = useParams();
   const [booksellerName, setBooksellerName] = useState('');
@@ -49,6 +81,45 @@ export default function KitapciPortalPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [tracking, setTracking] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [sinifFilter, setSinifFilter] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [nameSort, setNameSort] = useState<'asc' | 'desc'>('asc');
+
+  const sinifOptions = useMemo(() => {
+    const set = new Set<string>();
+    orders.forEach((o) => {
+      const s = String(o.sinif || '').trim();
+      if (s) set.add(s);
+    });
+    return Array.from(set).sort(
+      (a, b) => sinifSortKey(a) - sinifSortKey(b) || a.localeCompare(b, 'tr')
+    );
+  }, [orders]);
+
+  const filteredOrders = useMemo(() => {
+    const q = searchQuery.trim().toLocaleLowerCase('tr-TR');
+    let list = orders;
+
+    if (sinifFilter) {
+      list = list.filter((o) => String(o.sinif || '').trim() === sinifFilter);
+    }
+
+    if (q) {
+      list = list.filter((o) => orderSearchHaystack(o).includes(q));
+    }
+
+    return [...list].sort((a, b) => {
+      const cmp = String(a.ogrenci_ad_soyad || '').localeCompare(
+        String(b.ogrenci_ad_soyad || ''),
+        'tr',
+        { sensitivity: 'base' }
+      );
+      return nameSort === 'asc' ? cmp : -cmp;
+    });
+  }, [orders, sinifFilter, searchQuery, nameSort]);
+
+  const filtersActive = Boolean(sinifFilter || searchQuery.trim());
+
   const panelTitle = booksellerName
     ? `${booksellerName.toLocaleUpperCase('tr-TR')} KİTAP SİPARİŞ PANELİ`
     : 'KİTAP SİPARİŞ PANELİ';
@@ -114,14 +185,15 @@ export default function KitapciPortalPage() {
     }
   };
 
-  const downloadExcel = () => {
-    if (!orders.length) {
+  const downloadExcel = async () => {
+    if (!filteredOrders.length) {
       toast.error('İndirilecek sipariş yok');
       return;
     }
     try {
-      exportKitapciOrdersToExcel(orders, booksellerName);
-      toast.success(`${orders.length} sipariş Excel olarak indirildi`);
+      const { exportKitapciOrdersToExcel } = await import('../lib/kitapciPortalExport');
+      exportKitapciOrdersToExcel(filteredOrders, booksellerName);
+      toast.success(`${filteredOrders.length} sipariş Excel olarak indirildi`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Excel oluşturulamadı');
     }
@@ -141,6 +213,13 @@ export default function KitapciPortalPage() {
         <div className="max-w-md rounded-xl border border-red-200 bg-white p-6 text-center shadow-sm">
           <p className="font-semibold text-red-800">Panel açılamadı</p>
           <p className="mt-2 text-sm text-slate-600">{err}</p>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="mt-4 inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+          >
+            Tekrar dene
+          </button>
         </div>
       </div>
     );
@@ -164,22 +243,88 @@ export default function KitapciPortalPage() {
               <button
                 type="button"
                 onClick={downloadExcel}
-                className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900 hover:bg-emerald-100"
+                disabled={!filteredOrders.length}
+                className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Download className="h-4 w-4" />
-                Excel indir ({orders.length})
+                Excel indir ({filteredOrders.length}
+                {filtersActive && filteredOrders.length !== orders.length ? ` / ${orders.length}` : ''})
               </button>
             ) : null}
           </div>
         </header>
+
+        {orders.length > 0 ? (
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block text-xs font-medium text-slate-600 sm:col-span-2">
+                Öğrenci / veli ara
+                <div className="relative mt-1">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Ad, veli, telefon, kitap seti…"
+                    className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm"
+                  />
+                </div>
+              </label>
+              <label className="block text-xs font-medium text-slate-600">
+                Sınıf
+                <select
+                  value={sinifFilter}
+                  onChange={(e) => setSinifFilter(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                >
+                  <option value="">Tüm sınıflar</option>
+                  {sinifOptions.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="flex flex-col justify-end">
+                <span className="text-xs font-medium text-slate-600">Öğrenci adına göre sırala</span>
+                <button
+                  type="button"
+                  onClick={() => setNameSort((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
+                  className="mt-1 inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-900 hover:bg-indigo-100"
+                >
+                  {nameSort === 'asc' ? <ArrowDownAZ className="h-4 w-4" /> : <ArrowUpAZ className="h-4 w-4" />}
+                  {nameSort === 'asc' ? 'A → Z' : 'Z → A'}
+                </button>
+              </div>
+            </div>
+            <p className="mt-3 text-xs text-slate-500">
+              {filteredOrders.length} sipariş listeleniyor
+              {filtersActive && filteredOrders.length !== orders.length ? ` (toplam ${orders.length})` : ''}
+            </p>
+          </section>
+        ) : null}
+
         {orders.length === 0 ? (
           <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
             Size henüz iletilmiş sipariş görünmüyor. Kurum siparişi onaylayıp size WhatsApp gönderdiğinde öğrenci
             listesi burada çıkar.
           </div>
+        ) : filteredOrders.length === 0 ? (
+          <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
+            Arama veya sınıf filtresine uygun sipariş bulunamadı.
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery('');
+                setSinifFilter('');
+              }}
+              className="mt-3 block w-full text-sm font-semibold text-indigo-700 hover:underline"
+            >
+              Filtreleri temizle
+            </button>
+          </div>
         ) : (
           <ul className="space-y-4">
-            {orders.map((o) => (
+            {filteredOrders.map((o) => (
               <li key={o.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>

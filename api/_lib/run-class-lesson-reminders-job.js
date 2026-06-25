@@ -2,11 +2,11 @@
  * Grup dersi hatırlatma cron gövdesi — HTTP handler + birebir ders cron yedek tetikleyicisi.
  */
 import { supabaseAdmin } from './supabase-admin.js';
-import { metaWhatsAppConfigured } from './meta-whatsapp.js';
 import { OUTBOUND_LOG_CODE } from './whatsapp-outbound.js';
 import { insertWhatsAppAutomationLog } from './message-log.js';
 import { getIstanbulDateString } from './istanbul-time.js';
 import { recordCronRun } from './cron-run-log.js';
+import { resolveAutomationSendChannel } from './whatsapp-automation-channel.js';
 import { ensureClassSessionsFromWeeklySlots } from './class-sessions-from-slots.js';
 import { reconcileClassSessionsForReminders } from './class-session-reminder-reconcile.js';
 import { addCalendarDaysYmd } from './istanbul-time.js';
@@ -24,7 +24,8 @@ import {
   loadClassLessonReminderTemplate,
   validateClassLessonReminderTemplate,
   sendClassLessonReminderForSession,
-  markClassSessionReminderSent
+  claimClassSessionReminder,
+  releaseClassSessionReminderClaim
 } from './class-lesson-reminder-send.js';
 
 /**
@@ -36,9 +37,15 @@ export async function runClassLessonRemindersJob(opts = {}) {
   const log = [];
   const now = Date.now();
 
-  if (!metaWhatsAppConfigured()) {
-    await recordCronRun({ jobKey: 'class_lesson_reminders', ok: true, skipped: 'meta_whatsapp_not_ready' });
-    return { ok: true, skipped: 'meta_whatsapp_not_ready', log, triggeredBy };
+  const sendChannel = resolveAutomationSendChannel();
+  if (sendChannel === 'none') {
+    await recordCronRun({
+      jobKey: 'class_lesson_reminders',
+      ok: true,
+      skipped: 'automation_channel_not_ready',
+      detail: { hint: 'WHATSAPP_AUTOMATION_CHANNEL=gateway + gateway QR veya Meta env' }
+    });
+    return { ok: true, skipped: 'automation_channel_not_ready', log, triggeredBy };
   }
 
   const reminderTemplateRow = await loadClassLessonReminderTemplate();
@@ -162,6 +169,17 @@ export async function runClassLessonRemindersJob(opts = {}) {
   const classById = new Map((classes || []).map((c) => [String(c.id), c]));
 
   for (const s of dueSessions) {
+    const claimed = await claimClassSessionReminder(s.id);
+    if (!claimed) {
+      log.push({
+        session_id: s.id,
+        ok: true,
+        skipped: 'already_claimed',
+        note: 'Başka cron veya eşzamanlı işlem bu oturumu işledi'
+      });
+      continue;
+    }
+
     const studentIds = classToStudents.get(String(s.class_id)) || [];
     const result = await sendClassLessonReminderForSession({
       session: s,
@@ -175,7 +193,10 @@ export async function runClassLessonRemindersJob(opts = {}) {
       source: 'cron'
     });
     log.push(...result.log);
-    await markClassSessionReminderSent(s.id, result);
+
+    if (!result.anySucceeded) {
+      await releaseClassSessionReminderClaim(s.id);
+    }
   }
 
   const sent = log.filter((x) => x && x.ok === true && !x.skipped).length;

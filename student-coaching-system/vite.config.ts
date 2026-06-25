@@ -43,11 +43,28 @@ export default defineConfig(({ mode }) => {
   if (url) process.env.VITE_SUPABASE_URL = url
   if (anonKey) process.env.VITE_SUPABASE_ANON_KEY = anonKey
 
+  const apiProxyTarget =
+    (loadEnv(mode, root, "VITE_").VITE_API_BASE_URL ||
+      process.env.VITE_API_BASE_URL ||
+      "https://www.dersonlinevipkocluk.com")
+      .trim()
+      .replace(/\/$/, "")
+
   return {
     plugins: [react()],
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),
+      },
+    },
+    // Yerel `npm run dev`: /api yalnızca Vercel'de vardır; istekleri production API'ye yönlendir.
+    server: {
+      proxy: {
+        "/api": {
+          target: apiProxyTarget,
+          changeOrigin: true,
+          secure: true,
+        },
       },
     },
   }

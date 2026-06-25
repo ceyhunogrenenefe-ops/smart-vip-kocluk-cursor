@@ -4,16 +4,23 @@ import { useApp } from '../context/AppContext';
 import {
   CheckCircle,
   Clock,
+  Copy,
   Loader2,
   MessageCircle,
   Phone,
+  Plus,
   QrCode,
   RefreshCw,
+  Send,
   Smartphone,
+  Trash2,
   Unlink,
   User,
-  Users
+  Users,
+  Pencil
 } from 'lucide-react';
+import { formatClassLevelLabel } from '../types';
+import type { Student } from '../types';
 import { apiFetch, getAuthToken, getGatewaySessionUserId } from '../lib/session';
 import { normalizeWhatsAppPhoneForSend } from '../lib/whatsappOutbound';
 import WhatsAppMerkeziPanel from '../components/whatsapp/WhatsAppMerkeziPanel';
@@ -28,6 +35,71 @@ function isValidGatewayEnvUrl(s: string): boolean {
   return /^https?:\/\/[^\s]+/i.test(t);
 }
 
+const DEFAULT_QUICK_STUDENT_TEMPLATE =
+  'Merhaba {{name}}, bugün hedefin: {{task}}.\n\n• Kaç soru çözdün?\n• Hangi derslere çalıştın?\n• Kaç sayfa kitap okudun?';
+
+const DEFAULT_QUICK_PARENT_TEMPLATE =
+  'Sayın veli,\n{{name}} için bugün kısa durum özeti:\n• Disiplin: [1–10]\n• Odak: [1–10]\n• Ekran süresi: […]\n\nNot: {{task}}';
+
+const DEFAULT_BULK_DENEME_TEMPLATE = `Merhaba {{1}},
+
+Deneme sınavınız planlanmıştır.
+
+📅 Tarih: {{2}}
+⏰ Saat: {{3}}
+
+Sınava aşağıdaki bağlantı üzerinden katılabilirsiniz:
+🔗 {{4}}
+
+Başarılar dileriz.
+Online VIP Dershane`;
+
+function quickTemplatesStorageKey(userId: string) {
+  return `coach_wa_quick_templates_${userId}`;
+}
+
+function renderQuickTemplate(
+  template: string,
+  vars: { name?: string; task?: string; coach?: string }
+) {
+  return template
+    .replace(/\{\{\s*name\s*\}\}/gi, vars.name ?? '')
+    .replace(/\{\{\s*task\s*\}\}/gi, vars.task ?? '')
+    .replace(/\{\{\s*coach\s*\}\}/gi, vars.coach ?? '');
+}
+
+function renderBulkTemplate(
+  template: string,
+  vars: {
+    name?: string;
+    task?: string;
+    coach?: string;
+    examDate?: string;
+    examTime?: string;
+    examLink?: string;
+  }
+) {
+  const name = vars.name ?? '';
+  const examDate = vars.examDate ?? '';
+  const examTime = vars.examTime ?? '';
+  const examLink = vars.examLink ?? '';
+  return template
+    .replace(/\{\{\s*1\s*\}\}/g, name)
+    .replace(/\{\{\s*2\s*\}\}/g, examDate)
+    .replace(/\{\{\s*3\s*\}\}/g, examTime)
+    .replace(/\{\{\s*4\s*\}\}/g, examLink)
+    .replace(/\{\{\s*name\s*\}\}/gi, name)
+    .replace(/\{\{\s*task\s*\}\}/gi, vars.task ?? '')
+    .replace(/\{\{\s*coach\s*\}\}/gi, vars.coach ?? '')
+    .replace(/\{\{\s*date\s*\}\}/gi, examDate)
+    .replace(/\{\{\s*time\s*\}\}/gi, examTime)
+    .replace(/\{\{\s*link\s*\}\}/gi, examLink);
+}
+
+function bulkTemplateUsesExamVars(template: string) {
+  return /\{\{\s*[234]\s*\}\}|\{\{\s*(date|time|link)\s*\}\}/i.test(template);
+}
+
 interface WaScheduleDTO {
   coach_id: string;
   is_active: boolean;
@@ -39,6 +111,107 @@ interface WaScheduleDTO {
   campaign_days: number | null;
   campaign_started_at: string | null;
   prefer_parent_phone: boolean;
+}
+
+interface WaGatewayScheduleDTO {
+  id: string;
+  coach_id: string;
+  label: string | null;
+  is_active: boolean;
+  message_template: string;
+  send_hour_tr: number;
+  send_minute_tr: number;
+  weekdays_only: boolean;
+  interval_days: number;
+  campaign_days: number | null;
+  campaign_started_at: string | null;
+  prefer_parent_phone: boolean;
+  gateway_user_id: string | null;
+  repeat_mode?: 'once' | 'daily' | 'weekly' | 'interval';
+  send_date_tr?: string | null;
+  weekday_tr?: number | null;
+  target_student_ids?: string[];
+  target_class_level?: string | null;
+  target_group_name?: string | null;
+  recipient_channel?: 'student' | 'parent';
+  task_default?: string | null;
+  template_var_date?: string | null;
+  template_var_time?: string | null;
+  template_var_link?: string | null;
+}
+
+type GwRepeatMode = 'once' | 'daily' | 'weekly' | 'interval';
+
+interface BulkSavedTemplate {
+  id: string;
+  name: string;
+  template: string;
+  task: string;
+  examDate?: string;
+  examTime?: string;
+  examLink?: string;
+}
+
+const BUILTIN_BULK_TEMPLATES: BulkSavedTemplate[] = [
+  {
+    id: 'builtin_deneme_sinavi',
+    name: 'Deneme Sınavı',
+    template: DEFAULT_BULK_DENEME_TEMPLATE,
+    task: '',
+    examDate: '',
+    examTime: '',
+    examLink: ''
+  }
+];
+
+function mergeBulkTemplatesWithBuiltin(saved: BulkSavedTemplate[]) {
+  const custom = saved.filter((x) => !x.id.startsWith('builtin_'));
+  const builtins = BUILTIN_BULK_TEMPLATES.map((b) => {
+    const over = saved.find((x) => x.id === b.id);
+    return over ? { ...b, ...over, id: b.id, name: over.name || b.name } : b;
+  });
+  return [...builtins, ...custom];
+}
+
+const GW_WEEKDAY_OPTS: { value: number; label: string }[] = [
+  { value: 1, label: 'Pazartesi' },
+  { value: 2, label: 'Salı' },
+  { value: 3, label: 'Çarşamba' },
+  { value: 4, label: 'Perşembe' },
+  { value: 5, label: 'Cuma' },
+  { value: 6, label: 'Cumartesi' },
+  { value: 7, label: 'Pazar' }
+];
+
+function bulkTemplatesStorageKey(userId: string) {
+  return `coach_wa_bulk_templates_${userId}`;
+}
+
+function gwScheduleApiBody(row: WaGatewayScheduleDTO, restartCampaign = false) {
+  return {
+    label: row.label,
+    is_active: row.is_active,
+    message_template: row.message_template,
+    send_hour_tr: row.send_hour_tr,
+    send_minute_tr: row.send_minute_tr,
+    weekdays_only: row.weekdays_only,
+    interval_days: row.interval_days,
+    campaign_days:
+      row.campaign_days === null || row.campaign_days === undefined ? '' : row.campaign_days,
+    prefer_parent_phone: row.prefer_parent_phone,
+    recipient_channel: row.recipient_channel ?? (row.prefer_parent_phone ? 'parent' : 'student'),
+    repeat_mode: row.repeat_mode ?? 'daily',
+    send_date_tr: row.repeat_mode === 'once' ? row.send_date_tr ?? null : null,
+    weekday_tr: row.repeat_mode === 'weekly' ? row.weekday_tr ?? null : null,
+    target_student_ids: row.target_student_ids ?? [],
+    target_class_level: row.target_class_level ?? null,
+    target_group_name: row.target_group_name ?? null,
+    task_default: row.task_default ?? null,
+    template_var_date: row.template_var_date ?? null,
+    template_var_time: row.template_var_time ?? null,
+    template_var_link: row.template_var_link ?? null,
+    restart_campaign: restartCampaign
+  };
 }
 
 export default function CoachWhatsAppSettings() {
@@ -67,16 +240,50 @@ export default function CoachWhatsAppSettings() {
   const [status, setStatus] = useState<GatewayStatus>('idle');
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [lastConnectedAt, setLastConnectedAt] = useState<string | null>(null);
+  const [linkedPhone, setLinkedPhone] = useState<string | null>(null);
   /** VPS gateway (Baileys) bağlantı hatası — WhatsApp oturumu düşünce dolabilir */
   const [gatewaySessionError, setGatewaySessionError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState('');
+  const [healthCheckBusy, setHealthCheckBusy] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [templateTab, setTemplateTab] = useState<'student' | 'parent'>('student');
   const [templateTask, setTemplateTask] = useState('');
+  const [studentQuickTemplate, setStudentQuickTemplate] = useState(DEFAULT_QUICK_STUDENT_TEMPLATE);
+  const [parentQuickTemplate, setParentQuickTemplate] = useState(DEFAULT_QUICK_PARENT_TEMPLATE);
   const [templateSendBusy, setTemplateSendBusy] = useState(false);
   const [templateNotice, setTemplateNotice] = useState('');
   const [templateWaUrl, setTemplateWaUrl] = useState<string | null>(null);
+
+  const [bulkClassFilter, setBulkClassFilter] = useState('');
+  const [bulkGroupFilter, setBulkGroupFilter] = useState('');
+  const [bulkChannel, setBulkChannel] = useState<'student' | 'parent'>('student');
+  const [bulkSelectedIds, setBulkSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkTask, setBulkTask] = useState('');
+  const [bulkSendBusy, setBulkSendBusy] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState('');
+  const [bulkNotice, setBulkNotice] = useState('');
+  const [bulkTemplate, setBulkTemplate] = useState(DEFAULT_QUICK_STUDENT_TEMPLATE);
+  const [bulkTemplateName, setBulkTemplateName] = useState('');
+  const [bulkSavedTemplates, setBulkSavedTemplates] = useState<BulkSavedTemplate[]>([]);
+  const [bulkEditingTemplateId, setBulkEditingTemplateId] = useState<string | null>(null);
+  const [bulkRepeatMode, setBulkRepeatMode] = useState<GwRepeatMode>('daily');
+  const [bulkSendDate, setBulkSendDate] = useState('');
+  const [bulkWeekday, setBulkWeekday] = useState(1);
+  const [bulkSendHour, setBulkSendHour] = useState(9);
+  const [bulkSendMinute, setBulkSendMinute] = useState(0);
+  const [bulkPlanLabel, setBulkPlanLabel] = useState('');
+  const [bulkScheduleSaving, setBulkScheduleSaving] = useState(false);
+  const [bulkExamDate, setBulkExamDate] = useState('');
+  const [bulkExamTime, setBulkExamTime] = useState('');
+  const [bulkExamLink, setBulkExamLink] = useState('');
+
+  const [gwSchedulesLoading, setGwSchedulesLoading] = useState(false);
+  const [gwSchedulesSavingId, setGwSchedulesSavingId] = useState<string | null>(null);
+  const [gwSchedulesDeletingId, setGwSchedulesDeletingId] = useState<string | null>(null);
+  const [gwSchedulesMsg, setGwSchedulesMsg] = useState('');
+  const [gwSchedules, setGwSchedules] = useState<WaGatewayScheduleDTO[]>([]);
+  const [gwRestartCampaignIds, setGwRestartCampaignIds] = useState<Record<string, boolean>>({});
   const selectedStudent = students.find((s) => s.id === selectedStudentId);
   const isConnected = status === 'connected';
   const hasServerJwt = Boolean(getAuthToken());
@@ -126,6 +333,341 @@ export default function CoachWhatsAppSettings() {
   useEffect(() => {
     void loadWaSchedule();
   }, [loadWaSchedule]);
+
+  useEffect(() => {
+    if (!coachId) return;
+    try {
+      const raw = localStorage.getItem(quickTemplatesStorageKey(coachId));
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { student?: string; parent?: string };
+      if (typeof parsed.student === 'string' && parsed.student.trim()) {
+        setStudentQuickTemplate(parsed.student);
+      }
+      if (typeof parsed.parent === 'string' && parsed.parent.trim()) {
+        setParentQuickTemplate(parsed.parent);
+      }
+    } catch {
+      /* yoksay */
+    }
+  }, [coachId]);
+
+  useEffect(() => {
+    if (!coachId) return;
+    try {
+      localStorage.setItem(
+        quickTemplatesStorageKey(coachId),
+        JSON.stringify({ student: studentQuickTemplate, parent: parentQuickTemplate })
+      );
+    } catch {
+      /* yoksay */
+    }
+  }, [coachId, studentQuickTemplate, parentQuickTemplate]);
+
+  useEffect(() => {
+    if (!coachId) return;
+    try {
+      const raw = localStorage.getItem(bulkTemplatesStorageKey(coachId));
+      if (!raw) {
+        setBulkSavedTemplates(BUILTIN_BULK_TEMPLATES);
+        return;
+      }
+      const parsed = JSON.parse(raw) as BulkSavedTemplate[];
+      if (Array.isArray(parsed)) setBulkSavedTemplates(mergeBulkTemplatesWithBuiltin(parsed));
+      else setBulkSavedTemplates(BUILTIN_BULK_TEMPLATES);
+    } catch {
+      setBulkSavedTemplates(BUILTIN_BULK_TEMPLATES);
+    }
+  }, [coachId]);
+
+  useEffect(() => {
+    if (!coachId) return;
+    try {
+      localStorage.setItem(bulkTemplatesStorageKey(coachId), JSON.stringify(bulkSavedTemplates));
+    } catch {
+      /* yoksay */
+    }
+  }, [coachId, bulkSavedTemplates]);
+
+  useEffect(() => {
+    setBulkTemplate(bulkChannel === 'student' ? studentQuickTemplate : parentQuickTemplate);
+  }, [bulkChannel, studentQuickTemplate, parentQuickTemplate]);
+
+  const loadGwSchedules = useCallback(async () => {
+    if (!getAuthToken()) {
+      setGwSchedules([]);
+      return;
+    }
+    setGwSchedulesLoading(true);
+    setGwSchedulesMsg('');
+    try {
+      const res = await apiFetch('/api/coach-whatsapp-gateway-schedules');
+      const payload = (await res.json().catch(() => ({}))) as {
+        data?: WaGatewayScheduleDTO[];
+        error?: string;
+        hint?: string;
+      };
+      if (!res.ok) {
+        setGwSchedules([]);
+        setGwSchedulesMsg(payload?.hint || payload?.error || 'Gateway zamanlayıcıları yüklenemedi.');
+        return;
+      }
+      setGwSchedules(Array.isArray(payload.data) ? payload.data : []);
+    } catch {
+      setGwSchedules([]);
+      setGwSchedulesMsg('Gateway zamanlayıcıları yüklenemedi.');
+    } finally {
+      setGwSchedulesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadGwSchedules();
+  }, [loadGwSchedules]);
+
+  const patchGwSchedule = (id: string, patch: Partial<WaGatewayScheduleDTO>) => {
+    setGwSchedules((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  };
+
+  const createGwSchedule = async (seed?: Partial<WaGatewayScheduleDTO>) => {
+    if (!getAuthToken()) return;
+    setGwSchedulesMsg('');
+    try {
+      const res = await apiFetch('/api/coach-whatsapp-gateway-schedules', {
+        method: 'POST',
+        body: JSON.stringify(
+          gwScheduleApiBody({
+            label: seed?.label ?? 'Yeni plan',
+            is_active: seed?.is_active ?? false,
+            message_template: seed?.message_template ?? DEFAULT_QUICK_STUDENT_TEMPLATE,
+            send_hour_tr: seed?.send_hour_tr ?? 9,
+            send_minute_tr: seed?.send_minute_tr ?? 0,
+            weekdays_only: seed?.weekdays_only ?? false,
+            interval_days: seed?.interval_days ?? 1,
+            campaign_days: seed?.campaign_days ?? null,
+            prefer_parent_phone: seed?.prefer_parent_phone ?? false,
+            recipient_channel: seed?.recipient_channel,
+            repeat_mode: seed?.repeat_mode ?? 'daily',
+            send_date_tr: seed?.send_date_tr ?? null,
+            weekday_tr: seed?.weekday_tr ?? null,
+            target_student_ids: seed?.target_student_ids ?? [],
+            target_class_level: seed?.target_class_level ?? null,
+            target_group_name: seed?.target_group_name ?? null,
+            task_default: seed?.task_default ?? null,
+            id: '',
+            coach_id: '',
+            campaign_started_at: null,
+            gateway_user_id: null
+          })
+        )
+      });
+      const payload = (await res.json().catch(() => ({}))) as {
+        data?: WaGatewayScheduleDTO;
+        error?: string;
+      };
+      if (!res.ok || !payload.data) {
+        setGwSchedulesMsg(payload?.error || 'Plan oluşturulamadı.');
+        return;
+      }
+      setGwSchedules((prev) => [...prev, payload.data!]);
+      setGwSchedulesMsg('Yeni gateway planı eklendi.');
+    } catch {
+      setGwSchedulesMsg('Plan oluşturulamadı.');
+    }
+  };
+
+  const saveGwSchedule = async (row: WaGatewayScheduleDTO) => {
+    if (!getAuthToken()) return;
+    setGwSchedulesSavingId(row.id);
+    setGwSchedulesMsg('');
+    try {
+      const res = await apiFetch(`/api/coach-whatsapp-gateway-schedules/${row.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(gwScheduleApiBody(row, Boolean(gwRestartCampaignIds[row.id])))
+      });
+      const payload = (await res.json().catch(() => ({}))) as {
+        data?: WaGatewayScheduleDTO;
+        error?: string;
+      };
+      if (!res.ok || !payload.data) {
+        setGwSchedulesMsg(payload?.error || 'Kayıt başarısız.');
+        return;
+      }
+      setGwSchedules((prev) => prev.map((s) => (s.id === row.id ? payload.data! : s)));
+      setGwRestartCampaignIds((prev) => ({ ...prev, [row.id]: false }));
+      setGwSchedulesMsg('Gateway planı kaydedildi. QR oturumu bağlı olmalı; cron ~15 dk’da bir çalışır.');
+    } catch {
+      setGwSchedulesMsg('Kayıt başarısız.');
+    } finally {
+      setGwSchedulesSavingId(null);
+    }
+  };
+
+  const deleteGwSchedule = async (id: string) => {
+    if (!getAuthToken()) return;
+    setGwSchedulesDeletingId(id);
+    setGwSchedulesMsg('');
+    try {
+      const res = await apiFetch(`/api/coach-whatsapp-gateway-schedules/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => ({}))) as { error?: string };
+        setGwSchedulesMsg(payload?.error || 'Silinemedi.');
+        return;
+      }
+      setGwSchedules((prev) => prev.filter((s) => s.id !== id));
+      setGwSchedulesMsg('Plan silindi.');
+    } catch {
+      setGwSchedulesMsg('Silinemedi.');
+    } finally {
+      setGwSchedulesDeletingId(null);
+    }
+  };
+
+  const duplicateGwSchedule = (row: WaGatewayScheduleDTO) => {
+    void createGwSchedule({
+      label: row.label ? `${row.label} (kopya)` : 'Plan (kopya)',
+      is_active: false,
+      message_template: row.message_template,
+      send_hour_tr: row.send_hour_tr,
+      send_minute_tr: row.send_minute_tr,
+      weekdays_only: row.weekdays_only,
+      interval_days: row.interval_days,
+      campaign_days: row.campaign_days,
+      prefer_parent_phone: row.prefer_parent_phone,
+      recipient_channel: row.recipient_channel,
+      repeat_mode: row.repeat_mode,
+      send_date_tr: row.send_date_tr,
+      weekday_tr: row.weekday_tr,
+      target_student_ids: row.target_student_ids,
+      target_class_level: row.target_class_level,
+      target_group_name: row.target_group_name,
+      task_default: row.task_default
+    });
+  };
+
+  const saveBulkTemplateToLibrary = () => {
+    const name = bulkTemplateName.trim() || `Şablon ${bulkSavedTemplates.length + 1}`;
+    if (!bulkTemplate.trim()) {
+      setBulkNotice('Kaydetmek için şablon metni girin.');
+      return;
+    }
+    const examFields = {
+      examDate: bulkExamDate,
+      examTime: bulkExamTime,
+      examLink: bulkExamLink
+    };
+    if (bulkEditingTemplateId) {
+      setBulkSavedTemplates((prev) =>
+        prev.map((x) =>
+          x.id === bulkEditingTemplateId
+            ? { ...x, name, template: bulkTemplate, task: bulkTask, ...examFields }
+            : x
+        )
+      );
+      setBulkNotice(`«${name}» güncellendi.`);
+      return;
+    }
+    const entry: BulkSavedTemplate = {
+      id: `bt_${Date.now()}`,
+      name,
+      template: bulkTemplate,
+      task: bulkTask,
+      ...examFields
+    };
+    setBulkSavedTemplates((prev) => [...prev, entry]);
+    setBulkTemplateName('');
+    setBulkNotice(`«${name}» kaydedildi.`);
+  };
+
+  const startEditBulkSavedTemplate = (id: string) => {
+    const t = bulkSavedTemplates.find((x) => x.id === id);
+    if (!t) return;
+    setBulkEditingTemplateId(id);
+    setBulkTemplateName(t.name);
+    setBulkTemplate(t.template);
+    setBulkTask(t.task);
+    setBulkExamDate(t.examDate ?? '');
+    setBulkExamTime(t.examTime ?? '');
+    setBulkExamLink(t.examLink ?? '');
+    setBulkNotice(`«${t.name}» düzenleme modunda — metni değiştirin, «Değişiklikleri kaydet»e basın.`);
+  };
+
+  const applyBulkSavedTemplate = (id: string) => {
+    startEditBulkSavedTemplate(id);
+  };
+
+  const cancelBulkTemplateEdit = () => {
+    setBulkEditingTemplateId(null);
+    setBulkTemplateName('');
+    setBulkNotice('Yeni şablon modu — kayıt yeni bir şablon oluşturur.');
+  };
+
+  const deleteBulkSavedTemplate = (id: string) => {
+    if (id.startsWith('builtin_')) {
+      setBulkNotice('Hazır «Deneme Sınavı» şablonu silinemez; düzenleyip kaydedebilirsiniz.');
+      return;
+    }
+    setBulkSavedTemplates((prev) => prev.filter((x) => x.id !== id));
+    if (bulkEditingTemplateId === id) {
+      setBulkEditingTemplateId(null);
+      setBulkTemplateName('');
+    }
+  };
+
+  const saveBulkAsScheduledPlan = async () => {
+    if (!getAuthToken()) return;
+    if (!bulkTemplate.trim()) {
+      setBulkNotice('Zamanlayıcı için şablon metni girin.');
+      return;
+    }
+    if (bulkRepeatMode === 'once' && !bulkSendDate) {
+      setBulkNotice('Tek seferlik gönderim için tarih seçin.');
+      return;
+    }
+    setBulkScheduleSaving(true);
+    setBulkNotice('');
+    try {
+      const res = await apiFetch('/api/coach-whatsapp-gateway-schedules', {
+        method: 'POST',
+        body: JSON.stringify({
+          label: bulkPlanLabel.trim() || 'Toplu mesaj planı',
+          is_active: true,
+          message_template: bulkTemplate,
+          task_default: bulkTask,
+          template_var_date: bulkExamDate || null,
+          template_var_time: bulkExamTime || null,
+          template_var_link: bulkExamLink || null,
+          send_hour_tr: bulkSendHour,
+          send_minute_tr: bulkSendMinute,
+          repeat_mode: bulkRepeatMode,
+          send_date_tr: bulkRepeatMode === 'once' ? bulkSendDate : null,
+          weekday_tr: bulkRepeatMode === 'weekly' ? bulkWeekday : null,
+          interval_days: 1,
+          recipient_channel: bulkChannel,
+          prefer_parent_phone: bulkChannel === 'parent',
+          target_student_ids: [...bulkSelectedIds],
+          target_class_level: bulkClassFilter || null,
+          target_group_name: bulkGroupFilter || null
+        })
+      });
+      const payload = (await res.json().catch(() => ({}))) as {
+        data?: WaGatewayScheduleDTO;
+        error?: string;
+      };
+      if (!res.ok || !payload.data) {
+        setBulkNotice(payload?.error || 'Zamanlanmış plan kaydedilemedi.');
+        return;
+      }
+      setGwSchedules((prev) => [...prev, payload.data!]);
+      setBulkNotice(
+        'Zamanlanmış plan kaydedildi ve aktif. QR oturumu bağlı olmalı; cron ~15 dk’da bir tetiklenir.'
+      );
+      void loadGwSchedules();
+    } catch {
+      setBulkNotice('Zamanlanmış plan kaydedilemedi.');
+    } finally {
+      setBulkScheduleSaving(false);
+    }
+  };
 
   const saveWaSchedule = async () => {
     if (!waDraft || !getAuthToken()) return;
@@ -207,14 +749,25 @@ export default function CoachWhatsAppSettings() {
     restoreBlocked?: boolean;
     authOnDisk?: boolean;
     hint?: string | null;
+    linkedPhone?: string | null;
   };
 
   const applyGatewayStatusPayload = (data: GatewayStatusPayload) => {
     setStatus(data.status || 'idle');
     setQrDataUrl(data.qr || null);
     setLastConnectedAt(data.connectedAt || null);
+    const lp = String(data.linkedPhone || '').replace(/\D/g, '');
+    setLinkedPhone(
+      lp.startsWith('90') && lp.length >= 12
+        ? `+${lp.slice(0, 2)} ${lp.slice(2, 5)} ${lp.slice(5, 8)} ${lp.slice(8)}`
+        : lp
+          ? `+${lp}`
+          : null
+    );
     const err =
-      data.status === 'connected'
+      data.status === 'connected' ||
+      data.status === 'reconnecting' ||
+      data.status === 'connecting'
         ? null
         : typeof data.lastError === 'string' && data.lastError.trim()
           ? data.lastError.trim()
@@ -222,6 +775,28 @@ export default function CoachWhatsAppSettings() {
             ? data.hint
             : null;
     setGatewaySessionError(err);
+  };
+
+  const autoReconnectIfNeeded = async (data: GatewayStatusPayload) => {
+    if (!canUseGateway || !hasServerJwt) return;
+    const st = data.status || 'idle';
+    const transientErr = String(data.lastError || '').toLowerCase().includes('stream errored');
+    const canAutoRestore =
+      data.authOnDisk &&
+      !data.restoreBlocked &&
+      (st === 'idle' ||
+        st === 'reconnecting' ||
+        (st === 'logged_out' && transientErr));
+    if (!canAutoRestore) return;
+    if (st === 'reconnecting' || st === 'connecting') return;
+    try {
+      await callGateway<GatewayStatusPayload>(`/sessions/${coachId}/start`, {
+        method: 'POST',
+        body: JSON.stringify({ purge: false })
+      });
+    } catch {
+      /* status poll will retry */
+    }
   };
 
   const hasConnectionFailure =
@@ -236,7 +811,28 @@ export default function CoachWhatsAppSettings() {
     headers.set('Content-Type', 'application/json');
     if (authToken) headers.set('Authorization', `Bearer ${authToken}`);
     if (gatewayKey) headers.set('x-gateway-key', gatewayKey);
-    const res = await fetch(`${gatewayUrl}${endpoint}`, { headers, ...init });
+
+    const isSend = /\/send\/?$/i.test(endpoint);
+    const timeoutMs = isSend ? 115000 : 28000;
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), timeoutMs);
+
+    let res: Response;
+    try {
+      res = await fetch(`${gatewayUrl}${endpoint}`, { headers, ...init, signal: controller.signal });
+    } catch (e) {
+      clearTimeout(tid);
+      if (e instanceof Error && e.name === 'AbortError') {
+        throw new Error(
+          isSend
+            ? 'Mesaj gönderimi zaman aşımına uğradı. VPS gateway yavaş veya kopuk — pm2 restart whatsapp-gateway deneyin.'
+            : 'Gateway durumu alınamadı (zaman aşımı).'
+        );
+      }
+      throw e;
+    }
+    clearTimeout(tid);
+
     const rawText = await res.text();
     let data: {
       error?: string;
@@ -265,7 +861,9 @@ export default function CoachWhatsAppSettings() {
             : ' Oturum (JWT) süresi dolmuş veya APP_JWT_SECRET uyuşmuyor: çıkış yapıp tekrar giriş yapın. VPS gateway .env ile Vercel aynı APP_JWT_SECRET olmalı.'
           : res.status === 502
             ? ' VPS gateway kapalı/erişilemiyor — sunucuda pm2 restart whatsapp-gateway, port 4010 açık mı kontrol edin.'
-            : res.status === 403
+            : res.status === 504
+              ? ' Mesaj gönderimi zaman aşımına uğradı — VPS gateway yavaş veya kopuk; pm2 restart whatsapp-gateway.'
+              : res.status === 403
             ? ' URL’deki oturum id (JWT sub) ile eşleşme yok (coach_scope_mismatch) veya erişim reddedildi. Tarayıcıda açık olan kullanıcı = gateway’e giden id; Vercel’de WHATSAPP_GATEWAY_UPSTREAM / proxy çalışıyor olmalı.'
             : '';
       const upstreamUnreachableHint = buildGatewayUnreachableHint(base);
@@ -299,6 +897,7 @@ export default function CoachWhatsAppSettings() {
     try {
       const data = await callGateway<GatewayStatusPayload>(`/sessions/${coachId}/status`);
       applyGatewayStatusPayload(data);
+      void autoReconnectIfNeeded(data);
       return true;
     } catch (e) {
       const msg = e instanceof Error && e.message ? e.message : 'gateway_request_failed';
@@ -320,7 +919,9 @@ export default function CoachWhatsAppSettings() {
     const tick = async () => {
       if (cancelled) return;
       const ok = await fetchStatus();
-      delayMs = ok ? 5000 : Math.min(delayMs * 2, 30000);
+      const fastPoll =
+        status === 'connecting' || status === 'reconnecting' || status === 'qr_ready';
+      delayMs = ok ? (fastPoll ? 2000 : 5000) : Math.min(delayMs * 2, 30000);
       if (!cancelled) timer = setTimeout(() => void tick(), delayMs);
     };
 
@@ -329,7 +930,7 @@ export default function CoachWhatsAppSettings() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [canUseGateway, coachId, hasServerJwt]);
+  }, [canUseGateway, coachId, hasServerJwt, status]);
 
   const startConnection = async () => {
     if (!canUseGateway) {
@@ -441,18 +1042,175 @@ export default function CoachWhatsAppSettings() {
   };
 
   const sendGatewayMessage = async (targetPhone: string, message: string) => {
-    await callGateway(`/sessions/${coachId}/send`, {
-      method: 'POST',
-      body: JSON.stringify({ phone: targetPhone, message })
-    });
+    try {
+      await callGateway(`/sessions/${coachId}/send`, {
+        method: 'POST',
+        body: JSON.stringify({ phone: targetPhone, message })
+      });
+      setStatusMessage('');
+      setGatewaySessionError(null);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (/504|zaman aşımı|timeout/i.test(msg)) {
+        setStatusMessage(
+          'Gönderim yanıtı gecikti — mesaj telefona düşmüş olabilir. Aşağıdaki «Sağlık testi» ile oturumu doğrulayın.'
+        );
+      }
+      throw error;
+    } finally {
+      void fetchStatus();
+    }
   };
 
   const buildTemplateMessage = () => {
     if (!selectedStudent) return '';
-    if (templateTab === 'student') {
-      return `Merhaba ${selectedStudent.name}, bugün hedefin: ${templateTask || 'görev giriniz'}.\n\n• Kaç soru çözdün?\n• Hangi derslere çalıştın?\n• Kaç sayfa kitap okudun?`;
+    const template = templateTab === 'student' ? studentQuickTemplate : parentQuickTemplate;
+    const coachName = actor?.name || 'Koçunuz';
+    const taskFallback = templateTab === 'student' ? 'görev giriniz' : 'ek not yok';
+    return renderQuickTemplate(template, {
+      name: selectedStudent.name,
+      task: templateTask.trim() || taskFallback,
+      coach: coachName
+    });
+  };
+
+  const bulkClassOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const st of students) {
+      const key = st.classLevel != null ? String(st.classLevel) : '';
+      if (!key || seen.has(key)) continue;
+      seen.set(key, formatClassLevelLabel(st.classLevel));
     }
-    return `Sayın veli,\n${selectedStudent.name} için bugün kısa durum özeti:\n• Disiplin: [1–10]\n• Odak: [1–10]\n• Ekran süresi: […]\n\nNot: ${templateTask || 'ek not yok'}`;
+    return [...seen.entries()]
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'tr'));
+  }, [students]);
+
+  const bulkFilteredStudents = useMemo(() => {
+    return students.filter((st) => {
+      if (bulkClassFilter && String(st.classLevel ?? '') !== bulkClassFilter) return false;
+      if (bulkGroupFilter) {
+        const g = String(st.groupName || '').trim();
+        if (g !== bulkGroupFilter) return false;
+      }
+      return true;
+    });
+  }, [students, bulkClassFilter, bulkGroupFilter]);
+
+  const bulkGroupOptions = useMemo(() => {
+    const pool = bulkClassFilter
+      ? students.filter((st) => String(st.classLevel ?? '') === bulkClassFilter)
+      : students;
+    const groups = new Set<string>();
+    for (const st of pool) {
+      const g = String(st.groupName || '').trim();
+      if (g) groups.add(g);
+    }
+    return [...groups].sort((a, b) => a.localeCompare(b, 'tr'));
+  }, [students, bulkClassFilter]);
+
+  const resolveStudentPhone = (st: Student, channel: 'student' | 'parent') => {
+    const parentRaw =
+      st.parentPhone ||
+      (st as unknown as { parent_phone?: string } | undefined)?.parent_phone ||
+      '';
+    const raw =
+      channel === 'student'
+        ? String(st.phone || '').trim()
+        : String(parentRaw || st.phone || '').trim();
+    return formatPhone(raw);
+  };
+
+  const buildBulkMessageForStudent = (st: Student) => {
+    const taskFallback = bulkChannel === 'student' ? 'görev giriniz' : 'ek not yok';
+    return renderBulkTemplate(bulkTemplate, {
+      name: st.name,
+      task: bulkTask.trim() || taskFallback,
+      coach: actor?.name || 'Koçunuz',
+      examDate: bulkExamDate,
+      examTime: bulkExamTime,
+      examLink: bulkExamLink
+    });
+  };
+
+  const bulkNeedsExamFields = bulkTemplateUsesExamVars(bulkTemplate);
+
+  const toggleBulkStudent = (id: string) => {
+    setBulkSelectedIds((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  };
+
+  const selectAllBulkVisible = () => {
+    setBulkSelectedIds(new Set(bulkFilteredStudents.map((st) => st.id)));
+  };
+
+  const clearBulkSelection = () => setBulkSelectedIds(new Set());
+
+  const sendBulkGateway = async () => {
+    setBulkNotice('');
+    setBulkProgress('');
+    if (!bulkSelectedIds.size) {
+      setBulkNotice('En az bir öğrenci seçin.');
+      return;
+    }
+    if (!canUseGateway) {
+      setBulkNotice('Gateway kullanılamıyor — JWT ve gateway adresi gerekli.');
+      return;
+    }
+    if (!isConnected) {
+      setBulkNotice('Toplu gönderim için QR ile WhatsApp oturumunu bağlayın.');
+      return;
+    }
+
+    const targets = students.filter((st) => bulkSelectedIds.has(st.id));
+    const withPhone = targets.filter((st) => resolveStudentPhone(st, bulkChannel));
+    const skipped = targets.length - withPhone.length;
+    if (!withPhone.length) {
+      setBulkNotice(
+        bulkChannel === 'parent'
+          ? 'Seçili öğrencilerde veli/öğrenci telefonu yok.'
+          : 'Seçili öğrencilerde telefon numarası yok.'
+      );
+      return;
+    }
+
+    setBulkSendBusy(true);
+    let ok = 0;
+    let fail = 0;
+    const errors: string[] = [];
+    try {
+      for (let i = 0; i < withPhone.length; i++) {
+        const st = withPhone[i];
+        const phone = resolveStudentPhone(st, bulkChannel);
+        const message = buildBulkMessageForStudent(st);
+        setBulkProgress(`${i + 1}/${withPhone.length} — ${st.name}`);
+        try {
+          await sendGatewayMessage(phone, message);
+          ok += 1;
+        } catch (e) {
+          fail += 1;
+          const msg = e instanceof Error ? e.message : String(e);
+          if (errors.length < 3) errors.push(`${st.name}: ${msg}`);
+        }
+        if (i < withPhone.length - 1) {
+          await new Promise((r) => setTimeout(r, 900));
+        }
+      }
+      const parts = [`${ok}/${withPhone.length} mesaj gönderildi.`];
+      if (fail) parts.push(`${fail} başarısız.`);
+      if (skipped) parts.push(`${skipped} öğrenci telefonsuz atlandı.`);
+      if (errors.length) parts.push(errors.join(' · '));
+      setBulkNotice(parts.join(' '));
+    } catch (e) {
+      setBulkNotice(e instanceof Error ? e.message : 'Toplu gönderim hatası');
+    } finally {
+      setBulkSendBusy(false);
+      setBulkProgress('');
+    }
   };
 
   const sendQuickTemplate = async () => {
@@ -514,6 +1272,40 @@ export default function CoachWhatsAppSettings() {
       setTemplateNotice(`Mesaj gönderilemedi: ${(error as Error).message}`);
     } finally {
       setTemplateSendBusy(false);
+    }
+  };
+
+  const runGatewayHealthTest = async () => {
+    setHealthCheckBusy(true);
+    try {
+      const res = await apiFetch('/api/whatsapp-health');
+      const j = (await res.json().catch(() => ({}))) as {
+        hint?: string;
+        gateway?: {
+          gateway_connected?: boolean;
+          upstream_reachable?: boolean;
+          upstream_error?: string | null;
+          connected_live_count?: number;
+        };
+      };
+      const gw = j.gateway;
+      const parts: string[] = [];
+      if (gw?.upstream_reachable) {
+        parts.push('VPS gateway erişilebilir');
+      } else {
+        parts.push(`VPS erişilemiyor${gw?.upstream_error ? `: ${gw.upstream_error}` : ''}`);
+      }
+      if (gw?.gateway_connected) {
+        parts.push(`${gw.connected_live_count ?? 1} oturum bağlı`);
+      } else {
+        parts.push('Bağlı QR oturumu yok — QR ile bağlayın');
+      }
+      setStatusMessage(parts.join(' · '));
+      void fetchStatus();
+    } catch (e) {
+      setStatusMessage(`Sağlık testi başarısız: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setHealthCheckBusy(false);
     }
   };
 
@@ -774,6 +1566,317 @@ export default function CoachWhatsAppSettings() {
         </div>
       </section>
 
+      {/* Otomatik Gateway zamanlayıcı */}
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center gap-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50 to-violet-50/60 px-6 py-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-md">
+            <Clock className="h-6 w-6" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-lg font-semibold text-slate-900">Otomatik mesaj (Gateway)</h2>
+            <p className="text-sm text-slate-600">
+              Birden fazla plan tanımlayabilirsiniz. Mesajlar bağlı QR WhatsApp oturumunuzdan gider (Meta gerekmez).
+              Cron aynı uç noktada çalışır (~15 dk). Önce aşağıdaki QR bölümünden oturumu bağlayın.
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void loadGwSchedules()}
+              disabled={gwSchedulesLoading || !hasServerJwt}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Yenile
+            </button>
+            <button
+              type="button"
+              onClick={() => void createGwSchedule()}
+              disabled={!hasServerJwt}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+            >
+              <Plus className="h-4 w-4" />
+              Plan ekle
+            </button>
+          </div>
+        </div>
+        <div className="space-y-4 p-6">
+          {!hasServerJwt && (
+            <p className="text-sm text-slate-600">
+              Gateway zamanlayıcı için sunucu oturumu (JWT) gerekir.
+            </p>
+          )}
+          {gwSchedulesLoading ? (
+            <p className="flex items-center gap-2 text-slate-600">
+              <Loader2 className="h-5 w-5 animate-spin text-indigo-600" />
+              Gateway planları yükleniyor…
+            </p>
+          ) : gwSchedules.length === 0 ? (
+            <p className="text-sm text-slate-600">
+              Henüz gateway planı yok. «Plan ekle» ile oluşturun; QR oturumu bağlı olmalıdır.
+            </p>
+          ) : (
+            <div className="space-y-6">
+              {gwSchedules.map((row, index) => (
+                <div
+                  key={row.id}
+                  className="rounded-2xl border border-slate-200 bg-slate-50/40 p-4 shadow-sm"
+                >
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                    <input
+                      value={row.label ?? ''}
+                      onChange={(e) => patchGwSchedule(row.id, { label: e.target.value })}
+                      placeholder={`Plan ${index + 1}`}
+                      className="min-w-[12rem] flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800"
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => duplicateGwSchedule(row)}
+                        disabled={!hasServerJwt}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                        Kopyala
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void deleteGwSchedule(row.id)}
+                        disabled={gwSchedulesDeletingId === row.id || !hasServerJwt}
+                        className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-medium text-rose-800 hover:bg-rose-100 disabled:opacity-50"
+                      >
+                        {gwSchedulesDeletingId === row.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3.5 w-3.5" />
+                        )}
+                        Sil
+                      </button>
+                    </div>
+                  </div>
+
+                  <label className="mb-3 flex cursor-pointer items-center gap-3 text-sm font-medium text-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={row.is_active}
+                      onChange={(e) => patchGwSchedule(row.id, { is_active: e.target.checked })}
+                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    Planı aktif et
+                  </label>
+
+                  <div className="mb-3">
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Mesaj şablonu</label>
+                    <textarea
+                      value={row.message_template}
+                      onChange={(e) => patchGwSchedule(row.id, { message_template: e.target.value })}
+                      rows={4}
+                      className="w-full rounded-xl border border-slate-200 bg-white p-3 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                    />
+                    <p className="mt-1 text-xs text-slate-500">
+                      Yer tutucular:{' '}
+                      <code className="rounded bg-slate-100 px-1">{'{{name}}, {{coach}}, {{date}}, {{task}}'}</code>
+                    </p>
+                  </div>
+
+                  <div className="mb-3 grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-slate-700">Tekrar</label>
+                      <select
+                        value={row.repeat_mode ?? 'daily'}
+                        onChange={(e) => {
+                          const mode = e.target.value as GwRepeatMode;
+                          patchGwSchedule(row.id, {
+                            repeat_mode: mode,
+                            send_date_tr: mode === 'once' ? row.send_date_tr : null,
+                            weekday_tr: mode === 'weekly' ? row.weekday_tr ?? 1 : null
+                          });
+                        }}
+                        className="w-full rounded-xl border border-slate-200 bg-white py-2 px-3 text-sm"
+                      >
+                        <option value="once">Tek sefer</option>
+                        <option value="daily">Her gün</option>
+                        <option value="weekly">Haftada bir</option>
+                        <option value="interval">Her N gün (gelişmiş)</option>
+                      </select>
+                    </div>
+                    {(row.repeat_mode ?? 'daily') === 'once' ? (
+                      <div>
+                        <label className="mb-1 block text-sm font-medium text-slate-700">Tarih</label>
+                        <input
+                          type="date"
+                          value={row.send_date_tr ?? ''}
+                          onChange={(e) =>
+                            patchGwSchedule(row.id, { send_date_tr: e.target.value || null })
+                          }
+                          className="w-full rounded-xl border border-slate-200 bg-white py-2 px-3 text-sm"
+                        />
+                      </div>
+                    ) : null}
+                    {(row.repeat_mode ?? 'daily') === 'weekly' ? (
+                      <div>
+                        <label className="mb-1 block text-sm font-medium text-slate-700">Gün</label>
+                        <select
+                          value={row.weekday_tr ?? 1}
+                          onChange={(e) =>
+                            patchGwSchedule(row.id, { weekday_tr: Number(e.target.value) })
+                          }
+                          className="w-full rounded-xl border border-slate-200 bg-white py-2 px-3 text-sm"
+                        >
+                          {GW_WEEKDAY_OPTS.map((d) => (
+                            <option key={d.value} value={d.value}>
+                              {d.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : null}
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-slate-700">
+                        Gönderim saati (İstanbul)
+                      </label>
+                      <div className="flex gap-2">
+                        <select
+                          value={row.send_hour_tr}
+                          onChange={(e) =>
+                            patchGwSchedule(row.id, {
+                              send_hour_tr: Math.min(23, Math.max(0, Number(e.target.value)))
+                            })
+                          }
+                          className="w-full rounded-xl border border-slate-200 bg-white py-2 px-3 text-sm"
+                        >
+                          {Array.from({ length: 24 }, (_, h) => (
+                            <option key={h} value={h}>
+                              {String(h).padStart(2, '0')}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          value={Math.min(59, Math.max(0, row.send_minute_tr || 0))}
+                          onChange={(e) =>
+                            patchGwSchedule(row.id, {
+                              send_minute_tr: Math.min(59, Math.max(0, Number(e.target.value)))
+                            })
+                          }
+                          className="w-full rounded-xl border border-slate-200 bg-white py-2 px-3 text-sm"
+                        >
+                          {Array.from({ length: 60 }, (_, m) => (
+                            <option key={m} value={m}>
+                              {String(m).padStart(2, '0')}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    {(row.repeat_mode ?? 'daily') === 'interval' ? (
+                      <div>
+                        <label className="mb-1 block text-sm font-medium text-slate-700">
+                          Tekrar aralığı (gün)
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={365}
+                          value={row.interval_days}
+                          onChange={(e) =>
+                            patchGwSchedule(row.id, {
+                              interval_days: Math.min(365, Math.max(1, Number(e.target.value) || 1))
+                            })
+                          }
+                          className="w-full rounded-xl border border-slate-200 bg-white py-2 px-3 text-sm"
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="mb-3">
+                    <label className="mb-1 block text-sm font-medium text-slate-700">
+                      Kampanya süresi (gün)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={3650}
+                      value={row.campaign_days ?? ''}
+                      placeholder="Boş = süresiz"
+                      onChange={(e) => {
+                        const raw = e.target.value.trim();
+                        if (raw === '') {
+                          patchGwSchedule(row.id, { campaign_days: null });
+                          return;
+                        }
+                        const n = Number(raw);
+                        if (!Number.isFinite(n)) return;
+                        patchGwSchedule(row.id, {
+                          campaign_days: Math.min(3650, Math.max(1, Math.floor(n)))
+                        });
+                      }}
+                      className="w-full max-w-xs rounded-xl border border-slate-200 bg-white py-2 px-3 text-sm"
+                    />
+                    {row.campaign_started_at && row.campaign_days != null && (
+                      <p className="mt-1 text-xs text-slate-500">
+                        Başlangıç: {prettyDate(row.campaign_started_at)}
+                      </p>
+                    )}
+                  </div>
+
+                  <label className="mb-2 flex cursor-pointer items-center gap-3 text-sm text-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={row.weekdays_only}
+                      onChange={(e) => patchGwSchedule(row.id, { weekdays_only: e.target.checked })}
+                      className="h-4 w-4 rounded border-slate-300 text-indigo-600"
+                    />
+                    Yalnızca hafta içi
+                  </label>
+
+                  <label className="mb-3 flex cursor-pointer items-center gap-3 text-sm text-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={row.prefer_parent_phone}
+                      onChange={(e) =>
+                        patchGwSchedule(row.id, { prefer_parent_phone: e.target.checked })
+                      }
+                      className="h-4 w-4 rounded border-slate-300 text-indigo-600"
+                    />
+                    Varsa önce veli telefonunu kullan
+                  </label>
+
+                  <label className="mb-3 flex cursor-pointer items-center gap-3 text-sm text-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(gwRestartCampaignIds[row.id])}
+                      onChange={(e) =>
+                        setGwRestartCampaignIds((prev) => ({ ...prev, [row.id]: e.target.checked }))
+                      }
+                      className="h-4 w-4 rounded border-slate-300 text-indigo-600"
+                    />
+                    Kaydederken kampanya başlangıcını sıfırla
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() => void saveGwSchedule(row)}
+                    disabled={gwSchedulesSavingId === row.id || !hasServerJwt}
+                    className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    {gwSchedulesSavingId === row.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : null}
+                    Kaydet
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {gwSchedulesMsg ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              {gwSchedulesMsg}
+            </div>
+          ) : null}
+        </div>
+      </section>
+
       {/* 2 — QR Gateway */}
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-wrap items-center gap-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50/80 to-white px-6 py-4">
@@ -916,6 +2019,10 @@ export default function CoachWhatsAppSettings() {
                   <p className="font-medium text-slate-800">{prettyDate(lastConnectedAt)}</p>
                 </div>
                 <div className="rounded-xl bg-slate-50 p-3">
+                  <p className="text-xs text-slate-500">Bağlı WhatsApp hattı</p>
+                  <p className="font-medium text-slate-800">{linkedPhone || (isConnected ? '—' : 'Bağlı değil')}</p>
+                </div>
+                <div className="col-span-2 rounded-xl bg-slate-50 p-3">
                   <p className="text-xs text-slate-500">Oturum (kullanıcı id)</p>
                   <p className="truncate font-mono text-xs text-slate-700">{coachId || '—'}</p>
                 </div>
@@ -933,14 +2040,25 @@ export default function CoachWhatsAppSettings() {
                   />
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => void sendTestMessage()}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 py-2.5 text-sm font-medium text-white hover:bg-slate-800 sm:w-auto sm:px-6"
-              >
-                <MessageCircle className="h-4 w-4" />
-                Test mesajı gönder
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void sendTestMessage()}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 py-2.5 text-sm font-medium text-white hover:bg-slate-800 px-6"
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  Test mesajı gönder
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void runGatewayHealthTest()}
+                  disabled={healthCheckBusy || !hasServerJwt}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 px-6"
+                >
+                  {healthCheckBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  Sağlık testi
+                </button>
+              </div>
             </div>
             <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 p-4">
               <p className="mb-3 text-xs font-medium uppercase tracking-wide text-slate-500">QR kod</p>
@@ -993,6 +2111,27 @@ export default function CoachWhatsAppSettings() {
               <Users className="h-4 w-4" />
               Veli
             </button>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">
+              {templateTab === 'student' ? 'Öğrenci şablonu' : 'Veli şablonu'}
+            </label>
+            <textarea
+              value={templateTab === 'student' ? studentQuickTemplate : parentQuickTemplate}
+              onChange={(e) =>
+                templateTab === 'student'
+                  ? setStudentQuickTemplate(e.target.value)
+                  : setParentQuickTemplate(e.target.value)
+              }
+              rows={7}
+              className="w-full rounded-xl border border-slate-200 p-3 text-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-100"
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Yer tutucular:{' '}
+              <code className="rounded bg-slate-100 px-1">{'{{name}}, {{task}}, {{coach}}'}</code> — cihazınızda
+              otomatik kaydedilir.
+            </p>
           </div>
 
           <select
@@ -1049,6 +2188,414 @@ export default function CoachWhatsAppSettings() {
           >
             {templateSendBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : <MessageCircle className="h-5 w-5" />}
             {templateSendBusy ? 'Gönderiliyor…' : 'Şablonu gönder'}
+          </button>
+        </div>
+      </section>
+
+      {/* 4 — Toplu mesaj (Gateway) */}
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-center gap-4 border-b border-slate-100 bg-gradient-to-r from-teal-50 to-cyan-50/50 px-6 py-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-teal-600 text-white shadow-md">
+            <Send className="h-6 w-6" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Toplu mesaj (Gateway)</h2>
+            <p className="text-sm text-slate-600">
+              Sınıf veya gruba göre öğrenci seçin; anında gönderin veya tarih/saat ile zamanlayın. Gateway QR oturumu
+              gerekir.
+            </p>
+          </div>
+        </div>
+        <div className="space-y-4 p-6">
+          {!isConnected && canUseGateway ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+              Toplu gönderim için önce QR bölümünden WhatsApp oturumunu bağlayın.
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setBulkChannel('student')}
+              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-colors ${
+                bulkChannel === 'student'
+                  ? 'bg-blue-100 text-blue-900 ring-2 ring-blue-200'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              <User className="h-4 w-4" />
+              Öğrenci hattı
+            </button>
+            <button
+              type="button"
+              onClick={() => setBulkChannel('parent')}
+              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-colors ${
+                bulkChannel === 'parent'
+                  ? 'bg-purple-100 text-purple-900 ring-2 ring-purple-200'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              <Users className="h-4 w-4" />
+              Veli hattı
+            </button>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Mesaj şablonu</label>
+            <textarea
+              value={bulkTemplate}
+              onChange={(e) => setBulkTemplate(e.target.value)}
+              rows={6}
+              className="w-full rounded-xl border border-slate-200 p-3 text-sm focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-100"
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Yer tutucular:{' '}
+              <code className="rounded bg-slate-100 px-1">
+                {'{{1}} ad, {{2}} tarih, {{3}} saat, {{4}} link'}
+              </code>
+              {' · '}
+              <code className="rounded bg-slate-100 px-1">{'{{name}}, {{task}}, {{coach}}'}</code>
+            </p>
+          </div>
+
+          {bulkNeedsExamFields ? (
+            <div className="grid gap-3 sm:grid-cols-3">
+              <label className="text-sm">
+                <span className="mb-1 block font-medium text-slate-700">Deneme tarihi ({'{{2}}'})</span>
+                <input
+                  type="text"
+                  value={bulkExamDate}
+                  onChange={(e) => setBulkExamDate(e.target.value)}
+                  placeholder="örn. 25.06.2026"
+                  className="w-full rounded-xl border border-slate-200 py-2.5 px-3 text-sm"
+                />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block font-medium text-slate-700">Deneme saati ({'{{3}}'})</span>
+                <input
+                  type="text"
+                  value={bulkExamTime}
+                  onChange={(e) => setBulkExamTime(e.target.value)}
+                  placeholder="örn. 14:00"
+                  className="w-full rounded-xl border border-slate-200 py-2.5 px-3 text-sm"
+                />
+              </label>
+              <label className="text-sm sm:col-span-1">
+                <span className="mb-1 block font-medium text-slate-700">Sınav bağlantısı ({'{{4}}'})</span>
+                <input
+                  type="url"
+                  value={bulkExamLink}
+                  onChange={(e) => setBulkExamLink(e.target.value)}
+                  placeholder="https://..."
+                  className="w-full rounded-xl border border-slate-200 py-2.5 px-3 text-sm"
+                />
+              </label>
+            </div>
+          ) : null}
+
+          <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-4 space-y-3">
+            <p className="text-sm font-medium text-slate-800">Kayıtlı şablonlar</p>
+            <p className="text-xs text-slate-500">
+              Düzenlemek için listeden şablona tıklayın (veya kalem ikonu). Metni ve görev alanını değiştirin, ardından{' '}
+              <strong>Değişiklikleri kaydet</strong> — yeni şablon için <strong>Yeni şablon</strong>.
+            </p>
+            {bulkEditingTemplateId ? (
+              <p className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-900">
+                Düzenleniyor:{' '}
+                <strong>
+                  {bulkSavedTemplates.find((x) => x.id === bulkEditingTemplateId)?.name || 'Şablon'}
+                </strong>
+              </p>
+            ) : null}
+            <div className="flex flex-wrap gap-2">
+              <input
+                value={bulkTemplateName}
+                onChange={(e) => setBulkTemplateName(e.target.value)}
+                placeholder="Şablon adı"
+                className="min-w-[10rem] flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              />
+              <button
+                type="button"
+                onClick={saveBulkTemplateToLibrary}
+                className="rounded-lg bg-slate-800 px-3 py-2 text-sm font-medium text-white hover:bg-slate-900"
+              >
+                {bulkEditingTemplateId ? 'Değişiklikleri kaydet' : 'Yeni şablon kaydet'}
+              </button>
+              {bulkEditingTemplateId ? (
+                <button
+                  type="button"
+                  onClick={cancelBulkTemplateEdit}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Yeni şablon
+                </button>
+              ) : null}
+            </div>
+            {bulkSavedTemplates.length ? (
+              <ul className="flex flex-wrap gap-2">
+                {bulkSavedTemplates.map((t) => {
+                  const isEditing = bulkEditingTemplateId === t.id;
+                  return (
+                    <li
+                      key={t.id}
+                      className={`inline-flex items-center gap-1 rounded-lg border pl-2 pr-1 py-1 text-xs ${
+                        isEditing
+                          ? 'border-teal-400 bg-teal-50 ring-1 ring-teal-200'
+                          : 'border-slate-200 bg-white'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => applyBulkSavedTemplate(t.id)}
+                        className={`font-medium hover:underline ${
+                          isEditing ? 'text-teal-900' : 'text-teal-800'
+                        }`}
+                      >
+                        {t.name}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => startEditBulkSavedTemplate(t.id)}
+                        className="rounded p-0.5 text-slate-400 hover:text-teal-700"
+                        aria-label="Düzenle"
+                        title="Düzenle"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteBulkSavedTemplate(t.id)}
+                        disabled={t.id.startsWith('builtin_')}
+                        className="rounded p-0.5 text-slate-400 hover:text-rose-600 disabled:opacity-30"
+                        aria-label="Sil"
+                        title={t.id.startsWith('builtin_') ? 'Hazır şablon silinemez' : 'Sil'}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="text-xs text-slate-500">Henüz kayıtlı şablon yok.</p>
+            )}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-sm">
+              <span className="mb-1 block font-medium text-slate-700">Sınıf / program</span>
+              <select
+                value={bulkClassFilter}
+                onChange={(e) => {
+                  setBulkClassFilter(e.target.value);
+                  setBulkGroupFilter('');
+                }}
+                className="w-full rounded-xl border border-slate-200 py-2.5 px-3 text-sm"
+              >
+                <option value="">Tüm sınıflar</option>
+                {bulkClassOptions.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block font-medium text-slate-700">Grup / şube</span>
+              <select
+                value={bulkGroupFilter}
+                onChange={(e) => setBulkGroupFilter(e.target.value)}
+                disabled={!bulkGroupOptions.length}
+                className="w-full rounded-xl border border-slate-200 py-2.5 px-3 text-sm disabled:opacity-50"
+              >
+                <option value="">Tüm gruplar</option>
+                {bulkGroupOptions.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <input
+            value={bulkTask}
+            onChange={(e) => setBulkTask(e.target.value)}
+            placeholder="Ortak görev / ek not ({{task}})"
+            className="w-full rounded-xl border border-slate-200 py-3 px-3 text-sm focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-100"
+          />
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-slate-600">
+              {bulkFilteredStudents.length} öğrenci ·{' '}
+              <strong className="text-slate-900">{bulkSelectedIds.size}</strong> seçili
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={selectAllBulkVisible}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Görünenleri seç
+              </button>
+              <button
+                type="button"
+                onClick={clearBulkSelection}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
+              >
+                Seçimi temizle
+              </button>
+            </div>
+          </div>
+
+          <div className="max-h-72 overflow-y-auto rounded-xl border border-slate-200">
+            {bulkFilteredStudents.length ? (
+              <ul className="divide-y divide-slate-100">
+                {bulkFilteredStudents.map((st) => {
+                  const phoneOk = Boolean(resolveStudentPhone(st, bulkChannel));
+                  return (
+                    <li key={st.id} className="flex items-start gap-3 px-4 py-2.5 hover:bg-slate-50/80">
+                      <input
+                        type="checkbox"
+                        checked={bulkSelectedIds.has(st.id)}
+                        disabled={!phoneOk}
+                        onChange={() => toggleBulkStudent(st.id)}
+                        className="mt-1 h-4 w-4 rounded border-slate-300 text-teal-600"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-slate-900">{st.name}</p>
+                        <p className="text-xs text-slate-500">
+                          {formatClassLevelLabel(st.classLevel)}
+                          {st.groupName ? ` · ${st.groupName}` : ''}
+                          {!phoneOk ? (
+                            <span className="text-rose-600"> · telefon yok</span>
+                          ) : null}
+                        </p>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="px-4 py-8 text-center text-sm text-slate-500">Filtreye uyan öğrenci yok.</p>
+            )}
+          </div>
+
+          {bulkProgress ? (
+            <p className="flex items-center gap-2 text-sm text-teal-800">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Gönderiliyor: {bulkProgress}
+            </p>
+          ) : null}
+
+          {bulkNotice ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800">
+              {bulkNotice}
+            </div>
+          ) : null}
+
+          <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-4 space-y-4">
+            <div className="flex items-center gap-2">
+              <Clock className="h-5 w-5 text-indigo-700" />
+              <p className="text-sm font-semibold text-slate-900">Zamanlanmış gönderim</p>
+            </div>
+            <input
+              value={bulkPlanLabel}
+              onChange={(e) => setBulkPlanLabel(e.target.value)}
+              placeholder="Plan adı (örn. 12-A haftalık hatırlatma)"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+            />
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium text-slate-700">Tekrar</span>
+              <select
+                value={bulkRepeatMode}
+                onChange={(e) => setBulkRepeatMode(e.target.value as GwRepeatMode)}
+                className="w-full rounded-xl border border-slate-200 bg-white py-2.5 px-3 text-sm"
+              >
+                <option value="once">Tek sefer — seçilen tarih ve saatte</option>
+                <option value="daily">Her gün — aynı saatte</option>
+                <option value="weekly">Haftada bir — seçilen günde</option>
+              </select>
+            </label>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {bulkRepeatMode === 'once' ? (
+                <label className="text-sm sm:col-span-2">
+                  <span className="mb-1 block font-medium text-slate-700">Tarih (İstanbul)</span>
+                  <input
+                    type="date"
+                    value={bulkSendDate}
+                    onChange={(e) => setBulkSendDate(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white py-2.5 px-3 text-sm"
+                  />
+                </label>
+              ) : null}
+              {bulkRepeatMode === 'weekly' ? (
+                <label className="text-sm">
+                  <span className="mb-1 block font-medium text-slate-700">Gün</span>
+                  <select
+                    value={bulkWeekday}
+                    onChange={(e) => setBulkWeekday(Number(e.target.value))}
+                    className="w-full rounded-xl border border-slate-200 bg-white py-2.5 px-3 text-sm"
+                  >
+                    {GW_WEEKDAY_OPTS.map((d) => (
+                      <option key={d.value} value={d.value}>
+                        {d.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              <label className="text-sm">
+                <span className="mb-1 block font-medium text-slate-700">Saat (İstanbul)</span>
+                <div className="flex gap-2">
+                  <select
+                    value={bulkSendHour}
+                    onChange={(e) => setBulkSendHour(Number(e.target.value))}
+                    className="w-full rounded-xl border border-slate-200 bg-white py-2 px-3 text-sm"
+                  >
+                    {Array.from({ length: 24 }, (_, h) => (
+                      <option key={h} value={h}>
+                        {String(h).padStart(2, '0')}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={bulkSendMinute}
+                    onChange={(e) => setBulkSendMinute(Number(e.target.value))}
+                    className="w-full rounded-xl border border-slate-200 bg-white py-2 px-3 text-sm"
+                  >
+                    {Array.from({ length: 60 }, (_, m) => (
+                      <option key={m} value={m}>
+                        {String(m).padStart(2, '0')}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </label>
+            </div>
+            <p className="text-xs text-slate-500">
+              Seçili öğrenciler + sınıf/grup filtresi plana kaydedilir. Cron ~15 dk’da bir kontrol eder; tek seferlik
+              plan gönderimden sonra otomatik kapanır.
+            </p>
+            <button
+              type="button"
+              onClick={() => void saveBulkAsScheduledPlan()}
+              disabled={bulkScheduleSaving || !hasServerJwt}
+              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {bulkScheduleSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock className="h-4 w-4" />}
+              Zamanlanmış plan kaydet
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void sendBulkGateway()}
+            disabled={bulkSendBusy || !bulkSelectedIds.size || !canUseGateway || !isConnected}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-teal-600 py-3 text-sm font-semibold text-white shadow-md hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:px-8"
+          >
+            {bulkSendBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+            {bulkSendBusy ? 'Gönderiliyor…' : 'Şimdi gönder (Gateway)'}
           </button>
         </div>
       </section>

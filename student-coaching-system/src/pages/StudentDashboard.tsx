@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { userRoleTags } from '../config/rolePermissions';
+import { ScoresLoadingPlaceholder } from '../components/ui/ScoresLoadingPlaceholder';
 import { useApp } from '../context/AppContext';
 import { resolveStudentRecordId } from '../lib/coachResolve';
 import type { WrittenExamScore } from '../types';
@@ -74,7 +75,9 @@ export default function StudentDashboard() {
     calculateYearlyAverage,
     getWrittenExamStats,
     readingLogs,
-    examResults
+    examResults,
+    appDataLoading,
+    scoresDataReady
   } = useApp();
 
   /**
@@ -388,6 +391,9 @@ export default function StudentDashboard() {
         <div className="p-6">
           {/* Deneme Sınavları Tab */}
           {activeTab === 'exams' && (
+            !scoresDataReady && appDataLoading ? (
+              <ScoresLoadingPlaceholder message="Deneme sınavları yükleniyor…" />
+            ) : (
             <div className="space-y-6">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="bg-blue-50 rounded-xl p-4 text-center">
@@ -511,10 +517,14 @@ export default function StudentDashboard() {
                 </button>
               </div>
             </div>
+            )
           )}
 
           {/* Yazılı Takip Tab */}
           {activeTab === 'written' && (
+            !scoresDataReady && appDataLoading ? (
+              <ScoresLoadingPlaceholder message="Yazılı notları yükleniyor…" />
+            ) : (
             <div className="space-y-6">
               {/* Yazılı İstatistikleri */}
               {myWrittenExamStats && myWrittenExamStats.totalExams > 0 && (
@@ -814,10 +824,14 @@ export default function StudentDashboard() {
                 </div>
               )}
             </div>
+            )
           )}
 
           {/* Kitaplarım Tab */}
           {activeTab === 'books' && (
+            appDataLoading ? (
+              <ScoresLoadingPlaceholder message="Kitap verileri yükleniyor…" />
+            ) : (
             <div className="space-y-6">
               {/* Kitap İstatistikleri */}
               {myReadingStats && myReadingStats.totalMinutes > 0 ? (
@@ -950,6 +964,7 @@ export default function StudentDashboard() {
                 </div>
               )}
             </div>
+            )
           )}
         </div>
       </div>

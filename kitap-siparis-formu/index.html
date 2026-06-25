@@ -103,6 +103,10 @@
           <div class="field" id="f-ilce"><label for="ilce">İlçe <span class="req">*</span></label><input type="text" id="ilce" placeholder="İlçe"><div class="err-msg">Lütfen ilçe girin.</div></div>
           <div class="field" id="f-il"><label for="il">İl <span class="req">*</span></label><input type="text" id="il" placeholder="İl"><div class="err-msg">Lütfen il girin.</div></div>
         </div>
+        <div class="field" id="f-not">
+          <label for="siparis_notu">Sipariş notu <span style="font-weight:500;color:var(--muted)">(opsiyonel)</span></label>
+          <textarea id="siparis_notu" placeholder="Kapı kodu, teslimat saati, özel istek…" maxlength="500"></textarea>
+        </div>
         <button type="submit" class="submit">Siparişi Gönder</button>
         <p id="formError" style="display:none;margin-top:12px;text-align:center;color:#e01f26;font-size:13px;font-weight:600">Gönderim sırasında bir sorun oluştu. Lütfen tekrar deneyin.</p>
         <p class="priv">Bilgileriniz yalnızca sipariş işlemi için kullanılır.</p>
@@ -323,6 +327,7 @@
       return;
     }
     const telefon = document.getElementById('telefon').value.trim();
+    const siparisNotu = document.getElementById('siparis_notu').value.trim();
     const data = {
       institution_id: INSTITUTION_ID,
       veli_ad_soyad: veliAdSoyad,
@@ -338,11 +343,11 @@
       adres: document.getElementById('adres').value.trim(),
       ilce: document.getElementById('ilce').value.trim(),
       il: document.getElementById('il').value.trim(),
-      siparis_notu: null,
+      siparis_notu: siparisNotu || null,
       status: 'pending',
       whatsapp_status: 'awaiting_approval',
       source: 'form',
-      form_payload: { ad, soyad, ogrenci_adi: ogrenci, odeme_durumu: odeme }
+      form_payload: { ad, soyad, ogrenci_adi: ogrenci, odeme_durumu: odeme, siparis_notu: siparisNotu || null }
     };
 
     submitBtn.disabled=true; const old=submitBtn.textContent; submitBtn.textContent='Gönderiliyor…';
@@ -360,8 +365,8 @@
         adres: document.getElementById('adres').value.trim(),
         ilce: document.getElementById('ilce').value.trim(),
         il: document.getElementById('il').value.trim(),
-        siparis_notu: null,
-        form_payload: { ad, soyad, ogrenci_adi: ogrenci, odeme_durumu: odeme }
+        siparis_notu: siparisNotu || null,
+        form_payload: { ad, soyad, ogrenci_adi: ogrenci, odeme_durumu: odeme, siparis_notu: siparisNotu || null }
       };
       let res = await fetch(SUBMIT_API, {
         method: 'POST',
@@ -395,7 +400,8 @@
         : '')+
       '<div><span class="lbl">Telefon:</span> <b>'+escapeHtml(telefon)+'</b></div>'+
       '<div><span class="lbl">Adres:</span> <b>'+escapeHtml(data.adres)+'</b></div>'+
-      '<div><span class="lbl">İlçe / İl:</span> <b>'+escapeHtml(data.ilce)+' / '+escapeHtml(data.il)+'</b></div>';
+      '<div><span class="lbl">İlçe / İl:</span> <b>'+escapeHtml(data.ilce)+' / '+escapeHtml(data.il)+'</b></div>'+
+      (siparisNotu ? '<div><span class="lbl">Sipariş notu:</span> <b>'+escapeHtml(siparisNotu)+'</b></div>' : '');
     const pn = document.getElementById('paynote');
     if (odeme === 'Ödendi') {
       pn.className = 'paynote paid';

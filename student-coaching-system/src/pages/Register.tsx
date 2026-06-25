@@ -95,7 +95,7 @@ export default function Register() {
         const serverError = String(payload?.error || '').trim();
         if (serverError === 'tc_11_hane_olmali') throw new Error('TC kimlik numarası 11 haneli olmalıdır.');
         if (serverError === 'gecersiz_email') throw new Error('Geçerli bir e-posta adresi girin.');
-        if (serverError === 'gecersiz_telefon_e164') throw new Error('Telefon numarasını geçerli formatta girin. (05xx... veya +90...)');
+        if (serverError === 'gecersiz_telefon_e164') throw new Error('Telefon numarasını geçerli formatta girin. (05xx…, +90… veya yurt dışı +ülke kodu)');
         if (serverError === 'bu_email_icin_bekleyen_kayit_var') throw new Error('Bu e-posta için bekleyen bir kayıt zaten var.');
         if (serverError === 'bu_tc_icin_bekleyen_kayit_var') throw new Error('Bu TC için bekleyen bir kayıt zaten var.');
         if (serverError === 'email_zaten_kullanimda') throw new Error('Bu e-posta zaten kullanımda.');
@@ -218,7 +218,7 @@ export default function Register() {
                   value={formData.phone}
                   onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
                   className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500"
-                  placeholder="05xx xxx xx xx veya +90..."
+                  placeholder="05xx… veya +49 151…"
                 />
               </div>
 
@@ -263,7 +263,7 @@ export default function Register() {
                     value={formData.parentPhone}
                     onChange={(e) => setFormData(prev => ({ ...prev, parentPhone: e.target.value }))}
                     className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500"
-                    placeholder="05xx xxx xx xx veya +90..."
+                    placeholder="05xx… veya +49 151…"
                   />
                 </div>
               </div>

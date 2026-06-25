@@ -9,9 +9,15 @@ import { metaWhatsAppConfigured } from '../api/_lib/meta-whatsapp.js';
 import { sendAutomatedWhatsApp } from '../api/_lib/whatsapp-outbound.js';
 import { syncClassSessionsScheduledToCompleted } from '../api/_lib/class-sessions-sync.js';
 import { resolveStudentRowForUser } from '../api/_lib/resolve-student-id.js';
-import { buildAttendanceReport, getVisibleStudentIdSet } from '../api/_lib/attendance-report-query.js';
+import {
+  buildAttendanceReport,
+  getVisibleStudentIdSet,
+  getInstitutionStudentIds,
+  resolveInstitutionClassIds
+} from '../api/_lib/attendance-report-query.js';
 import { sendMetaTextMessage } from '../api/_lib/meta-whatsapp.js';
 import { isUuid } from '../api/_lib/uuid.js';
+import { randomUUID } from 'crypto';
 import {
   loadClassLessonReminderTemplate,
   validateClassLessonReminderTemplate,
@@ -23,12 +29,19 @@ import {
   insertOneOptionalModerator,
   insertManyOptionalModerator
 } from '../api/_lib/supabase-optional-moderator.js';
-import { handleBbbJoinGet, patchRowMeetingLinks } from '../api/_lib/bbb-join-handler.js';
+import { handleBbbJoinGet, handleBbbRecordingGet, patchRowMeetingLinks, patchRowRecordingLink } from '../api/_lib/bbb-join-handler.js';
+import { createGuestJoinShareLink } from '../api/_lib/bbb-guest-join-core.js';
 import { buildBbbAttendeeJoinUrl, parseBbbJoinCredentials, parseBbbMeetingIdFromJoinUrl } from '../api/_lib/bbb.js';
 import { pollBbbPresenceForSession, applyAutoAttendanceForClassSession } from '../api/_lib/bbb-attendance.js';
 import { isBbbAutoAttendanceEnabled } from '../api/_lib/bbb-auto-attendance-enabled.js';
 import { applyEarlyBbbAbsentCheck } from '../api/_lib/bbb-early-absent.js';
 import { sendAbsentNoticeForStudent } from '../api/_lib/class-attendance-notify.js';
+import {
+  completedSessionMinutes,
+  sessionLessonUnits40,
+  roundUnits,
+  GROUP_LESSON_UNIT_MINUTES
+} from '../api/_lib/class-lesson-payment-units.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -179,21 +192,64 @@ async function teacherTimeConflictOnDate({ teacherId, lessonDate, start, end, ex
   return { ok: true };
 }
 
-function completedSessionMinutes(row) {
-  const start = String(row?.start_time || '').slice(0, 8);
-  const end = String(row?.end_time || '').slice(0, 8);
-  const toSec = (t) => {
-    const p = String(t || '')
-      .trim()
-      .split(':')
-      .map((x) => Number(x || 0));
-    if (p.length < 2 || p.some((x) => Number.isNaN(x))) return null;
-    return (p[0] || 0) * 3600 + (p[1] || 0) * 60 + (p[2] || 0);
-  };
-  const a = toSec(start);
-  const b = toSec(end);
-  if (a != null && b != null && b >= a) return Math.round((b - a) / 60);
-  return 60;
+function isPaymentSummaryAdmin(role) {
+  const r = normalizeRole(role);
+  return r === 'admin' || r === 'super_admin';
+}
+
+function buildCompletedSessionsQuery({ from, to, teacherId, classId, role, institutionId, scopedInstitutionId }) {
+  let q = supabaseAdmin
+    .from('class_sessions')
+    .select('id,teacher_id,class_id,start_time,end_time,status,lesson_date,subject')
+    .eq('status', 'completed');
+  if (from) q = q.gte('lesson_date', from);
+  if (to) q = q.lte('lesson_date', to);
+  if (teacherId) q = q.eq('teacher_id', teacherId);
+  if (classId) q = q.eq('class_id', classId);
+  if (role === 'admin' && institutionId) q = q.eq('institution_id', institutionId);
+  if (role === 'super_admin' && institutionId && scopedInstitutionId) {
+    q = q.eq('institution_id', scopedInstitutionId);
+  }
+  return q;
+}
+
+async function loadTeacherGroupLessonRates(teacherIds) {
+  const uniq = [...new Set((teacherIds || []).map((x) => String(x || '').trim()).filter(Boolean))];
+  if (!uniq.length) return new Map();
+  const { data, error } = await supabaseAdmin
+    .from('teacher_group_lesson_rates')
+    .select('teacher_id,unit_price_tl')
+    .in('teacher_id', uniq);
+  if (error) {
+    if (String(error.message || '').toLowerCase().includes('teacher_group_lesson_rates')) return new Map();
+    throw error;
+  }
+  const map = new Map();
+  for (const row of data || []) {
+    const price = Number(row.unit_price_tl);
+    if (Number.isFinite(price) && price > 0) map.set(String(row.teacher_id), price);
+  }
+  return map;
+}
+
+async function loadTeacherGroupLessonPayouts({ from, to, institutionId }) {
+  if (!from || !to) return new Map();
+  let q = supabaseAdmin
+    .from('teacher_group_lesson_payouts')
+    .select('teacher_id,period_from,period_to,amount_tl,paid_at,paid_by')
+    .eq('period_from', from)
+    .eq('period_to', to);
+  if (institutionId) q = q.eq('institution_id', institutionId);
+  const { data, error } = await q;
+  if (error) {
+    if (String(error.message || '').toLowerCase().includes('teacher_group_lesson_payouts')) return new Map();
+    throw error;
+  }
+  const map = new Map();
+  for (const row of data || []) {
+    map.set(String(row.teacher_id), row);
+  }
+  return map;
 }
 
 /** Eski `classes` şemasında eksik kolon (ör. class_level) nedeniyle oluşan PostgREST hataları */
@@ -242,12 +298,24 @@ async function getManagedClassIds(actor) {
 
   /** Öğretmen: class_teachers atamaları (koç+öğretmen birlikte olsa da geçerli) */
   if (roleTags.includes('teacher') || isTeacherRole(actor.role)) {
+    const tid = String(actor.sub || '').trim();
     const { data, error } = await supabaseAdmin
       .from('class_teachers')
       .select('class_id')
-      .eq('teacher_id', actor.sub);
+      .eq('teacher_id', tid);
     if (error) throw error;
     for (const row of data || []) {
+      if (row.class_id) classIds.add(row.class_id);
+    }
+    /** Slot veya oturumda öğretmen atanmış sınıflar (class_teachers eksik olsa bile) */
+    const [{ data: slotRows }, { data: sessionRows }] = await Promise.all([
+      supabaseAdmin.from('class_weekly_slots').select('class_id').eq('teacher_id', tid),
+      supabaseAdmin.from('class_sessions').select('class_id').eq('teacher_id', tid)
+    ]);
+    for (const row of slotRows || []) {
+      if (row.class_id) classIds.add(row.class_id);
+    }
+    for (const row of sessionRows || []) {
       if (row.class_id) classIds.add(row.class_id);
     }
   }
@@ -316,6 +384,58 @@ async function getClassDetails(classId) {
     teacher_ids: (teachers || []).map((t) => t.teacher_id),
     student_ids: (students || []).map((s) => s.student_id)
   };
+}
+
+function normalizeSessionTimeSig(t) {
+  return String(t || '').slice(0, 8);
+}
+
+function sessionBatchSignature(session) {
+  return [
+    String(session.class_id || ''),
+    String(session.subject || '').trim(),
+    String(session.teacher_id || ''),
+    normalizeSessionTimeSig(session.start_time),
+    normalizeSessionTimeSig(session.end_time)
+  ].join('|');
+}
+
+/** Toplu planlanmış planlı oturum eşleri (schedule_batch_id veya aynı şablon imzası). */
+async function listScheduledSessionBatchPeers(session) {
+  const selfId = String(session.id || '').trim();
+  if (String(session.status || '') !== 'scheduled') return selfId ? [selfId] : [];
+
+  const batchId = session.schedule_batch_id ? String(session.schedule_batch_id).trim() : '';
+  if (batchId) {
+    const { data, error } = await supabaseAdmin
+      .from('class_sessions')
+      .select('id')
+      .eq('schedule_batch_id', batchId)
+      .eq('status', 'scheduled');
+    if (error) {
+      if (/schedule_batch_id|schema cache|PGRST204/i.test(String(error.message || ''))) {
+        /* sütun yoksa imza yöntemine düş */
+      } else {
+        throw error;
+      }
+    } else {
+      const ids = (data || []).map((r) => String(r.id)).filter(Boolean);
+      if (ids.length) return ids;
+    }
+  }
+
+  const sig = sessionBatchSignature(session);
+  const { data, error } = await supabaseAdmin
+    .from('class_sessions')
+    .select('id,class_id,subject,teacher_id,start_time,end_time,status')
+    .eq('class_id', session.class_id)
+    .eq('status', 'scheduled');
+  if (error) throw error;
+  const ids = (data || [])
+    .filter((r) => sessionBatchSignature(r) === sig)
+    .map((r) => String(r.id))
+    .filter(Boolean);
+  return ids.length > 1 ? ids : selfId ? [selfId] : [];
 }
 
 function normalizeAttendanceStatus(raw) {
@@ -453,6 +573,41 @@ async function handleClassLiveBbbJoin(req, res, actor, role) {
   });
 }
 
+async function handleClassGuestJoinLink(req, res, actor, role) {
+  if (role === 'student') return res.status(403).json({ error: 'Yetkiniz yok' });
+  const id = String(req.query?.id || '').trim();
+  if (!id) return res.status(400).json({ error: 'id gerekli' });
+  const { data: row, error } = await supabaseAdmin.from('class_sessions').select('*').eq('id', id).maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!row) return res.status(404).json({ error: 'Kayıt bulunamadı' });
+  if (!(await canAccessClassLiveRow(actor, role, row))) return res.status(403).json({ error: 'Yetkiniz yok' });
+  try {
+    const link = await createGuestJoinShareLink({ kind: 'class', id });
+    return res.status(200).json({ ok: true, ...link });
+  } catch (e) {
+    return res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+}
+
+async function handleClassLiveBbbRecording(req, res, actor, role) {
+  const slotMode = String(req.query?.kind || 'session').trim() === 'slot';
+  const table = slotMode ? 'class_weekly_slots' : 'class_sessions';
+
+  return handleBbbRecordingGet(req, res, {
+    loadRow: async (id) => {
+      const { data, error } = await supabaseAdmin.from(table).select('*').eq('id', id).maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    canAccess: (act, row) => canAccessClassLiveRow(act, role, row),
+    patchRecordingLink: slotMode ? undefined : (id, playbackUrl) => patchRowRecordingLink(table, id, playbackUrl),
+    getMeetingKeyPrefix: (row) =>
+      slotMode
+        ? `clslot${String(row.id || '').replace(/-/g, '')}`
+        : `cljoin${String(row.id || '').replace(/-/g, '')}`
+  });
+}
+
 export default async function handler(req, res) {
   let actor;
   try {
@@ -473,14 +628,26 @@ export default async function handler(req, res) {
     if (getOp === 'bbb-join') {
       return handleClassLiveBbbJoin(req, res, actor, role);
     }
+    if (getOp === 'bbb-recording') {
+      return handleClassLiveBbbRecording(req, res, actor, role);
+    }
+    if (getOp === 'guest-join-link') {
+      return handleClassGuestJoinLink(req, res, actor, role);
+    }
     await syncClassSessionsScheduledToCompleted();
     const scope = String(req.query.scope || 'classes');
     if (scope === 'classes') {
       const allowedClassIds = await getManagedClassIds(actor);
+      const scopedClassInst = String(req.query.institution_id || '').trim();
       let q = supabaseAdmin.from('classes').select('*').order('created_at', { ascending: false });
       if (!seesAllInstitutionClasses(role)) {
         if (!allowedClassIds || !allowedClassIds.length) return res.status(200).json({ data: [] });
         q = q.in('id', allowedClassIds);
+      } else if (scopedClassInst && role === 'super_admin') {
+        const studentIds = await getInstitutionStudentIds(supabaseAdmin, scopedClassInst);
+        const classIds = await resolveInstitutionClassIds(supabaseAdmin, scopedClassInst, studentIds);
+        if (classIds.length) q = q.in('id', classIds);
+        else return res.status(200).json({ data: [] });
       } else if (institutionId) {
         q = q.eq('institution_id', institutionId);
       }
@@ -544,47 +711,92 @@ export default async function handler(req, res) {
       return res.status(200).json({ data: enriched });
     }
 
+    if (scope === 'teacher-rates') {
+      if (!isPaymentSummaryAdmin(role)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const { data, error } = await supabaseAdmin
+        .from('teacher_group_lesson_rates')
+        .select('teacher_id,unit_price_tl,updated_at')
+        .order('updated_at', { ascending: false });
+      if (error) {
+        if (String(error.message || '').toLowerCase().includes('teacher_group_lesson_rates')) {
+          return res.status(200).json({ data: [], table_missing: true });
+        }
+        return res.status(500).json({ error: error.message });
+      }
+      return res.status(200).json({ data: data || [] });
+    }
+
+    if (scope === 'teacher-payouts') {
+      if (!isPaymentSummaryAdmin(role)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const from = String(req.query.from || '').trim().slice(0, 10);
+      const to = String(req.query.to || '').trim().slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        return res.status(400).json({ error: 'from_to_invalid', hint: 'YYYY-MM-DD' });
+      }
+      try {
+        const payoutMap = await loadTeacherGroupLessonPayouts({ from, to, institutionId });
+        const data = [...payoutMap.values()].map((row) => ({
+          teacher_id: row.teacher_id,
+          period_from: row.period_from,
+          period_to: row.period_to,
+          amount_tl: row.amount_tl != null ? Number(row.amount_tl) : null,
+          paid_at: row.paid_at,
+          paid_by: row.paid_by || null,
+          paid: true
+        }));
+        return res.status(200).json({ data });
+      } catch (e) {
+        return res.status(500).json({ error: e instanceof Error ? e.message : 'payout_load_failed' });
+      }
+    }
+
     if (scope === 'summary') {
-      if (role !== 'super_admin' && role !== 'admin') {
+      if (!isPaymentSummaryAdmin(role)) {
         return res.status(403).json({ error: 'forbidden' });
       }
       const from = String(req.query.from || '').trim();
       const to = String(req.query.to || '').trim();
       const teacherId = String(req.query.teacher_id || '').trim();
       const classId = String(req.query.class_id || '').trim();
-      let q = supabaseAdmin
-        .from('class_sessions')
-        .select('teacher_id,class_id,start_time,end_time,status,lesson_date')
-        .eq('status', 'completed');
-      if (from) q = q.gte('lesson_date', from);
-      if (to) q = q.lte('lesson_date', to);
-      if (teacherId) q = q.eq('teacher_id', teacherId);
-      if (classId) q = q.eq('class_id', classId);
-      if (role === 'admin' && institutionId) q = q.eq('institution_id', institutionId);
-      if (role === 'super_admin' && institutionId) {
-        const scoped = String(req.query.institution_id || '').trim();
-        if (scoped && !isUuid(scoped)) {
-          return res.status(400).json({
-            error: 'invalid_institution_uuid',
-            hint: 'Kurum kimliği UUID olmalı (class_sessions). Üst çubuktan geçerli bir kurum seçin veya yeni kurum oluşturun.'
-          });
-        }
-        if (scoped) q = q.eq('institution_id', scoped);
+      const includeSessions = String(req.query.include_sessions || '').trim() === '1';
+      const scopedInstitutionId = String(req.query.institution_id || '').trim();
+      if (role === 'super_admin' && institutionId && scopedInstitutionId && !isUuid(scopedInstitutionId)) {
+        return res.status(400).json({
+          error: 'invalid_institution_uuid',
+          hint: 'Kurum kimliği UUID olmalı (class_sessions). Üst çubuktan geçerli bir kurum seçin veya yeni kurum oluşturun.'
+        });
       }
-      const { data, error } = await q;
+
+      const { data, error } = await buildCompletedSessionsQuery({
+        from,
+        to,
+        teacherId,
+        classId,
+        role,
+        institutionId,
+        scopedInstitutionId
+      });
       if (error) return res.status(500).json({ error: error.message });
 
       const agg = new Map();
       for (const row of data || []) {
         const key = `${row.teacher_id}|${row.class_id}`;
+        const minutes = completedSessionMinutes(row);
+        const units = sessionLessonUnits40(row);
         const cur = agg.get(key) || {
           teacher_id: row.teacher_id,
           class_id: row.class_id,
           completed_lesson_count: 0,
-          total_minutes: 0
+          total_minutes: 0,
+          lesson_units_40: 0
         };
         cur.completed_lesson_count += 1;
-        cur.total_minutes += completedSessionMinutes(row);
+        cur.total_minutes += minutes;
+        cur.lesson_units_40 = roundUnits(cur.lesson_units_40 + units);
         agg.set(key, cur);
       }
 
@@ -607,23 +819,93 @@ export default async function handler(req, res) {
         }
       }
 
+      const rateMap = await loadTeacherGroupLessonRates(teacherIds);
+      const defaultUnitPrice = 500;
+
       const rows = vals
-        .map((r) => ({
-          teacher_id: r.teacher_id,
-          class_id: r.class_id,
-          teacher_name: teacherNames[r.teacher_id] || r.teacher_id,
-          class_name: classNames[r.class_id] || r.class_id,
-          completed_lesson_count: r.completed_lesson_count,
-          total_minutes: r.total_minutes,
-          total_hours: Math.round((r.total_minutes / 60) * 100) / 100
-        }))
+        .map((r) => {
+          const unitPrice = rateMap.get(String(r.teacher_id)) ?? defaultUnitPrice;
+          const lessonUnits = roundUnits(r.lesson_units_40);
+          return {
+            teacher_id: r.teacher_id,
+            class_id: r.class_id,
+            teacher_name: teacherNames[r.teacher_id] || r.teacher_id,
+            class_name: classNames[r.class_id] || r.class_id,
+            completed_lesson_count: r.completed_lesson_count,
+            total_minutes: r.total_minutes,
+            total_hours: roundUnits(r.total_minutes / 60),
+            lesson_units_40: lessonUnits,
+            unit_price_tl: unitPrice,
+            total_amount_tl: roundUnits(lessonUnits * unitPrice)
+          };
+        })
         .sort((a, b) => {
           const x = a.teacher_name.localeCompare(b.teacher_name, 'tr');
           if (x !== 0) return x;
           return a.class_name.localeCompare(b.class_name, 'tr');
         });
 
-      return res.status(200).json({ data: rows });
+      const teacherTotalsMap = new Map();
+      for (const row of rows) {
+        const tid = String(row.teacher_id || '');
+        const cur = teacherTotalsMap.get(tid) || {
+          teacher_id: tid,
+          teacher_name: row.teacher_name,
+          completed_lesson_count: 0,
+          total_minutes: 0,
+          lesson_units_40: 0,
+          unit_price_tl: row.unit_price_tl,
+          total_amount_tl: 0
+        };
+        cur.completed_lesson_count += row.completed_lesson_count;
+        cur.total_minutes += row.total_minutes;
+        cur.lesson_units_40 = roundUnits(cur.lesson_units_40 + row.lesson_units_40);
+        cur.total_amount_tl = roundUnits(cur.total_amount_tl + row.total_amount_tl);
+        if (rateMap.has(tid)) cur.unit_price_tl = rateMap.get(tid);
+        teacherTotalsMap.set(tid, cur);
+      }
+
+      const teacher_totals = [...teacherTotalsMap.values()].sort((a, b) =>
+        a.teacher_name.localeCompare(b.teacher_name, 'tr')
+      );
+
+      let sessions = undefined;
+      if (includeSessions) {
+        sessions = (data || [])
+          .map((row) => {
+            const minutes = completedSessionMinutes(row);
+            const units = sessionLessonUnits40(row);
+            const unitPrice = rateMap.get(String(row.teacher_id)) ?? defaultUnitPrice;
+            return {
+              id: row.id,
+              lesson_date: row.lesson_date,
+              start_time: row.start_time,
+              end_time: row.end_time,
+              subject: row.subject,
+              teacher_id: row.teacher_id,
+              class_id: row.class_id,
+              teacher_name: teacherNames[row.teacher_id] || row.teacher_id,
+              class_name: classNames[row.class_id] || row.class_id,
+              total_minutes: minutes,
+              lesson_units_40: units,
+              unit_price_tl: unitPrice,
+              line_amount_tl: roundUnits(units * unitPrice)
+            };
+          })
+          .sort((a, b) => {
+            const d = String(a.lesson_date).localeCompare(String(b.lesson_date));
+            if (d !== 0) return d;
+            return String(a.start_time).localeCompare(String(b.start_time));
+          });
+      }
+
+      return res.status(200).json({
+        data: rows,
+        teacher_totals,
+        unit_period_minutes: GROUP_LESSON_UNIT_MINUTES,
+        default_unit_price_tl: defaultUnitPrice,
+        sessions
+      });
     }
 
     if (scope === 'slots') {
@@ -1353,7 +1635,9 @@ export default async function handler(req, res) {
       meetingLinkModerator = resolved.meetingLinkModerator;
       autoBbb = resolved.autoBbb;
 
+      const scheduleBatchId = randomUUID();
       const rowsToInsert = [];
+      const skipped = [];
       for (let i = 0; i < occurrences; i++) {
         const lessonDate =
           repeatInterval === 0 ? startDate : addDaysIsoDate(startDate, i * repeatInterval);
@@ -1362,11 +1646,11 @@ export default async function handler(req, res) {
         }
         const clash = await teacherTimeConflictOnDate({ teacherId, lessonDate, start, end });
         if (!clash.ok) {
-          return res.status(409).json({
-            error: clash.reason || 'Çakışma',
-            code: 'teacher_time_conflict',
-            lesson_date: lessonDate
+          skipped.push({
+            lesson_date: lessonDate,
+            reason: clash.reason || 'Çakışma'
           });
+          continue;
         }
         rowsToInsert.push({
           class_id: classId,
@@ -1380,7 +1664,18 @@ export default async function handler(req, res) {
           ...(meetingLinkModerator ? { meeting_link_moderator: meetingLinkModerator } : {}),
           ...bbbFieldsFromResolved(resolved),
           homework: String(body.homework || '').trim() || null,
-          status: 'scheduled'
+          status: 'scheduled',
+          schedule_batch_id: scheduleBatchId
+        });
+      }
+
+      if (!rowsToInsert.length) {
+        const first = skipped[0] || {};
+        return res.status(409).json({
+          error: first.reason || 'Hiçbir oturum oluşturulamadı (tüm tarihlerde çakışma).',
+          code: 'teacher_time_conflict',
+          lesson_date: first.lesson_date,
+          skipped
         });
       }
 
@@ -1389,12 +1684,115 @@ export default async function handler(req, res) {
         rowsToInsert
       );
       if (insErr) return res.status(500).json({ error: insErr.message });
-      return res.status(201).json({ data: created || [], auto_bbb: autoBbb });
+      return res.status(201).json({ data: created || [], auto_bbb: autoBbb, skipped });
     }
   }
 
   if (req.method === 'PATCH') {
     const body = parseBody(req);
+    if (String(body.op || '') === 'teacher-rates') {
+      if (!isPaymentSummaryAdmin(role)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const teacherId = String(body.teacher_id || '').trim();
+      const unitPrice = Number(body.unit_price_tl);
+      if (!teacherId) return res.status(400).json({ error: 'teacher_id_required' });
+      if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+        return res.status(400).json({ error: 'invalid_unit_price_tl' });
+      }
+      const { data, error } = await supabaseAdmin
+        .from('teacher_group_lesson_rates')
+        .upsert(
+          {
+            teacher_id: teacherId,
+            institution_id: institutionId || null,
+            unit_price_tl: Math.round(unitPrice * 100) / 100,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: 'teacher_id' }
+        )
+        .select('teacher_id,unit_price_tl,updated_at')
+        .maybeSingle();
+      if (error) {
+        if (String(error.message || '').toLowerCase().includes('teacher_group_lesson_rates')) {
+          return res.status(503).json({
+            error: 'teacher_rates_table_missing',
+            hint: 'student-coaching-system/sql/2026-06-01-teacher-group-lesson-rates.sql'
+          });
+        }
+        return res.status(500).json({ error: error.message });
+      }
+      return res.status(200).json({ data });
+    }
+
+    if (String(body.op || '') === 'teacher-payout') {
+      if (!isPaymentSummaryAdmin(role)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const teacherId = String(body.teacher_id || '').trim();
+      const periodFrom = String(body.period_from || body.from || '').trim().slice(0, 10);
+      const periodTo = String(body.period_to || body.to || '').trim().slice(0, 10);
+      const paid = body.paid !== false && body.paid !== 0 && String(body.paid || 'true') !== 'false';
+      if (!teacherId) return res.status(400).json({ error: 'teacher_id_required' });
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(periodFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(periodTo)) {
+        return res.status(400).json({ error: 'from_to_invalid', hint: 'YYYY-MM-DD' });
+      }
+      if (periodFrom > periodTo) return res.status(400).json({ error: 'from_after_to' });
+
+      if (!paid) {
+        let delQ = supabaseAdmin
+          .from('teacher_group_lesson_payouts')
+          .delete()
+          .eq('teacher_id', teacherId)
+          .eq('period_from', periodFrom)
+          .eq('period_to', periodTo);
+        if (institutionId) delQ = delQ.eq('institution_id', institutionId);
+        const { error: delErr } = await delQ;
+        if (delErr) {
+          if (String(delErr.message || '').toLowerCase().includes('teacher_group_lesson_payouts')) {
+            return res.status(503).json({
+              error: 'teacher_payouts_table_missing',
+              hint: 'student-coaching-system/sql/2026-06-01-teacher-group-lesson-payouts.sql'
+            });
+          }
+          return res.status(500).json({ error: delErr.message });
+        }
+        return res.status(200).json({ ok: true, paid: false });
+      }
+
+      const amountRaw = body.amount_tl != null ? Number(body.amount_tl) : null;
+      const amountTl =
+        amountRaw != null && Number.isFinite(amountRaw) && amountRaw >= 0
+          ? Math.round(amountRaw * 100) / 100
+          : null;
+      const { data, error } = await supabaseAdmin
+        .from('teacher_group_lesson_payouts')
+        .upsert(
+          {
+            teacher_id: teacherId,
+            institution_id: institutionId || null,
+            period_from: periodFrom,
+            period_to: periodTo,
+            amount_tl: amountTl,
+            paid_at: new Date().toISOString(),
+            paid_by: String(actor.sub || actor.id || '').trim() || null
+          },
+          { onConflict: 'teacher_id,institution_id,period_from,period_to' }
+        )
+        .select('teacher_id,period_from,period_to,amount_tl,paid_at,paid_by')
+        .maybeSingle();
+      if (error) {
+        if (String(error.message || '').toLowerCase().includes('teacher_group_lesson_payouts')) {
+          return res.status(503).json({
+            error: 'teacher_payouts_table_missing',
+            hint: 'student-coaching-system/sql/2026-06-01-teacher-group-lesson-payouts.sql'
+          });
+        }
+        return res.status(500).json({ error: error.message });
+      }
+      return res.status(200).json({ data, paid: true });
+    }
+
     const slotMode = String(body.kind || '') === 'slot';
     const rowId = String(body.id || '').trim();
     if (!rowId) return res.status(400).json({ error: 'id_required' });
@@ -1461,6 +1859,9 @@ export default async function handler(req, res) {
     }
     if (body.homework !== undefined) patch.homework = String(body.homework || '').trim() || null;
 
+    const applyScope = String(body.apply_scope || body.applyScope || 'single').trim().toLowerCase();
+    const applyBatch = applyScope === 'batch' || applyScope === 'series' || applyScope === 'all';
+
     if (body.teacher_id !== undefined) {
       const tid = String(body.teacher_id || '').trim();
       if (!tid) {
@@ -1513,6 +1914,57 @@ export default async function handler(req, res) {
       }
     }
 
+    if (!slotMode && applyBatch) {
+      const peerIds = await listScheduledSessionBatchPeers(session);
+      if (peerIds.length > 1) {
+        const batchPatch = { ...patch };
+        delete batchPatch.lesson_date;
+
+        if (batchPatch.teacher_id || batchPatch.start_time || batchPatch.end_time) {
+          for (const pid of peerIds) {
+            const { data: peer, error: peerErr } = await supabaseAdmin
+              .from('class_sessions')
+              .select('*')
+              .eq('id', pid)
+              .maybeSingle();
+            if (peerErr) throw peerErr;
+            if (!peer) continue;
+            const teacherIdForCheck = String((batchPatch.teacher_id ?? peer.teacher_id) || '');
+            const lessonDate = String(peer.lesson_date || '').slice(0, 10);
+            const start = hhmmss(batchPatch.start_time || peer.start_time, '09:00:00');
+            const end = hhmmss(batchPatch.end_time || peer.end_time, '10:00:00');
+            const clash = await teacherTimeConflictOnDate({
+              teacherId: teacherIdForCheck,
+              lessonDate,
+              start,
+              end,
+              excludeSessionIds: peerIds
+            });
+            if (!clash.ok) {
+              return res.status(409).json({
+                error: `${lessonDate}: ${clash.reason || 'Çakışma'}`,
+                code: 'teacher_time_conflict',
+                lesson_date: lessonDate
+              });
+            }
+          }
+        }
+
+        const { data: batchRows, error: batchErr } = await supabaseAdmin
+          .from('class_sessions')
+          .update(batchPatch)
+          .in('id', peerIds)
+          .select('*');
+        if (batchErr) return res.status(500).json({ error: batchErr.message });
+        const primary = (batchRows || []).find((r) => String(r.id) === rowId) || batchRows?.[0] || null;
+        return res.status(200).json({
+          data: primary,
+          updated_count: batchRows?.length ?? peerIds.length,
+          batch: true
+        });
+      }
+    }
+
     const { data, error } = await supabaseAdmin
       .from(table)
       .update(patch)
@@ -1537,6 +1989,18 @@ export default async function handler(req, res) {
       const details = await getClassDetails(session.class_id);
       if (!isAdminRole(role) && session.teacher_id !== actor.sub && !details.teacher_ids.includes(actor.sub)) {
         return res.status(403).json({ error: 'forbidden' });
+      }
+      const applyScope = String(req.query.apply_scope || req.query.applyScope || 'single')
+        .trim()
+        .toLowerCase();
+      const applyBatch = applyScope === 'batch' || applyScope === 'series' || applyScope === 'all';
+      if (applyBatch) {
+        const peerIds = await listScheduledSessionBatchPeers(session);
+        if (peerIds.length > 1) {
+          const { error } = await supabaseAdmin.from('class_sessions').delete().in('id', peerIds);
+          if (error) return res.status(500).json({ error: error.message });
+          return res.status(200).json({ ok: true, deleted_count: peerIds.length, batch: true });
+        }
       }
       const { error } = await supabaseAdmin.from('class_sessions').delete().eq('id', sessionId);
       if (error) return res.status(500).json({ error: error.message });

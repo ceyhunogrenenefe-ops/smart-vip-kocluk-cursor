@@ -141,17 +141,28 @@ function bookOrderSendChannel(fallbackUserId) {
   return 'auto';
 }
 
+/** Gateway: düz metin — env oturumu, giriş yapan kullanıcı veya bağlı paylaşımlı oturum */
 export async function sendBookOrderViaGateway(phone, order, gatewaySessionId) {
   const message = renderBookOrderWhatsAppBody(order);
+  const primarySid = resolveBookOrderGatewaySessionId(gatewaySessionId);
+  const sessionCandidates = [
+    ...new Set(
+      [
+        primarySid,
+        bookOrderGatewaySessionId(),
+        reportReminderGatewaySessionId(),
+        String(gatewaySessionId || '').trim()
+      ]
+        .map((x) => String(x || '').trim())
+        .filter(Boolean)
+    )
+  ];
   return sendGatewayTextMessage({
     phone,
     message,
-    sessionId: resolveBookOrderGatewaySessionId(gatewaySessionId),
-    sessionCandidates: [
-      gatewaySessionId,
-      bookOrderGatewaySessionId(),
-      reportReminderGatewaySessionId()
-    ]
+    sessionId: primarySid,
+    sessionCandidates,
+    allowSharedFallback: true
   });
 }
 

@@ -38,6 +38,7 @@ import WhatsAppGatewaySessionPanel from '../components/whatsapp/WhatsAppGatewayS
 import { PageCollapsibleSection } from '../components/ui/PageCollapsibleSection';
 import { userHasAnyRole } from '../config/rolePermissions';
 import { exportBookOrdersToExcel } from '../lib/bookOrdersExport';
+import { PLATFORM_BOOK_ORDER_INSTITUTION_ID } from '../lib/bookOrderConstants';
 
 function statusLabel(status: string) {
   switch (status) {
@@ -211,7 +212,7 @@ function formatTrDate(iso: string) {
 export default function BookOrdersPage() {
   const { effectiveUser, user } = useAuth();
   const { activeInstitutionId } = useApp();
-  const isSuper = effectiveUser?.role === 'super_admin';
+  const isSuper = userHasAnyRole(effectiveUser, ['super_admin']);
   const canApproveBookOrders = userHasAnyRole(effectiveUser, ['super_admin', 'admin']);
   const personalGatewaySessionId = getGatewaySessionUserId(user?.id);
 
@@ -274,10 +275,14 @@ export default function BookOrdersPage() {
   const effectiveInstitutionId = useMemo(() => {
     if (isSuper) {
       if (institutionId === '__all__') return '';
-      return institutionId.trim() || String(activeInstitutionId || '').trim();
+      if (institutionId.trim()) return institutionId.trim();
+      return String(activeInstitutionId || PLATFORM_BOOK_ORDER_INSTITUTION_ID).trim();
     }
-    return String(activeInstitutionId || effectiveUser?.institution_id || '').trim();
-  }, [isSuper, institutionId, activeInstitutionId, effectiveUser?.institution_id]);
+    /** Veli formu siparişleri platform kurumuna yazılır — aktif kurum farklı olsa bile burada göster */
+    const userInst = String(effectiveUser?.institutionId || '').trim();
+    if (userInst === PLATFORM_BOOK_ORDER_INSTITUTION_ID) return userInst;
+    return PLATFORM_BOOK_ORDER_INSTITUTION_ID;
+  }, [isSuper, institutionId, activeInstitutionId, effectiveUser?.institutionId]);
 
   const listInstitutionId = useMemo(() => {
     if (showAllInstitutions) return undefined;
@@ -294,10 +299,10 @@ export default function BookOrdersPage() {
   useEffect(() => {
     if (!isSuper || institutionId.trim()) return;
     const fromActive = String(activeInstitutionId || '').trim();
-    const vipDefault = '73323d75-eea1-4552-8bba-d50555423589';
+    const vipDefault = PLATFORM_BOOK_ORDER_INSTITUTION_ID;
     const fromList =
       institutionOptions.find((i) => i.id === vipDefault)?.id || institutionOptions[0]?.id || '';
-    const pick = fromActive || fromList;
+    const pick = fromActive === vipDefault ? vipDefault : vipDefault || fromList || fromActive;
     if (pick) setInstitutionId(pick);
   }, [isSuper, institutionId, activeInstitutionId, institutionOptions]);
 
@@ -1872,7 +1877,7 @@ export default function BookOrdersPage() {
                             WhatsApp tekrar
                           </button>
                         ) : null}
-                        {isSuper ? (
+                        {canApproveBookOrders ? (
                           <button
                             type="button"
                             disabled={busy === `del-${o.id}`}

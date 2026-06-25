@@ -15,6 +15,9 @@ import {
   Pencil,
   Clock,
   Target,
+  FileDown,
+  MessageCircle,
+  Loader2,
 } from 'lucide-react';
 import type { CoachWeeklyGoalRow, WeeklyPlannerEntryRow } from '../../lib/weeklyPlannerApi';
 import {
@@ -41,8 +44,15 @@ import { mergeScreenTimeByDate } from '../../lib/mergeScreenTimeByDate';
 import { fetchWeeklyEntriesScreenTimeForStudent } from '../../lib/weeklyPlannerApi';
 import { subjectPlannerStyle } from './subjectPlannerStyle';
 import { cn } from '../../lib/utils';
+import { useMobileAppShell } from '../../hooks/useMobileAppShell';
 import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
 import { formatClassLevelLabel } from '../../types';
+import { formatWhatsAppPhone, sendWhatsAppOutbound } from '../../lib/whatsappOutbound';
+import {
+  buildParentWeeklyGoalsMessage,
+  downloadWeeklyPlannerPdf,
+} from '../../lib/pdfWeeklyPlanner';
 
 export { subjectPlannerStyle };
 
@@ -158,6 +168,7 @@ export function WeeklyPlannerCalendar({
 }: WeeklyPlannerCalendarProps) {
   const {
     students,
+    institution,
     getTopics,
     getTopicsByClass,
     markTopicCompleted,
@@ -165,6 +176,11 @@ export function WeeklyPlannerCalendar({
     refreshTopicProgress,
     weeklyEntries,
   } = useApp();
+  const { effectiveUser } = useAuth();
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [parentShareBusy, setParentShareBusy] = useState(false);
+  const [parentShareNotice, setParentShareNotice] = useState('');
+  const [parentShareWaUrl, setParentShareWaUrl] = useState<string | null>(null);
 
   const studentWeeklyEntries = useMemo(
     () => weeklyEntries.filter((e) => e.studentId === studentId),
@@ -272,6 +288,8 @@ export function WeeklyPlannerCalendar({
     typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false
   );
   const [mobileDayIdx, setMobileDayIdx] = useState(0);
+  const mobileAppShell = useMobileAppShell();
+  const vibrantMobileChrome = studentStudyLogUi || mobileAppShell;
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 767px)');
@@ -379,6 +397,23 @@ export function WeeklyPlannerCalendar({
     });
   }, [goals, entries, weekStartStr, weekEndStr, studentWeeklyEntries]);
 
+  /** Modalda gösterilecek kalan kota — düzenlemede mevcut hücrenin miktarı geri sayılır. */
+  const modalGoalQuota = useMemo(() => {
+    return goalAggregates.map((row) => {
+      const editingBonus =
+        activeEntry?.coach_goal_id === row.goal.id ? Number(activeEntry.planned_quantity || 0) : 0;
+      return {
+        ...row,
+        available: row.remaining + editingBonus,
+      };
+    });
+  }, [goalAggregates, activeEntry]);
+
+  const selectedGoalAvailable = useMemo(() => {
+    if (!formGoalId) return null;
+    return modalGoalQuota.find((r) => r.goal.id === formGoalId)?.available ?? 0;
+  }, [formGoalId, modalGoalQuota]);
+
   const goalsByDayDate = useMemo(() => {
     const out: Record<string, CoachWeeklyGoalRow[]> = {};
     for (const d of dayDates) {
@@ -396,7 +431,75 @@ export function WeeklyPlannerCalendar({
     setMobileDayIdx(idx >= 0 ? idx : 0);
   }, [weekStartStr, dayDates]);
 
-  const showMobileDayView = studentStudyLogUi && isCompactMobile;
+  const showMobileDayView = mobileAppShell || (studentStudyLogUi && isCompactMobile);
+  const showCoachParentShare = !studentStudyLogUi && canManageGoals;
+  const canExportPdf = Boolean(canEditPlan && studentId);
+
+  const exportPlannerPdf = useCallback(async () => {
+    if (!studentId) return;
+    setPdfBusy(true);
+    try {
+      await downloadWeeklyPlannerPdf({
+        studentName: studentName || plannerStudent?.name || 'Öğrenci',
+        weekStart: weekStartStr,
+        weekEnd: weekEndStr,
+        dayDates,
+        goals,
+        entries,
+        institutionName: institution?.name,
+        logoUrl: institution?.logo ?? null,
+      });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'PDF oluşturulamadı');
+    } finally {
+      setPdfBusy(false);
+    }
+  }, [
+    studentId,
+    studentName,
+    plannerStudent?.name,
+    weekStartStr,
+    weekEndStr,
+    dayDates,
+    goals,
+    entries,
+    institution?.name,
+    institution?.logo,
+  ]);
+
+  const shareWeeklyGoalsWithParent = useCallback(async () => {
+    setParentShareNotice('');
+    setParentShareWaUrl(null);
+    const st = plannerStudent;
+    if (!st || !effectiveUser?.id) return;
+    const parentPhone = formatWhatsAppPhone(st.parentPhone || '');
+    if (!parentPhone) {
+      setParentShareNotice('Bu öğrenci için veli telefonu tanımlı değil.');
+      return;
+    }
+    const message = buildParentWeeklyGoalsMessage({
+      studentName: st.name,
+      weekStart: weekStartStr,
+      weekEnd: weekEndStr,
+      goals,
+      entries,
+    });
+    setParentShareBusy(true);
+    try {
+      const result = await sendWhatsAppOutbound({
+        coachUserId: effectiveUser.id,
+        targetPhone: parentPhone,
+        message,
+      });
+      setParentShareNotice(result.notice);
+      setParentShareWaUrl(result.waUrl ?? null);
+    } catch (e) {
+      setParentShareNotice(e instanceof Error ? e.message : 'Mesaj gönderilemedi');
+    } finally {
+      setParentShareBusy(false);
+    }
+  }, [plannerStudent, effectiveUser?.id, weekStartStr, weekEndStr, goals, entries]);
+
   const mobileDayDate = dayDates[Math.min(mobileDayIdx, Math.max(dayDates.length - 1, 0))] ?? weekStartStr;
   const mobileDayEntries = useMemo(
     () =>
@@ -575,6 +678,18 @@ export function WeeklyPlannerCalendar({
         formTitle.trim() ||
         (g ? `${g.title} (${g.quantity_unit})` : formSubject ? `${formSubject} çalışması` : 'Görev');
       const subject = (g?.subject || formSubject || 'Genel').trim() || 'Genel';
+      if (formGoalId) {
+        const available = modalGoalQuota.find((r) => r.goal.id === formGoalId)?.available ?? 0;
+        const qty = Math.max(0, Math.round(Number(formPlannedQty)));
+        if (qty <= 0) {
+          alert('Planlanan miktar 0 olamaz.');
+          return;
+        }
+        if (qty > available) {
+          alert(`Bu hedef için en fazla ${available} ${g?.quantity_unit || 'birim'} planlayabilirsiniz.`);
+          return;
+        }
+      }
       try {
         await createWeeklyPlannerEntry({
           student_id: studentId,
@@ -583,7 +698,7 @@ export function WeeklyPlannerCalendar({
           end_time: end,
           title,
           subject,
-          planned_quantity: Math.max(0, formPlannedQty),
+          planned_quantity: Math.max(0, Math.round(Number(formPlannedQty))),
           coach_goal_id: formGoalId,
           status: 'planned',
           completed_quantity: 0,
@@ -645,6 +760,14 @@ export function WeeklyPlannerCalendar({
         return;
       }
       const pq = Math.max(0, Math.round(Number(formPlannedQty)));
+      if (formGoalId) {
+        const g = goals.find((x) => x.id === formGoalId);
+        const available = modalGoalQuota.find((r) => r.goal.id === formGoalId)?.available ?? 0;
+        if (pq > available) {
+          alert(`Bu hedef için en fazla ${available} ${g?.quantity_unit || 'birim'} planlayabilirsiniz.`);
+          return;
+        }
+      }
       const patch: Record<string, unknown> = {
         title: formTitle,
         subject: formSubject,
@@ -988,10 +1111,62 @@ export function WeeklyPlannerCalendar({
                   Sonraki haftaya bırak →
                 </div>
               ) : null}
+              {canExportPdf ? (
+                <button
+                  type="button"
+                  disabled={pdfBusy}
+                  onClick={() => void exportPlannerPdf()}
+                  className={cn(
+                    'inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition disabled:opacity-50',
+                    studentStudyLogUi
+                      ? 'border-violet-200 bg-violet-50 text-violet-900 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-100'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200'
+                  )}
+                >
+                  {pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
+                  PDF indir
+                </button>
+              ) : null}
+              {showCoachParentShare ? (
+                <button
+                  type="button"
+                  disabled={parentShareBusy}
+                  onClick={() => void shareWeeklyGoalsWithParent()}
+                  className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900 transition hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
+                >
+                  {parentShareBusy ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <MessageCircle className="h-4 w-4" />
+                  )}
+                  Veliye gönder
+                </button>
+              ) : null}
             </div>
           </div>
         </div>
       </div>
+
+      {showCoachParentShare && parentShareNotice ? (
+        <div
+          role="status"
+          className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-950 whitespace-pre-wrap"
+        >
+          {parentShareNotice}
+          {parentShareWaUrl ? (
+            <p className="mt-2">
+              <a
+                href={parentShareWaUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium underline text-emerald-800"
+              >
+                WhatsApp bağlantısını aç
+              </a>
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {err ? (
         <div className="flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg p-3">
@@ -1181,7 +1356,7 @@ export function WeeklyPlannerCalendar({
         <div
           className={cn(
             'overflow-hidden rounded-2xl border bg-white dark:bg-slate-900',
-            studentStudyLogUi
+            vibrantMobileChrome
               ? 'border-violet-200/90 shadow-[0_24px_56px_-28px_rgb(139,92,246,0.38)] ring-2 ring-violet-100/70 dark:border-violet-900/55 dark:shadow-[0_20px_50px_-24px_rgb(0,0,0,0.5)] dark:ring-violet-900/40'
               : 'border-slate-200/95 shadow-[0_20px_50px_-24px_rgb(15,23,42,0.18)] ring-1 ring-slate-100/90 dark:border-slate-700 dark:shadow-none dark:ring-slate-800/80'
           )}
@@ -1189,7 +1364,7 @@ export function WeeklyPlannerCalendar({
           <div
             className={cn(
               'flex flex-col gap-2 border-b px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between',
-              studentStudyLogUi
+              vibrantMobileChrome
                 ? 'border-violet-100/90 bg-gradient-to-r from-violet-100/90 via-fuchsia-50/80 to-amber-50/70 dark:border-violet-900/50 dark:from-violet-950/45 dark:via-fuchsia-950/25 dark:to-amber-950/20'
                 : 'border-slate-100 bg-gradient-to-r from-indigo-50/85 via-white to-violet-50/40 dark:border-slate-800 dark:from-indigo-950/30 dark:via-slate-900 dark:to-violet-950/20'
             )}
@@ -1216,7 +1391,7 @@ export function WeeklyPlannerCalendar({
           <div
             className={cn(
               showMobileDayView ? '' : 'overflow-x-auto',
-              studentStudyLogUi
+              vibrantMobileChrome
                 ? 'bg-gradient-to-b from-violet-50/50 via-white to-amber-50/30 dark:from-slate-950 dark:via-slate-950 dark:to-violet-950/20'
                 : 'bg-slate-50/40 dark:bg-slate-950/40'
             )}
@@ -1771,22 +1946,34 @@ export function WeeklyPlannerCalendar({
                   >
                     Manuel
                   </button>
-                  {goals.map((g) => (
+                  {modalGoalQuota.map(({ goal: g, available, target }) => {
+                    const depleted = available <= 0;
+                    return (
                     <button
                       key={g.id}
                       type="button"
+                      disabled={depleted && modalMode === 'create'}
                       onClick={() => {
+                        if (depleted && modalMode === 'create') return;
+                        const chunk = Math.min(Math.max(available, 0), 50) || Math.max(available, 0);
                         setFormGoalId(g.id);
                         setFormSubject(g.subject);
                         setFormTitle(g.title);
+                        setFormPlannedQty(chunk > 0 ? chunk : 10);
                       }}
-                      className={`text-xs px-2 py-1 rounded-lg border truncate max-w-[140px] ${
+                      className={`text-xs px-2 py-1 rounded-lg border truncate max-w-[160px] ${
                         formGoalId === g.id ? 'bg-red-600 text-white border-red-600' : 'border-slate-200'
-                      }`}
+                      } ${depleted && modalMode === 'create' ? 'opacity-40 cursor-not-allowed' : ''}`}
+                      title={
+                        depleted
+                          ? 'Bu hedef için planlanabilir kota kalmadı'
+                          : `${g.title} — hedef ${target}, kalan ${available} ${g.quantity_unit}`
+                      }
                     >
-                      {g.subject} ({g.target_quantity} {g.quantity_unit})
+                      {g.subject} ({available} {g.quantity_unit})
                     </button>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1881,10 +2068,17 @@ export function WeeklyPlannerCalendar({
                 <input
                   type="number"
                   min={0}
+                  max={formGoalId && selectedGoalAvailable != null ? selectedGoalAvailable : undefined}
                   value={formPlannedQty}
                   onChange={(e) => setFormPlannedQty(Number(e.target.value))}
                   className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
                 />
+                {formGoalId && selectedGoalAvailable != null ? (
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Kalan kota: <strong>{selectedGoalAvailable}</strong>{' '}
+                    {goals.find((g) => g.id === formGoalId)?.quantity_unit || 'birim'}
+                  </p>
+                ) : null}
               </div>
 
               {modalMode === 'edit' && activeEntry && canEditPlan ? (

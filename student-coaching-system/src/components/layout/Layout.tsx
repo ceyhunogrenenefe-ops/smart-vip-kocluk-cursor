@@ -2,8 +2,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Sidebar, { SIDEBAR_DESKTOP_WIDE_KEY } from './Sidebar';
 import TopBar from './TopBar';
-import StudentMobileTabBar from './StudentMobileTabBar';
-import { useStudentMobileShell } from '../../hooks/useStudentMobileShell';
+import MobileTabBar from './MobileTabBar';
+import { useMobileAppShell } from '../../hooks/useMobileAppShell';
 import { cn } from '../../lib/utils';
 
 function readDesktopWideInitial(): boolean {
@@ -25,7 +25,7 @@ export default function Layout({ children }: LayoutProps) {
   const [desktopShell, setDesktopShell] = useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(min-width: 1024px)').matches : false
   );
-  const studentMobileShell = useStudentMobileShell();
+  const mobileAppShell = useMobileAppShell();
 
   useEffect(() => {
     const mq = window.matchMedia('(min-width: 1024px)');
@@ -75,7 +75,7 @@ export default function Layout({ children }: LayoutProps) {
     <TopBar
       drawerOpen={mobileDrawerOpen}
       onMenuClick={toggleMobileDrawer}
-      hideMenuButton={studentMobileShell}
+      hideMenuButton={mobileAppShell}
     />
   );
 
@@ -84,7 +84,7 @@ export default function Layout({ children }: LayoutProps) {
       className={cn(
         'w-full max-w-[100vw] px-3 py-4 sm:px-5 sm:py-6 lg:px-6 lg:py-6',
         desktopShell && 'min-h-0 flex-1 overflow-y-auto overscroll-contain [webkit-overflow-scrolling:touch]',
-        studentMobileShell ? 'pb-24' : 'pb-safe'
+        mobileAppShell ? 'pb-24' : 'pb-safe'
       )}
     >
       {children}
@@ -94,7 +94,7 @@ export default function Layout({ children }: LayoutProps) {
   if (!desktopShell) {
     return (
       <>
-        {!studentMobileShell ? (
+        {!mobileAppShell ? (
           <Sidebar
             mobileOpen={mobileDrawerOpen}
             onMobileOpenChange={setMobileDrawerOpen}
@@ -106,16 +106,16 @@ export default function Layout({ children }: LayoutProps) {
         <div
           className={cn(
             'mobile-scroll-port fixed inset-0 z-0 bg-slate-50',
-            studentMobileShell && 'student-mobile-scroll-port'
+            mobileAppShell && 'mobile-app-scroll-port student-mobile-scroll-port'
           )}
         >
           {topBar}
           {mainContent}
         </div>
 
-        {studentMobileShell ? <StudentMobileTabBar /> : null}
+        {mobileAppShell ? <MobileTabBar /> : null}
 
-        {!studentMobileShell && mobileDrawerOpen ? (
+        {!mobileAppShell && mobileDrawerOpen ? (
           <button
             type="button"
             className="fixed inset-0 z-[140] bg-slate-950/55 backdrop-blur-sm"
@@ -129,7 +129,7 @@ export default function Layout({ children }: LayoutProps) {
 
   return (
     <div className="flex h-[100dvh] max-h-[100dvh] min-h-0 overflow-hidden bg-slate-50">
-      {!studentMobileShell ? (
+      {!mobileAppShell ? (
         <Sidebar
           mobileOpen={mobileDrawerOpen}
           onMobileOpenChange={setMobileDrawerOpen}
@@ -141,16 +141,16 @@ export default function Layout({ children }: LayoutProps) {
       <div
         className={cn(
           'relative z-10 flex h-full min-h-0 w-full min-w-0 flex-col bg-slate-50 transition-[padding] duration-300',
-          !studentMobileShell && (desktopWide ? 'lg:pl-64' : 'lg:pl-[4.5rem]')
+          !mobileAppShell && (desktopWide ? 'lg:pl-64' : 'lg:pl-[4.5rem]')
         )}
       >
         {topBar}
         {mainContent}
       </div>
 
-      {studentMobileShell ? <StudentMobileTabBar /> : null}
+      {mobileAppShell ? <MobileTabBar /> : null}
 
-      {!studentMobileShell && mobileDrawerOpen ? (
+      {!mobileAppShell && mobileDrawerOpen ? (
         <button
           type="button"
           className="fixed inset-0 z-[140] bg-slate-950/55 backdrop-blur-sm lg:hidden"

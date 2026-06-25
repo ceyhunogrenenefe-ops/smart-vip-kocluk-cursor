@@ -1,6 +1,6 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import { normalizePhoneToE164 } from './phone-whatsapp.js';
-import { sendAutomatedWhatsApp } from './whatsapp-outbound.js';
+import { sendAutomationTemplateMessage } from './whatsapp-automation-channel.js';
 import { getIstanbulDateString } from './istanbul-time.js';
 
 function formatTrDate(isoDate) {
@@ -75,15 +75,18 @@ export function buildEventTemplateVars(event, participant) {
   return base;
 }
 
-async function sendParticipantWhatsApp(event, participant, templateType) {
+async function sendParticipantWhatsApp(event, participant, templateType, templateRow) {
   const phone = normalizePhoneToE164(participant.phone);
   if (!phone) {
     return { ok: false, error: 'invalid_phone' };
   }
   const vars = buildEventTemplateVars(event, participant);
-  const sent = await sendAutomatedWhatsApp({ phone, templateType, vars });
+  const sent = templateRow?.content
+    ? await sendAutomationTemplateMessage({ phone, templateRow, vars, templateType })
+    : { ok: false, channel: 'none', error: 'template_not_found' };
   const today = getIstanbulDateString();
   const preview = sent.bodyPreview || `[${templateType}] ${participant.display_name}`;
+  const messageId = sent.sid || sent.meta_message_id || sent.gateway_message_id || null;
   try {
     await supabaseAdmin.from('message_logs').insert({
       student_id: participant.student_id || null,
@@ -94,13 +97,53 @@ async function sendParticipantWhatsApp(event, participant, templateType) {
       log_date: today,
       error: sent.ok ? null : sent.error || null,
       phone,
-      meta_message_id: sent.sid || sent.meta_message_id || null,
-      meta_template_name: sent.meta_template_name || null
+      meta_message_id: messageId,
+      meta_template_name: sent.meta_template_name || templateType || null
     });
   } catch (e) {
     console.warn('[institution-event-send] message_log', e?.message || e);
   }
   return sent;
+}
+
+/** message_logs'ta sent kaydı var ama katılımcı hâlâ pending — UI «bekliyor» sapmasını düzeltir. */
+export async function reconcileEventParticipantStatuses(eventId) {
+  const id = String(eventId || '').trim();
+  if (!id) return 0;
+
+  const { data: participants, error } = await supabaseAdmin
+    .from('institution_event_participants')
+    .select('id, phone, whatsapp_status')
+    .eq('event_id', id)
+    .in('whatsapp_status', ['pending', 'failed']);
+  if (error || !participants?.length) return 0;
+
+  let fixed = 0;
+  for (const p of participants) {
+    const phone = normalizePhoneToE164(p.phone);
+    if (!phone) continue;
+    const { data: log } = await supabaseAdmin
+      .from('message_logs')
+      .select('id, sent_at')
+      .eq('kind', 'institution_event_invite')
+      .eq('related_id', id)
+      .eq('status', 'sent')
+      .eq('phone', phone)
+      .order('sent_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!log) continue;
+    const { error: updErr } = await supabaseAdmin
+      .from('institution_event_participants')
+      .update({
+        whatsapp_status: 'sent',
+        whatsapp_error: null,
+        whatsapp_sent_at: log.sent_at || new Date().toISOString()
+      })
+      .eq('id', p.id);
+    if (!updErr) fixed += 1;
+  }
+  return fixed;
 }
 
 /** @param {{ resendAll?: boolean, participantIds?: string[]|null }} opts */
@@ -122,26 +165,47 @@ export async function sendEventInvites(event, opts = {}) {
     return { ok: false, error: 'template_type_required', results: [] };
   }
 
+  const { data: templateRow } = await supabaseAdmin
+    .from('message_templates')
+    .select('*')
+    .eq('type', templateType)
+    .maybeSingle();
+
   const results = [];
   for (const p of rows || []) {
-    const sent = await sendParticipantWhatsApp(event, p, templateType);
+    const sent = await sendParticipantWhatsApp(event, p, templateType, templateRow);
     const patch = {
       whatsapp_status: sent.ok ? 'sent' : 'failed',
       whatsapp_error: sent.ok ? null : String(sent.error || 'send_failed').slice(0, 500),
       whatsapp_sent_at: sent.ok ? new Date().toISOString() : p.whatsapp_sent_at,
-      meta_message_id: sent.ok ? sent.sid || sent.meta_message_id || null : p.meta_message_id
+      meta_message_id: sent.ok
+        ? sent.sid || sent.meta_message_id || sent.gateway_message_id || null
+        : p.meta_message_id
     };
-    await supabaseAdmin.from('institution_event_participants').update(patch).eq('id', p.id);
+    const { error: updErr } = await supabaseAdmin
+      .from('institution_event_participants')
+      .update(patch)
+      .eq('id', p.id);
+    if (updErr) {
+      console.warn('[institution-event-send] participant update', updErr.message);
+    }
     results.push({
       participant_id: p.id,
       display_name: p.display_name,
       ok: sent.ok,
+      channel: sent.channel || null,
       error: sent.ok ? null : sent.error
     });
   }
   const sentCount = results.filter((r) => r.ok).length;
   const failCount = results.length - sentCount;
-  return { ok: failCount === 0, sent: sentCount, failed: failCount, results };
+  return {
+    ok: failCount === 0,
+    sent: sentCount,
+    failed: failCount,
+    channel: templateRow?.content ? results.find((r) => r.channel)?.channel || null : null,
+    results
+  };
 }
 
 export function aggregateParticipantStats(participants) {

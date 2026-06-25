@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Student } from '../types';
-import { clearAuthToken, fetchPublicPost, setAuthToken, getAuthToken, peekJwtClaims } from '../lib/session';
+import { clearAuthToken, fetchPublicPost, setAuthToken, getAuthToken, peekJwtClaims, authLoginUnavailableMessage } from '../lib/session';
 import { db } from '../lib/database';
 import { studentRowToStudent } from '../lib/mapStudentRow';
 import type { UserRow } from '../lib/userRowToSystemUser';
@@ -246,6 +246,15 @@ type AuthLoginUserPayload = {
   createdAt?: string;
 };
 
+function serverAuthTokenFailureMessage(authLoginStatus?: number, retryHint = false): string {
+  const api404 = authLoginStatus != null ? authLoginUnavailableMessage(authLoginStatus) : null;
+  if (api404) return api404;
+  if (retryHint) {
+    return 'Sunucu oturumu oluşturulamadı (auth-login). Lütfen tekrar deneyin; sorun sürerse yöneticiye bildirin.';
+  }
+  return 'Sunucu oturumu oluşturulamadı (auth-login). Ağ veya API yapılandırmasını kontrol edin.';
+}
+
 /**
  * Vercel `/api/*` ile aynı JWT + auth-login `user` gövdesini birleştirir (coachId / studentId UI ve backend ile uyumlu kalsın).
  */
@@ -253,10 +262,10 @@ async function syncServerAuthToken(
   email: string,
   password: string,
   baseUser: SystemUser
-): Promise<{ user: SystemUser; tokenStored: boolean }> {
+): Promise<{ user: SystemUser; tokenStored: boolean; authLoginStatus?: number }> {
   try {
     const res = await fetchPublicPost('/api/auth-login', { email, password });
-    if (!res.ok) return { user: baseUser, tokenStored: false };
+    if (!res.ok) return { user: baseUser, tokenStored: false, authLoginStatus: res.status };
     const body = (await res.json().catch(() => ({}))) as {
       token?: string;
       user?: AuthLoginUserPayload;
@@ -470,11 +479,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isActive: true,
         createdAt: new Date().toISOString()
       };
-      const { user: merged, tokenStored } = await syncServerAuthToken(demoUser.email, demoUser.password, userData);
+      const { user: merged, tokenStored, authLoginStatus } = await syncServerAuthToken(demoUser.email, demoUser.password, userData);
       if (!tokenStored) {
         return {
           success: false,
-          message: 'Sunucu oturumu oluşturulamadı (auth-login). Ağ veya API yapılandırmasını kontrol edin.'
+          message: serverAuthTokenFailureMessage(authLoginStatus)
         };
       }
       localStorage.setItem('coaching_user', JSON.stringify(merged));
@@ -556,7 +565,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           createdAt: dbUser.created_at
         });
 
-        const { user: merged, tokenStored } = await syncServerAuthToken(
+        const { user: merged, tokenStored, authLoginStatus } = await syncServerAuthToken(
           String(dbUser.email || normalizedEmail).toLowerCase().trim(),
           password,
           userData
@@ -564,8 +573,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!tokenStored) {
           return {
             success: false,
-            message:
-              'Sunucu oturumu oluşturulamadı (auth-login). Lütfen tekrar deneyin; sorun sürerse yöneticiye bildirin.'
+            message: serverAuthTokenFailureMessage(authLoginStatus, true)
           };
         }
         localStorage.setItem('coaching_user', JSON.stringify(merged));
@@ -577,6 +585,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           const res = await fetchPublicPost('/api/auth-login', { email: normalizedEmail, password });
           if (!res.ok) {
+            const api404 = authLoginUnavailableMessage(res.status);
+            if (api404) return { success: false, message: api404 };
             const serverMessage = await getServerLoginErrorMessage(res);
             if (serverMessage) return { success: false, message: serverMessage };
           }
@@ -639,12 +649,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         /* yoksay */
       }
       const userData = applyTrialAccountCoachOnly({ ...pub, studentId, coachId });
-      const { user: merged, tokenStored } = await syncServerAuthToken(normalizedEmail, password, userData);
+      const { user: merged, tokenStored, authLoginStatus } = await syncServerAuthToken(normalizedEmail, password, userData);
       if (!tokenStored) {
         return {
           success: false,
-          message:
-            'Sunucu oturumu oluşturulamadı (auth-login). Lütfen tekrar deneyin; sorun sürerse yöneticiye bildirin.'
+          message: serverAuthTokenFailureMessage(authLoginStatus, true)
         };
       }
       localStorage.setItem('coaching_user', JSON.stringify(merged));
@@ -657,6 +666,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const res = await fetchPublicPost('/api/auth-login', { email: normalizedEmail, password });
         if (!res.ok) {
+          const api404 = authLoginUnavailableMessage(res.status);
+          if (api404) return { success: false, message: api404 };
           const serverMessage = await getServerLoginErrorMessage(res);
           if (serverMessage) return { success: false, message: serverMessage };
         }

@@ -23,15 +23,30 @@ export function bookOrderGatewaySessionId() {
   ).trim();
 }
 
-/** Env yoksa giriş yapan admin/koç oturumu (QR bağlı users.id). */
+/** Giriş yapan kullanıcının kendi gateway oturumu (QR = users.id). */
+export function resolveActorGatewaySessionId(userId) {
+  return String(userId || '').trim();
+}
+
+/** Cron / kitap siparişi env oturumu — yalnızca otomasyon için. */
 export function resolveBookOrderGatewaySessionId(fallbackUserId) {
-  return bookOrderGatewaySessionId() || String(fallbackUserId || '').trim();
+  return bookOrderGatewaySessionId() || resolveActorGatewaySessionId(fallbackUserId);
 }
 
 /** Günlük rapor hatırlatması — aynı QR oturumu (kitap siparişi ile paylaşılabilir). */
 export function reportReminderGatewaySessionId() {
   return String(
     process.env.REPORT_REMINDER_GATEWAY_SESSION_ID ||
+      process.env.BOOK_ORDER_GATEWAY_SESSION_ID ||
+      process.env.WHATSAPP_GATEWAY_SESSION_ID ||
+      ''
+  ).trim();
+}
+
+/** Öğretmen ders hatırlatması cron — varsayılan süper admin / kitap siparişi gateway oturumu. */
+export function teacherReminderGatewaySessionId() {
+  return String(
+    process.env.TEACHER_REMINDER_GATEWAY_SESSION_ID ||
       process.env.BOOK_ORDER_GATEWAY_SESSION_ID ||
       process.env.WHATSAPP_GATEWAY_SESSION_ID ||
       ''
@@ -131,8 +146,8 @@ export async function probeConnectedGatewaySessionIds(extraCandidates = []) {
   return connected;
 }
 
-/** Önce aday id'ler, sonra VPS'teki bağlı oturumlar — QR hangi hesaptaysa onu bulur. */
-export async function pickConnectedGatewaySessionId(candidates = []) {
+/** Yalnızca aday listedeki oturumları dener; başka kullanıcının bağlı hattını kullanmaz. */
+export async function pickConnectedGatewaySessionId(candidates = [], { allowSharedFallback = false } = {}) {
   const uniq = [
     ...new Set(
       (Array.isArray(candidates) ? candidates : [candidates])
@@ -145,9 +160,14 @@ export async function pickConnectedGatewaySessionId(candidates = []) {
     const st = await getGatewaySessionStatus(id);
     if (st.ok && st.status === 'connected') return id;
   }
+  if (!allowSharedFallback) return uniq[0] || '';
+
   let live = await listConnectedGatewaySessionIds();
   if (!live.length) {
     live = await probeConnectedGatewaySessionIds(uniq);
+  }
+  for (const id of uniq) {
+    if (live.includes(id)) return id;
   }
   for (const id of live) {
     if (gatewayConfiguredForSession(id)) return id;
@@ -186,8 +206,8 @@ async function gatewayFetch(path, { method = 'GET', body, sessionId } = {}) {
   if (body != null) headers['Content-Type'] = 'application/json';
 
   const timeoutMs = Math.min(
-    55000,
-    Math.max(15000, Number(process.env.WA_GATEWAY_SEND_TIMEOUT_MS) || 48000)
+    115000,
+    Math.max(20000, Number(process.env.WA_GATEWAY_SEND_TIMEOUT_MS) || 110000)
   );
   const controller = new AbortController();
   const tid = setTimeout(() => controller.abort(), timeoutMs);
@@ -210,6 +230,97 @@ async function gatewayFetch(path, { method = 'GET', body, sessionId } = {}) {
       data: { error: aborted ? 'gateway_upstream_timeout' : 'gateway_fetch_failed' }
     };
   }
+}
+
+/**
+ * Kopmuş oturumu diskteki auth ile sessizce yeniden bağlar (QR gerekmez).
+ * @returns {Promise<{ ok: boolean, status?: string, warmed?: boolean }>}
+ */
+export async function warmGatewaySession(sessionId, { waitMs = 9000 } = {}) {
+  const id = String(sessionId || '').trim();
+  if (!id || !gatewayConfiguredForSession(id)) {
+    return { ok: false, status: 'not_configured' };
+  }
+
+  const health = await probeGatewayHealth();
+  if (!health.ok) {
+    return { ok: false, status: 'vps_unreachable' };
+  }
+
+  let st = await getGatewaySessionStatus(id);
+  if (st.ok && st.status === 'connected') {
+    return { ok: true, status: 'connected', warmed: false };
+  }
+
+  const raw = st.raw && typeof st.raw === 'object' ? st.raw : {};
+  const authOnDisk = raw.authOnDisk === true;
+  const restoreBlocked = raw.restoreBlocked === true;
+  const status = String(st.status || raw.status || '').toLowerCase();
+  const canWarm =
+    authOnDisk &&
+    !restoreBlocked &&
+    (status === 'idle' ||
+      status === 'reconnecting' ||
+      status === 'logged_out' ||
+      status === 'connecting' ||
+      status === 'unknown' ||
+      !status);
+
+  if (!canWarm) {
+    return { ok: false, status: status || 'not_warmable' };
+  }
+
+  await gatewayFetch(`/sessions/${encodeURIComponent(id)}/start`, {
+    method: 'POST',
+    body: { purge: false },
+    sessionId: id
+  });
+
+  const deadline = Date.now() + Math.max(2000, waitMs);
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 400));
+    st = await getGatewaySessionStatus(id);
+    if (st.ok && st.status === 'connected') {
+      return { ok: true, status: 'connected', warmed: true };
+    }
+    const cur = String(st.status || '').toLowerCase();
+    if (cur === 'qr_ready') break;
+  }
+
+  return {
+    ok: st.ok && st.status === 'connected',
+    status: st.status || 'warming',
+    warmed: true
+  };
+}
+
+/** Aktif gateway zamanlayıcılarındaki oturumları cron öncesi canlı tutar. */
+export async function warmActiveCoachGatewaySessions(sessionIds = []) {
+  const uniq = [
+    ...new Set(
+      (Array.isArray(sessionIds) ? sessionIds : [sessionIds])
+        .map((x) => String(x || '').trim())
+        .filter(Boolean)
+    )
+  ];
+  const bookId = bookOrderGatewaySessionId();
+  if (bookId) uniq.push(bookId);
+  const results = [];
+  for (const id of uniq) {
+    if (!gatewayConfiguredForSession(id)) continue;
+    try {
+      const out = await warmGatewaySession(id, { waitMs: 6000 });
+      results.push({ session_id: id, ...out });
+    } catch (e) {
+      results.push({
+        session_id: id,
+        ok: false,
+        status: 'warm_error',
+        error: e instanceof Error ? e.message : String(e)
+      });
+    }
+  }
+  return results;
 }
 
 export async function getGatewaySessionStatus(sessionId = bookOrderGatewaySessionId()) {
@@ -273,16 +384,25 @@ export { probeGatewayHealth };
  * Gateway üzerinden düz metin WhatsApp gönderir.
  * @returns {Promise<{ ok: boolean, sid?: string|null, channel: string, error?: string, errorCode?: string, bodyPreview?: string }>}
  */
-export async function sendGatewayTextMessage({ phone, message, sessionId, sessionCandidates }) {
-  const e164 = normalizePhoneToE164(phone);
-  const text = String(message || '').trim();
+export async function sendGatewayTextMessage({
+  phone,
+  message,
+  sessionId,
+  sessionCandidates,
+  allowSharedFallback = false
+}) {
+  const actorSid = String(sessionId || '').trim();
   const candidates = [
     ...(Array.isArray(sessionCandidates) ? sessionCandidates : []),
-    sessionId,
-    bookOrderGatewaySessionId(),
-    reportReminderGatewaySessionId()
+    actorSid
   ];
-  const sid = await pickConnectedGatewaySessionId(candidates);
+  if (allowSharedFallback) {
+    candidates.push(bookOrderGatewaySessionId(), reportReminderGatewaySessionId());
+  }
+  const sid = await pickConnectedGatewaySessionId(candidates, { allowSharedFallback });
+
+  const e164 = normalizePhoneToE164(phone);
+  const text = String(message || '').trim();
 
   if (!resolveGatewayUpstream() || !String(process.env.APP_JWT_SECRET || '').trim()) {
     return {
@@ -296,8 +416,9 @@ export async function sendGatewayTextMessage({ phone, message, sessionId, sessio
     return {
       ok: false,
       channel: 'gateway',
-      error:
-        'Bağlı WhatsApp oturumu yok. Kitap siparişleri veya Koç WhatsApp sayfasından QR okutun; ardından BOOK_ORDER_GATEWAY_SESSION_ID olarak kullanıcı id yazın.',
+      error: allowSharedFallback
+        ? 'Bağlı WhatsApp oturumu yok. İlgili kullanıcı kendi hesabından QR ile bağlanmalı.'
+        : 'Sizin WhatsApp oturumunuz bağlı değil — Koç WhatsApp ayarlarından kendi numaranızı QR ile bağlayın.',
       errorCode: 'GATEWAY_NOT_CONNECTED'
     };
   }
@@ -310,12 +431,27 @@ export async function sendGatewayTextMessage({ phone, message, sessionId, sessio
 
   const status = await getGatewaySessionStatus(sid);
   if (!status.ok) {
-    const st = status.status || 'unknown';
+    const warmed = await warmGatewaySession(sid, { waitMs: 10000 });
+    if (!warmed.ok) {
+      const st = status.status || 'unknown';
+      return {
+        ok: false,
+        channel: 'gateway',
+        error: status.error || `WhatsApp gateway bağlı değil (${st}). QR ile bağlayın.`,
+        errorCode: st === 'missing_session_id' ? 'GATEWAY_SESSION' : 'GATEWAY_NOT_CONNECTED',
+        gateway_session_id: sid
+      };
+    }
+  }
+
+  const recheck = await getGatewaySessionStatus(sid);
+  if (!recheck.ok) {
+    const st = recheck.status || 'unknown';
     return {
       ok: false,
       channel: 'gateway',
-      error: status.error || `WhatsApp gateway bağlı değil (${st}). QR ile bağlayın.`,
-      errorCode: st === 'missing_session_id' ? 'GATEWAY_SESSION' : 'GATEWAY_NOT_CONNECTED',
+      error: recheck.error || `WhatsApp gateway bağlı değil (${st}). QR ile bağlayın.`,
+      errorCode: 'GATEWAY_NOT_CONNECTED',
       gateway_session_id: sid
     };
   }
@@ -328,11 +464,52 @@ export async function sendGatewayTextMessage({ phone, message, sessionId, sessio
 
   if (!r.ok) {
     const err = String(r.data?.error || 'gateway_send_failed');
+    const retryable = new Set([
+      'send_message_timeout',
+      'gateway_upstream_timeout',
+      'session_not_connected',
+      'send_precheck_timeout'
+    ]);
+    if (retryable.has(err)) {
+      await warmGatewaySession(sid, { waitMs: 4000 });
+      const r2 = await gatewayFetch(`/sessions/${encodeURIComponent(sid)}/send`, {
+        method: 'POST',
+        body: { phone: e164.replace(/^\+/, ''), message: text },
+        sessionId: sid
+      });
+      if (r2.ok) {
+        return {
+          ok: true,
+          channel: 'gateway',
+          sid: r2.data?.id || null,
+          meta_message_id: null,
+          bodyPreview: text.slice(0, 200),
+          gateway_message_id: r2.data?.id || null,
+          gateway_session_id: sid
+        };
+      }
+      const err2 = String(r2.data?.error || err);
+      const hints = {
+        session_not_connected: 'Gateway oturumu düştü — QR ile yeniden bağlayın.',
+        number_not_on_whatsapp: 'Numara WhatsApp kayıtlı değil.',
+        invalid_gateway_key: 'GATEWAY_API_KEY uyuşmuyor.',
+        gateway_upstream_timeout: 'VPS gateway zaman aşımı — pm2 restart whatsapp-gateway.',
+        send_message_timeout: 'WhatsApp gönderimi zaman aşımına uğradı; tekrar denendi, yine başarısız.'
+      };
+      return {
+        ok: false,
+        channel: 'gateway',
+        error: hints[err2] || err2,
+        errorCode: err2.toUpperCase().slice(0, 32)
+      };
+    }
+
     const hints = {
       session_not_connected: 'Gateway oturumu düştü — QR ile yeniden bağlayın.',
       number_not_on_whatsapp: 'Numara WhatsApp kayıtlı değil.',
       invalid_gateway_key: 'GATEWAY_API_KEY uyuşmuyor.',
-      gateway_upstream_timeout: 'VPS gateway zaman aşımı — pm2 restart whatsapp-gateway.'
+      gateway_upstream_timeout: 'VPS gateway zaman aşımı — pm2 restart whatsapp-gateway.',
+      send_message_timeout: 'WhatsApp gönderimi zaman aşımına uğradı; birkaç saniye sonra tekrar deneyin.'
     };
     return {
       ok: false,

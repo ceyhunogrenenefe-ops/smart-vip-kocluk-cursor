@@ -1,10 +1,12 @@
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { authorizeVercelOrCronSecret } from '../api/_lib/cron-auth.js';
-import { metaWhatsAppConfigured } from '../api/_lib/meta-whatsapp.js';
-import { sendAutomatedWhatsApp } from '../api/_lib/whatsapp-outbound.js';
 import { renderMessageTemplate } from '../api/_lib/template-engine.js';
 import { normalizePhoneToE164 } from '../api/_lib/phone-whatsapp.js';
 import { recordCronRun } from '../api/_lib/cron-run-log.js';
+import {
+  resolveAutomationSendChannel,
+  sendAutomationTemplateMessage
+} from '../api/_lib/whatsapp-automation-channel.js';
 
 const TEMPLATE_TYPE = 'class_absent_notice_1';
 const ABSENT_KINDS = ['class_absent_notice_1', 'class_absent_notice'];
@@ -41,14 +43,15 @@ export default async function handler(req, res) {
   const auth = authorizeVercelOrCronSecret(req);
   if (!auth.ok) return res.status(401).json({ error: 'Unauthorized cron' });
 
-  if (!metaWhatsAppConfigured()) {
+  const sendChannel = resolveAutomationSendChannel();
+  if (sendChannel === 'none') {
     await recordCronRun({
       jobKey: 'absent_student_notification',
       ok: true,
-      skipped: 'meta_whatsapp_not_ready',
+      skipped: 'automation_channel_not_ready',
       detail: { path: 'class-absent-notify-retry' }
     });
-    return res.status(200).json({ ok: true, skipped: 'meta_whatsapp_not_ready' });
+    return res.status(200).json({ ok: true, skipped: 'automation_channel_not_ready' });
   }
 
   const sinceIso = new Date(Date.now() - 36 * 3600 * 1000).toISOString();
@@ -126,11 +129,20 @@ export default async function handler(req, res) {
       lesson_time: lessonTime
     };
 
-    const sent = await sendAutomatedWhatsApp({
-      phone: parentPhone,
-      templateType: TEMPLATE_TYPE,
-      vars
-    });
+    const { data: templateRow } = await supabaseAdmin
+      .from('message_templates')
+      .select('*')
+      .eq('type', TEMPLATE_TYPE)
+      .maybeSingle();
+
+    const sent = templateRow?.content
+      ? await sendAutomationTemplateMessage({
+          phone: parentPhone,
+          templateRow,
+          vars,
+          templateType: TEMPLATE_TYPE
+        })
+      : { ok: false, bodyPreview: null, sid: null, meta_template_name: null, error: 'template_not_found' };
 
     const preview = sent.bodyPreview || renderMessageTemplate(PREVIEW_FALLBACK, vars);
 
@@ -144,7 +156,7 @@ export default async function handler(req, res) {
           kind: 'class_absent_notice_1',
           phone: parentPhone,
           message: preview,
-          meta_message_id: sent.sid || null,
+          meta_message_id: sent.sid || sent.gateway_message_id || null,
           meta_template_name: sent.meta_template_name || null,
           twilio_error_code: sent.errorCode != null ? String(sent.errorCode) : null
         })

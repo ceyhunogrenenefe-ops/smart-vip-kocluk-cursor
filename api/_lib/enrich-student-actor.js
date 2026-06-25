@@ -4,7 +4,7 @@ import { ensureStudentProfileForActor } from './ensure-student-profile.js';
 /**
  * auth-login ile aynı: coaches satırı e-posta ile bulunur (JWT’de coach_id boş kalmış olabilir).
  */
-async function resolveCoachIdByUserSub(sub) {
+export async function resolveCoachIdByUserSub(sub) {
   if (!sub || sub === 'anonymous') return null;
   const { data: userRow } = await supabaseAdmin
     .from('users')

@@ -3,9 +3,12 @@ import { authorizeVercelOrCronSecret } from '../api/_lib/cron-auth.js';
 import { getIstanbulDateString, addCalendarDaysYmd } from '../api/_lib/istanbul-time.js';
 import { wallTimeToUtcMs } from '../api/_lib/teacher-lesson-start-ms.js';
 import { normalizePhoneToE164 } from '../api/_lib/phone-whatsapp.js';
-import { metaWhatsAppConfigured } from '../api/_lib/meta-whatsapp.js';
-import { sendAutomatedWhatsApp, resolveMetaTemplateName } from '../api/_lib/whatsapp-outbound.js';
-import { getStudentPhones, classifyLessonReminderRecipients } from '../api/_lib/meetings-resolve.js';
+import { resolveMetaTemplateName } from '../api/_lib/whatsapp-outbound.js';
+import {
+  resolveAutomationSendChannel,
+  sendAutomationTemplateMessage
+} from '../api/_lib/whatsapp-automation-channel.js';
+import { getStudentPhones, classifyLessonReminderRecipients, getPrimaryAutomationPhone } from '../api/_lib/meetings-resolve.js';
 import { alreadySentLessonReminder } from '../api/_lib/message-log.js';
 import { recordCronRun } from '../api/_lib/cron-run-log.js';
 import { parseReminderWindowConfig, isWithinReminderWindowMs } from '../api/_lib/lesson-reminder-window.js';
@@ -13,6 +16,7 @@ import {
   loadInstitutionWhatsappAutomationMap,
   studentAllowsWhatsappAutomation
 } from '../api/_lib/whatsapp-automation-eligibility.js';
+import { resolveGuestShareUrlForTeacherLesson } from '../api/_lib/guest-join-share-url.js';
 
 const LESSON_WINDOW = parseReminderWindowConfig('LESSON_REMINDER');
 
@@ -23,7 +27,7 @@ export default async function handler(req, res) {
   const auth = authorizeVercelOrCronSecret(req);
   if (!auth.ok) return res.status(401).json({ error: 'Unauthorized cron' });
 
-  const metaReady = metaWhatsAppConfigured();
+  const sendChannel = resolveAutomationSendChannel();
 
   const log = [];
   const nowMs = Date.now();
@@ -31,8 +35,12 @@ export default async function handler(req, res) {
   const tomorrow = addCalendarDaysYmd(today, 1);
 
   try {
-    const { data: lrRow } = await supabaseAdmin.from('message_templates').select('type').eq('type', 'lesson_reminder').maybeSingle();
-    if (!lrRow) {
+    const { data: lrRow } = await supabaseAdmin
+      .from('message_templates')
+      .select('*')
+      .eq('type', 'lesson_reminder')
+      .maybeSingle();
+    if (!lrRow?.content || lrRow.is_active === false) {
       await recordCronRun({ jobKey: 'lesson_reminders', ok: true, skipped: 'no_lesson_reminder_template' });
       await recordCronRun({
         jobKey: 'lesson_reminder_parent',
@@ -52,8 +60,8 @@ export default async function handler(req, res) {
       : '';
     const parentVeliCronReady =
       Boolean(lrParentRow?.content) &&
-      Boolean(parentMetaResolved) &&
-      lrParentRow?.is_active !== false;
+      lrParentRow?.is_active !== false &&
+      (sendChannel === 'gateway' || Boolean(parentMetaResolved));
 
     let parentSentOk = 0;
     let parentSentFail = 0;
@@ -92,16 +100,19 @@ export default async function handler(req, res) {
       }
 
       const phones = await getStudentPhones(student);
-      if (!phones.length) {
+      const primaryPhone = getPrimaryAutomationPhone(student);
+      if (!primaryPhone) {
         log.push({ lesson_id: lesson.id, note: 'no_phone' });
         continue;
       }
 
-      const recipients = classifyLessonReminderRecipients(student, phones);
-      /** Veli satırı önce — Meta kesintisinde bile veli şansı artsın */
-      const recipientsOrdered = [...recipients].sort(
-        (a, b) => (a.role === 'parent' ? 0 : 1) - (b.role === 'parent' ? 0 : 1)
+      const recipients = classifyLessonReminderRecipients(student, phones).filter(
+        (r) => normalizePhoneToE164(r.phone) === primaryPhone
       );
+      const recipientsOrdered =
+        recipients.length > 0
+          ? recipients
+          : [{ phone: primaryPhone, role: normalizePhoneToE164(student.parent_phone) === primaryPhone ? 'parent' : 'student' }];
 
       const timeLabel = new Intl.DateTimeFormat('tr-TR', {
         timeZone: 'Europe/Istanbul',
@@ -110,7 +121,7 @@ export default async function handler(req, res) {
         hour12: false
       }).format(new Date(startMs));
 
-      const lessonLink = lesson.meeting_link || process.env.APP_BASE_URL || '';
+      const lessonLink = await resolveGuestShareUrlForTeacherLesson(lesson);
 
       const classLabel =
         String(student.class_level || student.class_label || student.group_name || '').trim() || 'Sınıf';
@@ -144,19 +155,20 @@ export default async function handler(req, res) {
           /* devam */
         }
 
-        if (!metaReady) {
-          log.push({ lesson_id: lesson.id, note: 'missing_meta_whatsapp_env' });
+        if (sendChannel === 'none') {
+          log.push({ lesson_id: lesson.id, note: 'automation_channel_not_ready' });
           break;
         }
 
         let templateType = 'lesson_reminder';
         let logKind = 'lesson_reminder';
+        let templateRow = lrRow;
         if (role === 'parent') {
-          if (parentVeliCronReady) {
+          if (parentVeliCronReady && lrParentRow) {
             templateType = 'lesson_reminder_parent';
             logKind = 'lesson_reminder_parent';
+            templateRow = lrParentRow;
           } else {
-            /** Veli şablonu yok veya Meta adı eksik: öğrenci ile aynı `lesson_reminder` şablonu (Meta’da onaylı) kullanılır */
             log.push({
               lesson_id: lesson.id,
               phone: e164,
@@ -166,10 +178,11 @@ export default async function handler(req, res) {
         }
 
         try {
-          const sent = await sendAutomatedWhatsApp({
+          const sent = await sendAutomationTemplateMessage({
             phone: e164,
-            templateType,
-            vars: baseVars
+            templateRow,
+            vars: baseVars,
+            templateType
           });
           const preview = sent.bodyPreview || '';
           const { error: insErr } = await supabaseAdmin.from('message_logs').insert({
@@ -184,7 +197,7 @@ export default async function handler(req, res) {
             twilio_sid: null,
             twilio_error_code: sent.errorCode || null,
             twilio_content_sid: null,
-            meta_message_id: sent.sid || null,
+            meta_message_id: sent.sid || sent.gateway_message_id || null,
             meta_template_name: sent.meta_template_name || null
           });
           if (insErr?.code === '23505') {
@@ -229,9 +242,9 @@ export default async function handler(req, res) {
     const failed = log.filter((x) => x && x.error).length;
 
     let parentSkipped = null;
-    if (!metaReady) parentSkipped = 'missing_meta_whatsapp_env';
+    if (sendChannel === 'none') parentSkipped = 'automation_channel_not_ready';
     else if (!parentVeliCronReady && parentSentOk === 0 && parentSentFail === 0) {
-      parentSkipped = 'parent_template_meta_missing_or_inactive';
+      parentSkipped = 'parent_template_missing_or_inactive';
     }
 
     await recordCronRun({
@@ -240,7 +253,8 @@ export default async function handler(req, res) {
       messagesSent: sent,
       messagesFailed: failed,
       detail: {
-        meta_ready: metaReady,
+        meta_ready: sendChannel === 'meta',
+        send_channel: sendChannel,
         entries: log.length,
         lessons_total: (lessons || []).length,
         lessons_in_reminder_window: lessonsInReminderWindow,
@@ -258,22 +272,19 @@ export default async function handler(req, res) {
       detail: {
         parent_template_ready: parentVeliCronReady,
         parent_meta_resolved: parentMetaResolved,
-        meta_ready: metaReady,
+        meta_ready: sendChannel === 'meta',
+        send_channel: sendChannel,
         lessons_total: (lessons || []).length,
         lessons_in_reminder_window: lessonsInReminderWindow,
         parent_meta_language: lrParentRow?.meta_template_language ?? null
       }
     });
-    let classGroupReminders = null;
-    try {
-      const { runClassLessonRemindersJob } = await import('../api/_lib/run-class-lesson-reminders-job.js');
-      classGroupReminders = await runClassLessonRemindersJob({ triggeredBy: 'lesson_reminders_piggyback' });
-    } catch (piggyErr) {
-      const piggyMsg = piggyErr instanceof Error ? piggyErr.message : String(piggyErr);
-      console.warn('[cron-lesson-reminder] class group piggyback failed', piggyMsg);
-      classGroupReminders = { ok: false, error: piggyMsg };
-    }
-    return res.status(200).json({ ok: true, processed: log.length, log, class_group_reminders: classGroupReminders });
+    return res.status(200).json({
+      ok: true,
+      processed: log.length,
+      log,
+      note: 'class_group_reminders run via /api/cron/class-lesson-reminders only'
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await recordCronRun({ jobKey: 'lesson_reminders', ok: false, detail: { error: msg } });
