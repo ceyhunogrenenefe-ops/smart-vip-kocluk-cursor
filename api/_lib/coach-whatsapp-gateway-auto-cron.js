@@ -45,7 +45,8 @@ function campaignStillActive(schedule, todayTr) {
 function timeMatches(schedule, hour, minute) {
   if (hour !== Number(schedule.send_hour_tr)) return false;
   const sm = Number(schedule.send_minute_tr) || 0;
-  return minute >= sm && minute <= sm + 14;
+  const delta = minute - sm;
+  return delta >= 0 && delta < 15;
 }
 
 function studentPrimaryPhoneRow(student, schedule) {

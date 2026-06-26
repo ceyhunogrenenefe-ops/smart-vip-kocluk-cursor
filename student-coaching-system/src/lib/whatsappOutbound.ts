@@ -59,16 +59,14 @@ function isValidGatewayEnvUrl(s: string): boolean {
 export function resolveWhatsAppGatewayBase(): string {
   const raw = String(import.meta.env.VITE_WHATSAPP_GATEWAY_URL || '').trim();
   const gv = raw.replace(/\/$/, '');
-  if (!gv || !isValidGatewayEnvUrl(gv)) return '';
-  if (typeof window === 'undefined') return gv;
-  try {
-    if (window.location.protocol === 'https:' && gv.startsWith('http://')) {
-      return `${window.location.origin.replace(/\/$/, '')}/api/whatsapp-gateway`;
-    }
-  } catch {
-    /* noop */
+  if (typeof window !== 'undefined') {
+    const origin = window.location.origin.replace(/\/$/, '');
+    const proxy = `${origin}/api/whatsapp-gateway`;
+    if (!gv || !isValidGatewayEnvUrl(gv)) return proxy;
+    if (window.location.protocol === 'https:' && gv.startsWith('http://')) return proxy;
+    return gv;
   }
-  return gv;
+  return gv && isValidGatewayEnvUrl(gv) ? gv : '';
 }
 
 type GatewayStatusPayload = {
@@ -91,7 +89,7 @@ async function callGateway<T>(coachUserId: string, endpoint: string, init?: Requ
   if (gatewayKey) headers.set('x-gateway-key', gatewayKey);
 
   const isSend = /\/send\/?$/i.test(endpoint);
-  const timeoutMs = isSend ? 52000 : 22000;
+  const timeoutMs = isSend ? 115000 : 28000;
   const controller = new AbortController();
   const tid = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -103,7 +101,7 @@ async function callGateway<T>(coachUserId: string, endpoint: string, init?: Requ
     if (e instanceof Error && e.name === 'AbortError') {
       throw new Error(
         isSend
-          ? 'İstek zaman aşımı (52 sn). VPS gateway yavaş veya takılı; pm2 restart whatsapp-gateway deneyin.'
+          ? 'İstek zaman aşımı (115 sn). VPS gateway yavaş veya takılı; pm2 restart whatsapp-gateway deneyin.'
           : 'Gateway durumu alınamadı (zaman aşımı).'
       );
     }
@@ -166,14 +164,11 @@ export async function sendWhatsAppOutbound(opts: {
 
   if (gatewayUrl && coachUserId && hasJwt) {
     try {
-      const connected = await isGatewayWhatsAppConnected(coachUserId);
-      if (connected) {
-        await callGateway(coachUserId, `/sessions/${coachUserId}/send`, {
-          method: 'POST',
-          body: JSON.stringify({ phone: target, message })
-        });
-        return { channel: 'gateway', notice: 'Analiz özeti veliye WhatsApp gateway üzerinden gönderildi.' };
-      }
+      await callGateway(coachUserId, `/sessions/${coachUserId}/send`, {
+        method: 'POST',
+        body: JSON.stringify({ phone: target, message })
+      });
+      return { channel: 'gateway', notice: 'Analiz özeti veliye WhatsApp gateway üzerinden gönderildi.' };
     } catch (e) {
       const err = e instanceof Error ? e.message : 'gateway_send_failed';
       const { opened, url } = openWaMeLink(target, message);

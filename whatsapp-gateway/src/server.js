@@ -74,8 +74,8 @@ const SEND_READY_DELAY_MS = Math.min(
   Math.max(0, Number(process.env.WA_SEND_READY_DELAY_MS) || 500)
 );
 const SEND_WAIT_READY_MS = Math.min(
-  25_000,
-  Math.max(2_000, Number(process.env.WA_SEND_WAIT_READY_MS) || 12_000)
+  45_000,
+  Math.max(5_000, Number(process.env.WA_SEND_WAIT_READY_MS) || 28_000)
 );
 const SEND_WAIT_POLL_MS = Math.min(
   500,
@@ -862,7 +862,7 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
   }
 }
 
-async function ensureConnectedForSend(coachId) {
+async function ensureConnectedForSend(coachId, { waitMs = SEND_WAIT_READY_MS } = {}) {
   if (setupInFlight.has(coachId)) {
     try {
       await setupInFlight.get(coachId);
@@ -911,7 +911,7 @@ async function ensureConnectedForSend(coachId) {
     }
     return session;
   }
-  const waited = await waitUntilReady(SEND_WAIT_READY_MS);
+  const waited = await waitUntilReady(waitMs);
   if (waited) return waited;
   return null;
 }
@@ -1100,11 +1100,16 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
     }
 
     const result = await runInCoachSendQueue(coachId, async () => {
-      const session = await ensureConnectedForSend(coachId);
+      let session = await ensureConnectedForSend(coachId);
+      if (!session?.sock || session.status !== 'connected') {
+        await sleep(1800);
+        session = await ensureConnectedForSend(coachId, { waitMs: SEND_WAIT_READY_MS });
+      }
       if (!session?.sock || session.status !== 'connected') {
         const err = new Error('session_not_connected');
         err.httpStatus = 409;
-        err.hint = 'Bağlantı yeniden kuruluyor olabilir. 2-3 saniye sonra tekrar deneyin veya QR ile yeniden bağlanın.';
+        err.hint =
+          'Bağlantı yeniden kuruluyor. 5-10 saniye bekleyip tekrar deneyin veya Koç WhatsApp’tan QR ile bağlanın.';
         throw err;
       }
 

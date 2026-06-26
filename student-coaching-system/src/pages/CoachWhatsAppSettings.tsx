@@ -1042,24 +1042,82 @@ export default function CoachWhatsAppSettings() {
   };
 
   const sendGatewayMessage = async (targetPhone: string, message: string) => {
-    try {
-      await callGateway(`/sessions/${coachId}/send`, {
-        method: 'POST',
-        body: JSON.stringify({ phone: targetPhone, message })
-      });
-      setStatusMessage('');
-      setGatewaySessionError(null);
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      if (/504|zaman aşımı|timeout/i.test(msg)) {
-        setStatusMessage(
-          'Gönderim yanıtı gecikti — mesaj telefona düşmüş olabilir. Aşağıdaki «Sağlık testi» ile oturumu doğrulayın.'
-        );
+    const maxAttempts = 3;
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        if (attempt === 1) {
+          await ensureGatewayReadyBeforeSend();
+        } else {
+          await new Promise((r) => setTimeout(r, 2500));
+          try {
+            await callGateway(`/sessions/${coachId}/start`, {
+              method: 'POST',
+              body: JSON.stringify({ purge: false })
+            });
+          } catch {
+            /* warm retry */
+          }
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+
+        await callGateway(`/sessions/${coachId}/send`, {
+          method: 'POST',
+          body: JSON.stringify({ phone: targetPhone, message })
+        });
+        setStatusMessage('');
+        setGatewaySessionError(null);
+        return;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        const status = (error as Error & { httpStatus?: number }).httpStatus;
+        const retryable =
+          status === 409 ||
+          status === 502 ||
+          status === 504 ||
+          /session_not_connected|timeout|stream errored|zaman aşımı/i.test(lastError.message);
+        if (!retryable || attempt >= maxAttempts) break;
+      } finally {
+        if (attempt >= maxAttempts) void fetchStatus();
       }
-      throw error;
-    } finally {
-      void fetchStatus();
     }
+
+    const msg = lastError?.message || 'gateway_send_failed';
+    if (/504|zaman aşımı|timeout/i.test(msg)) {
+      setStatusMessage(
+        'Gönderim yanıtı gecikti — mesaj telefona düşmüş olabilir. «Sağlık testi» ile oturumu doğrulayın.'
+      );
+    }
+    throw lastError || new Error(msg);
+  };
+
+  const ensureGatewayReadyBeforeSend = async (): Promise<boolean> => {
+    if (!canUseGateway) return false;
+    if (status === 'connected') return true;
+    try {
+      const data = await callGateway<GatewayStatusPayload>(`/sessions/${coachId}/status`);
+      if (data.status === 'connected') {
+        applyGatewayStatusPayload(data);
+        return true;
+      }
+      if (data.authOnDisk && !data.restoreBlocked) {
+        await callGateway(`/sessions/${coachId}/start`, {
+          method: 'POST',
+          body: JSON.stringify({ purge: false })
+        });
+        for (let i = 0; i < 36; i++) {
+          await new Promise((r) => setTimeout(r, 500));
+          const st = await callGateway<GatewayStatusPayload>(`/sessions/${coachId}/status`);
+          applyGatewayStatusPayload(st);
+          if (st.status === 'connected') return true;
+          if (st.status === 'qr_ready') return false;
+        }
+      }
+    } catch {
+      /* send may still warm on VPS */
+    }
+    return status === 'connected';
   };
 
   const buildTemplateMessage = () => {
@@ -1161,8 +1219,12 @@ export default function CoachWhatsAppSettings() {
       setBulkNotice('Gateway kullanılamıyor — JWT ve gateway adresi gerekli.');
       return;
     }
-    if (!isConnected) {
-      setBulkNotice('Toplu gönderim için QR ile WhatsApp oturumunu bağlayın.');
+
+    const ready = await ensureGatewayReadyBeforeSend();
+    if (!ready) {
+      setBulkNotice(
+        'WhatsApp oturumu bağlı değil. «Oturumu başlat» veya QR ile bağlayın; diskte oturum varsa otomatik yeniden bağlanır.'
+      );
       return;
     }
 
@@ -1244,29 +1306,32 @@ export default function CoachWhatsAppSettings() {
 
     setTemplateSendBusy(true);
     try {
-      if (isConnected && canUseGateway) {
-        await sendGatewayMessage(target, message);
-        setTemplateNotice('Mesaj bağlı WhatsApp oturumundan gönderildi.');
+      if (canUseGateway) {
+        const ready = await ensureGatewayReadyBeforeSend();
+        if (ready) {
+          await sendGatewayMessage(target, message);
+          setTemplateNotice('Mesaj bağlı WhatsApp oturumundan gönderildi.');
+          return;
+        }
+      }
+      const { opened, url } = openWaFallback(target, message);
+      setTemplateWaUrl(url);
+      if (opened) {
+        setTemplateNotice(
+          'Oturum yok; whatsapp bağlantısı yeni sekmede açıldı. Görmüyorsanız görev çubuğundaki sekme veya tarayıcı “popup izni” uyarısı.'
+        );
       } else {
-        const { opened, url } = openWaFallback(target, message);
-        setTemplateWaUrl(url);
-        if (opened) {
-          setTemplateNotice(
-            'Oturum yok; whatsapp bağlantısı yeni sekmede açıldı. Görmüyorsanız görev çubuğundaki sekme veya tarayıcı “popup izni” uyarısı.'
-          );
-        } else {
-          setTemplateNotice(
-            'Tarayıcı yeni sekme açmayı engelledi. Adresteki kilit/popup ikonundan izin verin veya bağlantıyı aşağıdan kopyalayın.'
-          );
+        setTemplateNotice(
+          'Tarayıcı yeni sekme açmayı engelledi. Adresteki kilit/popup ikonundan izin verin veya bağlantıyı aşağıdan kopyalayın.'
+        );
+      }
+      try {
+        if (!opened && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(url);
+          setTemplateNotice((prev) => `${prev}\n(Metin bağlantısı panoya kopyalandı.)`);
         }
-        try {
-          if (!opened && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(url);
-            setTemplateNotice((prev) => `${prev}\n(Metin bağlantısı panoya kopyalandı.)`);
-          }
-        } catch {
-          /* yoksay */
-        }
+      } catch {
+        /* yoksay */
       }
     } catch (error) {
       setTemplateNotice(`Mesaj gönderilemedi: ${(error as Error).message}`);
@@ -1317,17 +1382,20 @@ export default function CoachWhatsAppSettings() {
     }
     const message = 'Merhaba, koç paneli WhatsApp bağlantı test mesajı.';
     try {
-      if (isConnected && canUseGateway) {
-        await sendGatewayMessage(target, message);
-        setStatusMessage('Test mesajı bağlı oturumdan gönderildi.');
-      } else {
-        const { opened, url } = openWaFallback(target, message);
-        setStatusMessage(
-          opened
-            ? 'Oturum yok; whatsapp bağlantısı yeni sekmede açıldı.'
-            : `Tarayıcı yeni sekme açmayı engelledi. Bağlantı:\n${url}`
-        );
+      if (canUseGateway) {
+        const ready = await ensureGatewayReadyBeforeSend();
+        if (ready) {
+          await sendGatewayMessage(target, message);
+          setStatusMessage('Test mesajı bağlı oturumdan gönderildi.');
+          return;
+        }
       }
+      const { opened, url } = openWaFallback(target, message);
+      setStatusMessage(
+        opened
+          ? 'Oturum yok; whatsapp bağlantısı yeni sekmede açıldı.'
+          : `Tarayıcı yeni sekme açmayı engelledi. Bağlantı:\n${url}`
+      );
     } catch (error) {
       setStatusMessage(`Test mesajı gönderilemedi: ${(error as Error).message}`);
     }
@@ -2591,7 +2659,7 @@ export default function CoachWhatsAppSettings() {
           <button
             type="button"
             onClick={() => void sendBulkGateway()}
-            disabled={bulkSendBusy || !bulkSelectedIds.size || !canUseGateway || !isConnected}
+            disabled={bulkSendBusy || !bulkSelectedIds.size || !canUseGateway}
             className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-teal-600 py-3 text-sm font-semibold text-white shadow-md hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:px-8"
           >
             {bulkSendBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}

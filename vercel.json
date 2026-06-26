@@ -39,7 +39,7 @@
     },
     {
       "path": "/api/cron/coach-whatsapp-auto",
-      "schedule": "*/15 * * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/cron/teacher-lessons",

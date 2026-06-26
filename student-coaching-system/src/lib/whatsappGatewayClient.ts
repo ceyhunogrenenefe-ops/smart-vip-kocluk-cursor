@@ -88,6 +88,10 @@ export async function callWhatsAppGateway<T>(
   let res: Response;
   try {
     res = await fetch(`${gatewayUrl}${endpoint}`, { headers, ...init, signal: controller.signal });
+    if (isSend && (res.status === 409 || res.status === 502 || res.status === 504)) {
+      await new Promise((r) => setTimeout(r, 2200));
+      res = await fetch(`${gatewayUrl}${endpoint}`, { headers, ...init, signal: controller.signal });
+    }
   } catch (e) {
     clearTimeout(tid);
     if (e instanceof Error && e.name === 'AbortError') {

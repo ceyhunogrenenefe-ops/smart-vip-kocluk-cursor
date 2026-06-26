@@ -146,8 +146,8 @@ export async function probeConnectedGatewaySessionIds(extraCandidates = []) {
   return connected;
 }
 
-/** Yalnızca aday listedeki oturumları dener; başka kullanıcının bağlı hattını kullanmaz. */
-export async function pickConnectedGatewaySessionId(candidates = [], { allowSharedFallback = false } = {}) {
+/** Gönderim için oturum: önce canlı bağlı, yoksa ısıtılacak aday. */
+export async function resolveGatewaySessionForSend(candidates = [], { allowSharedFallback = false } = {}) {
   const uniq = [
     ...new Set(
       (Array.isArray(candidates) ? candidates : [candidates])
@@ -155,24 +155,30 @@ export async function pickConnectedGatewaySessionId(candidates = [], { allowShar
         .filter(Boolean)
     )
   ];
-  for (const id of uniq) {
-    if (!gatewayConfiguredForSession(id)) continue;
-    const st = await getGatewaySessionStatus(id);
-    if (st.ok && st.status === 'connected') return id;
-  }
-  if (!allowSharedFallback) return uniq[0] || '';
-
   let live = await listConnectedGatewaySessionIds();
-  if (!live.length) {
+  if (!live.length && allowSharedFallback) {
     live = await probeConnectedGatewaySessionIds(uniq);
   }
   for (const id of uniq) {
-    if (live.includes(id)) return id;
+    if (live.includes(id) && gatewayConfiguredForSession(id)) {
+      return { sessionId: id, connected: true };
+    }
   }
-  for (const id of live) {
-    if (gatewayConfiguredForSession(id)) return id;
+  if (allowSharedFallback) {
+    for (const id of live) {
+      if (gatewayConfiguredForSession(id)) return { sessionId: id, connected: true };
+    }
   }
-  return uniq[0] || live[0] || '';
+  for (const id of uniq) {
+    if (gatewayConfiguredForSession(id)) return { sessionId: id, connected: false };
+  }
+  return { sessionId: '', connected: false };
+}
+
+/** @deprecated resolveGatewaySessionForSend kullanın */
+export async function pickConnectedGatewaySessionId(candidates = [], { allowSharedFallback = false } = {}) {
+  const { sessionId } = await resolveGatewaySessionForSend(candidates, { allowSharedFallback });
+  return sessionId;
 }
 
 function serviceGatewayJwt(sessionId) {
@@ -236,7 +242,7 @@ async function gatewayFetch(path, { method = 'GET', body, sessionId } = {}) {
  * Kopmuş oturumu diskteki auth ile sessizce yeniden bağlar (QR gerekmez).
  * @returns {Promise<{ ok: boolean, status?: string, warmed?: boolean }>}
  */
-export async function warmGatewaySession(sessionId, { waitMs = 9000 } = {}) {
+export async function warmGatewaySession(sessionId, { waitMs = 25000 } = {}) {
   const id = String(sessionId || '').trim();
   if (!id || !gatewayConfiguredForSession(id)) {
     return { ok: false, status: 'not_configured' };
@@ -309,7 +315,7 @@ export async function warmActiveCoachGatewaySessions(sessionIds = []) {
   for (const id of uniq) {
     if (!gatewayConfiguredForSession(id)) continue;
     try {
-      const out = await warmGatewaySession(id, { waitMs: 6000 });
+      const out = await warmGatewaySession(id, { waitMs: 12000 });
       results.push({ session_id: id, ...out });
     } catch (e) {
       results.push({
@@ -399,7 +405,6 @@ export async function sendGatewayTextMessage({
   if (allowSharedFallback) {
     candidates.push(bookOrderGatewaySessionId(), reportReminderGatewaySessionId());
   }
-  const sid = await pickConnectedGatewaySessionId(candidates, { allowSharedFallback });
 
   const e164 = normalizePhoneToE164(phone);
   const text = String(message || '').trim();
@@ -412,6 +417,11 @@ export async function sendGatewayTextMessage({
       errorCode: 'GATEWAY_ENV'
     };
   }
+
+  let { sessionId: sid, connected } = await resolveGatewaySessionForSend(candidates, {
+    allowSharedFallback
+  });
+
   if (!sid) {
     return {
       ok: false,
@@ -429,103 +439,83 @@ export async function sendGatewayTextMessage({
     return { ok: false, channel: 'gateway', error: 'Mesaj metni boş.', errorCode: 'MESSAGE' };
   }
 
-  const status = await getGatewaySessionStatus(sid);
-  if (!status.ok) {
-    const warmed = await warmGatewaySession(sid, { waitMs: 10000 });
-    if (!warmed.ok) {
-      const st = status.status || 'unknown';
-      return {
-        ok: false,
-        channel: 'gateway',
-        error: status.error || `WhatsApp gateway bağlı değil (${st}). QR ile bağlayın.`,
-        errorCode: st === 'missing_session_id' ? 'GATEWAY_SESSION' : 'GATEWAY_NOT_CONNECTED',
-        gateway_session_id: sid
-      };
-    }
-  }
+  const retryableErrors = new Set([
+    'send_message_timeout',
+    'gateway_upstream_timeout',
+    'session_not_connected',
+    'send_precheck_timeout',
+    'gateway_fetch_failed'
+  ]);
 
-  const recheck = await getGatewaySessionStatus(sid);
-  if (!recheck.ok) {
-    const st = recheck.status || 'unknown';
-    return {
-      ok: false,
-      channel: 'gateway',
-      error: recheck.error || `WhatsApp gateway bağlı değil (${st}). QR ile bağlayın.`,
-      errorCode: 'GATEWAY_NOT_CONNECTED',
-      gateway_session_id: sid
-    };
-  }
+  const hints = {
+    session_not_connected: 'Gateway oturumu düştü — QR ile yeniden bağlayın veya birkaç saniye sonra tekrar deneyin.',
+    number_not_on_whatsapp: 'Numara WhatsApp kayıtlı değil.',
+    invalid_gateway_key: 'GATEWAY_API_KEY uyuşmuyor.',
+    gateway_upstream_timeout: 'VPS gateway zaman aşımı — pm2 restart whatsapp-gateway.',
+    send_message_timeout: 'WhatsApp gönderimi zaman aşımına uğradı; tekrar denendi.'
+  };
 
-  const r = await gatewayFetch(`/sessions/${encodeURIComponent(sid)}/send`, {
-    method: 'POST',
-    body: { phone: e164.replace(/^\+/, ''), message: text },
-    sessionId: sid
-  });
+  const maxAttempts = 3;
+  let lastErr = 'gateway_send_failed';
 
-  if (!r.ok) {
-    const err = String(r.data?.error || 'gateway_send_failed');
-    const retryable = new Set([
-      'send_message_timeout',
-      'gateway_upstream_timeout',
-      'session_not_connected',
-      'send_precheck_timeout'
-    ]);
-    if (retryable.has(err)) {
-      await warmGatewaySession(sid, { waitMs: 4000 });
-      const r2 = await gatewayFetch(`/sessions/${encodeURIComponent(sid)}/send`, {
-        method: 'POST',
-        body: { phone: e164.replace(/^\+/, ''), message: text },
-        sessionId: sid
-      });
-      if (r2.ok) {
-        return {
-          ok: true,
-          channel: 'gateway',
-          sid: r2.data?.id || null,
-          meta_message_id: null,
-          bodyPreview: text.slice(0, 200),
-          gateway_message_id: r2.data?.id || null,
-          gateway_session_id: sid
-        };
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (!connected || attempt > 1) {
+      const warmed = await warmGatewaySession(sid, { waitMs: attempt === 1 ? 22000 : 14000 });
+      connected = warmed.ok;
+      if (!warmed.ok && attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
       }
-      const err2 = String(r2.data?.error || err);
-      const hints = {
-        session_not_connected: 'Gateway oturumu düştü — QR ile yeniden bağlayın.',
-        number_not_on_whatsapp: 'Numara WhatsApp kayıtlı değil.',
-        invalid_gateway_key: 'GATEWAY_API_KEY uyuşmuyor.',
-        gateway_upstream_timeout: 'VPS gateway zaman aşımı — pm2 restart whatsapp-gateway.',
-        send_message_timeout: 'WhatsApp gönderimi zaman aşımına uğradı; tekrar denendi, yine başarısız.'
-      };
+    }
+
+    const recheck = await getGatewaySessionStatus(sid);
+    if (!recheck.ok && attempt < maxAttempts) {
+      lastErr = String(recheck.error || recheck.status || 'GATEWAY_NOT_CONNECTED');
+      await new Promise((r) => setTimeout(r, 2500));
+      continue;
+    }
+
+    const r = await gatewayFetch(`/sessions/${encodeURIComponent(sid)}/send`, {
+      method: 'POST',
+      body: { phone: e164.replace(/^\+/, ''), message: text },
+      sessionId: sid
+    });
+
+    if (r.ok) {
       return {
-        ok: false,
+        ok: true,
         channel: 'gateway',
-        error: hints[err2] || err2,
-        errorCode: err2.toUpperCase().slice(0, 32)
+        sid: r.data?.id || null,
+        meta_message_id: null,
+        bodyPreview: text.slice(0, 200),
+        gateway_message_id: r.data?.id || null,
+        gateway_session_id: sid,
+        attempts: attempt
       };
     }
 
-    const hints = {
-      session_not_connected: 'Gateway oturumu düştü — QR ile yeniden bağlayın.',
-      number_not_on_whatsapp: 'Numara WhatsApp kayıtlı değil.',
-      invalid_gateway_key: 'GATEWAY_API_KEY uyuşmuyor.',
-      gateway_upstream_timeout: 'VPS gateway zaman aşımı — pm2 restart whatsapp-gateway.',
-      send_message_timeout: 'WhatsApp gönderimi zaman aşımına uğradı; birkaç saniye sonra tekrar deneyin.'
-    };
-    return {
-      ok: false,
-      channel: 'gateway',
-      error: hints[err] || err,
-      errorCode: err.toUpperCase().slice(0, 32)
-    };
+    lastErr = String(r.data?.error || 'gateway_send_failed');
+    if (!retryableErrors.has(lastErr) || attempt >= maxAttempts) {
+      return {
+        ok: false,
+        channel: 'gateway',
+        error: hints[lastErr] || lastErr,
+        errorCode: lastErr.toUpperCase().slice(0, 32),
+        gateway_session_id: sid,
+        attempts: attempt
+      };
+    }
+
+    await warmGatewaySession(sid, { waitMs: 4000 });
+    await new Promise((r) => setTimeout(r, 2000));
+    connected = false;
   }
 
   return {
-    ok: true,
+    ok: false,
     channel: 'gateway',
-    sid: r.data?.id || null,
-    meta_message_id: null,
-    bodyPreview: text.slice(0, 200),
-    gateway_message_id: r.data?.id || null,
+    error: hints[lastErr] || lastErr,
+    errorCode: String(lastErr).toUpperCase().slice(0, 32),
     gateway_session_id: sid
   };
 }

@@ -25,8 +25,15 @@ export function resolveGatewayUpstream() {
   }
 }
 
-/** VPS /health — JWT gerekmez */
+/** VPS /health — JWT gerekmez; kısa süre önbellek (status spam önlenir). */
+let healthCache = { at: 0, data: null };
+const HEALTH_CACHE_MS = Math.min(8000, Math.max(1500, Number(process.env.WA_GATEWAY_HEALTH_CACHE_MS) || 3000));
+
 export async function probeGatewayHealth() {
+  const now = Date.now();
+  if (healthCache.data && now - healthCache.at < HEALTH_CACHE_MS) {
+    return healthCache.data;
+  }
   const upstream = resolveGatewayUpstream();
   if (!upstream) {
     return { ok: false, error: 'upstream_missing', upstream: null };
@@ -38,7 +45,7 @@ export async function probeGatewayHealth() {
     const res = await fetch(`${upstream}/health`, { signal: controller.signal });
     clearTimeout(tid);
     const data = await res.json().catch(() => ({}));
-    return {
+    const out = {
       ok: res.ok && data?.ok !== false,
       status: res.status,
       upstream: upstream.replace(/^https?:\/\//, ''),
@@ -50,13 +57,17 @@ export async function probeGatewayHealth() {
         : [],
       error: res.ok ? null : String(data?.error || `http_${res.status}`)
     };
+    healthCache = { at: Date.now(), data: out };
+    return out;
   } catch (e) {
     clearTimeout(tid);
     const aborted = e instanceof Error && e.name === 'AbortError';
-    return {
+    const out = {
       ok: false,
       upstream: upstream.replace(/^https?:\/\//, ''),
       error: aborted ? 'gateway_upstream_timeout' : e instanceof Error ? e.message : 'fetch_failed'
     };
+    healthCache = { at: Date.now(), data: out };
+    return out;
   }
 }
