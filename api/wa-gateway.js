@@ -88,7 +88,7 @@ export default async function handler(req, res) {
       isStatusRoute ||
       (isSendRoute && (r.status === 409 || r.status === 502 || r.status === 504));
     if (canRetry && (r.status === 409 || r.status === 502 || r.status === 504)) {
-      await new Promise((resolve) => setTimeout(resolve, isSendRoute ? 2200 : 250));
+      await new Promise((resolve) => setTimeout(resolve, isSendRoute ? 900 : 200));
       r = await fetchOnce();
     }
     const buf = Buffer.from(await r.arrayBuffer());

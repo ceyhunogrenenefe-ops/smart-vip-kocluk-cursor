@@ -89,7 +89,7 @@ export async function callWhatsAppGateway<T>(
   try {
     res = await fetch(`${gatewayUrl}${endpoint}`, { headers, ...init, signal: controller.signal });
     if (isSend && (res.status === 409 || res.status === 502 || res.status === 504)) {
-      await new Promise((r) => setTimeout(r, 2200));
+      await new Promise((r) => setTimeout(r, 900));
       res = await fetch(`${gatewayUrl}${endpoint}`, { headers, ...init, signal: controller.signal });
     }
   } catch (e) {

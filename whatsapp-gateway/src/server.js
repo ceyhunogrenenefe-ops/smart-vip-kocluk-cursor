@@ -74,8 +74,8 @@ const SEND_READY_DELAY_MS = Math.min(
   Math.max(0, Number(process.env.WA_SEND_READY_DELAY_MS) || 500)
 );
 const SEND_WAIT_READY_MS = Math.min(
-  45_000,
-  Math.max(5_000, Number(process.env.WA_SEND_WAIT_READY_MS) || 28_000)
+  30_000,
+  Math.max(5_000, Number(process.env.WA_SEND_WAIT_READY_MS) || 14_000)
 );
 const SEND_WAIT_POLL_MS = Math.min(
   500,
@@ -1100,9 +1100,19 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
     }
 
     const result = await runInCoachSendQueue(coachId, async () => {
-      let session = await ensureConnectedForSend(coachId);
+      let session = sessions.get(coachId);
+      if (
+        session?.sock &&
+        session.status === 'connected' &&
+        session.sock.user &&
+        Date.now() >= Number(session.readyAt || 0)
+      ) {
+        return sendTextWithTimeout(session.sock, jid, message);
+      }
+
+      session = await ensureConnectedForSend(coachId, { waitMs: 6000 });
       if (!session?.sock || session.status !== 'connected') {
-        await sleep(1800);
+        await sleep(400);
         session = await ensureConnectedForSend(coachId, { waitMs: SEND_WAIT_READY_MS });
       }
       if (!session?.sock || session.status !== 'connected') {

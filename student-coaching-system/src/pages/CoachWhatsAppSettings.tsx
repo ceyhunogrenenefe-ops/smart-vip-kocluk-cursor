@@ -1042,15 +1042,13 @@ export default function CoachWhatsAppSettings() {
   };
 
   const sendGatewayMessage = async (targetPhone: string, message: string) => {
-    const maxAttempts = 3;
+    const maxAttempts = 2;
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        if (attempt === 1) {
-          await ensureGatewayReadyBeforeSend();
-        } else {
-          await new Promise((r) => setTimeout(r, 2500));
+        if (attempt > 1) {
+          await new Promise((r) => setTimeout(r, 1200));
           try {
             await callGateway(`/sessions/${coachId}/start`, {
               method: 'POST',
@@ -1059,7 +1057,9 @@ export default function CoachWhatsAppSettings() {
           } catch {
             /* warm retry */
           }
-          await new Promise((r) => setTimeout(r, 2000));
+          await new Promise((r) => setTimeout(r, 1000));
+        } else if (status !== 'connected') {
+          await ensureGatewayReadyBeforeSend(5000);
         }
 
         await callGateway(`/sessions/${coachId}/send`, {
@@ -1068,18 +1068,17 @@ export default function CoachWhatsAppSettings() {
         });
         setStatusMessage('');
         setGatewaySessionError(null);
+        void fetchStatus();
         return;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        const status = (error as Error & { httpStatus?: number }).httpStatus;
+        const httpStatus = (error as Error & { httpStatus?: number }).httpStatus;
         const retryable =
-          status === 409 ||
-          status === 502 ||
-          status === 504 ||
+          httpStatus === 409 ||
+          httpStatus === 502 ||
+          httpStatus === 504 ||
           /session_not_connected|timeout|stream errored|zaman aşımı/i.test(lastError.message);
         if (!retryable || attempt >= maxAttempts) break;
-      } finally {
-        if (attempt >= maxAttempts) void fetchStatus();
       }
     }
 
@@ -1089,10 +1088,11 @@ export default function CoachWhatsAppSettings() {
         'Gönderim yanıtı gecikti — mesaj telefona düşmüş olabilir. «Sağlık testi» ile oturumu doğrulayın.'
       );
     }
+    void fetchStatus();
     throw lastError || new Error(msg);
   };
 
-  const ensureGatewayReadyBeforeSend = async (): Promise<boolean> => {
+  const ensureGatewayReadyBeforeSend = async (maxWaitMs = 5000): Promise<boolean> => {
     if (!canUseGateway) return false;
     if (status === 'connected') return true;
     try {
@@ -1102,12 +1102,13 @@ export default function CoachWhatsAppSettings() {
         return true;
       }
       if (data.authOnDisk && !data.restoreBlocked) {
-        await callGateway(`/sessions/${coachId}/start`, {
+        void callGateway(`/sessions/${coachId}/start`, {
           method: 'POST',
           body: JSON.stringify({ purge: false })
         });
-        for (let i = 0; i < 36; i++) {
-          await new Promise((r) => setTimeout(r, 500));
+        const deadline = Date.now() + Math.max(1500, maxWaitMs);
+        while (Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 350));
           const st = await callGateway<GatewayStatusPayload>(`/sessions/${coachId}/status`);
           applyGatewayStatusPayload(st);
           if (st.status === 'connected') return true;
@@ -1115,7 +1116,7 @@ export default function CoachWhatsAppSettings() {
         }
       }
     } catch {
-      /* send may still warm on VPS */
+      /* VPS send endpoint may still warm */
     }
     return status === 'connected';
   };
@@ -1220,12 +1221,8 @@ export default function CoachWhatsAppSettings() {
       return;
     }
 
-    const ready = await ensureGatewayReadyBeforeSend();
-    if (!ready) {
-      setBulkNotice(
-        'WhatsApp oturumu bağlı değil. «Oturumu başlat» veya QR ile bağlayın; diskte oturum varsa otomatik yeniden bağlanır.'
-      );
-      return;
+    if (status !== 'connected') {
+      await ensureGatewayReadyBeforeSend(4000);
     }
 
     const targets = students.filter((st) => bulkSelectedIds.has(st.id));
@@ -1259,7 +1256,7 @@ export default function CoachWhatsAppSettings() {
           if (errors.length < 3) errors.push(`${st.name}: ${msg}`);
         }
         if (i < withPhone.length - 1) {
-          await new Promise((r) => setTimeout(r, 900));
+          await new Promise((r) => setTimeout(r, 350));
         }
       }
       const parts = [`${ok}/${withPhone.length} mesaj gönderildi.`];
@@ -1307,11 +1304,12 @@ export default function CoachWhatsAppSettings() {
     setTemplateSendBusy(true);
     try {
       if (canUseGateway) {
-        const ready = await ensureGatewayReadyBeforeSend();
-        if (ready) {
+        try {
           await sendGatewayMessage(target, message);
           setTemplateNotice('Mesaj bağlı WhatsApp oturumundan gönderildi.');
           return;
+        } catch {
+          /* wa.me yedek */
         }
       }
       const { opened, url } = openWaFallback(target, message);
@@ -1383,11 +1381,12 @@ export default function CoachWhatsAppSettings() {
     const message = 'Merhaba, koç paneli WhatsApp bağlantı test mesajı.';
     try {
       if (canUseGateway) {
-        const ready = await ensureGatewayReadyBeforeSend();
-        if (ready) {
+        try {
           await sendGatewayMessage(target, message);
           setStatusMessage('Test mesajı bağlı oturumdan gönderildi.');
           return;
+        } catch {
+          /* wa.me yedek */
         }
       }
       const { opened, url } = openWaFallback(target, message);

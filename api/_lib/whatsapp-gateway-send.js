@@ -242,20 +242,20 @@ async function gatewayFetch(path, { method = 'GET', body, sessionId } = {}) {
  * Kopmuş oturumu diskteki auth ile sessizce yeniden bağlar (QR gerekmez).
  * @returns {Promise<{ ok: boolean, status?: string, warmed?: boolean }>}
  */
-export async function warmGatewaySession(sessionId, { waitMs = 25000 } = {}) {
+export async function warmGatewaySession(sessionId, { waitMs = 8000 } = {}) {
   const id = String(sessionId || '').trim();
   if (!id || !gatewayConfiguredForSession(id)) {
     return { ok: false, status: 'not_configured' };
   }
 
+  let st = await getGatewaySessionStatus(id, { skipHealth: true });
+  if (st.ok && st.status === 'connected') {
+    return { ok: true, status: 'connected', warmed: false };
+  }
+
   const health = await probeGatewayHealth();
   if (!health.ok) {
     return { ok: false, status: 'vps_unreachable' };
-  }
-
-  let st = await getGatewaySessionStatus(id);
-  if (st.ok && st.status === 'connected') {
-    return { ok: true, status: 'connected', warmed: false };
   }
 
   const raw = st.raw && typeof st.raw === 'object' ? st.raw : {};
@@ -284,8 +284,8 @@ export async function warmGatewaySession(sessionId, { waitMs = 25000 } = {}) {
 
   const deadline = Date.now() + Math.max(2000, waitMs);
   while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 400));
-    st = await getGatewaySessionStatus(id);
+    await new Promise((r) => setTimeout(r, 300));
+    st = await getGatewaySessionStatus(id, { skipHealth: true });
     if (st.ok && st.status === 'connected') {
       return { ok: true, status: 'connected', warmed: true };
     }
@@ -329,21 +329,24 @@ export async function warmActiveCoachGatewaySessions(sessionIds = []) {
   return results;
 }
 
-export async function getGatewaySessionStatus(sessionId = bookOrderGatewaySessionId()) {
+export async function getGatewaySessionStatus(sessionId = bookOrderGatewaySessionId(), opts = {}) {
   const id = String(sessionId || '').trim();
   if (!id) return { ok: false, status: 'missing_session_id' };
 
-  const health = await probeGatewayHealth();
-  if (!health.ok) {
-    return {
-      ok: false,
-      status: 'vps_unreachable',
-      health,
-      error:
-        health.error === 'fetch_failed' || health.error === 'gateway_upstream_timeout'
-          ? 'VPS gateway yanıt vermiyor — sunucuda pm2 restart whatsapp-gateway ve 4010 portu açık mı kontrol edin.'
-          : health.error || 'gateway_health_failed'
-    };
+  let health = null;
+  if (!opts.skipHealth) {
+    health = await probeGatewayHealth();
+    if (!health.ok) {
+      return {
+        ok: false,
+        status: 'vps_unreachable',
+        health,
+        error:
+          health.error === 'fetch_failed' || health.error === 'gateway_upstream_timeout'
+            ? 'VPS gateway yanıt vermiyor — sunucuda pm2 restart whatsapp-gateway ve 4010 portu açık mı kontrol edin.'
+            : health.error || 'gateway_health_failed'
+      };
+    }
   }
 
   const r = await gatewayFetch(`/sessions/${encodeURIComponent(id)}/status`, { sessionId: id });
@@ -418,7 +421,7 @@ export async function sendGatewayTextMessage({
     };
   }
 
-  let { sessionId: sid, connected } = await resolveGatewaySessionForSend(candidates, {
+  let { sessionId: sid } = await resolveGatewaySessionForSend(candidates, {
     allowSharedFallback
   });
 
@@ -455,29 +458,14 @@ export async function sendGatewayTextMessage({
     send_message_timeout: 'WhatsApp gönderimi zaman aşımına uğradı; tekrar denendi.'
   };
 
-  const maxAttempts = 3;
+  const payload = { phone: e164.replace(/^\+/, ''), message: text };
+  const maxAttempts = 2;
   let lastErr = 'gateway_send_failed';
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    if (!connected || attempt > 1) {
-      const warmed = await warmGatewaySession(sid, { waitMs: attempt === 1 ? 22000 : 14000 });
-      connected = warmed.ok;
-      if (!warmed.ok && attempt < maxAttempts) {
-        await new Promise((r) => setTimeout(r, 2000));
-        continue;
-      }
-    }
-
-    const recheck = await getGatewaySessionStatus(sid);
-    if (!recheck.ok && attempt < maxAttempts) {
-      lastErr = String(recheck.error || recheck.status || 'GATEWAY_NOT_CONNECTED');
-      await new Promise((r) => setTimeout(r, 2500));
-      continue;
-    }
-
     const r = await gatewayFetch(`/sessions/${encodeURIComponent(sid)}/send`, {
       method: 'POST',
-      body: { phone: e164.replace(/^\+/, ''), message: text },
+      body: payload,
       sessionId: sid
     });
 
@@ -506,9 +494,10 @@ export async function sendGatewayTextMessage({
       };
     }
 
-    await warmGatewaySession(sid, { waitMs: 4000 });
-    await new Promise((r) => setTimeout(r, 2000));
-    connected = false;
+    const warmed = await warmGatewaySession(sid, { waitMs: attempt === 1 ? 7000 : 10000 });
+    if (!warmed.ok) {
+      await new Promise((r) => setTimeout(r, 800));
+    }
   }
 
   return {
