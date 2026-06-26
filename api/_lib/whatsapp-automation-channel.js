@@ -55,36 +55,47 @@ export function automationGatewayReady() {
   return automationGatewaySessionCandidates().some((id) => gatewayConfiguredForSession(id));
 }
 
+/** Meta yedek: gateway başarısız olunca (varsayılan açık). WHATSAPP_AUTOMATION_FALLBACK_META=0 ile kapatılır. */
+export function automationMetaFallbackEnabled() {
+  if (automationChannelPreference() === 'meta') return true;
+  return String(process.env.WHATSAPP_AUTOMATION_FALLBACK_META ?? '1').trim() !== '0';
+}
+
 /** Aktif gönderim kanalı (tercih + yapılandırma). */
 export function resolveAutomationSendChannel() {
   const pref = automationChannelPreference();
-  if (pref === 'gateway' && automationGatewayReady()) return 'gateway';
-  if (metaWhatsAppConfigured()) return 'meta';
+  if (pref === 'meta') {
+    return metaWhatsAppConfigured() ? 'meta' : automationGatewayReady() ? 'gateway' : 'none';
+  }
   if (automationGatewayReady()) return 'gateway';
+  if (metaWhatsAppConfigured()) return 'meta';
   return 'none';
 }
 
-/** Günlük rapor — REPORT_REMINDER_CHANNEL ile geçersiz kılınabilir. */
+/** Günlük rapor — önce gateway, olmazsa Meta (REPORT_REMINDER_CHANNEL artık yalnızca teşhis). */
 export function reportReminderSendChannel() {
-  const legacyRaw = String(process.env.REPORT_REMINDER_CHANNEL ?? '').trim().toLowerCase();
-  if (legacyRaw) {
-    const pref = parseAutomationChannel(
-      legacyRaw === 'meta' || legacyRaw === 'cloud' || legacyRaw === 'meta_cloud_api' ? 'meta' : legacyRaw
-    );
-    if (pref === 'gateway') {
-      return automationGatewayReady() ? 'gateway' : 'none';
-    }
-    return metaWhatsAppConfigured() ? 'meta' : 'none';
-  }
-  return resolveAutomationSendChannel();
+  if (automationGatewayReady()) return 'gateway';
+  if (metaWhatsAppConfigured()) return 'meta';
+  return 'none';
+}
+
+function automationSendPlan() {
+  const pref = automationChannelPreference();
+  const gwReady = automationGatewayReady();
+  const metaReady = metaWhatsAppConfigured();
+  const metaFallback = automationMetaFallbackEnabled();
+  const tryGateway = pref !== 'meta' && gwReady;
+  const tryMeta = metaReady && (pref === 'meta' || metaFallback || !gwReady);
+  return { pref, gwReady, metaReady, tryGateway, tryMeta };
 }
 
 /**
  * message_templates satırı + değişkenlerle gönder (gateway düz metin veya Meta şablon).
  */
 export async function sendAutomationTemplateMessage({ phone, templateRow, vars, templateType }) {
-  const channel = resolveAutomationSendChannel();
-  if (channel === 'none') {
+  const { tryGateway, tryMeta } = automationSendPlan();
+
+  if (!tryGateway && !tryMeta) {
     return {
       ok: false,
       channel: 'none',
@@ -100,7 +111,7 @@ export async function sendAutomationTemplateMessage({ phone, templateRow, vars, 
   if (!templateRow?.content) {
     return {
       ok: false,
-      channel,
+      channel: tryGateway ? 'gateway' : 'meta',
       error: 'template_not_found',
       errorCode: 'TEMPLATE_NOT_FOUND',
       bodyPreview: null,
@@ -110,48 +121,10 @@ export async function sendAutomationTemplateMessage({ phone, templateRow, vars, 
     };
   }
 
-  if (channel === 'gateway') {
-    const text = renderMessageTemplate(String(templateRow.content), vars || {}).trim();
-    const sessionId = automationGatewaySessionId();
-    const sent = await sendGatewayTextMessage({
-      phone,
-      message: text,
-      sessionId,
-      sessionCandidates: automationGatewaySessionCandidates(),
-      allowSharedFallback: true
-    });
-    return {
-      ok: sent.ok,
-      channel: 'gateway',
-      error: sent.ok ? null : sent.error || null,
-      errorCode: sent.ok ? null : sent.errorCode || 'GATEWAY_SEND_FAILED',
-      bodyPreview: text.slice(0, 800),
-      sid: sent.gateway_message_id || sent.sid || null,
-      gateway_message_id: sent.gateway_message_id || sent.sid || null,
-      meta_template_name: 'gateway_plain',
-      logCode: sent.ok ? null : sent.errorCode || 'GATEWAY_SEND_FAILED'
-    };
-  }
+  const text = renderMessageTemplate(String(templateRow.content), vars || {}).trim();
+  let lastGw = null;
 
-  return sendWhatsAppUsingTemplateRow({
-    phone,
-    templateRow,
-    vars,
-    templateType
-  });
-}
-
-/** Serbest metin (yoklama toplu bildirim vb.). */
-export async function sendAutomationPlainText({ phone, message }) {
-  const channel = resolveAutomationSendChannel();
-  const text = String(message || '').trim();
-  if (!text) {
-    return { ok: false, channel, error: 'empty_message', errorCode: 'EMPTY_MESSAGE' };
-  }
-  if (channel === 'none') {
-    return { ok: false, channel: 'none', error: 'no_automation_channel', errorCode: 'NO_CHANNEL' };
-  }
-  if (channel === 'gateway') {
+  if (tryGateway) {
     const sent = await sendGatewayTextMessage({
       phone,
       message: text,
@@ -159,13 +132,98 @@ export async function sendAutomationPlainText({ phone, message }) {
       sessionCandidates: automationGatewaySessionCandidates(),
       allowSharedFallback: true
     });
+    if (sent.ok) {
+      return {
+        ok: true,
+        channel: 'gateway',
+        error: null,
+        errorCode: null,
+        bodyPreview: text.slice(0, 800),
+        sid: sent.gateway_message_id || sent.sid || null,
+        gateway_message_id: sent.gateway_message_id || sent.sid || null,
+        meta_template_name: 'gateway_plain',
+        logCode: null
+      };
+    }
+    lastGw = sent;
+    if (!tryMeta) {
+      return {
+        ok: false,
+        channel: 'gateway',
+        error: sent.error || null,
+        errorCode: sent.errorCode || 'GATEWAY_SEND_FAILED',
+        bodyPreview: text.slice(0, 800),
+        sid: null,
+        gateway_message_id: null,
+        meta_template_name: 'gateway_plain',
+        logCode: sent.errorCode || 'GATEWAY_SEND_FAILED'
+      };
+    }
+  }
+
+  const meta = await sendWhatsAppUsingTemplateRow({
+    phone,
+    templateRow,
+    vars,
+    templateType
+  });
+  if (meta.ok) {
     return {
-      ok: sent.ok,
-      channel: 'gateway',
-      error: sent.ok ? null : sent.error || null,
-      errorCode: sent.ok ? null : sent.errorCode || null,
-      gateway_message_id: sent.gateway_message_id || null
+      ...meta,
+      channel: 'meta',
+      fallback_from: lastGw ? 'gateway' : null
     };
+  }
+  if (lastGw) {
+    return {
+      ...meta,
+      channel: 'meta',
+      error: `${lastGw.error || 'gateway_failed'} · Meta: ${meta.error || 'failed'}`,
+      gateway_attempt: lastGw.errorCode || null
+    };
+  }
+  return meta;
+}
+
+/** Serbest metin (yoklama toplu bildirim vb.). */
+export async function sendAutomationPlainText({ phone, message }) {
+  const { tryGateway, tryMeta } = automationSendPlan();
+  const text = String(message || '').trim();
+  if (!text) {
+    return { ok: false, channel: 'none', error: 'empty_message', errorCode: 'EMPTY_MESSAGE' };
+  }
+  if (!tryGateway && !tryMeta) {
+    return { ok: false, channel: 'none', error: 'no_automation_channel', errorCode: 'NO_CHANNEL' };
+  }
+
+  let lastGw = null;
+  if (tryGateway) {
+    const sent = await sendGatewayTextMessage({
+      phone,
+      message: text,
+      sessionId: automationGatewaySessionId(),
+      sessionCandidates: automationGatewaySessionCandidates(),
+      allowSharedFallback: true
+    });
+    if (sent.ok) {
+      return {
+        ok: true,
+        channel: 'gateway',
+        error: null,
+        errorCode: null,
+        gateway_message_id: sent.gateway_message_id || null
+      };
+    }
+    lastGw = sent;
+    if (!tryMeta) {
+      return {
+        ok: false,
+        channel: 'gateway',
+        error: sent.error || null,
+        errorCode: sent.errorCode || null,
+        gateway_message_id: null
+      };
+    }
   }
 
   const { sendMetaTextMessage } = await import('./meta-whatsapp.js');
@@ -175,10 +233,20 @@ export async function sendAutomationPlainText({ phone, message }) {
       ok: true,
       channel: 'meta',
       sid: r?.messages?.[0]?.id || null,
-      meta_message_id: r?.messages?.[0]?.id || null
+      meta_message_id: r?.messages?.[0]?.id || null,
+      fallback_from: lastGw ? 'gateway' : null
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    if (lastGw) {
+      return {
+        ok: false,
+        channel: 'meta',
+        error: `${lastGw.error || 'gateway_failed'} · Meta: ${msg}`,
+        errorCode: 'META_SEND_FAILED',
+        gateway_attempt: lastGw.errorCode || null
+      };
+    }
     return { ok: false, channel: 'meta', error: msg, errorCode: 'META_SEND_FAILED' };
   }
 }

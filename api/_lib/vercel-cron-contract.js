@@ -7,7 +7,7 @@
  * --- Günlük rapor WhatsApp (handlers/cron-report-check.js) ---
  * Hedef: Her akşam **İstanbul 22:00**.
  * vercel.json: **UTC `0 19 * * *`** (19:00 UTC + 3 saat = 22:00 TR).
- * Kanal: varsayılan **gateway** (WHATSAPP_AUTOMATION_CHANNEL). Meta yedek: WHATSAPP_AUTOMATION_CHANNEL=meta
+ * Kanal: önce **gateway** (WHATSAPP_AUTOMATION_CHANNEL). Gateway başarısızsa Meta yedek.
  *
  * --- Canlı ders hatırlatma (handlers/cron-lesson-reminder.js) ---
  * Her 5 dk UTC; pencere: ders başlamadan 7–13 dk (≈10 dk). Kanal: gateway (varsayılan).

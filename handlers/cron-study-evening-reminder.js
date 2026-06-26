@@ -2,7 +2,7 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { authorizeVercelOrCronSecret } from '../api/_lib/cron-auth.js';
 import { getIstanbulDateString, getIstanbulHour } from '../api/_lib/istanbul-time.js';
 import { renderMessageTemplate } from '../api/_lib/template-engine.js';
-import { sendAutomatedWhatsApp } from '../api/_lib/whatsapp-outbound.js';
+import { sendAutomationTemplateMessage, automationGatewayReady } from '../api/_lib/whatsapp-automation-channel.js';
 import { metaWhatsAppConfigured } from '../api/_lib/meta-whatsapp.js';
 import { getStudentPhoneForReport } from '../api/_lib/meetings-resolve.js';
 import { recordCronRun } from '../api/_lib/cron-run-log.js';
@@ -21,7 +21,7 @@ export default async function handler(req, res) {
   const auth = authorizeVercelOrCronSecret(req);
   if (!auth.ok) return res.status(401).json({ error: 'Unauthorized cron' });
 
-  const metaReady = metaWhatsAppConfigured();
+  const canSend = automationGatewayReady() || metaWhatsAppConfigured();
   const hourIst = getIstanbulHour();
 
   if (auth.source === 'vercel' && hourIst !== 22) {
@@ -39,9 +39,9 @@ export default async function handler(req, res) {
     });
   }
 
-  if (!metaReady) {
-    await recordCronRun({ jobKey: 'study_evening_reminder', ok: true, skipped: 'missing_meta_whatsapp_env' });
-    return res.status(200).json({ ok: true, skipped: 'missing_meta_whatsapp_env', log: [] });
+  if (!canSend) {
+    await recordCronRun({ jobKey: 'study_evening_reminder', ok: true, skipped: 'no_automation_channel' });
+    return res.status(200).json({ ok: true, skipped: 'no_automation_channel', log: [] });
   }
 
   const log = [];
@@ -50,7 +50,7 @@ export default async function handler(req, res) {
   try {
     const { data: template, error: tErr } = await supabaseAdmin
       .from('message_templates')
-      .select('content')
+      .select('*')
       .eq('type', 'study_evening_reminder')
       .maybeSingle();
     if (tErr) throw tErr;
@@ -72,8 +72,8 @@ export default async function handler(req, res) {
 
     const { data: sentRows } = await supabaseAdmin
       .from('message_logs')
-      .select('student_id')
-      .eq('kind', 'study_evening_reminder')
+      .select('student_id, kind')
+      .in('kind', ['study_evening_reminder', 'report_reminder', 'report_reminder_parent'])
       .eq('log_date', today)
       .eq('status', 'sent');
     const alreadySent = new Set((sentRows || []).map((r) => r.student_id));
@@ -104,8 +104,9 @@ export default async function handler(req, res) {
       const body = renderMessageTemplate(template.content, tmplVars);
 
       try {
-        const sent = await sendAutomatedWhatsApp({
+        const sent = await sendAutomationTemplateMessage({
           phone: dest,
+          templateRow: template,
           templateType: 'study_evening_reminder',
           vars: tmplVars,
         });

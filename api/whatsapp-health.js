@@ -128,13 +128,13 @@ export default async function handler(req, res) {
       ist_hour: reportReminderIstHour(),
       cron_utc: CRON_DAILY_REPORT_REMINDERS_UTC,
       template_type: 'report_reminder',
-      env_channel: String(process.env.REPORT_REMINDER_CHANNEL ?? 'meta').trim() || 'meta',
+      env_channel: String(process.env.WHATSAPP_AUTOMATION_CHANNEL ?? 'gateway').trim() || 'gateway',
       hint:
-        reportReminderSendChannel() === 'meta'
-          ? 'Günlük rapor hatırlatması Meta şablonu ile gider (22:00 TR). Supabase message_templates.report_reminder aktif olmalı.'
-          : reportReminderSendChannel() === 'gateway'
-            ? 'Gateway modu — REPORT_REMINDER_CHANNEL=gateway. Meta için env boş bırakın veya meta yazın.'
-            : 'Meta env eksik veya gateway yapılandırılmamış — mesaj gitmez.'
+        reportReminderSendChannel() === 'gateway'
+          ? 'Günlük rapor: önce gateway (QR), başarısızsa Meta yedek (22:00 TR).'
+          : reportReminderSendChannel() === 'meta'
+            ? 'Gateway yapılandırılmamış — yalnızca Meta şablonu ile gider. message_templates.report_reminder aktif olmalı.'
+            : 'Gateway ve Meta yapılandırılmamış — mesaj gitmez.'
     },
     meta,
     twilio: {
