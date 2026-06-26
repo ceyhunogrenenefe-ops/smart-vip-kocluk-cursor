@@ -91,6 +91,8 @@ const SEND_MESSAGE_RETRIES = Math.min(
   2,
   Math.max(0, Number(process.env.WA_SEND_MESSAGE_RETRIES) || 1)
 );
+/** İstenen oturum bağlı değilse başka bağlı WhatsApp hattından gönder (otomasyon). */
+const SHARED_SEND_FALLBACK = String(process.env.WA_SHARED_SEND_FALLBACK ?? '1') !== '0';
 
 app.use(
   cors({
@@ -352,10 +354,72 @@ function normalizeDigitsForWhatsApp(phone) {
   if (d.length === 11 && d.startsWith('1') && /^5\d{9}$/.test(d.slice(1))) {
     d = d.slice(1);
   }
+  // 12 hane 015xxxxxxxxx — baştaki 0 fazla (015563536549 → 905563536549)
+  if (d.length === 12 && /^015\d{9}$/.test(d)) {
+    d = `90${d.slice(2)}`;
+  }
   if (d.startsWith('90') && d.length >= 12) return d;
-  if (d.startsWith('0') && d.length === 11) return `90${d.slice(1)}`;
+  if (d.startsWith('0') && d.length === 11 && d[1] === '5') return `90${d.slice(1)}`;
   if (d.length === 10 && d.startsWith('5')) return `90${d}`;
   return d;
+}
+
+function isSessionReady(session) {
+  return Boolean(
+    session?.sock &&
+    session.status === 'connected' &&
+    session.sock.user &&
+    Date.now() >= Number(session.readyAt || 0)
+  );
+}
+
+function listConnectedCoachIds() {
+  const out = [];
+  for (const [coachId, session] of sessions.entries()) {
+    if (isSessionReady(session)) out.push(coachId);
+  }
+  return out;
+}
+
+/** Önce istenen oturum; olmazsa bağlı paylaşımlı oturum (BOOK_ORDER öncelikli). */
+async function resolveSendSession(coachId) {
+  let session = sessions.get(coachId);
+  if (isSessionReady(session)) {
+    return { session, usedCoachId: coachId, sharedFallback: false };
+  }
+
+  session = await ensureConnectedForSend(coachId, { waitMs: 6000 });
+  if (!isSessionReady(session)) {
+    await sleep(400);
+    session = await ensureConnectedForSend(coachId, { waitMs: SEND_WAIT_READY_MS });
+  }
+  if (isSessionReady(session)) {
+    return { session, usedCoachId: coachId, sharedFallback: false };
+  }
+
+  if (!SHARED_SEND_FALLBACK) {
+    return { session: null, usedCoachId: coachId, sharedFallback: false };
+  }
+
+  const live = listConnectedCoachIds().filter((id) => id !== coachId);
+  if (!live.length) {
+    return { session: null, usedCoachId: coachId, sharedFallback: false };
+  }
+
+  const priorityId = String(
+    process.env.BOOK_ORDER_GATEWAY_SESSION_ID || process.env.WHATSAPP_GATEWAY_SESSION_ID || ''
+  ).trim();
+  const pick = (priorityId && live.includes(priorityId) ? priorityId : null) || live[0];
+  const alt = sessions.get(pick);
+  if (!isSessionReady(alt)) {
+    return { session: null, usedCoachId: coachId, sharedFallback: false };
+  }
+
+  logger.warn(
+    { requestedCoachId: coachId, usedCoachId: pick, connected: live },
+    'shared send fallback — BOOK_ORDER_GATEWAY_SESSION_ID bağlı oturumla eşleşmeli'
+  );
+  return { session: alt, usedCoachId: pick, sharedFallback: true };
 }
 
 function ensurePhoneJid(phone) {
@@ -1099,27 +1163,22 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
       return res.status(400).json({ ok: false, error: 'phone_and_message_required' });
     }
 
+    let sendMeta = { sharedFallback: false, usedCoachId: coachId };
     const result = await runInCoachSendQueue(coachId, async () => {
-      let session = sessions.get(coachId);
-      if (
-        session?.sock &&
-        session.status === 'connected' &&
-        session.sock.user &&
-        Date.now() >= Number(session.readyAt || 0)
-      ) {
-        return sendTextWithTimeout(session.sock, jid, message);
-      }
-
-      session = await ensureConnectedForSend(coachId, { waitMs: 6000 });
-      if (!session?.sock || session.status !== 'connected') {
-        await sleep(400);
-        session = await ensureConnectedForSend(coachId, { waitMs: SEND_WAIT_READY_MS });
-      }
-      if (!session?.sock || session.status !== 'connected') {
+      const resolved = await resolveSendSession(coachId);
+      sendMeta = {
+        sharedFallback: resolved.sharedFallback,
+        usedCoachId: resolved.usedCoachId || coachId
+      };
+      const session = resolved.session;
+      if (!isSessionReady(session)) {
+        const live = listConnectedCoachIds();
         const err = new Error('session_not_connected');
         err.httpStatus = 409;
-        err.hint =
-          'Bağlantı yeniden kuruluyor. 5-10 saniye bekleyip tekrar deneyin veya Koç WhatsApp’tan QR ile bağlanın.';
+        err.connected_session_ids = live;
+        err.hint = live.length
+          ? `Bu oturum bağlı değil. Vercel BOOK_ORDER_GATEWAY_SESSION_ID şunlardan biri olmalı: ${live.join(', ')}`
+          : 'WhatsApp bağlı değil — Koç WhatsApp’tan QR ile bağlayın.';
         throw err;
       }
 
@@ -1142,7 +1201,13 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
       return sendTextWithTimeout(session.sock, jid, message);
     });
 
-    res.json({ ok: true, id: result?.key?.id || null, phone: digits });
+    res.json({
+      ok: true,
+      id: result?.key?.id || null,
+      phone: digits,
+      shared_fallback: sendMeta.sharedFallback,
+      gateway_session_id: sendMeta.usedCoachId,
+    });
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'send_failed';
     const dynamicStatus =
@@ -1187,6 +1252,10 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
     res.status(status).json({
       ok: false,
       error: outError,
+      connected_session_ids:
+        typeof error === 'object' && error !== null && Array.isArray(error.connected_session_ids)
+          ? error.connected_session_ids
+          : listConnectedCoachIds(),
       hint:
         (typeof error === 'object' && error !== null && typeof error.hint === 'string' && error.hint) ||
         hint ||

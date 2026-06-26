@@ -9,6 +9,9 @@ export function normalizePhoneToE164(phone) {
   if (d.length === 11 && d.startsWith('1') && /^5\d{9}$/.test(d.slice(1))) {
     d = d.slice(1);
   }
+  if (d.length === 12 && /^015\d{9}$/.test(d)) {
+    d = `90${d.slice(2)}`;
+  }
   if (d.startsWith('90') && d.length >= 12) return `+${d}`;
   // Yalnızca TR cep (05xx…) — Almanya vb. 0 ile başlayan 11 hane yanlışlıkla +90 olmasın
   if (d.startsWith('0') && d.length === 11 && d[1] === '5') return `+90${d.slice(1)}`;
