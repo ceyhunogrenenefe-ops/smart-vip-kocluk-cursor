@@ -56,6 +56,7 @@ export const routeLoaders = {
   'teacher-lessons': () => import('../handlers/teacher-lessons.js'),
   'student-teacher-lesson-quota': () => import('../handlers/student-teacher-lesson-quota.js'),
   'class-live-lessons': () => import('../handlers/class-live-lessons.js'),
+  'class-schedule-plans': () => import('../handlers/class-schedule-plans.js'),
   'academic-center-links': () => import('../handlers/academic-center-links.js'),
   'parent-sign-contracts': () => import('../handlers/parent-sign-contracts.js'),
   'parent-sign-class-presets': () => import('../handlers/parent-sign-class-presets.js'),
@@ -78,5 +79,6 @@ export const routeLoaders = {
   'book-orders': () => import('../handlers/book-orders.js'),
   'book-orders-kitapci-portal': () => import('../handlers/book-orders-kitapci-portal.js'),
   'registration-approvals': () => import('../handlers/registration-approvals.js'),
-  'cron/book-orders': () => import('../handlers/cron-book-orders.js')
+  'cron/book-orders': () => import('../handlers/cron-book-orders.js'),
+  'cron/veli-kayit-admin-notify-retry': () => import('../handlers/cron-veli-kayit-admin-notify-retry.js')
 };

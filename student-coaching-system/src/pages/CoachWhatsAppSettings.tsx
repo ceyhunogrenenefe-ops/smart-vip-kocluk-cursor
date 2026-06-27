@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import {
@@ -24,7 +24,7 @@ import type { Student } from '../types';
 import { apiFetch, getAuthToken, getGatewaySessionUserId } from '../lib/session';
 import { normalizeWhatsAppPhoneForSend } from '../lib/whatsappOutbound';
 import WhatsAppMerkeziPanel from '../components/whatsapp/WhatsAppMerkeziPanel';
-import { resolveWhatsAppGatewayBase } from '../lib/whatsappGatewayClient';
+import { resolveWhatsAppGatewayBase, emptyGatewayStatusPayload, isGatewayStatusForSession, resolveGatewaySessionPath } from '../lib/whatsappGatewayClient';
 
 type GatewayStatus = 'idle' | 'connecting' | 'qr_ready' | 'connected' | 'logged_out' | 'reconnecting';
 
@@ -284,6 +284,7 @@ export default function CoachWhatsAppSettings() {
   const [gwSchedulesMsg, setGwSchedulesMsg] = useState('');
   const [gwSchedules, setGwSchedules] = useState<WaGatewayScheduleDTO[]>([]);
   const [gwRestartCampaignIds, setGwRestartCampaignIds] = useState<Record<string, boolean>>({});
+  const fetchGenRef = useRef(0);
   const selectedStudent = students.find((s) => s.id === selectedStudentId);
   const isConnected = status === 'connected';
   const hasServerJwt = Boolean(getAuthToken());
@@ -750,9 +751,31 @@ export default function CoachWhatsAppSettings() {
     authOnDisk?: boolean;
     hint?: string | null;
     linkedPhone?: string | null;
+    sessionCoachId?: string | null;
+    coachId?: string | null;
   };
 
+  useEffect(() => {
+    fetchGenRef.current += 1;
+    const empty = emptyGatewayStatusPayload();
+    setStatus(empty.status);
+    setQrDataUrl(null);
+    setLastConnectedAt(null);
+    setLinkedPhone(null);
+    setGatewaySessionError(null);
+    setStatusMessage('');
+  }, [coachId]);
+
   const applyGatewayStatusPayload = (data: GatewayStatusPayload) => {
+    if (!isGatewayStatusForSession(data, coachId)) {
+      const empty = emptyGatewayStatusPayload();
+      setStatus(empty.status);
+      setQrDataUrl(null);
+      setLastConnectedAt(null);
+      setLinkedPhone(null);
+      setGatewaySessionError(null);
+      return;
+    }
     setStatus(data.status || 'idle');
     setQrDataUrl(data.qr || null);
     setLastConnectedAt(data.connectedAt || null);
@@ -807,19 +830,37 @@ export default function CoachWhatsAppSettings() {
     if (!gatewayUrl || !coachId) throw new Error('whatsapp_gateway_url_missing');
     const authToken = getAuthToken();
     if (!authToken) throw new Error('jwt_required_log_in_again');
+    const resolvedEndpoint = resolveGatewaySessionPath(coachId, endpoint);
     const headers = new Headers(init?.headers || {});
     headers.set('Content-Type', 'application/json');
     if (authToken) headers.set('Authorization', `Bearer ${authToken}`);
     if (gatewayKey) headers.set('x-gateway-key', gatewayKey);
 
-    const isSend = /\/send\/?$/i.test(endpoint);
+    const isSend = /\/send\/?$/i.test(resolvedEndpoint);
+    if (isSend) headers.set('x-gateway-strict-session', '1');
+
+    let body = init?.body;
+    if (isSend && body && typeof body === 'string') {
+      try {
+        const parsed = JSON.parse(body) as Record<string, unknown>;
+        body = JSON.stringify({ ...parsed, strict_session: true });
+      } catch {
+        /* keep original body */
+      }
+    }
+
     const timeoutMs = isSend ? 115000 : 28000;
     const controller = new AbortController();
     const tid = setTimeout(() => controller.abort(), timeoutMs);
 
     let res: Response;
     try {
-      res = await fetch(`${gatewayUrl}${endpoint}`, { headers, ...init, signal: controller.signal });
+      res = await fetch(`${gatewayUrl}${resolvedEndpoint}`, {
+        headers,
+        ...init,
+        body: body ?? init?.body,
+        signal: controller.signal
+      });
     } catch (e) {
       clearTimeout(tid);
       if (e instanceof Error && e.name === 'AbortError') {
@@ -894,12 +935,15 @@ export default function CoachWhatsAppSettings() {
 
   const fetchStatus = async () => {
     if (!canUseGateway || !hasServerJwt) return false;
+    const gen = ++fetchGenRef.current;
     try {
       const data = await callGateway<GatewayStatusPayload>(`/sessions/${coachId}/status`);
+      if (gen !== fetchGenRef.current) return false;
       applyGatewayStatusPayload(data);
       void autoReconnectIfNeeded(data);
       return true;
     } catch (e) {
+      if (gen !== fetchGenRef.current) return false;
       const msg = e instanceof Error && e.message ? e.message : 'gateway_request_failed';
       const upstreamHint = msg.includes('whatsapp_gateway_upstream_missing')
         ? ' Vercel ortam değişkeni: WHATSAPP_GATEWAY_UPSTREAM=http://SUNUCU_IP:4010 (WhatsApp gateway VPS).'

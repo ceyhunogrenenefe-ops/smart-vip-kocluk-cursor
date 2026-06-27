@@ -76,6 +76,29 @@ export async function resolveInstitutionClassIds(supabaseAdmin, institutionId, s
     }
   }
 
+  /** Kurumsuz (institution_id null) ama kurum admini tarafından oluşturulmuş sınıflar */
+  const { data: orphanRows, error: orphanErr } = await supabaseAdmin
+    .from('classes')
+    .select('id, created_by, institution_id')
+    .is('institution_id', null);
+  if (!orphanErr && orphanRows?.length) {
+    const creatorIds = [...new Set(orphanRows.map((r) => r.created_by).filter(Boolean))];
+    if (creatorIds.length) {
+      const { data: creators } = await supabaseAdmin
+        .from('users')
+        .select('id, institution_id')
+        .in('id', creatorIds);
+      const creatorsInInst = new Set(
+        (creators || [])
+          .filter((u) => institutionIdMatches(u.institution_id, instId))
+          .map((u) => String(u.id))
+      );
+      for (const c of orphanRows) {
+        if (creatorsInInst.has(String(c.created_by || ''))) classIds.add(String(c.id));
+      }
+    }
+  }
+
   return [...classIds];
 }
 

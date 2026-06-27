@@ -90,6 +90,7 @@ const PANEL_PATHS = new Set([
 
 const LESSON_PATHS = new Set([
   '/class-live-lessons',
+  '/schedule-planner',
   '/live-lessons',
   '/meetings',
   '/class-schedule',
@@ -173,6 +174,7 @@ const SETTINGS_ORDER = ['/my-profile', '/settings', '/webhooks'] as const;
 
 const LESSON_LABELS: Record<string, string> = {
   '/class-live-lessons': 'Canlı Grup Dersleri',
+  '/schedule-planner': 'Ders Programı Planlayıcı',
   '/live-lessons': 'Canlı Özel Dersler',
   '/meetings': 'Online Görüşmeler',
   '/class-schedule': 'Canlı derslerim',
@@ -225,6 +227,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/academic-center', icon: Sparkles, label: 'Akademik Merkez' },
       { path: '/live-lessons', icon: Radio, label: 'Canlı özel dersler' },
       { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
+      { path: '/schedule-planner', icon: CalendarDays, label: 'Ders Programı Planlayıcı' },
       { path: '/edu-panel', icon: Presentation, label: 'Ders içerik paneli' },
       { path: '/ai-agents-admin', icon: Bot, label: 'AI Ders Ajanları' },
       { path: '/super-admin', icon: Server, label: 'Kurum Yönetimi' },
@@ -257,6 +260,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/dashboard', icon: LayoutDashboard, label: 'Ana Panel' },
     { path: '/live-lessons', icon: Radio, label: 'Canlı özel dersler' },
     { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
+    { path: '/schedule-planner', icon: CalendarDays, label: 'Ders Programı Planlayıcı' },
     { path: '/edu-panel', icon: Presentation, label: 'Ders içerik paneli' },
     { path: '/ai-agents-admin', icon: Bot, label: 'AI Ders Ajanları' },
     { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },

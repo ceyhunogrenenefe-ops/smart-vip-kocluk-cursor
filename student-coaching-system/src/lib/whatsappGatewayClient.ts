@@ -12,7 +12,44 @@ export type GatewayStatusPayload = {
   hint?: string | null;
   linkedPhone?: string | null;
   sessionCoachId?: string | null;
+  coachId?: string | null;
 };
+
+/** Gateway URL'lerindeki oturum id her zaman JWT sub (giriş yapan kullanıcı) olmalı. */
+export function resolveGatewaySessionPath(sessionId: string, endpoint: string): string {
+  const sid = getGatewaySessionUserId(sessionId) || String(sessionId || '').trim();
+  const ep = String(endpoint || '').trim();
+  if (!sid || !ep) return ep;
+  return ep.replace(/\/sessions\/[^/]+/, `/sessions/${encodeURIComponent(sid)}`);
+}
+
+export function gatewayStatusOwnerId(data: GatewayStatusPayload | null | undefined): string {
+  return String(data?.sessionCoachId || data?.coachId || '').trim();
+}
+
+/** Yanıt başka kullanıcının oturumuna aitse UI'da "bağlı" gösterme. */
+export function isGatewayStatusForSession(
+  data: GatewayStatusPayload | null | undefined,
+  expectedSessionId: string
+): boolean {
+  const expected = getGatewaySessionUserId(expectedSessionId) || String(expectedSessionId || '').trim();
+  if (!expected) return false;
+  const owner = gatewayStatusOwnerId(data);
+  if (!owner) return true;
+  return owner === expected;
+}
+
+export function emptyGatewayStatusPayload(): GatewayStatusPayload {
+  return {
+    status: 'idle',
+    qr: null,
+    connectedAt: null,
+    lastError: null,
+    linkedPhone: null,
+    sessionCoachId: null,
+    coachId: null
+  };
+}
 
 function isValidGatewayEnvUrl(s: string): boolean {
   const t = s.trim();
@@ -73,24 +110,28 @@ export async function callWhatsAppGateway<T>(
   if (!gatewayUrl || !sid) throw new Error('whatsapp_gateway_url_missing');
   const authToken = getAuthToken();
   if (!authToken) throw new Error('jwt_required_log_in_again');
+  const resolvedEndpoint = resolveGatewaySessionPath(sid, endpoint);
 
   const headers = new Headers(init?.headers || {});
   headers.set('Content-Type', 'application/json');
   headers.set('Authorization', `Bearer ${authToken}`);
   const gk = gatewayApiKeyHeader();
   if (gk) headers.set('x-gateway-key', gk);
+  if (/\/send\/?$/i.test(resolvedEndpoint)) {
+    headers.set('x-gateway-strict-session', '1');
+  }
 
-  const isSend = /\/send\/?$/i.test(endpoint);
+  const isSend = /\/send\/?$/i.test(resolvedEndpoint);
   const timeoutMs = isSend ? 115000 : 28000;
   const controller = new AbortController();
   const tid = setTimeout(() => controller.abort(), timeoutMs);
 
   let res: Response;
   try {
-    res = await fetch(`${gatewayUrl}${endpoint}`, { headers, ...init, signal: controller.signal });
+    res = await fetch(`${gatewayUrl}${resolvedEndpoint}`, { headers, ...init, signal: controller.signal });
     if (isSend && (res.status === 409 || res.status === 502 || res.status === 504)) {
       await new Promise((r) => setTimeout(r, 900));
-      res = await fetch(`${gatewayUrl}${endpoint}`, { headers, ...init, signal: controller.signal });
+      res = await fetch(`${gatewayUrl}${resolvedEndpoint}`, { headers, ...init, signal: controller.signal });
     }
   } catch (e) {
     clearTimeout(tid);
@@ -141,18 +182,19 @@ export async function callWhatsAppGateway<T>(
 }
 
 export async function gatewayResetSession(sessionId: string): Promise<GatewayStatusPayload & { purged?: boolean }> {
+  const sid = getGatewaySessionUserId(sessionId) || String(sessionId || '').trim();
   try {
     return await callWhatsAppGateway<GatewayStatusPayload & { reset?: boolean }>(
-      sessionId,
-      `/sessions/${sessionId}/reset`,
+      sid,
+      `/sessions/${sid}/reset`,
       { method: 'POST' }
     );
   } catch (e) {
     const status = (e as Error & { httpStatus?: number }).httpStatus;
     if (status === 404) {
       return callWhatsAppGateway<GatewayStatusPayload & { purged?: boolean }>(
-        sessionId,
-        `/sessions/${sessionId}/start`,
+        sid,
+        `/sessions/${sid}/start`,
         { method: 'POST', body: JSON.stringify({ purge: true }) }
       );
     }

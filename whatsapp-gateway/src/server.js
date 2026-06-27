@@ -91,8 +91,8 @@ const SEND_MESSAGE_RETRIES = Math.min(
   2,
   Math.max(0, Number(process.env.WA_SEND_MESSAGE_RETRIES) || 1)
 );
-/** İstenen oturum bağlı değilse başka bağlı WhatsApp hattından gönder (otomasyon). */
-const SHARED_SEND_FALLBACK = String(process.env.WA_SHARED_SEND_FALLBACK ?? '1') !== '0';
+/** İstenen oturum bağlı değilse başka bağlı WhatsApp hattından gönder (otomasyon). Varsayılan kapalı — WA_SHARED_SEND_FALLBACK=1 ile açılır. */
+const SHARED_SEND_FALLBACK = String(process.env.WA_SHARED_SEND_FALLBACK ?? '0') !== '0';
 
 app.use(
   cors({
@@ -381,8 +381,8 @@ function listConnectedCoachIds() {
   return out;
 }
 
-/** Önce istenen oturum; olmazsa bağlı paylaşımlı oturum (BOOK_ORDER öncelikli). */
-async function resolveSendSession(coachId) {
+/** Önce istenen oturum; olmazsa bağlı paylaşımlı oturum (BOOK_ORDER öncelikli). strictSession=true → panel gönderimi, yalnız kendi oturum. */
+async function resolveSendSession(coachId, { strictSession = false } = {}) {
   let session = sessions.get(coachId);
   if (isSessionReady(session)) {
     return { session, usedCoachId: coachId, sharedFallback: false };
@@ -397,7 +397,7 @@ async function resolveSendSession(coachId) {
     return { session, usedCoachId: coachId, sharedFallback: false };
   }
 
-  if (!SHARED_SEND_FALLBACK) {
+  if (strictSession || !SHARED_SEND_FALLBACK) {
     return { session: null, usedCoachId: coachId, sharedFallback: false };
   }
 
@@ -1156,6 +1156,9 @@ async function sendTextWithTimeout(sock, jid, message, retriesLeft = SEND_MESSAG
 app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async (req, res) => {
   const coachId = getCoachId(req);
   const digits = normalizeDigitsForWhatsApp(req.body?.phone);
+  const strictSession =
+    req.body?.strict_session === true ||
+    String(req.headers['x-gateway-strict-session'] || '').trim() === '1';
   try {
     const jid = ensurePhoneJid(digits);
     const message = String(req.body?.message || '').trim();
@@ -1165,7 +1168,7 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
 
     let sendMeta = { sharedFallback: false, usedCoachId: coachId };
     const result = await runInCoachSendQueue(coachId, async () => {
-      const resolved = await resolveSendSession(coachId);
+      const resolved = await resolveSendSession(coachId, { strictSession });
       sendMeta = {
         sharedFallback: resolved.sharedFallback,
         usedCoachId: resolved.usedCoachId || coachId
@@ -1177,7 +1180,9 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
         err.httpStatus = 409;
         err.connected_session_ids = live;
         err.hint = live.length
-          ? `Bu oturum bağlı değil. Vercel BOOK_ORDER_GATEWAY_SESSION_ID şunlardan biri olmalı: ${live.join(', ')}`
+          ? strictSession
+            ? 'Bu hesabın kendi WhatsApp oturumu bağlı değil — Koç WhatsApp ayarlarından kendi numaranızı QR ile bağlayın.'
+            : `Bu oturum bağlı değil. Vercel BOOK_ORDER_GATEWAY_SESSION_ID şunlardan biri olmalı: ${live.join(', ')}`
           : 'WhatsApp bağlı değil — Koç WhatsApp’tan QR ile bağlayın.';
         throw err;
       }

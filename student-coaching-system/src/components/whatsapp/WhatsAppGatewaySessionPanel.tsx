@@ -1,10 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, RefreshCw, Smartphone } from 'lucide-react';
 import { getAuthToken, getGatewaySessionUserId } from '../../lib/session';
 import {
   callWhatsAppGateway,
+  emptyGatewayStatusPayload,
   formatGatewaySessionError,
   gatewayResetSession,
+  isGatewayStatusForSession,
   resolveWhatsAppGatewayBase,
   type GatewayStatus,
   type GatewayStatusPayload
@@ -42,6 +44,7 @@ export default function WhatsAppGatewaySessionPanel({
   const [gatewaySessionError, setGatewaySessionError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState('');
   const [isBusy, setIsBusy] = useState(false);
+  const fetchGenRef = useRef(0);
 
   const isConnected = status === 'connected';
   const statusLabel = useMemo(() => {
@@ -52,21 +55,44 @@ export default function WhatsAppGatewaySessionPanel({
     return 'Bağlı değil';
   }, [status]);
 
-  const applyPayload = useCallback((data: GatewayStatusPayload) => {
-    setStatus(data.status || 'idle');
-    setQrDataUrl(data.qr || null);
-    setLastConnectedAt(data.connectedAt || null);
-    setLinkedPhone(formatLinkedPhone(data.linkedPhone));
-    const err =
-      data.status === 'connected' || data.status === 'reconnecting' || data.status === 'connecting'
-        ? null
-        : typeof data.lastError === 'string' && data.lastError.trim()
-          ? data.lastError.trim()
-          : data.restoreBlocked && data.hint
-            ? data.hint
-            : null;
-    setGatewaySessionError(err);
-  }, []);
+  const applyPayload = useCallback(
+    (data: GatewayStatusPayload) => {
+      if (!isGatewayStatusForSession(data, sid)) {
+        const empty = emptyGatewayStatusPayload();
+        setStatus(empty.status);
+        setQrDataUrl(null);
+        setLastConnectedAt(null);
+        setLinkedPhone(null);
+        setGatewaySessionError(null);
+        return;
+      }
+      setStatus(data.status || 'idle');
+      setQrDataUrl(data.qr || null);
+      setLastConnectedAt(data.connectedAt || null);
+      setLinkedPhone(formatLinkedPhone(data.linkedPhone));
+      const err =
+        data.status === 'connected' || data.status === 'reconnecting' || data.status === 'connecting'
+          ? null
+          : typeof data.lastError === 'string' && data.lastError.trim()
+            ? data.lastError.trim()
+            : data.restoreBlocked && data.hint
+              ? data.hint
+              : null;
+      setGatewaySessionError(err);
+    },
+    [sid]
+  );
+
+  useEffect(() => {
+    fetchGenRef.current += 1;
+    const empty = emptyGatewayStatusPayload();
+    setStatus(empty.status);
+    setQrDataUrl(null);
+    setLastConnectedAt(null);
+    setLinkedPhone(null);
+    setGatewaySessionError(null);
+    setStatusMessage('');
+  }, [sid]);
 
   const autoReconnectIfNeeded = useCallback(
     async (data: GatewayStatusPayload) => {
@@ -95,12 +121,15 @@ export default function WhatsAppGatewaySessionPanel({
 
   const fetchStatus = useCallback(async () => {
     if (!canUse) return false;
+    const gen = ++fetchGenRef.current;
     try {
       const data = await callWhatsAppGateway<GatewayStatusPayload>(sid, `/sessions/${sid}/status`);
+      if (gen !== fetchGenRef.current) return false;
       applyPayload(data);
       void autoReconnectIfNeeded(data);
       return true;
     } catch (e) {
+      if (gen !== fetchGenRef.current) return false;
       const msg = e instanceof Error ? e.message : 'gateway_request_failed';
       setGatewaySessionError(null);
       setStatusMessage(`Durum alınamadı: ${msg}`);

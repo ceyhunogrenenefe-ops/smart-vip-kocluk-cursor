@@ -47,6 +47,10 @@ export default async function handler(req, res) {
     '';
   const gatewayKey = String(Array.isArray(gk) ? gk[0] : gk).trim();
   if (gatewayKey) fwd['x-gateway-key'] = gatewayKey;
+  const strictHdr = req.headers['x-gateway-strict-session'];
+  if (strictHdr) {
+    fwd['x-gateway-strict-session'] = Array.isArray(strictHdr) ? strictHdr[0] : strictHdr;
+  }
 
   const method = String(req.method || 'GET').toUpperCase();
   /** @type {RequestInit} */

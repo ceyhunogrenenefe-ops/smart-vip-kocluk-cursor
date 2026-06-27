@@ -29,6 +29,12 @@ import {
   insertOneOptionalModerator,
   insertManyOptionalModerator
 } from '../api/_lib/supabase-optional-moderator.js';
+import {
+  ensureClassSessionsForClassInRange,
+  backfillClassSessionMeetingLinksInRange,
+  backfillClassWeeklySlotMeetingLinks,
+  backfillClassSessionInstitutionId
+} from '../api/_lib/class-sessions-from-slots.js';
 import { handleBbbJoinGet, handleBbbRecordingGet, patchRowMeetingLinks, patchRowRecordingLink } from '../api/_lib/bbb-join-handler.js';
 import { createGuestJoinShareLink } from '../api/_lib/bbb-guest-join-core.js';
 import { buildBbbAttendeeJoinUrl, parseBbbJoinCredentials, parseBbbMeetingIdFromJoinUrl } from '../api/_lib/bbb.js';
@@ -648,6 +654,11 @@ export default async function handler(req, res) {
         const classIds = await resolveInstitutionClassIds(supabaseAdmin, scopedClassInst, studentIds);
         if (classIds.length) q = q.in('id', classIds);
         else return res.status(200).json({ data: [] });
+      } else if (scopedClassInst && role === 'admin') {
+        const studentIds = await getInstitutionStudentIds(supabaseAdmin, scopedClassInst);
+        const classIds = await resolveInstitutionClassIds(supabaseAdmin, scopedClassInst, studentIds);
+        if (classIds.length) q = q.in('id', classIds);
+        else return res.status(200).json({ data: [] });
       } else if (institutionId) {
         q = q.eq('institution_id', institutionId);
       }
@@ -702,8 +713,11 @@ export default async function handler(req, res) {
       if (!seesAllInstitutionClasses(role)) {
         if (!allowedClassIds || !allowedClassIds.length) return res.status(200).json({ data: [] });
         q = q.in('class_id', allowedClassIds);
-      } else if (institutionId) {
-        q = q.eq('institution_id', institutionId);
+      } else if (institutionId && !classId) {
+        const studentIds = await getInstitutionStudentIds(supabaseAdmin, institutionId);
+        const classIds = await resolveInstitutionClassIds(supabaseAdmin, institutionId, studentIds);
+        if (classIds.length) q = q.in('class_id', classIds);
+        else q = q.eq('institution_id', institutionId);
       }
       const { data, error } = await q;
       if (error) return res.status(500).json({ error: error.message });
@@ -910,18 +924,28 @@ export default async function handler(req, res) {
 
     if (scope === 'slots') {
       const classId = String(req.query.class_id || '').trim();
+      const scopedClassInst = String(req.query.institution_id || '').trim();
       const allowedClassIds = await getManagedClassIds(actor);
       let q = supabaseAdmin
         .from('class_weekly_slots')
         .select('*')
         .order('day_of_week', { ascending: true })
         .order('start_time', { ascending: true });
-      if (classId) q = q.eq('class_id', classId);
-      if (!seesAllInstitutionClasses(role)) {
+      if (classId) {
+        q = q.eq('class_id', classId);
+      } else if (!seesAllInstitutionClasses(role)) {
         if (!allowedClassIds || !allowedClassIds.length) return res.status(200).json({ data: [] });
         q = q.in('class_id', allowedClassIds);
+      } else if (scopedClassInst && (role === 'super_admin' || role === 'admin')) {
+        const studentIds = await getInstitutionStudentIds(supabaseAdmin, scopedClassInst);
+        const classIds = await resolveInstitutionClassIds(supabaseAdmin, scopedClassInst, studentIds);
+        if (classIds.length) q = q.in('class_id', classIds);
+        else return res.status(200).json({ data: [] });
       } else if (institutionId) {
-        q = q.eq('institution_id', institutionId);
+        const studentIds = await getInstitutionStudentIds(supabaseAdmin, institutionId);
+        const classIds = await resolveInstitutionClassIds(supabaseAdmin, institutionId, studentIds);
+        if (classIds.length) q = q.in('class_id', classIds);
+        else q = q.eq('institution_id', institutionId);
       }
       const { data, error } = await q;
       if (error) return res.status(500).json({ error: error.message });
@@ -1005,6 +1029,32 @@ export default async function handler(req, res) {
   if (req.method === 'POST') {
     const op = String(req.query.op || '').trim();
     const body = parseBody(req);
+
+    if (op === 'ensure-sessions-range') {
+      const classId = String(body.class_id || '').trim();
+      const from = String(body.date_from || body.from || '').trim().slice(0, 10);
+      const to = String(body.date_to || body.to || '').trim().slice(0, 10);
+      if (!classId) return res.status(400).json({ error: 'class_id_required' });
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        return res.status(400).json({ error: 'date_range_invalid' });
+      }
+      const details = await getClassDetails(classId);
+      if (!details.class) return res.status(404).json({ error: 'class_not_found' });
+      if (!isAdminRole(role) && !details.teacher_ids.includes(actor.sub)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const instId =
+        String(details.class.institution_id || institutionId || body.institution_id || '').trim() || null;
+      if (instId) await backfillClassSessionInstitutionId(classId, instId);
+      await backfillClassWeeklySlotMeetingLinks(classId);
+      const sessionResult = await ensureClassSessionsForClassInRange(classId, from, to);
+      const linkBackfill = await backfillClassSessionMeetingLinksInRange(classId, from, to);
+      return res.status(200).json({
+        ok: true,
+        ...sessionResult,
+        sessions_link_backfilled: linkBackfill.updated || 0
+      });
+    }
 
     if (op === 'set-attendance-prefs') {
       if (role !== 'admin' && role !== 'super_admin') {
@@ -1116,8 +1166,20 @@ export default async function handler(req, res) {
       const classLevelRaw = String(body.class_level || '').trim() || null;
       const branchRaw = String(body.branch || '').trim() || null;
 
+      let writeInstitutionId = institutionId;
+      if (role === 'super_admin') {
+        const bodyInst = String(body.institution_id || req.query.institution_id || '').trim();
+        if (bodyInst) writeInstitutionId = bodyInst;
+      }
+      if (!writeInstitutionId) {
+        return res.status(400).json({
+          error: 'institution_id_required',
+          message: 'Sınıf oluşturmak için üst menüden kurum seçin.'
+        });
+      }
+
       const baseRow = {
-        institution_id: institutionId,
+        institution_id: writeInstitutionId,
         name,
         description: String(body.description || '').trim() || null,
         created_by: actor.sub

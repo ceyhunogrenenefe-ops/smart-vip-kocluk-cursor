@@ -13,6 +13,12 @@ function errorText(err) {
   return `${err?.message || ''} ${err?.details || ''} ${err?.hint || ''}`;
 }
 
+function columnFromSchemaError(err) {
+  const m = errorText(err);
+  const match = m.match(/Could not find the '([^']+)' column/i);
+  return match ? match[1] : null;
+}
+
 function missingOptionalColumn(err) {
   const m = errorText(err);
   if (/PGRST204|schema cache/i.test(m)) return true;
@@ -43,6 +49,18 @@ async function insertWithOptionalFallback(table, rows, single) {
       ? await supabaseAdmin.from(table).insert(current[0]).select('*').maybeSingle()
       : await supabaseAdmin.from(table).insert(current).select('*');
     if (!result.error) return result;
+
+    const missingCol = columnFromSchemaError(result.error);
+    if (missingCol && current.some((r) => r && missingCol in r)) {
+      current = current.map((r) => {
+        if (!r || !(missingCol in r)) return r;
+        const o = { ...r };
+        delete o[missingCol];
+        return o;
+      });
+      continue;
+    }
+
     if (!missingOptionalColumn(result.error) || !current.some((r) => rowHasAnyOptionalField(r))) {
       return result;
     }

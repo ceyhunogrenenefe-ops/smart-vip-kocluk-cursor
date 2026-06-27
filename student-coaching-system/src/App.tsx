@@ -44,6 +44,7 @@ import MessageTemplates from './pages/MessageTemplates';
 import Meetings from './pages/Meetings';
 import LiveLessons from './pages/LiveLessons';
 import ClassLiveLessons from './pages/ClassLiveLessons';
+import SchedulePlannerPage from './pages/SchedulePlannerPage';
 import AttendanceReportPage from './pages/AttendanceReportPage';
 import BbbPortalJoinPage from './pages/BbbPortalJoinPage';
 import BbbGuestJoinPage from './pages/BbbGuestJoinPage';
@@ -457,6 +458,14 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/class-live-lessons')}>
                 <Layout>
                   <ClassLiveLessons />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/schedule-planner" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/schedule-planner')}>
+                <Layout>
+                  <SchedulePlannerPage />
                 </Layout>
               </ProtectedRoute>
             } />

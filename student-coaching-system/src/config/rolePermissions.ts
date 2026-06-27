@@ -51,6 +51,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/live-lessons': ['super_admin', 'admin', 'teacher', 'coach'],
   '/teacher-panel': ['teacher'],
   '/class-live-lessons': ['super_admin', 'admin', 'coach', 'teacher'],
+  '/schedule-planner': ['super_admin', 'admin'],
   '/class-schedule': ['student'],
   '/veli-onay': ['super_admin', 'admin', 'coach'],
   '/tahsilat-muhasebe': ['super_admin', 'admin'],

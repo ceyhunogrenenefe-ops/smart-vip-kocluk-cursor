@@ -28,6 +28,7 @@ import { notifyTaksitMarkedPaid } from '../api/_lib/taksit-whatsapp-notify.js';
 import { resolveSinifFromVeliKayit } from '../api/_lib/veli-kayit-class-level.js';
 import { provisionStudentFromParentSignContract } from '../api/_lib/provision-student-from-parent-sign.js';
 import { notifyAdminsOnVeliKayitForm } from '../api/_lib/veli-kayit-admin-notify.js';
+import { notifyVeliSignReady } from '../api/_lib/veli-sign-ready-notify.js';
 
 const ODEME_SEKLI_SET = new Set(['aylik_taksit', 'kredi_karti_tek', 'kredi_karti_otomatik']);
 const ODEME_TERCİHİ_VELİ_SET = new Set(['henuz_odemedi', 'kredi_karti_odendi', 'aylik_taksit_istiyorum']);
@@ -1177,6 +1178,13 @@ export default async function handler(req, res) {
         .select()
         .single();
       if (uErr) throw uErr;
+
+      if (phase0 === 'awaiting_admin_price' && nextKayitJson?.phase === 'ready_to_sign') {
+        void notifyVeliSignReady({ contract: updated, institution: inst }).catch((e) => {
+          console.warn('[parent-sign-contracts veli sign ready notify]', errorMessage(e));
+        });
+      }
+
       return res.status(200).json({ data: updated });
     }
 

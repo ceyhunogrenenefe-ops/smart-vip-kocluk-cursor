@@ -63,6 +63,7 @@ export default function TopBar({ onMenuClick, drawerOpen = false, hideMenuButton
       '/settings': 'Ayarlar',
       '/class-schedule': 'Canlı derslerim',
       '/class-live-lessons': 'Canlı Grup Dersi',
+      '/schedule-planner': 'Ders Programı Planlayıcı',
       '/live-lessons': 'Canlı özel dersler',
       '/attendance-report': 'Yoklama raporu',
       '/teacher-dashboard': 'Öğretmen Paneli',

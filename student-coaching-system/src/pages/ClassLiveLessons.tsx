@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { apiFetch } from '../lib/session';
@@ -136,11 +136,13 @@ const todayIso = () => isoFromLocalDate(new Date());
 
 export default function ClassLiveLessons() {
   const { effectiveUser } = useAuth();
-  const { students, institution } = useApp();
+  const { students, institution, activeInstitutionId } = useApp();
+  const [searchParams] = useSearchParams();
   const safeStudents = Array.isArray(students) ? students : [];
   const role = String(effectiveUser?.role || '');
   const actorUserId = String(effectiveUser?.id || '');
   const canManageClasses = role === 'admin' || role === 'super_admin' || role === 'coach';
+  const canOpenSchedulePlanner = role === 'admin' || role === 'super_admin';
   const canManageSlots = canManageClasses || role === 'teacher';
   const canViewPaymentSummary = role === 'admin' || role === 'super_admin';
   const isStudentView = role.toLowerCase() === 'student';
@@ -176,7 +178,10 @@ export default function ClassLiveLessons() {
 
   const [classes, setClasses] = useState<ClassRow[]>([]);
   const [slots, setSlots] = useState<SlotRow[]>([]);
-  const [selectedClassId, setSelectedClassId] = useState('');
+  const [selectedClassId, setSelectedClassId] = useState(() => {
+    const cid = String(typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('class_id') || '' : '').trim();
+    return cid;
+  });
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const { showRecordingUnavailable, recordingAlertModal } = useRecordingUnavailableAlert();
@@ -191,7 +196,11 @@ export default function ClassLiveLessons() {
   const [slotTeacherId, setSlotTeacherId] = useState('');
   const [slotMeetingLink, setSlotMeetingLink] = useState('');
 
-  const [calendarWeekMondayIso, setCalendarWeekMondayIso] = useState(() => mondayIsoContaining());
+  const [calendarWeekMondayIso, setCalendarWeekMondayIso] = useState(() => {
+    const week = String(typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('week') || '' : '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(week)) return mondayIsoContaining(week);
+    return mondayIsoContaining();
+  });
   const [weekSessions, setWeekSessions] = useState<SessionRow[]>([]);
   const [batchSessionsPool, setBatchSessionsPool] = useState<SessionRow[]>([]);
   const [calendarLoading, setCalendarLoading] = useState(false);
@@ -264,7 +273,7 @@ export default function ClassLiveLessons() {
     }
   }, []);
 
-  const joinClassSession = useCallback(async (s: { id: string; join_link?: string; meeting_link?: string }) => {
+  const joinClassSession = useCallback(async (s: { id: string; join_link?: string; meeting_link?: string; lesson_date?: string }) => {
     const url = String(s.join_link || s.meeting_link || '').trim();
     if (!url) {
       setError('Toplantı bağlantısı yok.');
@@ -272,7 +281,8 @@ export default function ClassLiveLessons() {
     }
     try {
       if (needsBbbJoinFlow(url)) {
-        await openBbbJoin('class-live-lessons', s.id);
+        const kind = s.lesson_date ? 'session' : 'slot';
+        await openBbbJoin('class-live-lessons', s.id, { kind });
       } else {
         window.open(url, '_blank', 'noopener,noreferrer');
       }
@@ -365,6 +375,21 @@ export default function ClassLiveLessons() {
 
   const classSlots = useMemo(() => slots.filter((s) => s.class_id === selectedClassId), [slots, selectedClassId]);
 
+  const calendarHours = useMemo(() => {
+    const hours = new Set<number>();
+    for (let h = 8; h <= 22; h++) hours.add(h);
+    for (const s of classSlots) {
+      const h = Number(String(s.start_time || '').slice(0, 2));
+      if (Number.isFinite(h)) hours.add(h);
+    }
+    for (const s of weekSessions) {
+      if (s.class_id !== selectedClassId) continue;
+      const h = Number(String(s.start_time || '').slice(0, 2));
+      if (Number.isFinite(h)) hours.add(h);
+    }
+    return [...hours].sort((a, b) => a - b);
+  }, [classSlots, weekSessions, selectedClassId]);
+
   const weekColumnDates = useMemo(() => Array.from({ length: 7 }, (_, i) => addDaysIso(calendarWeekMondayIso, i)), [calendarWeekMondayIso]);
 
   const weekRangeLabel = useMemo(() => {
@@ -382,6 +407,15 @@ export default function ClassLiveLessons() {
     try {
       const from = weekColumnDates[0];
       const to = weekColumnDates[6];
+      await apiFetch('/api/class-live-lessons?op=ensure-sessions-range', {
+        method: 'POST',
+        body: JSON.stringify({
+          class_id: selectedClassId,
+          date_from: from,
+          date_to: to,
+          institution_id: activeInstitutionId || institution?.id || undefined
+        })
+      }).catch(() => null);
       const qs = new URLSearchParams({
         scope: 'sessions',
         class_id: selectedClassId,
@@ -400,7 +434,7 @@ export default function ClassLiveLessons() {
     } finally {
       setCalendarLoading(false);
     }
-  }, [selectedClassId, weekColumnDates]);
+  }, [selectedClassId, weekColumnDates, activeInstitutionId, institution?.id]);
 
   const loadBatchSessionsPool = useCallback(async () => {
     if (!selectedClassId) {
@@ -436,13 +470,32 @@ export default function ClassLiveLessons() {
     void loadWeekSessions();
   }, [loadWeekSessions]);
 
+  useEffect(() => {
+    const cid = searchParams.get('class_id')?.trim();
+    const week = searchParams.get('week')?.trim();
+    if (cid) setSelectedClassId(cid);
+    if (week && /^\d{4}-\d{2}-\d{2}$/.test(week)) {
+      setCalendarWeekMondayIso(mondayIsoContaining(week));
+    }
+  }, [searchParams]);
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
+      const instId =
+        role === 'super_admin'
+          ? String(activeInstitutionId || institution?.id || '').trim()
+          : '';
+      const classQs = new URLSearchParams({ scope: 'classes' });
+      const slotQs = new URLSearchParams({ scope: 'slots' });
+      if (instId) {
+        classQs.set('institution_id', instId);
+        slotQs.set('institution_id', instId);
+      }
       const [cRes, sRes] = await Promise.all([
-        apiFetch('/api/class-live-lessons?scope=classes'),
-        apiFetch('/api/class-live-lessons?scope=slots')
+        apiFetch(`/api/class-live-lessons?${classQs.toString()}`),
+        apiFetch(`/api/class-live-lessons?${slotQs.toString()}`)
       ]);
       const [cJson, sJson] = await Promise.all([cRes.json().catch(() => ({})), sRes.json().catch(() => ({}))]);
       if (!cRes.ok) throw new Error(String(cJson.error || 'Sınıf listesi alınamadı'));
@@ -460,8 +513,9 @@ export default function ClassLiveLessons() {
       setClasses(filteredClasses);
       setSlots(filteredSlots);
       setSelectedClassId((cur) => {
-        if (!filteredClasses.length) return '';
+        if (!filteredClasses.length) return cur || '';
         if (cur && filteredClasses.some((c) => c.id === cur)) return cur;
+        if (cur) return cur;
         return filteredClasses[0].id;
       });
     } catch (e) {
@@ -469,11 +523,30 @@ export default function ClassLiveLessons() {
     } finally {
       setLoading(false);
     }
-  }, [selectedClassId, isStudentView, resolvedStudentId]);
+  }, [role, activeInstitutionId, institution?.id, isStudentView, resolvedStudentId]);
+
+  const loadClassSlots = useCallback(async (classId: string) => {
+    const cid = String(classId || '').trim();
+    if (!cid) return;
+    try {
+      const qs = new URLSearchParams({ scope: 'slots', class_id: cid });
+      const res = await apiFetch(`/api/class-live-lessons?${qs.toString()}`);
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+      const rows = Array.isArray(j.data) ? (j.data as SlotRow[]) : [];
+      setSlots((prev) => [...prev.filter((s) => s.class_id !== cid), ...rows]);
+    } catch {
+      /* sessiz */
+    }
+  }, []);
 
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  useEffect(() => {
+    if (selectedClassId) void loadClassSlots(selectedClassId);
+  }, [selectedClassId, loadClassSlots]);
 
   useEffect(() => {
     if (isStudentView) {
@@ -511,6 +584,11 @@ export default function ClassLiveLessons() {
     teacher_ids: string[];
     student_ids: string[];
   }): Promise<boolean> => {
+    const instId = String(
+      role === 'super_admin'
+        ? activeInstitutionId || institution?.id || effectiveUser?.institution_id || ''
+        : effectiveUser?.institution_id || activeInstitutionId || institution?.id || ''
+    ).trim();
     const res = await apiFetch('/api/class-live-lessons?op=create-class', {
       method: 'POST',
       body: JSON.stringify({
@@ -518,7 +596,8 @@ export default function ClassLiveLessons() {
         class_level: payload.class_level,
         branch: payload.branch?.trim() || undefined,
         teacher_ids: payload.teacher_ids,
-        student_ids: payload.student_ids
+        student_ids: payload.student_ids,
+        ...(instId ? { institution_id: instId } : {})
       })
     });
     const j = await res.json().catch(() => ({}));
@@ -963,19 +1042,31 @@ export default function ClassLiveLessons() {
       </div>
 
       <div className={`bg-white rounded-xl border border-slate-200 p-4 ${isStudentView ? 'hidden sm:block' : ''}`}>
-        <h1 className="text-xl font-bold text-slate-800">
-          {isStudentView ? 'Canlı derslerim' : 'Canlı Grup Dersi Yönetimi'}
-        </h1>
-        <p className="text-sm text-slate-600">
-          {isStudentView ? (
-            'Atandığınız grup canlı derslerini haftalık görünümde görürsünüz. Bire bir canlı özel dersler için üstteki «Canlı özel derslerim» sekmesini açın.'
-          ) : (
-            <>
-              Takvimde Pazartesi–Pazar için gerçek tarihler gösterilir; muhasebe için hafta aralığını seçin. Öğretmen
-              hatırlatması ve tamamlanan ders sayacı tarihli oturumlardan beslenir.
-            </>
-          )}
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h1 className="text-xl font-bold text-slate-800">
+              {isStudentView ? 'Canlı derslerim' : 'Canlı Grup Dersi Yönetimi'}
+            </h1>
+            <p className="text-sm text-slate-600">
+              {isStudentView ? (
+                'Atandığınız grup canlı derslerini haftalık görünümde görürsünüz. Bire bir canlı özel dersler için üstteki «Canlı özel derslerim» sekmesini açın.'
+              ) : (
+                <>
+                  Takvimde Pazartesi–Pazar için gerçek tarihler gösterilir; muhasebe için hafta aralığını seçin. Öğretmen
+                  hatırlatması ve tamamlanan ders sayacı tarihli oturumlardan beslenir.
+                </>
+              )}
+            </p>
+          </div>
+          {canOpenSchedulePlanner && !isStudentView ? (
+            <Link
+              to="/schedule-planner"
+              className="shrink-0 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-800 hover:bg-indigo-100"
+            >
+              Ders programı planlayıcı
+            </Link>
+          ) : null}
+        </div>
       </div>
 
       {error && <div className="rounded-lg border border-red-100 bg-red-50 text-red-700 px-3 py-2 text-sm">{error}</div>}
@@ -1319,7 +1410,7 @@ export default function ClassLiveLessons() {
               </tr>
             </thead>
             <tbody className="bg-white">
-              {Array.from({ length: 15 }, (_, i) => 10 + i).map((hour) => (
+              {calendarHours.map((hour) => (
                 <tr key={hour} className="border-t border-slate-100/90 transition-colors hover:bg-slate-50/40">
                   <td className="bg-slate-50 px-2 py-2 text-right font-mono text-[11px] font-semibold tabular-nums text-slate-600">
                     {String(hour).padStart(2, '0')}:00
@@ -1472,6 +1563,7 @@ export default function ClassLiveLessons() {
                           {templatesHere.map((s) => {
                             const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
                             const accent = liveSubjectAccent(s.subject);
+                            const slotLink = String(s.join_link || s.meeting_link || '').trim();
                             return (
                               <div
                                 key={s.id}
@@ -1483,13 +1575,15 @@ export default function ClassLiveLessons() {
                                   {teacher?.name || s.teacher_name || s.teacher_id} · {String(s.start_time).slice(0, 5)}
                                 </p>
                                 <div className="mt-1.5 flex flex-wrap gap-1 calendar-pdf-hide-ui">
-                                  <button
-                                    type="button"
-                                    onClick={() => void joinClassSession(s)}
-                                    className="rounded-lg bg-indigo-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-indigo-700"
-                                  >
-                                    Link
-                                  </button>
+                                  {slotLink ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => void joinClassSession(s)}
+                                      className="rounded-lg bg-indigo-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-indigo-700"
+                                    >
+                                      Katıl
+                                    </button>
+                                  ) : null}
                                   {canManageSlots ? (
                                     <button
                                       type="button"

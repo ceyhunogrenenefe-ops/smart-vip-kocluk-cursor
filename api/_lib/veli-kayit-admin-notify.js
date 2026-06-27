@@ -1,11 +1,13 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import { errorMessage } from './error-msg.js';
 import { normalizePhoneToE164 } from './phone-whatsapp.js';
-import { sendGatewayTextMessage } from './whatsapp-gateway-send.js';
 import { insertWhatsAppAutomationLog } from './message-log.js';
 import { isEmailConfigured, logEmailError, publicAppOrigin, sendTransactionalEmail } from './send-email.js';
+import { sendAutomatedWhatsApp } from './whatsapp-outbound.js';
+import { metaWhatsAppConfigured } from './meta-whatsapp.js';
 
 export const VELI_KAYIT_ADMIN_WA_KIND = 'veli_kayit_admin_notify';
+export const VELI_KAYIT_ADMIN_TEMPLATE_TYPE = 'veli_kayit_admin_notify';
 
 const ADMIN_ROLES = new Set(['admin', 'super_admin']);
 
@@ -56,20 +58,32 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
+export function buildVeliKayitAdminTemplateVars(payload) {
+  const program = String(payload.programAdi || '').trim();
+  const sinif = String(payload.sinif || '').trim();
+  const programSinif =
+    program && sinif ? `${program} · ${sinif}` : program || sinif || '—';
+  return {
+    kurum_adi: String(payload.kurumAdi || 'Online VIP Dershane').trim() || 'Online VIP Dershane',
+    ogrenci_ad_soyad: String(payload.ogrenciLabel || '—').trim() || '—',
+    veli_ad_soyad: String(payload.veliLabel || '—').trim() || '—',
+    program_sinif: programSinif,
+    veli_tel: String(payload.veliTel || '—').trim() || '—',
+    sozlesme_no: String(payload.contractNumber || '—').trim() || '—'
+  };
+}
+
 export function buildVeliKayitAdminWhatsAppText(payload) {
+  const v = buildVeliKayitAdminTemplateVars(payload);
   const lines = [
     '📋 YENİ DERSHANE KAYIT FORMU',
     '',
-    `Kurum: ${payload.kurumAdi || '—'}`,
-    `Öğrenci: ${payload.ogrenciLabel || '—'}`,
-    `Veli: ${payload.veliLabel || '—'}`,
-    `Program: ${payload.programAdi || '—'}`,
-    `Sınıf: ${payload.sinif || '—'}`,
-    `Veli tel: ${payload.veliTel || '—'}`,
-    `Öğr. tel: ${payload.ogrenciTel || '—'}`,
-    `E-posta: ${payload.eposta || '—'}`,
-    `Ödeme: ${payload.odemeLabel || '—'}`,
-    `Sözleşme no: ${payload.contractNumber || '—'}`
+    `Kurum: ${v.kurum_adi}`,
+    `Öğrenci: ${v.ogrenci_ad_soyad}`,
+    `Veli: ${v.veli_ad_soyad}`,
+    `Program / Sınıf: ${v.program_sinif}`,
+    `Veli tel: ${v.veli_tel}`,
+    `Sözleşme no: ${v.sozlesme_no}`
   ];
   if (payload.adminUrl) lines.push('', `Panel: ${payload.adminUrl}`);
   return lines.join('\n').trim();
@@ -165,6 +179,24 @@ async function loadAdminRecipients(institutionId) {
   return [...byKey.values()];
 }
 
+async function alreadyNotifiedAdmin(contractId, phoneE164) {
+  const cid = String(contractId || '').trim();
+  const phone = normalizePhoneToE164(phoneE164);
+  if (!cid || !phone) return false;
+  const { count, error } = await supabaseAdmin
+    .from('message_logs')
+    .select('id', { count: 'exact', head: true })
+    .eq('related_id', cid)
+    .eq('phone', phone)
+    .eq('status', 'sent')
+    .like('kind', `${VELI_KAYIT_ADMIN_TEMPLATE_TYPE}:%`);
+  if (error) {
+    console.warn('[veli-kayit-admin-notify] dedupe check', error.message);
+    return false;
+  }
+  return (count || 0) > 0;
+}
+
 function buildNotifyPayload({ contract, reg, institution, signUrl }) {
   const origin = publicAppOrigin();
   const adminUrl = `${origin}/veli-onay`;
@@ -187,10 +219,16 @@ function buildNotifyPayload({ contract, reg, institution, signUrl }) {
 }
 
 /**
- * Veli kayıt formu gönderildiğinde kurum adminlerine e-posta + WhatsApp bildirimi.
+ * Veli kayıt formu gönderildiğinde kurum adminlerine e-posta + Meta WhatsApp bildirimi.
  * @returns {Promise<{ ok: boolean, emails: object[], whatsapp: object[], skipped?: string }>}
  */
-export async function notifyAdminsOnVeliKayitForm({ contract, reg, institution, signUrl }) {
+export async function notifyAdminsOnVeliKayitForm({
+  contract,
+  reg,
+  institution,
+  signUrl,
+  retryMode = false
+}) {
   const contractId = String(contract?.id || '').trim();
   const institutionId = String(contract?.institution_id || institution?.id || '').trim();
   if (!contractId || !institutionId) {
@@ -210,15 +248,17 @@ export async function notifyAdminsOnVeliKayitForm({ contract, reg, institution, 
   }
 
   const payload = buildNotifyPayload({ contract, reg, institution, signUrl });
+  const templateVars = buildVeliKayitAdminTemplateVars(payload);
   const waText = buildVeliKayitAdminWhatsAppText(payload);
   const emailSubject = `Yeni dershane kayıt formu — ${payload.ogrenciLabel || 'Öğrenci'}`;
   const emailHtml = buildVeliKayitAdminEmailHtml(payload);
-  const emailText = buildVeliKayitAdminWhatsAppText(payload);
+  const emailText = waText;
 
   const emailResults = [];
   const waResults = [];
+  const metaReady = metaWhatsAppConfigured();
 
-  if (isEmailConfigured()) {
+  if (isEmailConfigured() && !retryMode) {
     for (const r of recipients) {
       const to = String(r.email || '').trim();
       if (!to || !to.includes('@')) continue;
@@ -235,35 +275,39 @@ export async function notifyAdminsOnVeliKayitForm({ contract, reg, institution, 
         emailResults.push({ to, ok: false, error: errorMessage(e) });
       }
     }
-  } else {
+  } else if (!retryMode) {
     emailResults.push({ ok: false, skipped: 'email_not_configured' });
   }
 
-  for (const r of recipients) {
-    const phone = normalizePhoneToE164(r.phone);
-    if (!phone) continue;
-    const sid =
-      String(process.env.VELI_KAYIT_GATEWAY_SESSION_ID || '').trim() ||
-      String(process.env.REPORT_REMINDER_GATEWAY_SESSION_ID || '').trim() ||
-      String(process.env.BOOK_ORDER_GATEWAY_SESSION_ID || '').trim();
-    const sent = await sendGatewayTextMessage({
-      phone,
-      message: waText,
-      sessionId: sid,
-      sessionCandidates: sid ? [sid] : [],
-      allowSharedFallback: Boolean(sid)
-    });
-    await insertWhatsAppAutomationLog({
-      studentId: null,
-      relatedId: contractId,
-      kind: `${VELI_KAYIT_ADMIN_WA_KIND}:${String(r.id || phone).slice(0, 40)}`,
-      message: waText.slice(0, 8000),
-      status: sent.ok ? 'sent' : 'failed',
-      logCode: sent.ok ? null : sent.errorCode || 'GATEWAY_SEND_FAILED',
-      error: sent.ok ? null : String(sent.error || 'send_failed').slice(0, 400),
-      phone
-    });
-    waResults.push({ phone, ok: sent.ok, error: sent.error || null });
+  if (!metaReady) {
+    waResults.push({ ok: false, skipped: 'meta_whatsapp_not_configured' });
+  } else {
+    for (const r of recipients) {
+      const phone = normalizePhoneToE164(r.phone);
+      if (!phone) continue;
+      if (await alreadyNotifiedAdmin(contractId, phone)) {
+        waResults.push({ phone, ok: true, skipped: 'already_sent' });
+        continue;
+      }
+      const sent = await sendAutomatedWhatsApp({
+        phone,
+        templateType: VELI_KAYIT_ADMIN_TEMPLATE_TYPE,
+        vars: templateVars
+      });
+      await insertWhatsAppAutomationLog({
+        studentId: null,
+        relatedId: contractId,
+        kind: `${VELI_KAYIT_ADMIN_TEMPLATE_TYPE}:${String(r.id || phone).slice(0, 40)}`,
+        message: waText.slice(0, 8000),
+        status: sent.ok ? 'sent' : 'failed',
+        logCode: sent.ok ? null : sent.errorCode || 'META_SEND_FAILED',
+        error: sent.ok ? null : String(sent.error || 'send_failed').slice(0, 400),
+        phone,
+        meta_message_id: sent.sid || sent.meta_message_id || null,
+        meta_template_name: sent.meta_template_name || VELI_KAYIT_ADMIN_TEMPLATE_TYPE
+      });
+      waResults.push({ phone, ok: sent.ok, error: sent.error || null });
+    }
   }
 
   if (!waResults.length && !emailResults.some((x) => x.ok)) {
