@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import {
   BookOpen,
   ClipboardList,
@@ -10,8 +10,7 @@ import {
   Loader2,
   ScanLine,
   Video,
-  X,
-  LayoutGrid
+  X
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
@@ -25,7 +24,6 @@ import {
   type ExamEntryKey
 } from '../lib/academicCenterLinks';
 import { AppModal } from '../components/ui/AppModal';
-import { OnlineExamInfoModal } from '../components/academic/OnlineExamInfoModal';
 import { VirtualOpticInfoModal } from '../components/academic/VirtualOpticInfoModal';
 type TabKey = 'study' | 'exam' | 'pool';
 
@@ -199,7 +197,6 @@ function ExamRulesModal(props: {
 }
 
 export default function AcademicCenter() {
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { institution, activeInstitutionId } = useApp();
   const institutionId = institution?.id || activeInstitutionId || null;
@@ -209,7 +206,6 @@ export default function AcademicCenter() {
   );
   const [bbbBusyRoom, setBbbBusyRoom] = useState<ExamEntryKey | null>(null);
   const [examModal, setExamModal] = useState<ExamModalTarget | null>(null);
-  const [examBlocksModalOpen, setExamBlocksModalOpen] = useState(false);
   const [opticModalOpen, setOpticModalOpen] = useState(false);
 
   useEffect(() => {
@@ -412,22 +408,6 @@ export default function AcademicCenter() {
           {activeTab === 'exam' && (
             <div className="space-y-6">
               <PortalActionCard
-                accent="from-sky-500 to-indigo-600"
-                icon={<LayoutGrid className="h-5 w-5" />}
-                title="Sınav Blokları"
-                description={
-                  <>
-                    Tanımlanan online sınavlarınıza bu bölümden ulaşabilirsiniz. Devam etmeden önce sınav
-                    kuralları hakkında kısa bir bilgilendirme gösterilir.
-                  </>
-                }
-                buttonLabel="Sınav Bloklarına Git"
-                clickableCard
-                onAction={() => setExamBlocksModalOpen(true)}
-                buttonClassName="bg-gradient-to-r from-sky-600 to-indigo-600 text-white hover:brightness-110"
-              />
-
-              <PortalActionCard
                 accent="from-teal-500 to-emerald-600"
                 icon={<ScanLine className="h-5 w-5" />}
                 title="Sanal Optik"
@@ -522,15 +502,6 @@ export default function AcademicCenter() {
         onClose={() => setExamModal(null)}
         onConfirm={confirmExamClassJoin}
         confirming={examModal ? bbbBusyRoom === examModal.key : false}
-      />
-
-      <OnlineExamInfoModal
-        open={examBlocksModalOpen}
-        onClose={() => setExamBlocksModalOpen(false)}
-        onConfirm={() => {
-          setExamBlocksModalOpen(false);
-          navigate('/sinav-bloklari');
-        }}
       />
 
       <VirtualOpticInfoModal

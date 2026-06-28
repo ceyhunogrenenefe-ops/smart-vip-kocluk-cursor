@@ -12,7 +12,6 @@ const DEFAULT_EXAMS = {
   class56: 'https://kurumsal.ornek.edu/tr/deneme-56',
   class78: 'https://kurumsal.ornek.edu/tr/deneme-78',
   optic: 'https://kurumsal.ornek.edu/tr/sanal-optik',
-  examBlocks: 'https://kurumsal.ornek.edu/tr/sinav-bloklari',
   exam: 'https://kurumsal.ornek.edu/tr/deneme'
 };
 

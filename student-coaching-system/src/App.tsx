@@ -55,7 +55,6 @@ import MobileLessonsHubPage from './pages/MobileLessonsHubPage';
 import MobileAcademicHubPage from './pages/MobileAcademicHubPage';
 import MobileAdminHubPage from './pages/MobileAdminHubPage';
 import AcademicCenter from './pages/AcademicCenter';
-import ExamBlocksPage from './pages/ExamBlocksPage';
 import ParentSignFlowPage from './pages/ParentSignFlowPage';
 import TahsilatMuhasebePage from './pages/TahsilatMuhasebePage';
 import VeliImzaPage from './pages/VeliImzaPage';
@@ -271,14 +270,6 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/academic-center')}>
                 <Layout>
                   <AcademicCenter />
-                </Layout>
-              </ProtectedRoute>
-            } />
-
-            <Route path="/sinav-bloklari" element={
-              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/sinav-bloklari')}>
-                <Layout>
-                  <ExamBlocksPage />
                 </Layout>
               </ProtectedRoute>
             } />

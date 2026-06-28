@@ -112,7 +112,6 @@ export const MOBILE_LESSON_MATCH_PATHS = [...LESSON_PATHS] as const;
 export const MOBILE_ACADEMIC_MATCH_PATHS = [
   '/mobile/akademik',
   '/academic-center',
-  '/sinav-bloklari',
   '/weekly-planner',
   '/tracking',
   '/book-tracking',

@@ -36,7 +36,6 @@ export const ROUTE_ALLOWED_ROLES = {
   '/weekly-planner': ['super_admin', 'admin', 'coach', 'student'],
   '/my-profile': ['super_admin', 'admin', 'coach', 'student', 'teacher'],
   '/academic-center': ['super_admin', 'admin', 'coach', 'student', 'teacher'],
-  '/sinav-bloklari': ['super_admin', 'admin', 'coach', 'student', 'teacher'],
   '/super-admin': ['super_admin', 'admin'],
   '/user-management': ['super_admin', 'admin'],
   '/subscription': ['super_admin', 'admin'],

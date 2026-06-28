@@ -24,8 +24,6 @@ export type AcademicCenterLinks = {
     class56: string;
     class78: string;
     optic: string;
-    /** Online sınav sistemi — Sınav Blokları sayfası */
-    examBlocks: string;
     /** @deprecated use lise */
     exam?: string;
   };
@@ -63,7 +61,6 @@ export const defaultAcademicCenterLinks: AcademicCenterLinks = {
     class56: 'https://kurumsal.ornek.edu/tr/deneme-56',
     class78: 'https://kurumsal.ornek.edu/tr/deneme-78',
     optic: 'https://kurumsal.ornek.edu/tr/sanal-optik',
-    examBlocks: 'https://kurumsal.ornek.edu/tr/sinav-bloklari',
     exam: 'https://kurumsal.ornek.edu/tr/deneme'
   },
   questionPools: {
