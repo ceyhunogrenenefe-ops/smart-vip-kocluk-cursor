@@ -55,6 +55,7 @@ import MobileLessonsHubPage from './pages/MobileLessonsHubPage';
 import MobileAcademicHubPage from './pages/MobileAcademicHubPage';
 import MobileAdminHubPage from './pages/MobileAdminHubPage';
 import AcademicCenter from './pages/AcademicCenter';
+import AcademicCenterBbbJoinPage from './pages/AcademicCenterBbbJoinPage';
 import ParentSignFlowPage from './pages/ParentSignFlowPage';
 import TahsilatMuhasebePage from './pages/TahsilatMuhasebePage';
 import VeliImzaPage from './pages/VeliImzaPage';
@@ -263,6 +264,12 @@ function App() {
                 <Layout>
                   <WeeklyPlannerPage />
                 </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/academic-center/bbb-join" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/academic-center/bbb-join')}>
+                <AcademicCenterBbbJoinPage />
               </ProtectedRoute>
             } />
 

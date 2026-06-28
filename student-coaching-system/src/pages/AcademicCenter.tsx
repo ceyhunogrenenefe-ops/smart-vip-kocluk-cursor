@@ -66,7 +66,7 @@ function PortalActionCard(props: {
 
   return (
     <div
-      className={`group relative flex h-full overflow-hidden rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:shadow-md ${
+      className={`group relative flex h-full overflow-hidden rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition hover:shadow-md sm:p-5 ${
         clickableCard && canAct ? 'cursor-pointer' : ''
       }`}
       role={clickableCard && canAct ? 'button' : undefined}
@@ -84,15 +84,13 @@ function PortalActionCard(props: {
       }
     >
       <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${accent}`} />
-      <div className="flex w-full items-start gap-4">
+      <div className="flex w-full flex-col items-stretch gap-4 sm:flex-row sm:items-start">
         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
           {icon}
         </div>
         <div className="flex min-w-0 flex-1 flex-col">
-          <p className="font-semibold text-slate-900">{title}</p>
-          <div className="mt-2 min-h-[7.5rem] flex-1 text-sm leading-relaxed text-slate-600 sm:min-h-[6.5rem]">
-            {description}
-          </div>
+          <p className="text-base font-semibold text-slate-900">{title}</p>
+          <div className="mt-2 flex-1 text-sm leading-relaxed text-slate-600">{description}</div>
           <button
             type="button"
             disabled={!canAct}
@@ -100,7 +98,7 @@ function PortalActionCard(props: {
               e.stopPropagation();
               trigger();
             }}
-            className={`mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold shadow-md transition disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${buttonClassName}`}
+            className={`mt-4 inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold shadow-md transition disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${buttonClassName}`}
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             {buttonLabel}
@@ -132,7 +130,12 @@ function ExamRulesModal(props: {
   ];
 
   return (
-    <AppModal open={Boolean(target)} onClose={onClose} align="center" panelClassName="max-w-lg overflow-hidden p-0">
+    <AppModal
+      open={Boolean(target)}
+      onClose={onClose}
+      align="center"
+      panelClassName="max-w-lg overflow-hidden p-0 mx-auto max-h-[min(90dvh,90vh)]"
+    >
       {target ? (
         <>
           <div className="border-b border-slate-100 bg-gradient-to-r from-emerald-50 to-teal-50 px-5 py-4">
@@ -172,11 +175,11 @@ function ExamRulesModal(props: {
               </p>
             ) : null}
           </div>
-          <div className="flex flex-col-reverse gap-2 border-t border-slate-100 bg-slate-50/80 px-5 py-4 sm:flex-row sm:justify-end">
+          <div className="flex flex-col-reverse gap-2 border-t border-slate-100 bg-slate-50/80 px-4 py-4 sm:flex-row sm:justify-end sm:px-5">
             <button
               type="button"
               onClick={onClose}
-              className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              className="inline-flex min-h-[44px] touch-manipulation items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
               İptal
             </button>
@@ -184,7 +187,7 @@ function ExamRulesModal(props: {
               type="button"
               disabled={confirming || !hasLink}
               onClick={onConfirm}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex min-h-[44px] touch-manipulation items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {confirming ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Kuralları Okudum, Devam Et
@@ -297,8 +300,8 @@ export default function AcademicCenter() {
   ];
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto">
-      <div className="relative overflow-hidden rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-600 p-6 text-white shadow-xl shadow-indigo-400/25">
+    <div className="space-y-6 max-w-5xl mx-auto px-1 sm:px-0">
+      <div className="relative overflow-hidden rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-600 p-4 text-white shadow-xl shadow-indigo-400/25 sm:p-6">
         <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-white/10 blur-2xl" />
         <div className="absolute -bottom-10 left-1/4 h-24 w-40 rounded-full bg-fuchsia-400/20 blur-2xl" />
         <div className="relative flex flex-wrap items-start gap-4">

@@ -5,6 +5,7 @@ import {
   openBbbWaitingPopup,
   showBbbWaitingPopupError
 } from './bbbWaitingPopup';
+import { isMobileOrTabletViewport } from './viewportUtils';
 
 const STORAGE_KEY_PREFIX = 'academic_center_links_v2';
 
@@ -155,6 +156,20 @@ export async function saveAcademicCenterLinksToServer(
   return saved;
 }
 
+export async function fetchAcademicCenterBbbJoinUrl(
+  room: ExamEntryKey,
+  institutionId?: string | null
+): Promise<string> {
+  const qs = new URLSearchParams({ room });
+  if (institutionId) qs.set('institution_id', institutionId);
+  const res = await apiFetch(`/api/academic-center-bbb-join?${qs.toString()}`);
+  const json = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+  if (!res.ok || !json.url) {
+    throw new Error(json.error || 'BBB oturumu açılamadı');
+  }
+  return json.url;
+}
+
 export async function openAcademicCenterLink(
   url: string,
   opts?: { room?: ExamEntryKey; institutionId?: string | null; busy?: (v: boolean) => void }
@@ -163,20 +178,21 @@ export async function openAcademicCenterLink(
   if (!href) return;
 
   if (isBbbAutoMeetingLink(href) && opts?.room) {
+    if (isMobileOrTabletViewport()) {
+      const qs = new URLSearchParams({ room: opts.room });
+      if (opts.institutionId) qs.set('institution_id', opts.institutionId);
+      window.location.assign(`/academic-center/bbb-join?${qs.toString()}`);
+      return;
+    }
+
     opts.busy?.(true);
     const popup = openBbbWaitingPopup({
       title: 'Deneme sınavı sınıfına yönlendiriliyorsunuz',
       subtitle: 'Lütfen bekleyiniz…'
     });
     try {
-      const qs = new URLSearchParams({ room: opts.room });
-      if (opts.institutionId) qs.set('institution_id', opts.institutionId);
-      const res = await apiFetch(`/api/academic-center-bbb-join?${qs.toString()}`);
-      const json = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
-      if (!res.ok || !json.url) {
-        throw new Error(json.error || 'BBB oturumu açılamadı');
-      }
-      assignBbbWaitingPopup(popup, json.url);
+      const joinUrl = await fetchAcademicCenterBbbJoinUrl(opts.room, opts.institutionId);
+      assignBbbWaitingPopup(popup, joinUrl);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'BBB oturumu açılamadı';
       showBbbWaitingPopupError(popup, msg);
@@ -184,6 +200,11 @@ export async function openAcademicCenterLink(
     } finally {
       opts.busy?.(false);
     }
+    return;
+  }
+
+  if (isMobileOrTabletViewport()) {
+    window.location.assign(href);
     return;
   }
 

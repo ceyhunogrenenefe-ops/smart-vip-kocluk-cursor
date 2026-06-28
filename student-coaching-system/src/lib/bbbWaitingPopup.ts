@@ -15,17 +15,19 @@ function waitingHtml({ title, subtitle, error }: WaitingCopy): string {
 <html lang="tr">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>${heading}</title>
   <style>
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html { -webkit-text-size-adjust: 100%; }
     body {
       margin: 0;
       min-height: 100vh;
+      min-height: 100dvh;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 24px;
+      padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
       background: linear-gradient(160deg, #ecfdf5 0%, #f8fafc 45%, #eef2ff 100%);
       color: #0f172a;
@@ -35,9 +37,15 @@ function waitingHtml({ title, subtitle, error }: WaitingCopy): string {
       background: #fff;
       border: 1px solid #e2e8f0;
       border-radius: 16px;
-      padding: 32px 28px;
+      padding: 28px 20px;
       text-align: center;
       box-shadow: 0 10px 40px rgba(15, 23, 42, 0.08);
+    }
+    @media (min-width: 480px) {
+      .card { padding: 32px 28px; }
+    }
+    @media (min-width: 768px) {
+      .card { padding: 36px 32px; border-radius: 20px; }
     }
     .spinner {
       width: 44px;
@@ -51,14 +59,14 @@ function waitingHtml({ title, subtitle, error }: WaitingCopy): string {
     @keyframes spin { to { transform: rotate(360deg); } }
     h1 {
       margin: 0 0 10px;
-      font-size: 1.125rem;
+      font-size: clamp(1rem, 4.5vw, 1.125rem);
       line-height: 1.45;
       font-weight: 700;
       color: #0f172a;
     }
     p {
       margin: 0;
-      font-size: 0.95rem;
+      font-size: clamp(0.9rem, 3.8vw, 0.95rem);
       line-height: 1.55;
       color: #475569;
     }

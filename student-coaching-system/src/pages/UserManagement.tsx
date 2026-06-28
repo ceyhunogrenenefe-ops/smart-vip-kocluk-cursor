@@ -2371,11 +2371,11 @@ export default function UserManagement() {
             />
           </div>
 
-          <div className="flex flex-col sm:flex-row flex-wrap gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:flex xl:flex-row xl:flex-wrap">
             <select
               value={filterRole}
               onChange={(e) => setFilterRole(e.target.value as UserRole | 'all')}
-              className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-w-[10rem]"
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-h-[44px] xl:min-w-[10rem] xl:w-auto"
               aria-label="Rol filtresi"
             >
               <option value="all">Tüm roller</option>
@@ -2389,7 +2389,7 @@ export default function UserManagement() {
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value as typeof filterStatus)}
-              className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-w-[10rem]"
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-h-[44px] xl:min-w-[10rem] xl:w-auto"
               aria-label="Durum filtresi"
             >
               <option value="all">Tüm durumlar</option>
@@ -2402,7 +2402,7 @@ export default function UserManagement() {
               <select
                 value={filterInstitutionId}
                 onChange={(e) => setFilterInstitutionId(e.target.value)}
-                className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-w-[12rem]"
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-h-[44px] xl:min-w-[12rem] xl:w-auto"
                 aria-label="Kurum filtresi"
               >
                 <option value="all">Tüm kurumlar</option>
@@ -2417,7 +2417,7 @@ export default function UserManagement() {
             <select
               value={filterClassLevel}
               onChange={(e) => setFilterClassLevel(e.target.value)}
-              className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-w-[10rem]"
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-h-[44px] xl:min-w-[10rem] xl:w-auto"
               aria-label="Sınıf filtresi"
             >
               <option value="all">Tüm sınıflar</option>
@@ -2436,7 +2436,7 @@ export default function UserManagement() {
             <select
               value={filterCoachId}
               onChange={(e) => setFilterCoachId(e.target.value)}
-              className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-w-[12rem]"
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-h-[44px] xl:min-w-[12rem] xl:w-auto"
               aria-label="Koç filtresi"
             >
               <option value="all">Tüm koçlar</option>
@@ -2476,7 +2476,7 @@ export default function UserManagement() {
       ) : null}
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {/* Mobil: yatay kaydırma yok, düzenle her zaman görünür */}
-        <div className="lg:hidden divide-y divide-gray-100">
+        <div className="md:hidden divide-y divide-gray-100">
           {listLoading || authLoading ? (
             <div className="px-4 py-12 text-center text-sm text-slate-500">
               <span className="inline-flex items-center justify-center gap-2">
@@ -2652,7 +2652,7 @@ export default function UserManagement() {
           ) : null}
         </div>
 
-        <div className="hidden lg:block overflow-x-auto">
+        <div className="hidden md:block overflow-x-auto overscroll-x-contain">
           <table className="w-full min-w-[1100px] table-fixed">
             <thead className="bg-gray-50/90 border-b border-gray-100">
               <tr>
@@ -2859,7 +2859,7 @@ export default function UserManagement() {
         </div>
 
         {!listLoading && !authLoading && filteredUsers.length === 0 ? (
-          <div className="hidden lg:block p-8 text-center text-gray-500">
+          <div className="hidden md:block p-8 text-center text-gray-500">
             <Users className="w-12 h-12 mx-auto mb-3 text-gray-300" />
             <p>Kullanıcı bulunamadı</p>
           </div>
