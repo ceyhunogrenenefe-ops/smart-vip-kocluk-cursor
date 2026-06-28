@@ -14,7 +14,7 @@ const TABLE = 'platform_academic_center_links';
 
 function parseBody(req) {
   const b = req.body;
-  if (b && typeof b === 'object') return b;
+  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;
   if (typeof b === 'string') {
     try {
       return JSON.parse(b || '{}');
@@ -22,6 +22,13 @@ function parseBody(req) {
       return {};
     }
   }
+  return {};
+}
+
+function extractLinksPayload(body) {
+  const root = body && typeof body === 'object' ? body : {};
+  if (root.links && typeof root.links === 'object') return root.links;
+  if (root.studyClasses || root.exams || root.questionPools) return root;
   return {};
 }
 
@@ -95,7 +102,7 @@ export default async function handler(req, res) {
     }
   }
 
-  if (req.method === 'PUT') {
+  if (req.method === 'PUT' || req.method === 'POST') {
     let actor;
     try {
       actor = requireAuthenticatedActor(req);
@@ -111,7 +118,14 @@ export default async function handler(req, res) {
 
     const body = parseBody(req);
     const institutionId = resolveInstitutionScope(actor, body.institution_id);
-    const patch = coerceAcademicLinks(body.links ? body.links : body);
+    const linksPayload = extractLinksPayload(body);
+    if (!linksPayload || typeof linksPayload !== 'object' || !Object.keys(linksPayload).length) {
+      return res.status(400).json({
+        error: 'invalid_body',
+        hint: 'links (studyClasses, exams, questionPools) JSON gövdesi gerekli.'
+      });
+    }
+    const patch = coerceAcademicLinks(linksPayload);
 
     try {
       let store;
@@ -147,13 +161,13 @@ export default async function handler(req, res) {
 
       const savedStore = normalizeAcademicLinksStore(data?.links ?? data?.payload);
       const saved = linksForInstitution(savedStore, institutionId);
-      return res.status(200).json({ data: saved, institution_id: institutionId || null });
+      return res.status(200).json({ ok: true, data: saved, institution_id: institutionId || null });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'upsert_failed';
       return res.status(500).json({ error: msg });
     }
   }
 
-  res.setHeader('Allow', 'GET, PUT');
+  res.setHeader('Allow', 'GET, PUT, POST');
   return res.status(405).json({ error: 'method_not_allowed' });
 }

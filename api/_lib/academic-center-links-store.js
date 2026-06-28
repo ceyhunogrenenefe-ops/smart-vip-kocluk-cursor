@@ -77,7 +77,7 @@ export function linksForInstitution(store, institutionId) {
   if (!iid) return base;
   const patch = normalized.byInstitution[iid];
   if (!patch) return base;
-  return coerceAcademicLinks(deepMerge(base, patch));
+  return coerceAcademicLinks(deepMerge(base, coerceAcademicLinks(patch)));
 }
 
 export function upsertInstitutionLinks(store, institutionId, patchLinks) {
@@ -87,12 +87,11 @@ export function upsertInstitutionLinks(store, institutionId, patchLinks) {
   if (!iid) {
     return { default: nextPatch, byInstitution: normalized.byInstitution };
   }
-  const prev = normalized.byInstitution[iid] || {};
   return {
     default: normalized.default,
     byInstitution: {
       ...normalized.byInstitution,
-      [iid]: coerceAcademicLinks(deepMerge(prev, nextPatch))
+      [iid]: nextPatch
     }
   };
 }

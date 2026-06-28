@@ -1,7 +1,12 @@
 import { apiFetch } from './session';
 import { BBB_AUTO_MEETING_LINK, isBbbAutoMeetingLink } from './liveLessonUtils';
 
-const STORAGE_KEY = 'academic_center_links_v1';
+const STORAGE_KEY_PREFIX = 'academic_center_links_v2';
+
+function storageKey(institutionId?: string | null) {
+  const iid = String(institutionId || '').trim();
+  return iid ? `${STORAGE_KEY_PREFIX}_${iid}` : `${STORAGE_KEY_PREFIX}_platform`;
+}
 
 export type ExamEntryKey = 'lise' | 'yos' | 'class34' | 'class56' | 'class78';
 
@@ -77,9 +82,9 @@ export function coerceAcademicCenterLinks(next: Partial<AcademicCenterLinks> | n
   };
 }
 
-export function loadAcademicCenterLinks(): AcademicCenterLinks | null {
+export function loadAcademicCenterLinks(institutionId?: string | null): AcademicCenterLinks | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(storageKey(institutionId));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<AcademicCenterLinks> | null;
     if (!parsed || typeof parsed !== 'object') return null;
@@ -89,9 +94,9 @@ export function loadAcademicCenterLinks(): AcademicCenterLinks | null {
   }
 }
 
-export function saveAcademicCenterLinksLocal(next: AcademicCenterLinks): void {
+export function saveAcademicCenterLinksLocal(next: AcademicCenterLinks, institutionId?: string | null): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    localStorage.setItem(storageKey(institutionId), JSON.stringify(next));
   } catch {
     /* ignore */
   }
@@ -114,7 +119,7 @@ export async function fetchAcademicCenterLinksFromServer(
   }
 
   const data = coerceAcademicCenterLinks(json.data);
-  saveAcademicCenterLinksLocal(data);
+  saveAcademicCenterLinksLocal(data, institutionId);
   return data;
 }
 
@@ -141,7 +146,7 @@ export async function saveAcademicCenterLinksToServer(
   }
 
   const saved = coerceAcademicCenterLinks(json.data);
-  saveAcademicCenterLinksLocal(saved);
+  saveAcademicCenterLinksLocal(saved, institutionId);
   return saved;
 }
 

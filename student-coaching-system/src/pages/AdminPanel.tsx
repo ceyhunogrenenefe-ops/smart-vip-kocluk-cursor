@@ -1,5 +1,5 @@
 // Türkçe: Super Admin Paneli - Tüm Kurumları Yönetme
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOrganization, PLAN_LIMITS } from '../context/OrganizationContext';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
@@ -35,6 +35,7 @@ import {
   defaultAcademicCenterLinks,
   EXAM_ENTRY_DEFS,
   fetchAcademicCenterLinksFromServer,
+  loadAcademicCenterLinks,
   saveAcademicCenterLinksToServer,
   BBB_AUTO_MEETING_LINK,
   isBbbAutoMeetingLink,
@@ -100,6 +101,12 @@ export default function AdminPanel() {
   const [academicLinksInstitutionId, setAcademicLinksInstitutionId] = useState<string>('');
   const [academicLinksMsg, setAcademicLinksMsg] = useState<string | null>(null);
   const [academicLinksBusy, setAcademicLinksBusy] = useState(false);
+  const academicLinksLoadSeq = useRef(0);
+
+  const effectiveAcademicLinksInstitutionId = useMemo(() => {
+    if (user?.role === 'admin') return String(user.institutionId || academicLinksInstitutionId || '').trim();
+    return academicLinksInstitutionId.trim();
+  }, [user?.role, user?.institutionId, academicLinksInstitutionId]);
 
   const refreshMetaWa = useCallback(async () => {
     if (!canWhatsAppTest || !getAuthToken()) return;
@@ -140,20 +147,24 @@ export default function AdminPanel() {
 
   useEffect(() => {
     if (!getAuthToken()) return;
-    let cancelled = false;
+    if (user?.role === 'admin' && !effectiveAcademicLinksInstitutionId) return;
+
+    const seq = ++academicLinksLoadSeq.current;
+    const instId = effectiveAcademicLinksInstitutionId || undefined;
+
     void (async () => {
       try {
-        const instId = academicLinksInstitutionId.trim() || undefined;
         const data = await fetchAcademicCenterLinksFromServer(instId);
-        if (!cancelled) setAcademicLinks(data);
+        if (seq !== academicLinksLoadSeq.current) return;
+        setAcademicLinks(data);
       } catch {
-        if (!cancelled) setAcademicLinks({ ...defaultAcademicCenterLinks });
+        if (seq !== academicLinksLoadSeq.current) return;
+        setAcademicLinks(
+          loadAcademicCenterLinks(instId) ?? { ...defaultAcademicCenterLinks }
+        );
       }
     })();
-    return () => {
-      cancelled = true;
-    };
-  }, [academicLinksInstitutionId]);
+  }, [effectiveAcademicLinksInstitutionId, user?.role]);
 
   useEffect(() => {
     if (user?.role === 'admin' && user.institutionId) {
@@ -244,14 +255,19 @@ export default function AdminPanel() {
     setAcademicLinksBusy(true);
     setAcademicLinksMsg(null);
     try {
-      const instId = academicLinksInstitutionId.trim() || undefined;
+      const instId = effectiveAcademicLinksInstitutionId || undefined;
+      if (user?.role === 'super_admin' && !instId) {
+        setAcademicLinksMsg('Kaydetmeden önce listeden bir kurum seçin.');
+        return;
+      }
+      if (user?.role === 'admin' && !instId) {
+        setAcademicLinksMsg('Kurum kimliği bulunamadı. Çıkış yapıp tekrar giriş yapın.');
+        return;
+      }
       const saved = await saveAcademicCenterLinksToServer(academicLinks, instId);
+      academicLinksLoadSeq.current += 1;
       setAcademicLinks(saved);
-      setAcademicLinksMsg(
-        instId
-          ? 'Kurum Akademik Merkez linkleri kaydedildi.'
-          : 'Platform varsayılan linkleri kaydedildi.'
-      );
+      setAcademicLinksMsg('Kurum Akademik Merkez linkleri kaydedildi.');
     } catch (e) {
       setAcademicLinksMsg(
         e instanceof Error && e.message
@@ -508,7 +524,7 @@ export default function AdminPanel() {
                 onChange={(e) => setAcademicLinksInstitutionId(e.target.value)}
                 className="mt-1 w-full max-w-md px-3 py-2 border border-slate-200 rounded-lg text-sm"
               >
-                <option value="">Platform varsayılanı (tüm kurumlar)</option>
+                <option value="">— Kurum seçin —</option>
                 {institutions.map((inst) => (
                   <option key={inst.id} value={inst.id}>
                     {inst.name}
@@ -536,7 +552,7 @@ export default function AdminPanel() {
                 <label key={key} className="block">
                   <span className="text-xs text-slate-600">{label}</span>
                   <input
-                    type="url"
+                    type="text"
                     value={academicLinks.studyClasses[key]}
                     onChange={(e) =>
                       setAcademicLinks((prev) => ({
@@ -569,7 +585,7 @@ export default function AdminPanel() {
                     </div>
                     {!bbbMode ? (
                       <input
-                        type="url"
+                        type="text"
                         value={href}
                         onChange={(e) => setExamEntryLink(key, e.target.value)}
                         placeholder="https://zoom.us/j/… veya meet.google.com/…"
@@ -584,7 +600,7 @@ export default function AdminPanel() {
               <label className="block pt-2">
                 <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Sanal optik (ortak)</span>
                 <input
-                  type="url"
+                  type="text"
                   value={academicLinks.exams.optic}
                   onChange={(e) =>
                     setAcademicLinks((prev) => ({
@@ -599,7 +615,7 @@ export default function AdminPanel() {
               <label className="block">
                 <span className="text-xs text-slate-600">Havuz 1</span>
                 <input
-                  type="url"
+                  type="text"
                   value={academicLinks.questionPools.pool1}
                   onChange={(e) =>
                     setAcademicLinks((prev) => ({
@@ -613,7 +629,7 @@ export default function AdminPanel() {
               <label className="block">
                 <span className="text-xs text-slate-600">Havuz 2</span>
                 <input
-                  type="url"
+                  type="text"
                   value={academicLinks.questionPools.pool2}
                   onChange={(e) =>
                     setAcademicLinks((prev) => ({

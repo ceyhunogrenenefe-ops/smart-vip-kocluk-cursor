@@ -1,6 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { BookOpen, ClipboardList, School, ExternalLink, Sparkles, KeyRound, Loader2 } from 'lucide-react';
+import {
+  BookOpen,
+  ClipboardList,
+  School,
+  ExternalLink,
+  Sparkles,
+  KeyRound,
+  Loader2,
+  ScanLine,
+  Video,
+  X
+} from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
   defaultAcademicCenterLinks,
@@ -15,13 +26,155 @@ import {
 } from '../lib/academicCenterLinks';
 type TabKey = 'study' | 'exam' | 'pool';
 
+const EXAM_CLASS_INTRO =
+  'Canlı öğretmen eşliğinde gerçekleştirilen deneme sınavı oturumlarına bu bölümden katılabilirsiniz.';
+
+type ExamModalTarget = { key: ExamEntryKey; href: string; label: string };
+
+function PortalActionCard(props: {
+  accent: string;
+  icon: React.ReactNode;
+  title: string;
+  description: React.ReactNode;
+  buttonLabel: string;
+  onAction: () => void;
+  disabled?: boolean;
+  busy?: boolean;
+  buttonClassName?: string;
+}) {
+  const {
+    accent,
+    icon,
+    title,
+    description,
+    buttonLabel,
+    onAction,
+    disabled,
+    busy,
+    buttonClassName = 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white hover:brightness-110'
+  } = props;
+
+  return (
+    <div className="group relative overflow-hidden rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:shadow-md">
+      <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${accent}`} />
+      <div className="flex items-start gap-4">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+          {icon}
+        </div>
+        <div className="flex min-h-[9.5rem] min-w-0 flex-1 flex-col">
+          <p className="font-semibold text-slate-900">{title}</p>
+          <div className="mt-2 flex-1 text-sm leading-relaxed text-slate-600">{description}</div>
+          <button
+            type="button"
+            disabled={disabled || busy}
+            onClick={onAction}
+            className={`mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold shadow-md transition disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${buttonClassName}`}
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {buttonLabel}
+            {!busy ? <ExternalLink className="h-4 w-4" /> : null}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ExamRulesModal(props: {
+  target: ExamModalTarget | null;
+  onClose: () => void;
+  onConfirm: () => void;
+  confirming?: boolean;
+}) {
+  const { target, onClose, onConfirm, confirming } = props;
+  if (!target) return null;
+
+  const rules = [
+    'Deneme sınavının geçerli sayılabilmesi için kameranız açık olmalıdır.',
+    'Kamera açınız; yüzünüzü, kitapçığınızı ve ellerinizi net şekilde gösterecek biçimde ayarlanmalıdır.',
+    'Sınav boyunca kameranızı kapatmamanız gerekmektedir.',
+    'Bu kurallara uyulmaması durumunda deneme sınavı geçersiz sayılabilir.'
+  ];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="exam-rules-title"
+    >
+      <button
+        type="button"
+        className="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px]"
+        aria-label="Kapat"
+        onClick={onClose}
+      />
+      <div className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+        <div className="border-b border-slate-100 bg-gradient-to-r from-emerald-50 to-teal-50 px-5 py-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white">
+                <Video className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 id="exam-rules-title" className="text-lg font-bold text-slate-900">
+                  Deneme Sınavı Bilgilendirmesi
+                </h3>
+                <p className="mt-0.5 text-sm text-slate-600">{target.label}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg p-1.5 text-slate-500 hover:bg-white hover:text-slate-800"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+        <div className="px-5 py-5">
+          <ul className="space-y-3 text-sm leading-relaxed text-slate-700">
+            {rules.map((rule) => (
+              <li key={rule} className="flex gap-2.5">
+                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+                <span>{rule}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="flex flex-col-reverse gap-2 border-t border-slate-100 bg-slate-50/80 px-5 py-4 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            İptal
+          </button>
+          <button
+            type="button"
+            disabled={confirming}
+            onClick={onConfirm}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md hover:brightness-110 disabled:opacity-60"
+          >
+            {confirming ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Kuralları Okudum, Devam Et
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AcademicCenter() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { institution, activeInstitutionId } = useApp();
   const institutionId = institution?.id || activeInstitutionId || null;
   const [activeTab, setActiveTab] = useState<TabKey>('study');
-  const [links, setLinks] = useState<AcademicCenterLinks>(() => loadAcademicCenterLinks() ?? defaultAcademicCenterLinks);
+  const [links, setLinks] = useState<AcademicCenterLinks>(
+    () => loadAcademicCenterLinks(institutionId) ?? defaultAcademicCenterLinks
+  );
   const [bbbBusyRoom, setBbbBusyRoom] = useState<ExamEntryKey | null>(null);
+  const [examModal, setExamModal] = useState<ExamModalTarget | null>(null);
 
   useEffect(() => {
     const t = searchParams.get('tab');
@@ -44,7 +197,7 @@ export default function AcademicCenter() {
         const data = await fetchAcademicCenterLinksFromServer(institutionId);
         if (mounted) setLinks(data);
       } catch {
-        if (mounted) setLinks(loadAcademicCenterLinks() ?? defaultAcademicCenterLinks);
+        if (mounted) setLinks(loadAcademicCenterLinks(institutionId) ?? defaultAcademicCenterLinks);
       }
     })();
     return () => {
@@ -58,6 +211,18 @@ export default function AcademicCenter() {
       institutionId,
       busy: room ? (v) => setBbbBusyRoom(v ? room : null) : undefined
     });
+  };
+
+  const requestExamClassJoin = (key: ExamEntryKey, label: string) => {
+    const href = examEntryUrl(links, key);
+    if (!href) return;
+    setExamModal({ key, href, label });
+  };
+
+  const confirmExamClassJoin = () => {
+    if (!examModal) return;
+    openLink(examModal.href, examModal.key);
+    setExamModal(null);
   };
 
   const tabs: {
@@ -210,56 +375,70 @@ export default function AcademicCenter() {
           )}
 
           {activeTab === 'exam' && (
-            <div className="space-y-4">
-              <div className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-teal-50 p-4 shadow-sm">
-                <p className="text-sm font-semibold text-emerald-950">Sanal optik</p>
-                <p className="mt-1 text-sm text-emerald-900/80">
-                  Tüm sınıf seviyeleri için ortak sanal optik girişi.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => openLink(links.exams.optic)}
-                  className="mt-3 inline-flex items-center justify-center gap-2 rounded-xl border-2 border-emerald-600 bg-white px-5 py-3 text-sm font-bold text-emerald-800 shadow-sm transition hover:bg-emerald-50"
-                >
-                  Sanal optik <ExternalLink className="h-4 w-4" />
-                </button>
+            <div className="space-y-6">
+              <PortalActionCard
+                accent="from-teal-500 to-emerald-600"
+                icon={<ScanLine className="h-5 w-5" />}
+                title="Sanal Optik"
+                description={
+                  <>
+                    Kodlamalarınızı bu bölüm üzerinden gerçekleştirebilirsiniz.{' '}
+                    <strong>Sanal Optik</strong> butonuna tıkladığınızda otomatik olarak{' '}
+                    <strong>Deneme Sınav Sistemi</strong>&apos;ne yönlendirileceksiniz. Açılan ekranda{' '}
+                    <strong>Deneme Sınav Sistemi kullanıcı adı ve şifreniz</strong> ile giriş yaparak optik
+                    kodlamalarınızı tamamlayabilirsiniz.
+                  </>
+                }
+                buttonLabel="Sanal Optik"
+                onAction={() => openLink(links.exams.optic)}
+                buttonClassName="border-2 border-emerald-600 bg-white text-emerald-800 shadow-sm hover:bg-emerald-50"
+              />
+
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900">Deneme Sınavı Sınıfları</h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Sınıf seviyenize uygun canlı deneme oturumunu seçin.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {EXAM_ENTRY_DEFS.map((x) => {
+                    const href = examEntryUrl(links, x.key);
+                    const bbb = isBbbAutoMeetingLink(href);
+                    const busy = bbbBusyRoom === x.key;
+                    return (
+                      <PortalActionCard
+                        key={x.key}
+                        accent={x.accent}
+                        icon={<ClipboardList className="h-5 w-5" />}
+                        title={x.label}
+                        description={
+                          <>
+                            {EXAM_CLASS_INTRO}
+                            {bbb ? (
+                              <span className="mt-2 block text-xs text-slate-500">
+                                BBB otomatik oda — katılınca oluşturulur.
+                              </span>
+                            ) : null}
+                          </>
+                        }
+                        buttonLabel="Deneme Sınıfına Katıl"
+                        disabled={!href}
+                        busy={busy}
+                        onAction={() => requestExamClassJoin(x.key, x.label)}
+                      />
+                    );
+                  })}
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                {EXAM_ENTRY_DEFS.map((x) => {
-                  const href = examEntryUrl(links, x.key);
-                  const bbb = isBbbAutoMeetingLink(href);
-                  const busy = bbbBusyRoom === x.key;
-                  return (
-                    <div
-                      key={x.key}
-                      className="group relative overflow-hidden rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:shadow-md"
-                    >
-                      <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${x.accent}`} />
-                      <div className="flex items-start gap-3">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
-                          <ClipboardList className="h-5 w-5" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="font-semibold text-slate-800">{x.label}</p>
-                          {bbb ? (
-                            <p className="mt-1 text-xs text-slate-500">BBB otomatik oda — katılınca oluşturulur</p>
-                          ) : null}
-                          <button
-                            type="button"
-                            disabled={!href || busy}
-                            onClick={() => openLink(href, x.key)}
-                            className="mt-3 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                            Deneme giriş <ExternalLink className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              <ExamRulesModal
+                target={examModal}
+                onClose={() => setExamModal(null)}
+                onConfirm={confirmExamClassJoin}
+                confirming={examModal ? bbbBusyRoom === examModal.key : false}
+              />
             </div>
           )}
 
