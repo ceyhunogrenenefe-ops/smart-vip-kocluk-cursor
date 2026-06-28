@@ -17,12 +17,13 @@ import {
 import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
+import { userRoleTags } from '../config/rolePermissions';
 import { apiFetch } from '../lib/session';
 import { mergeClassSlotsIntoPlanner, type PlannerState as FullPlannerState } from '../lib/classSlotsToPlanner';
 import { PLANNER_CURRICULUM_PRESETS, PLANNER_POOL_SUBJECTS } from '../lib/plannerTopicPool';
 
 type PlannerTeacher = { id: string; name: string; email?: string; branches?: string[] };
-type PlannerStudent = { id: string; name: string; class_level?: string | number | null; email?: string; class_ids?: string[] };
+type PlannerStudent = { id: string; name: string; class_level?: string | number | null; email?: string; school?: string; class_ids?: string[] };
 type PlannerGroup = { id: string; name: string };
 type PlannerState = {
   groups?: PlannerGroup[];
@@ -73,7 +74,9 @@ const API_ERROR_LABELS: Record<string, string> = {
     'Seçilen sınıf bu kuruma ait değil. Üst menüden doğru kurumu seçin veya Canlı Grup Dersi\'nde sınıfın öğrenci atamasını kontrol edin.',
   planner_json_required: 'Planlayıcı verisi okunamadı.',
   institution_required: 'Kurum seçili değil.',
-  export_failed: 'Aktarım sırasında hata oluştu.'
+  export_failed: 'Aktarım sırasında hata oluştu.',
+  forbidden: 'Bu işlem için yetkiniz yok.',
+  planner_resources_failed: 'Kurum sınıf listesi yüklenemedi.'
 };
 
 function formatYmd(d: Date): string {
@@ -156,12 +159,17 @@ function postPlannerMessage<T>(
 export default function SchedulePlannerPage() {
   const { effectiveUser } = useAuth();
   const { activeInstitutionId } = useApp();
-  const isSuper = effectiveUser?.role === 'super_admin';
+  const roleTags = userRoleTags(effectiveUser);
+  const isSuper = effectiveUser?.role === 'super_admin' || roleTags.includes('super_admin');
+  const isAdmin = effectiveUser?.role === 'admin' || roleTags.includes('admin');
   const institutionId = String(
-    isSuper ? activeInstitutionId || effectiveUser?.institution_id || '' : effectiveUser?.institution_id || activeInstitutionId || ''
+    isSuper
+      ? activeInstitutionId || effectiveUser?.institution_id || ''
+      : effectiveUser?.institution_id || activeInstitutionId || ''
   ).trim();
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [loadError, setLoadError] = useState('');
   const [iframeReady, setIframeReady] = useState(false);
   const [plans, setPlans] = useState<PlanRow[]>([]);
   const [classes, setClasses] = useState<ClassRow[]>([]);
@@ -187,6 +195,7 @@ export default function SchedulePlannerPage() {
     if (!iframeReady || !institutionId) return;
     try {
       await postPlannerMessage(iframeRef.current, 'SET_CONTEXT', {
+        institutionId,
         classes: classes.map((c) => ({
           id: c.id,
           name: c.name,
@@ -196,27 +205,41 @@ export default function SchedulePlannerPage() {
         teachers: systemTeachers,
         students: systemStudents,
         poolSubjects: PLANNER_POOL_SUBJECTS,
-        curriculumPresets: PLANNER_CURRICULUM_PRESETS
+        curriculumPresets: PLANNER_CURRICULUM_PRESETS,
+        autoSyncClasses: isAdmin || isSuper
       });
-    } catch {
-      /* iframe henüz hazır olmayabilir */
+      setLoadError('');
+    } catch (e) {
+      setLoadError('Planlayıcı bağlantısı kurulamadı. Sayfayı yenileyin.');
     }
-  }, [iframeReady, institutionId, classes, systemTeachers, systemStudents]);
+  }, [iframeReady, institutionId, classes, systemTeachers, systemStudents, isAdmin, isSuper]);
 
   const loadPlannerResources = useCallback(async () => {
     if (!institutionId) return;
     const qs = new URLSearchParams({ op: 'planner-resources', institution_id: institutionId });
     const res = await apiFetch(`/api/class-schedule-plans?${qs.toString()}`);
     const j = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(j.error || 'planner_resources_failed');
+    if (!res.ok) throw new Error(API_ERROR_LABELS[j.error as string] || j.error || 'planner_resources_failed');
     setSystemTeachers(Array.isArray(j.teachers) ? j.teachers : []);
     setSystemStudents(Array.isArray(j.students) ? j.students : []);
-    if (Array.isArray(j.classes) && j.classes.length) {
-      setClasses((prev) => {
-        const map = new Map(prev.map((c) => [c.id, c]));
-        for (const c of j.classes as ClassRow[]) map.set(c.id, c);
-        return [...map.values()].sort((a, b) => String(a.name).localeCompare(String(b.name), 'tr'));
-      });
+    if (Array.isArray(j.classes)) {
+      setClasses(
+        (j.classes as ClassRow[])
+          .slice()
+          .sort((a, b) => String(a.name).localeCompare(String(b.name), 'tr'))
+      );
+    }
+  }, [institutionId]);
+
+  const loadClassesFallback = useCallback(async () => {
+    if (!institutionId) return;
+    const qs = new URLSearchParams({ scope: 'classes', institution_id: institutionId });
+    const res = await apiFetch(`/api/class-live-lessons?${qs.toString()}`);
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(j.error || 'classes_failed');
+    const rows = Array.isArray(j.classes) ? j.classes : Array.isArray(j.data) ? j.data : [];
+    if (rows.length) {
+      setClasses(rows);
     }
   }, [institutionId]);
 
@@ -241,20 +264,28 @@ export default function SchedulePlannerPage() {
   }, [institutionId]);
 
   const loadClasses = useCallback(async () => {
-    const qs = new URLSearchParams({ scope: 'classes' });
-    if (institutionId) qs.set('institution_id', institutionId);
-    const res = await apiFetch(`/api/class-live-lessons?${qs.toString()}`);
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(j.error || 'classes_failed');
-    const rows = Array.isArray(j.classes) ? j.classes : Array.isArray(j.data) ? j.data : [];
-    setClasses(rows);
+    await loadPlannerResources().catch(() => {});
+    await loadClassesFallback().catch(() => {});
+  }, [loadPlannerResources, loadClassesFallback]);
+
+  useEffect(() => {
+    setIframeReady(false);
   }, [institutionId]);
 
   useEffect(() => {
-    loadPlans().catch((e) => toast.error(String(e.message || e)));
-    loadClasses().catch(() => {});
-    loadPlannerResources().catch(() => {});
-  }, [loadPlans, loadClasses, loadPlannerResources]);
+    if (!institutionId) return;
+    setLoadError('');
+    loadPlans().catch((e) => {
+      const msg = String(e.message || e);
+      setLoadError(msg);
+      toast.error(msg);
+    });
+    loadClasses().catch((e) => {
+      const msg = String(e.message || e);
+      setLoadError(msg);
+      toast.error(msg);
+    });
+  }, [institutionId, loadPlans, loadClasses]);
 
   useEffect(() => {
     if (iframeReady) void pushPlannerContext();
@@ -678,9 +709,33 @@ export default function SchedulePlannerPage() {
         </div>
       </div>
 
-      {!institutionId && isSuper ? (
+      {loadError ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          {loadError}
+        </div>
+      ) : null}
+
+      {!institutionId ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          Süper admin: üst menüden kurum seçin, ardından planı kaydedip aktarabilirsiniz.
+          {isSuper
+            ? 'Süper admin: üst menüden kurum seçin, ardından planı kaydedip aktarabilirsiniz.'
+            : isAdmin
+              ? 'Kurum bilgisi yüklenemedi. Çıkış yapıp tekrar giriş yapın veya destek ile iletişime geçin.'
+              : 'Kurum seçili değil.'}
+        </div>
+      ) : classes.length === 0 ? (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+          Bu kurumda henüz Canlı Grup sınıfı bulunamadı. Önce{' '}
+          <Link to="/class-live-lessons" className="font-semibold text-indigo-600 underline">
+            Canlı Grup Dersi
+          </Link>{' '}
+          sayfasından sınıf oluşturun veya mevcut sınıflara öğrenci atayın.
+        </div>
+      ) : null}
+
+      {institutionId && classes.length > 0 ? (
+        <div className="rounded-lg border border-indigo-100 bg-indigo-50/80 px-3 py-2 text-xs text-indigo-950 dark:border-indigo-900/50 dark:bg-indigo-950/30 dark:text-indigo-100">
+          Kurumda <strong>{classes.length}</strong> sınıf yüklendi — planlayıcıda «Tüm Sınıflar» sekmesinde görünür.
         </div>
       ) : null}
 
@@ -770,6 +825,7 @@ export default function SchedulePlannerPage() {
       ) : null}
 
       <iframe
+        key={institutionId || 'default'}
         ref={iframeRef}
         src={IFRAME_SRC}
         title="Ders programı planlayıcı"

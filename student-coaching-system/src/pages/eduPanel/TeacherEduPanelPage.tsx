@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { EDU_HOMEWORK_ANIMATIONS_LABEL } from '../../components/layout/sidebar/navModel';
 import { BookOpen, GraduationCap, Layers, Loader2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import EduAnimationPreviewModal from '../../components/eduPanel/EduAnimationPreviewModal';
@@ -181,7 +181,7 @@ export default function TeacherEduPanelPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
       <div className="rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 p-6 text-white">
-        <h1 className="text-2xl font-bold">Ders içerik paneli</h1>
+        <h1 className="text-2xl font-bold">{EDU_HOMEWORK_ANIMATIONS_LABEL}</h1>
         <p className="mt-1 text-sm text-violet-100">
           Önce sınıf kademesini, sonra dersi seçin. Her ders altındaki konu kartları öğrenciye yalnızca
           ilgili sınıf ve ders bağlamında gösterilir.

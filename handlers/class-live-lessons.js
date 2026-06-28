@@ -13,6 +13,7 @@ import {
   buildAttendanceReport,
   getVisibleStudentIdSet,
   getInstitutionStudentIds,
+  loadInstitutionClassIdSet,
   resolveInstitutionClassIds
 } from '../api/_lib/attendance-report-query.js';
 import { sendMetaTextMessage } from '../api/_lib/meta-whatsapp.js';
@@ -649,16 +650,12 @@ export default async function handler(req, res) {
       if (!seesAllInstitutionClasses(role)) {
         if (!allowedClassIds || !allowedClassIds.length) return res.status(200).json({ data: [] });
         q = q.in('id', allowedClassIds);
-      } else if (scopedClassInst && role === 'super_admin') {
+      } else if (scopedClassInst && seesAllInstitutionClasses(role)) {
         const studentIds = await getInstitutionStudentIds(supabaseAdmin, scopedClassInst);
-        const classIds = await resolveInstitutionClassIds(supabaseAdmin, scopedClassInst, studentIds);
+        const classIdSet = await loadInstitutionClassIdSet(supabaseAdmin, scopedClassInst, studentIds);
+        const classIds = [...classIdSet];
         if (classIds.length) q = q.in('id', classIds);
-        else return res.status(200).json({ data: [] });
-      } else if (scopedClassInst && role === 'admin') {
-        const studentIds = await getInstitutionStudentIds(supabaseAdmin, scopedClassInst);
-        const classIds = await resolveInstitutionClassIds(supabaseAdmin, scopedClassInst, studentIds);
-        if (classIds.length) q = q.in('id', classIds);
-        else return res.status(200).json({ data: [] });
+        else q = q.eq('institution_id', scopedClassInst);
       } else if (institutionId) {
         q = q.eq('institution_id', institutionId);
       }

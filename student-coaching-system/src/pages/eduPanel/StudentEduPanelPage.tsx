@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { EDU_HOMEWORK_ANIMATIONS_LABEL } from '../../components/layout/sidebar/navModel';
 import { BookMarked, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import EduAnimationPreviewModal from '../../components/eduPanel/EduAnimationPreviewModal';
@@ -79,7 +79,7 @@ export default function StudentEduPanelPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-4 md:p-6">
       <div className="rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 p-6 text-white">
-        <h1 className="text-2xl font-bold">Derslerim</h1>
+        <h1 className="text-2xl font-bold">{EDU_HOMEWORK_ANIMATIONS_LABEL}</h1>
         <p className="mt-1 text-sm text-indigo-100">
           Her konu ayrı bir klasördür. Animasyon ve ödev birbirinden ayrı; yalnızca o konuya ait
           içerikleri görürsünüz.

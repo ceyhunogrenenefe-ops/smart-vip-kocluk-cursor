@@ -52,6 +52,8 @@ export default function TopBar({ onMenuClick, drawerOpen = false, hideMenuButton
       '/coaches': 'Koçlar',
       '/tracking': 'Haftalık Takip',
       '/book-tracking': 'Kitap Takibi',
+      '/edu-panel': 'Ödevlerim ve Animasyonlarım',
+      '/edu-derslerim': 'Ödevlerim ve Animasyonlarım',
       '/exam-tracking': 'Sınav Takibi (Denemelerim)',
       '/topics': 'Konu Havuzu',
       '/analytics': 'Analiz Paneli',

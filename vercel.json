@@ -150,7 +150,7 @@
       "destination": "/api/guest-join-preview?code=:code"
     },
     {
-      "source": "/((?!api/|assets/).*)",
+      "source": "/((?!api/|assets/|ders-program-planner/).*)",
       "destination": "/index.html"
     }
   ]

@@ -77,9 +77,33 @@ function formHasTeacherRole(role: UserRole, alsoTeacher: boolean): boolean {
   return role === 'teacher' || alsoTeacher;
 }
 
+function buildStaffRoleAssignment(
+  formData: { role: UserRole; alsoCoach: boolean; alsoTeacher: boolean },
+  canAssign: boolean
+): { roles: UserRole[]; primary: UserRole } | null {
+  if (!canAssign || formData.role === 'student') return null;
+  if (formData.role === 'admin') {
+    const roles: UserRole[] = ['admin'];
+    if (formData.alsoCoach) roles.push('coach');
+    if (formData.alsoTeacher) roles.push('teacher');
+    return { roles, primary: 'admin' };
+  }
+  if (formData.role === 'teacher') {
+    const roles: UserRole[] = ['teacher'];
+    if (formData.alsoCoach) roles.push('coach');
+    return { roles, primary: 'teacher' };
+  }
+  if (formData.role === 'coach') {
+    const roles: UserRole[] = ['coach'];
+    if (formData.alsoTeacher) roles.push('teacher');
+    return { roles, primary: 'coach' };
+  }
+  return null;
+}
+
 function userHasTeacherQuestionRole(user: SystemUser): boolean {
   const rt = userRoleTags(user as SystemUser);
-  return formHasTeacherRole(user.role, rt.includes('teacher') && user.role === 'coach');
+  return formHasTeacherRole(user.role, rt.includes('teacher'));
 }
 
 const toClassLevel = (raw: string): ClassLevel => {
@@ -1281,23 +1305,10 @@ export default function UserManagement() {
         }
 
         const staffRoles =
-          formData.role !== 'student' &&
-          formData.role !== 'admin' &&
-          (currentUser?.role === 'admin' || currentUser?.role === 'super_admin')
-            ? (() => {
-                if (formData.role === 'teacher') {
-                  const r: UserRole[] = ['teacher'];
-                  if (formData.alsoCoach) r.push('coach');
-                  return { roles: r, primary: 'teacher' as UserRole };
-                }
-                if (formData.role === 'coach') {
-                  const r: UserRole[] = ['coach'];
-                  if (formData.alsoTeacher) r.push('teacher');
-                  return { roles: r, primary: 'coach' as UserRole };
-                }
-                return null;
-              })()
-            : null;
+          buildStaffRoleAssignment(
+            formData,
+            currentUser?.role === 'admin' || currentUser?.role === 'super_admin'
+          );
 
         const patch: Record<string, unknown> = {
           name: fullName,
@@ -1533,24 +1544,10 @@ export default function UserManagement() {
                 ? 'Öğretmen'
                 : 'Admin';
 
-        const staffRolesNew =
-          formData.role !== 'student' &&
-          formData.role !== 'admin' &&
-          (currentUser?.role === 'admin' || currentUser?.role === 'super_admin')
-            ? (() => {
-                if (formData.role === 'teacher') {
-                  const r: UserRole[] = ['teacher'];
-                  if (formData.alsoCoach) r.push('coach');
-                  return { roles: r, primary: 'teacher' as UserRow['role'] };
-                }
-                if (formData.role === 'coach') {
-                  const r: UserRole[] = ['coach'];
-                  if (formData.alsoTeacher) r.push('teacher');
-                  return { roles: r, primary: 'coach' as UserRow['role'] };
-                }
-                return null;
-              })()
-            : null;
+        const staffRolesNew = buildStaffRoleAssignment(
+          formData,
+          currentUser?.role === 'admin' || currentUser?.role === 'super_admin'
+        );
 
         const superAdminChosenInst =
           currentUser?.role === 'super_admin' ? String(formData.studentInstitutionId || '').trim() : '';
@@ -3031,11 +3028,33 @@ export default function UserManagement() {
                 )}
 
               {(currentUser?.role === 'admin' || currentUser?.role === 'super_admin') &&
-                (formData.role === 'teacher' || formData.role === 'coach') && (
+                (formData.role === 'teacher' || formData.role === 'coach' || formData.role === 'admin') && (
                   <div className="rounded-lg border border-violet-100 bg-violet-50/80 p-3 space-y-2">
                     <p className="text-xs text-violet-900 font-medium">
-                      Ek roller (aynı kişide öğretmen ve koç birlikte)
+                      Ek roller (aynı kişide birden fazla yetki)
                     </p>
+                    {formData.role === 'admin' && (
+                      <>
+                        <label className="flex items-center gap-2 text-sm text-gray-800 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={formData.alsoCoach}
+                            onChange={(e) => setFormData({ ...formData, alsoCoach: e.target.checked })}
+                            className="rounded border-gray-300"
+                          />
+                          Koç rolü de ver
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-gray-800 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={formData.alsoTeacher}
+                            onChange={(e) => setFormData({ ...formData, alsoTeacher: e.target.checked })}
+                            className="rounded border-gray-300"
+                          />
+                          Öğretmen rolü de ver
+                        </label>
+                      </>
+                    )}
                     {formData.role === 'teacher' && (
                       <label className="flex items-center gap-2 text-sm text-gray-800 cursor-pointer">
                         <input

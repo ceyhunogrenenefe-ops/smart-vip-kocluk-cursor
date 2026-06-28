@@ -102,6 +102,19 @@ export async function resolveInstitutionClassIds(supabaseAdmin, institutionId, s
   return [...classIds];
 }
 
+/** Kurum admini planlayıcı / Canlı Grup: resolve + doğrudan institution_id eşleşmesi birleşik */
+export async function loadInstitutionClassIdSet(supabaseAdmin, institutionId, studentIdsSet) {
+  const instId = String(institutionId || '').trim();
+  const classIds = new Set(await resolveInstitutionClassIds(supabaseAdmin, instId, studentIdsSet));
+  if (!instId) return classIds;
+  const { data: direct, error } = await supabaseAdmin.from('classes').select('id').eq('institution_id', instId);
+  if (error) throw error;
+  for (const c of direct || []) {
+    if (c?.id) classIds.add(String(c.id));
+  }
+  return classIds;
+}
+
 export async function getVisibleStudentIdSet(
   supabaseAdmin,
   normalizeRole,

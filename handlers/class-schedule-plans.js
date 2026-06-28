@@ -3,8 +3,10 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import {
   getInstitutionStudentIds,
+  loadInstitutionClassIdSet,
   resolveInstitutionClassIds
 } from '../api/_lib/attendance-report-query.js';
+import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import {
   exportPlannerGroupToClass,
   loadInstitutionTeachers,
@@ -224,8 +226,25 @@ async function loadInstitutionClassesForPlanner(institutionId) {
   const instId = String(institutionId || '').trim();
   if (!instId) return [];
   const studentIds = await getInstitutionStudentIds(supabaseAdmin, instId);
-  const classIds = await resolveInstitutionClassIds(supabaseAdmin, instId, studentIds);
-  if (!classIds.length) return [];
+  const classIdSet = await loadInstitutionClassIdSet(supabaseAdmin, instId, studentIds);
+  const classIds = [...classIdSet];
+  if (!classIds.length) {
+    const { data: direct, error: dErr } = await supabaseAdmin
+      .from('classes')
+      .select('id,name,class_level,branch,institution_id')
+      .eq('institution_id', instId)
+      .order('name', { ascending: true });
+    if (dErr) throw dErr;
+    return (direct || [])
+      .map((c) => ({
+        id: c.id,
+        name: String(c.name || '').trim(),
+        class_level: c.class_level ?? null,
+        branch: c.branch ?? null
+      }))
+      .filter((c) => c.name)
+      .sort((a, b) => String(a.name).localeCompare(String(b.name), 'tr'));
+  }
   const { data, error } = await supabaseAdmin
     .from('classes')
     .select('id,name,class_level,branch,institution_id')
@@ -253,7 +272,7 @@ async function loadInstitutionStudentsForPlanner(institutionId) {
     const chunk = ids.slice(i, i + CHUNK);
     const { data, error } = await supabaseAdmin
       .from('students')
-      .select('id,name,class_level,email')
+      .select('id,name,class_level,email,school')
       .in('id', chunk);
     if (error) throw error;
     if (data?.length) rows.push(...data);
@@ -278,6 +297,7 @@ async function loadInstitutionStudentsForPlanner(institutionId) {
       name: String(s.name || '').trim(),
       class_level: s.class_level ?? null,
       email: String(s.email || '').trim(),
+      school: String(s.school || '').trim(),
       class_ids: classIdsByStudent.get(String(s.id)) || []
     }))
     .filter((s) => s.name)
@@ -317,7 +337,12 @@ export default async function handler(req, res) {
   }
 
   const role = String(actor.role || '');
-  const canAccess = role === 'super_admin' || role === 'admin';
+  const roleTags = await normalizedUserRolesFromDb(actor.sub);
+  const canAccess =
+    role === 'super_admin' ||
+    role === 'admin' ||
+    roleTags.includes('super_admin') ||
+    roleTags.includes('admin');
   if (!canAccess) return res.status(403).json({ error: 'forbidden' });
 
   const op = String(req.query.op || '').trim();

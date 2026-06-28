@@ -288,6 +288,8 @@ export function WeeklyPlannerCalendar({
     typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false
   );
   const [mobileDayIdx, setMobileDayIdx] = useState(0);
+  const [mobileCreateHour, setMobileCreateHour] = useState(9);
+  const [formHour, setFormHour] = useState(9);
   const mobileAppShell = useMobileAppShell();
   const vibrantMobileChrome = studentStudyLogUi || mobileAppShell;
 
@@ -501,14 +503,19 @@ export function WeeklyPlannerCalendar({
   }, [plannerStudent, effectiveUser?.id, weekStartStr, weekEndStr, goals, entries]);
 
   const mobileDayDate = dayDates[Math.min(mobileDayIdx, Math.max(dayDates.length - 1, 0))] ?? weekStartStr;
-  const mobileDayEntries = useMemo(
-    () =>
-      entries
-        .filter((e) => e.planner_date === mobileDayDate)
-        .sort((a, b) => String(a.start_time || '').localeCompare(String(b.start_time || ''))),
-    [entries, mobileDayDate]
-  );
   const mobileDayGoals = goalsByDayDate[mobileDayDate] ?? [];
+
+  useEffect(() => {
+    if (!showMobileDayView) return;
+    const now = new Date();
+    const isToday = mobileDayDate === format(now, 'yyyy-MM-dd');
+    const fromClock = isToday ? Math.max(8, Math.min(22, now.getHours())) : 9;
+    const free =
+      HOURS.find((h) => h >= fromClock && entries.filter((e) => e.planner_date === mobileDayDate && hourFromTime(e.start_time) === h).length === 0) ??
+      HOURS.find((h) => entries.filter((e) => e.planner_date === mobileDayDate && hourFromTime(e.start_time) === h).length === 0) ??
+      fromClock;
+    setMobileCreateHour(free);
+  }, [mobileDayDate, showMobileDayView, entries]);
 
   const weekStats = useMemo(() => {
     let planned = 0;
@@ -531,6 +538,7 @@ export function WeeklyPlannerCalendar({
 
   const openCreate = (date: string, hour: number) => {
     setSlotContext({ date, hour });
+    setFormHour(hour);
     setActiveEntry(null);
     setModalMode('create');
     setFormGoalId(null);
@@ -540,7 +548,9 @@ export function WeeklyPlannerCalendar({
   };
 
   const openEdit = (entry: WeeklyPlannerEntryRow) => {
-    setSlotContext({ date: entry.planner_date, hour: hourFromTime(entry.start_time) ?? 8 });
+    const hour = hourFromTime(entry.start_time) ?? 8;
+    setSlotContext({ date: entry.planner_date, hour });
+    setFormHour(hour);
     setActiveEntry(entry);
     setModalMode('edit');
     setFormGoalId(entry.coach_goal_id);
@@ -663,8 +673,8 @@ export function WeeklyPlannerCalendar({
   const submitCreate = async () => {
     if (!slotContext || !studentId) return;
     await runPlannerMutation(async () => {
-      const start = padHour(slotContext.hour);
-      const end = padHour(Math.min(slotContext.hour + 1, 23));
+      const start = padHour(formHour);
+      const end = padHour(Math.min(formHour + 1, 23));
       const g = goals.find((x) => x.id === formGoalId);
       if (
         !formGoalId &&
@@ -774,6 +784,11 @@ export function WeeklyPlannerCalendar({
         planned_quantity: pq,
         coach_goal_id: formGoalId,
       };
+      const origHour = hourFromTime(activeEntry.start_time);
+      if (origHour !== formHour) {
+        patch.start_time = padHour(formHour);
+        patch.end_time = padHour(Math.min(formHour + 1, 23));
+      }
       if (pq <= 0 && activeEntry.status === 'completed') {
         patch.status = 'planned';
         patch.completed_quantity = 0;
@@ -1441,79 +1456,138 @@ export function WeeklyPlannerCalendar({
                   </div>
                 ) : null}
 
-                {mobileDayEntries.length === 0 ? (
-                  <p className="rounded-xl border border-dashed border-slate-200 bg-white/80 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/50">
-                    Bu gün için plan yok. Aşağıdan görev ekleyebilirsin.
-                  </p>
-                ) : (
-                  <ul className="space-y-2">
-                    {mobileDayEntries.map((en) => {
-                      const linkedGoal = goals.find((g) => g.id === en.coach_goal_id);
-                      const st = subjectPlannerStyle(en.subject, linkedGoal?.quantity_unit);
-                      const plannedN = Number(en.planned_quantity || 0);
-                      const doneQty = linkedGoal
-                        ? effectivePlannerEntryDone(linkedGoal, en, studentWeeklyEntries)
-                        : Math.min(
-                            Number(en.completed_quantity || 0),
-                            plannedN > 0 ? plannedN : Number(en.completed_quantity || 0)
-                          );
-                      const isRealized = doneQty > 0;
-                      const hour = hourFromTime(en.start_time) ?? 9;
-                      const miss = pastSlot(mobileDayDate, hour) && !isRealized && en.status === 'planned';
-                      const borderCls = isRealized
-                        ? 'border-emerald-500 ring-1 ring-emerald-200 bg-emerald-50/95 dark:bg-emerald-950/45'
-                        : plannedN > 0
-                          ? 'border-orange-500 ring-1 ring-orange-200 bg-orange-50/95 dark:bg-orange-950/35'
-                          : miss
-                            ? 'border-red-400 ring-1 ring-red-100'
-                            : 'border-slate-200';
-                      return (
-                        <li key={en.id}>
-                          <button
-                            type="button"
-                            disabled={!canEditPlan}
-                            onClick={() => {
-                              if (!canEditPlan) return;
-                              if (studyLogOnClick) setStudyModalEntry(en);
-                              else openEdit(en);
-                            }}
-                            className={cn(
-                              'w-full rounded-xl border px-3 py-3 text-left shadow-sm transition active:scale-[0.99]',
-                              st.chip,
-                              borderCls,
-                              canEditPlan ? 'touch-manipulation' : 'opacity-80'
-                            )}
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-bold text-slate-900 dark:text-slate-100">
-                                  {en.title}
-                                </p>
-                                <p className="mt-0.5 text-xs font-medium text-slate-600 dark:text-slate-300">
-                                  {en.subject}
-                                  {en.start_time ? ` · ${String(en.start_time).slice(0, 5)}` : ''}
-                                </p>
+                <ul className="space-y-1.5">
+                  {HOURS.map((hour) => {
+                    const slotList = cellEntries(mobileDayDate, hour);
+                    const isPast = pastSlot(mobileDayDate, hour);
+                    return (
+                      <li key={hour} className="flex gap-2">
+                        <div
+                          className={cn(
+                            'w-[3.25rem] shrink-0 pt-2.5 text-right font-mono text-[11px] font-semibold tabular-nums',
+                            isPast ? 'text-slate-400' : 'text-slate-600 dark:text-slate-400'
+                          )}
+                        >
+                          {padHour(hour)}
+                        </div>
+                        <div className="min-w-0 flex-1 space-y-1.5">
+                          {slotList.length === 0 ? (
+                            canEditPlan ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setMobileCreateHour(hour);
+                                  openCreate(mobileDayDate, hour);
+                                }}
+                                className={cn(
+                                  'flex w-full items-center gap-2 rounded-xl border border-dashed px-3 py-2.5 text-left text-xs touch-manipulation active:scale-[0.99]',
+                                  mobileCreateHour === hour
+                                    ? 'border-violet-400 bg-violet-50 text-violet-900 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-100'
+                                    : 'border-slate-200 bg-white/70 text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400'
+                                )}
+                              >
+                                <Plus className="h-3.5 w-3.5 shrink-0" />
+                                Bu saate görev ekle
+                              </button>
+                            ) : (
+                              <div className="rounded-xl border border-dashed border-slate-200/80 px-3 py-2.5 text-xs text-slate-400 dark:border-slate-700">
+                                Boş
                               </div>
-                              <span className="shrink-0 rounded-lg bg-white/70 px-2 py-1 text-[10px] font-bold tabular-nums text-slate-700 dark:bg-slate-950/40 dark:text-slate-200">
-                                {doneQty}/{plannedN || '–'}
-                              </span>
-                            </div>
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
+                            )
+                          ) : (
+                            slotList.map((en) => {
+                              const linkedGoal = goals.find((g) => g.id === en.coach_goal_id);
+                              const st = subjectPlannerStyle(en.subject, linkedGoal?.quantity_unit);
+                              const plannedN = Number(en.planned_quantity || 0);
+                              const doneQty = linkedGoal
+                                ? effectivePlannerEntryDone(linkedGoal, en, studentWeeklyEntries)
+                                : Math.min(
+                                    Number(en.completed_quantity || 0),
+                                    plannedN > 0 ? plannedN : Number(en.completed_quantity || 0)
+                                  );
+                              const isRealized = doneQty > 0;
+                              const miss = isPast && !isRealized && en.status === 'planned';
+                              const borderCls = isRealized
+                                ? 'border-emerald-500 ring-1 ring-emerald-200 bg-emerald-50/95 dark:bg-emerald-950/45'
+                                : plannedN > 0
+                                  ? 'border-orange-500 ring-1 ring-orange-200 bg-orange-50/95 dark:bg-orange-950/35'
+                                  : miss
+                                    ? 'border-red-400 ring-1 ring-red-100'
+                                    : 'border-slate-200';
+                              return (
+                                <button
+                                  key={en.id}
+                                  type="button"
+                                  disabled={!canEditPlan}
+                                  onClick={() => {
+                                    if (!canEditPlan) return;
+                                    if (studyLogOnClick) setStudyModalEntry(en);
+                                    else openEdit(en);
+                                  }}
+                                  className={cn(
+                                    'w-full rounded-xl border px-3 py-3 text-left shadow-sm transition active:scale-[0.99]',
+                                    st.chip,
+                                    borderCls,
+                                    canEditPlan ? 'touch-manipulation' : 'opacity-80'
+                                  )}
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <p className="truncate text-sm font-bold text-slate-900 dark:text-slate-100">
+                                        {en.title}
+                                      </p>
+                                      <p className="mt-0.5 text-xs font-medium text-slate-600 dark:text-slate-300">
+                                        {en.subject}
+                                      </p>
+                                    </div>
+                                    <span className="shrink-0 rounded-lg bg-white/70 px-2 py-1 text-[10px] font-bold tabular-nums text-slate-700 dark:bg-slate-950/40 dark:text-slate-200">
+                                      {doneQty}/{plannedN || '–'}
+                                    </span>
+                                  </div>
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
 
                 {canEditPlan ? (
-                  <button
-                    type="button"
-                    onClick={() => openCreate(mobileDayDate, hourFromTime(mobileDayEntries[0]?.start_time) ?? 9)}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-violet-200 bg-violet-50 py-3 text-sm font-semibold text-violet-900 touch-manipulation active:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-100"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Görev ekle
-                  </button>
+                  <div className="sticky bottom-0 z-10 space-y-2 rounded-xl border border-violet-200/90 bg-white/95 p-3 shadow-lg backdrop-blur-sm dark:border-violet-800/60 dark:bg-slate-900/95">
+                    <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Yeni görev — saat seç</p>
+                    <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5">
+                      {HOURS.map((hour) => {
+                        const taken = cellEntries(mobileDayDate, hour).length > 0;
+                        return (
+                          <button
+                            key={hour}
+                            type="button"
+                            onClick={() => setMobileCreateHour(hour)}
+                            className={cn(
+                              'min-w-[3.1rem] shrink-0 rounded-lg border px-2 py-2 text-center font-mono text-[11px] font-bold tabular-nums touch-manipulation',
+                              mobileCreateHour === hour
+                                ? 'border-violet-600 bg-violet-600 text-white shadow-md'
+                                : taken
+                                  ? 'border-slate-200 bg-slate-100 text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-500'
+                                  : 'border-slate-200 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200'
+                            )}
+                          >
+                            {String(hour).padStart(2, '0')}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => openCreate(mobileDayDate, mobileCreateHour)}
+                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 py-3.5 text-sm font-semibold text-white touch-manipulation active:bg-violet-700"
+                    >
+                      <Plus className="h-4 w-4" />
+                      {padHour(mobileCreateHour)} — Görev ekle
+                    </button>
+                  </div>
                 ) : null}
               </div>
             ) : (
@@ -1916,21 +1990,58 @@ export function WeeklyPlannerCalendar({
 
       {/* Modal */}
       {(modalMode === 'create' || modalMode === 'edit') && slotContext && (
-        <div className="fixed inset-0 z-[200] bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="p-5 border-b border-slate-100 flex justify-between items-center">
-              <h4 className="font-semibold text-slate-800">
+        <div className="fixed inset-0 z-[220] bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="flex max-h-[min(92dvh,900px)] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl bg-white shadow-xl sm:rounded-2xl dark:bg-slate-900">
+            <div className="flex shrink-0 items-center justify-between border-b border-slate-100 p-5 dark:border-slate-800">
+              <h4 className="font-semibold text-slate-800 dark:text-slate-100">
                 {modalMode === 'create' ? 'Yeni görev' : 'Görevi düzenle'}
               </h4>
-              <button type="button" onClick={closeModal} className="text-slate-500 hover:text-slate-800">
+              <button type="button" onClick={closeModal} className="text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
                 ✕
               </button>
             </div>
-            <div className="p-5 space-y-4">
-              <p className="text-xs text-slate-500">
-                Zaman: {slotContext.date} {padHour(slotContext.hour)} →{' '}
-                {padHour(Math.min(slotContext.hour + 1, 23))}
-              </p>
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
+              <div>
+                <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Gün</label>
+                <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  {format(parseISO(`${slotContext.date}T12:00:00`), 'd MMMM yyyy, EEEE', { locale: tr })}
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="formHourSelect" className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                  Saat dilimi
+                </label>
+                <select
+                  id="formHourSelect"
+                  value={formHour}
+                  onChange={(e) => setFormHour(Number(e.target.value))}
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                >
+                  {HOURS.map((h) => (
+                    <option key={h} value={h}>
+                      {padHour(h)} – {padHour(Math.min(h + 1, 23))}
+                    </option>
+                  ))}
+                </select>
+                <div className="-mx-1 mt-2 flex gap-1.5 overflow-x-auto px-1 pb-0.5 sm:hidden">
+                  {HOURS.map((h) => (
+                    <button
+                      key={h}
+                      type="button"
+                      onClick={() => setFormHour(h)}
+                      className={cn(
+                        'min-w-[3rem] shrink-0 rounded-lg border px-2 py-2 font-mono text-[11px] font-bold tabular-nums',
+                        formHour === h
+                          ? 'border-violet-600 bg-violet-600 text-white'
+                          : 'border-slate-200 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200'
+                      )}
+                    >
+                      {String(h).padStart(2, '0')}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               <div>
                 <p className="text-xs font-medium text-slate-600 mb-2">Koç hedefinden bağla</p>
@@ -2103,9 +2214,16 @@ export function WeeklyPlannerCalendar({
                   </button>
                 </div>
               ) : null}
+            </div>
 
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-                <button type="button" disabled={plannerUiBusy} onClick={closeModal} className="px-4 py-2 text-sm text-slate-600 disabled:opacity-50">
+            <div className="shrink-0 border-t border-slate-100 bg-white p-4 pb-safe dark:border-slate-800 dark:bg-slate-900">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={plannerUiBusy}
+                  onClick={closeModal}
+                  className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-600 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300"
+                >
                   İptal
                 </button>
                 {modalMode === 'create' && canEditPlan ? (
@@ -2113,9 +2231,9 @@ export function WeeklyPlannerCalendar({
                     type="button"
                     disabled={plannerUiBusy}
                     onClick={() => void submitCreate()}
-                    className="px-4 py-2 text-sm rounded-lg bg-red-600 text-white font-medium disabled:opacity-50"
+                    className="flex-[1.4] rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
                   >
-                    Ekle
+                    {plannerUiBusy ? 'Kaydediliyor…' : 'Kaydet'}
                   </button>
                 ) : null}
                 {modalMode === 'edit' && canEditPlan ? (
@@ -2123,9 +2241,9 @@ export function WeeklyPlannerCalendar({
                     type="button"
                     disabled={plannerUiBusy}
                     onClick={() => void saveEdit()}
-                    className="px-4 py-2 text-sm rounded-lg bg-slate-800 text-white font-medium disabled:opacity-50"
+                    className="flex-[1.4] rounded-xl bg-slate-800 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
                   >
-                    Kaydet
+                    {plannerUiBusy ? 'Kaydediliyor…' : 'Kaydet'}
                   </button>
                 ) : null}
               </div>
