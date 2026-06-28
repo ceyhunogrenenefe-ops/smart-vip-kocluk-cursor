@@ -1,20 +1,27 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { BookOpen, ClipboardList, School, ExternalLink, Sparkles, KeyRound } from 'lucide-react';
+import { BookOpen, ClipboardList, School, ExternalLink, Sparkles, KeyRound, Loader2 } from 'lucide-react';
+import { useApp } from '../context/AppContext';
 import {
   defaultAcademicCenterLinks,
+  examEntryUrl,
+  EXAM_ENTRY_DEFS,
   fetchAcademicCenterLinksFromServer,
+  isBbbAutoMeetingLink,
   loadAcademicCenterLinks,
-  type AcademicCenterLinks
+  openAcademicCenterLink,
+  type AcademicCenterLinks,
+  type ExamEntryKey
 } from '../lib/academicCenterLinks';
 type TabKey = 'study' | 'exam' | 'pool';
 
-const openLink = (url: string) => window.open(url, '_blank', 'noopener,noreferrer');
-
 export default function AcademicCenter() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { institution, activeInstitutionId } = useApp();
+  const institutionId = institution?.id || activeInstitutionId || null;
   const [activeTab, setActiveTab] = useState<TabKey>('study');
   const [links, setLinks] = useState<AcademicCenterLinks>(() => loadAcademicCenterLinks() ?? defaultAcademicCenterLinks);
+  const [bbbBusyRoom, setBbbBusyRoom] = useState<ExamEntryKey | null>(null);
 
   useEffect(() => {
     const t = searchParams.get('tab');
@@ -34,7 +41,7 @@ export default function AcademicCenter() {
     let mounted = true;
     (async () => {
       try {
-        const data = await fetchAcademicCenterLinksFromServer();
+        const data = await fetchAcademicCenterLinksFromServer(institutionId);
         if (mounted) setLinks(data);
       } catch {
         if (mounted) setLinks(loadAcademicCenterLinks() ?? defaultAcademicCenterLinks);
@@ -43,7 +50,15 @@ export default function AcademicCenter() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [institutionId]);
+
+  const openLink = (url: string, room?: ExamEntryKey) => {
+    void openAcademicCenterLink(url, {
+      room,
+      institutionId,
+      busy: room ? (v) => setBbbBusyRoom(v ? room : null) : undefined
+    });
+  };
 
   const tabs: {
     id: TabKey;
@@ -195,36 +210,55 @@ export default function AcademicCenter() {
           )}
 
           {activeTab === 'exam' && (
-            <div className="mx-auto max-w-xl">
-              <div className="relative overflow-hidden rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-teal-50 p-6 shadow-sm">
-                <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-emerald-200/40 blur-2xl" />
-                <div className="relative flex flex-col gap-4 sm:flex-row sm:items-start">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-lg">
-                    <ClipboardList className="h-6 w-6" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-lg font-bold text-emerald-950">Deneme Sınavı / Sanal Optik</p>
-                    <p className="mt-1 text-sm text-emerald-900/80">
-                      Kurum girişinizle deneme oturumu ve sanal optik için ayrı giriş adresleri.
-                    </p>
-                    <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                      <button
-                        type="button"
-                        onClick={() => openLink(links.exams.exam)}
-                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-600/30 transition hover:bg-emerald-700"
-                      >
-                        Deneme giriş <ExternalLink className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => openLink(links.exams.optic)}
-                        className="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-emerald-600 bg-white px-5 py-3 text-sm font-bold text-emerald-800 shadow-sm transition hover:bg-emerald-50"
-                      >
-                        Sanal optik <ExternalLink className="h-4 w-4" />
-                      </button>
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-teal-50 p-4 shadow-sm">
+                <p className="text-sm font-semibold text-emerald-950">Sanal optik</p>
+                <p className="mt-1 text-sm text-emerald-900/80">
+                  Tüm sınıf seviyeleri için ortak sanal optik girişi.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => openLink(links.exams.optic)}
+                  className="mt-3 inline-flex items-center justify-center gap-2 rounded-xl border-2 border-emerald-600 bg-white px-5 py-3 text-sm font-bold text-emerald-800 shadow-sm transition hover:bg-emerald-50"
+                >
+                  Sanal optik <ExternalLink className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {EXAM_ENTRY_DEFS.map((x) => {
+                  const href = examEntryUrl(links, x.key);
+                  const bbb = isBbbAutoMeetingLink(href);
+                  const busy = bbbBusyRoom === x.key;
+                  return (
+                    <div
+                      key={x.key}
+                      className="group relative overflow-hidden rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:shadow-md"
+                    >
+                      <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${x.accent}`} />
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+                          <ClipboardList className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-slate-800">{x.label}</p>
+                          {bbb ? (
+                            <p className="mt-1 text-xs text-slate-500">BBB otomatik oda — katılınca oluşturulur</p>
+                          ) : null}
+                          <button
+                            type="button"
+                            disabled={!href || busy}
+                            onClick={() => openLink(href, x.key)}
+                            className="mt-3 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                            Deneme giriş <ExternalLink className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  );
+                })}
               </div>
             </div>
           )}

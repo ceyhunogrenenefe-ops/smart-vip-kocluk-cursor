@@ -33,9 +33,13 @@ import {
 } from 'lucide-react';
 import {
   defaultAcademicCenterLinks,
+  EXAM_ENTRY_DEFS,
   fetchAcademicCenterLinksFromServer,
   saveAcademicCenterLinksToServer,
-  type AcademicCenterLinks
+  BBB_AUTO_MEETING_LINK,
+  isBbbAutoMeetingLink,
+  type AcademicCenterLinks,
+  type ExamEntryKey
 } from '../lib/academicCenterLinks';
 
 interface MetaWhatsAppServerStatus {
@@ -93,6 +97,7 @@ export default function AdminPanel() {
   const [academicLinks, setAcademicLinks] = useState<AcademicCenterLinks>(() => ({
     ...defaultAcademicCenterLinks
   }));
+  const [academicLinksInstitutionId, setAcademicLinksInstitutionId] = useState<string>('');
   const [academicLinksMsg, setAcademicLinksMsg] = useState<string | null>(null);
   const [academicLinksBusy, setAcademicLinksBusy] = useState(false);
 
@@ -138,7 +143,8 @@ export default function AdminPanel() {
     let cancelled = false;
     void (async () => {
       try {
-        const data = await fetchAcademicCenterLinksFromServer();
+        const instId = academicLinksInstitutionId.trim() || undefined;
+        const data = await fetchAcademicCenterLinksFromServer(instId);
         if (!cancelled) setAcademicLinks(data);
       } catch {
         if (!cancelled) setAcademicLinks({ ...defaultAcademicCenterLinks });
@@ -147,7 +153,13 @@ export default function AdminPanel() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [academicLinksInstitutionId]);
+
+  useEffect(() => {
+    if (user?.role === 'admin' && user.institutionId) {
+      setAcademicLinksInstitutionId(String(user.institutionId));
+    }
+  }, [user?.role, user?.institutionId]);
 
   useEffect(() => {
     if (!getAuthToken()) return;
@@ -232,9 +244,14 @@ export default function AdminPanel() {
     setAcademicLinksBusy(true);
     setAcademicLinksMsg(null);
     try {
-      const saved = await saveAcademicCenterLinksToServer(academicLinks);
+      const instId = academicLinksInstitutionId.trim() || undefined;
+      const saved = await saveAcademicCenterLinksToServer(academicLinks, instId);
       setAcademicLinks(saved);
-      setAcademicLinksMsg('Akademik Merkez linkleri kaydedildi.');
+      setAcademicLinksMsg(
+        instId
+          ? 'Kurum Akademik Merkez linkleri kaydedildi.'
+          : 'Platform varsayılan linkleri kaydedildi.'
+      );
     } catch (e) {
       setAcademicLinksMsg(
         e instanceof Error && e.message
@@ -244,6 +261,17 @@ export default function AdminPanel() {
     } finally {
       setAcademicLinksBusy(false);
     }
+  };
+
+  const setExamEntryLink = (key: ExamEntryKey, value: string) => {
+    setAcademicLinks((prev) => ({
+      ...prev,
+      exams: { ...prev.exams, [key]: value }
+    }));
+  };
+
+  const setExamEntryMode = (key: ExamEntryKey, mode: 'url' | 'bbb') => {
+    setExamEntryLink(key, mode === 'bbb' ? BBB_AUTO_MEETING_LINK : '');
   };
 
   const sendTemplateTest = async () => {
@@ -467,13 +495,33 @@ export default function AdminPanel() {
             <div className="min-w-0 flex-1">
               <h3 className="font-semibold text-slate-800">Akademik Merkez linkleri</h3>
               <p className="text-sm text-slate-600 mt-1">
-                Etüt sınıfları, deneme / sanal optik ve soru havuzu adresleri. Kayıt için{' '}
-                <code className="text-xs bg-slate-100 px-1 rounded">platform_academic_center_links</code> tablosu ve
-                sunucuda service role anahtarı gerekir (
-                <code className="text-xs">sql/2026-05-07-academic-center-links.sql</code>).
+                Etüt sınıfları, deneme girişleri (sınıf seviyesine göre), sanal optik ve soru havuzu. Zoom / Meet
+                linki yapıştırın veya deneme girişlerinde BBB otomatik seçin.
               </p>
             </div>
           </div>
+          {user?.role === 'super_admin' ? (
+            <label className="block text-sm mb-4">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Kurum</span>
+              <select
+                value={academicLinksInstitutionId}
+                onChange={(e) => setAcademicLinksInstitutionId(e.target.value)}
+                className="mt-1 w-full max-w-md px-3 py-2 border border-slate-200 rounded-lg text-sm"
+              >
+                <option value="">Platform varsayılanı (tüm kurumlar)</option>
+                {institutions.map((inst) => (
+                  <option key={inst.id} value={inst.id}>
+                    {inst.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <p className="text-sm text-slate-600 mb-4">
+              Kurum:{' '}
+              <strong>{institutions.find((i) => i.id === academicLinksInstitutionId)?.name || '—'}</strong>
+            </p>
+          )}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-sm">
             <div className="space-y-2">
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Etüt sınıfları</p>
@@ -502,23 +550,39 @@ export default function AdminPanel() {
               ))}
             </div>
             <div className="space-y-2">
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Deneme / optik</p>
-              <label className="block">
-                <span className="text-xs text-slate-600">Deneme giriş</span>
-                <input
-                  type="url"
-                  value={academicLinks.exams.exam}
-                  onChange={(e) =>
-                    setAcademicLinks((prev) => ({
-                      ...prev,
-                      exams: { ...prev.exams, exam: e.target.value }
-                    }))
-                  }
-                  className="mt-0.5 w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm"
-                />
-              </label>
-              <label className="block">
-                <span className="text-xs text-slate-600">Sanal optik</span>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Deneme girişleri</p>
+              {EXAM_ENTRY_DEFS.map(({ key, label }) => {
+                const href = academicLinks.exams[key];
+                const bbbMode = isBbbAutoMeetingLink(href);
+                return (
+                  <div key={key} className="rounded-lg border border-slate-100 bg-slate-50/80 p-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                      <span className="text-xs font-medium text-slate-700">{label}</span>
+                      <select
+                        value={bbbMode ? 'bbb' : 'url'}
+                        onChange={(e) => setExamEntryMode(key, e.target.value as 'url' | 'bbb')}
+                        className="rounded border border-slate-200 px-2 py-1 text-xs"
+                      >
+                        <option value="url">Zoom / Meet / link</option>
+                        <option value="bbb">BBB otomatik</option>
+                      </select>
+                    </div>
+                    {!bbbMode ? (
+                      <input
+                        type="url"
+                        value={href}
+                        onChange={(e) => setExamEntryLink(key, e.target.value)}
+                        placeholder="https://zoom.us/j/… veya meet.google.com/…"
+                        className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm bg-white"
+                      />
+                    ) : (
+                      <p className="text-xs text-indigo-700 px-1">BBB sunucusu oturum açar (Online Görüşmeler ayarı).</p>
+                    )}
+                  </div>
+                );
+              })}
+              <label className="block pt-2">
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Sanal optik (ortak)</span>
                 <input
                   type="url"
                   value={academicLinks.exams.optic}

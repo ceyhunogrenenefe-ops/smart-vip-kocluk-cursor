@@ -1,6 +1,9 @@
 import { apiFetch } from './session';
+import { BBB_AUTO_MEETING_LINK, isBbbAutoMeetingLink } from './liveLessonUtils';
 
 const STORAGE_KEY = 'academic_center_links_v1';
+
+export type ExamEntryKey = 'lise' | 'yos' | 'class34' | 'class56' | 'class78';
 
 export type AcademicCenterLinks = {
   studyClasses: {
@@ -10,14 +13,34 @@ export type AcademicCenterLinks = {
     yks: string;
   };
   exams: {
-    exam: string;
+    lise: string;
+    yos: string;
+    class34: string;
+    class56: string;
+    class78: string;
     optic: string;
+    /** @deprecated use lise */
+    exam?: string;
   };
   questionPools: {
     pool1: string;
     pool2: string;
   };
 };
+
+export const EXAM_ENTRY_DEFS: {
+  key: ExamEntryKey;
+  label: string;
+  accent: string;
+}[] = [
+  { key: 'lise', label: 'Lise deneme sınavı giriş', accent: 'from-blue-500 to-indigo-600' },
+  { key: 'yos', label: 'YÖS deneme sınavı giriş', accent: 'from-rose-500 to-orange-600' },
+  { key: 'class34', label: '3-4. sınıf deneme sınıfı giriş', accent: 'from-emerald-500 to-teal-600' },
+  { key: 'class56', label: '5-6. sınıf deneme sınıfı giriş', accent: 'from-violet-500 to-purple-600' },
+  { key: 'class78', label: '7-8. sınıf deneme sınıfı giriş', accent: 'from-fuchsia-500 to-pink-600' }
+];
+
+export { BBB_AUTO_MEETING_LINK, isBbbAutoMeetingLink };
 
 export const defaultAcademicCenterLinks: AcademicCenterLinks = {
   studyClasses: {
@@ -27,8 +50,13 @@ export const defaultAcademicCenterLinks: AcademicCenterLinks = {
     yks: 'https://kurumsal.ornek.edu/tr/etut-yks'
   },
   exams: {
-    exam: 'https://kurumsal.ornek.edu/tr/deneme',
-    optic: 'https://kurumsal.ornek.edu/tr/sanal-optik'
+    lise: 'https://kurumsal.ornek.edu/tr/deneme-lise',
+    yos: 'https://kurumsal.ornek.edu/tr/deneme-yos',
+    class34: 'https://kurumsal.ornek.edu/tr/deneme-34',
+    class56: 'https://kurumsal.ornek.edu/tr/deneme-56',
+    class78: 'https://kurumsal.ornek.edu/tr/deneme-78',
+    optic: 'https://kurumsal.ornek.edu/tr/sanal-optik',
+    exam: 'https://kurumsal.ornek.edu/tr/deneme'
   },
   questionPools: {
     pool1: 'https://kurumsal.ornek.edu/tr/havuz-1',
@@ -38,10 +66,13 @@ export const defaultAcademicCenterLinks: AcademicCenterLinks = {
 
 export function coerceAcademicCenterLinks(next: Partial<AcademicCenterLinks> | null | undefined): AcademicCenterLinks {
   const d = defaultAcademicCenterLinks;
-  if (!next || typeof next !== 'object') return { ...d };
+  if (!next || typeof next !== 'object') return JSON.parse(JSON.stringify(d)) as AcademicCenterLinks;
+  const exams = { ...d.exams, ...(next.exams || {}) };
+  if (exams.exam && !exams.lise) exams.lise = exams.exam;
+  if (!exams.lise && exams.exam) exams.lise = exams.exam;
   return {
     studyClasses: { ...d.studyClasses, ...(next.studyClasses || {}) },
-    exams: { ...d.exams, ...(next.exams || {}) },
+    exams,
     questionPools: { ...d.questionPools, ...(next.questionPools || {}) }
   };
 }
@@ -66,8 +97,11 @@ export function saveAcademicCenterLinksLocal(next: AcademicCenterLinks): void {
   }
 }
 
-export async function fetchAcademicCenterLinksFromServer(): Promise<AcademicCenterLinks> {
-  const res = await apiFetch('/api/academic-center-links');
+export async function fetchAcademicCenterLinksFromServer(
+  institutionId?: string | null
+): Promise<AcademicCenterLinks> {
+  const qs = institutionId ? `?institution_id=${encodeURIComponent(institutionId)}` : '';
+  const res = await apiFetch(`/api/academic-center-links${qs}`);
   const json = (await res.json().catch(() => ({}))) as {
     data?: AcademicCenterLinks;
     warning?: string;
@@ -84,10 +118,16 @@ export async function fetchAcademicCenterLinksFromServer(): Promise<AcademicCent
   return data;
 }
 
-export async function saveAcademicCenterLinksToServer(next: AcademicCenterLinks): Promise<AcademicCenterLinks> {
+export async function saveAcademicCenterLinksToServer(
+  next: AcademicCenterLinks,
+  institutionId?: string | null
+): Promise<AcademicCenterLinks> {
+  const body: Record<string, unknown> = { links: coerceAcademicCenterLinks(next) };
+  if (institutionId) body.institution_id = institutionId;
+
   const res = await apiFetch('/api/academic-center-links', {
     method: 'PUT',
-    body: JSON.stringify(coerceAcademicCenterLinks(next))
+    body: JSON.stringify(body)
   });
   const json = (await res.json().catch(() => ({}))) as {
     data?: AcademicCenterLinks;
@@ -103,4 +143,39 @@ export async function saveAcademicCenterLinksToServer(next: AcademicCenterLinks)
   const saved = coerceAcademicCenterLinks(json.data);
   saveAcademicCenterLinksLocal(saved);
   return saved;
+}
+
+export async function openAcademicCenterLink(
+  url: string,
+  opts?: { room?: ExamEntryKey; institutionId?: string | null; busy?: (v: boolean) => void }
+): Promise<void> {
+  const href = String(url || '').trim();
+  if (!href) return;
+
+  if (isBbbAutoMeetingLink(href) && opts?.room) {
+    opts.busy?.(true);
+    try {
+      const qs = new URLSearchParams({ room: opts.room });
+      if (opts.institutionId) qs.set('institution_id', opts.institutionId);
+      const res = await apiFetch(`/api/academic-center-bbb-join?${qs.toString()}`);
+      const json = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+      if (!res.ok || !json.url) {
+        throw new Error(json.error || 'BBB oturumu açılamadı');
+      }
+      window.open(json.url, '_blank', 'noopener,noreferrer');
+    } finally {
+      opts.busy?.(false);
+    }
+    return;
+  }
+
+  window.open(href, '_blank', 'noopener,noreferrer');
+}
+
+export function examEntryUrl(links: AcademicCenterLinks, key: ExamEntryKey): string {
+  const v = links.exams[key];
+  if (v && String(v).trim()) return String(v).trim();
+  const legacy = links.exams.exam;
+  if (key === 'lise' && legacy) return String(legacy).trim();
+  return '';
 }

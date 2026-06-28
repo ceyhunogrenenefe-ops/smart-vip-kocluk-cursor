@@ -1,24 +1,16 @@
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
+import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
+import {
+  coerceAcademicLinks,
+  linksForInstitution,
+  normalizeAcademicLinksStore,
+  upsertDefaultLinks,
+  upsertInstitutionLinks,
+  DEFAULT_ACADEMIC_LINKS
+} from '../api/_lib/academic-center-links-store.js';
 
 const TABLE = 'platform_academic_center_links';
-
-const DEFAULT_LINKS = {
-  studyClasses: {
-    class56: 'https://kurumsal.ornek.edu/tr/etut-56',
-    class78: 'https://kurumsal.ornek.edu/tr/etut-78',
-    class911: 'https://kurumsal.ornek.edu/tr/etut-911',
-    yks: 'https://kurumsal.ornek.edu/tr/etut-yks'
-  },
-  exams: {
-    exam: 'https://kurumsal.ornek.edu/tr/deneme',
-    optic: 'https://kurumsal.ornek.edu/tr/sanal-optik'
-  },
-  questionPools: {
-    pool1: 'https://kurumsal.ornek.edu/tr/havuz-1',
-    pool2: 'https://kurumsal.ornek.edu/tr/havuz-2'
-  }
-};
 
 function parseBody(req) {
   const b = req.body;
@@ -33,70 +25,71 @@ function parseBody(req) {
   return {};
 }
 
-function deepMerge(base, patch) {
-  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return base;
-  const out = { ...base };
-  for (const [k, v] of Object.entries(patch)) {
-    if (v != null && typeof v === 'object' && !Array.isArray(v)) {
-      out[k] = deepMerge(base[k] && typeof base[k] === 'object' ? base[k] : {}, v);
-    } else if (typeof v === 'string') {
-      out[k] = v;
-    }
-  }
-  return out;
+function resolveInstitutionScope(actor, requestedId) {
+  const role = String(actor.role || '').trim();
+  const req = String(requestedId || '').trim();
+  if (role === 'super_admin') return req;
+  const own = String(actor.institution_id || '').trim();
+  if (role === 'admin') return own || req;
+  return own || req;
 }
 
-function coerceLinks(raw) {
-  const d = DEFAULT_LINKS;
-  if (!raw || typeof raw !== 'object') return { ...d };
-  return deepMerge(d, raw);
+async function readStore() {
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .select('links, payload')
+    .eq('id', 1)
+    .maybeSingle();
+  if (error) throw error;
+  return normalizeAcademicLinksStore(data?.links ?? data?.payload);
 }
 
 export default async function handler(req, res) {
   if (req.method === 'GET') {
     try {
-      const { data, error } = await supabaseAdmin
-        .from(TABLE)
-        .select('links, payload')
-        .eq('id', 1)
-        .maybeSingle();
+      let actor = null;
+      try {
+        actor = requireAuthenticatedActor(req);
+        actor = await enrichStudentActor(actor);
+      } catch {
+        actor = null;
+      }
 
-      if (error) {
-        const msg = String(error.message || '');
+      const qInst = String(req.query?.institution_id || '').trim();
+      const institutionId = actor
+        ? resolveInstitutionScope(actor, qInst)
+        : qInst;
+
+      let store;
+      try {
+        store = await readStore();
+      } catch (error) {
+        const msg = String(error?.message || '');
         const missing =
           msg.includes('does not exist') ||
           msg.includes('schema cache') ||
-          msg.includes("'links' column") ||
-          msg.includes('links column') ||
-          error.code === '42P01' ||
-          error.code === 'PGRST205' ||
-          error.code === 'PGRST204';
+          error?.code === '42P01' ||
+          error?.code === 'PGRST205';
 
         if (missing) {
           return res.status(200).json({
-            data: DEFAULT_LINKS,
+            data: coerceAcademicLinks(DEFAULT_ACADEMIC_LINKS),
+            institution_id: institutionId || null,
             warning:
-              'platform_academic_center_links eksik veya `links` sütunu yok. Supabase SQL Editor\'da sql/2026-05-08-platform-academic-center-links-links-column.sql (veya 2026-05-07-academic-center-links.sql) çalıştırın.',
+              'platform_academic_center_links eksik. sql/2026-05-07-academic-center-links.sql çalıştırın.',
             defaults: true
           });
         }
-
-        return res.status(500).json({
-          error: error.message,
-          hint: "Supabase'de sql/2026-05-08-platform-academic-center-links-links-column.sql migration'ını çalıştırın; şimdilik varsayılan linkler döndürüldü.",
-          data: DEFAULT_LINKS,
-          defaults: true
-        });
+        throw error;
       }
 
-      const raw = data?.links ?? data?.payload;
-      const merged = coerceLinks(raw);
-      return res.status(200).json({ data: merged });
+      const data = linksForInstitution(store, institutionId);
+      return res.status(200).json({ data, institution_id: institutionId || null });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'read_failed';
       return res.status(500).json({
         error: msg,
-        data: DEFAULT_LINKS,
+        data: coerceAcademicLinks(DEFAULT_ACADEMIC_LINKS),
         defaults: true
       });
     }
@@ -109,6 +102,7 @@ export default async function handler(req, res) {
     } catch {
       return res.status(401).json({ error: 'Missing token' });
     }
+    actor = await enrichStudentActor(actor);
 
     const role = String(actor.role || '').trim();
     if (role !== 'super_admin' && role !== 'admin') {
@@ -116,40 +110,44 @@ export default async function handler(req, res) {
     }
 
     const body = parseBody(req);
-    const next = coerceLinks(body);
+    const institutionId = resolveInstitutionScope(actor, body.institution_id);
+    const patch = coerceAcademicLinks(body.links ? body.links : body);
 
     try {
+      let store;
+      try {
+        store = await readStore();
+      } catch (readErr) {
+        store = normalizeAcademicLinksStore(null);
+      }
+
+      const nextStore = institutionId
+        ? upsertInstitutionLinks(store, institutionId, patch)
+        : upsertDefaultLinks(store, patch);
+
       const ts = new Date().toISOString();
       const row = {
         id: 1,
-        links: next,
-        payload: next,
+        links: nextStore,
+        payload: nextStore,
         updated_at: ts
       };
-      const { data, error } = await supabaseAdmin.from(TABLE).upsert(row, { onConflict: 'id' }).select('links, payload').single();
+      const { data, error } = await supabaseAdmin
+        .from(TABLE)
+        .upsert(row, { onConflict: 'id' })
+        .select('links, payload')
+        .single();
 
       if (error) {
-        const msg = String(error.message || '');
-        const missing =
-          msg.includes('does not exist') ||
-          msg.includes('schema cache') ||
-          msg.includes("'links' column") ||
-          msg.includes('links column') ||
-          error.code === '42P01' ||
-          error.code === 'PGRST205' ||
-          error.code === 'PGRST204';
-
-        return res.status(missing ? 503 : 500).json({
-          error:
-            error.message ||
-            'Kayıt başarısız. SUPABASE_SERVICE_ROLE_KEY ve migration (platform_academic_center_links) kontrol edin.',
-          hint:
-            "Supabase SQL Editor'da student-coaching-system/sql/2026-05-08-platform-academic-center-links-links-column.sql (veya 2026-05-07-academic-center-links.sql) dosyasını çalıştırın; ardından şema yenilenir."
+        return res.status(500).json({
+          error: error.message || 'Kayıt başarısız.',
+          hint: "Supabase'de platform_academic_center_links migration'ını çalıştırın."
         });
       }
 
-      const merged = coerceLinks(data?.links ?? data?.payload);
-      return res.status(200).json({ data: merged });
+      const savedStore = normalizeAcademicLinksStore(data?.links ?? data?.payload);
+      const saved = linksForInstitution(savedStore, institutionId);
+      return res.status(200).json({ data: saved, institution_id: institutionId || null });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'upsert_failed';
       return res.status(500).json({ error: msg });
