@@ -32,6 +32,60 @@ const BBB_FETCH_TIMEOUT_MS = Math.max(
   5000,
   Number(process.env.BBB_FETCH_TIMEOUT_MS || 22000) || 22000
 );
+const BBB_JOIN_INFO_TIMEOUT_MS = Math.max(
+  3000,
+  Number(process.env.BBB_JOIN_INFO_TIMEOUT_MS || 8000) || 8000
+);
+const BBB_CREATE_TIMEOUT_MS = Math.max(
+  5000,
+  Number(process.env.BBB_CREATE_TIMEOUT_MS || 15000) || 15000
+);
+const BBB_ROOM_CACHE_MS = Math.max(
+  60000,
+  Number(process.env.BBB_ROOM_CACHE_MS || 300000) || 300000
+);
+
+/** @type {Map<string, { meetingId: string, attendeePW: string, moderatorPW: string | null, expiresAt: number }>} */
+const bbbRoomCredentialCache = new Map();
+
+function getCachedBbbRoom(meetingId) {
+  const key = sanitizeBbbMeetingId(meetingId);
+  if (!key) return null;
+  const hit = bbbRoomCredentialCache.get(key);
+  if (!hit) return null;
+  if (Date.now() > hit.expiresAt) {
+    bbbRoomCredentialCache.delete(key);
+    return null;
+  }
+  return hit;
+}
+
+function setCachedBbbRoom(meetingId, creds) {
+  const key = sanitizeBbbMeetingId(meetingId);
+  if (!key || !creds?.attendeePW) return;
+  bbbRoomCredentialCache.set(key, {
+    meetingId: key,
+    attendeePW: creds.attendeePW,
+    moderatorPW: creds.moderatorPW || null,
+    expiresAt: Date.now() + BBB_ROOM_CACHE_MS
+  });
+}
+
+function joinLinksFromRoomCreds({ meetingId, attendeePW, moderatorPW, attendeeName, moderatorName }) {
+  const attendeeJoinLink = buildBbbAttendeeJoinUrl({
+    meetingId,
+    attendeePassword: attendeePW,
+    fullName: attendeeName
+  });
+  const moderatorJoinLink = moderatorPW
+    ? buildBbbModeratorJoinUrl({
+        meetingId,
+        moderatorPassword: moderatorPW,
+        fullName: moderatorName
+      })
+    : null;
+  return { attendeeJoinLink, moderatorJoinLink };
+}
 
 export class BbbApiTimeoutError extends Error {
   constructor(message = 'BBB sunucusu zaman aşımına uğradı.') {
@@ -468,23 +522,56 @@ export async function getBbbRecordingPlaybackUrlForMeetingIds(meetingIds) {
   return null;
 }
 
-export async function bbbMeetingExists(meetingId) {
+export async function fetchBbbMeetingInfo(meetingId, { timeoutMs = BBB_JOIN_INFO_TIMEOUT_MS } = {}) {
   const { apiBase, secret } = bbbApiConfig();
-  if (!apiBase || !secret) return false;
+  if (!apiBase || !secret) return null;
   const safeMeetingId = sanitizeBbbMeetingId(meetingId);
-  if (!safeMeetingId) return false;
+  if (!safeMeetingId) return null;
 
   const query = asQuery({ meetingID: safeMeetingId });
   const checksum = bbbChecksum('getMeetingInfo', query, secret);
   const url = `${apiBase}getMeetingInfo?${query}&checksum=${checksum}`;
 
   try {
-    const res = await fetch(url);
+    const res = await bbbFetch(url, { timeoutMs });
     const text = await res.text();
-    return res.ok && text.includes('<returncode>SUCCESS</returncode>');
+    if (!res.ok || !text.includes('<returncode>SUCCESS</returncode>')) return null;
+    const attendeePW = String(parseXmlTagValues(text, 'attendeePW')[0] || '').trim();
+    if (!attendeePW) return null;
+    const moderatorPW = String(parseXmlTagValues(text, 'moderatorPW')[0] || '').trim() || null;
+    const runningRaw = (parseXmlTagValues(text, 'running')[0] || '').toLowerCase();
+    return {
+      meetingId: safeMeetingId,
+      attendeePW,
+      moderatorPW,
+      running: runningRaw === 'true'
+    };
   } catch {
-    return false;
+    return null;
   }
+}
+
+function ensuredFromRoomCreds(creds, { attendeeName, moderatorName, refreshed = false }) {
+  const { attendeeJoinLink, moderatorJoinLink } = joinLinksFromRoomCreds({
+    meetingId: creds.meetingId,
+    attendeePW: creds.attendeePW,
+    moderatorPW: creds.moderatorPW,
+    attendeeName,
+    moderatorName
+  });
+  return {
+    refreshed,
+    attendeeLink: attendeeJoinLink,
+    moderatorLink: moderatorJoinLink,
+    meetingId: creds.meetingId,
+    attendeePW: creds.attendeePW,
+    moderatorPW: creds.moderatorPW
+  };
+}
+
+export async function bbbMeetingExists(meetingId) {
+  const info = await fetchBbbMeetingInfo(meetingId, { timeoutMs: BBB_JOIN_INFO_TIMEOUT_MS });
+  return Boolean(info?.attendeePW);
 }
 
 /**
@@ -519,6 +606,7 @@ export async function ensureBbbMeetingAlive({
       moderatorName,
       durationMinutes
     });
+    setCachedBbbRoom(stableMeetingId, bbb);
     return {
       refreshed: true,
       attendeeLink: bbb.attendeeJoinLink,
@@ -529,12 +617,27 @@ export async function ensureBbbMeetingAlive({
     };
   };
 
+  const tryReuseStableRoom = async () => {
+    const cached = getCachedBbbRoom(stableMeetingId);
+    if (cached?.attendeePW) {
+      return ensuredFromRoomCreds(cached, { attendeeName, moderatorName });
+    }
+    const live = await fetchBbbMeetingInfo(stableMeetingId);
+    if (live?.attendeePW) {
+      setCachedBbbRoom(stableMeetingId, live);
+      return ensuredFromRoomCreds(live, { attendeeName, moderatorName });
+    }
+    return null;
+  };
+
   if (isBbbAutoMeetingLink(attendee) || isBbbAutoMeetingLink(moderator)) {
     if (!isBbbConfigured()) {
       throw new Error(
         'BBB otomatik ders ayarlı ancak BBB_API_ENDPOINT / BBB_API_SECRET tanımlı değil.'
       );
     }
+    const reused = await tryReuseStableRoom();
+    if (reused) return reused;
     return createWithStableId();
   }
 
@@ -547,21 +650,15 @@ export async function ensureBbbMeetingAlive({
 
   const rawMeetingId =
     parseBbbMeetingIdFromJoinUrl(moderator) || parseBbbMeetingIdFromJoinUrl(attendee) || stableMeetingId;
-  let exists = false;
   if (rawMeetingId) {
-    exists = await bbbMeetingExists(rawMeetingId);
-    if (!exists && rawMeetingId !== sanitizeBbbMeetingId(rawMeetingId)) {
-      exists = await bbbMeetingExists(sanitizeBbbMeetingId(rawMeetingId));
+    let live = await fetchBbbMeetingInfo(rawMeetingId);
+    if (!live?.attendeePW && rawMeetingId !== sanitizeBbbMeetingId(rawMeetingId)) {
+      live = await fetchBbbMeetingInfo(sanitizeBbbMeetingId(rawMeetingId));
     }
-  }
-
-  if (exists) {
-    return {
-      refreshed: false,
-      attendeeLink: attendee,
-      moderatorLink: moderator || null,
-      meetingId: sanitizeBbbMeetingId(rawMeetingId)
-    };
+    if (live?.attendeePW) {
+      setCachedBbbRoom(live.meetingId, live);
+      return ensuredFromRoomCreds(live, { attendeeName, moderatorName });
+    }
   }
 
   if (!isBbbConfigured()) {
@@ -608,7 +705,7 @@ export async function createBbbMeetingAndJoinLink({
   const createChecksum = bbbChecksum('create', createQuery, secret);
   const createUrl = `${apiBase}create?${createQuery}&checksum=${createChecksum}`;
 
-  const createRes = await fetch(createUrl);
+  const createRes = await bbbFetch(createUrl, { timeoutMs: BBB_CREATE_TIMEOUT_MS });
   const createText = await createRes.text();
   if (!createRes.ok || !createText.includes('<returncode>SUCCESS</returncode>')) {
     throw new Error(`BBB create başarısız: ${createText.slice(0, 280)}`);

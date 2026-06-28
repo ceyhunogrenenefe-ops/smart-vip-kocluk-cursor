@@ -159,15 +159,24 @@ export async function openAcademicCenterLink(
 
   if (isBbbAutoMeetingLink(href) && opts?.room) {
     opts.busy?.(true);
+    const popup = window.open('about:blank', '_blank');
     try {
       const qs = new URLSearchParams({ room: opts.room });
       if (opts.institutionId) qs.set('institution_id', opts.institutionId);
       const res = await apiFetch(`/api/academic-center-bbb-join?${qs.toString()}`);
       const json = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
       if (!res.ok || !json.url) {
+        popup?.close();
         throw new Error(json.error || 'BBB oturumu açılamadı');
       }
-      window.open(json.url, '_blank', 'noopener,noreferrer');
+      if (popup && !popup.closed) {
+        popup.location.href = json.url;
+      } else {
+        window.open(json.url, '_blank', 'noopener,noreferrer');
+      }
+    } catch (e) {
+      popup?.close();
+      throw e;
     } finally {
       opts.busy?.(false);
     }
