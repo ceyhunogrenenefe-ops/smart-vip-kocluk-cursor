@@ -413,9 +413,8 @@ export default function AcademicCenter() {
                 title="Sanal Optik"
                 description={
                   <>
-                    Kodlamalarınızı bu bölüm üzerinden gerçekleştirebilirsiniz.{' '}
-                    <strong>Sanal Optik</strong> butonuna tıkladığınızda otomatik olarak{' '}
-                    <strong>Deneme Sınav Sistemi</strong>&apos;ne yönlendirileceksiniz. Açılan ekranda{' '}
+                    Kodlamalarınızı bu bölüm üzerinden gerçekleştirebilirsiniz. Devam ettiğinizde{' '}
+                    <strong>Deneme Sınav Sistemi</strong>&apos;ne yönlendirilirsiniz. Açılan ekranda{' '}
                     <strong>Deneme Sınav Sistemi kullanıcı adı ve şifreniz</strong> ile giriş yaparak optik
                     kodlamalarınızı tamamlayabilirsiniz.
                   </>

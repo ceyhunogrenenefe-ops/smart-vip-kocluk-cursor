@@ -1,17 +1,26 @@
 import React from 'react';
-import { Loader2, ScanLine } from 'lucide-react';
+import { ClipboardCheck, Loader2 } from 'lucide-react';
 import { AppModal } from '../ui/AppModal';
 
 const RULES: React.ReactNode[] = [
-  'Kodlamalarınızı bu bölüm üzerinden gerçekleştirebilirsiniz.',
   <>
-    <strong>Sanal Optik</strong> ile devam ettiğinizde otomatik olarak{' '}
-    <strong>Deneme Sınav Sistemi</strong>&apos;ne yönlendirileceksiniz.
+    Tanımlanan sınavlarınızı <strong>Online Sınavlar</strong> bölümünde görebilirsiniz.
   </>,
   <>
-    Açılan ekranda <strong>Deneme Sınav Sistemi kullanıcı adı ve şifreniz</strong> ile giriş yapın.
+    Sınavınıza <strong>Sınava Başla</strong> butonuna tıkladığınız anda süre başlamaktadır.
   </>,
-  'Giriş yaptıktan sonra optik kodlamalarınızı tamamlayabilirsiniz.'
+  <>
+    Her bölüm değişikliğinde cevaplarınızın kaybolmaması için <strong>Kaydet</strong> butonuna basmayı
+    unutmayınız.
+  </>,
+  <>
+    Sınavınızı tamamladıktan sonra <strong>Sınavı Bitir</strong> butonuna basarak sınavınızı
+    sonlandırınız.
+  </>,
+  <>
+    Sınav sonuçlarınızı ve detaylı analizlerinizi <strong>Sınav Raporları</strong> bölümünden
+    görüntüleyebilirsiniz.
+  </>
 ];
 
 type VirtualOpticInfoModalProps = {
@@ -34,11 +43,11 @@ export function VirtualOpticInfoModal({
       <div className="border-b border-slate-100 bg-gradient-to-r from-emerald-50 to-teal-50 px-5 py-4">
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white">
-            <ScanLine className="h-5 w-5" />
+            <ClipboardCheck className="h-5 w-5" />
           </div>
           <div>
-            <h3 className="text-lg font-bold text-slate-900">Sanal Optik Bilgilendirmesi</h3>
-            <p className="mt-0.5 text-sm text-slate-600">Deneme Sınav Sistemi</p>
+            <h3 className="text-lg font-bold text-slate-900">Online Sınav Bilgilendirmesi</h3>
+            <p className="mt-0.5 text-sm text-slate-600">Sanal Optik</p>
           </div>
         </div>
       </div>
@@ -69,10 +78,10 @@ export function VirtualOpticInfoModal({
           type="button"
           disabled={confirming || !hasLink}
           onClick={onConfirm}
-          className="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-emerald-600 bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {confirming ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          Okudum, Devam Et
+          Okudum, Sınava Devam Et
         </button>
       </div>
     </AppModal>
