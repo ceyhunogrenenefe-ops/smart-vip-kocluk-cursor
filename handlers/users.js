@@ -14,6 +14,10 @@ const normalizeRoles = (raw, fallbackRole = 'student') => {
   return [...new Set(cleaned)];
 };
 
+function existingUserRoles(row) {
+  return normalizeRoles(row?.roles, String(row?.role || 'student'));
+}
+
 async function coachAssignedStudentEmails(coachId) {
   if (!coachId) return [];
   const { data, error } = await supabaseAdmin.from('students').select('email').eq('coach_id', coachId);
@@ -31,13 +35,17 @@ async function teacherScopeStudentEmails(teacherSub) {
   return new Set((data || []).map((r) => String(r.email || '').toLowerCase().trim()).filter(Boolean));
 }
 
+function targetIsSuperAdmin(row) {
+  return existingUserRoles(row).includes('super_admin');
+}
+
 async function actorCanSeeUserRow(actor, row) {
   if (!row) return false;
   if (actor.role === 'super_admin') return true;
   const rowEmail = String(row.email || '').toLowerCase().trim();
 
   if (actor.role === 'admin')
-    return hasInstitutionAccess(actor, row.institution_id) && row.role !== 'super_admin';
+    return hasInstitutionAccess(actor, row.institution_id) && !targetIsSuperAdmin(row);
 
   if (actor.role === 'teacher') {
     if (row.role !== 'student' || !hasInstitutionAccess(actor, row.institution_id)) return false;
@@ -69,6 +77,26 @@ const actorMayAssignRole = (actor, newRole) => {
   if (actor.role === 'coach') return newRole === 'student';
   return false;
 };
+
+function actorPrivilegeForRoleAssignment(actor, roleTags = []) {
+  const tags = Array.isArray(roleTags) ? roleTags : [];
+  if (actor.role === 'super_admin' || tags.includes('super_admin')) return 'super_admin';
+  if (actor.role === 'admin' || tags.includes('admin')) return 'admin';
+  if (actor.role === 'teacher' || tags.includes('teacher')) return 'teacher';
+  if (actor.role === 'coach' || tags.includes('coach')) return 'coach';
+  return actor.role;
+}
+
+function actorMayAssignRoleWithTags(actor, newRole, roleTags = []) {
+  return actorMayAssignRole({ ...actor, role: actorPrivilegeForRoleAssignment(actor, roleTags) }, newRole);
+}
+
+function actorMayAssignRoleChangeWithTags(actor, newRole, priorRoles = [], roleTags = []) {
+  const role = String(newRole || '').trim();
+  if (!USER_ROLES.includes(role)) return false;
+  if (priorRoles.includes(role)) return true;
+  return actorMayAssignRoleWithTags(actor, role, roleTags);
+}
 
 const createdByForInsert = (actor) => {
   if (!actor?.sub || actor.sub === 'anonymous') return null;
@@ -127,8 +155,9 @@ async function resolveCreatedByFk(actor) {
 
 export default async function handler(req, res) {
   try {
-    let actor = requireAuth(req);
-    actor = await enrichStudentActor(actor);
+    let actor = await enrichStudentActor(requireAuth(req));
+    const actorRoleTags = await normalizedUserRolesFromDb(actor.sub);
+    actor = { ...actor, role: actorPrivilegeForRoleAssignment(actor, actorRoleTags) };
 
     if (req.method === 'GET') {
       if (!(actor.role === 'super_admin' || actor.role === 'admin' || actor.role === 'teacher' || actor.role === 'coach')) {
@@ -206,7 +235,7 @@ export default async function handler(req, res) {
 
       const requestedRoles = normalizeRoles(body.roles, String(body.role || 'student'));
       for (const r of requestedRoles) {
-        if (!actorMayAssignRole(actor, r)) {
+        if (!actorMayAssignRoleWithTags(actor, r, actorRoleTags)) {
           return res.status(403).json({ error: 'role_forbidden' });
         }
       }
@@ -345,20 +374,21 @@ export default async function handler(req, res) {
       }
 
       const raw = req.body || {};
-      if (existing.role === 'super_admin' && actor.role !== 'super_admin') {
+      if (targetIsSuperAdmin(existing) && actor.role !== 'super_admin') {
         return res.status(403).json({ error: 'forbidden' });
       }
 
+      const priorRoles = existingUserRoles(existing);
       if (
         raw.role !== undefined &&
         String(raw.role) !== String(existing.role) &&
-        !actorMayAssignRole(actor, String(raw.role))
+        !actorMayAssignRoleChangeWithTags(actor, String(raw.role), priorRoles, actorRoleTags)
       ) {
         return res.status(403).json({ error: 'role_forbidden' });
       }
       if (raw.roles !== undefined) {
         const normalized = normalizeRoles(raw.roles, String(existing.role || 'student'));
-        if (!normalized.every((r) => actorMayAssignRole(actor, r))) {
+        if (!normalized.every((r) => actorMayAssignRoleChangeWithTags(actor, r, priorRoles, actorRoleTags))) {
           return res.status(403).json({ error: 'role_forbidden' });
         }
       }

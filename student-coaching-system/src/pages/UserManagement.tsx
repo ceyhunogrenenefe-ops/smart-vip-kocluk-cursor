@@ -30,7 +30,7 @@ import {
   LogIn
 } from 'lucide-react';
 import { UserRole, ClassLevel, Coach, Student, CLASS_LEVELS, formatClassLevelLabel } from '../types';
-import { userRoleTags } from '../config/rolePermissions';
+import { userHasAnyRole, userRoleTags } from '../config/rolePermissions';
 import { db, PendingRegistrationRow, QuotaSnapshot } from '../lib/database';
 import { QuotaManagementPanel } from '../components/quota/QuotaManagementPanel';
 import { PageCollapsibleSection } from '../components/ui/PageCollapsibleSection';
@@ -75,6 +75,10 @@ import { saveTeacherQuestionProfile, fetchTeacherQuestionProfile } from '../lib/
 
 function formHasTeacherRole(role: UserRole, alsoTeacher: boolean): boolean {
   return role === 'teacher' || alsoTeacher;
+}
+
+function isAdminActor(user: SystemUser | null | undefined): boolean {
+  return userHasAnyRole(user, ['admin', 'super_admin']);
 }
 
 function buildStaffRoleAssignment(
@@ -1099,7 +1103,7 @@ export default function UserManagement() {
     if (authLoading) return;
     if (searchParams.get('ogretmen_ekle') !== '1') return;
 
-    if (!(currentUser?.role === 'admin' || currentUser?.role === 'super_admin')) {
+    if (!(isAdminActor(currentUser))) {
       setMessage({ type: 'error', text: 'Öğretmen ekleme yetkisi yalnızca yönetici rollerinde açıktır.' });
       navigate('/user-management', { replace: true });
       return;
@@ -1161,7 +1165,7 @@ export default function UserManagement() {
     if (authLoading || listLoading) return;
     const editId = (searchParams.get('kullanici_duzenle') || '').trim();
     if (!editId) return;
-    if (!(currentUser?.role === 'admin' || currentUser?.role === 'super_admin')) {
+    if (!(isAdminActor(currentUser))) {
       navigate('/user-management', { replace: true });
       return;
     }
@@ -1176,7 +1180,7 @@ export default function UserManagement() {
     if (authLoading || listLoading) return;
     const coachId = (searchParams.get('koc_giris') || '').trim();
     if (!coachId) return;
-    if (!(currentUser?.role === 'admin' || currentUser?.role === 'super_admin')) {
+    if (!(isAdminActor(currentUser))) {
       navigate('/user-management', { replace: true });
       return;
     }
@@ -1234,7 +1238,7 @@ export default function UserManagement() {
     setMessage(null);
 
     const needsTeacherQuestionProfile =
-      (currentUser?.role === 'admin' || currentUser?.role === 'super_admin') &&
+      (isAdminActor(currentUser)) &&
       formHasTeacherRole(formData.role, formData.alsoTeacher);
 
     if (needsTeacherQuestionProfile) {
@@ -1307,7 +1311,7 @@ export default function UserManagement() {
         const staffRoles =
           buildStaffRoleAssignment(
             formData,
-            currentUser?.role === 'admin' || currentUser?.role === 'super_admin'
+            isAdminActor(currentUser)
           );
 
         const patch: Record<string, unknown> = {
@@ -1546,7 +1550,7 @@ export default function UserManagement() {
 
         const staffRolesNew = buildStaffRoleAssignment(
           formData,
-          currentUser?.role === 'admin' || currentUser?.role === 'super_admin'
+          isAdminActor(currentUser)
         );
 
         const superAdminChosenInst =
@@ -1788,7 +1792,7 @@ export default function UserManagement() {
   const stats = useMemo(() => computeSystemUserStats(users), [users]);
 
   const canBulkImport =
-    currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+    isAdminActor(currentUser);
 
   const handleBulkUserImport = async (file: File | null) => {
     if (!file) return;
@@ -2053,7 +2057,7 @@ export default function UserManagement() {
         </div>
         </div>
 
-        {(currentUser?.role === 'admin' || currentUser?.role === 'super_admin') &&
+        {(isAdminActor(currentUser)) &&
         classLevelStats.length > 0 ? (
           <div className="mt-6 border-t border-gray-100 pt-4">
             <h3 className="text-sm font-semibold text-slate-800 mb-3">
@@ -3027,7 +3031,7 @@ export default function UserManagement() {
                   </div>
                 )}
 
-              {(currentUser?.role === 'admin' || currentUser?.role === 'super_admin') &&
+              {(isAdminActor(currentUser)) &&
                 (formData.role === 'teacher' || formData.role === 'coach' || formData.role === 'admin') && (
                   <div className="rounded-lg border border-violet-100 bg-violet-50/80 p-3 space-y-2">
                     <p className="text-xs text-violet-900 font-medium">
@@ -3080,7 +3084,7 @@ export default function UserManagement() {
                   </div>
                 )}
 
-              {(currentUser?.role === 'admin' || currentUser?.role === 'super_admin') &&
+              {(isAdminActor(currentUser)) &&
                 formHasTeacherRole(formData.role, formData.alsoTeacher) && (
                   <div className="space-y-2">
                     <p className="text-xs text-violet-800">

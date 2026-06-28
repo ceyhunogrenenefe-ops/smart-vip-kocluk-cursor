@@ -19,6 +19,7 @@ import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { userRoleTags } from '../config/rolePermissions';
 import { apiFetch } from '../lib/session';
+import { resolveInstitutionIdForActor } from '../lib/activeInstitutionScope';
 import { mergeClassSlotsIntoPlanner, type PlannerState as FullPlannerState } from '../lib/classSlotsToPlanner';
 import { PLANNER_CURRICULUM_PRESETS, PLANNER_POOL_SUBJECTS } from '../lib/plannerTopicPool';
 
@@ -177,15 +178,28 @@ function postPlannerMessage<T>(
 
 export default function SchedulePlannerPage() {
   const { effectiveUser } = useAuth();
-  const { activeInstitutionId } = useApp();
+  const { activeInstitutionId, institution, institutions } = useApp();
   const roleTags = userRoleTags(effectiveUser);
   const isSuper = effectiveUser?.role === 'super_admin' || roleTags.includes('super_admin');
   const isAdmin = effectiveUser?.role === 'admin' || roleTags.includes('admin');
-  const institutionId = String(
-    isSuper
-      ? activeInstitutionId || effectiveUser?.institution_id || ''
-      : effectiveUser?.institution_id || activeInstitutionId || ''
-  ).trim();
+  const institutionId = useMemo(
+    () =>
+      String(
+        resolveInstitutionIdForActor({
+          role: effectiveUser?.role,
+          userInstitutionId: effectiveUser?.institutionId,
+          activeInstitutionId,
+          fallbackId: institution?.id ?? institutions[0]?.id ?? null
+        }) || ''
+      ).trim(),
+    [
+      effectiveUser?.role,
+      effectiveUser?.institutionId,
+      activeInstitutionId,
+      institution?.id,
+      institutions
+    ]
+  );
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [loadError, setLoadError] = useState('');
@@ -242,13 +256,14 @@ export default function SchedulePlannerPage() {
         students: systemStudents,
         poolSubjects: PLANNER_POOL_SUBJECTS,
         curriculumPresets: PLANNER_CURRICULUM_PRESETS,
-        autoSyncClasses: true
+        autoSyncClasses: true,
+        planName: planName.trim()
       });
       setLoadError('');
     } catch (e) {
       setLoadError('Planlayıcı bağlantısı kurulamadı. Sayfayı yenileyin.');
     }
-  }, [iframeReady, institutionId, classes, systemTeachers, systemStudents]);
+  }, [iframeReady, institutionId, classes, systemTeachers, systemStudents, planName]);
 
   const loadPlannerResources = useCallback(async (): Promise<ClassRow[]> => {
     if (!institutionId) return [];
@@ -342,7 +357,7 @@ export default function SchedulePlannerPage() {
 
   useEffect(() => {
     if (iframeReady) void pushPlannerContext();
-  }, [iframeReady, pushPlannerContext, classes]);
+  }, [iframeReady, pushPlannerContext, classes, planName]);
 
   const refreshPlannerGroups = useCallback(async () => {
     if (!iframeReady) return;
@@ -355,11 +370,60 @@ export default function SchedulePlannerPage() {
     }
   }, [iframeReady, exportGroupId]);
 
+  const reloadSharedPlan = useCallback(async () => {
+    if (!institutionId || !(isAdmin || isSuper)) return;
+    planTouchedRef.current = false;
+    autoPlanLoadedFor.current = '';
+    planLoadGenRef.current += 1;
+    setBusy('reload');
+    try {
+      await loadPlans();
+      const qs = new URLSearchParams({ institution_id: institutionId });
+      const res = await apiFetch(`/api/class-schedule-plans?${qs.toString()}`);
+      const j = await res.json().catch(() => ({}));
+      const rows: PlanRow[] = Array.isArray(j.data) ? j.data : [];
+      if (!rows.length) {
+        toast.message('Bu kurumda kayıtlı ortak taslak yok.');
+        return;
+      }
+      const pick =
+        [...rows].sort((a, b) =>
+          String(b.updated_at || '').localeCompare(String(a.updated_at || ''))
+        )[0]?.id || rows[0]?.id;
+      if (!pick) return;
+      await pushPlannerContext();
+      const planRes = await apiFetch(`/api/class-schedule-plans?id=${encodeURIComponent(pick)}`);
+      const planJson = await planRes.json().catch(() => ({}));
+      if (!planRes.ok || !planJson.data?.planner_json) {
+        throw new Error(planJson.error || 'load_failed');
+      }
+      await postPlannerMessage(iframeRef.current, 'SET_STATE', planJson.data.planner_json);
+      setSelectedPlanId(pick);
+      setPlanName(String(planJson.data.name || ''));
+      rememberSharedPlan(pick);
+      await refreshPlannerGroups();
+      await pushPlannerContext();
+      toast.success('Ortak taslak sunucudan yenilendi.');
+    } catch (e) {
+      toast.error(String((e as Error).message || e));
+    } finally {
+      setBusy('');
+    }
+  }, [
+    institutionId,
+    isAdmin,
+    isSuper,
+    loadPlans,
+    pushPlannerContext,
+    rememberSharedPlan,
+    refreshPlannerGroups
+  ]);
+
   useEffect(() => {
     if (!iframeReady || !institutionId || !(isAdmin || isSuper)) return;
     if (planTouchedRef.current) return;
     if (!plans.length) return;
-    const marker = `${institutionId}:${plans.map((p) => p.id).join(',')}`;
+    const marker = `${institutionId}:${plans.map((p) => `${p.id}:${p.updated_at || ''}`).join(',')}`;
     if (autoPlanLoadedFor.current === marker) return;
     autoPlanLoadedFor.current = marker;
 
@@ -370,7 +434,11 @@ export default function SchedulePlannerPage() {
       stored = '';
     }
     const pick =
-      (stored && plans.some((p) => p.id === stored) ? stored : null) || plans[0]?.id;
+      (stored && plans.some((p) => p.id === stored) ? stored : null) ||
+      [...plans].sort((a, b) =>
+        String(b.updated_at || '').localeCompare(String(a.updated_at || ''))
+      )[0]?.id ||
+      plans[0]?.id;
     if (!pick) return;
 
     const gen = ++planLoadGenRef.current;
@@ -715,21 +783,25 @@ export default function SchedulePlannerPage() {
         <div className="flex items-center gap-2 text-slate-800 dark:text-slate-100">
           <CalendarDays className="h-5 w-5 text-indigo-600" />
           <div>
-            <h1 className="text-base font-semibold">Ders Programı Planlayıcı</h1>
+            <h1 className="text-base font-semibold">Ders Program Planlayıcısı</h1>
             <p className="text-xs text-slate-500">
-              Kurumdaki tüm sınıflar «Tüm Sınıflar» sekmesinde birlikte görünür. Kayıtlı taslak tüm yöneticilerde ortaktır — Kaydet ile güncelleyin.
+              Kurumdaki tüm sınıflar «Tüm Sınıflar» sekmesinde birlikte görünür. Plan adını yazıp Kaydet ile ortak taslağı güncelleyin.
             </p>
           </div>
         </div>
 
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          <input
-            type="text"
-            value={planName}
-            onChange={(e) => setPlanName(e.target.value)}
-            placeholder="Taslak adı"
-            className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800"
-          />
+        <div className="ml-auto flex flex-wrap items-end gap-2">
+          <label className="flex min-w-[12rem] flex-col gap-0.5 text-xs text-slate-500 dark:text-slate-400">
+            Plan adı
+            <input
+              type="text"
+              value={planName}
+              onChange={(e) => setPlanName(e.target.value)}
+              placeholder="örn. 2025 Yaz Dönemi"
+              aria-label="Plan adı"
+              className="min-w-[12rem] rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+            />
+          </label>
           <select
             value={selectedPlanId}
             onChange={(e) => handleLoadPlan(e.target.value)}
@@ -801,11 +873,12 @@ export default function SchedulePlannerPage() {
           </Link>
           <button
             type="button"
-            onClick={() => refreshPlannerGroups()}
-            className="rounded-lg border border-slate-200 p-1.5 text-slate-600 hover:bg-slate-50 dark:border-slate-600"
-            title="Yenile"
+            onClick={() => void reloadSharedPlan()}
+            disabled={!!busy || !iframeReady || !institutionId}
+            className="rounded-lg border border-slate-200 p-1.5 text-slate-600 hover:bg-slate-50 dark:border-slate-600 disabled:opacity-50"
+            title="Ortak taslağı sunucudan yenile"
           >
-            <RefreshCw className="h-4 w-4" />
+            {busy === 'reload' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           </button>
         </div>
       </div>
@@ -836,7 +909,8 @@ export default function SchedulePlannerPage() {
 
       {institutionId && classes.length > 0 ? (
         <div className="rounded-lg border border-indigo-100 bg-indigo-50/80 px-3 py-2 text-xs text-indigo-950 dark:border-indigo-900/50 dark:bg-indigo-950/30 dark:text-indigo-100">
-          Kurumda <strong>{classes.length}</strong> sınıf yüklendi (6-A vb. yeni sınıflar otomatik eklenir) — «Tüm Sınıflar» sekmesinde hepsini görün.
+          Kurum: <strong>{institution?.name || institutionId.slice(0, 8)}</strong> —{' '}
+          <strong>{classes.length}</strong> sınıf yüklendi (6-A vb. yeni sınıflar otomatik eklenir) — «Tüm Sınıflar» sekmesinde hepsini görün.
           {selectedPlanId ? (
             <>
               {' '}

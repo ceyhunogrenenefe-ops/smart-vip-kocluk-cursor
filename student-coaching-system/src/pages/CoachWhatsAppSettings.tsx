@@ -23,6 +23,7 @@ import { formatClassLevelLabel } from '../types';
 import type { Student } from '../types';
 import { apiFetch, getAuthToken, getGatewaySessionUserId } from '../lib/session';
 import { normalizeWhatsAppPhoneForSend } from '../lib/whatsappOutbound';
+import { sendWhatsAppMessage } from '../lib/twilio';
 import WhatsAppMerkeziPanel from '../components/whatsapp/WhatsAppMerkeziPanel';
 import { resolveWhatsAppGatewayBase, emptyGatewayStatusPayload, isGatewayStatusForSession, resolveGatewaySessionPath } from '../lib/whatsappGatewayClient';
 
@@ -470,7 +471,7 @@ export default function CoachWhatsAppSettings() {
         return;
       }
       setGwSchedules((prev) => [...prev, payload.data!]);
-      setGwSchedulesMsg('Yeni gateway planı eklendi.');
+      setGwSchedulesMsg('Yeni toplu mesaj planı eklendi.');
     } catch {
       setGwSchedulesMsg('Plan oluşturulamadı.');
     }
@@ -495,7 +496,7 @@ export default function CoachWhatsAppSettings() {
       }
       setGwSchedules((prev) => prev.map((s) => (s.id === row.id ? payload.data! : s)));
       setGwRestartCampaignIds((prev) => ({ ...prev, [row.id]: false }));
-      setGwSchedulesMsg('Gateway planı kaydedildi. QR oturumu bağlı olmalı; cron ~15 dk’da bir çalışır.');
+      setGwSchedulesMsg('Plan kaydedildi. Zamanlanmış gönderimler Meta Cloud API ile sunucudan yapılır; cron ~15 dk’da bir çalışır.');
     } catch {
       setGwSchedulesMsg('Kayıt başarısız.');
     } finally {
@@ -660,7 +661,7 @@ export default function CoachWhatsAppSettings() {
       }
       setGwSchedules((prev) => [...prev, payload.data!]);
       setBulkNotice(
-        'Zamanlanmış plan kaydedildi ve aktif. QR oturumu bağlı olmalı; cron ~15 dk’da bir tetiklenir.'
+        'Zamanlanmış plan kaydedildi ve aktif. Mesajlar Meta Cloud API ile gönderilir; cron ~15 dk’da bir tetiklenir.'
       );
       void loadGwSchedules();
     } catch {
@@ -1253,20 +1254,16 @@ export default function CoachWhatsAppSettings() {
 
   const clearBulkSelection = () => setBulkSelectedIds(new Set());
 
-  const sendBulkGateway = async () => {
+  const sendBulkMeta = async () => {
     setBulkNotice('');
     setBulkProgress('');
     if (!bulkSelectedIds.size) {
       setBulkNotice('En az bir öğrenci seçin.');
       return;
     }
-    if (!canUseGateway) {
-      setBulkNotice('Gateway kullanılamıyor — JWT ve gateway adresi gerekli.');
+    if (!hasServerJwt) {
+      setBulkNotice('Toplu gönderim için sunucu oturumu (JWT) gerekli — çıkış yapıp tekrar giriş yapın.');
       return;
-    }
-
-    if (status !== 'connected') {
-      await ensureGatewayReadyBeforeSend(4000);
     }
 
     const targets = students.filter((st) => bulkSelectedIds.has(st.id));
@@ -1292,18 +1289,22 @@ export default function CoachWhatsAppSettings() {
         const message = buildBulkMessageForStudent(st);
         setBulkProgress(`${i + 1}/${withPhone.length} — ${st.name}`);
         try {
-          await sendGatewayMessage(phone, message);
-          ok += 1;
+          const sent = await sendWhatsAppMessage({ to: phone, body: message });
+          if (sent.ok) ok += 1;
+          else {
+            fail += 1;
+            if (errors.length < 3) errors.push(`${st.name}: ${sent.error || 'meta_send_failed'}`);
+          }
         } catch (e) {
           fail += 1;
           const msg = e instanceof Error ? e.message : String(e);
           if (errors.length < 3) errors.push(`${st.name}: ${msg}`);
         }
         if (i < withPhone.length - 1) {
-          await new Promise((r) => setTimeout(r, 350));
+          await new Promise((r) => setTimeout(r, 400));
         }
       }
-      const parts = [`${ok}/${withPhone.length} mesaj gönderildi.`];
+      const parts = [`${ok}/${withPhone.length} mesaj Meta üzerinden gönderildi.`];
       if (fail) parts.push(`${fail} başarısız.`);
       if (skipped) parts.push(`${skipped} öğrenci telefonsuz atlandı.`);
       if (errors.length) parts.push(errors.join(' · '));
@@ -1677,17 +1678,17 @@ export default function CoachWhatsAppSettings() {
         </div>
       </section>
 
-      {/* Otomatik Gateway zamanlayıcı */}
+      {/* Otomatik toplu mesaj planları (Meta) */}
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-wrap items-center gap-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50 to-violet-50/60 px-6 py-4">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-md">
             <Clock className="h-6 w-6" />
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-semibold text-slate-900">Otomatik mesaj (Gateway)</h2>
+            <h2 className="text-lg font-semibold text-slate-900">Otomatik toplu mesaj (Meta)</h2>
             <p className="text-sm text-slate-600">
-              Birden fazla plan tanımlayabilirsiniz. Mesajlar bağlı QR WhatsApp oturumunuzdan gider (Meta gerekmez).
-              Cron aynı uç noktada çalışır (~15 dk). Önce aşağıdaki QR bölümünden oturumu bağlayın.
+              Birden fazla plan tanımlayabilirsiniz. Zamanlanmış toplu mesajlar Meta Cloud API ile sunucudan gider; QR
+              gateway bağlantısı gerekmez. Cron ~15 dk’da bir çalışır.
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
@@ -1713,17 +1714,17 @@ export default function CoachWhatsAppSettings() {
         <div className="space-y-4 p-6">
           {!hasServerJwt && (
             <p className="text-sm text-slate-600">
-              Gateway zamanlayıcı için sunucu oturumu (JWT) gerekir.
+              Toplu mesaj planları için sunucu oturumu (JWT) gerekir.
             </p>
           )}
           {gwSchedulesLoading ? (
             <p className="flex items-center gap-2 text-slate-600">
               <Loader2 className="h-5 w-5 animate-spin text-indigo-600" />
-              Gateway planları yükleniyor…
+              Planlar yükleniyor…
             </p>
           ) : gwSchedules.length === 0 ? (
             <p className="text-sm text-slate-600">
-              Henüz gateway planı yok. «Plan ekle» ile oluşturun; QR oturumu bağlı olmalıdır.
+              Henüz toplu mesaj planı yok. «Plan ekle» ile oluşturun; Meta Cloud API yapılandırılmış olmalıdır.
             </p>
           ) : (
             <div className="space-y-6">
@@ -2303,27 +2304,21 @@ export default function CoachWhatsAppSettings() {
         </div>
       </section>
 
-      {/* 4 — Toplu mesaj (Gateway) */}
+      {/* 4 — Toplu mesaj (Meta) */}
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center gap-4 border-b border-slate-100 bg-gradient-to-r from-teal-50 to-cyan-50/50 px-6 py-4">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-teal-600 text-white shadow-md">
             <Send className="h-6 w-6" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">Toplu mesaj (Gateway)</h2>
+            <h2 className="text-lg font-semibold text-slate-900">Toplu mesaj (Meta)</h2>
             <p className="text-sm text-slate-600">
-              Sınıf veya gruba göre öğrenci seçin; anında gönderin veya tarih/saat ile zamanlayın. Gateway QR oturumu
-              gerekir.
+              Sınıf veya gruba göre öğrenci seçin; anında veya tarih/saat ile zamanlayın. Gönderimler Meta Cloud API
+              üzerinden yapılır (QR gateway gerekmez).
             </p>
           </div>
         </div>
         <div className="space-y-4 p-6">
-          {!isConnected && canUseGateway ? (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-              Toplu gönderim için önce QR bölümünden WhatsApp oturumunu bağlayın.
-            </div>
-          ) : null}
-
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -2685,8 +2680,8 @@ export default function CoachWhatsAppSettings() {
               </label>
             </div>
             <p className="text-xs text-slate-500">
-              Seçili öğrenciler + sınıf/grup filtresi plana kaydedilir. Cron ~15 dk’da bir kontrol eder; tek seferlik
-              plan gönderimden sonra otomatik kapanır.
+              Seçili öğrenciler + sınıf/grup filtresi plana kaydedilir. Cron ~15 dk’da bir kontrol eder; mesajlar Meta
+              Cloud API ile gider. Tek seferlik plan gönderimden sonra otomatik kapanır.
             </p>
             <button
               type="button"
@@ -2701,12 +2696,12 @@ export default function CoachWhatsAppSettings() {
 
           <button
             type="button"
-            onClick={() => void sendBulkGateway()}
-            disabled={bulkSendBusy || !bulkSelectedIds.size || !canUseGateway}
+            onClick={() => void sendBulkMeta()}
+            disabled={bulkSendBusy || !bulkSelectedIds.size || !hasServerJwt}
             className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-teal-600 py-3 text-sm font-semibold text-white shadow-md hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:px-8"
           >
             {bulkSendBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
-            {bulkSendBusy ? 'Gönderiliyor…' : 'Şimdi gönder (Gateway)'}
+            {bulkSendBusy ? 'Gönderiliyor…' : 'Şimdi gönder (Meta)'}
           </button>
         </div>
       </section>

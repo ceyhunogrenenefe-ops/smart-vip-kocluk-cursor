@@ -39,7 +39,7 @@ function resolveWriteInstitutionId(actor, bodyInstitutionId) {
   const bodyId = String(bodyInstitutionId || '').trim();
   const actorId = String(actor.institution_id || '').trim();
   if (role === 'super_admin') return bodyId || actorId;
-  if (bodyId && hasInstitutionAccess(actor, bodyId)) return bodyId;
+  if (bodyId && institutionIdMatches(actorId, bodyId)) return bodyId;
   return actorId;
 }
 
@@ -48,7 +48,7 @@ function resolveReadInstitutionId(actor, queryInstitutionId) {
   const q = String(queryInstitutionId || '').trim();
   const actorId = String(actor.institution_id || '').trim();
   if (role === 'super_admin') return q || actorId;
-  if (q && hasInstitutionAccess(actor, q)) return q;
+  if (q && institutionIdMatches(actorId, q)) return q;
   return actorId;
 }
 
@@ -57,6 +57,37 @@ function institutionIdMatches(stored, requested) {
   const b = String(requested ?? '').trim();
   if (!a || !b) return false;
   return a === b || a.toLowerCase() === b.toLowerCase();
+}
+
+function actorIsSuperAdmin(actor, roleTags) {
+  return String(actor.role || '') === 'super_admin' || roleTags.includes('super_admin');
+}
+
+function actorCanAccessInstitution(actor, roleTags, institutionId) {
+  if (actorIsSuperAdmin(actor, roleTags)) return true;
+  const actorInst = String(actor.institution_id || '').trim();
+  return institutionIdMatches(actorInst, institutionId);
+}
+
+async function listPlansForInstitution(institutionId) {
+  const instId = String(institutionId || '').trim();
+  if (!instId) return [];
+  const { data, error } = await supabaseAdmin
+    .from('class_schedule_plans')
+    .select('id,name,institution_id,created_by,created_at,updated_at')
+    .eq('institution_id', instId)
+    .order('updated_at', { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  const rows = data || [];
+  if (rows.length) return rows;
+  const { data: allRows, error: allErr } = await supabaseAdmin
+    .from('class_schedule_plans')
+    .select('id,name,institution_id,created_by,created_at,updated_at')
+    .order('updated_at', { ascending: false })
+    .limit(500);
+  if (allErr) throw allErr;
+  return (allRows || []).filter((p) => institutionIdMatches(p.institution_id, instId));
 }
 
 async function inferClassInstitutionId(classId) {
@@ -368,7 +399,7 @@ export default async function handler(req, res) {
           throw error;
         }
         if (!data) return res.status(404).json({ error: 'not_found' });
-        if (role === 'admin' && !hasInstitutionAccess(actor, data.institution_id)) {
+        if (!actorCanAccessInstitution(actor, roleTags, data.institution_id)) {
           return res.status(403).json({ error: 'forbidden' });
         }
         return res.status(200).json({ data });
@@ -376,10 +407,10 @@ export default async function handler(req, res) {
 
       const institutionId = resolveReadInstitutionId(actor, req.query.institution_id);
       if (!institutionId) {
-        if (role === 'super_admin') return res.status(400).json({ error: 'institution_id_query_required' });
+        if (actorIsSuperAdmin(actor, roleTags)) return res.status(400).json({ error: 'institution_id_query_required' });
         return res.status(400).json({ error: 'institution_required' });
       }
-      if (role === 'admin' && !hasInstitutionAccess(actor, institutionId)) {
+      if (!actorCanAccessInstitution(actor, roleTags, institutionId)) {
         return res.status(403).json({ error: 'forbidden' });
       }
 
@@ -392,29 +423,26 @@ export default async function handler(req, res) {
         return res.status(200).json({ classes, teachers, students });
       }
 
-      const { data, error } = await supabaseAdmin
-        .from('class_schedule_plans')
-        .select('id,name,institution_id,created_by,created_at,updated_at')
-        .eq('institution_id', institutionId)
-        .order('updated_at', { ascending: false })
-        .limit(200);
-      if (error) {
+      const plans = await listPlansForInstitution(institutionId).catch((error) => {
         if (String(error.message || '').includes('relation') || error.code === '42P01') {
-          return res.status(200).json({
-            data: [],
-            hint: 'class_schedule_plans için 2026-06-24-class-schedule-plans.sql çalıştırın.'
-          });
+          return { missingTable: true };
         }
         throw error;
+      });
+      if (plans && typeof plans === 'object' && 'missingTable' in plans) {
+        return res.status(200).json({
+          data: [],
+          hint: 'class_schedule_plans için 2026-06-24-class-schedule-plans.sql çalıştırın.'
+        });
       }
-      return res.status(200).json({ data: data || [] });
+      return res.status(200).json({ data: plans });
     }
 
     if (req.method === 'POST') {
       const body = parseBody(req);
       const institutionId = resolveWriteInstitutionId(actor, body.institution_id);
       if (!institutionId) return res.status(400).json({ error: 'institution_required' });
-      if (role === 'admin' && !hasInstitutionAccess(actor, institutionId)) {
+      if (!actorCanAccessInstitution(actor, roleTags, institutionId)) {
         return res.status(403).json({ error: 'forbidden' });
       }
 
@@ -589,7 +617,7 @@ export default async function handler(req, res) {
         .maybeSingle();
       if (exErr) throw exErr;
       if (!existing) return res.status(404).json({ error: 'not_found' });
-      if (role === 'admin' && !hasInstitutionAccess(actor, existing.institution_id)) {
+      if (!actorCanAccessInstitution(actor, roleTags, existing.institution_id)) {
         return res.status(403).json({ error: 'forbidden' });
       }
 
@@ -626,7 +654,7 @@ export default async function handler(req, res) {
         .maybeSingle();
       if (exErr) throw exErr;
       if (!existing) return res.status(404).json({ error: 'not_found' });
-      if (role === 'admin' && !hasInstitutionAccess(actor, existing.institution_id)) {
+      if (!actorCanAccessInstitution(actor, roleTags, existing.institution_id)) {
         return res.status(403).json({ error: 'forbidden' });
       }
 

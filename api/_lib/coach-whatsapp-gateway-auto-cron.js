@@ -1,4 +1,5 @@
 import { supabaseAdmin } from './supabase-admin.js';
+import { metaWhatsAppConfigured, sendMetaTextMessage } from './meta-whatsapp.js';
 import { getStudentPhones } from './meetings-resolve.js';
 import {
   getIstanbulDateString,
@@ -12,20 +13,11 @@ import {
   loadInstitutionWhatsappAutomationMap,
   studentAllowsWhatsappAutomation
 } from './whatsapp-automation-eligibility.js';
-import {
-  bookOrderGatewaySessionId,
-  gatewayConfiguredForSession,
-  resolveGatewayUpstream,
-  sendGatewayTextMessage,
-  warmActiveCoachGatewaySessions
-} from './whatsapp-gateway-send.js';
 
 const KIND = 'coach_gateway_template';
 
-function gatewayReady() {
-  return Boolean(
-    resolveGatewayUpstream() && String(process.env.APP_JWT_SECRET || '').trim()
-  );
+function metaReady() {
+  return metaWhatsAppConfigured();
 }
 
 function istanbulDayDelta(fromIsoDate, toIsoDate) {
@@ -155,26 +147,6 @@ async function persistSuccessLog(params) {
   }
 }
 
-async function resolveGatewayUserId(schedule) {
-  const fromSchedule = String(schedule.gateway_user_id || '').trim();
-  if (fromSchedule) return fromSchedule;
-
-  const { data: coachRow } = await supabaseAdmin
-    .from('coaches')
-    .select('email')
-    .eq('id', schedule.coach_id)
-    .maybeSingle();
-  const email = coachRow?.email ? String(coachRow.email).toLowerCase().trim() : '';
-  if (!email) return '';
-
-  const { data: userRow } = await supabaseAdmin
-    .from('users')
-    .select('id')
-    .eq('email', email)
-    .maybeSingle();
-  return userRow?.id ? String(userRow.id).trim() : '';
-}
-
 export async function runCoachWhatsappGatewayAutoCron(opts = {}) {
   const istanbulHour =
     opts.istanbulHour != null ? opts.istanbulHour : getIstanbulHour();
@@ -182,8 +154,8 @@ export async function runCoachWhatsappGatewayAutoCron(opts = {}) {
     opts.istanbulMinute != null ? opts.istanbulMinute : getIstanbulMinute();
   const todayTr = opts.todayTr ?? getIstanbulDateString();
 
-  if (!gatewayReady()) {
-    return { ok: false, skipped: true, reason: 'missing_gateway_env' };
+  if (!metaReady()) {
+    return { ok: false, skipped: true, reason: 'missing_meta_whatsapp_env' };
   }
 
   const { data: schedules, error: schErr } = await supabaseAdmin
@@ -194,13 +166,6 @@ export async function runCoachWhatsappGatewayAutoCron(opts = {}) {
     .eq('is_active', true);
 
   if (schErr) throw schErr;
-
-  const gatewaySessionIds = [];
-  for (const schedule of schedules || []) {
-    const gid = await resolveGatewayUserId(schedule);
-    if (gid) gatewaySessionIds.push(gid);
-  }
-  const warmResults = await warmActiveCoachGatewaySessions(gatewaySessionIds);
 
   const institutionFlags = await loadInstitutionWhatsappAutomationMap(supabaseAdmin);
   const summary = [];
@@ -243,21 +208,6 @@ export async function runCoachWhatsappGatewayAutoCron(opts = {}) {
         });
         continue;
       }
-    }
-
-    const gatewayUserId = await resolveGatewayUserId(schedule);
-    const sessionCandidates = [
-      gatewayUserId,
-      bookOrderGatewaySessionId()
-    ].filter(Boolean);
-
-    if (!sessionCandidates.some((id) => gatewayConfiguredForSession(id))) {
-      summary.push({
-        schedule_id: schedule.id,
-        coach_id: schedule.coach_id,
-        skipped: 'gateway_not_configured'
-      });
-      continue;
     }
 
     const { data: coachRow } = await supabaseAdmin
@@ -312,22 +262,7 @@ export async function runCoachWhatsappGatewayAutoCron(opts = {}) {
           template_var_link: schedule.template_var_link
         }).trim();
 
-        const sendOut = await sendGatewayTextMessage({
-          phone: phones[0],
-          message: body,
-          sessionId: gatewayUserId,
-          sessionCandidates: [gatewayUserId],
-          allowSharedFallback: false
-        });
-
-        if (!sendOut.ok) {
-          logDetail.push({
-            student_id: st.id,
-            ok: false,
-            error: sendOut.error || 'gateway_send_failed'
-          });
-          continue;
-        }
+        const { messageId } = await sendMetaTextMessage({ toE164: phones[0], text: body });
 
         await persistSuccessLog({
           scheduleId: schedule.id,
@@ -335,10 +270,10 @@ export async function runCoachWhatsappGatewayAutoCron(opts = {}) {
           todayTr,
           recipient: phones[0],
           body,
-          sid: sendOut.sid || sendOut.gateway_message_id || null
+          sid: messageId
         });
         sentCount += 1;
-        logDetail.push({ student_id: st.id, ok: true, sid: sendOut.sid || null });
+        logDetail.push({ student_id: st.id, ok: true, sid: messageId, channel: 'meta' });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         logDetail.push({ student_id: st.id, ok: false, error: msg });
@@ -370,7 +305,7 @@ export async function runCoachWhatsappGatewayAutoCron(opts = {}) {
     today_tr: todayTr,
     istanbul_hour: istanbulHour,
     istanbul_minute: istanbulMinute,
-    warm: warmResults,
+    channel: 'meta',
     summary
   };
 }
