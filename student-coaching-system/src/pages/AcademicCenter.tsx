@@ -26,6 +26,7 @@ import {
 } from '../lib/academicCenterLinks';
 import { AppModal } from '../components/ui/AppModal';
 import { OnlineExamInfoModal } from '../components/academic/OnlineExamInfoModal';
+import { VirtualOpticInfoModal } from '../components/academic/VirtualOpticInfoModal';
 type TabKey = 'study' | 'exam' | 'pool';
 
 const EXAM_CLASS_INTRO =
@@ -209,6 +210,7 @@ export default function AcademicCenter() {
   const [bbbBusyRoom, setBbbBusyRoom] = useState<ExamEntryKey | null>(null);
   const [examModal, setExamModal] = useState<ExamModalTarget | null>(null);
   const [examBlocksModalOpen, setExamBlocksModalOpen] = useState(false);
+  const [opticModalOpen, setOpticModalOpen] = useState(false);
 
   useEffect(() => {
     const t = searchParams.get('tab');
@@ -439,7 +441,8 @@ export default function AcademicCenter() {
                   </>
                 }
                 buttonLabel="Sanal Optik"
-                onAction={() => openLink(links.exams.optic)}
+                clickableCard
+                onAction={() => setOpticModalOpen(true)}
                 buttonClassName="border-2 border-emerald-600 bg-white text-emerald-800 shadow-sm hover:bg-emerald-50"
               />
 
@@ -527,6 +530,18 @@ export default function AcademicCenter() {
         onConfirm={() => {
           setExamBlocksModalOpen(false);
           navigate('/sinav-bloklari');
+        }}
+      />
+
+      <VirtualOpticInfoModal
+        open={opticModalOpen}
+        onClose={() => setOpticModalOpen(false)}
+        hasLink={Boolean(String(links.exams.optic || '').trim())}
+        onConfirm={() => {
+          const href = String(links.exams.optic || '').trim();
+          if (!href) return;
+          setOpticModalOpen(false);
+          openLink(href);
         }}
       />
     </div>
