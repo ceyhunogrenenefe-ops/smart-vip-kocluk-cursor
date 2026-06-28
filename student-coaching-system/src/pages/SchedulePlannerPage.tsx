@@ -19,6 +19,7 @@ import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { apiFetch } from '../lib/session';
 import { mergeClassSlotsIntoPlanner, type PlannerState as FullPlannerState } from '../lib/classSlotsToPlanner';
+import { PLANNER_CURRICULUM_PRESETS, PLANNER_POOL_SUBJECTS } from '../lib/plannerTopicPool';
 
 type PlannerTeacher = { id: string; name: string; email?: string; branches?: string[] };
 type PlannerGroup = { id: string; name: string };
@@ -190,7 +191,9 @@ export default function SchedulePlannerPage() {
           class_level: c.class_level ?? null,
           branch: c.branch ?? null
         })),
-        teachers: systemTeachers
+        teachers: systemTeachers,
+        poolSubjects: PLANNER_POOL_SUBJECTS,
+        curriculumPresets: PLANNER_CURRICULUM_PRESETS
       });
     } catch {
       /* iframe henüz hazır olmayabilir */

@@ -195,6 +195,15 @@
   .modal .warn-box.show{display:block}
   .modal .mf{display:flex; gap:8px; padding:14px 18px; border-top:1px solid var(--line); background:var(--surface-2)}
   .modal .mf .btn{flex:1; justify-content:center}
+  .modal.wide{max-width:680px}
+  .cur-table{width:100%; border-collapse:collapse; font-size:13px; margin-top:8px}
+  .cur-table th,.cur-table td{padding:6px 4px; border-bottom:1px solid var(--line); text-align:left; vertical-align:middle}
+  .cur-table th{font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); font-weight:600}
+  .cur-table .inp{min-height:34px; padding:6px 8px; font-size:13px}
+  .cur-table .inp.num{max-width:56px; text-align:center}
+  .mode-pick{display:flex; gap:16px; flex-wrap:wrap; margin-bottom:12px; font-size:13.5px}
+  .mode-pick label{display:flex; align-items:center; gap:6px; cursor:pointer}
+  .cur-summary{font-size:12px; color:var(--muted); margin-top:6px}
 
   .hide{display:none !important}
   .tiny{font-size:12.5px; color:var(--muted)}
@@ -308,6 +317,51 @@
   </div>
 </div>
 
+<!-- Sınıf oluştur / müfredat modal -->
+<div class="scrim" id="classScrim">
+  <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="cbTitle">
+    <div class="mh">
+      <div class="mt" id="cbTitle">Sınıf oluştur</div>
+      <div class="ms" id="cbSub">Dersleri konu havuzundan seçin, haftalık saat ve öğretmen atayın.</div>
+    </div>
+    <div class="mb">
+      <div class="mode-pick" id="cbModePick">
+        <label><input type="radio" name="cbMode" value="custom" checked> Özel sınıf adı</label>
+        <label><input type="radio" name="cbMode" value="system"> Sistem sınıfı</label>
+      </div>
+      <div class="field" id="cbCustomWrap">
+        <label for="cbName">Sınıf adı</label>
+        <input class="inp" id="cbName" placeholder="örn. LGS-A">
+      </div>
+      <div class="field hide" id="cbSystemWrap">
+        <label for="cbSystem">Canlı Grup Dersi sınıfı</label>
+        <select class="inp" id="cbSystem"><option value="">Seçin…</option></select>
+      </div>
+      <div class="field">
+        <label>Haftalık müfredat</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+          <select class="inp" id="cbPreset" style="max-width:200px;min-height:36px">
+            <option value="">Şablon yükle…</option>
+          </select>
+          <button type="button" class="btn sm" data-act="cb-add-row">+ Ders satırı</button>
+        </div>
+        <table class="cur-table">
+          <thead><tr><th>Ders (konu havuzu)</th><th>Saat/hf</th><th>Öğretmen</th><th></th></tr></thead>
+          <tbody id="cbRows"></tbody>
+        </table>
+        <datalist id="cbSubjectList"></datalist>
+        <datalist id="cbTeacherList"></datalist>
+        <div class="cur-summary" id="cbTotal"></div>
+      </div>
+    </div>
+    <div class="mf">
+      <button type="button" class="btn" data-act="class-cancel">İptal</button>
+      <button type="button" class="btn primary" data-act="class-save">Kaydet</button>
+      <button type="button" class="btn primary" data-act="class-save-fill">Kaydet &amp; programa yerleştir</button>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ---------------- storage (localStorage + in-memory fallback) ---------------- */
 const KEY='yazDonemiSistemi.v1';
@@ -335,7 +389,7 @@ function defaultState(){
     {label:'5. Ders', time:'15:30–16:15'},
     {label:'6. Ders', time:'16:30–17:15'},
   ];
-  const mk=(name,color)=>({id:uid(), name, advisor:'', color, students:[], schedule:{}, periods:PERIODS()});
+  const mk=(name,color)=>({id:uid(), name, advisor:'', color, students:[], schedule:{}, periods:PERIODS(), locked:false, classId:null, curriculum:[]});
   return {
     term:{start:'2026-07-01', end:'2026-08-23'},
     days:['Pazartesi','Salı','Çarşamba','Perşembe','Cuma','Cumartesi'],
@@ -365,11 +419,14 @@ function migrateState(){
   }
   if(!state.teachers) state.teachers=[];
   if(!state.systemClasses) state.systemClasses=[];
+  if(!state.poolSubjects) state.poolSubjects=[];
+  if(!state.curriculumPresets) state.curriculumPresets={};
   if(state.editGroupIds===undefined) state.editGroupIds=null;
   if(state.autoConsecutive===undefined) state.autoConsecutive=true;
   state.groups.forEach(g=>{
     if(g.locked===undefined) g.locked=false;
     if(g.classId===undefined) g.classId=null;
+    if(!Array.isArray(g.curriculum)) g.curriculum=[];
     if(!Array.isArray(g.periods)||!g.periods.length) g.periods=(state.periods||[]).map(p=>({label:p.label,time:p.time}));
   });
 }
@@ -379,6 +436,7 @@ let activeGroupId=state.groups[0] ? state.groups[0].id : null;
 let editingCell=null; // {groupId, key}
 let importTargetGroup=null;
 let showPeriods=false; // per-class period editor toggle
+let classBuilder={mode:'create', groupId:null}; // sınıf / müfredat modal
 
 /* undo + drag (ders programı) */
 const UNDO_MAX=50;
@@ -446,7 +504,7 @@ function addGroupFromSystemClass(cls){
   const exists=state.groups.some(g=>g.classId===cls.id||norm(g.name)===norm(cls.name));
   if(exists){ alert('Bu sınıf zaten planlayıcıda var.'); return; }
   const c=COLORS[state.groups.length%COLORS.length];
-  const ng={id:uid(), name:String(cls.name).trim(), classId:cls.id||null, advisor:'', color:c, students:[], schedule:{}, periods:(state.periods||[]).map(p=>({...p})), locked:false};
+  const ng={id:uid(), name:String(cls.name).trim(), classId:cls.id||null, advisor:'', color:c, students:[], schedule:{}, periods:(state.periods||[]).map(p=>({...p})), locked:false, curriculum:[]};
   state.groups.push(ng); activeGroupId=ng.id; saveState(); render();
 }
 function applyPeriodTemplateToGroups(templateKey, groupIds){
@@ -471,41 +529,248 @@ function toggleSlotLock(gid, di, pi){
   else state.lockedSlots[gk]=true;
   saveState(); render();
 }
-function autoFillSchedules(){
-  const roster=(state.teachers||[]).filter(t=>t.name&&(t.branches||[]).length);
-  if(!roster.length){ alert('Önce sistem öğretmenlerini yükleyin (üst menüden plan açıldığında otomatik gelir) veya Ayarlar\'da branş tanımlı öğretmen ekleyin.'); return; }
-  pushUndo();
-  let placed=0;
-  state.groups.forEach(g=>{
-    if(g.locked||!canEditGroup(g.id)) return;
-    const per=g.periods||state.periods||[];
-    let rIdx=0;
-    state.days.forEach((d,di)=>{
-      let prevSubject=null;
-      per.forEach((p,pi)=>{
-        const key=di+'_'+pi;
-        if(isSlotLocked(g.id, di, pi)) return;
-        if(cellHasLesson(g.schedule[key])){ prevSubject=g.schedule[key].subject||null; return; }
-        let pick=null;
-        if(state.autoConsecutive&&prevSubject){
-          pick=roster.find(t=>(t.branches||[]).some(b=>norm(b)===norm(prevSubject)));
-        }
-        if(!pick){
-          for(let k=0;k<roster.length;k++){
-            const t=roster[(rIdx+k)%roster.length];
-            if(t.branches&&t.branches.length){ pick=t; rIdx=(rIdx+k+1)%roster.length; break; }
-          }
-        }
-        if(!pick) return;
-        const subject=(pick.branches||[])[0]||'Ders';
-        g.schedule[key]={teacher:pick.name, subject};
-        prevSubject=subject;
-        placed++;
-      });
+function poolSubjectOptions(){
+  const set=new Map();
+  (state.poolSubjects||[]).forEach(s=>{ const t=String(s||'').trim(); if(t&&!set.has(norm(t))) set.set(norm(t),t); });
+  allSubjects().forEach(s=>{ if(s&&!set.has(norm(s))) set.set(norm(s),s); });
+  return [...set.values()].sort((a,b)=>a.localeCompare(b,'tr'));
+}
+function findTeacherForSubject(subject){
+  const subj=String(subject||'').trim(); if(!subj) return '';
+  const exact=(state.teachers||[]).find(t=>(t.branches||[]).some(b=>norm(b)===norm(subj)));
+  if(exact) return exact.name;
+  const partial=(state.teachers||[]).find(t=>(t.branches||[]).some(b=>{
+    const bn=norm(b), sn=norm(subj);
+    return bn.includes(sn)||sn.includes(bn);
+  }));
+  return partial?partial.name:'';
+}
+function teacherOccupiedAt(teacherName, di, pi, per, ignoreGid, ignoreKey){
+  const tn=norm(teacherName); if(!tn) return false;
+  const range=parseRange(per[pi]?.time);
+  for(const g of state.groups){
+    const gPer=g.periods||state.periods||[];
+    for(const [k,v] of Object.entries(g.schedule||{})){
+      if(!v?.teacher||norm(v.teacher)!==tn) continue;
+      if(g.id===ignoreGid&&k===ignoreKey) continue;
+      const [gdi,gpi]=k.split('_').map(Number);
+      if(gdi!==di) continue;
+      const gr=parseRange(gPer[gpi]?.time);
+      if(range&&gr){ if(rangesOverlap(range,gr)) return true; }
+      else if(norm(gPer[gpi]?.time||'')===norm(per[pi]?.time||'')) return true;
+    }
+  }
+  return false;
+}
+function buildLessonQueue(curriculum){
+  const queue=[];
+  (curriculum||[]).forEach(line=>{
+    const subject=String(line.subject||'').trim();
+    const hours=Math.max(0, Math.min(40, parseInt(line.hours,10)||0));
+    const teacher=String(line.teacher||'').trim()||findTeacherForSubject(subject);
+    for(let i=0;i<hours;i++) queue.push({subject, teacher});
+  });
+  return queue;
+}
+function autoFillGroupFromCurriculum(g, options={}){
+  const curriculum=g.curriculum||[];
+  if(!curriculum.length) return 0;
+  const queue=buildLessonQueue(curriculum);
+  if(!queue.length) return 0;
+  const per=g.periods||state.periods||[];
+  const slots=[];
+  state.days.forEach((d,di)=>{
+    per.forEach((p,pi)=>{
+      const key=di+'_'+pi;
+      if(isSlotLocked(g.id, di, pi)) return;
+      if(!options.replace && cellHasLesson(g.schedule[key])) return;
+      slots.push({di, pi, key});
     });
   });
+  if(!slots.length) return 0;
+  if(options.replace){
+    Object.keys(g.schedule||{}).forEach(k=>{
+      const [di,pi]=k.split('_').map(Number);
+      if(!isSlotLocked(g.id, di, pi)) delete g.schedule[k];
+    });
+  }
+  const byDay={};
+  state.days.forEach((_,i)=>{ byDay[i]=0; });
+  slots.sort((a,b)=> byDay[a.di]-byDay[b.di] || a.pi-b.pi);
+  let placed=0;
+  const lastSubjectDay={};
+  queue.forEach(lesson=>{
+    let pickIdx=-1;
+    for(let si=0;si<slots.length;si++){
+      const slot=slots[si];
+      if(g.schedule[slot.key]) continue;
+      const teacher=lesson.teacher||findTeacherForSubject(lesson.subject);
+      if(teacher&&teacherOccupiedAt(teacher, slot.di, slot.pi, per, g.id, slot.key)) continue;
+      if(state.autoConsecutive&&lastSubjectDay[norm(lesson.subject)]===slot.di){
+        pickIdx=si; break;
+      }
+      if(pickIdx<0) pickIdx=si;
+    }
+    if(pickIdx<0) return;
+    const slot=slots.splice(pickIdx,1)[0];
+    const teacher=lesson.teacher||findTeacherForSubject(lesson.subject);
+    g.schedule[slot.key]={subject:lesson.subject, teacher:teacher||''};
+    byDay[slot.di]=(byDay[slot.di]||0)+1;
+    lastSubjectDay[norm(lesson.subject)]=slot.di;
+    placed++;
+  });
+  return placed;
+}
+function renderCurriculumBuilderRows(rows){
+  const tbody=$('#cbRows');
+  if(!tbody) return;
+  const subjOpts=poolSubjectOptions();
+  $('#cbSubjectList').innerHTML=subjOpts.map(s=>`<option value="${esc(s)}">`).join('');
+  $('#cbTeacherList').innerHTML=allTeachers().map(t=>`<option value="${esc(t)}">`).join('');
+  tbody.innerHTML=(rows&&rows.length?rows:[{subject:'',hours:1,teacher:''}]).map((r,i)=>`
+    <tr data-i="${i}">
+      <td><input class="inp cb-subject" list="cbSubjectList" value="${esc(r.subject||'')}" placeholder="Matematik"></td>
+      <td><input class="inp num cb-hours" type="number" min="0" max="40" value="${Math.max(0,parseInt(r.hours,10)||0)||''}" placeholder="1"></td>
+      <td><input class="inp cb-teacher" list="cbTeacherList" value="${esc(r.teacher||'')}" placeholder="Öğretmen"></td>
+      <td><button type="button" class="btn sm danger" data-act="cb-del-row" data-i="${i}">×</button></td>
+    </tr>`).join('');
+  updateCurriculumTotal();
+}
+function readCurriculumFromBuilder(){
+  const rows=[];
+  document.querySelectorAll('#cbRows tr').forEach(tr=>{
+    const subject=tr.querySelector('.cb-subject')?.value.trim()||'';
+    const hours=parseInt(tr.querySelector('.cb-hours')?.value,10)||0;
+    const teacher=tr.querySelector('.cb-teacher')?.value.trim()||'';
+    if(subject&&hours>0) rows.push({subject, hours, teacher});
+  });
+  return rows;
+}
+function updateCurriculumTotal(){
+  const el=$('#cbTotal');
+  if(!el) return;
+  const rows=readCurriculumFromBuilder();
+  const total=rows.reduce((a,r)=>a+(r.hours||0),0);
+  el.textContent=rows.length ? `Toplam ${total} ders saati / hafta · ${rows.length} branş` : 'En az bir ders satırı ekleyin.';
+}
+function syncClassBuilderMode(){
+  const mode=document.querySelector('input[name="cbMode"]:checked')?.value||'custom';
+  $('#cbCustomWrap').classList.toggle('hide', mode!=='custom');
+  $('#cbSystemWrap').classList.toggle('hide', mode!=='system');
+}
+function openClassBuilder(opts={}){
+  classBuilder={mode:opts.groupId?'edit':'create', groupId:opts.groupId||null};
+  const g=opts.groupId?group(opts.groupId):null;
+  $('#cbTitle').textContent=g?'Müfredat düzenle': 'Sınıf oluştur';
+  $('#cbSub').textContent=g
+    ? `${g.name} — ders saatleri ve öğretmen atamaları`
+    : 'Sistem sınıfı veya özel ad; konu havuzundan ders seçin.';
+  const sysSel=$('#cbSystem');
+  sysSel.innerHTML='<option value="">Seçin…</option>'+(state.systemClasses||[]).map(c=>
+    `<option value="${esc(c.id)}" ${g&&g.classId===c.id?'selected':''}>${esc(c.name)}${c.branch?' ('+esc(c.branch)+')':''}</option>`
+  ).join('');
+  const presetSel=$('#cbPreset');
+  presetSel.innerHTML='<option value="">Şablon yükle…</option>'+Object.keys(state.curriculumPresets||{}).map(k=>
+    `<option value="${esc(k)}">${esc(k)} (ör. ${(state.curriculumPresets[k]||[]).reduce((a,l)=>a+(l.hours||0),0)} saat)</option>`
+  ).join('');
+  if(g&&g.classId){
+    document.querySelector('input[name="cbMode"][value="system"]').checked=true;
+    $('#cbName').value=g.name;
+  }else{
+    document.querySelector('input[name="cbMode"][value="custom"]').checked=true;
+    $('#cbName').value=g?g.name:'';
+  }
+  syncClassBuilderMode();
+  renderCurriculumBuilderRows(g?.curriculum?.length?g.curriculum.map(x=>({...x})):[]);
+  $('#classScrim').classList.add('show');
+  setTimeout(()=>{ const el=$('#cbName'); if(el&&!el.closest('.hide')) el.focus(); }, 30);
+}
+function closeClassBuilder(){ $('#classScrim').classList.remove('show'); classBuilder={mode:'create', groupId:null}; }
+function saveClassBuilder(andFill){
+  const mode=document.querySelector('input[name="cbMode"]:checked')?.value||'custom';
+  const curriculum=readCurriculumFromBuilder();
+  let name=$('#cbName').value.trim();
+  let classId=null;
+  if(mode==='system'){
+    const cid=$('#cbSystem').value;
+    const cls=(state.systemClasses||[]).find(c=>c.id===cid);
+    if(!cls){ alert('Sistem sınıfı seçin veya özel sınıf moduna geçin.'); return; }
+    name=String(cls.name).trim();
+    classId=cls.id;
+    const exists=state.groups.some(g=>g.classId===classId&&g.id!==classBuilder.groupId);
+    if(exists){ alert('Bu sistem sınıfı zaten planlayıcıda.'); return; }
+  }
+  if(!name){ alert('Sınıf adı girin.'); return; }
+  if(!curriculum.length){ alert('En az bir ders satırı (branş + haftalık saat) ekleyin.'); return; }
+  pushUndo();
+  let g;
+  if(classBuilder.groupId){
+    g=group(classBuilder.groupId);
+    if(!g) return;
+    g.name=name; g.classId=classId; g.curriculum=curriculum;
+  }else{
+    const dup=state.groups.some(x=>norm(x.name)===norm(name));
+    if(dup){ alert('Bu isimde sınıf zaten var.'); undoStack.pop(); updateUndoBtn(); return; }
+    const c=COLORS[state.groups.length%COLORS.length];
+    g={id:uid(), name, classId, advisor:'', color:c, students:[], schedule:{}, periods:(state.periods||[]).map(p=>({...p})), locked:false, curriculum};
+    state.groups.push(g); activeGroupId=g.id;
+  }
+  let placed=0;
+  if(andFill) placed=autoFillGroupFromCurriculum(g, {replace:true});
+  saveState(); closeClassBuilder(); render();
+  if(andFill) alert(placed?`${placed} ders programa yerleştirildi.`:'Müfredat kaydedildi; uygun boş hücre bulunamadı (saat sayısını veya kilitleri kontrol edin).');
+}
+function autoFillSchedules(){
+  const targets=state.groups.filter(g=>!g.locked&&canEditGroup(g.id));
+  const withCurr=targets.filter(g=>(g.curriculum||[]).length);
+  const withoutCurr=targets.filter(g=>!(g.curriculum||[]).length);
+  if(!withCurr.length&&!withoutCurr.length){
+    alert('Yerleştirilecek sınıf yok (kilitli veya filtre dışı).');
+    return;
+  }
+  pushUndo();
+  let placed=0;
+  withCurr.forEach(g=>{ placed+=autoFillGroupFromCurriculum(g); });
+  if(withoutCurr.length){
+    const roster=(state.teachers||[]).filter(t=>t.name&&(t.branches||[]).length);
+    if(!roster.length&&!withCurr.length){
+      alert('Önce müfredat tanımlayın veya sistem öğretmenlerini yükleyin.');
+      undoStack.pop(); updateUndoBtn(); return;
+    }
+    withoutCurr.forEach(g=>{
+      const per=g.periods||state.periods||[];
+      let rIdx=0;
+      state.days.forEach((d,di)=>{
+        let prevSubject=null;
+        per.forEach((p,pi)=>{
+          const key=di+'_'+pi;
+          if(isSlotLocked(g.id, di, pi)) return;
+          if(cellHasLesson(g.schedule[key])){ prevSubject=g.schedule[key].subject||null; return; }
+          let pick=null;
+          if(state.autoConsecutive&&prevSubject){
+            pick=roster.find(t=>(t.branches||[]).some(b=>norm(b)===norm(prevSubject)));
+          }
+          if(!pick){
+            for(let k=0;k<roster.length;k++){
+              const t=roster[(rIdx+k)%roster.length];
+              if(t.branches&&t.branches.length){
+                if(!teacherOccupiedAt(t.name, di, pi, per, g.id, key)){
+                  pick=t; rIdx=(rIdx+k+1)%roster.length; break;
+                }
+              }
+            }
+          }else if(teacherOccupiedAt(pick.name, di, pi, per, g.id, key)) pick=null;
+          if(!pick) return;
+          const subject=(pick.branches||[])[0]||'Ders';
+          g.schedule[key]={teacher:pick.name, subject};
+          prevSubject=subject;
+          placed++;
+        });
+      });
+    });
+  }
   saveState(); render();
-  alert(placed ? `${placed} boş hücreye ders yerleştirildi (kilitli sınıf/saatler atlandı).` : 'Yerleştirilecek uygun boş hücre bulunamadı.');
+  alert(placed ? `${placed} ders hücresine yerleştirildi (müfredat + çakışma kontrolü).` : 'Yerleştirilecek uygun boş hücre bulunamadı veya tüm saatler dolu/çakışıyor.');
 }
 function subjectAbbr(subject){
   const s=String(subject||'').trim();
@@ -587,7 +852,11 @@ function subjectsForTeacher(name){
 }
 function allSubjects(){
   const set=new Map();
-  state.groups.forEach(g=>Object.values(g.schedule).forEach(v=>{ if(v&&v.subject){const t=v.subject.trim(); if(t&&!set.has(norm(t))) set.set(norm(t),t);} }));
+  (state.poolSubjects||[]).forEach(s=>{ const t=String(s||'').trim(); if(t&&!set.has(norm(t))) set.set(norm(t),t); });
+  state.groups.forEach(g=>{
+    (g.curriculum||[]).forEach(c=>{ const t=String(c.subject||'').trim(); if(t&&!set.has(norm(t))) set.set(norm(t),t); });
+    Object.values(g.schedule).forEach(v=>{ if(v&&v.subject){const t=v.subject.trim(); if(t&&!set.has(norm(t))) set.set(norm(t),t);} });
+  });
   return [...set.values()].sort((a,b)=>a.localeCompare(b,'tr'));
 }
 /* time-based conflict: same teacher, same day, overlapping time across classes */
@@ -693,7 +962,8 @@ function renderGruplar(){
     <div class="prog-head">
       <div class="tiny">${state.groups.length} sınıf/grup · toplam ${totalStu} öğrenci</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        ${state.systemClasses.length?`<select id="sysClassPick" class="inp" style="max-width:240px;min-height:36px"><option value="">Canlı Grup Dersi sınıfı…</option>${state.systemClasses.map(c=>`<option value="${esc(c.id)}">${esc(c.name)}${c.branch?' ('+esc(c.branch)+')':''}</option>`).join('')}</select><button class="btn sm primary" data-act="add-sys-class">Sınıf ekle</button>`:'<span class="tiny">Sistem sınıfları üst uygulamadan yüklenir.</span>'}
+        <button class="btn sm primary" data-act="open-class-builder">Sınıf oluştur</button>
+        ${state.systemClasses.length?`<select id="sysClassPick" class="inp" style="max-width:200px;min-height:36px"><option value="">Hızlı: sistem sınıfı…</option>${state.systemClasses.map(c=>`<option value="${esc(c.id)}">${esc(c.name)}${c.branch?' ('+esc(c.branch)+')':''}</option>`).join('')}</select><button class="btn sm" data-act="add-sys-class">Ekle</button>`:''}
         <button class="btn sm" data-act="add-group">Boş grup</button>
       </div>
     </div>
@@ -711,6 +981,11 @@ function renderGruplar(){
           <div class="field">
             <label>Eğitim Danışmanı</label>
             <input class="inp" data-field="advisor" value="${esc(g.advisor)}" placeholder="Danışman adı">
+          </div>
+          <div class="field" style="margin-bottom:10px">
+            <label>Haftalık müfredat ${(g.curriculum||[]).length?'· '+(g.curriculum||[]).reduce((a,c)=>a+(parseInt(c.hours,10)||0),0)+' saat':''}</label>
+            <button type="button" class="btn sm" data-act="edit-curriculum">Dersler &amp; öğretmenler</button>
+            ${(g.curriculum||[]).length?`<div class="cur-summary">${(g.curriculum||[]).map(c=>esc(c.subject)+' ×'+(c.hours||0)+(c.teacher?' · '+esc(c.teacher):'')).join(' · ')}</div>`:'<div class="tiny">Henüz müfredat yok — LGS vb. şablonla ekleyebilirsiniz.</div>'}
           </div>
           <div class="students">
             <div class="scount" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
@@ -779,7 +1054,7 @@ function renderMaster(){
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="btn sm" id="undoBtn" data-act="undo" disabled title="Ctrl+Z">Geri al</button>
         <button class="btn sm primary" data-act="auto-fill">Otomatik yerleştir</button>
-        ${state.systemClasses.length?`<button class="btn sm" data-act="add-sys-class">Sınıf ekle</button>`:''}
+        <button class="btn sm" data-act="open-class-builder">Sınıf oluştur</button>
         <label class="tiny" style="display:flex;align-items:center;gap:6px">Düzenle:
           <select id="editFilter" class="inp" style="min-height:34px;max-width:200px">
             <option value="">Tüm sınıflar</option>
@@ -955,7 +1230,7 @@ function renderAyarlar(){
           Aynı günde ard arda aynı branş (mümkünse)
         </label>
         <button class="btn sm primary" data-act="auto-fill" style="margin-top:10px">Şimdi otomatik yerleştir</button>
-        <p class="tiny" style="margin-bottom:0">Kilitli sınıflar ve kilitli saatler atlanır. Öğretmenler branşlarıyla eşleştirilir.</p>
+        <p class="tiny" style="margin-bottom:0">Müfredatı olan sınıflar önce müfredata göre yerleştirilir; öğretmen çakışmaları kontrol edilir.</p>
       </div>
     </div>
 
@@ -1108,8 +1383,22 @@ document.addEventListener('click',e=>{
   switch(act){
     case 'add-group':{
       const c=COLORS[state.groups.length%COLORS.length];
-      const ng={id:uid(),name:'Yeni Grup',advisor:'',color:c,students:[],schedule:{},periods:(state.periods||[]).map(p=>({...p})),locked:false,classId:null};
+      const ng={id:uid(),name:'Yeni Grup',advisor:'',color:c,students:[],schedule:{},periods:(state.periods||[]).map(p=>({...p})),locked:false,classId:null,curriculum:[]};
       state.groups.push(ng); activeGroupId=ng.id; saveState(); render();
+      break;}
+    case 'open-class-builder': openClassBuilder(); break;
+    case 'edit-curriculum': openClassBuilder({groupId:gid}); break;
+    case 'class-save': saveClassBuilder(false); break;
+    case 'class-save-fill': saveClassBuilder(true); break;
+    case 'class-cancel': closeClassBuilder(); break;
+    case 'cb-add-row':{
+      renderCurriculumBuilderRows(readCurriculumFromBuilder().concat([{subject:'',hours:1,teacher:''}]));
+      break;}
+    case 'cb-del-row':{
+      const i=parseInt(a.dataset.i,10);
+      const rows=readCurriculumFromBuilder();
+      rows.splice(i,1);
+      renderCurriculumBuilderRows(rows.length?rows:[{subject:'',hours:1,teacher:''}]);
       break;}
     case 'add-sys-class':
     case 'add-sys-class-master':{
@@ -1252,7 +1541,10 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Enter' && e.target.dataset && e.target.dataset.act==='student-input'){
     const card=e.target.closest('[data-gid]'); addStudent(card.dataset.gid, e.target.value); e.target.value='';
   }
-  if(e.key==='Escape' && $('#scrim').classList.contains('show')) closeModal();
+  if(e.key==='Escape'){
+    if($('#classScrim').classList.contains('show')) closeClassBuilder();
+    else if($('#scrim').classList.contains('show')) closeModal();
+  }
   if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z' && !e.shiftKey && (tab==='program'||tab==='master') && !$('#scrim').classList.contains('show')){
     const tag=(e.target.tagName||'').toLowerCase();
     if(tag==='input'||tag==='textarea'||e.target.isContentEditable) return;
@@ -1276,6 +1568,28 @@ document.addEventListener('change',e=>{
   }
 });
 $('#scrim').addEventListener('click',e=>{ if(e.target.id==='scrim') closeModal(); });
+$('#classScrim').addEventListener('click',e=>{ if(e.target.id==='classScrim') closeClassBuilder(); });
+document.addEventListener('change',e=>{
+  if(e.target.name==='cbMode') syncClassBuilderMode();
+  if(e.target.id==='cbPreset'){
+    const key=e.target.value;
+    if(key&&state.curriculumPresets&&state.curriculumPresets[key]){
+      renderCurriculumBuilderRows(state.curriculumPresets[key].map(x=>({...x, teacher:x.teacher||findTeacherForSubject(x.subject)})));
+    }
+    e.target.value='';
+  }
+});
+document.addEventListener('input',e=>{
+  if(e.target.closest('#cbRows')) updateCurriculumTotal();
+  if(e.target.classList&&e.target.classList.contains('cb-subject')&&e.target.closest('#cbRows')){
+    const tr=e.target.closest('tr');
+    const teacherInp=tr?.querySelector('.cb-teacher');
+    if(teacherInp&&!teacherInp.value.trim()){
+      const t=findTeacherForSubject(e.target.value);
+      if(t) teacherInp.value=t;
+    }
+  }
+});
 
 /* drag & drop: ders hücreleri (tek sınıf + tüm sınıflar) */
 document.addEventListener('dragstart',e=>{
@@ -1534,6 +1848,8 @@ window.addEventListener('message', (ev)=>{
     const p=msg.payload||{};
     if(Array.isArray(p.classes)) state.systemClasses=p.classes;
     if(Array.isArray(p.teachers)) mergeTeachersFromSystem(p.teachers);
+    if(Array.isArray(p.poolSubjects)) state.poolSubjects=p.poolSubjects;
+    if(p.curriculumPresets&&typeof p.curriculumPresets==='object') state.curriculumPresets=p.curriculumPresets;
     saveState(); render();
     reply({type:'SET_CONTEXT_OK', ok:true});
   }
