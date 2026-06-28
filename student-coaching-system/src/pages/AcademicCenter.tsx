@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   BookOpen,
   ClipboardList,
@@ -10,7 +10,8 @@ import {
   Loader2,
   ScanLine,
   Video,
-  X
+  X,
+  LayoutGrid
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
@@ -23,6 +24,8 @@ import {
   type AcademicCenterLinks,
   type ExamEntryKey
 } from '../lib/academicCenterLinks';
+import { AppModal } from '../components/ui/AppModal';
+import { OnlineExamInfoModal } from '../components/academic/OnlineExamInfoModal';
 type TabKey = 'study' | 'exam' | 'pool';
 
 const EXAM_CLASS_INTRO =
@@ -117,7 +120,7 @@ function ExamRulesModal(props: {
   confirming?: boolean;
 }) {
   const { target, onClose, onConfirm, confirming } = props;
-  if (!target) return null;
+  const hasLink = Boolean(target?.href?.trim());
 
   const rules: React.ReactNode[] = [
     'Deneme sınavının geçerli sayılabilmesi için kameranız açık olmalıdır.',
@@ -130,75 +133,72 @@ function ExamRulesModal(props: {
   ];
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="exam-rules-title"
-    >
-      <button
-        type="button"
-        className="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px]"
-        aria-label="Kapat"
-        onClick={onClose}
-      />
-      <div className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-        <div className="border-b border-slate-100 bg-gradient-to-r from-emerald-50 to-teal-50 px-5 py-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white">
-                <Video className="h-5 w-5" />
+    <AppModal open={Boolean(target)} onClose={onClose} align="bottom" panelClassName="max-w-lg overflow-hidden p-0">
+      {target ? (
+        <>
+          <div className="border-b border-slate-100 bg-gradient-to-r from-emerald-50 to-teal-50 px-5 py-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white">
+                  <Video className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 id="exam-rules-title" className="text-lg font-bold text-slate-900">
+                    Deneme Sınavı Bilgilendirmesi
+                  </h3>
+                  <p className="mt-0.5 text-sm text-slate-600">{target.label}</p>
+                </div>
               </div>
-              <div>
-                <h3 id="exam-rules-title" className="text-lg font-bold text-slate-900">
-                  Deneme Sınavı Bilgilendirmesi
-                </h3>
-                <p className="mt-0.5 text-sm text-slate-600">{target.label}</p>
-              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg p-1.5 text-slate-500 hover:bg-white hover:text-slate-800"
+              >
+                <X className="h-5 w-5" />
+              </button>
             </div>
+          </div>
+          <div className="px-5 py-5">
+            <ul className="space-y-3 text-sm leading-relaxed text-slate-700">
+              {rules.map((rule, i) => (
+                <li key={i} className="flex gap-2.5">
+                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+                  <span>{rule}</span>
+                </li>
+              ))}
+            </ul>
+            {!hasLink ? (
+              <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950">
+                Bu sınıf için henüz giriş bağlantısı tanımlanmamış. Yöneticinizden link eklemesini isteyin.
+              </p>
+            ) : null}
+          </div>
+          <div className="flex flex-col-reverse gap-2 border-t border-slate-100 bg-slate-50/80 px-5 py-4 sm:flex-row sm:justify-end">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg p-1.5 text-slate-500 hover:bg-white hover:text-slate-800"
+              className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
-              <X className="h-5 w-5" />
+              İptal
+            </button>
+            <button
+              type="button"
+              disabled={confirming || !hasLink}
+              onClick={onConfirm}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {confirming ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Kuralları Okudum, Devam Et
             </button>
           </div>
-        </div>
-        <div className="px-5 py-5">
-          <ul className="space-y-3 text-sm leading-relaxed text-slate-700">
-            {rules.map((rule, i) => (
-              <li key={i} className="flex gap-2.5">
-                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
-                <span>{rule}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div className="flex flex-col-reverse gap-2 border-t border-slate-100 bg-slate-50/80 px-5 py-4 sm:flex-row sm:justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            İptal
-          </button>
-          <button
-            type="button"
-            disabled={confirming}
-            onClick={onConfirm}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md hover:brightness-110 disabled:opacity-60"
-          >
-            {confirming ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Kuralları Okudum, Devam Et
-          </button>
-        </div>
-      </div>
-    </div>
+        </>
+      ) : null}
+    </AppModal>
   );
 }
 
 export default function AcademicCenter() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { institution, activeInstitutionId } = useApp();
   const institutionId = institution?.id || activeInstitutionId || null;
@@ -208,6 +208,7 @@ export default function AcademicCenter() {
   );
   const [bbbBusyRoom, setBbbBusyRoom] = useState<ExamEntryKey | null>(null);
   const [examModal, setExamModal] = useState<ExamModalTarget | null>(null);
+  const [examBlocksModalOpen, setExamBlocksModalOpen] = useState(false);
 
   useEffect(() => {
     const t = searchParams.get('tab');
@@ -248,12 +249,11 @@ export default function AcademicCenter() {
 
   const requestExamClassJoin = (key: ExamEntryKey, label: string) => {
     const href = examEntryUrl(links, key);
-    if (!href) return;
     setExamModal({ key, href, label });
   };
 
   const confirmExamClassJoin = () => {
-    if (!examModal) return;
+    if (!examModal?.href?.trim()) return;
     openLink(examModal.href, examModal.key);
     setExamModal(null);
   };
@@ -410,6 +410,22 @@ export default function AcademicCenter() {
           {activeTab === 'exam' && (
             <div className="space-y-6">
               <PortalActionCard
+                accent="from-sky-500 to-indigo-600"
+                icon={<LayoutGrid className="h-5 w-5" />}
+                title="Sınav Blokları"
+                description={
+                  <>
+                    Tanımlanan online sınavlarınıza bu bölümden ulaşabilirsiniz. Devam etmeden önce sınav
+                    kuralları hakkında kısa bir bilgilendirme gösterilir.
+                  </>
+                }
+                buttonLabel="Sınav Bloklarına Git"
+                clickableCard
+                onAction={() => setExamBlocksModalOpen(true)}
+                buttonClassName="bg-gradient-to-r from-sky-600 to-indigo-600 text-white hover:brightness-110"
+              />
+
+              <PortalActionCard
                 accent="from-teal-500 to-emerald-600"
                 icon={<ScanLine className="h-5 w-5" />}
                 title="Sanal Optik"
@@ -432,7 +448,6 @@ export default function AcademicCenter() {
 
                 <div className="grid grid-cols-1 items-stretch gap-4 md:grid-cols-2">
                   {EXAM_ENTRY_DEFS.map((x) => {
-                    const href = examEntryUrl(links, x.key);
                     const busy = bbbBusyRoom === x.key;
                     return (
                       <PortalActionCard
@@ -442,7 +457,6 @@ export default function AcademicCenter() {
                         title={x.label}
                         description={EXAM_CLASS_INTRO}
                         buttonLabel="Deneme Sınıfına Katıl"
-                        disabled={!href}
                         busy={busy}
                         clickableCard
                         onAction={() => requestExamClassJoin(x.key, x.label)}
@@ -451,13 +465,6 @@ export default function AcademicCenter() {
                   })}
                 </div>
               </div>
-
-              <ExamRulesModal
-                target={examModal}
-                onClose={() => setExamModal(null)}
-                onConfirm={confirmExamClassJoin}
-                confirming={examModal ? bbbBusyRoom === examModal.key : false}
-              />
             </div>
           )}
 
@@ -506,6 +513,22 @@ export default function AcademicCenter() {
           )}
         </div>
       </div>
+
+      <ExamRulesModal
+        target={examModal}
+        onClose={() => setExamModal(null)}
+        onConfirm={confirmExamClassJoin}
+        confirming={examModal ? bbbBusyRoom === examModal.key : false}
+      />
+
+      <OnlineExamInfoModal
+        open={examBlocksModalOpen}
+        onClose={() => setExamBlocksModalOpen(false)}
+        onConfirm={() => {
+          setExamBlocksModalOpen(false);
+          navigate('/sinav-bloklari');
+        }}
+      />
     </div>
   );
 }

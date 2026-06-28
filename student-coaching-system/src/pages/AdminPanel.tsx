@@ -611,6 +611,21 @@ export default function AdminPanel() {
                   className="mt-0.5 w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm"
                 />
               </label>
+              <label className="block pt-2">
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Sınav Blokları (online sınav)</span>
+                <input
+                  type="text"
+                  value={academicLinks.exams.examBlocks}
+                  onChange={(e) =>
+                    setAcademicLinks((prev) => ({
+                      ...prev,
+                      exams: { ...prev.exams, examBlocks: e.target.value }
+                    }))
+                  }
+                  placeholder="https://…"
+                  className="mt-0.5 w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm"
+                />
+              </label>
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide pt-2">Soru havuzları</p>
               <label className="block">
                 <span className="text-xs text-slate-600">Havuz 1</span>

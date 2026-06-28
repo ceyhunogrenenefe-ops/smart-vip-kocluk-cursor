@@ -78,6 +78,7 @@ export default function TopBar({ onMenuClick, drawerOpen = false, hideMenuButton
       '/notifications': 'Bildirimler',
       '/my-profile': 'Profilim',
       '/academic-center': 'Akademik Merkez',
+      '/sinav-bloklari': 'Sınav Blokları',
       '/weekly-planner': 'Haftalık Plan',
       '/mobile/dersler': 'Ders & Görüşmeler',
       '/mobile/akademik': 'Akademik Takip',
