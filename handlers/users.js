@@ -5,6 +5,7 @@ import { getSupabaseAdmin, hasSupabaseServiceRoleKey, supabaseAdmin } from '../a
 import { getTeacherGroupClassStudentScope } from '../api/_lib/teacher-class-scope.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import { normalizeUuidOrGenerate } from '../api/_lib/uuid.js';
+import { USER_LIST_COLUMNS } from '../api/_lib/list-query-columns.js';
 
 const USER_ROLES = ['super_admin', 'admin', 'coach', 'teacher', 'student'];
 const normalizeRoles = (raw, fallbackRole = 'student') => {
@@ -178,7 +179,7 @@ export default async function handler(req, res) {
 
         let q = supabaseAdmin
           .from('users')
-          .select('*')
+          .select(USER_LIST_COLUMNS)
           .eq('institution_id', actor.institution_id)
           .eq('role', 'student')
           .order('created_at', { ascending: false });
@@ -199,7 +200,7 @@ export default async function handler(req, res) {
         if (email && !tel.has(email)) return res.status(200).json({ data: [] });
         let q = supabaseAdmin
           .from('users')
-          .select('*')
+          .select(USER_LIST_COLUMNS)
           .eq('institution_id', actor.institution_id)
           .eq('role', 'student')
           .order('created_at', { ascending: false });
@@ -211,7 +212,7 @@ export default async function handler(req, res) {
         return res.status(200).json({ data: filtered });
       }
 
-      let query = supabaseAdmin.from('users').select('*').order('created_at', { ascending: false });
+      let query = supabaseAdmin.from('users').select(USER_LIST_COLUMNS).order('created_at', { ascending: false });
       if (actor.role === 'admin') {
         if (!actor.institution_id) return res.status(200).json({ data: [] });
         query = query.eq('institution_id', actor.institution_id);

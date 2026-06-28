@@ -6,6 +6,7 @@ import { rebuildCoachStudentIdsFromFk } from '../api/_lib/sync-coach-students.js
 import { enforceStudentInsertQuotas, enforceCoachStudentQuota, QuotaError } from '../api/_lib/quota-enforce.js';
 import { getTeacherGroupClassStudentScope } from '../api/_lib/teacher-class-scope.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
+import { STUDENT_LIST_COLUMNS } from '../api/_lib/list-query-columns.js';
 
 const normActorRole = (r) => String(r || '').trim().toLowerCase();
 
@@ -186,7 +187,7 @@ async function listStudentsMergedCoachTeacher(actor, roleSet) {
     if (ids.length) {
       const { data, error } = await supabaseAdmin
         .from('students')
-        .select('*')
+        .select(STUDENT_LIST_COLUMNS)
         .in('id', ids)
         .eq('institution_id', inst)
         .order('created_at', { ascending: false });
@@ -198,7 +199,7 @@ async function listStudentsMergedCoachTeacher(actor, roleSet) {
   if (roleSet.has('coach') && actor.coach_id) {
     const { data, error } = await supabaseAdmin
       .from('students')
-      .select('*')
+      .select(STUDENT_LIST_COLUMNS)
       .eq('coach_id', actor.coach_id)
       .order('created_at', { ascending: false });
     if (error) throw error;
@@ -252,7 +253,7 @@ export default async function handler(req, res) {
       if (rs.has('super_admin')) {
         const { data, error } = await supabaseAdmin
           .from('students')
-          .select('*')
+          .select(STUDENT_LIST_COLUMNS)
           .order('created_at', { ascending: false });
         if (error) throw error;
         return res.status(200).json({ data: data || [] });
@@ -283,7 +284,7 @@ export default async function handler(req, res) {
         if (!actor.institution_id) return res.status(403).json({ error: 'institution_missing' });
         const { data, error } = await supabaseAdmin
           .from('students')
-          .select('*')
+          .select(STUDENT_LIST_COLUMNS)
           .eq('institution_id', actor.institution_id)
           .order('created_at', { ascending: false });
         if (error) throw error;

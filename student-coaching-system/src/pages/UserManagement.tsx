@@ -1,5 +1,5 @@
 // Türkçe: Kullanıcı Yönetimi Sayfası - Super Admin Paneli
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, startTransition } from 'react';
 import { useAuth, SystemUser } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -183,6 +183,9 @@ const ROLES: { value: UserRole; label: string; color: string }[] = [
 
 const ROLE_BADGE_ORDER: UserRole[] = ['super_admin', 'admin', 'teacher', 'coach', 'student'];
 
+/** İlk boyamada tablo kaydırması için parti boyutu */
+const USERS_RENDER_BATCH = 100;
+
 function roleLabelFromRoles(role: UserRole, extraRoles?: UserRole[] | null): string {
   const tags = extraRoles?.length ? extraRoles : [role];
   return tags.map((t) => ROLES.find((r) => r.value === t)?.label || t).join(' · ');
@@ -242,6 +245,9 @@ export default function UserManagement() {
   const [pageStudents, setPageStudents] = useState<Student[]>([]);
   const [pageCoaches, setPageCoaches] = useState<Coach[]>([]);
   const [listLoading, setListLoading] = useState(true);
+  /** Öğrenci/koç profilleri arka planda yüklenirken sınıf–veli sütunları için */
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [renderLimit, setRenderLimit] = useState(USERS_RENDER_BATCH);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterRole, setFilterRole] = useState<UserRole | 'all'>('all');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'expired' | 'inactive'>('all');
@@ -416,6 +422,7 @@ export default function UserManagement() {
     if (authLoading) return;
     if (getAuthToken()) {
       setListLoading(true);
+      setDetailsLoading(true);
       try {
         const scope =
           currentUser?.role === 'super_admin'
@@ -424,8 +431,15 @@ export default function UserManagement() {
         const isAdminish =
           currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
 
-        const [rows, stRows, coRows, pendingRows] = await Promise.all([
-          db.getUsers(),
+        const rows = await db.getUsers();
+        setRawUserRows(rows as UserRow[]);
+        const initialFromApi = rows.map((row) =>
+          userRowToSystemUser(row, { coaches: [], students: [] })
+        );
+        setUsers(initialFromApi);
+        setListLoading(false);
+
+        const [stRows, coRows, pendingRows] = await Promise.all([
           db.getStudents(scope),
           db.getCoaches(scope),
           isAdminish
@@ -437,7 +451,6 @@ export default function UserManagement() {
         const joinCoaches = coRows.map(coachRowToCoach);
         setPageStudents(joinStudents);
         setPageCoaches(joinCoaches);
-        setRawUserRows(rows as UserRow[]);
         if (isAdminish) setPendingRegistrations(pendingRows);
 
         const fromApi = rows.map((row) =>
@@ -445,7 +458,9 @@ export default function UserManagement() {
         );
         const stubs = coachProfilesWithoutLoginUser(joinCoaches, rows as UserRow[]);
         const seen = new Set(fromApi.map((u) => u.email.toLowerCase().trim()));
-        setUsers([...fromApi, ...stubs.filter((s) => !seen.has(s.email.toLowerCase().trim()))]);
+        startTransition(() => {
+          setUsers([...fromApi, ...stubs.filter((s) => !seen.has(s.email.toLowerCase().trim()))]);
+        });
         return;
       } catch (e) {
         console.error('[UserManagement] /api/users yüklenemedi:', e);
@@ -461,6 +476,7 @@ export default function UserManagement() {
         );
       } finally {
         setListLoading(false);
+        setDetailsLoading(false);
       }
     } else {
       setUsers(getAllUsers());
@@ -468,6 +484,7 @@ export default function UserManagement() {
       setPageStudents([]);
       setPageCoaches([]);
       setListLoading(false);
+      setDetailsLoading(false);
     }
   }, [
     getAllUsers,
@@ -684,72 +701,105 @@ export default function UserManagement() {
   const trIncludes = (haystack: string, needle: string) =>
     haystack.toLocaleLowerCase('tr-TR').includes(needle.toLocaleLowerCase('tr-TR'));
 
-  const filteredUsers = users.filter(user => {
+  const filteredUsers = useMemo(() => {
     const q = searchTerm.trim();
-    const phoneMatch = (user.phone || '').replace(/\s/g, '').toLowerCase();
     const qDigits = q.replace(/\D/g, '');
-    const tags = userRoleTags(user as { role: UserRole; roles?: UserRole[] });
-    const studentMatchForFilter = tags.includes('student')
-      ? resolveStudentForUser(
-          { id: user.id, email: user.email, studentId: user.studentId },
-          studentLinkIndex
-        ) ??
-        findStudentForPlatformUser(
-          {
-            platformUserId: user.id,
-            email: user.email,
-            studentId: user.studentId
-          },
-          linkedStudents
+    return users.filter((user) => {
+      const phoneMatch = (user.phone || '').replace(/\s/g, '').toLowerCase();
+      const tags = userRoleTags(user as { role: UserRole; roles?: UserRole[] });
+      const studentMatchForFilter = tags.includes('student')
+        ? resolveStudentForUser(
+            { id: user.id, email: user.email, studentId: user.studentId },
+            studentLinkIndex
+          ) ??
+          findStudentForPlatformUser(
+            {
+              platformUserId: user.id,
+              email: user.email,
+              studentId: user.studentId
+            },
+            linkedStudents
+          )
+        : undefined;
+      if (
+        searchTerm &&
+        !trIncludes(user.name, q) &&
+        !trIncludes(user.email, q) &&
+        !(
+          user.phone &&
+          (phoneMatch.includes(q.replace(/\s/g, '')) ||
+            (qDigits.length >= 4 && phoneMatch.includes(qDigits)))
         )
-      : undefined;
-    if (
-      searchTerm &&
-      !trIncludes(user.name, q) &&
-      !trIncludes(user.email, q) &&
-      !(user.phone && (phoneMatch.includes(q.replace(/\s/g, '')) || (qDigits.length >= 4 && phoneMatch.includes(qDigits))))
-    ) {
-      return false;
-    }
+      ) {
+        return false;
+      }
 
-    if (filterInstitutionId !== 'all' && currentUser?.role === 'super_admin') {
-      const userInst =
-        String(studentMatchForFilter?.institutionId || user.institutionId || '').trim();
-      if (userInst !== filterInstitutionId) return false;
-    }
+      if (filterInstitutionId !== 'all' && currentUser?.role === 'super_admin') {
+        const userInst = String(studentMatchForFilter?.institutionId || user.institutionId || '').trim();
+        if (userInst !== filterInstitutionId) return false;
+      }
 
-    // Rol filtresi (çoklu rol: örneğin öğretmen+koç)
-    if (filterRole !== 'all') {
-      if (!tags.includes(filterRole)) return false;
-    }
+      if (filterRole !== 'all') {
+        if (!tags.includes(filterRole)) return false;
+      }
 
-    // Durum filtresi
-    if (filterStatus !== 'all') {
-      if (filterStatus === 'active' && !isUserActiveAccount(user)) return false;
-      if (filterStatus === 'expired' && !isUserExpiredAccount(user)) return false;
-      if (filterStatus === 'inactive' && user.isActive !== false) return false;
-    }
+      if (filterStatus !== 'all') {
+        if (filterStatus === 'active' && !isUserActiveAccount(user)) return false;
+        if (filterStatus === 'expired' && !isUserExpiredAccount(user)) return false;
+        if (filterStatus === 'inactive' && user.isActive !== false) return false;
+      }
 
-    if (filterClassLevel !== 'all') {
-      if (!tags.includes('student')) return false;
-      if (!classLevelsMatch(studentMatchForFilter?.classLevel, filterClassLevel)) return false;
-    }
+      if (filterClassLevel !== 'all') {
+        if (!tags.includes('student')) return false;
+        if (!classLevelsMatch(studentMatchForFilter?.classLevel, filterClassLevel)) return false;
+      }
 
-    if (filterCoachId !== 'all') {
-      const coachRow = coachesForFilter.find((c) => c.id === filterCoachId);
-      const studentCoach = studentMatchForFilter?.coachId ? String(studentMatchForFilter.coachId) : '';
-      const userCoachId = user.coachId ? String(user.coachId) : '';
-      const coachEmail = coachRow?.email?.toLowerCase().trim();
-      const userEmail = user.email?.toLowerCase().trim();
-      const matchesCoach =
-        studentCoach === filterCoachId ||
-        userCoachId === filterCoachId ||
-        Boolean(coachEmail && userEmail && userEmail === coachEmail);
-      if (!matchesCoach) return false;
-    }
+      if (filterCoachId !== 'all') {
+        const coachRow = coachesForFilter.find((c) => c.id === filterCoachId);
+        const studentCoach = studentMatchForFilter?.coachId ? String(studentMatchForFilter.coachId) : '';
+        const userCoachId = user.coachId ? String(user.coachId) : '';
+        const coachEmail = coachRow?.email?.toLowerCase().trim();
+        const userEmail = user.email?.toLowerCase().trim();
+        const matchesCoach =
+          studentCoach === filterCoachId ||
+          userCoachId === filterCoachId ||
+          Boolean(coachEmail && userEmail && userEmail === coachEmail);
+        if (!matchesCoach) return false;
+      }
 
-    return true;
-  });
+      return true;
+    });
+  }, [
+    users,
+    searchTerm,
+    filterInstitutionId,
+    currentUser?.role,
+    filterRole,
+    filterStatus,
+    filterClassLevel,
+    filterCoachId,
+    studentLinkIndex,
+    linkedStudents,
+    coachesForFilter
+  ]);
+
+  useEffect(() => {
+    setRenderLimit(USERS_RENDER_BATCH);
+  }, [
+    searchTerm,
+    filterRole,
+    filterStatus,
+    filterInstitutionId,
+    filterClassLevel,
+    filterCoachId
+  ]);
+
+  const visibleUsers = useMemo(
+    () => filteredUsers.slice(0, renderLimit),
+    [filteredUsers, renderLimit]
+  );
+
+  const hasMoreUsers = filteredUsers.length > visibleUsers.length;
 
   const coachesForStudentForm = useMemo(() => {
     const inst = String(formData.studentInstitutionId || '').trim();
@@ -2418,6 +2468,12 @@ export default function UserManagement() {
       )}
 
       {/* Users — mobil kartlar / masaüstü tablo */}
+      {detailsLoading && !listLoading ? (
+        <p className="text-xs text-slate-500 flex items-center gap-2 -mt-1">
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-red-500" />
+          Sınıf, koç ve veli bilgileri yükleniyor…
+        </p>
+      ) : null}
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {/* Mobil: yatay kaydırma yok, düzenle her zaman görünür */}
         <div className="lg:hidden divide-y divide-gray-100">
@@ -2429,7 +2485,7 @@ export default function UserManagement() {
               </span>
             </div>
           ) : (
-            filteredUsers.map((user) => {
+            visibleUsers.map((user) => {
               const subStatus = getSubscriptionStatus(user);
               const tags = userRoleTags(user as SystemUser);
               const studentMatch =
@@ -2583,6 +2639,17 @@ export default function UserManagement() {
               <p>Kullanıcı bulunamadı</p>
             </div>
           ) : null}
+          {!listLoading && !authLoading && hasMoreUsers ? (
+            <div className="border-t border-gray-100 px-4 py-3 text-center">
+              <button
+                type="button"
+                onClick={() => setRenderLimit((n) => n + USERS_RENDER_BATCH)}
+                className="text-sm font-medium text-red-600 hover:text-red-700"
+              >
+                Daha fazla göster ({visibleUsers.length} / {filteredUsers.length})
+              </button>
+            </div>
+          ) : null}
         </div>
 
         <div className="hidden lg:block overflow-x-auto">
@@ -2612,12 +2679,12 @@ export default function UserManagement() {
                   <td colSpan={13} className="px-4 py-12 text-center text-sm text-slate-500">
                     <span className="inline-flex items-center justify-center gap-2">
                       <Loader2 className="h-5 w-5 animate-spin text-red-500" />
-                      Kullanıcılar ve öğrenci profilleri yükleniyor…
+                      Kullanıcılar yükleniyor…
                     </span>
                   </td>
                 </tr>
               ) : (
-              filteredUsers.map(user => {
+              visibleUsers.map(user => {
                 const subStatus = getSubscriptionStatus(user);
                 const em = user.email.toLowerCase().trim();
                 const tags = userRoleTags(user as SystemUser);
@@ -2795,6 +2862,18 @@ export default function UserManagement() {
           <div className="hidden lg:block p-8 text-center text-gray-500">
             <Users className="w-12 h-12 mx-auto mb-3 text-gray-300" />
             <p>Kullanıcı bulunamadı</p>
+          </div>
+        ) : null}
+
+        {!listLoading && !authLoading && hasMoreUsers ? (
+          <div className="border-t border-gray-100 px-4 py-3 text-center">
+            <button
+              type="button"
+              onClick={() => setRenderLimit((n) => n + USERS_RENDER_BATCH)}
+              className="text-sm font-medium text-red-600 hover:text-red-700"
+            >
+              Daha fazla göster ({visibleUsers.length} / {filteredUsers.length})
+            </button>
           </div>
         ) : null}
       </div>

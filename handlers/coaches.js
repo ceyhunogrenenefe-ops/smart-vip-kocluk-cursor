@@ -5,6 +5,7 @@ import { getTeacherGroupClassStudentScope } from '../api/_lib/teacher-class-scop
 import { applyStudentIdsToCoachFk, rebuildCoachStudentIdsFromFk } from '../api/_lib/sync-coach-students.js';
 import { enforceOrganizationCoachQuota, QuotaError, getInstitutionAdminUserId } from '../api/_lib/quota-enforce.js';
 import { normalizeUuidOrGenerate, isUuid } from '../api/_lib/uuid.js';
+import { COACH_LIST_COLUMNS } from '../api/_lib/list-query-columns.js';
 
 /** Eski projelerde `coaches.managed_by_admin_id` yoksa Supabase şeması bu hatayı verir — tekrarsız olarak sütunu düşürüp yeniden deneriz. */
 function errText(error) {
@@ -82,12 +83,12 @@ export default async function handler(req, res) {
         if (stuErr) throw stuErr;
         const cid = stu?.coach_id ? String(stu.coach_id).trim() : '';
         if (!cid) return res.status(200).json({ data: [] });
-        const { data: one, error: cErr } = await supabaseAdmin.from('coaches').select('*').eq('id', cid).maybeSingle();
+        const { data: one, error: cErr } = await supabaseAdmin.from('coaches').select(COACH_LIST_COLUMNS).eq('id', cid).maybeSingle();
         if (cErr) throw cErr;
         return res.status(200).json({ data: one ? [one] : [] });
       }
 
-      let query = supabaseAdmin.from('coaches').select('*').order('created_at', { ascending: false });
+      let query = supabaseAdmin.from('coaches').select(COACH_LIST_COLUMNS).order('created_at', { ascending: false });
       if (actor.role === 'admin') {
         if (!actor.institution_id) return res.status(200).json({ data: [] });
         query = query.eq('institution_id', actor.institution_id);
