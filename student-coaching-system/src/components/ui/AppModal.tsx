@@ -27,7 +27,7 @@ export function AppModal({
     <div
       className={cn(
         'fixed inset-0 flex p-4',
-        align === 'bottom' ? 'items-end sm:items-center' : 'items-center justify-center',
+        align === 'bottom' ? 'items-end justify-center sm:items-center' : 'items-center justify-center',
         className
       )}
       style={{ zIndex: APP_MODAL_Z }}

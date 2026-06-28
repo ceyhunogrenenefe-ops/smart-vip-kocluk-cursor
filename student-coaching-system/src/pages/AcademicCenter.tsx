@@ -132,7 +132,7 @@ function ExamRulesModal(props: {
   ];
 
   return (
-    <AppModal open={Boolean(target)} onClose={onClose} align="bottom" panelClassName="max-w-lg overflow-hidden p-0">
+    <AppModal open={Boolean(target)} onClose={onClose} align="center" panelClassName="max-w-lg overflow-hidden p-0">
       {target ? (
         <>
           <div className="border-b border-slate-100 bg-gradient-to-r from-emerald-50 to-teal-50 px-5 py-4">

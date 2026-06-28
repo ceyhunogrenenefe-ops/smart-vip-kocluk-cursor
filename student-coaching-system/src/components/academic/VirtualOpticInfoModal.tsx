@@ -39,7 +39,7 @@ export function VirtualOpticInfoModal({
   hasLink = true
 }: VirtualOpticInfoModalProps) {
   return (
-    <AppModal open={open} onClose={onClose} align="bottom" panelClassName="max-w-lg overflow-hidden p-0">
+    <AppModal open={open} onClose={onClose} align="center" panelClassName="max-w-lg overflow-hidden p-0">
       <div className="border-b border-slate-100 bg-gradient-to-r from-emerald-50 to-teal-50 px-5 py-4">
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white">
