@@ -210,6 +210,8 @@ export default function SchedulePlannerPage() {
   const [systemTeachers, setSystemTeachers] = useState<PlannerTeacher[]>([]);
   const [systemStudents, setSystemStudents] = useState<PlannerStudent[]>([]);
   const autoPlanLoadedFor = useRef('');
+  const planTouchedRef = useRef(false);
+  const planLoadGenRef = useRef(0);
 
   const rememberSharedPlan = useCallback(
     (planId: string) => {
@@ -289,6 +291,10 @@ export default function SchedulePlannerPage() {
       if (ev.data?.source === 'scs-planner-embed' && ev.data?.type === 'READY') {
         setIframeReady(true);
       }
+      if (ev.data?.source === 'scs-planner-embed' && ev.data?.type === 'PLAN_USER_EDIT') {
+        planTouchedRef.current = true;
+        planLoadGenRef.current += 1;
+      }
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
@@ -315,6 +321,8 @@ export default function SchedulePlannerPage() {
   useEffect(() => {
     setIframeReady(false);
     autoPlanLoadedFor.current = '';
+    planTouchedRef.current = false;
+    planLoadGenRef.current += 1;
   }, [institutionId]);
 
   useEffect(() => {
@@ -349,6 +357,7 @@ export default function SchedulePlannerPage() {
 
   useEffect(() => {
     if (!iframeReady || !institutionId || !(isAdmin || isSuper)) return;
+    if (planTouchedRef.current) return;
     if (!plans.length) return;
     const marker = `${institutionId}:${plans.map((p) => p.id).join(',')}`;
     if (autoPlanLoadedFor.current === marker) return;
@@ -364,11 +373,16 @@ export default function SchedulePlannerPage() {
       (stored && plans.some((p) => p.id === stored) ? stored : null) || plans[0]?.id;
     if (!pick) return;
 
+    const gen = ++planLoadGenRef.current;
     void (async () => {
       try {
+        if (planTouchedRef.current || gen !== planLoadGenRef.current) return;
+        await pushPlannerContext();
+        if (planTouchedRef.current || gen !== planLoadGenRef.current) return;
         const res = await apiFetch(`/api/class-schedule-plans?id=${encodeURIComponent(pick)}`);
         const j = await res.json().catch(() => ({}));
         if (!res.ok || !j.data?.planner_json) return;
+        if (planTouchedRef.current || gen !== planLoadGenRef.current) return;
         await postPlannerMessage(iframeRef.current, 'SET_STATE', j.data.planner_json);
         setSelectedPlanId(pick);
         setPlanName(String(j.data.name || ''));
@@ -438,11 +452,14 @@ export default function SchedulePlannerPage() {
       setPlanName('');
       return;
     }
+    planTouchedRef.current = true;
+    planLoadGenRef.current += 1;
     setBusy('load');
     try {
       const res = await apiFetch(`/api/class-schedule-plans?id=${encodeURIComponent(planId)}`);
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j.data) throw new Error(j.error || 'load_failed');
+      await pushPlannerContext();
       await postPlannerMessage(iframeRef.current, 'SET_STATE', j.data.planner_json);
       setSelectedPlanId(planId);
       setPlanName(String(j.data.name || ''));
