@@ -18,7 +18,6 @@ import {
   examEntryUrl,
   EXAM_ENTRY_DEFS,
   fetchAcademicCenterLinksFromServer,
-  isBbbAutoMeetingLink,
   loadAcademicCenterLinks,
   openAcademicCenterLink,
   type AcademicCenterLinks,
@@ -41,6 +40,8 @@ function PortalActionCard(props: {
   disabled?: boolean;
   busy?: boolean;
   buttonClassName?: string;
+  /** Tüm karta tıklanınca da aksiyon tetiklensin (deneme sınıfları). */
+  clickableCard?: boolean;
 }) {
   const {
     accent,
@@ -51,23 +52,52 @@ function PortalActionCard(props: {
     onAction,
     disabled,
     busy,
-    buttonClassName = 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white hover:brightness-110'
+    buttonClassName = 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white hover:brightness-110',
+    clickableCard = false
   } = props;
 
+  const canAct = !disabled && !busy;
+
+  const trigger = () => {
+    if (canAct) onAction();
+  };
+
   return (
-    <div className="group relative overflow-hidden rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:shadow-md">
+    <div
+      className={`group relative flex h-full overflow-hidden rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:shadow-md ${
+        clickableCard && canAct ? 'cursor-pointer' : ''
+      }`}
+      role={clickableCard && canAct ? 'button' : undefined}
+      tabIndex={clickableCard && canAct ? 0 : undefined}
+      onClick={clickableCard ? trigger : undefined}
+      onKeyDown={
+        clickableCard && canAct
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                trigger();
+              }
+            }
+          : undefined
+      }
+    >
       <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${accent}`} />
-      <div className="flex items-start gap-4">
+      <div className="flex w-full items-start gap-4">
         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
           {icon}
         </div>
-        <div className="flex min-h-[9.5rem] min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col">
           <p className="font-semibold text-slate-900">{title}</p>
-          <div className="mt-2 flex-1 text-sm leading-relaxed text-slate-600">{description}</div>
+          <div className="mt-2 min-h-[7.5rem] flex-1 text-sm leading-relaxed text-slate-600 sm:min-h-[6.5rem]">
+            {description}
+          </div>
           <button
             type="button"
-            disabled={disabled || busy}
-            onClick={onAction}
+            disabled={!canAct}
+            onClick={(e) => {
+              e.stopPropagation();
+              trigger();
+            }}
             className={`mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold shadow-md transition disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${buttonClassName}`}
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
@@ -89,9 +119,12 @@ function ExamRulesModal(props: {
   const { target, onClose, onConfirm, confirming } = props;
   if (!target) return null;
 
-  const rules = [
+  const rules: React.ReactNode[] = [
     'Deneme sınavının geçerli sayılabilmesi için kameranız açık olmalıdır.',
-    'Kamera açınız; yüzünüzü, kitapçığınızı ve ellerinizi net şekilde gösterecek biçimde ayarlanmalıdır.',
+    <>
+      Kamera açınız; <strong>yüzünüzü, kitapçığınızı ve ellerinizi</strong> net şekilde gösterecek biçimde
+      ayarlanmalıdır.
+    </>,
     'Sınav boyunca kameranızı kapatmamanız gerekmektedir.',
     'Bu kurallara uyulmaması durumunda deneme sınavı geçersiz sayılabilir.'
   ];
@@ -134,8 +167,8 @@ function ExamRulesModal(props: {
         </div>
         <div className="px-5 py-5">
           <ul className="space-y-3 text-sm leading-relaxed text-slate-700">
-            {rules.map((rule) => (
-              <li key={rule} className="flex gap-2.5">
+            {rules.map((rule, i) => (
+              <li key={i} className="flex gap-2.5">
                 <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
                 <span>{rule}</span>
               </li>
@@ -395,17 +428,11 @@ export default function AcademicCenter() {
               />
 
               <div className="space-y-4">
-                <div>
-                  <h2 className="text-lg font-bold text-slate-900">Deneme Sınavı Sınıfları</h2>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Sınıf seviyenize uygun canlı deneme oturumunu seçin.
-                  </p>
-                </div>
+                <h2 className="text-lg font-bold text-slate-900">Deneme Sınavı Sınıfları</h2>
 
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="grid grid-cols-1 items-stretch gap-4 md:grid-cols-2">
                   {EXAM_ENTRY_DEFS.map((x) => {
                     const href = examEntryUrl(links, x.key);
-                    const bbb = isBbbAutoMeetingLink(href);
                     const busy = bbbBusyRoom === x.key;
                     return (
                       <PortalActionCard
@@ -413,19 +440,11 @@ export default function AcademicCenter() {
                         accent={x.accent}
                         icon={<ClipboardList className="h-5 w-5" />}
                         title={x.label}
-                        description={
-                          <>
-                            {EXAM_CLASS_INTRO}
-                            {bbb ? (
-                              <span className="mt-2 block text-xs text-slate-500">
-                                BBB otomatik oda — katılınca oluşturulur.
-                              </span>
-                            ) : null}
-                          </>
-                        }
+                        description={EXAM_CLASS_INTRO}
                         buttonLabel="Deneme Sınıfına Katıl"
                         disabled={!href}
                         busy={busy}
+                        clickableCard
                         onAction={() => requestExamClassJoin(x.key, x.label)}
                       />
                     );
