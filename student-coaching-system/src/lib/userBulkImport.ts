@@ -481,8 +481,15 @@ export function parseUserImportGridWithMapping(
   for (let i = dataStart; i < rows.length; i++) {
     const line = rows[i] || [];
     if (line.every((c) => !cellValueToString(c))) continue;
-    const firstName = cell(line, colMap.get('firstName'));
-    const lastName = cell(line, colMap.get('lastName'));
+    let firstName = cell(line, colMap.get('firstName'));
+    let lastName = cell(line, colMap.get('lastName'));
+    if (firstName && !lastName && !colMap.has('lastName')) {
+      const parts = firstName.trim().split(/\s+/).filter(Boolean);
+      if (parts.length >= 2) {
+        lastName = parts.slice(1).join(' ');
+        firstName = parts[0]!;
+      }
+    }
     const email = cell(line, colMap.get('email')).toLowerCase();
     const roleRaw = hasRoleColumn ? cell(line, colMap.get('role')) : '';
     const roles = parseRoles(roleRaw);

@@ -1876,7 +1876,7 @@ export default function UserManagement() {
         return;
       }
 
-      const res = await apiFetch('/api/users/bulk-import', {
+      const res = await apiFetch('/api/users-bulk-import', {
         method: 'POST',
         body: JSON.stringify({
           institution_id: resolvedInstitutionBase ?? null,

@@ -15,6 +15,7 @@ export const routeLoaders = {
   coaches: () => import('../handlers/coaches.js'),
   users: () => import('../handlers/users.js'),
   'users/bulk-import': () => import('../handlers/users-bulk-import.js'),
+  'users-bulk-import': () => import('../handlers/users-bulk-import.js'),
   quota: () => import('../handlers/quota.js'),
   'weekly-entries': () => import('../handlers/weekly-entries.js'),
   'weekly-planner-entries': () => import('../handlers/weekly-planner-entries.js'),
