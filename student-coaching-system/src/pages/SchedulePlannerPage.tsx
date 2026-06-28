@@ -20,6 +20,7 @@ import { useApp } from '../context/AppContext';
 import { apiFetch } from '../lib/session';
 import { mergeClassSlotsIntoPlanner, type PlannerState as FullPlannerState } from '../lib/classSlotsToPlanner';
 
+type PlannerTeacher = { id: string; name: string; email?: string; branches?: string[] };
 type PlannerGroup = { id: string; name: string };
 type PlannerState = {
   groups?: PlannerGroup[];
@@ -135,6 +136,7 @@ function postPlannerMessage<T>(
       window.removeEventListener('message', onMessage);
       if (type === 'GET_STATE' && msg.type === 'STATE') resolve(msg.payload as T);
       else if (type === 'SET_STATE' && msg.type === 'SET_OK') resolve(msg as T);
+      else if (type === 'SET_CONTEXT' && msg.type === 'SET_CONTEXT_OK') resolve(msg as T);
       else reject(new Error(String(msg.type || 'unexpected_response')));
     };
     window.addEventListener('message', onMessage);
@@ -176,6 +178,40 @@ export default function SchedulePlannerPage() {
   const [exportDateTo, setExportDateTo] = useState('');
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
   const [importClassId, setImportClassId] = useState('');
+  const [systemTeachers, setSystemTeachers] = useState<PlannerTeacher[]>([]);
+
+  const pushPlannerContext = useCallback(async () => {
+    if (!iframeReady || !institutionId) return;
+    try {
+      await postPlannerMessage(iframeRef.current, 'SET_CONTEXT', {
+        classes: classes.map((c) => ({
+          id: c.id,
+          name: c.name,
+          class_level: c.class_level ?? null,
+          branch: c.branch ?? null
+        })),
+        teachers: systemTeachers
+      });
+    } catch {
+      /* iframe henüz hazır olmayabilir */
+    }
+  }, [iframeReady, institutionId, classes, systemTeachers]);
+
+  const loadPlannerResources = useCallback(async () => {
+    if (!institutionId) return;
+    const qs = new URLSearchParams({ op: 'planner-resources', institution_id: institutionId });
+    const res = await apiFetch(`/api/class-schedule-plans?${qs.toString()}`);
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(j.error || 'planner_resources_failed');
+    setSystemTeachers(Array.isArray(j.teachers) ? j.teachers : []);
+    if (Array.isArray(j.classes) && j.classes.length) {
+      setClasses((prev) => {
+        const map = new Map(prev.map((c) => [c.id, c]));
+        for (const c of j.classes as ClassRow[]) map.set(c.id, c);
+        return [...map.values()].sort((a, b) => String(a.name).localeCompare(String(b.name), 'tr'));
+      });
+    }
+  }, [institutionId]);
 
   useEffect(() => {
     const onMessage = (ev: MessageEvent) => {
@@ -210,7 +246,12 @@ export default function SchedulePlannerPage() {
   useEffect(() => {
     loadPlans().catch((e) => toast.error(String(e.message || e)));
     loadClasses().catch(() => {});
-  }, [loadPlans, loadClasses]);
+    loadPlannerResources().catch(() => {});
+  }, [loadPlans, loadClasses, loadPlannerResources]);
+
+  useEffect(() => {
+    if (iframeReady) void pushPlannerContext();
+  }, [iframeReady, pushPlannerContext]);
 
   const refreshPlannerGroups = useCallback(async () => {
     if (!iframeReady) return;
@@ -285,6 +326,7 @@ export default function SchedulePlannerPage() {
       setSelectedPlanId(planId);
       setPlanName(String(j.data.name || ''));
       await refreshPlannerGroups();
+      await pushPlannerContext();
       toast.success('Plan yüklendi.');
     } catch (e) {
       toast.error(String((e as Error).message || e));

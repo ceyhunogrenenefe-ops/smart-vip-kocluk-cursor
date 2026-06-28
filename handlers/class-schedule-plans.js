@@ -194,6 +194,53 @@ async function loadClassForExport(classId, institutionId, actor) {
   };
 }
 
+async function loadTeachersWithBranches(institutionId) {
+  const teachers = await loadInstitutionTeachers(institutionId);
+  const ids = teachers.map((t) => t.id).filter(Boolean);
+  const branchMap = new Map();
+  if (ids.length) {
+    const { data: profiles, error: pErr } = await supabaseAdmin
+      .from('question_help_teacher_profiles')
+      .select('user_id, branches')
+      .in('user_id', ids);
+    if (!pErr) {
+      for (const p of profiles || []) {
+        branchMap.set(
+          p.user_id,
+          Array.isArray(p.branches) ? p.branches.map((x) => String(x || '').trim()).filter(Boolean) : []
+        );
+      }
+    }
+  }
+  return teachers.map((t) => ({
+    id: t.id,
+    name: String(t.name || t.email || '').trim(),
+    email: t.email || '',
+    branches: branchMap.get(t.id) || []
+  }));
+}
+
+async function loadInstitutionClassesForPlanner(institutionId) {
+  const instId = String(institutionId || '').trim();
+  if (!instId) return [];
+  const studentIds = await getInstitutionStudentIds(supabaseAdmin, instId);
+  const classIds = await resolveInstitutionClassIds(supabaseAdmin, instId, studentIds);
+  if (!classIds.length) return [];
+  const { data, error } = await supabaseAdmin
+    .from('classes')
+    .select('id,name,class_level,branch,institution_id')
+    .in('id', classIds);
+  if (error) throw error;
+  return (data || [])
+    .map((c) => ({
+      id: c.id,
+      name: String(c.name || '').trim(),
+      class_level: c.class_level ?? null,
+      branch: c.branch ?? null
+    }))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), 'tr'));
+}
+
 /** Planlayıcı hücrelerindeki öğretmen adlarını kurum öğretmenleriyle eşleştirme özeti */
 async function previewTeacherMatches(plannerJson, groupId, institutionId) {
   const pj = plannerJson && typeof plannerJson === 'object' ? plannerJson : {};
@@ -265,6 +312,14 @@ export default async function handler(req, res) {
       }
       if (role === 'admin' && !hasInstitutionAccess(actor, institutionId)) {
         return res.status(403).json({ error: 'forbidden' });
+      }
+
+      if (op === 'planner-resources') {
+        const [classes, teachers] = await Promise.all([
+          loadInstitutionClassesForPlanner(institutionId),
+          loadTeachersWithBranches(institutionId)
+        ]);
+        return res.status(200).json({ classes, teachers });
       }
 
       const { data, error } = await supabaseAdmin
