@@ -22,6 +22,7 @@ import { mergeClassSlotsIntoPlanner, type PlannerState as FullPlannerState } fro
 import { PLANNER_CURRICULUM_PRESETS, PLANNER_POOL_SUBJECTS } from '../lib/plannerTopicPool';
 
 type PlannerTeacher = { id: string; name: string; email?: string; branches?: string[] };
+type PlannerStudent = { id: string; name: string; class_level?: string | number | null; email?: string; class_ids?: string[] };
 type PlannerGroup = { id: string; name: string };
 type PlannerState = {
   groups?: PlannerGroup[];
@@ -180,6 +181,7 @@ export default function SchedulePlannerPage() {
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
   const [importClassId, setImportClassId] = useState('');
   const [systemTeachers, setSystemTeachers] = useState<PlannerTeacher[]>([]);
+  const [systemStudents, setSystemStudents] = useState<PlannerStudent[]>([]);
 
   const pushPlannerContext = useCallback(async () => {
     if (!iframeReady || !institutionId) return;
@@ -192,13 +194,14 @@ export default function SchedulePlannerPage() {
           branch: c.branch ?? null
         })),
         teachers: systemTeachers,
+        students: systemStudents,
         poolSubjects: PLANNER_POOL_SUBJECTS,
         curriculumPresets: PLANNER_CURRICULUM_PRESETS
       });
     } catch {
       /* iframe henüz hazır olmayabilir */
     }
-  }, [iframeReady, institutionId, classes, systemTeachers]);
+  }, [iframeReady, institutionId, classes, systemTeachers, systemStudents]);
 
   const loadPlannerResources = useCallback(async () => {
     if (!institutionId) return;
@@ -207,6 +210,7 @@ export default function SchedulePlannerPage() {
     const j = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(j.error || 'planner_resources_failed');
     setSystemTeachers(Array.isArray(j.teachers) ? j.teachers : []);
+    setSystemStudents(Array.isArray(j.students) ? j.students : []);
     if (Array.isArray(j.classes) && j.classes.length) {
       setClasses((prev) => {
         const map = new Map(prev.map((c) => [c.id, c]));

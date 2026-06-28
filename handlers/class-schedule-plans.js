@@ -241,6 +241,49 @@ async function loadInstitutionClassesForPlanner(institutionId) {
     .sort((a, b) => String(a.name).localeCompare(String(b.name), 'tr'));
 }
 
+async function loadInstitutionStudentsForPlanner(institutionId) {
+  const instId = String(institutionId || '').trim();
+  if (!instId) return [];
+  const studentIdSet = await getInstitutionStudentIds(supabaseAdmin, instId);
+  if (!studentIdSet.size) return [];
+  const ids = [...studentIdSet];
+  const CHUNK = 500;
+  const rows = [];
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const { data, error } = await supabaseAdmin
+      .from('students')
+      .select('id,name,class_level,email')
+      .in('id', chunk);
+    if (error) throw error;
+    if (data?.length) rows.push(...data);
+  }
+  const classIdsByStudent = new Map();
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const { data: csRows, error: csErr } = await supabaseAdmin
+      .from('class_students')
+      .select('student_id, class_id')
+      .in('student_id', chunk);
+    if (csErr) throw csErr;
+    for (const row of csRows || []) {
+      const sid = String(row.student_id);
+      if (!classIdsByStudent.has(sid)) classIdsByStudent.set(sid, []);
+      classIdsByStudent.get(sid).push(String(row.class_id));
+    }
+  }
+  return rows
+    .map((s) => ({
+      id: String(s.id),
+      name: String(s.name || '').trim(),
+      class_level: s.class_level ?? null,
+      email: String(s.email || '').trim(),
+      class_ids: classIdsByStudent.get(String(s.id)) || []
+    }))
+    .filter((s) => s.name)
+    .sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+}
+
 /** Planlayıcı hücrelerindeki öğretmen adlarını kurum öğretmenleriyle eşleştirme özeti */
 async function previewTeacherMatches(plannerJson, groupId, institutionId) {
   const pj = plannerJson && typeof plannerJson === 'object' ? plannerJson : {};
@@ -315,11 +358,12 @@ export default async function handler(req, res) {
       }
 
       if (op === 'planner-resources') {
-        const [classes, teachers] = await Promise.all([
+        const [classes, teachers, students] = await Promise.all([
           loadInstitutionClassesForPlanner(institutionId),
-          loadTeachersWithBranches(institutionId)
+          loadTeachersWithBranches(institutionId),
+          loadInstitutionStudentsForPlanner(institutionId)
         ]);
-        return res.status(200).json({ classes, teachers });
+        return res.status(200).json({ classes, teachers, students });
       }
 
       const { data, error } = await supabaseAdmin

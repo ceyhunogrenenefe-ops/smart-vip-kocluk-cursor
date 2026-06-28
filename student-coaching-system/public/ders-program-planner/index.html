@@ -158,6 +158,15 @@
   table.master .day-sep{border-left:2px solid var(--line-strong)}
   .shared-groups-list{display:flex; flex-direction:column; gap:6px; margin-top:8px; max-height:140px; overflow-y:auto}
   .shared-groups-list label{display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer}
+  .student-pick-list{display:flex; flex-direction:column; gap:4px; max-height:320px; overflow-y:auto; margin-top:10px; border:1px solid var(--line); border-radius:9px; padding:8px}
+  .sp-row{display:flex; align-items:flex-start; gap:10px; padding:8px 6px; border-bottom:1px solid var(--line); font-size:14px; cursor:pointer}
+  .sp-row:last-child{border-bottom:none}
+  .sp-row.in-group{opacity:.55; cursor:default}
+  .sp-row input{margin-top:3px; flex:none}
+  .sp-name{flex:1; min-width:0}
+  .sp-meta{display:block; font-size:11.5px; color:var(--muted); margin-top:2px}
+  .sp-filter{display:flex; gap:14px; flex-wrap:wrap; margin-top:8px; font-size:13px}
+  .sp-filter label{display:flex; align-items:center; gap:6px; cursor:pointer}
   .master-tools{display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; margin-bottom:12px}
 
   /* Conflicts tab */
@@ -337,6 +346,16 @@
         <label for="cbSystem">Canlı Grup Dersi sınıfı</label>
         <select class="inp" id="cbSystem"><option value="">Seçin…</option></select>
       </div>
+      <div class="field" id="cbPeriodsWrap">
+        <label>Günlük ders saatleri</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+          <button type="button" class="btn sm" data-act="cb-per-morning">Sabah şablonu</button>
+          <button type="button" class="btn sm" data-act="cb-per-evening">Akşam şablonu</button>
+          <button type="button" class="btn sm" data-act="cb-per-add">+ Ders saati</button>
+        </div>
+        <div class="chip-list" id="cbPeriodList"></div>
+        <p class="tiny" style="margin:8px 0 0">Saat biçimi: 09:00–09:45 · Program tablosundaki satır sayısı buradan gelir.</p>
+      </div>
       <div class="field">
         <label>Haftalık müfredat</label>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
@@ -358,6 +377,30 @@
       <button type="button" class="btn" data-act="class-cancel">İptal</button>
       <button type="button" class="btn primary" data-act="class-save">Kaydet</button>
       <button type="button" class="btn primary" data-act="class-save-fill">Kaydet &amp; programa yerleştir</button>
+    </div>
+  </div>
+</div>
+
+<!-- Sistemden öğrenci seç modal -->
+<div class="scrim" id="studentScrim">
+  <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="spTitle">
+    <div class="mh">
+      <div class="mt" id="spTitle">Sistemden öğrenci ekle</div>
+      <div class="ms" id="spSub"></div>
+    </div>
+    <div class="mb">
+      <div class="field" style="margin-bottom:10px">
+        <label for="spSearch">Ara</label>
+        <input class="inp" id="spSearch" placeholder="Ad veya e-posta…" autocomplete="off">
+      </div>
+      <div class="sp-filter" id="spFilterWrap"></div>
+      <div class="tiny" id="spCount" style="margin-top:8px"></div>
+      <div class="student-pick-list" id="spList"></div>
+    </div>
+    <div class="mf">
+      <button type="button" class="btn sm" data-act="sp-select-all">Görünenleri seç</button>
+      <button type="button" class="btn" data-act="sp-cancel">İptal</button>
+      <button type="button" class="btn primary" data-act="sp-save">Seçilenleri ekle</button>
     </div>
   </div>
 </div>
@@ -389,7 +432,7 @@ function defaultState(){
     {label:'5. Ders', time:'15:30–16:15'},
     {label:'6. Ders', time:'16:30–17:15'},
   ];
-  const mk=(name,color)=>({id:uid(), name, advisor:'', color, students:[], schedule:{}, periods:PERIODS(), locked:false, classId:null, curriculum:[]});
+  const mk=(name,color)=>({id:uid(), name, advisor:'', color, students:[], schedule:{}, periods:PERIODS(), locked:false, classId:null, classLevel:null, curriculum:[]});
   return {
     term:{start:'2026-07-01', end:'2026-08-23'},
     days:['Pazartesi','Salı','Çarşamba','Perşembe','Cuma','Cumartesi'],
@@ -419,6 +462,7 @@ function migrateState(){
   }
   if(!state.teachers) state.teachers=[];
   if(!state.systemClasses) state.systemClasses=[];
+  if(!state.systemStudents) state.systemStudents=[];
   if(!state.poolSubjects) state.poolSubjects=[];
   if(!state.curriculumPresets) state.curriculumPresets={};
   if(state.editGroupIds===undefined) state.editGroupIds=null;
@@ -426,8 +470,10 @@ function migrateState(){
   state.groups.forEach(g=>{
     if(g.locked===undefined) g.locked=false;
     if(g.classId===undefined) g.classId=null;
+    if(g.classLevel===undefined) g.classLevel=null;
     if(!Array.isArray(g.curriculum)) g.curriculum=[];
     if(!Array.isArray(g.periods)||!g.periods.length) g.periods=(state.periods||[]).map(p=>({label:p.label,time:p.time}));
+    (g.students||[]).forEach(s=>{ if(s.systemId===undefined) s.systemId=null; });
   });
 }
 migrateState();
@@ -437,6 +483,9 @@ let editingCell=null; // {groupId, key}
 let importTargetGroup=null;
 let showPeriods=false; // per-class period editor toggle
 let classBuilder={mode:'create', groupId:null}; // sınıf / müfredat modal
+let studentPickTargetGroup=null;
+let studentPickFilter='class';
+let studentPickSelected=new Set();
 
 /* undo + drag (ders programı) */
 const UNDO_MAX=50;
@@ -504,8 +553,209 @@ function addGroupFromSystemClass(cls){
   const exists=state.groups.some(g=>g.classId===cls.id||norm(g.name)===norm(cls.name));
   if(exists){ alert('Bu sınıf zaten planlayıcıda var.'); return; }
   const c=COLORS[state.groups.length%COLORS.length];
-  const ng={id:uid(), name:String(cls.name).trim(), classId:cls.id||null, advisor:'', color:c, students:[], schedule:{}, periods:(state.periods||[]).map(p=>({...p})), locked:false, curriculum:[]};
-  state.groups.push(ng); activeGroupId=ng.id; saveState(); render();
+  const ng={id:uid(), name:String(cls.name).trim(), classId:cls.id||null, classLevel:cls.class_level??null, advisor:'', color:c, students:[], schedule:{}, periods:(state.periods||[]).map(p=>({...p})), locked:false, curriculum:[]};
+  state.groups.push(ng);
+  const classStudents=studentsMatchingGroup(ng);
+  if(classStudents.length) addSystemStudentsToGroup(ng.id, classStudents, {silent:true});
+  activeGroupId=ng.id; saveState(); render();
+}
+function getClassNameForId(classId){
+  const cls=(state.systemClasses||[]).find(c=>c.id===classId);
+  return cls?String(cls.name||'').trim():'';
+}
+function normClassLevel(v){
+  if(v==null||v==='') return '';
+  if(typeof v==='number'&&Number.isFinite(v)){ const n=Math.trunc(v); if(n>=3&&n<=12) return String(n); return ''; }
+  const s=String(v).trim();
+  if(!s) return '';
+  const u=s.toUpperCase();
+  if(u==='LGS') return 'LGS';
+  if(u==='YOS'||u==='YÖS') return 'YOS';
+  if(s==='TYT-Maarif') return 'TYT-Maarif';
+  if(s.startsWith('YKS-')) return s;
+  const n=parseInt(s,10);
+  if(!Number.isNaN(n)&&n>=3&&n<=12) return String(n);
+  return s;
+}
+function classLevelsMatch(a,b){
+  const na=normClassLevel(a), nb=normClassLevel(b);
+  return !!(na&&nb&&na===nb);
+}
+function inferClassLevelFromName(name){
+  const s=String(name||'').trim().toUpperCase();
+  if(!s) return '';
+  if(/\bLGS\b/.test(s)||/^LGS[\s\-_/]/.test(s)) return 'LGS';
+  if(/\bYÖS\b|\bYOS\b/.test(s)||/^YÖS|^YOS/.test(s)) return 'YOS';
+  if(/\bTYT\b/.test(s)||s.includes('TYT-MAARIF')) return 'TYT-Maarif';
+  const yks=s.match(/\bYKS[\s\-_]*(SAY|SÖZ|SOZ|EA|DİL|DIL)\b/);
+  if(yks){
+    const b=yks[1];
+    if(b==='SAY') return 'YKS-Sayısal';
+    if(b==='EA') return 'YKS-Eşit Ağırlık';
+    if(b==='SÖZ'||b==='SOZ') return 'YKS-Sözel';
+    if(b==='DİL'||b==='DIL') return 'YKS-Dil';
+  }
+  const m=s.match(/\b(1[0-2]|[3-9])\b/);
+  if(m) return normClassLevel(m[1]);
+  return '';
+}
+function resolveGroupClassLevel(g){
+  if(!g) return '';
+  if(g.classLevel!=null&&String(g.classLevel).trim()!=='') return normClassLevel(g.classLevel);
+  if(g.classId){
+    const cls=(state.systemClasses||[]).find(c=>c.id===g.classId);
+    if(cls?.class_level!=null&&String(cls.class_level).trim()!=='') return normClassLevel(cls.class_level);
+  }
+  return inferClassLevelFromName(g.name);
+}
+function classLevelFilterLabel(gl){
+  if(!gl) return 'Sınıf seviyesi';
+  if(gl==='LGS') return 'LGS';
+  if(gl==='YOS') return 'YÖS';
+  if(gl==='TYT-Maarif') return 'TYT Maarif';
+  return String(gl);
+}
+function studentsMatchingGroup(g){
+  const all=state.systemStudents||[];
+  if(!all.length||!g) return [];
+  if(g.classId){
+    const byMembership=all.filter(s=>(s.class_ids||[]).includes(g.classId));
+    if(byMembership.length) return byMembership;
+  }
+  const gl=resolveGroupClassLevel(g);
+  if(gl) return all.filter(s=>classLevelsMatch(s.class_level, gl));
+  if(g.classId) return all.filter(s=>(s.class_ids||[]).includes(g.classId));
+  return [];
+}
+function studentAlreadyInGroup(g, sysStudent){
+  if(!g||!sysStudent) return false;
+  const sid=String(sysStudent.id||'');
+  return (g.students||[]).some(s=>(s.systemId&&String(s.systemId)===sid)||norm(s.name)===norm(sysStudent.name));
+}
+function studentsForGroupFilter(g, filter){
+  const all=state.systemStudents||[];
+  if(!all.length) return [];
+  const mode=filter||'level';
+  if(mode==='all') return all.slice();
+  if(mode==='class'&&g?.classId) return all.filter(s=>(s.class_ids||[]).includes(g.classId));
+  const gl=resolveGroupClassLevel(g);
+  if(mode==='level'&&gl) return all.filter(s=>classLevelsMatch(s.class_level, gl));
+  if(g?.classId) return all.filter(s=>(s.class_ids||[]).includes(g.classId));
+  return all.slice();
+}
+function addSystemStudentsToGroup(gid, sysRows, opts={}){
+  const g=group(gid);
+  if(!g) return 0;
+  let added=0;
+  for(const s of sysRows||[]){
+    if(studentAlreadyInGroup(g, s)) continue;
+    const name=String(s.name||'').trim();
+    if(!name) continue;
+    g.students.push({id:uid(), systemId:String(s.id), name});
+    added++;
+  }
+  if(added && !opts.silent){ saveState(); render(); }
+  return added;
+}
+function openStudentPicker(gid){
+  const g=group(gid);
+  if(!g) return;
+  if(!(state.systemStudents||[]).length){
+    alert('Sistemde yüklü öğrenci bulunamadı. Sayfayı yenileyin veya kurum bağlantısını kontrol edin.');
+    return;
+  }
+  studentPickTargetGroup=gid;
+  const gl=resolveGroupClassLevel(g);
+  studentPickFilter=gl?'level':(g.classId?'class':'all');
+  studentPickSelected=new Set();
+  renderStudentPickerModal();
+  $('#studentScrim').classList.add('show');
+  setTimeout(()=>{ const el=$('#spSearch'); if(el){ el.value=''; el.focus(); } }, 30);
+}
+function closeStudentPicker(){
+  $('#studentScrim').classList.remove('show');
+  studentPickTargetGroup=null;
+  studentPickSelected=new Set();
+}
+function renderStudentPickerModal(){
+  const g=group(studentPickTargetGroup);
+  const sub=$('#spSub'), list=$('#spList');
+  if(!g||!sub||!list) return;
+  const className=g.classId?getClassNameForId(g.classId):'';
+  const gl=resolveGroupClassLevel(g);
+  sub.textContent=gl
+    ? `${g.name} · ${classLevelFilterLabel(gl)} (kullanıcı yönetimi sınıf seviyesi)`
+    : (g.classId
+      ? `${g.name} · ${className||'sistem sınıfı'} öğrencileri`
+      : `${g.name} · kurum öğrencileri`);
+  const filterWrap=$('#spFilterWrap');
+  if(filterWrap){
+    if(gl){
+      filterWrap.innerHTML=`
+        <label><input type="radio" name="spFilter" value="level" ${studentPickFilter==='level'?'checked':''}> ${esc(classLevelFilterLabel(gl))} öğrencileri</label>
+        ${g.classId?`<label><input type="radio" name="spFilter" value="class" ${studentPickFilter==='class'?'checked':''}> Bu canlı sınıf (kayıtlılar)</label>`:''}
+        <label><input type="radio" name="spFilter" value="all" ${studentPickFilter==='all'?'checked':''}> Tüm kurum</label>`;
+    }else if(g.classId){
+      filterWrap.innerHTML=`<label><input type="radio" name="spFilter" value="class" ${studentPickFilter==='class'?'checked':''}> Bu sınıf</label>
+         <label><input type="radio" name="spFilter" value="all" ${studentPickFilter==='all'?'checked':''}> Tüm kurum</label>`;
+    }else{
+      filterWrap.innerHTML=`<span class="tiny">Sınıf seviyesi tanımlı değil — tüm kurum listeleniyor</span>`;
+    }
+  }
+  const q=($('#spSearch')?.value||'').trim().toLowerCase();
+  let rows=studentsForGroupFilter(g, studentPickFilter);
+  if(q) rows=rows.filter(s=>String(s.name||'').toLowerCase().includes(q)||String(s.email||'').toLowerCase().includes(q));
+  if(!rows.length){
+    list.innerHTML='<div class="empty">Bu filtreye uygun öğrenci yok.</div>';
+  }else{
+    list.innerHTML=rows.map(s=>{
+      const inGroup=studentAlreadyInGroup(g, s);
+      const checked=studentPickSelected.has(String(s.id));
+      const meta=[s.class_level?String(s.class_level):'', s.email||''].filter(Boolean).join(' · ');
+      return `<label class="sp-row ${inGroup?'in-group':''}">
+        <input type="checkbox" data-act="sp-toggle" data-sid="${esc(s.id)}" ${inGroup?'disabled':''} ${checked?'checked':''}>
+        <span><span class="sp-name">${esc(s.name)}${inGroup?' · grupta':''}</span>${meta?`<span class="sp-meta">${esc(meta)}</span>`:''}</span>
+      </label>`;
+    }).join('');
+  }
+  const countEl=$('#spCount');
+  if(countEl) countEl.textContent=`${studentPickSelected.size} seçili · ${rows.length} listeleniyor`;
+}
+function importClassStudents(gid){
+  const g=group(gid);
+  if(!g) return;
+  const rows=studentsMatchingGroup(g);
+  if(!rows.length){
+    const gl=resolveGroupClassLevel(g);
+    alert(gl
+      ? `${classLevelFilterLabel(gl)} olarak kayıtlı öğrenci bulunamadı.`
+      : 'Bu gruba uygun sistem öğrencisi bulunamadı.');
+    return;
+  }
+  const added=addSystemStudentsToGroup(gid, rows, {silent:true});
+  saveState(); render();
+  alert(added?`${added} öğrenci eklendi.`:'Eklenecek yeni öğrenci yok (hepsi zaten grupta).');
+}
+function addSelectedSystemStudents(){
+  const gid=studentPickTargetGroup;
+  if(!gid) return;
+  const ids=[...studentPickSelected];
+  if(!ids.length){ alert('En az bir öğrenci seçin.'); return; }
+  const map=new Map((state.systemStudents||[]).map(s=>[String(s.id), s]));
+  const rows=ids.map(id=>map.get(String(id))).filter(Boolean);
+  const added=addSystemStudentsToGroup(gid, rows, {silent:true});
+  closeStudentPicker();
+  saveState(); render();
+  alert(added?`${added} öğrenci eklendi.`:'Seçilen öğrenciler zaten grupta.');
+}
+function selectAllVisibleStudents(){
+  const g=group(studentPickTargetGroup);
+  if(!g) return;
+  let rows=studentsForGroupFilter(g, studentPickFilter);
+  const q=($('#spSearch')?.value||'').trim().toLowerCase();
+  if(q) rows=rows.filter(s=>String(s.name||'').toLowerCase().includes(q)||String(s.email||'').toLowerCase().includes(q));
+  rows.forEach(s=>{ if(!studentAlreadyInGroup(g, s)) studentPickSelected.add(String(s.id)); });
+  renderStudentPickerModal();
 }
 function applyPeriodTemplateToGroups(templateKey, groupIds){
   const tpl=templateKey==='evening' ? state.eveningPeriods : state.periods;
@@ -653,6 +903,37 @@ function updateCurriculumTotal(){
   const total=rows.reduce((a,r)=>a+(r.hours||0),0);
   el.textContent=rows.length ? `Toplam ${total} ders saati / hafta · ${rows.length} branş` : 'En az bir ders satırı ekleyin.';
 }
+function readPeriodsFromBuilder(){
+  const rows=[];
+  document.querySelectorAll('#cbPeriodList .chip-row').forEach(row=>{
+    const label=row.querySelector('[data-act="cb-per-label"]')?.value.trim()||'';
+    const time=row.querySelector('[data-act="cb-per-time"]')?.value.trim()||'';
+    if(label||time) rows.push({label:label||(rows.length+1)+'. Ders', time});
+  });
+  return rows;
+}
+function renderClassBuilderPeriods(periods){
+  const list=$('#cbPeriodList');
+  if(!list) return;
+  const rows=periods&&periods.length?periods:[{label:'1. Ders', time:''}];
+  list.innerHTML=rows.map((p,i)=>`
+    <div class="chip-row">
+      <input class="inp" data-act="cb-per-label" data-i="${i}" value="${esc(p.label||'')}" placeholder="1. Ders">
+      <input class="inp t" data-act="cb-per-time" data-i="${i}" value="${esc(p.time||'')}" placeholder="09:00–09:45">
+      <button type="button" class="btn sm danger" data-act="cb-per-del" data-i="${i}" aria-label="Saati sil">×</button>
+    </div>`).join('');
+}
+function applyPeriodsToGroup(g, periods){
+  if(!g) return;
+  g.periods=(periods||[]).map((p,i)=>({
+    label:String(p.label||'').trim()||(i+1)+'. Ders',
+    time:String(p.time||'').trim()
+  }));
+  const max=g.periods.length;
+  const ns={};
+  Object.entries(g.schedule||{}).forEach(([k,v])=>{ const [di,pi]=k.split('_').map(Number); if(pi<max) ns[k]=v; });
+  g.schedule=ns;
+}
 function syncClassBuilderMode(){
   const mode=document.querySelector('input[name="cbMode"]:checked')?.value||'custom';
   $('#cbCustomWrap').classList.toggle('hide', mode!=='custom');
@@ -663,8 +944,8 @@ function openClassBuilder(opts={}){
   const g=opts.groupId?group(opts.groupId):null;
   $('#cbTitle').textContent=g?'Müfredat düzenle': 'Sınıf oluştur';
   $('#cbSub').textContent=g
-    ? `${g.name} — ders saatleri ve öğretmen atamaları`
-    : 'Sistem sınıfı veya özel ad; konu havuzundan ders seçin.';
+    ? `${g.name} — günlük ders saatleri, branşlar ve öğretmen atamaları`
+    : 'Sistem sınıfı veya özel ad; ders saatlerini ve müfredatı tanımlayın.';
   const sysSel=$('#cbSystem');
   sysSel.innerHTML='<option value="">Seçin…</option>'+(state.systemClasses||[]).map(c=>
     `<option value="${esc(c.id)}" ${g&&g.classId===c.id?'selected':''}>${esc(c.name)}${c.branch?' ('+esc(c.branch)+')':''}</option>`
@@ -680,7 +961,14 @@ function openClassBuilder(opts={}){
     document.querySelector('input[name="cbMode"][value="custom"]').checked=true;
     $('#cbName').value=g?g.name:'';
   }
+  if(g){
+    $('#cbModePick').classList.add('hide');
+    $('#cbCustomWrap').classList.remove('hide');
+    $('#cbSystemWrap').classList.add('hide');
+    $('#cbName').value=g.name;
+  }
   syncClassBuilderMode();
+  renderClassBuilderPeriods((g?.periods||state.periods||[]).map(p=>({label:p.label, time:p.time})));
   renderCurriculumBuilderRows(g?.curriculum?.length?g.curriculum.map(x=>({...x})):[]);
   $('#classScrim').classList.add('show');
   setTimeout(()=>{ const el=$('#cbName'); if(el&&!el.closest('.hide')) el.focus(); }, 30);
@@ -689,11 +977,13 @@ function closeClassBuilder(){ $('#classScrim').classList.remove('show'); classBu
 function saveClassBuilder(andFill){
   const mode=document.querySelector('input[name="cbMode"]:checked')?.value||'custom';
   const curriculum=readCurriculumFromBuilder();
+  const periods=readPeriodsFromBuilder();
   let name=$('#cbName').value.trim();
   let classId=null;
+  let cls=null;
   if(mode==='system'){
     const cid=$('#cbSystem').value;
-    const cls=(state.systemClasses||[]).find(c=>c.id===cid);
+    cls=(state.systemClasses||[]).find(c=>c.id===cid);
     if(!cls){ alert('Sistem sınıfı seçin veya özel sınıf moduna geçin.'); return; }
     name=String(cls.name).trim();
     classId=cls.id;
@@ -701,22 +991,35 @@ function saveClassBuilder(andFill){
     if(exists){ alert('Bu sistem sınıfı zaten planlayıcıda.'); return; }
   }
   if(!name){ alert('Sınıf adı girin.'); return; }
+  if(!periods.length){ alert('En az bir ders saati tanımlayın.'); return; }
   if(!curriculum.length){ alert('En az bir ders satırı (branş + haftalık saat) ekleyin.'); return; }
   pushUndo();
+  const resolvedClassLevel=cls?.class_level!=null
+    ? normClassLevel(cls.class_level)||null
+    : inferClassLevelFromName(name)||null;
   let g;
   if(classBuilder.groupId){
     g=group(classBuilder.groupId);
     if(!g) return;
-    g.name=name; g.classId=classId; g.curriculum=curriculum;
+    g.name=name;
+    g.classId=classId||g.classId||null;
+    g.classLevel=resolvedClassLevel||g.classLevel||null;
+    g.curriculum=curriculum;
+    applyPeriodsToGroup(g, periods);
   }else{
     const dup=state.groups.some(x=>norm(x.name)===norm(name));
     if(dup){ alert('Bu isimde sınıf zaten var.'); undoStack.pop(); updateUndoBtn(); return; }
     const c=COLORS[state.groups.length%COLORS.length];
-    g={id:uid(), name, classId, advisor:'', color:c, students:[], schedule:{}, periods:(state.periods||[]).map(p=>({...p})), locked:false, curriculum};
+    g={id:uid(), name, classId, classLevel:resolvedClassLevel, advisor:'', color:c, students:[], schedule:{}, periods:[], locked:false, curriculum};
+    applyPeriodsToGroup(g, periods);
     state.groups.push(g); activeGroupId=g.id;
   }
   let placed=0;
   if(andFill) placed=autoFillGroupFromCurriculum(g, {replace:true});
+  if(classBuilder.mode==='create'){
+    const classStudents=studentsMatchingGroup(g);
+    if(classStudents.length) addSystemStudentsToGroup(g.id, classStudents, {silent:true});
+  }
   saveState(); closeClassBuilder(); render();
   if(andFill) alert(placed?`${placed} ders programa yerleştirildi.`:'Müfredat kaydedildi; uygun boş hücre bulunamadı (saat sayısını veya kilitleri kontrol edin).');
 }
@@ -984,18 +1287,22 @@ function renderGruplar(){
           </div>
           <div class="field" style="margin-bottom:10px">
             <label>Haftalık müfredat ${(g.curriculum||[]).length?'· '+(g.curriculum||[]).reduce((a,c)=>a+(parseInt(c.hours,10)||0),0)+' saat':''}</label>
-            <button type="button" class="btn sm" data-act="edit-curriculum">Dersler &amp; öğretmenler</button>
+            <button type="button" class="btn sm" data-act="edit-curriculum">Müfredat &amp; ders saatleri</button>
             ${(g.curriculum||[]).length?`<div class="cur-summary">${(g.curriculum||[]).map(c=>esc(c.subject)+' ×'+(c.hours||0)+(c.teacher?' · '+esc(c.teacher):'')).join(' · ')}</div>`:'<div class="tiny">Henüz müfredat yok — LGS vb. şablonla ekleyebilirsiniz.</div>'}
           </div>
           <div class="students">
-            <div class="scount" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-              <span>ÖĞRENCİLER · ${g.students.length}</span>
-              <button class="btn sm" data-act="import-students" title="Excel veya CSV'den öğrenci listesi yükle"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 8l5-5 5 5"/><path d="M12 3v12"/></svg>Excel / CSV</button>
+            <div class="scount" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+              <span>ÖĞRENCİLER · ${g.students.length}${(state.systemStudents||[]).length?` · ${(state.systemStudents||[]).length} sistemde`:''}</span>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                ${(state.systemStudents||[]).length?`<button class="btn sm primary" data-act="pick-system-students">Sistemden ekle</button>`:''}
+                ${resolveGroupClassLevel(g)&&(state.systemStudents||[]).length?`<button class="btn sm" data-act="import-class-students">${esc(classLevelFilterLabel(resolveGroupClassLevel(g)))} — tümü</button>`:''}
+                <button class="btn sm" data-act="import-students" title="Excel veya CSV'den öğrenci listesi yükle"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 8l5-5 5 5"/><path d="M12 3v12"/></svg>Excel</button>
+              </div>
             </div>
             ${g.students.length? g.students.map((s,i)=>`
               <div class="stu">
                 <span class="num">${i+1}.</span>
-                <span class="nm">${esc(s.name)}</span>
+                <span class="nm">${esc(s.name)}${s.systemId?' · sistem':''}</span>
                 <button class="x" data-act="del-student" data-sid="${s.id}" aria-label="Öğrenciyi sil">×</button>
               </div>`).join('') : '<div class="empty">Henüz öğrenci yok.</div>'}
             <div class="add-row">
@@ -1383,7 +1690,7 @@ document.addEventListener('click',e=>{
   switch(act){
     case 'add-group':{
       const c=COLORS[state.groups.length%COLORS.length];
-      const ng={id:uid(),name:'Yeni Grup',advisor:'',color:c,students:[],schedule:{},periods:(state.periods||[]).map(p=>({...p})),locked:false,classId:null,curriculum:[]};
+      const ng={id:uid(),name:'Yeni Grup',advisor:'',color:c,students:[],schedule:{},periods:(state.periods||[]).map(p=>({...p})),locked:false,classId:null,classLevel:null,curriculum:[]};
       state.groups.push(ng); activeGroupId=ng.id; saveState(); render();
       break;}
     case 'open-class-builder': openClassBuilder(); break;
@@ -1400,6 +1707,23 @@ document.addEventListener('click',e=>{
       rows.splice(i,1);
       renderCurriculumBuilderRows(rows.length?rows:[{subject:'',hours:1,teacher:''}]);
       break;}
+    case 'cb-per-add':{
+      const rows=readPeriodsFromBuilder();
+      rows.push({label:(rows.length+1)+'. Ders', time:''});
+      renderClassBuilderPeriods(rows);
+      break;}
+    case 'cb-per-del':{
+      const i=parseInt(a.dataset.i,10);
+      const rows=readPeriodsFromBuilder();
+      rows.splice(i,1);
+      renderClassBuilderPeriods(rows.length?rows:[{label:'1. Ders', time:''}]);
+      break;}
+    case 'cb-per-morning':
+      renderClassBuilderPeriods((state.periods||[]).map(p=>({label:p.label, time:p.time})));
+      break;
+    case 'cb-per-evening':
+      renderClassBuilderPeriods((state.eveningPeriods||[]).map(p=>({label:p.label, time:p.time})));
+      break;
     case 'add-sys-class':
     case 'add-sys-class-master':{
       const pick=document.getElementById('sysClassPick');
@@ -1434,6 +1758,11 @@ document.addEventListener('click',e=>{
     case 'pick-group':{ activeGroupId=a.dataset.gid; render(); break; }
     case 'edit-name':{ const inp=card.querySelector('.gname'); if(inp){ inp.focus(); inp.select(); } break; }
     case 'import-students':{ importTargetGroup=gid; $('#studentImportFile').click(); break; }
+    case 'pick-system-students': openStudentPicker(gid); break;
+    case 'import-class-students': importClassStudents(gid); break;
+    case 'sp-save': addSelectedSystemStudents(); break;
+    case 'sp-cancel': closeStudentPicker(); break;
+    case 'sp-select-all': selectAllVisibleStudents(); break;
     case 'bulk-import':{ $('#bulkImportFile').click(); break; }
     case 'edit-master-cell':{
       if(suppressCellClick) break;
@@ -1476,7 +1805,7 @@ document.addEventListener('click',e=>{
 });
 function addStudent(gid,name){
   name=(name||'').trim(); if(!name) return;
-  group(gid).students.push({id:uid(),name}); saveState(); render();
+  group(gid).students.push({id:uid(), systemId:null, name}); saveState(); render();
 }
 function pruneDay(i){
   state.days.splice(i,1);
@@ -1542,7 +1871,8 @@ document.addEventListener('keydown',e=>{
     const card=e.target.closest('[data-gid]'); addStudent(card.dataset.gid, e.target.value); e.target.value='';
   }
   if(e.key==='Escape'){
-    if($('#classScrim').classList.contains('show')) closeClassBuilder();
+    if($('#studentScrim').classList.contains('show')) closeStudentPicker();
+    else if($('#classScrim').classList.contains('show')) closeClassBuilder();
     else if($('#scrim').classList.contains('show')) closeModal();
   }
   if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z' && !e.shiftKey && (tab==='program'||tab==='master') && !$('#scrim').classList.contains('show')){
@@ -1569,6 +1899,24 @@ document.addEventListener('change',e=>{
 });
 $('#scrim').addEventListener('click',e=>{ if(e.target.id==='scrim') closeModal(); });
 $('#classScrim').addEventListener('click',e=>{ if(e.target.id==='classScrim') closeClassBuilder(); });
+$('#studentScrim').addEventListener('click',e=>{ if(e.target.id==='studentScrim') closeStudentPicker(); });
+document.addEventListener('input',e=>{
+  if(e.target.id==='spSearch') renderStudentPickerModal();
+});
+document.addEventListener('change',e=>{
+  if(e.target.dataset&&e.target.dataset.act==='sp-toggle'){
+    const sid=e.target.dataset.sid;
+    if(!sid) return;
+    if(e.target.checked) studentPickSelected.add(sid);
+    else studentPickSelected.delete(sid);
+    renderStudentPickerModal();
+    return;
+  }
+  if(e.target.name==='spFilter'){
+    studentPickFilter=e.target.value||'all';
+    renderStudentPickerModal();
+  }
+});
 document.addEventListener('change',e=>{
   if(e.target.name==='cbMode') syncClassBuilderMode();
   if(e.target.id==='cbPreset'){
@@ -1848,6 +2196,7 @@ window.addEventListener('message', (ev)=>{
     const p=msg.payload||{};
     if(Array.isArray(p.classes)) state.systemClasses=p.classes;
     if(Array.isArray(p.teachers)) mergeTeachersFromSystem(p.teachers);
+    if(Array.isArray(p.students)) state.systemStudents=p.students;
     if(Array.isArray(p.poolSubjects)) state.poolSubjects=p.poolSubjects;
     if(p.curriculumPresets&&typeof p.curriculumPresets==='object') state.curriculumPresets=p.curriculumPresets;
     saveState(); render();
