@@ -14,6 +14,7 @@ export const routeLoaders = {
   'my-profile': () => import('../handlers/my-profile.js'),
   coaches: () => import('../handlers/coaches.js'),
   users: () => import('../handlers/users.js'),
+  'users/bulk-import': () => import('../handlers/users-bulk-import.js'),
   quota: () => import('../handlers/quota.js'),
   'weekly-entries': () => import('../handlers/weekly-entries.js'),
   'weekly-planner-entries': () => import('../handlers/weekly-planner-entries.js'),
@@ -80,5 +81,6 @@ export const routeLoaders = {
   'book-orders-kitapci-portal': () => import('../handlers/book-orders-kitapci-portal.js'),
   'registration-approvals': () => import('../handlers/registration-approvals.js'),
   'cron/book-orders': () => import('../handlers/cron-book-orders.js'),
-  'cron/veli-kayit-admin-notify-retry': () => import('../handlers/cron-veli-kayit-admin-notify-retry.js')
+  'cron/veli-kayit-admin-notify-retry': () => import('../handlers/cron-veli-kayit-admin-notify-retry.js'),
+  'cron/veli-sign-ready-notify-retry': () => import('../handlers/cron-veli-sign-ready-notify-retry.js')
 };

@@ -34,7 +34,7 @@ import { userRoleTags } from '../config/rolePermissions';
 import { db, PendingRegistrationRow, QuotaSnapshot } from '../lib/database';
 import { QuotaManagementPanel } from '../components/quota/QuotaManagementPanel';
 import { PageCollapsibleSection } from '../components/ui/PageCollapsibleSection';
-import { getAuthToken } from '../lib/session';
+import { getAuthToken, apiFetch } from '../lib/session';
 import {
   userRowToSystemUser,
   findStudentForPlatformUser,
@@ -49,19 +49,26 @@ import {
 import { studentRowToStudent, coachRowToCoach } from '../lib/mapStudentRow';
 import {
   downloadUserImportTemplateXlsx,
-  importedRolesKindConflict,
-  normalizeImportedFullNameKey,
-  normalizeRolesFromApiUser,
-  parseUserImportGrid,
+  parseUserImportGridWithMapping,
+  mappingArrayToColMap,
   readUserImportFileAsGrid,
-  USER_IMPORT_TEMPLATE_HEADERS
+  USER_IMPORT_TEMPLATE_HEADERS,
+  type UserImportColumnKey
 } from '../lib/userBulkImport';
+import { UserImportMappingModal } from '../components/users/UserImportMappingModal';
 import {
   COACH_PROFILE_ONLY_PREFIX,
   computeSystemUserStats,
+  computeStudentsByClassLevel,
+  computeStudentsByInstitutionAndClass,
+  classLevelsMatch,
   getDaysLeftFromEndDate,
+  indexStudentsByPlatformLink,
   isUserActiveAccount,
-  isUserExpiredAccount
+  isUserExpiredAccount,
+  normalizeClassLevelFilterKey,
+  resolveStudentForUser,
+  sortClassLevelKeys
 } from '../lib/userStats';
 import TeacherQuestionProfileFields from '../components/questionHelp/TeacherQuestionProfileFields';
 import { saveTeacherQuestionProfile, fetchTeacherQuestionProfile } from '../lib/questionHelp/questionHelpApi';
@@ -221,6 +228,16 @@ export default function UserManagement() {
   const [quota, setQuota] = useState<QuotaSnapshot | null>(null);
   const [quotaRefreshKey, setQuotaRefreshKey] = useState(0);
   const [importBusy, setImportBusy] = useState(false);
+  const [importResult, setImportResult] = useState<{
+    created: number;
+    updated: number;
+    skipped: number;
+    failed: number;
+    errors: { rowNumber: number; message: string }[];
+  } | null>(null);
+  const [importMappingOpen, setImportMappingOpen] = useState(false);
+  const [importGrid, setImportGrid] = useState<unknown[][]>([]);
+  const [importFileName, setImportFileName] = useState('');
   /** Satır içi koç ataması PATCH sırasında */
   const [coachAssignBusy, setCoachAssignBusy] = useState<string | null>(null);
   const [classAssignBusy, setClassAssignBusy] = useState<string | null>(null);
@@ -296,6 +313,56 @@ export default function UserManagement() {
 
   const linkedStudents = pageStudents.length > 0 ? pageStudents : students;
   const linkedCoaches = pageCoaches.length > 0 ? pageCoaches : coaches;
+
+  const studentLinkIndex = useMemo(
+    () => indexStudentsByPlatformLink(linkedStudents),
+    [linkedStudents]
+  );
+
+  const classLevelFilterOptions = useMemo(() => {
+    const known = new Set(CLASS_LEVELS.map((l) => String(l.value)));
+    const extras = new Set<string>();
+    for (const s of linkedStudents) {
+      const key = normalizeClassLevelFilterKey(s.classLevel);
+      if (key && !known.has(key)) extras.add(key);
+    }
+    return sortClassLevelKeys([...extras]).map((key) => ({
+      value: key,
+      label: formatClassLevelLabel(key)
+    }));
+  }, [linkedStudents]);
+
+  const statsStudentsScope = useMemo(() => {
+    if (currentUser?.role === 'super_admin' && filterInstitutionId !== 'all') {
+      return linkedStudents.filter((s) => s.institutionId === filterInstitutionId);
+    }
+    if (currentUser?.role === 'admin') {
+      const inst = activeInstitutionId || institution?.id || currentUser?.institutionId;
+      if (inst) return linkedStudents.filter((s) => !s.institutionId || s.institutionId === inst);
+    }
+    return linkedStudents;
+  }, [
+    linkedStudents,
+    currentUser?.role,
+    currentUser?.institutionId,
+    filterInstitutionId,
+    activeInstitutionId,
+    institution?.id
+  ]);
+
+  const classLevelStats = useMemo(
+    () => computeStudentsByClassLevel(statsStudentsScope),
+    [statsStudentsScope]
+  );
+
+  const institutionClassStats = useMemo(() => {
+    if (currentUser?.role !== 'super_admin') return [];
+    let scope = linkedStudents;
+    if (filterInstitutionId !== 'all') {
+      scope = linkedStudents.filter((s) => s.institutionId === filterInstitutionId);
+    }
+    return computeStudentsByInstitutionAndClass(scope, institutions);
+  }, [linkedStudents, institutions, currentUser?.role, filterInstitutionId]);
 
   useEffect(() => {
     if (currentUser?.role !== 'super_admin' || !activeInstitutionId) return;
@@ -594,17 +661,20 @@ export default function UserManagement() {
     const phoneMatch = (user.phone || '').replace(/\s/g, '').toLowerCase();
     const qDigits = q.replace(/\D/g, '');
     const tags = userRoleTags(user as { role: UserRole; roles?: UserRole[] });
-    const studentMatchForFilter =
-      tags.includes('student')
-        ? findStudentForPlatformUser(
-            {
-              platformUserId: user.id,
-              email: user.email,
-              studentId: user.studentId
-            },
-            linkedStudents
-          )
-        : undefined;
+    const studentMatchForFilter = tags.includes('student')
+      ? resolveStudentForUser(
+          { id: user.id, email: user.email, studentId: user.studentId },
+          studentLinkIndex
+        ) ??
+        findStudentForPlatformUser(
+          {
+            platformUserId: user.id,
+            email: user.email,
+            studentId: user.studentId
+          },
+          linkedStudents
+        )
+      : undefined;
     if (
       searchTerm &&
       !trIncludes(user.name, q) &&
@@ -633,8 +703,8 @@ export default function UserManagement() {
     }
 
     if (filterClassLevel !== 'all') {
-      if (!studentMatchForFilter) return false;
-      if (String(studentMatchForFilter.classLevel ?? '') !== filterClassLevel) return false;
+      if (!tags.includes('student')) return false;
+      if (!classLevelsMatch(studentMatchForFilter?.classLevel, filterClassLevel)) return false;
     }
 
     if (filterCoachId !== 'all') {
@@ -1720,21 +1790,15 @@ export default function UserManagement() {
 
   const stats = useMemo(() => computeSystemUserStats(users), [users]);
 
-  const importAllowedRoles = useMemo((): UserRole[] => {
-    const r = currentUser?.role;
-    if (r === 'teacher') return ['student'];
-    if (r === 'admin' || r === 'super_admin') return ['student', 'teacher', 'coach'];
-    return [];
-  }, [currentUser?.role]);
+  const canBulkImport =
+    currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
 
   const handleBulkUserImport = async (file: File | null) => {
     if (!file) return;
-    if (!(currentUser?.role === 'admin' || currentUser?.role === 'super_admin' || currentUser?.role === 'teacher')) {
-      setMessage({ type: 'error', text: 'Dosya ile içe aktarma yalnızca yönetici veya öğretmen için açıktır.' });
+    if (!canBulkImport) {
+      setMessage({ type: 'error', text: 'Excel ile içe aktarma yalnızca admin ve süper admin için açıktır.' });
       return;
     }
-    setImportBusy(true);
-    const rowErrors: string[] = [];
     try {
       let grid: unknown[][];
       try {
@@ -1743,7 +1807,33 @@ export default function UserManagement() {
         setMessage({ type: 'error', text: 'Dosya okunamadı. .xlsx veya .csv kullanın.' });
         return;
       }
-      const { rows: parsed, headerError, invalidComboRows } = parseUserImportGrid(grid);
+      if (!grid.length) {
+        setMessage({ type: 'error', text: 'Dosya boş.' });
+        return;
+      }
+      setImportGrid(grid);
+      setImportFileName(file.name);
+      setImportMappingOpen(true);
+      setImportResult(null);
+    } catch {
+      setMessage({ type: 'error', text: 'Dosya işlenemedi.' });
+    }
+  };
+
+  const runBulkImportWithMapping = async (
+    headerRowIndex: number,
+    mappings: (UserImportColumnKey | '')[]
+  ) => {
+    if (!canBulkImport) return;
+    setImportBusy(true);
+    setImportResult(null);
+    try {
+      const colMap = mappingArrayToColMap(mappings);
+      const { rows: parsed, headerError, invalidComboRows } = parseUserImportGridWithMapping(
+        importGrid,
+        headerRowIndex,
+        colMap
+      );
       if (headerError) {
         setMessage({ type: 'error', text: headerError });
         return;
@@ -1766,9 +1856,9 @@ export default function UserManagement() {
 
       const instFallback = activeInstitutionId || institution?.id;
       let resolvedInstitutionBase =
-        currentUser?.role === 'teacher'
-          ? currentUser.institutionId
-          : instFallback || currentUser?.institutionId;
+        currentUser?.role === 'super_admin'
+          ? instFallback || currentUser?.institutionId
+          : currentUser?.institutionId || instFallback;
       if (
         resolvedInstitutionBase &&
         institutions.length > 0 &&
@@ -1777,456 +1867,68 @@ export default function UserManagement() {
         resolvedInstitutionBase = undefined;
       }
 
-      let updated = 0;
-      let created = 0;
-      let fail = 0;
-
-      const matchesInstitution = (
-        rowInst: string | null | undefined,
-        scope: string | null
-      ): boolean =>
-        !scope ||
-        rowInst === scope ||
-        rowInst === null ||
-        rowInst === undefined;
-
-      for (const pr of parsed) {
-        const disallowed = pr.roles.filter((r) => !importAllowedRoles.includes(r));
-        if (disallowed.length) {
-          fail += 1;
-          rowErrors.push(`Satır ${pr.rowNumber}: Bu roller için yetkiniz yok: ${disallowed.join(', ')}.`);
-          continue;
-        }
-        const pwd = pr.password.trim();
-        const pwd2 = (pr.passwordConfirm || '').trim();
-        if (pwd.length < 6) {
-          fail += 1;
-          rowErrors.push(`Satır ${pr.rowNumber}: Şifre en az 6 karakter olmalıdır.`);
-          continue;
-        }
-        if (pwd2 && pwd !== pwd2) {
-          fail += 1;
-          rowErrors.push(`Satır ${pr.rowNumber}: Şifre ile şifre tekrarı eşleşmiyor.`);
-          continue;
-        }
-
-        const instId = (resolvedInstitutionBase ?? null) as string | null;
-        const emailLower = pr.email.toLowerCase().trim();
-        const nameKey = normalizeImportedFullNameKey(pr.fullName.trim());
-
-        let nameMatchStudent: Student | undefined;
-        let nameMatchCoach: Coach | undefined;
-
-        const syncProfileCreate = async (newUserId: string) => {
-          if (pr.roles.includes('student')) {
-            await addStudent({
-              id: newUserId,
-              name: pr.fullName.trim(),
-              email: pr.email.trim(),
-              password: pwd,
-              phone: pr.phone.trim() || '',
-              birthDate: pr.birthDate || undefined,
-              parentName: pr.parentName.trim() || undefined,
-              parentPhone: pr.parentPhone.trim() || '',
-              classLevel: toClassLevel(pr.classLevel),
-              school: pr.branch.trim() || undefined,
-              institutionId: instId || undefined,
-              createdAt: new Date().toISOString()
-            });
-          }
-          if (pr.roles.includes('coach')) {
-            await addCoach({
-              id: newUserId,
-              name: pr.fullName.trim(),
-              email: pr.email.trim(),
-              phone: pr.phone.trim() || '',
-              subjects: [],
-              studentIds: [],
-              institutionId: instId || undefined,
-              createdAt: new Date().toISOString()
-            });
-          }
-        };
-
-        const upsertProfilesForExistingUser = async (existing: {
-          id: string;
-          email?: string | null;
-        }) => {
-          if (pr.roles.includes('student')) {
-            const stMail = String(existing.email || '').toLowerCase().trim();
-            const st =
-              findStudentForPlatformUser(
-                {
-                  platformUserId: existing.id,
-                  email: existing.email || undefined,
-                  studentId: undefined
-                },
-                linkedStudents
-              ) || nameMatchStudent;
-            if (st) {
-              await updateStudent(st.id, {
-                name: pr.fullName.trim(),
-                email: pr.email.trim(),
-                password: pwd,
-                phone: pr.phone.trim() || '',
-                birthDate: pr.birthDate || undefined,
-                parentName: pr.parentName.trim() || undefined,
-                parentPhone: pr.parentPhone.trim() || '',
-                classLevel: toClassLevel(pr.classLevel),
-                school: pr.branch.trim() || undefined,
-                institutionId: instId || undefined
-              });
-            } else {
-              await addStudent({
-                id: existing.id,
-                name: pr.fullName.trim(),
-                email: pr.email.trim(),
-                password: pwd,
-                phone: pr.phone.trim() || '',
-                birthDate: pr.birthDate || undefined,
-                parentName: pr.parentName.trim() || undefined,
-                parentPhone: pr.parentPhone.trim() || '',
-                classLevel: toClassLevel(pr.classLevel),
-                school: pr.branch.trim() || undefined,
-                institutionId: instId || undefined,
-                createdAt: new Date().toISOString()
-              });
-            }
-          }
-          if (pr.roles.includes('coach')) {
-            const chEm = String(existing.email || '').toLowerCase().trim();
-            const ch =
-              coaches.find((c) => c.email.toLowerCase().trim() === chEm) ||
-              nameMatchCoach ||
-              coaches.find((c) => String(c.id) === String(existing.id));
-            if (ch) {
-              await updateCoach(ch.id, {
-                name: pr.fullName.trim(),
-                email: pr.email.trim(),
-                phone: pr.phone.trim() || ''
-              });
-            } else {
-              await addCoach({
-                id: existing.id,
-                name: pr.fullName.trim(),
-                email: pr.email.trim(),
-                phone: pr.phone.trim() || '',
-                subjects: [],
-                studentIds: [],
-                institutionId: instId || undefined,
-                createdAt: new Date().toISOString()
-              });
-            }
-          }
-        };
-
-        try {
-          if (getAuthToken()) {
-            let existing: UserRow | null = null;
-            try {
-              existing = await db.getUserByEmail(emailLower);
-            } catch {
-              existing = null;
-            }
-
-            if (!existing && pr.roles.includes('student')) {
-              const cand = linkedStudents.filter(
-                (st) =>
-                  normalizeImportedFullNameKey(st.name) === nameKey &&
-                  matchesInstitution(st.institutionId, instId)
-              );
-              if (cand.length > 1) {
-                fail += 1;
-                rowErrors.push(
-                  `Satır ${pr.rowNumber}: Aynı ada soyada kurumda birden fazla öğrenci var; tekilleştirmek için e-postayı dosyada doğru kullanın.`
-                );
-                continue;
-              }
-              nameMatchStudent = cand[0];
-              if (nameMatchStudent) {
-                try {
-                  existing = await db.getUserByEmail(
-                    String(nameMatchStudent.email || '').toLowerCase().trim()
-                  );
-                } catch {
-                  existing = null;
-                }
-              }
-            }
-
-            if (!existing && pr.roles.includes('coach')) {
-              const cand = coaches.filter(
-                (c) =>
-                  normalizeImportedFullNameKey(c.name) === nameKey &&
-                  matchesInstitution(c.institutionId, instId)
-              );
-              if (cand.length > 1) {
-                fail += 1;
-                rowErrors.push(
-                  `Satır ${pr.rowNumber}: Aynı ada soyada birden fazla koç var; e-posta ile eşleştirin.`
-                );
-                continue;
-              }
-              nameMatchCoach = cand[0];
-              if (nameMatchCoach) {
-                try {
-                  existing = await db.getUserByEmail(String(nameMatchCoach.email || '').toLowerCase().trim());
-                } catch {
-                  existing = null;
-                }
-              }
-            }
-
-            if (!existing && pr.roles.includes('teacher')) {
-              const cand = rawUserRows
-                .filter((rw) => normalizeRolesFromApiUser(rw).includes('teacher'))
-                .map((rw) => userRowToSystemUser(rw, { coaches: linkedCoaches, students: linkedStudents }))
-                .filter(
-                  (u) =>
-                    !u.id.startsWith(COACH_PROFILE_ONLY_PREFIX) &&
-                    normalizeImportedFullNameKey(u.name) === nameKey &&
-                    matchesInstitution(u.institutionId, instId)
-                );
-              if (cand.length > 1) {
-                fail += 1;
-                rowErrors.push(
-                  `Satır ${pr.rowNumber}: Aynı ada soyada birden fazla öğretmen var; e-posta ile eşleştirin.`
-                );
-                continue;
-              }
-              const tRow = cand[0];
-              if (tRow) {
-                try {
-                  existing = await db.getUserByEmail(String(tRow.email || '').toLowerCase().trim());
-                } catch {
-                  existing = null;
-                }
-              }
-            }
-
-            if (existing) {
-              const existingRoles = normalizeRolesFromApiUser(existing);
-              if (importedRolesKindConflict(existingRoles, pr.roles)) {
-                fail += 1;
-                rowErrors.push(
-                  `Satır ${pr.rowNumber}: Mevcut kullanıcı rolleri (${existingRoles.join(
-                    ', '
-                  )}) ile dosyadaki roller (${pr.roles.join(', ')}) uyumsuz (öğrenci ile personeli karıştırmayın).`
-                );
-                continue;
-              }
-              const primaryRole = pr.roles[0] as UserRow['role'];
-              await db.updateUser(existing.id, {
-                name: pr.fullName.trim(),
-                email: emailLower,
-                phone: pr.phone.trim() || null,
-                password_hash: pwd,
-                roles: pr.roles,
-                role: primaryRole
-              } as Partial<UserRow>);
-              await upsertProfilesForExistingUser({ id: existing.id, email: emailLower });
-              updated += 1;
-              continue;
-            }
-
-            const row = await db.createUser({
-              email: emailLower,
-              name: pr.fullName.trim(),
-              phone: pr.phone.trim() || null,
-              role: pr.roles[0] as UserRow['role'],
-              roles: pr.roles,
-              password_hash: pwd,
-              institution_id: instId,
-              is_active: true,
-              package: 'trial',
-              start_date: new Date().toISOString(),
-              end_date: null,
-              created_by: null
-            });
-            try {
-              if (pr.roles.includes('student') || pr.roles.includes('coach')) {
-                await syncProfileCreate(row.id);
-              }
-            } catch (syncErr) {
-              fail += 1;
-              rowErrors.push(
-                `Satır ${pr.rowNumber}: Kullanıcı oluşturuldu ancak profil senkronu başarısız: ${
-                  syncErr instanceof Error ? syncErr.message : 'bilinmeyen'
-                }`
-              );
-              continue;
-            }
-            created += 1;
-          } else {
-            let existingLocal =
-              getAllUsers().find((u) => u.email.toLowerCase().trim() === emailLower) || null;
-
-            if (!existingLocal && pr.roles.includes('student')) {
-              const cand = linkedStudents.filter(
-                (st) =>
-                  normalizeImportedFullNameKey(st.name) === nameKey &&
-                  matchesInstitution(st.institutionId, instId)
-              );
-              if (cand.length > 1) {
-                fail += 1;
-                rowErrors.push(
-                  `Satır ${pr.rowNumber}: Aynı ada soyada birden fazla öğrenci var; e-posta kullanın.`
-                );
-                continue;
-              }
-              nameMatchStudent = cand[0];
-              if (nameMatchStudent)
-                existingLocal =
-                  getAllUsers().find(
-                    (u) =>
-                      u.email.toLowerCase().trim() ===
-                      String(nameMatchStudent!.email || '').toLowerCase().trim()
-                  ) || null;
-            }
-
-            if (!existingLocal && pr.roles.includes('coach')) {
-              const cand = coaches.filter(
-                (c) =>
-                  normalizeImportedFullNameKey(c.name) === nameKey &&
-                  matchesInstitution(c.institutionId, instId)
-              );
-              if (cand.length > 1) {
-                fail += 1;
-                rowErrors.push(
-                  `Satır ${pr.rowNumber}: Aynı ada soyada birden fazla koç var; e-posta kullanın.`
-                );
-                continue;
-              }
-              nameMatchCoach = cand[0];
-              if (nameMatchCoach)
-                existingLocal =
-                  getAllUsers().find(
-                    (u) =>
-                      u.email.toLowerCase().trim() ===
-                      String(nameMatchCoach!.email || '').toLowerCase().trim()
-                  ) || null;
-            }
-
-            if (!existingLocal && pr.roles.includes('teacher')) {
-              const cand = rawUserRows.length
-                ? rawUserRows
-                    .filter((rw) => normalizeRolesFromApiUser(rw).includes('teacher'))
-                    .map((rw) => userRowToSystemUser(rw, { coaches: linkedCoaches, students: linkedStudents }))
-                    .filter(
-                      (u) =>
-                        !u.id.startsWith(COACH_PROFILE_ONLY_PREFIX) &&
-                        normalizeImportedFullNameKey(u.name) === nameKey &&
-                        matchesInstitution(u.institutionId, instId)
-                    )
-                : users.filter(
-                    (u) =>
-                      !u.id.startsWith(COACH_PROFILE_ONLY_PREFIX) &&
-                      (u.role === 'teacher' || (u.roles || []).includes('teacher')) &&
-                      normalizeImportedFullNameKey(u.name) === nameKey &&
-                      matchesInstitution(u.institutionId, instId)
-                  );
-              if (cand.length > 1) {
-                fail += 1;
-                rowErrors.push(
-                  `Satır ${pr.rowNumber}: Aynı ada soyada birden fazla öğretmen var; e-posta kullanın.`
-                );
-                continue;
-              }
-              const tRw = cand[0];
-              if (tRw) existingLocal = getAllUsers().find((u) => u.id === tRw.id) || null;
-            }
-
-            if (existingLocal) {
-              const existingLocalRoles =
-                existingLocal.roles?.length ? existingLocal.roles : [existingLocal.role];
-              if (importedRolesKindConflict(existingLocalRoles, pr.roles)) {
-                fail += 1;
-                rowErrors.push(
-                  `Satır ${pr.rowNumber}: Yerel kayıt rolleri (${existingLocalRoles.join(
-                    ', '
-                  )}) ile dosya (${pr.roles.join(', ')}) uyumsuz.`
-                );
-                continue;
-              }
-              const ur = await updateUser(existingLocal.id, {
-                name: pr.fullName.trim(),
-                email: pr.email.trim(),
-                phone: pr.phone.trim(),
-                password: pwd,
-                role: pr.roles[0],
-                roles: pr.roles
-              });
-              if (!ur.success) {
-                fail += 1;
-                rowErrors.push(`Satır ${pr.rowNumber}: ${ur.message}`);
-                continue;
-              }
-              await upsertProfilesForExistingUser({
-                id: existingLocal.id,
-                email: emailLower
-              });
-              updated += 1;
-              continue;
-            }
-
-            const result = await createUser({
-              name: pr.fullName.trim(),
-              email: pr.email.trim(),
-              phone: pr.phone.trim(),
-              password: pwd,
-              role: pr.roles[0],
-              roles: pr.roles,
-              package: 'trial',
-              startDate: new Date().toISOString(),
-              isActive: true,
-              institutionId: instId || undefined,
-              institution_id: instId || undefined
-            });
-            if (!result.success) {
-              fail += 1;
-              rowErrors.push(`Satır ${pr.rowNumber}: ${result.message}`);
-              continue;
-            }
-            const newUserId = result.userId || '';
-            if (!newUserId) {
-              fail += 1;
-              rowErrors.push(`Satır ${pr.rowNumber}: Kullanıcı kimliği alınamadı.`);
-              continue;
-            }
-            try {
-              if (pr.roles.includes('student') || pr.roles.includes('coach')) {
-                await syncProfileCreate(newUserId);
-              }
-            } catch (syncErr) {
-              fail += 1;
-              rowErrors.push(
-                `Satır ${pr.rowNumber}: Kullanıcı oluşturuldu ancak profil senkronu başarısız: ${
-                  syncErr instanceof Error ? syncErr.message : 'bilinmeyen'
-                }`
-              );
-              continue;
-            }
-            created += 1;
-          }
-        } catch (e) {
-          fail += 1;
-          rowErrors.push(
-            `Satır ${pr.rowNumber}: ${e instanceof Error ? e.message : 'Kayıt oluşturulamadı.'}`
-          );
-        }
+      const disallowed = parsed.flatMap((pr) =>
+        pr.roles.filter((r) => r !== 'student' && r !== 'teacher' && r !== 'coach')
+      );
+      if (disallowed.length) {
+        setMessage({ type: 'error', text: 'Yalnızca öğrenci, öğretmen ve koç rolleri desteklenir.' });
+        return;
       }
 
+      const res = await apiFetch('/api/users/bulk-import', {
+        method: 'POST',
+        body: JSON.stringify({
+          institution_id: resolvedInstitutionBase ?? null,
+          rows: parsed.map((pr) => ({
+            rowNumber: pr.rowNumber,
+            firstName: pr.firstName,
+            lastName: pr.lastName,
+            fullName: pr.fullName,
+            email: pr.email,
+            phone: pr.phone,
+            birthDate: pr.birthDate,
+            classLevel: pr.classLevel,
+            branch: pr.branch,
+            roles: pr.roles,
+            password: pr.password,
+            parentName: pr.parentName,
+            parentPhone: pr.parentPhone
+          }))
+        })
+      });
+
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMessage({
+          type: 'error',
+          text: String(payload?.error || payload?.hint || 'Toplu içe aktarma başarısız.')
+        });
+        return;
+      }
+
+      setImportMappingOpen(false);
+      setImportResult({
+        created: Number(payload.created) || 0,
+        updated: Number(payload.updated) || 0,
+        skipped: Number(payload.skipped) || 0,
+        failed: Number(payload.failed) || 0,
+        errors: Array.isArray(payload.errors) ? payload.errors : []
+      });
+
       await refreshUsers();
+      const ok = (Number(payload.created) || 0) + (Number(payload.updated) || 0);
       const errTail =
-        rowErrors.length > 0
+        Array.isArray(payload.errors) && payload.errors.length > 0
           ? ' ' +
-            rowErrors.slice(0, 8).join(' ') +
-            (rowErrors.length > 8 ? ` (+${rowErrors.length - 8} satır daha)` : '')
+            payload.errors
+              .slice(0, 8)
+              .map((x: { rowNumber: number; message: string }) => `Satır ${x.rowNumber}: ${x.message}`)
+              .join(' ') +
+            (payload.errors.length > 8 ? ` (+${payload.errors.length - 8} satır daha)` : '')
           : '';
-      const ok = updated + created;
       setMessage({
         type: ok > 0 ? 'success' : 'error',
-        text: `İçe aktarma bitti. Güncellenen: ${updated}, Yeni: ${created}, Hatalı: ${fail}.${errTail}`
+        text: `İçe aktarma bitti. Yeni: ${payload.created || 0}, Güncellenen: ${payload.updated || 0}, Atlanan: ${payload.skipped || 0}, Hatalı: ${payload.failed || 0}.${errTail}`
       });
     } finally {
       setImportBusy(false);
@@ -2252,6 +1954,7 @@ export default function UserManagement() {
           Yeni Kullanıcı
         </button>
       </div>
+      {canBulkImport ? (
       <PageCollapsibleSection
         title="Excel / CSV ile toplu kullanıcı ekle"
         description="Dosya yükleme ve örnek şablon"
@@ -2266,28 +1969,50 @@ export default function UserManagement() {
               <Download className="h-4 w-4" />
               Örnek Excel indir
             </button>
-            <input
-              type="file"
-              accept=".xlsx,.xls,.csv,.txt"
-              disabled={importBusy}
-              onChange={(e) => void handleBulkUserImport(e.target.files?.[0] || null)}
-              className="text-sm"
-            />
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv,.txt"
+                disabled={importBusy}
+                onChange={(e) => void handleBulkUserImport(e.target.files?.[0] || null)}
+                className="text-sm"
+              />
+              {importBusy ? (
+                <span className="inline-flex items-center gap-1 text-slate-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Yükleniyor…
+                </span>
+              ) : null}
+            </label>
           </div>
           <p className="text-xs text-slate-500">
-            Önerilen başlık sırası: {USER_IMPORT_TEMPLATE_HEADERS.join(' · ')}. Başlıklar Türkçe veya İngilizce
-            eşlenir; veli telefonu ile öğrenci telefonu farklı sütunlarda olmalıdır. GSM numaraları Excelde sayı olsa bile
-            okunur (gerekirse başa 0 eklenir). Sınıf ve şube iki sütunda olabileceği gibi tek hücrede{' '}
-            <span className="font-mono">11-A</span>, <span className="font-mono">11 / B</span> veya{' '}
-            <span className="font-mono">12C</span> biçiminde de olabilir. Aynı e-posta ile tekrar yüklerseniz veya
-            kurumda yalnızca bir kişiyle eşleşen aynı ad-soyad bulunursa kayıt güncellenir (yeni satır açılmaz). Rol
-            için: öğrenci, öğretmen
-            {currentUser?.role === 'admin' || currentUser?.role === 'super_admin' ? ', koç' : ''}; birden fazla rol için
-            virgül, noktalı virgül veya <span className="font-mono">ve</span> ile ayırın (örn. öğretmen, koç). Şifre tekrarı
-            doluysa birinciyle aynı olmalıdır.
+            Excel yükledikten sonra sütun eşleştirme ekranı açılır — her sütunu Ad, Soyad, Mail, Şifre, Veli
+            adı vb. alanlara seçerek eşleyebilirsiniz. Örnek şablon sütunları:{' '}
+            {USER_IMPORT_TEMPLATE_HEADERS.join(' · ')}. Rol sütunu yoksa kayıt öğrenci olarak eklenir.
           </p>
+          {importResult ? (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+              <div className="font-medium">Son içe aktarma özeti</div>
+              <div className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <span>Yeni: {importResult.created}</span>
+                <span>Güncellenen: {importResult.updated}</span>
+                <span>Atlanan: {importResult.skipped}</span>
+                <span>Hatalı: {importResult.failed}</span>
+              </div>
+              {importResult.errors.length > 0 ? (
+                <ul className="mt-2 max-h-40 list-disc space-y-1 overflow-y-auto pl-5 text-xs text-red-700">
+                  {importResult.errors.slice(0, 20).map((err, i) => (
+                    <li key={`${err.rowNumber}-${i}`}>
+                      Satır {err.rowNumber}: {err.message}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </PageCollapsibleSection>
+      ) : null}
 
       <PageCollapsibleSection
         title="Özet istatistikler"
@@ -2330,6 +2055,81 @@ export default function UserManagement() {
           <div className="text-sm text-gray-500">Süresi Dolmuş</div>
         </div>
         </div>
+
+        {(currentUser?.role === 'admin' || currentUser?.role === 'super_admin') &&
+        classLevelStats.length > 0 ? (
+          <div className="mt-6 border-t border-gray-100 pt-4">
+            <h3 className="text-sm font-semibold text-slate-800 mb-3">
+              {currentUser?.role === 'super_admin' && filterInstitutionId !== 'all'
+                ? 'Seçili kurum — sınıfa göre öğrenci'
+                : currentUser?.role === 'admin'
+                  ? 'Kurumunuz — sınıfa göre öğrenci'
+                  : 'Sınıfa göre öğrenci dağılımı'}
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+              {classLevelStats.map((row) => (
+                <button
+                  key={row.key}
+                  type="button"
+                  onClick={() =>
+                    setFilterClassLevel(row.key === '__unknown__' ? 'all' : row.key)
+                  }
+                  className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                    filterClassLevel === row.key
+                      ? 'border-red-300 bg-red-50'
+                      : 'border-gray-100 bg-white hover:border-slate-200'
+                  }`}
+                >
+                  <div className="text-lg font-bold text-slate-800">{row.count}</div>
+                  <div className="text-xs text-slate-500">{row.label}</div>
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-slate-400">
+              Kutuya tıklayarak sınıf süzgecini uygulayabilirsiniz. Toplam:{' '}
+              {statsStudentsScope.length} öğrenci profili.
+            </p>
+          </div>
+        ) : null}
+
+        {currentUser?.role === 'super_admin' && institutionClassStats.length > 0 ? (
+          <div className="mt-6 border-t border-gray-100 pt-4">
+            <h3 className="text-sm font-semibold text-slate-800 mb-3">
+              Kurumlara göre sınıf dağılımı
+            </h3>
+            <div className="space-y-4 max-h-96 overflow-y-auto pr-1">
+              {institutionClassStats.map((inst) => (
+                <div
+                  key={inst.institutionId}
+                  className="rounded-lg border border-gray-100 bg-white p-3"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                    <span className="font-medium text-slate-800">{inst.institutionName}</span>
+                    <span className="text-xs text-slate-500">{inst.total} öğrenci</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {inst.byClass.map((row) => (
+                      <button
+                        key={`${inst.institutionId}-${row.key}`}
+                        type="button"
+                        onClick={() => {
+                          if (inst.institutionId !== '__none__') {
+                            setFilterInstitutionId(inst.institutionId);
+                          }
+                          if (row.key !== '__unknown__') setFilterClassLevel(row.key);
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-100"
+                      >
+                        <span className="font-semibold">{row.count}</span>
+                        <span>{row.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </PageCollapsibleSection>
 
       {(currentUser?.role === 'super_admin' || currentUser?.role === 'admin') &&
@@ -2573,6 +2373,11 @@ export default function UserManagement() {
               {CLASS_LEVELS.map((level) => (
                 <option key={String(level.value)} value={String(level.value)}>
                   {level.label}
+                </option>
+              ))}
+              {classLevelFilterOptions.map((opt) => (
+                <option key={`extra-${opt.value}`} value={opt.value}>
+                  {opt.label} (veride)
                 </option>
               ))}
             </select>
@@ -3570,6 +3375,19 @@ export default function UserManagement() {
         onClose={() => setLoginCredentialsModal(null)}
         data={loginCredentialsModal}
         autoCopyAll
+      />
+
+      <UserImportMappingModal
+        open={importMappingOpen}
+        grid={importGrid}
+        fileName={importFileName}
+        busy={importBusy}
+        onClose={() => {
+          if (!importBusy) setImportMappingOpen(false);
+        }}
+        onConfirm={(headerRowIndex, mappings) =>
+          void runBulkImportWithMapping(headerRowIndex, mappings)
+        }
       />
     </div>
   );

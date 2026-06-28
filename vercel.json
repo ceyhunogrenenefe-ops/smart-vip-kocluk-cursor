@@ -86,6 +86,10 @@
       "schedule": "*/10 * * * *"
     },
     {
+      "path": "/api/cron/veli-sign-ready-notify-retry",
+      "schedule": "*/10 * * * *"
+    },
+    {
       "path": "/api/cron/edesis-sync",
       "schedule": "0 6,18 * * *"
     },

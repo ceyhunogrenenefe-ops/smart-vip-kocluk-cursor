@@ -30,7 +30,8 @@ export const TEMPLATE_TYPE_TO_CRON_JOB_KEY = {
   class_absent_notice_1: 'absent_student_notification',
   /** Kitap siparişi — onayda anlık gönderim; cron yalnızca pending yedek */
   kitap_siparis_bildirim: 'book_orders',
-  veli_kayit_admin_notify: 'veli_kayit_admin_notify'
+  veli_kayit_admin_notify: 'veli_kayit_admin_notify',
+  veli_sign_ready_notify: 'veli_sign_ready_notify'
 };
 
 export const KNOWN_CRON_JOBS = [
@@ -45,7 +46,8 @@ export const KNOWN_CRON_JOBS = [
   { key: 'study_evening_reminder', label: 'Akşam çalışma hatırlatması', expectEveryMinutes: 24 * 60 },
   { key: 'absent_student_notification', label: 'Devamsızlık bildirimi (anlık + başarısız yeniden deneme)', expectEveryMinutes: 15 },
   { key: 'book_orders', label: 'Kitap siparişi — yalnızca başarısız WhatsApp yeniden deneme (onay anında)', expectEveryMinutes: 15 },
-  { key: 'veli_kayit_admin_notify', label: 'Yeni kayıt formu — admin Meta bildirimi (retry)', expectEveryMinutes: 10 }
+  { key: 'veli_kayit_admin_notify', label: 'Yeni kayıt formu — admin Meta bildirimi (retry)', expectEveryMinutes: 10 },
+  { key: 'veli_sign_ready_notify', label: 'Veli imza hazır — Meta bildirimi (retry)', expectEveryMinutes: 10 }
 ];
 
 function templateTypesForCronJobKey(jobKey) {

@@ -4,6 +4,18 @@ import type { UserRole } from '../types';
 
 /** Şablonda ve yardım metninde kullanılan tam başlık sırası */
 export const USER_IMPORT_TEMPLATE_HEADERS = [
+  'Veli adı',
+  'Veli telefonu',
+  'Sınıf',
+  'Ad',
+  'Soyad',
+  'Öğrenci tel',
+  'Mail',
+  'Şifre'
+] as const;
+
+/** Geniş şablon (rol, doğum tarihi, şube vb.) — geriye dönük uyumluluk */
+export const USER_IMPORT_EXTENDED_HEADERS = [
   'Adı',
   'Soyadı',
   'E-mail adresi',
@@ -75,7 +87,7 @@ function headerToKey(h: string): UserImportColumnKey | null {
   if (!n) return null;
   if (/^(adi|ad|isim|name)$/.test(n)) return 'firstName';
   if (/^(soyadi|soyad|surname|lastname|last name)$/.test(n)) return 'lastName';
-  if (/(e\s*[-]?\s*mail|eposta|email)/.test(n.replace(/\s/g, ''))) return 'email';
+  if (/(e\s*[-]?\s*mail|eposta|email|^mail$)/.test(n.replace(/\s/g, ''))) return 'email';
 
   // ÖNEMLİ: "Veli telefon" genel "telefon" deseninden önce kontrol edilmeli (aksi halde yanlış sütun eşlenir)
   if (
@@ -83,7 +95,7 @@ function headerToKey(h: string): UserImportColumnKey | null {
   ) {
     return 'parentPhone';
   }
-  if (/(veli adi|veli ismi|veli\s+adi|ebeveyn adi|parent\s*name)/.test(n)) return 'parentName';
+  if (/(veli adi|veli ismi|veli\s+adi|ebeveyn adi|parent\s*name|^veli ad)/.test(n)) return 'parentName';
 
   if (/(dogum tarihi|dogumtarihi|dogum|birthdate|birthday|dtarihi)/.test(n)) return 'birthDate';
 
@@ -112,7 +124,7 @@ function headerToKey(h: string): UserImportColumnKey | null {
   )
     return 'classLevel';
 
-  if (/(ogrenci\s*(telefon|tel|gsm|cep)|cep\s*telefon|mobile|^gsm|^tel\b|^\s*(telefon|tel)\s|telefon\b)/.test(n))
+  if (/(ogrenci\s*(telefon|tel|gsm|cep)|ogrenci tel|cep\s*telefon|mobile|^gsm|^tel\b|^\s*(telefon|tel)\s|telefon\b)/.test(n))
     return 'phone';
 
   if (/^rol/.test(n) || n === 'role') return 'role';
@@ -122,7 +134,7 @@ function headerToKey(h: string): UserImportColumnKey | null {
     )
   )
     return 'passwordConfirm';
-  if (/^sifre/.test(n) || /^password/.test(n)) return 'password';
+  if (/^sifre$|^sifresi$|^password$/.test(n)) return 'password';
   return null;
 }
 
@@ -368,29 +380,115 @@ export function parseUserImportGrid(rows: unknown[][]): {
   }
   const headerCells = rows[0]!.map((c) => cellValueToString(c));
   const colMap = buildHeaderIndexMap(headerCells);
-  const need: UserImportColumnKey[] = ['firstName', 'lastName', 'email', 'role'];
+  return parseUserImportGridWithMapping(rows, 0, colMap);
+}
+
+/** UI: sütun eşleme seçenekleri */
+export const USER_IMPORT_FIELD_OPTIONS: {
+  key: UserImportColumnKey | '';
+  label: string;
+  required?: boolean;
+}[] = [
+  { key: '', label: '— Atla —' },
+  { key: 'firstName', label: 'Ad', required: true },
+  { key: 'lastName', label: 'Soyad', required: true },
+  { key: 'email', label: 'Mail / E-posta', required: true },
+  { key: 'phone', label: 'Öğrenci tel' },
+  { key: 'classLevel', label: 'Sınıf' },
+  { key: 'branch', label: 'Şube' },
+  { key: 'password', label: 'Şifre' },
+  { key: 'passwordConfirm', label: 'Şifre (tekrar)' },
+  { key: 'parentName', label: 'Veli adı' },
+  { key: 'parentPhone', label: 'Veli telefonu' },
+  { key: 'birthDate', label: 'Doğum tarihi' },
+  { key: 'role', label: 'Rol' }
+];
+
+export function columnLetter(colIdx: number): string {
+  let n = colIdx;
+  let s = '';
+  do {
+    s = String.fromCharCode(65 + (n % 26)) + s;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return s;
+}
+
+/** Başlık satırından otomatik sütun eşlemesi öner */
+export function suggestColumnMapping(headerRow: unknown[]): Map<UserImportColumnKey, number> {
+  const headerCells = headerRow.map((c) => cellValueToString(c));
+  return buildHeaderIndexMap(headerCells);
+}
+
+/** Manuel sütun eşlemesi: colIdx → alan anahtarı */
+export function mappingArrayToColMap(
+  mappings: (UserImportColumnKey | '' | null | undefined)[]
+): Map<UserImportColumnKey, number> {
+  const map = new Map<UserImportColumnKey, number>();
+  mappings.forEach((key, colIdx) => {
+    if (!key) return;
+    if (key === 'password') {
+      if (!map.has('password')) map.set('password', colIdx);
+      else if (!map.has('passwordConfirm')) map.set('passwordConfirm', colIdx);
+      return;
+    }
+    if (!map.has(key)) map.set(key, colIdx);
+  });
+  return map;
+}
+
+export function colMapToMappingArray(
+  colCount: number,
+  colMap: Map<UserImportColumnKey, number>
+): (UserImportColumnKey | '')[] {
+  const out: (UserImportColumnKey | '')[] = Array.from({ length: colCount }, () => '');
+  for (const [key, idx] of colMap.entries()) {
+    if (idx >= 0 && idx < colCount) out[idx] = key;
+  }
+  return out;
+}
+
+export function parseUserImportGridWithMapping(
+  rows: unknown[][],
+  headerRowIndex: number,
+  colMap: Map<UserImportColumnKey, number>
+): {
+  rows: ParsedUserImportRow[];
+  headerError: string | null;
+  invalidComboRows: { rowNumber: number; message: string }[];
+} {
+  const dataStart = headerRowIndex >= 0 ? headerRowIndex + 1 : 0;
+  if (rows.length <= dataStart) {
+    return { rows: [], headerError: 'Dosyada en az bir veri satırı olmalıdır.', invalidComboRows: [] };
+  }
+
+  const need: UserImportColumnKey[] = ['firstName', 'lastName', 'email'];
   const missing = need.filter((k) => !colMap.has(k));
   if (missing.length) {
+    const labels = missing
+      .map((k) => USER_IMPORT_FIELD_OPTIONS.find((o) => o.key === k)?.label || k)
+      .join(', ');
     return {
       rows: [],
-      headerError:
-        'Zorunlu sütunlar eksik: Adı, Soyadı, E-mail adresi, Rolü (birden fazla rol için virgülle ayırın). İndirdiğiniz örnek şablonu kullanın veya başlıkları kontrol edin.',
+      headerError: `Zorunlu alanlar eşlenmedi: ${labels}. Her sütun için açılır menüden alan seçin.`,
       invalidComboRows: []
     };
   }
+  const hasRoleColumn = colMap.has('role');
 
   const out: ParsedUserImportRow[] = [];
   const invalidComboRows: { rowNumber: number; message: string }[] = [];
-  for (let i = 1; i < rows.length; i++) {
+  for (let i = dataStart; i < rows.length; i++) {
     const line = rows[i] || [];
     if (line.every((c) => !cellValueToString(c))) continue;
     const firstName = cell(line, colMap.get('firstName'));
     const lastName = cell(line, colMap.get('lastName'));
     const email = cell(line, colMap.get('email')).toLowerCase();
-    const roleRaw = cell(line, colMap.get('role'));
+    const roleRaw = hasRoleColumn ? cell(line, colMap.get('role')) : '';
     const roles = parseRoles(roleRaw);
-    if (!firstName || !lastName || !email || !roles.length) continue;
-    const comboErr = validateImportedRoleCombo(roles);
+    const resolvedRoles = roles.length ? roles : (['student'] as UserRole[]);
+    if (!firstName || !lastName || !email) continue;
+    const comboErr = validateImportedRoleCombo(resolvedRoles);
     if (comboErr) {
       invalidComboRows.push({ rowNumber: i + 1, message: comboErr });
       continue;
@@ -413,7 +511,7 @@ export function parseUserImportGrid(rows: unknown[][]): {
       birthDate: birthIso,
       classLevel: clParsed,
       branch: brParsed,
-      roles,
+      roles: resolvedRoles,
       password: cell(line, colMap.get('password')),
       passwordConfirm: cell(line, colMap.get('passwordConfirm')),
       parentName: cell(line, colMap.get('parentName')),
@@ -443,32 +541,14 @@ export function downloadUserImportTemplateXlsx(): void {
   const ws = XLSX.utils.aoa_to_sheet([
     [...USER_IMPORT_TEMPLATE_HEADERS],
     [
-      'Ayşe Örnek',
-      'Yılmaz',
-      'ayse.ornek@ornek.com',
-      '05551112233',
-      '2008-01-15',
-      '11',
-      'A',
-      'öğrenci',
-      'Ogrenci123!',
-      'Ogrenci123!',
       'Ali Veli',
-      '05559998877'
-    ],
-    [
-      'Mehmet Öğretmen',
-      'Kaya',
-      'mehmet.ogretmen@ornek.com',
-      '05552223344',
-      '',
-      '',
-      '',
-      'öğretmen, koç',
-      'Ogretmen123!',
-      'Ogretmen123!',
-      '',
-      ''
+      '05559998877',
+      '11',
+      'Ayşe',
+      'Yılmaz',
+      '05551112233',
+      'ayse.ornek@ornek.com',
+      'Ogrenci123!'
     ]
   ]);
   const wb = XLSX.utils.book_new();

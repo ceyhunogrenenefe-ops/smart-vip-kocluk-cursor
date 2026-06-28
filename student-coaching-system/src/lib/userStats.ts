@@ -1,7 +1,9 @@
 import type { SystemUser } from '../context/AuthContext';
-import type { UserRole } from '../types';
+import type { UserRole, Student, ClassLevel } from '../types';
+import { CLASS_LEVELS, formatClassLevelLabel } from '../types';
 import { userRoleTags } from '../config/rolePermissions';
 import { normalizeRolesFromApiUser } from './userBulkImport';
+import { normalizeClassLevel } from './mapStudentRow';
 
 /** `users` satırı yok; yalnızca `coaches` tablosundaki profil (UserManagement listesi) */
 export const COACH_PROFILE_ONLY_PREFIX = '__coach_profile__:';
@@ -113,4 +115,125 @@ export function buildLiveCountsByInstitution(
     if (tags.includes('teacher')) m[iid].teachers += 1;
   }
   return m;
+}
+
+/** Filtre / istatistik için tutarlı sınıf anahtarı (9, LGS, YKS-Sayısal …) */
+export function normalizeClassLevelFilterKey(
+  level: ClassLevel | string | number | undefined | null
+): string {
+  if (level === undefined || level === null || level === '') return '';
+  const normalized = normalizeClassLevel(level);
+  if (normalized !== undefined) return String(normalized);
+  return String(level).trim();
+}
+
+export function classLevelsMatch(
+  level: ClassLevel | string | number | undefined | null,
+  filterKey: string
+): boolean {
+  if (!filterKey || filterKey === 'all') return true;
+  return normalizeClassLevelFilterKey(level) === normalizeClassLevelFilterKey(filterKey);
+}
+
+const CLASS_LEVEL_ORDER = CLASS_LEVELS.map((l) => String(l.value));
+
+export function sortClassLevelKeys(keys: string[]): string[] {
+  return [...keys].sort((a, b) => {
+    const ia = CLASS_LEVEL_ORDER.indexOf(a);
+    const ib = CLASS_LEVEL_ORDER.indexOf(b);
+    if (ia >= 0 && ib >= 0) return ia - ib;
+    if (ia >= 0) return -1;
+    if (ib >= 0) return 1;
+    return a.localeCompare(b, 'tr');
+  });
+}
+
+export interface ClassLevelStudentCount {
+  key: string;
+  label: string;
+  count: number;
+}
+
+export function computeStudentsByClassLevel(students: Student[]): ClassLevelStudentCount[] {
+  const counts = new Map<string, number>();
+  let unknown = 0;
+  for (const s of students) {
+    const key = normalizeClassLevelFilterKey(s.classLevel);
+    if (!key) {
+      unknown += 1;
+      continue;
+    }
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const rows: ClassLevelStudentCount[] = sortClassLevelKeys([...counts.keys()]).map((key) => ({
+    key,
+    label: formatClassLevelLabel(key),
+    count: counts.get(key) || 0
+  }));
+  if (unknown > 0) {
+    rows.push({ key: '__unknown__', label: 'Sınıf belirtilmemiş', count: unknown });
+  }
+  return rows;
+}
+
+export interface InstitutionClassStats {
+  institutionId: string;
+  institutionName: string;
+  total: number;
+  byClass: ClassLevelStudentCount[];
+}
+
+export function computeStudentsByInstitutionAndClass(
+  students: Student[],
+  institutions: { id: string; name: string }[]
+): InstitutionClassStats[] {
+  const instName = new Map(institutions.map((i) => [i.id, i.name]));
+  const byInst = new Map<string, Student[]>();
+  for (const s of students) {
+    const iid = s.institutionId || '__none__';
+    if (!byInst.has(iid)) byInst.set(iid, []);
+    byInst.get(iid)!.push(s);
+  }
+  return [...byInst.entries()]
+    .map(([institutionId, sts]) => ({
+      institutionId,
+      institutionName:
+        institutionId === '__none__'
+          ? 'Kurumsuz'
+          : instName.get(institutionId) || institutionId.slice(0, 8),
+      total: sts.length,
+      byClass: computeStudentsByClassLevel(sts)
+    }))
+    .sort((a, b) => a.institutionName.localeCompare(b.institutionName, 'tr'));
+}
+
+export function indexStudentsByPlatformLink(students: Student[]): {
+  byPlatformUserId: Map<string, Student>;
+  byEmail: Map<string, Student>;
+  byId: Map<string, Student>;
+} {
+  const byPlatformUserId = new Map<string, Student>();
+  const byEmail = new Map<string, Student>();
+  const byId = new Map<string, Student>();
+  for (const s of students) {
+    byId.set(s.id, s);
+    const pid = String(s.platformUserId || '').trim();
+    if (pid) byPlatformUserId.set(pid, s);
+    const em = (s.email || '').toLowerCase().trim();
+    if (em) byEmail.set(em, s);
+  }
+  return { byPlatformUserId, byEmail, byId };
+}
+
+export function resolveStudentForUser(
+  user: { id: string; email: string; studentId?: string },
+  index: ReturnType<typeof indexStudentsByPlatformLink>
+): Student | undefined {
+  const uid = String(user.id || '').trim();
+  const em = (user.email || '').toLowerCase().trim();
+  if (uid && index.byPlatformUserId.get(uid)) return index.byPlatformUserId.get(uid);
+  if (uid && index.byId.get(uid)) return index.byId.get(uid);
+  if (user.studentId && index.byId.get(user.studentId)) return index.byId.get(user.studentId);
+  if (em && index.byEmail.get(em)) return index.byEmail.get(em);
+  return undefined;
 }

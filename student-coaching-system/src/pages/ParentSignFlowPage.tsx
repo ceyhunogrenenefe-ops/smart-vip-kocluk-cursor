@@ -1000,7 +1000,7 @@ export default function ParentSignFlowPage() {
         delete next[r.id];
         return next;
       });
-      setMsg('Ücret ve taksit planı kaydedildi; veliye imza linki WhatsApp ile gönderildi.');
+      setMsg('Ücret ve taksit planı kaydedildi; veliye imza linki Meta WhatsApp ile gönderildi.');
       void load();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Kaydedilemedi');

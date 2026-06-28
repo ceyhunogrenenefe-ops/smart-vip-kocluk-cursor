@@ -8,6 +8,21 @@ import { db } from '../lib/database';
 
 type InstitutionOption = { id: string; name: string };
 
+const REGISTRATION_CLASS_OPTIONS = [
+  { value: '3', label: '3. Sınıf' },
+  { value: '4', label: '4. Sınıf' },
+  { value: '5', label: '5. Sınıf' },
+  { value: '6', label: '6. Sınıf' },
+  { value: '7', label: '7. Sınıf' },
+  { value: 'LGS', label: 'LGS (8. Sınıf)' },
+  { value: '9', label: '9. Sınıf' },
+  { value: '10', label: '10. Sınıf' },
+  { value: '11', label: '11. Sınıf' },
+  { value: 'YKS', label: 'YKS' },
+  { value: 'YOS', label: 'YÖS' },
+  { value: 'Diğer', label: 'Diğer' }
+] as const;
+
 const ROLE_OPTIONS = [
   { value: 'student', label: 'Öğrenci' },
   { value: 'coach', label: 'Koç' },
@@ -24,7 +39,6 @@ export default function Register() {
     email: '',
     phone: '',
     classLevel: '',
-    branch: '',
     parentName: '',
     parentPhone: '',
     birthDate: '',
@@ -82,7 +96,6 @@ export default function Register() {
         email: formData.email,
         phone: formData.phone,
         class_level: formData.classLevel || null,
-        branch: formData.branch || null,
         parent_name: formData.parentName || null,
         parent_phone: formData.parentPhone || null,
         birth_date: formData.birthDate || null,
@@ -222,27 +235,22 @@ export default function Register() {
                 />
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Sınıf</label>
-                  <input
-                    type="text"
-                    value={formData.classLevel}
-                    onChange={(e) => setFormData(prev => ({ ...prev, classLevel: e.target.value }))}
-                    className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500"
-                    placeholder="Örn: 11, TYT, YKS-12"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Şube</label>
-                  <input
-                    type="text"
-                    value={formData.branch}
-                    onChange={(e) => setFormData(prev => ({ ...prev, branch: e.target.value }))}
-                    className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500"
-                    placeholder="Örn: A, B"
-                  />
-                </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Sınıf</label>
+                <select
+                  required
+                  value={formData.classLevel}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, classLevel: e.target.value }))}
+                  className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500"
+                >
+                  <option value="">Sınıf seçin</option>
+                  {REGISTRATION_CLASS_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-slate-500">Şube bilgisi kurum tarafından atanır.</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
