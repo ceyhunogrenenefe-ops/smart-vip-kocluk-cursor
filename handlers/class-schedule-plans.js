@@ -228,36 +228,37 @@ async function loadInstitutionClassesForPlanner(institutionId) {
   const studentIds = await getInstitutionStudentIds(supabaseAdmin, instId);
   const classIdSet = await loadInstitutionClassIdSet(supabaseAdmin, instId, studentIds);
   const classIds = [...classIdSet];
-  if (!classIds.length) {
-    const { data: direct, error: dErr } = await supabaseAdmin
-      .from('classes')
-      .select('id,name,class_level,branch,institution_id')
-      .eq('institution_id', instId)
-      .order('name', { ascending: true });
-    if (dErr) throw dErr;
-    return (direct || [])
-      .map((c) => ({
-        id: c.id,
-        name: String(c.name || '').trim(),
-        class_level: c.class_level ?? null,
-        branch: c.branch ?? null
-      }))
-      .filter((c) => c.name)
-      .sort((a, b) => String(a.name).localeCompare(String(b.name), 'tr'));
-  }
-  const { data, error } = await supabaseAdmin
-    .from('classes')
-    .select('id,name,class_level,branch,institution_id')
-    .in('id', classIds);
-  if (error) throw error;
-  return (data || [])
-    .map((c) => ({
-      id: c.id,
-      name: String(c.name || '').trim(),
+  const map = new Map();
+
+  const pushRow = (c) => {
+    const id = String(c?.id || '').trim();
+    const name = String(c?.name || '').trim();
+    if (!id || !name) return;
+    map.set(id, {
+      id,
+      name,
       class_level: c.class_level ?? null,
       branch: c.branch ?? null
-    }))
-    .sort((a, b) => String(a.name).localeCompare(String(b.name), 'tr'));
+    });
+  };
+
+  if (classIds.length) {
+    const { data, error } = await supabaseAdmin
+      .from('classes')
+      .select('id,name,class_level,branch,institution_id')
+      .in('id', classIds);
+    if (error) throw error;
+    for (const c of data || []) pushRow(c);
+  }
+
+  const { data: direct, error: dErr } = await supabaseAdmin
+    .from('classes')
+    .select('id,name,class_level,branch,institution_id')
+    .eq('institution_id', instId);
+  if (dErr) throw dErr;
+  for (const c of direct || []) pushRow(c);
+
+  return [...map.values()].sort((a, b) => String(a.name).localeCompare(String(b.name), 'tr'));
 }
 
 async function loadInstitutionStudentsForPlanner(institutionId) {

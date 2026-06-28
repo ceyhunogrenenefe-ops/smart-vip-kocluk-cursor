@@ -1509,7 +1509,8 @@ function renderMaster(){
       return `<th class="${cls.trim()}" title="${esc(p.label+' '+p.time)}">${esc(t)}</th>`;
     }).join('');
   }).join('');
-  const rows=state.groups.map(g=>{
+  const sortedGroups=[...state.groups].sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'tr'));
+  const rows=sortedGroups.map(g=>{
     const cells=state.days.map((d,di)=> per.map((p,pi)=>{
       const {key, cell}=lessonAtMasterSlot(g, di, pi);
       const conf=cell&&cell.teacher&&key&&conflictCells.has(g.id+'|'+key);
@@ -1534,9 +1535,12 @@ function renderMaster(){
     </tr>`;
   }).join('');
   const conflictCount=conflicts.length;
+  const sysCount=(state.systemClasses||[]).length;
+  const missingSys=Math.max(0, sysCount-sortedGroups.length);
   $('#view').innerHTML=`
     <div class="master-tools">
-      <div class="tiny">Tüm sınıflar: dolu hücreyi sürükleyin. <b>Shift+tık</b> saat kilidi. Kilitli sınıflar ve kilitli saatler burada görünür. Çakışan hücreler <span style="color:var(--danger);font-weight:600">kırmızı</span> — üzerine gelince karşı sınıf adı çıkar.</div>
+      <div class="tiny">Tüm sınıflar (${sortedGroups.length}${sysCount?` / ${sysCount} kurum sınıfı`:''}): dolu hücreyi sürükleyin. <b>Shift+tık</b> saat kilidi. Yeni sınıflar (ör. 6-A) otomatik satır olarak gelir. Çakışan hücreler <span style="color:var(--danger);font-weight:600">kırmızı</span>.</div>
+      ${missingSys?`<div class="conf-banner bad" style="margin:0 0 10px;padding:10px 12px;font-size:13px">${missingSys} kurum sınıfı planda yok — sayfayı yenileyin veya «Tümünü ekle» kullanın.</div>`:''}
       ${conflictCount?`<div class="conf-banner bad" style="margin:0 0 10px;padding:10px 12px"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.7 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>${conflictCount} öğretmen çakışması — «Çakışmalar» sekmesinde ayrıntılı liste.</div>`:''}
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="btn sm" id="undoBtn" data-act="undo" disabled title="Ctrl+Z">Geri al</button>
@@ -2392,7 +2396,7 @@ window.addEventListener('message', (ev)=>{
     if(Array.isArray(p.students)) state.systemStudents=p.students;
     if(Array.isArray(p.poolSubjects)) state.poolSubjects=p.poolSubjects;
     if(p.curriculumPresets&&typeof p.curriculumPresets==='object') state.curriculumPresets=p.curriculumPresets;
-    if(p.autoSyncClasses && (state.systemClasses||[]).length) syncAllSystemClasses(true);
+    if((state.systemClasses||[]).length) syncAllSystemClasses(true);
     else { saveState(); render(); }
     reply({type:'SET_CONTEXT_OK', ok:true, institutionChanged:instChanged, groups:state.groups.length});
   }
