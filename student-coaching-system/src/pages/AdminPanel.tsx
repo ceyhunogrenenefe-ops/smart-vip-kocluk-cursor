@@ -34,13 +34,15 @@ import {
 import {
   defaultAcademicCenterLinks,
   EXAM_ENTRY_DEFS,
+  STUDY_ENTRY_DEFS,
   fetchAcademicCenterLinksFromServer,
   loadAcademicCenterLinks,
   saveAcademicCenterLinksToServer,
   BBB_AUTO_MEETING_LINK,
   isBbbAutoMeetingLink,
   type AcademicCenterLinks,
-  type ExamEntryKey
+  type ExamEntryKey,
+  type StudyEntryKey
 } from '../lib/academicCenterLinks';
 
 interface MetaWhatsAppServerStatus {
@@ -290,6 +292,17 @@ export default function AdminPanel() {
     setExamEntryLink(key, mode === 'bbb' ? BBB_AUTO_MEETING_LINK : '');
   };
 
+  const setStudyEntryLink = (key: StudyEntryKey, value: string) => {
+    setAcademicLinks((prev) => ({
+      ...prev,
+      studyClasses: { ...prev.studyClasses, [key]: value }
+    }));
+  };
+
+  const setStudyEntryMode = (key: StudyEntryKey, mode: 'url' | 'bbb') => {
+    setStudyEntryLink(key, mode === 'bbb' ? BBB_AUTO_MEETING_LINK : '');
+  };
+
   const sendTemplateTest = async () => {
     const p = ttPhone.trim();
     if (!p || p.replace(/\D/g, '').length < 10) {
@@ -512,7 +525,7 @@ export default function AdminPanel() {
               <h3 className="font-semibold text-slate-800">Akademik Merkez linkleri</h3>
               <p className="text-sm text-slate-600 mt-1">
                 Etüt sınıfları, deneme girişleri (sınıf seviyesine göre), sanal optik ve soru havuzu. Zoom / Meet
-                linki yapıştırın veya deneme girişlerinde BBB otomatik seçin.
+                linki yapıştırın veya etüt / deneme girişlerinde BBB otomatik seçin.
               </p>
             </div>
           </div>
@@ -541,29 +554,36 @@ export default function AdminPanel() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-sm">
             <div className="space-y-2">
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Etüt sınıfları</p>
-              {(
-                [
-                  ['class56', '5–6. sınıf'],
-                  ['class78', '7–8. sınıf'],
-                  ['class911', '9–10–11'],
-                  ['yks', 'YKS']
-                ] as const
-              ).map(([key, label]) => (
-                <label key={key} className="block">
-                  <span className="text-xs text-slate-600">{label}</span>
-                  <input
-                    type="text"
-                    value={academicLinks.studyClasses[key]}
-                    onChange={(e) =>
-                      setAcademicLinks((prev) => ({
-                        ...prev,
-                        studyClasses: { ...prev.studyClasses, [key]: e.target.value }
-                      }))
-                    }
-                    className="mt-0.5 w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm"
-                  />
-                </label>
-              ))}
+              {STUDY_ENTRY_DEFS.map(({ key, label }) => {
+                const href = academicLinks.studyClasses[key];
+                const bbbMode = isBbbAutoMeetingLink(href);
+                return (
+                  <div key={key} className="rounded-lg border border-slate-100 bg-slate-50/80 p-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                      <span className="text-xs font-medium text-slate-700">{label}</span>
+                      <select
+                        value={bbbMode ? 'bbb' : 'url'}
+                        onChange={(e) => setStudyEntryMode(key, e.target.value as 'url' | 'bbb')}
+                        className="rounded border border-slate-200 px-2 py-1 text-xs"
+                      >
+                        <option value="url">Zoom / Meet / link</option>
+                        <option value="bbb">BBB otomatik</option>
+                      </select>
+                    </div>
+                    {!bbbMode ? (
+                      <input
+                        type="text"
+                        value={href}
+                        onChange={(e) => setStudyEntryLink(key, e.target.value)}
+                        placeholder="https://zoom.us/j/… veya meet.google.com/…"
+                        className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm bg-white"
+                      />
+                    ) : (
+                      <p className="text-xs text-indigo-700 px-1">BBB sunucusu oturum açar (Online Görüşmeler ayarı).</p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
             <div className="space-y-2">
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Deneme girişleri</p>

@@ -20,8 +20,11 @@ import {
   fetchAcademicCenterLinksFromServer,
   loadAcademicCenterLinks,
   openAcademicCenterLink,
+  STUDY_ENTRY_DEFS,
+  studyEntryUrl,
   type AcademicCenterLinks,
-  type ExamEntryKey
+  type ExamEntryKey,
+  type StudyEntryKey
 } from '../lib/academicCenterLinks';
 import { AppModal } from '../components/ui/AppModal';
 import { VirtualOpticInfoModal } from '../components/academic/VirtualOpticInfoModal';
@@ -208,6 +211,7 @@ export default function AcademicCenter() {
     () => loadAcademicCenterLinks(institutionId) ?? defaultAcademicCenterLinks
   );
   const [bbbBusyRoom, setBbbBusyRoom] = useState<ExamEntryKey | null>(null);
+  const [bbbBusyStudy, setBbbBusyStudy] = useState<StudyEntryKey | null>(null);
   const [examModal, setExamModal] = useState<ExamModalTarget | null>(null);
   const [opticModalOpen, setOpticModalOpen] = useState(false);
 
@@ -240,11 +244,21 @@ export default function AcademicCenter() {
     };
   }, [institutionId]);
 
-  const openLink = (url: string, room?: ExamEntryKey) => {
+  const openLink = (
+    url: string,
+    opts?: { room?: ExamEntryKey | StudyEntryKey; kind?: 'exam' | 'study' }
+  ) => {
+    const kind = opts?.kind ?? 'exam';
     void openAcademicCenterLink(url, {
-      room,
+      room: opts?.room,
+      kind: opts?.room ? kind : undefined,
       institutionId,
-      busy: room ? (v) => setBbbBusyRoom(v ? room : null) : undefined
+      busy: opts?.room
+        ? (v) => {
+            if (kind === 'study') setBbbBusyStudy(v ? (opts.room as StudyEntryKey) : null);
+            else setBbbBusyRoom(v ? (opts.room as ExamEntryKey) : null);
+          }
+        : undefined
     });
   };
 
@@ -255,7 +269,7 @@ export default function AcademicCenter() {
 
   const confirmExamClassJoin = () => {
     if (!examModal?.href?.trim()) return;
-    openLink(examModal.href, examModal.key);
+    openLink(examModal.href, { room: examModal.key, kind: 'exam' });
     setExamModal(null);
   };
 
@@ -376,34 +390,36 @@ export default function AcademicCenter() {
                 </div>
               </div>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              {[
-                { label: '5-6. sınıf etüt sınıfı', href: links.studyClasses.class56, accent: 'from-violet-500 to-purple-600' },
-                { label: '7-8. sınıf etüt sınıfı', href: links.studyClasses.class78, accent: 'from-fuchsia-500 to-pink-600' },
-                { label: '9-10-11 etüt sınıfı', href: links.studyClasses.class911, accent: 'from-blue-500 to-indigo-600' },
-                { label: 'YKS etüt sınıfı', href: links.studyClasses.yks, accent: 'from-amber-500 to-orange-600' }
-              ].map((x) => (
+              {STUDY_ENTRY_DEFS.map((x) => {
+                const href = studyEntryUrl(links, x.key);
+                const busy = bbbBusyStudy === x.key;
+                return (
                 <div
-                  key={x.label}
-                  className="group relative overflow-hidden rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:shadow-md"
+                  key={x.key}
+                  className="group relative overflow-hidden rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition hover:shadow-md sm:p-5"
                 >
                   <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${x.accent}`} />
-                  <div className="flex items-start gap-3">
+                  <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-start">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
                       <School className="h-5 w-5" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-slate-800">{x.label}</p>
+                      <p className="text-base font-semibold text-slate-800">{x.label}</p>
                       <button
                         type="button"
-                        onClick={() => openLink(x.href)}
-                        className="mt-3 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:brightness-110"
+                        disabled={busy || !href}
+                        onClick={() => openLink(href, { room: x.key, kind: 'study' })}
+                        className="mt-3 inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                       >
-                        Etüte Katıl <ExternalLink className="h-4 w-4" />
+                        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                        Etüte Katıl
+                        {!busy ? <ExternalLink className="h-4 w-4" /> : null}
                       </button>
                     </div>
                   </div>
                 </div>
-              ))}
+              );
+              })}
               </div>
             </div>
           )}

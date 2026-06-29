@@ -15,6 +15,9 @@ function storageKey(institutionId?: string | null) {
 }
 
 export type ExamEntryKey = 'lise' | 'yos' | 'class34' | 'class56' | 'class78';
+export type StudyEntryKey = 'class56' | 'class78' | 'class911' | 'yks';
+export type AcademicBbbRoomKind = 'exam' | 'study';
+export type AcademicBbbRoomKey = ExamEntryKey | StudyEntryKey;
 
 export type AcademicCenterLinks = {
   studyClasses: {
@@ -49,6 +52,17 @@ export const EXAM_ENTRY_DEFS: {
   { key: 'class34', label: '3-4. sınıf deneme sınıfı giriş', accent: 'from-emerald-500 to-teal-600' },
   { key: 'class56', label: '5-6. sınıf deneme sınıfı giriş', accent: 'from-violet-500 to-purple-600' },
   { key: 'class78', label: '7-8. sınıf deneme sınıfı giriş', accent: 'from-fuchsia-500 to-pink-600' }
+];
+
+export const STUDY_ENTRY_DEFS: {
+  key: StudyEntryKey;
+  label: string;
+  accent: string;
+}[] = [
+  { key: 'class56', label: '5-6. sınıf etüt sınıfı', accent: 'from-violet-500 to-purple-600' },
+  { key: 'class78', label: '7-8. sınıf etüt sınıfı', accent: 'from-fuchsia-500 to-pink-600' },
+  { key: 'class911', label: '9-10-11 etüt sınıfı', accent: 'from-blue-500 to-indigo-600' },
+  { key: 'yks', label: 'YKS etüt sınıfı', accent: 'from-amber-500 to-orange-600' }
 ];
 
 export { BBB_AUTO_MEETING_LINK, isBbbAutoMeetingLink };
@@ -157,10 +171,11 @@ export async function saveAcademicCenterLinksToServer(
 }
 
 export async function fetchAcademicCenterBbbJoinUrl(
-  room: ExamEntryKey,
-  institutionId?: string | null
+  room: AcademicBbbRoomKey,
+  institutionId?: string | null,
+  kind: AcademicBbbRoomKind = 'exam'
 ): Promise<string> {
-  const qs = new URLSearchParams({ room });
+  const qs = new URLSearchParams({ room, kind });
   if (institutionId) qs.set('institution_id', institutionId);
   const res = await apiFetch(`/api/academic-center-bbb-join?${qs.toString()}`);
   const json = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
@@ -170,32 +185,48 @@ export async function fetchAcademicCenterBbbJoinUrl(
   return json.url;
 }
 
+const BBB_WAITING_COPY: Record<AcademicBbbRoomKind, { title: string; subtitle: string }> = {
+  exam: {
+    title: 'Deneme sınavı sınıfına yönlendiriliyorsunuz',
+    subtitle: 'Lütfen bekleyiniz…'
+  },
+  study: {
+    title: 'Etüt sınıfına yönlendiriliyorsunuz',
+    subtitle: 'Lütfen bekleyiniz…'
+  }
+};
+
 export async function openAcademicCenterLink(
   url: string,
-  opts?: { room?: ExamEntryKey; institutionId?: string | null; busy?: (v: boolean) => void }
+  opts?: {
+    room?: AcademicBbbRoomKey;
+    kind?: AcademicBbbRoomKind;
+    institutionId?: string | null;
+    busy?: (v: boolean) => void;
+  }
 ): Promise<void> {
   const href = String(url || '').trim();
   if (!href) return;
 
+  const kind = opts?.kind ?? 'exam';
+
   if (isBbbAutoMeetingLink(href) && opts?.room) {
+    const waiting = BBB_WAITING_COPY[kind];
     if (isMobileOrTabletViewport()) {
-      const qs = new URLSearchParams({ room: opts.room });
+      const qs = new URLSearchParams({ room: opts.room, kind });
       if (opts.institutionId) qs.set('institution_id', opts.institutionId);
       window.location.assign(`/academic-center/bbb-join?${qs.toString()}`);
       return;
     }
 
     opts.busy?.(true);
-    const popup = openBbbWaitingPopup({
-      title: 'Deneme sınavı sınıfına yönlendiriliyorsunuz',
-      subtitle: 'Lütfen bekleyiniz…'
-    });
+    const popup = openBbbWaitingPopup(waiting);
     try {
-      const joinUrl = await fetchAcademicCenterBbbJoinUrl(opts.room, opts.institutionId);
+      const joinUrl = await fetchAcademicCenterBbbJoinUrl(opts.room, opts.institutionId, kind);
       assignBbbWaitingPopup(popup, joinUrl);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'BBB oturumu açılamadı';
-      showBbbWaitingPopupError(popup, msg);
+      showBbbWaitingPopupError(popup, msg, { title: waiting.title });
       throw e;
     } finally {
       opts.busy?.(false);
@@ -217,4 +248,8 @@ export function examEntryUrl(links: AcademicCenterLinks, key: ExamEntryKey): str
   const legacy = links.exams.exam;
   if (key === 'lise' && legacy) return String(legacy).trim();
   return '';
+}
+
+export function studyEntryUrl(links: AcademicCenterLinks, key: StudyEntryKey): string {
+  return String(links.studyClasses[key] || '').trim();
 }

@@ -2,6 +2,7 @@ import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import {
   ACADEMIC_EXAM_ROOM_LABELS,
+  ACADEMIC_STUDY_ROOM_LABELS,
   DEFAULT_ACADEMIC_LINKS
 } from '../api/_lib/academic-center-links-store.js';
 import {
@@ -12,7 +13,8 @@ import {
   resolveBbbMeetingDurationMinutes
 } from '../api/_lib/bbb.js';
 
-const VALID_ROOMS = new Set(['lise', 'yos', 'class34', 'class56', 'class78']);
+const VALID_EXAM_ROOMS = new Set(['lise', 'yos', 'class34', 'class56', 'class78']);
+const VALID_STUDY_ROOMS = new Set(['class56', 'class78', 'class911', 'yks']);
 
 function sanitizeName(raw) {
   const name = String(raw || '')
@@ -22,11 +24,17 @@ function sanitizeName(raw) {
   return name || 'Öğrenci';
 }
 
-function meetingKeyPrefix(institutionId, room) {
+function meetingKeyPrefix(institutionId, room, kind) {
   const inst = String(institutionId || 'platform')
     .replace(/-/g, '')
     .slice(0, 12);
-  return `acad${inst}${room}`;
+  const tag = kind === 'study' ? 'etut' : 'acad';
+  return `${tag}${inst}${room}`;
+}
+
+function resolveKind(raw) {
+  const k = String(raw || 'exam').trim().toLowerCase();
+  return k === 'study' ? 'study' : 'exam';
 }
 
 export default async function handler(req, res) {
@@ -43,9 +51,17 @@ export default async function handler(req, res) {
   }
   actor = await enrichStudentActor(actor);
 
+  const kind = resolveKind(req.query?.kind || req.body?.kind);
   const room = String(req.query?.room || req.body?.room || '').trim().toLowerCase();
-  if (!VALID_ROOMS.has(room)) {
-    return res.status(400).json({ error: 'invalid_room', hint: 'Geçerli oda: lise, yos, class34, class56, class78' });
+  const validRooms = kind === 'study' ? VALID_STUDY_ROOMS : VALID_EXAM_ROOMS;
+  if (!validRooms.has(room)) {
+    return res.status(400).json({
+      error: 'invalid_room',
+      hint:
+        kind === 'study'
+          ? 'Geçerli etüt oda: class56, class78, class911, yks'
+          : 'Geçerli deneme oda: lise, yos, class34, class56, class78'
+    });
   }
 
   if (!isBbbConfigured()) {
@@ -70,9 +86,16 @@ export default async function handler(req, res) {
       'Öğrenci'
   );
 
-  const meetingName = ACADEMIC_EXAM_ROOM_LABELS[room] || DEFAULT_ACADEMIC_LINKS.exams[room] || 'Deneme Sınavı';
+  const meetingName =
+    kind === 'study'
+      ? ACADEMIC_STUDY_ROOM_LABELS[room] ||
+        DEFAULT_ACADEMIC_LINKS.studyClasses[room] ||
+        'Etüt Sınıfı'
+      : ACADEMIC_EXAM_ROOM_LABELS[room] ||
+        DEFAULT_ACADEMIC_LINKS.exams[room] ||
+        'Deneme Sınavı';
   const durationMinutes = resolveBbbMeetingDurationMinutes(180);
-  const prefix = meetingKeyPrefix(institutionId, room);
+  const prefix = meetingKeyPrefix(institutionId, room, kind);
 
   try {
     const ensured = await ensureBbbMeetingAlive({
@@ -103,6 +126,7 @@ export default async function handler(req, res) {
       url: joinUrl,
       title: meetingName,
       room,
+      kind,
       institution_id: institutionId || null
     });
   } catch (e) {

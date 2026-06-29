@@ -34,6 +34,13 @@ export const ACADEMIC_EXAM_ROOM_LABELS = {
   class78: '7-8. Sınıf Deneme Sınavı'
 };
 
+export const ACADEMIC_STUDY_ROOM_LABELS = {
+  class56: '5-6. Sınıf Etüt',
+  class78: '7-8. Sınıf Etüt',
+  class911: '9-10-11 Etüt',
+  yks: 'YKS Etüt'
+};
+
 function deepMerge(base, patch) {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return base;
   const out = { ...base };
