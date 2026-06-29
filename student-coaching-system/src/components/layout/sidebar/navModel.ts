@@ -298,6 +298,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
 
   const MENU_TEACHER: FlatNavItem[] = [
     { path: '/teacher-panel', icon: LayoutDashboard, label: 'Öğretmen Paneli' },
+    { path: '/teacher-solution-appointments', icon: Calendar, label: 'Bugünkü Randevular' },
     { path: '/edu-panel', icon: Presentation, label: EDU_HOMEWORK_ANIMATIONS_LABEL },
     { path: '/ai-agents-admin', icon: Bot, label: 'AI Ders Ajanları' },
     { path: '/soru-havuzu', icon: CircleHelp, label: 'Soru Havuzu' },

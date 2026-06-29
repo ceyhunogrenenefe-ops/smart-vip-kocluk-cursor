@@ -49,6 +49,7 @@ import AttendanceReportPage from './pages/AttendanceReportPage';
 import BbbPortalJoinPage from './pages/BbbPortalJoinPage';
 import BbbGuestJoinPage from './pages/BbbGuestJoinPage';
 import TeacherPanel from './pages/TeacherPanel';
+import TeacherSolutionAppointmentsPage from './pages/TeacherSolutionAppointmentsPage';
 import WeeklyPlannerPage from './pages/WeeklyPlannerPage';
 import MyProfilePage from './pages/MyProfilePage';
 import MobileLessonsHubPage from './pages/MobileLessonsHubPage';
@@ -457,6 +458,14 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/teacher-panel')}>
                 <Layout>
                   <TeacherPanel />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/teacher-solution-appointments" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/teacher-solution-appointments')}>
+                <Layout>
+                  <TeacherSolutionAppointmentsPage />
                 </Layout>
               </ProtectedRoute>
             } />

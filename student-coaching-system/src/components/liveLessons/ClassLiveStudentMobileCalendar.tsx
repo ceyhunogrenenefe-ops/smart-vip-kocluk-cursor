@@ -3,6 +3,8 @@ import { PlayCircle } from 'lucide-react';
 import { liveSubjectAccent } from './liveSubjectAccent';
 import { hasClassSessionRecordingAccess } from '../../lib/liveLessonUtils';
 import { cn } from '../../lib/utils';
+import { SolutionLessonStudentActions } from '../solutionAppointments/SolutionLessonStudentActions';
+import { isSolutionLessonSubject } from '../../lib/solutionAppointments/utils';
 
 type SessionRow = {
   id: string;
@@ -44,6 +46,7 @@ export type ClassLiveStudentMobileCalendarProps = {
   todayIso: string;
   onJoinSession?: (s: SessionRow) => void;
   onWatchSession?: (s: SessionRow) => void;
+  studentAppointmentDefaults?: { name?: string; class_level?: string };
 };
 
 /** Öğrenci mobil — haftalık grid yerine gün seçimi + ders listesi */
@@ -56,7 +59,8 @@ export function ClassLiveStudentMobileCalendar({
   dowFromIso,
   todayIso,
   onJoinSession,
-  onWatchSession
+  onWatchSession,
+  studentAppointmentDefaults
 }: ClassLiveStudentMobileCalendarProps) {
   const [dayIdx, setDayIdx] = useState(() => {
     const idx = weekColumnDates.indexOf(todayIso);
@@ -133,6 +137,8 @@ export function ClassLiveStudentMobileCalendar({
             const sessionLink = String(s.join_link || s.meeting_link || '').trim();
             const canJoin = s.status === 'scheduled' && Boolean(sessionLink);
             const canWatch = hasClassSessionRecordingAccess(s);
+            const isSolutionLesson = isSolutionLessonSubject(s.subject);
+            const teacherLabel = teacher?.name || s.teacher_name || 'Öğretmen';
             return (
               <li
                 key={s.id}
@@ -159,7 +165,19 @@ export function ClassLiveStudentMobileCalendar({
                   ) : null}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {canJoin ? (
+                  {isSolutionLesson ? (
+                    <SolutionLessonStudentActions
+                      session={s}
+                      teacherName={teacherLabel}
+                      studentDefaults={studentAppointmentDefaults}
+                      onJoin={(row) =>
+                        onJoinSession
+                          ? onJoinSession(row)
+                          : window.open(sessionLink, '_blank', 'noopener,noreferrer')
+                      }
+                      compact
+                    />
+                  ) : canJoin ? (
                     <button
                       type="button"
                       onClick={() =>

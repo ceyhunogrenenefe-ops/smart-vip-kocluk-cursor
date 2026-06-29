@@ -84,5 +84,7 @@ export const routeLoaders = {
   'registration-approvals': () => import('../handlers/registration-approvals.js'),
   'cron/book-orders': () => import('../handlers/cron-book-orders.js'),
   'cron/veli-kayit-admin-notify-retry': () => import('../handlers/cron-veli-kayit-admin-notify-retry.js'),
-  'cron/veli-sign-ready-notify-retry': () => import('../handlers/cron-veli-sign-ready-notify-retry.js')
+  'cron/veli-sign-ready-notify-retry': () => import('../handlers/cron-veli-sign-ready-notify-retry.js'),
+  'solution-appointments': () => import('../handlers/solution-appointments.js'),
+  'cron/solution-appointment-reminders': () => import('../handlers/cron-solution-appointment-reminders.js')
 };

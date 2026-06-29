@@ -48,6 +48,17 @@ export default function TeacherPanel() {
           <p className="text-slate-700 text-sm">HTML animasyon, ödev ve sınıf ders satırları</p>
         </button>
         <button
+          type="button"
+          onClick={() => navigate('/teacher-solution-appointments')}
+          className="bg-white border border-slate-100 rounded-xl p-4 text-left hover:bg-slate-50"
+        >
+          <div className="flex items-center gap-2 text-teal-600 mb-1">
+            <CheckCircle2 className="w-4 h-4" />
+            <span className="text-sm">Bugünkü Randevular</span>
+          </div>
+          <p className="text-slate-700 text-sm">Soru çözümü randevularını görüntüle ve oturum başlat</p>
+        </button>
+        <button
           onClick={() => navigate('/live-lessons')}
           className="bg-white border border-slate-100 rounded-xl p-4 text-left hover:bg-slate-50"
         >

@@ -18,6 +18,8 @@ import { openBbbJoin, openBbbRecording } from '../lib/bbbJoin';
 import ClassLiveClassManager from '../components/liveLessons/ClassLiveClassManager';
 import { copyGuestJoinShareText } from '../lib/bbbGuestJoin';
 import { useRecordingUnavailableAlert, recordingUnavailableText } from '../hooks/useRecordingUnavailableAlert';
+import { SolutionLessonStudentActions } from '../components/solutionAppointments/SolutionLessonStudentActions';
+import { isSolutionLessonSubject } from '../lib/solutionAppointments/utils';
 
 type ClassRow = {
   id: string;
@@ -171,6 +173,15 @@ export default function ClassLiveLessons() {
       '';
     return isStudentView ? sid : '';
   }, [isStudentView, effectiveUser?.studentId, effectiveUser?.email, safeStudents]);
+
+  const studentAppointmentDefaults = useMemo(() => {
+    if (!resolvedStudentId) return { name: effectiveUser?.name || '', class_level: '' };
+    const st = safeStudents.find((x) => x.id === resolvedStudentId);
+    return {
+      name: st?.name || effectiveUser?.name || '',
+      class_level: st?.class_level || st?.school || ''
+    };
+  }, [resolvedStudentId, safeStudents, effectiveUser?.name]);
 
   /** Öğrenci: grup takvimi | birebir canlı dersler */
   type StudentScheduleTab = 'group' | 'private';
@@ -1449,6 +1460,8 @@ export default function ClassLiveLessons() {
                             const hasSessionLink = Boolean(sessionLink);
                             const canJoin = s.status === 'scheduled' && hasSessionLink;
                             const canWatchRecording = hasClassSessionRecordingAccess(s);
+                            const isSolutionLesson = isSolutionLessonSubject(s.subject);
+                            const teacherLabel = teacher?.name || s.teacher_name || s.teacher_id;
                             return (
                               <div
                                 key={s.id}
@@ -1490,7 +1503,14 @@ export default function ClassLiveLessons() {
                                       Davet linki
                                     </button>
                                   ) : null}
-                                  {canJoin ? (
+                                  {isStudentView && isSolutionLesson ? (
+                                    <SolutionLessonStudentActions
+                                      session={s}
+                                      teacherName={teacherLabel}
+                                      studentDefaults={studentAppointmentDefaults}
+                                      onJoin={(row) => void joinClassSession(row)}
+                                    />
+                                  ) : canJoin ? (
                                     <button
                                       type="button"
                                       onClick={() => void joinClassSession(s)}
@@ -1629,6 +1649,7 @@ export default function ClassLiveLessons() {
             todayIso={todayIso()}
             onJoinSession={(s) => void joinClassSession(s)}
             onWatchSession={(s) => void watchClassSessionRecording(s)}
+            studentAppointmentDefaults={studentAppointmentDefaults}
           />
         )}
       </WeeklyLiveGridShell>
