@@ -3,6 +3,8 @@
  * Özel ders (teacher_lessons) yoklama tablosu olmadığı için lesson_type=private i boş döner.
  */
 
+import { isUuid } from './uuid.js';
+
 function institutionIdMatches(stored, requested) {
   const a = String(stored ?? '').trim();
   const b = String(requested ?? '').trim();
@@ -13,19 +15,17 @@ function institutionIdMatches(stored, requested) {
 export async function getInstitutionStudentIds(supabaseAdmin, institutionId) {
   const instId = String(institutionId || '').trim();
   const set = new Set();
-  if (!instId) return set;
+  if (!instId || !isUuid(instId)) return set;
 
   const { data: direct, error } = await supabaseAdmin
     .from('students')
-    .select('id, institution_id, email, platform_user_id, user_id')
+    .select('id, institution_id')
     .eq('institution_id', instId);
   if (error) throw error;
   for (const s of direct || []) set.add(String(s.id));
 
   if (!set.size) {
-    const { data: all, error: allErr } = await supabaseAdmin
-      .from('students')
-      .select('id, institution_id, email, platform_user_id, user_id');
+    const { data: all, error: allErr } = await supabaseAdmin.from('students').select('id, institution_id');
     if (allErr) throw allErr;
     for (const s of all || []) {
       if (institutionIdMatches(s.institution_id, instId)) set.add(String(s.id));
@@ -43,21 +43,23 @@ export async function getInstitutionStudentIds(supabaseAdmin, institutionId) {
     ];
     for (let i = 0; i < userIds.length; i += 200) {
       const chunk = userIds.slice(i, i + 200);
-      const { data: linked, error: lErr } = await supabaseAdmin
+      const { data: byId } = await supabaseAdmin.from('students').select('id').in('id', chunk);
+      for (const s of byId || []) set.add(String(s.id));
+      const { data: byPlatform, error: puErr } = await supabaseAdmin
         .from('students')
         .select('id')
-        .or(`platform_user_id.in.(${chunk.join(',')}),user_id.in.(${chunk.join(',')}),id.in.(${chunk.join(',')})`);
-      if (lErr) break;
-      for (const s of linked || []) set.add(String(s.id));
+        .in('platform_user_id', chunk);
+      if (!puErr) for (const s of byPlatform || []) set.add(String(s.id));
+      const { data: byUserId, error: uidErr } = await supabaseAdmin
+        .from('students')
+        .select('id')
+        .in('user_id', chunk);
+      if (!uidErr) for (const s of byUserId || []) set.add(String(s.id));
     }
     for (let i = 0; i < emails.length; i += 200) {
       const chunk = emails.slice(i, i + 200);
-      const { data: byEmail, error: eErr } = await supabaseAdmin
-        .from('students')
-        .select('id')
-        .in('email', chunk);
-      if (eErr) break;
-      for (const s of byEmail || []) set.add(String(s.id));
+      const { data: byEmail, error: eErr } = await supabaseAdmin.from('students').select('id').in('email', chunk);
+      if (!eErr) for (const s of byEmail || []) set.add(String(s.id));
     }
   }
 
@@ -67,7 +69,7 @@ export async function getInstitutionStudentIds(supabaseAdmin, institutionId) {
 export async function resolveInstitutionClassIds(supabaseAdmin, institutionId, studentIdsSet) {
   const instId = String(institutionId || '').trim();
   const classIds = new Set();
-  if (!instId) return [];
+  if (!instId || !isUuid(instId)) return [];
 
   const { data: clsRows, error: clsErr } = await supabaseAdmin
     .from('classes')
@@ -138,7 +140,7 @@ export async function resolveInstitutionClassIds(supabaseAdmin, institutionId, s
 export async function loadInstitutionClassIdSet(supabaseAdmin, institutionId, studentIdsSet) {
   const instId = String(institutionId || '').trim();
   const classIds = new Set(await resolveInstitutionClassIds(supabaseAdmin, instId, studentIdsSet));
-  if (!instId) return classIds;
+  if (!instId || !isUuid(instId)) return classIds;
   const { data: direct, error } = await supabaseAdmin.from('classes').select('id').eq('institution_id', instId);
   if (error) throw error;
   for (const c of direct || []) {

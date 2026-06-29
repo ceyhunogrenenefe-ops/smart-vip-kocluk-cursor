@@ -19,6 +19,14 @@ import {
 import { sendMetaTextMessage } from '../api/_lib/meta-whatsapp.js';
 import { isUuid } from '../api/_lib/uuid.js';
 import { randomUUID } from 'crypto';
+
+function resolveScopedInstitutionId(queryInstitutionId, actorInstitutionId) {
+  const scoped = String(queryInstitutionId || '').trim();
+  if (scoped && isUuid(scoped)) return scoped;
+  const actorInst = String(actorInstitutionId || '').trim();
+  if (actorInst && isUuid(actorInst)) return actorInst;
+  return null;
+}
 import {
   loadClassLessonReminderTemplate,
   validateClassLessonReminderTemplate,
@@ -678,7 +686,7 @@ export default async function handler(req, res) {
     const scope = String(req.query.scope || 'classes');
     if (scope === 'classes') {
       const allowedClassIds = await getManagedClassIds(actor);
-      const scopedClassInst = String(req.query.institution_id || '').trim();
+      const scopedClassInst = resolveScopedInstitutionId(req.query.institution_id, institutionId);
       let q = supabaseAdmin.from('classes').select('*').order('created_at', { ascending: false });
       if (!seesAllInstitutionClasses(role)) {
         if (!allowedClassIds || !allowedClassIds.length) return res.status(200).json({ data: [] });
@@ -973,7 +981,7 @@ export default async function handler(req, res) {
 
     if (scope === 'slots') {
       const classId = String(req.query.class_id || '').trim();
-      const scopedClassInst = String(req.query.institution_id || '').trim();
+      const scopedClassInst = resolveScopedInstitutionId(req.query.institution_id, institutionId);
       const allowedClassIds = await getManagedClassIds(actor);
       let q = supabaseAdmin
         .from('class_weekly_slots')

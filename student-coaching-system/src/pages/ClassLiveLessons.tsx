@@ -10,7 +10,7 @@ import { ClassLiveStudentMobileCalendar } from '../components/liveLessons/ClassL
 import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
 import { useStudentMobileShell } from '../hooks/useStudentMobileShell';
 import { useMobileAppShell } from '../hooks/useMobileAppShell';
-import type { Student } from '../types';
+import { isUuid } from '../utils/uuid';
 import { GripVertical, KeyRound, Loader2, Pencil, PlayCircle, Trash2, FileDown, Bell } from 'lucide-react';
 import BbbAutoLinkFieldHint from '../components/liveLessons/BbbAutoLinkFieldHint';
 import { isBbbJoinUrl, hasClassSessionRecordingAccess, isBbbPlaybackUrl, needsBbbJoinFlow, displayMeetingLinkForRow, meetingLinkForSave, shouldSkipClassLessonReminder } from '../lib/liveLessonUtils';
@@ -424,7 +424,10 @@ export default function ClassLiveLessons() {
           class_id: selectedClassId,
           date_from: from,
           date_to: to,
-          institution_id: activeInstitutionId || institution?.id || undefined
+          institution_id: (() => {
+            const id = String(activeInstitutionId || institution?.id || '').trim();
+            return isUuid(id) ? id : undefined;
+          })()
         })
       }).catch(() => null);
       const qs = new URLSearchParams({
@@ -494,10 +497,11 @@ export default function ClassLiveLessons() {
     setLoading(true);
     setError(null);
     try {
-      const instId =
+      const rawInstId =
         role === 'super_admin'
           ? String(activeInstitutionId || institution?.id || '').trim()
           : '';
+      const instId = isUuid(rawInstId) ? rawInstId : '';
       const classQs = new URLSearchParams({ scope: 'classes' });
       const slotQs = new URLSearchParams({ scope: 'slots' });
       if (instId) {
@@ -595,11 +599,12 @@ export default function ClassLiveLessons() {
     teacher_ids: string[];
     student_ids: string[];
   }): Promise<boolean> => {
-    const instId = String(
+    const rawInstId = String(
       role === 'super_admin'
         ? activeInstitutionId || institution?.id || effectiveUser?.institution_id || ''
         : effectiveUser?.institution_id || activeInstitutionId || institution?.id || ''
     ).trim();
+    const instId = isUuid(rawInstId) ? rawInstId : '';
     const res = await apiFetch('/api/class-live-lessons?op=create-class', {
       method: 'POST',
       body: JSON.stringify({

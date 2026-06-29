@@ -144,7 +144,7 @@ const saveToStorage = <T,>(key: string, value: T): void => {
 
 // Varsayılan kurum (yerel boş liste veya yedek)
 const createDefaultInstitution = (): Institution => ({
-  id: 'default',
+  id: '',
   name: 'Kurum',
   phone: '',
   address: '',
