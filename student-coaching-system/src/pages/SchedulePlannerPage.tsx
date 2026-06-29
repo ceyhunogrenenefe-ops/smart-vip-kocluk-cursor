@@ -590,7 +590,7 @@ export default function SchedulePlannerPage() {
     setExportResult(null);
     await refreshPlannerGroups();
     setExportClassId('');
-    setReplaceExisting(false);
+    setReplaceExisting(true);
     setTeacherMap({});
     try {
       const state = await getPlannerState();
@@ -750,6 +750,7 @@ export default function SchedulePlannerPage() {
           institution_id: institutionId,
           replace_existing: replaceExisting,
           clear_cross_class_conflicts: true,
+          clip_sessions_to_range: true,
           teacher_map: teacherMap,
           date_from: exportDateFrom,
           date_to: exportDateTo
@@ -1048,8 +1049,9 @@ export default function SchedulePlannerPage() {
           <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-4 shadow-xl dark:bg-slate-900">
             <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Canlı Grup Dersi&apos;ne aktar</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Planlayıcıdaki bir grubu seçili sınıfın haftalık şablonlarına yazar; seçtiğiniz tarih aralığında
-              tarihli oturumlar oluşturulur. BBB linkleri otomatik üretilir.
+              Planlayıcıdaki bir grubu seçili sınıfın haftalık şablonlarına yazar; yalnızca seçtiğiniz tarih
+              aralığında planlı oturumlar oluşturulur (aralık dışındaki planlı oturumlar temizlenir). BBB linkleri
+              otomatik üretilir.
             </p>
 
             <div className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50/80 p-3">

@@ -329,6 +329,7 @@
           Ortak ders — aynı saatte seçili sınıflara da uygula
         </label>
         <div id="mSharedGroups" class="shared-groups-list"></div>
+        <p id="mSharedHint" class="hint" style="display:none;margin:8px 0 0;font-size:12px;color:var(--muted)"></p>
       </div>
     </div>
     <div class="mf">
@@ -530,30 +531,6 @@ function migrateState(){
     if(!Array.isArray(g.curriculum)) g.curriculum=[];
     if(!Array.isArray(g.periods)||!g.periods.length) g.periods=(state.periods||[]).map(p=>({label:p.label,time:p.time}));
     (g.students||[]).forEach(s=>{ if(s.systemId===undefined) s.systemId=null; });
-  });
-  repairInferredSharedLessonIds();
-}
-function repairInferredSharedLessonIds(){
-  const buckets=new Map();
-  state.groups.forEach(g=>{
-    const per=g.periods||state.periods||[];
-    Object.entries(g.schedule||{}).forEach(([k,v])=>{
-      if(!v?.teacher) return;
-      if(v.sharedLessonId) return;
-      const [di,pi]=k.split('_').map(Number);
-      const p=per[pi]||{};
-      const bk=norm(v.teacher)+'|'+di+'|'+norm(v.subject||'')+'|'+norm(p.time||'');
-      if(!buckets.has(bk)) buckets.set(bk,[]);
-      buckets.get(bk).push({g,v,k});
-    });
-  });
-  buckets.forEach(items=>{
-    const gids=new Set(items.map(x=>x.g.id));
-    if(gids.size<2) return;
-    const id=uid();
-    items.forEach(({g,v,k})=>{
-      if(!v.sharedLessonId){ v.sharedLessonId=id; g.schedule[k]=v; }
-    });
   });
 }
 migrateState();
@@ -1899,19 +1876,37 @@ function openCellEditor(groupId,key,masterDi=null,masterPi=null){
     const sid=String(v.sharedLessonId||'').trim();
     const mDi=masterDi!=null?masterDi:di;
     const mPi=masterPi!=null?masterPi:pi;
-    $('#mShared').checked=!!sid;
+    $('#mShared').checked=false;
     sharedList.innerHTML=state.groups.filter(x=>x.id!==groupId).map(x=>{
-      let checked='';
+      let linked='';
       if(sid){
         const k2=groupKeyForMasterSlot(x,mDi,mPi)||key;
         const c2=x.schedule[k2];
-        if(c2&&String(c2.sharedLessonId||'')===sid) checked=' checked';
+        if(c2&&String(c2.sharedLessonId||'')===sid) linked=' data-linked="1"';
       }
-      return `<label><input type="checkbox" class="mSharedGroup" value="${x.id}"${checked}> ${esc(x.name)}</label>`;
+      return `<label${linked}><input type="checkbox" class="mSharedGroup" value="${x.id}"> ${esc(x.name)}</label>`;
     }).join('');
+    const hint=$('#mSharedHint');
+    if(sid){
+      const linkedNames=state.groups.filter(x=>{
+        if(x.id===groupId) return false;
+        const k2=groupKeyForMasterSlot(x,mDi,mPi)||key;
+        const c2=x.schedule[k2];
+        return c2&&String(c2.sharedLessonId||'')===sid;
+      }).map(x=>x.name);
+      hint.style.display='block';
+      hint.textContent=linkedNames.length
+        ? 'Bu hücre ortak derse bağlı ('+linkedNames.join(', ')+'). Yalnızca bu hücreyi düzenlemek için kutuyu işaretlemeyin; birden fazla sınıfa uygulamak için işaretleyin.'
+        : 'Yalnızca bu hücre düzenlenir. Birden fazla sınıfa uygulamak için kutuyu işaretleyin.';
+    } else {
+      hint.style.display='none';
+      hint.textContent='';
+    }
   } else {
     sharedWrap.style.display='none';
     sharedList.innerHTML='';
+    const hint=$('#mSharedHint');
+    if(hint){ hint.style.display='none'; hint.textContent=''; }
   }
   checkModalConflict();
   $('#scrim').classList.add('show');
@@ -1967,37 +1962,49 @@ function saveCell(){
   if($('#mShared')?.checked){
     document.querySelectorAll('.mSharedGroup:checked').forEach(el=>targets.push(el.value));
   }
-  const uniqueTargets=[...new Set(targets)];
+  const sharedMode=$('#mShared')?.checked;
+  const uniqueTargets=sharedMode ? [...new Set(targets)] : [editingCell.groupId];
   const eg=group(editingCell.groupId);
   const prevCell=eg?.schedule?.[editingCell.key]||{};
   let sharedId=null;
-  if(!nextEmpty){
-    if(uniqueTargets.length>1){
-      sharedId=String(prevCell.sharedLessonId||'').trim()||uid();
-    } else if(String(prevCell.sharedLessonId||'').trim()){
-      sharedId=prevCell.sharedLessonId;
-    }
+  if(!nextEmpty && sharedMode && uniqueTargets.length>1){
+    sharedId=String(prevCell.sharedLessonId||'').trim()||uid();
   }
   let anyChange=false;
-  for(const gid of uniqueTargets){
-    const g=group(gid);
-    if(!g) continue;
-    let key=gid===editingCell.groupId ? editingCell.key : groupKeyForMasterSlot(g, masterDi, masterPi);
-    if(!key && !nextEmpty){
-      key=masterDi+'_'+masterPi;
-      if(!g.periods||!g.periods[masterPi]){
-        g.periods=(g.periods||state.periods||[]).map(p=>({...p}));
-        while(g.periods.length<=masterPi) g.periods.push({label:(g.periods.length+1)+'. Ders', time:(masterPeriods()[g.periods.length]?.time||'')});
+  if(sharedMode){
+    for(const gid of uniqueTargets){
+      const g=group(gid);
+      if(!g) continue;
+      let key=gid===editingCell.groupId ? editingCell.key : groupKeyForMasterSlot(g, masterDi, masterPi);
+      if(!key && !nextEmpty){
+        key=masterDi+'_'+masterPi;
+        if(!g.periods||!g.periods[masterPi]){
+          g.periods=(g.periods||state.periods||[]).map(p=>({...p}));
+          while(g.periods.length<=masterPi) g.periods.push({label:(g.periods.length+1)+'. Ders', time:(masterPeriods()[g.periods.length]?.time||'')});
+        }
+      }
+      if(!key) continue;
+      const prev=g.schedule[key];
+      const prevEmpty=!cellHasLesson(prev);
+      if(nextEmpty && prevEmpty) continue;
+      const changed=nextEmpty!==prevEmpty || (!nextEmpty && (String(prev?.teacher||'')!==teacher || String(prev?.subject||'')!==subject || String(prev?.sharedLessonId||'')!==String(sharedId||'')));
+      if(changed) anyChange=true;
+      if(!teacher && !subject) delete g.schedule[key];
+      else g.schedule[key]=sharedId?{teacher,subject,sharedLessonId:sharedId}:{teacher,subject};
+    }
+  } else {
+    const g=eg;
+    if(g){
+      const key=editingCell.key;
+      const prev=g.schedule[key];
+      const prevEmpty=!cellHasLesson(prev);
+      if(!(nextEmpty && prevEmpty)){
+        const changed=nextEmpty!==prevEmpty || (!nextEmpty && (String(prev?.teacher||'')!==teacher || String(prev?.subject||'')!==subject || !!prev?.sharedLessonId));
+        if(changed) anyChange=true;
+        if(!teacher && !subject) delete g.schedule[key];
+        else g.schedule[key]={teacher,subject};
       }
     }
-    if(!key) continue;
-    const prev=g.schedule[key];
-    const prevEmpty=!cellHasLesson(prev);
-    if(nextEmpty && prevEmpty) continue;
-    const changed=nextEmpty!==prevEmpty || (!nextEmpty && (String(prev?.teacher||'')!==teacher || String(prev?.subject||'')!==subject || String(prev?.sharedLessonId||'')!==String(sharedId||'')));
-    if(changed) anyChange=true;
-    if(!teacher && !subject) delete g.schedule[key];
-    else g.schedule[key]=sharedId?{teacher,subject,sharedLessonId:sharedId}:{teacher,subject};
   }
   if(anyChange) pushUndo();
   saveState(); closeModal(); render();
@@ -2007,18 +2014,9 @@ function clearCell(){
   const [edi,epi]=editingCell.key.split('_').map(Number);
   const masterDi=editingCell.masterDi!=null?editingCell.masterDi:edi;
   const masterPi=editingCell.masterPi!=null?editingCell.masterPi:epi;
-  const eg=group(editingCell.groupId);
-  const sid=String(eg?.schedule?.[editingCell.key]?.sharedLessonId||'').trim();
   const targets=[editingCell.groupId];
   if($('#mShared')?.checked){
     document.querySelectorAll('.mSharedGroup:checked').forEach(el=>targets.push(el.value));
-  } else if(sid){
-    state.groups.forEach(g=>{
-      if(g.id===editingCell.groupId) return;
-      const k=groupKeyForMasterSlot(g, masterDi, masterPi);
-      const c=k?g.schedule[k]:null;
-      if(c&&String(c.sharedLessonId||'')===sid) targets.push(g.id);
-    });
   }
   let any=false;
   for(const gid of [...new Set(targets)]){

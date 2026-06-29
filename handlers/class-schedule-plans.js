@@ -535,7 +535,7 @@ export default async function handler(req, res) {
           teacherMap
         });
 
-        if (replaceExisting && dateFrom && dateTo) {
+        if (dateFrom && dateTo) {
           await supabaseAdmin
             .from('class_sessions')
             .delete()
@@ -543,6 +543,22 @@ export default async function handler(req, res) {
             .gte('lesson_date', dateFrom)
             .lte('lesson_date', dateTo)
             .eq('status', 'scheduled');
+
+          const clipOutside = body.clip_sessions_to_range !== false;
+          if (clipOutside) {
+            await supabaseAdmin
+              .from('class_sessions')
+              .delete()
+              .eq('class_id', classId)
+              .eq('status', 'scheduled')
+              .lt('lesson_date', dateFrom);
+            await supabaseAdmin
+              .from('class_sessions')
+              .delete()
+              .eq('class_id', classId)
+              .eq('status', 'scheduled')
+              .gt('lesson_date', dateTo);
+          }
         }
 
         const sessionResult = await ensureClassSessionsForClassInRange(classId, dateFrom, dateTo);
