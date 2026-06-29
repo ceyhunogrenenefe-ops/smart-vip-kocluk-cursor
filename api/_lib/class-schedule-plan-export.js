@@ -2,6 +2,7 @@ import { supabaseAdmin } from './supabase-admin.js';
 import { resolveBbbMeetingDurationMinutes } from './bbb.js';
 import { resolveBbbOrManualMeetingLink } from './resolve-bbb-meeting-link.js';
 import { insertOneOptionalModerator } from './supabase-optional-moderator.js';
+import { isSolutionLessonSubject } from './solution-appointments-core.js';
 
 function normTr(s) {
   return String(s || '')
@@ -411,11 +412,13 @@ export async function exportPlannerGroupToClass({
       continue;
     }
 
-    const crossConflicts = (sameTeacherSlots || []).filter(
-      (x) =>
-        String(x.class_id) !== String(classId) &&
-        timeOverlap(timeParsed.start, timeParsed.end, x.start_time, x.end_time)
-    );
+    const crossConflicts = isSolutionLessonSubject(subject)
+      ? []
+      : (sameTeacherSlots || []).filter(
+          (x) =>
+            String(x.class_id) !== String(classId) &&
+            timeOverlap(timeParsed.start, timeParsed.end, x.start_time, x.end_time)
+        );
     if (crossConflicts.length) {
       if (clearCrossClassConflicts) {
         const cleared = await clearCrossClassSlotConflicts(crossConflicts, institutionId);

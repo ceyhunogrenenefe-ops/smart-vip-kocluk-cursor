@@ -49,6 +49,7 @@ import {
   roundUnits,
   GROUP_LESSON_UNIT_MINUTES
 } from '../api/_lib/class-lesson-payment-units.js';
+import { isSolutionLessonSubject } from '../api/_lib/solution-appointments-core.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -170,7 +171,8 @@ function dowFromIsoDate(dateStr) {
   return jd === 0 ? 7 : jd;
 }
 
-async function teacherTimeConflictOnDate({ teacherId, lessonDate, start, end, excludeSessionIds = [] }) {
+async function teacherTimeConflictOnDate({ teacherId, lessonDate, start, end, excludeSessionIds = [], subject = '' }) {
+  if (isSolutionLessonSubject(subject)) return { ok: true };
   const ex = new Set(excludeSessionIds.map(String));
   const { data: sess, error: sErr } = await supabaseAdmin
     .from('class_sessions')
@@ -1614,7 +1616,10 @@ export default async function handler(req, res) {
         .eq('teacher_id', teacherId)
         .eq('day_of_week', dayOfWeek);
       if (cErr) return res.status(500).json({ error: cErr.message });
-      if ((sameTeacherSlots || []).some((x) => timeOverlap(start, end, x.start_time, x.end_time))) {
+      if (
+        !isSolutionLessonSubject(subject) &&
+        (sameTeacherSlots || []).some((x) => timeOverlap(start, end, x.start_time, x.end_time))
+      ) {
         return res.status(409).json({ error: 'Aynı öğretmen aynı saatte ders alamaz.', code: 'teacher_time_conflict' });
       }
 
@@ -1703,7 +1708,7 @@ export default async function handler(req, res) {
         if (!lessonDate) {
           return res.status(400).json({ error: 'date_compute_failed' });
         }
-        const clash = await teacherTimeConflictOnDate({ teacherId, lessonDate, start, end });
+        const clash = await teacherTimeConflictOnDate({ teacherId, lessonDate, start, end, subject });
         if (!clash.ok) {
           skipped.push({
             lesson_date: lessonDate,
@@ -1941,12 +1946,14 @@ export default async function handler(req, res) {
       const lessonDate = String((patch.lesson_date ?? session.lesson_date) || '').slice(0, 10);
       const start = hhmmss(patch.start_time || session.start_time, '09:00:00');
       const end = hhmmss(patch.end_time || session.end_time, '10:00:00');
+      const subjectForCheck = String((patch.subject ?? session.subject) || '');
       const clash = await teacherTimeConflictOnDate({
         teacherId: teacherIdForCheck,
         lessonDate,
         start,
         end,
-        excludeSessionIds: [rowId]
+        excludeSessionIds: [rowId],
+        subject: subjectForCheck
       });
       if (!clash.ok) {
         return res.status(409).json({
@@ -1961,6 +1968,7 @@ export default async function handler(req, res) {
       const dayOfWeek = Number(patch.day_of_week || session.day_of_week);
       const start = String((patch.start_time || session.start_time) || '');
       const end = String((patch.end_time || session.end_time) || '');
+      const subjectForCheck = String((patch.subject ?? session.subject) || '');
       const { data: sameTeacherSlots, error: cErr } = await supabaseAdmin
         .from('class_weekly_slots')
         .select('id,start_time,end_time')
@@ -1968,7 +1976,10 @@ export default async function handler(req, res) {
         .eq('day_of_week', dayOfWeek)
         .neq('id', rowId);
       if (cErr) return res.status(500).json({ error: cErr.message });
-      if ((sameTeacherSlots || []).some((x) => timeOverlap(start, end, x.start_time, x.end_time))) {
+      if (
+        !isSolutionLessonSubject(subjectForCheck) &&
+        (sameTeacherSlots || []).some((x) => timeOverlap(start, end, x.start_time, x.end_time))
+      ) {
         return res.status(409).json({ error: 'Aynı öğretmen aynı saatte ders alamaz.', code: 'teacher_time_conflict' });
       }
     }
@@ -1992,12 +2003,14 @@ export default async function handler(req, res) {
             const lessonDate = String(peer.lesson_date || '').slice(0, 10);
             const start = hhmmss(batchPatch.start_time || peer.start_time, '09:00:00');
             const end = hhmmss(batchPatch.end_time || peer.end_time, '10:00:00');
+            const subjectForCheck = String((batchPatch.subject ?? peer.subject ?? session.subject) || '');
             const clash = await teacherTimeConflictOnDate({
               teacherId: teacherIdForCheck,
               lessonDate,
               start,
               end,
-              excludeSessionIds: peerIds
+              excludeSessionIds: peerIds,
+              subject: subjectForCheck
             });
             if (!clash.ok) {
               return res.status(409).json({

@@ -1354,6 +1354,10 @@ function allSubjects(){
   });
   return [...set.values()].sort((a,b)=>a.localeCompare(b,'tr'));
 }
+function isSolutionLessonSubject(subject){
+  const s=String(subject||'').trim().toLocaleLowerCase('tr-TR').replace(/ı/g,'i');
+  return s.includes('soru cozum')||s.includes('soru çözüm');
+}
 /* time-based conflict: same teacher, same day, overlapping time across classes */
 function conflictData(){
   const items=[];
@@ -1364,6 +1368,7 @@ function conflictData(){
       const [di,pi]=k.split('_').map(Number);
       const p=per[pi]; if(!p) return;
       items.push({gid:g.id, gname:g.name, key:k, di, tn:norm(v.teacher), td:v.teacher.trim(),
+                  subject:String(v.subject||'').trim(),
                   range:parseRange(p.time), ptime:p.time||'', plabel:p.label});
     });
   });
@@ -1389,6 +1394,7 @@ function conflictData(){
       else if(A.ptime&&B.ptime) clash=norm(A.ptime)===norm(B.ptime);
       else clash=A.plabel===B.plabel;
       if(clash){
+        if(isSolutionLessonSubject(A.subject)||isSolutionLessonSubject(B.subject)) continue;
         conflictCells.add(A.gid+'|'+A.key);
         conflictCells.add(B.gid+'|'+B.key);
         addConflictPartner(A,B);
