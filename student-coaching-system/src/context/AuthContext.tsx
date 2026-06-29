@@ -26,6 +26,7 @@ export interface SystemUser {
   package?: 'trial' | 'starter' | 'professional' | 'enterprise';
   startDate?: string;
   endDate?: string;
+  academicYearLabel?: string;
   isActive?: boolean;
   createdAt?: string;
 }
@@ -711,6 +712,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       package: row.package ?? undefined,
       startDate: row.start_date ?? undefined,
       endDate: row.end_date ?? undefined,
+      academicYearLabel: row.academic_year_label ?? undefined,
       isActive: row.is_active,
       createdAt: row.created_at
     };

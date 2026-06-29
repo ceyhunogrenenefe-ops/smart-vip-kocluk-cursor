@@ -15,6 +15,14 @@ const normalizeRoles = (raw, fallbackRole = 'student') => {
   return [...new Set(cleaned)];
 };
 
+function normalizeAcademicYearLabel(v) {
+  const s = String(v || '').trim();
+  if (!s) return null;
+  const m = s.match(/^(\d{4})\s*[-–/]\s*(\d{4})$/);
+  if (m) return `${m[1]}-${m[2]}`;
+  return s;
+}
+
 function existingUserRoles(row) {
   return normalizeRoles(row?.roles, String(row?.role || 'student'));
 }
@@ -328,6 +336,7 @@ export default async function handler(req, res) {
         package: rest.package || 'trial',
         start_date: rest.start_date || new Date().toISOString(),
         end_date: rest.end_date || null,
+        academic_year_label: normalizeAcademicYearLabel(rest.academic_year_label),
         created_by: createdByFk,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -394,8 +403,8 @@ export default async function handler(req, res) {
         }
       }
 
-      const teacherAllowed = ['name', 'phone', 'email', 'password_hash', 'is_active', 'package', 'start_date', 'end_date'];
-      const coachStudentAllowed = ['name', 'phone', 'email', 'password_hash', 'is_active', 'package', 'start_date', 'end_date'];
+      const teacherAllowed = ['name', 'phone', 'email', 'password_hash', 'is_active', 'package', 'start_date', 'end_date', 'academic_year_label'];
+      const coachStudentAllowed = ['name', 'phone', 'email', 'password_hash', 'is_active', 'package', 'start_date', 'end_date', 'academic_year_label'];
       const adminPlus = [...teacherAllowed, 'role', 'roles', 'institution_id'];
       const keys =
         actor.role === 'teacher'
@@ -406,6 +415,9 @@ export default async function handler(req, res) {
       const body = {};
       for (const k of keys) {
         if (Object.prototype.hasOwnProperty.call(raw, k)) body[k] = raw[k];
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'academic_year_label')) {
+        body.academic_year_label = normalizeAcademicYearLabel(body.academic_year_label);
       }
       if (Object.prototype.hasOwnProperty.call(raw, 'roles')) {
         body.roles = normalizeRoles(raw.roles, String(raw.role || existing.role || 'student'));

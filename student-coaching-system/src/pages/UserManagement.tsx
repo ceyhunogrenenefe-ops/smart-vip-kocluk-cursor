@@ -76,6 +76,11 @@ import {
 } from '../lib/userStats';
 import TeacherQuestionProfileFields from '../components/questionHelp/TeacherQuestionProfileFields';
 import { saveTeacherQuestionProfile, fetchTeacherQuestionProfile } from '../lib/questionHelp/questionHelpApi';
+import {
+  currentAcademicYearTerm,
+  mergeAcademicYearTermOptions,
+  normalizeAcademicYearLabel
+} from '../lib/academicYearTerms';
 
 function formHasTeacherRole(role: UserRole, alsoTeacher: boolean): boolean {
   return role === 'teacher' || alsoTeacher;
@@ -258,6 +263,7 @@ export default function UserManagement() {
   const [filterInstitutionId, setFilterInstitutionId] = useState<string>('all');
   const [filterClassLevel, setFilterClassLevel] = useState<string>('all');
   const [filterBranch, setFilterBranch] = useState<string>('all');
+  const [filterAcademicYear, setFilterAcademicYear] = useState<string>('all');
   const [filterCoachId, setFilterCoachId] = useState<string>('all');
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<'add' | 'edit'>('add');
@@ -697,6 +703,7 @@ export default function UserManagement() {
     bootstrap_max_coaches: '10',
     bootstrap_package_label: 'professional',
     package: 'trial' as 'trial' | 'starter' | 'professional' | 'enterprise',
+    academicYearLabel: currentAcademicYearTerm(),
     startDate: new Date().toISOString().split('T')[0],
     endDate: '',
     isActive: true,
@@ -710,6 +717,29 @@ export default function UserManagement() {
   // Filtrelenmiş kullanıcılar
   const trIncludes = (haystack: string, needle: string) =>
     haystack.toLocaleLowerCase('tr-TR').includes(needle.toLocaleLowerCase('tr-TR'));
+
+  const academicYearOptions = useMemo(
+    () =>
+      mergeAcademicYearTermOptions(
+        users.map((u) => normalizeAcademicYearLabel(u.academicYearLabel)).filter(Boolean)
+      ),
+    [users]
+  );
+
+  const academicYearStats = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const u of users) {
+      const key = normalizeAcademicYearLabel(u.academicYearLabel) || '__unset__';
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return academicYearOptions
+      .map((term) => ({ key: term, label: term, count: counts.get(term) || 0 }))
+      .concat(
+        (counts.get('__unset__') || 0) > 0
+          ? [{ key: '__unset__', label: 'Dönem atanmamış', count: counts.get('__unset__') || 0 }]
+          : []
+      );
+  }, [users, academicYearOptions]);
 
   const filteredUsers = useMemo(() => {
     const q = searchTerm.trim();
@@ -786,6 +816,15 @@ export default function UserManagement() {
         if (!matchesCoach) return false;
       }
 
+      if (filterAcademicYear !== 'all') {
+        const label = normalizeAcademicYearLabel(user.academicYearLabel);
+        if (filterAcademicYear === '__unset__') {
+          if (label) return false;
+        } else if (label !== filterAcademicYear) {
+          return false;
+        }
+      }
+
       return true;
     });
   }, [
@@ -797,6 +836,7 @@ export default function UserManagement() {
     filterStatus,
     filterClassLevel,
     filterBranch,
+    filterAcademicYear,
     filterCoachId,
     studentLinkIndex,
     linkedStudents,
@@ -812,6 +852,7 @@ export default function UserManagement() {
     filterInstitutionId,
     filterClassLevel,
     filterBranch,
+    filterAcademicYear,
     filterCoachId
   ]);
 
@@ -997,6 +1038,7 @@ export default function UserManagement() {
         bootstrap_max_coaches: '10',
         bootstrap_package_label: 'professional',
         package: user.package || 'trial',
+        academicYearLabel: normalizeAcademicYearLabel(user.academicYearLabel) || '',
         startDate: user.startDate?.split('T')[0] || new Date().toISOString().split('T')[0],
         endDate: user.endDate?.split('T')[0] || '',
         isActive: user.isActive !== false,
@@ -1072,6 +1114,7 @@ export default function UserManagement() {
         bootstrap_max_coaches: '10',
         bootstrap_package_label: 'professional',
         package: 'trial',
+        academicYearLabel: currentAcademicYearTerm(),
         startDate: new Date().toISOString().split('T')[0],
         endDate: endDate.toISOString().split('T')[0],
         isActive: true,
@@ -1144,6 +1187,7 @@ export default function UserManagement() {
       bootstrap_max_coaches: '10',
       bootstrap_package_label: 'professional',
       package: 'trial',
+      academicYearLabel: currentAcademicYearTerm(),
       startDate: new Date().toISOString().split('T')[0],
       endDate: endDate.toISOString().split('T')[0],
       isActive: true,
@@ -1211,6 +1255,7 @@ export default function UserManagement() {
       bootstrap_max_coaches: '10',
       bootstrap_package_label: 'professional',
       package: 'trial',
+      academicYearLabel: currentAcademicYearTerm(),
       startDate: new Date().toISOString().split('T')[0],
       endDate: endDate.toISOString().split('T')[0],
       isActive: true,
@@ -1355,6 +1400,7 @@ export default function UserManagement() {
               institution_id: instId,
               is_active: formData.isActive,
               package: formData.package,
+              academic_year_label: normalizeAcademicYearLabel(formData.academicYearLabel) || null,
               start_date: new Date(formData.startDate).toISOString(),
               end_date: formData.endDate ? new Date(formData.endDate).toISOString() : null,
               created_by: null
@@ -1391,6 +1437,7 @@ export default function UserManagement() {
           phone: formData.phone,
           role: staffRoles ? staffRoles.primary : formData.role,
           package: formData.package,
+          academic_year_label: normalizeAcademicYearLabel(formData.academicYearLabel) || null,
           start_date: new Date(formData.startDate).toISOString(),
           end_date: formData.endDate ? new Date(formData.endDate).toISOString() : undefined,
           is_active: formData.isActive
@@ -1665,6 +1712,7 @@ export default function UserManagement() {
                 institution_id: institutionIdForNewUser as string | null,
                 is_active: formData.isActive !== false,
                 package: formData.package,
+                academic_year_label: normalizeAcademicYearLabel(formData.academicYearLabel) || null,
                 start_date: new Date(formData.startDate).toISOString(),
                 end_date: formData.endDate ? new Date(formData.endDate).toISOString() : null,
                 created_by: null
@@ -2026,6 +2074,45 @@ export default function UserManagement() {
           Yeni Kullanıcı
         </button>
       </div>
+
+      <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
+        <h3 className="text-sm font-semibold text-slate-800 mb-3">Eğitim dönemi</h3>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setFilterAcademicYear('all')}
+            className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+              filterAcademicYear === 'all'
+                ? 'border-red-300 bg-red-50 text-red-800'
+                : 'border-gray-100 bg-white hover:border-slate-200 text-slate-700'
+            }`}
+          >
+            Tüm dönemler
+          </button>
+          {academicYearStats.map((row) => (
+            <button
+              key={row.key}
+              type="button"
+              onClick={() =>
+                setFilterAcademicYear((prev) => (prev === row.key ? 'all' : row.key))
+              }
+              className={`rounded-lg border px-3 py-2 text-center min-w-[6.5rem] transition-colors ${
+                filterAcademicYear === row.key
+                  ? 'border-red-300 bg-red-50'
+                  : 'border-gray-100 bg-white hover:border-slate-200'
+              }`}
+            >
+              <div className="text-lg font-bold text-slate-800">{row.count}</div>
+              <div className="text-xs text-slate-500">{row.label}</div>
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-slate-400">
+          Dönem kutusuna tıklayarak listeyi süzebilirsiniz. Kullanıcı düzenleme penceresinden dönem
+          atayabilirsiniz.
+        </p>
+      </div>
+
       {canBulkImport ? (
       <PageCollapsibleSection
         title="Excel / CSV ile toplu kullanıcı ekle"
@@ -2594,7 +2681,6 @@ export default function UserManagement() {
             </div>
           ) : (
             visibleUsers.map((user) => {
-              const subStatus = getSubscriptionStatus(user);
               const tags = userRoleTags(user as SystemUser);
               const studentMatch =
                 tags.includes('student')
@@ -2671,16 +2757,11 @@ export default function UserManagement() {
                     >
                       {roleBadge.label}
                     </span>
-                    <span
-                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${PACKAGES[(user.package || 'trial') as keyof typeof PACKAGES].color}`}
-                    >
-                      {PACKAGES[(user.package || 'trial') as keyof typeof PACKAGES].name}
-                    </span>
-                    <span
-                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${subStatus.className}`}
-                    >
-                      {subStatus.status}
-                    </span>
+                    {user.academicYearLabel ? (
+                      <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
+                        {normalizeAcademicYearLabel(user.academicYearLabel)}
+                      </span>
+                    ) : null}
                   </div>
 
                   {studentMatch ? (
@@ -2774,17 +2855,14 @@ export default function UserManagement() {
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[9%]">Rolü</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[8%]">Veli adı</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[10%]">Veli telefon numarası</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[8%]">Paket</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[10%]">
-                  Durum / Kaç gün kaldı
-                </th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[8%]">Dönem</th>
                 <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 w-[10%]">İşlemler</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {listLoading || authLoading ? (
                 <tr>
-                  <td colSpan={13} className="px-4 py-12 text-center text-sm text-slate-500">
+                  <td colSpan={12} className="px-4 py-12 text-center text-sm text-slate-500">
                     <span className="inline-flex items-center justify-center gap-2">
                       <Loader2 className="h-5 w-5 animate-spin text-red-500" />
                       Kullanıcılar yükleniyor…
@@ -2793,7 +2871,6 @@ export default function UserManagement() {
                 </tr>
               ) : (
               visibleUsers.map(user => {
-                const subStatus = getSubscriptionStatus(user);
                 const em = user.email.toLowerCase().trim();
                 const tags = userRoleTags(user as SystemUser);
                 const studentMatch =
@@ -2907,19 +2984,8 @@ export default function UserManagement() {
                     <td className="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">
                       {studentMatch?.parentPhone?.trim() ? studentMatch.parentPhone : '—'}
                     </td>
-                    <td className="px-3 py-3">
-                      <span
-                        className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${PACKAGES[(user.package || 'trial') as keyof typeof PACKAGES].color}`}
-                      >
-                        {PACKAGES[(user.package || 'trial') as keyof typeof PACKAGES].name}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3">
-                      <span
-                        className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${subStatus.className}`}
-                      >
-                        {subStatus.status}
-                      </span>
+                    <td className="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">
+                      {normalizeAcademicYearLabel(user.academicYearLabel) || '—'}
                     </td>
                     <td className="px-3 py-3">
                       <div className="flex items-center justify-end gap-1">
@@ -3476,6 +3542,28 @@ export default function UserManagement() {
                   </div>
                 </div>
               )}
+
+              {/* Academic year */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Eğitim dönemi</label>
+                <select
+                  value={formData.academicYearLabel}
+                  onChange={(e) => setFormData({ ...formData, academicYearLabel: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                >
+                  <option value="">— Seçilmedi —</option>
+                  {mergeAcademicYearTermOptions(
+                    formData.academicYearLabel ? [formData.academicYearLabel] : []
+                  ).map((term) => (
+                    <option key={term} value={term}>
+                      {term}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Örnek: 2025-2026, 2026-2027. Liste üstünden döneme göre süzebilirsiniz.
+                </p>
+              </div>
 
               {/* Package */}
               <div>

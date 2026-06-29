@@ -61,6 +61,7 @@ export function userRowToSystemUser(r: UserRow, opts: { coaches: Coach[]; studen
     package: r.package ?? undefined,
     startDate: r.start_date ?? undefined,
     endDate: r.end_date ?? undefined,
+    academicYearLabel: r.academic_year_label ?? undefined,
     isActive: r.is_active,
     createdAt: r.created_at
   };

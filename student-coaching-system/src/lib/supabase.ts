@@ -139,6 +139,7 @@ export interface Database {
           package: 'trial' | 'starter' | 'professional' | 'enterprise' | null;
           start_date: string | null;
           end_date: string | null;
+          academic_year_label: string | null;
           created_at: string;
           updated_at: string;
         };
