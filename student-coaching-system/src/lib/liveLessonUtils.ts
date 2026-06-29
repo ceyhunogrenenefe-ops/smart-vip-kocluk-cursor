@@ -292,3 +292,24 @@ export function coachingMeetingJoinUrl(
   if (r === 'student') return String(m.meet_link || '').trim();
   return String(m.link_bbb || m.meet_link || '').trim();
 }
+
+function normLessonSubjectForReminder(subject: string): string {
+  return String(subject || '')
+    .trim()
+    .toLocaleLowerCase('tr-TR')
+    .replace(/ı/g, 'i')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+/** Deneme ve rehberlik oturumlarına grup dersi WhatsApp hatırlatması gönderilmez. */
+export function shouldSkipClassLessonReminder(subject: string | null | undefined): boolean {
+  const s = normLessonSubjectForReminder(String(subject || ''));
+  if (!s) return false;
+  return s.includes('deneme') || s.includes('rehberlik');
+}

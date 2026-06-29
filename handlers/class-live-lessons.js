@@ -25,6 +25,7 @@ import {
   sendClassLessonReminderForSession,
   markClassSessionReminderSent
 } from '../api/_lib/class-lesson-reminder-send.js';
+import { shouldSkipClassLessonReminder } from '../api/_lib/class-lesson-reminder-logic.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import {
   insertOneOptionalModerator,
@@ -1434,6 +1435,17 @@ export default async function handler(req, res) {
           reminder_sent: true,
           sent_count: 0,
           failed_count: 0
+        });
+      }
+
+      if (shouldSkipClassLessonReminder(session.subject)) {
+        return res.status(200).json({
+          ok: true,
+          skipped: 'excluded_subject',
+          reminder_sent: false,
+          sent_count: 0,
+          failed_count: 0,
+          message: 'Deneme ve rehberlik derslerine grup hatırlatması gönderilmez.'
         });
       }
 

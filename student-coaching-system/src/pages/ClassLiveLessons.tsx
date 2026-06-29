@@ -13,7 +13,7 @@ import { useMobileAppShell } from '../hooks/useMobileAppShell';
 import type { Student } from '../types';
 import { GripVertical, KeyRound, Loader2, Pencil, PlayCircle, Trash2, FileDown, Bell } from 'lucide-react';
 import BbbAutoLinkFieldHint from '../components/liveLessons/BbbAutoLinkFieldHint';
-import { isBbbJoinUrl, hasClassSessionRecordingAccess, isBbbPlaybackUrl, needsBbbJoinFlow, displayMeetingLinkForRow, meetingLinkForSave } from '../lib/liveLessonUtils';
+import { isBbbJoinUrl, hasClassSessionRecordingAccess, isBbbPlaybackUrl, needsBbbJoinFlow, displayMeetingLinkForRow, meetingLinkForSave, shouldSkipClassLessonReminder } from '../lib/liveLessonUtils';
 import { openBbbJoin, openBbbRecording } from '../lib/bbbJoin';
 import ClassLiveClassManager from '../components/liveLessons/ClassLiveClassManager';
 import { copyGuestJoinShareText } from '../lib/bbbGuestJoin';
@@ -1548,7 +1548,7 @@ export default function ClassLiveLessons() {
                                       Kaydı izle
                                     </button>
                                   ) : null}
-                                  {canSendLessonReminder && s.status === 'scheduled' && !s.reminder_sent ? (
+                                  {canSendLessonReminder && s.status === 'scheduled' && !s.reminder_sent && !shouldSkipClassLessonReminder(s.subject) ? (
                                     <button
                                       type="button"
                                       disabled={reminderBusyId === s.id}

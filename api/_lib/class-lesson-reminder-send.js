@@ -2,7 +2,7 @@ import { supabaseAdmin } from './supabase-admin.js';
 import { normalizePhoneToE164 } from './phone-whatsapp.js';
 import { insertWhatsAppAutomationLog, alreadySentClassLessonReminder } from './message-log.js';
 import { getIstanbulDateString } from './istanbul-time.js';
-import { shouldSkipConsecutiveSameLesson } from './class-lesson-reminder-logic.js';
+import { shouldSkipConsecutiveSameLesson, shouldSkipClassLessonReminder } from './class-lesson-reminder-logic.js';
 import { resolveGuestShareUrlForClassSession } from './guest-join-share-url.js';
 import { sendAutomationTemplateMessage } from './whatsapp-automation-channel.js';
 import { OUTBOUND_LOG_CODE } from './whatsapp-outbound.js';
@@ -67,6 +67,25 @@ export async function sendClassLessonReminderForSession(p) {
   const studentDaySessions = p.studentDaySessions || new Map();
   const applyConsecutiveSkip = p.applyConsecutiveSkip === true;
   const source = p.source === 'manual' ? 'manual' : 'cron';
+
+  if (shouldSkipClassLessonReminder(session?.subject)) {
+    return {
+      log: [
+        {
+          session_id: session.id,
+          class_id: session.class_id,
+          ok: true,
+          skipped: 'excluded_subject',
+          note: 'Deneme veya rehberlik dersi — grup hatırlatması gönderilmez',
+          subject: session.subject || ''
+        }
+      ],
+      anySucceeded: true,
+      hadSendFailure: false,
+      evaluatedAny: false,
+      source
+    };
+  }
 
   /** @type {object[]} */
   const log = [];

@@ -3,6 +3,7 @@ import {
   isInReminderWindow,
   isSameLessonSession,
   shouldSkipConsecutiveSameLesson,
+  shouldSkipClassLessonReminder,
   toLessonStartUtcMs,
   normalizeTimeHms
 } from './class-lesson-reminder-logic.js';
@@ -34,5 +35,11 @@ const fourteenMinBefore = startMs - 14 * 60 * 1000;
 assert.equal(isInReminderWindow(lessonDate, start, fourteenMinBefore), false);
 const fortyMinBefore = startMs - 40 * 60 * 1000;
 assert.equal(isInReminderWindow(lessonDate, start, fortyMinBefore), false);
+
+assert.equal(shouldSkipClassLessonReminder('TYT Deneme'), true);
+assert.equal(shouldSkipClassLessonReminder('Rehberlik'), true);
+assert.equal(shouldSkipClassLessonReminder('REHBERLİK'), true);
+assert.equal(shouldSkipClassLessonReminder('Matematik'), false);
+assert.equal(shouldSkipClassLessonReminder('Soru Çözüm Kimya'), false);
 
 console.log('class-lesson-reminder-logic: ok');

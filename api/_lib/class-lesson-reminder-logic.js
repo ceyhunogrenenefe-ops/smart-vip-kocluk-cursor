@@ -33,6 +33,7 @@ export function isInReminderWindow(dateStr, timeStr, nowMs = Date.now()) {
 }
 /** Hatırlatma henüz gitmemiş oturumları sınıflandır (panel özeti). */
 export function classifyUnsentSessionReminder(session, nowMs = Date.now()) {
+  if (shouldSkipClassLessonReminder(session?.subject)) return 'excluded_subject';
   if (session?.reminder_sent) return 'already_sent';
   const until = msUntilLessonStart(session.lesson_date, session.start_time, nowMs);
   if (until <= 0) return 'started_without_reminder';
@@ -44,10 +45,12 @@ export function summarizeUnsentClassSessions(sessions, nowMs = Date.now()) {
   let due_now = 0;
   let waiting_for_window = 0;
   let started_without_reminder = 0;
+  let excluded_subject = 0;
   for (const s of sessions || []) {
     if (s?.reminder_sent || String(s?.status || '') !== 'scheduled') continue;
     const bucket = classifyUnsentSessionReminder(s, nowMs);
-    if (bucket === 'due_now') due_now += 1;
+    if (bucket === 'excluded_subject') excluded_subject += 1;
+    else if (bucket === 'due_now') due_now += 1;
     else if (bucket === 'waiting_for_window') waiting_for_window += 1;
     else if (bucket === 'started_without_reminder') started_without_reminder += 1;
   }
@@ -55,11 +58,33 @@ export function summarizeUnsentClassSessions(sessions, nowMs = Date.now()) {
     due_now,
     waiting_for_window,
     started_without_reminder,
+    excluded_subject,
     total_unsent: due_now + waiting_for_window + started_without_reminder
   };
 }
 
 function norm(s) {
+  return String(s || '')
+    .trim()
+    .toLocaleLowerCase('tr-TR')
+    .replace(/ı/g, 'i')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+/** Deneme ve rehberlik oturumlarına grup dersi WhatsApp hatırlatması gönderilmez. */
+export function shouldSkipClassLessonReminder(subject) {
+  const s = norm(subject);
+  if (!s) return false;
+  return s.includes('deneme') || s.includes('rehberlik');
+}
+
+function normSubjectCompare(s) {
   return String(s || '')
     .trim()
     .toLowerCase()
@@ -70,7 +95,7 @@ function norm(s) {
 export function isSameLessonSession(a, b) {
   if (!a || !b) return false;
   if (String(a.class_id || '') !== String(b.class_id || '')) return false;
-  if (norm(a.subject) !== norm(b.subject)) return false;
+  if (normSubjectCompare(a.subject) !== normSubjectCompare(b.subject)) return false;
   const linkA = norm(a.meeting_link);
   const linkB = norm(b.meeting_link);
   if (linkA && linkB && linkA !== linkB) return false;
