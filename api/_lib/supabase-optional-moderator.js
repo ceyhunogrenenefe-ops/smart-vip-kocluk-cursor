@@ -15,7 +15,11 @@ function errorText(err) {
 
 function columnFromSchemaError(err) {
   const m = errorText(err);
-  const match = m.match(/Could not find the '([^']+)' column/i);
+  let match = m.match(/Could not find the '([^']+)' column/i);
+  if (match) return match[1];
+  match = m.match(/column\s+[\w.]+\.(\w+)\s+does not exist/i);
+  if (match) return match[1];
+  match = m.match(/column\s+"?(\w+)"?\s+does not exist/i);
   return match ? match[1] : null;
 }
 
@@ -80,4 +84,54 @@ export async function insertOneOptionalModerator(table, row) {
 
 export async function insertManyOptionalModerator(table, rows) {
   return insertWithOptionalFallback(table, rows, false);
+}
+
+/** SELECT: isteğe bağlı kolonlar şemada yoksa yalnızca temel kolonlarla yeniden dener. */
+export async function selectWithOptionalColumns(table, baseSelect, optionalColumns, applyQuery) {
+  const optional = Array.isArray(optionalColumns) ? optionalColumns : OPTIONAL_INSERT_COLUMNS;
+  const base = String(baseSelect || '*').trim();
+  const baseCols = new Set(base.split(',').map((c) => c.trim()).filter(Boolean));
+  const extra = optional.filter((c) => !baseCols.has(c));
+  const select = extra.length ? `${base},${extra.join(',')}` : base;
+
+  let q = supabaseAdmin.from(table).select(select);
+  if (typeof applyQuery === 'function') q = applyQuery(q) || q;
+  let result = await q;
+  if (!result.error) return result;
+
+  const missingCol = columnFromSchemaError(result.error);
+  const canRetry =
+    Boolean(missingCol) ||
+    missingOptionalColumn(result.error) ||
+    /does not exist/i.test(errorText(result.error));
+  if (!canRetry) return result;
+
+  q = supabaseAdmin.from(table).select(base);
+  if (typeof applyQuery === 'function') q = applyQuery(q) || q;
+  return await q;
+}
+
+/** UPDATE: isteğe bağlı kolonlar şemada yoksa kademeli düşürülür. */
+export async function updateOneOptionalModerator(table, patch, eqColumn, eqValue) {
+  let current = patch && typeof patch === 'object' ? { ...patch } : {};
+  for (let attempt = 0; attempt < OPTIONAL_INSERT_COLUMNS.length + 2; attempt++) {
+    const result = await supabaseAdmin.from(table).update(current).eq(eqColumn, eqValue);
+    if (!result.error) return result;
+
+    const missingCol = columnFromSchemaError(result.error);
+    if (missingCol && missingCol in current) {
+      const next = { ...current };
+      delete next[missingCol];
+      current = next;
+      continue;
+    }
+
+    if (!missingOptionalColumn(result.error) || !rowHasAnyOptionalField(current)) {
+      return result;
+    }
+    const next = stripOptionalInsertFields(current);
+    if (JSON.stringify(next) === JSON.stringify(current)) return result;
+    current = next;
+  }
+  return await supabaseAdmin.from(table).update(stripOptionalInsertFields(patch)).eq(eqColumn, eqValue);
 }

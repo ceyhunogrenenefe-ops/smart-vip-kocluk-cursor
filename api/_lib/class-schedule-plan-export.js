@@ -1,7 +1,11 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import { resolveBbbMeetingDurationMinutes } from './bbb.js';
 import { resolveBbbOrManualMeetingLink } from './resolve-bbb-meeting-link.js';
-import { insertOneOptionalModerator } from './supabase-optional-moderator.js';
+import {
+  insertOneOptionalModerator,
+  selectWithOptionalColumns,
+  updateOneOptionalModerator
+} from './supabase-optional-moderator.js';
 import { isSolutionLessonSubject } from './solution-appointments-core.js';
 
 function normTr(s) {
@@ -334,10 +338,14 @@ export function buildExportResultSummary({
   if (!hasSlots && !hasSessions) {
     ok = false;
     const topReasons = [...new Set(slotSkipped.map((s) => SKIP_REASON_LABELS[s.reason] || s.reason))].slice(0, 3);
-    message =
-      topReasons.length > 0
-        ? `Aktarım başarısız: ${topReasons.join('; ')}. Öğretmen adlarını ve planlayıcı hücrelerini kontrol edin.`
-        : 'Aktarım başarısız: planlayıcıda doldurulmuş ders yok veya tüm kayıtlar atlandı.';
+    const topErrors = [...new Set(errList.map((e) => String(e || '').trim()).filter(Boolean))].slice(0, 2);
+    if (topErrors.length) {
+      message = `Aktarım başarısız: ${topErrors.join('; ')}`;
+    } else if (topReasons.length > 0) {
+      message = `Aktarım başarısız: ${topReasons.join('; ')}. Öğretmen adlarını ve planlayıcı hücrelerini kontrol edin.`;
+    } else {
+      message = 'Aktarım başarısız: planlayıcıda doldurulmuş ders yok veya tüm kayıtlar atlandı.';
+    }
   } else if ((newSessions > 0 || existSessions > 0) && !hasProblems) {
     ok = true;
     message = `Aktarım başarılı: ${newSlots} yeni şablon${existSlots ? `, ${existSlots} mevcut şablon` : ''}, ${newSessions} yeni oturum${existSessions ? `, ${existSessions} oturum zaten vardı` : ''} (${dateFrom} – ${dateTo}).`;
@@ -480,11 +488,12 @@ export async function exportPlannerGroupToClass({
       continue;
     }
 
-    const { data: sameTeacherSlots, error: cErr } = await supabaseAdmin
-      .from('class_weekly_slots')
-      .select('id,start_time,end_time,class_id,meeting_link,bbb_meeting_id,bbb_attendee_pw')
-      .eq('teacher_id', teacherId)
-      .eq('day_of_week', dayOfWeek);
+    const { data: sameTeacherSlots, error: cErr } = await selectWithOptionalColumns(
+      'class_weekly_slots',
+      'id,start_time,end_time,class_id,meeting_link',
+      ['bbb_meeting_id', 'bbb_attendee_pw', 'meeting_link_moderator'],
+      (q) => q.eq('teacher_id', teacherId).eq('day_of_week', dayOfWeek)
+    );
     if (cErr) {
       errors.push(cErr.message);
       continue;
@@ -497,10 +506,12 @@ export async function exportPlannerGroupToClass({
     if (sameClassDup && !replaceExisting) {
       alreadyExists += 1;
       if (needsMeetingLinkRefresh(sameClassDup.meeting_link)) {
-        const { error: patchErr } = await supabaseAdmin
-          .from('class_weekly_slots')
-          .update(meetingFields)
-          .eq('id', sameClassDup.id);
+        const { error: patchErr } = await updateOneOptionalModerator(
+          'class_weekly_slots',
+          meetingFields,
+          'id',
+          sameClassDup.id
+        );
         if (patchErr) errors.push(patchErr.message);
       }
       continue;
