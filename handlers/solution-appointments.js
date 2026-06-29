@@ -96,6 +96,70 @@ async function hydrateFiles(files) {
   return out;
 }
 
+async function findExistingStudentAppointment(lessonId, studentId) {
+  const { data, error } = await supabaseAdmin
+    .from('appointments')
+    .select('*')
+    .eq('lesson_id', lessonId)
+    .eq('student_id', studentId)
+    .in('status', ['scheduled', 'in_progress'])
+    .order('created_at', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  return data?.[0] || null;
+}
+
+async function upsertStudentAppointmentNote(appointmentId, studentNote) {
+  if (studentNote == null) return;
+  await supabaseAdmin.from('appointment_notes').upsert(
+    {
+      appointment_id: appointmentId,
+      student_note: String(studentNote || '').trim().slice(0, 2000) || null,
+      updated_at: new Date().toISOString()
+    },
+    { onConflict: 'appointment_id' }
+  );
+}
+
+async function appendAppointmentFiles(appointmentId, files) {
+  for (const f of files || []) {
+    const mime = String(f.mime || f.mime_type || '').trim().toLowerCase();
+    if (!ALLOWED_MIME.has(mime)) continue;
+    const b64 = String(f.data || f.base64 || '').trim();
+    if (!b64) continue;
+    const bufLen = Buffer.from(b64, 'base64').length;
+    if (bufLen > MAX_FILE_BYTES) continue;
+    const ext = mime === 'application/pdf' ? 'pdf' : mime === 'image/png' ? 'png' : 'jpg';
+    const path = `${appointmentId}/${randomUUID()}.${ext}`;
+    const uploaded = await uploadSolutionAppointmentFile({
+      base64: b64,
+      mime,
+      path,
+      originalName: f.filename || f.name || null
+    });
+    await supabaseAdmin.from('question_files').insert({
+      appointment_id: appointmentId,
+      storage_path: uploaded.storage_path,
+      file_url: uploaded.file_url,
+      mime_type: uploaded.mime_type,
+      original_name: uploaded.original_name
+    });
+  }
+}
+
+async function isSlotTakenByOther(lessonId, slotStart, excludeAppointmentId = null) {
+  let query = supabaseAdmin
+    .from('appointments')
+    .select('id')
+    .eq('lesson_id', lessonId)
+    .eq('slot_start', slotStart)
+    .in('status', ['scheduled', 'in_progress']);
+  if (excludeAppointmentId) query = query.neq('id', excludeAppointmentId);
+  const { data, error } = await query.maybeSingle();
+  if (error) throw error;
+  return Boolean(data?.id);
+}
+
 async function buildLessonPayload(lesson, studentId = null) {
   if (!lesson) return null;
   if (!isSolutionLessonSubject(lesson.subject)) {
@@ -154,13 +218,14 @@ async function buildLessonPayload(lesson, studentId = null) {
     slots: slots.map((slot) => {
       const key = normalizeTime(slot.slot_start);
       const ap = taken.get(key);
+      const isMine = Boolean(ap && studentId && String(ap.student_id) === String(studentId));
       return {
         ...slot,
         slot_start_display: slot.slot_start.slice(0, 5),
         slot_end_display: slot.slot_end.slice(0, 5),
-        available: !ap,
+        available: !ap || isMine,
         appointment_id: ap?.id || null,
-        taken_by_me: ap && studentId ? String(ap.student_id) === String(studentId) : false
+        taken_by_me: isMine
       };
     }),
     my_appointment: my
@@ -294,23 +359,67 @@ async function handleCreate(req, res, actor) {
   if (!match) return res.status(400).json({ error: 'invalid_slot' });
 
   const st = await studentDisplay(stActor.student_id);
-  const { data: existingMine } = await supabaseAdmin
-    .from('appointments')
-    .select('id')
-    .eq('lesson_id', lessonId)
-    .eq('student_id', stActor.student_id)
-    .in('status', ['scheduled', 'in_progress'])
-    .maybeSingle();
-  if (existingMine?.id) return res.status(409).json({ error: 'already_booked' });
+  const existingMine = await findExistingStudentAppointment(lessonId, stActor.student_id);
+  const files = Array.isArray(body.files) ? body.files : [];
 
-  const { data: taken } = await supabaseAdmin
-    .from('appointments')
-    .select('id')
-    .eq('lesson_id', lessonId)
-    .eq('slot_start', slotStart)
-    .in('status', ['scheduled', 'in_progress'])
-    .maybeSingle();
-  if (taken?.id) return res.status(409).json({ error: 'slot_taken' });
+  if (existingMine) {
+    const sameSlot =
+      normalizeTime(existingMine.slot_start) === slotStart &&
+      normalizeTime(existingMine.slot_end) === slotEnd;
+
+    if (!sameSlot) {
+      if (!isBookingOpen(lesson.lesson_date, lesson.start_time, now)) {
+        return res.status(400).json({
+          error: 'booking_deadline_passed',
+          message: 'Bu ders için randevu süresi dolmuştur.'
+        });
+      }
+      if (await isSlotTakenByOther(lessonId, slotStart, existingMine.id)) {
+        return res.status(409).json({ error: 'slot_taken', message: 'Bu saat dilimi dolu.' });
+      }
+      await supabaseAdmin
+        .from('appointments')
+        .update({
+          slot_start: slotStart,
+          slot_end: slotEnd,
+          question_count: questionCount,
+          student_name: studentName || existingMine.student_name || st?.name || '',
+          student_class_level: studentClass || existingMine.student_class_level || st?.class_level || '',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existingMine.id);
+    } else {
+      await supabaseAdmin
+        .from('appointments')
+        .update({
+          question_count: questionCount,
+          student_name: studentName || existingMine.student_name || st?.name || '',
+          student_class_level: studentClass || existingMine.student_class_level || st?.class_level || '',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existingMine.id);
+    }
+
+    await upsertStudentAppointmentNote(existingMine.id, studentNote);
+    const effectiveSlotStart = sameSlot ? existingMine.slot_start : slotStart;
+    if (files.length && canUploadFiles(lesson.lesson_date, effectiveSlotStart, now)) {
+      await appendAppointmentFiles(existingMine.id, files);
+    }
+
+    const payload = await buildLessonPayload(lesson, stActor.student_id);
+    const message = sameSlot ? 'Randevunuz güncellendi.' : 'Randevu saatiniz güncellendi.';
+    return res.status(200).json({
+      ok: true,
+      message,
+      appointment_id: existingMine.id,
+      rescheduled: !sameSlot,
+      ...payload
+    });
+  }
+
+  if (await isSlotTakenByOther(lessonId, slotStart)) {
+    return res.status(409).json({ error: 'slot_taken', message: 'Bu saat dilimi dolu.' });
+  }
 
   const appointmentId = randomUUID();
   const insertRow = {
@@ -335,30 +444,7 @@ async function handleCreate(req, res, actor) {
     student_note: studentNote || null
   });
 
-  const files = Array.isArray(body.files) ? body.files : [];
-  for (const f of files) {
-    const mime = String(f.mime || f.mime_type || '').trim().toLowerCase();
-    if (!ALLOWED_MIME.has(mime)) continue;
-    const b64 = String(f.data || f.base64 || '').trim();
-    if (!b64) continue;
-    const bufLen = Buffer.from(b64, 'base64').length;
-    if (bufLen > MAX_FILE_BYTES) continue;
-    const ext = mime === 'application/pdf' ? 'pdf' : mime === 'image/png' ? 'png' : 'jpg';
-    const path = `${appointmentId}/${randomUUID()}.${ext}`;
-    const uploaded = await uploadSolutionAppointmentFile({
-      base64: b64,
-      mime,
-      path,
-      originalName: f.filename || f.name || null
-    });
-    await supabaseAdmin.from('question_files').insert({
-      appointment_id: appointmentId,
-      storage_path: uploaded.storage_path,
-      file_url: uploaded.file_url,
-      mime_type: uploaded.mime_type,
-      original_name: uploaded.original_name
-    });
-  }
+  await appendAppointmentFiles(appointmentId, files);
 
   await notifyStudentUser(stActor.student_id, {
     title: 'Randevu oluşturuldu',
@@ -389,40 +475,63 @@ async function handlePatch(req, res, actor) {
     if (!hasStudentId || String(ap.student_id) !== String(stActor.student_id)) {
       return res.status(403).json({ error: 'forbidden' });
     }
-    if (!canUploadFiles(ap.appointment_date, ap.slot_start, now)) {
+    const studentNote = body.student_note != null ? String(body.student_note).trim().slice(0, 2000) : null;
+    const slotStart = body.slot_start != null ? normalizeTime(body.slot_start) : null;
+    const slotEnd = body.slot_end != null ? normalizeTime(body.slot_end) : null;
+    const questionCount =
+      body.question_count != null ? String(body.question_count || '1').trim() : null;
+
+    if (slotStart && slotEnd) {
+      const lesson = await loadLesson(ap.lesson_id);
+      if (!lesson) return res.status(404).json({ error: 'lesson_not_found' });
+      if (!isBookingOpen(lesson.lesson_date, lesson.start_time, now)) {
+        return res.status(400).json({
+          error: 'booking_deadline_passed',
+          message: 'Bu ders için randevu süresi dolmuştur.'
+        });
+      }
+      const validSlots = buildTenMinuteSlots(lesson.start_time, lesson.end_time);
+      const match = validSlots.find(
+        (s) => normalizeTime(s.slot_start) === slotStart && normalizeTime(s.slot_end) === slotEnd
+      );
+      if (!match) return res.status(400).json({ error: 'invalid_slot' });
+      const sameSlot =
+        normalizeTime(ap.slot_start) === slotStart && normalizeTime(ap.slot_end) === slotEnd;
+      if (!sameSlot && (await isSlotTakenByOther(ap.lesson_id, slotStart, ap.id))) {
+        return res.status(409).json({ error: 'slot_taken', message: 'Bu saat dilimi dolu.' });
+      }
+      if (!sameSlot) {
+        await supabaseAdmin
+          .from('appointments')
+          .update({
+            slot_start: slotStart,
+            slot_end: slotEnd,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', id);
+      }
+    }
+
+    if (questionCount && VALID_QUESTION_COUNTS.has(questionCount)) {
+      await supabaseAdmin
+        .from('appointments')
+        .update({ question_count: questionCount, updated_at: new Date().toISOString() })
+        .eq('id', id);
+    }
+
+    const files = Array.isArray(body.files) ? body.files : [];
+    const hasFileUpload = files.length > 0;
+    if (hasFileUpload && !canUploadFiles(ap.appointment_date, slotStart || ap.slot_start, now)) {
       return res.status(400).json({ error: 'upload_deadline_passed', message: 'Dosya yükleme süresi doldu.' });
     }
-    const studentNote = body.student_note != null ? String(body.student_note).trim().slice(0, 2000) : null;
     if (studentNote != null) {
-      await supabaseAdmin
-        .from('appointment_notes')
-        .upsert({ appointment_id: id, student_note: studentNote || null, updated_at: new Date().toISOString() }, { onConflict: 'appointment_id' });
+      await upsertStudentAppointmentNote(id, studentNote);
     }
-    const files = Array.isArray(body.files) ? body.files : [];
-    for (const f of files) {
-      const mime = String(f.mime || f.mime_type || '').trim().toLowerCase();
-      if (!ALLOWED_MIME.has(mime)) continue;
-      const b64 = String(f.data || f.base64 || '').trim();
-      if (!b64) continue;
-      const bufLen = Buffer.from(b64, 'base64').length;
-      if (bufLen > MAX_FILE_BYTES) continue;
-      const ext = mime === 'application/pdf' ? 'pdf' : mime === 'image/png' ? 'png' : 'jpg';
-      const path = `${id}/${randomUUID()}.${ext}`;
-      const uploaded = await uploadSolutionAppointmentFile({
-        base64: b64,
-        mime,
-        path,
-        originalName: f.filename || f.name || null
-      });
-      await supabaseAdmin.from('question_files').insert({
-        appointment_id: id,
-        storage_path: uploaded.storage_path,
-        file_url: uploaded.file_url,
-        mime_type: uploaded.mime_type,
-        original_name: uploaded.original_name
-      });
+    if (hasFileUpload) {
+      await appendAppointmentFiles(id, files);
     }
-    return res.status(200).json({ ok: true });
+    const payload = await buildLessonPayload(await loadLesson(ap.lesson_id), stActor.student_id);
+    return res.status(200).json({ ok: true, ...payload });
   }
 
   if (isTeacherLike(role)) {

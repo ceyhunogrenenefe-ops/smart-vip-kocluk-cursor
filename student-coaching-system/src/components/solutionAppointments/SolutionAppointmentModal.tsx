@@ -63,6 +63,11 @@ export function SolutionAppointmentModal({
         setStep('form');
         setQuestionCount(data.my_appointment.question_count || '1');
         setStudentNote(data.my_appointment.note?.student_note || '');
+        setSelectedSlot({
+          slot_start: data.my_appointment.slot_start,
+          slot_end: data.my_appointment.slot_end,
+          available: true
+        });
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -113,9 +118,19 @@ export function SolutionAppointmentModal({
 
   const removeFile = (idx: number) => setFiles((prev) => prev.filter((_, i) => i !== idx));
 
+  const slotChanged =
+    Boolean(
+      myAp &&
+        selectedSlot &&
+        (normalizeTime(selectedSlot.slot_start) !== normalizeTime(myAp.slot_start) ||
+          normalizeTime(selectedSlot.slot_end) !== normalizeTime(myAp.slot_end))
+    );
+
   const submit = async () => {
-    if (myAp) {
-      if (!myAp.can_upload) {
+    if (loading) return;
+
+    if (myAp && !slotChanged && step === 'form' && !selectedSlot) {
+      if (!myAp.can_upload && files.length > 0) {
         setError('Dosya yükleme süresi doldu.');
         return;
       }
@@ -138,7 +153,8 @@ export function SolutionAppointmentModal({
       return;
     }
 
-    if (!selectedSlot) {
+    const slot = selectedSlot || (myAp ? { slot_start: myAp.slot_start, slot_end: myAp.slot_end } : null);
+    if (!slot) {
       setError('Lütfen bir zaman dilimi seçin.');
       return;
     }
@@ -152,8 +168,8 @@ export function SolutionAppointmentModal({
       const encoded = await Promise.all(files.map(fileToBase64));
       const res = await createSolutionAppointment({
         lesson_id: session.id,
-        slot_start: selectedSlot.slot_start,
-        slot_end: selectedSlot.slot_end,
+        slot_start: slot.slot_start,
+        slot_end: slot.slot_end,
         question_count: questionCount,
         student_name: studentName.trim(),
         student_class_level: studentClass.trim(),
@@ -165,10 +181,18 @@ export function SolutionAppointmentModal({
       onSuccess?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      await load();
     } finally {
       setSaving(false);
     }
   };
+
+  function normalizeTime(t: string) {
+    const parts = String(t || '').split(':');
+    const h = String(Number(parts[0]) || 0).padStart(2, '0');
+    const m = String(Number(parts[1]) || 0).padStart(2, '0');
+    return `${h}:${m}:00`;
+  }
 
   if (!open) return null;
 
@@ -226,7 +250,7 @@ export function SolutionAppointmentModal({
             </div>
           ) : null}
 
-          {!loading && !myAp && step === 'slot' && !bookingClosed ? (
+          {!loading && step === 'slot' && !bookingClosed && (!myAp || payload?.booking_open) ? (
             <div>
               <p className="mb-2 text-xs font-medium text-slate-600">Müsait zaman dilimleri</p>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -277,6 +301,15 @@ export function SolutionAppointmentModal({
                   <p>
                     <span className="font-semibold">Durum:</span> {myAp.status_label || myAp.status}
                   </p>
+                  {payload?.booking_open ? (
+                    <button
+                      type="button"
+                      onClick={() => setStep('slot')}
+                      className="mt-2 text-[11px] font-semibold text-indigo-700 underline"
+                    >
+                      Slotu değiştir
+                    </button>
+                  ) : null}
                 </div>
               ) : selectedSlot ? (
                 <p className="text-xs text-slate-600">
@@ -410,12 +443,12 @@ export function SolutionAppointmentModal({
           {(step === 'form' || myAp) && (!bookingClosed || myAp) ? (
             <button
               type="button"
-              disabled={saving}
+              disabled={saving || loading}
               onClick={() => void submit()}
               className="ml-auto inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calendar className="h-4 w-4" />}
-              {myAp ? 'Güncelle' : 'Randevuyu Oluştur'}
+              {myAp && !slotChanged ? 'Güncelle' : slotChanged ? 'Slotu Güncelle' : 'Randevuyu Oluştur'}
             </button>
           ) : null}
         </div>

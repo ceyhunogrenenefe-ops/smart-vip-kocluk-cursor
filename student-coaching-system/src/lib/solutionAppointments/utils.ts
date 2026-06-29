@@ -1,11 +1,22 @@
 /** Soru çözüm randevu — istemci yardımcıları (sunucu doğrulaması esas). */
 
-export function isSolutionLessonSubject(subject: string | null | undefined): boolean {
-  const s = String(subject || '')
+export function normalizeLessonSubjectKey(subject: string | null | undefined): string {
+  return String(subject || '')
     .trim()
     .toLocaleLowerCase('tr-TR')
-    .replace(/ı/g, 'i');
-  return s.includes('soru cozum') || s.includes('soru çözüm');
+    .replace(/ı/g, 'i')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+export function isSolutionLessonSubject(subject: string | null | undefined): boolean {
+  const s = normalizeLessonSubjectKey(subject);
+  return s.includes('soru cozum') || s.includes('soru-cozum');
 }
 
 export type SolutionSlot = {

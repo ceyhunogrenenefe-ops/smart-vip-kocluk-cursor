@@ -1355,8 +1355,10 @@ function allSubjects(){
   return [...set.values()].sort((a,b)=>a.localeCompare(b,'tr'));
 }
 function isSolutionLessonSubject(subject){
-  const s=String(subject||'').trim().toLocaleLowerCase('tr-TR').replace(/ı/g,'i');
-  return s.includes('soru cozum')||s.includes('soru çözüm');
+  const s=String(subject||'').trim().toLocaleLowerCase('tr-TR')
+    .replace(/ı/g,'i').replace(/ğ/g,'g').replace(/ü/g,'u').replace(/ş/g,'s').replace(/ö/g,'o').replace(/ç/g,'c')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  return s.includes('soru cozum')||s.includes('soru-cozum');
 }
 /* time-based conflict: same teacher, same day, overlapping time across classes */
 function conflictData(){

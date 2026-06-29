@@ -4,7 +4,20 @@ import type { SolutionLessonPayload, TeacherAppointmentRow } from './utils';
 async function parseJson(res: Response) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const msg = (data as { message?: string; error?: string }).message || (data as { error?: string }).error || res.statusText;
+    const code = String((data as { error?: string }).error || '');
+    const messages: Record<string, string> = {
+      already_booked: 'Bu ders için zaten randevunuz var.',
+      slot_taken: 'Bu saat dilimi dolu.',
+      booking_deadline_passed: 'Bu ders için randevu süresi dolmuştur.',
+      upload_deadline_passed: 'Dosya yükleme süresi doldu.',
+      student_profile_required: 'Öğrenci profili bulunamadı.',
+      schema_missing: 'Randevu sistemi henüz kurulmamış. Yöneticiye bildirin.'
+    };
+    const msg =
+      (data as { message?: string }).message ||
+      messages[code] ||
+      code ||
+      res.statusText;
     throw new Error(msg);
   }
   return data;

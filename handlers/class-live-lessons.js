@@ -395,6 +395,36 @@ async function getClassDetails(classId) {
   };
 }
 
+async function resolveActorStudentId(actor) {
+  let sid = actor.student_id ? String(actor.student_id).trim() : '';
+  if (!sid && actor.sub) {
+    const { data: userRow } = await supabaseAdmin
+      .from('users')
+      .select('email, institution_id')
+      .eq('id', actor.sub)
+      .maybeSingle();
+    const resolved = await resolveStudentRowForUser({
+      userId: actor.sub,
+      email: userRow?.email,
+      institutionId: userRow?.institution_id ?? actor.institution_id ?? null
+    });
+    if (resolved?.id) sid = String(resolved.id).trim();
+  }
+  return sid;
+}
+
+async function actorEnrolledInClass(actor, details) {
+  const sid = await resolveActorStudentId(actor);
+  return Boolean(sid && details.student_ids.includes(sid));
+}
+
+async function canManageOrViewClassSessions(actor, role, details) {
+  if (isAdminRole(role)) return true;
+  if (details.teacher_ids.includes(String(actor.sub || ''))) return true;
+  if (normalizeRole(role) === 'student') return await actorEnrolledInClass(actor, details);
+  return false;
+}
+
 function normalizeSessionTimeSig(t) {
   return String(t || '').slice(0, 8);
 }
@@ -700,6 +730,25 @@ export default async function handler(req, res) {
       const from = String(req.query.from || '').trim();
       const to = String(req.query.to || '').trim();
       const allowedClassIds = await getManagedClassIds(actor);
+
+      if (
+        classId &&
+        /^\d{4}-\d{2}-\d{2}$/.test(from) &&
+        /^\d{4}-\d{2}-\d{2}$/.test(to)
+      ) {
+        const details = await getClassDetails(classId);
+        if (details.class && (await canManageOrViewClassSessions(actor, role, details))) {
+          try {
+            const instId = String(details.class.institution_id || institutionId || '').trim() || null;
+            if (instId) await backfillClassSessionInstitutionId(classId, instId);
+            await backfillClassWeeklySlotMeetingLinks(classId);
+            await ensureClassSessionsForClassInRange(classId, from, to);
+          } catch (e) {
+            console.warn('[class-live-lessons] ensure sessions on read', e instanceof Error ? e.message : e);
+          }
+        }
+      }
+
       let q = supabaseAdmin
         .from('class_sessions')
         .select('*')
@@ -1039,7 +1088,7 @@ export default async function handler(req, res) {
       }
       const details = await getClassDetails(classId);
       if (!details.class) return res.status(404).json({ error: 'class_not_found' });
-      if (!isAdminRole(role) && !details.teacher_ids.includes(actor.sub)) {
+      if (!(await canManageOrViewClassSessions(actor, role, details))) {
         return res.status(403).json({ error: 'forbidden' });
       }
       const instId =

@@ -1482,6 +1482,11 @@ export default function ClassLiveLessons() {
                                           Hatırlatma ✓
                                         </span>
                                       ) : null}
+                                      {isSolutionLesson ? (
+                                        <span className="rounded-md bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-violet-800 ring-1 ring-violet-400/40">
+                                          Randevu modu
+                                        </span>
+                                      ) : null}
                                     </div>
                                     <p className="mt-0.5 text-[11px] font-medium text-slate-800">
                                       {teacher?.name || s.teacher_name || s.teacher_id}
@@ -1510,6 +1515,19 @@ export default function ClassLiveLessons() {
                                       studentDefaults={studentAppointmentDefaults}
                                       onJoin={(row) => void joinClassSession(row)}
                                     />
+                                  ) : isSolutionLesson && canJoin ? (
+                                    <>
+                                      <p className="w-full text-[9px] text-violet-700">
+                                        Öğrenci panelinde «Randevu Al» görünür.
+                                      </p>
+                                      <button
+                                        type="button"
+                                        onClick={() => void joinClassSession(s)}
+                                        className="rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-2 py-1 text-[10px] font-semibold text-white shadow-sm hover:brightness-110"
+                                      >
+                                        Katıl
+                                      </button>
+                                    </>
                                   ) : canJoin ? (
                                     <button
                                       type="button"

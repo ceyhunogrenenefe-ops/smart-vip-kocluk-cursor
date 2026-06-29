@@ -8,12 +8,23 @@ export const SESSION_DURATION_MINUTES = 10;
 
 const IST_OFFSET = '+03:00';
 
-export function isSolutionLessonSubject(subject) {
-  const s = String(subject || '')
+export function normalizeLessonSubjectKey(subject) {
+  return String(subject || '')
     .trim()
     .toLocaleLowerCase('tr-TR')
-    .replace(/ı/g, 'i');
-  return s.includes('soru cozum') || s.includes('soru çözüm');
+    .replace(/ı/g, 'i')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+export function isSolutionLessonSubject(subject) {
+  const s = normalizeLessonSubjectKey(subject);
+  return s.includes('soru cozum') || s.includes('soru-cozum');
 }
 
 export function normalizeTime(t) {
