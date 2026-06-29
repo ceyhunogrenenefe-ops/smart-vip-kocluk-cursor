@@ -750,24 +750,28 @@ function groupStudentFilterLabel(g){
   if(gl) return classLevelFilterLabel(gl);
   return 'Grup';
 }
-function filterStudentsForGroup(g, mode){
+function collectStudentsForClassGroup(g){
   const all=state.systemStudents||[];
   if(!all.length||!g) return [];
-  const m=mode||'level_branch';
-  if(m==='all') return all.slice();
-  if(m==='class'&&g.classId) return all.filter(s=>(s.class_ids||[]).includes(g.classId));
-  const gl=resolveGroupClassLevel(g);
-  const gb=resolveGroupBranch(g);
-  let rows=gl?all.filter(s=>classLevelsMatch(s.class_level, gl)):all.slice();
-  if(m==='level_branch'&&gb) rows=rows.filter(s=>branchesMatch(s.school, gb, gl));
-  return rows;
-}
-function studentsMatchingGroup(g){
-  const all=state.systemStudents||[];
-  if(!all.length||!g) return [];
+  const seen=new Set();
+  const out=[];
+  const push=(s)=>{
+    const id=String(s.id||'');
+    if(!id||seen.has(id)) return;
+    seen.add(id);
+    out.push(s);
+  };
   if(g.classId){
-    const byMembership=all.filter(s=>(s.class_ids||[]).includes(g.classId));
-    if(byMembership.length) return byMembership;
+    all.filter(s=>(s.class_ids||[]).includes(g.classId)).forEach(push);
+    const cls=(state.systemClasses||[]).find(c=>c.id===g.classId);
+    const gl=cls?.class_level!=null&&String(cls.class_level).trim()!==''?normClassLevel(cls.class_level):resolveGroupClassLevel(g);
+    const gb=cls?.branch!=null&&String(cls.branch).trim()!==''?String(cls.branch).trim():resolveGroupBranch(g);
+    if(gl){
+      let rows=all.filter(s=>classLevelsMatch(s.class_level, gl));
+      if(gb) rows=rows.filter(s=>branchesMatch(s.school, gb, gl));
+      rows.forEach(push);
+    }
+    return out;
   }
   const gl=resolveGroupClassLevel(g);
   const gb=resolveGroupBranch(g);
@@ -776,8 +780,22 @@ function studentsMatchingGroup(g){
     if(gb) rows=rows.filter(s=>branchesMatch(s.school, gb, gl));
     return rows;
   }
-  if(g.classId) return all.filter(s=>(s.class_ids||[]).includes(g.classId));
   return [];
+}
+function filterStudentsForGroup(g, mode){
+  const all=state.systemStudents||[];
+  if(!all.length||!g) return [];
+  const m=mode||'level_branch';
+  if(m==='all') return all.slice();
+  if(m==='class'&&g.classId) return collectStudentsForClassGroup(g);
+  const gl=resolveGroupClassLevel(g);
+  const gb=resolveGroupBranch(g);
+  let rows=gl?all.filter(s=>classLevelsMatch(s.class_level, gl)):all.slice();
+  if(m==='level_branch'&&gb) rows=rows.filter(s=>branchesMatch(s.school, gb, gl));
+  return rows;
+}
+function studentsMatchingGroup(g){
+  return collectStudentsForClassGroup(g);
 }
 function studentAlreadyInGroup(g, sysStudent){
   if(!g||!sysStudent) return false;

@@ -6,6 +6,7 @@ import {
   loadInstitutionClassIdSet,
   resolveInstitutionClassIds
 } from '../api/_lib/attendance-report-query.js';
+import { inferClassIdsForStudent } from '../api/_lib/planner-class-student-match.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import {
   exportPlannerGroupToClass,
@@ -295,6 +296,7 @@ async function loadInstitutionClassesForPlanner(institutionId) {
 async function loadInstitutionStudentsForPlanner(institutionId) {
   const instId = String(institutionId || '').trim();
   if (!instId) return [];
+  const classes = await loadInstitutionClassesForPlanner(instId);
   const studentIdSet = await getInstitutionStudentIds(supabaseAdmin, instId);
   if (!studentIdSet.size) return [];
   const ids = [...studentIdSet];
@@ -324,14 +326,20 @@ async function loadInstitutionStudentsForPlanner(institutionId) {
     }
   }
   return rows
-    .map((s) => ({
-      id: String(s.id),
-      name: String(s.name || '').trim(),
-      class_level: s.class_level ?? null,
-      email: String(s.email || '').trim(),
-      school: String(s.school || '').trim(),
-      class_ids: classIdsByStudent.get(String(s.id)) || []
-    }))
+    .map((s) => {
+      const base = {
+        id: String(s.id),
+        name: String(s.name || '').trim(),
+        class_level: s.class_level ?? null,
+        email: String(s.email || '').trim(),
+        school: String(s.school || '').trim(),
+        class_ids: classIdsByStudent.get(String(s.id)) || []
+      };
+      return {
+        ...base,
+        class_ids: inferClassIdsForStudent(base, classes)
+      };
+    })
     .filter((s) => s.name)
     .sort((a, b) => a.name.localeCompare(b.name, 'tr'));
 }

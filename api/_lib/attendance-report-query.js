@@ -17,18 +17,50 @@ export async function getInstitutionStudentIds(supabaseAdmin, institutionId) {
 
   const { data: direct, error } = await supabaseAdmin
     .from('students')
-    .select('id, institution_id')
+    .select('id, institution_id, email, platform_user_id, user_id')
     .eq('institution_id', instId);
   if (error) throw error;
   for (const s of direct || []) set.add(String(s.id));
 
   if (!set.size) {
-    const { data: all, error: allErr } = await supabaseAdmin.from('students').select('id, institution_id');
+    const { data: all, error: allErr } = await supabaseAdmin
+      .from('students')
+      .select('id, institution_id, email, platform_user_id, user_id');
     if (allErr) throw allErr;
     for (const s of all || []) {
       if (institutionIdMatches(s.institution_id, instId)) set.add(String(s.id));
     }
   }
+
+  const { data: instUsers, error: uErr } = await supabaseAdmin
+    .from('users')
+    .select('id, email')
+    .eq('institution_id', instId);
+  if (!uErr && instUsers?.length) {
+    const userIds = instUsers.map((u) => String(u.id)).filter(Boolean);
+    const emails = [
+      ...new Set(instUsers.map((u) => String(u.email || '').toLowerCase().trim()).filter(Boolean))
+    ];
+    for (let i = 0; i < userIds.length; i += 200) {
+      const chunk = userIds.slice(i, i + 200);
+      const { data: linked, error: lErr } = await supabaseAdmin
+        .from('students')
+        .select('id')
+        .or(`platform_user_id.in.(${chunk.join(',')}),user_id.in.(${chunk.join(',')}),id.in.(${chunk.join(',')})`);
+      if (lErr) break;
+      for (const s of linked || []) set.add(String(s.id));
+    }
+    for (let i = 0; i < emails.length; i += 200) {
+      const chunk = emails.slice(i, i + 200);
+      const { data: byEmail, error: eErr } = await supabaseAdmin
+        .from('students')
+        .select('id')
+        .in('email', chunk);
+      if (eErr) break;
+      for (const s of byEmail || []) set.add(String(s.id));
+    }
+  }
+
   return set;
 }
 
