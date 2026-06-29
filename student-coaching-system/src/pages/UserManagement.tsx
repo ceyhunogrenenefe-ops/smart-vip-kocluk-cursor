@@ -82,6 +82,12 @@ import {
   normalizeAcademicYearLabel
 } from '../lib/academicYearTerms';
 
+function studentBranchSelectValue(school: string | undefined | null): string {
+  const key = normalizeStudentBranchKey(school);
+  if ((STANDARD_BRANCH_LETTERS as readonly string[]).includes(key)) return key;
+  return '';
+}
+
 function formHasTeacherRole(role: UserRole, alsoTeacher: boolean): boolean {
   return role === 'teacher' || alsoTeacher;
 }
@@ -286,6 +292,13 @@ export default function UserManagement() {
   /** Satır içi koç ataması PATCH sırasında */
   const [coachAssignBusy, setCoachAssignBusy] = useState<string | null>(null);
   const [classAssignBusy, setClassAssignBusy] = useState<string | null>(null);
+  const [branchAssignBusy, setBranchAssignBusy] = useState<string | null>(null);
+  const [termAssignBusy, setTermAssignBusy] = useState<string | null>(null);
+  const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(() => new Set());
+  const [bulkBranch, setBulkBranch] = useState('');
+  const [bulkCoachId, setBulkCoachId] = useState('');
+  const [bulkAcademicYear, setBulkAcademicYear] = useState('');
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [loginAsBusyId, setLoginAsBusyId] = useState<string | null>(null);
   const [loginCredentialsModal, setLoginCredentialsModal] = useState<LoginCredentialsData | null>(null);
   const [pendingRegistrations, setPendingRegistrations] = useState<PendingRegistrationRow[]>([]);
@@ -863,6 +876,46 @@ export default function UserManagement() {
 
   const hasMoreUsers = filteredUsers.length > visibleUsers.length;
 
+  const selectableStudents = useMemo(
+    () => filteredUsers.filter((u) => userRoleTags(u as SystemUser).includes('student')),
+    [filteredUsers]
+  );
+
+  const allFilteredStudentsSelected =
+    selectableStudents.length > 0 &&
+    selectableStudents.every((u) => selectedStudentIds.has(u.id));
+
+  const clearStudentSelection = useCallback(() => {
+    setSelectedStudentIds(new Set());
+  }, []);
+
+  const toggleStudentSelection = useCallback((userId: string) => {
+    setSelectedStudentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+  }, []);
+
+  const selectAllFilteredStudents = useCallback(() => {
+    setSelectedStudentIds(new Set(selectableStudents.map((u) => u.id)));
+  }, [selectableStudents]);
+
+  useEffect(() => {
+    clearStudentSelection();
+  }, [
+    searchTerm,
+    filterRole,
+    filterStatus,
+    filterInstitutionId,
+    filterClassLevel,
+    filterBranch,
+    filterAcademicYear,
+    filterCoachId,
+    clearStudentSelection
+  ]);
+
   const coachesForStudentForm = useMemo(() => {
     const inst = String(formData.studentInstitutionId || '').trim();
     if (!inst) return coaches;
@@ -989,6 +1042,125 @@ export default function UserManagement() {
       });
     } finally {
       setClassAssignBusy(null);
+    }
+  };
+
+  const handleInlineBranchChange = async (user: SystemUser, branchLetter: string) => {
+    const tags = userRoleTags(user as SystemUser);
+    if (!tags.includes('student')) return;
+    const st = await resolveStudentLinkForUser(user);
+    if (!st) return;
+    const next = branchLetter.trim().toLocaleUpperCase('tr-TR');
+    if (normalizeStudentBranchKey(st.school) === next) return;
+    setBranchAssignBusy(user.id);
+    setMessage(null);
+    try {
+      await updateStudent(st.id, { school: next || undefined });
+      await refreshUsers();
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Şube güncellenemedi.'
+      });
+    } finally {
+      setBranchAssignBusy(null);
+    }
+  };
+
+  const handleInlineAcademicYearChange = async (user: SystemUser, termRaw: string) => {
+    const tags = userRoleTags(user as SystemUser);
+    if (!tags.includes('student')) return;
+    const next = normalizeAcademicYearLabel(termRaw);
+    if (normalizeAcademicYearLabel(user.academicYearLabel) === next) return;
+    setTermAssignBusy(user.id);
+    setMessage(null);
+    try {
+      if (getAuthToken()) {
+        await db.updateUser(user.id, {
+          academic_year_label: next || null
+        } as Partial<UserRow>);
+      } else {
+        await updateUser(user.id, { academic_year_label: next || null });
+      }
+      await refreshUsers();
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Dönem güncellenemedi.'
+      });
+    } finally {
+      setTermAssignBusy(null);
+    }
+  };
+
+  const applyBulkStudentEdit = async (field: 'branch' | 'coach' | 'term') => {
+    const ids = [...selectedStudentIds];
+    if (!ids.length) return;
+    if (field === 'branch' && !bulkBranch.trim()) {
+      setMessage({ type: 'error', text: 'Toplu şube için bir şube seçin.' });
+      return;
+    }
+    if (field === 'coach' && !bulkCoachId.trim()) {
+      setMessage({ type: 'error', text: 'Toplu koç ataması için bir koç seçin.' });
+      return;
+    }
+    if (field === 'term' && !bulkAcademicYear.trim()) {
+      setMessage({ type: 'error', text: 'Toplu dönem için bir dönem seçin.' });
+      return;
+    }
+
+    setBulkBusy(true);
+    setMessage(null);
+    let ok = 0;
+    let fail = 0;
+    const errors: string[] = [];
+
+    for (const userId of ids) {
+      const user = users.find((u) => u.id === userId);
+      if (!user || !userRoleTags(user as SystemUser).includes('student')) continue;
+      try {
+        if (field === 'branch') {
+          const st = await resolveStudentLinkForUser(user);
+          if (!st) throw new Error('Öğrenci kartı yok');
+          await updateStudent(st.id, {
+            school: bulkBranch.trim().toLocaleUpperCase('tr-TR') || undefined
+          });
+        } else if (field === 'coach') {
+          const st = await resolveStudentLinkForUser(user);
+          if (!st) throw new Error('Öğrenci kartı yok');
+          await updateStudent(st.id, { coachId: bulkCoachId.trim() || undefined });
+        } else if (field === 'term') {
+          const label = normalizeAcademicYearLabel(bulkAcademicYear) || null;
+          if (getAuthToken()) {
+            await db.updateUser(user.id, { academic_year_label: label } as Partial<UserRow>);
+          } else {
+            await updateUser(user.id, { academic_year_label: label });
+          }
+        }
+        ok += 1;
+      } catch (e) {
+        fail += 1;
+        if (errors.length < 4) {
+          errors.push(
+            `${user.name}: ${e instanceof Error ? e.message : 'güncellenemedi'}`
+          );
+        }
+      }
+    }
+
+    try {
+      await refreshUsers();
+      const errTail = errors.length ? ` ${errors.join(' · ')}` : '';
+      setMessage({
+        type: ok > 0 ? 'success' : 'error',
+        text:
+          fail > 0
+            ? `${ok} öğrenci güncellendi, ${fail} hata.${errTail}`
+            : `${ok} öğrenci güncellendi.`
+      });
+      if (fail === 0) clearStudentSelection();
+    } finally {
+      setBulkBusy(false);
     }
   };
 
@@ -2108,10 +2280,182 @@ export default function UserManagement() {
           ))}
         </div>
         <p className="mt-2 text-xs text-slate-400">
-          Dönem kutusuna tıklayarak listeyi süzebilirsiniz. Kullanıcı düzenleme penceresinden dönem
-          atayabilirsiniz.
+          Dönem kutusuna tıklayarak listeyi süzebilirsiniz. Tablodan satır içi dönem değiştirebilir veya
+          toplu düzenleme kullanabilirsiniz.
         </p>
       </div>
+
+      {isAdminActor(currentUser) ? (
+        <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
+          <h3 className="text-sm font-semibold text-slate-800 mb-3">Şube</h3>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setFilterBranch('all')}
+              className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+                filterBranch === 'all'
+                  ? 'border-red-300 bg-red-50 text-red-800'
+                  : 'border-gray-100 bg-white hover:border-slate-200 text-slate-700'
+              }`}
+            >
+              Tüm şubeler
+            </button>
+            {STANDARD_BRANCH_LETTERS.map((letter) => {
+              const count = branchStats.find((r) => r.key === letter)?.count ?? 0;
+              return (
+                <button
+                  key={letter}
+                  type="button"
+                  onClick={() => setFilterBranch((prev) => (prev === letter ? 'all' : letter))}
+                  className={`rounded-lg border px-3 py-2 text-center min-w-[3.25rem] transition-colors ${
+                    filterBranch === letter
+                      ? 'border-red-300 bg-red-50'
+                      : 'border-gray-100 bg-white hover:border-slate-200'
+                  }`}
+                >
+                  <div className="text-lg font-bold text-slate-800">{count}</div>
+                  <div className="text-xs text-slate-500">Şube {letter}</div>
+                </button>
+              );
+            })}
+            {branchStats
+              .filter((r) => r.key === '__unknown__')
+              .map((row) => (
+                <button
+                  key={row.key}
+                  type="button"
+                  onClick={() => setFilterBranch((prev) => (prev === row.key ? 'all' : row.key))}
+                  className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                    filterBranch === row.key
+                      ? 'border-red-300 bg-red-50'
+                      : 'border-gray-100 bg-white hover:border-slate-200'
+                  }`}
+                >
+                  <div className="text-lg font-bold text-slate-800">{row.count}</div>
+                  <div className="text-xs text-slate-500">{row.label}</div>
+                </button>
+              ))}
+          </div>
+          <p className="mt-2 text-xs text-slate-400">
+            Şube kutusuna tıklayarak listeyi süzebilirsiniz. Sınıf filtresinden bağımsızdır. Tablodan satır
+            içi şube değiştirebilirsiniz.
+          </p>
+        </div>
+      ) : null}
+
+      {selectedStudentIds.size > 0 ? (
+        <div className="rounded-xl border border-violet-200 bg-violet-50 p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-sm font-semibold text-violet-950">
+              {selectedStudentIds.size} öğrenci seçildi
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={selectAllFilteredStudents}
+                disabled={bulkBusy || allFilteredStudentsSelected}
+                className="rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-sm font-medium text-violet-800 hover:bg-violet-100 disabled:opacity-50"
+              >
+                Filtrelenen tümünü seç ({selectableStudents.length})
+              </button>
+              <button
+                type="button"
+                onClick={clearStudentSelection}
+                disabled={bulkBusy}
+                className="rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-violet-100 disabled:opacity-50"
+              >
+                Seçimi temizle
+              </button>
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="flex-1 min-w-[8rem] text-xs font-medium text-violet-900">
+                Şube
+                <select
+                  value={bulkBranch}
+                  onChange={(e) => setBulkBranch(e.target.value)}
+                  disabled={bulkBusy}
+                  className="mt-1 w-full rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="">Seçin</option>
+                  {STANDARD_BRANCH_LETTERS.map((letter) => (
+                    <option key={letter} value={letter}>
+                      Şube {letter}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => void applyBulkStudentEdit('branch')}
+                disabled={bulkBusy || !bulkBranch}
+                className="rounded-lg bg-violet-600 px-3 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+              >
+                Uygula
+              </button>
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="flex-1 min-w-[8rem] text-xs font-medium text-violet-900">
+                Koç
+                <select
+                  value={bulkCoachId}
+                  onChange={(e) => setBulkCoachId(e.target.value)}
+                  disabled={bulkBusy}
+                  className="mt-1 w-full rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="">Seçin</option>
+                  {coachesForFilter.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => void applyBulkStudentEdit('coach')}
+                disabled={bulkBusy || !bulkCoachId}
+                className="rounded-lg bg-violet-600 px-3 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+              >
+                Uygula
+              </button>
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="flex-1 min-w-[8rem] text-xs font-medium text-violet-900">
+                Dönem
+                <select
+                  value={bulkAcademicYear}
+                  onChange={(e) => setBulkAcademicYear(e.target.value)}
+                  disabled={bulkBusy}
+                  className="mt-1 w-full rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="">Seçin</option>
+                  {academicYearOptions.map((term) => (
+                    <option key={term} value={term}>
+                      {term}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => void applyBulkStudentEdit('term')}
+                disabled={bulkBusy || !bulkAcademicYear}
+                className="rounded-lg bg-violet-600 px-3 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+              >
+                Uygula
+              </button>
+            </div>
+          </div>
+          {bulkBusy ? (
+            <p className="mt-2 text-xs text-violet-800 inline-flex items-center gap-1">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Toplu güncelleme yapılıyor…
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {canBulkImport ? (
       <PageCollapsibleSection
@@ -2247,72 +2591,6 @@ export default function UserManagement() {
             <p className="mt-2 text-xs text-slate-400">
               Kutuya tıklayarak sınıf süzgecini uygulayabilirsiniz. Toplam:{' '}
               {statsStudentsScope.length} öğrenci profili.
-            </p>
-          </div>
-        ) : null}
-
-        {isAdminActor(currentUser) ? (
-          <div className="mt-6 border-t border-gray-100 pt-4">
-            <h3 className="text-sm font-semibold text-slate-800 mb-3">
-              {currentUser?.role === 'super_admin' && filterInstitutionId !== 'all'
-                ? 'Seçili kurum — şubeye göre öğrenci'
-                : currentUser?.role === 'admin'
-                  ? 'Kurumunuz — şubeye göre öğrenci'
-                  : 'Şubeye göre öğrenci dağılımı'}
-            </h3>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setFilterBranch('all')}
-                className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
-                  filterBranch === 'all'
-                    ? 'border-red-300 bg-red-50 text-red-800'
-                    : 'border-gray-100 bg-white hover:border-slate-200 text-slate-700'
-                }`}
-              >
-                Tüm şubeler
-              </button>
-              {STANDARD_BRANCH_LETTERS.map((letter) => {
-                const count = branchStats.find((r) => r.key === letter)?.count ?? 0;
-                return (
-                  <button
-                    key={letter}
-                    type="button"
-                    onClick={() => setFilterBranch((prev) => (prev === letter ? 'all' : letter))}
-                    className={`rounded-lg border px-3 py-2 text-center min-w-[3.25rem] transition-colors ${
-                      filterBranch === letter
-                        ? 'border-red-300 bg-red-50'
-                        : 'border-gray-100 bg-white hover:border-slate-200'
-                    }`}
-                  >
-                    <div className="text-lg font-bold text-slate-800">{count}</div>
-                    <div className="text-xs text-slate-500">Şube {letter}</div>
-                  </button>
-                );
-              })}
-              {branchStats
-                .filter((r) => r.key === '__unknown__')
-                .map((row) => (
-                  <button
-                    key={row.key}
-                    type="button"
-                    onClick={() =>
-                      setFilterBranch((prev) => (prev === row.key ? 'all' : row.key))
-                    }
-                    className={`rounded-lg border px-3 py-2 text-left transition-colors ${
-                      filterBranch === row.key
-                        ? 'border-red-300 bg-red-50'
-                        : 'border-gray-100 bg-white hover:border-slate-200'
-                    }`}
-                  >
-                    <div className="text-lg font-bold text-slate-800">{row.count}</div>
-                    <div className="text-xs text-slate-500">{row.label}</div>
-                  </button>
-                ))}
-            </div>
-            <p className="mt-2 text-xs text-slate-400">
-              Şube kutusuna tıklayarak listeyi süzebilirsiniz. Sınıf ve şube filtreleri birlikte
-              uygulanır.
             </p>
           </div>
         ) : null}
@@ -2629,6 +2907,27 @@ export default function UserManagement() {
             </select>
 
             <select
+              value={filterAcademicYear}
+              onChange={(e) => setFilterAcademicYear(e.target.value)}
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-h-[44px] xl:min-w-[10rem] xl:w-auto"
+              aria-label="Dönem filtresi"
+            >
+              <option value="all">Tüm dönemler</option>
+              {academicYearOptions.map((term) => (
+                <option key={term} value={term}>
+                  {term}
+                </option>
+              ))}
+              {academicYearStats
+                .filter((r) => r.key === '__unset__')
+                .map((row) => (
+                  <option key={row.key} value={row.key}>
+                    {row.label}
+                  </option>
+                ))}
+            </select>
+
+            <select
               value={filterCoachId}
               onChange={(e) => setFilterCoachId(e.target.value)}
               className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-h-[44px] xl:min-w-[12rem] xl:w-auto"
@@ -2707,12 +3006,23 @@ export default function UserManagement() {
               return (
                 <article key={user.id} className="p-4 space-y-3">
                   <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 flex-1 items-start gap-3">
+                      {tags.includes('student') ? (
+                        <input
+                          type="checkbox"
+                          checked={selectedStudentIds.has(user.id)}
+                          onChange={() => toggleStudentSelection(user.id)}
+                          className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                          aria-label={`${user.name} seç`}
+                        />
+                      ) : null}
+                      <div className="min-w-0 flex-1">
                       <p className="text-base font-semibold text-slate-900 break-words">{user.name}</p>
                       <p className="mt-0.5 text-sm text-gray-600 break-all">{user.email}</p>
                       {user.phone ? (
                         <p className="mt-0.5 text-sm text-gray-500">{user.phone}</p>
                       ) : null}
+                      </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-0.5">
                       {canImpersonate(user) && !user.id.startsWith('demo-seed-') ? (
@@ -2757,15 +3067,48 @@ export default function UserManagement() {
                     >
                       {roleBadge.label}
                     </span>
-                    {user.academicYearLabel ? (
-                      <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
-                        {normalizeAcademicYearLabel(user.academicYearLabel)}
-                      </span>
-                    ) : null}
                   </div>
 
                   {studentMatch ? (
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <label className="block text-xs">
+                        <span className="font-medium text-slate-500">Şube</span>
+                        <div className="relative mt-1">
+                          <select
+                            value={studentBranchSelectValue(studentMatch.school)}
+                            disabled={branchAssignBusy === user.id}
+                            onChange={(e) => void handleInlineBranchChange(user, e.target.value)}
+                            className="w-full appearance-none rounded-lg border border-slate-200 bg-white py-2 pl-2 pr-8 text-sm text-slate-800"
+                          >
+                            <option value="">—</option>
+                            {STANDARD_BRANCH_LETTERS.map((letter) => (
+                              <option key={letter} value={letter}>
+                                Şube {letter}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        </div>
+                      </label>
+                      <label className="block text-xs">
+                        <span className="font-medium text-slate-500">Dönem</span>
+                        <div className="relative mt-1">
+                          <select
+                            value={normalizeAcademicYearLabel(user.academicYearLabel)}
+                            disabled={termAssignBusy === user.id}
+                            onChange={(e) => void handleInlineAcademicYearChange(user, e.target.value)}
+                            className="w-full appearance-none rounded-lg border border-slate-200 bg-white py-2 pl-2 pr-8 text-sm text-slate-800"
+                          >
+                            <option value="">—</option>
+                            {academicYearOptions.map((term) => (
+                              <option key={term} value={term}>
+                                {term}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        </div>
+                      </label>
                       <label className="block text-xs">
                         <span className="font-medium text-slate-500">Sınıf</span>
                         <div className="relative mt-1">
@@ -2845,7 +3188,20 @@ export default function UserManagement() {
           <table className="w-full min-w-[1100px] table-fixed">
             <thead className="bg-gray-50/90 border-b border-gray-100">
               <tr>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[9%]">Adı</th>
+                <th className="px-2 py-3 text-center text-xs font-medium text-gray-500 w-[3%]">
+                  <input
+                    type="checkbox"
+                    checked={allFilteredStudentsSelected}
+                    onChange={(e) =>
+                      e.target.checked ? selectAllFilteredStudents() : clearStudentSelection()
+                    }
+                    disabled={selectableStudents.length === 0}
+                    className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                    title="Filtrelenen öğrencilerin tümünü seç"
+                    aria-label="Filtrelenen öğrencilerin tümünü seç"
+                  />
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[8%]">Adı</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[9%]">Soyadı</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[14%]">E-mail adresi</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[11%]">Telefon numarası</th>
@@ -2862,7 +3218,7 @@ export default function UserManagement() {
             <tbody className="divide-y divide-gray-100">
               {listLoading || authLoading ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-12 text-center text-sm text-slate-500">
+                  <td colSpan={13} className="px-4 py-12 text-center text-sm text-slate-500">
                     <span className="inline-flex items-center justify-center gap-2">
                       <Loader2 className="h-5 w-5 animate-spin text-red-500" />
                       Kullanıcılar yükleniyor…
@@ -2898,6 +3254,17 @@ export default function UserManagement() {
 
                 return (
                   <tr key={user.id} className="hover:bg-slate-50/80">
+                    <td className="px-2 py-3 text-center align-middle">
+                      {tags.includes('student') ? (
+                        <input
+                          type="checkbox"
+                          checked={selectedStudentIds.has(user.id)}
+                          onChange={() => toggleStudentSelection(user.id)}
+                          className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                          aria-label={`${user.name} seç`}
+                        />
+                      ) : null}
+                    </td>
                     <td className="px-3 py-3 text-sm font-semibold text-slate-900 uppercase tracking-tight truncate" title={firstName}>
                       {firstName}
                     </td>
@@ -2941,8 +3308,27 @@ export default function UserManagement() {
                         <span className="text-sm text-gray-400">—</span>
                       )}
                     </td>
-                    <td className="px-3 py-3 text-sm text-gray-600 uppercase">
-                      {studentMatch?.school?.trim() ? studentMatch.school : '—'}
+                    <td className="px-3 py-3 align-middle">
+                      {studentMatch ? (
+                        <div className="relative min-w-[4.5rem] max-w-[7rem]">
+                          <select
+                            value={studentBranchSelectValue(studentMatch.school)}
+                            disabled={branchAssignBusy === user.id}
+                            onChange={(e) => void handleInlineBranchChange(user, e.target.value)}
+                            className="w-full appearance-none rounded-lg border border-slate-200 bg-white py-1.5 pl-2 pr-8 text-xs font-medium text-slate-800 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-60"
+                          >
+                            <option value="">—</option>
+                            {STANDARD_BRANCH_LETTERS.map((letter) => (
+                              <option key={letter} value={letter}>
+                                {letter}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        </div>
+                      ) : (
+                        <span className="text-sm text-gray-400">—</span>
+                      )}
                     </td>
                     <td className="px-3 py-3 align-middle">
                       {studentMatch ? (
@@ -2984,8 +3370,27 @@ export default function UserManagement() {
                     <td className="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">
                       {studentMatch?.parentPhone?.trim() ? studentMatch.parentPhone : '—'}
                     </td>
-                    <td className="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">
-                      {normalizeAcademicYearLabel(user.academicYearLabel) || '—'}
+                    <td className="px-3 py-3 align-middle">
+                      {tags.includes('student') ? (
+                        <div className="relative min-w-[7rem] max-w-[10rem]">
+                          <select
+                            value={normalizeAcademicYearLabel(user.academicYearLabel)}
+                            disabled={termAssignBusy === user.id}
+                            onChange={(e) => void handleInlineAcademicYearChange(user, e.target.value)}
+                            className="w-full appearance-none rounded-lg border border-slate-200 bg-white py-1.5 pl-2 pr-8 text-xs font-medium text-slate-800 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-60"
+                          >
+                            <option value="">—</option>
+                            {academicYearOptions.map((term) => (
+                              <option key={term} value={term}>
+                                {term}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        </div>
+                      ) : (
+                        <span className="text-sm text-gray-400">—</span>
+                      )}
                     </td>
                     <td className="px-3 py-3">
                       <div className="flex items-center justify-end gap-1">
