@@ -17,6 +17,7 @@
     --brand-navy:#1F478F; --brand-red:#FC3232; --brand-navy-soft:#E9F0FB;
     --danger:#D64545; --danger-soft:#FBECEC;
     --ok:#1F8A5B; --ok-soft:#E7F4EE;
+    --shared:#2E6B8C; --shared-soft:#E6F2F8;
     --warn:#B7791F;
     --shadow:0 1px 2px rgba(26,29,38,.05), 0 6px 20px rgba(26,29,38,.06);
     --radius:13px;
@@ -127,6 +128,10 @@
   .cell.conflict{background:var(--danger-soft)}
   .cell.conflict:hover{background:#F7DDDD}
   .cell.conflict .tch{color:var(--danger); font-weight:600}
+  .cell.shared-lesson{background:var(--shared-soft)}
+  .cell.shared-lesson:hover{background:#D9EBF5}
+  .cell.shared-lesson .tch{color:var(--shared); font-weight:600}
+  .cell .shared-with{display:block;font-size:10.5px;color:var(--shared);font-weight:600;margin-top:4px;line-height:1.3}
   .cell .conf-with{display:block;font-size:10.5px;color:var(--danger);font-weight:600;margin-top:4px;line-height:1.3}
   .cell.has-lesson{cursor:grab}
   .cell.has-lesson:active{cursor:grabbing}
@@ -157,6 +162,9 @@
   table.master .mcell.conflict{background:var(--danger-soft)}
   table.master .mcell.conflict .abbr{color:var(--danger)}
   table.master .mcell.conflict .mini{color:var(--danger); font-weight:600}
+  table.master .mcell.shared-lesson{background:var(--shared-soft)}
+  table.master .mcell.shared-lesson .abbr{color:var(--shared)}
+  table.master .mcell.shared-lesson .mini{color:var(--shared); font-weight:600}
   table.master .mcell.empty{color:var(--faint); font-size:14px}
   table.master .day-sep{border-left:2px solid var(--line-strong)}
   .shared-groups-list{display:flex; flex-direction:column; gap:6px; margin-top:8px; max-height:140px; overflow-y:auto}
@@ -522,6 +530,30 @@ function migrateState(){
     if(!Array.isArray(g.curriculum)) g.curriculum=[];
     if(!Array.isArray(g.periods)||!g.periods.length) g.periods=(state.periods||[]).map(p=>({label:p.label,time:p.time}));
     (g.students||[]).forEach(s=>{ if(s.systemId===undefined) s.systemId=null; });
+  });
+  repairInferredSharedLessonIds();
+}
+function repairInferredSharedLessonIds(){
+  const buckets=new Map();
+  state.groups.forEach(g=>{
+    const per=g.periods||state.periods||[];
+    Object.entries(g.schedule||{}).forEach(([k,v])=>{
+      if(!v?.teacher) return;
+      if(v.sharedLessonId) return;
+      const [di,pi]=k.split('_').map(Number);
+      const p=per[pi]||{};
+      const bk=norm(v.teacher)+'|'+di+'|'+norm(v.subject||'')+'|'+norm(p.time||'');
+      if(!buckets.has(bk)) buckets.set(bk,[]);
+      buckets.get(bk).push({g,v,k});
+    });
+  });
+  buckets.forEach(items=>{
+    const gids=new Set(items.map(x=>x.g.id));
+    if(gids.size<2) return;
+    const id=uid();
+    items.forEach(({g,v,k})=>{
+      if(!v.sharedLessonId){ v.sharedLessonId=id; g.schedule[k]=v; }
+    });
   });
 }
 migrateState();
@@ -947,6 +979,8 @@ function findTeacherForSubject(subject){
 function teacherOccupiedAt(teacherName, di, pi, per, ignoreGid, ignoreKey){
   const tn=norm(teacherName); if(!tn) return false;
   const range=parseRange(per[pi]?.time);
+  const ignoreCell=ignoreGid&&ignoreKey?state.groups.find(g=>g.id===ignoreGid)?.schedule?.[ignoreKey]:null;
+  const ignoreSharedId=String(ignoreCell?.sharedLessonId||'').trim();
   for(const g of state.groups){
     const gPer=g.periods||state.periods||[];
     for(const [k,v] of Object.entries(g.schedule||{})){
@@ -955,8 +989,14 @@ function teacherOccupiedAt(teacherName, di, pi, per, ignoreGid, ignoreKey){
       const [gdi,gpi]=k.split('_').map(Number);
       if(gdi!==di) continue;
       const gr=parseRange(gPer[gpi]?.time);
-      if(range&&gr){ if(rangesOverlap(range,gr)) return true; }
-      else if(norm(gPer[gpi]?.time||'')===norm(per[pi]?.time||'')) return true;
+      let clash=false;
+      if(range&&gr){ clash=rangesOverlap(range,gr); }
+      else if(norm(gPer[gpi]?.time||'')===norm(per[pi]?.time||'')) clash=true;
+      if(!clash) continue;
+      const sid=String(v.sharedLessonId||'').trim();
+      if(ignoreSharedId&&sid&&sid===ignoreSharedId) continue;
+      if(g.id!==ignoreGid && norm(v.subject||'')===norm(ignoreCell?.subject||'') && ignoreCell) continue;
+      return true;
     }
   }
   return false;
@@ -1360,6 +1400,14 @@ function isSolutionLessonSubject(subject){
     .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
   return s.includes('soru cozum')||s.includes('soru-cozum');
 }
+function cellsAreSharedPartners(A,B){
+  const sidA=String(A.sharedId||'').trim();
+  const sidB=String(B.sharedId||'').trim();
+  if(sidA&&sidB&&sidA===sidB) return true;
+  if(A.gid===B.gid) return false;
+  if(A.tn!==B.tn||A.di!==B.di) return false;
+  return norm(A.subject||'')===norm(B.subject||'');
+}
 /* time-based conflict: same teacher, same day, overlapping time across classes */
 function conflictData(){
   const items=[];
@@ -1371,17 +1419,29 @@ function conflictData(){
       const p=per[pi]; if(!p) return;
       items.push({gid:g.id, gname:g.name, key:k, di, tn:norm(v.teacher), td:v.teacher.trim(),
                   subject:String(v.subject||'').trim(),
+                  sharedId:String(v.sharedLessonId||'').trim(),
                   range:parseRange(p.time), ptime:p.time||'', plabel:p.label});
     });
   });
   const conflictCells=new Set(); // `${gid}|${key}`
   const conflictMap={}; // `${gid}|${key}` -> [{gname, when}]
+  const sharedCells=new Set();
+  const sharedMap={};
   const addConflictPartner=(A,B)=>{
     const push=(cellKey, partner)=>{
       if(!conflictMap[cellKey]) conflictMap[cellKey]=[];
       const sig=partner.gname+'\0'+(partner.when||'');
       if(conflictMap[cellKey].some(x=>x.gname===partner.gname&&(x.when||'')===(partner.when||''))) return;
       conflictMap[cellKey].push(partner);
+    };
+    push(A.gid+'|'+A.key, {gname:B.gname, when:B.ptime||B.plabel});
+    push(B.gid+'|'+B.key, {gname:A.gname, when:A.ptime||A.plabel});
+  };
+  const addSharedPartner=(A,B)=>{
+    const push=(cellKey, partner)=>{
+      if(!sharedMap[cellKey]) sharedMap[cellKey]=[];
+      if(sharedMap[cellKey].some(x=>x.gname===partner.gname&&(x.when||'')===(partner.when||''))) return;
+      sharedMap[cellKey].push(partner);
     };
     push(A.gid+'|'+A.key, {gname:B.gname, when:B.ptime||B.plabel});
     push(B.gid+'|'+B.key, {gname:A.gname, when:A.ptime||A.plabel});
@@ -1395,12 +1455,17 @@ function conflictData(){
       if(A.range&&B.range) clash=rangesOverlap(A.range,B.range);
       else if(A.ptime&&B.ptime) clash=norm(A.ptime)===norm(B.ptime);
       else clash=A.plabel===B.plabel;
-      if(clash){
-        if(isSolutionLessonSubject(A.subject)||isSolutionLessonSubject(B.subject)) continue;
-        conflictCells.add(A.gid+'|'+A.key);
-        conflictCells.add(B.gid+'|'+B.key);
-        addConflictPartner(A,B);
+      if(!clash) continue;
+      if(isSolutionLessonSubject(A.subject)||isSolutionLessonSubject(B.subject)) continue;
+      if(cellsAreSharedPartners(A,B)){
+        sharedCells.add(A.gid+'|'+A.key);
+        sharedCells.add(B.gid+'|'+B.key);
+        addSharedPartner(A,B);
+        continue;
       }
+      conflictCells.add(A.gid+'|'+A.key);
+      conflictCells.add(B.gid+'|'+B.key);
+      addConflictPartner(A,B);
     }
   }
   // group flagged items into readable conflict rows (per day + teacher)
@@ -1412,7 +1477,15 @@ function conflictData(){
     grp[rk].entries.push({gname:it.gname, when:it.ptime||it.plabel});
   });
   const conflicts=Object.values(grp);
-  return {conflicts, conflictCells, conflictMap};
+  const sharedGrp={};
+  items.forEach(it=>{
+    if(!sharedCells.has(it.gid+'|'+it.key)) return;
+    const rk=it.di+'|'+it.tn+'|'+norm(it.subject||'');
+    sharedGrp[rk]=sharedGrp[rk]||{di:it.di, teacher:it.td, subject:it.subject||'—', entries:[]};
+    if(!sharedGrp[rk].entries.some(e=>e.gname===it.gname)) sharedGrp[rk].entries.push({gname:it.gname, when:it.ptime||it.plabel});
+  });
+  const sharedLessons=Object.values(sharedGrp);
+  return {conflicts, conflictCells, conflictMap, sharedCells, sharedMap, sharedLessons};
 }
 function teacherLoad(){
   const load={};
@@ -1519,7 +1592,7 @@ function renderGruplar(){
 /* ---------------- render: master (all classes) ---------------- */
 function renderMaster(){
   const per=masterPeriods();
-  const {conflictCells, conflictMap, conflicts}=conflictData();
+  const {conflictCells, conflictMap, conflicts, sharedCells, sharedMap}=conflictData();
   if(!state.groups.length){
     const sysCount=(state.systemClasses||[]).length;
     $('#view').innerHTML=`<div class="empty" style="padding:24px;text-align:center">
@@ -1544,17 +1617,21 @@ function renderMaster(){
     const cells=state.days.map((d,di)=> per.map((p,pi)=>{
       const {key, cell}=lessonAtMasterSlot(g, di, pi);
       const conf=cell&&cell.teacher&&key&&conflictCells.has(g.id+'|'+key);
+      const shared=cell&&cell.teacher&&key&&sharedCells.has(g.id+'|'+key);
       const partners=conf?(conflictMap[g.id+'|'+key]||[]):[];
+      const sharedPartners=shared?(sharedMap[g.id+'|'+key]||[]):[];
       const has=cellHasLesson(cell);
       const slotLocked=isSlotLockedForKey(g.id, key);
       const readonly=!canEditGroup(g.id)||g.locked;
       const confHint=conf&&partners.length
         ? ' · ÇAKIŞMA: '+partners.map(x=>x.gname+(x.when?(' '+x.when):'')).join(', ')
-        : '';
+        : (shared&&sharedPartners.length
+          ? ' · ORTAK DERS: '+sharedPartners.map(x=>x.gname+(x.when?(' '+x.when):'')).join(', ')
+          : '');
       const inner=has
-        ? `<span class="abbr">${esc(subjectAbbr(cell.subject))}${slotLocked?' 🔒':''}${conf?' ⚠':''}</span><span class="mini">${esc(cell.teacher||'')}</span>`
+        ? `<span class="abbr">${esc(subjectAbbr(cell.subject))}${slotLocked?' 🔒':''}${conf?' ⚠':''}${shared?' ⊕':''}</span><span class="mini">${esc(cell.teacher||'')}</span>`
         : (slotLocked?'🔒':'·');
-      const cls=[conf?'conflict':'', has?'has-lesson':'empty', slotLocked?'locked-slot':'', g.locked?'group-locked':'', readonly?'readonly-slot':''].filter(Boolean).join(' ');
+      const cls=[conf?'conflict':'', shared?'shared-lesson':'', has?'has-lesson':'empty', slotLocked?'locked-slot':'', g.locked?'group-locked':'', readonly?'readonly-slot':''].filter(Boolean).join(' ');
       const dataKey=key||groupKeyForMasterSlot(g,di,pi)||(di+'_'+pi);
       const dragAttr=has&&!slotLocked&&!readonly?' draggable="true"':'';
       return `<td${pi===0&&di>0?' class="day-sep"':''}><button type="button" class="mcell ${cls}" data-act="edit-master-cell" data-gid="${g.id}" data-key="${dataKey}" data-di="${di}" data-pi="${pi}"${dragAttr} title="${esc(g.name+' · '+d+' · '+(p.label||'')+' '+(p.time||'')+(slotLocked?' · Kilitli':'')+confHint)}">${inner}</button></td>`;
@@ -1569,7 +1646,7 @@ function renderMaster(){
   const missingSys=Math.max(0, sysCount-sortedGroups.length);
   $('#view').innerHTML=`
     <div class="master-tools">
-      <div class="tiny">Tüm sınıflar (${sortedGroups.length}${sysCount?` / ${sysCount} kurum sınıfı`:''}): dolu hücreyi sürükleyin. <b>Shift+tık</b> saat kilidi. Yeni sınıflar (ör. 6-A) otomatik satır olarak gelir. Çakışan hücreler <span style="color:var(--danger);font-weight:600">kırmızı</span>.</div>
+      <div class="tiny">Tüm sınıflar (${sortedGroups.length}${sysCount?` / ${sysCount} kurum sınıfı`:''}): dolu hücreyi sürükleyin. <b>Shift+tık</b> saat kilidi. Çakışan hücreler <span style="color:var(--danger);font-weight:600">kırmızı</span>, ortak dersler <span style="color:var(--shared);font-weight:600">mavi</span>.</div>
       ${missingSys?`<div class="conf-banner bad" style="margin:0 0 10px;padding:10px 12px;font-size:13px">${missingSys} kurum sınıfı planda yok — sayfayı yenileyin veya «Tümünü ekle» kullanın.</div>`:''}
       ${conflictCount?`<div class="conf-banner bad" style="margin:0 0 10px;padding:10px 12px"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.7 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>${conflictCount} öğretmen çakışması — «Çakışmalar» sekmesinde ayrıntılı liste.</div>`:''}
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -1621,10 +1698,17 @@ function formatConflictPartners(partners){
     return `↔ ${esc(p.gname)}${when}`;
   }).join('<br>');
 }
+function formatSharedPartners(partners){
+  if(!partners||!partners.length) return '';
+  return partners.map(p=>{
+    const when=p.when?` (${p.when})`:'';
+    return `⊕ ${esc(p.gname)}${when}`;
+  }).join('<br>');
+}
 function renderProgram(){
   if(!activeGroupId && state.groups[0]) activeGroupId=state.groups[0].id;
   const g=group(activeGroupId);
-  const {conflictCells, conflictMap}=conflictData();
+  const {conflictCells, conflictMap, sharedCells, sharedMap}=conflictData();
   const pills=state.groups.map(x=>`<button class="gpill ${x.id===activeGroupId?'active':''}" data-act="pick-group" data-gid="${x.id}"><span class="d" style="background:${x.color}"></span>${esc(x.name)}</button>`).join('');
   let table='';
   if(g){
@@ -1637,17 +1721,21 @@ function renderProgram(){
         ${state.days.map((d,di)=>{
           const key=di+'_'+pi; const v=g.schedule[key];
           const conf=v&&v.teacher&&conflictCells.has(g.id+'|'+key);
+          const shared=v&&v.teacher&&sharedCells.has(g.id+'|'+key);
           const partners=conf?(conflictMap[g.id+'|'+key]||[]):[];
+          const sharedPartners=shared?(sharedMap[g.id+'|'+key]||[]):[];
           const hasLesson=cellHasLesson(v);
           const slotLocked=isSlotLocked(g.id, di, pi);
           const readonly=g.locked||!canEditGroup(g.id);
           const inner=v&&(v.subject||v.teacher)
-            ? `<span class="subj">${esc(v.subject||'—')}</span><span class="tch">${conf?'<svg class="icon" style="width:13px;height:13px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.7 3.86a2 2 0 0 0-3.42 0z"/></svg>':''}${esc(v.teacher||'')}</span>${conf&&partners.length?`<span class="conf-with">${formatConflictPartners(partners)}</span>`:''}`
+            ? `<span class="subj">${esc(v.subject||'—')}</span><span class="tch">${conf?'<svg class="icon" style="width:13px;height:13px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.7 3.86a2 2 0 0 0-3.42 0z"/></svg>':''}${shared?'<span style="color:var(--shared);font-weight:700">⊕</span>':''}${esc(v.teacher||'')}</span>${conf&&partners.length?`<span class="conf-with">${formatConflictPartners(partners)}</span>`:''}${shared&&sharedPartners.length?`<span class="shared-with">Ortak: ${formatSharedPartners(sharedPartners)}</span>`:''}`
             : (slotLocked?'<span class="plus">🔒</span>':'<span class="plus">+</span>');
           const confLabel=conf&&partners.length
             ? ` · çakışma: ${partners.map(p=>p.gname+(p.when?(' '+p.when):'')).join(', ')}`
-            : '';
-          return `<td><button type="button" class="cell ${conf?'conflict':''} ${hasLesson?'has-lesson':''} ${slotLocked?'locked-slot':''} ${readonly?'readonly-slot':''}" data-act="edit-cell" data-gid="${g.id}" data-key="${key}" data-di="${di}" data-pi="${pi}" ${hasLesson&&!slotLocked&&!readonly?'draggable="true"':''} aria-label="${esc(d)} ${esc(p.label)} ders ata${confLabel}">${inner}</button></td>`;
+            : (shared&&sharedPartners.length
+              ? ` · ortak ders: ${sharedPartners.map(p=>p.gname+(p.when?(' '+p.when):'')).join(', ')}`
+              : '');
+          return `<td><button type="button" class="cell ${conf?'conflict':''} ${shared?'shared-lesson':''} ${hasLesson?'has-lesson':''} ${slotLocked?'locked-slot':''} ${readonly?'readonly-slot':''}" data-act="edit-cell" data-gid="${g.id}" data-key="${key}" data-di="${di}" data-pi="${pi}" ${hasLesson&&!slotLocked&&!readonly?'draggable="true"':''} aria-label="${esc(d)} ${esc(p.label)} ders ata${confLabel}">${inner}</button></td>`;
         }).join('')}
       </tr>`).join('')}
       </tbody></table></div>`;
@@ -1659,7 +1747,7 @@ function renderProgram(){
       <div class="gpills">${pills}</div>
     </div>
     <div class="prog-tools" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px">
-      <div class="tiny">Dolu hücreyi sürükleyip başka hücreye bırakarak dersleri yer değiştirin. Çakışan hücrelerde <span style="color:var(--danger);font-weight:600">kırmızı</span> satırda karşı sınıf adı görünür.</div>
+      <div class="tiny">Dolu hücreyi sürükleyip başka hücreye bırakarak dersleri yer değiştirin. Çakışan hücreler <span style="color:var(--danger);font-weight:600">kırmızı</span>, ortak dersler <span style="color:var(--shared);font-weight:600">mavi</span>.</div>
       ${g?`<div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn sm" id="undoBtn" data-act="undo" disabled title="Ctrl+Z"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h10a5 5 0 0 1 5 5v2"/><path d="M3 10l4-4M3 10l4 4"/></svg>Geri al</button>
         <button class="btn sm" data-act="export-png"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m3 16 5-5 4 4 3-3 6 6"/><circle cx="8.5" cy="8.5" r="1.5"/></svg>PNG indir</button>
@@ -1673,21 +1761,30 @@ function renderProgram(){
 
 /* ---------------- render: conflicts ---------------- */
 function renderCakisma(){
-  const {conflicts}=conflictData();
+  const {conflicts, sharedLessons}=conflictData();
   const load=teacherLoad();
   const dayName=di=>state.days[di]||'?';
   const banner=conflicts.length
     ? `<div class="conf-banner bad"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.7 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>${conflicts.length} çakışma var — aynı öğretmen aynı saatte birden fazla sınıfta.</div>`
     : `<div class="conf-banner ok"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Çakışma yok. Hiçbir öğretmen aynı saatte iki sınıfta değil.</div>`;
+  const sharedBanner=sharedLessons.length
+    ? `<div class="conf-banner ok" style="background:var(--shared-soft);color:var(--shared);border:1px solid #B8D9EA;margin-top:10px"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>${sharedLessons.length} ortak ders — aynı öğretmen ve saatte birleştirilmiş sınıflar (aktarımda tek BBB linki).</div>`
+    : '';
   const list=conflicts.map(c=>`<div class="card conf-item">
       <div class="when">${esc(dayName(c.di))}</div>
       <div class="who"><div class="t">${esc(c.teacher)}</div><div class="g">${c.entries.map(e=>'<strong>Sınıf:</strong> '+esc(e.gname)+(e.when?(' · <span style="font-weight:500">'+esc(e.when)+'</span>'):'')).join('<br>')}</div></div>
+    </div>`).join('');
+  const sharedList=sharedLessons.map(c=>`<div class="card conf-item" style="border-color:#B8D9EA">
+      <div class="when">${esc(dayName(c.di))}</div>
+      <div class="who"><div class="t">${esc(c.teacher)} · ${esc(c.subject)}</div><div class="g">${c.entries.map(e=>'<strong>Sınıf:</strong> '+esc(e.gname)+(e.when?(' · <span style="font-weight:500">'+esc(e.when)+'</span>'):'')).join('<br>')}</div></div>
     </div>`).join('');
   const loadRows=load.length? load.map(l=>`<tr><td>${esc(l.display)}</td><td class="n">${l.count}</td></tr>`).join('')
     : '<tr><td colspan="2" class="empty">Henüz öğretmen ataması yok.</td></tr>';
   $('#view').innerHTML=`
     ${banner}
+    ${sharedBanner}
     ${conflicts.length?`<div class="conf-list">${list}</div>`:''}
+    ${sharedLessons.length?`<div class="section-title">Ortak Dersler</div><div class="conf-list">${sharedList}</div>`:''}
     <div class="section-title">Öğretmen Ders Yükü</div>
     <div class="card"><table class="load"><thead><tr><th>Öğretmen</th><th style="text-align:right">Haftalık ders</th></tr></thead><tbody>${loadRows}</tbody></table></div>`;
 }
@@ -1799,10 +1896,19 @@ function openCellEditor(groupId,key,masterDi=null,masterPi=null){
   const sharedList=$('#mSharedGroups');
   if(state.groups.length>1){
     sharedWrap.style.display='block';
-    $('#mShared').checked=false;
-    sharedList.innerHTML=state.groups.filter(x=>x.id!==groupId).map(x=>
-      `<label><input type="checkbox" class="mSharedGroup" value="${x.id}"> ${esc(x.name)}</label>`
-    ).join('');
+    const sid=String(v.sharedLessonId||'').trim();
+    const mDi=masterDi!=null?masterDi:di;
+    const mPi=masterPi!=null?masterPi:pi;
+    $('#mShared').checked=!!sid;
+    sharedList.innerHTML=state.groups.filter(x=>x.id!==groupId).map(x=>{
+      let checked='';
+      if(sid){
+        const k2=groupKeyForMasterSlot(x,mDi,mPi)||key;
+        const c2=x.schedule[k2];
+        if(c2&&String(c2.sharedLessonId||'')===sid) checked=' checked';
+      }
+      return `<label><input type="checkbox" class="mSharedGroup" value="${x.id}"${checked}> ${esc(x.name)}</label>`;
+    }).join('');
   } else {
     sharedWrap.style.display='none';
     sharedList.innerHTML='';
@@ -1819,7 +1925,11 @@ function checkModalConflict(){
   const eg=group(editingCell.groupId);
   const [edi,epi]=editingCell.key.split('_').map(Number);
   const eP=(eg.periods||state.periods)[epi]||{}; const eRange=parseRange(eP.time);
+  const curSubj=norm($('#mSubject').value);
+  const curCell=eg?.schedule?.[editingCell.key]||{};
+  const curSharedId=String(curCell.sharedLessonId||'').trim();
   const hits=[];
+  const sharedHits=[];
   state.groups.forEach(g=>{
     const per=g.periods||state.periods||[];
     Object.entries(g.schedule).forEach(([k,v])=>{
@@ -1829,11 +1939,22 @@ function checkModalConflict(){
       if(di!==edi) return;
       const p=per[pi]||{}; const r=parseRange(p.time);
       let clash = (eRange&&r)? rangesOverlap(eRange,r) : (eP.time&&p.time? norm(eP.time)===norm(p.time) : true);
-      if(clash) hits.push('Sınıf: '+g.name+(p.time?(' · '+p.time):''));
+      if(!clash) return;
+      const sid=String(v.sharedLessonId||'').trim();
+      if(curSharedId&&sid&&sid===curSharedId){
+        sharedHits.push('Sınıf: '+g.name+(p.time?(' · '+p.time):''));
+        return;
+      }
+      if(g.id!==editingCell.groupId && norm(v.subject||'')===curSubj && curSubj){
+        sharedHits.push('Sınıf: '+g.name+(p.time?(' · '+p.time):'')+' (ortak ders adayı)');
+        return;
+      }
+      hits.push('Sınıf: '+g.name+(p.time?(' · '+p.time):''));
     });
   });
   if(hits.length){ box.textContent='Dikkat: bu öğretmen aynı saatte şurada da var → '+hits.join(', '); box.classList.add('show'); }
-  else box.classList.remove('show');
+  else if(sharedHits.length){ box.textContent='Ortak ders: aynı saatte şu sınıflarla birleştirilebilir → '+sharedHits.join(', '); box.classList.add('show'); box.style.background='var(--shared-soft)'; box.style.color='var(--shared)'; }
+  else { box.classList.remove('show'); box.style.background=''; box.style.color=''; }
 }
 function saveCell(){
   if(!editingCell) return;
@@ -1847,6 +1968,16 @@ function saveCell(){
     document.querySelectorAll('.mSharedGroup:checked').forEach(el=>targets.push(el.value));
   }
   const uniqueTargets=[...new Set(targets)];
+  const eg=group(editingCell.groupId);
+  const prevCell=eg?.schedule?.[editingCell.key]||{};
+  let sharedId=null;
+  if(!nextEmpty){
+    if(uniqueTargets.length>1){
+      sharedId=String(prevCell.sharedLessonId||'').trim()||uid();
+    } else if(String(prevCell.sharedLessonId||'').trim()){
+      sharedId=prevCell.sharedLessonId;
+    }
+  }
   let anyChange=false;
   for(const gid of uniqueTargets){
     const g=group(gid);
@@ -1863,10 +1994,10 @@ function saveCell(){
     const prev=g.schedule[key];
     const prevEmpty=!cellHasLesson(prev);
     if(nextEmpty && prevEmpty) continue;
-    const changed=nextEmpty!==prevEmpty || (!nextEmpty && (String(prev?.teacher||'')!==teacher || String(prev?.subject||'')!==subject));
+    const changed=nextEmpty!==prevEmpty || (!nextEmpty && (String(prev?.teacher||'')!==teacher || String(prev?.subject||'')!==subject || String(prev?.sharedLessonId||'')!==String(sharedId||'')));
     if(changed) anyChange=true;
     if(!teacher && !subject) delete g.schedule[key];
-    else g.schedule[key]={teacher,subject};
+    else g.schedule[key]=sharedId?{teacher,subject,sharedLessonId:sharedId}:{teacher,subject};
   }
   if(anyChange) pushUndo();
   saveState(); closeModal(); render();
@@ -1876,9 +2007,18 @@ function clearCell(){
   const [edi,epi]=editingCell.key.split('_').map(Number);
   const masterDi=editingCell.masterDi!=null?editingCell.masterDi:edi;
   const masterPi=editingCell.masterPi!=null?editingCell.masterPi:epi;
+  const eg=group(editingCell.groupId);
+  const sid=String(eg?.schedule?.[editingCell.key]?.sharedLessonId||'').trim();
   const targets=[editingCell.groupId];
   if($('#mShared')?.checked){
     document.querySelectorAll('.mSharedGroup:checked').forEach(el=>targets.push(el.value));
+  } else if(sid){
+    state.groups.forEach(g=>{
+      if(g.id===editingCell.groupId) return;
+      const k=groupKeyForMasterSlot(g, masterDi, masterPi);
+      const c=k?g.schedule[k]:null;
+      if(c&&String(c.sharedLessonId||'')===sid) targets.push(g.id);
+    });
   }
   let any=false;
   for(const gid of [...new Set(targets)]){

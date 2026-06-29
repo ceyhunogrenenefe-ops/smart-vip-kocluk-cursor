@@ -53,6 +53,95 @@ function needsMeetingLinkRefresh(link) {
   return !String(link || '').trim();
 }
 
+function inferSharedBucketKey(teacherName, di, subject, timeStr) {
+  const t = normTr(teacherName);
+  const sub = normTr(subject);
+  if (!t || !sub) return null;
+  const parsed = parsePeriodTime(timeStr);
+  const timeKey = parsed ? parsed.start : String(timeStr || '').replace(/\s/g, '');
+  return `infer:${t}|${di}|${timeKey}|${sub}`;
+}
+
+/**
+ * Planlayıcıdaki ortak ders kümeleri — sharedLessonId veya aynı öğretmen/konu/gün/saat (farklı gruplar).
+ * @returns {{
+ *   clusterFor: (groupId: string, key: string) => string|null,
+ *   partnerClassIds: (groupId: string, key: string, ownClassId?: string) => Set<string>,
+ *   meetingKeyPrefix: (clusterKey: string) => string,
+ *   isShared: (groupId: string, key: string) => boolean
+ * }}
+ */
+export function indexPlannerSharedLessons(plannerJson) {
+  const pj = plannerJson && typeof plannerJson === 'object' ? plannerJson : {};
+  const groups = Array.isArray(pj.groups) ? pj.groups : [];
+  const defaultPeriods = Array.isArray(pj.periods) ? pj.periods : [];
+  /** @type {Map<string, { groupIds: Set<string>, classIds: Set<string> }>} */
+  const clusters = new Map();
+  /** @type {Map<string, string>} */
+  const cellToCluster = new Map();
+
+  for (const g of groups) {
+    const schedule = g.schedule && typeof g.schedule === 'object' ? g.schedule : {};
+    const periods = Array.isArray(g.periods) ? g.periods : defaultPeriods;
+    const groupId = String(g.id || '');
+    for (const [key, cell] of Object.entries(schedule)) {
+      if (!cell || typeof cell !== 'object' || !String(cell.teacher || '').trim()) continue;
+      const [diStr, piStr] = String(key).split('_');
+      const di = Number(diStr);
+      const pi = Number(piStr);
+      if (!Number.isFinite(di) || !Number.isFinite(pi)) continue;
+      const period = periods[pi] || {};
+      const teacherName = String(cell.teacher || '').trim();
+      const subject = String(cell.subject || '').trim();
+      const explicitId = String(cell.sharedLessonId || '').trim();
+      const bucketKey = explicitId
+        ? `id:${explicitId}`
+        : inferSharedBucketKey(teacherName, di, subject, period?.time);
+      if (!bucketKey) continue;
+
+      const cellKey = `${groupId}|${key}`;
+      if (!clusters.has(bucketKey)) {
+        clusters.set(bucketKey, { groupIds: new Set(), classIds: new Set() });
+      }
+      const meta = clusters.get(bucketKey);
+      meta.groupIds.add(groupId);
+      if (g.classId) meta.classIds.add(String(g.classId));
+      cellToCluster.set(cellKey, bucketKey);
+    }
+  }
+
+  const sharedClusters = new Set();
+  for (const [bucketKey, meta] of clusters) {
+    if (meta.groupIds.size >= 2) sharedClusters.add(bucketKey);
+  }
+
+  return {
+    clusterFor(groupId, key) {
+      const bucket = cellToCluster.get(`${String(groupId)}|${String(key)}`);
+      if (!bucket || !sharedClusters.has(bucket)) return null;
+      return bucket;
+    },
+    partnerClassIds(groupId, key, ownClassId) {
+      const bucket = cellToCluster.get(`${String(groupId)}|${String(key)}`);
+      if (!bucket || !sharedClusters.has(bucket)) return new Set();
+      const meta = clusters.get(bucket);
+      const out = new Set(meta?.classIds || []);
+      if (ownClassId) out.delete(String(ownClassId));
+      return out;
+    },
+    meetingKeyPrefix(clusterKey) {
+      const id = String(clusterKey || '')
+        .replace(/[^a-zA-Z0-9]/g, '')
+        .slice(0, 64);
+      return `planimportshared${id}`;
+    },
+    isShared(groupId, key) {
+      const bucket = cellToCluster.get(`${String(groupId)}|${String(key)}`);
+      return Boolean(bucket && sharedClusters.has(bucket));
+    }
+  };
+}
+
 /** Planlayıcıda yalnızca öğretmen varsa ders adını otomatik üret (Canlı Grup Dersi ile uyumlu). */
 export function resolvePlannerCellSubject(cell, period, teacherName, dayLabel) {
   const explicit = String(cell?.subject || '').trim();
@@ -298,6 +387,7 @@ export async function exportPlannerGroupToClass({
   const schedule = group.schedule && typeof group.schedule === 'object' ? group.schedule : {};
   const institutionId = String(classRow.institution_id || '').trim();
   const teachers = await loadTeachersForClassExport(institutionId, classId);
+  const sharedIndex = indexPlannerSharedLessons(plannerJson);
 
   if (replaceExisting) {
     const { error: delErr } = await supabaseAdmin.from('class_weekly_slots').delete().eq('class_id', classId);
@@ -355,13 +445,17 @@ export async function exportPlannerGroupToClass({
     }
 
     const duration = resolveBbbMeetingDurationMinutes(timeParsed.durationMinutes);
+    const sharedCluster = sharedIndex.clusterFor(groupId, key);
+    const meetingKeyPrefix = sharedCluster
+      ? sharedIndex.meetingKeyPrefix(sharedCluster)
+      : `planimport${classId}${di}${pi}`;
     const resolved = await resolveClassMeetingLinkFromRequest({
       manualLink: '',
       subject,
       className: classRow.name || group.name || '',
       teacherId,
       durationMinutes: duration,
-      meetingKeyPrefix: `planimport${classId}${di}${pi}`
+      meetingKeyPrefix
     });
     if (!resolved.ok) {
       skipped.push({
@@ -388,7 +482,7 @@ export async function exportPlannerGroupToClass({
 
     const { data: sameTeacherSlots, error: cErr } = await supabaseAdmin
       .from('class_weekly_slots')
-      .select('id,start_time,end_time,class_id,meeting_link')
+      .select('id,start_time,end_time,class_id,meeting_link,bbb_meeting_id,bbb_attendee_pw')
       .eq('teacher_id', teacherId)
       .eq('day_of_week', dayOfWeek);
     if (cErr) {
@@ -419,12 +513,25 @@ export async function exportPlannerGroupToClass({
             String(x.class_id) !== String(classId) &&
             timeOverlap(timeParsed.start, timeParsed.end, x.start_time, x.end_time)
         );
-    if (crossConflicts.length) {
+    const sharedPartnerIds = sharedIndex.partnerClassIds(groupId, key, classId);
+    const sharedPartnerSlots = crossConflicts.filter((x) => sharedPartnerIds.has(String(x.class_id)));
+    if (sharedPartnerSlots.length) {
+      const donor = sharedPartnerSlots.find((x) => String(x.meeting_link || '').trim()) || sharedPartnerSlots[0];
+      if (donor?.meeting_link) {
+        Object.assign(meetingFields, {
+          meeting_link: donor.meeting_link,
+          ...(donor.bbb_meeting_id ? { bbb_meeting_id: donor.bbb_meeting_id } : {}),
+          ...(donor.bbb_attendee_pw ? { bbb_attendee_pw: donor.bbb_attendee_pw } : {})
+        });
+      }
+    }
+    const blockingConflicts = crossConflicts.filter((x) => !sharedPartnerIds.has(String(x.class_id)));
+    if (blockingConflicts.length) {
       if (clearCrossClassConflicts) {
-        const cleared = await clearCrossClassSlotConflicts(crossConflicts, institutionId);
+        const cleared = await clearCrossClassSlotConflicts(blockingConflicts, institutionId);
         conflictsCleared += cleared.length;
-        if (cleared.length < crossConflicts.length) {
-          const blocked = crossConflicts.filter((c) => !cleared.some((x) => x.id === c.id));
+        if (cleared.length < blockingConflicts.length) {
+          const blocked = blockingConflicts.filter((c) => !cleared.some((x) => x.id === c.id));
           const names = [];
           for (const b of blocked) {
             const meta = await getClassMeta(b.class_id);
@@ -442,7 +549,7 @@ export async function exportPlannerGroupToClass({
         }
       } else {
         const names = [];
-        for (const b of crossConflicts) {
+        for (const b of blockingConflicts) {
           const meta = await getClassMeta(b.class_id);
           if (meta?.name) names.push(meta.name);
         }
