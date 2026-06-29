@@ -9,8 +9,13 @@ import { resolveStudentRecordId } from '../lib/coachResolve';
 import { eachDayOfInterval, differenceInCalendarDays } from 'date-fns';
 import type { CoachWeeklyGoalRow, WeeklyPlannerEntryRow } from '../lib/weeklyPlannerApi';
 import { loadStudentCoachAnalyticsBundle } from '../lib/studentCoachQuestionStats';
-import { getAuthToken } from '../lib/session';
-import { formatWhatsAppPhone, sendWhatsAppOutbound } from '../lib/whatsappOutbound';
+import { getAuthToken, getGatewaySessionUserId } from '../lib/session';
+import {
+  blobToBase64,
+  formatWhatsAppPhone,
+  sendWhatsAppOutbound,
+  sendWhatsAppOutboundDocument,
+} from '../lib/whatsappOutbound';
 import {
   computeCoachGoalRangeAnalytics,
   coachSubjectProgressInRange,
@@ -103,6 +108,7 @@ export default function Analytics() {
   const [useAllTime, setUseAllTime] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [parentShareBusy, setParentShareBusy] = useState(false);
+  const [parentPdfShareBusy, setParentPdfShareBusy] = useState(false);
   const [parentShareNotice, setParentShareNotice] = useState('');
   const [parentShareWaUrl, setParentShareWaUrl] = useState<string | null>(null);
   /** Tek öğrenci + tarih aralığı: analiz KPI ve grafiklerde koç hedefi (oransal) */
@@ -682,7 +688,9 @@ export default function Analytics() {
   const shareWithParent = async () => {
     setParentShareNotice('');
     setParentShareWaUrl(null);
-    if (!selectedStudent || !effectiveUser?.id) return;
+    if (!selectedStudent) return;
+    const coachUserId = getGatewaySessionUserId(effectiveUser?.id);
+    if (!coachUserId) return;
     const parentPhone = formatWhatsAppPhone(selectedStudent.parentPhone || '');
     if (!parentPhone) {
       setParentShareNotice('Bu öğrenci için veli telefonu tanımlı değil.');
@@ -694,7 +702,7 @@ export default function Analytics() {
     setParentShareBusy(true);
     try {
       const result = await sendWhatsAppOutbound({
-        coachUserId: effectiveUser.id,
+        coachUserId,
         targetPhone: parentPhone,
         message
       });
@@ -707,6 +715,102 @@ export default function Analytics() {
     }
   };
 
+  const buildAnalyticsPdfBlob = async (): Promise<{ blob: Blob; filename: string }> => {
+    if (!reportRef.current) throw new Error('Rapor alanı bulunamadı');
+    if (!selectedStudentId) throw new Error('Lütfen önce öğrenci seçin');
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const canvas = await html2canvas(reportRef.current, {
+      scale: 2,
+      useCORS: true,
+      logging: false,
+      backgroundColor: '#ffffff'
+    });
+
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const marginX = 8;
+    const topY = 20;
+    const bottomY = 10;
+    const contentWidth = pageWidth - marginX * 2;
+    const printableHeight = pageHeight - topY - bottomY;
+    const pxPerMm = canvas.width / contentWidth;
+    const pageHeightPx = Math.floor(printableHeight * pxPerMm);
+
+    const studentName = (selectedStudent?.name || 'Tum_Ogrenciler').replace(/\s+/g, '_');
+    const datePart = new Date().toISOString().split('T')[0];
+    const filename = `Koc_Analiz_${studentName}_${datePart}.pdf`;
+
+    let renderedHeight = 0;
+    let pageIndex = 0;
+    while (renderedHeight < canvas.height) {
+      const sliceHeight = Math.min(pageHeightPx, canvas.height - renderedHeight);
+      const pageCanvas = document.createElement('canvas');
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = sliceHeight;
+      const ctx = pageCanvas.getContext('2d');
+      if (!ctx) break;
+      ctx.drawImage(
+        canvas,
+        0,
+        renderedHeight,
+        canvas.width,
+        sliceHeight,
+        0,
+        0,
+        canvas.width,
+        sliceHeight
+      );
+
+      if (pageIndex > 0) pdf.addPage();
+      const sliceHeightMm = sliceHeight / pxPerMm;
+      pdf.addImage(pageCanvas.toDataURL('image/png'), 'PNG', marginX, pageIndex === 0 ? topY : 8, contentWidth, sliceHeightMm);
+
+      renderedHeight += sliceHeight;
+      pageIndex += 1;
+    }
+
+    for (let i = 1; i <= pdf.getNumberOfPages(); i += 1) {
+      pdf.setPage(i);
+      pdf.setFontSize(8);
+      pdf.text(`${i}/${pdf.getNumberOfPages()}`, pageWidth - 15, pageHeight - 4);
+    }
+
+    return { blob: pdf.output('blob'), filename };
+  };
+
+  const sharePdfWithParent = async () => {
+    setParentShareNotice('');
+    setParentShareWaUrl(null);
+    if (!selectedStudent) return;
+    const coachUserId = getGatewaySessionUserId(effectiveUser?.id);
+    if (!coachUserId) return;
+    const parentPhone = formatWhatsAppPhone(selectedStudent.parentPhone || '');
+    if (!parentPhone) {
+      setParentShareNotice('Bu öğrenci için veli telefonu tanımlı değil.');
+      return;
+    }
+
+    setParentPdfShareBusy(true);
+    try {
+      const { blob, filename } = await buildAnalyticsPdfBlob();
+      const caption = buildParentAnalyticsMessage();
+      const result = await sendWhatsAppOutboundDocument({
+        coachUserId,
+        targetPhone: parentPhone,
+        filename,
+        base64: await blobToBase64(blob),
+        caption: caption || undefined,
+      });
+      setParentShareNotice(result.notice);
+    } catch (e) {
+      setParentShareNotice(e instanceof Error ? e.message : 'PDF gönderilemedi');
+    } finally {
+      setParentPdfShareBusy(false);
+    }
+  };
+
   const generateAnalyticsPdf = async () => {
     if (!reportRef.current) return;
     if (!selectedStudentId) {
@@ -716,64 +820,13 @@ export default function Analytics() {
 
     setIsGeneratingPdf(true);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      const canvas = await html2canvas(reportRef.current, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff'
-      });
-
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const marginX = 8;
-      const topY = 20;
-      const bottomY = 10;
-      const contentWidth = pageWidth - marginX * 2;
-      const printableHeight = pageHeight - topY - bottomY;
-      const pxPerMm = canvas.width / contentWidth;
-      const pageHeightPx = Math.floor(printableHeight * pxPerMm);
-
-      const studentName = (selectedStudent?.name || 'Tum_Ogrenciler').replace(/\s+/g, '_');
-      const datePart = new Date().toISOString().split('T')[0];
-
-      let renderedHeight = 0;
-      let pageIndex = 0;
-      while (renderedHeight < canvas.height) {
-        const sliceHeight = Math.min(pageHeightPx, canvas.height - renderedHeight);
-        const pageCanvas = document.createElement('canvas');
-        pageCanvas.width = canvas.width;
-        pageCanvas.height = sliceHeight;
-        const ctx = pageCanvas.getContext('2d');
-        if (!ctx) break;
-        ctx.drawImage(
-          canvas,
-          0,
-          renderedHeight,
-          canvas.width,
-          sliceHeight,
-          0,
-          0,
-          canvas.width,
-          sliceHeight
-        );
-
-        if (pageIndex > 0) pdf.addPage();
-        const sliceHeightMm = sliceHeight / pxPerMm;
-        pdf.addImage(pageCanvas.toDataURL('image/png'), 'PNG', marginX, pageIndex === 0 ? topY : 8, contentWidth, sliceHeightMm);
-
-        renderedHeight += sliceHeight;
-        pageIndex += 1;
-      }
-
-      for (let i = 1; i <= pdf.getNumberOfPages(); i += 1) {
-        pdf.setPage(i);
-        pdf.setFontSize(8);
-        pdf.text(`${i}/${pdf.getNumberOfPages()}`, pageWidth - 15, pageHeight - 4);
-      }
-
-      pdf.save(`Koc_Analiz_${studentName}_${datePart}.pdf`);
+      const { blob, filename } = await buildAnalyticsPdfBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Analiz PDF olusturma hatasi:', error);
       alert('PDF olusturulurken bir hata olustu.');
@@ -959,15 +1012,26 @@ export default function Analytics() {
               Veli ile analiz paylaşımı ({selectedStudent.name}) — seçili aralık: {rangeLabel}. Bağlı WhatsApp
               gateway varsa doğrudan gönderilir; yoksa Twilio veya wa.me kullanılır.
             </p>
-            <button
-              type="button"
-              onClick={() => void shareWithParent()}
-              disabled={parentShareBusy}
-              className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm inline-flex items-center gap-2"
-            >
-              <MessageCircle className="w-4 h-4" />
-              {parentShareBusy ? 'Gönderiliyor…' : 'Veliye WhatsApp gönder'}
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void shareWithParent()}
+                disabled={parentShareBusy || parentPdfShareBusy}
+                className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm inline-flex items-center gap-2"
+              >
+                <MessageCircle className="w-4 h-4" />
+                {parentShareBusy ? 'Gönderiliyor…' : 'Veliye metin gönder'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void sharePdfWithParent()}
+                disabled={parentPdfShareBusy || parentShareBusy || isGeneratingPdf}
+                className="px-3 py-2 bg-emerald-700 text-white rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm inline-flex items-center gap-2"
+              >
+                <FileText className="w-4 h-4" />
+                {parentPdfShareBusy ? 'PDF gönderiliyor…' : 'Veliye PDF gönder'}
+              </button>
+            </div>
           </div>
           {parentShareNotice ? (
             <div

@@ -48,9 +48,11 @@ import { useMobileAppShell } from '../../hooks/useMobileAppShell';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { formatClassLevelLabel } from '../../types';
-import { formatWhatsAppPhone, sendWhatsAppOutbound } from '../../lib/whatsappOutbound';
+import { formatWhatsAppPhone, sendWhatsAppOutbound, sendWhatsAppOutboundDocument, blobToBase64 } from '../../lib/whatsappOutbound';
+import { getGatewaySessionUserId } from '../../lib/session';
 import {
   buildParentWeeklyGoalsMessage,
+  buildWeeklyPlannerPdfBlob,
   downloadWeeklyPlannerPdf,
 } from '../../lib/pdfWeeklyPlanner';
 
@@ -179,6 +181,7 @@ export function WeeklyPlannerCalendar({
   const { effectiveUser } = useAuth();
   const [pdfBusy, setPdfBusy] = useState(false);
   const [parentShareBusy, setParentShareBusy] = useState(false);
+  const [parentPdfShareBusy, setParentPdfShareBusy] = useState(false);
   const [parentShareNotice, setParentShareNotice] = useState('');
   const [parentShareWaUrl, setParentShareWaUrl] = useState<string | null>(null);
 
@@ -473,7 +476,8 @@ export function WeeklyPlannerCalendar({
     setParentShareNotice('');
     setParentShareWaUrl(null);
     const st = plannerStudent;
-    if (!st || !effectiveUser?.id) return;
+    const coachUserId = getGatewaySessionUserId(effectiveUser?.id);
+    if (!st || !coachUserId) return;
     const parentPhone = formatWhatsAppPhone(st.parentPhone || '');
     if (!parentPhone) {
       setParentShareNotice('Bu öğrenci için veli telefonu tanımlı değil.');
@@ -489,7 +493,7 @@ export function WeeklyPlannerCalendar({
     setParentShareBusy(true);
     try {
       const result = await sendWhatsAppOutbound({
-        coachUserId: effectiveUser.id,
+        coachUserId,
         targetPhone: parentPhone,
         message,
       });
@@ -501,6 +505,63 @@ export function WeeklyPlannerCalendar({
       setParentShareBusy(false);
     }
   }, [plannerStudent, effectiveUser?.id, weekStartStr, weekEndStr, goals, entries]);
+
+  const shareWeeklyPdfWithParent = useCallback(async () => {
+    setParentShareNotice('');
+    setParentShareWaUrl(null);
+    const st = plannerStudent;
+    const coachUserId = getGatewaySessionUserId(effectiveUser?.id);
+    if (!st || !coachUserId || !studentId) return;
+    const parentPhone = formatWhatsAppPhone(st.parentPhone || '');
+    if (!parentPhone) {
+      setParentShareNotice('Bu öğrenci için veli telefonu tanımlı değil.');
+      return;
+    }
+    setParentPdfShareBusy(true);
+    try {
+      const { blob, filename } = await buildWeeklyPlannerPdfBlob({
+        studentName: studentName || st.name || 'Öğrenci',
+        weekStart: weekStartStr,
+        weekEnd: weekEndStr,
+        dayDates,
+        goals,
+        entries,
+        institutionName: institution?.name,
+        logoUrl: institution?.logo ?? null,
+      });
+      const caption = buildParentWeeklyGoalsMessage({
+        studentName: st.name,
+        weekStart: weekStartStr,
+        weekEnd: weekEndStr,
+        goals,
+        entries,
+      });
+      const result = await sendWhatsAppOutboundDocument({
+        coachUserId,
+        targetPhone: parentPhone,
+        filename,
+        base64: await blobToBase64(blob),
+        caption,
+      });
+      setParentShareNotice(result.notice);
+    } catch (e) {
+      setParentShareNotice(e instanceof Error ? e.message : 'PDF gönderilemedi');
+    } finally {
+      setParentPdfShareBusy(false);
+    }
+  }, [
+    plannerStudent,
+    effectiveUser?.id,
+    studentId,
+    studentName,
+    weekStartStr,
+    weekEndStr,
+    dayDates,
+    goals,
+    entries,
+    institution?.name,
+    institution?.logo,
+  ]);
 
   const mobileDayDate = dayDates[Math.min(mobileDayIdx, Math.max(dayDates.length - 1, 0))] ?? weekStartStr;
   const mobileDayGoals = goalsByDayDate[mobileDayDate] ?? [];
@@ -1143,19 +1204,34 @@ export function WeeklyPlannerCalendar({
                 </button>
               ) : null}
               {showCoachParentShare ? (
-                <button
-                  type="button"
-                  disabled={parentShareBusy}
-                  onClick={() => void shareWeeklyGoalsWithParent()}
-                  className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900 transition hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
-                >
-                  {parentShareBusy ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <MessageCircle className="h-4 w-4" />
-                  )}
-                  Veliye gönder
-                </button>
+                <>
+                  <button
+                    type="button"
+                    disabled={parentShareBusy || parentPdfShareBusy}
+                    onClick={() => void shareWeeklyGoalsWithParent()}
+                    className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900 transition hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
+                  >
+                    {parentShareBusy ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <MessageCircle className="h-4 w-4" />
+                    )}
+                    Veliye metin gönder
+                  </button>
+                  <button
+                    type="button"
+                    disabled={parentPdfShareBusy || parentShareBusy || pdfBusy}
+                    onClick={() => void shareWeeklyPdfWithParent()}
+                    className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-900 transition hover:bg-teal-100 disabled:opacity-50 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-100"
+                  >
+                    {parentPdfShareBusy ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <FileDown className="h-4 w-4" />
+                    )}
+                    Veliye PDF gönder
+                  </button>
+                </>
               ) : null}
             </div>
           </div>

@@ -441,7 +441,7 @@ async function buildWeeklyPlannerDocument(opts: {
 }
 
 /** Noto Sans + html2canvas — Türkçe karakterler, kurum logosu, öğrenci dostu tasarım */
-export async function downloadWeeklyPlannerPdf(opts: {
+export async function buildWeeklyPlannerPdfBlob(opts: {
   calendarElement?: HTMLElement | null;
   studentName: string;
   weekStart: string;
@@ -452,7 +452,7 @@ export async function downloadWeeklyPlannerPdf(opts: {
   institutionName?: string;
   logoUrl?: string | null;
   preferGridFallback?: boolean;
-}): Promise<void> {
+}): Promise<{ blob: Blob; filename: string }> {
   void opts.calendarElement;
   void opts.preferGridFallback;
 
@@ -501,5 +501,27 @@ export async function downloadWeeklyPlannerPdf(opts: {
   const contentW = pageW - margin * 2;
 
   addCanvasPaginatedToLandscapePdf(doc, canvas, margin, contentW);
-  doc.save(filename);
+  const blob = doc.output('blob');
+  return { blob, filename };
+}
+
+export async function downloadWeeklyPlannerPdf(opts: {
+  calendarElement?: HTMLElement | null;
+  studentName: string;
+  weekStart: string;
+  weekEnd: string;
+  dayDates: string[];
+  goals: CoachWeeklyGoalRow[];
+  entries: WeeklyPlannerEntryRow[];
+  institutionName?: string;
+  logoUrl?: string | null;
+  preferGridFallback?: boolean;
+}): Promise<void> {
+  const { blob, filename } = await buildWeeklyPlannerPdfBlob(opts);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }

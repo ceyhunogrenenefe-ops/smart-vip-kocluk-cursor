@@ -496,7 +496,7 @@ export default function CoachWhatsAppSettings() {
       }
       setGwSchedules((prev) => prev.map((s) => (s.id === row.id ? payload.data! : s)));
       setGwRestartCampaignIds((prev) => ({ ...prev, [row.id]: false }));
-      setGwSchedulesMsg('Plan kaydedildi. Zamanlanmış gönderimler Meta Cloud API ile sunucudan yapılır; cron ~15 dk’da bir çalışır.');
+      setGwSchedulesMsg('Plan kaydedildi. Zamanlanmış gönderimler bağlı WhatsApp gateway oturumunuzdan gider; cron ~15 dk’da bir çalışır.');
     } catch {
       setGwSchedulesMsg('Kayıt başarısız.');
     } finally {
@@ -661,7 +661,7 @@ export default function CoachWhatsAppSettings() {
       }
       setGwSchedules((prev) => [...prev, payload.data!]);
       setBulkNotice(
-        'Zamanlanmış plan kaydedildi ve aktif. Mesajlar Meta Cloud API ile gönderilir; cron ~15 dk’da bir tetiklenir.'
+        'Zamanlanmış plan kaydedildi ve aktif. Mesajlar bağlı WhatsApp gateway oturumunuzdan gönderilir; cron ~15 dk’da bir tetiklenir.'
       );
       void loadGwSchedules();
     } catch {
@@ -1265,6 +1265,10 @@ export default function CoachWhatsAppSettings() {
       setBulkNotice('Toplu gönderim için sunucu oturumu (JWT) gerekli — çıkış yapıp tekrar giriş yapın.');
       return;
     }
+    if (canUseGateway && !isConnected) {
+      setBulkNotice('WhatsApp gateway bağlı değil. QR ile bağlandıktan sonra tekrar deneyin.');
+      return;
+    }
 
     const targets = students.filter((st) => bulkSelectedIds.has(st.id));
     const withPhone = targets.filter((st) => resolveStudentPhone(st, bulkChannel));
@@ -1278,6 +1282,7 @@ export default function CoachWhatsAppSettings() {
       return;
     }
 
+    const viaGateway = canUseGateway && isConnected;
     setBulkSendBusy(true);
     let ok = 0;
     let fail = 0;
@@ -1289,11 +1294,16 @@ export default function CoachWhatsAppSettings() {
         const message = buildBulkMessageForStudent(st);
         setBulkProgress(`${i + 1}/${withPhone.length} — ${st.name}`);
         try {
-          const sent = await sendWhatsAppMessage({ to: phone, body: message });
-          if (sent.ok) ok += 1;
-          else {
-            fail += 1;
-            if (errors.length < 3) errors.push(`${st.name}: ${sent.error || 'meta_send_failed'}`);
+          if (viaGateway) {
+            await sendGatewayMessage(phone, message);
+            ok += 1;
+          } else {
+            const sent = await sendWhatsAppMessage({ to: phone, body: message });
+            if (sent.ok) ok += 1;
+            else {
+              fail += 1;
+              if (errors.length < 3) errors.push(`${st.name}: ${sent.error || 'meta_send_failed'}`);
+            }
           }
         } catch (e) {
           fail += 1;
@@ -1304,7 +1314,8 @@ export default function CoachWhatsAppSettings() {
           await new Promise((r) => setTimeout(r, 400));
         }
       }
-      const parts = [`${ok}/${withPhone.length} mesaj Meta üzerinden gönderildi.`];
+      const channelLabel = viaGateway ? 'WhatsApp gateway (QR)' : 'Meta Cloud API';
+      const parts = [`${ok}/${withPhone.length} mesaj ${channelLabel} üzerinden gönderildi.`];
       if (fail) parts.push(`${fail} başarısız.`);
       if (skipped) parts.push(`${skipped} öğrenci telefonsuz atlandı.`);
       if (errors.length) parts.push(errors.join(' · '));
@@ -2701,7 +2712,7 @@ export default function CoachWhatsAppSettings() {
             className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-teal-600 py-3 text-sm font-semibold text-white shadow-md hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:px-8"
           >
             {bulkSendBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
-            {bulkSendBusy ? 'Gönderiliyor…' : 'Şimdi gönder (Meta)'}
+            {bulkSendBusy ? 'Gönderiliyor…' : isConnected ? 'Şimdi gönder (gateway)' : 'Şimdi gönder (Meta)'}
           </button>
         </div>
       </section>

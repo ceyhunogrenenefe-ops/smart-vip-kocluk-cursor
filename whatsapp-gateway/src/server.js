@@ -1153,6 +1153,23 @@ async function sendTextWithTimeout(sock, jid, message, retriesLeft = SEND_MESSAG
   }
 }
 
+async function sendDocumentWithTimeout(sock, jid, payload, retriesLeft = SEND_MESSAGE_RETRIES) {
+  try {
+    return await withTimeout(
+      () => sock.sendMessage(jid, payload),
+      SEND_MESSAGE_TIMEOUT_MS,
+      'send_document_timeout'
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (retriesLeft > 0 && (msg === 'send_document_timeout' || msg === 'send_message_timeout')) {
+      await sleep(600);
+      return sendDocumentWithTimeout(sock, jid, payload, retriesLeft - 1);
+    }
+    throw err;
+  }
+}
+
 app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async (req, res) => {
   const coachId = getCoachId(req);
   const digits = normalizeDigitsForWhatsApp(req.body?.phone);
@@ -1269,6 +1286,88 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
         typeof error === 'object' && error !== null && typeof error.phone === 'string'
           ? error.phone
           : undefined,
+    });
+  }
+});
+
+app.post('/sessions/:coachId/send-document', requireGatewayAuth, requireCoachScope, async (req, res) => {
+  const coachId = getCoachId(req);
+  const digits = normalizeDigitsForWhatsApp(req.body?.phone);
+  const strictSession =
+    req.body?.strict_session === true ||
+    String(req.headers['x-gateway-strict-session'] || '').trim() === '1';
+  try {
+    const jid = ensurePhoneJid(digits);
+    const dataBase64 = String(req.body?.data_base64 || '').trim();
+    const caption = String(req.body?.caption || '').trim();
+    const filename = String(req.body?.filename || 'document.pdf').trim().slice(0, 120) || 'document.pdf';
+    const mimetype = String(req.body?.mimetype || 'application/pdf').trim() || 'application/pdf';
+    if (!jid || !dataBase64) {
+      return res.status(400).json({ ok: false, error: 'phone_and_document_required' });
+    }
+    const buf = Buffer.from(dataBase64, 'base64');
+    if (!buf.length) {
+      return res.status(400).json({ ok: false, error: 'invalid_document_base64' });
+    }
+    if (buf.length > 16 * 1024 * 1024) {
+      return res.status(400).json({ ok: false, error: 'document_too_large' });
+    }
+
+    let sendMeta = { sharedFallback: false, usedCoachId: coachId };
+    const result = await runInCoachSendQueue(coachId, async () => {
+      const resolved = await resolveSendSession(coachId, { strictSession });
+      sendMeta = {
+        sharedFallback: resolved.sharedFallback,
+        usedCoachId: resolved.usedCoachId || coachId
+      };
+      const session = resolved.session;
+      if (!isSessionReady(session)) {
+        const live = listConnectedCoachIds();
+        const err = new Error('session_not_connected');
+        err.httpStatus = 409;
+        err.connected_session_ids = live;
+        err.hint = live.length
+          ? strictSession
+            ? 'Bu hesabın kendi WhatsApp oturumu bağlı değil — Koç WhatsApp ayarlarından QR ile bağlayın.'
+            : `Bu oturum bağlı değil. Vercel BOOK_ORDER_GATEWAY_SESSION_ID şunlardan biri olmalı: ${live.join(', ')}`
+          : 'WhatsApp bağlı değil — Koç WhatsApp’tan QR ile bağlayın.';
+        throw err;
+      }
+
+      const payload = {
+        document: buf,
+        mimetype,
+        fileName: filename
+      };
+      if (caption) payload.caption = caption;
+      return sendDocumentWithTimeout(session.sock, jid, payload);
+    });
+
+    res.json({
+      ok: true,
+      id: result?.key?.id || null,
+      phone: digits,
+      shared_fallback: sendMeta.sharedFallback,
+      gateway_session_id: sendMeta.usedCoachId
+    });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'send_document_failed';
+    const dynamicStatus =
+      typeof error === 'object' && error !== null && Number.isFinite(error.httpStatus)
+        ? Number(error.httpStatus)
+        : null;
+    let status = dynamicStatus || (msg.includes('timeout') ? 504 : 500);
+    res.status(status).json({
+      ok: false,
+      error: msg,
+      connected_session_ids:
+        typeof error === 'object' && error !== null && Array.isArray(error.connected_session_ids)
+          ? error.connected_session_ids
+          : listConnectedCoachIds(),
+      hint:
+        typeof error === 'object' && error !== null && typeof error.hint === 'string'
+          ? error.hint
+          : undefined
     });
   }
 });

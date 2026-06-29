@@ -22,6 +22,9 @@ function humanizeGatewayError(status: number, data: { error?: string; detail?: s
   if (code === 'send_message_timeout') {
     return 'WhatsApp sunucusu zaman aşımına uğradı. VPS’te gateway (pm2) çalışıyor mu kontrol edin; tekrar deneyin.';
   }
+  if (code === 'send_document_timeout') {
+    return 'PDF gönderimi zaman aşımına uğradı. Dosya büyük olabilir veya gateway yavaş — tekrar deneyin.';
+  }
   if (code === 'send_precheck_timeout') {
     return 'WhatsApp ön kontrolü (numara doğrulama) zaman aşımına uğradı. Bağlantı yeni açıldıysa 2-3 sn bekleyip tekrar deneyin.';
   }
@@ -88,7 +91,7 @@ async function callGateway<T>(coachUserId: string, endpoint: string, init?: Requ
   const gatewayKey = (import.meta.env.VITE_WHATSAPP_GATEWAY_KEY || '').trim();
   if (gatewayKey) headers.set('x-gateway-key', gatewayKey);
 
-  const isSend = /\/send\/?$/i.test(endpoint);
+  const isSend = /\/send\/?$/i.test(endpoint) || /\/send-document\/?$/i.test(endpoint);
   const timeoutMs = isSend ? 115000 : 28000;
   const controller = new AbortController();
   const tid = setTimeout(() => controller.abort(), timeoutMs);
@@ -144,6 +147,19 @@ export type WhatsAppSendResult = {
   notice: string;
   waUrl?: string;
 };
+
+export function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      const idx = result.indexOf(',');
+      resolve(idx >= 0 ? result.slice(idx + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error || new Error('blob_read_failed'));
+    reader.readAsDataURL(blob);
+  });
+}
 
 /**
  * Gateway (bağlı oturum) → Twilio → wa.me sırası — Koç WhatsApp merkezi ile aynı mantık.
@@ -234,4 +250,53 @@ export async function sendWhatsAppOutbound(opts: {
     waUrl: url,
     notice: 'Tarayıcı yeni sekme açmayı engelledi. Bağlantı panoya kopyalandı veya aşağıdan açılabilir.'
   };
+}
+
+/** PDF veya belge — gateway Baileys oturumu üzerinden (caption opsiyonel). */
+export async function sendWhatsAppOutboundDocument(opts: {
+  coachUserId: string;
+  targetPhone: string;
+  filename: string;
+  base64: string;
+  caption?: string;
+  mimeType?: string;
+}): Promise<WhatsAppSendResult> {
+  const target = normalizeWhatsAppPhoneForSend(opts.targetPhone);
+  const coachUserId = String(opts.coachUserId || '').trim();
+  const base64 = String(opts.base64 || '').trim();
+  const filename = String(opts.filename || 'document.pdf').trim() || 'document.pdf';
+  const caption = String(opts.caption || '').trim();
+  if (!target) throw new Error('Geçerli telefon numarası yok');
+  if (!base64) throw new Error('Belge verisi boş');
+
+  const gatewayUrl = resolveWhatsAppGatewayBase();
+  const hasJwt = Boolean(getAuthToken());
+
+  if (gatewayUrl && coachUserId && hasJwt) {
+    try {
+      await callGateway(coachUserId, `/sessions/${coachUserId}/send-document`, {
+        method: 'POST',
+        body: JSON.stringify({
+          phone: target,
+          caption,
+          filename,
+          mimetype: opts.mimeType || 'application/pdf',
+          data_base64: base64
+        })
+      });
+      return {
+        channel: 'gateway',
+        notice: caption
+          ? 'Belge veliye WhatsApp gateway üzerinden gönderildi.'
+          : 'PDF veliye WhatsApp gateway üzerinden gönderildi.'
+      };
+    } catch (e) {
+      const err = e instanceof Error ? e.message : 'gateway_document_send_failed';
+      throw new Error(`PDF gönderilemedi: ${err}`);
+    }
+  }
+
+  throw new Error(
+    'PDF gönderimi için WhatsApp gateway oturumu ve sunucu girişi (JWT) gerekli. Koç WhatsApp ayarlarından QR ile bağlanın.'
+  );
 }
