@@ -154,6 +154,63 @@ export interface ClassLevelStudentCount {
   count: number;
 }
 
+/** Kullanıcı yönetimi şube süzgeci — A–F */
+export const STANDARD_BRANCH_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'] as const;
+
+export function normalizeStudentBranchKey(school: string | undefined | null): string {
+  const raw = String(school || '').trim();
+  if (!raw) return '';
+  const u = raw.toLocaleUpperCase('tr-TR');
+  if (/^[A-F]$/.test(u)) return u;
+  const tail = u.match(/(?:^|[\s\-_/])([A-F])$/);
+  if (tail) return tail[1]!;
+  const glued = u.match(/\d([A-F])$/);
+  if (glued) return glued[1]!;
+  return u;
+}
+
+export function branchMatches(
+  school: string | undefined | null,
+  filterKey: string
+): boolean {
+  if (!filterKey || filterKey === 'all') return true;
+  const studentKey = normalizeStudentBranchKey(school);
+  if (!studentKey) return false;
+  return studentKey === normalizeStudentBranchKey(filterKey);
+}
+
+export interface BranchStudentCount {
+  key: string;
+  label: string;
+  count: number;
+}
+
+export function computeStudentsByBranch(students: Student[]): BranchStudentCount[] {
+  const counts = new Map<string, number>();
+  let unknown = 0;
+  for (const s of students) {
+    const key = normalizeStudentBranchKey(s.school);
+    if (!key) {
+      unknown += 1;
+      continue;
+    }
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const rows: BranchStudentCount[] = STANDARD_BRANCH_LETTERS.map((letter) => ({
+    key: letter,
+    label: `Şube ${letter}`,
+    count: counts.get(letter) || 0
+  }));
+  for (const [key, count] of counts) {
+    if ((STANDARD_BRANCH_LETTERS as readonly string[]).includes(key)) continue;
+    rows.push({ key, label: `Şube ${key}`, count });
+  }
+  if (unknown > 0) {
+    rows.push({ key: '__unknown__', label: 'Şube belirtilmemiş', count: unknown });
+  }
+  return rows;
+}
+
 export function computeStudentsByClassLevel(students: Student[]): ClassLevelStudentCount[] {
   const counts = new Map<string, number>();
   let unknown = 0;

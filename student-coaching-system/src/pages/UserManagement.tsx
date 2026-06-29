@@ -61,7 +61,11 @@ import {
   computeSystemUserStats,
   computeStudentsByClassLevel,
   computeStudentsByInstitutionAndClass,
+  computeStudentsByBranch,
   classLevelsMatch,
+  branchMatches,
+  STANDARD_BRANCH_LETTERS,
+  normalizeStudentBranchKey,
   getDaysLeftFromEndDate,
   indexStudentsByPlatformLink,
   isUserActiveAccount,
@@ -253,6 +257,7 @@ export default function UserManagement() {
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'expired' | 'inactive'>('all');
   const [filterInstitutionId, setFilterInstitutionId] = useState<string>('all');
   const [filterClassLevel, setFilterClassLevel] = useState<string>('all');
+  const [filterBranch, setFilterBranch] = useState<string>('all');
   const [filterCoachId, setFilterCoachId] = useState<string>('all');
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<'add' | 'edit'>('add');
@@ -386,6 +391,11 @@ export default function UserManagement() {
 
   const classLevelStats = useMemo(
     () => computeStudentsByClassLevel(statsStudentsScope),
+    [statsStudentsScope]
+  );
+
+  const branchStats = useMemo(
+    () => computeStudentsByBranch(statsStudentsScope),
     [statsStudentsScope]
   );
 
@@ -754,6 +764,15 @@ export default function UserManagement() {
         if (!classLevelsMatch(studentMatchForFilter?.classLevel, filterClassLevel)) return false;
       }
 
+      if (filterBranch !== 'all') {
+        if (!tags.includes('student')) return false;
+        if (filterBranch === '__unknown__') {
+          if (normalizeStudentBranchKey(studentMatchForFilter?.school)) return false;
+        } else if (!branchMatches(studentMatchForFilter?.school, filterBranch)) {
+          return false;
+        }
+      }
+
       if (filterCoachId !== 'all') {
         const coachRow = coachesForFilter.find((c) => c.id === filterCoachId);
         const studentCoach = studentMatchForFilter?.coachId ? String(studentMatchForFilter.coachId) : '';
@@ -777,6 +796,7 @@ export default function UserManagement() {
     filterRole,
     filterStatus,
     filterClassLevel,
+    filterBranch,
     filterCoachId,
     studentLinkIndex,
     linkedStudents,
@@ -791,6 +811,7 @@ export default function UserManagement() {
     filterStatus,
     filterInstitutionId,
     filterClassLevel,
+    filterBranch,
     filterCoachId
   ]);
 
@@ -2143,6 +2164,72 @@ export default function UserManagement() {
           </div>
         ) : null}
 
+        {isAdminActor(currentUser) ? (
+          <div className="mt-6 border-t border-gray-100 pt-4">
+            <h3 className="text-sm font-semibold text-slate-800 mb-3">
+              {currentUser?.role === 'super_admin' && filterInstitutionId !== 'all'
+                ? 'Seçili kurum — şubeye göre öğrenci'
+                : currentUser?.role === 'admin'
+                  ? 'Kurumunuz — şubeye göre öğrenci'
+                  : 'Şubeye göre öğrenci dağılımı'}
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setFilterBranch('all')}
+                className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+                  filterBranch === 'all'
+                    ? 'border-red-300 bg-red-50 text-red-800'
+                    : 'border-gray-100 bg-white hover:border-slate-200 text-slate-700'
+                }`}
+              >
+                Tüm şubeler
+              </button>
+              {STANDARD_BRANCH_LETTERS.map((letter) => {
+                const count = branchStats.find((r) => r.key === letter)?.count ?? 0;
+                return (
+                  <button
+                    key={letter}
+                    type="button"
+                    onClick={() => setFilterBranch((prev) => (prev === letter ? 'all' : letter))}
+                    className={`rounded-lg border px-3 py-2 text-center min-w-[3.25rem] transition-colors ${
+                      filterBranch === letter
+                        ? 'border-red-300 bg-red-50'
+                        : 'border-gray-100 bg-white hover:border-slate-200'
+                    }`}
+                  >
+                    <div className="text-lg font-bold text-slate-800">{count}</div>
+                    <div className="text-xs text-slate-500">Şube {letter}</div>
+                  </button>
+                );
+              })}
+              {branchStats
+                .filter((r) => r.key === '__unknown__')
+                .map((row) => (
+                  <button
+                    key={row.key}
+                    type="button"
+                    onClick={() =>
+                      setFilterBranch((prev) => (prev === row.key ? 'all' : row.key))
+                    }
+                    className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                      filterBranch === row.key
+                        ? 'border-red-300 bg-red-50'
+                        : 'border-gray-100 bg-white hover:border-slate-200'
+                    }`}
+                  >
+                    <div className="text-lg font-bold text-slate-800">{row.count}</div>
+                    <div className="text-xs text-slate-500">{row.label}</div>
+                  </button>
+                ))}
+            </div>
+            <p className="mt-2 text-xs text-slate-400">
+              Şube kutusuna tıklayarak listeyi süzebilirsiniz. Sınıf ve şube filtreleri birlikte
+              uygulanır.
+            </p>
+          </div>
+        ) : null}
+
         {currentUser?.role === 'super_admin' && institutionClassStats.length > 0 ? (
           <div className="mt-6 border-t border-gray-100 pt-4">
             <h3 className="text-sm font-semibold text-slate-800 mb-3">
@@ -2431,6 +2518,27 @@ export default function UserManagement() {
                   {opt.label} (veride)
                 </option>
               ))}
+            </select>
+
+            <select
+              value={filterBranch}
+              onChange={(e) => setFilterBranch(e.target.value)}
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-h-[44px] xl:min-w-[9rem] xl:w-auto"
+              aria-label="Şube filtresi"
+            >
+              <option value="all">Tüm şubeler</option>
+              {STANDARD_BRANCH_LETTERS.map((letter) => (
+                <option key={letter} value={letter}>
+                  Şube {letter}
+                </option>
+              ))}
+              {branchStats
+                .filter((r) => r.key === '__unknown__')
+                .map((row) => (
+                  <option key={row.key} value={row.key}>
+                    {row.label}
+                  </option>
+                ))}
             </select>
 
             <select
@@ -2999,13 +3107,22 @@ export default function UserManagement() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Şubesi</label>
-                      <input
-                        type="text"
+                      <select
                         value={formData.branch}
                         onChange={(e) => setFormData({ ...formData, branch: e.target.value })}
                         className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-                        placeholder="A"
-                      />
+                      >
+                        <option value="">Seçin…</option>
+                        {STANDARD_BRANCH_LETTERS.map((letter) => (
+                          <option key={letter} value={letter}>
+                            Şube {letter}
+                          </option>
+                        ))}
+                        {formData.branch &&
+                        !(STANDARD_BRANCH_LETTERS as readonly string[]).includes(formData.branch) ? (
+                          <option value={formData.branch}>{formData.branch} (mevcut)</option>
+                        ) : null}
+                      </select>
                     </div>
                   </div>
 
