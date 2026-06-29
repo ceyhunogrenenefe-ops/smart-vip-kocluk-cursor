@@ -5,7 +5,8 @@ import { getSupabaseAdmin, hasSupabaseServiceRoleKey, supabaseAdmin } from '../a
 import { getTeacherGroupClassStudentScope } from '../api/_lib/teacher-class-scope.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import { normalizeUuidOrGenerate } from '../api/_lib/uuid.js';
-import { USER_LIST_COLUMNS } from '../api/_lib/list-query-columns.js';
+import { USER_LIST_COLUMNS, USER_LIST_OPTIONAL_COLUMNS } from '../api/_lib/list-query-columns.js';
+import { selectWithOptionalColumns } from '../api/_lib/supabase-optional-moderator.js';
 
 const USER_ROLES = ['super_admin', 'admin', 'coach', 'teacher', 'student'];
 const normalizeRoles = (raw, fallbackRole = 'student') => {
@@ -25,6 +26,71 @@ function normalizeAcademicYearLabel(v) {
 
 function existingUserRoles(row) {
   return normalizeRoles(row?.roles, String(row?.role || 'student'));
+}
+
+function schemaErrorColumn(err) {
+  const m = `${err?.message || ''} ${err?.details || ''} ${err?.hint || ''}`;
+  let match = m.match(/Could not find the '([^']+)' column/i);
+  if (match) return match[1];
+  match = m.match(/column\s+[\w.]+\.(\w+)\s+does not exist/i);
+  if (match) return match[1];
+  match = m.match(/column\s+"?(\w+)"?\s+does not exist/i);
+  return match ? match[1] : null;
+}
+
+function stripUserOptionalFields(row) {
+  if (!row || typeof row !== 'object') return row;
+  const out = { ...row };
+  for (const col of USER_LIST_OPTIONAL_COLUMNS) delete out[col];
+  return out;
+}
+
+async function queryUsersList(applyQuery) {
+  return selectWithOptionalColumns(
+    'users',
+    USER_LIST_COLUMNS,
+    USER_LIST_OPTIONAL_COLUMNS,
+    applyQuery
+  );
+}
+
+async function insertUserRow(payload) {
+  let current = { ...payload };
+  for (let attempt = 0; attempt < USER_LIST_OPTIONAL_COLUMNS.length + 1; attempt++) {
+    const result = await supabaseAdmin.from('users').insert(current).select().single();
+    if (!result.error) return result;
+    const missing = schemaErrorColumn(result.error);
+    if (missing && missing in current) {
+      const next = { ...current };
+      delete next[missing];
+      current = next;
+      continue;
+    }
+    return result;
+  }
+  return supabaseAdmin.from('users').insert(stripUserOptionalFields(payload)).select().single();
+}
+
+async function updateUserRow(id, patch) {
+  let current = { ...patch };
+  for (let attempt = 0; attempt < USER_LIST_OPTIONAL_COLUMNS.length + 1; attempt++) {
+    const result = await supabaseAdmin.from('users').update(current).eq('id', id).select().single();
+    if (!result.error) return result;
+    const missing = schemaErrorColumn(result.error);
+    if (missing && missing in current) {
+      const next = { ...current };
+      delete next[missing];
+      current = next;
+      continue;
+    }
+    return result;
+  }
+  return supabaseAdmin
+    .from('users')
+    .update(stripUserOptionalFields(patch))
+    .eq('id', id)
+    .select()
+    .single();
 }
 
 async function coachAssignedStudentEmails(coachId) {
@@ -185,14 +251,14 @@ export default async function handler(req, res) {
         }
         if (email && !emailSet.has(email)) return res.status(200).json({ data: [] });
 
-        let q = supabaseAdmin
-          .from('users')
-          .select(USER_LIST_COLUMNS)
-          .eq('institution_id', actor.institution_id)
-          .eq('role', 'student')
-          .order('created_at', { ascending: false });
-        if (email) q = q.eq('email', email);
-        const { data: coachUsers, error: coachErr } = await q;
+        const { data: coachUsers, error: coachErr } = await queryUsersList((q) => {
+          let query = q
+            .eq('institution_id', actor.institution_id)
+            .eq('role', 'student')
+            .order('created_at', { ascending: false });
+          if (email) query = query.eq('email', email);
+          return query;
+        });
         if (coachErr) throw coachErr;
         const rows = coachUsers || [];
         const filtered = email
@@ -206,27 +272,30 @@ export default async function handler(req, res) {
         if (!actor.institution_id) return res.status(200).json({ data: [] });
         const tel = await teacherScopeStudentEmails(actor.sub);
         if (email && !tel.has(email)) return res.status(200).json({ data: [] });
-        let q = supabaseAdmin
-          .from('users')
-          .select(USER_LIST_COLUMNS)
-          .eq('institution_id', actor.institution_id)
-          .eq('role', 'student')
-          .order('created_at', { ascending: false });
-        if (email) q = q.eq('email', email);
-        const { data, error } = await q;
+        const { data, error } = await queryUsersList((q) => {
+          let query = q
+            .eq('institution_id', actor.institution_id)
+            .eq('role', 'student')
+            .order('created_at', { ascending: false });
+          if (email) query = query.eq('email', email);
+          return query;
+        });
         if (error) throw error;
         const filtered = (data || []).filter((u) =>
           tel.has(String(u.email || '').toLowerCase().trim()));
         return res.status(200).json({ data: filtered });
       }
 
-      let query = supabaseAdmin.from('users').select(USER_LIST_COLUMNS).order('created_at', { ascending: false });
-      if (actor.role === 'admin') {
-        if (!actor.institution_id) return res.status(200).json({ data: [] });
-        query = query.eq('institution_id', actor.institution_id);
-      }
-      if (email) query = query.eq('email', email);
-      const { data, error } = await query;
+      if (actor.role === 'admin' && !actor.institution_id) return res.status(200).json({ data: [] });
+
+      const { data, error } = await queryUsersList((q) => {
+        let query = q.order('created_at', { ascending: false });
+        if (actor.role === 'admin') {
+          query = query.eq('institution_id', actor.institution_id);
+        }
+        if (email) query = query.eq('email', email);
+        return query;
+      });
       if (error) throw error;
       return res.status(200).json({ data: data || [] });
     }
@@ -342,7 +411,7 @@ export default async function handler(req, res) {
         updated_at: new Date().toISOString()
       };
 
-      const { data, error } = await supabaseAdmin.from('users').insert(payload).select().single();
+      const { data, error } = await insertUserRow(payload);
       if (error) throw error;
 
       await provisionSupabaseAuthUser({
@@ -430,12 +499,7 @@ export default async function handler(req, res) {
         }
       }
 
-      const { data, error } = await supabaseAdmin
-        .from('users')
-        .update({ ...body, updated_at: new Date().toISOString() })
-        .eq('id', id)
-        .select()
-        .single();
+      const { data, error } = await updateUserRow(id, { ...body, updated_at: new Date().toISOString() });
       if (error) throw error;
       return res.status(200).json({ data });
     }
