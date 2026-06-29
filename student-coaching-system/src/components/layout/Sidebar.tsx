@@ -9,10 +9,10 @@ import {
   LayoutDashboard,
   MessageCircle,
   Settings,
-  TrendingUp,
   Users,
   Video
 } from 'lucide-react';
+import { DEFAULT_BRAND_LOGO } from '../../lib/brandAssets';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { userRoleTags, userHasAnyRole } from '../../config/rolePermissions';
@@ -153,9 +153,11 @@ export default function Sidebar({
             className="h-9 w-9 shrink-0 rounded-lg bg-slate-100 object-contain p-0.5 ring-2 ring-slate-600/40 shadow-md"
           />
         ) : (
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 shadow-md shadow-slate-900/25 ring-1 ring-white/15">
-            <TrendingUp className="h-5 w-5 text-white" strokeWidth={2} />
-          </div>
+          <img
+            src={DEFAULT_BRAND_LOGO}
+            alt="Online VIP Dershane"
+            className="h-9 w-9 shrink-0 rounded-lg bg-white object-contain p-0.5 ring-2 ring-slate-600/40 shadow-md"
+          />
         )}
         {(!railCollapsed || !isLg) && (
           <div className="ml-2.5 min-w-0 flex-1 max-lg:block lg:block">

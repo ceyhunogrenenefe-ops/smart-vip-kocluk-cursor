@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ders Program Planlayıcısı</title>
-<link rel="icon" href="logo.svg" type="image/svg+xml">
+<link rel="icon" href="logo.png" type="image/png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600&display=swap" rel="stylesheet">
@@ -277,7 +277,7 @@
 <div class="app">
   <header class="top">
     <div class="brandwrap">
-      <img class="logo" src="logo.svg" alt="Online VIP Dershane logosu">
+      <img class="logo" src="logo.png" alt="Online VIP Dershane logosu">
       <div class="brand">
         <h1>Ders Program Planlayıcısı</h1>
         <p class="shared-plan-name" id="sharedPlanName" hidden></p>
@@ -501,7 +501,7 @@ function defaultState(emptyGroups){
     ],
   };
 }
-let state=loadState() || defaultState();
+let state=window.parent!==window ? defaultState(true) : (loadState() || defaultState());
 /* migration: her sınıfa kendi ders saatleri */
 if(!state.periods||!state.periods.length) state.periods=defaultState().periods;
 state.groups.forEach(g=>{ if(!Array.isArray(g.periods)||!g.periods.length){ g.periods=(state.periods||[]).map(p=>({label:p.label,time:p.time})); } });
@@ -2564,14 +2564,17 @@ window.addEventListener('message', (ev)=>{
   else if(msg.type==='SET_STATE') reply({type:'SET_OK', ok: importSnapshot(msg.payload, {silent:true})});
   else if(msg.type==='SET_CONTEXT'){
     const p=msg.payload||{};
-    const instChanged=!!(p.institutionId&&applyInstitutionStorage(p.institutionId, {preserveCurrentState: explicitPlanLoaded}));
+    const serverPlanActive=!!p.serverPlanActive;
+    const autoSync=!!p.autoSyncClasses;
+    const preserveState=explicitPlanLoaded||serverPlanActive;
+    const instChanged=!!(p.institutionId&&applyInstitutionStorage(p.institutionId, {preserveCurrentState: preserveState}));
     if(Array.isArray(p.classes)) state.systemClasses=p.classes;
     if(Array.isArray(p.teachers)) mergeTeachersFromSystem(p.teachers);
     if(Array.isArray(p.students)) state.systemStudents=p.students;
     if(Array.isArray(p.poolSubjects)) state.poolSubjects=p.poolSubjects;
     if(p.curriculumPresets&&typeof p.curriculumPresets==='object') state.curriculumPresets=p.curriculumPresets;
     if(typeof p.planName==='string') renderSharedPlanName(p.planName);
-    if((state.systemClasses||[]).length) syncAllSystemClasses(true);
+    if(autoSync&&(state.systemClasses||[]).length) syncAllSystemClasses(true);
     else { saveState(); render(); }
     reply({type:'SET_CONTEXT_OK', ok:true, institutionChanged:instChanged, groups:state.groups.length});
   }

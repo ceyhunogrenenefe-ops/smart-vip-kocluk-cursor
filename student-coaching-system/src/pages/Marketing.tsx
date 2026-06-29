@@ -1,6 +1,7 @@
 // Türkçe: Pazarlama Sayfası - SaaS Landing Page
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { DEFAULT_BRAND_LOGO } from '../lib/brandAssets';
 import {
   GraduationCap,
   Users,
@@ -290,10 +291,12 @@ export default function Marketing() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-2">
-              <div className="w-10 h-10 bg-gradient-to-br from-red-500 to-red-600 rounded-xl flex items-center justify-center">
-                <TrendingUp className="w-6 h-6 text-white" />
-              </div>
-              <span className="text-xl font-bold text-gray-900">Smart Koçluk</span>
+              <img
+                src={DEFAULT_BRAND_LOGO}
+                alt="Online VIP Dershane"
+                className="h-10 w-10 rounded-xl bg-white object-contain p-0.5"
+              />
+              <span className="text-xl font-bold text-gray-900">Online VIP Dershane</span>
             </div>
 
             {/* Desktop Menu */}

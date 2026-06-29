@@ -226,6 +226,8 @@ export default function SchedulePlannerPage() {
   const autoPlanLoadedFor = useRef('');
   const planTouchedRef = useRef(false);
   const planLoadGenRef = useRef(0);
+  const planBootstrappedRef = useRef(false);
+  const [apiHint, setApiHint] = useState('');
 
   const rememberSharedPlan = useCallback(
     (planId: string) => {
@@ -241,29 +243,33 @@ export default function SchedulePlannerPage() {
     [institutionId]
   );
 
-  const pushPlannerContext = useCallback(async () => {
-    if (!iframeReady || !institutionId) return;
-    try {
-      await postPlannerMessage(iframeRef.current, 'SET_CONTEXT', {
-        institutionId,
-        classes: classes.map((c) => ({
-          id: c.id,
-          name: c.name,
-          class_level: c.class_level ?? null,
-          branch: c.branch ?? null
-        })),
-        teachers: systemTeachers,
-        students: systemStudents,
-        poolSubjects: PLANNER_POOL_SUBJECTS,
-        curriculumPresets: PLANNER_CURRICULUM_PRESETS,
-        autoSyncClasses: true,
-        planName: planName.trim()
-      });
-      setLoadError('');
-    } catch (e) {
-      setLoadError('Planlayıcı bağlantısı kurulamadı. Sayfayı yenileyin.');
-    }
-  }, [iframeReady, institutionId, classes, systemTeachers, systemStudents, planName]);
+  const pushPlannerContext = useCallback(
+    async (opts?: { serverPlanActive?: boolean; autoSyncClasses?: boolean; nameOverride?: string }) => {
+      if (!iframeReady || !institutionId) return;
+      try {
+        await postPlannerMessage(iframeRef.current, 'SET_CONTEXT', {
+          institutionId,
+          classes: classes.map((c) => ({
+            id: c.id,
+            name: c.name,
+            class_level: c.class_level ?? null,
+            branch: c.branch ?? null
+          })),
+          teachers: systemTeachers,
+          students: systemStudents,
+          poolSubjects: PLANNER_POOL_SUBJECTS,
+          curriculumPresets: PLANNER_CURRICULUM_PRESETS,
+          autoSyncClasses: opts?.autoSyncClasses ?? true,
+          serverPlanActive: opts?.serverPlanActive ?? planBootstrappedRef.current,
+          planName: String(opts?.nameOverride ?? planName).trim()
+        });
+        setLoadError('');
+      } catch {
+        setLoadError('Planlayıcı bağlantısı kurulamadı. Sayfayı yenileyin.');
+      }
+    },
+    [iframeReady, institutionId, classes, systemTeachers, systemStudents, planName]
+  );
 
   const loadPlannerResources = useCallback(async (): Promise<ClassRow[]> => {
     if (!institutionId) return [];
@@ -322,7 +328,12 @@ export default function SchedulePlannerPage() {
     const j = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(j.error || 'plan_list_failed');
     setPlans(Array.isArray(j.data) ? j.data : []);
-    if (j.hint) toast.message(j.hint);
+    if (j.hint) {
+      setApiHint(String(j.hint));
+      toast.message(j.hint);
+    } else {
+      setApiHint('');
+    }
   }, [institutionId]);
 
   const loadClasses = useCallback(async () => {
@@ -337,6 +348,7 @@ export default function SchedulePlannerPage() {
     setIframeReady(false);
     autoPlanLoadedFor.current = '';
     planTouchedRef.current = false;
+    planBootstrappedRef.current = false;
     planLoadGenRef.current += 1;
   }, [institutionId]);
 
@@ -356,8 +368,14 @@ export default function SchedulePlannerPage() {
   }, [institutionId, loadPlans, loadClasses]);
 
   useEffect(() => {
-    if (iframeReady) void pushPlannerContext();
-  }, [iframeReady, pushPlannerContext, classes, planName]);
+    if (!iframeReady || !institutionId) return;
+    if (planBootstrappedRef.current) {
+      void pushPlannerContext({ serverPlanActive: true, autoSyncClasses: true });
+      return;
+    }
+    if (plans.length > 0 && (isAdmin || isSuper) && !planTouchedRef.current) return;
+    void pushPlannerContext({ serverPlanActive: false, autoSyncClasses: true });
+  }, [iframeReady, institutionId, plans.length, isAdmin, isSuper, pushPlannerContext, classes, planName]);
 
   const refreshPlannerGroups = useCallback(async () => {
     if (!iframeReady) return;
@@ -369,6 +387,17 @@ export default function SchedulePlannerPage() {
       /* iframe henüz hazır olmayabilir */
     }
   }, [iframeReady, exportGroupId]);
+
+  const applyServerPlanToIframe = useCallback(
+    async (plannerJson: unknown, name: string) => {
+      if (!iframeReady) throw new Error('iframe_not_ready');
+      await postPlannerMessage(iframeRef.current, 'SET_STATE', plannerJson);
+      planBootstrappedRef.current = true;
+      await pushPlannerContext({ serverPlanActive: true, autoSyncClasses: true, nameOverride: name });
+      await refreshPlannerGroups();
+    },
+    [iframeReady, pushPlannerContext, refreshPlannerGroups]
+  );
 
   const reloadSharedPlan = useCallback(async () => {
     if (!institutionId || !(isAdmin || isSuper)) return;
@@ -391,18 +420,15 @@ export default function SchedulePlannerPage() {
           String(b.updated_at || '').localeCompare(String(a.updated_at || ''))
         )[0]?.id || rows[0]?.id;
       if (!pick) return;
-      await pushPlannerContext();
       const planRes = await apiFetch(`/api/class-schedule-plans?id=${encodeURIComponent(pick)}`);
       const planJson = await planRes.json().catch(() => ({}));
       if (!planRes.ok || !planJson.data?.planner_json) {
         throw new Error(planJson.error || 'load_failed');
       }
-      await postPlannerMessage(iframeRef.current, 'SET_STATE', planJson.data.planner_json);
+      await applyServerPlanToIframe(planJson.data.planner_json, String(planJson.data.name || ''));
       setSelectedPlanId(pick);
       setPlanName(String(planJson.data.name || ''));
       rememberSharedPlan(pick);
-      await refreshPlannerGroups();
-      await pushPlannerContext();
       toast.success('Ortak taslak sunucudan yenilendi.');
     } catch (e) {
       toast.error(String((e as Error).message || e));
@@ -414,9 +440,8 @@ export default function SchedulePlannerPage() {
     isAdmin,
     isSuper,
     loadPlans,
-    pushPlannerContext,
-    rememberSharedPlan,
-    refreshPlannerGroups
+    applyServerPlanToIframe,
+    rememberSharedPlan
   ]);
 
   useEffect(() => {
@@ -445,23 +470,23 @@ export default function SchedulePlannerPage() {
     void (async () => {
       try {
         if (planTouchedRef.current || gen !== planLoadGenRef.current) return;
-        await pushPlannerContext();
-        if (planTouchedRef.current || gen !== planLoadGenRef.current) return;
         const res = await apiFetch(`/api/class-schedule-plans?id=${encodeURIComponent(pick)}`);
         const j = await res.json().catch(() => ({}));
-        if (!res.ok || !j.data?.planner_json) return;
+        if (!res.ok || !j.data?.planner_json) {
+          throw new Error(j.error || 'plan_load_failed');
+        }
         if (planTouchedRef.current || gen !== planLoadGenRef.current) return;
-        await postPlannerMessage(iframeRef.current, 'SET_STATE', j.data.planner_json);
+        await applyServerPlanToIframe(j.data.planner_json, String(j.data.name || ''));
         setSelectedPlanId(pick);
         setPlanName(String(j.data.name || ''));
         rememberSharedPlan(pick);
-        await refreshPlannerGroups();
-        await pushPlannerContext();
-      } catch {
-        /* sessiz */
+      } catch (e) {
+        const msg = String((e as Error).message || e);
+        setLoadError(`Kayıtlı plan yüklenemedi: ${msg}`);
+        toast.error(`Kayıtlı plan yüklenemedi: ${msg}`);
       }
     })();
-  }, [iframeReady, institutionId, plans, isAdmin, isSuper, pushPlannerContext, rememberSharedPlan, refreshPlannerGroups]);
+  }, [iframeReady, institutionId, plans, isAdmin, isSuper, applyServerPlanToIframe, rememberSharedPlan]);
 
   useEffect(() => {
     if (iframeReady) refreshPlannerGroups();
@@ -527,13 +552,10 @@ export default function SchedulePlannerPage() {
       const res = await apiFetch(`/api/class-schedule-plans?id=${encodeURIComponent(planId)}`);
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j.data) throw new Error(j.error || 'load_failed');
-      await pushPlannerContext();
-      await postPlannerMessage(iframeRef.current, 'SET_STATE', j.data.planner_json);
+      await applyServerPlanToIframe(j.data.planner_json, String(j.data.name || ''));
       setSelectedPlanId(planId);
       setPlanName(String(j.data.name || ''));
       rememberSharedPlan(planId);
-      await refreshPlannerGroups();
-      await pushPlannerContext();
       toast.success('Plan yüklendi.');
     } catch (e) {
       toast.error(String((e as Error).message || e));
@@ -658,6 +680,8 @@ export default function SchedulePlannerPage() {
         }))
       );
       await postPlannerMessage(iframeRef.current, 'SET_STATE', merged);
+      planBootstrappedRef.current = true;
+      await pushPlannerContext({ serverPlanActive: true, autoSyncClasses: true });
       await refreshPlannerGroups();
       const matchedGroup = (merged.groups || []).find(
         (g) => normMatchLabel(g.name) === normMatchLabel(classRow.name)
@@ -882,6 +906,12 @@ export default function SchedulePlannerPage() {
           </button>
         </div>
       </div>
+
+      {apiHint ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {apiHint}
+        </div>
+      ) : null}
 
       {loadError ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">

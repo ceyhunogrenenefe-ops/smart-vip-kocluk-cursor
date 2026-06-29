@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { GraduationCap, Mail, AlertCircle, CheckCircle, ArrowLeft } from 'lucide-react';
+import { Mail, AlertCircle, CheckCircle, ArrowLeft } from 'lucide-react';
 import { fetchPublicPost } from '../lib/session';
+import { DEFAULT_BRAND_LOGO } from '../lib/brandAssets';
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState('');
@@ -46,9 +47,11 @@ export default function ForgotPassword() {
       <div className="relative w-full max-w-md">
         <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
           <div className="bg-gradient-to-r from-slate-800 to-slate-700 p-8 text-center">
-            <div className="w-16 h-16 bg-red-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <GraduationCap className="w-8 h-8 text-white" />
-            </div>
+            <img
+              src={DEFAULT_BRAND_LOGO}
+              alt="Online VIP Dershane"
+              className="mx-auto mb-4 h-16 w-16 rounded-2xl bg-white object-contain p-1"
+            />
             <h1 className="text-2xl font-bold text-white">Şifremi unuttum</h1>
             <p className="text-slate-300 mt-1 text-sm">Kayıtlı e-postanıza sıfırlama bağlantısı gönderilir</p>
           </div>
