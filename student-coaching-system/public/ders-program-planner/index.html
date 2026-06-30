@@ -1006,12 +1006,13 @@ function buildLessonQueue(curriculum){
   });
   return queue;
 }
-function autoFillGroupFromCurriculum(g, options={}){
-  const curriculum=g.curriculum||[];
-  if(!curriculum.length) return 0;
-  const queue=buildLessonQueue(curriculum);
-  if(!queue.length) return 0;
-  const per=g.periods||state.periods||[];
+function curriculumTotalHours(curriculum){
+  return (curriculum||[]).reduce((a,c)=>a+(Math.max(0, parseInt(c.hours,10)||0)), 0);
+}
+function scheduleLessonCount(g){
+  return Object.values(g?.schedule||{}).filter(cellHasLesson).length;
+}
+function listGroupFreeSlots(g, per, options={}){
   const slots=[];
   state.days.forEach((d,di)=>{
     per.forEach((p,pi)=>{
@@ -1021,38 +1022,72 @@ function autoFillGroupFromCurriculum(g, options={}){
       slots.push({di, pi, key});
     });
   });
-  if(!slots.length) return 0;
+  return slots;
+}
+function pickSlotForLesson(g, lesson, slots, per, lastSubjectDay, byDay, ignoreTeacherConflict){
+  let pickIdx=-1;
+  let pickScore=-Infinity;
+  for(let si=0;si<slots.length;si++){
+    const slot=slots[si];
+    if(g.schedule[slot.key]) continue;
+    const teacher=lesson.teacher||findTeacherForSubject(lesson.subject);
+    const teacherBusy=!!(teacher&&teacherOccupiedAt(teacher, slot.di, slot.pi, per, g.id, slot.key));
+    if(teacherBusy&&!ignoreTeacherConflict) continue;
+    let score=0;
+    if(state.autoConsecutive&&lastSubjectDay[norm(lesson.subject)]===slot.di) score+=100;
+    score-=(byDay[slot.di]||0)*10;
+    score-=slot.pi;
+    if(teacherBusy) score-=1000;
+    if(score>pickScore){ pickScore=score; pickIdx=si; }
+  }
+  return pickIdx;
+}
+function autoFillGroupFromCurriculum(g, options={}){
+  const curriculum=g.curriculum||[];
+  if(!curriculum.length) return 0;
+  const queue=buildLessonQueue(curriculum);
+  if(!queue.length) return 0;
+  const per=g.periods||state.periods||[];
   if(options.replace){
     Object.keys(g.schedule||{}).forEach(k=>{
       const [di,pi]=k.split('_').map(Number);
       if(!isSlotLocked(g.id, di, pi)) delete g.schedule[k];
     });
   }
+  let slots=listGroupFreeSlots(g, per, options);
+  if(!slots.length) return 0;
   const byDay={};
   state.days.forEach((_,i)=>{ byDay[i]=0; });
   slots.sort((a,b)=> byDay[a.di]-byDay[b.di] || a.pi-b.pi);
   let placed=0;
   const lastSubjectDay={};
+  const unplaced=[];
   queue.forEach(lesson=>{
-    let pickIdx=-1;
-    for(let si=0;si<slots.length;si++){
-      const slot=slots[si];
-      if(g.schedule[slot.key]) continue;
-      const teacher=lesson.teacher||findTeacherForSubject(lesson.subject);
-      if(teacher&&teacherOccupiedAt(teacher, slot.di, slot.pi, per, g.id, slot.key)) continue;
-      if(state.autoConsecutive&&lastSubjectDay[norm(lesson.subject)]===slot.di){
-        pickIdx=si; break;
-      }
-      if(pickIdx<0) pickIdx=si;
-    }
-    if(pickIdx<0) return;
-    const slot=slots.splice(pickIdx,1)[0];
+    const pickIdx=pickSlotForLesson(g, lesson, slots, per, lastSubjectDay, byDay, false);
+    if(pickIdx<0){ unplaced.push(lesson); return; }
+    const slot=slots[pickIdx];
+    slots.splice(pickIdx,1);
     const teacher=lesson.teacher||findTeacherForSubject(lesson.subject);
     g.schedule[slot.key]={subject:lesson.subject, teacher:teacher||''};
     byDay[slot.di]=(byDay[slot.di]||0)+1;
     lastSubjectDay[norm(lesson.subject)]=slot.di;
     placed++;
   });
+  if(unplaced.length){
+    slots=listGroupFreeSlots(g, per, {replace:false});
+    slots.sort((a,b)=> byDay[a.di]-byDay[b.di] || a.pi-b.pi);
+    unplaced.forEach(lesson=>{
+      const pickIdx=pickSlotForLesson(g, lesson, slots, per, lastSubjectDay, byDay, true);
+      if(pickIdx<0) return;
+      const slot=slots[pickIdx];
+      slots.splice(pickIdx,1);
+      const teacher=lesson.teacher||findTeacherForSubject(lesson.subject);
+      g.schedule[slot.key]={subject:lesson.subject, teacher:teacher||''};
+      byDay[slot.di]=(byDay[slot.di]||0)+1;
+      lastSubjectDay[norm(lesson.subject)]=slot.di;
+      placed++;
+    });
+  }
   return placed;
 }
 function renderCurriculumBuilderRows(rows){
@@ -1214,13 +1249,27 @@ function saveClassBuilder(andFill){
     state.groups.push(g); activeGroupId=g.id;
   }
   let placed=0;
+  const expectedHours=curriculumTotalHours(curriculum);
   if(andFill) placed=autoFillGroupFromCurriculum(g, {replace:true});
   if(classBuilder.mode==='create'){
     const classStudents=studentsMatchingGroup(g);
     if(classStudents.length) addSystemStudentsToGroup(g.id, classStudents, {silent:true});
   }
   saveState(); closeClassBuilder(); render();
-  if(andFill) alert(placed?`${placed} ders programa yerleştirildi.`:'Müfredat kaydedildi; uygun boş hücre bulunamadı (saat sayısını veya kilitleri kontrol edin).');
+  if(andFill){
+    const schedCount=scheduleLessonCount(g);
+    if(placed<expectedHours||schedCount<expectedHours){
+      const freeSlots=listGroupFreeSlots(g, g.periods||state.periods||[], {replace:false}).length;
+      alert(
+        `${schedCount} / ${expectedHours} ders programa yerleştirildi.\n`+
+        (freeSlots<expectedHours-schedCount
+          ? `Haftalık tabloda yeterli boş hücre yok (${freeSlots} boş). Günlük ders saati satırı ekleyin veya kilitleri kaldırın.`
+          : `${expectedHours-schedCount} saat çakışma nedeniyle uyarılı olarak yerleştirildi veya boş kaldı — «Çakışmalar» sekmesini kontrol edin.`)
+      );
+    }else{
+      alert(`${placed} ders programa yerleştirildi.`);
+    }
+  }
 }
 function autoFillSchedules(){
   const targets=state.groups.filter(g=>!g.locked&&canEditGroup(g.id));
@@ -1554,7 +1603,7 @@ function renderGruplar(){
             <input class="inp" data-field="advisor" value="${esc(g.advisor)}" placeholder="Danışman adı">
           </div>
           <div class="field" style="margin-bottom:10px">
-            <label>Haftalık müfredat ${(g.curriculum||[]).length?'· '+(g.curriculum||[]).reduce((a,c)=>a+(parseInt(c.hours,10)||0),0)+' saat':''}</label>
+            <label>Haftalık müfredat ${(g.curriculum||[]).length?(()=>{const t=curriculumTotalHours(g.curriculum); const s=scheduleLessonCount(g); const warn=s>0&&s<t?' <span style="color:var(--warn);font-weight:600">· programda '+s+'/'+t+' saat</span>':''; return '· '+t+' saat'+warn; })():''}</label>
             <button type="button" class="btn sm" data-act="edit-curriculum">Müfredat &amp; ders saatleri</button>
             ${(g.curriculum||[]).length?`<div class="cur-summary">${(g.curriculum||[]).map(c=>esc(c.subject)+' ×'+(c.hours||0)+(c.teacher?' · '+esc(c.teacher):'')).join(' · ')}</div>`:'<div class="tiny">Henüz müfredat yok — LGS vb. şablonla ekleyebilirsiniz.</div>'}
           </div>
