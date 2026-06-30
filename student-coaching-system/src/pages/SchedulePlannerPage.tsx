@@ -212,7 +212,9 @@ export default function SchedulePlannerPage() {
   const [exportOpen, setExportOpen] = useState(false);
   const [exportGroupId, setExportGroupId] = useState('');
   const [exportClassId, setExportClassId] = useState('');
-  const [replaceExisting, setReplaceExisting] = useState(true);
+  const [replaceExisting, setReplaceExisting] = useState(false);
+  const [clearCrossClassConflicts, setClearCrossClassConflicts] = useState(false);
+  const [replaceSessionsInRange, setReplaceSessionsInRange] = useState(false);
   const [plannerGroups, setPlannerGroups] = useState<PlannerGroup[]>([]);
   const [unmatchedTeachers, setUnmatchedTeachers] = useState<string[]>([]);
   const [teacherOptions, setTeacherOptions] = useState<TeacherOption[]>([]);
@@ -749,8 +751,9 @@ export default function SchedulePlannerPage() {
           planner_json,
           institution_id: institutionId,
           replace_existing: replaceExisting,
-          clear_cross_class_conflicts: true,
-          clip_sessions_to_range: true,
+          clear_cross_class_conflicts: clearCrossClassConflicts,
+          replace_sessions_in_range: replaceSessionsInRange,
+          clip_sessions_to_range: replaceSessionsInRange && replaceExisting,
           teacher_map: teacherMap,
           date_from: exportDateFrom,
           date_to: exportDateTo
@@ -1049,9 +1052,9 @@ export default function SchedulePlannerPage() {
           <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-4 shadow-xl dark:bg-slate-900">
             <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Canlı Grup Dersi&apos;ne aktar</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Planlayıcıdaki bir grubu seçili sınıfın haftalık şablonlarına yazar; yalnızca seçtiğiniz tarih
-              aralığında planlı oturumlar oluşturulur (aralık dışındaki planlı oturumlar temizlenir). BBB linkleri
-              otomatik üretilir.
+              Planlayıcıdaki bir grubu seçili sınıfın haftalık şablonlarına yazar; eksik planlı oturumlar seçtiğiniz
+              tarih aralığında oluşturulur. Mevcut programı silmek için aşağıdaki onay kutularını işaretleyin. BBB
+              linkleri otomatik üretilir.
             </p>
 
             <div className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50/80 p-3">
@@ -1113,7 +1116,28 @@ export default function SchedulePlannerPage() {
                 checked={replaceExisting}
                 onChange={(e) => setReplaceExisting(e.target.checked)}
               />
-              Mevcut haftalık şablonları sil ve yerine yaz (aynı kurumdaki çakışan hayalet şablonlar da temizlenir)
+              Mevcut haftalık şablonları sil ve yerine yaz
+            </label>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              İşaretlenmezse yalnızca eksik şablonlar eklenir; mevcut program korunur.
+            </p>
+
+            <label className="mt-3 flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={replaceSessionsInRange}
+                onChange={(e) => setReplaceSessionsInRange(e.target.checked)}
+              />
+              Seçilen tarih aralığındaki planlı oturumları sil ve şablondan yeniden oluştur
+            </label>
+
+            <label className="mt-3 flex items-center gap-2 text-sm text-amber-800 dark:text-amber-200">
+              <input
+                type="checkbox"
+                checked={clearCrossClassConflicts}
+                onChange={(e) => setClearCrossClassConflicts(e.target.checked)}
+              />
+              Çakışan diğer sınıfların şablonlarını sil (dikkatli kullanın)
             </label>
 
             {unmatchedTeachers.length ? (

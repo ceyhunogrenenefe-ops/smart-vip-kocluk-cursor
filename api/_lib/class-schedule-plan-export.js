@@ -380,7 +380,7 @@ export async function exportPlannerGroupToClass({
   classId,
   classRow,
   replaceExisting = false,
-  clearCrossClassConflicts = true,
+  clearCrossClassConflicts = false,
   teacherMap = {}
 }) {
   const pj = plannerJson && typeof plannerJson === 'object' ? plannerJson : {};

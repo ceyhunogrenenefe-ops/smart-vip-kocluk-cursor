@@ -21,6 +21,7 @@ import {
   backfillClassWeeklySlotMeetingLinks,
   backfillClassSessionInstitutionId
 } from '../api/_lib/class-sessions-from-slots.js';
+import { syncPlannerGroupStudentSubjects, syncInstitutionStudentSubjectsFromPlans } from '../api/_lib/class-student-subjects.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -454,6 +455,17 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: 'forbidden' });
       }
 
+      if (op === 'sync-all-student-subjects') {
+        const plannerJsonExtra =
+          body.planner_json && typeof body.planner_json === 'object' ? body.planner_json : null;
+        const result = await syncInstitutionStudentSubjectsFromPlans(institutionId, plannerJsonExtra);
+        return res.status(200).json({
+          ok: true,
+          message: `${result.updated} öğrenci kaydı güncellendi (${result.classes_touched} sınıf, ${result.plans_scanned} plan tarandı).`,
+          ...result
+        });
+      }
+
       if (op === 'preview-teachers') {
         const groupId = String(body.group_id || '').trim();
         if (!groupId) return res.status(400).json({ error: 'group_id_required' });
@@ -530,8 +542,10 @@ export default async function handler(req, res) {
           });
         }
 
-        const replaceExisting = body.replace_existing !== false;
-        const clearCrossClassConflicts = body.clear_cross_class_conflicts !== false;
+        const replaceExisting = body.replace_existing === true;
+        const clearCrossClassConflicts = body.clear_cross_class_conflicts === true;
+        const replaceSessionsInRange =
+          body.replace_sessions_in_range === true || (replaceExisting && body.replace_sessions_in_range !== false);
 
         const slotResult = await exportPlannerGroupToClass({
           plannerJson,
@@ -543,7 +557,22 @@ export default async function handler(req, res) {
           teacherMap
         });
 
-        if (dateFrom && dateTo) {
+        let studentSubjectSync = { updated: 0 };
+        try {
+          const groups = Array.isArray(plannerJson.groups) ? plannerJson.groups : [];
+          const group = groups.find((g) => String(g.id) === String(groupId));
+          if (group) {
+            studentSubjectSync = await syncPlannerGroupStudentSubjects({
+              classId,
+              group,
+              plannerJson
+            });
+          }
+        } catch (syncErr) {
+          console.warn('[class-schedule-plans] student subjects sync', syncErr instanceof Error ? syncErr.message : syncErr);
+        }
+
+        if (dateFrom && dateTo && replaceSessionsInRange) {
           await supabaseAdmin
             .from('class_sessions')
             .delete()
@@ -552,7 +581,7 @@ export default async function handler(req, res) {
             .lte('lesson_date', dateTo)
             .eq('status', 'scheduled');
 
-          const clipOutside = body.clip_sessions_to_range !== false;
+          const clipOutside = body.clip_sessions_to_range === true;
           if (clipOutside) {
             await supabaseAdmin
               .from('class_sessions')
@@ -603,7 +632,8 @@ export default async function handler(req, res) {
           skipped_descriptions: (slotResult.skipped || []).map(describeSkippedItem),
           session_skipped_descriptions: (sessionResult.skipped || []).map(describeSkippedItem),
           sessions_link_backfilled: linkBackfill.updated || 0,
-          conflicts_cleared: slotResult.conflicts_cleared || 0
+          conflicts_cleared: slotResult.conflicts_cleared || 0,
+          student_subjects_synced: studentSubjectSync.updated || 0
         });
       }
 
