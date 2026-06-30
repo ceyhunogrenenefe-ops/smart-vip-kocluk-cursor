@@ -17,7 +17,8 @@ import {
   CheckCircle,
   AlertCircle,
   BarChart3,
-  Users
+  Users,
+  User
 } from 'lucide-react';
 
 type LiveClassOption = {
@@ -684,29 +685,68 @@ export default function Meetings() {
             </button>
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2 font-medium text-slate-800">
-                  <Plus className="w-5 h-5" />
-                  Yeni görüşme
-                </div>
-                <div className="flex rounded-lg border border-slate-200 p-0.5 text-sm">
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-5">
+              <div className="flex items-center gap-2 font-semibold text-slate-900 text-lg">
+                <Plus className="w-5 h-5 text-emerald-600" />
+                Yeni görüşme oluştur
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-slate-700">Görüşme türü</p>
+                <div className="grid gap-3 sm:grid-cols-2">
                   <button
                     type="button"
                     onClick={() => setCreateMode('single')}
-                    className={`rounded-md px-3 py-1.5 ${createMode === 'single' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+                    className={`rounded-xl border-2 p-4 text-left transition shadow-sm ${
+                      createMode === 'single'
+                        ? 'border-emerald-600 bg-emerald-50 ring-2 ring-emerald-200'
+                        : 'border-slate-200 bg-white hover:border-emerald-300 hover:bg-emerald-50/40'
+                    }`}
                   >
-                    Tek öğrenci
+                    <div className="flex items-start gap-3">
+                      <span
+                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
+                          createMode === 'single' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        <User className="h-5 w-5" />
+                      </span>
+                      <span>
+                        <span className="block text-base font-semibold text-slate-900">Tek öğrenci</span>
+                        <span className="mt-1 block text-sm text-slate-600">
+                          Bir öğrenci için birebir online görüşme planlayın.
+                        </span>
+                      </span>
+                    </div>
                   </button>
                   <button
                     type="button"
                     onClick={() => setCreateMode('class')}
-                    className={`rounded-md px-3 py-1.5 ${createMode === 'class' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+                    className={`rounded-xl border-2 p-4 text-left transition shadow-sm ${
+                      createMode === 'class'
+                        ? 'border-indigo-600 bg-indigo-50 ring-2 ring-indigo-200'
+                        : 'border-slate-200 bg-white hover:border-indigo-300 hover:bg-indigo-50/40'
+                    }`}
                   >
-                    Toplu sınıf
+                    <div className="flex items-start gap-3">
+                      <span
+                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
+                          createMode === 'class' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        <Users className="h-5 w-5" />
+                      </span>
+                      <span>
+                        <span className="block text-base font-semibold text-slate-900">Toplu sınıf görüşmesi</span>
+                        <span className="mt-1 block text-sm text-slate-600">
+                          Canlı grup sınıfından öğrencileri seçin; tek Meet/BBB odası, tümünü seç destekli.
+                        </span>
+                      </span>
+                    </div>
                   </button>
                 </div>
               </div>
+
               <div className="grid gap-4 md:grid-cols-2">
                 {(role === 'admin' || role === 'super_admin') ? (
                   <label className="block text-sm">
