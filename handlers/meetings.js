@@ -402,6 +402,282 @@ async function handleCreate(req, res) {
   }
 }
 
+/** Sınıf görüşmesi: tek Meet/BBB odası, her öğrenci için ayrı meetings satırı. */
+async function handleCreateClass(req, res) {
+  if (req.method !== 'POST') return jsonError(res, 405, 'Method not allowed');
+  try {
+    let actor;
+    try {
+      actor = requireAuthenticatedActor(req);
+    } catch (authErr) {
+      return jsonError(res, 401, errorMessage(authErr) || 'Missing token');
+    }
+
+    if (!['coach', 'admin', 'super_admin'].includes(actor.role)) {
+      return jsonError(res, 403, 'Bu işlem için yetkiniz yok.');
+    }
+
+    const body = req.body || {};
+    const coachId = String(body.coach_id || (actor.role === 'coach' ? actor.coach_id : '') || '');
+    const studentIds = [
+      ...new Set(
+        (Array.isArray(body.student_ids) ? body.student_ids : [])
+          .map((x) => String(x || '').trim())
+          .filter(Boolean)
+      )
+    ];
+    const startIso = body.start_datetime || body.start_time;
+    const durationMinutes = Number(body.duration_minutes || body.durationMinutes || 60);
+    const className = String(body.class_name || '').trim();
+
+    if (!coachId || !studentIds.length || !startIso) {
+      return jsonError(res, 400, 'coach_id, student_ids ve start_datetime gereklidir.');
+    }
+    if (studentIds.length > 250) {
+      return jsonError(res, 400, 'En fazla 250 öğrenci seçilebilir.');
+    }
+    if (actor.role === 'coach' && actor.coach_id !== coachId) {
+      return jsonError(res, 403, 'Yalnızca kendi profilinize toplantı oluşturabilirsiniz.');
+    }
+
+    let coachUserId =
+      actor.role === 'coach' ? actor.sub || null : await coachRowToPlatformUserId(coachId);
+    if (!coachUserId) {
+      return jsonError(
+        res,
+        400,
+        'Koç hesabınız platform kullanıcısıyla eşleşmiyor. Koç kaydındaki e‑posta, giriş yaptığınız hesabın e‑postasıyla aynı olmalı (koç veya öğretmen rolü).'
+      );
+    }
+
+    const { data: studentRows, error: studentsErr } = await supabaseAdmin
+      .from('students')
+      .select('*')
+      .in('id', studentIds);
+    if (studentsErr) throw studentsErr;
+    if ((studentRows || []).length !== studentIds.length) {
+      return jsonError(res, 404, 'Bazı öğrenciler bulunamadı.');
+    }
+
+    const coachIsAdmin = actor.role === 'admin' || actor.role === 'super_admin';
+    for (const student of studentRows || []) {
+      if (!coachIsAdmin && student.coach_id !== coachId) {
+        return jsonError(res, 403, `${student.name || 'Öğrenci'} seçilen koça bağlı değil.`);
+      }
+      if (actor.role === 'admin' && !hasInstitutionAccess(actor, student.institution_id)) {
+        return jsonError(res, 403, 'Kurum dışı öğrenci seçildi.');
+      }
+    }
+
+    const start = new Date(startIso);
+    if (Number.isNaN(+start)) return jsonError(res, 400, 'Geçersiz tarih.');
+    const end = new Date(start.getTime() + Math.max(15, durationMinutes) * 60_000);
+
+    const { data: coachRow } = await supabaseAdmin.from('coaches').select('name, email').eq('id', coachId).maybeSingle();
+
+    let linkZoom = null;
+    let linkBbb = null;
+    try {
+      linkZoom = normalizeOptionalMeetingUrl(body.link_zoom, 'Zoom');
+      linkBbb = normalizeOptionalMeetingUrl(body.link_bbb, 'BBB');
+    } catch (e) {
+      const em = e instanceof Error ? e.message : String(e);
+      return jsonError(res, 400, em);
+    }
+
+    const { data: integration } = await supabaseAdmin
+      .from('integrations_google')
+      .select('user_id')
+      .eq('user_id', coachUserId)
+      .maybeSingle();
+
+    const hasManualLinks = Boolean(linkZoom || linkBbb);
+    const canAutoBbb = isBbbConfigured();
+    if (!integration && !hasManualLinks && !canAutoBbb) {
+      const who =
+        actor.role === 'admin' || actor.role === 'super_admin'
+          ? 'Seçilen koçun platform kullanıcısında'
+          : 'Hesabınızda';
+      return jsonError(res, 400, `${who} Google Takvim kaydı yok. Zoom/BBB linki girin veya BBB API etkinleştirin.`, {
+        code: 'meetings_need_calendar_or_links'
+      });
+    }
+
+    const summary =
+      body.title ||
+      (className ? `${className} — toplu görüşme` : `Sınıf görüşmesi (${studentIds.length} öğrenci)`);
+    const studentNames = (studentRows || []).map((s) => s.name).filter(Boolean).slice(0, 12);
+    const description =
+      body.description ||
+      [
+        'Toplu sınıf online görüşmesi.',
+        className ? `Sınıf: ${className}` : null,
+        `Öğrenci sayısı: ${studentIds.length}`,
+        studentNames.length ? `Öğrenciler: ${studentNames.join(', ')}${studentIds.length > studentNames.length ? '…' : ''}` : null,
+        `Koç: ${coachRow?.name || ''}`
+      ]
+        .filter(Boolean)
+        .join('\n');
+
+    const attendeeEmails = [];
+    if (coachRow?.email) attendeeEmails.push(String(coachRow.email));
+    for (const s of studentRows || []) {
+      if (s.email) attendeeEmails.push(String(s.email));
+    }
+
+    let meetLinkResult = null;
+    let googleEventId = null;
+    let autoBbbLink = null;
+    const bbbMeetingKey = `coaching-class-${sanitizeBbbMeetingId(className || 'group')}-${Date.now()}`;
+
+    if (integration) {
+      try {
+        const meet = await createMeetCalendarEvent({
+          userId: coachUserId,
+          summary,
+          description,
+          startIso: start.toISOString(),
+          endIso: end.toISOString(),
+          attendeeEmails
+        });
+        meetLinkResult = meet.meetLink || null;
+        googleEventId = meet.eventId || null;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'calendar_create_failed';
+        if (hasManualLinks) {
+          meetLinkResult = linkZoom || linkBbb;
+          googleEventId = null;
+          console.warn('[meetings create-class] Google Takvim hatası, Zoom/BBB kullanılıyor:', msg);
+        } else if (canAutoBbb) {
+          const bbb = await createBbbMeetingAndJoinLink({
+            meetingId: bbbMeetingKey,
+            meetingName: summary,
+            attendeeName: 'Öğrenci',
+            moderatorName: coachRow?.name || 'Koç',
+            durationMinutes
+          });
+          const applied = applyAutoBbbMeetingLinks(bbb);
+          autoBbbLink = applied.autoBbb;
+          meetLinkResult = applied.meetLink;
+          linkBbb = applied.linkBbb;
+          googleEventId = null;
+        } else {
+          return jsonError(res, 502, msg);
+        }
+      }
+      if (!meetLinkResult) {
+        if (hasManualLinks) {
+          meetLinkResult = linkZoom || linkBbb;
+        } else if (canAutoBbb) {
+          const bbb = await createBbbMeetingAndJoinLink({
+            meetingId: bbbMeetingKey,
+            meetingName: summary,
+            attendeeName: 'Öğrenci',
+            moderatorName: coachRow?.name || 'Koç',
+            durationMinutes
+          });
+          const applied = applyAutoBbbMeetingLinks(bbb);
+          autoBbbLink = applied.autoBbb;
+          meetLinkResult = applied.meetLink;
+          linkBbb = applied.linkBbb;
+        } else {
+          return jsonError(res, 502, 'Google Meet bağlantısı oluşturulamadı. Zoom veya BBB adresi ekleyin.');
+        }
+      }
+    } else if (hasManualLinks) {
+      meetLinkResult = linkZoom || linkBbb;
+    } else if (canAutoBbb) {
+      const bbb = await createBbbMeetingAndJoinLink({
+        meetingId: bbbMeetingKey,
+        meetingName: summary,
+        attendeeName: 'Öğrenci',
+        moderatorName: coachRow?.name || 'Koç',
+        durationMinutes
+      });
+      const applied = applyAutoBbbMeetingLinks(bbb);
+      autoBbbLink = applied.autoBbb;
+      meetLinkResult = applied.meetLink;
+      linkBbb = applied.linkBbb;
+    }
+
+    const institutionId =
+      (studentRows || []).find((s) => s.institution_id)?.institution_id || actor.institution_id || null;
+    const now = new Date().toISOString();
+    const payloads = (studentRows || []).map((student) => ({
+      institution_id: student.institution_id || institutionId,
+      coach_id: coachId,
+      student_id: student.id,
+      coach_user_id: coachUserId,
+      start_time: start.toISOString(),
+      end_time: end.toISOString(),
+      meet_link: meetLinkResult,
+      google_calendar_event_id: googleEventId,
+      status: 'planned',
+      notes: body.notes ?? (className ? `Sınıf: ${className}` : null),
+      attended: null,
+      ai_summary: null,
+      link_zoom: linkZoom,
+      link_bbb: linkBbb,
+      created_at: now,
+      updated_at: now
+    }));
+
+    const { data: created, error: insErr } = await supabaseAdmin.from('meetings').insert(payloads).select('*');
+    if (insErr) throw insErr;
+
+    const twilioReady =
+      process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM;
+    let whatsappSent = 0;
+    let whatsappFailed = 0;
+    if (twilioReady) {
+      let notifyBodyCreated = `Sınıf görüşmeniz planlandı: ${meetLinkResult}`;
+      if (linkZoom && linkZoom !== meetLinkResult) notifyBodyCreated += `\nZoom: ${linkZoom}`;
+      if (linkBbb && linkBbb !== meetLinkResult) notifyBodyCreated += `\nBBB: ${linkBbb}`;
+      for (const meeting of created || []) {
+        const student = (studentRows || []).find((s) => s.id === meeting.student_id);
+        if (!student) continue;
+        const phones = await getStudentPhones(student);
+        if (!phones.length) continue;
+        try {
+          const r = await deliverWhatsAppWithLog({
+            meetingId: meeting.id,
+            kind: 'whatsapp_created',
+            recipientE164: phones[0],
+            body: notifyBodyCreated
+          });
+          if (r.ok && !r.skipped) {
+            whatsappSent += 1;
+            await supabaseAdmin.from('meetings').update({ whatsapp_created_sent: true }).eq('id', meeting.id);
+          } else if (!r.skipped) {
+            whatsappFailed += 1;
+          }
+        } catch {
+          whatsappFailed += 1;
+        }
+      }
+    }
+
+    return res.status(200).json({
+      ok: true,
+      created_count: (created || []).length,
+      data: created || [],
+      whatsapp: { sent: whatsappSent, failed: whatsappFailed },
+      calendar: googleEventId ? { ok: true } : { skipped: true },
+      auto_bbb: autoBbbLink ? { ok: true, provider: 'bbb' } : { skipped: true }
+    });
+  } catch (e) {
+    const msg = errorMessage(e);
+    if (isAuthFailureMessage(msg)) return jsonError(res, 401, msg);
+    if (isSupabaseServerEnvError(msg)) {
+      return res.status(503).json({
+        error: 'Sunucu Supabase ortam değişkenleri eksik (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY).',
+        code: 'supabase_env_missing'
+      });
+    }
+    return jsonError(res, 500, msg);
+  }
+}
+
 /**
  * Tekrarlayan görüşmeler: aynı bağlantı / tek Google Meet — ardışık 7 veya 15 gün.
  * `meeting_series` + toplu `meetings` (WhatsApp yalnızca ilk oturum).
@@ -943,6 +1219,7 @@ export default async function handler(req, res) {
   }
   if (op === 'bbb-join') return handleMeetingBbbJoin(req, res);
   if (op === 'create') return handleCreate(req, res);
+  if (op === 'create-class') return handleCreateClass(req, res);
   if (op === 'create-series') return handleCreateSeries(req, res);
   if (op === 'delete-series') return handleDeleteSeries(req, res);
   if (op === 'update-status') return handleUpdateStatus(req, res);
@@ -950,7 +1227,7 @@ export default async function handler(req, res) {
   return jsonError(
     res,
     400,
-    'Geçersiz veya eksik ?op parametresi (list|create|create-series|delete-series|update-status).'
+    'Geçersiz veya eksik ?op parametresi (list|create|create-class|create-series|delete-series|update-status).'
   );
 }
 

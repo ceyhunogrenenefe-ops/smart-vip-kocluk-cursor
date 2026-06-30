@@ -16,8 +16,19 @@ import {
   Link2,
   CheckCircle,
   AlertCircle,
-  BarChart3
+  BarChart3,
+  Users
 } from 'lucide-react';
+
+type LiveClassOption = {
+  id: string;
+  name: string;
+  class_level?: string | null;
+  branch?: string | null;
+  student_ids?: string[];
+};
+
+type CreateMeetingMode = 'single' | 'class';
 
 function startOfWeek(d: Date): Date {
   const x = new Date(d);
@@ -40,7 +51,7 @@ function formatISO(d: Date) {
 
 export default function Meetings() {
   const { effectiveUser } = useAuth();
-  const { students, coaches } = useApp();
+  const { students, coaches, tenantScopeInstitutionId } = useApp();
   const [params, setSearchParams] = useSearchParams();
   const isStudent = effectiveUser?.role === 'student';
 
@@ -64,6 +75,11 @@ export default function Meetings() {
   const [meetingRecurrence, setMeetingRecurrence] = useState(false);
   const [meetingIntervalDays, setMeetingIntervalDays] = useState<7 | 15>(7);
   const [meetingRecurrenceUntil, setMeetingRecurrenceUntil] = useState('');
+  const [createMode, setCreateMode] = useState<CreateMeetingMode>('single');
+  const [liveClasses, setLiveClasses] = useState<LiveClassOption[]>([]);
+  const [classIdDraft, setClassIdDraft] = useState('');
+  const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(() => new Set());
+  const [classStudentsSearch, setClassStudentsSearch] = useState('');
 
   const role = effectiveUser?.role || '';
 
@@ -108,6 +124,84 @@ export default function Meetings() {
       setCoachIdDraft(coaches[0].id);
     }
   }, [role, defaultCoachId, coaches]);
+
+  const coachSel = role === 'coach' ? defaultCoachId : coachIdDraft;
+
+  const loadLiveClasses = useCallback(async () => {
+    try {
+      const qs = new URLSearchParams({ scope: 'classes' });
+      if (tenantScopeInstitutionId) qs.set('institution_id', tenantScopeInstitutionId);
+      const res = await apiFetch(`/api/class-live-lessons?${qs.toString()}`);
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+      const rows = Array.isArray(j.data) ? j.data : Array.isArray(j.classes) ? j.classes : [];
+      setLiveClasses(
+        (rows as LiveClassOption[])
+          .map((c) => ({
+            id: String(c.id || ''),
+            name: String(c.name || '').trim(),
+            class_level: c.class_level ?? null,
+            branch: c.branch ?? null,
+            student_ids: Array.isArray(c.student_ids) ? c.student_ids.map(String) : []
+          }))
+          .filter((c) => c.id && c.name)
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [tenantScopeInstitutionId]);
+
+  useEffect(() => {
+    if (isStudent) return;
+    void loadLiveClasses();
+  }, [isStudent, loadLiveClasses]);
+
+  const selectedLiveClass = useMemo(
+    () => liveClasses.find((c) => c.id === classIdDraft) || null,
+    [liveClasses, classIdDraft]
+  );
+
+  const classStudentRows = useMemo(() => {
+    if (!selectedLiveClass) return [];
+    const idSet = new Set(selectedLiveClass.student_ids || []);
+    return students
+      .filter((s) => idSet.has(s.id))
+      .filter((s) => {
+        if (role === 'coach' || role === 'teacher') {
+          return s.coachId === coachSel;
+        }
+        return true;
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+  }, [selectedLiveClass, students, role, coachSel]);
+
+  const filteredClassStudentRows = useMemo(() => {
+    const q = classStudentsSearch.trim().toLocaleLowerCase('tr');
+    if (!q) return classStudentRows;
+    return classStudentRows.filter((s) => s.name.toLocaleLowerCase('tr').includes(q));
+  }, [classStudentRows, classStudentsSearch]);
+
+  useEffect(() => {
+    if (createMode !== 'class' || !classIdDraft) return;
+    setSelectedStudentIds(new Set(classStudentRows.map((s) => s.id)));
+  }, [createMode, classIdDraft, classStudentRows]);
+
+  const toggleClassStudent = (studentId: string) => {
+    setSelectedStudentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(studentId)) next.delete(studentId);
+      else next.add(studentId);
+      return next;
+    });
+  };
+
+  const selectAllClassStudents = () => {
+    setSelectedStudentIds(new Set(classStudentRows.map((s) => s.id)));
+  };
+
+  const clearClassStudentSelection = () => {
+    setSelectedStudentIds(new Set());
+  };
 
   const rangeFrom = useMemo(() => addDays(startOfWeek(new Date()), -7), []);
   const rangeTo = useMemo(() => addDays(new Date(), 45), []);
@@ -457,6 +551,54 @@ export default function Meetings() {
     }
   };
 
+  const handleCreateClassMeeting = async () => {
+    const startJs = datetimeLocal ? new Date(datetimeLocal) : null;
+    const ids = [...selectedStudentIds];
+    if (!coachSel || !ids.length || !startJs || Number.isNaN(+startJs)) {
+      setError('Koç, en az bir öğrenci ve başlangıç zamanı seçin.');
+      return;
+    }
+    setCreateBusy(true);
+    setError(null);
+    try {
+      const res = await apiFetch('/api/meetings?op=create-class', {
+        method: 'POST',
+        body: JSON.stringify({
+          coach_id: coachSel,
+          student_ids: ids,
+          class_name: selectedLiveClass?.name || undefined,
+          start_datetime: startJs.toISOString(),
+          duration_minutes: durationMin,
+          title: titleDraft || undefined,
+          link_zoom: linkZoomDraft.trim() || undefined,
+          link_bbb: linkBbbDraft.trim() || undefined
+        })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || 'create_class_failed');
+      await loadMeetings();
+      setDatetimeLocal('');
+      setTitleDraft('');
+      setLinkZoomDraft('');
+      setLinkBbbDraft('');
+      setClassIdDraft('');
+      setSelectedStudentIds(new Set());
+      setClassStudentsSearch('');
+      const n = Number(j.created_count ?? (j.data || []).length ?? ids.length);
+      setError(null);
+      window.alert(`${n} öğrenci için ortak sınıf görüşmesi oluşturuldu.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCreateBusy(false);
+    }
+  };
+
+  const handleCreateSubmit = () => {
+    if (createMode === 'class') void handleCreateClassMeeting();
+    else void handleCreate();
+  };
+
   const updateMeeting = async (
     meetingId: string,
     patch: Partial<{ status: MeetingStatus; notes: string | null; attended: boolean | null; ai_summary: string | null }>
@@ -543,9 +685,27 @@ export default function Meetings() {
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
-              <div className="flex items-center gap-2 font-medium text-slate-800">
-                <Plus className="w-5 h-5" />
-                Yeni görüşme
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 font-medium text-slate-800">
+                  <Plus className="w-5 h-5" />
+                  Yeni görüşme
+                </div>
+                <div className="flex rounded-lg border border-slate-200 p-0.5 text-sm">
+                  <button
+                    type="button"
+                    onClick={() => setCreateMode('single')}
+                    className={`rounded-md px-3 py-1.5 ${createMode === 'single' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+                  >
+                    Tek öğrenci
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCreateMode('class')}
+                    className={`rounded-md px-3 py-1.5 ${createMode === 'class' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+                  >
+                    Toplu sınıf
+                  </button>
+                </div>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 {(role === 'admin' || role === 'super_admin') ? (
@@ -565,21 +725,101 @@ export default function Meetings() {
                     </select>
                   </label>
                 ) : null}
-                <label className="block text-sm md:col-span-1">
-                  <span className="text-slate-600">Öğrenci</span>
-                  <select
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 bg-white text-slate-900"
-                    value={studentIdDraft}
-                    onChange={(e) => setStudentIdDraft(e.target.value)}
-                  >
-                    <option value="">Öğrenci seçin</option>
-                    {students.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {createMode === 'single' ? (
+                  <label className="block text-sm md:col-span-1">
+                    <span className="text-slate-600">Öğrenci</span>
+                    <select
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 bg-white text-slate-900"
+                      value={studentIdDraft}
+                      onChange={(e) => setStudentIdDraft(e.target.value)}
+                    >
+                      <option value="">Öğrenci seçin</option>
+                      {students.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <div className="md:col-span-2 rounded-lg border border-indigo-100 bg-indigo-50/40 p-4 space-y-3">
+                    <label className="block text-sm">
+                      <span className="text-slate-600">Canlı grup sınıfı</span>
+                      <select
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 bg-white text-slate-900"
+                        value={classIdDraft}
+                        onChange={(e) => setClassIdDraft(e.target.value)}
+                      >
+                        <option value="">Sınıf seçin (ör. 8-E)</option>
+                        {liveClasses.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                            {c.branch ? ` (${c.branch})` : ''}
+                            {(c.student_ids || []).length ? ` · ${(c.student_ids || []).length} öğrenci` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {classIdDraft ? (
+                      <>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="flex items-center gap-1.5 text-sm font-medium text-slate-700">
+                            <Users className="w-4 h-4" />
+                            Öğrenciler ({selectedStudentIds.size}/{classStudentRows.length})
+                          </span>
+                          <div className="flex flex-wrap gap-1.5">
+                            <button
+                              type="button"
+                              onClick={selectAllClassStudents}
+                              className="rounded-md border border-indigo-200 bg-white px-2 py-1 text-[11px] font-medium text-indigo-800 hover:bg-indigo-50"
+                            >
+                              Tümünü seç
+                            </button>
+                            <button
+                              type="button"
+                              onClick={clearClassStudentSelection}
+                              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-50"
+                            >
+                              Temizle
+                            </button>
+                          </div>
+                        </div>
+                        <input
+                          type="search"
+                          value={classStudentsSearch}
+                          onChange={(e) => setClassStudentsSearch(e.target.value)}
+                          placeholder="Öğrenci ara…"
+                          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900"
+                        />
+                        <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
+                          {filteredClassStudentRows.length === 0 ? (
+                            <p className="px-3 py-4 text-sm text-slate-500">
+                              Bu sınıfta seçilebilir öğrenci yok. Canlı Grup Dersi&apos;nde öğrenci atamasını veya koç eşleşmesini kontrol edin.
+                            </p>
+                          ) : (
+                            filteredClassStudentRows.map((s) => (
+                              <label
+                                key={s.id}
+                                className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedStudentIds.has(s.id)}
+                                  onChange={() => toggleClassStudent(s.id)}
+                                  className="rounded border-slate-300"
+                                />
+                                <span className="text-slate-900">{s.name}</span>
+                              </label>
+                            ))
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-500">
+                          Tüm seçili öğrenciler aynı Meet/BBB odasına davet edilir; her öğrencinin takviminde ayrı kayıt oluşur.
+                        </p>
+                      </>
+                    ) : null}
+                  </div>
+                )}
                 <label className="block text-sm">
                   <span className="text-slate-600">Başlangıç (yerel)</span>
                   <input
@@ -632,13 +872,14 @@ export default function Meetings() {
                     onChange={(e) => setLinkBbbDraft(e.target.value)}
                   />
                 </label>
-                <div className="md:col-span-2 rounded-lg border border-indigo-100 bg-indigo-50/50 p-4 space-y-3">
+                <div className={`md:col-span-2 rounded-lg border border-indigo-100 bg-indigo-50/50 p-4 space-y-3 ${createMode === 'class' ? 'opacity-50 pointer-events-none' : ''}`}>
                   <label className="flex items-center gap-2 text-sm font-medium text-slate-800">
                     <input
                       type="checkbox"
                       checked={meetingRecurrence}
                       onChange={(e) => setMeetingRecurrence(e.target.checked)}
                       className="rounded border-slate-300"
+                      disabled={createMode === 'class'}
                     />
                     Tekrarlayan görüşme (aynı bağlantı ile)
                   </label>
@@ -670,14 +911,16 @@ export default function Meetings() {
               </div>
               <button
                 type="button"
-                disabled={
-                  createBusy
-                }
-                onClick={() => void handleCreate()}
+                disabled={createBusy}
+                onClick={handleCreateSubmit}
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-45"
               >
                 <CalendarIcon className="w-4 h-4" />
-                {meetingRecurrence ? 'Tekrarlayan seriyi oluştur' : 'Görüşmeyi oluştur'}
+                {createMode === 'class'
+                  ? `Sınıf görüşmesi oluştur (${selectedStudentIds.size})`
+                  : meetingRecurrence
+                    ? 'Tekrarlayan seriyi oluştur'
+                    : 'Görüşmeyi oluştur'}
               </button>
               {(role === 'admin' || role === 'super_admin') ? (
                 <p className="text-xs text-slate-600">
