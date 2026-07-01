@@ -19,6 +19,8 @@ const normalizeRoles = (raw, fallbackRole = 'student') => {
 function normalizeAcademicYearLabel(v) {
   const s = String(v || '').trim();
   if (!s) return null;
+  const yaz = s.match(/^(\d{4})\s*[-–/]\s*(\d{4})\s+(yaz\s*dönemi|yaz)$/i);
+  if (yaz) return `${yaz[1]}-${yaz[2]} Yaz Dönemi`;
   const m = s.match(/^(\d{4})\s*[-–/]\s*(\d{4})$/);
   if (m) return `${m[1]}-${m[2]}`;
   return s;
@@ -249,41 +251,57 @@ export default async function handler(req, res) {
           const tel = await teacherScopeStudentEmails(actor.sub);
           tel.forEach((e) => emailSet.add(e));
         }
-        if (email && !emailSet.has(email)) return res.status(200).json({ data: [] });
 
-        const { data: coachUsers, error: coachErr } = await queryUsersList((q) => {
+        const scopeEmails = email
+          ? emailSet.has(email)
+            ? [email]
+            : []
+          : [...emailSet];
+
+        let filtered = [];
+        if (scopeEmails.length) {
+          const { data: coachUsers, error: coachErr } = await queryUsersList((q) =>
+            q
+              .eq('institution_id', actor.institution_id)
+              .eq('role', 'student')
+              .in('email', scopeEmails.slice(0, 500))
+              .order('created_at', { ascending: false })
+          );
+          if (coachErr) throw coachErr;
+          filtered = coachUsers || [];
+        }
+
+        const { data: teacherUsers, error: teacherErr } = await queryUsersList((q) => {
           let query = q
             .eq('institution_id', actor.institution_id)
-            .eq('role', 'student')
+            .eq('role', 'teacher')
             .order('created_at', { ascending: false });
           if (email) query = query.eq('email', email);
           return query;
         });
-        if (coachErr) throw coachErr;
-        const rows = coachUsers || [];
-        const filtered = email
-          ? rows
-          : rows.filter((u) =>
-              emailSet.has(String(u.email || '').toLowerCase().trim()));
-        return res.status(200).json({ data: filtered });
+        if (teacherErr) throw teacherErr;
+
+        const byId = new Map();
+        for (const u of filtered) byId.set(u.id, u);
+        for (const u of teacherUsers || []) byId.set(u.id, u);
+        return res.status(200).json({ data: [...byId.values()] });
       }
 
       if (actor.role === 'teacher') {
         if (!actor.institution_id) return res.status(200).json({ data: [] });
         const tel = await teacherScopeStudentEmails(actor.sub);
         if (email && !tel.has(email)) return res.status(200).json({ data: [] });
-        const { data, error } = await queryUsersList((q) => {
-          let query = q
+        const scopeEmails = email ? [email] : [...tel];
+        if (!scopeEmails.length) return res.status(200).json({ data: [] });
+        const { data, error } = await queryUsersList((q) =>
+          q
             .eq('institution_id', actor.institution_id)
             .eq('role', 'student')
-            .order('created_at', { ascending: false });
-          if (email) query = query.eq('email', email);
-          return query;
-        });
+            .in('email', scopeEmails.slice(0, 500))
+            .order('created_at', { ascending: false })
+        );
         if (error) throw error;
-        const filtered = (data || []).filter((u) =>
-          tel.has(String(u.email || '').toLowerCase().trim()));
-        return res.status(200).json({ data: filtered });
+        return res.status(200).json({ data: data || [] });
       }
 
       if (actor.role === 'admin' && !actor.institution_id) return res.status(200).json({ data: [] });

@@ -71,11 +71,12 @@ export default async function handler(req, res) {
 
     const { data: lessons, error: lErr } = await supabaseAdmin
       .from('teacher_lessons')
-      .select('*')
+      .select('id, student_id, lesson_date, start_time, title, status')
       .in('lesson_date', [today, tomorrow])
       .eq('status', 'scheduled');
     if (lErr) throw lErr;
 
+    const dueLessons = [];
     for (const lesson of lessons || []) {
       const startMs = wallTimeToUtcMs(lesson.lesson_date, lesson.start_time);
       if (startMs == null) {
@@ -83,13 +84,27 @@ export default async function handler(req, res) {
         continue;
       }
       const until = startMs - nowMs;
-      if (!isWithinReminderWindowMs(until, LESSON_WINDOW)) {
-        continue;
-      }
+      if (!isWithinReminderWindowMs(until, LESSON_WINDOW)) continue;
+      dueLessons.push({ lesson, startMs });
+    }
 
-      lessonsInReminderWindow += 1;
+    lessonsInReminderWindow = dueLessons.length;
 
-      const { data: student } = await supabaseAdmin.from('students').select('*').eq('id', lesson.student_id).maybeSingle();
+    const studentIds = [...new Set(dueLessons.map(({ lesson }) => lesson.student_id).filter(Boolean))];
+    const studentById = new Map();
+    if (studentIds.length) {
+      const { data: studentRows, error: stErr } = await supabaseAdmin
+        .from('students')
+        .select(
+          'id, name, phone, parent_phone, class_level, class_label, group_name, institution_id, whatsapp_automation_enabled'
+        )
+        .in('id', studentIds);
+      if (stErr) throw stErr;
+      for (const row of studentRows || []) studentById.set(row.id, row);
+    }
+
+    for (const { lesson, startMs } of dueLessons) {
+      const student = studentById.get(lesson.student_id);
       if (!student) {
         log.push({ lesson_id: lesson.id, note: 'no_student' });
         continue;
