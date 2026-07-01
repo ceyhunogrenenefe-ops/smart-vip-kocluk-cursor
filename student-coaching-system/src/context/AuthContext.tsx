@@ -162,7 +162,7 @@ const demoUsersAsSystemUsers = (): SystemUser[] =>
     createdAt: new Date().toISOString()
   }));
 
-const AUTH_TIMEOUT_MS = 8000;
+const AUTH_TIMEOUT_MS = 15000;
 
 const withTimeout = async <T,>(promise: Promise<T>, timeoutMs = AUTH_TIMEOUT_MS): Promise<T> => {
   return new Promise<T>((resolve, reject) => {
@@ -513,100 +513,144 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: true, message: 'Giriş başarılı!' };
     }
 
-    // 3) Supabase önce: öğrenci/koç paneli için studentId & coachId burada bağlanır
-    let supabaseFailed = false;
+    const persistLoggedInUser = (merged: SystemUser) => {
+      localStorage.setItem('coaching_user', JSON.stringify(merged));
+      pinActiveInstitutionForUser(merged.institutionId, merged.role);
+      setUser(merged);
+    };
+
+    const completeAuthLoginResponse = (body: { token?: string; user?: AuthLoginUserPayload }) => {
+      if (!body?.token || typeof body.token !== 'string' || !body.user) return false;
+      setAuthToken(body.token);
+      const u = body.user;
+      const merged = applyTrialAccountCoachOnly({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        phone: u.phone,
+        role: u.role,
+        studentId: u.studentId,
+        coachId: u.coachId,
+        institutionId: u.institutionId,
+        package: u.package,
+        startDate: u.startDate,
+        endDate: u.endDate,
+        isActive: u.isActive,
+        createdAt: u.createdAt
+      });
+      persistLoggedInUser(merged);
+      return true;
+    };
+
+    // 3) Sunucu auth-login — onaylı hesaplar RLS yüzünden istemci Supabase ile doğrulanamayabilir
+    let authLoginUnavailable = false;
     try {
-      const { data: dbUser, error } = await withTimeout(
-        supabase
-          .from('users')
-          .select('*')
-          .eq('email', normalizedEmail)
-          .single()
-      );
-
-      if (!error && dbUser && dbUser.password_hash === password) {
-        if (dbUser.is_active === false) {
-          return { success: false, message: 'Hesabınız askıya alınmış.' };
+      const res = await fetchPublicPost('/api/auth-login', { email: normalizedEmail, password });
+      if (res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { token?: string; user?: AuthLoginUserPayload };
+        if (completeAuthLoginResponse(body)) {
+          return { success: true, message: 'Giriş başarılı!' };
         }
+        return {
+          success: false,
+          message: serverAuthTokenFailureMessage(res.status, true)
+        };
+      }
+      const api404 = authLoginUnavailableMessage(res.status);
+      if (api404) return { success: false, message: api404 };
+      if (res.status === 401 || res.status === 403) {
+        const serverMessage = await getServerLoginErrorMessage(res);
+        return {
+          success: false,
+          message: serverMessage || 'E-posta veya şifre hatalı!'
+        };
+      }
+      if (res.status === 502 || res.status === 503 || res.status === 504) authLoginUnavailable = true;
+    } catch {
+      authLoginUnavailable = true;
+    }
 
-        let studentId: string | undefined;
-        let coachId: string | undefined;
-
-        if (dbUser.role === 'student') {
-          studentId = await resolveStudentTableIdForUserLogin({
-            id: dbUser.id,
-            email: dbUser.email,
-            institution_id: dbUser.institution_id
-          });
-        } else if (dbUser.role === 'coach' || dbUser.role === 'teacher') {
-          let { data: coachRow } = await withTimeout(
-            supabase.from('coaches').select('id').eq('email', normalizedEmail).maybeSingle()
-          );
-          if (!coachRow?.id) {
-            ({ data: coachRow } = await withTimeout(
-              supabase.from('coaches').select('id').ilike('email', normalizedEmail).maybeSingle()
-            ));
-          }
-          coachId = coachRow?.id;
-        }
-
-        const userData = applyTrialAccountCoachOnly({
-          id: dbUser.id,
-          name: dbUser.name,
-          email: dbUser.email,
-          role: dbUser.role,
-          phone: dbUser.phone,
-          studentId,
-          coachId,
-          institutionId: dbUser.institution_id || undefined,
-          package: dbUser.package || undefined,
-          startDate: dbUser.start_date || undefined,
-          endDate: dbUser.end_date || undefined,
-          isActive: dbUser.is_active,
-          createdAt: dbUser.created_at
-        });
-
-        const { user: merged, tokenStored, authLoginStatus } = await syncServerAuthToken(
-          String(dbUser.email || normalizedEmail).toLowerCase().trim(),
-          password,
-          userData
+    // 4) Supabase istemci yedek — yalnızca auth-login API erişilemezse
+    let supabaseFailed = false;
+    if (authLoginUnavailable) {
+      try {
+        const { data: dbUser, error } = await withTimeout(
+          supabase
+            .from('users')
+            .select('*')
+            .eq('email', normalizedEmail)
+            .single()
         );
-        if (!tokenStored) {
-          return {
-            success: false,
-            message: serverAuthTokenFailureMessage(authLoginStatus, true)
-          };
-        }
-        localStorage.setItem('coaching_user', JSON.stringify(merged));
-        pinActiveInstitutionForUser(merged.institutionId, merged.role);
-        setUser(merged);
-        return { success: true, message: 'Giriş başarılı!' };
-      }
-      if (error) {
-        try {
-          const res = await fetchPublicPost('/api/auth-login', { email: normalizedEmail, password });
-          if (!res.ok) {
-            const api404 = authLoginUnavailableMessage(res.status);
-            if (api404) return { success: false, message: api404 };
-            const serverMessage = await getServerLoginErrorMessage(res);
-            if (serverMessage) return { success: false, message: serverMessage };
+
+        if (!error && dbUser && dbUser.password_hash === password) {
+          if (dbUser.is_active === false) {
+            return { success: false, message: 'Hesabınız askıya alınmış.' };
           }
-        } catch {
-          /* ignore */
+
+          let studentId: string | undefined;
+          let coachId: string | undefined;
+
+          if (dbUser.role === 'student') {
+            studentId = await resolveStudentTableIdForUserLogin({
+              id: dbUser.id,
+              email: dbUser.email,
+              institution_id: dbUser.institution_id
+            });
+          } else if (dbUser.role === 'coach' || dbUser.role === 'teacher') {
+            let { data: coachRow } = await withTimeout(
+              supabase.from('coaches').select('id').eq('email', normalizedEmail).maybeSingle()
+            );
+            if (!coachRow?.id) {
+              ({ data: coachRow } = await withTimeout(
+                supabase.from('coaches').select('id').ilike('email', normalizedEmail).maybeSingle()
+              ));
+            }
+            coachId = coachRow?.id;
+          }
+
+          const userData = applyTrialAccountCoachOnly({
+            id: dbUser.id,
+            name: dbUser.name,
+            email: dbUser.email,
+            role: dbUser.role,
+            phone: dbUser.phone,
+            studentId,
+            coachId,
+            institutionId: dbUser.institution_id || undefined,
+            package: dbUser.package || undefined,
+            startDate: dbUser.start_date || undefined,
+            endDate: dbUser.end_date || undefined,
+            isActive: dbUser.is_active,
+            createdAt: dbUser.created_at
+          });
+
+          const { user: merged, tokenStored, authLoginStatus } = await syncServerAuthToken(
+            String(dbUser.email || normalizedEmail).toLowerCase().trim(),
+            password,
+            userData
+          );
+          if (!tokenStored) {
+            return {
+              success: false,
+              message: serverAuthTokenFailureMessage(authLoginStatus, true)
+            };
+          }
+          persistLoggedInUser(merged);
+          return { success: true, message: 'Giriş başarılı!' };
         }
-      }
-    } catch (e) {
-      supabaseFailed = true;
-      if (e instanceof Error && e.message === 'AUTH_TIMEOUT') {
-        if (!USE_DEMO_MODE) {
-          return { success: false, message: 'Giriş isteği zaman aşımına uğradı. Lütfen tekrar deneyin.' };
+      } catch (e) {
+        supabaseFailed = true;
+        if (e instanceof Error && e.message === 'AUTH_TIMEOUT') {
+          if (!USE_DEMO_MODE) {
+            return { success: false, message: 'Giriş isteği zaman aşımına uğradı. Lütfen tekrar deneyin.' };
+          }
+        } else if (!USE_DEMO_MODE) {
+          return { success: false, message: 'Giriş sırasında bir hata oluştu. Lütfen tekrar deneyin.' };
         }
-      } else if (!USE_DEMO_MODE) {
-        return { success: false, message: 'Giriş sırasında bir hata oluştu. Lütfen tekrar deneyin.' };
       }
     }
 
-    // 4) Kullanıcı yönetimi yerel listesi (sunucu cevap vermezse veya satır yoksa yedek)
+    // 5) Kullanıcı yönetimi yerel listesi (sunucu cevap vermezse veya satır yoksa yedek)
     const managed = readManagedUsers().find(
       u => u.email.toLowerCase() === normalizedEmail && u.password === password
     );
@@ -657,24 +701,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           message: serverAuthTokenFailureMessage(authLoginStatus, true)
         };
       }
-      localStorage.setItem('coaching_user', JSON.stringify(merged));
-      pinActiveInstitutionForUser(merged.institutionId, merged.role);
-      setUser(merged);
+      persistLoggedInUser(merged);
       return { success: true, message: 'Giriş başarılı!' };
     }
 
     if (supabaseFailed && USE_DEMO_MODE) {
-      try {
-        const res = await fetchPublicPost('/api/auth-login', { email: normalizedEmail, password });
-        if (!res.ok) {
-          const api404 = authLoginUnavailableMessage(res.status);
-          if (api404) return { success: false, message: api404 };
-          const serverMessage = await getServerLoginErrorMessage(res);
-          if (serverMessage) return { success: false, message: serverMessage };
-        }
-      } catch {
-        /* ignore */
-      }
       return { success: false, message: 'Sunucuya ulaşılamadı. Demo/deneme hesabı ile giriş yapabilirsiniz.' };
     }
     return { success: false, message: 'E-posta veya şifre hatalı!' };

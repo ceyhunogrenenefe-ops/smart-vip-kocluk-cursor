@@ -1,6 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
+    "api/auth-login.js": {
+      "maxDuration": 120
+    },
     "api/wa-gateway.js": {
       "maxDuration": 120
     },
