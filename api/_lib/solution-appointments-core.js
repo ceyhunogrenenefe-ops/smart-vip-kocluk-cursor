@@ -1,7 +1,8 @@
 /** Soru çözümü randevu — zaman kuralları ve slot üretimi (sunucu doğrulaması). */
 
 export const SLOT_MINUTES = 10;
-export const BOOKING_HOURS_BEFORE = 12;
+/** Randevu alma ders başlangıcından bu kadar dakika önce kapanır */
+export const BOOKING_MINUTES_BEFORE = 60;
 export const FILE_UPLOAD_MINUTES_BEFORE = 30;
 export const JOIN_MINUTES_BEFORE = 10;
 export const SESSION_DURATION_MINUTES = 10;
@@ -69,7 +70,7 @@ export function buildTenMinuteSlots(startTime, endTime) {
 
 export function isBookingOpen(lessonDate, lessonStartTime, now = new Date()) {
   const lessonStart = combineIstanbulDateTime(lessonDate, lessonStartTime);
-  const deadline = new Date(lessonStart.getTime() - BOOKING_HOURS_BEFORE * 60 * 60 * 1000);
+  const deadline = new Date(lessonStart.getTime() - BOOKING_MINUTES_BEFORE * 60 * 1000);
   return now.getTime() <= deadline.getTime();
 }
 

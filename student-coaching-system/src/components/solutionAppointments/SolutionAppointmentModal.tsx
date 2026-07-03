@@ -260,7 +260,7 @@ export function SolutionAppointmentModal({
 
           {!loading && bookingClosed && !myAp ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
-              Bu ders için randevu süresi dolmuştur.
+              Bu ders için randevu süresi dolmuştur (ders başlangıcından 60 dk önce kapanır).
             </div>
           ) : null}
 
