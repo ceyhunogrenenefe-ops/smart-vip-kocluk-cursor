@@ -176,7 +176,12 @@ export function SolutionAppointmentModal({
         student_note: studentNote.trim() || undefined,
         files: encoded
       });
-      setSuccess(String((res as { message?: string }).message || 'Randevunuz oluşturuldu.'));
+      setSuccess(
+        String(
+          (res as { message?: string }).message ||
+            'Randevunuz oluşturuldu. Sorularınızı bu pencereden yükleyin; ders saatinde karttaki «Derse Katıl» ile canlı derse girin.'
+        )
+      );
       await load();
       onSuccess?.();
     } catch (e) {
@@ -222,6 +227,15 @@ export function SolutionAppointmentModal({
         </div>
 
         <div className="overflow-y-auto px-4 py-3 space-y-4">
+          <div className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5 text-[11px] leading-relaxed text-violet-950">
+            <p className="font-semibold">Nasıl çalışır?</p>
+            <ol className="mt-1 list-decimal space-y-0.5 pl-4">
+              <li>Randevu saati seçin</li>
+              <li>Soru fotoğrafı veya PDF yükleyin</li>
+              <li>Randevu saatinden 10 dk önce ders kartındaki «Derse Katıl» ile canlı derse girin</li>
+            </ol>
+          </div>
+
           <dl className="grid grid-cols-2 gap-2 text-xs">
             <div className="rounded-lg bg-slate-50 px-2.5 py-2">
               <dt className="text-slate-500">Öğretmen</dt>

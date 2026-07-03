@@ -398,6 +398,7 @@ export type BookOrderGatewayConfig = {
   gateway?: { configured?: boolean; hint?: string; session_id_suffix?: string | null };
   gateway_health?: { ok?: boolean; error?: string };
   gateway_session?: { ok?: boolean; status?: string; error?: string | null };
+  webhook?: { configured?: boolean; hint?: string; webhook_url?: string };
   hint?: string;
 };
 

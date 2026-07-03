@@ -534,6 +534,7 @@ export default async function handler(req, res) {
           gateway,
           gateway_health: gatewayHealth,
           gateway_session: gatewayLive,
+          webhook: getMetaWebhookEnvStatus(),
           connected_live_session_ids: connectedLive.length ? connectedLive.map((x) => `…${x.slice(-8)}`) : [],
           hint: !gatewayHealth.ok
             ? `VPS erişilemiyor (${gatewayHealth.error || 'fetch_failed'}) — pm2 restart whatsapp-gateway`

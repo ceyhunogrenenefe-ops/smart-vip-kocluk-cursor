@@ -74,6 +74,35 @@ function displayOrderStatus(order: { status: string; whatsapp_status: string }) 
   return { label: statusLabel(st), badge: statusBadge(st) };
 }
 
+function metaDeliveryProgressLabel(status: string | null | undefined) {
+  const st = String(status || '').toLowerCase();
+  if (st === 'sent') return 'Meta iletti — teslim bekleniyor';
+  if (st === 'delivered' || st === 'read') return 'Meta: teslim edildi';
+  if (st === 'failed') return 'Meta: teslimat başarısız';
+  return null;
+}
+
+function metaAcceptedHints(opts: {
+  meta_delivery_status?: string | null;
+  gatewayConnected?: boolean;
+  webhookConfigured?: boolean;
+}) {
+  const lines: string[] = [];
+  const progress = metaDeliveryProgressLabel(opts.meta_delivery_status);
+  if (progress) lines.push(progress);
+  else lines.push('Meta API kabul etti — henüz «teslim edildi» değil.');
+  lines.push('Kitapçı WhatsApp’ta: İşletme sohbetleri / Güncellemeler (0850 hattı).');
+  if (opts.gatewayConnected) {
+    lines.push('Gateway bağlı — «WhatsApp tekrar» ile normal sohbete de gönderebilirsiniz.');
+  } else {
+    lines.push('Kalıcı çözüm: yukarıdan gateway QR bağlayın; sonraki siparişler önce oradan gider.');
+  }
+  if (opts.webhookConfigured === false) {
+    lines.push('Webhook yok: Vercel META_WEBHOOK_VERIFY_TOKEN + Meta BM → /api/meta/webhook');
+  }
+  return lines;
+}
+
 function waOutcomeMessage(opts: {
   whatsapp_status?: string | null;
   phone?: string | null;
@@ -1773,13 +1802,13 @@ export default function BookOrdersPage() {
                       ) : null}
                       {o.whatsapp_status === 'accepted' ? (
                         <div className="text-[10px] text-amber-700 space-y-0.5">
-                          <div>Meta API kabul etti (wamid) — bu, telefona düştü anlamına gelmez.</div>
-                          <div>Alıcıda: WhatsApp → İşletme sohbetleri / Güncellemeler (0850 hattından gelir).</div>
-                          <div>Vercel: META_WEBHOOK_VERIFY_TOKEN + Meta BM webhook → delivered/failed görünür.</div>
-                          <div>Meta BM: kitap_siparisi1 kategorisi UTILITY olmalı.</div>
-                          {o.meta_delivery_status && !['accepted', 'sent', 'gateway_sent'].includes(o.meta_delivery_status) ? (
-                            <div className="font-mono text-red-700">Meta durum: {o.meta_delivery_status}</div>
-                          ) : null}
+                          {metaAcceptedHints({
+                            meta_delivery_status: o.meta_delivery_status,
+                            gatewayConnected: gatewayConfig?.gateway_session?.ok === true,
+                            webhookConfigured: gatewayConfig?.webhook?.configured
+                          }).map((line) => (
+                            <div key={line}>{line}</div>
+                          ))}
                         </div>
                       ) : null}
                       {o.whatsapp_status === 'sent' ? (
