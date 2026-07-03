@@ -42,6 +42,9 @@ export async function fetchInboxNotifications(): Promise<{
   schemaWarning?: string | null;
 }> {
   const res = await apiFetch('/api/notifications?scope=inbox');
+  if (res.status === 504 || res.status === 503 || res.status === 502) {
+    return { data: [], unread_count: 0, schemaWarning: null };
+  }
   const j = await parseJson<{ data: PlatformNotification[]; unread_count?: number; warning?: string; hint?: string }>(
     res
   );

@@ -319,20 +319,18 @@ const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
 /** İstenen vade listesini doğrular; eksikse başlangıçtan aylık üretir */
 export function normalizeTaksitVadeleri(rawVadeler, taksitN, baslangicYmd) {
   const n = Math.max(1, Math.min(48, Math.round(Number(taksitN) || 1)));
-  const rawStart = String(baslangicYmd || '')
-    .trim()
-    .slice(0, 10);
-  const start = YMD_RE.test(rawStart) ? rawStart : todayYmdLocal();
   const fromBody = Array.isArray(rawVadeler)
-    ? rawVadeler.map((v) => String(v || '').trim().slice(0, 10)).filter((v) => YMD_RE.test(v))
+    ? rawVadeler.map((v) => String(v || '').trim().slice(0, 10))
     : [];
+  const firstAnchor =
+    fromBody[0] && YMD_RE.test(fromBody[0]) ? fromBody[0] : todayYmdLocal();
   const out = [];
   for (let i = 0; i < n; i++) {
     if (fromBody[i] && YMD_RE.test(fromBody[i])) {
       out.push(fromBody[i]);
       continue;
     }
-    out.push(shiftYmdByMonths(start, i) || start);
+    out.push(shiftYmdByMonths(firstAnchor, i) || firstAnchor);
   }
   return out;
 }

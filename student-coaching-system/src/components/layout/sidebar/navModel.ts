@@ -234,6 +234,8 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
       { path: '/edu-panel', icon: Presentation, label: EDU_HOMEWORK_ANIMATIONS_LABEL },
       { path: '/ai-agents-admin', icon: Bot, label: 'AI Ders Ajanları' },
+      { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
+      { path: '/teachers', icon: GraduationCap, label: 'Öğretmenler' },
       { path: '/super-admin', icon: Server, label: 'Kurum Yönetimi' },
       { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
       { path: '/notifications', icon: Bell, label: 'Bildirimler' },
@@ -307,7 +309,6 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/live-lessons', icon: Radio, label: 'Canlı özel dersler' },
     { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
     { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
-    { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
     { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
     { path: '/settings', icon: Settings, label: 'Ayarlar' }
   ];

@@ -9,7 +9,13 @@ type WaitingCopy = {
 
 function waitingHtml({ title, subtitle, error }: WaitingCopy): string {
   const heading = error ? 'Bağlantı kurulamadı' : title || DEFAULT_TITLE;
-  const body = error || subtitle || DEFAULT_SUBTITLE;
+  const body = error
+    ? error
+    : subtitle !== undefined
+      ? subtitle
+      : title
+        ? ''
+        : DEFAULT_SUBTITLE;
   const accent = error ? '#dc2626' : '#059669';
   return `<!DOCTYPE html>
 <html lang="tr">
@@ -87,7 +93,7 @@ function waitingHtml({ title, subtitle, error }: WaitingCopy): string {
   <div class="card">
     ${error ? '<div class="error-icon">!</div>' : '<div class="spinner" aria-hidden="true"></div>'}
     <h1>${heading}</h1>
-    <p>${body}</p>
+    ${body ? `<p>${body}</p>` : ''}
   </div>
 </body>
 </html>`;

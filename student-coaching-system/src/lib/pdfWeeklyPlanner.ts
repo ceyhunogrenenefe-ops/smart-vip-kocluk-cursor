@@ -3,26 +3,26 @@ import { tr } from 'date-fns/locale/tr';
 import { jsPDF } from 'jspdf';
 import type { CoachWeeklyGoalRow, WeeklyPlannerEntryRow } from './weeklyPlannerApi';
 import {
-  addCanvasPaginatedToLandscapePdf,
+  addCanvasFillLandscapePage,
   buildHeaderElement,
   ensureNotoSansForPdfCapture,
   formatDdMmYyyyDots,
   rasterizeHtmlElementForPdf,
   type WeekGridColumn,
-  type WeekGridRow,
 } from './pdfLiveWeekGrid';
+import { buildPlannerTimeSlots, entryMatchesPlannerSlot, timeToMinutes } from './weeklyPlannerTimeSlots';
+import {
+  buildWeeklyMotivationMessages,
+  evaluatePreviousWeekPlanner,
+} from './weeklyPlannerPdfMotivation';
 
 const DAY_LABELS = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
-const HOURS = Array.from({ length: 16 }, (_, i) => i + 8);
-
-function padHour(h: number) {
-  return `${String(h).padStart(2, '0')}:00`;
-}
-
-function hourFromTime(t: string) {
-  const h = parseInt(String(t || '').split(':')[0], 10);
-  return Number.isNaN(h) ? null : h;
-}
+/** PDF tek sayfaya sığsın diye dışa aktarımda 1 saatlik dilim */
+const PDF_GRID_STEP_MINUTES = 60;
+/** A4 yatay (297×210 mm) — tek sayfaya sığdırma için hedef piksel boyutu */
+const PDF_LANDSCAPE_WIDTH_PX = 1100;
+const PDF_LANDSCAPE_HEIGHT_PX = Math.round(PDF_LANDSCAPE_WIDTH_PX / (297 / 210));
+const PDF_PAGE_MARGIN_MM = 1;
 
 function escapeHtml(s: string): string {
   return s
@@ -113,7 +113,70 @@ export function buildParentWeeklyGoalsMessage(opts: {
   );
 }
 
+export function buildParentWeeklyPlanPdfCaption(opts: {
+  studentName: string;
+  weekStart: string;
+  weekEnd: string;
+}): string {
+  const { studentName, weekStart, weekEnd } = opts;
+  const rangeLabel = `${formatDdMmYyyyDots(weekStart)} – ${formatDdMmYyyyDots(weekEnd)}`;
+  return (
+    `Merhaba,\n\n${studentName} için ${rangeLabel} haftalık çalışma planı ektedir.\n` +
+    `• 1. sayfa: haftalık hedefler\n` +
+    `• 2. sayfa: çalışma takvimi\n\n` +
+    `Smart VIP Koçluk`
+  );
+}
+
 type GridCellEntry = WeeklyPlannerEntryRow;
+
+function pdfPlannerHoursRange(entries: WeeklyPlannerEntryRow[]): { startHour: number; endHour: number } {
+  let minM = Infinity;
+  let maxM = -Infinity;
+  let has = false;
+  for (const e of entries) {
+    const m = timeToMinutes(String(e.start_time || ''));
+    if (m == null) continue;
+    has = true;
+    minM = Math.min(minM, m);
+    const endM = timeToMinutes(String(e.end_time || '')) ?? m + 60;
+    maxM = Math.max(maxM, endM);
+  }
+  if (!has) return { startHour: 8, endHour: 18 };
+  const startHour = Math.max(7, Math.floor((minM - 30) / 60));
+  const endHour = Math.min(22, Math.ceil((maxM + 30) / 60));
+  return { startHour, endHour: Math.max(endHour, startHour + 3) };
+}
+
+/** PDF’de yalnızca planlı saatler (+1 saat tampon) — satır yüksekliği ve okunaklı yazı için */
+function trimPdfGridRows(
+  rows: { hourLabel: string; cells: GridCellEntry[][] }[]
+): { hourLabel: string; cells: GridCellEntry[][] }[] {
+  let first = -1;
+  let last = -1;
+  rows.forEach((row, i) => {
+    if (row.cells.some((c) => c.length > 0)) {
+      if (first < 0) first = i;
+      last = i;
+    }
+  });
+  if (first < 0) return rows;
+  const from = Math.max(0, first - 1);
+  const to = Math.min(rows.length, last + 2);
+  return rows.slice(from, to);
+}
+
+function pdfCellFontSizes(rowHeightPx: number, entryCount: number): { main: number; sub: number; qty: number } {
+  const solo = entryCount <= 1;
+  const main = Math.max(12, Math.min(15, Math.floor(rowHeightPx * (solo ? 0.36 : 0.3))));
+  return { main, sub: Math.max(11, main - 1), qty: Math.max(10, main - 1) };
+}
+
+function truncatePdfText(text: string, maxLen: number): string {
+  const t = String(text || '').trim();
+  if (t.length <= maxLen) return t;
+  return `${t.slice(0, maxLen - 1)}…`;
+}
 
 function buildGridFromEntries(dayDates: string[], entries: WeeklyPlannerEntryRow[]): {
   columns: WeekGridColumn[];
@@ -129,16 +192,24 @@ function buildGridFromEntries(dayDates: string[], entries: WeeklyPlannerEntryRow
     return { iso, headLine: DAY_LABELS[i] ?? iso, subLine };
   });
 
-  const rows = HOURS.map((hour) => {
-    const cells = dayDates.map((date) =>
-      entries.filter(
-        (e) =>
-          String(e.planner_date || '').slice(0, 10) === date &&
-          hourFromTime(String(e.start_time || '')) === hour
-      )
-    );
-    return { hourLabel: padHour(hour), cells };
+  const { startHour, endHour } = pdfPlannerHoursRange(entries);
+  const timeSlots = buildPlannerTimeSlots({
+    stepMinutes: PDF_GRID_STEP_MINUTES,
+    startHour,
+    endHour,
   });
+  const rows = trimPdfGridRows(
+    timeSlots.map((slot) => {
+      const cells = dayDates.map((date) =>
+        entries.filter(
+          (e) =>
+            String(e.planner_date || '').slice(0, 10) === date &&
+            entryMatchesPlannerSlot(String(e.start_time || ''), slot)
+        )
+      );
+      return { hourLabel: slot.label, cells };
+    })
+  );
 
   return { columns, rows };
 }
@@ -218,73 +289,66 @@ function buildGoalsSection(goals: CoachWeeklyGoalRow[]): HTMLElement {
 
 function buildGridTable(
   columns: WeekGridColumn[],
-  rows: { hourLabel: string; cells: GridCellEntry[][] }[]
+  rows: { hourLabel: string; cells: GridCellEntry[][] }[],
+  rowHeightPx: number,
+  theadHeightPx: number
 ): HTMLElement {
   const wrap = document.createElement('div');
-  wrap.style.marginTop = '16px';
+  wrap.style.flex = '1';
+  wrap.style.minHeight = '0';
+  wrap.style.height = `${theadHeightPx + rowHeightPx * rows.length}px`;
+  wrap.style.display = 'flex';
+  wrap.style.flexDirection = 'column';
 
-  const titleRow = document.createElement('div');
-  titleRow.style.display = 'flex';
-  titleRow.style.alignItems = 'center';
-  titleRow.style.gap = '10px';
-  titleRow.style.marginBottom = '12px';
-
-  const emoji = document.createElement('span');
-  emoji.textContent = '📅';
-  emoji.style.fontSize = '22px';
-  titleRow.appendChild(emoji);
-
-  const title = document.createElement('div');
-  title.textContent = 'Haftalık çalışma takvimi';
-  title.style.fontSize = '17px';
-  title.style.fontWeight = '600';
-  title.style.color = '#312e81';
-  titleRow.appendChild(title);
-  wrap.appendChild(titleRow);
+  const cellFont = Math.max(12, Math.min(14, Math.round(rowHeightPx * 0.34)));
+  const titleFont = Math.max(11, cellFont - 1);
+  const timeFont = Math.max(11, cellFont - 1);
 
   const table = document.createElement('table');
   table.style.width = '100%';
-  table.style.borderCollapse = 'separate';
-  table.style.borderSpacing = '0';
-  table.style.fontSize = '12px';
-  table.style.borderRadius = '12px';
+  table.style.height = '100%';
+  table.style.tableLayout = 'fixed';
+  table.style.borderCollapse = 'collapse';
+  table.style.fontSize = `${cellFont}px`;
+  table.style.borderRadius = '8px';
   table.style.overflow = 'hidden';
-  table.style.boxShadow = '0 8px 32px rgba(49, 46, 129, 0.1)';
+  table.style.boxShadow = '0 4px 16px rgba(49, 46, 129, 0.08)';
 
   const thead = document.createElement('thead');
   const hr = document.createElement('tr');
+  hr.style.height = `${theadHeightPx}px`;
 
   const thTime = document.createElement('th');
   thTime.textContent = 'Saat';
-  thTime.style.padding = '12px 8px';
+  thTime.style.padding = '6px 4px';
   thTime.style.fontWeight = '700';
-  thTime.style.fontSize = '11px';
+  thTime.style.fontSize = `${timeFont}px`;
   thTime.style.color = '#eef2ff';
   thTime.style.background = 'linear-gradient(180deg, #6366f1 0%, #4338ca 100%)';
-  thTime.style.borderBottom = '2px solid #312e81';
-  thTime.style.width = '72px';
+  thTime.style.borderBottom = '1px solid #312e81';
+  thTime.style.width = '52px';
   hr.appendChild(thTime);
 
   columns.forEach((c) => {
     const th = document.createElement('th');
-    th.style.padding = '10px 6px';
+    th.style.padding = '5px 3px';
     th.style.fontWeight = '700';
     th.style.background = 'linear-gradient(180deg, #6366f1 0%, #4338ca 100%)';
-    th.style.borderBottom = '2px solid #312e81';
+    th.style.borderBottom = '1px solid #312e81';
     th.style.color = '#eef2ff';
     th.style.textAlign = 'center';
 
     const day = document.createElement('div');
     day.textContent = c.headLine;
-    day.style.fontSize = '13px';
+    day.style.fontSize = `${titleFont + 1}px`;
     th.appendChild(day);
 
     const sub = document.createElement('div');
     sub.textContent = c.subLine;
-    sub.style.fontSize = '10px';
+    sub.style.fontSize = `${titleFont - 1}px`;
     sub.style.fontWeight = '400';
     sub.style.opacity = '0.9';
-    sub.style.marginTop = '2px';
+    sub.style.marginTop = '1px';
     th.appendChild(sub);
 
     hr.appendChild(th);
@@ -296,12 +360,13 @@ function buildGridTable(
   rows.forEach((row, ri) => {
     const tr = document.createElement('tr');
     tr.style.background = ri % 2 === 0 ? '#faf5ff' : '#ffffff';
+    tr.style.height = `${rowHeightPx}px`;
 
     const tdTime = document.createElement('td');
     tdTime.textContent = row.hourLabel;
-    tdTime.style.padding = '8px 6px';
+    tdTime.style.padding = '3px 3px';
     tdTime.style.fontWeight = '700';
-    tdTime.style.fontSize = '11px';
+    tdTime.style.fontSize = `${timeFont}px`;
     tdTime.style.color = '#4338ca';
     tdTime.style.background = '#ede9fe';
     tdTime.style.borderBottom = '1px solid #e9d5ff';
@@ -311,49 +376,83 @@ function buildGridTable(
 
     row.cells.forEach((cellEntries) => {
       const td = document.createElement('td');
-      td.style.padding = '6px 4px';
+      td.style.padding = '3px 3px';
       td.style.verticalAlign = 'top';
       td.style.borderBottom = '1px solid #e9d5ff';
       td.style.borderLeft = '1px solid #f3e8ff';
-      td.style.minHeight = '44px';
+      td.style.height = `${rowHeightPx}px`;
+      td.style.overflow = 'hidden';
 
       if (!cellEntries.length) {
         const empty = document.createElement('div');
         empty.textContent = '—';
         empty.style.color = '#cbd5e1';
         empty.style.textAlign = 'center';
-        empty.style.padding = '8px 0';
+        empty.style.padding = '4px 0';
+        empty.style.fontSize = `${titleFont}px`;
         td.appendChild(empty);
       } else {
+        const fonts = pdfCellFontSizes(rowHeightPx, cellEntries.length);
+        const cardGap = cellEntries.length > 1 ? 3 : 0;
+        const cardH =
+          cellEntries.length > 1
+            ? Math.floor((rowHeightPx - 6 - cardGap * (cellEntries.length - 1)) / cellEntries.length)
+            : rowHeightPx - 6;
+
         cellEntries.forEach((e, ei) => {
           const style = subjectPdfStyle(e.subject, e.quantity_unit);
           const card = document.createElement('div');
           card.style.background = style.bg;
           card.style.border = `1.5px solid ${style.border}`;
-          card.style.borderRadius = '8px';
-          card.style.padding = '6px 8px';
-          card.style.marginBottom = ei < cellEntries.length - 1 ? '4px' : '0';
-          card.style.fontSize = '11px';
-          card.style.lineHeight = '1.35';
+          card.style.borderRadius = '5px';
+          card.style.padding = '4px 5px';
+          card.style.marginBottom = ei < cellEntries.length - 1 ? `${cardGap}px` : '0';
+          card.style.boxSizing = 'border-box';
+          card.style.height = cellEntries.length === 1 ? `${rowHeightPx - 6}px` : `${Math.max(28, cardH)}px`;
+          card.style.display = 'flex';
+          card.style.flexDirection = 'column';
+          card.style.justifyContent = 'center';
           card.style.color = style.text;
+          card.style.overflow = 'hidden';
 
-          const subj = document.createElement('div');
-          subj.textContent = e.subject;
-          subj.style.fontWeight = '700';
-          subj.style.fontSize = '10px';
-          card.appendChild(subj);
+          const konuRaw = String(e.title || '').trim();
+          const dersRaw = String(e.subject || '').trim();
+          const konuText = truncatePdfText(konuRaw || dersRaw || '—', cellEntries.length > 1 ? 34 : 50);
 
-          const t = document.createElement('div');
-          t.textContent = e.title;
-          t.style.fontWeight = '600';
-          t.style.marginTop = '2px';
-          card.appendChild(t);
+          const konu = document.createElement('div');
+          konu.textContent = konuText;
+          konu.style.fontWeight = '700';
+          konu.style.fontSize = `${fonts.main}px`;
+          konu.style.lineHeight = '1.2';
+          konu.style.letterSpacing = '0.01em';
+          konu.style.wordBreak = 'break-word';
+          konu.style.overflow = 'hidden';
+          konu.style.display = '-webkit-box';
+          konu.style.webkitLineClamp = cellEntries.length > 1 ? '2' : '3';
+          konu.style.webkitBoxOrient = 'vertical';
+          card.appendChild(konu);
 
+          if (dersRaw && dersRaw !== konuRaw) {
+            const ders = document.createElement('div');
+            ders.textContent = truncatePdfText(dersRaw, 18);
+            ders.style.fontWeight = '600';
+            ders.style.fontSize = `${fonts.sub}px`;
+            ders.style.lineHeight = '1.2';
+            ders.style.marginTop = '2px';
+            ders.style.opacity = '0.85';
+            card.appendChild(ders);
+          }
+
+          const qtyUnit = String(e.quantity_unit || '').trim();
+          const qtyText = qtyUnit
+            ? `${e.planned_quantity} ${qtyUnit}`
+            : String(e.planned_quantity);
           const q = document.createElement('div');
-          q.textContent = String(e.planned_quantity);
-          q.style.fontSize = '10px';
+          q.textContent = qtyText;
+          q.style.fontSize = `${fonts.qty}px`;
+          q.style.fontWeight = '600';
           q.style.marginTop = '3px';
-          q.style.opacity = '0.85';
+          q.style.opacity = '0.9';
           card.appendChild(q);
 
           td.appendChild(card);
@@ -370,73 +469,148 @@ function buildGridTable(
   return wrap;
 }
 
-function buildFooterNote(studentName: string): HTMLElement {
+function buildMotivationSection(studentName: string, messages: string[]): HTMLElement {
   const foot = document.createElement('div');
-  foot.style.marginTop = '24px';
-  foot.style.padding = '16px 20px';
+  foot.style.marginTop = '14px';
+  foot.style.padding = '14px 16px';
   foot.style.borderRadius = '12px';
   foot.style.background = 'linear-gradient(90deg, #ede9fe 0%, #fce7f3 50%, #fef3c7 100%)';
   foot.style.border = '1px solid #c4b5fd';
-  foot.style.display = 'flex';
-  foot.style.alignItems = 'center';
-  foot.style.gap = '14px';
+  foot.style.flexShrink = '0';
+
+  const titleRow = document.createElement('div');
+  titleRow.style.display = 'flex';
+  titleRow.style.alignItems = 'center';
+  titleRow.style.gap = '8px';
+  titleRow.style.marginBottom = '8px';
 
   const icon = document.createElement('span');
   icon.textContent = '✨';
-  icon.style.fontSize = '28px';
-  foot.appendChild(icon);
+  icon.style.fontSize = '22px';
+  titleRow.appendChild(icon);
 
-  const text = document.createElement('div');
-  text.innerHTML = `<strong style="color:#4338ca">${escapeHtml(studentName)}</strong>, küçük adımlar büyük başarıları getirir! Bu hafta planına sadık kal — sen yaparsın! 💪`;
-  text.style.fontSize = '13px';
-  text.style.lineHeight = '1.5';
-  text.style.color = '#4c1d95';
-  foot.appendChild(text);
+  const title = document.createElement('div');
+  title.textContent = 'Bu hafta için motivasyon';
+  title.style.fontSize = '14px';
+  title.style.fontWeight = '700';
+  title.style.color = '#4338ca';
+  titleRow.appendChild(title);
+  foot.appendChild(titleRow);
 
+  const list = document.createElement('div');
+  list.style.display = 'flex';
+  list.style.flexDirection = 'column';
+  list.style.gap = '6px';
+
+  for (const msg of messages) {
+    const line = document.createElement('div');
+    line.style.fontSize = '12px';
+    line.style.lineHeight = '1.45';
+    line.style.color = '#4c1d95';
+    line.textContent = `• ${msg}`;
+    list.appendChild(line);
+  }
+
+  foot.appendChild(list);
   return foot;
 }
 
-async function buildWeeklyPlannerDocument(opts: {
+async function buildWeeklyPlannerGoalsPage(opts: {
   studentName: string;
   weekStart: string;
   weekEnd: string;
   goals: CoachWeeklyGoalRow[];
+  motivationMessages: string[];
+  institutionName?: string;
+  logoUrl?: string | null;
+}): Promise<HTMLElement> {
+  const { studentName, weekStart, weekEnd, goals, motivationMessages, institutionName, logoUrl } = opts;
+  const root = document.createElement('div');
+  root.className = 'pdf-capture-root';
+  root.setAttribute('data-pdf-font-root', '1');
+  root.style.boxSizing = 'border-box';
+  root.style.width = `${PDF_LANDSCAPE_WIDTH_PX}px`;
+  root.style.height = `${PDF_LANDSCAPE_HEIGHT_PX}px`;
+  root.style.padding = '10px 14px 12px';
+  root.style.display = 'flex';
+  root.style.flexDirection = 'column';
+  root.style.fontFamily = '"Noto Sans", "Segoe UI", system-ui, sans-serif';
+  root.style.background = 'linear-gradient(180deg, #f5f3ff 0%, #ffffff 8%, #fafafa 100%)';
+  root.style.overflow = 'hidden';
+
+  const header = await buildHeaderElement(`${studentName} — Haftalık Çalışma Planı`, [
+    `${formatDdMmYyyyDots(weekStart)} – ${formatDdMmYyyyDots(weekEnd)}`,
+    'Sayfa 1: Hedefler',
+  ], {
+    institutionName: institutionName || '',
+    logoUrl,
+  });
+  header.style.marginBottom = '6px';
+  header.style.flexShrink = '0';
+  root.appendChild(header);
+
+  if (goals.length) {
+    const goalsEl = buildGoalsSection(goals);
+    goalsEl.style.flex = '1';
+    goalsEl.style.minHeight = '0';
+    goalsEl.style.overflow = 'hidden';
+    root.appendChild(goalsEl);
+  } else {
+    const empty = document.createElement('p');
+    empty.textContent = 'Bu hafta için tanımlı hedef bulunmuyor.';
+    empty.style.color = '#64748b';
+    empty.style.fontSize = '14px';
+    root.appendChild(empty);
+  }
+
+  root.appendChild(buildMotivationSection(studentName, motivationMessages));
+  return root;
+}
+
+function computePdfGridLayout(rowCount: number): { rowHeightPx: number; theadHeightPx: number } {
+  const paddingY = 10 + 12;
+  const headerH = 72 + 4;
+  const theadHeightPx = 36;
+  const bodyBudget = PDF_LANDSCAPE_HEIGHT_PX - paddingY - headerH - theadHeightPx;
+  const rowHeightPx = rowCount > 0 ? Math.max(44, Math.floor(bodyBudget / rowCount)) : 48;
+  return { rowHeightPx, theadHeightPx };
+}
+
+async function buildWeeklyPlannerGridPage(opts: {
+  studentName: string;
+  weekStart: string;
+  weekEnd: string;
   columns: WeekGridColumn[];
   rows: { hourLabel: string; cells: GridCellEntry[][] }[];
   institutionName?: string;
   logoUrl?: string | null;
 }): Promise<HTMLElement> {
-  const { studentName, weekStart, weekEnd, goals, columns, rows, institutionName, logoUrl } = opts;
-
+  const { studentName, weekStart, weekEnd, columns, rows, institutionName, logoUrl } = opts;
+  const { rowHeightPx, theadHeightPx } = computePdfGridLayout(rows.length);
   const root = document.createElement('div');
   root.className = 'pdf-capture-root';
   root.setAttribute('data-pdf-font-root', '1');
   root.style.boxSizing = 'border-box';
-  root.style.width = '1280px';
-  root.style.padding = '20px 24px 32px';
+  root.style.width = `${PDF_LANDSCAPE_WIDTH_PX}px`;
+  root.style.height = `${PDF_LANDSCAPE_HEIGHT_PX}px`;
+  root.style.padding = '10px 14px 12px';
   root.style.fontFamily = '"Noto Sans", "Segoe UI", system-ui, sans-serif';
-  root.style.background = 'linear-gradient(180deg, #f5f3ff 0%, #ffffff 8%, #fafafa 100%)';
+  root.style.background = '#ffffff';
+  root.style.display = 'flex';
+  root.style.flexDirection = 'column';
+  root.style.overflow = 'hidden';
 
-  const titleLine = `${studentName} — Haftalık Çalışma Planı`;
-  const subtitleLines = [
+  const header = await buildHeaderElement(`${studentName} — Çalışma Takvimi`, [
     `${formatDdMmYyyyDots(weekStart)} – ${formatDdMmYyyyDots(weekEnd)}`,
-    `${goals.length} hedef · ${rows.reduce((n, r) => n + r.cells.reduce((m, c) => m + c.length, 0), 0)} plan bloğu`,
-  ];
-
-  const header = await buildHeaderElement(titleLine, subtitleLines, {
+    'Sayfa 2: Haftalık takvim',
+  ], {
     institutionName: institutionName || '',
     logoUrl,
   });
   header.style.marginBottom = '4px';
+  header.style.flexShrink = '0';
   root.appendChild(header);
-
-  if (goals.length) {
-    root.appendChild(buildGoalsSection(goals));
-  }
-
-  root.appendChild(buildGridTable(columns, rows));
-  root.appendChild(buildFooterNote(studentName));
-
+  root.appendChild(buildGridTable(columns, rows, rowHeightPx, theadHeightPx));
   return root;
 }
 
@@ -452,6 +626,12 @@ export async function buildWeeklyPlannerPdfBlob(opts: {
   institutionName?: string;
   logoUrl?: string | null;
   preferGridFallback?: boolean;
+  /** WhatsApp gönderimi için daha küçük dosya (JPEG + düşük çözünürlük) */
+  compactForShare?: boolean;
+  /** Önceki hafta plan verisi — motive edici metin için */
+  prevWeekStart?: string;
+  prevWeekEnd?: string;
+  prevWeekEntries?: WeeklyPlannerEntryRow[];
 }): Promise<{ blob: Blob; filename: string }> {
   void opts.calendarElement;
   void opts.preferGridFallback;
@@ -465,7 +645,25 @@ export async function buildWeeklyPlannerPdfBlob(opts: {
     entries,
     institutionName,
     logoUrl,
+    compactForShare = false,
+    prevWeekStart,
+    prevWeekEnd,
+    prevWeekEntries = [],
   } = opts;
+
+  const prevReview =
+    prevWeekStart && prevWeekEnd
+      ? evaluatePreviousWeekPlanner(prevWeekEntries, prevWeekStart, prevWeekEnd)
+      : null;
+  const motivationMessages = buildWeeklyMotivationMessages({
+    studentName,
+    review: prevReview,
+  });
+
+  /** İndirme: yüksek çözünürlük. Veli/WhatsApp: compactForShare ile küçük JPEG. */
+  const rasterScale = compactForShare ? 1.25 : 2.5;
+  const imageFormat = compactForShare ? 'JPEG' : 'PNG';
+  const jpegQuality = compactForShare ? 0.72 : 0.92;
 
   await ensureNotoSansForPdfCapture();
 
@@ -482,25 +680,34 @@ export async function buildWeeklyPlannerPdfBlob(opts: {
     throw new Error('Bu hafta için PDF oluşturulacak plan verisi yok.');
   }
 
-  const docEl = await buildWeeklyPlannerDocument({
+  const docEl = await buildWeeklyPlannerGoalsPage({
     studentName,
     weekStart,
     weekEnd,
     goals,
+    motivationMessages,
+    institutionName,
+    logoUrl,
+  });
+  const gridEl = await buildWeeklyPlannerGridPage({
+    studentName,
+    weekStart,
+    weekEnd,
     columns,
     rows,
     institutionName,
     logoUrl,
   });
 
-  const canvas = await rasterizeHtmlElementForPdf(docEl, 2);
+  const [goalsCanvas, gridCanvas] = await Promise.all([
+    rasterizeHtmlElementForPdf(docEl, rasterScale),
+    rasterizeHtmlElementForPdf(gridEl, rasterScale),
+  ]);
 
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-  const pageW = doc.internal.pageSize.getWidth();
-  const margin = 8;
-  const contentW = pageW - margin * 2;
-
-  addCanvasPaginatedToLandscapePdf(doc, canvas, margin, contentW);
+  const margin = PDF_PAGE_MARGIN_MM;
+  addCanvasFillLandscapePage(doc, goalsCanvas, margin, false, imageFormat, jpegQuality);
+  addCanvasFillLandscapePage(doc, gridCanvas, margin, true, imageFormat, jpegQuality);
   const blob = doc.output('blob');
   return { blob, filename };
 }
@@ -516,6 +723,9 @@ export async function downloadWeeklyPlannerPdf(opts: {
   institutionName?: string;
   logoUrl?: string | null;
   preferGridFallback?: boolean;
+  prevWeekStart?: string;
+  prevWeekEnd?: string;
+  prevWeekEntries?: WeeklyPlannerEntryRow[];
 }): Promise<void> {
   const { blob, filename } = await buildWeeklyPlannerPdfBlob(opts);
   const url = URL.createObjectURL(blob);

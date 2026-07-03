@@ -5,6 +5,8 @@ import type {
   EduHomework,
   EduHomeworkSubmission,
   EduLessonRow,
+  EduLessonRowProgress,
+  EduRowStudentProgress,
   HomeworkStatus,
   LessonRowFormValues,
   LessonStatus
@@ -24,25 +26,27 @@ export async function fetchEduLessonRows(): Promise<EduLessonRow[]> {
   return j.data || [];
 }
 
-export async function createEduLessonRow(values: LessonRowFormValues): Promise<EduLessonRow> {
+export async function createEduLessonRow(
+  values: LessonRowFormValues
+): Promise<{ data: EduLessonRow; warning?: string; hint?: string }> {
   const res = await apiFetch('/api/edu-panel?resource=rows', {
     method: 'POST',
     body: JSON.stringify(values)
   });
-  const j = await parseJson<{ data: EduLessonRow }>(res);
-  return j.data;
+  const j = await parseJson<{ data: EduLessonRow; warning?: string; hint?: string }>(res);
+  return { data: j.data, warning: j.warning, hint: j.hint };
 }
 
 export async function updateEduLessonRow(
   id: string,
   patch: Partial<LessonRowFormValues> & { status?: LessonStatus }
-): Promise<EduLessonRow> {
+): Promise<{ data: EduLessonRow; warning?: string }> {
   const res = await apiFetch(`/api/edu-panel?resource=rows&id=${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(patch)
   });
-  const j = await parseJson<{ data: EduLessonRow }>(res);
-  return j.data;
+  const j = await parseJson<{ data: EduLessonRow; warning?: string }>(res);
+  return { data: j.data, warning: j.warning };
 }
 
 export async function deleteEduLessonRow(id: string): Promise<void> {
@@ -154,6 +158,52 @@ export async function submitEduHomework(
   });
   await parseJson(res);
 }
+
+export async function fetchMyEduProgress(): Promise<EduLessonRowProgress[]> {
+  const res = await apiFetch('/api/edu-panel?resource=progress');
+  const j = await parseJson<{ data: EduLessonRowProgress[] }>(res);
+  return j.data || [];
+}
+
+export async function saveEduLessonProgress(
+  lessonRowId: string,
+  patch: {
+    animation_completed?: boolean;
+    homework_percent?: number;
+    topic_completed?: boolean;
+  }
+): Promise<EduLessonRowProgress> {
+  const res = await apiFetch('/api/edu-panel?resource=progress', {
+    method: 'POST',
+    body: JSON.stringify({ lesson_row_id: lessonRowId, ...patch })
+  });
+  const j = await parseJson<{ data: EduLessonRowProgress }>(res);
+  return j.data;
+}
+
+export async function markEduAnimationViewed(lessonRowId: string): Promise<void> {
+  const res = await apiFetch('/api/edu-panel?resource=progress', {
+    method: 'POST',
+    body: JSON.stringify({ lesson_row_id: lessonRowId, animation_completed: true })
+  });
+  await parseJson(res);
+}
+
+export async function fetchEduRowStudentProgress(
+  lessonRowId: string,
+  classId?: string | null
+): Promise<{ data: EduRowStudentProgress[]; classes: { id: string; name: string }[] }> {
+  const q = classId
+    ? `&class_id=${encodeURIComponent(classId)}`
+    : '';
+  const res = await apiFetch(
+    `/api/edu-panel?resource=row-progress&lesson_row_id=${encodeURIComponent(lessonRowId)}${q}`
+  );
+  const j = await parseJson<{ data: EduRowStudentProgress[]; classes?: { id: string; name: string }[] }>(res);
+  return { data: j.data || [], classes: j.classes || [] };
+}
+
+export type { EduRowStudentProgress };
 
 export async function fetchEduClasses(): Promise<EduClass[]> {
   const res = await apiFetch('/api/class-live-lessons?scope=classes');

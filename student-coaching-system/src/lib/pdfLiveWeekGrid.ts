@@ -79,6 +79,45 @@ export function addCanvasPaginatedToLandscapePdf(
   addCanvasPaginated(doc, canvas, margin, maxWidthMm);
 }
 
+/** Tek sayfaya sığdır (ölçekle); taşma yok — takvim PDF için */
+export type PdfCanvasImageFormat = 'PNG' | 'JPEG';
+
+export function addCanvasFitToLandscapePage(
+  doc: jsPDF,
+  canvas: HTMLCanvasElement,
+  margin: number,
+  newPage: boolean,
+  imageFormat: PdfCanvasImageFormat = 'PNG',
+  jpegQuality = 0.92
+): void {
+  if (newPage) doc.addPage();
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const contentW = pageW - margin * 2;
+  const contentH = pageH - margin * 2;
+  addCanvasFitWidth(doc, canvas, margin, margin, contentW, contentH, imageFormat, jpegQuality);
+}
+
+/** A4 yatay sayfanın tamamını kapla (kenardan kenara) */
+export function addCanvasFillLandscapePage(
+  doc: jsPDF,
+  canvas: HTMLCanvasElement,
+  margin: number,
+  newPage: boolean,
+  imageFormat: PdfCanvasImageFormat = 'PNG',
+  jpegQuality = 0.92
+): void {
+  if (newPage) doc.addPage();
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const contentW = pageW - margin * 2;
+  const contentH = pageH - margin * 2;
+  const mime = imageFormat === 'JPEG' ? 'image/jpeg' : 'image/png';
+  const quality = imageFormat === 'JPEG' ? jpegQuality : 0.95;
+  const img = canvas.toDataURL(mime, quality);
+  doc.addImage(img, imageFormat, margin, margin, contentW, contentH);
+}
+
 async function loadImageForPdfExport(url: string): Promise<HTMLImageElement | null> {
   if (!url.trim()) return null;
   return new Promise((resolve) => {
@@ -198,7 +237,9 @@ function addCanvasFitWidth(
   x: number,
   y: number,
   maxWidthMm: number,
-  maxHeightMm: number
+  maxHeightMm: number,
+  imageFormat: PdfCanvasImageFormat = 'PNG',
+  jpegQuality = 0.92
 ): number {
   const cw = canvas.width;
   const ch = canvas.height;
@@ -208,8 +249,10 @@ function addCanvasFitWidth(
     hMm = maxHeightMm;
     wMm = (cw / ch) * hMm;
   }
-  const img = canvas.toDataURL('image/png', 0.95);
-  doc.addImage(img, 'PNG', x, y, wMm, hMm);
+  const mime = imageFormat === 'JPEG' ? 'image/jpeg' : 'image/png';
+  const quality = imageFormat === 'JPEG' ? jpegQuality : 0.95;
+  const img = canvas.toDataURL(mime, quality);
+  doc.addImage(img, imageFormat, x, y, wMm, hMm);
   return hMm;
 }
 
@@ -245,8 +288,8 @@ export async function buildHeaderElement(
   const wrap = document.createElement('div');
   wrap.setAttribute('data-pdf-font-root', '1');
   wrap.style.boxSizing = 'border-box';
-  wrap.style.width = '1280px';
-  wrap.style.height = '96px';
+  wrap.style.width = '100%';
+  wrap.style.height = '72px';
   wrap.style.display = 'flex';
   wrap.style.alignItems = 'center';
   wrap.style.padding = '0 28px';

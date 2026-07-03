@@ -8,6 +8,7 @@ import { normalizePhoneToE164 } from '../api/_lib/phone-whatsapp.js';
 import { metaWhatsAppConfigured } from '../api/_lib/meta-whatsapp.js';
 import { sendAutomatedWhatsApp } from '../api/_lib/whatsapp-outbound.js';
 import { syncClassSessionsScheduledToCompleted } from '../api/_lib/class-sessions-sync.js';
+import { handleLivePresenceRequest } from '../api/_lib/live-presence-api.js';
 import { resolveStudentRowForUser } from '../api/_lib/resolve-student-id.js';
 import {
   buildAttendanceReport,
@@ -36,6 +37,15 @@ import {
 import { shouldSkipClassLessonReminder } from '../api/_lib/class-lesson-reminder-logic.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import {
+  buildClassStudentSubjectMap,
+  filterStudentIdsForClassSubject,
+  loadClassStudentSubjectRows,
+  studentHasClassSubject,
+  syncInstitutionStudentSubjectsFromPlans,
+  patchBulkClassStudentSubjects
+} from '../api/_lib/class-student-subjects.js';
+import { buildClassSessionAttendanceRoster } from '../api/_lib/class-session-attendance-roster.js';
+import {
   insertOneOptionalModerator,
   insertManyOptionalModerator
 } from '../api/_lib/supabase-optional-moderator.js';
@@ -47,7 +57,7 @@ import {
 } from '../api/_lib/class-sessions-from-slots.js';
 import { handleBbbJoinGet, handleBbbRecordingGet, patchRowMeetingLinks, patchRowRecordingLink } from '../api/_lib/bbb-join-handler.js';
 import { createGuestJoinShareLink } from '../api/_lib/bbb-guest-join-core.js';
-import { buildBbbAttendeeJoinUrl, parseBbbJoinCredentials, parseBbbMeetingIdFromJoinUrl } from '../api/_lib/bbb.js';
+import { buildBbbAttendeeJoinUrl, buildStaffBbbJoinUrl, parseBbbJoinCredentials, parseBbbMeetingIdFromJoinUrl, parseBbbPasswordFromJoinUrl } from '../api/_lib/bbb.js';
 import { pollBbbPresenceForSession, applyAutoAttendanceForClassSession } from '../api/_lib/bbb-attendance.js';
 import { isBbbAutoAttendanceEnabled } from '../api/_lib/bbb-auto-attendance-enabled.js';
 import { applyEarlyBbbAbsentCheck } from '../api/_lib/bbb-early-absent.js';
@@ -59,6 +69,9 @@ import {
   GROUP_LESSON_UNIT_MINUTES
 } from '../api/_lib/class-lesson-payment-units.js';
 import { isSolutionLessonSubject } from '../api/_lib/solution-appointments-core.js';
+import { listScheduledSessionBatchPeers } from '../api/_lib/class-session-batch-peers.js';
+import { ensureClassTeacherLink, getTeacherPanelClassIds } from '../api/_lib/teacher-class-scope.js';
+import { errorMessage } from '../api/_lib/error-msg.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -126,10 +139,24 @@ function isAdminRole(role) {
   return r === 'admin' || r === 'super_admin' || r === 'coach';
 }
 
-/** Sınıf listesinde kurum geneli: yalnızca yöneticiler (koç / öğretmen sınıfları sınırlı) */
-function seesAllInstitutionClasses(role) {
+/** Sınıf listesinde kurum geneli: salt yönetici (öğretmen/koç etiketi varsa asla tam kurum) */
+function seesAllInstitutionClasses(role, roleTags = []) {
   const r = normalizeRole(role);
-  return r === 'admin' || r === 'super_admin';
+  const tags = Array.isArray(roleTags) ? roleTags : [];
+  if (
+    tags.includes('teacher') ||
+    tags.includes('coach') ||
+    isTeacherRole(role) ||
+    r === 'coach'
+  ) {
+    return false;
+  }
+  return (
+    r === 'admin' ||
+    r === 'super_admin' ||
+    tags.includes('admin') ||
+    tags.includes('super_admin')
+  );
 }
 
 function isTeacherRole(role) {
@@ -180,9 +207,31 @@ function dowFromIsoDate(dateStr) {
   return jd === 0 ? 7 : jd;
 }
 
-async function teacherTimeConflictOnDate({ teacherId, lessonDate, start, end, excludeSessionIds = [], subject = '' }) {
+async function cancelClassSessionsByIds(ids) {
+  const list = [...new Set((ids || []).map((x) => String(x || '').trim()).filter(Boolean))];
+  if (!list.length) return { updated: 0 };
+  const { data, error } = await supabaseAdmin
+    .from('class_sessions')
+    .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+    .in('id', list)
+    .neq('status', 'cancelled')
+    .select('id');
+  if (error) throw error;
+  return { updated: (data || []).length };
+}
+
+async function teacherTimeConflictOnDate({
+  teacherId,
+  lessonDate,
+  start,
+  end,
+  excludeSessionIds = [],
+  subject = '',
+  sameClassId = null
+}) {
   if (isSolutionLessonSubject(subject)) return { ok: true };
   const ex = new Set(excludeSessionIds.map(String));
+  const ownClassId = sameClassId ? String(sameClassId).trim() : '';
   const { data: sess, error: sErr } = await supabaseAdmin
     .from('class_sessions')
     .select('id,start_time,end_time,status')
@@ -200,12 +249,15 @@ async function teacherTimeConflictOnDate({ teacherId, lessonDate, start, end, ex
   if (dow == null) return { ok: true };
   const { data: slots, error: slErr } = await supabaseAdmin
     .from('class_weekly_slots')
-    .select('start_time,end_time')
+    .select('class_id,start_time,end_time')
     .eq('teacher_id', teacherId)
     .eq('day_of_week', dow);
   if (slErr) throw slErr;
-  if ((slots || []).some((x) => timeOverlap(start, end, x.start_time, x.end_time))) {
-    return { ok: false, reason: `Bu öğretmenin aynı gün/saatte haftalık şablon dersi var (${lessonDate}).` };
+  for (const x of slots || []) {
+    if (ownClassId && String(x.class_id || '') === ownClassId) continue;
+    if (timeOverlap(start, end, x.start_time, x.end_time)) {
+      return { ok: false, reason: `Bu öğretmenin aynı gün/saatte haftalık şablon dersi var (${lessonDate}).` };
+    }
   }
   return { ok: true };
 }
@@ -303,38 +355,25 @@ async function getManagedClassIds(actor) {
   const role = normalizeRole(actor.role);
   const roleTags = await normalizedUserRolesFromDb(actor.sub);
 
-  if (
+  const hasTeacher = roleTags.includes('teacher') || isTeacherRole(actor.role);
+  const hasCoach = roleTags.includes('coach') || role === 'coach';
+  const hasAdmin =
     role === 'admin' ||
     role === 'super_admin' ||
     roleTags.includes('admin') ||
-    roleTags.includes('super_admin')
-  ) {
+    roleTags.includes('super_admin');
+
+  /** Salt yönetici: sınırsız. admin+öğretmen veya admin+koç atamaya göre sınırlanır. */
+  if (hasAdmin && !hasTeacher && !hasCoach) {
     return null;
   }
 
   const classIds = new Set();
 
-  /** Öğretmen: class_teachers atamaları (koç+öğretmen birlikte olsa da geçerli) */
+  /** Öğretmen: yalnızca class_teachers ataması (slot geçmişi tüm kurumu açmasın) */
   if (roleTags.includes('teacher') || isTeacherRole(actor.role)) {
-    const tid = String(actor.sub || '').trim();
-    const { data, error } = await supabaseAdmin
-      .from('class_teachers')
-      .select('class_id')
-      .eq('teacher_id', tid);
-    if (error) throw error;
-    for (const row of data || []) {
-      if (row.class_id) classIds.add(row.class_id);
-    }
-    /** Slot veya oturumda öğretmen atanmış sınıflar (class_teachers eksik olsa bile) */
-    const [{ data: slotRows }, { data: sessionRows }] = await Promise.all([
-      supabaseAdmin.from('class_weekly_slots').select('class_id').eq('teacher_id', tid),
-      supabaseAdmin.from('class_sessions').select('class_id').eq('teacher_id', tid)
-    ]);
-    for (const row of slotRows || []) {
-      if (row.class_id) classIds.add(row.class_id);
-    }
-    for (const row of sessionRows || []) {
-      if (row.class_id) classIds.add(row.class_id);
+    for (const cid of await getTeacherPanelClassIds(actor.sub)) {
+      classIds.add(cid);
     }
   }
 
@@ -361,7 +400,12 @@ async function getManagedClassIds(actor) {
     }
   }
 
-  if (roleTags.includes('teacher') || roleTags.includes('coach')) {
+  if (
+    roleTags.includes('teacher') ||
+    roleTags.includes('coach') ||
+    isTeacherRole(actor.role) ||
+    role === 'coach'
+  ) {
     return [...classIds];
   }
 
@@ -422,6 +466,21 @@ async function resolveActorStudentId(actor) {
   return sid;
 }
 
+async function filterRowsForStudentEnrollment(actor, role, rows) {
+  if (normalizeRole(role) !== 'student') return rows || [];
+  const sid = await resolveActorStudentId(actor);
+  if (!sid) return [];
+  const classIds = [...new Set((rows || []).map((r) => String(r.class_id || '').trim()).filter(Boolean))];
+  if (!classIds.length) return [];
+  const enrollmentRows = await loadClassStudentSubjectRows(classIds);
+  const map = buildClassStudentSubjectMap(enrollmentRows);
+  return (rows || []).filter((r) => {
+    const classMap = map.get(String(r.class_id || ''));
+    const enrolled = classMap?.get(sid);
+    return studentHasClassSubject(enrolled, r.subject);
+  });
+}
+
 async function actorEnrolledInClass(actor, details) {
   const sid = await resolveActorStudentId(actor);
   return Boolean(sid && details.student_ids.includes(sid));
@@ -429,61 +488,22 @@ async function actorEnrolledInClass(actor, details) {
 
 async function canManageOrViewClassSessions(actor, role, details) {
   if (isAdminRole(role)) return true;
+  const classId = String(details.class?.id || '').trim();
   if (details.teacher_ids.includes(String(actor.sub || ''))) return true;
+  if (isTeacherRole(role) && classId) {
+    const allowed = await getManagedClassIds(actor);
+    if (Array.isArray(allowed) && allowed.includes(classId)) return true;
+  }
   if (normalizeRole(role) === 'student') return await actorEnrolledInClass(actor, details);
   return false;
 }
 
-function normalizeSessionTimeSig(t) {
-  return String(t || '').slice(0, 8);
-}
-
-function sessionBatchSignature(session) {
-  return [
-    String(session.class_id || ''),
-    String(session.subject || '').trim(),
-    String(session.teacher_id || ''),
-    normalizeSessionTimeSig(session.start_time),
-    normalizeSessionTimeSig(session.end_time)
-  ].join('|');
-}
-
-/** Toplu planlanmış planlı oturum eşleri (schedule_batch_id veya aynı şablon imzası). */
-async function listScheduledSessionBatchPeers(session) {
-  const selfId = String(session.id || '').trim();
-  if (String(session.status || '') !== 'scheduled') return selfId ? [selfId] : [];
-
-  const batchId = session.schedule_batch_id ? String(session.schedule_batch_id).trim() : '';
-  if (batchId) {
-    const { data, error } = await supabaseAdmin
-      .from('class_sessions')
-      .select('id')
-      .eq('schedule_batch_id', batchId)
-      .eq('status', 'scheduled');
-    if (error) {
-      if (/schedule_batch_id|schema cache|PGRST204/i.test(String(error.message || ''))) {
-        /* sütun yoksa imza yöntemine düş */
-      } else {
-        throw error;
-      }
-    } else {
-      const ids = (data || []).map((r) => String(r.id)).filter(Boolean);
-      if (ids.length) return ids;
-    }
-  }
-
-  const sig = sessionBatchSignature(session);
-  const { data, error } = await supabaseAdmin
-    .from('class_sessions')
-    .select('id,class_id,subject,teacher_id,start_time,end_time,status')
-    .eq('class_id', session.class_id)
-    .eq('status', 'scheduled');
-  if (error) throw error;
-  const ids = (data || [])
-    .filter((r) => sessionBatchSignature(r) === sig)
-    .map((r) => String(r.id))
-    .filter(Boolean);
-  return ids.length > 1 ? ids : selfId ? [selfId] : [];
+async function actorMayAccessClassId(actor, role, classId, roleTags = []) {
+  const cid = String(classId || '').trim();
+  if (!cid) return false;
+  if (seesAllInstitutionClasses(role, roleTags)) return true;
+  const allowed = await getManagedClassIds(actor);
+  return Array.isArray(allowed) && allowed.includes(cid);
 }
 
 function normalizeAttendanceStatus(raw) {
@@ -576,6 +596,30 @@ async function resolveStudentBbbJoinUrl(actor, row, ensured) {
   return buildBbbAttendeeJoinUrl({ meetingId, attendeePassword: attendeePw, fullName });
 }
 
+async function resolveStaffBbbJoinUrl(actor, row, ensured) {
+  const actorName = String(actor.name || actor.email || 'Öğretmen').trim().slice(0, 64);
+  const meetingId =
+    String(row.bbb_meeting_id || ensured.meetingId || '').trim() ||
+    parseBbbMeetingIdFromJoinUrl(String(ensured.moderatorLink || row.meeting_link_moderator || '')) ||
+    parseBbbMeetingIdFromJoinUrl(String(ensured.attendeeLink || row.meeting_link || '')) ||
+    '';
+  const modPw =
+    String(ensured.moderatorPW || '').trim() ||
+    parseBbbPasswordFromJoinUrl(String(ensured.moderatorLink || row.meeting_link_moderator || '')) ||
+    '';
+  const attendeePw =
+    String(row.bbb_attendee_pw || ensured.attendeePW || '').trim() ||
+    parseBbbJoinCredentials(String(ensured.attendeeLink || row.meeting_link || ''))?.attendeePassword ||
+    '';
+  return buildStaffBbbJoinUrl({
+    actorName,
+    meetingId,
+    moderatorPassword: modPw,
+    attendeePassword: attendeePw,
+    preferModerator: true
+  });
+}
+
 async function handleClassLiveBbbJoin(req, res, actor, role) {
   const slotMode = String(req.query?.kind || 'session').trim() === 'slot';
   const table = slotMode ? 'class_weekly_slots' : 'class_sessions';
@@ -617,7 +661,8 @@ async function handleClassLiveBbbJoin(req, res, actor, role) {
         bbb_meeting_id: links.bbb_meeting_id,
         bbb_attendee_pw: links.bbb_attendee_pw
       }),
-    resolveStudentJoinUrl: slotMode ? undefined : (act, row, ensured) => resolveStudentBbbJoinUrl(act, row, ensured)
+    resolveStudentJoinUrl: slotMode ? undefined : (act, row, ensured) => resolveStudentBbbJoinUrl(act, row, ensured),
+    resolveStaffJoinUrl: async (act, row, ensured) => resolveStaffBbbJoinUrl(act, row, ensured)
   });
 }
 
@@ -663,6 +708,20 @@ export default async function handler(req, res) {
   } catch {
     return res.status(401).json({ error: 'Missing token' });
   }
+
+  const earlyScope = req.method === 'GET' ? String(req.query.scope || 'classes') : '';
+  if (req.method === 'GET' && earlyScope === 'live-presence') {
+    const role = normalizeRole(actor.role);
+    const result = await handleLivePresenceRequest({
+      actor,
+      role,
+      query: req.query,
+      getManagedClassIds,
+      normalizeRole
+    });
+    return res.status(result.status).json(result.body);
+  }
+
   try {
     actor = await enrichStudentActor(actor);
   } catch {
@@ -670,9 +729,21 @@ export default async function handler(req, res) {
   }
   const role = normalizeRole(actor.role);
   const institutionId = actor.institution_id || null;
+  const getScope = req.method === 'GET' ? String(req.query.scope || 'classes') : '';
+  const getOpEarly = req.method === 'GET' ? String(req.query?.op || '').trim() : '';
+  const skipSessionSync =
+    getScope === 'live-presence' ||
+    getScope === 'attendance-prefs' ||
+    getScope === 'class-subjects' ||
+    getScope === 'teacher-rates' ||
+    getScope === 'teacher-payouts';
+  const roleTags =
+    getScope === 'live-presence'
+      ? []
+      : await normalizedUserRolesFromDb(actor.sub);
 
   if (req.method === 'GET') {
-    const getOp = String(req.query?.op || '').trim();
+    const getOp = getOpEarly;
     if (getOp === 'bbb-join') {
       return handleClassLiveBbbJoin(req, res, actor, role);
     }
@@ -682,16 +753,18 @@ export default async function handler(req, res) {
     if (getOp === 'guest-join-link') {
       return handleClassGuestJoinLink(req, res, actor, role);
     }
-    await syncClassSessionsScheduledToCompleted();
-    const scope = String(req.query.scope || 'classes');
+    if (!skipSessionSync) {
+      await syncClassSessionsScheduledToCompleted();
+    }
+    const scope = getScope || 'classes';
     if (scope === 'classes') {
       const allowedClassIds = await getManagedClassIds(actor);
       const scopedClassInst = resolveScopedInstitutionId(req.query.institution_id, institutionId);
       let q = supabaseAdmin.from('classes').select('*').order('created_at', { ascending: false });
-      if (!seesAllInstitutionClasses(role)) {
+      if (!seesAllInstitutionClasses(role, roleTags)) {
         if (!allowedClassIds || !allowedClassIds.length) return res.status(200).json({ data: [] });
         q = q.in('id', allowedClassIds);
-      } else if (scopedClassInst && seesAllInstitutionClasses(role)) {
+      } else if (scopedClassInst && seesAllInstitutionClasses(role, roleTags)) {
         const studentIds = await getInstitutionStudentIds(supabaseAdmin, scopedClassInst);
         const classIdSet = await loadInstitutionClassIdSet(supabaseAdmin, scopedClassInst, studentIds);
         const classIds = [...classIdSet];
@@ -708,12 +781,11 @@ export default async function handler(req, res) {
         classIds.length
           ? supabaseAdmin.from('class_teachers').select('class_id, teacher_id').in('class_id', classIds)
           : Promise.resolve({ data: [] }),
-        classIds.length
-          ? supabaseAdmin.from('class_students').select('class_id, student_id').in('class_id', classIds)
-          : Promise.resolve({ data: [] })
+        classIds.length ? loadClassStudentSubjectRows(classIds).then((rows) => ({ data: rows })) : Promise.resolve({ data: [] })
       ]);
       const teacherMap = new Map();
       const studentMap = new Map();
+      const studentSubjectsMap = new Map();
       for (const r of teachersRes.data || []) {
         const arr = teacherMap.get(r.class_id) || [];
         arr.push(r.teacher_id);
@@ -723,13 +795,17 @@ export default async function handler(req, res) {
         const arr = studentMap.get(r.class_id) || [];
         arr.push(r.student_id);
         studentMap.set(r.class_id, arr);
+        const subMap = studentSubjectsMap.get(r.class_id) || {};
+        subMap[r.student_id] = Array.isArray(r.subjects) ? r.subjects : [];
+        studentSubjectsMap.set(r.class_id, subMap);
       }
 
       return res.status(200).json({
         data: (data || []).map((c) => ({
           ...c,
           teacher_ids: teacherMap.get(c.id) || [],
-          student_ids: studentMap.get(c.id) || []
+          student_ids: studentMap.get(c.id) || [],
+          student_subjects: studentSubjectsMap.get(c.id) || {}
         }))
       });
     }
@@ -743,7 +819,8 @@ export default async function handler(req, res) {
       if (
         classId &&
         /^\d{4}-\d{2}-\d{2}$/.test(from) &&
-        /^\d{4}-\d{2}-\d{2}$/.test(to)
+        /^\d{4}-\d{2}-\d{2}$/.test(to) &&
+        String(req.query.materialize || '') === '1'
       ) {
         const details = await getClassDetails(classId);
         if (details.class && (await canManageOrViewClassSessions(actor, role, details))) {
@@ -763,11 +840,19 @@ export default async function handler(req, res) {
         .select('*')
         .order('lesson_date', { ascending: true })
         .order('start_time', { ascending: true });
-      if (classId) q = q.eq('class_id', classId);
+      if (String(req.query.include_cancelled || '') !== '1') {
+        q = q.neq('status', 'cancelled');
+      }
+      if (classId) {
+        if (!(await actorMayAccessClassId(actor, role, classId, roleTags))) {
+          return res.status(200).json({ data: [] });
+        }
+        q = q.eq('class_id', classId);
+      }
       if (from) q = q.gte('lesson_date', from);
       if (to) q = q.lte('lesson_date', to);
 
-      if (!seesAllInstitutionClasses(role)) {
+      if (!seesAllInstitutionClasses(role, roleTags)) {
         if (!allowedClassIds || !allowedClassIds.length) return res.status(200).json({ data: [] });
         q = q.in('class_id', allowedClassIds);
       } else if (institutionId && !classId) {
@@ -778,7 +863,8 @@ export default async function handler(req, res) {
       }
       const { data, error } = await q;
       if (error) return res.status(500).json({ error: error.message });
-      const enriched = enrichMeetingRowsJoinLink(await attachTeacherNameField(data || []), role);
+      const filtered = await filterRowsForStudentEnrollment(actor, role, data || []);
+      const enriched = enrichMeetingRowsJoinLink(await attachTeacherNameField(filtered), role);
       return res.status(200).json({ data: enriched });
     }
 
@@ -979,6 +1065,34 @@ export default async function handler(req, res) {
       });
     }
 
+    if (scope === 'class-subjects') {
+      const classId = String(req.query.class_id || '').trim();
+      if (!classId) return res.status(400).json({ error: 'class_id_required' });
+      const allowedClassIds = await getManagedClassIds(actor);
+      if (!seesAllInstitutionClasses(role, roleTags)) {
+        if (!allowedClassIds?.includes(classId)) return res.status(403).json({ error: 'forbidden' });
+      }
+      const details = await getClassDetails(classId);
+      if (!details.class) return res.status(404).json({ error: 'class_not_found' });
+      const [{ data: slotRows }, { data: sessRows }] = await Promise.all([
+        supabaseAdmin.from('class_weekly_slots').select('subject').eq('class_id', classId),
+        supabaseAdmin
+          .from('class_sessions')
+          .select('subject')
+          .eq('class_id', classId)
+          .order('lesson_date', { ascending: false })
+          .limit(400)
+      ]);
+      const set = new Set();
+      for (const r of [...(slotRows || []), ...(sessRows || [])]) {
+        const s = String(r?.subject || '').trim();
+        if (s) set.add(s);
+      }
+      return res.status(200).json({
+        data: [...set].sort((a, b) => a.localeCompare(b, 'tr'))
+      });
+    }
+
     if (scope === 'slots') {
       const classId = String(req.query.class_id || '').trim();
       const scopedClassInst = resolveScopedInstitutionId(req.query.institution_id, institutionId);
@@ -989,8 +1103,11 @@ export default async function handler(req, res) {
         .order('day_of_week', { ascending: true })
         .order('start_time', { ascending: true });
       if (classId) {
+        if (!(await actorMayAccessClassId(actor, role, classId, roleTags))) {
+          return res.status(200).json({ data: [] });
+        }
         q = q.eq('class_id', classId);
-      } else if (!seesAllInstitutionClasses(role)) {
+      } else if (!seesAllInstitutionClasses(role, roleTags)) {
         if (!allowedClassIds || !allowedClassIds.length) return res.status(200).json({ data: [] });
         q = q.in('class_id', allowedClassIds);
       } else if (scopedClassInst && (role === 'super_admin' || role === 'admin')) {
@@ -1006,7 +1123,8 @@ export default async function handler(req, res) {
       }
       const { data, error } = await q;
       if (error) return res.status(500).json({ error: error.message });
-      const enriched = enrichMeetingRowsJoinLink(await attachTeacherNameField(data || []), role);
+      const filtered = await filterRowsForStudentEnrollment(actor, role, data || []);
+      const enriched = enrichMeetingRowsJoinLink(await attachTeacherNameField(filtered), role);
       return res.status(200).json({ data: enriched });
     }
 
@@ -1015,22 +1133,25 @@ export default async function handler(req, res) {
       if (!sessionId) return res.status(400).json({ error: 'session_id_required' });
       const { data: session } = await supabaseAdmin
         .from('class_sessions')
-        .select('id,class_id')
+        .select('id,class_id,subject')
         .eq('id', sessionId)
         .maybeSingle();
       if (!session) return res.status(404).json({ error: 'session_not_found' });
       const allowedClassIds = await getManagedClassIds(actor);
-      if (!seesAllInstitutionClasses(role)) {
+      if (!seesAllInstitutionClasses(role, roleTags)) {
         if (!allowedClassIds || !allowedClassIds.includes(session.class_id)) {
           return res.status(403).json({ error: 'forbidden' });
         }
       }
-      const { data, error } = await supabaseAdmin
-        .from('class_session_attendance')
-        .select('*')
-        .eq('session_id', sessionId);
+      const [{ data, error }, roster] = await Promise.all([
+        supabaseAdmin.from('class_session_attendance').select('*').eq('session_id', sessionId),
+        buildClassSessionAttendanceRoster({
+          classId: session.class_id,
+          subject: session.subject
+        })
+      ]);
       if (error) return res.status(500).json({ error: error.message });
-      return res.status(200).json({ data: data || [] });
+      return res.status(200).json({ data: data || [], roster });
     }
 
     if (scope === 'attendance-prefs') {
@@ -1071,7 +1192,7 @@ export default async function handler(req, res) {
       const rep = await buildAttendanceReport({
         supabaseAdmin,
         getManagedClassIds,
-        seesAllInstitutionClasses,
+        seesAllInstitutionClasses: (r) => seesAllInstitutionClasses(r, roleTags),
         normalizeRole,
         institutionId,
         actor,
@@ -1086,6 +1207,59 @@ export default async function handler(req, res) {
   if (req.method === 'POST') {
     const op = String(req.query.op || '').trim();
     const body = parseBody(req);
+
+    if (op === 'bulk-patch-student-subjects') {
+      if (!isAdminRole(role)) return res.status(403).json({ error: 'forbidden' });
+      const patches = Array.isArray(body.patches) ? body.patches : [];
+      if (!patches.length) return res.status(400).json({ error: 'patches_required' });
+      const allowedClassIds = await getManagedClassIds(actor);
+      const sanitized = [];
+      for (const patch of patches) {
+        const classId = String(patch?.class_id || '').trim();
+        if (!classId) continue;
+        if (!seesAllInstitutionClasses(role, roleTags)) {
+          if (!allowedClassIds?.includes(classId)) continue;
+        }
+        const details = await getClassDetails(classId);
+        if (!details.class) continue;
+        sanitized.push({
+          class_id: classId,
+          student_subjects:
+            patch.student_subjects && typeof patch.student_subjects === 'object' ? patch.student_subjects : {},
+          subject_options: Array.isArray(patch.subject_options) ? patch.subject_options : []
+        });
+      }
+      if (!sanitized.length) return res.status(400).json({ error: 'no_valid_patches' });
+      const result = await patchBulkClassStudentSubjects(sanitized);
+      return res.status(200).json({
+        ok: true,
+        message: `${result.updated} öğrenci kaydı güncellendi (${result.classes_touched} sınıf).`,
+        ...result
+      });
+    }
+
+    if (op === 'sync-all-student-subjects') {
+      if (!isAdminRole(role)) return res.status(403).json({ error: 'forbidden' });
+      let writeInstitutionId = institutionId;
+      if (role === 'super_admin') {
+        const bodyInst = String(body.institution_id || req.query.institution_id || '').trim();
+        if (bodyInst) writeInstitutionId = bodyInst;
+      }
+      if (!writeInstitutionId) {
+        return res.status(400).json({
+          error: 'institution_id_required',
+          message: 'Kurum seçin.'
+        });
+      }
+      const plannerJsonExtra =
+        body.planner_json && typeof body.planner_json === 'object' ? body.planner_json : null;
+      const result = await syncInstitutionStudentSubjectsFromPlans(writeInstitutionId, plannerJsonExtra);
+      return res.status(200).json({
+        ok: true,
+        message: `${result.updated} öğrenci kaydı güncellendi (${result.classes_touched} sınıf).`,
+        ...result
+      });
+    }
 
     if (op === 'ensure-sessions-range') {
       const classId = String(body.class_id || '').trim();
@@ -1319,6 +1493,8 @@ export default async function handler(req, res) {
       if (!classId) return res.status(400).json({ error: 'class_id_required' });
       const teacherIds = Array.isArray(body.teacher_ids) ? body.teacher_ids.map(String).filter(Boolean) : [];
       const studentIds = Array.isArray(body.student_ids) ? body.student_ids.map(String).filter(Boolean) : [];
+      const studentSubjects =
+        body.student_subjects && typeof body.student_subjects === 'object' ? body.student_subjects : null;
 
       await Promise.all([
         supabaseAdmin.from('class_teachers').delete().eq('class_id', classId),
@@ -1330,9 +1506,15 @@ export default async function handler(req, res) {
           .insert(teacherIds.map((teacherId) => ({ class_id: classId, teacher_id: teacherId })));
       }
       if (studentIds.length) {
-        await supabaseAdmin
-          .from('class_students')
-          .insert(studentIds.map((studentId) => ({ class_id: classId, student_id: studentId })));
+        const rows = studentIds.map((studentId) => {
+          const row = { class_id: classId, student_id: studentId };
+          if (studentSubjects && Object.prototype.hasOwnProperty.call(studentSubjects, studentId)) {
+            const subs = studentSubjects[studentId];
+            row.subjects = Array.isArray(subs) ? subs.map(String).filter(Boolean) : [];
+          }
+          return row;
+        });
+        await supabaseAdmin.from('class_students').insert(rows);
       }
       if (Object.prototype.hasOwnProperty.call(body, 'class_level') || Object.prototype.hasOwnProperty.call(body, 'branch') || Object.prototype.hasOwnProperty.call(body, 'name')) {
         const clsPatch = {};
@@ -1417,9 +1599,6 @@ export default async function handler(req, res) {
     if (op === 'send-lesson-reminder') {
       const sessionId = String(body.session_id || '').trim();
       if (!sessionId) return res.status(400).json({ error: 'session_id_required' });
-      if (!metaWhatsAppConfigured()) {
-        return res.status(503).json({ error: 'meta_whatsapp_not_ready' });
-      }
 
       const { data: session } = await supabaseAdmin
         .from('class_sessions')
@@ -1463,7 +1642,14 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: tplCheck.code });
       }
 
-      const studentIds = details.student_ids || [];
+      const enrollmentRows = await loadClassStudentSubjectRows([session.class_id]);
+      const subjectMap = buildClassStudentSubjectMap(enrollmentRows);
+      const studentIds = filterStudentIdsForClassSubject(
+        subjectMap,
+        session.class_id,
+        session.subject,
+        details.student_ids || []
+      );
       const { data: students } = studentIds.length
         ? await supabaseAdmin
             .from('students')
@@ -1706,6 +1892,7 @@ export default async function handler(req, res) {
           homework: String(body.homework || '').trim() || null
         });
       if (error) return res.status(500).json({ error: error.message });
+      if (teacherId && classId) await ensureClassTeacherLink(classId, teacherId);
       return res.status(201).json({ data, auto_bbb: autoBbb });
     }
 
@@ -1777,7 +1964,14 @@ export default async function handler(req, res) {
         if (!lessonDate) {
           return res.status(400).json({ error: 'date_compute_failed' });
         }
-        const clash = await teacherTimeConflictOnDate({ teacherId, lessonDate, start, end, subject });
+        const clash = await teacherTimeConflictOnDate({
+          teacherId,
+          lessonDate,
+          start,
+          end,
+          subject,
+          sameClassId: classId
+        });
         if (!clash.ok) {
           skipped.push({
             lesson_date: lessonDate,
@@ -2022,7 +2216,8 @@ export default async function handler(req, res) {
         start,
         end,
         excludeSessionIds: [rowId],
-        subject: subjectForCheck
+        subject: subjectForCheck,
+        sameClassId: session.class_id
       });
       if (!clash.ok) {
         return res.status(409).json({
@@ -2079,7 +2274,8 @@ export default async function handler(req, res) {
               start,
               end,
               excludeSessionIds: peerIds,
-              subject: subjectForCheck
+              subject: subjectForCheck,
+              sameClassId: peer.class_id || session.class_id
             });
             if (!clash.ok) {
               return res.status(409).json({
@@ -2138,14 +2334,13 @@ export default async function handler(req, res) {
       if (applyBatch) {
         const peerIds = await listScheduledSessionBatchPeers(session);
         if (peerIds.length > 1) {
-          const { error } = await supabaseAdmin.from('class_sessions').delete().in('id', peerIds);
-          if (error) return res.status(500).json({ error: error.message });
-          return res.status(200).json({ ok: true, deleted_count: peerIds.length, batch: true });
+          const { updated } = await cancelClassSessionsByIds(peerIds);
+          return res.status(200).json({ ok: true, cancelled_count: updated, batch: true });
         }
       }
-      const { error } = await supabaseAdmin.from('class_sessions').delete().eq('id', sessionId);
-      if (error) return res.status(500).json({ error: error.message });
-      return res.status(200).json({ ok: true });
+      const { updated } = await cancelClassSessionsByIds([sessionId]);
+      if (!updated) return res.status(404).json({ error: 'session_not_found' });
+      return res.status(200).json({ ok: true, cancelled: true });
     }
     if (classId) {
       if (!isAdminRole(role)) return res.status(403).json({ error: 'forbidden' });

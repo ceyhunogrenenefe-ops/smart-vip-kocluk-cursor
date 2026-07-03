@@ -2,10 +2,29 @@ import { requireAuthenticatedActor, hasInstitutionAccess } from '../api/_lib/aut
 import { supabaseAdmin, getSupabaseAdmin, hasSupabaseServiceRoleKey } from '../api/_lib/supabase-admin.js';
 import { normalizeUuidOrGenerate } from '../api/_lib/uuid.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
+import { upsertCoachProfile } from '../api/_lib/user-bulk-import.js';
+
+const STAFF_ROLES = new Set(['admin', 'coach', 'teacher']);
 
 function normalizeRole(raw) {
   const v = String(raw || '').trim().toLowerCase();
   return ['admin', 'coach', 'teacher', 'student'].includes(v) ? v : '';
+}
+
+function normalizeInstitutionId(raw) {
+  if (raw == null || raw === '') return null;
+  const s = String(raw).trim();
+  return s.length ? s : null;
+}
+
+/** Kurum yöneticisi onayında kurum her zaman kendi kurumudur; süper admin form/kayıt kurumunu veya body override kullanır. */
+function resolveApprovedInstitutionId(actor, pending, bodyOverride) {
+  const override = normalizeInstitutionId(bodyOverride);
+  if (actor.role === 'admin' && actor.institution_id) {
+    return String(actor.institution_id).trim();
+  }
+  if (override) return override;
+  return normalizeInstitutionId(pending?.institution_id);
 }
 
 function normalizeBirthDate(raw) {
@@ -19,24 +38,34 @@ function actorCanManage(actor, row) {
   if (!row) return false;
   if (actor.role === 'super_admin') return true;
   if (actor.role !== 'admin') return false;
-  return hasInstitutionAccess(actor, row.institution_id);
+  const pendingInst = normalizeInstitutionId(row.institution_id);
+  if (!pendingInst) return Boolean(actor.institution_id);
+  return hasInstitutionAccess(actor, pendingInst);
 }
 
 async function provisionSupabaseAuthUser(userRow, passwordPlain) {
   if (!hasSupabaseServiceRoleKey()) return;
+  const pwd = String(passwordPlain || '').trim();
+  if (pwd.length < 6) return;
   const sb = getSupabaseAdmin();
-  const { data: existing } = await sb.auth.admin.getUserById(String(userRow.id));
-  if (existing?.user?.id) return;
-  await sb.auth.admin.createUser({
-    id: String(userRow.id),
-    email: String(userRow.email || '').toLowerCase().trim(),
-    password: String(passwordPlain || ''),
+  const id = String(userRow.id);
+  const email = String(userRow.email || '').toLowerCase().trim();
+  const { data: existing, error: getErr } = await sb.auth.admin.getUserById(id);
+  if (!getErr && existing?.user?.id) {
+    await sb.auth.admin.updateUserById(id, { password: pwd, email_confirm: true });
+    return;
+  }
+  const { error: cErr } = await sb.auth.admin.createUser({
+    id,
+    email,
+    password: pwd,
     email_confirm: true,
     user_metadata: {
       name: String(userRow.name || ''),
       app_role: String(userRow.role || '')
     }
   });
+  if (cErr) throw cErr;
 }
 
 export default async function handler(req, res) {
@@ -59,7 +88,12 @@ export default async function handler(req, res) {
         .eq('status', 'pending')
         .order('created_at', { ascending: false });
       if (actor.role === 'admin') {
-        q = q.eq('institution_id', actor.institution_id || '');
+        const inst = actor.institution_id ? String(actor.institution_id).trim() : '';
+        if (inst) {
+          q = q.or(`institution_id.eq.${inst},institution_id.is.null`);
+        } else {
+          q = q.is('institution_id', null);
+        }
       }
       const { data, error } = await q;
       if (error) throw error;
@@ -75,7 +109,9 @@ export default async function handler(req, res) {
 
       const { data: pending, error: pErr } = await supabaseAdmin
         .from('pending_registrations')
-        .select('*')
+        .select(
+          'id, institution_id, first_name, last_name, tc_identity_no, email, phone_e164, class_level, branch, parent_name, parent_phone_e164, birth_date, requested_role, password_plain, status, created_at, updated_at'
+        )
         .eq('id', registrationId)
         .maybeSingle();
       if (pErr) throw pErr;
@@ -103,7 +139,14 @@ export default async function handler(req, res) {
 
       const email = String(pending.email || '').toLowerCase().trim();
       const role = normalizeRole(pending.requested_role);
+      const passwordPlain = String(pending.password_plain || '').trim();
       if (!email || !role) return res.status(400).json({ error: 'invalid_pending_data' });
+      if (passwordPlain.length < 6) {
+        return res.status(400).json({
+          error: 'missing_registration_password',
+          message: 'Kayıt kaydında geçerli şifre bulunamadı. Kullanıcının kayıt formunu yeniden göndermesini isteyin.'
+        });
+      }
       const tcIdentityNo = String(pending.tc_identity_no || '').trim() || null;
       const classLevel = String(pending.class_level || '').trim() || null;
       const branch = String(pending.branch || '').trim() || null;
@@ -120,6 +163,31 @@ export default async function handler(req, res) {
         return res.status(409).json({ error: 'email_zaten_kullanimda' });
       }
 
+      const institutionId = resolveApprovedInstitutionId(actor, pending, body.institution_id);
+
+      if (STAFF_ROLES.has(role) && !institutionId) {
+        return res.status(400).json({
+          error: 'institution_required_for_staff',
+          message:
+            'Öğretmen, koç veya yönetici hesabı için kurum atanmalıdır. Kurum yöneticisi olarak onaylayın veya süper admin kurum seçerek onaylayın.'
+        });
+      }
+
+      if (institutionId) {
+        const { data: instRow, error: instErr } = await supabaseAdmin
+          .from('institutions')
+          .select('id')
+          .eq('id', institutionId)
+          .maybeSingle();
+        if (instErr) throw instErr;
+        if (!instRow?.id) {
+          return res.status(400).json({
+            error: 'invalid_institution_id',
+            message: 'Seçilen kurum veritabanında bulunamadı.'
+          });
+        }
+      }
+
       const userId = normalizeUuidOrGenerate(null);
       const fullName = `${String(pending.first_name || '').trim()} ${String(pending.last_name || '').trim()}`.trim();
       const now = new Date().toISOString();
@@ -131,8 +199,8 @@ export default async function handler(req, res) {
         tc_identity_no: tcIdentityNo,
         role,
         roles: [role],
-        password_hash: String(pending.password_plain || ''),
-        institution_id: pending.institution_id || (actor.role === 'admin' ? actor.institution_id || null : null),
+        password_hash: passwordPlain,
+        institution_id: institutionId,
         is_active: true,
         package: 'trial',
         start_date: now,
@@ -150,7 +218,7 @@ export default async function handler(req, res) {
       if (uErr) throw uErr;
 
       try {
-        await provisionSupabaseAuthUser(createdUser, String(pending.password_plain || ''));
+        await provisionSupabaseAuthUser(createdUser, passwordPlain);
       } catch (authErr) {
         console.warn('[registration-approvals] auth provision', errorMessage(authErr));
       }
@@ -194,6 +262,17 @@ export default async function handler(req, res) {
           });
           if (stInsErr) throw stInsErr;
         }
+      }
+
+      if (role === 'coach' || role === 'teacher') {
+        await upsertCoachProfile({
+          userId: createdUser.id,
+          fullName: fullName || email,
+          email,
+          phone: pending.phone_e164 || null,
+          institutionId,
+          now
+        });
       }
 
       const { data: updatedPending, error: pUpdErr } = await supabaseAdmin

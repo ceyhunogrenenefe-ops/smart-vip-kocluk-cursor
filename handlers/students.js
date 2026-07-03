@@ -179,21 +179,44 @@ async function assertStudentVisibilityResolved(actor, student) {
 }
 
 async function listStudentsMergedCoachTeacher(actor, roleSet) {
-  const rowsMap = new Map();
   const inst = actor.institution_id || null;
+  const primary = normActorRole(actor.role);
 
+  if (primary === 'coach' && roleSet.has('coach') && actor.coach_id) {
+    const { data, error } = await supabaseAdmin
+      .from('students')
+      .select(STUDENT_LIST_COLUMNS)
+      .eq('coach_id', actor.coach_id)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  }
+
+  if (primary === 'teacher' && roleSet.has('teacher') && inst) {
+    const { ids } = await getTeacherGroupClassStudentScope(actor.sub);
+    if (!ids.length) return [];
+    const { data, error } = await supabaseAdmin
+      .from('students')
+      .select(STUDENT_LIST_COLUMNS)
+      .in('id', ids)
+      .eq('institution_id', inst)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  }
+
+  /** İkincil etiket: birincil rol koç/öğretmen değilse dar kapsam */
   if (roleSet.has('teacher') && inst) {
     const { ids } = await getTeacherGroupClassStudentScope(actor.sub);
-    if (ids.length) {
-      const { data, error } = await supabaseAdmin
-        .from('students')
-        .select(STUDENT_LIST_COLUMNS)
-        .in('id', ids)
-        .eq('institution_id', inst)
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      (data || []).forEach((row) => rowsMap.set(row.id, row));
-    }
+    if (!ids.length) return [];
+    const { data, error } = await supabaseAdmin
+      .from('students')
+      .select(STUDENT_LIST_COLUMNS)
+      .in('id', ids)
+      .eq('institution_id', inst)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
   }
 
   if (roleSet.has('coach') && actor.coach_id) {
@@ -203,12 +226,10 @@ async function listStudentsMergedCoachTeacher(actor, roleSet) {
       .eq('coach_id', actor.coach_id)
       .order('created_at', { ascending: false });
     if (error) throw error;
-    (data || []).forEach((row) => rowsMap.set(row.id, row));
+    return data || [];
   }
 
-  return [...rowsMap.values()].sort(
-    (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
-  );
+  return [];
 }
 
 export default async function handler(req, res) {
@@ -274,12 +295,6 @@ export default async function handler(req, res) {
         return res.status(200).json({ data: data || [] });
       }
 
-      /** Öğretmen/koç: kurumdaki tüm liste değil — sınıf veya koç ataması (admin ile birlikte de önce dar kapsam) */
-      if (rs.has('teacher') || rs.has('coach')) {
-        const merged = await listStudentsMergedCoachTeacher(actor, rs);
-        return res.status(200).json({ data: merged });
-      }
-
       if (rs.has('admin')) {
         if (!actor.institution_id) return res.status(403).json({ error: 'institution_missing' });
         const { data, error } = await supabaseAdmin
@@ -289,6 +304,12 @@ export default async function handler(req, res) {
           .order('created_at', { ascending: false });
         if (error) throw error;
         return res.status(200).json({ data: data || [] });
+      }
+
+      /** Öğretmen/koç: kurumdaki tüm liste değil — sınıf veya koç ataması */
+      if (rs.has('teacher') || rs.has('coach')) {
+        const merged = await listStudentsMergedCoachTeacher(actor, rs);
+        return res.status(200).json({ data: merged });
       }
 
       return res.status(200).json({ data: [] });

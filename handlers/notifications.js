@@ -7,6 +7,9 @@ import {
   notificationMatchesRecipient
 } from '../api/_lib/platform-notifications.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
+import { getCachedInbox, setCachedInbox } from '../api/_lib/notifications-inbox-cache.js';
+
+const INBOX_TIMEOUT_MS = 12_000;
 function parseBody(req) {
   const b = req.body;
   if (b && typeof b === 'object') return b;
@@ -49,8 +52,24 @@ async function loadActorUserRow(actor) {
 }
 
 /** JWT + users + students — kurum ve rol eşleşmesi için */
-async function loadRecipientContext(actor) {
+async function loadRecipientContext(actor, { lite = false } = {}) {
   const primaryRole = String(actor.role || '').trim();
+
+  if (lite) {
+    const roles = new Set([primaryRole].filter(Boolean));
+    const altUserIds = new Set();
+    const studentId = actor.student_id ? String(actor.student_id).trim() : '';
+    if (studentId) altUserIds.add(studentId);
+    return {
+      userId: actor.sub,
+      role: primaryRole || 'student',
+      roles: [...roles],
+      institutionId: actor.institution_id ? String(actor.institution_id) : null,
+      altUserIds: [...altUserIds],
+      coachId: actor.coach_id || null
+    };
+  }
+
   const { data: u } = await supabaseAdmin
     .from('users')
     .select('id, role, institution_id')
@@ -235,6 +254,50 @@ async function enrichWithReadState(rows, userId) {
   }));
 }
 
+async function loadInboxForActor(actor, role, limit) {
+  const recipient = await loadRecipientContext(actor, { lite: true });
+
+  let q = supabaseAdmin
+    .from('platform_notifications')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(60);
+
+  const inst = recipient.institutionId;
+  if (inst && role !== 'super_admin') {
+    q = q.or(`institution_id.eq.${inst},institution_id.is.null`);
+  }
+
+  const { data, error } = await q;
+  if (error) throw error;
+
+  let rows = (data || []).filter((n) => notificationMatchesRecipient(n, recipient));
+
+  const isCoach = role === 'coach' || recipient.roles.includes('coach');
+  if (isCoach) {
+    const coachId = actor.coach_id || recipient.coachId;
+    if (coachId) {
+      const studentIds = await coachStudentUserIds(coachId);
+      rows = rows.filter((n) => {
+        if (n.target_type === 'user') {
+          const tid = String(n.target_user_id || '');
+          return studentIds.has(tid) || recipient.altUserIds.includes(tid);
+        }
+        if (n.target_type === 'role' && n.target_role === 'student') {
+          return true;
+        }
+        return false;
+      });
+    } else {
+      rows = [];
+    }
+  }
+
+  rows = await enrichWithReadState(rows.slice(0, limit), actor.sub);
+  const unreadCount = rows.filter((r) => !r.read_at).length;
+  return { data: rows, unread_count: unreadCount };
+}
+
 export default async function handler(req, res) {
   try {
     const actor = requireAuthenticatedActor(req);
@@ -341,43 +404,24 @@ export default async function handler(req, res) {
         return res.status(200).json({ data: data || [] });
       }
 
-      const recipient = await loadRecipientContext(actor);
-
-      const { data, error } = await supabaseAdmin
-        .from('platform_notifications')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(250);
-
-      if (error) {
-        if (isNotificationsSchemaError(error)) return schemaMissingResponse(res, { forWrite: false });
-        return res.status(500).json({
-          error: error.message,
-          code: error.code,
-          hint: 'Supabase: sql/2026-05-36b-platform-notifications-text-ids.sql (users.id TEXT)'
-        });
+      const cached = getCachedInbox(actor.sub);
+      if (cached) {
+        return res.status(200).json({ ...cached, cached: true });
       }
 
-      let rows = (data || []).filter((n) => notificationMatchesRecipient(n, recipient));
-
-      if (role === 'coach' || recipient.roles.includes('coach')) {
-        const coachId = actor.coach_id || recipient.coachId;
-        const studentIds = await coachStudentUserIds(coachId);
-        rows = rows.filter((n) => {
-          if (n.target_type === 'user') {
-            const tid = String(n.target_user_id || '');
-            return studentIds.has(tid) || recipient.altUserIds.includes(tid);
-          }
-          if (n.target_type === 'role' && n.target_role === 'student') {
-            return true;
-          }
-          return false;
-        });
+      try {
+        const payload = await Promise.race([
+          loadInboxForActor(actor, role, limit),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('inbox_timeout')), INBOX_TIMEOUT_MS)
+          )
+        ]);
+        setCachedInbox(actor.sub, payload);
+        return res.status(200).json(payload);
+      } catch (e) {
+        console.error('[notifications] inbox', errorMessage(e), e);
+        return res.status(200).json({ data: [], unread_count: 0, degraded: true });
       }
-
-      rows = await enrichWithReadState(rows.slice(0, limit), actor.sub);
-      const unreadCount = rows.filter((r) => !r.read_at).length;
-      return res.status(200).json({ data: rows, unread_count: unreadCount });
     }
 
     if (req.method === 'POST') {

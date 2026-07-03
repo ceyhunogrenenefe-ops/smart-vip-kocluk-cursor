@@ -23,6 +23,15 @@ export const SUBJECT_BORDER: Record<string, string> = {
   gray: 'border-l-gray-400'
 };
 
+function rowClassIds(r: EduLessonRow): string[] {
+  const ids = r.class_ids?.length ? r.class_ids : [r.class_id];
+  return [...new Set(ids.filter(Boolean))];
+}
+
+function rowTouchesClass(r: EduLessonRow, classId: string): boolean {
+  return rowClassIds(r).includes(classId);
+}
+
 export type ClassGroup = {
   classId: string;
   className: string;
@@ -105,7 +114,9 @@ export function buildLevelGroups(
 ): LevelGroup[] {
   const rowCountByClass = new Map<string, number>();
   for (const r of rows) {
-    rowCountByClass.set(r.class_id, (rowCountByClass.get(r.class_id) || 0) + 1);
+    for (const cid of rowClassIds(r)) {
+      rowCountByClass.set(cid, (rowCountByClass.get(cid) || 0) + 1);
+    }
   }
   const byLevel = new Map<string, LevelGroup>();
   for (const c of classes) {
@@ -134,10 +145,9 @@ export function subjectsForLevel(
   rows: EduLessonRow[],
   classIdsInLevel: string[]
 ): { subjectName: string; count: number }[] {
-  const allow = new Set(classIdsInLevel);
   const counts = new Map<string, number>();
   for (const r of rows) {
-    if (!allow.has(r.class_id)) continue;
+    if (!classIdsInLevel.some((cid) => rowTouchesClass(r, cid))) continue;
     const key = (r.subject_name || '').trim() || 'Ders';
     counts.set(key, (counts.get(key) || 0) + 1);
   }
@@ -155,8 +165,8 @@ export function filterRows(
   const allow = classIdsInLevel ? new Set(classIdsInLevel) : null;
   return rows
     .filter((r) => {
-      if (allow && !allow.has(r.class_id)) return false;
-      if (classId && r.class_id !== classId) return false;
+      if (allow && !rowClassIds(r).some((cid) => allow.has(cid))) return false;
+      if (classId && !rowTouchesClass(r, classId)) return false;
       if (subjectName && (r.subject_name || '').trim() !== subjectName) return false;
       return true;
     })
@@ -174,4 +184,32 @@ export function formatLessonDate(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+export function formatEduDateRange(
+  from?: string | null,
+  until?: string | null,
+  lessonDate?: string | null
+): string {
+  const start = (from || lessonDate || '').slice(0, 10);
+  const end = (until || lessonDate || '').slice(0, 10);
+  if (!start && !end) return '';
+  if (start && end && start !== end) {
+    return `${formatLessonDate(start)} – ${formatLessonDate(end)}`;
+  }
+  const one = start || end;
+  return one ? formatLessonDate(one) : '';
+}
+
+export function isEduTopicOpenNow(row: {
+  available_from?: string | null;
+  available_until?: string | null;
+  lesson_date?: string;
+}): boolean {
+  const today = new Date().toISOString().slice(0, 10);
+  const from = (row.available_from || row.lesson_date || '').slice(0, 10);
+  const until = (row.available_until || row.lesson_date || '').slice(0, 10);
+  if (from && today < from) return false;
+  if (until && today > until) return false;
+  return true;
 }

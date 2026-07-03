@@ -1,6 +1,18 @@
 import type { Student } from '../types';
 import { turkishFold } from './userBulkImport';
 
+export function resolveStudentInList(students: Student[], id: string): Student | undefined {
+  const needle = String(id || '').trim();
+  if (!needle) return undefined;
+  const direct = students.find((s) => s.id === needle);
+  if (direct) return direct;
+  return students.find((s) => {
+    const plat = String(s.platformUserId || '').trim();
+    const auth = String(s.authUserId || '').trim();
+    return plat === needle || auth === needle;
+  });
+}
+
 export function compactLevelKey(s: string): string {
   return turkishFold(String(s)).replace(/[\s\-_/]/g, '');
 }

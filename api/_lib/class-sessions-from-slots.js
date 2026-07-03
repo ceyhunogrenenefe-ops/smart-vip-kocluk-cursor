@@ -42,6 +42,45 @@ function sessionKey(classId, teacherId, startTime) {
   return `${String(classId || '')}|${String(teacherId || '')}|${normalizeTimeHms(startTime)}`;
 }
 
+function normSubjectKey(subject) {
+  return String(subject || '')
+    .trim()
+    .toLocaleLowerCase('tr-TR');
+}
+
+function timeRangesOverlap(startA, endA, startB, endB) {
+  const a0 = normalizeTimeHms(startA, '00:00:00');
+  const a1 = normalizeTimeHms(endA, a0);
+  const b0 = normalizeTimeHms(startB, '00:00:00');
+  const b1 = normalizeTimeHms(endB, b0);
+  return a0 < b1 && b0 < a1;
+}
+
+/** Şablondan oturum açma: aynı gün/sınıf için mevcut veya iptal edilmiş oturum varsa tekrar oluşturma. */
+function slotCoveredBySessions(slot, sessionsOnDay) {
+  const slotKey = sessionKey(slot.class_id, slot.teacher_id, slot.start_time);
+  const slotTeacher = String(slot.teacher_id || '').trim();
+  const slotSubject = normSubjectKey(slot.subject);
+
+  for (const s of sessionsOnDay || []) {
+    if (String(s.class_id || '') !== String(slot.class_id || '')) continue;
+    const sessKey = sessionKey(s.class_id, s.teacher_id, s.start_time);
+    if (sessKey === slotKey) return true;
+
+    const sessTeacher = String(s.teacher_id || '').trim();
+    const sessSubject = normSubjectKey(s.subject);
+    if (sessTeacher === slotTeacher && sessSubject === slotSubject) return true;
+
+    if (
+      sessTeacher === slotTeacher &&
+      timeRangesOverlap(slot.start_time, slot.end_time, s.start_time, s.end_time)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Haftalık şablondan (class_weekly_slots) o gün için eksik class_sessions satırlarını oluşturur.
  * Cron hatırlatması yalnızca class_sessions üzerinden çalışır; şablon tek başına yetmez.
@@ -61,14 +100,9 @@ export async function ensureClassSessionsFromWeeklySlots(lessonDate) {
 
   const { data: existing, error: exErr } = await supabaseAdmin
     .from('class_sessions')
-    .select('class_id,teacher_id,start_time,status')
-    .eq('lesson_date', date)
-    .neq('status', 'cancelled');
+    .select('class_id,teacher_id,start_time,end_time,status,subject')
+    .eq('lesson_date', date);
   if (exErr) throw exErr;
-
-  const existingKeys = new Set(
-    (existing || []).map((s) => sessionKey(s.class_id, s.teacher_id, s.start_time))
-  );
 
   const classIdsNeedingInst = [
     ...new Set(
@@ -87,13 +121,13 @@ export async function ensureClassSessionsFromWeeklySlots(lessonDate) {
   }
 
   const toInsert = [];
+  const sessionsOnDay = existing || [];
   for (const slot of slotList) {
-    const k = sessionKey(slot.class_id, slot.teacher_id, slot.start_time);
-    if (existingKeys.has(k)) continue;
+    if (slotCoveredBySessions(slot, sessionsOnDay)) continue;
     const row = sessionRowFromSlot(slot, date, instByClass.get(String(slot.class_id)) ?? null, null);
     if (!row.meeting_link) continue;
     toInsert.push(row);
-    existingKeys.add(k);
+    sessionsOnDay.push(row);
   }
 
   if (!toInsert.length) {
@@ -149,7 +183,25 @@ export async function ensureClassSessionsForClassInRange(classId, dateFrom, date
     institutionId = cls?.institution_id ?? null;
   }
 
-  const scheduleBatchId = opts.scheduleBatchId ? String(opts.scheduleBatchId) : randomUUID();
+  const batchIdBySlotKey = new Map();
+  function slotSeriesKey(slot) {
+    return [
+      Number(slot.day_of_week),
+      normalizeTimeHms(slot.start_time),
+      String(slot.subject || '').trim(),
+      String(slot.teacher_id || '')
+    ].join('|');
+  }
+  function batchIdForSlot(slot) {
+    const key = slotSeriesKey(slot);
+    let id = batchIdBySlotKey.get(key);
+    if (!id) {
+      id = randomUUID();
+      batchIdBySlotKey.set(key, id);
+    }
+    return id;
+  }
+
   let created = 0;
   let alreadyExists = 0;
   let daysScanned = 0;
@@ -167,24 +219,24 @@ export async function ensureClassSessionsForClassInRange(classId, dateFrom, date
 
     const { data: existing, error: exErr } = await supabaseAdmin
       .from('class_sessions')
-      .select('class_id,teacher_id,start_time,status')
+      .select('class_id,teacher_id,start_time,end_time,status,subject')
       .eq('class_id', cid)
-      .eq('lesson_date', cur)
-      .neq('status', 'cancelled');
+      .eq('lesson_date', cur);
     if (exErr) throw exErr;
 
-    const existingKeys = new Set(
-      (existing || []).map((s) => sessionKey(s.class_id, s.teacher_id, s.start_time))
-    );
-
+    const sessionsOnDay = existing || [];
     const toInsert = [];
     for (const slot of daySlots) {
-      const k = sessionKey(slot.class_id, slot.teacher_id, slot.start_time);
-      if (existingKeys.has(k)) {
+      if (slotCoveredBySessions(slot, sessionsOnDay)) {
         alreadyExists += 1;
         continue;
       }
-      const row = sessionRowFromSlot(slot, cur, slot.institution_id ?? institutionId ?? null, scheduleBatchId);
+      const row = sessionRowFromSlot(
+        slot,
+        cur,
+        slot.institution_id ?? institutionId ?? null,
+        batchIdForSlot(slot)
+      );
       if (!row.meeting_link) {
         skipped.push({
           reason: 'bbb_failed',
@@ -195,7 +247,7 @@ export async function ensureClassSessionsForClassInRange(classId, dateFrom, date
         continue;
       }
       toInsert.push(row);
-      existingKeys.add(k);
+      sessionsOnDay.push(row);
     }
 
     if (toInsert.length) {
@@ -210,7 +262,13 @@ export async function ensureClassSessionsForClassInRange(classId, dateFrom, date
     cur = addCalendarDaysYmd(cur, 1);
   }
 
-  return { created, already_exists: alreadyExists, days_scanned: daysScanned, skipped, schedule_batch_id: scheduleBatchId };
+  return {
+    created,
+    already_exists: alreadyExists,
+    days_scanned: daysScanned,
+    skipped,
+    schedule_batch_ids: [...batchIdBySlotKey.values()]
+  };
 }
 
 /** Aktarım sonrası: linki boş planlı oturumlara bbb:auto yazar (Canlı Grup Dersi «Katıl» ile aynı). */

@@ -37,6 +37,36 @@ export async function resolveCoachIdByUserSub(sub) {
 /**
  * JWT'de student_id / coach_id boşsa Supabase ile tamamlar (login ile aynı eşleme kuralları).
  */
+async function enrichActorInstitutionFromDb(actor) {
+  if (actor.institution_id || !actor.sub || actor.sub === 'anonymous') return actor;
+
+  const { data: userRow } = await supabaseAdmin
+    .from('users')
+    .select('institution_id')
+    .eq('id', actor.sub)
+    .maybeSingle();
+  if (userRow?.institution_id) {
+    return { ...actor, institution_id: userRow.institution_id };
+  }
+
+  if (actor.role === 'coach' || actor.role === 'teacher') {
+    const cid = actor.coach_id || (await resolveCoachIdByUserSub(actor.sub));
+    if (cid) {
+      const { data: co } = await supabaseAdmin
+        .from('coaches')
+        .select('institution_id')
+        .eq('id', cid)
+        .maybeSingle();
+      if (co?.institution_id) {
+        return { ...actor, coach_id: cid, institution_id: co.institution_id };
+      }
+      if (!actor.coach_id) return { ...actor, coach_id: cid };
+    }
+  }
+
+  return actor;
+}
+
 export async function enrichStudentActor(actor) {
   if (!actor) return actor;
 
@@ -44,14 +74,15 @@ export async function enrichStudentActor(actor) {
   if (!sub || sub === 'anonymous') return actor;
 
   const ensured = await ensureStudentProfileForActor(actor);
-  if (ensured.hasStudentId) return ensured.actor;
+  if (ensured.hasStudentId) return enrichActorInstitutionFromDb(ensured.actor);
 
-  if ((actor.role === 'coach' || actor.role === 'teacher') && !actor.coach_id) {
-    const cid = await resolveCoachIdByUserSub(actor.sub);
-    if (cid) return { ...actor, coach_id: cid };
+  let next = ensured.actor;
+  if ((next.role === 'coach' || next.role === 'teacher') && !next.coach_id) {
+    const cid = await resolveCoachIdByUserSub(next.sub);
+    if (cid) next = { ...next, coach_id: cid };
   }
 
-  return ensured.actor;
+  return enrichActorInstitutionFromDb(next);
 }
 
 /** Soru Sor API — öğrenci mi ve students.id bağlı mı */

@@ -129,7 +129,7 @@ async function buildClassGuestJoinUrl(session, guestName) {
   if (meetingId && attendeePw) {
     return buildBbbAttendeeJoinUrl({ meetingId, attendeePassword: attendeePw, fullName: guestName });
   }
-  return ensured.attendeeLink;
+  throw new Error('BBB katılım bağlantısı oluşturulamadı. Lütfen panelden tekrar «Katıl» deneyin.');
 }
 
 async function buildPrivateGuestJoinUrl(lesson, guestName) {
@@ -188,7 +188,7 @@ async function buildPrivateGuestJoinUrl(lesson, guestName) {
   if (meetingId && attendeePw) {
     return buildBbbAttendeeJoinUrl({ meetingId, attendeePassword: attendeePw, fullName: guestName });
   }
-  return ensured.attendeeLink;
+  throw new Error('BBB katılım bağlantısı oluşturulamadı. Lütfen panelden tekrar «Katıl» deneyin.');
 }
 
 export async function resolveGuestBbbJoinUrl({ kind, id, guestName }) {

@@ -87,6 +87,17 @@ export default async function handler(req, res) {
     if (!phoneE164) return res.status(400).json({ error: 'gecersiz_telefon_e164' });
     if (!passwordPlain || passwordPlain.length < 6) return res.status(400).json({ error: 'sifre_min_6' });
     if (!ROLE_SET.has(requestedRole)) return res.status(400).json({ error: 'gecersiz_rol' });
+    if (institutionId) {
+      const { data: instRow, error: instErr } = await supabaseAdmin
+        .from('institutions')
+        .select('id')
+        .eq('id', institutionId)
+        .maybeSingle();
+      if (instErr) throw instErr;
+      if (!instRow?.id) {
+        return res.status(400).json({ error: 'gecersiz_kurum' });
+      }
+    }
     if (body.birth_date || body.birthDate || body.dogum_tarihi || body.dogumTarihi) {
       if (!birthDate) return res.status(400).json({ error: 'gecersiz_dogum_tarihi' });
     }

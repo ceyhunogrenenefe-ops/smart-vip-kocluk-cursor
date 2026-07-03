@@ -52,51 +52,26 @@ import { formatWhatsAppPhone, sendWhatsAppOutbound, sendWhatsAppOutboundDocument
 import { getGatewaySessionUserId } from '../../lib/session';
 import {
   buildParentWeeklyGoalsMessage,
+  buildParentWeeklyPlanPdfCaption,
   buildWeeklyPlannerPdfBlob,
   downloadWeeklyPlannerPdf,
 } from '../../lib/pdfWeeklyPlanner';
+import {
+  addMinutesToTimeHhmm,
+  buildDistinctPlannerSlots,
+  buildPlannerTimeSlots,
+  entryMatchesPlannerSlot,
+  loadPlannerGridStepMinutes,
+  plannerGridRowMinHeight,
+  savePlannerGridStepMinutes,
+  timeToMinutes,
+  type PlannerGridStepMinutes,
+  type PlannerTimeSlot,
+} from '../../lib/weeklyPlannerTimeSlots';
 
 export { subjectPlannerStyle };
 
-const HOURS = Array.from({ length: 16 }, (_, i) => i + 8); // 08–23
 const DAY_LABELS = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
-
-function padHour(h: number) {
-  return `${String(h).padStart(2, '0')}:00`;
-}
-
-function hourFromTime(t: string) {
-  const h = parseInt(String(t || '').split(':')[0], 10);
-  return Number.isNaN(h) ? null : h;
-}
-
-/**
- * Aynı (tarih, saat) diliminde üst üste binmeden slot listesi.
- * "Kalanı günlere böl" gibi akışlarda sunucunun 409 time_conflict dönmesini engeller.
- */
-function buildDistinctPlannerSlots(
-  dayDates: string[],
-  spanStart: string,
-  spanEnd: string,
-  needed: number
-): { date: string; hour: number }[] {
-  const out: { date: string; hour: number }[] = [];
-  const used = new Set<string>();
-  const inSpan = dayDates.filter((d) => d >= spanStart && d <= spanEnd);
-  const pushSlots = (dates: string[]) => {
-    for (const date of dates) {
-      for (let hour = 8; hour <= 22 && out.length < needed; hour++) {
-        const key = `${date}_${hour}`;
-        if (used.has(key)) continue;
-        used.add(key);
-        out.push({ date, hour });
-      }
-    }
-  };
-  pushSlots(inSpan.length > 0 ? inSpan : dayDates);
-  if (out.length < needed) pushSlots(dayDates);
-  return out;
-}
 
 /** Hedef kartında gösterilecek okunaklı aralık (ör. tek gün Cumartesi veya 6–8 Şubat) */
 function formatGoalRangeLabel(startYmd: string, endYmd: string) {
@@ -240,7 +215,7 @@ export function WeeklyPlannerCalendar({
   const [err, setErr] = useState<string>('');
 
   const [modalMode, setModalMode] = useState<ModalMode>('idle');
-  const [slotContext, setSlotContext] = useState<{ date: string; hour: number } | null>(null);
+  const [slotContext, setSlotContext] = useState<{ date: string; startTime: string; endTime: string } | null>(null);
   const [activeEntry, setActiveEntry] = useState<WeeklyPlannerEntryRow | null>(null);
   const [studyModalEntry, setStudyModalEntry] = useState<WeeklyPlannerEntryRow | null>(null);
 
@@ -291,8 +266,17 @@ export function WeeklyPlannerCalendar({
     typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false
   );
   const [mobileDayIdx, setMobileDayIdx] = useState(0);
-  const [mobileCreateHour, setMobileCreateHour] = useState(9);
-  const [formHour, setFormHour] = useState(9);
+  const [mobileCreateSlotIdx, setMobileCreateSlotIdx] = useState(0);
+  const [gridSlotMinutes, setGridSlotMinutes] = useState<PlannerGridStepMinutes>(() => loadPlannerGridStepMinutes());
+  const [formStartTime, setFormStartTime] = useState('09:00');
+  const [formEndTime, setFormEndTime] = useState('10:00');
+
+  const timeSlots = useMemo(
+    () => buildPlannerTimeSlots({ stepMinutes: gridSlotMinutes }),
+    [gridSlotMinutes]
+  );
+  const gridRowMinH = useMemo(() => plannerGridRowMinHeight(gridSlotMinutes), [gridSlotMinutes]);
+
   const mobileAppShell = useMobileAppShell();
   const vibrantMobileChrome = studentStudyLogUi || mobileAppShell;
 
@@ -444,6 +428,9 @@ export function WeeklyPlannerCalendar({
     if (!studentId) return;
     setPdfBusy(true);
     try {
+      const prevWeekStart = format(addDays(parseISO(weekStartStr), -7), 'yyyy-MM-dd');
+      const prevWeekEnd = format(addDays(parseISO(prevWeekStart), 6), 'yyyy-MM-dd');
+      const prevWeekEntries = await fetchWeeklyPlannerEntries(studentId, prevWeekStart, prevWeekEnd);
       await downloadWeeklyPlannerPdf({
         studentName: studentName || plannerStudent?.name || 'Öğrenci',
         weekStart: weekStartStr,
@@ -453,6 +440,9 @@ export function WeeklyPlannerCalendar({
         entries,
         institutionName: institution?.name,
         logoUrl: institution?.logo ?? null,
+        prevWeekStart,
+        prevWeekEnd,
+        prevWeekEntries,
       });
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'PDF oluşturulamadı');
@@ -519,6 +509,9 @@ export function WeeklyPlannerCalendar({
     }
     setParentPdfShareBusy(true);
     try {
+      const prevWeekStart = format(addDays(parseISO(weekStartStr), -7), 'yyyy-MM-dd');
+      const prevWeekEnd = format(addDays(parseISO(prevWeekStart), 6), 'yyyy-MM-dd');
+      const prevWeekEntries = await fetchWeeklyPlannerEntries(studentId, prevWeekStart, prevWeekEnd);
       const { blob, filename } = await buildWeeklyPlannerPdfBlob({
         studentName: studentName || st.name || 'Öğrenci',
         weekStart: weekStartStr,
@@ -528,17 +521,22 @@ export function WeeklyPlannerCalendar({
         entries,
         institutionName: institution?.name,
         logoUrl: institution?.logo ?? null,
+        compactForShare: true,
+        prevWeekStart,
+        prevWeekEnd,
+        prevWeekEntries,
       });
-      const caption = buildParentWeeklyGoalsMessage({
+      const caption = buildParentWeeklyPlanPdfCaption({
         studentName: st.name,
         weekStart: weekStartStr,
         weekEnd: weekEndStr,
-        goals,
-        entries,
       });
       const result = await sendWhatsAppOutboundDocument({
         coachUserId,
         targetPhone: parentPhone,
+        studentId: studentId || undefined,
+        studentName: st.name || studentName || '',
+        pdfTitle: 'Haftalık çalışma planı',
         filename,
         base64: await blobToBase64(blob),
         caption,
@@ -570,13 +568,20 @@ export function WeeklyPlannerCalendar({
     if (!showMobileDayView) return;
     const now = new Date();
     const isToday = mobileDayDate === format(now, 'yyyy-MM-dd');
-    const fromClock = isToday ? Math.max(8, Math.min(22, now.getHours())) : 9;
-    const free =
-      HOURS.find((h) => h >= fromClock && entries.filter((e) => e.planner_date === mobileDayDate && hourFromTime(e.start_time) === h).length === 0) ??
-      HOURS.find((h) => entries.filter((e) => e.planner_date === mobileDayDate && hourFromTime(e.start_time) === h).length === 0) ??
-      fromClock;
-    setMobileCreateHour(free);
-  }, [mobileDayDate, showMobileDayView, entries]);
+    const fromClock = isToday ? Math.max(8 * 60, Math.min(22 * 60, now.getHours() * 60 + now.getMinutes())) : 9 * 60;
+    const freeIdx = timeSlots.findIndex(
+      (slot) =>
+        slot.startMinutes >= fromClock &&
+        entries.filter((e) => e.planner_date === mobileDayDate && entryMatchesPlannerSlot(e.start_time, slot))
+          .length === 0
+    );
+    const fallbackIdx = timeSlots.findIndex(
+      (slot) =>
+        entries.filter((e) => e.planner_date === mobileDayDate && entryMatchesPlannerSlot(e.start_time, slot))
+          .length === 0
+    );
+    setMobileCreateSlotIdx(freeIdx >= 0 ? freeIdx : Math.max(0, fallbackIdx));
+  }, [mobileDayDate, showMobileDayView, entries, timeSlots]);
 
   const weekStats = useMemo(() => {
     let planned = 0;
@@ -597,9 +602,10 @@ export function WeeklyPlannerCalendar({
     return { planned, done, minutes, pct };
   }, [entries, weekStartStr, weekEndStr, goals, studentWeeklyEntries]);
 
-  const openCreate = (date: string, hour: number) => {
-    setSlotContext({ date, hour });
-    setFormHour(hour);
+  const openCreate = (date: string, slot: PlannerTimeSlot) => {
+    setSlotContext({ date, startTime: slot.start, endTime: slot.end });
+    setFormStartTime(slot.start);
+    setFormEndTime(slot.end);
     setActiveEntry(null);
     setModalMode('create');
     setFormGoalId(null);
@@ -609,9 +615,11 @@ export function WeeklyPlannerCalendar({
   };
 
   const openEdit = (entry: WeeklyPlannerEntryRow) => {
-    const hour = hourFromTime(entry.start_time) ?? 8;
-    setSlotContext({ date: entry.planner_date, hour });
-    setFormHour(hour);
+    const start = String(entry.start_time || '09:00').slice(0, 5);
+    const end = String(entry.end_time || addMinutesToTimeHhmm(start, gridSlotMinutes)).slice(0, 5);
+    setSlotContext({ date: entry.planner_date, startTime: start, endTime: end });
+    setFormStartTime(start);
+    setFormEndTime(end);
     setActiveEntry(entry);
     setModalMode('edit');
     setFormGoalId(entry.coach_goal_id);
@@ -626,10 +634,10 @@ export function WeeklyPlannerCalendar({
     setActiveEntry(null);
   };
 
-  const handleDropOnCell = async (payload: string, date: string, hour: number) => {
+  const handleDropOnCell = async (payload: string, date: string, slot: PlannerTimeSlot) => {
     if (!canEditPlan) return;
-    const nextStart = padHour(hour);
-    const nextEnd = padHour(Math.min(hour + 1, 23));
+    const nextStart = slot.start;
+    const nextEnd = slot.end;
 
     if (payload.startsWith('goal:')) {
       await runPlannerMutation(async () => {
@@ -696,7 +704,7 @@ export function WeeklyPlannerCalendar({
       }
       const maxParts = 4;
       const { start: gS, end: gE } = goalEffectiveSpan(goal, weekStartStr, weekEndStr);
-      const slots = buildDistinctPlannerSlots(dayDates, gS, gE, maxParts);
+      const slots = buildDistinctPlannerSlots(dayDates, gS, gE, maxParts, gridSlotMinutes);
       if (slots.length === 0) {
         alert('Takvimde boş zaman dilimi bulunamadı. Bazı blokları silip tekrar deneyin.');
         return;
@@ -714,8 +722,8 @@ export function WeeklyPlannerCalendar({
           await createWeeklyPlannerEntry({
             student_id: studentId,
             planner_date: slot.date,
-            start_time: padHour(slot.hour),
-            end_time: padHour(Math.min(slot.hour + 1, 23)),
+            start_time: slot.startTime,
+            end_time: slot.endTime,
             title: goal.title,
             subject: goal.subject,
             planned_quantity: q,
@@ -734,8 +742,12 @@ export function WeeklyPlannerCalendar({
   const submitCreate = async () => {
     if (!slotContext || !studentId) return;
     await runPlannerMutation(async () => {
-      const start = padHour(formHour);
-      const end = padHour(Math.min(formHour + 1, 23));
+      const start = formStartTime.slice(0, 5);
+      const end = formEndTime.slice(0, 5);
+      if (!start || !end || (timeToMinutes(end) ?? 0) <= (timeToMinutes(start) ?? 0)) {
+        alert('Bitiş saati başlangıçtan sonra olmalı.');
+        return;
+      }
       const g = goals.find((x) => x.id === formGoalId);
       if (
         !formGoalId &&
@@ -845,10 +857,17 @@ export function WeeklyPlannerCalendar({
         planned_quantity: pq,
         coach_goal_id: formGoalId,
       };
-      const origHour = hourFromTime(activeEntry.start_time);
-      if (origHour !== formHour) {
-        patch.start_time = padHour(formHour);
-        patch.end_time = padHour(Math.min(formHour + 1, 23));
+      const origStart = String(activeEntry.start_time || '').slice(0, 5);
+      const origEnd = String(activeEntry.end_time || '').slice(0, 5);
+      const nextStart = formStartTime.slice(0, 5);
+      const nextEnd = formEndTime.slice(0, 5);
+      if (nextStart !== origStart || nextEnd !== origEnd) {
+        if ((timeToMinutes(nextEnd) ?? 0) <= (timeToMinutes(nextStart) ?? 0)) {
+          alert('Bitiş saati başlangıçtan sonra olmalı.');
+          return;
+        }
+        patch.start_time = nextStart;
+        patch.end_time = nextEnd;
       }
       if (pq <= 0 && activeEntry.status === 'completed') {
         patch.status = 'planned';
@@ -1017,11 +1036,11 @@ export function WeeklyPlannerCalendar({
     [canManageGoals, moveGoalToAdjacentWeek]
   );
 
-  const cellEntries = (date: string, hour: number) =>
-    entries.filter((e) => e.planner_date === date && hourFromTime(e.start_time) === hour);
+  const cellEntries = (date: string, slot: PlannerTimeSlot) =>
+    entries.filter((e) => e.planner_date === date && entryMatchesPlannerSlot(e.start_time, slot));
 
-  const pastSlot = (dateStr: string, hour: number) => {
-    const iso = `${dateStr}T${padHour(hour)}:00`;
+  const pastSlot = (dateStr: string, slotStart: string) => {
+    const iso = `${dateStr}T${slotStart}:00`;
     try {
       return isBefore(parseISO(iso), new Date());
     } catch {
@@ -1186,6 +1205,26 @@ export function WeeklyPlannerCalendar({
                 >
                   Sonraki haftaya bırak →
                 </div>
+              ) : null}
+              {canEditPlan ? (
+                <label className="inline-flex min-h-[42px] flex-col justify-center gap-0.5 text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                  Takvim dilimi
+                  <select
+                    value={gridSlotMinutes}
+                    onChange={(e) => {
+                      const v = Number(e.target.value) as PlannerGridStepMinutes;
+                      setGridSlotMinutes(v);
+                      savePlannerGridStepMinutes(v);
+                    }}
+                    className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                    title="Haftalık takvimde görünen saat aralığı"
+                  >
+                    <option value={60}>1 saat</option>
+                    <option value={30}>30 dk</option>
+                    <option value={15}>15 dk</option>
+                    <option value={10}>10 dk</option>
+                  </select>
+                </label>
               ) : null}
               {canExportPdf ? (
                 <button
@@ -1533,18 +1572,18 @@ export function WeeklyPlannerCalendar({
                 ) : null}
 
                 <ul className="space-y-1.5">
-                  {HOURS.map((hour) => {
-                    const slotList = cellEntries(mobileDayDate, hour);
-                    const isPast = pastSlot(mobileDayDate, hour);
+                  {timeSlots.map((slot, slotIdx) => {
+                    const slotList = cellEntries(mobileDayDate, slot);
+                    const isPast = pastSlot(mobileDayDate, slot.start);
                     return (
-                      <li key={hour} className="flex gap-2">
+                      <li key={`${slot.start}-${slot.end}`} className="flex gap-2">
                         <div
                           className={cn(
-                            'w-[3.25rem] shrink-0 pt-2.5 text-right font-mono text-[11px] font-semibold tabular-nums',
+                            'w-[3.75rem] shrink-0 pt-2.5 text-right font-mono text-[10px] font-semibold tabular-nums leading-tight',
                             isPast ? 'text-slate-400' : 'text-slate-600 dark:text-slate-400'
                           )}
                         >
-                          {padHour(hour)}
+                          {slot.label}
                         </div>
                         <div className="min-w-0 flex-1 space-y-1.5">
                           {slotList.length === 0 ? (
@@ -1552,12 +1591,12 @@ export function WeeklyPlannerCalendar({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setMobileCreateHour(hour);
-                                  openCreate(mobileDayDate, hour);
+                                  setMobileCreateSlotIdx(slotIdx);
+                                  openCreate(mobileDayDate, slot);
                                 }}
                                 className={cn(
                                   'flex w-full items-center gap-2 rounded-xl border border-dashed px-3 py-2.5 text-left text-xs touch-manipulation active:scale-[0.99]',
-                                  mobileCreateHour === hour
+                                  mobileCreateSlotIdx === slotIdx
                                     ? 'border-violet-400 bg-violet-50 text-violet-900 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-100'
                                     : 'border-slate-200 bg-white/70 text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400'
                                 )}
@@ -1634,34 +1673,37 @@ export function WeeklyPlannerCalendar({
                   <div className="sticky bottom-0 z-10 space-y-2 rounded-xl border border-violet-200/90 bg-white/95 p-3 shadow-lg backdrop-blur-sm dark:border-violet-800/60 dark:bg-slate-900/95">
                     <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Yeni görev — saat seç</p>
                     <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5">
-                      {HOURS.map((hour) => {
-                        const taken = cellEntries(mobileDayDate, hour).length > 0;
+                      {timeSlots.map((slot, slotIdx) => {
+                        const taken = cellEntries(mobileDayDate, slot).length > 0;
                         return (
                           <button
-                            key={hour}
+                            key={`${slot.start}-${slot.end}`}
                             type="button"
-                            onClick={() => setMobileCreateHour(hour)}
+                            onClick={() => setMobileCreateSlotIdx(slotIdx)}
                             className={cn(
-                              'min-w-[3.1rem] shrink-0 rounded-lg border px-2 py-2 text-center font-mono text-[11px] font-bold tabular-nums touch-manipulation',
-                              mobileCreateHour === hour
+                              'min-w-[3.4rem] shrink-0 rounded-lg border px-2 py-2 text-center font-mono text-[10px] font-bold tabular-nums touch-manipulation',
+                              mobileCreateSlotIdx === slotIdx
                                 ? 'border-violet-600 bg-violet-600 text-white shadow-md'
                                 : taken
                                   ? 'border-slate-200 bg-slate-100 text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-500'
                                   : 'border-slate-200 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200'
                             )}
                           >
-                            {String(hour).padStart(2, '0')}
+                            {slot.start.slice(0, 5)}
                           </button>
                         );
                       })}
                     </div>
                     <button
                       type="button"
-                      onClick={() => openCreate(mobileDayDate, mobileCreateHour)}
+                      onClick={() => {
+                        const slot = timeSlots[mobileCreateSlotIdx] ?? timeSlots[0];
+                        if (slot) openCreate(mobileDayDate, slot);
+                      }}
                       className="flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 py-3.5 text-sm font-semibold text-white touch-manipulation active:bg-violet-700"
                     >
                       <Plus className="h-4 w-4" />
-                      {padHour(mobileCreateHour)} — Görev ekle
+                      {(timeSlots[mobileCreateSlotIdx] ?? timeSlots[0])?.label ?? ''} — Görev ekle
                     </button>
                   </div>
                 ) : null}
@@ -1735,19 +1777,20 @@ export function WeeklyPlannerCalendar({
                   );
                 })}
 
-                {HOURS.map((hour) => (
-                  <React.Fragment key={hour}>
-                    <div className="sticky left-0 z-10 border-r border-b border-slate-100 bg-slate-50/98 py-2.5 pr-2 text-right text-[11px] font-medium tabular-nums tracking-tight text-slate-500 dark:border-slate-800 dark:bg-slate-900/98 dark:text-slate-400">
-                      <span className="font-mono">{padHour(hour)}</span>
+                {timeSlots.map((slot) => (
+                  <React.Fragment key={`${slot.start}-${slot.end}`}>
+                    <div className="sticky left-0 z-10 border-r border-b border-slate-100 bg-slate-50/98 py-1.5 pr-2 text-right text-[10px] font-medium tabular-nums tracking-tight text-slate-500 dark:border-slate-800 dark:bg-slate-900/98 dark:text-slate-400">
+                      <span className="font-mono">{slot.label}</span>
                     </div>
                     {dayDates.map((date, colIdx) => {
-                      const list = cellEntries(date, hour);
-                      const isPast = pastSlot(date, hour);
+                      const list = cellEntries(date, slot);
+                      const isPast = pastSlot(date, slot.start);
                       return (
                         <div
-                          key={`${date}-${hour}`}
+                          key={`${date}-${slot.start}`}
+                          style={{ minHeight: gridRowMinH }}
                           className={cn(
-                            'border-b border-slate-100 min-h-[58px] p-1 relative transition-[background-color,box-shadow] duration-150 dark:border-slate-800/85',
+                            'border-b border-slate-100 p-1 relative transition-[background-color,box-shadow] duration-150 dark:border-slate-800/85',
                             columnMeta[colIdx]?.isToday
                               ? isPast
                                 ? 'bg-indigo-50/35 dark:bg-indigo-950/18'
@@ -1766,7 +1809,7 @@ export function WeeklyPlannerCalendar({
                           )}
                           onClick={() => {
                             if (!canEditPlan) return;
-                            if (list.length === 0) openCreate(date, hour);
+                            if (list.length === 0) openCreate(date, slot);
                           }}
                           onDragOver={(e) => {
                             if (!canEditPlan) return;
@@ -1776,7 +1819,7 @@ export function WeeklyPlannerCalendar({
                             if (!canEditPlan) return;
                             e.preventDefault();
                             const id = e.dataTransfer.getData('text/plain');
-                            if (id) void handleDropOnCell(id, date, hour);
+                            if (id) void handleDropOnCell(id, date, slot);
                           }}
                         >
                           {list.map((en) => {
@@ -2084,39 +2127,51 @@ export function WeeklyPlannerCalendar({
                 </p>
               </div>
 
-              <div>
-                <label htmlFor="formHourSelect" className="text-xs font-medium text-slate-600 dark:text-slate-400">
-                  Saat dilimi
-                </label>
-                <select
-                  id="formHourSelect"
-                  value={formHour}
-                  onChange={(e) => setFormHour(Number(e.target.value))}
-                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
-                >
-                  {HOURS.map((h) => (
-                    <option key={h} value={h}>
-                      {padHour(h)} – {padHour(Math.min(h + 1, 23))}
-                    </option>
-                  ))}
-                </select>
-                <div className="-mx-1 mt-2 flex gap-1.5 overflow-x-auto px-1 pb-0.5 sm:hidden">
-                  {HOURS.map((h) => (
-                    <button
-                      key={h}
-                      type="button"
-                      onClick={() => setFormHour(h)}
-                      className={cn(
-                        'min-w-[3rem] shrink-0 rounded-lg border px-2 py-2 font-mono text-[11px] font-bold tabular-nums',
-                        formHour === h
-                          ? 'border-violet-600 bg-violet-600 text-white'
-                          : 'border-slate-200 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200'
-                      )}
-                    >
-                      {String(h).padStart(2, '0')}
-                    </button>
-                  ))}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="formStartTime" className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                    Başlangıç
+                  </label>
+                  <input
+                    id="formStartTime"
+                    type="time"
+                    step={gridSlotMinutes >= 60 ? 3600 : gridSlotMinutes * 60}
+                    value={formStartTime}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setFormStartTime(v);
+                      if ((timeToMinutes(formEndTime) ?? 0) <= (timeToMinutes(v) ?? 0)) {
+                        setFormEndTime(addMinutesToTimeHhmm(v, gridSlotMinutes));
+                      }
+                    }}
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                  />
                 </div>
+                <div>
+                  <label htmlFor="formEndTime" className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                    Bitiş
+                  </label>
+                  <input
+                    id="formEndTime"
+                    type="time"
+                    step={gridSlotMinutes >= 60 ? 3600 : gridSlotMinutes * 60}
+                    value={formEndTime}
+                    onChange={(e) => setFormEndTime(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {[10, 20, 30, 40, 60].map((mins) => (
+                  <button
+                    key={mins}
+                    type="button"
+                    onClick={() => setFormEndTime(addMinutesToTimeHhmm(formStartTime, mins))}
+                    className="rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300"
+                  >
+                    +{mins} dk
+                  </button>
+                ))}
               </div>
 
               <div>

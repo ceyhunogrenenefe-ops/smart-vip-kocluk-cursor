@@ -81,9 +81,11 @@ export function NotificationProvider({
 
   useEffect(() => {
     if (!userId || pollingInterval <= 0) return;
-    const id = window.setInterval(() => {
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       void refresh();
-    }, pollingInterval);
+    };
+    const id = window.setInterval(tick, pollingInterval);
     return () => window.clearInterval(id);
   }, [userId, pollingInterval, refresh]);
 

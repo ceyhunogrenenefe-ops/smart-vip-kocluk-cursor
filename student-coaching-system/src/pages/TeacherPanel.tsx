@@ -1,20 +1,71 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import { apiFetch } from '../lib/session';
 import { Users, Radio, CheckCircle2, Presentation } from 'lucide-react';
+
+type ScopeStudent = {
+  id: string;
+  name?: string;
+  email?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+};
+
+function studentDisplayName(s: ScopeStudent): string {
+  const direct = String(s.name || '').trim();
+  if (direct) return direct;
+  return [s.first_name, s.last_name].filter(Boolean).join(' ').trim() || s.id;
+}
 
 export default function TeacherPanel() {
   const navigate = useNavigate();
-  const { students } = useApp();
+  const { students: contextStudents } = useApp();
+  const [scopedStudents, setScopedStudents] = useState<ScopeStudent[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const myStudents = useMemo(() => students || [], [students]);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      setLoading(true);
+      try {
+        const res = await apiFetch('/api/teacher-scope');
+        const j = (await res.json().catch(() => ({}))) as {
+          data?: { students?: ScopeStudent[] };
+          error?: string;
+        };
+        if (!res.ok) throw new Error(String(j.error || 'Öğretmen kapsamı alınamadı'));
+        if (!cancelled) {
+          setScopedStudents(Array.isArray(j.data?.students) ? j.data!.students! : []);
+        }
+      } catch {
+        if (!cancelled) {
+          setScopedStudents(
+            (contextStudents || []).map((s) => ({
+              id: s.id,
+              name: s.name,
+              email: s.email
+            }))
+          );
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [contextStudents]);
+
+  const myStudents = useMemo(() => scopedStudents, [scopedStudents]);
 
   return (
     <div className="space-y-6">
       <div className="bg-gradient-to-r from-violet-600 to-indigo-600 rounded-xl p-6 text-white">
         <h1 className="text-2xl font-bold">Öğretmen Paneli</h1>
         <p className="text-violet-100 text-sm mt-1">
-          Kendi öğrencilerinizi görüntüleyin, canlı özel ders oluşturun ve dersi tamamlandı olarak işaretleyin.
+          Yalnızca atandığınız grup sınıflarındaki öğrencileri görüntüleyin, canlı özel ders oluşturun ve dersi
+          tamamlandı olarak işaretleyin.
         </p>
       </div>
 
@@ -24,7 +75,7 @@ export default function TeacherPanel() {
             <Users className="w-4 h-4" />
             <span className="text-sm">Öğrencilerim</span>
           </div>
-          <p className="text-2xl font-bold text-slate-800">{myStudents.length}</p>
+          <p className="text-2xl font-bold text-slate-800">{loading ? '…' : myStudents.length}</p>
         </div>
         <button
           onClick={() => navigate('/live-lessons')}
@@ -71,15 +122,24 @@ export default function TeacherPanel() {
       </div>
 
       <div className="bg-white border border-slate-100 rounded-xl p-4">
-        <h2 className="font-semibold text-slate-800 mb-3">Kendi öğrencileriniz</h2>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
-          {myStudents.map((s) => (
-            <div key={s.id} className="border border-slate-100 rounded-lg px-3 py-2">
-              <p className="text-sm font-medium text-slate-800">{s.name}</p>
-              <p className="text-xs text-slate-500">{s.email || '-'}</p>
-            </div>
-          ))}
-        </div>
+        <h2 className="font-semibold text-slate-800 mb-3">Atandığınız sınıflardaki öğrenciler</h2>
+        {loading ? (
+          <p className="text-sm text-slate-500">Yükleniyor…</p>
+        ) : myStudents.length === 0 ? (
+          <p className="text-sm text-slate-500">
+            Henüz bir grup sınıfına atanmadınız. Yöneticiniz sizi «Canlı Grup Dersi» sınıfına öğretmen olarak
+            eklemelidir.
+          </p>
+        ) : (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {myStudents.map((s) => (
+              <div key={s.id} className="border border-slate-100 rounded-lg px-3 py-2">
+                <p className="text-sm font-medium text-slate-800">{studentDisplayName(s)}</p>
+                <p className="text-xs text-slate-500">{s.email || '-'}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

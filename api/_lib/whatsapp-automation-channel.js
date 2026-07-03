@@ -14,6 +14,13 @@ import {
   teacherReminderGatewaySessionId
 } from './whatsapp-gateway-send.js';
 
+const CLASS_LESSON_REMINDER_TEMPLATE_TYPE = 'class_lesson_reminder';
+
+/** Meta üzerinden grup dersi hatırlatması — varsayılan kapalı */
+function isClassLessonReminderMetaEnabled() {
+  return String(process.env.CLASS_LESSON_REMINDER_META_ENABLED ?? '0').trim() === '1';
+}
+
 export function parseAutomationChannel(raw) {
   const v = String(raw ?? '').trim().toLowerCase();
   if (!v || v === 'gateway' || v === 'baileys' || v === 'wa_gateway') return 'gateway';
@@ -93,7 +100,13 @@ function automationSendPlan() {
  * message_templates satırı + değişkenlerle gönder (gateway düz metin veya Meta şablon).
  */
 export async function sendAutomationTemplateMessage({ phone, templateRow, vars, templateType }) {
-  const { tryGateway, tryMeta } = automationSendPlan();
+  let { tryGateway, tryMeta } = automationSendPlan();
+  if (
+    String(templateType || templateRow?.type || '') === CLASS_LESSON_REMINDER_TEMPLATE_TYPE &&
+    !isClassLessonReminderMetaEnabled()
+  ) {
+    tryMeta = false;
+  }
 
   if (!tryGateway && !tryMeta) {
     return {

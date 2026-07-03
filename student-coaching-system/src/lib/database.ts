@@ -1,6 +1,6 @@
 // Türkçe: Veritabanı Servis Katmanı - Supabase Entegrasyonu
 import { supabase, Database } from './supabase';
-import { apiFetch, getAuthToken } from './session';
+import { apiFetch, getAuthToken, peekJwtClaims } from './session';
 import type { AICoachSuggestion, ExamResult, ReadingLog, StudentTeacherLessonQuota } from '../types';
 import {
   aiSuggestionToPayload,
@@ -324,7 +324,8 @@ class DatabaseService {
 
   // Tüm öğrencileri getir
   async getStudents(institutionId?: string): Promise<StudentRow[]> {
-    const key = `students:${institutionId || '*'}`;
+    const authSub = peekJwtClaims(getAuthToken())?.sub || 'anon';
+    const key = `students:${authSub}:${institutionId || '*'}`;
     return this.dedupeGet(key, async () => {
       const rows = await this.apiListJson<StudentRow>('/api/students', '/api/students');
       if (!institutionId) return rows;
@@ -453,6 +454,28 @@ class DatabaseService {
 
   // Tüm kurumları getir
   async getInstitutions(): Promise<InstitutionRow[]> {
+    const token = getAuthToken();
+    if (token || import.meta.env.PROD) {
+      if (!token) {
+        return this.getPublicInstitutionOptions();
+      }
+      return this.dedupeGet('institutions', async () => {
+        let lastErr: unknown;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            return await this.apiListJson<InstitutionRow>(
+              '/api/institutions-list?full=1',
+              'institutions'
+            );
+          } catch (e) {
+            lastErr = e;
+            if (attempt === 0) await new Promise((r) => setTimeout(r, 600));
+          }
+        }
+        throw lastErr;
+      });
+    }
+
     const { data, error } = await supabase
       .from('institutions')
       .select('*')
@@ -463,6 +486,13 @@ class DatabaseService {
       throw error;
     }
     return data || [];
+  }
+
+  /** Kayıt formu — oturum gerektirmez */
+  async getPublicInstitutionOptions(): Promise<InstitutionRow[]> {
+    return this.dedupeGet('institutions:public', () =>
+      this.apiListJson<InstitutionRow>('/api/institutions-list?public=1', 'institutions-public')
+    );
   }
 
   // Kurum oluştur

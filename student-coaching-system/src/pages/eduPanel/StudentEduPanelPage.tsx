@@ -1,32 +1,45 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { EDU_HOMEWORK_ANIMATIONS_LABEL } from '../../components/layout/sidebar/navModel';
-import { BookMarked, Loader2 } from 'lucide-react';
+import { Award, BookMarked, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import EduAnimationPreviewModal from '../../components/eduPanel/EduAnimationPreviewModal';
+import EduBadgeChip from '../../components/eduPanel/EduBadgeChip';
 import StudentEduTopicCard from '../../components/eduPanel/StudentEduTopicCard';
 import { useEduAnimationPreview } from '../../components/eduPanel/useEduAnimationPreview';
-import type { EduHomework, EduLessonRow } from '../../types/eduPanel.types';
+import type { EduHomework, EduLessonRow, EduLessonRowProgress } from '../../types/eduPanel.types';
 import type { EduHomeworkSubmission } from '../../types/eduPanel.types';
 import { groupRowsBySubject } from '../../lib/eduPanel/eduPanelUi';
+import { badgeForPoints } from '../../lib/eduPanel/eduPanelProgress';
 import {
   fetchEduLessonRows,
+  fetchMyEduProgress,
   fetchMyEduSubmission,
+  saveEduLessonProgress,
   submitEduHomework
 } from '../../lib/eduPanel/eduPanelApi';
 
 export default function StudentEduPanelPage() {
   const [rows, setRows] = useState<EduLessonRow[]>([]);
+  const [progressList, setProgressList] = useState<EduLessonRowProgress[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [submissions, setSubmissions] = useState<Record<string, EduHomeworkSubmission | null>>({});
   const [busyHw, setBusyHw] = useState<string | null>(null);
+  const [busyProgressRow, setBusyProgressRow] = useState<string | null>(null);
   const preview = useEduAnimationPreview();
+
+  const progressByRow = useMemo(() => {
+    const m = new Map<string, EduLessonRowProgress>();
+    for (const p of progressList) m.set(p.lesson_row_id, p);
+    return m;
+  }, [progressList]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await fetchEduLessonRows();
+      const [data, prog] = await Promise.all([fetchEduLessonRows(), fetchMyEduProgress()]);
       setRows(data);
+      setProgressList(prog);
       const subs: Record<string, EduHomeworkSubmission | null> = {};
       for (const row of data) {
         for (const hw of row.homework || []) {
@@ -50,6 +63,14 @@ export default function StudentEduPanelPage() {
 
   const subjectGroups = useMemo(() => groupRowsBySubject(rows), [rows]);
 
+  const summary = useMemo(() => {
+    const completed = progressList.filter((p) => p.topic_completed).length;
+    const totalPts = progressList.reduce((s, p) => s + (p.points || 0), 0);
+    const avgPts = progressList.length ? Math.round(totalPts / progressList.length) : 0;
+    const topBadge = badgeForPoints(avgPts);
+    return { completed, totalPts, avgPts, topBadge, topicCount: rows.length };
+  }, [progressList, rows.length]);
+
   const onSubmitPhoto = async (hw: EduHomework, file: File | null) => {
     if (!file) return;
     if (!file.type.startsWith('image/')) {
@@ -69,6 +90,30 @@ export default function StudentEduPanelPage() {
     }
   };
 
+  const onSaveProgress = async (
+    rowId: string,
+    payload: {
+      animation_completed: boolean;
+      homework_percent: number;
+      topic_completed: boolean;
+    }
+  ) => {
+    setBusyProgressRow(rowId);
+    try {
+      const saved = await saveEduLessonProgress(rowId, payload);
+      setProgressList((prev) => {
+        const rest = prev.filter((p) => p.lesson_row_id !== rowId);
+        return [...rest, saved];
+      });
+      toast.success('Rozetin kaydedildi — aferin!');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Kaydedilemedi');
+      throw e;
+    } finally {
+      setBusyProgressRow(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center py-16">
@@ -82,9 +127,20 @@ export default function StudentEduPanelPage() {
       <div className="rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 p-6 text-white">
         <h1 className="text-2xl font-bold">{EDU_HOMEWORK_ANIMATIONS_LABEL}</h1>
         <p className="mt-1 text-sm text-indigo-100">
-          Her konu ayrı bir klasördür. Animasyon ve ödev birbirinden ayrı; yalnızca o konuya ait
-          içerikleri görürsünüz.
+          Konuyu tamamladıkça rozet ve puan kazan. Animasyon izleme + ödev yüzdesi toplam puana
+          eklenir.
         </p>
+        {rows.length > 0 ? (
+          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl bg-white/10 px-4 py-3 text-sm backdrop-blur">
+            <Award className="h-5 w-5 shrink-0" />
+            <span>
+              {summary.completed}/{summary.topicCount} konu tamamlandı
+            </span>
+            <span className="text-indigo-100">·</span>
+            <span>Ortalama {summary.avgPts}p</span>
+            <EduBadgeChip badge={summary.topBadge} compact />
+          </div>
+        ) : null}
       </div>
 
       {rows.length === 0 ? (
@@ -106,14 +162,17 @@ export default function StudentEduPanelPage() {
                   expanded={expandedId === row.id}
                   onToggle={() => setExpandedId(expandedId === row.id ? null : row.id)}
                   submissions={submissions}
+                  progress={progressByRow.get(row.id) || null}
                   animLoading={preview.loading}
                   busyHw={busyHw}
+                  busyProgress={busyProgressRow === row.id}
                   onOpenAnimation={(id) =>
-                    void preview.open(id).catch((e) =>
+                    void preview.open(id).then(() => void load()).catch((e) =>
                       toast.error(e instanceof Error ? e.message : 'Animasyon açılamadı')
                     )
                   }
                   onSubmitHomework={(hw, file) => void onSubmitPhoto(hw, file)}
+                  onSaveProgress={(p) => onSaveProgress(row.id, p)}
                 />
               ))}
             </div>

@@ -1,4 +1,4 @@
-import { apiFetch, getAuthToken } from './session';
+import { apiFetch, getAuthToken, peekJwtClaims } from './session';
 
 export function formatWhatsAppPhone(value: string): string {
   return String(value || '').replace(/\D/g, '');
@@ -24,6 +24,9 @@ function humanizeGatewayError(status: number, data: { error?: string; detail?: s
   }
   if (code === 'send_document_timeout') {
     return 'PDF gönderimi zaman aşımına uğradı. Dosya büyük olabilir veya gateway yavaş — tekrar deneyin.';
+  }
+  if (code === 'payload_too_large' || code === 'document_too_large' || /payloadtoolarge/i.test(code)) {
+    return 'PDF dosyası çok büyük. Gateway gövde limiti aşıldı — VPS’te whatsapp-gateway güncelleyip pm2 restart yapın.';
   }
   if (code === 'send_precheck_timeout') {
     return 'WhatsApp ön kontrolü (numara doğrulama) zaman aşımına uğradı. Bağlantı yeni açıldıysa 2-3 sn bekleyip tekrar deneyin.';
@@ -117,9 +120,16 @@ async function callGateway<T>(coachUserId: string, endpoint: string, init?: Requ
   try {
     data = rawText ? (JSON.parse(rawText) as typeof data) : {};
   } catch {
-    data = { detail: rawText.slice(0, 400) };
+    if (/payloadtoolarge|entity too large|request entity too large/i.test(rawText)) {
+      data = { error: 'payload_too_large', detail: rawText.slice(0, 200) };
+    } else {
+      data = { detail: rawText.slice(0, 400) };
+    }
   }
   if (!res.ok) {
+    throw new Error(humanizeGatewayError(res.status, data));
+  }
+  if (data.ok === false) {
     throw new Error(humanizeGatewayError(res.status, data));
   }
   return data as T;
@@ -143,7 +153,7 @@ export function openWaMeLink(targetPhone: string, message: string): { opened: bo
 }
 
 export type WhatsAppSendResult = {
-  channel: 'gateway' | 'twilio' | 'wame';
+  channel: 'gateway' | 'twilio' | 'meta' | 'wame';
   notice: string;
   waUrl?: string;
 };
@@ -252,7 +262,31 @@ export async function sendWhatsAppOutbound(opts: {
   };
 }
 
-/** PDF veya belge — gateway Baileys oturumu üzerinden (caption opsiyonel). */
+function actorRoleFromJwt(): string {
+  return String(peekJwtClaims(getAuthToken())?.role || '').trim();
+}
+
+/** Kurumsal Meta PDF yalnızca süper admin; koç/admin/öğretmen → kendi gateway hattı */
+function canUseMetaForParentPdf(): boolean {
+  return actorRoleFromJwt() === 'super_admin';
+}
+
+function buildParentPdfWaMeMessage(opts: {
+  studentName?: string;
+  title?: string;
+  caption?: string;
+  downloadUrl: string;
+}): string {
+  const student = String(opts.studentName || 'Öğrenci').trim() || 'Öğrenci';
+  const title = String(opts.title || opts.caption || 'PDF raporu').trim() || 'PDF raporu';
+  return (
+    `Merhaba,\n\n${student} için ${title} hazır.\n\n` +
+    `PDF indirme bağlantısı:\n${opts.downloadUrl}\n\n` +
+    `Smart VIP Koçluk`
+  );
+}
+
+/** PDF — süper admin: Meta şablon; koç/admin/öğretmen: yalnızca WhatsApp gateway */
 export async function sendWhatsAppOutboundDocument(opts: {
   coachUserId: string;
   targetPhone: string;
@@ -260,19 +294,25 @@ export async function sendWhatsAppOutboundDocument(opts: {
   base64: string;
   caption?: string;
   mimeType?: string;
+  studentId?: string;
+  studentName?: string;
+  pdfTitle?: string;
 }): Promise<WhatsAppSendResult> {
   const target = normalizeWhatsAppPhoneForSend(opts.targetPhone);
   const coachUserId = String(opts.coachUserId || '').trim();
   const base64 = String(opts.base64 || '').trim();
   const filename = String(opts.filename || 'document.pdf').trim() || 'document.pdf';
   const caption = String(opts.caption || '').trim();
+  const studentName = String(opts.studentName || '').trim();
+  const pdfTitle = String(opts.pdfTitle || '').trim();
   if (!target) throw new Error('Geçerli telefon numarası yok');
   if (!base64) throw new Error('Belge verisi boş');
 
-  const gatewayUrl = resolveWhatsAppGatewayBase();
   const hasJwt = Boolean(getAuthToken());
+  const useMeta = canUseMetaForParentPdf();
 
-  if (gatewayUrl && coachUserId && hasJwt) {
+  const gatewayUrl = resolveWhatsAppGatewayBase();
+  if (!useMeta && gatewayUrl && coachUserId && hasJwt) {
     try {
       await callGateway(coachUserId, `/sessions/${coachUserId}/send-document`, {
         method: 'POST',
@@ -286,17 +326,92 @@ export async function sendWhatsAppOutboundDocument(opts: {
       });
       return {
         channel: 'gateway',
-        notice: caption
-          ? 'Belge veliye WhatsApp gateway üzerinden gönderildi.'
-          : 'PDF veliye WhatsApp gateway üzerinden gönderildi.'
+        notice: 'PDF veliye koç WhatsApp hattınızdan (gateway) gönderildi.'
       };
     } catch (e) {
       const err = e instanceof Error ? e.message : 'gateway_document_send_failed';
-      throw new Error(`PDF gönderilemedi: ${err}`);
+      throw new Error(
+        `PDF gönderilemedi: ${err}. Koç WhatsApp ayarlarından QR ile bağlandığınızdan emin olun.`
+      );
     }
   }
 
+  if (useMeta && hasJwt) {
+    try {
+      const res = await apiFetch('/api/meta/whatsapp', {
+        method: 'POST',
+        body: JSON.stringify({
+          to: target,
+          student_id: opts.studentId || undefined,
+          student_name: studentName || undefined,
+          pdf_title: pdfTitle || caption || undefined,
+          document_base64: base64,
+          filename,
+          caption: caption || undefined,
+          mime_type: opts.mimeType || 'application/pdf'
+        })
+      });
+      const payload = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        sid?: string | null;
+        method?: string;
+        error?: string;
+        hint?: string;
+        download_url?: string;
+      };
+      if (res.ok && payload.ok === true && payload.sid) {
+        const viaTemplate = payload.method === 'template_link';
+        return {
+          channel: 'meta',
+          notice: viaTemplate
+            ? 'PDF bağlantısı veliye Meta şablonu ile gönderildi (24 saat kuralı yok).'
+            : 'PDF veliye kurumsal WhatsApp (Meta) ile gönderildi.'
+        };
+      }
+
+      const downloadUrl = String(payload.download_url || '').trim();
+      const metaErr = [payload.error, payload.hint].filter(Boolean).join(' — ');
+      if (downloadUrl) {
+        const waMessage = buildParentPdfWaMeMessage({
+          studentName,
+          title: pdfTitle,
+          caption,
+          downloadUrl
+        });
+        const { opened, url } = openWaMeLink(target, waMessage);
+        try {
+          if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(downloadUrl);
+          }
+        } catch {
+          /* ignore */
+        }
+        return {
+          channel: 'wame',
+          waUrl: url,
+          notice: opened
+            ? `Meta şablonu henüz hazır değil${metaErr ? ` (${metaErr})` : ''}. PDF linki wa.me ile açıldı; bağlantı panoya da kopyalandı.`
+            : `Meta şablonu hazır değil. wa.me: ${url} — PDF linki panoya kopyalandı.`
+        };
+      }
+
+      if (res.status !== 503 && !/meta_whatsapp_not_configured|missing_meta_whatsapp/i.test(metaErr)) {
+        throw new Error(metaErr || `meta_pdf_send_failed (HTTP ${res.status})`);
+      }
+    } catch (e) {
+      if (e instanceof Error && !/meta_whatsapp_not_configured|missing_meta_whatsapp/i.test(e.message)) {
+        throw new Error(`PDF gönderilemedi: ${e.message}`);
+      }
+    }
+  }
+
+  if (!useMeta) {
+    throw new Error(
+      'PDF gönderimi için Koç WhatsApp gateway oturumu gerekli. Ayarlar → Koç WhatsApp’tan QR ile bağlanın.'
+    );
+  }
+
   throw new Error(
-    'PDF gönderimi için WhatsApp gateway oturumu ve sunucu girişi (JWT) gerekli. Koç WhatsApp ayarlarından QR ile bağlanın.'
+    'PDF için Meta parent_pdf_link şablonunu onaylatın veya gateway ile gönderin.'
   );
 }

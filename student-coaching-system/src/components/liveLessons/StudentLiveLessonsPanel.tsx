@@ -3,7 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { apiFetch } from '../../lib/session';
 import type { StudentTeacherLessonQuota, TeacherLesson } from '../../types';
 import LiveLessonCard from './LiveLessonCard';
-import { copyLessonAccessMessage, lessonJoinUrl, needsBbbJoinFlow } from '../../lib/liveLessonUtils';
+import { copyLessonAccessMessage, lessonJoinUrl, needsBbbJoinFlow, shouldUsePanelBbbJoin, isExternalMeetingPlatform } from '../../lib/liveLessonUtils';
 import { openBbbJoin, openBbbRecording } from '../../lib/bbbJoin';
 import { Loader2, Radio, AlertTriangle, CalendarRange } from 'lucide-react';
 import { useRecordingUnavailableAlert, recordingUnavailableText } from '../../hooks/useRecordingUnavailableAlert';
@@ -308,8 +308,15 @@ export default function StudentLiveLessonsPanel() {
                   const url = lessonJoinUrl(lesson);
                   if (!url) return;
                   try {
-                    if (needsBbbJoinFlow(url)) await openBbbJoin('teacher-lessons', lesson.id);
-                    else window.open(url, '_blank', 'noopener,noreferrer');
+                    if (shouldUsePanelBbbJoin(lesson, url)) {
+                      await openBbbJoin('teacher-lessons', lesson.id);
+                    } else if (url && isExternalMeetingPlatform(url)) {
+                      window.open(url, '_blank', 'noopener,noreferrer');
+                    } else if (needsBbbJoinFlow(url)) {
+                      await openBbbJoin('teacher-lessons', lesson.id);
+                    } else if (url) {
+                      window.open(url, '_blank', 'noopener,noreferrer');
+                    }
                   } catch (e) {
                     setError(e instanceof Error ? e.message : String(e));
                   }

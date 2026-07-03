@@ -28,6 +28,11 @@ import {
   claimClassSessionReminder,
   releaseClassSessionReminderClaim
 } from './class-lesson-reminder-send.js';
+import {
+  buildClassStudentSubjectMap,
+  filterStudentIdsForClassSubject,
+  loadClassStudentSubjectRows
+} from './class-student-subjects.js';
 
 /**
  * @param {{ triggeredBy?: string }} [opts]
@@ -145,11 +150,8 @@ export async function runClassLessonRemindersJob(opts = {}) {
   }
 
   const classIds = [...new Set(dueSessions.map((s) => String(s.class_id)))];
-  const { data: classStudentRows, error: csErr } = await supabaseAdmin
-    .from('class_students')
-    .select('class_id,student_id')
-    .in('class_id', classIds);
-  if (csErr) throw csErr;
+  const classStudentRows = await loadClassStudentSubjectRows(classIds);
+  const classStudentSubjectMap = buildClassStudentSubjectMap(classStudentRows);
 
   const classToStudents = buildClassStudentMap(classStudentRows || []);
   const studentDaySessions = buildStudentDaySessionIndex(daySessions || [], classToStudents);
@@ -184,7 +186,12 @@ export async function runClassLessonRemindersJob(opts = {}) {
       continue;
     }
 
-    const studentIds = classToStudents.get(String(s.class_id)) || [];
+    const studentIds = filterStudentIdsForClassSubject(
+      classStudentSubjectMap,
+      s.class_id,
+      s.subject,
+      classToStudents.get(String(s.class_id)) || []
+    );
     const result = await sendClassLessonReminderForSession({
       session: s,
       templateRow: reminderTemplateRow,

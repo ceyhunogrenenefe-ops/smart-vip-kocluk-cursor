@@ -14,7 +14,7 @@ import type { UserRole } from '../types';
  */
 export const ROUTE_ALLOWED_ROLES = {
   '/dashboard': ['super_admin', 'admin', 'teacher'],
-  '/students': ['super_admin', 'admin', 'coach', 'teacher'],
+  '/students': ['super_admin', 'admin', 'coach'],
   '/teachers': ['super_admin', 'admin', 'coach'],
   '/coaches': ['super_admin', 'admin'],
   '/topics': ['super_admin', 'admin'],

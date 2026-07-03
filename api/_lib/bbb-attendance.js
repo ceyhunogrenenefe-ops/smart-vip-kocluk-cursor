@@ -1,5 +1,5 @@
 import { supabaseAdmin } from './supabase-admin.js';
-import { bbbGetMeetingAttendeeNames, isBbbJoinUrl, parseBbbMeetingIdFromJoinUrl } from './bbb.js';
+import { bbbGetMeetingAttendeeNames, isBbbJoinUrl, parseBbbMeetingIdFromJoinUrl, sanitizeBbbMeetingId } from './bbb.js';
 import { sendAbsentNoticeForStudent } from './class-attendance-notify.js';
 
 /** Türkçe karakter / boşluk normalize — öğrenci adı ↔ BBB fullName */
@@ -22,28 +22,87 @@ export function normalizePersonNameForMatch(raw) {
  * @param {string[]} attendeeNames BBB katılımcı isimleri (moderatör hariç)
  */
 export function matchStudentsByBbbNames(students, attendeeNames) {
-  const attendeeNorm = new Set(
-    (attendeeNames || []).map((n) => normalizePersonNameForMatch(n)).filter(Boolean)
-  );
+  const attendeeObjs = (attendeeNames || []).map((n) => ({ fullName: String(n || '') }));
   /** @type {Map<string, 'present' | 'absent'>} */
   const out = new Map();
   for (const s of students || []) {
     const sid = String(s.id || '').trim();
     if (!sid) continue;
-    const norm = normalizePersonNameForMatch(s.name);
-    const present = norm && attendeeNorm.has(norm);
-    out.set(sid, present ? 'present' : 'absent');
+    const matched = findBbbAttendeeForStudentName(s.name, attendeeObjs);
+    out.set(sid, matched ? 'present' : 'absent');
   }
   return out;
 }
 
 export function resolveBbbMeetingIdFromSession(session) {
-  const stored = String(session?.bbb_meeting_id || '').trim();
-  if (stored) return stored;
-  const fromLink =
-    parseBbbMeetingIdFromJoinUrl(session?.meeting_link) ||
-    parseBbbMeetingIdFromJoinUrl(session?.meeting_link_moderator);
-  return fromLink || '';
+  const ids = collectBbbMeetingIdsForLiveSession(session);
+  return ids[0] || '';
+}
+
+/** Canlı katılım / yoklama için olası BBB meetingID adayları (bbb:auto dahil). */
+export function collectBbbMeetingIdsForLiveSession(session) {
+  const ids = [];
+  const push = (v) => {
+    const raw = String(v || '').trim();
+    if (!raw) return;
+    const id = sanitizeBbbMeetingId(raw);
+    if (id && !ids.includes(id)) ids.push(id);
+  };
+  push(session?.bbb_meeting_id);
+  push(parseBbbMeetingIdFromJoinUrl(session?.meeting_link));
+  push(parseBbbMeetingIdFromJoinUrl(session?.meeting_link_moderator));
+  const sid = String(session?.id || '').replace(/-/g, '');
+  if (sid) push(`cljoin${sid}`);
+  return ids;
+}
+
+/** BBB ekran adından parantez / ek açıklamaları temizle */
+export function stripBbbDisplayNameNoise(raw) {
+  return String(raw || '')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Öğrenci adını BBB katılımcı listesiyle eşleştir (tam + parçalı).
+ * @param {string} studentName
+ * @param {Array<{ fullName: string }>} attendees
+ */
+export function findBbbAttendeeForStudentName(studentName, attendees) {
+  const list = Array.isArray(attendees) ? attendees : [];
+  const studentNorm = normalizePersonNameForMatch(stripBbbDisplayNameNoise(studentName));
+  if (!studentNorm) return null;
+
+  for (const a of list) {
+    const norm = normalizePersonNameForMatch(stripBbbDisplayNameNoise(a.fullName));
+    if (norm && norm === studentNorm) return a;
+  }
+
+  const studentTokens = studentNorm.split(' ').filter((t) => t.length >= 2);
+  if (studentTokens.length) {
+    let best = null;
+    let bestScore = 0;
+    for (const a of list) {
+      const norm = normalizePersonNameForMatch(stripBbbDisplayNameNoise(a.fullName));
+      const tokens = norm.split(' ').filter(Boolean);
+      const score = studentTokens.filter((t) => tokens.includes(t)).length;
+      const need = Math.min(2, studentTokens.length);
+      if (score > bestScore && score >= need) {
+        bestScore = score;
+        best = a;
+      }
+    }
+    if (best) return best;
+  }
+
+  for (const a of list) {
+    const norm = normalizePersonNameForMatch(stripBbbDisplayNameNoise(a.fullName));
+    if (!norm) continue;
+    if (norm.includes(studentNorm) || studentNorm.includes(norm)) return a;
+  }
+  return null;
 }
 
 export function mergeSeenNames(existing, incoming) {

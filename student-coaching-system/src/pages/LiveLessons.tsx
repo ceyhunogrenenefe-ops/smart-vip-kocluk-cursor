@@ -9,7 +9,7 @@ import BbbAutoLinkFieldHint from '../components/liveLessons/BbbAutoLinkFieldHint
 import LiveLessonCard from '../components/liveLessons/LiveLessonCard';
 import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShell';
 import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
-import { lessonJoinUrl, needsBbbJoinFlow } from '../lib/liveLessonUtils';
+import { lessonJoinUrl, needsBbbJoinFlow, shouldUsePanelBbbJoin, isExternalMeetingPlatform } from '../lib/liveLessonUtils';
 import { openBbbJoin } from '../lib/bbbJoin';
 import { copyGuestJoinShareText } from '../lib/bbbGuestJoin';
 import { Radio, Plus, Loader2, Filter, Clock, Pencil, Move, GripVertical, Trash2, FileDown } from 'lucide-react';
@@ -153,15 +153,25 @@ export default function LiveLessons() {
   const joinLiveLesson = useCallback(
     async (lesson: TeacherLesson) => {
       const url = lessonJoinUrl(lesson);
-      if (!url) {
+      if (!url && !lesson.id) {
         setError('Toplantı bağlantısı yok.');
         return;
       }
       try {
+        if (shouldUsePanelBbbJoin(lesson, url)) {
+          await openBbbJoin('teacher-lessons', lesson.id);
+          return;
+        }
+        if (url && isExternalMeetingPlatform(url)) {
+          window.open(url, '_blank', 'noopener,noreferrer');
+          return;
+        }
         if (needsBbbJoinFlow(url)) {
           await openBbbJoin('teacher-lessons', lesson.id);
-        } else {
+        } else if (url) {
           window.open(url, '_blank', 'noopener,noreferrer');
+        } else {
+          setError('Toplantı bağlantısı yok.');
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));

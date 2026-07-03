@@ -1,4 +1,5 @@
 import { supabaseAdmin } from './supabase-admin.js';
+import { ensureClassTeacherLink } from './teacher-class-scope.js';
 import { resolveBbbMeetingDurationMinutes } from './bbb.js';
 import { resolveBbbOrManualMeetingLink } from './resolve-bbb-meeting-link.js';
 import {
@@ -379,7 +380,7 @@ export async function exportPlannerGroupToClass({
   groupId,
   classId,
   classRow,
-  replaceExisting = false,
+  replaceExisting = true,
   clearCrossClassConflicts = false,
   teacherMap = {}
 }) {
@@ -591,6 +592,7 @@ export async function exportPlannerGroupToClass({
       errors.push(insErr.message);
       continue;
     }
+    if (teacherId && classId) await ensureClassTeacherLink(classId, teacherId);
     created.push({ subject, teacher: teacherName, day: days[di], time: period?.time });
   }
 

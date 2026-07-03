@@ -44,11 +44,16 @@ import {
   type ParaBirimi
 } from '../lib/parentSignApi';
 import {
+  applyTaksitVadeEdit,
   classifyTaksit,
   defaultTaksitVadeleri,
   effectiveVadeYmd,
+  resizeTaksitVadeleri,
   resizeTaksitTutarlari,
+  shiftYmdByMonths,
   splitTaksitTutarlari,
+  taksitVadeleriMonthly,
+  todayYmdLocal,
   type TaksitKartMuhasebe
 } from '../lib/taksitMuhasebe';
 import { rolesForProtectedRoute, userHasAnyRole } from '../config/rolePermissions';
@@ -152,16 +157,16 @@ function taksitKartlariFromRow(r: ParentSignContractRow): TaksitKart[] {
 
 const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-function resizeTaksitVadeleri(prev: string[], baslangic: string, count: number): string[] {
+function seedVadelerFromCards(cards: TaksitKart[], count: number): string[] {
   const n = Math.max(1, Math.min(48, Math.round(count) || 1));
-  if (n <= 1) return [];
-  const defaults = defaultTaksitVadeleri(baslangic, n);
-  const out: string[] = [];
-  for (let i = 0; i < n; i++) {
-    const p = prev[i];
-    out.push(p && YMD_RE.test(p) ? p : defaults[i]);
-  }
-  return out;
+  const today = todayYmdLocal();
+  const seed = Array.from({ length: n }, (_, i) => {
+    const c = cards[i];
+    const v = c ? String(c.vade_tarihi || '').trim().slice(0, 10) : '';
+    if (YMD_RE.test(v)) return v;
+    return shiftYmdByMonths(today, i) || today;
+  });
+  return resizeTaksitVadeleri(seed, n);
 }
 
 type PriceSetupDraft = {
@@ -182,7 +187,6 @@ function defaultPriceSetupDraft(r: ParentSignContractRow): PriceSetupDraft {
   const suggested = suggestHoursAndFeeFromSinif(r.sinif);
   let n = Math.max(1, Math.min(48, Math.round(Number(r.taksit_sayisi) || 1)));
   if (odemeSekli === 'kredi_karti_tek') n = 1;
-  const bas = String(r.baslangic_tarihi || '').slice(0, 10);
   const ucret = Number(r.ucret) > 0 ? Number(r.ucret) : suggested.fee;
   const rawPb = String(r.para_birimi || 'TRY').trim().toUpperCase();
   const paraBirimi = (PARA_BIRIMI_OPTIONS.some((o) => o.value === rawPb) ? rawPb : 'TRY') as ParaBirimi;
@@ -196,11 +200,7 @@ function defaultPriceSetupDraft(r: ParentSignContractRow): PriceSetupDraft {
       ucret,
       paraBirimi,
       taksitSayisi: n,
-      vadeler: resizeTaksitVadeleri(
-        cards.map((c, i) => effectiveVadeYmd(c, r.baslangic_tarihi, i)),
-        bas,
-        n
-      ),
+      vadeler: seedVadelerFromCards(cards, n),
       tutarlar: resizeTaksitTutarlari(
         cards.map((c) => Number(c.tutar_tl) || 0),
         ucret,
@@ -213,7 +213,7 @@ function defaultPriceSetupDraft(r: ParentSignContractRow): PriceSetupDraft {
     ucret,
     paraBirimi,
     taksitSayisi: n,
-    vadeler: defaultTaksitVadeleri(bas, n),
+    vadeler: defaultTaksitVadeleri(n),
     tutarlar: splitTaksitTutarlari(ucret, n),
     ...base
   };
@@ -223,7 +223,6 @@ function TaksitPlanEditor(props: {
   taksitSayisi: number;
   ucret: number;
   paraBirimi: ParaBirimi;
-  baslangic: string;
   vadeler: string[];
   tutarlar: number[];
   onVadelerChange: (next: string[]) => void;
@@ -276,9 +275,7 @@ function TaksitPlanEditor(props: {
               className="rounded-lg border border-slate-200 px-2 py-1 text-xs dark:bg-slate-950 dark:border-slate-600"
               value={vade}
               onChange={(e) => {
-                const next = [...props.vadeler];
-                next[idx] = e.target.value;
-                props.onVadelerChange(next);
+                props.onVadelerChange(applyTaksitVadeEdit(props.vadeler, idx, e.target.value));
               }}
             />
             <input
@@ -490,9 +487,9 @@ export default function ParentSignFlowPage() {
       setTaksitTutarlari([]);
       return;
     }
-    setTaksitVadeleri((prev) => resizeTaksitVadeleri(prev, baslangic, n));
+    setTaksitVadeleri((prev) => resizeTaksitVadeleri(prev, n));
     setTaksitTutarlari((prev) => resizeTaksitTutarlari(prev, ucret, n));
-  }, [ogrenciOnceKayitFormu, taksitSayisi, baslangic, ucret]);
+  }, [ogrenciOnceKayitFormu, taksitSayisi, ucret]);
 
   useEffect(() => {
     if (!editOpen) return;
@@ -502,9 +499,9 @@ export default function ParentSignFlowPage() {
       setEditTaksitTutarlari([]);
       return;
     }
-    setEditTaksitVadeleri((prev) => resizeTaksitVadeleri(prev, editBaslangic, n));
+    setEditTaksitVadeleri((prev) => resizeTaksitVadeleri(prev, n));
     setEditTaksitTutarlari((prev) => resizeTaksitTutarlari(prev, editUcret, n));
-  }, [editOpen, editTaksitSayisi, editBaslangic, editUcret]);
+  }, [editOpen, editTaksitSayisi, editUcret]);
 
   useEffect(() => {
     setPriceDrafts((prev) => {
@@ -939,10 +936,6 @@ export default function ParentSignFlowPage() {
       if (!cur) return prev;
       const merged = { ...cur, ...patch };
       const n = Math.max(1, Math.min(48, Math.round(merged.taksitSayisi) || 1));
-      const bas =
-        rows.find((x) => x.id === id)?.baslangic_tarihi != null
-          ? String(rows.find((x) => x.id === id)!.baslangic_tarihi).slice(0, 10)
-          : todayPlus(0);
       if (patch.odemeSekli === 'kredi_karti_tek') {
         merged.taksitSayisi = 1;
         merged.vadeler = [];
@@ -954,7 +947,7 @@ export default function ParentSignFlowPage() {
           merged.vadeler = [];
           merged.tutarlar = [];
         } else {
-          merged.vadeler = resizeTaksitVadeleri(merged.vadeler, bas, n2);
+          merged.vadeler = resizeTaksitVadeleri(merged.vadeler, n2);
           merged.tutarlar = resizeTaksitTutarlari(merged.tutarlar, merged.ucret, n2);
         }
       }
@@ -1014,7 +1007,15 @@ export default function ParentSignFlowPage() {
     setParentSignRowBusy(`${r.id}:v${index}`);
     setMsg(null);
     try {
-      await patchParentSignKayitOnly({ id: r.id, taksit_vade_update: { index, vade_tarihi } });
+      const cards = taksitKartlariFromRow(r);
+      if (index === 0 && cards.length > 1) {
+        const vadeler = taksitVadeleriMonthly(vade_tarihi, cards.length);
+        for (let i = 0; i < vadeler.length; i++) {
+          await patchParentSignKayitOnly({ id: r.id, taksit_vade_update: { index: i, vade_tarihi: vadeler[i] } });
+        }
+      } else {
+        await patchParentSignKayitOnly({ id: r.id, taksit_vade_update: { index, vade_tarihi } });
+      }
       void load();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Vade güncellenemedi');
@@ -1077,16 +1078,9 @@ export default function ParentSignFlowPage() {
     setEditTaksitSayisi(Number(r.taksit_sayisi) || 1);
     const editTaksitN = Math.max(1, Math.min(48, Math.round(Number(r.taksit_sayisi) || 1)));
     const editCards = taksitKartlariFromRow(r);
-    const editBas = String(r.baslangic_tarihi || '').slice(0, 10);
     if (editTaksitN > 1) {
       if (editCards.length > 0) {
-        setEditTaksitVadeleri(
-          resizeTaksitVadeleri(
-            editCards.map((c, i) => effectiveVadeYmd(c, r.baslangic_tarihi, i)),
-            editBas,
-            editTaksitN
-          )
-        );
+        setEditTaksitVadeleri(seedVadelerFromCards(editCards, editTaksitN));
         setEditTaksitTutarlari(
           resizeTaksitTutarlari(
             editCards.map((c) => Number(c.tutar_tl) || 0),
@@ -1095,7 +1089,7 @@ export default function ParentSignFlowPage() {
           )
         );
       } else {
-        setEditTaksitVadeleri(defaultTaksitVadeleri(editBas, editTaksitN));
+        setEditTaksitVadeleri(defaultTaksitVadeleri(editTaksitN));
         setEditTaksitTutarlari(splitTaksitTutarlari(Number(r.ucret) || 0, editTaksitN));
       }
     } else {
@@ -1828,12 +1822,11 @@ export default function ParentSignFlowPage() {
                   taksitSayisi={taksitSayisi}
                   ucret={ucret}
                   paraBirimi={paraBirimi}
-                  baslangic={baslangic}
                   vadeler={taksitVadeleri}
                   tutarlar={taksitTutarlari}
                   onVadelerChange={setTaksitVadeleri}
                   onTutarlarChange={setTaksitTutarlari}
-                  onResetMonthly={() => setTaksitVadeleri(defaultTaksitVadeleri(baslangic, taksitSayisi))}
+                  onResetMonthly={() => setTaksitVadeleri(defaultTaksitVadeleri(taksitSayisi))}
                   onResetEqualSplit={() => setTaksitTutarlari(splitTaksitTutarlari(ucret, taksitSayisi))}
                 />
               </>
@@ -2132,17 +2125,13 @@ export default function ParentSignFlowPage() {
                           taksitSayisi={priceDrafts[r.id].taksitSayisi}
                           ucret={priceDrafts[r.id].ucret}
                           paraBirimi={priceDrafts[r.id].paraBirimi}
-                          baslangic={String(r.baslangic_tarihi || '').slice(0, 10)}
                           vadeler={priceDrafts[r.id].vadeler}
                           tutarlar={priceDrafts[r.id].tutarlar}
                           onVadelerChange={(vadeler) => patchPriceDraft(r.id, { vadeler })}
                           onTutarlarChange={(tutarlar) => patchPriceDraft(r.id, { tutarlar })}
                           onResetMonthly={() =>
                             patchPriceDraft(r.id, {
-                              vadeler: defaultTaksitVadeleri(
-                                String(r.baslangic_tarihi || '').slice(0, 10),
-                                priceDrafts[r.id].taksitSayisi
-                              )
+                              vadeler: defaultTaksitVadeleri(priceDrafts[r.id].taksitSayisi)
                             })
                           }
                           onResetEqualSplit={() =>
@@ -2577,12 +2566,11 @@ export default function ParentSignFlowPage() {
                 taksitSayisi={editTaksitSayisi}
                 ucret={editUcret}
                 paraBirimi={editParaBirimi}
-                baslangic={editBaslangic}
                 vadeler={editTaksitVadeleri}
                 tutarlar={editTaksitTutarlari}
                 onVadelerChange={setEditTaksitVadeleri}
                 onTutarlarChange={setEditTaksitTutarlari}
-                onResetMonthly={() => setEditTaksitVadeleri(defaultTaksitVadeleri(editBaslangic, editTaksitSayisi))}
+                onResetMonthly={() => setEditTaksitVadeleri(defaultTaksitVadeleri(editTaksitSayisi))}
                 onResetEqualSplit={() => setEditTaksitTutarlari(splitTaksitTutarlari(editUcret, editTaksitSayisi))}
               />
             </div>

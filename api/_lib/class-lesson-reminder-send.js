@@ -11,6 +11,17 @@ import { getClassLessonReminderPhone } from './meetings-resolve.js';
 export const CLASS_LESSON_REMINDER_KIND = 'class_lesson_reminder';
 export const CLASS_LESSON_REMINDER_TEMPLATE = 'class_lesson_reminder';
 
+/** Meta üzerinden grup dersi hatırlatması — varsayılan kapalı; Vercel: CLASS_LESSON_REMINDER_META_ENABLED=1 */
+export function isClassLessonReminderMetaEnabled() {
+  return String(process.env.CLASS_LESSON_REMINDER_META_ENABLED ?? '0').trim() === '1';
+}
+
+/** Tüm grup hatırlatma cron/manuel — env ile zorla kapat (CLASS_LESSON_REMINDER_ENABLED=0) */
+export function isClassLessonReminderForceDisabled() {
+  const v = String(process.env.CLASS_LESSON_REMINDER_ENABLED ?? '').trim().toLowerCase();
+  return v === '0' || v === 'false' || v === 'off' || v === 'paused';
+}
+
 export async function loadClassLessonReminderTemplate() {
   const { data, error } = await supabaseAdmin
     .from('message_templates')
@@ -22,6 +33,9 @@ export async function loadClassLessonReminderTemplate() {
 }
 
 export function validateClassLessonReminderTemplate(row) {
+  if (isClassLessonReminderForceDisabled()) {
+    return { ok: false, code: 'class_lesson_reminders_suspended' };
+  }
   if (!row?.content) return { ok: false, code: 'template_not_found' };
   if (row.is_active === false) return { ok: false, code: 'template_inactive' };
   return { ok: true, metaName: String(row.meta_template_name || '').trim() || null };

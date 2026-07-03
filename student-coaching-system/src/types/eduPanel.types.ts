@@ -47,22 +47,56 @@ export type EduLessonRow = {
   teacher_user_id: string;
   institution_id?: string | null;
   class_id: string;
+  /** Junction tablosundan — birincil class_id dahil tüm sınıflar */
+  class_ids?: string[];
   title: string;
   subject_name: string;
   subject_color: SubjectColor;
   lesson_date: string;
+  available_from?: string | null;
+  available_until?: string | null;
   status: LessonStatus;
   notes?: string | null;
   animations?: EduAnimation[];
   homework?: EduHomework[];
 };
 
+export type EduLessonRowProgress = {
+  id: string;
+  lesson_row_id: string;
+  student_user_id: string;
+  student_id?: string | null;
+  animation_completed: boolean;
+  animation_completed_at?: string | null;
+  homework_percent: number;
+  topic_completed: boolean;
+  topic_completed_at?: string | null;
+  points: number;
+  updated_at?: string;
+};
+
+export type EduRowStudentProgress = {
+  student_id: string;
+  student_user_id: string;
+  student_name: string;
+  class_id?: string | null;
+  animation_completed: boolean;
+  homework_percent: number;
+  topic_completed: boolean;
+  points: number;
+  topic_completed_at?: string | null;
+};
+
 export type LessonRowFormValues = {
   class_id: string;
+  /** Birden fazla sınıf — API birincil olarak class_id kullanır */
+  class_ids?: string[];
   title: string;
   subject_name: string;
   subject_color: SubjectColor;
   lesson_date: string;
+  available_from?: string;
+  available_until?: string;
   status: LessonStatus;
   notes?: string;
 };

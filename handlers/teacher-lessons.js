@@ -1,5 +1,5 @@
 import { requireAuthenticatedActor, hasInstitutionAccess } from '../api/_lib/auth.js';
-import { enrichMeetingRowsJoinLink } from '../api/_lib/bbb.js';
+import { enrichMeetingRowsJoinLink, buildStaffBbbJoinUrl, parseBbbJoinCredentials, parseBbbMeetingIdFromJoinUrl, parseBbbPasswordFromJoinUrl } from '../api/_lib/bbb.js';
 import { resolveBbbOrManualMeetingLink } from '../api/_lib/resolve-bbb-meeting-link.js';
 import { handleBbbJoinGet, handleBbbRecordingGet, patchRowMeetingLinks, patchRowRecordingLink } from '../api/_lib/bbb-join-handler.js';
 import { createGuestJoinShareLink } from '../api/_lib/bbb-guest-join-core.js';
@@ -1325,6 +1325,30 @@ async function canAccessTeacherLesson(actor, row) {
   return false;
 }
 
+async function resolveTeacherStaffBbbJoinUrl(actor, row, ensured) {
+  const actorName = String(actor.name || actor.email || 'Öğretmen').trim().slice(0, 64);
+  const meetingId =
+    String(row.bbb_meeting_id || ensured.meetingId || '').trim() ||
+    parseBbbMeetingIdFromJoinUrl(String(ensured.moderatorLink || row.meeting_link_moderator || '')) ||
+    parseBbbMeetingIdFromJoinUrl(String(ensured.attendeeLink || row.meeting_link || '')) ||
+    '';
+  const modPw =
+    String(ensured.moderatorPW || '').trim() ||
+    parseBbbPasswordFromJoinUrl(String(ensured.moderatorLink || row.meeting_link_moderator || '')) ||
+    '';
+  const attendeePw =
+    String(row.bbb_attendee_pw || ensured.attendeePW || '').trim() ||
+    parseBbbJoinCredentials(String(ensured.attendeeLink || row.meeting_link || ''))?.attendeePassword ||
+    '';
+  return buildStaffBbbJoinUrl({
+    actorName,
+    meetingId,
+    moderatorPassword: modPw,
+    attendeePassword: attendeePw,
+    preferModerator: true
+  });
+}
+
 async function handleTeacherLessonBbbJoin(req, res) {
   return handleBbbJoinGet(req, res, {
     loadRow: async (id) => {
@@ -1358,7 +1382,8 @@ async function handleTeacherLessonBbbJoin(req, res) {
         meeting_link_moderator: links.meeting_link_moderator,
         bbb_meeting_id: links.bbb_meeting_id,
         bbb_attendee_pw: links.bbb_attendee_pw
-      })
+      }),
+    resolveStaffJoinUrl: async (act, row, ensured) => resolveTeacherStaffBbbJoinUrl(act, row, ensured)
   });
 }
 

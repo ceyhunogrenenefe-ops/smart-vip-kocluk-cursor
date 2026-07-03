@@ -59,10 +59,10 @@ export function todayYmdLocal(): string {
   return `${yy}-${mm}-${dd}`;
 }
 
-/** Sözleşme başlangıcından itibaren aylık taksit vadeleri */
-export function defaultTaksitVadeleri(baslangicYmd: string, count: number): string[] {
+/** İlk vade = anchorYmd; sonraki her taksit +1 ay */
+export function taksitVadeleriMonthly(anchorYmd: string, count: number): string[] {
   const n = Math.max(1, Math.min(48, Math.round(count) || 1));
-  const raw = String(baslangicYmd || '')
+  const raw = String(anchorYmd || '')
     .trim()
     .slice(0, 10);
   const start = YMD.test(raw) ? raw : todayYmdLocal();
@@ -71,6 +71,33 @@ export function defaultTaksitVadeleri(baslangicYmd: string, count: number): stri
     out.push(shiftYmdByMonths(start, i) || start);
   }
   return out;
+}
+
+/** Yeni plan: 1. vade bugün, sonrakiler aylık */
+export function defaultTaksitVadeleri(count: number): string[] {
+  return taksitVadeleriMonthly(todayYmdLocal(), count);
+}
+
+export function resizeTaksitVadeleri(prev: string[], count: number): string[] {
+  const n = Math.max(1, Math.min(48, Math.round(count) || 1));
+  if (n <= 1) return [];
+  const anchor = prev[0] && YMD.test(prev[0]) ? prev[0] : todayYmdLocal();
+  const series = taksitVadeleriMonthly(anchor, n);
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const p = prev[i];
+    out.push(p && YMD.test(p) ? p : series[i]);
+  }
+  return out;
+}
+
+/** 1. vade değişince sonrakileri aylık yeniden hesapla */
+export function applyTaksitVadeEdit(vadeler: string[], index: number, newYmd: string): string[] {
+  if (!YMD.test(newYmd)) return vadeler;
+  if (index === 0) return taksitVadeleriMonthly(newYmd, vadeler.length);
+  const next = [...vadeler];
+  next[index] = newYmd;
+  return next;
 }
 
 /** Toplam ücreti taksit sayısına böl (API buildTaksitPlan ile aynı) */
@@ -114,6 +141,8 @@ export function effectiveVadeYmd(
     .trim()
     .slice(0, 10);
   if (YMD.test(v)) return v;
+  const fromToday = shiftYmdByMonths(todayYmdLocal(), indexZero);
+  if (fromToday) return fromToday;
   const b = String(contractBaslangic || '')
     .trim()
     .slice(0, 10);

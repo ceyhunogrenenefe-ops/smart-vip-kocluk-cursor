@@ -317,7 +317,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [weeklyEntries, setWeeklyEntries] = useState<WeeklyEntry[]>([]);
 
   // Kurumlar — oturumlar arası önbellekten okuma yok (yanlış kurum flaşı); kaynak Supabase.
-  const [institutions, setInstitutions] = useState<Institution[]>(() => []);
+  const [institutions, setInstitutions] = useState<Institution[]>(() =>
+    loadFromStorage<Institution[]>(STORAGE_KEYS.institutions, [])
+  );
 
   const [activeInstitutionId, setActiveInstitutionId] = useState<string | null>(() => null);
 
@@ -412,6 +414,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         'Supabase yapılandırması eksik/geçersiz. Vercel’de VITE_SUPABASE_* veya SUPABASE_URL + SUPABASE_ANON_KEY (anon) tanımlı mı, Production + Redeploy yapıldı mı kontrol edin.'
       );
     }
+    if (effectiveUser?.id || getAuthToken()) {
+      return;
+    }
     const reachable = await verifySupabaseReachable();
     if (!reachable) {
       throw new Error(
@@ -451,10 +456,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
       try {
         await ensureSupabaseReady();
 
-        const [, dbInstitutions] = await Promise.all([
-          db.initializeDatabase(),
-          db.getInstitutions()
-        ]);
+        let dbInstitutions: Awaited<ReturnType<typeof db.getInstitutions>> = [];
+        try {
+          dbInstitutions = await db.getInstitutions();
+        } catch (instErr) {
+          console.warn('[AppContext] Kurumlar yüklenemedi, önbellek kullanılıyor:', instErr);
+          const cached = loadFromStorage<Institution[]>(STORAGE_KEYS.institutions, []);
+          dbInstitutions = cached.map((i) => ({
+            id: i.id,
+            name: i.name,
+            email: i.email,
+            phone: i.phone || null,
+            address: i.address || null,
+            website: i.website || null,
+            logo: i.logo || null,
+            plan: i.plan,
+            is_active: i.isActive,
+            whatsapp_automation_enabled: i.whatsappAutomationEnabled !== false,
+            created_at: i.createdAt,
+            updated_at: i.createdAt
+          }));
+        }
+
+        if (import.meta.env.DEV) {
+          await db.initializeDatabase();
+        }
+
         let loadedInstitutions: Institution[] = [];
         if (dbInstitutions.length > 0) {
           loadedInstitutions = dbInstitutions.map((i) => {
@@ -478,6 +505,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
               plan
             };
           });
+        } else {
+          const cached = loadFromStorage<Institution[]>(STORAGE_KEYS.institutions, []);
+          if (cached.length > 0) loadedInstitutions = cached;
         }
         setInstitutions(loadedInstitutions);
         saveToStorage(STORAGE_KEYS.institutions, loadedInstitutions);
@@ -2894,7 +2924,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (matched.length > 0) return matched;
       return [];
     }
-    /** Koç: salt kurum admin listesinden önce — admin+koç birlikte olsa dar liste */
+    if (tags.includes('admin')) {
+      return students.filter((s) => s.institutionId === effectiveUser.institutionId);
+    }
+    /** Öğretmen birincil rol: grup sınıfı öğrencileri (API ile uyumlu) */
+    if (tags.includes('teacher') && effectiveUser.role === 'teacher') {
+      return students;
+    }
+    /** Koç birincil rol */
     if (tags.includes('coach')) {
       const cid = resolveCoachRecordId(
         effectiveUser.role,
@@ -2905,14 +2942,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!cid) return [];
       return students.filter((s) => String(s.coachId || '') === String(cid));
     }
-    /** Öğretmen: kurumu varsa yalnız o kurumun öğrencileri */
+    /** Öğretmen etiketi (admin+öğretmen vb.) */
     if (tags.includes('teacher')) {
-      const iid = effectiveUser.institutionId;
-      if (iid) return students.filter((s) => s.institutionId === iid);
       return students;
-    }
-    if (tags.includes('admin')) {
-      return students.filter((s) => s.institutionId === effectiveUser.institutionId);
     }
     return students;
   }, [students, effectiveUser, coaches, tenantScopeInstitutionId]);

@@ -8,17 +8,27 @@ import StudentLiveLessonsPanel from '../components/liveLessons/StudentLiveLesson
 import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShell';
 import { ClassLiveStudentMobileCalendar } from '../components/liveLessons/ClassLiveStudentMobileCalendar';
 import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
+import { userHasAnyRole } from '../config/rolePermissions';
 import { useStudentMobileShell } from '../hooks/useStudentMobileShell';
 import { useMobileAppShell } from '../hooks/useMobileAppShell';
 import { isUuid } from '../utils/uuid';
+import { resolveStudentInList } from '../lib/classLiveBranchUtils';
 import { GripVertical, KeyRound, Loader2, Pencil, PlayCircle, Trash2, FileDown, Bell } from 'lucide-react';
 import BbbAutoLinkFieldHint from '../components/liveLessons/BbbAutoLinkFieldHint';
-import { isBbbJoinUrl, hasClassSessionRecordingAccess, isBbbPlaybackUrl, needsBbbJoinFlow, displayMeetingLinkForRow, meetingLinkForSave, shouldSkipClassLessonReminder } from '../lib/liveLessonUtils';
+import { isBbbJoinUrl, hasClassSessionRecordingAccess, isBbbPlaybackUrl, needsBbbJoinFlow, displayMeetingLinkForRow, meetingLinkForSave, shouldSkipClassLessonReminder, shouldUsePanelBbbJoin, isExternalMeetingPlatform, lessonJoinUrl } from '../lib/liveLessonUtils';
 import { openBbbJoin, openBbbRecording } from '../lib/bbbJoin';
 import ClassLiveClassManager from '../components/liveLessons/ClassLiveClassManager';
+import ClassLivePresenceModal from '../components/liveLessons/ClassLivePresenceModal';
+import {
+  CLASS_LIVE_PRESENCE_ENABLED,
+  type ClassLivePresenceModalKind
+} from '../lib/classLivePresence';
+import { useClassLivePresence } from '../hooks/useClassLivePresence';
+import { classIdsInLivePresenceWindow } from '../lib/classLiveWindow';
 import { copyGuestJoinShareText } from '../lib/bbbGuestJoin';
 import { useRecordingUnavailableAlert, recordingUnavailableText } from '../hooks/useRecordingUnavailableAlert';
 import { SolutionLessonStudentActions } from '../components/solutionAppointments/SolutionLessonStudentActions';
+import { inferSessionBatchPeers } from '../lib/classSessionBatchPeers';
 import { isSolutionLessonSubject } from '../lib/solutionAppointments/utils';
 
 type ClassRow = {
@@ -30,6 +40,7 @@ type ClassRow = {
   description?: string | null;
   teacher_ids: string[];
   student_ids: string[];
+  student_subjects?: Record<string, string[]>;
 };
 
 type SlotRow = {
@@ -68,28 +79,6 @@ type SessionRow = {
 
 function normalizeSessionTime(t: string): string {
   return String(t || '').slice(0, 8);
-}
-
-function sessionBatchSignature(session: SessionRow): string {
-  return [
-    String(session.class_id || ''),
-    String(session.subject || '').trim(),
-    String(session.teacher_id || ''),
-    normalizeSessionTime(session.start_time),
-    normalizeSessionTime(session.end_time)
-  ].join('|');
-}
-
-/** Toplu planlanmış oturum eşleri (schedule_batch_id veya aynı şablon imzası). */
-function inferSessionBatchPeers(session: SessionRow, pool: SessionRow[]): SessionRow[] {
-  const scheduled = pool.filter((s) => s.status === 'scheduled');
-  if (session.schedule_batch_id) {
-    const peers = scheduled.filter((s) => s.schedule_batch_id === session.schedule_batch_id);
-    if (peers.length > 1) return peers;
-  }
-  const sig = sessionBatchSignature(session);
-  const peers = scheduled.filter((s) => sessionBatchSignature(s) === sig);
-  return peers.length > 1 ? peers : [session];
 }
 
 const DAY_LABELS = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
@@ -146,6 +135,7 @@ export default function ClassLiveLessons() {
   const canManageClasses = role === 'admin' || role === 'super_admin' || role === 'coach';
   const canOpenSchedulePlanner = role === 'admin' || role === 'super_admin';
   const canManageSlots = canManageClasses || role === 'teacher';
+  const isTeacherView = userHasAnyRole(effectiveUser, ['teacher']);
   const canViewPaymentSummary = role === 'admin' || role === 'super_admin';
   const isStudentView = role.toLowerCase() === 'student';
   const studentMobileShell = useStudentMobileShell();
@@ -218,13 +208,88 @@ export default function ClassLiveLessons() {
   const classCalendarPdfRef = useRef<HTMLDivElement>(null);
   const [classPdfSnapBusy, setClassPdfSnapBusy] = useState(false);
 
+  const canViewLivePresence = !isStudentView;
+  const [todaySessionsForPresence, setTodaySessionsForPresence] = useState<SessionRow[]>([]);
+
+  const loadTodaySessionsForPresence = useCallback(async () => {
+    if (!canViewLivePresence || !classes.length) {
+      setTodaySessionsForPresence([]);
+      return;
+    }
+    try {
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul' });
+      const qs = new URLSearchParams({ scope: 'sessions', from: today, to: today });
+      const res = await apiFetch(`/api/class-live-lessons?${qs.toString()}`);
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setTodaySessionsForPresence([]);
+        return;
+      }
+      setTodaySessionsForPresence(Array.isArray(j.data) ? (j.data as SessionRow[]) : []);
+    } catch {
+      setTodaySessionsForPresence([]);
+    }
+  }, [canViewLivePresence, classes.length, activeInstitutionId, institution?.id]);
+
+  useEffect(() => {
+    if (!canViewLivePresence) return;
+    void loadTodaySessionsForPresence();
+    let cancelled = false;
+    let timer: number | undefined;
+    const schedule = (ms: number) => {
+      timer = window.setTimeout(() => {
+        if (cancelled) return;
+        if (document.visibilityState === 'visible') {
+          void loadTodaySessionsForPresence().finally(() => schedule(300_000));
+        } else {
+          schedule(60_000);
+        }
+      }, ms);
+    };
+    schedule(300_000);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void loadTodaySessionsForPresence();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      cancelled = true;
+      if (timer != null) window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [canViewLivePresence, loadTodaySessionsForPresence]);
+
+  const classIdsForPresence = useMemo(
+    () => classIdsInLivePresenceWindow(todaySessionsForPresence),
+    [todaySessionsForPresence]
+  );
+  const {
+    data: livePresenceData,
+    byClassId: livePresenceByClassId,
+    loading: livePresenceLoading,
+    error: livePresenceError
+  } = useClassLivePresence({
+    enabled: canViewLivePresence && classIdsForPresence.length > 0,
+    classIds: classIdsForPresence
+  });
+
+  const [presenceModal, setPresenceModal] = useState<{
+    classId: string;
+    kind: ClassLivePresenceModalKind;
+  } | null>(null);
+
+  const handleClosePresenceModal = useCallback(() => setPresenceModal(null), []);
+  const handlePresenceStatClick = useCallback((classId: string, kind: ClassLivePresenceModalKind) => {
+    setPresenceModal({ classId, kind });
+  }, []);
+
   const canMarkAttendance = canManageSlots && !isStudentView && Boolean(selectedClassId);
   const canSendLessonReminder = canMarkAttendance;
 
   const hintLessonReminderError = (note: string) => {
     const n = String(note || '').toLowerCase();
     if (n.includes('template_not_found')) return 'Grup dersi hatırlatma şablonu (class_lesson_reminder) tanımlı değil.';
-    if (n.includes('template_inactive')) return 'Hatırlatma şablonu pasif — Mesaj şablonlarından açın.';
+    if (n.includes('template_inactive') || n.includes('class_lesson_reminders_suspended'))
+      return 'Grup dersi hatırlatmaları askıda — yeniden açılana kadar gönderilmez.';
     if (n.includes('meta_whatsapp_not_ready')) return 'Meta WhatsApp yapılandırması eksik.';
     if (n.includes('meta_template_name_required')) return 'Şablonda Meta adı (meta_template_name) boş.';
     if (n.includes('invalid_phone') || n.includes('no_valid_phone')) return 'Öğrenci/veli telefonu geçersiz veya eksik.';
@@ -285,17 +350,27 @@ export default function ClassLiveLessons() {
   }, []);
 
   const joinClassSession = useCallback(async (s: { id: string; join_link?: string; meeting_link?: string; lesson_date?: string }) => {
-    const url = String(s.join_link || s.meeting_link || '').trim();
-    if (!url) {
+    const url = lessonJoinUrl(s);
+    if (!url && !s.id) {
       setError('Toplantı bağlantısı yok.');
       return;
     }
     try {
-      if (needsBbbJoinFlow(url)) {
-        const kind = s.lesson_date ? 'session' : 'slot';
+      const kind = s.lesson_date ? 'session' : 'slot';
+      if (shouldUsePanelBbbJoin(s, url)) {
         await openBbbJoin('class-live-lessons', s.id, { kind });
-      } else {
+        return;
+      }
+      if (url && isExternalMeetingPlatform(url)) {
         window.open(url, '_blank', 'noopener,noreferrer');
+        return;
+      }
+      if (needsBbbJoinFlow(url)) {
+        await openBbbJoin('class-live-lessons', s.id, { kind });
+      } else if (url) {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      } else {
+        setError('Toplantı bağlantısı yok.');
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -331,7 +406,7 @@ export default function ClassLiveLessons() {
 
   const [attendanceSession, setAttendanceSession] = useState<SessionRow | null>(null);
   const [attendanceDraft, setAttendanceDraft] = useState<
-    { student_id: string; status: 'present' | 'absent' | 'late' }[]
+    { student_id: string; student_name?: string; status: 'present' | 'absent' | 'late' }[]
   >([]);
   const [attendanceModalLoading, setAttendanceModalLoading] = useState(false);
   const [attendanceSaving, setAttendanceSaving] = useState(false);
@@ -418,18 +493,6 @@ export default function ClassLiveLessons() {
     try {
       const from = weekColumnDates[0];
       const to = weekColumnDates[6];
-      await apiFetch('/api/class-live-lessons?op=ensure-sessions-range', {
-        method: 'POST',
-        body: JSON.stringify({
-          class_id: selectedClassId,
-          date_from: from,
-          date_to: to,
-          institution_id: (() => {
-            const id = String(activeInstitutionId || institution?.id || '').trim();
-            return isUuid(id) ? id : undefined;
-          })()
-        })
-      }).catch(() => null);
       const qs = new URLSearchParams({
         scope: 'sessions',
         class_id: selectedClassId,
@@ -487,11 +550,15 @@ export default function ClassLiveLessons() {
   useEffect(() => {
     const cid = searchParams.get('class_id')?.trim();
     const week = searchParams.get('week')?.trim();
-    if (cid) setSelectedClassId(cid);
     if (week && /^\d{4}-\d{2}-\d{2}$/.test(week)) {
       setCalendarWeekMondayIso(mondayIsoContaining(week));
     }
-  }, [searchParams]);
+    if (!cid) return;
+    setSelectedClassId((cur) => {
+      if (!classes.length) return cid;
+      return classes.some((c) => c.id === cid) ? cid : cur;
+    });
+  }, [searchParams, classes]);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -524,13 +591,14 @@ export default function ClassLiveLessons() {
       const rawSlots = Array.isArray(sJson.data) ? (sJson.data as SlotRow[]) : [];
       const allowed = new Set(filteredClasses.map((c) => c.id));
       const filteredSlots =
-        isStudentView && sid ? rawSlots.filter((s) => allowed.has(s.class_id)) : rawSlots;
+        (isStudentView && sid) || isTeacherView
+          ? rawSlots.filter((s) => allowed.has(s.class_id))
+          : rawSlots;
       setClasses(filteredClasses);
       setSlots(filteredSlots);
       setSelectedClassId((cur) => {
-        if (!filteredClasses.length) return cur || '';
+        if (!filteredClasses.length) return '';
         if (cur && filteredClasses.some((c) => c.id === cur)) return cur;
-        if (cur) return cur;
         return filteredClasses[0].id;
       });
     } catch (e) {
@@ -538,7 +606,7 @@ export default function ClassLiveLessons() {
     } finally {
       setLoading(false);
     }
-  }, [role, activeInstitutionId, institution?.id, isStudentView, resolvedStudentId]);
+  }, [role, activeInstitutionId, institution?.id, isStudentView, isTeacherView, resolvedStudentId]);
 
   const loadClassSlots = useCallback(async (classId: string) => {
     const cid = String(classId || '').trim();
@@ -634,6 +702,7 @@ export default function ClassLiveLessons() {
       branch: string | null;
       teacher_ids: string[];
       student_ids: string[];
+      student_subjects?: Record<string, string[]>;
     }
   ): Promise<boolean> => {
     const res = await apiFetch('/api/class-live-lessons?op=update-class-members', {
@@ -644,7 +713,8 @@ export default function ClassLiveLessons() {
         class_level: payload.class_level,
         branch: payload.branch,
         teacher_ids: payload.teacher_ids,
-        student_ids: payload.student_ids
+        student_ids: payload.student_ids,
+        student_subjects: payload.student_subjects || {}
       })
     });
     const j = await res.json().catch(() => ({}));
@@ -776,29 +846,54 @@ export default function ClassLiveLessons() {
       );
       const j = await res.json().catch(() => ({}));
       const existing = Array.isArray(j.data) ? j.data : [];
-      const map = new Map<string, string>(
+      const roster = Array.isArray(j.roster) ? j.roster : [];
+      const statusById = new Map<string, string>(
         existing.map((row: { student_id?: string; status?: string }) => [
           String(row.student_id || '').trim(),
           String(row.status || '').trim()
         ])
       );
+      const resolveStatus = (studentId: string) => {
+        const direct = statusById.get(studentId);
+        if (direct) return direct;
+        const stu = resolveStudentInList(safeStudents, studentId);
+        if (stu?.id && statusById.has(stu.id)) return statusById.get(stu.id)!;
+        if (stu?.platformUserId && statusById.has(stu.platformUserId)) return statusById.get(stu.platformUserId)!;
+        if (stu?.authUserId && statusById.has(stu.authUserId)) return statusById.get(stu.authUserId)!;
+        return '';
+      };
+      const toDraftStatus = (st: string): 'present' | 'absent' | 'late' => {
+        if (st === 'absent') return 'absent';
+        if (st === 'late') return 'late';
+        return 'present';
+      };
+      if (roster.length) {
+        setAttendanceDraft(
+          roster.map((row: { student_id?: string; student_name?: string }) => {
+            const id = String(row.student_id || '').trim();
+            return {
+              student_id: id,
+              student_name: String(row.student_name || '').trim() || undefined,
+              status: toDraftStatus(resolveStatus(id))
+            };
+          })
+        );
+        return;
+      }
       const clsRow = classes.find((c) => c.id === s.class_id);
       const ids = Array.isArray(clsRow?.student_ids) ? clsRow!.student_ids.map(String).filter(Boolean) : [];
       setAttendanceDraft(
-        ids.map((id) => {
-          const st = map.get(id);
-          let status: 'present' | 'absent' | 'late' = 'present';
-          if (st === 'absent') status = 'absent';
-          else if (st === 'late') status = 'late';
-          return { student_id: id, status };
-        })
+        ids.map((id) => ({
+          student_id: id,
+          status: toDraftStatus(resolveStatus(id))
+        }))
       );
     } catch {
       setAttendanceDraft([]);
     } finally {
       setAttendanceModalLoading(false);
     }
-  }, [classes]);
+  }, [classes, safeStudents]);
 
   const saveAttendance = async () => {
     if (!attendanceSession || attendanceDraft.length === 0) return;
@@ -842,8 +937,9 @@ export default function ClassLiveLessons() {
       if (waFailed.length) {
         const parts = waFailed.map((row: { student_id?: string; note?: string }) => {
           const sid = String(row.student_id || '');
-          const stu = safeStudents.find((x) => x.id === sid);
-          const name = stu?.name || sid.slice(0, 8);
+          const stu = resolveStudentInList(safeStudents, sid);
+          const draftName = attendanceDraft.find((d) => d.student_id === sid)?.student_name;
+          const name = draftName || stu?.name || sid.slice(0, 8);
           return `${name}: ${hintWa(String(row.note || ''))}`;
         });
         setError(`Yoklama kaydedildi. Veli WhatsApp gönderilemedi — ${parts.join(' · ')}`);
@@ -1068,8 +1164,8 @@ export default function ClassLiveLessons() {
                 'Atandığınız grup canlı derslerini haftalık görünümde görürsünüz. Bire bir canlı özel dersler için üstteki «Canlı özel derslerim» sekmesini açın.'
               ) : (
                 <>
-                  Takvimde Pazartesi–Pazar için gerçek tarihler gösterilir; muhasebe için hafta aralığını seçin. Öğretmen
-                  hatırlatması ve tamamlanan ders sayacı tarihli oturumlardan beslenir.
+                  Takvimde Pazartesi–Pazar için gerçek tarihler gösterilir. Öğrenci ders kapsamını sınıf kartındaki{' '}
+                  <strong>kalem</strong> ile ayarlayın.
                 </>
               )}
             </p>
@@ -1086,6 +1182,11 @@ export default function ClassLiveLessons() {
       </div>
 
       {error && <div className="rounded-lg border border-red-100 bg-red-50 text-red-700 px-3 py-2 text-sm">{error}</div>}
+      {CLASS_LIVE_PRESENCE_ENABLED && livePresenceError && !isStudentView ? (
+        <div className="rounded-lg border border-amber-100 bg-amber-50 text-amber-800 px-3 py-2 text-sm">
+          Canlı katılım: {livePresenceError}
+        </div>
+      ) : null}
       {notice && (
         <div className="rounded-lg border border-emerald-100 bg-emerald-50 text-emerald-800 px-3 py-2 text-sm">
           {notice}
@@ -1110,6 +1211,7 @@ export default function ClassLiveLessons() {
         </div>
       )}
 
+
       <ClassLiveClassManager
         classes={classes}
         selectedClassId={selectedClassId}
@@ -1121,7 +1223,20 @@ export default function ClassLiveLessons() {
         onCreateClass={handleCreateClass}
         onUpdateClass={handleUpdateClass}
         onDeleteClass={handleDeleteClass}
+        livePresenceByClassId={livePresenceData?.classes}
+        livePresenceLoading={livePresenceLoading}
+        onPresenceStatClick={handlePresenceStatClick}
       />
+
+      {CLASS_LIVE_PRESENCE_ENABLED ? (
+        <ClassLivePresenceModal
+          open={Boolean(presenceModal)}
+          className={classes.find((c) => c.id === presenceModal?.classId)?.name || 'Sınıf'}
+          kind={presenceModal?.kind || 'active'}
+          presence={presenceModal ? livePresenceByClassId(presenceModal.classId) || null : null}
+          onClose={handleClosePresenceModal}
+        />
+      ) : null}
 
       {selectedClass && canManageSlots && (
         <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
@@ -1726,7 +1841,8 @@ export default function ClassLiveLessons() {
                   <span>
                     <span className="font-medium text-slate-800">Tüm planlı periyotlar ({sessionEditPeerCount})</span>
                     <span className="block text-xs text-slate-500">
-                      Ders adı, saat, öğretmen ve bağlantı tüm planlı oturumlara uygulanır; tarih oturuma özel kalır.
+                      Yalnızca aynı gün ve saatteki planlı oturumlara uygulanır (ör. tüm Cuma günleri). Salı/Çarşamba
+                      gibi diğer günlere dokunulmaz.
                     </span>
                   </span>
                 </label>
@@ -1967,13 +2083,14 @@ export default function ClassLiveLessons() {
                 </p>
               ) : (
                 attendanceDraft.map((row, idx) => {
-                  const stu = safeStudents.find((x) => x.id === row.student_id);
+                  const stu = resolveStudentInList(safeStudents, row.student_id);
+                  const displayName = row.student_name || stu?.name || row.student_id;
                   return (
                     <div
                       key={row.student_id}
                       className="flex items-center justify-between gap-2 text-sm border border-slate-100 rounded-lg px-3 py-2"
                     >
-                      <span className="text-slate-800">{stu?.name || row.student_id}</span>
+                      <span className="text-slate-800">{displayName}</span>
                       <select
                         value={row.status}
                         onChange={(e) => {

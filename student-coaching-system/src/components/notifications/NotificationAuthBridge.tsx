@@ -18,7 +18,7 @@ export default function NotificationAuthBridge({ children }: { children: ReactNo
       userRole={effectiveUser.role as PlatformRole}
       userName={effectiveUser.name}
       institutionId={effectiveUser.institutionId ?? null}
-      pollingInterval={30000}
+      pollingInterval={60000}
     >
       {children}
     </NotificationProvider>

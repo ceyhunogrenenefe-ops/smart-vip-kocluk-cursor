@@ -88,7 +88,7 @@ function normalizePhoneField(raw) {
   return { local, e164: e164 || local };
 }
 
-async function upsertCoachProfile({ userId, fullName, email, phone, institutionId, now }) {
+export async function upsertCoachProfile({ userId, fullName, email, phone, institutionId, now }) {
   const em = toLowerEmail(email);
   const { data: byEmail } = await supabaseAdmin.from('coaches').select('id').eq('email', em).maybeSingle();
   const { data: byId } = await supabaseAdmin.from('coaches').select('id').eq('id', userId).maybeSingle();

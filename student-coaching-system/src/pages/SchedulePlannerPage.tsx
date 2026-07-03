@@ -212,9 +212,9 @@ export default function SchedulePlannerPage() {
   const [exportOpen, setExportOpen] = useState(false);
   const [exportGroupId, setExportGroupId] = useState('');
   const [exportClassId, setExportClassId] = useState('');
-  const [replaceExisting, setReplaceExisting] = useState(false);
+  const [replaceExisting, setReplaceExisting] = useState(true);
   const [clearCrossClassConflicts, setClearCrossClassConflicts] = useState(false);
-  const [replaceSessionsInRange, setReplaceSessionsInRange] = useState(false);
+  const [replaceSessionsInRange, setReplaceSessionsInRange] = useState(true);
   const [plannerGroups, setPlannerGroups] = useState<PlannerGroup[]>([]);
   const [unmatchedTeachers, setUnmatchedTeachers] = useState<string[]>([]);
   const [teacherOptions, setTeacherOptions] = useState<TeacherOption[]>([]);
@@ -1119,7 +1119,8 @@ export default function SchedulePlannerPage() {
               Mevcut haftalık şablonları sil ve yerine yaz
             </label>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              İşaretlenmezse yalnızca eksik şablonlar eklenir; mevcut program korunur.
+              Varsayılan olarak mevcut program silinir ve planlayıcıdaki program yazılır. Eski programı korumak için
+              işareti kaldırın.
             </p>
 
             <label className="mt-3 flex items-center gap-2 text-sm">

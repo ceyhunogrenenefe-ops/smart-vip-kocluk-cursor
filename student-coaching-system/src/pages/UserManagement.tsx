@@ -3966,7 +3966,7 @@ export default function UserManagement() {
                   ))}
                 </select>
                 <p className="text-xs text-gray-500 mt-1">
-                  Örnek: 2025-2026, 2026-2027. Liste üstünden döneme göre süzebilirsiniz.
+                  Örnek: 2025-2026, 2025-2026 Yaz Dönemi, 2026-2027. Liste üstünden döneme göre süzebilirsiniz.
                 </p>
               </div>
 

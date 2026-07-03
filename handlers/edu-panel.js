@@ -87,14 +87,210 @@ async function studentClassIds(actor) {
   };
 }
 
-function studentCanAccessLessonRow(ctx, row) {
+function isJunctionMissing(err) {
+  const msg = String(err?.message || err || '').toLowerCase();
+  return msg.includes('edu_lesson_row_classes') && (msg.includes('does not exist') || msg.includes('schema cache'));
+}
+
+async function loadRowClassIdsMap(rowIds) {
+  const map = new Map();
+  for (const id of rowIds) map.set(id, []);
+  if (!rowIds.length) return map;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('edu_lesson_row_classes')
+      .select('lesson_row_id, class_id')
+      .in('lesson_row_id', rowIds);
+    if (error) {
+      if (isJunctionMissing(error)) return map;
+      throw error;
+    }
+    for (const link of data || []) {
+      const list = map.get(link.lesson_row_id) || [];
+      list.push(String(link.class_id));
+      map.set(link.lesson_row_id, list);
+    }
+  } catch (e) {
+    if (!isJunctionMissing(e)) throw e;
+  }
+  return map;
+}
+
+function mergedClassIdsForRow(row, linkMap) {
+  const linked = linkMap.get(row.id) || [];
+  return [...new Set([String(row.class_id), ...linked].filter(Boolean))];
+}
+
+function todayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function normalizeDateField(v, fallback = null) {
+  const s = String(v || '').trim().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  return fallback;
+}
+
+function defaultAvailableUntil(lessonDate) {
+  const base = normalizeDateField(lessonDate, todayIsoDate());
+  const d = new Date(`${base}T12:00:00`);
+  d.setDate(d.getDate() + 6);
+  return d.toISOString().slice(0, 10);
+}
+
+function isRowAvailableNow(row) {
+  const today = todayIsoDate();
+  const from = normalizeDateField(row.available_from, row.lesson_date);
+  const until = normalizeDateField(row.available_until, row.lesson_date);
+  if (from && today < from) return false;
+  if (until && today > until) return false;
+  return true;
+}
+
+async function teacherScopedClassIdsForRow(actor, row, tags) {
+  const linkMap = await loadRowClassIdsMap([row.id]);
+  const classIds = mergedClassIdsForRow(row, linkMap);
+  if (tags.includes('admin') || tags.includes('super_admin')) return classIds;
+  const scoped = [];
+  for (const cid of classIds) {
+    if (await teacherCanAccessClass(actor, cid, tags)) scoped.push(cid);
+  }
+  return scoped;
+}
+
+async function syncLessonRowClasses(rowId, classIds, primaryClassId, { strict = false } = {}) {
+  const unique = [...new Set(classIds.map((c) => String(c).trim()).filter(Boolean))];
+  const primary = String(primaryClassId || unique[0] || '').trim();
+  if (primary && !unique.includes(primary)) unique.unshift(primary);
+  if (!unique.length) return { classIds: [], junctionOk: true };
+  try {
+    await supabaseAdmin.from('edu_lesson_row_classes').delete().eq('lesson_row_id', rowId);
+    const rows = unique.map((class_id) => ({ lesson_row_id: rowId, class_id }));
+    const { error } = await supabaseAdmin.from('edu_lesson_row_classes').insert(rows);
+    if (error) {
+      if (isJunctionMissing(error)) return { classIds: unique, junctionOk: false };
+      throw error;
+    }
+    return { classIds: unique, junctionOk: true };
+  } catch (e) {
+    if (isJunctionMissing(e)) return { classIds: unique, junctionOk: false };
+    if (strict) throw e;
+    throw e;
+  }
+}
+
+function isOptionalEduColumnMissing(err, column) {
+  const msg = String(err?.message || err || '').toLowerCase();
+  const col = String(column || '').toLowerCase();
+  return (
+    msg.includes(col) &&
+    (msg.includes('schema cache') || msg.includes('does not exist') || msg.includes('column'))
+  );
+}
+
+async function insertLessonRowSafe(insert) {
+  const { data, error } = await supabaseAdmin.from('edu_lesson_rows').insert(insert).select().single();
+  if (!error) return data;
+  if (
+    isOptionalEduColumnMissing(error, 'available_from') ||
+    isOptionalEduColumnMissing(error, 'available_until')
+  ) {
+    const retryInsert = { ...insert };
+    delete retryInsert.available_from;
+    delete retryInsert.available_until;
+    const retry = await supabaseAdmin.from('edu_lesson_rows').insert(retryInsert).select().single();
+    if (retry.error) throw retry.error;
+    return retry.data;
+  }
+  throw error;
+}
+
+async function updateLessonRowSafe(rowId, patch) {
+  const attempt = { ...patch, updated_at: new Date().toISOString() };
+  const { data, error } = await supabaseAdmin
+    .from('edu_lesson_rows')
+    .update(attempt)
+    .eq('id', rowId)
+    .select()
+    .single();
+  if (!error) return data;
+  if (
+    isOptionalEduColumnMissing(error, 'available_from') ||
+    isOptionalEduColumnMissing(error, 'available_until')
+  ) {
+    const retryPatch = { ...attempt };
+    delete retryPatch.available_from;
+    delete retryPatch.available_until;
+    const retry = await supabaseAdmin
+      .from('edu_lesson_rows')
+      .update(retryPatch)
+      .eq('id', rowId)
+      .select()
+      .single();
+    if (retry.error) throw retry.error;
+    return retry.data;
+  }
+  throw error;
+}
+
+function studentCanAccessLessonRow(ctx, row, classIdsForRow = null) {
   if (!row || !ctx.student) return false;
-  if (!ctx.classIds.includes(row.class_id)) return false;
+  const rowClasses = classIdsForRow?.length
+    ? classIdsForRow
+    : [String(row.class_id)].filter(Boolean);
+  if (!rowClasses.some((cid) => ctx.classIds.includes(cid))) return false;
   if (row.status !== 'active') return false;
+  if (!isRowAvailableNow(row)) return false;
   const inst = ctx.student.institution_id;
   if (inst && row.institution_id && String(row.institution_id) !== String(inst)) return false;
-  if (!ctx.teacherIds.length) return false;
-  return ctx.teacherIds.includes(String(row.teacher_user_id));
+  return true;
+}
+
+async function fetchActiveLessonRowsForStudent(ctx) {
+  const { classIds } = ctx;
+  const { data: primary, error: pErr } = await supabaseAdmin
+    .from('edu_lesson_rows')
+    .select('*')
+    .in('class_id', classIds)
+    .eq('status', 'active')
+    .order('lesson_date', { ascending: false });
+  if (pErr) throw pErr;
+
+  const byId = new Map();
+  for (const row of primary || []) byId.set(row.id, row);
+
+  try {
+    const { data: links, error: lErr } = await supabaseAdmin
+      .from('edu_lesson_row_classes')
+      .select('lesson_row_id')
+      .in('class_id', classIds);
+    if (lErr) {
+      if (!isJunctionMissing(lErr)) throw lErr;
+    } else {
+      const extraIds = [...new Set((links || []).map((l) => l.lesson_row_id).filter((id) => !byId.has(id)))];
+      if (extraIds.length) {
+        const { data: extra, error: eErr } = await supabaseAdmin
+          .from('edu_lesson_rows')
+          .select('*')
+          .in('id', extraIds)
+          .eq('status', 'active');
+        if (eErr) throw eErr;
+        for (const row of extra || []) byId.set(row.id, row);
+      }
+    }
+  } catch (e) {
+    if (!isJunctionMissing(e)) throw e;
+  }
+
+  const linkMap = await loadRowClassIdsMap([...byId.keys()]);
+  return [...byId.values()].filter((row) =>
+    studentCanAccessLessonRow(ctx, row, mergedClassIdsForRow(row, linkMap))
+  );
+}
+
+async function canStudentAccessRow(ctx, row) {
+  const linkMap = await loadRowClassIdsMap([row.id]);
+  return studentCanAccessLessonRow(ctx, row, mergedClassIdsForRow(row, linkMap));
 }
 
 async function teacherCanAccessClass(actor, classId, tags) {
@@ -132,7 +328,149 @@ async function teacherCanAccessClass(actor, classId, tags) {
       .limit(1)
       .maybeSingle()
   ]);
-  return Boolean(slotHit || sessionHit);
+  if (slotHit || sessionHit) return true;
+
+  if (tags.includes('coach') && actor.coach_id) {
+    const { data: studs } = await supabaseAdmin
+      .from('students')
+      .select('id')
+      .eq('coach_id', actor.coach_id);
+    const sids = (studs || []).map((s) => s.id).filter(Boolean);
+    if (sids.length) {
+      const { data: cs } = await supabaseAdmin
+        .from('class_students')
+        .select('id')
+        .eq('class_id', classId)
+        .in('student_id', sids)
+        .limit(1);
+      if (cs?.length) return true;
+    }
+  }
+
+  return false;
+}
+
+function isProgressTableMissing(err) {
+  const msg = String(err?.message || err || '').toLowerCase();
+  return (
+    msg.includes('edu_lesson_row_progress') &&
+    (msg.includes('does not exist') || msg.includes('schema cache'))
+  );
+}
+
+function computeProgressPoints(animationCompleted, homeworkPercent) {
+  const anim = animationCompleted ? 40 : 0;
+  const hw = Math.round(Math.max(0, Math.min(100, Number(homeworkPercent) || 0)) * 0.6);
+  return anim + hw;
+}
+
+async function loadProgressForRow(lessonRowId, studentUserId) {
+  const { data, error } = await supabaseAdmin
+    .from('edu_lesson_row_progress')
+    .select('*')
+    .eq('lesson_row_id', lessonRowId)
+    .eq('student_user_id', studentUserId)
+    .maybeSingle();
+  if (error) {
+    if (isProgressTableMissing(error)) return null;
+    throw error;
+  }
+  return data;
+}
+
+async function upsertLessonRowProgress({
+  lessonRowId,
+  studentUserId,
+  studentId,
+  patch
+}) {
+  const existing = await loadProgressForRow(lessonRowId, studentUserId);
+  const animationCompleted =
+    patch.animation_completed !== undefined
+      ? Boolean(patch.animation_completed)
+      : Boolean(existing?.animation_completed);
+  const homeworkPercent =
+    patch.homework_percent !== undefined
+      ? Math.max(0, Math.min(100, Math.round(Number(patch.homework_percent) || 0)))
+      : Number(existing?.homework_percent || 0);
+  const topicCompleted =
+    patch.topic_completed !== undefined
+      ? Boolean(patch.topic_completed)
+      : Boolean(existing?.topic_completed);
+  const now = new Date().toISOString();
+  const row = {
+    lesson_row_id: lessonRowId,
+    student_user_id: studentUserId,
+    student_id: studentId || existing?.student_id || null,
+    animation_completed: animationCompleted,
+    animation_completed_at:
+      animationCompleted && !existing?.animation_completed
+        ? now
+        : existing?.animation_completed_at || (animationCompleted ? now : null),
+    homework_percent: homeworkPercent,
+    topic_completed: topicCompleted,
+    topic_completed_at:
+      topicCompleted && !existing?.topic_completed
+        ? now
+        : existing?.topic_completed_at || (topicCompleted ? now : null),
+    points: computeProgressPoints(animationCompleted, homeworkPercent),
+    updated_at: now
+  };
+
+  if (existing?.id) {
+    const { data, error } = await supabaseAdmin
+      .from('edu_lesson_row_progress')
+      .update(row)
+      .eq('id', existing.id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('edu_lesson_row_progress')
+    .insert(row)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function studentsForLessonRow(row, { actor = null, tags = [], classId = null } = {}) {
+  let classIds = mergedClassIdsForRow(row, await loadRowClassIdsMap([row.id]));
+  if (actor) {
+    classIds = await teacherScopedClassIdsForRow(actor, row, tags);
+  }
+  if (classId) classIds = classIds.filter((id) => String(id) === String(classId));
+  if (!classIds.length) return { students: [], classIds: [] };
+  const { data: cs, error } = await supabaseAdmin
+    .from('class_students')
+    .select('student_id, class_id')
+    .in('class_id', classIds);
+  if (error) throw error;
+  const studentIds = [...new Set((cs || []).map((c) => String(c.student_id)).filter(Boolean))];
+  if (!studentIds.length) return { students: [], classIds };
+  const classByStudent = new Map();
+  for (const link of cs || []) {
+    if (!classByStudent.has(link.student_id)) classByStudent.set(link.student_id, link.class_id);
+  }
+  const { data: students, error: sErr } = await supabaseAdmin
+    .from('students')
+    .select('id, name, user_id, platform_user_id')
+    .in('id', studentIds);
+  if (sErr) throw sErr;
+  return {
+    students: (students || []).map((st) => ({
+      ...st,
+      class_id: classByStudent.get(st.id) || classIds[0]
+    })),
+    classIds
+  };
+}
+
+function studentUserIdFromStudent(st) {
+  return String(st.platform_user_id || st.user_id || '').trim();
 }
 
 async function loadRow(id) {
@@ -148,9 +486,10 @@ async function loadRow(id) {
 async function enrichRows(rows, { viewerStudentUserId = null } = {}) {
   if (!rows?.length) return [];
   const ids = rows.map((r) => r.id);
-  const [{ data: anims }, { data: hws }] = await Promise.all([
+  const [{ data: anims }, { data: hws }, linkMap] = await Promise.all([
     supabaseAdmin.from('edu_animations').select('*').in('lesson_row_id', ids).order('display_order'),
-    supabaseAdmin.from('edu_homework').select('*').in('lesson_row_id', ids).order('created_at')
+    supabaseAdmin.from('edu_homework').select('*').in('lesson_row_id', ids).order('created_at'),
+    loadRowClassIdsMap(ids)
   ]);
   const hwIds = (hws || []).map((h) => h.id);
   let subs = [];
@@ -164,6 +503,7 @@ async function enrichRows(rows, { viewerStudentUserId = null } = {}) {
   }
   return rows.map((row) => ({
     ...row,
+    class_ids: mergedClassIdsForRow(row, linkMap),
     animations: (anims || []).filter((a) => a.lesson_row_id === row.id),
     homework: (hws || [])
       .filter((h) => h.lesson_row_id === row.id)
@@ -186,18 +526,10 @@ export default async function handler(req, res) {
         if (tags.includes('student')) {
           actor = await enrichStudentActor(actor);
           const ctx = await studentAccessContext(actor);
-          if (!ctx.classIds.length || !ctx.teacherIds.length) {
+          if (!ctx.classIds.length) {
             return res.status(200).json({ data: [] });
           }
-          const { data, error } = await supabaseAdmin
-            .from('edu_lesson_rows')
-            .select('*')
-            .in('class_id', ctx.classIds)
-            .in('teacher_user_id', ctx.teacherIds)
-            .eq('status', 'active')
-            .order('lesson_date', { ascending: false });
-          if (error) throw error;
-          const visible = (data || []).filter((row) => studentCanAccessLessonRow(ctx, row));
+          const visible = await fetchActiveLessonRowsForStudent(ctx);
           const enriched = await enrichRows(visible, { viewerStudentUserId: actor.sub });
           const published = enriched.map((row) => ({
             ...row,
@@ -223,37 +555,56 @@ export default async function handler(req, res) {
       if (req.method === 'POST') {
         if (!canTeach(tags)) return res.status(403).json({ error: 'forbidden' });
         const body = parseBody(req);
-        const classId = String(body.class_id || '').trim();
         const title = String(body.title || '').trim();
-        if (!classId || !title) return res.status(400).json({ error: 'class_id_and_title_required' });
-        if (!(await teacherCanAccessClass(actor, classId, tags))) {
-          return res.status(403).json({ error: 'class_forbidden' });
+        const classIdsRaw = Array.isArray(body.class_ids)
+          ? body.class_ids.map((c) => String(c || '').trim()).filter(Boolean)
+          : [];
+        const classId = String(body.class_id || classIdsRaw[0] || '').trim();
+        const classIds = [...new Set(classIdsRaw.length ? classIdsRaw : classId ? [classId] : [])];
+        if (!classIds.length || !title) return res.status(400).json({ error: 'class_id_and_title_required' });
+        for (const cid of classIds) {
+          if (!(await teacherCanAccessClass(actor, cid, tags))) {
+            return res.status(403).json({ error: 'class_forbidden' });
+          }
         }
+        const primaryClassId = classIds[0];
         const { data: cls } = await supabaseAdmin
           .from('classes')
           .select('institution_id')
-          .eq('id', classId)
+          .eq('id', primaryClassId)
           .maybeSingle();
+        const lessonDate = String(body.lesson_date || new Date().toISOString().slice(0, 10));
+        const availableFrom = normalizeDateField(body.available_from, lessonDate);
+        const availableUntil = normalizeDateField(
+          body.available_until,
+          defaultAvailableUntil(lessonDate)
+        );
         const insert = {
           teacher_user_id: actor.sub,
           institution_id: cls?.institution_id || actor.institution_id || null,
-          class_id: classId,
+          class_id: primaryClassId,
           title,
           subject_name: String(body.subject_name || 'Ders').trim(),
           subject_color: String(body.subject_color || 'blue').trim(),
-          lesson_date: String(body.lesson_date || new Date().toISOString().slice(0, 10)),
+          lesson_date: lessonDate,
+          available_from: availableFrom,
+          available_until: availableUntil,
           status: ['draft', 'active', 'archived'].includes(String(body.status))
             ? String(body.status)
             : 'draft',
           notes: body.notes ? String(body.notes).trim() : null
         };
-        const { data, error } = await supabaseAdmin
-          .from('edu_lesson_rows')
-          .insert(insert)
-          .select()
-          .single();
-        if (error) throw error;
-        return res.status(201).json({ data });
+        const data = await insertLessonRowSafe(insert);
+        const sync = await syncLessonRowClasses(data.id, classIds, primaryClassId);
+        const [enriched] = await enrichRows([data]);
+        if (!sync.junctionOk && classIds.length > 1) {
+          return res.status(201).json({
+            data: enriched || data,
+            warning: 'junction_table_missing',
+            hint: 'Çoklu sınıf tablosu henüz yok — yalnızca birincil sınıf kaydedildi. Supabase\'de 2026-06-25-edu-lesson-row-classes.sql çalıştırın.'
+          });
+        }
+        return res.status(201).json({ data: enriched || data });
       }
 
       if (req.method === 'PATCH' || req.method === 'DELETE') {
@@ -269,17 +620,69 @@ export default async function handler(req, res) {
         }
         const body = parseBody(req);
         const patch = {};
-        for (const k of ['title', 'subject_name', 'subject_color', 'lesson_date', 'status', 'notes', 'class_id']) {
+        for (const k of [
+          'title',
+          'subject_name',
+          'subject_color',
+          'lesson_date',
+          'available_from',
+          'available_until',
+          'status',
+          'notes',
+          'class_id'
+        ]) {
           if (body[k] !== undefined) patch[k] = body[k];
         }
-        const { data, error } = await supabaseAdmin
-          .from('edu_lesson_rows')
-          .update(patch)
-          .eq('id', rowId)
-          .select()
-          .single();
-        if (error) throw error;
-        return res.status(200).json({ data });
+        if (patch.lesson_date) {
+          patch.lesson_date = normalizeDateField(patch.lesson_date, row.lesson_date);
+        }
+        if (patch.available_from !== undefined) {
+          patch.available_from = normalizeDateField(
+            patch.available_from,
+            patch.lesson_date || row.lesson_date
+          );
+        }
+        if (patch.available_until !== undefined) {
+          patch.available_until = normalizeDateField(
+            patch.available_until,
+            row.available_until || defaultAvailableUntil(patch.lesson_date || row.lesson_date)
+          );
+        }
+
+        let junctionWarning = null;
+        if (Array.isArray(body.class_ids)) {
+          const classIds = [...new Set(body.class_ids.map((c) => String(c || '').trim()).filter(Boolean))];
+          if (!classIds.length) {
+            return res.status(400).json({ error: 'class_ids_required' });
+          }
+          for (const cid of classIds) {
+            if (!(await teacherCanAccessClass(actor, cid, tags))) {
+              return res.status(403).json({
+                error: 'class_forbidden',
+                hint: 'Seçilen sınıflardan birine erişim yetkiniz yok.'
+              });
+            }
+          }
+          const primary = classIds.includes(String(body.class_id || row.class_id))
+            ? String(body.class_id || row.class_id)
+            : classIds[0];
+          patch.class_id = primary;
+          const sync = await syncLessonRowClasses(rowId, classIds, primary, { strict: true });
+          if (!sync.junctionOk && classIds.length > 1) {
+            return res.status(503).json({
+              error: 'edu_junction_schema_missing',
+              hint: 'Çoklu sınıf için Supabase: sql/2026-06-25-edu-lesson-row-classes.sql'
+            });
+          }
+          if (!sync.junctionOk) junctionWarning = 'junction_table_missing_single_class';
+        }
+
+        const data = await updateLessonRowSafe(rowId, patch);
+        const [enriched] = await enrichRows([data]);
+        return res.status(200).json({
+          data: enriched || data,
+          warning: junctionWarning || undefined
+        });
       }
     }
 
@@ -350,7 +753,7 @@ export default async function handler(req, res) {
       if (tags.includes('student')) {
         actor = await enrichStudentActor(actor);
         const ctx = await studentAccessContext(actor);
-        if (!studentCanAccessLessonRow(ctx, row)) {
+        if (!(await canStudentAccessRow(ctx, row))) {
           return { error: 'forbidden', status: 403 };
         }
       } else if (String(row.teacher_user_id) !== String(actor.sub) && !tags.includes('admin') && !tags.includes('super_admin')) {
@@ -373,6 +776,22 @@ export default async function handler(req, res) {
       if (!animId) return res.status(400).json({ error: 'animation_id_required' });
       const access = await assertAnimationAccess(animId);
       if (access.error) return res.status(access.status).json({ error: access.error });
+      if (tags.includes('student')) {
+        try {
+          actor = await enrichStudentActor(actor);
+          const ctx = await studentAccessContext(actor);
+          if (ctx.student) {
+            await upsertLessonRowProgress({
+              lessonRowId: access.row.id,
+              studentUserId: actor.sub,
+              studentId: ctx.student.id,
+              patch: { animation_completed: true }
+            });
+          }
+        } catch (e) {
+          if (!isProgressTableMissing(e)) throw e;
+        }
+      }
       const buf = await downloadEduBuffer(EDU_ANIMATIONS_BUCKET, access.anim.storage_path);
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'private, max-age=300');
@@ -512,7 +931,7 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: 'homework_not_available' });
       }
       const ctx = await studentAccessContext(actor);
-      if (!studentCanAccessLessonRow(ctx, lessonRow)) {
+      if (!(await canStudentAccessRow(ctx, lessonRow))) {
         return res.status(403).json({ error: 'not_in_class' });
       }
       const student = ctx.student;
@@ -542,6 +961,126 @@ export default async function handler(req, res) {
         .single();
       if (error) throw error;
       return res.status(201).json({ data });
+    }
+
+    if (resource === 'progress') {
+      if (req.method === 'GET') {
+        if (!tags.includes('student')) return res.status(403).json({ error: 'forbidden' });
+        actor = await enrichStudentActor(actor);
+        const lessonRowId = String(req.query?.lesson_row_id || '').trim();
+        let q = supabaseAdmin
+          .from('edu_lesson_row_progress')
+          .select('*')
+          .eq('student_user_id', actor.sub);
+        if (lessonRowId) q = q.eq('lesson_row_id', lessonRowId);
+        const { data, error } = await q.order('updated_at', { ascending: false });
+        if (error) {
+          if (isProgressTableMissing(error)) return res.status(200).json({ data: [] });
+          throw error;
+        }
+        return res.status(200).json({ data: data || [] });
+      }
+      if (req.method === 'POST') {
+        if (!tags.includes('student')) return res.status(403).json({ error: 'forbidden' });
+        actor = await enrichStudentActor(actor);
+        const body = parseBody(req);
+        const lessonRowId = String(body.lesson_row_id || '').trim();
+        if (!lessonRowId) return res.status(400).json({ error: 'lesson_row_id_required' });
+        const row = await loadRow(lessonRowId);
+        if (!row || row.status !== 'active') {
+          return res.status(403).json({ error: 'lesson_not_available' });
+        }
+        const ctx = await studentAccessContext(actor);
+        if (!(await canStudentAccessRow(ctx, row))) {
+          return res.status(403).json({ error: 'not_in_class' });
+        }
+        const patch = {};
+        if (body.animation_completed !== undefined) patch.animation_completed = Boolean(body.animation_completed);
+        if (body.homework_percent !== undefined) patch.homework_percent = body.homework_percent;
+        if (body.topic_completed !== undefined) patch.topic_completed = Boolean(body.topic_completed);
+        try {
+          const data = await upsertLessonRowProgress({
+            lessonRowId,
+            studentUserId: actor.sub,
+            studentId: ctx.student?.id || null,
+            patch
+          });
+          return res.status(200).json({ data });
+        } catch (e) {
+          if (isProgressTableMissing(e)) {
+            return res.status(503).json({
+              error: 'edu_progress_schema_missing',
+              hint: 'Supabase: sql/2026-06-26-edu-lesson-row-progress.sql'
+            });
+          }
+          throw e;
+        }
+      }
+    }
+
+    if (resource === 'row-progress' && req.method === 'GET') {
+      if (!canTeach(tags)) return res.status(403).json({ error: 'forbidden' });
+      const lessonRowId = String(req.query?.lesson_row_id || '').trim();
+      if (!lessonRowId) return res.status(400).json({ error: 'lesson_row_id_required' });
+      const row = await loadRow(lessonRowId);
+      if (!row) return res.status(404).json({ error: 'not_found' });
+      if (
+        String(row.teacher_user_id) !== String(actor.sub) &&
+        !tags.includes('admin') &&
+        !tags.includes('super_admin')
+      ) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const classFilter = String(req.query?.class_id || '').trim();
+      const { students, classIds: scopedClassIds } = await studentsForLessonRow(row, {
+        actor,
+        tags,
+        classId: classFilter || null
+      });
+      let classMeta = [];
+      if (scopedClassIds.length) {
+        const { data: clsRows } = await supabaseAdmin
+          .from('classes')
+          .select('id, name')
+          .in('id', scopedClassIds);
+        classMeta = clsRows || [];
+      }
+      let progressRows = [];
+      try {
+        const { data, error } = await supabaseAdmin
+          .from('edu_lesson_row_progress')
+          .select('*')
+          .eq('lesson_row_id', lessonRowId);
+        if (error) {
+          if (!isProgressTableMissing(error)) throw error;
+        } else {
+          progressRows = data || [];
+        }
+      } catch (e) {
+        if (!isProgressTableMissing(e)) throw e;
+      }
+      const byUser = new Map(progressRows.map((p) => [String(p.student_user_id), p]));
+      const merged = students.map((st) => {
+        const uid = studentUserIdFromStudent(st);
+        const p = uid ? byUser.get(uid) : null;
+        return {
+          student_id: st.id,
+          student_user_id: uid,
+          student_name: st.name || 'Öğrenci',
+          class_id: st.class_id || null,
+          animation_completed: Boolean(p?.animation_completed),
+          homework_percent: Number(p?.homework_percent || 0),
+          topic_completed: Boolean(p?.topic_completed),
+          points: Number(p?.points || 0),
+          topic_completed_at: p?.topic_completed_at || null
+        };
+      });
+      merged.sort((a, b) => {
+        const diff = (b.points || 0) - (a.points || 0);
+        if (diff !== 0) return diff;
+        return String(a.student_name).localeCompare(String(b.student_name), 'tr');
+      });
+      return res.status(200).json({ data: merged, classes: classMeta });
     }
 
     if (resource === 'my-submission' && req.method === 'GET') {

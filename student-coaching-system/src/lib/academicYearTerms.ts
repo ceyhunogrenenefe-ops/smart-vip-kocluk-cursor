@@ -1,10 +1,17 @@
-/** Eğitim-öğretim yılı etiketi: 2025-2026 */
+/** Eğitim-öğretim yılı etiketi: 2025-2026 veya 2025-2026 Yaz Dönemi */
 
-export const PINNED_ACADEMIC_YEAR_TERMS = ['2025-2026', '2026-2027', '2027-2028'] as const;
+export const PINNED_ACADEMIC_YEAR_TERMS = [
+  '2025-2026',
+  '2025-2026 Yaz Dönemi',
+  '2026-2027',
+  '2027-2028',
+] as const;
 
 export function normalizeAcademicYearLabel(v: unknown): string {
   const s = String(v ?? '').trim();
   if (!s) return '';
+  const yaz = s.match(/^(\d{4})\s*[-–/]\s*(\d{4})\s+(yaz\s*dönemi|yaz)$/i);
+  if (yaz) return `${yaz[1]}-${yaz[2]} Yaz Dönemi`;
   const m = s.match(/^(\d{4})\s*[-–/]\s*(\d{4})$/);
   if (m) return `${m[1]}-${m[2]}`;
   return s;

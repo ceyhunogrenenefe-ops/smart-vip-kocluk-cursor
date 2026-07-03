@@ -82,15 +82,7 @@ export function ClassLiveStudentMobileCalendar({
     [weekSessions, dayIso]
   );
 
-  const templates = useMemo(
-    () =>
-      classSlots
-        .filter((s) => s.day_of_week === dowFromIso(dayIso))
-        .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time))),
-    [classSlots, dayIso, dowFromIso]
-  );
-
-  const hasAny = sessions.length > 0 || templates.length > 0;
+  const hasAny = sessions.length > 0;
 
   return (
     <div className="space-y-3 p-3 sm:p-4">
@@ -122,7 +114,6 @@ export function ClassLiveStudentMobileCalendar({
 
       <p className="text-xs font-medium text-slate-600">
         {formatDateDots(dayIso)} · {sessions.length} oturum
-        {templates.length > 0 ? ` · ${templates.length} şablon` : ''}
       </p>
 
       {!hasAny ? (
@@ -205,31 +196,6 @@ export function ClassLiveStudentMobileCalendar({
                     </button>
                   ) : null}
                 </div>
-              </li>
-            );
-          })}
-          {templates.map((s) => {
-            const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
-            const accent = liveSubjectAccent(s.subject);
-            return (
-              <li
-                key={`tpl-${s.id}`}
-                className="rounded-xl border border-dashed border-indigo-300/80 bg-indigo-50/60 px-3 py-3"
-              >
-                <p className={cn('text-sm font-bold', accent.title)}>{s.subject}</p>
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-600">Haftalık şablon</p>
-                <p className="text-xs text-slate-600">
-                  {teacher?.name || s.teacher_name || 'Öğretmen'} · {String(s.start_time).slice(0, 5)}
-                </p>
-                {(s.join_link || s.meeting_link) ? (
-                  <button
-                    type="button"
-                    onClick={() => window.open(String(s.join_link || s.meeting_link || ''), '_blank', 'noopener,noreferrer')}
-                    className="mt-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white"
-                  >
-                    Derse git
-                  </button>
-                ) : null}
               </li>
             );
           })}

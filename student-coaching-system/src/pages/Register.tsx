@@ -57,7 +57,7 @@ export default function Register() {
     let cancelled = false;
     (async () => {
       try {
-        const list = await db.getInstitutions();
+        const list = await db.getPublicInstitutionOptions();
         if (cancelled) return;
         setInstitutions((list || []).map((i) => ({ id: String(i.id), name: i.name })));
       } catch {

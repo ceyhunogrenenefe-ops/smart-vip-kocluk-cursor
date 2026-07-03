@@ -1,10 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Student } from '../../types';
 import {
+  CLASS_LIVE_PRESENCE_ENABLED,
+  type ClassLivePresenceModalKind,
+  type ClassLivePresenceSnapshot
+} from '../../lib/classLivePresence';
+import ClassLivePresencePanel from './ClassLivePresencePanel';
+import {
   branchSelectOptions,
   collectInstitutionBranchOptions,
   studentMatchesClassLevelAndBranch
 } from '../../lib/classLiveBranchUtils';
+import { apiFetch } from '../../lib/session';
 import {
   ChevronDown,
   GraduationCap,
@@ -17,6 +24,30 @@ import {
   X
 } from 'lucide-react';
 
+const ClassCardPresence = React.memo(function ClassCardPresence({
+  classId,
+  presence,
+  loading,
+  onPresenceStatClick
+}: {
+  classId: string;
+  presence: ClassLivePresenceSnapshot | undefined;
+  loading?: boolean;
+  onPresenceStatClick?: (classId: string, kind: ClassLivePresenceModalKind) => void;
+}) {
+  const onStatClick = React.useCallback(
+    (kind: ClassLivePresenceModalKind) => onPresenceStatClick?.(classId, kind),
+    [classId, onPresenceStatClick]
+  );
+  return (
+    <ClassLivePresencePanel
+      presence={presence}
+      loading={loading}
+      onStatClick={onPresenceStatClick ? onStatClick : undefined}
+    />
+  );
+});
+
 export type ClassLiveClassRow = {
   id: string;
   name: string;
@@ -24,6 +55,7 @@ export type ClassLiveClassRow = {
   branch?: string | null;
   teacher_ids: string[];
   student_ids: string[];
+  student_subjects?: Record<string, string[]>;
 };
 
 type TeacherOption = { id: string; name: string };
@@ -138,9 +170,13 @@ type Props = {
       branch: string | null;
       teacher_ids: string[];
       student_ids: string[];
+      student_subjects?: Record<string, string[]>;
     }
   ) => Promise<boolean>;
   onDeleteClass: (classId: string, className: string) => Promise<boolean>;
+  livePresenceByClassId?: Record<string, ClassLivePresenceSnapshot | undefined>;
+  livePresenceLoading?: boolean;
+  onPresenceStatClick?: (classId: string, kind: ClassLivePresenceModalKind) => void;
 };
 
 export default function ClassLiveClassManager({
@@ -153,7 +189,10 @@ export default function ClassLiveClassManager({
   isStudentView,
   onCreateClass,
   onUpdateClass,
-  onDeleteClass
+  onDeleteClass,
+  livePresenceByClassId,
+  livePresenceLoading,
+  onPresenceStatClick
 }: Props) {
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState('');
@@ -170,6 +209,9 @@ export default function ClassLiveClassManager({
   const [editBranch, setEditBranch] = useState('');
   const [editTeacherIds, setEditTeacherIds] = useState<string[]>([]);
   const [editStudentIds, setEditStudentIds] = useState<string[]>([]);
+  const [editStudentSubjects, setEditStudentSubjects] = useState<Record<string, string[]>>({});
+  const [editSubjectOptions, setEditSubjectOptions] = useState<string[]>([]);
+  const [editSubjectsLoading, setEditSubjectsLoading] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -206,6 +248,21 @@ export default function ClassLiveClassManager({
     });
   }, [studentsForEdit, editClass]);
 
+  useEffect(() => {
+    if (!editClass || !editSubjectOptions.length) return;
+    setEditStudentSubjects((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const sid of editStudentIds) {
+        if (!next[sid]?.length) {
+          next[sid] = [...editSubjectOptions];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [editStudentIds, editSubjectOptions, editClass]);
+
   const teacherNameById = useMemo(() => {
     const m = new Map<string, string>();
     for (const t of teacherOptions) m.set(t.id, t.name);
@@ -213,12 +270,40 @@ export default function ClassLiveClassManager({
   }, [teacherOptions]);
 
   const openEdit = (c: ClassLiveClassRow) => {
+    onSelectClass(c.id);
     setEditClass(c);
     setEditName(c.name);
     setEditLevel(String(c.class_level || '9'));
     setEditBranch(String(c.branch || ''));
     setEditTeacherIds([...(c.teacher_ids || [])]);
     setEditStudentIds([...(c.student_ids || [])]);
+    setEditSubjectsLoading(true);
+    setEditSubjectOptions([]);
+    void (async () => {
+      let opts: string[] = [];
+      try {
+        const res = await apiFetch(
+          `/api/class-live-lessons?scope=class-subjects&class_id=${encodeURIComponent(c.id)}`
+        );
+        const j = await res.json().catch(() => ({}));
+        if (res.ok && Array.isArray(j.data)) {
+          opts = j.data.map((x: unknown) => String(x || '').trim()).filter(Boolean);
+        }
+      } catch {
+        opts = [];
+      } finally {
+        setEditSubjectsLoading(false);
+      }
+      setEditSubjectOptions(opts);
+      const subjectMap: Record<string, string[]> = {};
+      for (const sid of c.student_ids || []) {
+        const saved = c.student_subjects?.[sid];
+        if (Array.isArray(saved) && saved.length) subjectMap[sid] = [...saved];
+        else if (opts.length) subjectMap[sid] = [...opts];
+        else subjectMap[sid] = [];
+      }
+      setEditStudentSubjects(subjectMap);
+    })();
   };
 
   const closeEdit = () => {
@@ -257,17 +342,37 @@ export default function ClassLiveClassManager({
     if (!editClass || !editName.trim()) return;
     setEditSaving(true);
     try {
+      const student_subjects: Record<string, string[]> = {};
+      if (editSubjectOptions.length) {
+        for (const sid of editStudentIds) {
+          const picked = editStudentSubjects[sid] || [];
+          student_subjects[sid] =
+            picked.length >= editSubjectOptions.length
+              ? []
+              : picked.filter((s) => editSubjectOptions.includes(s));
+        }
+      }
       const ok = await onUpdateClass(editClass.id, {
         name: editName.trim(),
         class_level: editLevel,
         branch: editBranch.trim() ? editBranch.trim() : null,
         teacher_ids: editTeacherIds,
-        student_ids: editStudentIds
+        student_ids: editStudentIds,
+        student_subjects
       });
       if (ok) setEditClass(null);
     } finally {
       setEditSaving(false);
     }
+  };
+
+  const toggleStudentSubject = (studentId: string, subject: string, checked: boolean) => {
+    setEditStudentSubjects((prev) => {
+      const base =
+        prev[studentId]?.length ? prev[studentId] : editSubjectOptions.length ? [...editSubjectOptions] : [];
+      const next = checked ? [...new Set([...base, subject])] : base.filter((s) => s !== subject);
+      return { ...prev, [studentId]: next };
+    });
   };
 
   const handleDelete = async (c: ClassLiveClassRow, e: React.MouseEvent) => {
@@ -480,6 +585,14 @@ export default function ClassLiveClassManager({
                   {teacherPreview ? (
                     <p className="mt-2 truncate text-[11px] text-slate-500">{teacherPreview}</p>
                   ) : null}
+                  {!isStudentView && CLASS_LIVE_PRESENCE_ENABLED ? (
+                    <ClassCardPresence
+                      classId={c.id}
+                      presence={livePresenceByClassId?.[c.id]}
+                      loading={livePresenceLoading}
+                      onPresenceStatClick={onPresenceStatClick}
+                    />
+                  ) : null}
                   {selected ? (
                     <span className="absolute bottom-3 right-3 rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
                       Seçili
@@ -505,7 +618,7 @@ export default function ClassLiveClassManager({
                 <h3 id="class-edit-title" className="text-lg font-bold text-slate-900">
                   Sınıfı düzenle
                 </h3>
-                <p className="text-xs text-slate-500">Ad, şube, öğretmen ve öğrenci atamaları</p>
+                <p className="text-xs text-slate-500">Ad, şube, öğretmen, öğrenci ve ders kapsamı</p>
               </div>
               <button
                 type="button"
@@ -573,6 +686,71 @@ export default function ClassLiveClassManager({
                 selectedIds={editStudentIds}
                 onChange={setEditStudentIds}
               />
+              {editStudentIds.length > 0 ? (
+                <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-3">
+                  <p className="text-sm font-bold text-amber-950">Öğrenci ders kapsamı</p>
+                  <p className="mt-1 text-xs text-amber-900/90">
+                    Bazı öğrenciler tüm dersleri almıyorsa (ör. yalnızca Kitap Okuma): işareti kaldırın. WhatsApp
+                    hatırlatması ve öğrenci takvimi buna göre filtrelenir.
+                  </p>
+                  {editSubjectsLoading ? (
+                    <p className="mt-3 flex items-center gap-2 text-xs text-amber-900">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Ders listesi yükleniyor…
+                    </p>
+                  ) : editSubjectOptions.length === 0 ? (
+                    <p className="mt-3 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-slate-700">
+                      Bu sınıfta henüz ders tanımı yok. Önce bu sayfada sınıfı seçip alttaki{' '}
+                      <strong>«Ders ekle»</strong> bölümünden Matematik, Fen, Kitap Okuma vb. ekleyin; ardından sınıf
+                      kartındaki kalemle tekrar açın.
+                    </p>
+                  ) : (
+                    <div className="mt-3 max-h-56 space-y-3 overflow-y-auto">
+                      {editStudentIds.map((sid) => {
+                        const label = editStudentItems.find((x) => x.id === sid)?.label || sid;
+                        const picked = editStudentSubjects[sid]?.length
+                          ? editStudentSubjects[sid]
+                          : editSubjectOptions;
+                        const restricted =
+                          picked.length > 0 && picked.length < editSubjectOptions.length;
+                        return (
+                          <div
+                            key={sid}
+                            className={`rounded-lg border bg-white p-2 ${restricted ? 'border-indigo-300 ring-1 ring-indigo-100' : 'border-amber-100'}`}
+                          >
+                            <p className="mb-1.5 text-xs font-semibold text-slate-800">
+                              {label}
+                              {restricted ? (
+                                <span className="ml-2 font-normal text-indigo-700">
+                                  ({picked.length}/{editSubjectOptions.length} ders)
+                                </span>
+                              ) : (
+                                <span className="ml-2 font-normal text-slate-500">(tüm dersler)</span>
+                              )}
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              {editSubjectOptions.map((sub) => (
+                                <label
+                                  key={`${sid}-${sub}`}
+                                  className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={picked.includes(sub)}
+                                    onChange={(e) => toggleStudentSubject(sid, sub, e.target.checked)}
+                                    className="rounded border-slate-300 text-indigo-600"
+                                  />
+                                  {sub}
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
             <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 bg-slate-50 px-4 py-3 sm:px-5">
               <button

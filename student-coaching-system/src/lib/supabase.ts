@@ -2,6 +2,7 @@
 // ÖNEMLİ: Canlıda mutlaka Vercel ortam değişkeni kullanın. Sabit (hardcode) URL burada
 // bırakılmaz; yanlış/eskimiş host DNS hatası (ERR_NAME_NOT_RESOLVED) üretir.
 import { createClient } from '@supabase/supabase-js';
+import { getAuthToken, resolveApiUrl } from './session';
 
 const rawSupabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || '';
 const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() || '';
@@ -68,11 +69,9 @@ let reachabilityChecked = false;
 let reachableCache = false;
 
 const REACHABILITY_TIMEOUT_MS = 15000;
+const API_FALLBACK_TIMEOUT_MS = 5000;
 
-export const verifySupabaseReachable = async (): Promise<boolean> => {
-  if (!isSupabaseReady) return false;
-  if (reachabilityChecked) return reachableCache;
-
+const fetchDirectSupabaseReachable = async (): Promise<boolean> => {
   let timeoutId: ReturnType<typeof window.setTimeout> | undefined;
   try {
     const controller = new AbortController();
@@ -80,26 +79,23 @@ export const verifySupabaseReachable = async (): Promise<boolean> => {
     const response = await fetch(
       `${normalizedSupabaseUrl}/rest/v1/institutions?select=id&limit=1`,
       {
-      method: 'GET',
-      headers: {
-        apikey: supabaseAnonKey,
-        Authorization: `Bearer ${supabaseAnonKey}`
-      },
-      signal: controller.signal
+        method: 'GET',
+        headers: {
+          apikey: supabaseAnonKey,
+          Authorization: `Bearer ${supabaseAnonKey}`
+        },
+        signal: controller.signal
       }
     );
 
-    // Host erişimi + key yetkisi yoksa (401/403) Supabase kullanımı tamamen kapatılır.
     if (response.status === 401 || response.status === 403) {
-      reachableCache = false;
       console.error(
         '[Supabase] API key yetkisiz (401/403). VITE_SUPABASE_ANON_KEY değerini kontrol edin.'
       );
-    } else {
-      reachableCache = response.status > 0;
+      return false;
     }
+    return response.status > 0;
   } catch (error) {
-    reachableCache = false;
     const isAbort =
       error instanceof DOMException
         ? error.name === 'AbortError'
@@ -112,11 +108,56 @@ export const verifySupabaseReachable = async (): Promise<boolean> => {
     } else {
       console.error('[Supabase] Host erişilemiyor. URL ve proje durumu kontrol edin:', error);
     }
+    return false;
   } finally {
     if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+  }
+};
+
+const fetchApiReachabilityPing = async (): Promise<boolean> => {
+  const token = getAuthToken();
+  if (!token) return false;
+
+  let timeoutId: ReturnType<typeof window.setTimeout> | undefined;
+  try {
+    const controller = new AbortController();
+    timeoutId = window.setTimeout(() => controller.abort(), API_FALLBACK_TIMEOUT_MS);
+    const response = await fetch(resolveApiUrl('/api/institutions-list?ping=1'), {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      signal: controller.signal
+    });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+  }
+};
+
+export const verifySupabaseReachable = async (): Promise<boolean> => {
+  if (!isSupabaseReady) return false;
+  if (reachabilityChecked) return reachableCache;
+
+  const hasToken = Boolean(getAuthToken());
+
+  if (hasToken) {
+    const apiOk = await fetchApiReachabilityPing();
     reachabilityChecked = true;
+    reachableCache = true;
+    if (!apiOk) {
+      console.warn(
+        '[Supabase] Sunucu ping yanıt vermedi; veri yükleme yine de /api üzerinden denenecek.'
+      );
+    }
+    return reachableCache;
   }
 
+  reachableCache = await fetchDirectSupabaseReachable();
+  reachabilityChecked = true;
   return reachableCache;
 };
 

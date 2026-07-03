@@ -132,6 +132,8 @@ const SUPER_ADMIN_TABS: MobileTabItem[] = [
 
   { path: '/mobile/akademik', label: 'Akademik', icon: BookOpenCheck, matchPaths: ACADEMIC_MATCH },
 
+  { path: '/students', label: 'Öğrenci', icon: GraduationCap },
+
   { path: '/user-management', label: 'Kullanıcı', icon: UserCog },
 
   { path: '/mobile/yonetim', label: 'Yönetim', icon: Server, matchPaths: ADMIN_HUB_MATCH },
@@ -181,8 +183,6 @@ const TEACHER_TABS: MobileTabItem[] = [
   { path: '/mobile/dersler', label: 'Dersler', icon: Video, matchPaths: LESSON_MATCH },
 
   { path: '/mobile/akademik', label: 'Akademik', icon: BookOpenCheck, matchPaths: ACADEMIC_MATCH },
-
-  { path: '/students', label: 'Öğrenci', icon: GraduationCap },
 
   { path: '/my-profile', label: 'Profil', icon: User, end: true }
 

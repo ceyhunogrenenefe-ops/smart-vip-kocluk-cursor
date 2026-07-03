@@ -542,10 +542,11 @@ export default async function handler(req, res) {
           });
         }
 
-        const replaceExisting = body.replace_existing === true;
+        // Aktarım her zaman mevcut haftalık şablonu değiştirir (üst üste binmeyi önler)
+        const replaceExisting = true;
         const clearCrossClassConflicts = body.clear_cross_class_conflicts === true;
-        const replaceSessionsInRange =
-          body.replace_sessions_in_range === true || (replaceExisting && body.replace_sessions_in_range !== false);
+        const replaceSessionsInRange = body.replace_sessions_in_range !== false;
+        const clipOutside = body.clip_sessions_to_range !== false;
 
         const slotResult = await exportPlannerGroupToClass({
           plannerJson,
@@ -565,7 +566,8 @@ export default async function handler(req, res) {
             studentSubjectSync = await syncPlannerGroupStudentSubjects({
               classId,
               group,
-              plannerJson
+              plannerJson,
+              replace: replaceExisting
             });
           }
         } catch (syncErr) {
@@ -581,7 +583,6 @@ export default async function handler(req, res) {
             .lte('lesson_date', dateTo)
             .eq('status', 'scheduled');
 
-          const clipOutside = body.clip_sessions_to_range === true;
           if (clipOutside) {
             await supabaseAdmin
               .from('class_sessions')

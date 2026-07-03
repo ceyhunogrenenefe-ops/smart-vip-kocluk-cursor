@@ -7,9 +7,21 @@ import { sessionEndUtcMs, shouldReopenScheduledSession } from './class-session-e
  * `class_sessions` içinde `scheduled` olup bitiş zamanı geçenleri `completed` yapar.
  * Yanlışlıkla completed yapılmış ama ders saati gelmemiş oturumları `scheduled` yapar.
  */
+/** Oturum durumu senkronu — poll başına en fazla bir kez (60s), ağır sorguyu sınırlar. */
+let lastSyncAt = 0;
+const SYNC_MIN_INTERVAL_MS = 60_000;
+
 export async function syncClassSessionsScheduledToCompleted() {
+  const now = Date.now();
+  if (now - lastSyncAt < SYNC_MIN_INTERVAL_MS) {
+    return { completed: 0, reopened: 0, skipped: true };
+  }
+  lastSyncAt = now;
+
   let completed = 0;
   let reopened = 0;
+  const toReopen = [];
+  const toComplete = [];
   try {
     const now = Date.now();
     const today = getIstanbulDateString();
@@ -26,17 +38,34 @@ export async function syncClassSessionsScheduledToCompleted() {
 
     for (const r of rows || []) {
       if (shouldReopenScheduledSession(r, now)) {
-        await supabaseAdmin.from('class_sessions').update({ status: 'scheduled' }).eq('id', r.id);
-        reopened += 1;
+        toReopen.push(r.id);
         continue;
       }
       if (String(r.status || '') !== 'scheduled') continue;
-
       const endMs = sessionEndUtcMs(r.lesson_date, r.start_time, r.end_time);
       if (endMs != null && endMs <= now) {
-        await supabaseAdmin.from('class_sessions').update({ status: 'completed' }).eq('id', r.id);
-        completed += 1;
+        toComplete.push(r.id);
       }
+    }
+
+    for (let i = 0; i < toReopen.length; i += 50) {
+      const slice = toReopen.slice(i, i + 50);
+      const { error } = await supabaseAdmin
+        .from('class_sessions')
+        .update({ status: 'scheduled' })
+        .in('id', slice);
+      if (error) throw error;
+      reopened += slice.length;
+    }
+
+    for (let i = 0; i < toComplete.length; i += 50) {
+      const slice = toComplete.slice(i, i + 50);
+      const { error } = await supabaseAdmin
+        .from('class_sessions')
+        .update({ status: 'completed' })
+        .in('id', slice);
+      if (error) throw error;
+      completed += slice.length;
     }
   } catch (e) {
     console.warn('[class-sessions sync]', errorMessage(e));

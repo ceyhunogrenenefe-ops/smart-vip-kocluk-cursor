@@ -10,9 +10,11 @@ import {
   isBbbAudioOnlyPlaybackUrl,
   buildBbbAttendeeJoinUrl,
   buildBbbModeratorJoinUrl,
+  buildStaffBbbJoinUrl,
   parseBbbJoinCredentials,
   parseBbbPasswordFromJoinUrl,
   parseBbbMeetingIdFromJoinUrl,
+  isCompleteBbbJoinUrl,
   getBbbRecordingPlaybackUrlForMeetingIds,
   collectBbbMeetingIdsForRecording
 } from './bbb.js';
@@ -44,6 +46,7 @@ function pickJoinUrl({ isStudent, attendeeLink, moderatorLink, joinLink }) {
  *   patchLinks: (id: string, links: { meeting_link: string, meeting_link_moderator?: string }) => Promise<void>,
  *   getLinks: (row: Record<string, unknown>) => { attendeeLink: string, moderatorLink: string | null },
  *   resolveStudentJoinUrl?: (actor: object, row: Record<string, unknown>, ensured: object) => Promise<string | null>,
+ *   resolveStaffJoinUrl?: (actor: object, row: Record<string, unknown>, ensured: object, ctx: object) => Promise<string | null>,
  * }} config
  */
 export async function handleBbbJoinGet(req, res, config) {
@@ -125,24 +128,40 @@ export async function handleBbbJoinGet(req, res, config) {
       const studentUrl = await config.resolveStudentJoinUrl(actor, row, ensured);
       if (studentUrl) url = studentUrl;
     } else if (!isStudent) {
-      const meetingId =
-        String(ensured.meetingId || row.bbb_meeting_id || '').trim() ||
-        parseBbbMeetingIdFromJoinUrl(ensured.moderatorLink || '') ||
-        parseBbbMeetingIdFromJoinUrl(ensured.attendeeLink || '');
-      const modPw =
-        parseBbbPasswordFromJoinUrl(ensured.moderatorLink || '') ||
-        String(ensured.moderatorPW || '').trim() ||
-        null;
-      const actorName = String(actor.name || actor.email || ctx.moderatorName || 'Öğretmen')
-        .trim()
-        .slice(0, 64);
-      if (meetingId && modPw) {
-        url = buildBbbModeratorJoinUrl({
+      if (config.resolveStaffJoinUrl) {
+        const staffUrl = await config.resolveStaffJoinUrl(actor, row, ensured, ctx);
+        if (staffUrl) url = staffUrl;
+      } else {
+        const meetingId =
+          String(ensured.meetingId || row.bbb_meeting_id || '').trim() ||
+          parseBbbMeetingIdFromJoinUrl(ensured.moderatorLink || '') ||
+          parseBbbMeetingIdFromJoinUrl(ensured.attendeeLink || '');
+        const modPw =
+          parseBbbPasswordFromJoinUrl(ensured.moderatorLink || '') ||
+          String(ensured.moderatorPW || '').trim() ||
+          null;
+        const attPw =
+          String(row.bbb_attendee_pw || ensured.attendeePW || '').trim() ||
+          parseBbbJoinCredentials(ensured.attendeeLink || '')?.attendeePassword ||
+          '';
+        const actorName = String(actor.name || actor.email || ctx.moderatorName || 'Öğretmen')
+          .trim()
+          .slice(0, 64);
+        const built = buildStaffBbbJoinUrl({
+          actorName,
           meetingId,
           moderatorPassword: modPw,
-          fullName: actorName || 'Öğretmen'
+          attendeePassword: attPw,
+          preferModerator: true
         });
+        if (built) url = built;
       }
+    }
+
+    if (!isCompleteBbbJoinUrl(url)) {
+      return jsonError(res, 502, 'BBB katılım bağlantısı oluşturulamadı (eksik şifre). Tekrar deneyin.', {
+        code: 'bbb_join_incomplete'
+      });
     }
 
     return res.status(200).json({

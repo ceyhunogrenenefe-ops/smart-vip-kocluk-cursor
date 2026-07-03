@@ -1,6 +1,31 @@
 import { apiFetch } from './session';
+import {
+  assignBbbWaitingPopup,
+  openBbbWaitingPopup,
+  showBbbWaitingPopupError
+} from './bbbWaitingPopup';
+import { isMobileOrTabletViewport } from './viewportUtils';
 
 export type BbbJoinApi = 'teacher-lessons' | 'class-live-lessons' | 'meetings';
+
+const LESSON_JOIN_WAITING = {
+  title: 'Derse yönlendiriliyorsunuz'
+};
+
+function portalJoinPath(
+  api: BbbJoinApi,
+  id: string,
+  options?: { kind?: 'session' | 'slot' }
+): string | null {
+  if (api === 'class-live-lessons') {
+    const q = options?.kind === 'slot' ? '?kind=slot' : '';
+    return `/katil/grup/${encodeURIComponent(id)}${q}`;
+  }
+  if (api === 'teacher-lessons') {
+    return `/katil/ozel/${encodeURIComponent(id)}`;
+  }
+  return null;
+}
 
 /**
  * Katıl: BBB odası yoksa sunucuda yeniden oluşturur, güncel join URL ile yönlendirir.
@@ -10,14 +35,25 @@ export async function openBbbJoin(
   id: string,
   options?: { kind?: 'session' | 'slot'; sameTab?: boolean }
 ): Promise<void> {
-  const url = await fetchBbbJoinUrl(api, id, options);
-  if (options?.sameTab) {
-    window.location.assign(url);
+  const portalPath = portalJoinPath(api, id, options);
+
+  if (portalPath && (options?.sameTab || isMobileOrTabletViewport())) {
+    window.location.assign(portalPath);
     return;
   }
-  const opened = window.open(url, '_blank', 'noopener,noreferrer');
-  if (!opened) {
-    window.location.assign(url);
+
+  const popup = openBbbWaitingPopup(LESSON_JOIN_WAITING);
+  try {
+    const url = await fetchBbbJoinUrl(api, id, options);
+    if (options?.sameTab) {
+      window.location.assign(url);
+      return;
+    }
+    assignBbbWaitingPopup(popup, url);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Katılım bağlantısı alınamadı';
+    showBbbWaitingPopupError(popup, msg, { title: LESSON_JOIN_WAITING.title });
+    throw e;
   }
 }
 

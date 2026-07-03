@@ -6,6 +6,11 @@ import { insertWhatsAppAutomationLog } from '../api/_lib/message-log.js';
 import { getIstanbulDateString } from '../api/_lib/istanbul-time.js';
 import { recordCronRun } from '../api/_lib/cron-run-log.js';
 import { getPrimaryAutomationPhone } from '../api/_lib/meetings-resolve.js';
+import {
+  buildClassStudentSubjectMap,
+  filterStudentIdsForClassSubject,
+  loadClassStudentSubjectRows
+} from '../api/_lib/class-student-subjects.js';
 
 const KIND = 'class_homework_notice';
 const TEMPLATE_TYPE = 'class_homework_notice';
@@ -58,11 +63,17 @@ export default async function handler(req, res) {
       const endMs = toUtcMs(s.lesson_date, s.end_time);
       if (now < endMs) continue;
 
-      const [{ data: cls }, { data: classStudents }] = await Promise.all([
+      const [{ data: cls }, classStudentRows] = await Promise.all([
         supabaseAdmin.from('classes').select('name').eq('id', s.class_id).maybeSingle(),
-        supabaseAdmin.from('class_students').select('student_id').eq('class_id', s.class_id)
+        loadClassStudentSubjectRows([s.class_id])
       ]);
-      const studentIds = (classStudents || []).map((x) => x.student_id);
+      const subjectMap = buildClassStudentSubjectMap(classStudentRows || []);
+      const studentIds = filterStudentIdsForClassSubject(
+        subjectMap,
+        s.class_id,
+        s.subject,
+        (classStudentRows || []).map((x) => x.student_id)
+      );
       if (!studentIds.length) continue;
 
       const { data: students } = await supabaseAdmin

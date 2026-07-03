@@ -68,7 +68,7 @@ export default async function handler(req, res) {
     }
   }
 
-  const isSendRoute = /\/send\/?$/i.test(pathPart);
+  const isSendRoute = /\/send(?:-document)?\/?$/i.test(pathPart);
   const isStatusRoute = /\/status\/?$/i.test(pathPart);
   const timeoutMs = isSendRoute
     ? Math.min(115000, Math.max(25000, Number(process.env.WA_GATEWAY_SEND_TIMEOUT_MS) || 110000))

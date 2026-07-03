@@ -715,13 +715,18 @@ export default function Analytics() {
     }
   };
 
-  const buildAnalyticsPdfBlob = async (): Promise<{ blob: Blob; filename: string }> => {
+  const buildAnalyticsPdfBlob = async (opts?: { compactForShare?: boolean }): Promise<{ blob: Blob; filename: string }> => {
     if (!reportRef.current) throw new Error('Rapor alanı bulunamadı');
     if (!selectedStudentId) throw new Error('Lütfen önce öğrenci seçin');
 
+    const compactForShare = opts?.compactForShare === true;
+    const rasterScale = compactForShare ? 1.25 : 2;
+    const imageFormat = compactForShare ? 'JPEG' : 'PNG';
+    const jpegQuality = 0.82;
+
     await new Promise((resolve) => setTimeout(resolve, 300));
     const canvas = await html2canvas(reportRef.current, {
-      scale: 2,
+      scale: rasterScale,
       useCORS: true,
       logging: false,
       backgroundColor: '#ffffff'
@@ -765,7 +770,16 @@ export default function Analytics() {
 
       if (pageIndex > 0) pdf.addPage();
       const sliceHeightMm = sliceHeight / pxPerMm;
-      pdf.addImage(pageCanvas.toDataURL('image/png'), 'PNG', marginX, pageIndex === 0 ? topY : 8, contentWidth, sliceHeightMm);
+      const mime = imageFormat === 'JPEG' ? 'image/jpeg' : 'image/png';
+      const quality = imageFormat === 'JPEG' ? jpegQuality : 0.95;
+      pdf.addImage(
+        pageCanvas.toDataURL(mime, quality),
+        imageFormat,
+        marginX,
+        pageIndex === 0 ? topY : 8,
+        contentWidth,
+        sliceHeightMm
+      );
 
       renderedHeight += sliceHeight;
       pageIndex += 1;
@@ -794,11 +808,14 @@ export default function Analytics() {
 
     setParentPdfShareBusy(true);
     try {
-      const { blob, filename } = await buildAnalyticsPdfBlob();
+      const { blob, filename } = await buildAnalyticsPdfBlob({ compactForShare: true });
       const caption = buildParentAnalyticsMessage();
       const result = await sendWhatsAppOutboundDocument({
         coachUserId,
         targetPhone: parentPhone,
+        studentId: selectedStudentId,
+        studentName: selectedStudent?.name || '',
+        pdfTitle: 'Koç analiz raporu',
         filename,
         base64: await blobToBase64(blob),
         caption: caption || undefined,

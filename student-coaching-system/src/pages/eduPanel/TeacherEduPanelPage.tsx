@@ -5,8 +5,16 @@ import { toast } from 'sonner';
 import EduAnimationPreviewModal from '../../components/eduPanel/EduAnimationPreviewModal';
 import TeacherEduTopicCard from '../../components/eduPanel/TeacherEduTopicCard';
 import { useEduAnimationPreview } from '../../components/eduPanel/useEduAnimationPreview';
-import type { EduClass, LessonRowFormValues, SubjectColor } from '../../types/eduPanel.types';
+import { useAuth } from '../../context/AuthContext';
+import type { EduClass, EduLessonRow, LessonRowFormValues, SubjectColor } from '../../types/eduPanel.types';
 import { buildLevelGroups, filterRows, subjectsForLevel } from '../../lib/eduPanel/eduPanelUi';
+import {
+  EMPTY_HOMEWORK_DRAFT,
+  homeworkTitleForApi,
+  validateHomeworkDraft,
+  type EduHomeworkDraft
+} from '../../lib/eduPanel/eduHomeworkForm';
+import { listBookOrderSets } from '../../lib/bookOrdersApi';
 import {
   createEduHomework,
   createEduLessonRow,
@@ -23,7 +31,14 @@ import {
 const ALL_LEVELS = '__all__';
 const ALL_SUBJECTS = '__all__';
 
+function defaultUntil(from: string): string {
+  const d = new Date(`${from.slice(0, 10)}T12:00:00`);
+  d.setDate(d.getDate() + 6);
+  return d.toISOString().slice(0, 10);
+}
+
 export default function TeacherEduPanelPage() {
+  const { user } = useAuth();
   const [rows, setRows] = useState<Awaited<ReturnType<typeof fetchEduLessonRows>>>([]);
   const [classes, setClasses] = useState<EduClass[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,17 +48,24 @@ export default function TeacherEduPanelPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const [form, setForm] = useState<LessonRowFormValues>({
-    class_id: '',
-    title: '',
-    subject_name: 'Matematik',
-    subject_color: 'blue',
-    lesson_date: new Date().toISOString().slice(0, 10),
-    status: 'draft',
-    notes: ''
+  const [form, setForm] = useState<LessonRowFormValues>(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return {
+      class_id: '',
+      class_ids: [],
+      title: '',
+      subject_name: 'Matematik',
+      subject_color: 'blue',
+      lesson_date: today,
+      available_from: today,
+      available_until: defaultUntil(today),
+      status: 'draft',
+      notes: ''
+    };
   });
 
-  const [hwTitle, setHwTitle] = useState<Record<string, string>>({});
+  const [hwDraft, setHwDraft] = useState<Record<string, EduHomeworkDraft>>({});
+  const [bookSuggestions, setBookSuggestions] = useState<string[]>([]);
   const preview = useEduAnimationPreview();
 
   const load = useCallback(async () => {
@@ -53,14 +75,28 @@ export default function TeacherEduPanelPage() {
       setRows(r);
       setClasses(c);
       if (c.length) {
-        setForm((f) => (f.class_id ? f : { ...f, class_id: c[0].id }));
+        setForm((f) =>
+          f.class_ids?.length
+            ? f
+            : { ...f, class_id: c[0].id, class_ids: [c[0].id] }
+        );
+      }
+      try {
+        const sets = await listBookOrderSets(user?.institutionId);
+        setBookSuggestions(
+          [...new Set((sets || []).map((s) => s.name).filter(Boolean))].sort((a, b) =>
+            a.localeCompare(b, 'tr')
+          )
+        );
+      } catch {
+        /* kitap setleri opsiyonel */
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Yüklenemedi');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user?.institutionId]);
 
   useEffect(() => {
     void load();
@@ -98,27 +134,75 @@ export default function TeacherEduPanelPage() {
     return m;
   }, [classes]);
 
+  const classesForForm = useMemo(
+    () => (activeLevel ? activeLevel.classes : classes),
+    [activeLevel, classes]
+  );
+
   const onSelectLevel = (key: string) => {
     setLevelKey(key);
     setSubjectName(ALL_SUBJECTS);
     if (key === ALL_LEVELS) {
-      setForm((f) => ({ ...f, class_id: classes[0]?.id || '' }));
+      const first = classes[0]?.id;
+      if (first) setForm((f) => ({ ...f, class_id: first, class_ids: [first] }));
     } else {
       const lg = levelGroups.find((g) => g.levelKey === key);
       const first = lg?.classIds[0];
-      if (first) setForm((f) => ({ ...f, class_id: first }));
+      if (first) setForm((f) => ({ ...f, class_id: first, class_ids: [first] }));
+    }
+  };
+
+  const rowClassLabels = useCallback(
+    (row: EduLessonRow) => {
+      const ids = row.class_ids?.length ? row.class_ids : [row.class_id];
+      return ids.map((id) => classNameById.get(id) || 'Sınıf').filter(Boolean);
+    },
+    [classNameById]
+  );
+
+  const onEditRow = async (rowId: string, patch: Partial<LessonRowFormValues>) => {
+    setBusy(true);
+    try {
+      const { warning } = await updateEduLessonRow(rowId, patch);
+      toast.success('Konu güncellendi');
+      if (warning) {
+        toast.warning(
+          'Çoklu sınıf tablosu henüz yok — yalnızca birincil sınıf kaydedildi. Supabase\'de 2026-06-25-edu-lesson-row-classes.sql çalıştırın.'
+        );
+      }
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Güncellenemedi');
+      throw e;
+    } finally {
+      setBusy(false);
     }
   };
 
   const onCreateRow = async () => {
-    if (!form.class_id || !form.title.trim()) {
-      toast.error('Sınıf ve konu başlığı zorunlu');
+    const classIds = form.class_ids?.length
+      ? form.class_ids
+      : form.class_id
+        ? [form.class_id]
+        : [];
+    if (!classIds.length || !form.title.trim()) {
+      toast.error('En az bir sınıf ve konu başlığı zorunlu');
       return;
     }
     setBusy(true);
     try {
-      const created = await createEduLessonRow(form);
+      const { data: created, warning, hint } = await createEduLessonRow({
+        ...form,
+        class_ids: classIds,
+        class_id: classIds[0]
+      });
       toast.success(`「${form.title}」 konusu oluşturuldu`);
+      if (warning) {
+        toast.warning(
+          hint ||
+            'Çoklu sınıf tablosu henüz yok — yalnızca birincil sınıf kaydedildi. Supabase\'de 2026-06-25-edu-lesson-row-classes.sql çalıştırın.'
+        );
+      }
       setForm((f) => ({ ...f, title: '', notes: '' }));
       setExpandedId(created.id);
       setShowCreate(false);
@@ -155,14 +239,23 @@ export default function TeacherEduPanelPage() {
   };
 
   const onAddHomework = async (rowId: string, rowTitle: string) => {
-    const title = (hwTitle[rowId] || '').trim();
-    if (!title) return;
+    const draft = hwDraft[rowId] || EMPTY_HOMEWORK_DRAFT;
+    const err = validateHomeworkDraft(draft);
+    if (err) {
+      toast.error(err);
+      return;
+    }
     setBusy(true);
     try {
-      const hw = await createEduHomework(rowId, { title, status: 'draft' });
+      const hw = await createEduHomework(rowId, {
+        title: homeworkTitleForApi(draft),
+        book_name: draft.book_name.trim() || undefined,
+        question_range: draft.question_range.trim() || undefined,
+        status: 'draft'
+      });
       await publishEduHomework(hw.id);
-      toast.success(`Ödev 「${rowTitle}」 konusuna eklendi`);
-      setHwTitle((h) => ({ ...h, [rowId]: '' }));
+      toast.success(`Ödev eklendi: ${homeworkTitleForApi(draft)}`);
+      setHwDraft((h) => ({ ...h, [rowId]: { ...EMPTY_HOMEWORK_DRAFT } }));
       void load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Ödev eklenemedi');
@@ -275,31 +368,83 @@ export default function TeacherEduPanelPage() {
         {showCreate ? (
           <div className="border-t border-slate-100 p-4 space-y-3 bg-slate-50/50">
             <p className="text-xs text-slate-600">
-              Konuyu bir sınıfa ve derse bağlayın. Üst kademe seçici otomatik kullanılır.
+              Konuyu bir veya birden fazla sınıfa bağlayın. Üst kademe seçici otomatik kullanılır.
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
-              <label className="text-sm">
-                <span className="text-slate-600">Sınıf</span>
-                <select
-                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm bg-white"
-                  value={form.class_id}
-                  onChange={(e) => setForm((f) => ({ ...f, class_id: e.target.value }))}
-                >
-                  <option value="">Seçin…</option>
-                  {(activeLevel ? activeLevel.classes : classes).map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="text-sm sm:col-span-2">
+                <span className="text-slate-600">Sınıflar</span>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {classesForForm.map((c) => {
+                    const checked = (form.class_ids || []).includes(c.id);
+                    return (
+                      <label
+                        key={c.id}
+                        className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm transition ${
+                          checked
+                            ? 'border-violet-400 bg-violet-50 text-violet-900'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-violet-200'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="rounded border-slate-300 text-violet-600"
+                          checked={checked}
+                          onChange={(e) => {
+                            setForm((f) => {
+                              const prev = f.class_ids || (f.class_id ? [f.class_id] : []);
+                              const next = e.target.checked
+                                ? [...new Set([...prev, c.id])]
+                                : prev.filter((id) => id !== c.id);
+                              return {
+                                ...f,
+                                class_ids: next,
+                                class_id: next[0] || ''
+                              };
+                            });
+                          }}
+                        />
+                        {c.name}
+                      </label>
+                    );
+                  })}
+                </div>
+                {!classesForForm.length ? (
+                  <p className="mt-1 text-xs text-slate-500">Önce sınıf oluşturun.</p>
+                ) : null}
+              </div>
               <label className="text-sm">
                 <span className="text-slate-600">Ders tarihi</span>
                 <input
                   type="date"
                   className="mt-1 w-full rounded-lg border px-3 py-2 text-sm bg-white"
                   value={form.lesson_date}
-                  onChange={(e) => setForm((f) => ({ ...f, lesson_date: e.target.value }))}
+                  onChange={(e) => {
+                    const d = e.target.value;
+                    setForm((f) => ({
+                      ...f,
+                      lesson_date: d,
+                      available_from: f.available_from || d,
+                      available_until: f.available_until || defaultUntil(d)
+                    }));
+                  }}
+                />
+              </label>
+              <label className="text-sm">
+                <span className="text-slate-600">Erişim başlangıcı</span>
+                <input
+                  type="date"
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm bg-white"
+                  value={form.available_from || form.lesson_date}
+                  onChange={(e) => setForm((f) => ({ ...f, available_from: e.target.value }))}
+                />
+              </label>
+              <label className="text-sm">
+                <span className="text-slate-600">Bitiş (son gün)</span>
+                <input
+                  type="date"
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm bg-white"
+                  value={form.available_until || defaultUntil(form.lesson_date)}
+                  onChange={(e) => setForm((f) => ({ ...f, available_until: e.target.value }))}
                 />
               </label>
               <label className="text-sm sm:col-span-2">
@@ -380,12 +525,16 @@ export default function TeacherEduPanelPage() {
             <TeacherEduTopicCard
               key={row.id}
               row={row}
-              className={classNameById.get(row.class_id) || 'Sınıf'}
+              classNames={rowClassLabels(row)}
+              classes={classes}
+              bookSuggestions={bookSuggestions}
               expanded={expandedId === row.id}
               onToggle={() => setExpandedId(expandedId === row.id ? null : row.id)}
               busy={busy}
-              hwTitle={hwTitle[row.id] || ''}
-              onHwTitleChange={(v) => setHwTitle((h) => ({ ...h, [row.id]: v }))}
+              hwDraft={hwDraft[row.id] || EMPTY_HOMEWORK_DRAFT}
+              onHwDraftChange={(draft) =>
+                setHwDraft((h) => ({ ...h, [row.id]: draft }))
+              }
               onUploadHtml={(file) => void onUploadHtml(row.id, row.title, file)}
               onPreview={(id) =>
                 void preview.open(id).catch((e) =>
@@ -401,10 +550,11 @@ export default function TeacherEduPanelPage() {
               onAddHomework={() => void onAddHomework(row.id, row.title)}
               onPublish={() =>
                 void updateEduLessonRow(row.id, { status: 'active' }).then(() => {
-                  toast.success('Konu yayında');
+                  toast.success('Konu yayında — öğrenciler görebilir');
                   void load();
                 })
               }
+              onEdit={(patch) => onEditRow(row.id, patch)}
               onDeleteRow={() =>
                 void deleteEduLessonRow(row.id).then(() => {
                   toast.success('Konu silindi');

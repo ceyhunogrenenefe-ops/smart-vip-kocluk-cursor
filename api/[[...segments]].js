@@ -55,6 +55,7 @@ export default async function handler(req, res) {
     return;
   }
 
+  const started = Date.now();
   try {
     const mod = await load();
     const fn = mod?.default;
@@ -63,9 +64,18 @@ export default async function handler(req, res) {
       return;
     }
     req.apiExtraSegments = extraSegments;
+    req.apiRoutePath = routePath;
     return await fn(req, res);
   } catch (e) {
+    const ms = Date.now() - started;
     const msg = e instanceof Error ? e.message : 'router_failed';
-    if (!res.headersSent) res.status(500).json({ error: msg });
+    console.error('[api-router]', {
+      path: routePath,
+      method: req.method,
+      ms,
+      error: msg,
+      stack: e instanceof Error ? e.stack : undefined
+    });
+    if (!res.headersSent) res.status(500).json({ error: msg, path: routePath });
   }
 }

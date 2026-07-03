@@ -50,6 +50,22 @@ export function isBbbJoinUrl(url: string): boolean {
   return /meetingID=/i.test(s) && /\/join/i.test(s);
 }
 
+/** biggerbluebutton vb. eksik parametreli join URL'leri — ham açılmamalı. */
+export function isLikelyBbbJoinUrl(url: string): boolean {
+  const s = String(url || '').trim();
+  if (!s) return false;
+  if (isBbbAutoMeetingLink(s)) return true;
+  if (isBbbJoinUrl(s)) return true;
+  if (/bigbluebutton|biggerbluebutton/i.test(s) && /\/join/i.test(s)) return true;
+  return false;
+}
+
+export function isExternalMeetingPlatform(url: string): boolean {
+  const s = String(url || '').trim();
+  if (!s) return false;
+  return /zoom\.us|meet\.google|teams\.microsoft|webex\.com|whereby\.com/i.test(s);
+}
+
 /** Oda ilk «Katıl»da açılır — ham BBB URL'si saklanmaz. */
 export const BBB_AUTO_MEETING_LINK = 'bbb:auto';
 
@@ -59,7 +75,18 @@ export function isBbbAutoMeetingLink(url: string): boolean {
 
 /** Katıl akışı BBB API üzerinden mi? (ham URL veya otomatik BBB) */
 export function needsBbbJoinFlow(url: string): boolean {
-  return isBbbJoinUrl(url) || isBbbAutoMeetingLink(url);
+  return isLikelyBbbJoinUrl(url);
+}
+
+/** Grup/özel ders satırı için panel BBB API katılımı (Zoom/Meet hariç). */
+export function shouldUsePanelBbbJoin(
+  row: { id?: string; meeting_link?: string | null; join_link?: string | null },
+  url?: string
+): boolean {
+  if (!row.id) return false;
+  const raw = String(url ?? lessonJoinUrl(row)).trim();
+  if (raw && isExternalMeetingPlatform(raw)) return false;
+  return true;
 }
 
 /** Tarayıcıdan açılabilir panel katılım linki (giriş gerekir). */
@@ -81,7 +108,7 @@ export function displayMeetingLinkForRow(
 ): string {
   const raw = lessonJoinUrl(row);
   if (!raw) return '';
-  if ((isBbbAutoMeetingLink(raw) || isBbbJoinUrl(raw)) && row.id) {
+  if ((isBbbAutoMeetingLink(raw) || isLikelyBbbJoinUrl(raw)) && row.id) {
     return portalBbbJoinUrl(kind, row.id, origin);
   }
   return raw;

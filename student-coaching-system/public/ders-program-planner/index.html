@@ -1384,20 +1384,45 @@ function lessonAtMasterSlot(g, di, masterPi){
   }
   return {key, cell:cellHasLesson(cell)?cell:null};
 }
-function applyLessonTransfer(groupId, fromKey, toKey){
-  const g=group(groupId);
-  if(!g||fromKey===toKey) return false;
-  const from=g.schedule[fromKey];
+function cloneLessonCell(cell){
+  if(!cellHasLesson(cell)) return null;
+  const out={teacher:String(cell.teacher||''), subject:String(cell.subject||'')};
+  const sid=String(cell.sharedLessonId||'').trim();
+  if(sid) out.sharedLessonId=sid;
+  return out;
+}
+function applyLessonTransfer(fromGroupId, fromKey, toGroupId, toKey){
+  if(String(fromGroupId)===String(toGroupId) && fromKey===toKey) return false;
+  const fromG=group(fromGroupId);
+  const toG=group(toGroupId);
+  if(!fromG||!toG) return false;
+  const from=fromG.schedule[fromKey];
   if(!cellHasLesson(from)) return false;
+  const fromCopy=cloneLessonCell(from);
+  if(!fromCopy) return false;
   pushUndo();
-  const to=g.schedule[toKey];
-  const fromCopy={teacher:String(from.teacher||''), subject:String(from.subject||'')};
-  if(cellHasLesson(to)){
-    g.schedule[fromKey]={teacher:String(to.teacher||''), subject:String(to.subject||'')};
-    g.schedule[toKey]=fromCopy;
+  const sameGroup=String(fromGroupId)===String(toGroupId);
+  const to=toG.schedule[toKey];
+  if(sameGroup){
+    if(cellHasLesson(to)){
+      fromG.schedule[fromKey]=cloneLessonCell(to);
+      toG.schedule[toKey]=fromCopy;
+    }else{
+      toG.schedule[toKey]=fromCopy;
+      delete fromG.schedule[fromKey];
+    }
   }else{
-    g.schedule[toKey]=fromCopy;
-    delete g.schedule[fromKey];
+    if(cellHasLesson(to)){
+      const toCopy=cloneLessonCell(to);
+      toG.schedule[toKey]=fromCopy;
+      if(toCopy) fromG.schedule[fromKey]=toCopy;
+      else delete fromG.schedule[fromKey];
+    }else{
+      toG.schedule[toKey]=fromCopy;
+      delete fromG.schedule[fromKey];
+    }
+    const moved=toG.schedule[toKey];
+    if(moved&&moved.sharedLessonId) delete moved.sharedLessonId;
   }
   saveState();
   return true;
@@ -1690,7 +1715,7 @@ function renderMaster(){
   const missingSys=Math.max(0, sysCount-sortedGroups.length);
   $('#view').innerHTML=`
     <div class="master-tools">
-      <div class="tiny">Tüm sınıflar (${sortedGroups.length}${sysCount?` / ${sysCount} kurum sınıfı`:''}): dolu hücreyi sürükleyin. <b>Shift+tık</b> saat kilidi. Çakışan hücreler <span style="color:var(--danger);font-weight:600">kırmızı</span>, ortak dersler <span style="color:var(--shared);font-weight:600">mavi</span>.</div>
+      <div class="tiny">Tüm sınıflar (${sortedGroups.length}${sysCount?` / ${sysCount} kurum sınıfı`:''}): dolu hücreyi sürükleyin; başka sınıf satırına bırakarak taşıyın. <b>Shift+tık</b> saat kilidi. Çakışan hücreler <span style="color:var(--danger);font-weight:600">kırmızı</span>, ortak dersler <span style="color:var(--shared);font-weight:600">mavi</span>.</div>
       ${missingSys?`<div class="conf-banner bad" style="margin:0 0 10px;padding:10px 12px;font-size:13px">${missingSys} kurum sınıfı planda yok — sayfayı yenileyin veya «Tümünü ekle» kullanın.</div>`:''}
       ${conflictCount?`<div class="conf-banner bad" style="margin:0 0 10px;padding:10px 12px"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.7 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>${conflictCount} öğretmen çakışması — «Çakışmalar» sekmesinde ayrıntılı liste.</div>`:''}
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -2413,9 +2438,15 @@ document.addEventListener('drop',e=>{
   cell.classList.remove('drag-over');
   const toGid=cell.dataset.gid||dragLesson.groupId;
   const toKey=cell.dataset.key;
-  if(toGid!==dragLesson.groupId){ dragLesson=null; return; }
+  if(!toGid||!toKey){ dragLesson=null; return; }
+  const fromG=group(dragLesson.groupId);
+  const toG=group(toGid);
+  if(!fromG||!toG){ dragLesson=null; return; }
+  if(fromG.locked||!canEditGroup(dragLesson.groupId)){ dragLesson=null; return; }
+  if(toG.locked||!canEditGroup(toGid)){ dragLesson=null; return; }
+  if(isSlotLockedForKey(dragLesson.groupId, dragLesson.key)){ dragLesson=null; return; }
   if(isSlotLockedForKey(toGid, toKey)){ dragLesson=null; return; }
-  if(applyLessonTransfer(dragLesson.groupId, dragLesson.key, toKey)) render();
+  if(applyLessonTransfer(dragLesson.groupId, dragLesson.key, toGid, toKey)) render();
   dragLesson=null;
 });
 
