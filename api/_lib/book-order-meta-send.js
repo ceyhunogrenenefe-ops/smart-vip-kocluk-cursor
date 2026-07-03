@@ -12,7 +12,8 @@ import {
   getGatewaySendEnvStatus,
   bookOrderGatewaySessionId,
   resolveBookOrderGatewaySessionId,
-  reportReminderGatewaySessionId
+  reportReminderGatewaySessionId,
+  gatewayConfiguredForSession
 } from './whatsapp-gateway-send.js';
 
 export const BOOK_ORDER_TEMPLATE_TYPE = 'kitap_siparis_bildirim';
@@ -122,23 +123,46 @@ export function renderBookOrderWhatsAppBody(order) {
 }
 
 function bookOrderSendChannelPreference() {
-  return String(process.env.BOOK_ORDER_WHATSAPP_CHANNEL || 'auto').trim().toLowerCase();
+  const raw = String(process.env.BOOK_ORDER_WHATSAPP_CHANNEL || 'gateway').trim().toLowerCase();
+  if (!raw || raw === 'auto' || raw === 'baileys' || raw === 'wa_gateway') return 'gateway';
+  if (raw === 'meta' || raw === 'cloud' || raw === 'meta_cloud_api') return 'meta';
+  return raw;
 }
 
-function metaFallbackEnabled() {
+/** Gateway yoksa veya düşerse Meta yedek (varsayılan açık). BOOK_ORDER_WHATSAPP_FALLBACK_META=0 ile kapatılır. */
+export function bookOrderMetaFallbackEnabled() {
   const pref = bookOrderSendChannelPreference();
   if (pref === 'meta') return false;
-  if (pref === 'gateway') {
-    return String(process.env.BOOK_ORDER_WHATSAPP_FALLBACK_META || '1').trim() !== '0';
-  }
-  return true;
+  return String(process.env.BOOK_ORDER_WHATSAPP_FALLBACK_META ?? '1').trim() !== '0';
 }
 
-function bookOrderSendChannel(fallbackUserId) {
-  const forced = bookOrderSendChannelPreference();
-  if (forced === 'meta') return 'meta';
-  if (forced === 'gateway') return 'gateway';
-  return 'auto';
+export function bookOrderGatewaySessionCandidates(gatewaySessionId) {
+  return [
+    ...new Set(
+      [
+        String(gatewaySessionId || '').trim(),
+        bookOrderGatewaySessionId(),
+        reportReminderGatewaySessionId()
+      ]
+        .map((x) => String(x || '').trim())
+        .filter(Boolean)
+    )
+  ];
+}
+
+export function bookOrderGatewayReady(gatewaySessionId) {
+  return bookOrderGatewaySessionCandidates(gatewaySessionId).some((id) => gatewayConfiguredForSession(id));
+}
+
+/** Önce gateway (bağlı oturum), olmazsa Meta — otomasyon kanalı ile aynı mantık. */
+export function bookOrderSendPlan(opts = {}) {
+  const pref = bookOrderSendChannelPreference();
+  const gwReady = bookOrderGatewayReady(opts.gatewaySessionId);
+  const metaReady = metaWhatsAppConfigured();
+  const metaFallback = bookOrderMetaFallbackEnabled();
+  const tryGateway = pref !== 'meta' && gwReady;
+  const tryMeta = metaReady && (pref === 'meta' || metaFallback || !gwReady);
+  return { pref, gwReady, metaReady, metaFallback, tryGateway, tryMeta };
 }
 
 /** Gateway: düz metin — env oturumu, giriş yapan kullanıcı veya bağlı paylaşımlı oturum */
@@ -178,17 +202,19 @@ export async function upsertBookOrderTemplateDefaults() {
   return data;
 }
 
-export async function activateBookOrderMetaTemplate() {
+export async function activateBookOrderMetaTemplate(opts = {}) {
   const template = await upsertBookOrderTemplateDefaults();
-  const channel = bookOrderSendChannel();
+  const plan = bookOrderSendPlan(opts);
   const gateway = getGatewaySendEnvStatus();
+  const sendVia = plan.tryGateway ? 'gateway' : plan.tryMeta ? 'meta_cloud_api' : 'none';
   return {
     ok: true,
     template,
     sync_warning: null,
-    meta_configured: metaWhatsAppConfigured(),
-    channel: channel === 'gateway' ? 'gateway' : 'meta_cloud_api',
-    send_via: channel,
+    meta_configured: plan.metaReady,
+    channel: sendVia,
+    send_via: sendVia,
+    send_plan: plan,
     gateway,
     gateway_session_id: bookOrderGatewaySessionId() || null,
     meta_template_name: BOOK_ORDER_META_NAME,
@@ -221,33 +247,32 @@ function mapSendResult(sent) {
     meta_message_status: messageStatus,
     meta_contact_wa_id: sent.meta_contact_wa_id || null,
     meta_send_mode: sent.bodyPreview || null,
-    channel: sent.channel || 'meta_cloud_api',
+    channel: sent.channel || 'meta',
     bodyPreview: sent.bodyPreview || `[template:${BOOK_ORDER_META_NAME}]`,
     content_variables_json: sent.content_variables_json || null
   };
 }
 
-/** auto: gateway (QR) dener, olmazsa Meta. gateway-only + fallback=0 hariç Meta yedek açık. */
+/** Önce gateway (QR), bağlı değilse veya gönderim düşerse Meta şablonu — atlama yok. */
 export async function sendBookOrderWhatsApp(phone, order, opts = {}) {
-  const channel = bookOrderSendChannel(opts.gatewaySessionId);
-  const tryGateway = channel === 'gateway' || channel === 'auto';
-  const tryMeta = channel === 'meta' || channel === 'auto' || metaFallbackEnabled();
+  const { tryGateway, tryMeta } = bookOrderSendPlan(opts);
   let lastGw = null;
 
   if (tryGateway) {
     const gw = await sendBookOrderViaGateway(phone, order, opts.gatewaySessionId);
     if (gw.ok) return gw;
     lastGw = gw;
-    if (!tryMeta || !metaWhatsAppConfigured()) return gw;
+    if (!tryMeta) return gw;
   }
 
-  if (tryMeta && metaWhatsAppConfigured()) {
+  if (tryMeta) {
     const meta = await sendBookOrderMetaWhatsApp(phone, order);
     if (!meta.ok && lastGw) {
       meta.error = `${lastGw.error || 'gateway_failed'} · Meta: ${meta.error || 'failed'}`;
       meta.gateway_attempt = lastGw.errorCode || null;
     } else if (meta.ok && lastGw) {
       meta.fallback_from = 'gateway';
+      meta.channel = 'meta';
     }
     return meta;
   }
@@ -256,9 +281,10 @@ export async function sendBookOrderWhatsApp(phone, order, opts = {}) {
 
   return {
     ok: false,
-    error: metaWhatsAppConfigured()
-      ? 'Gönderim kanalı seçilemedi.'
-      : 'WhatsApp yapılandırılmamış: gateway QR bağlayın veya META_WHATSAPP_TOKEN + META_PHONE_NUMBER_ID tanımlayın.',
+    error:
+      bookOrderSendPlan(opts).metaReady || metaWhatsAppConfigured()
+        ? 'Gönderim kanalı seçilemedi.'
+        : 'WhatsApp yapılandırılmamış: gateway QR bağlayın veya META_WHATSAPP_TOKEN + META_PHONE_NUMBER_ID tanımlayın.',
     errorCode: 'NO_CHANNEL'
   };
 }

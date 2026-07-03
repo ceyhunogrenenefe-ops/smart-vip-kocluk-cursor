@@ -551,15 +551,20 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET' && scope === 'whatsapp-template') {
     try {
-      const activated = await activateBookOrderMetaTemplate();
+      const activated = await activateBookOrderMetaTemplate({
+        gatewaySessionId: actorGatewaySessionId(actor)
+      });
       const env = getMetaWhatsAppEnvStatus();
       const webhook = getMetaWebhookEnvStatus();
       const gateway = getGatewaySendEnvStatus();
       const gatewayHealth = await probeGatewayHealth();
+      const plan = activated.send_plan || {};
       let gatewayLive = null;
-      if (gateway.configured) {
+      if (gateway.upstream_ready || plan.gwReady) {
         try {
-          gatewayLive = await getGatewaySessionStatus(bookOrderGatewaySessionId());
+          gatewayLive = await getGatewaySessionStatus(
+            bookOrderGatewaySessionId() || actorGatewaySessionId(actor)
+          );
         } catch {
           gatewayLive = { ok: false, status: 'check_failed' };
         }
@@ -581,29 +586,35 @@ export default async function handler(req, res) {
         /* opsiyonel */
       }
       return res.status(200).json({
-        ok: gateway.configured ? gatewayLive?.ok === true : env.configured,
+        ok: plan.tryGateway ? gatewayLive?.ok === true : env.configured,
         template_name: BOOK_ORDER_META_NAME,
         language: 'tr',
         phone_number_id_suffix: env.phone_number_id_suffix,
         waba_id_suffix: env.waba_id_suffix,
         meta_configured: env.configured,
         activated: activated.ok,
-        channel: String(process.env.BOOK_ORDER_WHATSAPP_CHANNEL || 'gateway').trim() || 'gateway',
-        send_via: 'gateway',
+        channel: activated.send_via || 'gateway',
+        send_via: activated.send_via || 'gateway',
+        send_plan: plan,
+        meta_fallback: plan.metaFallback !== false,
         gateway,
         gateway_health: gatewayHealth,
         gateway_session: gatewayLive,
         webhook,
         template_meta: templateMeta,
-        hint: !gatewayHealth.ok
-          ? `VPS erişilemiyor (${gatewayHealth.error || 'fetch_failed'}) — sunucuda pm2 restart whatsapp-gateway`
-          : gatewayLive?.error
-            ? gatewayLive.error
-            : gateway.configured
-              ? gatewayLive?.ok
-                ? 'Kitap siparişleri WhatsApp gateway (Baileys) üzerinden düz metin olarak gider.'
-                : `Gateway oturumu bağlı değil (${gatewayLive?.status || 'unknown'}). Koç WhatsApp ayarlarından QR ile bağlayın.`
-              : gateway.hint
+        hint: !gatewayHealth.ok && plan.tryMeta
+          ? `VPS erişilemiyor (${gatewayHealth.error || 'fetch_failed'}) — kitap siparişleri Meta şablonu ile gider.`
+          : !gatewayHealth.ok
+            ? `VPS erişilemiyor (${gatewayHealth.error || 'fetch_failed'}) — sunucuda pm2 restart whatsapp-gateway`
+            : gatewayLive?.error && plan.tryMeta
+              ? `${gatewayLive.error} Gönderim Meta şablonu ile yapılır.`
+              : gatewayLive?.error
+                ? gatewayLive.error
+                : plan.tryGateway && gatewayLive?.ok
+                  ? 'Kitap siparişleri önce WhatsApp gateway (Baileys), olmazsa Meta şablonu ile gider.'
+                  : plan.tryMeta
+                    ? 'Gateway bağlı değil — kitap siparişleri Meta şablonu (kitap_siparisi1) ile gider.'
+                    : gateway.hint
       });
     } catch (e) {
       return res.status(200).json({

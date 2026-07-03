@@ -302,9 +302,11 @@ export async function notifyBooksellerForOrder(order, opts = {}) {
   }
 
   const deliveryHint =
-    sent.ok && isGateway
-      ? 'Kitapçıya WhatsApp gateway üzerinden gönderildi.'
-      : sent.ok && waStatus === 'accepted'
+    sent.ok && sent.fallback_from === 'gateway'
+      ? 'Gateway gönderemedi — kitapçıya Meta şablonu ile iletildi.'
+      : sent.ok && isGateway
+        ? 'Kitapçıya WhatsApp gateway üzerinden gönderildi.'
+        : sent.ok && waStatus === 'accepted'
         ? sent.delivery_warning ||
           (sent.meta_contact_wa_id
             ? `Meta kabul etti (wa_id: ${sent.meta_contact_wa_id}) — teslim webhook ile doğrulanır.`

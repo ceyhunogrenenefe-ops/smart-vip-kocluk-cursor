@@ -161,7 +161,7 @@ function waErrorText(error: string) {
     return 'APP_JWT_SECRET uyuşmuyor — VPS gateway .env ile Vercel aynı olmalı';
   }
   if (e === 'GATEWAY_NOT_CONNECTED' || e.includes('gateway oturumu')) {
-    return 'WhatsApp gateway bağlı değil — Kitap siparişleri sayfasından QR ile bağlayın';
+    return 'WhatsApp gateway bağlı değil — Meta yedek açıksa otomatik denenir; yoksa QR ile bağlayın';
   }
   if (e === 'GATEWAY_ENV' || e.includes('Gateway yapılandırılmamış')) return 'Gateway env eksik: WHATSAPP_GATEWAY_UPSTREAM, BOOK_ORDER_GATEWAY_SESSION_ID, APP_JWT_SECRET';
   if (e.includes('number_not_on_whatsapp')) return 'Numara WhatsApp kayıtlı değil';
@@ -1019,7 +1019,8 @@ export default function BookOrdersPage() {
           </h1>
           <p className="mt-1 text-sm text-slate-600">
             Veli formu doldurur → sipariş tabloya düşer → siz onaylarsınız → kitapçıya WhatsApp gider.
-            Gönderim: <span className="font-mono text-xs">WhatsApp gateway</span> (Baileys oturumu)
+            Gönderim: önce <span className="font-mono text-xs">WhatsApp gateway</span>, bağlı değilse{' '}
+            <span className="font-mono text-xs">Meta şablonu</span> (kitap_siparisi1)
             <span className="text-slate-500"> · Kitapçı paneli: onay + kargo takibi</span>
           </p>
         </div>
