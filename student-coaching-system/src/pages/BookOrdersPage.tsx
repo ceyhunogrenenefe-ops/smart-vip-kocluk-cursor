@@ -62,45 +62,16 @@ function statusLabel(status: string) {
 function displayOrderStatus(order: { status: string; whatsapp_status: string }) {
   const wa = String(order.whatsapp_status || '').toLowerCase();
   const st = String(order.status || '');
-  if (wa === 'delivered' || wa === 'read') {
-    return { label: 'Kitapçıya iletildi', badge: 'bg-emerald-100 text-emerald-900' };
+  if (wa === 'delivered' || wa === 'read' || wa === 'accepted' || wa === 'sending') {
+    return { label: 'Metadan gönderildi', badge: 'bg-emerald-100 text-emerald-900' };
   }
   if (wa === 'sent') {
     return { label: 'Gateway ile gönderildi', badge: 'bg-emerald-100 text-emerald-900' };
   }
-  if (wa === 'accepted' || wa === 'sending' || (st === 'notified' && wa !== 'failed')) {
-    return { label: 'Meta kabul — teslim yok', badge: 'bg-amber-100 text-amber-900' };
+  if (st === 'notified' && wa !== 'failed') {
+    return { label: 'Metadan gönderildi', badge: 'bg-emerald-100 text-emerald-900' };
   }
   return { label: statusLabel(st), badge: statusBadge(st) };
-}
-
-function metaDeliveryProgressLabel(status: string | null | undefined) {
-  const st = String(status || '').toLowerCase();
-  if (st === 'sent') return 'Meta iletti — teslim bekleniyor';
-  if (st === 'delivered' || st === 'read') return 'Meta: teslim edildi';
-  if (st === 'failed') return 'Meta: teslimat başarısız';
-  return null;
-}
-
-function metaAcceptedHints(opts: {
-  meta_delivery_status?: string | null;
-  gatewayConnected?: boolean;
-  webhookConfigured?: boolean;
-}) {
-  const lines: string[] = [];
-  const progress = metaDeliveryProgressLabel(opts.meta_delivery_status);
-  if (progress) lines.push(progress);
-  else lines.push('Meta API kabul etti — henüz «teslim edildi» değil.');
-  lines.push('Kitapçı WhatsApp’ta: İşletme sohbetleri / Güncellemeler (0850 hattı).');
-  if (opts.gatewayConnected) {
-    lines.push('Gateway bağlı — «WhatsApp tekrar» ile normal sohbete de gönderebilirsiniz.');
-  } else {
-    lines.push('Kalıcı çözüm: yukarıdan gateway QR bağlayın; sonraki siparişler önce oradan gider.');
-  }
-  if (opts.webhookConfigured === false) {
-    lines.push('Webhook yok: Vercel META_WEBHOOK_VERIFY_TOKEN + Meta BM → /api/meta/webhook');
-  }
-  return lines;
 }
 
 function waOutcomeMessage(opts: {
@@ -110,18 +81,13 @@ function waOutcomeMessage(opts: {
   hint?: string | null;
 }) {
   const wa = String(opts.whatsapp_status || '').toLowerCase();
-  const dest = opts.phone ? ` → ${opts.phone}` : '';
-  const wamid = opts.meta_message_id ? ` (wamid …${opts.meta_message_id.slice(-8)})` : '';
-  if (wa === 'delivered' || wa === 'read') {
-    return `Kitapçıya teslim edildi${dest}`;
+  if (wa === 'delivered' || wa === 'read' || wa === 'accepted' || wa === 'sending') {
+    return 'Metadan gönderildi';
   }
   if (wa === 'sent') {
-    return `Gateway üzerinden gönderildi${dest}`;
+    return 'Gateway ile gönderildi';
   }
-  if (wa === 'accepted') {
-    return `Meta kabul etti — telefona düşmedi sayılmaz${dest}${wamid}`;
-  }
-  return opts.hint || `WhatsApp işlendi${dest}`;
+  return opts.hint || 'WhatsApp işlendi';
 }
 
 function statusBadge(status: string) {
@@ -150,9 +116,10 @@ function waLabel(status: string) {
     case 'sending':
       return 'Gönderiliyor…';
     case 'accepted':
-      return 'Meta kabul etti';
+      return 'Metadan gönderildi';
     case 'delivered':
-      return 'Teslim edildi';
+    case 'read':
+      return 'Metadan gönderildi';
     case 'sent':
       return 'Gateway gönderildi';
     case 'failed':
@@ -215,10 +182,9 @@ function waErrorText(error: string) {
 function waBadge(status: string) {
   switch (status) {
     case 'delivered':
-      return 'text-emerald-700';
     case 'sent':
     case 'accepted':
-      return 'text-sky-700';
+      return 'text-emerald-700';
     case 'failed':
       return 'text-red-700';
     case 'awaiting_approval':
@@ -883,10 +849,10 @@ export default function BookOrdersPage() {
     try {
       const wa = await resendBookOrderWhatsApp(id, kitapciId || undefined);
       const msg = waOutcomeMessage(wa);
-      if (wa.whatsapp_status === 'delivered' || wa.whatsapp_status === 'read') {
-        toast.success(msg);
+      if (wa.whatsapp_status === 'failed') {
+        toast.error(msg);
       } else {
-        toast.warning(msg);
+        toast.success(msg);
       }
       await load();
     } catch (e) {
@@ -914,10 +880,10 @@ export default function BookOrdersPage() {
         phone: row.kitapci_phone,
         meta_message_id: row.meta_message_id
       });
-      if (row.whatsapp_status === 'delivered' || row.whatsapp_status === 'read') {
+      if (row.whatsapp_status === 'failed') {
+        toast.error(msg);
+      } else if (row.whatsapp_status === 'accepted' || row.whatsapp_status === 'sent' || row.whatsapp_status === 'delivered' || row.whatsapp_status === 'read') {
         toast.success(msg);
-      } else if (row.whatsapp_status === 'accepted' || row.whatsapp_status === 'sent') {
-        toast.warning(`Onaylandı. ${msg}`);
       } else {
         toast.success('Sipariş onaylandı');
       }
@@ -1800,31 +1766,22 @@ export default function BookOrdersPage() {
                       o.kitapci_phone ? (
                         <div className="text-[10px] text-slate-600 font-mono">Alıcı: {o.kitapci_phone}</div>
                       ) : null}
-                      {o.whatsapp_status === 'accepted' ? (
-                        <div className="text-[10px] text-amber-700 space-y-0.5">
-                          {metaAcceptedHints({
-                            meta_delivery_status: o.meta_delivery_status,
-                            gatewayConnected: gatewayConfig?.gateway_session?.ok === true,
-                            webhookConfigured: gatewayConfig?.webhook?.configured
-                          }).map((line) => (
-                            <div key={line}>{line}</div>
-                          ))}
-                        </div>
+                      {o.whatsapp_status === 'accepted' ||
+                      o.whatsapp_status === 'delivered' ||
+                      o.whatsapp_status === 'read' ||
+                      o.whatsapp_status === 'sending' ? (
+                        <div className="text-[10px] font-medium text-emerald-700">Metadan gönderildi</div>
                       ) : null}
                       {o.whatsapp_status === 'sent' ? (
-                        <div className="text-[10px] text-emerald-700">
-                          WhatsApp gateway üzerinden düz metin olarak gönderildi.
-                        </div>
+                        <div className="text-[10px] font-medium text-emerald-700">Gateway ile gönderildi</div>
                       ) : null}
                       {o.whatsapp_status === 'failed' && o.meta_delivery_status === 'failed' ? (
                         <div className="text-[10px] text-red-700">Meta webhook: teslimat başarısız</div>
                       ) : null}
-                      {o.meta_message_id ? (
+                      {o.meta_message_id && o.whatsapp_status === 'failed' ? (
                         <div className="text-[10px] text-slate-500 font-mono" title={o.meta_message_id}>
-                          {o.whatsapp_status === 'sent' ? 'msg' : 'wamid'} …{o.meta_message_id.slice(-10)}
+                          wamid …{o.meta_message_id.slice(-10)}
                         </div>
-                      ) : o.whatsapp_status === 'delivered' || o.whatsapp_status === 'accepted' ? (
-                        <div className="text-[10px] text-amber-700">Meta mesaj kimliği yok</div>
                       ) : null}
                       {o.whatsapp_error ? (
                         <div className="text-[10px] text-red-600">{waErrorText(o.whatsapp_error)}</div>

@@ -81,6 +81,24 @@ export async function fetchCoachWeeklyGoalsInRange(
   return Array.isArray(data) ? data : [];
 }
 
+/** Koç paneli: tek istekte tüm öğrencilerin hedefleri */
+export async function fetchCoachWeeklyGoalsBatch(
+  rangeFrom: string,
+  rangeTo: string,
+  studentIds?: string[]
+): Promise<Record<string, CoachWeeklyGoalRow[]>> {
+  const rf = String(rangeFrom || '').trim().slice(0, 10);
+  const rt = String(rangeTo || '').trim().slice(0, 10);
+  if (!rf || !rt) return {};
+  const qs = new URLSearchParams({ batch: '1', range_from: rf, range_to: rt });
+  if (studentIds?.length) qs.set('student_ids', studentIds.join(','));
+  const res = await apiFetch(`/api/coach-weekly-goals?${qs.toString()}`);
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((payload as { error?: string })?.error || `API (${res.status})`);
+  const data = unwrap<Record<string, CoachWeeklyGoalRow[]>>(payload);
+  return data && typeof data === 'object' ? data : {};
+}
+
 export async function createCoachWeeklyGoal(body: {
   student_id: string;
   subject: string;
@@ -255,25 +273,34 @@ export function mapWeeklyEntryApiRow(e: WeeklyEntryApiRow): WeeklyEntry {
 }
 
 /** Analiz: öğrencinin tarih aralığındaki günlük çalışma kayıtları (taze API) */
+/** Koç: tarih aralığındaki tüm öğrenci günlük kayıtları (tek istek) */
+export async function fetchWeeklyEntriesCoachRange(from: string, to: string): Promise<WeeklyEntry[]> {
+  const f = from.slice(0, 10);
+  const t = to.slice(0, 10);
+  const qs = new URLSearchParams({ from: f, to: t });
+  const res = await apiFetch(`/api/weekly-entries?${qs.toString()}`);
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((payload as { error?: string })?.error || `API (${res.status})`);
+  const data = unwrap<WeeklyEntryApiRow[]>(payload);
+  if (!Array.isArray(data)) return [];
+  return data.map(mapWeeklyEntryApiRow);
+}
+
 export async function fetchWeeklyEntriesForStudentRange(
   studentId: string,
   from: string,
   to: string
 ): Promise<WeeklyEntry[]> {
-  const res = await apiFetch('/api/weekly-entries');
+  const sid = studentId.trim();
+  const f = from.slice(0, 10);
+  const t = to.slice(0, 10);
+  const qs = new URLSearchParams({ student_id: sid, from: f, to: t });
+  const res = await apiFetch(`/api/weekly-entries?${qs.toString()}`);
   const payload = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((payload as { error?: string })?.error || `API (${res.status})`);
   const data = unwrap<WeeklyEntryApiRow[]>(payload);
   if (!Array.isArray(data)) return [];
-  const sid = studentId.trim();
-  const f = from.slice(0, 10);
-  const t = to.slice(0, 10);
-  return data
-    .filter((row) => {
-      const d = String(row.date || '').slice(0, 10);
-      return String(row.student_id) === sid && d >= f && d <= t;
-    })
-    .map(mapWeeklyEntryApiRow);
+  return data.map(mapWeeklyEntryApiRow);
 }
 
 /** Haftalık plandan girilen ekran süreleri (weekly_entries). */
@@ -282,20 +309,16 @@ export async function fetchWeeklyEntriesScreenTimeForStudent(
   from: string,
   to: string
 ): Promise<WeeklyEntryScreenRow[]> {
-  const res = await apiFetch('/api/weekly-entries');
+  const sid = studentId.trim();
+  const f = from.slice(0, 10);
+  const t = to.slice(0, 10);
+  const qs = new URLSearchParams({ student_id: sid, from: f, to: t });
+  const res = await apiFetch(`/api/weekly-entries?${qs.toString()}`);
   const payload = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((payload as { error?: string })?.error || `API (${res.status})`);
   const data = unwrap<WeeklyEntryScreenRow[]>(payload);
   if (!Array.isArray(data)) return [];
-  const sid = studentId.trim();
-  const f = from.slice(0, 10);
-  const t = to.slice(0, 10);
-  return data.filter(
-    (row) =>
-      String(row.student_id) === sid &&
-      String(row.date || '').slice(0, 10) >= f &&
-      String(row.date || '').slice(0, 10) <= t
-  );
+  return data;
 }
 
 export async function submitPlannerDailyLog(
@@ -313,4 +336,31 @@ export async function submitPlannerDailyLog(
   if (!res.ok) throw new Error((payload as { error?: string })?.error || `API (${res.status})`);
   const data = unwrap<{ weekly_entry: unknown; planner_entry: WeeklyPlannerEntryRow }>(payload);
   return data;
+}
+
+export type EtutReportLinePayload = {
+  subject: string;
+  topic: string;
+  correct: number;
+  wrong: number;
+  blank: number;
+  notes?: string | null;
+};
+
+/** Etüt raporu: weekly_entries + aynı saatteki Etüt plan bloğu güncellenir. */
+export async function submitEtutSessionReport(body: {
+  planner_entry_id?: string;
+  planner_date?: string;
+  start_time?: string;
+  end_time?: string;
+  notes?: string | null;
+  lines: EtutReportLinePayload[];
+}): Promise<{ weekly_entries: unknown[]; planner_entry: WeeklyPlannerEntryRow | null }> {
+  const res = await apiFetch('/api/etut-session-report', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((payload as { error?: string })?.error || `API (${res.status})`);
+  return unwrap<{ weekly_entries: unknown[]; planner_entry: WeeklyPlannerEntryRow | null }>(payload);
 }

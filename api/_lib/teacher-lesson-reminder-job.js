@@ -1,6 +1,6 @@
 /**
- * Öğretmen ders hatırlatması — süper admin gateway (Baileys) üzerinden düz metin.
- * Pencere: varsayılan ders başlamadan 12–18 dk (≈15 dk, cron 5 dk).
+ * Öğretmen ders hatırlatması — Merkezi Meta WhatsApp API.
+ * Pencere: varsayılan ders başlamadan 10–25 dk (cron 5 dk).
  */
 import { supabaseAdmin } from './supabase-admin.js';
 import { getIstanbulDateString, addCalendarDaysYmd } from './istanbul-time.js';
@@ -10,15 +10,8 @@ import { normalizePhoneToE164 } from './phone-whatsapp.js';
 import { isWithinReminderWindowMs } from './lesson-reminder-window.js';
 import { msUntilLessonStart, normalizeTimeHms } from './class-lesson-reminder-logic.js';
 import { ensureClassSessionsFromWeeklySlots } from './class-sessions-from-slots.js';
-import {
-  bookOrderGatewaySessionId,
-  gatewayConfiguredForSession,
-  probeConnectedGatewaySessionIds,
-  reportReminderGatewaySessionId,
-  teacherReminderGatewaySessionId,
-  sendGatewayTextMessage,
-  warmActiveCoachGatewaySessions
-} from './whatsapp-gateway-send.js';
+import { sendNotification } from './message-service.js';
+import { metaWhatsAppConfigured } from './meta-whatsapp.js';
 import { insertWhatsAppAutomationLog, alreadySentTeacherLessonReminder } from './message-log.js';
 
 export const TEACHER_LESSON_REMINDER_KIND = 'teacher_lesson_reminder';
@@ -130,21 +123,6 @@ async function loadTeachersById(ids) {
   return map;
 }
 
-function gatewaySessionCandidates(primaryId) {
-  return [
-    ...new Set(
-      [
-        primaryId,
-        teacherReminderGatewaySessionId(),
-        bookOrderGatewaySessionId(),
-        reportReminderGatewaySessionId()
-      ]
-        .map((x) => String(x || '').trim())
-        .filter(Boolean)
-    )
-  ];
-}
-
 async function loadClassTeachersByClassId(classIds) {
   const uniq = [...new Set(classIds.map((x) => String(x || '').trim()).filter(Boolean))];
   if (!uniq.length) return new Map();
@@ -196,7 +174,6 @@ async function sendTeacherReminder(opts) {
     startTime,
     lessonLabel,
     templateContent,
-    gatewaySessionId,
     logDate,
     nowMs,
     log
@@ -235,12 +212,10 @@ async function sendTeacherReminder(opts) {
     minutes: minutesUntil
   }).trim();
 
-  const sent = await sendGatewayTextMessage({
-    sessionId: gatewaySessionId,
-    sessionCandidates: gatewaySessionCandidates(gatewaySessionId),
+  const sent = await sendNotification({
+    notificationType: TEACHER_LESSON_REMINDER_KIND,
     phone,
-    message: text,
-    allowSharedFallback: true
+    plainText: text
   });
 
   await insertWhatsAppAutomationLog({
@@ -253,7 +228,7 @@ async function sendTeacherReminder(opts) {
     error: sent.ok ? null : sent.error || null,
     phone,
     logDate,
-    meta_message_id: sent.gateway_message_id || null
+    meta_message_id: sent.sid || sent.meta_message_id || null
   });
 
   log.push({
@@ -286,18 +261,17 @@ export async function runTeacherLessonReminderJob(opts = {}) {
     return { ok: true, skipped: 'disabled', log, triggeredBy };
   }
 
-  const gatewaySessionId = teacherReminderGatewaySessionId();
-  if (!gatewayConfiguredForSession(gatewaySessionId)) {
+  if (!metaWhatsAppConfigured()) {
     await recordCronRun({
       jobKey: 'teacher_lesson_reminders',
       ok: true,
-      skipped: 'gateway_not_configured',
-      detail: { triggered_by: triggeredBy, session_suffix: gatewaySessionId?.slice(-8) || null }
+      skipped: 'meta_not_configured',
+      detail: { triggered_by: triggeredBy }
     });
     return {
       ok: true,
-      skipped: 'gateway_not_configured',
-      hint: 'WHATSAPP_GATEWAY_UPSTREAM, APP_JWT_SECRET, BOOK_ORDER_GATEWAY_SESSION_ID (süper admin QR oturumu)',
+      skipped: 'meta_not_configured',
+      hint: 'META_WHATSAPP_TOKEN ve META_WHATSAPP_PHONE_NUMBER_ID gerekli',
       log,
       triggeredBy
     };
@@ -354,11 +328,6 @@ export async function runTeacherLessonReminderJob(opts = {}) {
     return { ok: true, due: 0, window_label: windowCfg.label, log, triggeredBy };
   }
 
-  const sessionCandidates = gatewaySessionCandidates(gatewaySessionId);
-  const warmResults = await warmActiveCoachGatewaySessions(sessionCandidates);
-  const connectedIds = await probeConnectedGatewaySessionIds(sessionCandidates);
-  const effectiveGatewaySessionId = connectedIds[0] || gatewaySessionId;
-
   const classIds = classSessions.map((s) => s.class_id);
   const [classNamesById, classTeachersByClassId, templateContent] = await Promise.all([
     loadClassNames(classIds),
@@ -400,7 +369,6 @@ export async function runTeacherLessonReminderJob(opts = {}) {
       startTime: session.start_time,
       lessonLabel,
       templateContent,
-      gatewaySessionId: effectiveGatewaySessionId,
       logDate,
       nowMs: now,
       log
@@ -427,7 +395,6 @@ export async function runTeacherLessonReminderJob(opts = {}) {
       startTime: lesson.start_time,
       lessonLabel,
       templateContent,
-      gatewaySessionId: effectiveGatewaySessionId,
       logDate,
       nowMs: now,
       log
@@ -442,14 +409,11 @@ export async function runTeacherLessonReminderJob(opts = {}) {
     ok: sentFail === 0,
     messagesSent: sentOk,
     messagesFailed: sentFail,
-    detail: {
+      detail: {
       due_class: classSessions.length,
       due_private: privateLessons.length,
       window_label: windowCfg.label,
-      gateway_session_suffix: effectiveGatewaySessionId.slice(-8),
-      gateway_connected_count: connectedIds.length,
-      gateway_probe_empty: connectedIds.length === 0,
-      warm: warmResults,
+      channel: 'meta_api',
       log_date: logDate,
       triggered_by: triggeredBy
     }

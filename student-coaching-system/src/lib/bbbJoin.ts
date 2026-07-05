@@ -5,6 +5,7 @@ import {
   showBbbWaitingPopupError
 } from './bbbWaitingPopup';
 import { isMobileOrTabletViewport } from './viewportUtils';
+import { startEtutSession, todayYmd, type EtutSessionSource } from './etutSession';
 
 export type BbbJoinApi = 'teacher-lessons' | 'class-live-lessons' | 'meetings';
 
@@ -33,8 +34,33 @@ function portalJoinPath(
 export async function openBbbJoin(
   api: BbbJoinApi,
   id: string,
-  options?: { kind?: 'session' | 'slot'; sameTab?: boolean }
+  options?: {
+    kind?: 'session' | 'slot';
+    sameTab?: boolean;
+    etut?: {
+      studentId: string;
+      subject?: string;
+      topic?: string;
+      date?: string;
+      plannerEntryId?: string;
+      classSessionId?: string;
+      source?: EtutSessionSource;
+      label?: string;
+    };
+  }
 ): Promise<void> {
+  if (options?.etut?.studentId) {
+    startEtutSession({
+      studentId: options.etut.studentId,
+      source: options.etut.source || 'class-live',
+      subject: options.etut.subject || 'Etüt',
+      topic: options.etut.topic || options.etut.label || 'Etüt çalışması',
+      date: options.etut.date || todayYmd(),
+      plannerEntryId: options.etut.plannerEntryId,
+      classSessionId: options.etut.classSessionId || id,
+      label: options.etut.label,
+    });
+  }
   const portalPath = portalJoinPath(api, id, options);
 
   if (portalPath && (options?.sameTab || isMobileOrTabletViewport())) {

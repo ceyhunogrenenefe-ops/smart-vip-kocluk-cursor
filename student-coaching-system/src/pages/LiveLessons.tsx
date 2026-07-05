@@ -14,6 +14,12 @@ import { openBbbJoin } from '../lib/bbbJoin';
 import { copyGuestJoinShareText } from '../lib/bbbGuestJoin';
 import { Radio, Plus, Loader2, Filter, Clock, Pencil, Move, GripVertical, Trash2, FileDown } from 'lucide-react';
 import {
+  AppModal,
+  AppModalBody,
+  AppModalFooter,
+  AppModalHeader
+} from '../components/ui/AppModal';
+import {
   WEEKDAY_SHORT_MON_FIRST,
   downloadCalendarPdfWithSnapshot,
   formatDdMmYyyyDots as formatDdMmYyyyDotsGrid
@@ -1309,26 +1315,22 @@ export default function LiveLessons() {
         </div>
       </WeeklyLiveGridShell>
 
-      {editingLesson && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/40">
-          <div
-            role="dialog"
-            aria-modal
-            className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 space-y-4"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
-                <Pencil className="w-5 h-5 text-indigo-600" />
-                Dersi düzenle
-              </h2>
-              <button
-                type="button"
-                onClick={() => setEditingLesson(null)}
-                className="text-sm text-slate-500 hover:text-slate-800"
-              >
-                Kapat
-              </button>
-            </div>
+      {editingLesson ? (
+        <AppModal open onClose={() => setEditingLesson(null)} panelClassName="max-w-lg">
+          <AppModalHeader>
+            <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+              <Pencil className="w-5 h-5 text-indigo-600" />
+              Dersi düzenle
+            </h2>
+            <button
+              type="button"
+              onClick={() => setEditingLesson(null)}
+              className="text-sm text-slate-500 hover:text-slate-800"
+            >
+              Kapat
+            </button>
+          </AppModalHeader>
+          <AppModalBody className="space-y-4">
             {editingLesson.status !== 'scheduled' ? (
               <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                 Bu ders tamamlanmış veya iptal edilmiş. Tarih ve süre değiştirilemez; başlık ve toplantı bağlantısını
@@ -1450,27 +1452,29 @@ export default function LiveLessons() {
               value={editMeetingLink}
               onChange={setEditMeetingLink}
             />
-            <div className="flex gap-2 pt-2">
+          </AppModalBody>
+          <AppModalFooter>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:gap-2">
+              <button
+                type="button"
+                onClick={() => setEditingLesson(null)}
+                className="min-h-[44px] px-4 py-2 rounded-lg border border-slate-200 text-slate-700"
+              >
+                Vazgeç
+              </button>
               <button
                 type="button"
                 disabled={editBusy}
                 onClick={() => void saveEdit()}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-60"
+                className="min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-60"
               >
                 {editBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 Kaydet
               </button>
-              <button
-                type="button"
-                onClick={() => setEditingLesson(null)}
-                className="px-4 py-2 rounded-lg border border-slate-200 text-slate-700"
-              >
-                Vazgeç
-              </button>
             </div>
-          </div>
-        </div>
-      )}
+          </AppModalFooter>
+        </AppModal>
+      ) : null}
 
       <div className="space-y-3">
         <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">

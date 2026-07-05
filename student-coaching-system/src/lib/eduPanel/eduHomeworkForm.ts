@@ -5,12 +5,16 @@ export type EduHomeworkDraft = {
   book_name: string;
   /** Sayfa aralığı: 45-48, 45–60 vb. */
   question_range: string;
+  pool_animation_id?: string;
+  pool_animation_title?: string;
 };
 
 export const EMPTY_HOMEWORK_DRAFT: EduHomeworkDraft = {
   title: '',
   book_name: '',
-  question_range: ''
+  question_range: '',
+  pool_animation_id: undefined,
+  pool_animation_title: undefined
 };
 
 export function formatEduHomeworkLabel(hw: {

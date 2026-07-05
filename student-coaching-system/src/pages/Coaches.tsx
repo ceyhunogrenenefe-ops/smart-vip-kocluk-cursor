@@ -26,6 +26,13 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { CopyableLoginCredentialsPanel } from '../components/auth/CopyableLoginCredentials';
+import {
+  AppModal,
+  AppModalBody,
+  AppModalFooter,
+  AppModalForm,
+  AppModalHeader
+} from '../components/ui/AppModal';
 
 type ApiUserRow = {
   id: string;
@@ -494,27 +501,34 @@ export default function Coaches() {
         </div>
       )}
 
-      {/* Add/Edit Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4">
-          <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-6 border-b border-gray-100">
-              <h3 className="text-xl font-bold text-slate-800">
-                {editingCoach ? 'Koç Düzenle' : 'Yeni Koç Ekle'}
-              </h3>
-              <button
-                onClick={() => {
-                  setShowAddModal(false);
-                  setEditingCoach(null);
-                  resetForm();
-                }}
-                className="icon-tap-btn hover:bg-gray-100 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      <AppModal
+        open={showAddModal}
+        onClose={() => {
+          setShowAddModal(false);
+          setEditingCoach(null);
+          resetForm();
+        }}
+        panelClassName="max-w-2xl"
+      >
+        <AppModalHeader>
+          <h3 className="text-xl font-bold text-slate-800">
+            {editingCoach ? 'Koç Düzenle' : 'Yeni Koç Ekle'}
+          </h3>
+          <button
+            type="button"
+            onClick={() => {
+              setShowAddModal(false);
+              setEditingCoach(null);
+              resetForm();
+            }}
+            className="icon-tap-btn hover:bg-gray-100 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </AppModalHeader>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <AppModalForm onSubmit={handleSubmit}>
+          <AppModalBody className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* İsim */}
                 <div>
@@ -606,8 +620,10 @@ export default function Coaches() {
                   <p className="text-sm text-red-500 mt-2">En az bir branş seçilmelidir.</p>
                 )}
               </div>
+          </AppModalBody>
 
-              <div className="flex justify-end gap-3 pt-4">
+          <AppModalFooter>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
                 <button
                   type="button"
                   onClick={() => {
@@ -615,42 +631,40 @@ export default function Coaches() {
                     setEditingCoach(null);
                     resetForm();
                   }}
-                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="min-h-[44px] px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                 >
                   İptal
                 </button>
                 <button
                   type="submit"
                   disabled={formData.subjects.length === 0}
-                  className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="min-h-[44px] px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Check className="w-4 h-4" />
                   {editingCoach ? 'Güncelle' : 'Kaydet'}
                 </button>
               </div>
-            </form>
+          </AppModalFooter>
+        </AppModalForm>
 
-            {/* Oluşturulan Şifre Gösterimi */}
-            {createdCredentials && (
-              <div className="border-t border-green-200 bg-green-50">
-                <CopyableLoginCredentialsPanel
-                  data={{
-                    title: 'Koç kaydedildi',
-                    subtitle: 'Koça aşağıdaki bilgilerle giriş yapabilir.',
-                    email: createdCredentials.email,
-                    password: createdCredentials.password,
-                    roleLabel: 'Koç'
-                  }}
-                  onDismiss={() => {
-                    setCreatedCredentials(null);
-                    resetForm();
-                  }}
-                />
-              </div>
-            )}
+        {createdCredentials ? (
+          <div className="shrink-0 border-t border-green-200 bg-green-50 pb-safe">
+            <CopyableLoginCredentialsPanel
+              data={{
+                title: 'Koç kaydedildi',
+                subtitle: 'Koça aşağıdaki bilgilerle giriş yapabilir.',
+                email: createdCredentials.email,
+                password: createdCredentials.password,
+                roleLabel: 'Koç'
+              }}
+              onDismiss={() => {
+                setCreatedCredentials(null);
+                resetForm();
+              }}
+            />
           </div>
-        </div>
-      )}
+        ) : null}
+      </AppModal>
     </div>
   );
 }

@@ -48,14 +48,22 @@ async function pickCoachGoalId(studentId, entryDate, subjectRaw) {
   return row?.id || null;
 }
 
-async function resolveSlotTimes(studentId, plannerDate, excludePlannerId, preferredStart, preferredEnd) {
+async function resolveSlotTimes(
+  studentId,
+  plannerDate,
+  excludePlannerId,
+  preferredStart,
+  preferredEnd,
+  ignoreOverlapIds = []
+) {
   if (preferredStart && preferredEnd) {
     const clash = await findPlannerOverlapConflict(
       studentId,
       plannerDate,
       preferredStart,
       preferredEnd,
-      excludePlannerId
+      excludePlannerId,
+      ignoreOverlapIds
     );
     if (!clash?.conflictingId && !clash?.error) {
       return { start_time: preferredStart, end_time: preferredEnd };
@@ -64,7 +72,14 @@ async function resolveSlotTimes(studentId, plannerDate, excludePlannerId, prefer
   for (let hour = 8; hour <= 21; hour++) {
     const start = padPlannerHour(hour);
     const end = padPlannerHour(Math.min(hour + 1, 23));
-    const clash = await findPlannerOverlapConflict(studentId, plannerDate, start, end, excludePlannerId);
+    const clash = await findPlannerOverlapConflict(
+      studentId,
+      plannerDate,
+      start,
+      end,
+      excludePlannerId,
+      ignoreOverlapIds
+    );
     if (!clash?.conflictingId && !clash?.error) return { start_time: start, end_time: end };
   }
   return { start_time: '22:00', end_time: '23:00' };
@@ -72,8 +87,12 @@ async function resolveSlotTimes(studentId, plannerDate, excludePlannerId, prefer
 
 /**
  * weekly_entries satırına göre tek bir weekly_planner_entries satırını günceller veya oluşturur.
+ * @param {object} [opts]
+ * @param {string} [opts.preferredStart]
+ * @param {string} [opts.preferredEnd]
+ * @param {string[]} [opts.ignoreOverlapIds] — çakışma sayılmayacak plan blokları (ör. Etüt bloğu)
  */
-export async function syncWeeklyEntryPlannerRow(entry) {
+export async function syncWeeklyEntryPlannerRow(entry, opts = {}) {
   if (!entry?.id || !entry.student_id || !entry.date) return null;
 
   const solved = Number(entry.solved_questions ?? 0);
@@ -104,15 +123,18 @@ export async function syncWeeklyEntryPlannerRow(entry) {
   if (exErr) throw exErr;
 
   const dateChanged = existing && padDate(existing.planner_date) !== plannerDate;
-  const preferredStart = existing && !dateChanged ? existing.start_time : null;
-  const preferredEnd = existing && !dateChanged ? existing.end_time : null;
+  const preferredStart =
+    opts.preferredStart ?? (existing && !dateChanged ? existing.start_time : null);
+  const preferredEnd = opts.preferredEnd ?? (existing && !dateChanged ? existing.end_time : null);
+  const ignoreOverlapIds = opts.ignoreOverlapIds ?? [];
 
   const { start_time, end_time } = await resolveSlotTimes(
     entry.student_id,
     plannerDate,
     existing?.id || null,
     preferredStart,
-    preferredEnd
+    preferredEnd,
+    ignoreOverlapIds
   );
 
   const institutionId = entry.institution_id || null;
@@ -143,7 +165,14 @@ export async function syncWeeklyEntryPlannerRow(entry) {
       existing.id
     );
     if (clash?.conflictingId || clash?.error) {
-      const fallback = await resolveSlotTimes(entry.student_id, plannerDate, existing.id, null, null);
+      const fallback = await resolveSlotTimes(
+        entry.student_id,
+        plannerDate,
+        existing.id,
+        preferredStart,
+        preferredEnd,
+        ignoreOverlapIds
+      );
       payload.start_time = fallback.start_time;
       payload.end_time = fallback.end_time;
     }

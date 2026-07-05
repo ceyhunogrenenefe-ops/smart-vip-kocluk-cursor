@@ -1,4 +1,5 @@
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
+import { randomUUID } from 'crypto';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
@@ -32,6 +33,89 @@ function parseBody(req) {
 function isSchemaMissing(err) {
   const msg = String(err?.message || err || '').toLowerCase();
   return msg.includes('edu_lesson_rows') && (msg.includes('does not exist') || msg.includes('schema cache'));
+}
+
+function isPoolSchemaMissing(err) {
+  const msg = String(err?.message || err || '').toLowerCase();
+  return msg.includes('edu_animation_pool') && (msg.includes('does not exist') || msg.includes('schema cache'));
+}
+
+async function resolveTeacherNames(userIds) {
+  const ids = [...new Set((userIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
+  const map = {};
+  if (!ids.length) return map;
+  const { data: users } = await supabaseAdmin.from('users').select('id,name,email').in('id', ids);
+  for (const u of users || []) {
+    map[String(u.id)] = u.name || u.email || u.id;
+  }
+  return map;
+}
+
+async function loadPoolItem(poolId) {
+  const { data, error } = await supabaseAdmin
+    .from('edu_animation_pool')
+    .select('*')
+    .eq('id', poolId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function enrichPoolItems(items) {
+  const names = await resolveTeacherNames((items || []).map((i) => i.teacher_user_id));
+  return (items || []).map((i) => ({
+    ...i,
+    teacher_name: names[String(i.teacher_user_id)] || i.teacher_user_id
+  }));
+}
+
+function teacherCanManagePool(actor, pool, tags) {
+  if (tags.includes('admin') || tags.includes('super_admin')) return true;
+  return String(pool.teacher_user_id) === String(actor.sub);
+}
+
+async function assertPoolInstitutionAccess(actor, pool, tags) {
+  if (!pool) return { error: 'not_found', status: 404 };
+  if (!canTeach(tags)) return { error: 'forbidden', status: 403 };
+  const inst = actor.institution_id || null;
+  if (inst && pool.institution_id && String(pool.institution_id) !== String(inst)) {
+    return { error: 'forbidden', status: 403 };
+  }
+  return { pool };
+}
+
+async function resolveAnimStoragePath(anim) {
+  if (anim.pool_id) {
+    const pool = await loadPoolItem(anim.pool_id);
+    if (pool?.storage_path) return pool.storage_path;
+  }
+  return anim.storage_path;
+}
+
+async function attachPoolAnimationToRow(lessonRowId, poolId) {
+  const pool = await loadPoolItem(poolId);
+  if (!pool) return null;
+  const { data: existing } = await supabaseAdmin
+    .from('edu_animations')
+    .select('id')
+    .eq('lesson_row_id', lessonRowId)
+    .eq('pool_id', poolId)
+    .maybeSingle();
+  if (existing) return existing;
+  const { data, error } = await supabaseAdmin
+    .from('edu_animations')
+    .insert({
+      lesson_row_id: lessonRowId,
+      pool_id: poolId,
+      original_name: pool.title || pool.original_name,
+      storage_path: pool.storage_path,
+      file_size: pool.file_size || 0,
+      display_order: 0
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
 }
 
 const TEACHER_ROLES = new Set(['teacher', 'coach', 'admin', 'super_admin']);
@@ -735,7 +819,9 @@ export default async function handler(req, res) {
         if (String(owner) !== String(actor.sub) && !tags.includes('admin')) {
           return res.status(403).json({ error: 'forbidden' });
         }
-        await removeEduObject(EDU_ANIMATIONS_BUCKET, anim.storage_path);
+        if (!anim.pool_id) {
+          await removeEduObject(EDU_ANIMATIONS_BUCKET, anim.storage_path);
+        }
         await supabaseAdmin.from('edu_animations').delete().eq('id', animId);
         return res.status(200).json({ ok: true });
       }
@@ -744,7 +830,7 @@ export default async function handler(req, res) {
     async function assertAnimationAccess(animId) {
       const { data: anim } = await supabaseAdmin
         .from('edu_animations')
-        .select('storage_path, lesson_row_id')
+        .select('storage_path, lesson_row_id, pool_id')
         .eq('id', animId)
         .maybeSingle();
       if (!anim) return { error: 'not_found', status: 404 };
@@ -792,11 +878,171 @@ export default async function handler(req, res) {
           if (!isProgressTableMissing(e)) throw e;
         }
       }
-      const buf = await downloadEduBuffer(EDU_ANIMATIONS_BUCKET, access.anim.storage_path);
+      const storagePath = await resolveAnimStoragePath(access.anim);
+      const buf = await downloadEduBuffer(EDU_ANIMATIONS_BUCKET, storagePath);
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'private, max-age=300');
       res.setHeader('X-Content-Type-Options', 'nosniff');
       return res.status(200).send(buf);
+    }
+
+    if (resource === 'animation-pool') {
+      if (req.method === 'GET') {
+        if (!canTeach(tags)) return res.status(403).json({ error: 'forbidden' });
+        let q = supabaseAdmin.from('edu_animation_pool').select('*').order('created_at', { ascending: false });
+        const inst = actor.institution_id || null;
+        if (inst) q = q.eq('institution_id', inst);
+        const program = String(req.query?.program || '').trim();
+        const classLevel = String(req.query?.class_level || '').trim();
+        const subjectName = String(req.query?.subject_name || '').trim();
+        const search = String(req.query?.q || '').trim().toLowerCase();
+        if (program) q = q.eq('program', program);
+        if (classLevel) q = q.eq('class_level', classLevel);
+        if (subjectName) q = q.eq('subject_name', subjectName);
+        const { data, error } = await q;
+        if (error) {
+          if (isPoolSchemaMissing(error)) {
+            return res.status(503).json({
+              error: 'edu_pool_schema_missing',
+              hint: 'Supabase: sql/2026-07-06-edu-animation-pool.sql'
+            });
+          }
+          throw error;
+        }
+        let items = data || [];
+        if (search) {
+          items = items.filter((item) => {
+            const hay = [item.title, item.subject_name, item.topic_name]
+              .map((s) => String(s || '').toLowerCase())
+              .join(' ');
+            return hay.includes(search);
+          });
+        }
+        return res.status(200).json({ data: await enrichPoolItems(items) });
+      }
+      if (req.method === 'POST') {
+        if (!canTeach(tags)) return res.status(403).json({ error: 'forbidden' });
+        const body = parseBody(req);
+        const title = String(body.title || '').trim();
+        const program = String(body.program || '').trim().toLowerCase();
+        const classLevel = String(body.class_level || '').trim();
+        const subjectName = String(body.subject_name || '').trim();
+        const topicName = String(body.topic_name || '').trim();
+        const fileName = String(body.file_name || 'animation.html').trim();
+        const b64 = String(body.file_base64 || '');
+        if (!title || !program || !classLevel || !subjectName || !topicName || !b64) {
+          return res.status(400).json({ error: 'pool_fields_required' });
+        }
+        if (!['lgs', 'tyt', 'ayt'].includes(program)) {
+          return res.status(400).json({ error: 'invalid_program' });
+        }
+        const buf = Buffer.from(b64, 'base64');
+        if (buf.length > 10 * 1024 * 1024) return res.status(400).json({ error: 'file_too_large' });
+        const poolId = randomUUID();
+        const path = `pool/${poolId}/${Date.now()}-${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+        await uploadEduBuffer({
+          bucket: EDU_ANIMATIONS_BUCKET,
+          path,
+          buffer: buf,
+          contentType: 'text/html; charset=utf-8'
+        });
+        const { data, error } = await supabaseAdmin
+          .from('edu_animation_pool')
+          .insert({
+            id: poolId,
+            institution_id: actor.institution_id || null,
+            teacher_user_id: actor.sub,
+            title,
+            program,
+            class_level: classLevel,
+            subject_name: subjectName,
+            topic_name: topicName,
+            original_name: fileName,
+            storage_path: path,
+            file_size: buf.length
+          })
+          .select()
+          .single();
+        if (error) {
+          if (isPoolSchemaMissing(error)) {
+            return res.status(503).json({
+              error: 'edu_pool_schema_missing',
+              hint: 'Supabase: sql/2026-07-06-edu-animation-pool.sql'
+            });
+          }
+          throw error;
+        }
+        const [enriched] = await enrichPoolItems([data]);
+        return res.status(201).json({ data: enriched || data });
+      }
+      if (req.method === 'PATCH' || req.method === 'DELETE') {
+        const body = parseBody(req);
+        const pid =
+          rowId ||
+          String(req.query?.pool_id || body?.pool_id || body?.id || '').trim();
+        if (!pid) return res.status(400).json({ error: 'id_required' });
+        const pool = await loadPoolItem(pid);
+        if (!pool) return res.status(404).json({ error: 'not_found' });
+        if (!teacherCanManagePool(actor, pool, tags)) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        if (req.method === 'DELETE') {
+          await supabaseAdmin.from('edu_animations').delete().eq('pool_id', pid);
+          await supabaseAdmin.from('edu_homework').update({ pool_animation_id: null }).eq('pool_animation_id', pid);
+          await removeEduObject(EDU_ANIMATIONS_BUCKET, pool.storage_path);
+          await supabaseAdmin.from('edu_animation_pool').delete().eq('id', pid);
+          return res.status(200).json({ ok: true });
+        }
+        const patch = {};
+        for (const k of ['title', 'program', 'class_level', 'subject_name', 'topic_name']) {
+          if (body[k] !== undefined) patch[k] = String(body[k]).trim();
+        }
+        if (patch.program && !['lgs', 'tyt', 'ayt'].includes(String(patch.program).toLowerCase())) {
+          return res.status(400).json({ error: 'invalid_program' });
+        }
+        if (Object.keys(patch).length === 0) {
+          return res.status(400).json({ error: 'nothing_to_update' });
+        }
+        const { data, error } = await supabaseAdmin
+          .from('edu_animation_pool')
+          .update(patch)
+          .eq('id', pid)
+          .select()
+          .single();
+        if (error) throw error;
+        const [enriched] = await enrichPoolItems([data]);
+        return res.status(200).json({ data: enriched || data });
+      }
+    }
+
+    if (resource === 'pool-animation-html' && req.method === 'GET') {
+      const poolId = String(req.query?.pool_id || rowId).trim();
+      if (!poolId) return res.status(400).json({ error: 'pool_id_required' });
+      const pool = await loadPoolItem(poolId);
+      const access = await assertPoolInstitutionAccess(actor, pool, tags);
+      if (access.error) return res.status(access.status).json({ error: access.error });
+      const buf = await downloadEduBuffer(EDU_ANIMATIONS_BUCKET, pool.storage_path);
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Cache-Control', 'private, max-age=300');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      return res.status(200).send(buf);
+    }
+
+    if (resource === 'animation-attach-pool' && req.method === 'POST') {
+      if (!canTeach(tags)) return res.status(403).json({ error: 'forbidden' });
+      const body = parseBody(req);
+      const lessonRowId = String(body.lesson_row_id || '').trim();
+      const poolId = String(body.pool_id || '').trim();
+      if (!lessonRowId || !poolId) return res.status(400).json({ error: 'lesson_row_id_and_pool_id_required' });
+      const row = await loadRow(lessonRowId);
+      if (!row || String(row.teacher_user_id) !== String(actor.sub)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const pool = await loadPoolItem(poolId);
+      const access = await assertPoolInstitutionAccess(actor, pool, tags);
+      if (access.error) return res.status(access.status).json({ error: access.error });
+      const data = await attachPoolAnimationToRow(lessonRowId, poolId);
+      return res.status(201).json({ data });
     }
 
     if (resource === 'homework') {
@@ -810,21 +1056,32 @@ export default async function handler(req, res) {
         if (!row || String(row.teacher_user_id) !== String(actor.sub)) {
           return res.status(403).json({ error: 'forbidden' });
         }
-        const { data, error } = await supabaseAdmin
-          .from('edu_homework')
-          .insert({
-            lesson_row_id: lessonRowId,
-            title,
-            book_name: body.book_name ? String(body.book_name) : null,
-            question_range: body.question_range ? String(body.question_range) : null,
-            description: body.description ? String(body.description) : null,
-            due_date: body.due_date ? String(body.due_date) : null,
-            status: body.status === 'published' ? 'published' : 'draft'
-          })
-          .select()
-          .single();
-        if (error) throw error;
-        return res.status(201).json({ data });
+        const poolAnimationId = body.pool_animation_id
+          ? String(body.pool_animation_id).trim()
+          : null;
+        if (poolAnimationId) {
+          const pool = await loadPoolItem(poolAnimationId);
+          const access = await assertPoolInstitutionAccess(actor, pool, tags);
+          if (access.error) return res.status(access.status).json({ error: access.error });
+          await attachPoolAnimationToRow(lessonRowId, poolAnimationId);
+        }
+        const insertHw = {
+          lesson_row_id: lessonRowId,
+          title,
+          book_name: body.book_name ? String(body.book_name) : null,
+          question_range: body.question_range ? String(body.question_range) : null,
+          description: body.description ? String(body.description) : null,
+          due_date: body.due_date ? String(body.due_date) : null,
+          status: body.status === 'published' ? 'published' : 'draft'
+        };
+        if (poolAnimationId) insertHw.pool_animation_id = poolAnimationId;
+        let hwResult = await supabaseAdmin.from('edu_homework').insert(insertHw).select().single();
+        if (hwResult.error && poolAnimationId && isOptionalEduColumnMissing(hwResult.error, 'pool_animation_id')) {
+          delete insertHw.pool_animation_id;
+          hwResult = await supabaseAdmin.from('edu_homework').insert(insertHw).select().single();
+        }
+        if (hwResult.error) throw hwResult.error;
+        return res.status(201).json({ data: hwResult.data });
       }
       if (req.method === 'PATCH') {
         const hwId = rowId || String(req.query?.homework_id || '').trim();

@@ -316,7 +316,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshLinkedStudent = useCallback(async () => {
     const u = impersonationTarget ?? user;
-    if (!u || !getAuthToken()) {
+    const tokenAtStart = getAuthToken();
+    if (!u || !tokenAtStart) {
       setLinkedStudent(null);
       setLinkedStudentError(null);
       setLinkedStudentLoading(false);
@@ -333,6 +334,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLinkedStudentError(null);
     try {
       let row = await db.getMyStudent();
+      /** Çıkış yapıldıysa veya hesap değiştiyse geç gelen yanıt eski oturumu geri yazmasın (çıkışta otomatik tekrar giriş hatası). */
+      if (getAuthToken() !== tokenAtStart) {
+        return;
+      }
       if (row) {
         const st = studentRowToStudent(row);
         setLinkedStudent(st);
@@ -721,6 +726,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearAuthToken();
     setUser(null);
     setImpersonationTarget(null);
+    setLinkedStudent(null);
+    setLinkedStudentError(null);
+    setLinkedStudentLoading(false);
   };
 
   const userRowToLoginTarget = (row: UserRow): SystemUser => {

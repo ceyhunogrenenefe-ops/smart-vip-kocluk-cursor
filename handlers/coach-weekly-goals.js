@@ -2,6 +2,7 @@ import { requireAuth, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { addCalendarDaysYmd } from '../api/_lib/istanbul-time.js';
+import { authHttpStatus, isMissingTableError, isSchemaColumnError } from '../api/_lib/supabase-schema.js';
 
 const normalizeWeekStart = (v) => String(v || '').trim().slice(0, 10);
 
@@ -78,88 +79,299 @@ const assertGoalsWrite = async (actor, studentId, existingGoal = null) => {
   return { ok: false, status: 403, student: chk.student };
 };
 
+async function listLegacyWeekGoals(studentId, weekStart) {
+  const { data, error } = await supabaseAdmin
+    .from('coach_weekly_goals')
+    .select('*')
+    .eq('student_id', studentId)
+    .eq('week_start_date', weekStart)
+    .order('created_at', { ascending: true });
+  if (error) {
+    if (isMissingTableError(error, 'coach_weekly_goals')) return [];
+    throw error;
+  }
+  return data || [];
+}
+
+async function listLegacyRangeGoals(studentId, rangeFrom, rangeTo) {
+  const { data, error } = await supabaseAdmin
+    .from('coach_weekly_goals')
+    .select('*')
+    .eq('student_id', studentId)
+    .gte('week_start_date', rangeFrom)
+    .lte('week_start_date', rangeTo)
+    .order('created_at', { ascending: true });
+  if (error) {
+    if (isMissingTableError(error, 'coach_weekly_goals')) return [];
+    throw error;
+  }
+  return (data || []).filter((row) => {
+    const ws = normalizeWeekStart(row.week_start_date);
+    if (!ws) return false;
+    const we = addCalendarDaysYmd(ws, 6);
+    return ws <= rangeTo && we >= rangeFrom;
+  });
+}
+
+async function listGoalsForWeek(studentId, weekStart, weekEnd) {
+  try {
+    const [{ data: overlap, error: e1 }, { data: legacyOpen, error: e2 }] = await Promise.all([
+      supabaseAdmin
+        .from('coach_weekly_goals')
+        .select('*')
+        .eq('student_id', studentId)
+        .not('goal_start_date', 'is', null)
+        .not('goal_end_date', 'is', null)
+        .lte('goal_start_date', weekEnd)
+        .gte('goal_end_date', weekStart)
+        .order('created_at', { ascending: true }),
+      supabaseAdmin
+        .from('coach_weekly_goals')
+        .select('*')
+        .eq('student_id', studentId)
+        .eq('week_start_date', weekStart)
+        .or('goal_start_date.is.null,goal_end_date.is.null')
+        .order('created_at', { ascending: true }),
+    ]);
+    if (e1) throw e1;
+    if (e2) throw e2;
+
+    const map = new Map();
+    for (const r of [...(overlap || []), ...(legacyOpen || [])]) map.set(r.id, r);
+    return [...map.values()].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  } catch (e) {
+    if (
+      isSchemaColumnError(e, 'goal_start_date') ||
+      isSchemaColumnError(e, 'goal_end_date') ||
+      isMissingTableError(e, 'coach_weekly_goals')
+    ) {
+      return listLegacyWeekGoals(studentId, weekStart);
+    }
+    throw e;
+  }
+}
+
+async function listGoalsForRange(studentId, rangeFrom, rangeTo) {
+  try {
+    const [{ data: overlap, error: e1 }, { data: legacyOpen, error: e2 }] = await Promise.all([
+      supabaseAdmin
+        .from('coach_weekly_goals')
+        .select('*')
+        .eq('student_id', studentId)
+        .not('goal_start_date', 'is', null)
+        .not('goal_end_date', 'is', null)
+        .lte('goal_start_date', rangeTo)
+        .gte('goal_end_date', rangeFrom)
+        .order('created_at', { ascending: true }),
+      supabaseAdmin
+        .from('coach_weekly_goals')
+        .select('*')
+        .eq('student_id', studentId)
+        .or('goal_start_date.is.null,goal_end_date.is.null')
+        .order('created_at', { ascending: true }),
+    ]);
+    if (e1) throw e1;
+    if (e2) throw e2;
+
+    const legacyFiltered = (legacyOpen || []).filter((row) => {
+      const ws = normalizeWeekStart(row.week_start_date);
+      if (!ws) return false;
+      const we = addCalendarDaysYmd(ws, 6);
+      return ws <= rangeTo && we >= rangeFrom;
+    });
+
+    const map = new Map();
+    for (const r of [...(overlap || []), ...legacyFiltered]) map.set(r.id, r);
+    return [...map.values()].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  } catch (e) {
+    if (
+      isSchemaColumnError(e, 'goal_start_date') ||
+      isSchemaColumnError(e, 'goal_end_date') ||
+      isMissingTableError(e, 'coach_weekly_goals')
+    ) {
+      return listLegacyRangeGoals(studentId, rangeFrom, rangeTo);
+    }
+    throw e;
+  }
+}
+
+function groupGoalsByStudent(rows, studentIds) {
+  const out = Object.fromEntries((studentIds || []).map((id) => [id, []]));
+  const seen = new Set();
+  for (const row of rows || []) {
+    const sid = String(row.student_id || '').trim();
+    if (!sid || !out[sid]) continue;
+    const key = `${sid}::${row.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out[sid].push(row);
+  }
+  for (const sid of Object.keys(out)) {
+    out[sid].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  }
+  return out;
+}
+
+function chunkIds(ids, size = 80) {
+  const out = [];
+  for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size));
+  return out;
+}
+
+async function queryGoalsOverlapForStudents(studentIds, rangeFrom, rangeTo) {
+  const merged = [];
+  for (const part of chunkIds(studentIds)) {
+    const { data: overlap, error: e1 } = await supabaseAdmin
+      .from('coach_weekly_goals')
+      .select('*')
+      .in('student_id', part)
+      .not('goal_start_date', 'is', null)
+      .not('goal_end_date', 'is', null)
+      .lte('goal_start_date', rangeTo)
+      .gte('goal_end_date', rangeFrom)
+      .order('created_at', { ascending: true });
+    if (e1) throw e1;
+
+    const { data: legacyOpen, error: e2 } = await supabaseAdmin
+      .from('coach_weekly_goals')
+      .select('*')
+      .in('student_id', part)
+      .or('goal_start_date.is.null,goal_end_date.is.null')
+      .order('created_at', { ascending: true });
+    if (e2) throw e2;
+
+    const legacyFiltered = (legacyOpen || []).filter((row) => {
+      const ws = normalizeWeekStart(row.week_start_date);
+      if (!ws) return false;
+      const we = addCalendarDaysYmd(ws, 6);
+      return ws <= rangeTo && we >= rangeFrom;
+    });
+    merged.push(...(overlap || []), ...legacyFiltered);
+  }
+  return merged;
+}
+
+async function queryLegacyRangeGoalsForStudents(studentIds, rangeFrom, rangeTo) {
+  const merged = [];
+  for (const part of chunkIds(studentIds)) {
+    const { data, error } = await supabaseAdmin
+      .from('coach_weekly_goals')
+      .select('*')
+      .in('student_id', part)
+      .gte('week_start_date', rangeFrom)
+      .lte('week_start_date', rangeTo)
+      .order('created_at', { ascending: true });
+    if (error) {
+      if (isMissingTableError(error, 'coach_weekly_goals')) return [];
+      throw error;
+    }
+    for (const row of data || []) {
+      const ws = normalizeWeekStart(row.week_start_date);
+      if (!ws) continue;
+      const we = addCalendarDaysYmd(ws, 6);
+      if (ws <= rangeTo && we >= rangeFrom) merged.push(row);
+    }
+  }
+  return merged;
+}
+
+async function listGoalsForStudentsRange(studentIds, rangeFrom, rangeTo) {
+  const ids = [...new Set((studentIds || []).map((s) => String(s || '').trim()).filter(Boolean))];
+  if (!ids.length) return {};
+  try {
+    const rows = await queryGoalsOverlapForStudents(ids, rangeFrom, rangeTo);
+    return groupGoalsByStudent(rows, ids);
+  } catch (e) {
+    if (
+      isSchemaColumnError(e, 'goal_start_date') ||
+      isSchemaColumnError(e, 'goal_end_date') ||
+      isMissingTableError(e, 'coach_weekly_goals')
+    ) {
+      const rows = await queryLegacyRangeGoalsForStudents(ids, rangeFrom, rangeTo);
+      return groupGoalsByStudent(rows, ids);
+    }
+    throw e;
+  }
+}
+
+async function resolveBatchStudentIds(actor, role, query) {
+  const explicit = String(query.student_ids || query.studentIds || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (role === 'coach') {
+    if (!actor.coach_id) return [];
+    const { data, error } = await supabaseAdmin.from('students').select('id').eq('coach_id', actor.coach_id);
+    if (error) throw error;
+    const allowed = new Set((data || []).map((r) => String(r.id)));
+    if (!explicit.length) return [...allowed];
+    return explicit.filter((id) => allowed.has(id));
+  }
+  if (role === 'admin') {
+    if (!actor.institution_id) return [];
+    const { data, error } = await supabaseAdmin
+      .from('students')
+      .select('id')
+      .eq('institution_id', actor.institution_id);
+    if (error) throw error;
+    const allowed = new Set((data || []).map((r) => String(r.id)));
+    if (!explicit.length) return [...allowed];
+    return explicit.filter((id) => allowed.has(id));
+  }
+  if (role === 'super_admin') {
+    if (!explicit.length) return [];
+    return explicit;
+  }
+  return [];
+}
+
 export default async function handler(req, res) {
   try {
     const actor = requireAuth(req);
 
     if (req.method === 'GET') {
-      const studentRaw =
-        actor.role === 'student' ? String(actor.student_id || '') : String(req.query.student_id || '').trim();
-      if (!studentRaw) return res.status(400).json({ error: 'student_id_required' });
-
-      /** Analiz / rapor: `week_start` yerine tarih aralığı (YYYY-MM-DD) */
       const rangeFrom = normalizeWeekStart(req.query.range_from || '');
       const rangeTo = normalizeWeekStart(req.query.range_to || '');
+      const batchMode = String(req.query.batch || '') === '1';
+
+      if (batchMode && rangeFrom && rangeTo) {
+        if (ymdCmp(rangeFrom, rangeTo) > 0) {
+          return res.status(400).json({ error: 'invalid_date_range' });
+        }
+        const role = String(actor.role || '').trim();
+        if (role === 'student') {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        const studentIds = await resolveBatchStudentIds(actor, role, req.query);
+        if (!studentIds.length) return res.status(200).json({ data: {} });
+        const data = await listGoalsForStudentsRange(studentIds, rangeFrom, rangeTo);
+        return res.status(200).json({ data });
+      }
+
+      const studentRaw =
+        actor.role === 'student' ? String(actor.student_id || '') : String(req.query.student_id || '').trim();
+
       if (rangeFrom && rangeTo) {
+        if (!studentRaw) return res.status(400).json({ error: 'student_id_required' });
         if (ymdCmp(rangeFrom, rangeTo) > 0) {
           return res.status(400).json({ error: 'invalid_date_range' });
         }
         const gate = await assertCanReadStudentGoals(actor, studentRaw);
         if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
 
-        const { data: overlap, error: e1 } = await supabaseAdmin
-          .from('coach_weekly_goals')
-          .select('*')
-          .eq('student_id', studentRaw)
-          .not('goal_start_date', 'is', null)
-          .not('goal_end_date', 'is', null)
-          .lte('goal_start_date', rangeTo)
-          .gte('goal_end_date', rangeFrom)
-          .order('created_at', { ascending: true });
-        if (e1) throw e1;
-
-        const { data: legacyOpen, error: e2 } = await supabaseAdmin
-          .from('coach_weekly_goals')
-          .select('*')
-          .eq('student_id', studentRaw)
-          .or('goal_start_date.is.null,goal_end_date.is.null')
-          .order('created_at', { ascending: true });
-        if (e2) throw e2;
-
-        const legacyFiltered = (legacyOpen || []).filter((row) => {
-          const ws = normalizeWeekStart(row.week_start_date);
-          if (!ws) return false;
-          const we = addCalendarDaysYmd(ws, 6);
-          return ws <= rangeTo && we >= rangeFrom;
-        });
-
-        const map = new Map();
-        for (const r of [...(overlap || []), ...legacyFiltered]) map.set(r.id, r);
-        return res.status(200).json({
-          data: [...map.values()].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
-        });
+        const data = await listGoalsForRange(studentRaw, rangeFrom, rangeTo);
+        return res.status(200).json({ data });
       }
 
       const weekStart = normalizeWeekStart(req.query.week_start || '');
       const weekEnd = normalizeWeekStart(req.query.week_end || '') || addCalendarDaysYmd(weekStart, 6);
-      if (!weekStart) return res.status(400).json({ error: 'week_start_required' });
+      if (!weekStart || !studentRaw) return res.status(400).json({ error: 'week_start_required' });
 
       const gate = await assertCanReadStudentGoals(actor, studentRaw);
       if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
 
-      const { data: overlap, error: e1 } = await supabaseAdmin
-        .from('coach_weekly_goals')
-        .select('*')
-        .eq('student_id', studentRaw)
-        .not('goal_start_date', 'is', null)
-        .not('goal_end_date', 'is', null)
-        .lte('goal_start_date', weekEnd)
-        .gte('goal_end_date', weekStart)
-        .order('created_at', { ascending: true });
-      if (e1) throw e1;
-
-      const { data: legacyOpen, error: e2 } = await supabaseAdmin
-        .from('coach_weekly_goals')
-        .select('*')
-        .eq('student_id', studentRaw)
-        .eq('week_start_date', weekStart)
-        .or('goal_start_date.is.null,goal_end_date.is.null')
-        .order('created_at', { ascending: true });
-      if (e2) throw e2;
-
-      const map = new Map();
-      for (const r of [...(overlap || []), ...(legacyOpen || [])]) map.set(r.id, r);
-      return res.status(200).json({ data: [...map.values()].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))) });
+      const data = await listGoalsForWeek(studentRaw, weekStart, weekEnd);
+      return res.status(200).json({ data });
     }
 
     if (req.method === 'POST') {
@@ -209,14 +421,22 @@ export default async function handler(req, res) {
         title,
         target_quantity: Number.isFinite(targetQty) && targetQty >= 0 ? targetQty : 0,
         week_start_date: weekStart,
-        goal_start_date: goalStart,
-        goal_end_date: goalEnd,
         quantity_unit: quantityUnit || 'soru',
         created_at: now,
         updated_at: now,
       };
+      row.goal_start_date = goalStart;
+      row.goal_end_date = goalEnd;
 
-      const { data, error } = await supabaseAdmin.from('coach_weekly_goals').insert(row).select().single();
+      let { data, error } = await supabaseAdmin.from('coach_weekly_goals').insert(row).select().single();
+      if (
+        error &&
+        (isSchemaColumnError(error, 'goal_start_date') || isSchemaColumnError(error, 'goal_end_date'))
+      ) {
+        delete row.goal_start_date;
+        delete row.goal_end_date;
+        ({ data, error } = await supabaseAdmin.from('coach_weekly_goals').insert(row).select().single());
+      }
       if (error) throw error;
       return res.status(200).json({ data });
     }
@@ -327,6 +547,8 @@ export default async function handler(req, res) {
 
     return res.status(405).json({ error: 'method_not_allowed' });
   } catch (e) {
+    const authStatus = authHttpStatus(e);
+    if (authStatus) return res.status(authStatus).json({ error: 'unauthorized' });
     console.error('[coach-weekly-goals]', errorMessage(e), e);
     return res.status(500).json({ error: errorMessage(e) });
   }

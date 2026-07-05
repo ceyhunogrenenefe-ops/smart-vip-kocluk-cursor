@@ -8,6 +8,8 @@ import { useAuth, type SystemUser } from '../context/AuthContext';
 
 import { apiFetch } from '../lib/session';
 
+import { sortByFirstName } from '../lib/personNameSort';
+
 import { db } from '../lib/database';
 
 
@@ -124,7 +126,7 @@ export default function Teachers() {
 
       });
 
-      setRows(onlyTeachers);
+      setRows(sortByFirstName(onlyTeachers, (u) => u.name || ''));
 
     } catch (e) {
 
@@ -149,25 +151,17 @@ export default function Teachers() {
 
 
   const filtered = useMemo(() => {
-
     const q = search.trim().toLowerCase();
-
-    if (!q) return rows;
-
-    return rows.filter((u) => {
-
-      return (
-
-        String(u.name || '').toLowerCase().includes(q) ||
-
-        String(u.email || '').toLowerCase().includes(q) ||
-
-        String(u.phone || '').toLowerCase().includes(q)
-
-      );
-
-    });
-
+    const base = !q
+      ? rows
+      : rows.filter((u) => {
+          return (
+            String(u.name || '').toLowerCase().includes(q) ||
+            String(u.email || '').toLowerCase().includes(q) ||
+            String(u.phone || '').toLowerCase().includes(q)
+          );
+        });
+    return sortByFirstName(base, (u) => u.name || '');
   }, [rows, search]);
 
 

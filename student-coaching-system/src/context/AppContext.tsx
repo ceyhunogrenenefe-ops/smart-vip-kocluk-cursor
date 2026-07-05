@@ -51,6 +51,7 @@ import {
 import { useAuth } from './AuthContext';
 import { useOrganization } from './OrganizationContext';
 import { userRoleTags } from '../config/rolePermissions';
+import { sortByFirstName } from '../lib/personNameSort';
 import { topicPool as defaultTopicPool } from '../data/mockData';
 import { mergeTopicPools } from '../lib/mergeTopicPools';
 import { mergeStudyTracksIntoSubjects, studyTracksForClassLevel } from '../lib/studyTrackSubjects';
@@ -184,6 +185,7 @@ interface AppState {
   // Haftalık Kayıtlar
   weeklyEntries: WeeklyEntry[];
   addWeeklyEntry: (entry: WeeklyEntry) => void;
+  mergeWeeklyEntries: (entries: WeeklyEntry[]) => void;
   updateWeeklyEntry: (id: string, entry: Partial<WeeklyEntry>) => void;
   deleteWeeklyEntry: (id: string) => void;
   getStudentEntries: (studentId: string) => WeeklyEntry[];
@@ -1330,6 +1332,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setWeeklyEntries(prev => [...prev, newEntry]);
     }
   };
+
+  const mergeWeeklyEntries = useCallback((incoming: WeeklyEntry[]) => {
+    if (!incoming.length) return;
+    setWeeklyEntries((prev) => {
+      const byId = new Map(prev.map((e) => [e.id, e]));
+      for (const e of incoming) byId.set(e.id, e);
+      return Array.from(byId.values());
+    });
+  }, []);
 
   const updateWeeklyEntry = async (id: string, updatedEntry: Partial<WeeklyEntry>) => {
     try {
@@ -2907,46 +2918,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const scopedStudents = React.useMemo(() => {
     if (!effectiveUser) return [];
     const tags = userRoleTags(effectiveUser);
+    let list: Student[] = [];
     if (tags.includes('super_admin')) {
       const iid = tenantScopeInstitutionId;
-      if (!iid) return students;
-      return students.filter((s) => s.institutionId === iid);
-    }
-    if (tags.includes('student')) {
+      list = !iid ? students : students.filter((s) => s.institutionId === iid);
+    } else if (tags.includes('student')) {
       const sid = resolveStudentRecordId(
         effectiveUser.role,
         effectiveUser.studentId,
         effectiveUser.email,
         students
       );
-      if (!sid) return [];
-      const matched = students.filter((s) => s.id === sid);
-      if (matched.length > 0) return matched;
-      return [];
-    }
-    if (tags.includes('admin')) {
-      return students.filter((s) => s.institutionId === effectiveUser.institutionId);
-    }
-    /** Öğretmen birincil rol: grup sınıfı öğrencileri (API ile uyumlu) */
-    if (tags.includes('teacher') && effectiveUser.role === 'teacher') {
-      return students;
-    }
-    /** Koç birincil rol */
-    if (tags.includes('coach')) {
+      if (!sid) list = [];
+      else {
+        const matched = students.filter((s) => s.id === sid);
+        list = matched.length > 0 ? matched : [];
+      }
+    } else if (tags.includes('admin')) {
+      list = students.filter((s) => s.institutionId === effectiveUser.institutionId);
+    } else if (tags.includes('teacher') && effectiveUser.role === 'teacher') {
+      list = students;
+    } else if (tags.includes('coach')) {
       const cid = resolveCoachRecordId(
         effectiveUser.role,
         effectiveUser.coachId,
         effectiveUser.email,
         coaches
       );
-      if (!cid) return [];
-      return students.filter((s) => String(s.coachId || '') === String(cid));
+      list = !cid ? [] : students.filter((s) => String(s.coachId || '') === String(cid));
+    } else if (tags.includes('teacher')) {
+      list = students;
+    } else {
+      list = students;
     }
-    /** Öğretmen etiketi (admin+öğretmen vb.) */
-    if (tags.includes('teacher')) {
-      return students;
-    }
-    return students;
+    return sortByFirstName(list, (s) => s.name);
   }, [students, effectiveUser, coaches, tenantScopeInstitutionId]);
 
   const institutionStudents = React.useMemo(() => {
@@ -3094,6 +3099,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(t);
   }, [weeklyEntries.length, refreshCoachQuestionStats, effectiveUser?.role, scopedStudents.length]);
 
+  useEffect(() => {
+    const onEtutSaved = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ entries?: WeeklyEntry[] }>).detail;
+      if (detail?.entries?.length) mergeWeeklyEntries(detail.entries);
+    };
+    window.addEventListener('coaching:etut-report-saved', onEtutSaved);
+    return () => window.removeEventListener('coaching:etut-report-saved', onEtutSaved);
+  }, [mergeWeeklyEntries]);
+
   return (
     <AppContext.Provider value={{
       currentUser,
@@ -3113,6 +3127,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       deleteCoach,
       weeklyEntries: scopedWeeklyEntries,
       addWeeklyEntry,
+      mergeWeeklyEntries,
       updateWeeklyEntry,
       deleteWeeklyEntry,
       getStudentEntries,

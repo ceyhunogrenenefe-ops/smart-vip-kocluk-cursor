@@ -29,6 +29,7 @@ import Settings from './pages/Settings';
 import StudentDashboard from './pages/StudentDashboard';
 import StudentReports from './pages/StudentReports';
 import CoachDashboard from './pages/CoachDashboard';
+import CoachGuidePage from './pages/CoachGuidePage';
 import CoachReports from './pages/CoachReports';
 import AdminPanel from './pages/AdminPanel';
 import BookTracking from './pages/BookTracking';
@@ -418,6 +419,14 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/coach-dashboard')}>
                 <Layout>
                   <CoachDashboard />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/coach-kilavuz" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/coach-kilavuz')}>
+                <Layout>
+                  <CoachGuidePage />
                 </Layout>
               </ProtectedRoute>
             } />

@@ -1,9 +1,10 @@
 import { supabaseAdmin } from './supabase-admin.js';
-import { sendMetaTextMessage } from './meta-whatsapp.js';
+import { sendNotification } from './message-service.js';
+import { metaWhatsAppConfigured } from './meta-whatsapp.js';
 
 const CHANNEL = 'whatsapp';
 
-export async function deliverWhatsAppWithLog({ meetingId, kind, recipientE164, body }) {
+export async function deliverWhatsAppWithLog({ meetingId, kind, recipientE164, body, coachId }) {
   const now = new Date().toISOString();
 
   const { data: existing } = await supabaseAdmin
@@ -42,20 +43,27 @@ export async function deliverWhatsAppWithLog({ meetingId, kind, recipientE164, b
   const nextAttempt = (row?.attempt_count || 0) + 1;
 
   try {
-    const { messageId } = await sendMetaTextMessage({ toE164: recipientE164, text: body });
+    const sent = await sendNotification({
+      notificationType: 'meeting_notification',
+      phone: recipientE164,
+      plainText: body,
+      coachId: coachId || null
+    });
+    if (!sent.ok) throw new Error(sent.error || 'send_failed');
+    const messageId = sent.sid || sent.meta_message_id || sent.gateway_message_id || null;
     await supabaseAdmin
       .from('meeting_notification_log')
       .update({
         status: 'sent',
         attempt_count: nextAttempt,
         processed_at: now,
-        external_sid: messageId || null,
+        external_sid: messageId,
         last_error: null,
         recipient_e164: recipientE164,
-        payload: { body }
+        payload: { body, channel: sent.channel }
       })
       .eq('id', row.id);
-    return { ok: true };
+    return { ok: true, channel: sent.channel };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await supabaseAdmin

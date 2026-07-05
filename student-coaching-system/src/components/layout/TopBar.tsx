@@ -46,6 +46,7 @@ export default function TopBar({ onMenuClick, drawerOpen = false, hideMenuButton
     const titles: { [key: string]: string } = {
       '/dashboard': 'Ana Panel',
       '/coach-dashboard': 'Koç Paneli',
+      '/coach-kilavuz': 'Kullanım kılavuzu',
       '/teacher-panel': 'Öğretmen Paneli',
       '/students': 'Öğrenci Yönetimi',
       '/teachers': 'Öğretmen Yönetimi',

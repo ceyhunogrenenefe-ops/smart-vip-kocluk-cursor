@@ -94,6 +94,9 @@ export default async function handler(req, res) {
     if (body.meta_named_body_parameters !== undefined) {
       patch.meta_named_body_parameters = Boolean(body.meta_named_body_parameters);
     }
+    if (body.is_active !== undefined) {
+      patch.is_active = Boolean(body.is_active);
+    }
 
     if (Object.keys(patch).length <= 1) {
       return res.status(400).json({ error: 'nothing_to_update' });

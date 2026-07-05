@@ -13,6 +13,10 @@ import {
   X
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
+import { resolveStudentRecordId } from '../lib/coachResolve';
+import { userRoleTags } from '../config/rolePermissions';
+import { startEtutSession } from '../lib/etutSession';
 import {
   defaultAcademicCenterLinks,
   examEntryUrl,
@@ -204,7 +208,19 @@ function ExamRulesModal(props: {
 
 export default function AcademicCenter() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { institution, activeInstitutionId } = useApp();
+  const { institution, activeInstitutionId, students } = useApp();
+  const { effectiveUser } = useAuth();
+  const tags = userRoleTags(effectiveUser);
+  const isStudent = tags.includes('student');
+  const studentId = isStudent
+    ? resolveStudentRecordId(
+        effectiveUser?.role,
+        effectiveUser?.studentId,
+        effectiveUser?.email,
+        students,
+        { roles: tags }
+      )?.trim() || ''
+    : '';
   const institutionId = institution?.id || activeInstitutionId || null;
   const [activeTab, setActiveTab] = useState<TabKey>('study');
   const [links, setLinks] = useState<AcademicCenterLinks>(
@@ -249,6 +265,15 @@ export default function AcademicCenter() {
     opts?: { room?: ExamEntryKey | StudyEntryKey; kind?: 'exam' | 'study' }
   ) => {
     const kind = opts?.kind ?? 'exam';
+    if (kind === 'study' && studentId) {
+      startEtutSession({
+        studentId,
+        source: 'academic-center',
+        subject: 'Etüt',
+        topic: opts?.room ? `${opts.room} etüt` : 'Etüt çalışması',
+        label: opts?.room,
+      });
+    }
     void openAcademicCenterLink(url, {
       room: opts?.room,
       kind: opts?.room ? kind : undefined,

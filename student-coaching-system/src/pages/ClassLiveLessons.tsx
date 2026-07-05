@@ -26,7 +26,14 @@ import {
 import { useClassLivePresence } from '../hooks/useClassLivePresence';
 import { classIdsInLivePresenceWindow } from '../lib/classLiveWindow';
 import { copyGuestJoinShareText } from '../lib/bbbGuestJoin';
+import { isEtutSubject, startEtutSession } from '../lib/etutSession';
 import { useRecordingUnavailableAlert, recordingUnavailableText } from '../hooks/useRecordingUnavailableAlert';
+import {
+  AppModal,
+  AppModalBody,
+  AppModalFooter,
+  AppModalHeader
+} from '../components/ui/AppModal';
 import { SolutionLessonStudentActions } from '../components/solutionAppointments/SolutionLessonStudentActions';
 import { inferSessionBatchPeers } from '../lib/classSessionBatchPeers';
 import { isSolutionLessonSubject } from '../lib/solutionAppointments/utils';
@@ -349,25 +356,39 @@ export default function ClassLiveLessons() {
     }
   }, []);
 
-  const joinClassSession = useCallback(async (s: { id: string; join_link?: string; meeting_link?: string; lesson_date?: string }) => {
+  const joinClassSession = useCallback(async (s: { id: string; subject?: string; join_link?: string; meeting_link?: string; lesson_date?: string; homework?: string | null }) => {
     const url = lessonJoinUrl(s);
     if (!url && !s.id) {
       setError('Toplantı bağlantısı yok.');
       return;
     }
+    const etutCtx =
+      isStudentView && resolvedStudentId && isEtutSubject(s.subject)
+        ? {
+            studentId: resolvedStudentId,
+            subject: s.subject || 'Etüt',
+            topic: String(s.homework || s.subject || 'Etüt').trim(),
+            date: (s.lesson_date || '').slice(0, 10) || undefined,
+            classSessionId: s.id,
+            source: 'class-live' as const,
+            label: s.subject,
+          }
+        : undefined;
     try {
       const kind = s.lesson_date ? 'session' : 'slot';
       if (shouldUsePanelBbbJoin(s, url)) {
-        await openBbbJoin('class-live-lessons', s.id, { kind });
+        await openBbbJoin('class-live-lessons', s.id, { kind, etut: etutCtx });
         return;
       }
       if (url && isExternalMeetingPlatform(url)) {
+        if (etutCtx) startEtutSession(etutCtx);
         window.open(url, '_blank', 'noopener,noreferrer');
         return;
       }
       if (needsBbbJoinFlow(url)) {
-        await openBbbJoin('class-live-lessons', s.id, { kind });
+        await openBbbJoin('class-live-lessons', s.id, { kind, etut: etutCtx });
       } else if (url) {
+        if (etutCtx) startEtutSession(etutCtx);
         window.open(url, '_blank', 'noopener,noreferrer');
       } else {
         setError('Toplantı bağlantısı yok.');
@@ -375,7 +396,7 @@ export default function ClassLiveLessons() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, []);
+  }, [isStudentView, resolvedStudentId]);
 
   const watchClassSessionRecording = useCallback(
     async (s: {
@@ -497,7 +518,8 @@ export default function ClassLiveLessons() {
         scope: 'sessions',
         class_id: selectedClassId,
         from,
-        to
+        to,
+        materialize: '1'
       });
       const res = await apiFetch(`/api/class-live-lessons?${qs.toString()}`);
       const j = await res.json().catch(() => ({}));
@@ -1792,26 +1814,22 @@ export default function ClassLiveLessons() {
         )}
       </WeeklyLiveGridShell>
 
-      {editingSession && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4">
-          <div
-            role="dialog"
-            aria-modal
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-xl space-y-4"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
-                <Pencil className="h-5 w-5 text-indigo-600" />
-                Oturumu düzenle
-              </h3>
-              <button
-                type="button"
-                className="text-sm text-slate-500 hover:text-slate-800"
-                onClick={() => setEditingSession(null)}
-              >
-                Kapat
-              </button>
-            </div>
+      {editingSession ? (
+        <AppModal open onClose={() => setEditingSession(null)} panelClassName="max-w-lg">
+          <AppModalHeader>
+            <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
+              <Pencil className="h-5 w-5 text-indigo-600" />
+              Oturumu düzenle
+            </h3>
+            <button
+              type="button"
+              className="text-sm text-slate-500 hover:text-slate-800"
+              onClick={() => setEditingSession(null)}
+            >
+              Kapat
+            </button>
+          </AppModalHeader>
+          <AppModalBody className="space-y-4">
             {sessionEditPeerCount > 1 ? (
               <fieldset className="space-y-2 rounded-lg border border-violet-200 bg-violet-50/50 p-3">
                 <legend className="px-1 text-sm font-medium text-violet-900">Düzenleme kapsamı</legend>
@@ -1921,10 +1939,12 @@ export default function ClassLiveLessons() {
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
               />
             </label>
-            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+          </AppModalBody>
+          <AppModalFooter>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-2">
               <button
                 type="button"
-                className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700"
+                className="min-h-[44px] rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700"
                 onClick={() => setEditingSession(null)}
               >
                 Vazgeç
@@ -1933,35 +1953,31 @@ export default function ClassLiveLessons() {
                 type="button"
                 disabled={sessionEditBusy}
                 onClick={() => void saveSessionEdit()}
-                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+                className="min-h-[44px] rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
               >
                 {sessionEditBusy ? 'Kaydediliyor…' : 'Kaydet'}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </AppModalFooter>
+        </AppModal>
+      ) : null}
 
-      {editingSlotRow && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4">
-          <div
-            role="dialog"
-            aria-modal
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-xl space-y-4"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
-                <Pencil className="h-5 w-5 text-indigo-600" />
-                Haftalık şablonu düzenle
-              </h3>
-              <button
-                type="button"
-                className="text-sm text-slate-500 hover:text-slate-800"
-                onClick={() => setEditingSlotRow(null)}
-              >
-                Kapat
-              </button>
-            </div>
+      {editingSlotRow ? (
+        <AppModal open onClose={() => setEditingSlotRow(null)} panelClassName="max-w-lg">
+          <AppModalHeader>
+            <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
+              <Pencil className="h-5 w-5 text-indigo-600" />
+              Haftalık şablonu düzenle
+            </h3>
+            <button
+              type="button"
+              className="text-sm text-slate-500 hover:text-slate-800"
+              onClick={() => setEditingSlotRow(null)}
+            >
+              Kapat
+            </button>
+          </AppModalHeader>
+          <AppModalBody className="space-y-4">
             <label className="block text-sm">
               <span className="text-slate-600">Gün</span>
               <select
@@ -2028,10 +2044,12 @@ export default function ClassLiveLessons() {
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
               />
             </label>
-            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+          </AppModalBody>
+          <AppModalFooter>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-2">
               <button
                 type="button"
-                className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700"
+                className="min-h-[44px] rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700"
                 onClick={() => setEditingSlotRow(null)}
               >
                 Vazgeç
@@ -2040,14 +2058,14 @@ export default function ClassLiveLessons() {
                 type="button"
                 disabled={slotEditBusy}
                 onClick={() => void saveSlotEdit()}
-                className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-60"
+                className="min-h-[44px] rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-60"
               >
                 {slotEditBusy ? 'Kaydediliyor…' : 'Kaydet'}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </AppModalFooter>
+        </AppModal>
+      ) : null}
 
       {attendanceSession && (
         <div

@@ -1,6 +1,6 @@
 /**
  * Günlük rapor hatırlatması — rapor girmeyen öğrencilere WhatsApp.
- * Kanal: önce gateway (Baileys), başarısızsa Meta yedek.
+ * Kanal: ilgili koçun WhatsApp Gateway hesabı (Meta yedek yok).
  */
 import { supabaseAdmin } from './supabase-admin.js';
 import { getIstanbulDateString, getIstanbulHour } from './istanbul-time.js';
@@ -12,15 +12,13 @@ import {
   studentAllowsWhatsappAutomation
 } from './whatsapp-automation-eligibility.js';
 import { normalizePhoneToE164 } from './phone-whatsapp.js';
-import { metaWhatsAppConfigured } from './meta-whatsapp.js';
-import {
-  automationGatewayReady,
-  reportReminderSendChannel as resolveReportChannel,
-  sendAutomationTemplateMessage
-} from './whatsapp-automation-channel.js';
+import { coachDailyReportReminderEnabled } from './coach-notification-prefs.js';
+import { getCoachGatewayHealth } from './message-service.js';
+import { sendAutomationTemplateMessage } from './whatsapp-automation-channel.js';
+import { resolveEffectiveSendChannel, SEND_CHANNELS } from './notification-config.js';
 
 export function reportReminderSendChannel() {
-  return resolveReportChannel();
+  return resolveEffectiveSendChannel('report_reminder') === SEND_CHANNELS.META_API ? 'meta' : 'gateway';
 }
 
 export function reportReminderIstHour() {
@@ -37,6 +35,26 @@ function reportReminderPhoneKey(studentId, phone) {
   return `${studentId}:${norm}`;
 }
 
+const coachPrefsCache = new Map();
+const coachGatewayCache = new Map();
+
+async function coachCanSendDailyReport(coachId) {
+  const cid = String(coachId || '').trim();
+  if (!cid) return { ok: false, reason: 'no_coach' };
+  if (!coachPrefsCache.has(cid)) {
+    coachPrefsCache.set(cid, await coachDailyReportReminderEnabled(cid));
+  }
+  if (!coachPrefsCache.get(cid)) return { ok: false, reason: 'disabled_by_coach' };
+  if (!coachGatewayCache.has(cid)) {
+    coachGatewayCache.set(cid, await getCoachGatewayHealth(cid));
+  }
+  const gw = coachGatewayCache.get(cid);
+  if (!gw?.connected) {
+    return { ok: false, reason: 'gateway_disconnected', gateway: gw };
+  }
+  return { ok: true, gateway: gw };
+}
+
 /**
  * @param {{ skipHourCheck?: boolean, istanbulHour?: number, todayTr?: string }} opts
  */
@@ -46,8 +64,6 @@ export async function runDailyReportReminderJob(opts = {}) {
   const hourIst = opts.istanbulHour != null ? opts.istanbulHour : getIstanbulHour();
   const today = opts.todayTr ?? getIstanbulDateString();
   const log = [];
-  const gwReady = automationGatewayReady();
-  const metaReady = metaWhatsAppConfigured();
 
   if (!opts.skipHourCheck && hourIst !== expectedHour) {
     return {
@@ -60,16 +76,6 @@ export async function runDailyReportReminderJob(opts = {}) {
     };
   }
 
-  if (!gwReady && !metaReady) {
-    return {
-      ok: false,
-      skipped: true,
-      reason: 'no_report_reminder_channel',
-      hint: 'Gateway: WHATSAPP_GATEWAY_UPSTREAM + oturum id. Meta yedek: META_WHATSAPP_TOKEN.',
-      log
-    };
-  }
-
   const { data: template, error: tErr } = await supabaseAdmin
     .from('message_templates')
     .select('content, meta_template_name, is_active')
@@ -78,16 +84,6 @@ export async function runDailyReportReminderJob(opts = {}) {
   if (tErr) throw tErr;
   if (!template?.content || template.is_active === false) {
     return { ok: true, skipped: 'no_report_reminder_template', channel, log };
-  }
-
-  if (!gwReady && metaReady && !String(template.meta_template_name || '').trim()) {
-    return {
-      ok: true,
-      skipped: 'meta_template_name_missing',
-      channel,
-      hint: 'Gateway kapalıyken Meta yedek için message_templates.meta_template_name gerekli.',
-      log
-    };
   }
 
   const { data: entries, error: eErr } = await supabaseAdmin
@@ -124,7 +120,7 @@ export async function runDailyReportReminderJob(opts = {}) {
 
   const { data: students, error: sErr } = await supabaseAdmin
     .from('students')
-    .select('id,name,phone,parent_phone,email,institution_id,whatsapp_automation_enabled')
+    .select('id,name,phone,parent_phone,email,institution_id,whatsapp_automation_enabled,coach_id')
     .limit(8000);
   if (sErr) throw sErr;
 
@@ -134,6 +130,18 @@ export async function runDailyReportReminderJob(opts = {}) {
       continue;
     }
     if (!studentNeedsReportReminder(student.id, entries || [], plannerStudentIds)) {
+      continue;
+    }
+
+    const coachId = String(student.coach_id || '').trim();
+    const coachGate = await coachCanSendDailyReport(coachId);
+    if (!coachGate.ok) {
+      log.push({
+        student_id: student.id,
+        coach_id: coachId || null,
+        note: coachGate.reason,
+        gateway_status: coachGate.gateway?.status || null
+      });
       continue;
     }
 
@@ -163,10 +171,11 @@ export async function runDailyReportReminderJob(opts = {}) {
           phone,
           templateRow: template,
           vars: tmplVars,
-          templateType: 'report_reminder'
+          templateType: 'report_reminder',
+          coachId
         });
 
-        const usedChannel = sent.channel || (sent.fallback_from ? 'meta' : channel);
+        const usedChannel = sent.channel || 'coach_gateway';
 
         const { error: insErr } = await supabaseAdmin.from('message_logs').insert({
           student_id: student.id,
@@ -182,7 +191,7 @@ export async function runDailyReportReminderJob(opts = {}) {
           twilio_content_sid: null,
           meta_message_id: sent.sid || sent.gateway_message_id || sent.meta_message_id || null,
           meta_template_name:
-            usedChannel === 'gateway' || sent.meta_template_name === 'gateway_plain'
+            usedChannel === 'coach_gateway' || sent.meta_template_name === 'gateway_plain'
               ? 'gateway_plain'
               : sent.meta_template_name || template.meta_template_name || null
         });
@@ -196,15 +205,16 @@ export async function runDailyReportReminderJob(opts = {}) {
           sentPhoneKeys.add(phoneDedupeKey);
           log.push({
             student_id: student.id,
+            coach_id: coachId,
             phone,
             role,
             ok: true,
-            channel: usedChannel,
-            fallback_from: sent.fallback_from || null
+            channel: usedChannel
           });
         } else {
           log.push({
             student_id: student.id,
+            coach_id: coachId,
             phone,
             role,
             channel: usedChannel,
@@ -227,9 +237,9 @@ export async function runDailyReportReminderJob(opts = {}) {
           twilio_error_code: null,
           twilio_content_sid: null,
           meta_message_id: null,
-          meta_template_name: template.meta_template_name || null
+          meta_template_name: 'gateway_plain'
         });
-        log.push({ student_id: student.id, phone, role, error: errMsg });
+        log.push({ student_id: student.id, coach_id: coachId, phone, role, error: errMsg });
       }
     }
   }

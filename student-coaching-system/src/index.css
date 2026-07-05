@@ -43,8 +43,35 @@
   }
   .student-mobile-scroll-port,
   .mobile-app-scroll-port {
-    /* Alt sekme çubuğu için kaydırma alanı; içerik pb-24 ile tamamlanır */
     scroll-padding-bottom: max(4.5rem, calc(3.5rem + env(safe-area-inset-bottom, 0px)));
+  }
+  /* Eski modal sınıfları — mobilde kaydırılabilir gövde + sabit alt bar */
+  .mobile-form-modal-shell {
+    display: flex;
+    max-height: min(92dvh, 900px);
+    width: 100%;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: 1rem 1rem 0 0;
+  }
+  @media (min-width: 640px) {
+    .mobile-form-modal-shell {
+      border-radius: 1rem;
+    }
+  }
+  .mobile-form-modal-scroll {
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .mobile-form-modal-actions {
+    flex-shrink: 0;
+    border-top: 1px solid rgb(243 244 246);
+    background: #fff;
+    padding: 1rem;
+    padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
   }
 }
 

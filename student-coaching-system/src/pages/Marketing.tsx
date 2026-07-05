@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { DEFAULT_BRAND_LOGO } from '../lib/brandAssets';
+import InstagramEmbed from '../components/marketing/InstagramEmbed';
 import {
   GraduationCap,
   Users,
@@ -231,6 +232,19 @@ export default function Marketing() {
     }
   ];
 
+  const videoCategories = [
+    {
+      title: 'Veli Memnuniyet',
+      description: 'Velilerimizin Online VIP Dershane deneyimlerini dinleyin.',
+      videos: [
+        {
+          permalink: 'https://www.instagram.com/reel/DA3QXKaBSgi/',
+          caption: '@onlinevipdershane'
+        }
+      ]
+    }
+  ];
+
   const testimonials = [
     {
       name: 'Mehmet Yılmaz',
@@ -303,6 +317,7 @@ export default function Marketing() {
             <div className="hidden md:flex items-center gap-8">
               <a href="#features" className="text-gray-600 hover:text-red-600 transition-colors">Özellikler</a>
               <a href="#pricing" className="text-gray-600 hover:text-red-600 transition-colors">Fiyatlandırma</a>
+              <a href="#videolar" className="text-gray-600 hover:text-red-600 transition-colors">Videolar</a>
               <a href="#testimonials" className="text-gray-600 hover:text-red-600 transition-colors">Referanslar</a>
               <a href="#faq" className="text-gray-600 hover:text-red-600 transition-colors">SSS</a>
               <Link to="/login" className="text-gray-600 hover:text-red-600 transition-colors font-medium">
@@ -331,6 +346,7 @@ export default function Marketing() {
           <div className="md:hidden bg-white border-t border-gray-100 py-4 px-4 space-y-4">
             <a href="#features" className="block text-gray-600 hover:text-red-600">Özellikler</a>
             <a href="#pricing" className="block text-gray-600 hover:text-red-600">Fiyatlandırma</a>
+            <a href="#videolar" className="block text-gray-600 hover:text-red-600">Videolar</a>
             <a href="#testimonials" className="block text-gray-600 hover:text-red-600">Referanslar</a>
             <a href="#faq" className="block text-gray-600 hover:text-red-600">SSS</a>
             <Link to="/login" className="block text-gray-600 font-medium">Giriş Yap</Link>
@@ -614,6 +630,44 @@ export default function Marketing() {
         </div>
       </section>
 
+      {/* Videolar */}
+      <section id="videolar" className="py-20 bg-gray-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-16">
+            <span className="inline-block bg-red-100 text-red-600 px-4 py-2 rounded-full text-sm font-semibold mb-4">
+              VİDEOLAR
+            </span>
+            <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
+              Gerçek Deneyimler
+            </h2>
+            <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+              Velilerimizin ve öğrencilerimizin paylaştığı videoları izleyin.
+            </p>
+          </div>
+
+          <div className="space-y-16">
+            {videoCategories.map((category) => (
+              <div key={category.title}>
+                <div className="mb-8 text-center">
+                  <h3 className="text-2xl font-bold text-gray-900">{category.title}</h3>
+                  <p className="mt-2 text-gray-600">{category.description}</p>
+                </div>
+                <div className="flex flex-wrap justify-center gap-8">
+                  {category.videos.map((video) => (
+                    <div key={video.permalink} className="w-full max-w-[540px]">
+                      <InstagramEmbed permalink={video.permalink} />
+                      {video.caption ? (
+                        <p className="mt-3 text-center text-sm text-gray-500">{video.caption}</p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* Testimonials Section */}
       <section id="testimonials" className="py-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -819,7 +873,12 @@ export default function Marketing() {
                 <a href="#" className="w-10 h-10 bg-slate-800 rounded-lg flex items-center justify-center hover:bg-red-500 transition-colors">
                   <Twitter className="w-5 h-5" />
                 </a>
-                <a href="#" className="w-10 h-10 bg-slate-800 rounded-lg flex items-center justify-center hover:bg-red-500 transition-colors">
+                <a
+                  href="https://www.instagram.com/onlinevipdershane/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="w-10 h-10 bg-slate-800 rounded-lg flex items-center justify-center hover:bg-red-500 transition-colors"
+                >
                   <Instagram className="w-5 h-5" />
                 </a>
                 <a href="#" className="w-10 h-10 bg-slate-800 rounded-lg flex items-center justify-center hover:bg-red-500 transition-colors">
@@ -834,6 +893,7 @@ export default function Marketing() {
             <div>
               <h4 className="font-bold text-white mb-4">Ürün</h4>
               <ul className="space-y-3">
+                <li><a href="#videolar" className="hover:text-red-400 transition-colors">Videolar</a></li>
                 <li><a href="#features" className="hover:text-red-400 transition-colors">Özellikler</a></li>
                 <li><a href="#pricing" className="hover:text-red-400 transition-colors">Fiyatlandırma</a></li>
                 <li><a href="#" className="hover:text-red-400 transition-colors">Güncellemeler</a></li>

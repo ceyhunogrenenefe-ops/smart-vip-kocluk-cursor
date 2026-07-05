@@ -16,7 +16,12 @@ export function studentHasClassSubject(enrollmentSubjects, sessionSubject) {
   if (!list.length) return true;
   const target = normSubjectKey(sessionSubject);
   if (!target) return true;
-  return list.some((s) => normSubjectKey(s) === target);
+  if (list.some((s) => normSubjectKey(s) === target)) return true;
+  return list.some((s) => {
+    const n = normSubjectKey(s);
+    if (!n) return false;
+    return target.includes(n) || n.includes(target);
+  });
 }
 
 export function mergeSubjectLists(...lists) {

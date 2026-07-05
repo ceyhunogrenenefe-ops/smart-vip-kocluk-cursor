@@ -17,6 +17,24 @@ export type EduAnimation = {
   storage_path: string;
   file_size: number;
   display_order: number;
+  pool_id?: string | null;
+};
+
+export type EduAnimationPoolItem = {
+  id: string;
+  institution_id?: string | null;
+  teacher_user_id: string;
+  teacher_name?: string;
+  title: string;
+  program: 'lgs' | 'tyt' | 'ayt';
+  class_level: string;
+  subject_name: string;
+  topic_name: string;
+  original_name: string;
+  storage_path: string;
+  file_size: number;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export type EduHomeworkSubmission = {
@@ -39,6 +57,7 @@ export type EduHomework = {
   description?: string | null;
   due_date?: string | null;
   status: HomeworkStatus;
+  pool_animation_id?: string | null;
   submissions?: EduHomeworkSubmission[];
 };
 

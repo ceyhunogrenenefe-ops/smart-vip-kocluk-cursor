@@ -191,7 +191,8 @@ export async function sendClassLessonReminderForSession(p) {
         phone: ph,
         templateRow,
         vars,
-        templateType: CLASS_LESSON_REMINDER_TEMPLATE
+        templateType: CLASS_LESSON_REMINDER_TEMPLATE,
+        coachId: st.coach_id || null
       });
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);

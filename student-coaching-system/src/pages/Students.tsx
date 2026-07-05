@@ -1,5 +1,5 @@
 // Türkçe: Öğrenci Yönetimi Sayfası
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
@@ -16,7 +16,15 @@ import {
   StudentTeacherLessonQuota
 } from '../types';
 import { resolveCoachRecordId } from '../lib/coachResolve';
+import { sortByFirstName } from '../lib/personNameSort';
 import { db } from '../lib/database';
+import {
+  AppModal,
+  AppModalBody,
+  AppModalFooter,
+  AppModalForm,
+  AppModalHeader
+} from '../components/ui/AppModal';
 import {
   GraduationCap,
   Search,
@@ -78,19 +86,21 @@ export default function Students() {
   const [quotaCreditsInput, setQuotaCreditsInput] = useState('');
   const [quotaSaving, setQuotaSaving] = useState(false);
 
-  // Filtrelenmiş öğrenciler
-  const filteredStudents = students.filter(student => {
-    const name = (student.name || '').toLowerCase();
-    const email = (student.email || '').toLowerCase();
-    const phone = student.phone || '';
-    const q = searchTerm.toLowerCase();
-    const matchesSearch =
-      name.includes(q) || email.includes(q) || phone.includes(searchTerm);
-    const matchesClass = filterClass === 'all' || student.classLevel === filterClass;
-    const studentProgram = student.programName || inferProgramName(student.classLevel);
-    const matchesProgram = filterProgram === 'all' || studentProgram === filterProgram;
-    return matchesSearch && matchesClass && matchesProgram;
-  });
+  const filteredStudents = useMemo(() => {
+    const filtered = students.filter((student) => {
+      const name = (student.name || '').toLowerCase();
+      const email = (student.email || '').toLowerCase();
+      const phone = student.phone || '';
+      const q = searchTerm.toLowerCase();
+      const matchesSearch =
+        name.includes(q) || email.includes(q) || phone.includes(searchTerm);
+      const matchesClass = filterClass === 'all' || student.classLevel === filterClass;
+      const studentProgram = student.programName || inferProgramName(student.classLevel);
+      const matchesProgram = filterProgram === 'all' || studentProgram === filterProgram;
+      return matchesSearch && matchesClass && matchesProgram;
+    });
+    return sortByFirstName(filtered, (s) => s.name);
+  }, [students, searchTerm, filterClass, filterProgram]);
 
   // Yeni öğrenci formu
   const [formData, setFormData] = useState({
@@ -142,7 +152,7 @@ export default function Students() {
         alert(r.message || 'Öğrenci hesabına geçilemedi.');
         return;
       }
-      navigate('/student-dashboard');
+      navigate('/weekly-planner');
     } finally {
       setEnterAsBusyId(null);
     }
@@ -691,27 +701,34 @@ export default function Students() {
         </div>
       )}
 
-      {/* Add/Edit Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4">
-          <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-6 border-b border-gray-100">
-              <h3 className="text-xl font-bold text-slate-800">
-                {editingStudent ? 'Öğrenci düzenle' : 'Öğrenci ekle'}
-              </h3>
-              <button
-                onClick={() => {
-                  setShowAddModal(false);
-                  setEditingStudent(null);
-                  resetForm();
-                }}
-                className="icon-tap-btn hover:bg-gray-100 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      <AppModal
+        open={showAddModal}
+        onClose={() => {
+          setShowAddModal(false);
+          setEditingStudent(null);
+          resetForm();
+        }}
+        panelClassName="max-w-3xl"
+      >
+        <AppModalHeader>
+          <h3 className="text-xl font-bold text-slate-800">
+            {editingStudent ? 'Öğrenci düzenle' : 'Öğrenci ekle'}
+          </h3>
+          <button
+            type="button"
+            onClick={() => {
+              setShowAddModal(false);
+              setEditingStudent(null);
+              resetForm();
+            }}
+            className="icon-tap-btn hover:bg-gray-100 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </AppModalHeader>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <AppModalForm onSubmit={handleSubmit}>
+          <AppModalBody className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* İsim */}
                 <div>
@@ -1026,8 +1043,10 @@ export default function Students() {
                   </label>
                 </div>
               </div>
+          </AppModalBody>
 
-              <div className="flex justify-end gap-3 pt-4">
+          <AppModalFooter>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
                 <button
                   type="button"
                   onClick={() => {
@@ -1035,14 +1054,14 @@ export default function Students() {
                     setEditingStudent(null);
                     resetForm();
                   }}
-                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="min-h-[44px] px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                 >
                   İptal
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors flex items-center gap-2 disabled:opacity-60"
+                  className="min-h-[44px] px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
                 >
                   {saving ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -1052,36 +1071,37 @@ export default function Students() {
                   {editingStudent ? 'Güncelle' : 'Kaydet'}
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+          </AppModalFooter>
+        </AppModalForm>
+      </AppModal>
 
-      {/* Student Detail Modal */}
-      {selectedStudent && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-gray-100">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white text-2xl font-bold">
-                    {selectedStudent.name.charAt(0)}
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-bold text-slate-800">{selectedStudent.name}</h3>
-                    <p className="text-gray-500">{formatClassLevelLabel(selectedStudent.classLevel)}</p>
-                  </div>
+      <AppModal
+        open={Boolean(selectedStudent)}
+        onClose={() => setSelectedStudent(null)}
+        panelClassName="max-w-lg"
+      >
+        {selectedStudent ? (
+          <>
+            <AppModalHeader className="!items-start">
+              <div className="flex items-center gap-4 min-w-0">
+                <div className="w-16 h-16 shrink-0 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white text-2xl font-bold">
+                  {selectedStudent.name.charAt(0)}
                 </div>
-                <button
-                  onClick={() => setSelectedStudent(null)}
-                  className="icon-tap-btn hover:bg-gray-100 transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+                <div className="min-w-0">
+                  <h3 className="text-xl font-bold text-slate-800 truncate">{selectedStudent.name}</h3>
+                  <p className="text-gray-500">{formatClassLevelLabel(selectedStudent.classLevel)}</p>
+                </div>
               </div>
-            </div>
+              <button
+                type="button"
+                onClick={() => setSelectedStudent(null)}
+                className="icon-tap-btn hover:bg-gray-100 transition-colors shrink-0"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </AppModalHeader>
 
-            <div className="p-6 space-y-4">
+            <AppModalBody className="space-y-4">
               <div className="flex items-center gap-3 text-gray-600">
                 <Phone className="w-5 h-5" />
                 <span>{selectedStudent.phone}</span>
@@ -1231,15 +1251,17 @@ export default function Students() {
                   </>
                 )}
               </div>
-            </div>
+            </AppModalBody>
 
-            <div className="p-6 border-t border-gray-100 flex gap-3">
+            <AppModalFooter>
+            <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
               <button
+                type="button"
                 onClick={() => {
                   setSelectedStudent(null);
                   handleEdit(selectedStudent);
                 }}
-                className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                className="min-h-[44px] flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
               >
                 Düzenle
               </button>
@@ -1251,14 +1273,15 @@ export default function Students() {
                   window.open(`https://wa.me/${digits}`, '_blank');
                 }}
                 disabled={!(selectedStudent.parentPhone || '').replace(/\D/g, '')}
-                className="flex-1 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="min-h-[44px] flex-1 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 WhatsApp
               </button>
             </div>
-          </div>
-        </div>
-      )}
+            </AppModalFooter>
+          </>
+        ) : null}
+      </AppModal>
     </div>
   );
 }

@@ -82,7 +82,30 @@ export function ClassLiveStudentMobileCalendar({
     [weekSessions, dayIso]
   );
 
-  const hasAny = sessions.length > 0;
+  const slotFallback = useMemo(() => {
+    if (sessions.length > 0) return [] as SessionRow[];
+    const dow = dowFromIso(dayIso);
+    return classSlots
+      .filter((s) => s.day_of_week === dow)
+      .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)))
+      .map(
+        (s): SessionRow => ({
+          id: `slot-${s.id}`,
+          lesson_date: dayIso,
+          start_time: s.start_time,
+          end_time: s.end_time,
+          subject: s.subject,
+          teacher_id: s.teacher_id,
+          teacher_name: s.teacher_name,
+          status: 'scheduled',
+          meeting_link: s.meeting_link
+        })
+      );
+  }, [sessions.length, classSlots, dayIso, dowFromIso]);
+
+  const displaySessions = sessions.length ? sessions : slotFallback;
+  const fromTemplate = sessions.length === 0 && slotFallback.length > 0;
+  const hasAny = displaySessions.length > 0;
 
   return (
     <div className="space-y-3 p-3 sm:p-4">
@@ -113,7 +136,7 @@ export function ClassLiveStudentMobileCalendar({
       </div>
 
       <p className="text-xs font-medium text-slate-600">
-        {formatDateDots(dayIso)} · {sessions.length} oturum
+        {formatDateDots(dayIso)} · {displaySessions.length} {fromTemplate ? 'planlı ders' : 'oturum'}
       </p>
 
       {!hasAny ? (
@@ -122,7 +145,7 @@ export function ClassLiveStudentMobileCalendar({
         </div>
       ) : (
         <ul className="space-y-2.5">
-          {sessions.map((s) => {
+          {displaySessions.map((s) => {
             const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
             const accent = liveSubjectAccent(s.subject);
             const sessionLink = String(s.join_link || s.meeting_link || '').trim();
@@ -150,8 +173,15 @@ export function ClassLiveStudentMobileCalendar({
                     </p>
                   </div>
                   {s.status === 'scheduled' ? (
-                    <span className="shrink-0 rounded-md bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-800">
-                      Planlı
+                    <span
+                      className={cn(
+                        'shrink-0 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase',
+                        fromTemplate
+                          ? 'border border-dashed border-indigo-300 bg-indigo-50 text-indigo-800'
+                          : 'bg-emerald-500/15 text-emerald-800'
+                      )}
+                    >
+                      {fromTemplate ? 'Haftalık plan' : 'Planlı'}
                     </span>
                   ) : null}
                 </div>

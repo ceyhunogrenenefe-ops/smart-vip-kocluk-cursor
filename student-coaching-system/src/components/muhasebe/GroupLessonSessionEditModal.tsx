@@ -1,6 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { Pencil } from 'lucide-react';
-import { AppModal } from '../ui/AppModal';
+import {
+  AppModal,
+  AppModalBody,
+  AppModalFooter,
+  AppModalForm,
+  AppModalHeader
+} from '../ui/AppModal';
 import { apiFetch } from '../../lib/session';
 import type { GroupLessonSummarySession } from '../liveLessons/GroupLessonPaymentSummary';
 
@@ -65,16 +71,16 @@ export function GroupLessonSessionEditModal({ session, teacherOptions, onClose, 
 
   return (
     <AppModal open={Boolean(session)} onClose={onClose} panelClassName="max-w-lg">
-      <div className="p-5 sm:p-6 space-y-4">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
-            <Pencil className="h-5 w-5 text-indigo-600" />
-            Oturum düzenle (muhasebe)
-          </h3>
-          <button type="button" className="text-sm text-slate-500 hover:text-slate-800" onClick={onClose}>
-            Kapat
-          </button>
-        </div>
+      <AppModalHeader>
+        <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
+          <Pencil className="h-5 w-5 text-indigo-600" />
+          Oturum düzenle (muhasebe)
+        </h3>
+        <button type="button" className="text-sm text-slate-500 hover:text-slate-800" onClick={onClose}>
+          Kapat
+        </button>
+      </AppModalHeader>
+      <AppModalBody className="space-y-4">
         <label className="block text-sm">
           <span className="text-slate-600">Konu</span>
           <input
@@ -138,20 +144,22 @@ export function GroupLessonSessionEditModal({ session, teacherOptions, onClose, 
             <option value="cancelled">İptal</option>
           </select>
         </label>
-        <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-          <button type="button" className="rounded-lg border border-slate-200 px-4 py-2 text-sm" onClick={onClose}>
+      </AppModalBody>
+      <AppModalFooter>
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-2">
+          <button type="button" className="min-h-[44px] rounded-lg border border-slate-200 px-4 py-2 text-sm" onClick={onClose}>
             Vazgeç
           </button>
           <button
             type="button"
             disabled={busy}
             onClick={() => void save()}
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+            className="min-h-[44px] rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
           >
             {busy ? 'Kaydediliyor…' : 'Kaydet'}
           </button>
         </div>
-      </div>
+      </AppModalFooter>
     </AppModal>
   );
 }

@@ -1,6 +1,7 @@
 import { apiFetch } from '../session';
 import type {
   EduAnimation,
+  EduAnimationPoolItem,
   EduClass,
   EduHomework,
   EduHomeworkSubmission,
@@ -88,10 +89,100 @@ export async function deleteEduAnimation(id: string): Promise<void> {
   await parseJson(res);
 }
 
+export async function fetchEduAnimationPool(params?: {
+  program?: string;
+  class_level?: string;
+  subject_name?: string;
+  q?: string;
+}): Promise<EduAnimationPoolItem[]> {
+  const sp = new URLSearchParams({ resource: 'animation-pool' });
+  if (params?.program) sp.set('program', params.program);
+  if (params?.class_level) sp.set('class_level', params.class_level);
+  if (params?.subject_name) sp.set('subject_name', params.subject_name);
+  if (params?.q) sp.set('q', params.q);
+  const res = await apiFetch(`/api/edu-panel?${sp.toString()}`);
+  const j = await parseJson<{ data: EduAnimationPoolItem[] }>(res);
+  return j.data || [];
+}
+
+export async function uploadEduPoolAnimation(payload: {
+  title: string;
+  program: string;
+  class_level: string;
+  subject_name: string;
+  topic_name: string;
+  file: File;
+}): Promise<EduAnimationPoolItem> {
+  const file_base64 = await fileToBase64(payload.file);
+  const res = await apiFetch('/api/edu-panel?resource=animation-pool', {
+    method: 'POST',
+    body: JSON.stringify({
+      title: payload.title,
+      program: payload.program,
+      class_level: payload.class_level,
+      subject_name: payload.subject_name,
+      topic_name: payload.topic_name,
+      file_name: payload.file.name,
+      file_base64
+    })
+  });
+  const j = await parseJson<{ data: EduAnimationPoolItem }>(res);
+  return j.data;
+}
+
+export async function updateEduPoolAnimation(
+  id: string,
+  patch: Partial<Pick<EduAnimationPoolItem, 'title' | 'program' | 'class_level' | 'subject_name' | 'topic_name'>>
+): Promise<EduAnimationPoolItem> {
+  const res = await apiFetch(`/api/edu-panel?resource=animation-pool&id=${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch)
+  });
+  const j = await parseJson<{ data: EduAnimationPoolItem }>(res);
+  return j.data;
+}
+
+export async function deleteEduPoolAnimation(id: string): Promise<void> {
+  const res = await apiFetch(`/api/edu-panel?resource=animation-pool&id=${encodeURIComponent(id)}`, {
+    method: 'DELETE'
+  });
+  await parseJson(res);
+}
+
+export async function attachPoolAnimationToLessonRow(
+  lessonRowId: string,
+  poolId: string
+): Promise<EduAnimation> {
+  const res = await apiFetch('/api/edu-panel?resource=animation-attach-pool', {
+    method: 'POST',
+    body: JSON.stringify({ lesson_row_id: lessonRowId, pool_id: poolId })
+  });
+  const j = await parseJson<{ data: EduAnimation }>(res);
+  return j.data;
+}
+
 /** Animasyon HTML — doğru charset ile; iframe için blob URL üretin. */
 export async function fetchAnimationHtml(animationId: string): Promise<string> {
   const res = await apiFetch(
     `/api/edu-panel?resource=animation-html&animation_id=${encodeURIComponent(animationId)}`
+  );
+  if (!res.ok) {
+    let msg = res.statusText;
+    try {
+      const j = (await res.json()) as { error?: string; hint?: string };
+      msg = j.hint || j.error || msg;
+    } catch {
+      /* text/html hata gövdesi olabilir */
+    }
+    throw new Error(msg || 'Animasyon yüklenemedi');
+  }
+  return res.text();
+}
+
+/** Havuz animasyonu HTML — önizleme için blob URL üretin. */
+export async function fetchPoolAnimationHtml(poolId: string): Promise<string> {
+  const res = await apiFetch(
+    `/api/edu-panel?resource=pool-animation-html&pool_id=${encodeURIComponent(poolId)}`
   );
   if (!res.ok) {
     let msg = res.statusText;
@@ -115,6 +206,7 @@ export async function createEduHomework(
     description?: string;
     due_date?: string;
     status?: HomeworkStatus;
+    pool_animation_id?: string;
   }
 ): Promise<EduHomework> {
   const res = await apiFetch('/api/edu-panel?resource=homework', {

@@ -101,6 +101,32 @@ function bulkTemplateUsesExamVars(template: string) {
   return /\{\{\s*[234]\s*\}\}|\{\{\s*(date|time|link)\s*\}\}/i.test(template);
 }
 
+interface CoachWaPrefsPayload {
+  coach_id: string;
+  prefs: {
+    daily_report_enabled: boolean;
+    daily_report_scope: string;
+    updated_at: string | null;
+  };
+  gateway: {
+    connected: boolean;
+    label: string;
+    status: string;
+    error: string | null;
+    session_id: string | null;
+  };
+  recent_logs: Array<{
+    id: string;
+    student_id: string | null;
+    kind: string;
+    phone: string | null;
+    status: string;
+    sent_at: string;
+    error: string | null;
+    meta_template_name: string | null;
+  }>;
+}
+
 interface WaScheduleDTO {
   coach_id: string;
   is_active: boolean;
@@ -285,6 +311,10 @@ export default function CoachWhatsAppSettings() {
   const [gwSchedulesMsg, setGwSchedulesMsg] = useState('');
   const [gwSchedules, setGwSchedules] = useState<WaGatewayScheduleDTO[]>([]);
   const [gwRestartCampaignIds, setGwRestartCampaignIds] = useState<Record<string, boolean>>({});
+  const [waPrefsLoading, setWaPrefsLoading] = useState(false);
+  const [waPrefsSaving, setWaPrefsSaving] = useState(false);
+  const [waPrefsMsg, setWaPrefsMsg] = useState('');
+  const [waPrefs, setWaPrefs] = useState<CoachWaPrefsPayload | null>(null);
   const fetchGenRef = useRef(0);
   const selectedStudent = students.find((s) => s.id === selectedStudentId);
   const isConnected = status === 'connected';
@@ -331,6 +361,54 @@ export default function CoachWhatsAppSettings() {
       setWaScheduleLoading(false);
     }
   }, []);
+
+  const loadWaPrefs = useCallback(async () => {
+    if (!getAuthToken()) {
+      setWaPrefs(null);
+      return;
+    }
+    setWaPrefsLoading(true);
+    setWaPrefsMsg('');
+    try {
+      const res = await apiFetch('/api/coach-whatsapp-notification-prefs');
+      const payload = (await res.json().catch(() => ({}))) as CoachWaPrefsPayload & { error?: string };
+      if (!res.ok) {
+        setWaPrefs(null);
+        setWaPrefsMsg(payload?.error || 'WhatsApp ayarları yüklenemedi.');
+        return;
+      }
+      setWaPrefs(payload);
+    } catch {
+      setWaPrefs(null);
+      setWaPrefsMsg('WhatsApp ayarları yüklenemedi.');
+    } finally {
+      setWaPrefsLoading(false);
+    }
+  }, []);
+
+  const saveDailyReportPref = async (enabled: boolean) => {
+    setWaPrefsSaving(true);
+    setWaPrefsMsg('');
+    try {
+      const res = await apiFetch('/api/coach-whatsapp-notification-prefs', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ daily_report_enabled: enabled, daily_report_scope: enabled ? 'all' : 'none' })
+      });
+      const j = (await res.json().catch(() => ({}))) as { error?: string; prefs?: CoachWaPrefsPayload['prefs'] };
+      if (!res.ok) throw new Error(j?.error || res.statusText);
+      setWaPrefsMsg(enabled ? 'Günlük rapor hatırlatması açıldı.' : 'Günlük rapor hatırlatması kapatıldı.');
+      void loadWaPrefs();
+    } catch (e) {
+      setWaPrefsMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setWaPrefsSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadWaPrefs();
+  }, [loadWaPrefs]);
 
   useEffect(() => {
     void loadWaSchedule();
@@ -1465,11 +1543,142 @@ export default function CoachWhatsAppSettings() {
           <p className="text-sm font-medium uppercase tracking-wider text-emerald-200/90">Koç · Mesajlaşma</p>
           <h1 className="mt-1 text-2xl font-bold md:text-3xl">WhatsApp merkezi</h1>
           <p className="mt-2 max-w-xl text-sm text-emerald-100/95">
-            Otomatik bildirimler <strong className="text-white">Meta Cloud API</strong> üzerinden gider. İsteğe bağlı{' '}
-            <strong className="text-white">QR gateway</strong> ile kendi WhatsApp hattınızdan anlık mesaj atabilirsiniz.
+            Otomatik bildirimler bildirim türüne göre{' '}
+            <strong className="text-white">Koç WhatsApp Gateway</strong> veya{' '}
+            <strong className="text-white">Meta WhatsApp API</strong> üzerinden gider. Gateway ile kendi hattınızdan
+            anlık mesaj ve koç kapsamlı hatırlatmalar gönderilir.
           </p>
         </div>
       </div>
+
+      {/* WhatsApp Ayarları — gateway özeti, bildirim tercihleri, mesaj geçmişi */}
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center gap-4 border-b border-slate-100 bg-gradient-to-r from-teal-50 to-emerald-50/60 px-6 py-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-teal-600 text-white shadow-md">
+            <MessageCircle className="h-6 w-6" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-lg font-semibold text-slate-900">WhatsApp Ayarları</h2>
+            <p className="text-sm text-slate-600">
+              Gateway bağlantınız, günlük rapor hatırlatması ve son otomasyon mesajlarınız.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              void loadWaPrefs();
+              void fetchStatus();
+            }}
+            disabled={waPrefsLoading || !hasServerJwt}
+            className="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Yenile
+          </button>
+        </div>
+        <div className="grid gap-6 p-6 lg:grid-cols-3">
+          <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/80 p-4">
+            <h3 className="text-sm font-semibold text-slate-900">Gateway yönetimi</h3>
+            <div className="flex items-center gap-2 text-sm">
+              <CheckCircle
+                className={`h-5 w-5 ${isConnected || waPrefs?.gateway?.connected ? 'text-emerald-600' : 'text-slate-300'}`}
+              />
+              <span>
+                Durum:{' '}
+                <strong>{waPrefs?.gateway?.label || connectionLabel}</strong>
+              </span>
+            </div>
+            <p className="text-xs text-slate-500">
+              Son bağlantı: {prettyDate(lastConnectedAt)}
+            </p>
+            <p className="text-xs text-slate-500">
+              Bağlantı sağlığı:{' '}
+              {waPrefs?.gateway?.error
+                ? waPrefs.gateway.error
+                : isConnected || waPrefs?.gateway?.connected
+                  ? 'Sağlıklı'
+                  : 'Gateway bağlı değil — otomatik hatırlatmalar gönderilmez'}
+            </p>
+            <div className="flex flex-wrap gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => void startConnection()}
+                disabled={isBusy || !canUseGateway}
+                className="rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-700 disabled:opacity-50"
+              >
+                Gateway bağla
+              </button>
+              <button
+                type="button"
+                onClick={() => void resetGatewaySession()}
+                disabled={isBusy || !canUseGateway}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Yeniden bağlan
+              </button>
+              <button
+                type="button"
+                onClick={() => void disconnect()}
+                disabled={isBusy || !canUseGateway}
+                className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-800 hover:bg-rose-100 disabled:opacity-50"
+              >
+                Bağlantıyı kaldır
+              </button>
+            </div>
+            <a href="#wa-gateway-qr" className="text-xs font-medium text-teal-700 hover:underline">
+              QR ve detaylı gateway ayarları ↓
+            </a>
+          </div>
+
+          <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/80 p-4">
+            <h3 className="text-sm font-semibold text-slate-900">Günlük rapor ayarları</h3>
+            <p className="text-xs text-slate-600">
+              Rapor girmeyen öğrencilerinize saat 22:00 (İstanbul) civarında hatırlatma — yalnızca sizin gateway
+              hesabınızdan gider.
+            </p>
+            {waPrefsLoading ? (
+              <p className="flex items-center gap-2 text-sm text-slate-600">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Yükleniyor…
+              </p>
+            ) : (
+              <label className="flex cursor-pointer items-center gap-3 text-sm font-medium text-slate-800">
+                <input
+                  type="checkbox"
+                  checked={waPrefs?.prefs?.daily_report_enabled !== false}
+                  disabled={waPrefsSaving || !hasServerJwt}
+                  onChange={(e) => void saveDailyReportPref(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                />
+                Günlük rapor hatırlatması (tüm öğrenciler)
+              </label>
+            )}
+            {waPrefsMsg ? <p className="text-xs text-slate-600">{waPrefsMsg}</p> : null}
+          </div>
+
+          <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/80 p-4 lg:col-span-1">
+            <h3 className="text-sm font-semibold text-slate-900">Mesaj geçmişi</h3>
+            <ul className="max-h-52 space-y-2 overflow-auto text-xs">
+              {(waPrefs?.recent_logs || []).length ? (
+                waPrefs!.recent_logs.map((l) => (
+                  <li key={l.id} className="rounded-lg border border-slate-100 bg-white px-2 py-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-slate-800">{l.kind}</span>
+                      <span>{l.status === 'sent' ? '🟢' : '🔴'}</span>
+                    </div>
+                    <p className="text-slate-500">{l.phone || '—'}</p>
+                    <p className="text-slate-400">
+                      {l.sent_at ? new Date(l.sent_at).toLocaleString('tr-TR') : ''}
+                    </p>
+                    {l.error ? <p className="text-rose-700">{l.error}</p> : null}
+                  </li>
+                ))
+              ) : (
+                <li className="text-slate-500">Henüz kayıt yok.</li>
+              )}
+            </ul>
+          </div>
+        </div>
+      </section>
 
       <WhatsAppMerkeziPanel />
 
@@ -2001,7 +2210,7 @@ export default function CoachWhatsAppSettings() {
       </section>
 
       {/* 2 — QR Gateway */}
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <section id="wa-gateway-qr" className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-wrap items-center gap-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50/80 to-white px-6 py-4">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-md">
             <Smartphone className="h-6 w-6" />

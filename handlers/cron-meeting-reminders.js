@@ -45,8 +45,8 @@ export default async function handler(req, res) {
       const { data: student } = await supabaseAdmin.from('students').select('*').eq('id', m.student_id).maybeSingle();
       if (!student) continue;
       const phones = await getStudentPhones(student);
-      if (!phones.length || !metaReady) {
-        log.push({ id: m.id, note: metaReady ? 'no_phone' : 'missing_meta_whatsapp_env' });
+      if (!phones.length) {
+        log.push({ id: m.id, note: 'no_phone' });
         continue;
       }
 
@@ -70,7 +70,8 @@ export default async function handler(req, res) {
           meetingId: m.id,
           kind: 'whatsapp_reminder_10m',
           recipientE164: phones[0],
-          body: bodyText
+          body: bodyText,
+          coachId: m.coach_id || student.coach_id || null
         });
         if (r.ok && !r.skipped) {
           await supabaseAdmin.from('meetings').update({ whatsapp_reminder_sent: true, updated_at: new Date().toISOString() }).eq('id', m.id);
@@ -101,7 +102,8 @@ export default async function handler(req, res) {
           meetingId: meet.id,
           kind: 'whatsapp_reminder_10m',
           recipientE164: f.recipient_e164,
-          body: reminderBodyText(meet)
+          body: reminderBodyText(meet),
+          coachId: meet.coach_id || null
         });
         if (r.ok && !r.skipped) {
           await supabaseAdmin

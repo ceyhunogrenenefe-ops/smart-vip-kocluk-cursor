@@ -21,7 +21,8 @@ import {
   Flame,
   Timer,
   FileText,
-  UserPlus
+  UserPlus,
+  BookOpen
 } from 'lucide-react';
 import {
   BarChart,
@@ -220,7 +221,7 @@ export default function CoachDashboard() {
           <div className="text-right">
             <p className="text-4xl font-bold">{myStudents.length}</p>
             <p className="text-purple-200">Öğrenci Sayınız</p>
-            <div className="mt-3 flex flex-col sm:flex-row gap-2 justify-end">
+            <div className="mt-3 flex flex-col sm:flex-row flex-wrap gap-2 justify-end">
               <button
                 type="button"
                 onClick={() => navigate('/students?add=1')}
@@ -228,6 +229,14 @@ export default function CoachDashboard() {
               >
                 <UserPlus className="w-4 h-4" />
                 Öğrenci ekle
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/coach-kilavuz')}
+                className="px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-sm flex items-center justify-center gap-1.5"
+              >
+                <BookOpen className="w-4 h-4" />
+                Kullanım kılavuzu
               </button>
               <button
                 type="button"

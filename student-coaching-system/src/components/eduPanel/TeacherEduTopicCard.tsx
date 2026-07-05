@@ -10,7 +10,8 @@ import {
   MessageCircle,
   Pencil,
   Trash2,
-  Upload
+  Upload,
+  X
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp } from '../../context/AppContext';
@@ -43,6 +44,7 @@ type Props = {
   onPreview: (animationId: string) => void;
   onDeleteAnimation: (id: string) => void;
   onAddHomework: () => void;
+  onOpenPoolPicker: () => void;
   onPublish: () => void;
   onEdit: (patch: Partial<LessonRowFormValues>) => Promise<void>;
   onDeleteRow: () => void;
@@ -62,6 +64,7 @@ export default function TeacherEduTopicCard({
   onPreview,
   onDeleteAnimation,
   onAddHomework,
+  onOpenPoolPicker,
   onPublish,
   onEdit,
   onDeleteRow
@@ -214,6 +217,11 @@ export default function TeacherEduTopicCard({
                         <Clapperboard className="h-4 w-4 shrink-0 text-violet-500" />
                         <span className="min-w-0 flex-1 truncate text-sm text-slate-800">
                           {a.original_name}
+                          {a.pool_id ? (
+                            <span className="ml-1.5 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">
+                              Havuz
+                            </span>
+                          ) : null}
                         </span>
                         <button
                           type="button"
@@ -340,6 +348,38 @@ export default function TeacherEduTopicCard({
                       }
                     />
                   </label>
+                  {hwDraft.pool_animation_id ? (
+                    <div className="flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50/50 px-3 py-2 text-xs">
+                      <Clapperboard className="h-4 w-4 shrink-0 text-violet-600" />
+                      <span className="min-w-0 flex-1 truncate text-violet-900">
+                        {hwDraft.pool_animation_title || 'Seçili animasyon'}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          onHwDraftChange({
+                            ...hwDraft,
+                            pool_animation_id: undefined,
+                            pool_animation_title: undefined
+                          })
+                        }
+                        className="rounded p-1 text-slate-500 hover:bg-white"
+                        title="Animasyonu kaldır"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ) : null}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={onOpenPoolPicker}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-800 hover:bg-violet-100 disabled:opacity-50"
+                  >
+                    <Clapperboard className="h-4 w-4" />
+                    Animasyon Seç
+                  </button>
                   <button
                     type="button"
                     disabled={

@@ -31,17 +31,18 @@ import {
   patchWeeklyPlannerEntry,
 } from '../../lib/weeklyPlannerApi';
 import { COACH_GOAL_QUANTITY_UNITS } from '../../lib/coachGoalUnits';
-import { effectivePlannerEntryDone } from '../../lib/coachGoalAnalytics';
+import { effectivePlannerEntryDone, completedForCoachGoal } from '../../lib/coachGoalAnalytics';
 import { defaultGoalUnitForSubject, sortSubjectsWithStudyTracks } from '../../lib/studyTrackSubjects';
 import {
   isTopicMarkedCompleted,
   resolveTopicLabelForTracking
 } from '../../lib/topicProgressSync';
 import { WeeklyPlannerStudyModal } from './WeeklyPlannerStudyModal';
+import { EtutPlannerEntryModal } from '../etut/EtutPlannerEntryModal';
+import { isEtutSubject } from '../../lib/etutSession';
 import { DailyScreenTimeChart } from './DailyScreenTimeChart';
 import { fetchScreenTimeLogs } from '../../lib/screenTimeApi';
 import { mergeScreenTimeByDate } from '../../lib/mergeScreenTimeByDate';
-import { fetchWeeklyEntriesScreenTimeForStudent } from '../../lib/weeklyPlannerApi';
 import { subjectPlannerStyle } from './subjectPlannerStyle';
 import { cn } from '../../lib/utils';
 import { useMobileAppShell } from '../../hooks/useMobileAppShell';
@@ -218,6 +219,7 @@ export function WeeklyPlannerCalendar({
   const [slotContext, setSlotContext] = useState<{ date: string; startTime: string; endTime: string } | null>(null);
   const [activeEntry, setActiveEntry] = useState<WeeklyPlannerEntryRow | null>(null);
   const [studyModalEntry, setStudyModalEntry] = useState<WeeklyPlannerEntryRow | null>(null);
+  const [etutPlannerEntry, setEtutPlannerEntry] = useState<WeeklyPlannerEntryRow | null>(null);
 
   const [newGoalSubject, setNewGoalSubject] = useState('');
   const [newGoalTitle, setNewGoalTitle] = useState('');
@@ -290,6 +292,7 @@ export function WeeklyPlannerCalendar({
 
   /** Çift tıklama / yarış: aynı işlem iki kez API çağırmasın */
   const plannerMutateLock = useRef(false);
+  const reloadSeq = useRef(0);
   const [plannerUiBusy, setPlannerUiBusy] = useState(false);
   const runPlannerMutation = useCallback(async (fn: () => Promise<void>) => {
     if (plannerMutateLock.current) return;
@@ -303,50 +306,87 @@ export function WeeklyPlannerCalendar({
     }
   }, []);
 
-  const reload = useCallback(async () => {
-    if (!studentId) return;
-    setLoading(true);
-    setErr('');
-    try {
-      const g = await fetchCoachWeeklyGoals(studentId, weekStartStr);
-      let entryFrom = weekStartStr;
-      let entryTo = weekEndStr;
-      for (const goal of g) {
-        const { start, end } = goalEffectiveSpan(goal, weekStartStr, weekEndStr);
-        if (start < entryFrom) entryFrom = start;
-        if (end > entryTo) entryTo = end;
-      }
-      const e = await fetchWeeklyPlannerEntries(studentId, entryFrom, entryTo);
-      setGoals(g);
-      setEntries(e);
+  const loadScreenTimeForWeek = useCallback(
+    async (seq: number) => {
       setScreenTimeLoading(true);
       try {
-        const [st, weeklyRows] = await Promise.all([
-          fetchScreenTimeLogs(studentId, weekStartStr, weekEndStr),
-          fetchWeeklyEntriesScreenTimeForStudent(studentId, weekStartStr, weekEndStr).catch(
-            () => [] as Awaited<ReturnType<typeof fetchWeeklyEntriesScreenTimeForStudent>>
-          )
-        ]);
+        const weeklyRows = studentWeeklyEntries
+          .filter((e) => e.date >= weekStartStr && e.date <= weekEndStr)
+          .map((e) => ({
+            student_id: studentId,
+            date: e.date,
+            screen_time_minutes: e.screenTimeMinutes ?? null,
+          }));
+        const st = await fetchScreenTimeLogs(studentId, weekStartStr, weekEndStr);
+        if (seq !== reloadSeq.current) return;
         const dedicated = new Map<string, number>();
         for (const row of st) {
           dedicated.set(String(row.log_date).slice(0, 10), Number(row.screen_minutes) || 0);
         }
         setScreenTimeByDate(mergeScreenTimeByDate(dedicated, weeklyRows));
       } catch {
-        setScreenTimeByDate(new Map());
+        if (seq === reloadSeq.current) setScreenTimeByDate(new Map());
       } finally {
-        setScreenTimeLoading(false);
+        if (seq === reloadSeq.current) setScreenTimeLoading(false);
       }
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Yükleme hatası');
-    } finally {
-      setLoading(false);
-    }
-  }, [studentId, weekStartStr, weekEndStr]);
+    },
+    [studentId, weekStartStr, weekEndStr, studentWeeklyEntries]
+  );
+
+  const reload = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!studentId) return;
+      const seq = ++reloadSeq.current;
+      if (!opts?.silent) setLoading(true);
+      setErr('');
+      try {
+        const [g, eWeek] = await Promise.all([
+          fetchCoachWeeklyGoals(studentId, weekStartStr),
+          fetchWeeklyPlannerEntries(studentId, weekStartStr, weekEndStr),
+        ]);
+        if (seq !== reloadSeq.current) return;
+
+        let entryFrom = weekStartStr;
+        let entryTo = weekEndStr;
+        for (const goal of g) {
+          const { start, end } = goalEffectiveSpan(goal, weekStartStr, weekEndStr);
+          if (start < entryFrom) entryFrom = start;
+          if (end > entryTo) entryTo = end;
+        }
+
+        setGoals(g);
+        setEntries(eWeek);
+        if (!opts?.silent) setLoading(false);
+
+        if (entryFrom < weekStartStr || entryTo > weekEndStr) {
+          const eExtended = await fetchWeeklyPlannerEntries(studentId, entryFrom, entryTo);
+          if (seq !== reloadSeq.current) return;
+          setEntries(eExtended);
+        }
+
+        void loadScreenTimeForWeek(seq);
+      } catch (e) {
+        if (seq !== reloadSeq.current) return;
+        setErr(e instanceof Error ? e.message : 'Yükleme hatası');
+        if (!opts?.silent) setLoading(false);
+      }
+    },
+    [studentId, weekStartStr, weekEndStr, loadScreenTimeForWeek]
+  );
 
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    const onEtutSaved = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ studentId?: string }>).detail;
+      if (detail?.studentId && detail.studentId !== studentId) return;
+      void reload({ silent: true });
+    };
+    window.addEventListener('coaching:etut-report-saved', onEtutSaved);
+    return () => window.removeEventListener('coaching:etut-report-saved', onEtutSaved);
+  }, [studentId, reload]);
 
   useEffect(() => {
     setNewGoalSubject('');
@@ -359,8 +399,18 @@ export function WeeklyPlannerCalendar({
   }, [weekStartStr, weekEndStr]);
 
   useEffect(() => {
-    const id = window.setInterval(() => void reload(), 8000);
-    return () => window.clearInterval(id);
+    const tick = () => {
+      if (document.visibilityState === 'visible') void reload({ silent: true });
+    };
+    const id = window.setInterval(tick, 45000);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void reload({ silent: true });
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
+    };
   }, [reload]);
 
   const dayDates = useMemo(
@@ -375,10 +425,7 @@ export function WeeklyPlannerCalendar({
         (e) => e.coach_goal_id === g.id && e.planner_date >= gStart && e.planner_date <= gEnd
       );
       const plannedSum = rel.reduce((s, e) => s + Number(e.planned_quantity || 0), 0);
-      const completedSum = rel.reduce(
-        (s, e) => s + effectivePlannerEntryDone(g, e, studentWeeklyEntries),
-        0
-      );
+      const completedSum = completedForCoachGoal(g, studentWeeklyEntries, gStart, gEnd, entries);
       const target = Number(g.target_quantity || 0);
       const remaining = Math.max(0, target - plannedSum);
       const over = plannedSum > target;
@@ -1036,8 +1083,38 @@ export function WeeklyPlannerCalendar({
     [canManageGoals, moveGoalToAdjacentWeek]
   );
 
-  const cellEntries = (date: string, slot: PlannerTimeSlot) =>
-    entries.filter((e) => e.planner_date === date && entryMatchesPlannerSlot(e.start_time, slot));
+  const entriesByCellKey = useMemo(() => {
+    const map = new Map<string, WeeklyPlannerEntryRow[]>();
+    for (const e of entries) {
+      const em = timeToMinutes(e.start_time);
+      if (em == null) continue;
+      const slot = timeSlots.find((s) => em >= s.startMinutes && em < s.endMinutes);
+      if (!slot) continue;
+      const key = `${e.planner_date}:${slot.start}`;
+      const arr = map.get(key) ?? [];
+      arr.push(e);
+      map.set(key, arr);
+    }
+    return map;
+  }, [entries, timeSlots]);
+
+  const openPlannerBlock = useCallback(
+    (en: WeeklyPlannerEntryRow) => {
+      if (!canEditPlan) return;
+      if (studyLogOnClick && isEtutSubject(en.subject)) {
+        setEtutPlannerEntry(en);
+        return;
+      }
+      if (studyLogOnClick) setStudyModalEntry(en);
+      else openEdit(en);
+    },
+    [canEditPlan, studyLogOnClick]
+  );
+
+  const cellEntries = useCallback(
+    (date: string, slot: PlannerTimeSlot) => entriesByCellKey.get(`${date}:${slot.start}`) ?? [],
+    [entriesByCellKey]
+  );
 
   const pastSlot = (dateStr: string, slotStart: string) => {
     const iso = `${dateStr}T${slotStart}:00`;
@@ -1636,8 +1713,7 @@ export function WeeklyPlannerCalendar({
                                   disabled={!canEditPlan}
                                   onClick={() => {
                                     if (!canEditPlan) return;
-                                    if (studyLogOnClick) setStudyModalEntry(en);
-                                    else openEdit(en);
+                                    openPlannerBlock(en);
                                   }}
                                   className={cn(
                                     'w-full rounded-xl border px-3 py-3 text-left shadow-sm transition active:scale-[0.99]',
@@ -1854,11 +1930,7 @@ export function WeeklyPlannerCalendar({
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   if (!canEditPlan) return;
-                                  if (studyLogOnClick) {
-                                    setStudyModalEntry(en);
-                                  } else {
-                                    openEdit(en);
-                                  }
+                                  openPlannerBlock(en);
                                 }}
                                 className={cn(
                                   'text-[11px] leading-snug rounded-lg px-2 py-1.5 mb-1 border shadow-sm backdrop-blur-[1px] transition hover:brightness-[1.03] dark:hover:brightness-110',
@@ -2104,6 +2176,20 @@ export function WeeklyPlannerCalendar({
             setStudyModalEntry(null);
             openEdit(en);
           }}
+        />
+      ) : null}
+
+      {etutPlannerEntry ? (
+        <EtutPlannerEntryModal
+          entry={etutPlannerEntry}
+          studentId={studentId}
+          classLevel={classLevel}
+          institutionId={plannerStudent?.institutionId || institution?.id || null}
+          onStudyLog={() => {
+            setStudyModalEntry(etutPlannerEntry);
+            setEtutPlannerEntry(null);
+          }}
+          onClose={() => setEtutPlannerEntry(null)}
         />
       ) : null}
 

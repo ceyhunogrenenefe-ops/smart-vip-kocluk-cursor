@@ -96,7 +96,7 @@ export default async function handler(req, res) {
       const { data: studentRows, error: stErr } = await supabaseAdmin
         .from('students')
         .select(
-          'id, name, phone, parent_phone, class_level, class_label, group_name, institution_id, whatsapp_automation_enabled'
+          'id, name, phone, parent_phone, class_level, class_label, group_name, institution_id, whatsapp_automation_enabled, coach_id'
         )
         .in('id', studentIds);
       if (stErr) throw stErr;
@@ -197,7 +197,8 @@ export default async function handler(req, res) {
             phone: e164,
             templateRow,
             vars: baseVars,
-            templateType
+            templateType,
+            coachId: role === 'parent' ? student.coach_id || null : null
           });
           const preview = sent.bodyPreview || '';
           const { error: insErr } = await supabaseAdmin.from('message_logs').insert({

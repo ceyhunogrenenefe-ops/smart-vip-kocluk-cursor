@@ -24,6 +24,13 @@ import {
   BookMarked,
   PlusCircle
 } from 'lucide-react';
+import {
+  AppModal,
+  AppModalBody,
+  AppModalFooter,
+  AppModalForm,
+  AppModalHeader
+} from '../components/ui/AppModal';
 
 // YKS sınıfları için uygun dersleri tanımla - mockData topicPool ile uyumlu
 const YKS_SUBJECTS: Record<string, string[]> = {
@@ -548,15 +555,22 @@ export default function Tracking() {
         </div>
       )}
 
-      {/* Add/Edit Modal */}
-      {showForm && selectedStudent && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4">
-          <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-6 border-b border-gray-100">
+      <AppModal
+        open={Boolean(showForm && selectedStudent)}
+        onClose={() => {
+          setShowForm(false);
+          resetForm();
+        }}
+        panelClassName="max-w-3xl"
+      >
+        {selectedStudent ? (
+          <>
+            <AppModalHeader>
               <h3 className="text-xl font-bold text-slate-800">
                 {editingEntry ? 'Kayıt Düzenle' : 'Yeni Kayıt'} - {selectedStudent.name}
               </h3>
               <button
+                type="button"
                 onClick={() => {
                   setShowForm(false);
                   resetForm();
@@ -565,9 +579,10 @@ export default function Tracking() {
               >
                 <X className="w-5 h-5" />
               </button>
-            </div>
+            </AppModalHeader>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <AppModalForm onSubmit={handleSubmit}>
+              <AppModalBody className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Ders */}
                 <div>
@@ -835,31 +850,34 @@ export default function Tracking() {
                   </div>
                 )}
               </div>
+              </AppModalBody>
 
-              <div className="flex justify-end gap-3 pt-4">
+              <AppModalFooter>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
                 <button
                   type="button"
                   onClick={() => {
                     setShowForm(false);
                     resetForm();
                   }}
-                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="min-h-[44px] px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                 >
                   İptal
                 </button>
                 <button
                   type="submit"
                   disabled={!!error}
-                  className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="min-h-[44px] px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Save className="w-4 h-4" />
                   {editingEntry ? 'Güncelle' : 'Kaydet'}
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+              </AppModalFooter>
+            </AppModalForm>
+          </>
+        ) : null}
+      </AppModal>
     </div>
   );
 }

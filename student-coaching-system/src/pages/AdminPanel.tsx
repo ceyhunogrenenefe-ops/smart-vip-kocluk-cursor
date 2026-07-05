@@ -408,7 +408,7 @@ export default function AdminPanel() {
     const result = await impersonate(userId);
     if (!result.success) return;
     if (role === 'coach') navigate('/coach-dashboard');
-    else if (role === 'student') navigate('/student-dashboard');
+    else if (role === 'student') navigate('/weekly-planner');
     else navigate('/dashboard');
   };
 

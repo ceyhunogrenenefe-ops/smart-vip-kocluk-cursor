@@ -46,6 +46,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/student-analytics': ['student'],
   '/student-meetings': ['student'],
   '/coach-dashboard': ['coach'],
+  '/coach-kilavuz': ['coach'],
   '/coach-reports': ['coach'],
   '/coach-whatsapp-settings': ['super_admin', 'admin', 'coach', 'teacher'],
   '/meetings': ['super_admin', 'admin', 'coach'],

@@ -494,8 +494,15 @@ export default function ClassLiveClassManager({
         {classes.length === 0 ? (
           <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center">
             <Users className="mx-auto h-8 w-8 text-slate-300" aria-hidden />
-            <p className="mt-2 text-sm font-medium text-slate-600">Henüz sınıf yok</p>
-            {canManageClasses ? (
+            <p className="mt-2 text-sm font-medium text-slate-600">
+              {isStudentView ? 'Henüz canlı grup sınıfına atanmadınız' : 'Henüz sınıf yok'}
+            </p>
+            {isStudentView ? (
+              <p className="mt-1 text-xs text-slate-500">
+                Yöneticiniz sizi bir sınıfa eklediğinde dersler burada görünür. Bire bir özel dersler için üstteki
+                «Canlı özel derslerim» sekmesine bakın.
+              </p>
+            ) : canManageClasses ? (
               <p className="mt-1 text-xs text-slate-500">«Yeni sınıf» ile ilk grubunuzu oluşturun.</p>
             ) : null}
           </div>
@@ -612,7 +619,7 @@ export default function ClassLiveClassManager({
           aria-modal="true"
           aria-labelledby="class-edit-title"
         >
-          <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-2xl">
+          <div className="flex max-h-[min(92dvh,900px)] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-2xl">
             <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 sm:px-5">
               <div>
                 <h3 id="class-edit-title" className="text-lg font-bold text-slate-900">
@@ -629,7 +636,7 @@ export default function ClassLiveClassManager({
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="space-y-4 overflow-y-auto px-4 py-4 sm:px-5">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5 [-webkit-overflow-scrolling:touch]">
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="sm:col-span-1">
                   <label className="mb-1 block text-xs font-medium text-slate-600">Sınıf adı</label>
@@ -752,12 +759,12 @@ export default function ClassLiveClassManager({
                 </div>
               ) : null}
             </div>
-            <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 bg-slate-50 px-4 py-3 sm:px-5">
+            <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-slate-100 bg-slate-50 px-4 py-3 pb-safe sm:px-5">
               <button
                 type="button"
                 onClick={closeEdit}
                 disabled={editSaving}
-                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                className="min-h-[44px] rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
                 İptal
               </button>
@@ -765,7 +772,7 @@ export default function ClassLiveClassManager({
                 type="button"
                 disabled={editSaving || !editName.trim()}
                 onClick={() => void submitEdit()}
-                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
               >
                 {editSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                 Kaydet

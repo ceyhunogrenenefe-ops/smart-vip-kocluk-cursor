@@ -4,6 +4,8 @@ import { getTeacherGroupClassStudentScope } from '../api/_lib/teacher-class-scop
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { syncWeeklyEntryPlannerRow } from '../api/_lib/sync-weekly-entry-planner.js';
 import { syncStudentScreenTimeLog } from '../api/_lib/sync-student-screen-time-log.js';
+import { authHttpStatus, isMissingTableError } from '../api/_lib/supabase-schema.js';
+import { withDbTimeout } from '../api/_lib/db-timeout.js';
 
 const canAccessEntry = async (actor, entry) => {
   if (actor.role === 'super_admin') return true;
@@ -29,8 +31,13 @@ export default async function handler(req, res) {
       if (actor.role === 'student' && !actor.student_id) {
         return res.status(200).json({ data: [] });
       }
+      const from = String(req.query.from || '').trim().slice(0, 10);
+      const to = String(req.query.to || '').trim().slice(0, 10);
+      const scopedStudentId = String(req.query.student_id || req.query.studentId || '').trim();
+
       let query = supabaseAdmin.from('weekly_entries').select('*').order('date', { ascending: false });
       if (actor.role === 'admin') {
+        if (!actor.institution_id) return res.status(200).json({ data: [] });
         query = query.eq('institution_id', actor.institution_id);
       }
       if (actor.role === 'teacher') {
@@ -41,16 +48,64 @@ export default async function handler(req, res) {
       }
       if (actor.role === 'student') query = query.eq('student_id', actor.student_id);
       if (actor.role === 'coach') {
-        const { data: students } = await supabaseAdmin
-          .from('students')
-          .select('id')
-          .eq('coach_id', actor.coach_id);
+        if (!actor.coach_id) return res.status(200).json({ data: [] });
+        const { data: students, error: stErr } = await withDbTimeout(
+          supabaseAdmin.from('students').select('id').eq('coach_id', actor.coach_id),
+          8000,
+          'weekly_entries_coach_students'
+        );
+        if (stErr) throw stErr;
         const ids = (students || []).map((s) => s.id);
         if (ids.length === 0) return res.status(200).json({ data: [] });
-        query = query.in('student_id', ids);
+        if (ids.length <= 80) {
+          query = query.in('student_id', ids);
+        } else {
+          const chunks = [];
+          for (let i = 0; i < ids.length; i += 80) chunks.push(ids.slice(i, i + 80));
+          const parts = await Promise.all(
+            chunks.map(async (part) => {
+              let q = supabaseAdmin
+                .from('weekly_entries')
+                .select('*')
+                .in('student_id', part)
+                .order('date', { ascending: false });
+              if (/^\d{4}-\d{2}-\d{2}$/.test(from)) q = q.gte('date', from);
+              if (/^\d{4}-\d{2}-\d{2}$/.test(to)) q = q.lte('date', to);
+              const { data: rows, error: pe } = await withDbTimeout(q, 12000, 'weekly_entries_list_chunk');
+              if (pe) throw pe;
+              return rows || [];
+            })
+          );
+          const merged = parts.flat().sort((a, b) => String(b.date).localeCompare(String(a.date)));
+          return res.status(200).json({ data: merged });
+        }
       }
-      const { data, error } = await query;
-      if (error) throw error;
+      if (scopedStudentId) {
+        if (actor.role === 'student' && scopedStudentId !== String(actor.student_id)) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        if (actor.role === 'coach') {
+          const { data: st } = await supabaseAdmin
+            .from('students')
+            .select('coach_id')
+            .eq('id', scopedStudentId)
+            .maybeSingle();
+          if (!st || st.coach_id !== actor.coach_id) {
+            return res.status(403).json({ error: 'forbidden' });
+          }
+        }
+        query = query.eq('student_id', scopedStudentId);
+      }
+      if (/^\d{4}-\d{2}-\d{2}$/.test(from)) query = query.gte('date', from);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(to)) query = query.lte('date', to);
+
+      const { data, error } = await withDbTimeout(query, 12000, 'weekly_entries_list');
+      if (error) {
+        if (isMissingTableError(error, 'weekly_entries')) {
+          return res.status(200).json({ data: [] });
+        }
+        throw error;
+      }
       return res.status(200).json({ data: data || [] });
     }
 
@@ -180,6 +235,8 @@ export default async function handler(req, res) {
 
     return res.status(405).json({ error: 'method_not_allowed' });
   } catch (e) {
+    const authStatus = authHttpStatus(e);
+    if (authStatus) return res.status(authStatus).json({ error: 'unauthorized' });
     console.error('[weekly-entries]', errorMessage(e), e);
     return res.status(500).json({ error: errorMessage(e) });
   }

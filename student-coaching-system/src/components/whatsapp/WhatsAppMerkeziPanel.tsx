@@ -109,6 +109,24 @@ interface CoachStudentRow {
   lesson_reminder_parent_7d: boolean;
 }
 
+interface NotificationRegistryRow {
+  id: string;
+  template_type: string;
+  name: string;
+  description: string | null;
+  send_channel: 'coach_gateway' | 'meta_api' | null;
+  send_channel_label: string;
+  mode: string;
+  mode_label: string;
+  coach_scoped: boolean;
+  is_active: boolean;
+  template_id: string | null;
+  cron_job_key: string | null;
+  last_sent_at: string | null;
+  cron_state: string | null;
+  allow_meta_fallback: boolean;
+}
+
 interface CenterPayload {
   server_time?: string;
   mode: string;
@@ -118,12 +136,13 @@ interface CenterPayload {
   cron_recent_errors: CronErrorRow[];
   cron_table_missing?: boolean;
   templates: TemplateRow[];
+  notifications_registry?: NotificationRegistryRow[];
   logs: LogRow[];
   live_events: LiveEv[];
   coach_student_summary: CoachStudentRow[];
 }
 
-type InnerTab = 'ozet' | 'sablonlar' | 'cron' | 'log' | 'ogrenciler';
+type InnerTab = 'ozet' | 'bildirimler' | 'sablonlar' | 'cron' | 'log' | 'ogrenciler';
 
 const POLL_MS = 8000;
 
@@ -203,6 +222,7 @@ export default function WhatsAppMerkeziPanel() {
   const [testingType, setTestingType] = useState<string | null>(null);
   const [testMsg, setTestMsg] = useState('');
   const [cronErrorsOpen, setCronErrorsOpen] = useState(false);
+  const [toggleBusy, setToggleBusy] = useState<string | null>(null);
 
   const isAdmin = payload?.mode === 'admin';
 
@@ -274,6 +294,35 @@ export default function WhatsAppMerkeziPanel() {
     }
   };
 
+  const toggleNotificationActive = async (row: NotificationRegistryRow) => {
+    if (!isAdmin || !row.template_id) return;
+    setToggleBusy(row.id);
+    try {
+      const res = await apiFetch('/api/message-templates', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: row.template_id, is_active: !row.is_active })
+      });
+      const j = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(j?.error || res.statusText);
+      void load();
+    } catch (e) {
+      setTestMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setToggleBusy(null);
+    }
+  };
+
+  const channelBadge = (channel: string | null) => {
+    if (channel === 'coach_gateway') {
+      return { emoji: '🟢', label: 'Koç WhatsApp Gateway', cls: 'bg-emerald-50 text-emerald-900 border-emerald-200' };
+    }
+    if (channel === 'meta_api') {
+      return { emoji: '🔵', label: 'Meta WhatsApp API', cls: 'bg-sky-50 text-sky-900 border-sky-200' };
+    }
+    return { emoji: '⚪', label: '—', cls: 'bg-slate-50 text-slate-700 border-slate-200' };
+  };
+
   const summary = payload?.summary;
 
   if (loading && !payload) {
@@ -321,7 +370,7 @@ export default function WhatsAppMerkeziPanel() {
         {(
           [
             ['ozet', 'Özet'],
-            ...(isAdmin ? ([['sablonlar', 'Şablonlar']] as const) : []),
+            ...(isAdmin ? ([['bildirimler', 'Bildirimler'], ['sablonlar', 'Şablonlar']] as const) : []),
             ['cron', 'Cron durumu'],
             ['log', 'Mesaj günlüğü'],
             ['ogrenciler', payload?.mode === 'scoped' ? 'Öğrencilerim' : 'Telefon özeti']
@@ -536,6 +585,109 @@ export default function WhatsAppMerkeziPanel() {
                 <li className="px-4 py-8 text-center text-slate-500">Henüz kayıt yok.</li>
               )}
             </ul>
+          </div>
+        </div>
+      ) : null}
+
+      {/* BİLDİRİMLER */}
+      {innerTab === 'bildirimler' && isAdmin && payload ? (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            <p>
+              Gönderim kanalları konfigürasyon tabanlıdır.{' '}
+              <span className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-xs">
+                🟢 Koç WhatsApp Gateway
+              </span>{' '}
+              koçun kendi QR oturumundan;{' '}
+              <span className="inline-flex items-center gap-1 rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-xs">
+                🔵 Meta WhatsApp API
+              </span>{' '}
+              kurum hesabından gider.
+            </p>
+          </div>
+          <div className="overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <table className="min-w-full text-left text-sm">
+              <thead className="sticky top-0 bg-slate-50 text-xs font-semibold uppercase text-slate-500">
+                <tr>
+                  <th className="px-3 py-3">Bildirim</th>
+                  <th className="px-3 py-3">Kanal</th>
+                  <th className="px-3 py-3">Durum</th>
+                  <th className="px-3 py-3">Otomatik / Manuel</th>
+                  <th className="px-3 py-3">Son gönderim</th>
+                  <th className="px-3 py-3">Aç / Kapat</th>
+                  <th className="px-3 py-3">Düzenle</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {(payload.notifications_registry || []).map((n) => {
+                  const ch = channelBadge(n.send_channel);
+                  const statusOk = n.is_active && n.cron_state !== 'error';
+                  return (
+                    <tr key={n.id} className="hover:bg-slate-50/80">
+                      <td className="px-3 py-3">
+                        <p className="font-medium text-slate-900">{n.name}</p>
+                        <p className="font-mono text-[10px] text-slate-400">{n.template_type}</p>
+                        {n.description ? (
+                          <p className="mt-1 text-xs text-slate-500">{n.description}</p>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <span
+                          className={cn(
+                            'inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium',
+                            ch.cls
+                          )}
+                        >
+                          {ch.emoji} {ch.label}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {statusOk ? '🟢 Aktif' : n.is_active ? '🟡 Uyarı' : '🔴 Kapalı'}
+                        {n.cron_state ? (
+                          <span className="block text-[10px] text-slate-400">cron: {n.cron_state}</span>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-3">{n.mode_label}</td>
+                      <td className="px-3 py-3 text-xs text-slate-600 whitespace-nowrap">
+                        {n.last_sent_at ? new Date(n.last_sent_at).toLocaleString('tr-TR') : '—'}
+                      </td>
+                      <td className="px-3 py-3">
+                        {n.template_id ? (
+                          <button
+                            type="button"
+                            disabled={toggleBusy === n.id}
+                            onClick={() => void toggleNotificationActive(n)}
+                            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            {toggleBusy === n.id ? (
+                              <Loader2 className="inline h-3.5 w-3.5 animate-spin" />
+                            ) : n.is_active ? (
+                              'Kapat'
+                            ) : (
+                              'Aç'
+                            )}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-400">Şablon yok</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-3">
+                        <button
+                          type="button"
+                          onClick={() => setInnerTab('sablonlar')}
+                          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                        >
+                          Şablon →
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {(payload.notifications_registry || []).length === 0 ? (
+              <p className="px-4 py-8 text-center text-sm text-slate-500">Bildirim kaydı yok.</p>
+            ) : null}
           </div>
         </div>
       ) : null}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchAnimationHtml } from '../../lib/eduPanel/eduPanelApi';
+import { fetchAnimationHtml, fetchPoolAnimationHtml } from '../../lib/eduPanel/eduPanelApi';
 
 export function useEduAnimationPreview() {
   const [animUrl, setAnimUrl] = useState<string | null>(null);
@@ -15,25 +15,44 @@ export function useEduAnimationPreview() {
     setLoading(false);
   }, []);
 
+  const openHtml = useCallback(async (html: string) => {
+    if (blobRef.current) {
+      URL.revokeObjectURL(blobRef.current);
+      blobRef.current = null;
+    }
+    setAnimUrl(null);
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    blobRef.current = url;
+    setAnimUrl(url);
+  }, []);
+
   const open = useCallback(
     async (animationId: string) => {
       setLoading(true);
-      if (blobRef.current) {
-        URL.revokeObjectURL(blobRef.current);
-        blobRef.current = null;
-      }
       setAnimUrl(null);
       try {
         const html = await fetchAnimationHtml(animationId);
-        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        blobRef.current = url;
-        setAnimUrl(url);
+        await openHtml(html);
       } finally {
         setLoading(false);
       }
     },
-    []
+    [openHtml]
+  );
+
+  const openPool = useCallback(
+    async (poolId: string) => {
+      setLoading(true);
+      setAnimUrl(null);
+      try {
+        const html = await fetchPoolAnimationHtml(poolId);
+        await openHtml(html);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [openHtml]
   );
 
   useEffect(
@@ -47,6 +66,7 @@ export function useEduAnimationPreview() {
     animUrl,
     loading,
     open,
+    openPool,
     close,
     isOpen: loading || Boolean(animUrl)
   };

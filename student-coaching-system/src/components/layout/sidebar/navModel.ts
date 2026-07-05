@@ -30,7 +30,8 @@ import {
   User,
   CalendarDays,
   Bot,
-  CloudDownload
+  CloudDownload,
+  ScrollText
 } from 'lucide-react';
 import type { UserRole } from '../../../types';
 
@@ -315,6 +316,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
 
   const MENU_COACH: FlatNavItem[] = [
     { path: '/coach-dashboard', icon: LayoutDashboard, label: 'Koç Paneli' },
+    { path: '/coach-kilavuz', icon: ScrollText, label: 'Kullanım kılavuzu' },
     { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
     { path: '/edu-panel', icon: Presentation, label: EDU_HOMEWORK_ANIMATIONS_LABEL },
     { path: '/ai-agents-admin', icon: Bot, label: 'AI Ders Ajanları' },

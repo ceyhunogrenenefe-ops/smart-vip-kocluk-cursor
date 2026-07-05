@@ -15,6 +15,12 @@ import {
   kindLabelTr
 } from '../api/_lib/whatsapp-center-stats.js';
 import { summarizeUnsentClassSessions } from '../api/_lib/class-lesson-reminder-logic.js';
+import {
+  listNotificationDefinitions,
+  resolveEffectiveSendChannel,
+  channelLabelTr,
+  modeLabelTr
+} from '../api/_lib/notification-config.js';
 
 /** Panel — `cron_run_log.job_key`; ek kayıtlar otomatik birleştirilir */
 export const TEMPLATE_TYPE_TO_CRON_JOB_KEY = {
@@ -35,12 +41,12 @@ export const TEMPLATE_TYPE_TO_CRON_JOB_KEY = {
 };
 
 export const KNOWN_CRON_JOBS = [
-  { key: 'class_lesson_reminders', label: 'Grup dersi hatırlatma (~10 dk önce · gateway)', expectEveryMinutes: 5 },
-  { key: 'teacher_lesson_reminders', label: 'Öğretmen ders hatırlatması (~15 dk önce · gateway)', expectEveryMinutes: 5 },
-  { key: 'daily_report_reminder', label: 'Günlük rapor hatırlatması (22:00 TR · gateway)', expectEveryMinutes: 24 * 60 },
-  { key: 'lesson_reminders', label: 'Birebir ders hatırlatma (~10 dk önce · gateway)', expectEveryMinutes: 5 },
-  { key: 'lesson_reminder_parent', label: 'Veli ders hatırlatma (gateway)', expectEveryMinutes: 5 },
-  { key: 'meeting_reminders', label: 'Görüşme 10 dk hatırlatma (Meta)', expectEveryMinutes: 5 },
+  { key: 'class_lesson_reminders', label: 'Grup dersi hatırlatma (~10 dk · koç gateway)', expectEveryMinutes: 5 },
+  { key: 'teacher_lesson_reminders', label: 'Öğretmen ders hatırlatması (~15 dk · Meta API)', expectEveryMinutes: 5 },
+  { key: 'daily_report_reminder', label: 'Günlük rapor hatırlatması (22:00 TR · koç gateway)', expectEveryMinutes: 24 * 60 },
+  { key: 'lesson_reminders', label: 'Birebir ders hatırlatma (~10 dk · Meta API)', expectEveryMinutes: 5 },
+  { key: 'lesson_reminder_parent', label: 'Veli ders hatırlatma (koç gateway)', expectEveryMinutes: 5 },
+  { key: 'meeting_reminders', label: 'Görüşme 10 dk hatırlatma (koç gateway)', expectEveryMinutes: 5 },
   { key: 'class_homework_notify', label: 'Grup ödev bildirimi', expectEveryMinutes: 10 },
   { key: 'coach_followup', label: 'Koç otomasyon (Meta şablon)', expectEveryMinutes: 15 },
   { key: 'study_evening_reminder', label: 'Akşam çalışma hatırlatması', expectEveryMinutes: 24 * 60 },
@@ -112,6 +118,42 @@ function buildCronStatusDefinitions(latestByJob, tplRows) {
   }
   pending.sort((a, b) => a.key.localeCompare(b.key));
   return [...rows, ...pending];
+}
+
+function buildNotificationsRegistry(tplRows, statsPool, cronStatusRows) {
+  const tplByType = new Map((tplRows || []).map((t) => [String(t.type || ''), t]));
+  const lastSentByKind = new Map();
+  for (const row of statsPool || []) {
+    const kind = String(row.kind || '').trim();
+    if (!kind || lastSentByKind.has(kind)) continue;
+    if (row.status === 'sent') lastSentByKind.set(kind, row.sent_at);
+  }
+  const cronByKey = new Map((cronStatusRows || []).map((c) => [c.key, c]));
+
+  return listNotificationDefinitions().map((def) => {
+    const tpl = tplByType.get(def.templateType);
+    const channel = resolveEffectiveSendChannel(def.templateType);
+    const cron = def.cronJobKey ? cronByKey.get(def.cronJobKey) : null;
+    const lastFromLogs = lastSentByKind.get(def.templateType) || null;
+    const isActive = tpl ? tpl.is_active !== false : true;
+    return {
+      id: def.id,
+      template_type: def.templateType,
+      name: tpl?.name || def.nameTr,
+      description: def.descriptionTr || null,
+      send_channel: channel,
+      send_channel_label: channelLabelTr(channel),
+      mode: def.mode,
+      mode_label: modeLabelTr(def.mode),
+      coach_scoped: def.coachScoped,
+      is_active: isActive,
+      template_id: tpl?.id || null,
+      cron_job_key: def.cronJobKey || null,
+      last_sent_at: lastFromLogs || cron?.last_run_at || null,
+      cron_state: cron?.state || null,
+      allow_meta_fallback: def.allowMetaFallback
+    };
+  });
 }
 
 function parseLogErrorCode(errorText) {
@@ -565,6 +607,7 @@ export default async function handler(req, res) {
       mode,
       today_istanbul: today,
       known_crons: cronDefs.map((d) => ({ key: d.key, label: d.label, expectEveryMinutes: d.expectEveryMinutes })),
+      notifications_registry: buildNotificationsRegistry(tplRows, statsPool, cron_status),
       summary: {
         sent_today: sentToday,
         failed_today: failedToday,

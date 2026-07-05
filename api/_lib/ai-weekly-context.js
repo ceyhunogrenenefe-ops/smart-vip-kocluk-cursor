@@ -1,5 +1,6 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import { addCalendarDaysYmd, getIstanbulDateString, isoWeekdayMon1Istanbul } from './istanbul-time.js';
+import { isMissingTableError, isSchemaColumnError } from './supabase-schema.js';
 
 function clipYmd(v) {
   return String(v || '').trim().slice(0, 10);
@@ -14,35 +15,59 @@ export function currentWeekRangeYmd() {
 }
 
 async function loadCoachGoalsForRange(studentId, rangeFrom, rangeTo) {
-  const { data: overlap, error: e1 } = await supabaseAdmin
-    .from('coach_weekly_goals')
-    .select('*')
-    .eq('student_id', studentId)
-    .not('goal_start_date', 'is', null)
-    .not('goal_end_date', 'is', null)
-    .lte('goal_start_date', rangeTo)
-    .gte('goal_end_date', rangeFrom)
-    .order('created_at', { ascending: true });
-  if (e1) throw e1;
+  try {
+    const { data: overlap, error: e1 } = await supabaseAdmin
+      .from('coach_weekly_goals')
+      .select('*')
+      .eq('student_id', studentId)
+      .not('goal_start_date', 'is', null)
+      .not('goal_end_date', 'is', null)
+      .lte('goal_start_date', rangeTo)
+      .gte('goal_end_date', rangeFrom)
+      .order('created_at', { ascending: true });
+    if (e1) throw e1;
 
-  const { data: legacyOpen, error: e2 } = await supabaseAdmin
-    .from('coach_weekly_goals')
-    .select('*')
-    .eq('student_id', studentId)
-    .or('goal_start_date.is.null,goal_end_date.is.null')
-    .order('created_at', { ascending: true });
-  if (e2) throw e2;
+    const { data: legacyOpen, error: e2 } = await supabaseAdmin
+      .from('coach_weekly_goals')
+      .select('*')
+      .eq('student_id', studentId)
+      .or('goal_start_date.is.null,goal_end_date.is.null')
+      .order('created_at', { ascending: true });
+    if (e2) throw e2;
 
-  const legacyFiltered = (legacyOpen || []).filter((row) => {
-    const ws = clipYmd(row.week_start_date);
-    if (!ws) return false;
-    const we = addCalendarDaysYmd(ws, 6);
-    return ws <= rangeTo && we >= rangeFrom;
-  });
+    const legacyFiltered = (legacyOpen || []).filter((row) => {
+      const ws = clipYmd(row.week_start_date);
+      if (!ws) return false;
+      const we = addCalendarDaysYmd(ws, 6);
+      return ws <= rangeTo && we >= rangeFrom;
+    });
 
-  const map = new Map();
-  for (const r of [...(overlap || []), ...legacyFiltered]) map.set(r.id, r);
-  return [...map.values()];
+    const map = new Map();
+    for (const r of [...(overlap || []), ...legacyFiltered]) map.set(r.id, r);
+    return [...map.values()];
+  } catch (e) {
+    if (
+      isSchemaColumnError(e, 'goal_start_date') ||
+      isSchemaColumnError(e, 'goal_end_date') ||
+      isMissingTableError(e, 'coach_weekly_goals')
+    ) {
+      const { data, error } = await supabaseAdmin
+        .from('coach_weekly_goals')
+        .select('*')
+        .eq('student_id', studentId)
+        .gte('week_start_date', rangeFrom)
+        .lte('week_start_date', rangeTo)
+        .order('created_at', { ascending: true });
+      if (error) return [];
+      return (data || []).filter((row) => {
+        const ws = clipYmd(row.week_start_date);
+        if (!ws) return false;
+        const we = addCalendarDaysYmd(ws, 6);
+        return ws <= rangeTo && we >= rangeFrom;
+      });
+    }
+    throw e;
+  }
 }
 
 function entryInRange(date, from, to) {

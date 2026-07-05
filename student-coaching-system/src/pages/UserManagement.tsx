@@ -34,6 +34,13 @@ import { userHasAnyRole, userRoleTags } from '../config/rolePermissions';
 import { db, PendingRegistrationRow, QuotaSnapshot } from '../lib/database';
 import { QuotaManagementPanel } from '../components/quota/QuotaManagementPanel';
 import { PageCollapsibleSection } from '../components/ui/PageCollapsibleSection';
+import {
+  AppModal,
+  AppModalBody,
+  AppModalFooter,
+  AppModalForm,
+  AppModalHeader
+} from '../components/ui/AppModal';
 import { getAuthToken, apiFetch } from '../lib/session';
 import {
   userRowToSystemUser,
@@ -81,6 +88,7 @@ import {
   mergeAcademicYearTermOptions,
   normalizeAcademicYearLabel
 } from '../lib/academicYearTerms';
+import { compareByFirstName, sortByFirstName } from '../lib/personNameSort';
 
 function studentBranchSelectValue(school: string | undefined | null): string {
   const key = normalizeStudentBranchKey(school);
@@ -350,7 +358,7 @@ export default function UserManagement() {
       setMessage({ type: 'success', text: r.message });
       const role = row.role;
       if (role === 'coach') navigate('/coach-dashboard');
-      else if (role === 'student') navigate('/student-dashboard');
+      else if (role === 'student') navigate('/weekly-planner');
       else if (role === 'teacher') navigate('/teacher-panel');
       else if (role === 'admin') navigate('/dashboard');
       else navigate('/dashboard');
@@ -433,7 +441,7 @@ export default function UserManagement() {
   }, [currentUser?.role, activeInstitutionId]);
 
   const coachesForFilter = useMemo(() => {
-    let list = [...linkedCoaches].sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+    let list = [...linkedCoaches].sort((a, b) => compareByFirstName(a.name, b.name));
     if (currentUser?.role === 'super_admin' && filterInstitutionId !== 'all') {
       list = list.filter((c) => !c.institutionId || c.institutionId === filterInstitutionId);
     }
@@ -757,7 +765,8 @@ export default function UserManagement() {
   const filteredUsers = useMemo(() => {
     const q = searchTerm.trim();
     const qDigits = q.replace(/\D/g, '');
-    return users.filter((user) => {
+    return sortByFirstName(
+      users.filter((user) => {
       const phoneMatch = (user.phone || '').replace(/\s/g, '').toLowerCase();
       const tags = userRoleTags(user as { role: UserRole; roles?: UserRole[] });
       const studentMatchForFilter = tags.includes('student')
@@ -839,7 +848,9 @@ export default function UserManagement() {
       }
 
       return true;
-    });
+    }),
+      (u) => u.name
+    );
   }, [
     users,
     searchTerm,
@@ -3457,12 +3468,8 @@ export default function UserManagement() {
         ) : null}
       </div>
 
-      {/* Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            {/* Header */}
-            <div className="p-6 border-b flex items-center justify-between">
+      <AppModal open={showModal} onClose={() => setShowModal(false)} panelClassName="max-w-lg">
+            <AppModalHeader>
               <h2 className="text-xl font-bold text-slate-800">
                 {modalMode === 'add'
                   ? 'Yeni Kullanıcı Ekle'
@@ -3470,13 +3477,13 @@ export default function UserManagement() {
                     ? 'Koç — giriş hesabı oluştur'
                     : 'Kullanıcı Düzenle'}
               </h2>
-              <button onClick={() => setShowModal(false)} className="icon-tap-btn hover:bg-gray-100">
+              <button type="button" onClick={() => setShowModal(false)} className="icon-tap-btn hover:bg-gray-100">
                 <X className="w-5 h-5" />
               </button>
-            </div>
+            </AppModalHeader>
 
-            {/* Form */}
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <AppModalForm onSubmit={handleSubmit}>
+            <AppModalBody className="space-y-4">
               {modalMode === 'edit' && selectedUser?.id.startsWith(COACH_PROFILE_ONLY_PREFIX) ? (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                   Bu koç <code className="rounded bg-white/80 px-1">coaches</code> tablosunda;{' '}
@@ -4050,20 +4057,22 @@ export default function UserManagement() {
                   {formData.isActive ? 'Aktif' : 'Pasif'}
                 </span>
               </div>
+            </AppModalBody>
 
               {/* Actions */}
-              <div className="flex gap-3 pt-4">
+              <AppModalFooter>
+              <div className="flex gap-3">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="flex-1 px-4 py-2 border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                  className="min-h-[44px] flex-1 px-4 py-2 border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                 >
                   İptal
                 </button>
                 <button
                   type="submit"
                   disabled={loading}
-                  className="flex-1 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="min-h-[44px] flex-1 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {loading ? (
                     <>
@@ -4078,10 +4087,9 @@ export default function UserManagement() {
                   )}
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+              </AppModalFooter>
+            </AppModalForm>
+      </AppModal>
       <CopyableLoginCredentialsModal
         open={loginCredentialsModal != null}
         onClose={() => setLoginCredentialsModal(null)}

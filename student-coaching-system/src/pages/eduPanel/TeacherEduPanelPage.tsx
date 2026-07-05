@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { EDU_HOMEWORK_ANIMATIONS_LABEL } from '../../components/layout/sidebar/navModel';
-import { BookOpen, GraduationCap, Layers, Loader2, Plus } from 'lucide-react';
+import { BookOpen, Clapperboard, GraduationCap, Layers, Loader2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import EduAnimationPreviewModal from '../../components/eduPanel/EduAnimationPreviewModal';
+import EduAnimationPoolPickerModal from '../../components/eduPanel/EduAnimationPoolPickerModal';
+import EduAnimationPoolTab from '../../components/eduPanel/EduAnimationPoolTab';
 import TeacherEduTopicCard from '../../components/eduPanel/TeacherEduTopicCard';
 import { useEduAnimationPreview } from '../../components/eduPanel/useEduAnimationPreview';
 import { useAuth } from '../../context/AuthContext';
-import type { EduClass, EduLessonRow, LessonRowFormValues, SubjectColor } from '../../types/eduPanel.types';
+import type { EduAnimationPoolItem, EduClass, EduLessonRow, LessonRowFormValues, SubjectColor } from '../../types/eduPanel.types';
 import { buildLevelGroups, filterRows, subjectsForLevel } from '../../lib/eduPanel/eduPanelUi';
 import {
   EMPTY_HOMEWORK_DRAFT,
@@ -30,6 +32,7 @@ import {
 
 const ALL_LEVELS = '__all__';
 const ALL_SUBJECTS = '__all__';
+type PageTab = 'topics' | 'pool';
 
 function defaultUntil(from: string): string {
   const d = new Date(`${from.slice(0, 10)}T12:00:00`);
@@ -47,6 +50,8 @@ export default function TeacherEduPanelPage() {
   const [subjectName, setSubjectName] = useState<string>(ALL_SUBJECTS);
   const [showCreate, setShowCreate] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [pageTab, setPageTab] = useState<PageTab>('topics');
+  const [poolPickerRowId, setPoolPickerRowId] = useState<string | null>(null);
 
   const [form, setForm] = useState<LessonRowFormValues>(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -251,7 +256,8 @@ export default function TeacherEduPanelPage() {
         title: homeworkTitleForApi(draft),
         book_name: draft.book_name.trim() || undefined,
         question_range: draft.question_range.trim() || undefined,
-        status: 'draft'
+        status: 'draft',
+        pool_animation_id: draft.pool_animation_id
       });
       await publishEduHomework(hw.id);
       toast.success(`Ödev eklendi: ${homeworkTitleForApi(draft)}`);
@@ -282,6 +288,47 @@ export default function TeacherEduPanelPage() {
         </p>
       </div>
 
+      <div className="flex gap-2 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+        <button
+          type="button"
+          onClick={() => setPageTab('topics')}
+          className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition ${
+            pageTab === 'topics'
+              ? 'bg-violet-600 text-white shadow-sm'
+              : 'text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          <BookOpen className="h-4 w-4" />
+          Animasyonlarım
+        </button>
+        <button
+          type="button"
+          onClick={() => setPageTab('pool')}
+          className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition ${
+            pageTab === 'pool'
+              ? 'bg-violet-600 text-white shadow-sm'
+              : 'text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          <Clapperboard className="h-4 w-4" />
+          Animasyon Havuzu
+        </button>
+      </div>
+
+      {pageTab === 'pool' ? (
+        <EduAnimationPoolTab
+          rows={rows}
+          busy={busy}
+          setBusy={setBusy}
+          onPreview={(item) =>
+            void preview.openPool(item.id).catch((e) =>
+              toast.error(e instanceof Error ? e.message : 'Önizleme açılamadı')
+            )
+          }
+          onAttached={() => void load()}
+        />
+      ) : (
+        <>
       {/* 1. Seviye — Sınıf kademesi */}
       <section className="space-y-2">
         <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -548,6 +595,7 @@ export default function TeacherEduPanelPage() {
                 })
               }
               onAddHomework={() => void onAddHomework(row.id, row.title)}
+              onOpenPoolPicker={() => setPoolPickerRowId(row.id)}
               onPublish={() =>
                 void updateEduLessonRow(row.id, { status: 'active' }).then(() => {
                   toast.success('Konu yayında — öğrenciler görebilir');
@@ -566,6 +614,33 @@ export default function TeacherEduPanelPage() {
           ))}
         </div>
       )}
+        </>
+      )}
+
+      <EduAnimationPoolPickerModal
+        open={Boolean(poolPickerRowId)}
+        onClose={() => setPoolPickerRowId(null)}
+        title="Animasyon Seç"
+        selectLabel="Ödeve Ekle"
+        onPreview={(item) =>
+          void preview.openPool(item.id).catch((e) =>
+            toast.error(e instanceof Error ? e.message : 'Önizleme açılamadı')
+          )
+        }
+        onSelect={(item: EduAnimationPoolItem) => {
+          if (!poolPickerRowId) return;
+          setHwDraft((h) => ({
+            ...h,
+            [poolPickerRowId]: {
+              ...(h[poolPickerRowId] || EMPTY_HOMEWORK_DRAFT),
+              pool_animation_id: item.id,
+              pool_animation_title: item.title
+            }
+          }));
+          setPoolPickerRowId(null);
+          toast.success(`「${item.title}」 ödeve eklenecek`);
+        }}
+      />
 
       <EduAnimationPreviewModal
         open={preview.isOpen}

@@ -4,7 +4,9 @@ import {
 } from './coachGoalAnalytics';
 import type { CoachWeeklyGoalRow, WeeklyPlannerEntryRow } from './weeklyPlannerApi';
 import {
+  fetchCoachWeeklyGoalsBatch,
   fetchCoachWeeklyGoalsInRange,
+  fetchWeeklyEntriesCoachRange,
   fetchWeeklyEntriesForStudentRange,
   fetchWeeklyPlannerEntries,
 } from './weeklyPlannerApi';
@@ -188,21 +190,53 @@ export async function loadCoachQuestionStatsBatch(
 ): Promise<Record<string, StudentCoachQuestionStats>> {
   const out: Record<string, StudentCoachQuestionStats> = {};
   const ids = [...new Set(studentIds.map((id) => id.trim()).filter(Boolean))];
-  await Promise.all(
-    ids.map(async (sid) => {
+  const rf = rangeFrom.slice(0, 10);
+  const rt = rangeTo.slice(0, 10);
+  const empty = (): StudentCoachQuestionStats => ({
+    coachTarget: 0,
+    solved: 0,
+    realizationPct: 0,
+    hasCoachGoals: false,
+    rangeFrom: rf,
+    rangeTo: rt,
+  });
+
+  if (!ids.length) return out;
+
+  try {
+    const [goalsByStudent, weeklyAll] = await Promise.all([
+      fetchCoachWeeklyGoalsBatch(rf, rt, ids),
+      fetchWeeklyEntriesCoachRange(rf, rt).catch(() => [] as WeeklyEntry[]),
+    ]);
+
+    const weeklyByStudent = new Map<string, WeeklyEntry[]>();
+    for (const row of weeklyAll) {
+      const sid = String(row.studentId || '').trim();
+      if (!sid) continue;
+      const arr = weeklyByStudent.get(sid) || [];
+      arr.push(row);
+      weeklyByStudent.set(sid, arr);
+    }
+
+    for (const sid of ids) {
       try {
-        out[sid] = await loadStudentCoachQuestionStats(sid, rangeFrom, rangeTo);
+        const goals = goalsByStudent[sid] || [];
+        const weekly = weeklyByStudent.get(sid) || [];
+        const stats = computeStatsFromBundle(goals, weekly, [], rf, rt);
+        out[sid] = stats;
+        setCachedStudentCoachQuestionStats(sid, rf, rt, stats);
       } catch {
-        out[sid] = {
-          coachTarget: 0,
-          solved: 0,
-          realizationPct: 0,
-          hasCoachGoals: false,
-          rangeFrom: rangeFrom.slice(0, 10),
-          rangeTo: rangeTo.slice(0, 10),
-        };
+        out[sid] = empty();
       }
-    })
-  );
+    }
+  } catch {
+    for (const sid of ids) {
+      try {
+        out[sid] = await loadStudentCoachQuestionStats(sid, rf, rt);
+      } catch {
+        out[sid] = empty();
+      }
+    }
+  }
   return out;
 }

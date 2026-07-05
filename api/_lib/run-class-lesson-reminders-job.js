@@ -160,7 +160,7 @@ export async function runClassLessonRemindersJob(opts = {}) {
   const { data: students, error: stErr } = allStudentIds.length
     ? await supabaseAdmin
         .from('students')
-        .select('id,name,phone,parent_phone')
+        .select('id,name,phone,parent_phone,coach_id')
         .in('id', allStudentIds)
     : { data: [], error: null };
   if (stErr) throw stErr;
