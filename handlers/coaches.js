@@ -112,11 +112,10 @@ export default async function handler(req, res) {
         return res.status(200).json({ data: one ? [one] : [] });
       }
 
-      let query = supabaseAdmin.from('coaches').order('created_at', { ascending: false });
-      if (actor.role === 'admin') {
-        if (!actor.institution_id) return res.status(200).json({ data: [] });
-        query = query.eq('institution_id', actor.institution_id);
+      if (actor.role === 'admin' && !actor.institution_id) {
+        return res.status(200).json({ data: [] });
       }
+
       if (actor.role === 'teacher') {
         if (!actor.institution_id) return res.status(200).json({ data: [] });
         const { ids: studentIds } = await getTeacherGroupClassStudentScope(actor.sub);
@@ -129,10 +128,28 @@ export default async function handler(req, res) {
         if (se) throw se;
         const coachIds = [...new Set((studs || []).map((s) => s.coach_id).filter(Boolean))];
         if (!coachIds.length) return res.status(200).json({ data: [] });
-        query = query.eq('institution_id', actor.institution_id).in('id', coachIds);
+        const { data, error } = await selectCoachesList((columns) =>
+          supabaseAdmin
+            .from('coaches')
+            .select(columns)
+            .eq('institution_id', actor.institution_id)
+            .in('id', coachIds)
+            .order('created_at', { ascending: false })
+        );
+        if (error) throw error;
+        return res.status(200).json({ data: data || [] });
       }
-      if (actor.role === 'coach') query = query.eq('id', actor.coach_id);
-      const { data, error } = await selectCoachesList((columns) => query.select(columns));
+
+      const { data, error } = await selectCoachesList((columns) => {
+        let q = supabaseAdmin.from('coaches').select(columns);
+        if (actor.role === 'admin') {
+          q = q.eq('institution_id', actor.institution_id);
+        }
+        if (actor.role === 'coach') {
+          q = q.eq('id', actor.coach_id);
+        }
+        return q.order('created_at', { ascending: false });
+      });
       if (error) throw error;
       return res.status(200).json({ data: data || [] });
     }
