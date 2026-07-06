@@ -519,14 +519,46 @@ export default function Coaches() {
                         {row.last_login_at ? formatDateTr(row.last_login_at) : '—'}
                       </td>
                       <td className="px-3 py-2">
-                        {coachLockById.get(row.coach_id) ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
-                            <Lock className="h-3 w-3" />
-                            Kilitli
-                          </span>
-                        ) : (
-                          <span className="text-xs text-slate-400">Açık</span>
-                        )}
+                        {(() => {
+                          const coach = coaches.find((c) => c.id === row.coach_id);
+                          const locked = coachLockById.get(row.coach_id);
+                          if (!coach) {
+                            return locked ? (
+                              <span className="inline-flex items-center gap-1 text-xs text-amber-800">
+                                <Lock className="h-3 w-3" />
+                                Kilitli
+                              </span>
+                            ) : (
+                              <span className="text-xs text-slate-400">Açık</span>
+                            );
+                          }
+                          return (
+                            <button
+                              type="button"
+                              disabled={lockBusyId === coach.id}
+                              title={
+                                locked
+                                  ? 'Ders ve görüşme kilidini aç'
+                                  : 'Ders ve görüşmeleri kilitle'
+                              }
+                              onClick={() => void toggleCoachLessonsLock(coach)}
+                              className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
+                                locked
+                                  ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                              }`}
+                            >
+                              {lockBusyId === coach.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : locked ? (
+                                <Lock className="h-3 w-3" />
+                              ) : (
+                                <Unlock className="h-3 w-3" />
+                              )}
+                              {locked ? 'Kilitli' : 'Kilitle'}
+                            </button>
+                          );
+                        })()}
                       </td>
                       <td className="px-3 py-2">
                         <button

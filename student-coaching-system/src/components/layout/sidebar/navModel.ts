@@ -237,6 +237,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/ai-agents-admin', icon: Bot, label: 'AI Ders Ajanları' },
       { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
       { path: '/teachers', icon: GraduationCap, label: 'Öğretmenler' },
+      { path: '/coaches', icon: Users, label: 'Koçlar' },
       { path: '/super-admin', icon: Server, label: 'Kurum Yönetimi' },
       { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
       { path: '/notifications', icon: Bell, label: 'Bildirimler' },
