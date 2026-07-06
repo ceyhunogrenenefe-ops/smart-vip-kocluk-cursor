@@ -131,6 +131,8 @@ export interface Coach {
   institutionId?: string;
   studentIds: string[]; // Bu koça atanan öğrenciler
   maxStudents?: number;
+  /** Ders ve online görüşme erişimi kilitli */
+  lessonsMeetingsLocked?: boolean;
   bio?: string; // Koç hakkında
   experience?: number; // Deneyim yılı
   createdAt: string;

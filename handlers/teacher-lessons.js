@@ -13,6 +13,12 @@ import { sumLessonUnitsUsed } from '../api/_lib/count-teacher-lesson-usage.js';
 import { lessonUnitsFromDurationMinutes } from '../api/_lib/lesson-duration-units.js';
 import { isTeacherLessonsRelationMissingError } from '../api/_lib/is-teacher-lessons-missing.js';
 import { statusAndBodyFromSupabaseError } from '../api/_lib/supabase-error-response.js';
+import {
+  assertCoachLessonsMeetingsUnlocked,
+  assertStudentCoachLessonsUnlocked,
+  getCoachLessonsMeetingsLocked,
+  CoachLessonsLockError
+} from '../api/_lib/coach-lessons-lock.js';
 import { resolveStudentRowForUser } from '../api/_lib/resolve-student-id.js';
 import { isStudentAllowedForTeacherGroupLessons } from '../api/_lib/teacher-class-scope.js';
 
@@ -474,6 +480,13 @@ async function handleCreate(req, res) {
       return jsonError(res, 403, 'Bu öğrenci için ders planlayamazsınız.');
     }
 
+    if (actor.role !== 'super_admin') {
+      await assertStudentCoachLessonsUnlocked(studentId);
+      if (actor.role === 'coach' && actor.coach_id) {
+        await assertCoachLessonsMeetingsUnlocked(actor.coach_id);
+      }
+    }
+
     let teacherId = actor.sub;
     if (actor.role === 'super_admin' || actor.role === 'admin') {
       const forced = String(body.teacher_id || '').trim();
@@ -636,6 +649,13 @@ async function handleCreateLessonSeries(req, res) {
     if (!student) return jsonError(res, 404, 'Öğrenci bulunamadı.');
     if (!(await canPlanLessonForStudent(actor, student))) {
       return jsonError(res, 403, 'Bu öğrenci için ders planlayamazsınız.');
+    }
+
+    if (actor.role !== 'super_admin') {
+      await assertStudentCoachLessonsUnlocked(studentId);
+      if (actor.role === 'coach' && actor.coach_id) {
+        await assertCoachLessonsMeetingsUnlocked(actor.coach_id);
+      }
     }
 
     let teacherId = actor.sub;

@@ -636,6 +636,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             subjects: c.specialties || [],
             studentIds: c.student_ids || [],
             institutionId: c.institution_id || undefined,
+            lessonsMeetingsLocked: c.lessons_meetings_locked === true,
             createdAt: c.created_at
           }));
           const localCoaches = loadFromStorage<Coach[]>(STORAGE_KEYS.coaches, []).map((c) => ({
@@ -1235,7 +1236,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         email: updatedCoach.email,
         phone: updatedCoach.phone,
         specialties: updatedCoach.subjects,
-        student_ids: updatedCoach.studentIds
+        student_ids: updatedCoach.studentIds,
+        ...(updatedCoach.lessonsMeetingsLocked !== undefined
+          ? { lessons_meetings_locked: updatedCoach.lessonsMeetingsLocked }
+          : {})
       });
     } catch (error) {
       console.error('Koç güncelleme hatası:', error);

@@ -10,4 +10,4 @@ export const STUDENT_LIST_COLUMNS =
   'id,name,email,phone,class_level,school,parent_name,parent_phone,coach_id,institution_id,platform_user_id,user_id,birth_date,whatsapp_automation_enabled,program_id,created_at,updated_at';
 
 export const COACH_LIST_COLUMNS =
-  'id,name,email,phone,institution_id,specialties,created_at,updated_at';
+  'id,name,email,phone,institution_id,specialties,lessons_meetings_locked,created_at,updated_at';

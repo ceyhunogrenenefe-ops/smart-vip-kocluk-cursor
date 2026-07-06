@@ -13,8 +13,20 @@ import {
   sanitizeBbbMeetingId
 } from '../api/_lib/bbb.js';
 import { handleBbbJoinGet, patchCoachingMeetingLinks } from '../api/_lib/bbb-join-handler.js';
+import {
+  assertCoachLessonsMeetingsUnlocked,
+  getCoachLessonsMeetingsLocked,
+  CoachLessonsLockError
+} from '../api/_lib/coach-lessons-lock.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
+
+function respondCoachLockError(res, e) {
+  if (e instanceof CoachLessonsLockError || e?.code === 'coach_lessons_locked') {
+    return jsonError(res, 403, e.userMessage || 'Koç kilitli', { code: 'coach_lessons_locked' });
+  }
+  return null;
+}
 
 /** @param {unknown} raw @param {string} label */
 function normalizeOptionalMeetingUrl(raw, label) {
@@ -194,6 +206,9 @@ async function handleCreate(req, res) {
     }
     if (actor.role === 'coach' && actor.coach_id !== coachId) {
       return jsonError(res, 403, 'Yalnızca kendi profilinize toplantı oluşturabilirsiniz.');
+    }
+    if (actor.role !== 'super_admin') {
+      await assertCoachLessonsMeetingsUnlocked(coachId);
     }
 
     let coachUserId =
@@ -390,6 +405,8 @@ async function handleCreate(req, res) {
       auto_bbb: autoBbbLink ? { ok: true, provider: 'bbb' } : { skipped: true }
     });
   } catch (e) {
+    const lockRes = respondCoachLockError(res, e);
+    if (lockRes) return lockRes;
     const msg = errorMessage(e);
     if (isAuthFailureMessage(msg)) return jsonError(res, 401, msg);
     if (isSupabaseServerEnvError(msg)) {
@@ -438,6 +455,9 @@ async function handleCreateClass(req, res) {
     }
     if (actor.role === 'coach' && actor.coach_id !== coachId) {
       return jsonError(res, 403, 'Yalnızca kendi profilinize toplantı oluşturabilirsiniz.');
+    }
+    if (actor.role !== 'super_admin') {
+      await assertCoachLessonsMeetingsUnlocked(coachId);
     }
 
     let coachUserId =
@@ -666,6 +686,8 @@ async function handleCreateClass(req, res) {
       auto_bbb: autoBbbLink ? { ok: true, provider: 'bbb' } : { skipped: true }
     });
   } catch (e) {
+    const lockRes = respondCoachLockError(res, e);
+    if (lockRes) return lockRes;
     const msg = errorMessage(e);
     if (isAuthFailureMessage(msg)) return jsonError(res, 401, msg);
     if (isSupabaseServerEnvError(msg)) {
@@ -718,6 +740,9 @@ async function handleCreateSeries(req, res) {
     }
     if (actor.role === 'coach' && actor.coach_id !== coachId) {
       return jsonError(res, 403, 'Yalnızca kendi profilinize toplantı oluşturabilirsiniz.');
+    }
+    if (actor.role !== 'super_admin') {
+      await assertCoachLessonsMeetingsUnlocked(coachId);
     }
 
     let coachUserId =
@@ -985,6 +1010,8 @@ async function handleCreateSeries(req, res) {
       auto_bbb: autoBbbLink ? { ok: true, provider: 'bbb' } : { skipped: true }
     });
   } catch (e) {
+    const lockRes = respondCoachLockError(res, e);
+    if (lockRes) return lockRes;
     const msg = errorMessage(e);
     if (isAuthFailureMessage(msg)) return jsonError(res, 401, msg);
     if (isSupabaseServerEnvError(msg)) {
@@ -1148,6 +1175,9 @@ async function handleMeetingBbbJoin(req, res) {
       return data;
     },
     canAccess: async (actor, row) => {
+      if (actor.role !== 'super_admin' && actor.role !== 'admin' && row.coach_id) {
+        if (await getCoachLessonsMeetingsLocked(row.coach_id)) return false;
+      }
       if (actor.role === 'super_admin') return true;
       if (actor.role === 'student') {
         let sid = actor.student_id || null;

@@ -37,6 +37,8 @@ import {
 import { SolutionLessonStudentActions } from '../components/solutionAppointments/SolutionLessonStudentActions';
 import { inferSessionBatchPeers } from '../lib/classSessionBatchPeers';
 import { isSolutionLessonSubject } from '../lib/solutionAppointments/utils';
+import { useCoachLessonsMeetingsLock } from '../lib/coachLessonsLock';
+import { CoachLessonsLockBanner } from '../components/coach/CoachLessonsLockBanner';
 
 type ClassRow = {
   id: string;
@@ -134,7 +136,7 @@ const todayIso = () => isoFromLocalDate(new Date());
 
 export default function ClassLiveLessons() {
   const { effectiveUser } = useAuth();
-  const { students, institution, activeInstitutionId } = useApp();
+  const { students, institution, activeInstitutionId, coaches } = useApp();
   const [searchParams] = useSearchParams();
   const safeStudents = Array.isArray(students) ? students : [];
   const role = String(effectiveUser?.role || '');
@@ -1115,6 +1117,18 @@ export default function ClassLiveLessons() {
       setSlotEditBusy(false);
     }
   };
+
+  const lessonsLock = useCoachLessonsMeetingsLock(effectiveUser, coaches, safeStudents);
+  if (lessonsLock.locked && (isStudentView || role === 'coach')) {
+    return (
+      <div className="p-4">
+        <CoachLessonsLockBanner
+          coachName={lessonsLock.coachName}
+          forStudent={isStudentView}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

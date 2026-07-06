@@ -6,6 +6,8 @@ import { useApp } from '../context/AppContext';
 import { apiFetch } from '../lib/session';
 import { isNativeApp } from '../lib/nativeApp';
 import { resolveCoachRecordId } from '../lib/coachResolve';
+import { useCoachLessonsMeetingsLock } from '../lib/coachLessonsLock';
+import { CoachLessonsLockBanner } from '../components/coach/CoachLessonsLockBanner';
 import { coachingMeetingJoinUrl, isBbbJoinUrl } from '../lib/liveLessonUtils';
 import { openBbbJoin } from '../lib/bbbJoin';
 import type { CoachingMeetingRecord, MeetingStatus } from '../types';
@@ -695,6 +697,18 @@ export default function Meetings() {
   };
 
   if (!effectiveUser) return null;
+
+  const lessonsLock = useCoachLessonsMeetingsLock(effectiveUser, coaches, students);
+  if (lessonsLock.locked && (role === 'coach' || role === 'student')) {
+    return (
+      <div className="max-w-6xl mx-auto px-4 py-6">
+        <CoachLessonsLockBanner
+          coachName={lessonsLock.coachName}
+          forStudent={role === 'student'}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 space-y-8">

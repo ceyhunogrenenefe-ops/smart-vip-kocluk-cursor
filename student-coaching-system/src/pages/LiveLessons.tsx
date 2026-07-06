@@ -11,6 +11,8 @@ import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShe
 import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
 import { lessonJoinUrl, needsBbbJoinFlow, shouldUsePanelBbbJoin, isExternalMeetingPlatform } from '../lib/liveLessonUtils';
 import { openBbbJoin } from '../lib/bbbJoin';
+import { useCoachLessonsMeetingsLock } from '../lib/coachLessonsLock';
+import { CoachLessonsLockBanner } from '../components/coach/CoachLessonsLockBanner';
 import { copyGuestJoinShareText } from '../lib/bbbGuestJoin';
 import { Radio, Plus, Loader2, Filter, Clock, Pencil, Move, GripVertical, Trash2, FileDown } from 'lucide-react';
 import {
@@ -90,7 +92,7 @@ type StaffUser = {
 
 export default function LiveLessons() {
   const { effectiveUser } = useAuth();
-  const { students, institution } = useApp();
+  const { students, institution, coaches } = useApp();
   const role = (effectiveUser?.role || '') as UserRole;
 
   const [lessons, setLessons] = useState<TeacherLesson[]>([]);
@@ -670,6 +672,15 @@ export default function LiveLessons() {
     return (
       <div className="p-6 text-center text-slate-600">
         Bu sayfaya erişim yetkiniz yok.
+      </div>
+    );
+  }
+
+  const lessonsLock = useCoachLessonsMeetingsLock(effectiveUser, coaches, students);
+  if (lessonsLock.locked && role === 'coach') {
+    return (
+      <div className="p-6">
+        <CoachLessonsLockBanner coachName={lessonsLock.coachName} />
       </div>
     );
   }

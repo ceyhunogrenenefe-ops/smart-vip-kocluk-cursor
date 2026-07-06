@@ -24,7 +24,9 @@ import {
   UserCircle,
   LogIn,
   Loader2,
-  ChevronDown
+  ChevronDown,
+  Lock,
+  Unlock
 } from 'lucide-react';
 import { CopyableLoginCredentialsPanel } from '../components/auth/CopyableLoginCredentials';
 import {
@@ -76,6 +78,7 @@ export default function Coaches() {
     is_active: true
   });
   const [licenseSaving, setLicenseSaving] = useState(false);
+  const [lockBusyId, setLockBusyId] = useState<string | null>(null);
 
   const userByEmail = useMemo(() => {
     const m = new Map<string, ApiUserRow>();
@@ -343,6 +346,29 @@ export default function Coaches() {
     }
   };
 
+  const toggleCoachLessonsLock = async (coach: Coach) => {
+    if (!canSetCoachQuota) return;
+    const next = !coach.lessonsMeetingsLocked;
+    const label = next ? 'kilitlemek' : 'kilidini açmak';
+    if (!confirm(`${coach.name} için ders ve görüşmeleri ${label} istiyor musunuz?`)) return;
+    setLockBusyId(coach.id);
+    try {
+      await updateCoach(coach.id, { lessonsMeetingsLocked: next });
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Kilit güncellenemedi');
+    } finally {
+      setLockBusyId(null);
+    }
+  };
+
+  const coachLockById = useMemo(() => {
+    const m = new Map<string, boolean>();
+    for (const c of coaches) {
+      m.set(c.id, c.lessonsMeetingsLocked === true);
+    }
+    return m;
+  }, [coaches]);
+
   const formatDateTr = (v: string | null) => {
     if (!v) return '—';
     const d = String(v).slice(0, 10);
@@ -446,19 +472,20 @@ export default function Coaches() {
                   <th className="px-3 py-2">Kullanılan</th>
                   <th className="px-3 py-2">Boş</th>
                   <th className="px-3 py-2">Son giriş</th>
+                  <th className="px-3 py-2">Kilit</th>
                   <th className="px-3 py-2" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {licensesLoading ? (
                   <tr>
-                    <td colSpan={10} className="px-3 py-8 text-center text-slate-500">
+                    <td colSpan={11} className="px-3 py-8 text-center text-slate-500">
                       <Loader2 className="mx-auto h-6 w-6 animate-spin" />
                     </td>
                   </tr>
                 ) : coachLicenses.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-3 py-6 text-center text-slate-500">
+                    <td colSpan={11} className="px-3 py-6 text-center text-slate-500">
                       Henüz koç lisansı yok
                     </td>
                   </tr>
@@ -490,6 +517,16 @@ export default function Coaches() {
                       <td className="px-3 py-2">{row.remaining_students ?? '—'}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-xs text-slate-600">
                         {row.last_login_at ? formatDateTr(row.last_login_at) : '—'}
+                      </td>
+                      <td className="px-3 py-2">
+                        {coachLockById.get(row.coach_id) ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                            <Lock className="h-3 w-3" />
+                            Kilitli
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-400">Açık</span>
+                        )}
                       </td>
                       <td className="px-3 py-2">
                         <button
@@ -541,9 +578,40 @@ export default function Coaches() {
                   <p className="text-sm text-gray-500">
                     {getStudentCount(coach.id)} öğrenci
                   </p>
+                  {coach.lessonsMeetingsLocked ? (
+                    <p className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-amber-700">
+                      <Lock className="h-3 w-3" />
+                      Ders ve görüşmeler kilitli
+                    </p>
+                  ) : null}
                 </div>
               </div>
               <div className="flex items-center gap-1">
+                {canSetCoachQuota ? (
+                  <button
+                    type="button"
+                    title={
+                      coach.lessonsMeetingsLocked
+                        ? 'Ders ve görüşme kilidini aç'
+                        : 'Ders ve görüşmeleri kilitle'
+                    }
+                    disabled={lockBusyId === coach.id}
+                    onClick={() => void toggleCoachLessonsLock(coach)}
+                    className={`p-1.5 rounded-lg transition-colors disabled:opacity-50 ${
+                      coach.lessonsMeetingsLocked
+                        ? 'text-amber-700 hover:bg-amber-50'
+                        : 'text-slate-400 hover:text-amber-700 hover:bg-amber-50'
+                    }`}
+                  >
+                    {lockBusyId === coach.id ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : coach.lessonsMeetingsLocked ? (
+                      <Lock className="w-4 h-4" />
+                    ) : (
+                      <Unlock className="w-4 h-4" />
+                    )}
+                  </button>
+                ) : null}
                 {canManageLogin ? (
                   <button
                     type="button"

@@ -67,6 +67,7 @@ export function coachRowToCoach(c: ApiCoachRow): Coach {
     subjects: c.specialties || [],
     studentIds: c.student_ids || [],
     institutionId: c.institution_id || undefined,
+    lessonsMeetingsLocked: c.lessons_meetings_locked === true,
     createdAt: c.created_at
   };
 }

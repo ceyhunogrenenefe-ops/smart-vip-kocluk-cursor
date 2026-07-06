@@ -48,6 +48,14 @@ async function updateCoachRow(id, patchFields) {
       p = { ...rest, updated_at: new Date().toISOString() };
       continue;
     }
+    if (
+      isMissingCoachesColumn(error, 'lessons_meetings_locked') &&
+      'lessons_meetings_locked' in p
+    ) {
+      const { lessons_meetings_locked: _l, ...rest } = p;
+      p = { ...rest, updated_at: new Date().toISOString() };
+      continue;
+    }
     return { data, error };
   }
   return { data: null, error: { message: 'coaches update failed' } };
@@ -60,6 +68,20 @@ const assertCoachVisibility = (actor, coach) => {
   if (actor.role === 'coach') return Boolean(actor.coach_id && coach.id === actor.coach_id);
   return false;
 };
+
+async function selectCoachesList(buildQuery) {
+  let columns = COACH_LIST_COLUMNS;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const { data, error } = await buildQuery(columns);
+    if (!error) return { data, error: null };
+    if (isMissingCoachesColumn(error, 'lessons_meetings_locked')) {
+      columns = columns.replace(',lessons_meetings_locked', '');
+      continue;
+    }
+    return { data, error };
+  }
+  return { data: null, error: { message: 'coaches select failed' } };
+}
 
 export default async function handler(req, res) {
   try {
@@ -83,12 +105,14 @@ export default async function handler(req, res) {
         if (stuErr) throw stuErr;
         const cid = stu?.coach_id ? String(stu.coach_id).trim() : '';
         if (!cid) return res.status(200).json({ data: [] });
-        const { data: one, error: cErr } = await supabaseAdmin.from('coaches').select(COACH_LIST_COLUMNS).eq('id', cid).maybeSingle();
+        const { data: one, error: cErr } = await selectCoachesList((columns) =>
+          supabaseAdmin.from('coaches').select(columns).eq('id', cid).maybeSingle()
+        );
         if (cErr) throw cErr;
         return res.status(200).json({ data: one ? [one] : [] });
       }
 
-      let query = supabaseAdmin.from('coaches').select(COACH_LIST_COLUMNS).order('created_at', { ascending: false });
+      let query = supabaseAdmin.from('coaches').order('created_at', { ascending: false });
       if (actor.role === 'admin') {
         if (!actor.institution_id) return res.status(200).json({ data: [] });
         query = query.eq('institution_id', actor.institution_id);
@@ -108,7 +132,7 @@ export default async function handler(req, res) {
         query = query.eq('institution_id', actor.institution_id).in('id', coachIds);
       }
       if (actor.role === 'coach') query = query.eq('id', actor.coach_id);
-      const { data, error } = await query;
+      const { data, error } = await selectCoachesList((columns) => query.select(columns));
       if (error) throw error;
       return res.status(200).json({ data: data || [] });
     }
@@ -246,7 +270,14 @@ export default async function handler(req, res) {
       const { data: existing } = await supabaseAdmin.from('coaches').select('*').eq('id', id).single();
       if (!existing || !assertCoachVisibility(actor, existing)) return res.status(403).json({ error: 'forbidden' });
       const body = req.body || {};
-      const { data, error } = await updateCoachRow(id, body);
+      const patch = { ...body };
+      if (patch.lessons_meetings_locked !== undefined) {
+        if (actor.role !== 'super_admin' && actor.role !== 'admin') {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        patch.lessons_meetings_locked = Boolean(patch.lessons_meetings_locked);
+      }
+      const { data, error } = await updateCoachRow(id, patch);
       if (error) throw error;
       if (Array.isArray(body.student_ids)) {
         await applyStudentIdsToCoachFk(id, body.student_ids.map(String));

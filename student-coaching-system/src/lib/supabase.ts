@@ -229,6 +229,7 @@ export interface Database {
           student_ids: string[];
           institution_id: string | null;
           managed_by_admin_id: string | null;
+          lessons_meetings_locked: boolean;
           created_at: string;
           updated_at: string;
         };
