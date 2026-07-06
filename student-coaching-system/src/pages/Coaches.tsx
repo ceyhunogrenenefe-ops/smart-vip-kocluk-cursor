@@ -29,6 +29,7 @@ import {
   Unlock
 } from 'lucide-react';
 import { CopyableLoginCredentialsPanel } from '../components/auth/CopyableLoginCredentials';
+import { coachRowToCoach } from '../lib/mapStudentRow';
 import {
   AppModal,
   AppModalBody,
@@ -79,6 +80,12 @@ export default function Coaches() {
   });
   const [licenseSaving, setLicenseSaving] = useState(false);
   const [lockBusyId, setLockBusyId] = useState<string | null>(null);
+  const [allCoachesForPage, setAllCoachesForPage] = useState<Coach[]>([]);
+
+  const coachesForPage =
+    effectiveUser?.role === 'super_admin' && allCoachesForPage.length > 0
+      ? allCoachesForPage
+      : coaches;
 
   const userByEmail = useMemo(() => {
     const m = new Map<string, ApiUserRow>();
@@ -90,7 +97,7 @@ export default function Coaches() {
   }, [apiUsers]);
 
   // Filtrelenmiş koçlar
-  const filteredCoaches = coaches.filter(coach =>
+  const filteredCoaches = coachesForPage.filter(coach =>
     coach.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     coach.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
     coach.subjects.some(s => s.toLowerCase().includes(searchTerm.toLowerCase()))
@@ -306,6 +313,25 @@ export default function Coaches() {
     };
   }, [canSetCoachQuota, licenseInstitutionId]);
 
+  useEffect(() => {
+    if (effectiveUser?.role !== 'super_admin' || !getAuthToken()) {
+      setAllCoachesForPage([]);
+      return;
+    }
+    let cancelled = false;
+    void db
+      .getCoaches()
+      .then((rows) => {
+        if (!cancelled) setAllCoachesForPage(rows.map(coachRowToCoach));
+      })
+      .catch(() => {
+        if (!cancelled) setAllCoachesForPage([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveUser?.role]);
+
   const reloadLicenses = async () => {
     try {
       const rows = await db.getCoachLicenses(licenseInstitutionId);
@@ -346,14 +372,26 @@ export default function Coaches() {
     }
   };
 
-  const toggleCoachLessonsLock = async (coach: Coach) => {
+  const toggleCoachLessonsLock = async (target: {
+    id: string;
+    name: string;
+    lessonsMeetingsLocked: boolean;
+  }) => {
     if (!canSetCoachQuota) return;
-    const next = !coach.lessonsMeetingsLocked;
+    const next = !target.lessonsMeetingsLocked;
     const label = next ? 'kilitlemek' : 'kilidini açmak';
-    if (!confirm(`${coach.name} için ders ve görüşmeleri ${label} istiyor musunuz?`)) return;
-    setLockBusyId(coach.id);
+    if (!confirm(`${target.name} için ders ve görüşmeleri ${label} istiyor musunuz?`)) return;
+    setLockBusyId(target.id);
     try {
-      await updateCoach(coach.id, { lessonsMeetingsLocked: next });
+      await updateCoach(target.id, { lessonsMeetingsLocked: next });
+      setAllCoachesForPage((prev) =>
+        prev.map((c) => (c.id === target.id ? { ...c, lessonsMeetingsLocked: next } : c))
+      );
+      setCoachLicenses((prev) =>
+        prev.map((r) =>
+          r.coach_id === target.id ? { ...r, lessons_meetings_locked: next } : r
+        )
+      );
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Kilit güncellenemedi');
     } finally {
@@ -363,11 +401,14 @@ export default function Coaches() {
 
   const coachLockById = useMemo(() => {
     const m = new Map<string, boolean>();
-    for (const c of coaches) {
+    for (const row of coachLicenses) {
+      m.set(row.coach_id, row.lessons_meetings_locked === true);
+    }
+    for (const c of coachesForPage) {
       m.set(c.id, c.lessonsMeetingsLocked === true);
     }
     return m;
-  }, [coaches]);
+  }, [coachLicenses, coachesForPage]);
 
   const formatDateTr = (v: string | null) => {
     if (!v) return '—';
@@ -388,12 +429,12 @@ export default function Coaches() {
   };
 
   useEffect(() => {
-    if (!canSetCoachQuota || !getAuthToken() || !isSupabaseReady || coaches.length === 0) return;
+    if (!canSetCoachQuota || !getAuthToken() || !isSupabaseReady || coachesForPage.length === 0) return;
     let cancelled = false;
     void (async () => {
       const nextQuota: Record<string, { max: number | null; assigned: number }> = {};
       const nextInputs: Record<string, string> = {};
-      for (const c of coaches) {
+      for (const c of coachesForPage) {
         try {
           const d = await db.getCoachQuota(c.id);
           nextQuota[c.id] = { max: d.max_students, assigned: d.assigned_students };
@@ -413,7 +454,7 @@ export default function Coaches() {
     return () => {
       cancelled = true;
     };
-  }, [canSetCoachQuota, coaches, students]);
+  }, [canSetCoachQuota, coachesForPage, students]);
 
   return (
     <div className="space-y-6">
@@ -421,7 +462,7 @@ export default function Coaches() {
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Eğitim Koçu Yönetimi</h2>
-          <p className="text-gray-500">Toplam {coaches.length} eğitim koçu kayıtlı</p>
+          <p className="text-gray-500">Toplam {coachesForPage.length} eğitim koçu kayıtlı</p>
         </div>
         <button
           onClick={() => {
@@ -520,35 +561,30 @@ export default function Coaches() {
                       </td>
                       <td className="px-3 py-2">
                         {(() => {
-                          const coach = coaches.find((c) => c.id === row.coach_id);
-                          const locked = coachLockById.get(row.coach_id);
-                          if (!coach) {
-                            return locked ? (
-                              <span className="inline-flex items-center gap-1 text-xs text-amber-800">
-                                <Lock className="h-3 w-3" />
-                                Kilitli
-                              </span>
-                            ) : (
-                              <span className="text-xs text-slate-400">Açık</span>
-                            );
-                          }
+                          const locked = coachLockById.get(row.coach_id) === true;
                           return (
                             <button
                               type="button"
-                              disabled={lockBusyId === coach.id}
+                              disabled={lockBusyId === row.coach_id}
                               title={
                                 locked
                                   ? 'Ders ve görüşme kilidini aç'
                                   : 'Ders ve görüşmeleri kilitle'
                               }
-                              onClick={() => void toggleCoachLessonsLock(coach)}
+                              onClick={() =>
+                                void toggleCoachLessonsLock({
+                                  id: row.coach_id,
+                                  name: row.coach_name,
+                                  lessonsMeetingsLocked: locked
+                                })
+                              }
                               className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
                                 locked
                                   ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
                                   : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
                               }`}
                             >
-                              {lockBusyId === coach.id ? (
+                              {lockBusyId === row.coach_id ? (
                                 <Loader2 className="h-3 w-3 animate-spin" />
                               ) : locked ? (
                                 <Lock className="h-3 w-3" />
@@ -628,7 +664,13 @@ export default function Coaches() {
                         : 'Ders ve görüşmeleri kilitle'
                     }
                     disabled={lockBusyId === coach.id}
-                    onClick={() => void toggleCoachLessonsLock(coach)}
+                    onClick={() =>
+                      void toggleCoachLessonsLock({
+                        id: coach.id,
+                        name: coach.name,
+                        lessonsMeetingsLocked: coach.lessonsMeetingsLocked === true
+                      })
+                    }
                     className={`p-1.5 rounded-lg transition-colors disabled:opacity-50 ${
                       coach.lessonsMeetingsLocked
                         ? 'text-amber-700 hover:bg-amber-50'

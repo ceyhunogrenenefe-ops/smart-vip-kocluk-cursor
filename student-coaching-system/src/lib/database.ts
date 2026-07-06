@@ -63,6 +63,7 @@ export type CoachLicenseRow = {
   remaining_students: number | null;
   days_remaining: number | null;
   license_status: string;
+  lessons_meetings_locked?: boolean;
 };
 type TopicRow = Database['public']['Tables']['topics']['Row'];
 type TopicProgressRow = Database['public']['Tables']['topic_progress']['Row'];

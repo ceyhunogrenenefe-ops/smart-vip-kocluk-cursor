@@ -99,25 +99,32 @@ export async function buildCoachLicenseRow(coach) {
     used_students: used,
     remaining_students: remaining,
     days_remaining: daysRemaining(user?.end_date),
-    license_status: status
+    license_status: status,
+    lessons_meetings_locked: coach.lessons_meetings_locked === true
   };
 }
 
 async function loadCoachesForLicenseScope(institutionId) {
-  let q = supabaseAdmin
-    .from('coaches')
-    .select('id, name, email, institution_id, created_at')
-    .order('name', { ascending: true });
-  if (institutionId) {
-    if (institutionId === PLATFORM_PRIMARY_INSTITUTION_ID) {
-      q = q.or(`institution_id.eq.${institutionId},institution_id.is.null`);
-    } else {
-      q = q.eq('institution_id', institutionId);
+  let columns = 'id, name, email, institution_id, created_at, lessons_meetings_locked';
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let q = supabaseAdmin.from('coaches').select(columns).order('name', { ascending: true });
+    if (institutionId) {
+      if (institutionId === PLATFORM_PRIMARY_INSTITUTION_ID) {
+        q = q.or(`institution_id.eq.${institutionId},institution_id.is.null`);
+      } else {
+        q = q.eq('institution_id', institutionId);
+      }
     }
+    const { data, error } = await q;
+    if (!error) return data || [];
+    const msg = `${error.message || ''} ${error.details || ''}`;
+    if (attempt === 0 && msg.includes("'lessons_meetings_locked'") && msg.includes('schema cache')) {
+      columns = 'id, name, email, institution_id, created_at';
+      continue;
+    }
+    throw error;
   }
-  const { data, error } = await q;
-  if (error) throw error;
-  return data || [];
+  return [];
 }
 
 export async function getCoachLicensesForInstitution(institutionId) {
@@ -132,7 +139,7 @@ export async function getCoachLicensesForInstitution(institutionId) {
 export async function getCoachLicenseByCoachId(coachId) {
   const { data: coach, error } = await supabaseAdmin
     .from('coaches')
-    .select('id, name, email, institution_id, created_at')
+    .select('id, name, email, institution_id, created_at, lessons_meetings_locked')
     .eq('id', coachId)
     .maybeSingle();
   if (error) throw error;
