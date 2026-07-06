@@ -991,6 +991,20 @@ export default function CoachWhatsAppSettings() {
       err.httpStatus = res.status;
       throw err;
     }
+    if (data.ok === false) {
+      const parts = [data.error, data.detail, data.hint].filter(
+        (x): x is string => typeof x === 'string' && x.length > 0
+      );
+      throw new Error(parts.length ? parts.join(' — ') : 'gateway_send_failed');
+    }
+    if (isSend) {
+      const mid = String((data as { id?: string | null; message_id?: string | null }).id || (data as { message_id?: string }).message_id || '').trim();
+      if (!mid) {
+        throw new Error(
+          'Gateway mesaj kimliği dönmedi — gönderim doğrulanamadı. QR oturumunu kontrol edip tekrar deneyin.'
+        );
+      }
+    }
     return data as T;
   };
 

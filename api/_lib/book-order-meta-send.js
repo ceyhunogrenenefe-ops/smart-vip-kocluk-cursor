@@ -123,9 +123,9 @@ export function renderBookOrderWhatsAppBody(order) {
 }
 
 function bookOrderSendChannelPreference() {
-  const raw = String(process.env.BOOK_ORDER_WHATSAPP_CHANNEL || 'gateway').trim().toLowerCase();
-  if (!raw || raw === 'auto' || raw === 'baileys' || raw === 'wa_gateway') return 'gateway';
-  if (raw === 'meta' || raw === 'cloud' || raw === 'meta_cloud_api') return 'meta';
+  const raw = String(process.env.BOOK_ORDER_WHATSAPP_CHANNEL || 'meta').trim().toLowerCase();
+  if (!raw || raw === 'auto' || raw === 'meta' || raw === 'cloud' || raw === 'meta_cloud_api') return 'meta';
+  if (raw === 'baileys' || raw === 'wa_gateway' || raw === 'gateway') return 'gateway';
   return raw;
 }
 
@@ -154,7 +154,7 @@ export function bookOrderGatewayReady(gatewaySessionId) {
   return bookOrderGatewaySessionCandidates(gatewaySessionId).some((id) => gatewayConfiguredForSession(id));
 }
 
-/** Önce gateway (bağlı oturum), olmazsa Meta — otomasyon kanalı ile aynı mantık. */
+/** Önce Meta (varsayılan), BOOK_ORDER_WHATSAPP_CHANNEL=gateway ile eski yol. */
 export function bookOrderSendPlan(opts = {}) {
   const pref = bookOrderSendChannelPreference();
   const gwReady = bookOrderGatewayReady(opts.gatewaySessionId);
@@ -253,38 +253,36 @@ function mapSendResult(sent) {
   };
 }
 
-/** Önce gateway (QR), bağlı değilse veya gönderim düşerse Meta şablonu — atlama yok. */
+/** Önce Meta şablonu; BOOK_ORDER_WHATSAPP_CHANNEL=gateway ile eski gateway yolu. */
 export async function sendBookOrderWhatsApp(phone, order, opts = {}) {
   const { tryGateway, tryMeta } = bookOrderSendPlan(opts);
-  let lastGw = null;
+  let lastMeta = null;
+
+  if (tryMeta) {
+    const meta = await sendBookOrderMetaWhatsApp(phone, order);
+    if (meta.ok) return meta;
+    lastMeta = meta;
+    if (!tryGateway) return meta;
+  }
 
   if (tryGateway) {
     const gw = await sendBookOrderViaGateway(phone, order, opts.gatewaySessionId);
     if (gw.ok) return gw;
-    lastGw = gw;
-    if (!tryMeta) return gw;
-  }
-
-  if (tryMeta) {
-    const meta = await sendBookOrderMetaWhatsApp(phone, order);
-    if (!meta.ok && lastGw) {
-      meta.error = `${lastGw.error || 'gateway_failed'} · Meta: ${meta.error || 'failed'}`;
-      meta.gateway_attempt = lastGw.errorCode || null;
-    } else if (meta.ok && lastGw) {
-      meta.fallback_from = 'gateway';
-      meta.channel = 'meta';
+    if (lastMeta) {
+      gw.error = `Meta: ${lastMeta.error || 'failed'} · Gateway: ${gw.error || 'failed'}`;
+      gw.meta_attempt = lastMeta.errorCode || null;
     }
-    return meta;
+    return gw;
   }
 
-  if (lastGw) return lastGw;
+  if (lastMeta) return lastMeta;
 
   return {
     ok: false,
     error:
       bookOrderSendPlan(opts).metaReady || metaWhatsAppConfigured()
         ? 'Gönderim kanalı seçilemedi.'
-        : 'WhatsApp yapılandırılmamış: gateway QR bağlayın veya META_WHATSAPP_TOKEN + META_PHONE_NUMBER_ID tanımlayın.',
+        : 'Meta WhatsApp yapılandırılmamış: META_WHATSAPP_TOKEN ve META_PHONE_NUMBER_ID tanımlayın.',
     errorCode: 'NO_CHANNEL'
   };
 }

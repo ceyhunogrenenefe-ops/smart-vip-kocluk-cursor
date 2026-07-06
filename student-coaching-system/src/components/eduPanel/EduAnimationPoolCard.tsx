@@ -1,6 +1,10 @@
 import { Clapperboard, Pencil, Play, Plus, Trash2, User } from 'lucide-react';
 import type { EduAnimationPoolItem } from '../../types/eduPanel.types';
-import { subjectCoverGradient } from '../../lib/eduPanel/eduAnimationPoolCatalog';
+import {
+  formatPoolTargetLabel,
+  normalizePoolTargets,
+  subjectCoverGradient
+} from '../../lib/eduPanel/eduAnimationPoolCatalog';
 
 type Props = {
   item: EduAnimationPoolItem;
@@ -24,6 +28,7 @@ export default function EduAnimationPoolCard({
   addLabel = 'Ödeve Ekle'
 }: Props) {
   const gradient = subjectCoverGradient(item.subject_name);
+  const targets = normalizePoolTargets(item);
 
   return (
     <article className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md">
@@ -37,6 +42,17 @@ export default function EduAnimationPoolCard({
       </div>
 
       <div className="flex flex-1 flex-col gap-2 p-4">
+        <div className="flex flex-wrap gap-1">
+          {targets.map((target) => (
+            <span
+              key={`${target.program}:${target.class_level}`}
+              className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-800 ring-1 ring-indigo-100"
+            >
+              {formatPoolTargetLabel(target)}
+            </span>
+          ))}
+        </div>
+
         <div className="space-y-1 text-sm">
           <p className="text-slate-600">
             <span className="font-medium text-slate-800">Ders:</span> {item.subject_name}

@@ -107,8 +107,9 @@ export async function fetchEduAnimationPool(params?: {
 
 export async function uploadEduPoolAnimation(payload: {
   title: string;
-  program: string;
-  class_level: string;
+  program?: string;
+  class_level?: string;
+  targets?: { program: string; class_level: string }[];
   subject_name: string;
   topic_name: string;
   file: File;
@@ -120,6 +121,7 @@ export async function uploadEduPoolAnimation(payload: {
       title: payload.title,
       program: payload.program,
       class_level: payload.class_level,
+      targets: payload.targets,
       subject_name: payload.subject_name,
       topic_name: payload.topic_name,
       file_name: payload.file.name,
@@ -132,7 +134,12 @@ export async function uploadEduPoolAnimation(payload: {
 
 export async function updateEduPoolAnimation(
   id: string,
-  patch: Partial<Pick<EduAnimationPoolItem, 'title' | 'program' | 'class_level' | 'subject_name' | 'topic_name'>>
+  patch: Partial<
+    Pick<
+      EduAnimationPoolItem,
+      'title' | 'program' | 'class_level' | 'subject_name' | 'topic_name' | 'targets'
+    >
+  >
 ): Promise<EduAnimationPoolItem> {
   const res = await apiFetch(`/api/edu-panel?resource=animation-pool&id=${encodeURIComponent(id)}`, {
     method: 'PATCH',

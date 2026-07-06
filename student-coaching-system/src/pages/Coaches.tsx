@@ -5,6 +5,7 @@ import { useApp } from '../context/AppContext';
 import { useAuth, type SystemUser } from '../context/AuthContext';
 import { Coach } from '../types';
 import { db } from '../lib/database';
+import type { CoachLicenseRow } from '../lib/database';
 import { isSupabaseReady } from '../lib/supabase';
 import { apiFetch, getAuthToken } from '../lib/session';
 import {
@@ -62,6 +63,17 @@ export default function Coaches() {
   const [apiUsers, setApiUsers] = useState<ApiUserRow[]>([]);
   const [loginBusyId, setLoginBusyId] = useState<string | null>(null);
   const [openQuotaCoachId, setOpenQuotaCoachId] = useState<string | null>(null);
+  const [coachLicenses, setCoachLicenses] = useState<CoachLicenseRow[]>([]);
+  const [licensesLoading, setLicensesLoading] = useState(false);
+  const [licenseEdit, setLicenseEdit] = useState<CoachLicenseRow | null>(null);
+  const [licenseForm, setLicenseForm] = useState({
+    package: 'starter',
+    start_date: '',
+    end_date: '',
+    max_students: '5',
+    is_active: true
+  });
+  const [licenseSaving, setLicenseSaving] = useState(false);
 
   const userByEmail = useMemo(() => {
     const m = new Map<string, ApiUserRow>();
@@ -86,7 +98,8 @@ export default function Coaches() {
     password: '',
     phone: '',
     subjects: [] as string[],
-    institutionId: ''
+    institutionId: '',
+    maxStudents: '5'
   });
 
   // Yeni kayıt sonrası gösterilecek şifre
@@ -110,7 +123,8 @@ export default function Coaches() {
       password: '',
       phone: '',
       subjects: [],
-      institutionId: ''
+      institutionId: '',
+      maxStudents: '5'
     });
     setCreatedCredentials(null);
   };
@@ -141,6 +155,7 @@ export default function Coaches() {
         phone: formData.phone,
         subjects: formData.subjects,
         institutionId: formData.institutionId || activeInstitutionId || institution?.id || undefined,
+        maxStudents: Math.max(0, Math.floor(Number(formData.maxStudents) || 5)),
         studentIds: [],
         createdAt: new Date().toISOString()
       };
@@ -261,6 +276,83 @@ export default function Coaches() {
   };
 
   useEffect(() => {
+    if (!canSetCoachQuota || !getAuthToken()) return;
+    let cancelled = false;
+    setLicensesLoading(true);
+    void (async () => {
+      try {
+        const rows = await db.getCoachLicenses(activeInstitutionId || institution?.id);
+        if (!cancelled) setCoachLicenses(rows);
+      } catch {
+        if (!cancelled) setCoachLicenses([]);
+      } finally {
+        if (!cancelled) setLicensesLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [canSetCoachQuota, coaches.length, activeInstitutionId, institution?.id]);
+
+  const reloadLicenses = async () => {
+    try {
+      const rows = await db.getCoachLicenses(activeInstitutionId || institution?.id);
+      setCoachLicenses(rows);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const openLicenseEdit = (row: CoachLicenseRow) => {
+    setLicenseEdit(row);
+    setLicenseForm({
+      package: row.package || 'starter',
+      start_date: row.start_date ? String(row.start_date).slice(0, 10) : '',
+      end_date: row.end_date ? String(row.end_date).slice(0, 10) : '',
+      max_students: row.max_students != null ? String(row.max_students) : '5',
+      is_active: row.is_active !== false
+    });
+  };
+
+  const saveLicenseEdit = async () => {
+    if (!licenseEdit) return;
+    setLicenseSaving(true);
+    try {
+      await db.patchCoachLicense(licenseEdit.coach_id, {
+        package: licenseForm.package,
+        start_date: licenseForm.start_date || null,
+        end_date: licenseForm.end_date || null,
+        max_students: Math.max(0, Math.floor(Number(licenseForm.max_students) || 0)),
+        is_active: licenseForm.is_active
+      });
+      await reloadLicenses();
+      setLicenseEdit(null);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Lisans güncellenemedi');
+    } finally {
+      setLicenseSaving(false);
+    }
+  };
+
+  const formatDateTr = (v: string | null) => {
+    if (!v) return '—';
+    const d = String(v).slice(0, 10);
+    const [y, m, day] = d.split('-');
+    if (!y || !m || !day) return d;
+    return `${day}.${m}.${y}`;
+  };
+
+  const statusBadge = (row: CoachLicenseRow) => {
+    if (!row.is_active) {
+      return <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">Pasif</span>;
+    }
+    if (row.license_status === 'expired') {
+      return <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">Süresi doldu</span>;
+    }
+    return <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">Aktif</span>;
+  };
+
+  useEffect(() => {
     if (!canSetCoachQuota || !getAuthToken() || !isSupabaseReady || coaches.length === 0) return;
     let cancelled = false;
     void (async () => {
@@ -308,6 +400,90 @@ export default function Coaches() {
           Yeni Koç Ekle
         </button>
       </div>
+
+      {canSetCoachQuota ? (
+        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 px-4 py-3">
+            <h3 className="text-sm font-bold text-slate-800">Koç lisansları</h3>
+            <p className="text-xs text-slate-500">
+              Paket, süre ve öğrenci kotası — tek yerden yönetin
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-3 py-2">Koç</th>
+                  <th className="px-3 py-2">Durum</th>
+                  <th className="px-3 py-2">Başlangıç</th>
+                  <th className="px-3 py-2">Bitiş</th>
+                  <th className="px-3 py-2">Kalan gün</th>
+                  <th className="px-3 py-2">Limit</th>
+                  <th className="px-3 py-2">Kullanılan</th>
+                  <th className="px-3 py-2">Boş</th>
+                  <th className="px-3 py-2">Son giriş</th>
+                  <th className="px-3 py-2" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {licensesLoading ? (
+                  <tr>
+                    <td colSpan={10} className="px-3 py-8 text-center text-slate-500">
+                      <Loader2 className="mx-auto h-6 w-6 animate-spin" />
+                    </td>
+                  </tr>
+                ) : coachLicenses.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="px-3 py-6 text-center text-slate-500">
+                      Henüz koç lisansı yok
+                    </td>
+                  </tr>
+                ) : (
+                  coachLicenses.map((row) => (
+                    <tr key={row.coach_id} className="hover:bg-slate-50/80">
+                      <td className="px-3 py-2">
+                        <div className="font-medium text-slate-800">{row.coach_name}</div>
+                        <div className="text-xs text-slate-500">{row.package_label}</div>
+                      </td>
+                      <td className="px-3 py-2">{statusBadge(row)}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{formatDateTr(row.start_date)}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{formatDateTr(row.end_date)}</td>
+                      <td className="px-3 py-2">
+                        {row.days_remaining != null ? (
+                          <span
+                            className={
+                              row.days_remaining <= 7 ? 'font-semibold text-amber-700' : 'text-slate-700'
+                            }
+                          >
+                            {row.days_remaining}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td className="px-3 py-2">{row.max_students ?? '—'}</td>
+                      <td className="px-3 py-2">{row.used_students}</td>
+                      <td className="px-3 py-2">{row.remaining_students ?? '—'}</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-xs text-slate-600">
+                        {row.last_login_at ? formatDateTr(row.last_login_at) : '—'}
+                      </td>
+                      <td className="px-3 py-2">
+                        <button
+                          type="button"
+                          onClick={() => openLicenseEdit(row)}
+                          className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                        >
+                          Düzenle
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       {/* Arama */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
@@ -584,6 +760,19 @@ export default function Coaches() {
                   </div>
                 )}
 
+                {!editingCoach && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Öğrenci limiti</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={formData.maxStudents}
+                      onChange={(e) => setFormData({ ...formData, maxStudents: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                    />
+                  </div>
+                )}
+
                 {/* Kurum */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Kurum</label>
@@ -664,6 +853,89 @@ export default function Coaches() {
             />
           </div>
         ) : null}
+      </AppModal>
+
+      <AppModal
+        open={licenseEdit != null}
+        onClose={() => setLicenseEdit(null)}
+        panelClassName="max-w-lg"
+      >
+        <AppModalHeader>
+          <h3 className="text-lg font-bold text-slate-800">Lisans düzenle</h3>
+          <button type="button" onClick={() => setLicenseEdit(null)} className="icon-tap-btn">
+            <X className="h-5 w-5" />
+          </button>
+        </AppModalHeader>
+        <AppModalForm
+          onSubmit={(e) => {
+            e.preventDefault();
+            void saveLicenseEdit();
+          }}
+        >
+          <AppModalBody className="space-y-3">
+            <p className="text-sm font-medium text-slate-800">{licenseEdit?.coach_name}</p>
+            <label className="block text-sm">
+              <span className="text-xs text-slate-600">Paket</span>
+              <select
+                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                value={licenseForm.package}
+                onChange={(e) => setLicenseForm((f) => ({ ...f, package: e.target.value }))}
+              >
+                <option value="starter">Smart Coach Basic</option>
+                <option value="professional">Smart Coach Pro</option>
+                <option value="enterprise">Smart Coach Enterprise</option>
+                <option value="trial">Deneme</option>
+              </select>
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block text-sm">
+                <span className="text-xs text-slate-600">Başlangıç</span>
+                <input
+                  type="date"
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                  value={licenseForm.start_date}
+                  onChange={(e) => setLicenseForm((f) => ({ ...f, start_date: e.target.value }))}
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="text-xs text-slate-600">Bitiş</span>
+                <input
+                  type="date"
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                  value={licenseForm.end_date}
+                  onChange={(e) => setLicenseForm((f) => ({ ...f, end_date: e.target.value }))}
+                />
+              </label>
+            </div>
+            <label className="block text-sm">
+              <span className="text-xs text-slate-600">Öğrenci limiti</span>
+              <input
+                type="number"
+                min={0}
+                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                value={licenseForm.max_students}
+                onChange={(e) => setLicenseForm((f) => ({ ...f, max_students: e.target.value }))}
+              />
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={licenseForm.is_active}
+                onChange={(e) => setLicenseForm((f) => ({ ...f, is_active: e.target.checked }))}
+              />
+              Hesap aktif
+            </label>
+          </AppModalBody>
+          <AppModalFooter>
+            <button
+              type="submit"
+              disabled={licenseSaving}
+              className="rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {licenseSaving ? 'Kaydediliyor…' : 'Kaydet'}
+            </button>
+          </AppModalFooter>
+        </AppModalForm>
       </AppModal>
     </div>
   );

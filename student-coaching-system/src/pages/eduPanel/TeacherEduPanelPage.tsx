@@ -318,6 +318,7 @@ export default function TeacherEduPanelPage() {
       {pageTab === 'pool' ? (
         <EduAnimationPoolTab
           rows={rows}
+          classes={classes}
           busy={busy}
           setBusy={setBusy}
           onPreview={(item) =>

@@ -20,6 +20,11 @@ export type EduAnimation = {
   pool_id?: string | null;
 };
 
+export type EduAnimationPoolTarget = {
+  program: 'lgs' | 'tyt' | 'ayt';
+  class_level: string;
+};
+
 export type EduAnimationPoolItem = {
   id: string;
   institution_id?: string | null;
@@ -28,6 +33,7 @@ export type EduAnimationPoolItem = {
   title: string;
   program: 'lgs' | 'tyt' | 'ayt';
   class_level: string;
+  targets?: EduAnimationPoolTarget[];
   subject_name: string;
   topic_name: string;
   original_name: string;

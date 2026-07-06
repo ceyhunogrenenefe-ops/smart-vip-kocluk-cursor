@@ -69,6 +69,46 @@ async function enrichPoolItems(items) {
   }));
 }
 
+function normalizePoolTargets(item) {
+  if (Array.isArray(item?.targets) && item.targets.length > 0) {
+    return item.targets
+      .map((t) => ({
+        program: String(t?.program || '').trim().toLowerCase(),
+        class_level: String(t?.class_level || '').trim()
+      }))
+      .filter((t) => ['lgs', 'tyt', 'ayt'].includes(t.program) && t.class_level);
+  }
+  const program = String(item?.program || '').trim().toLowerCase();
+  const classLevel = String(item?.class_level || '').trim();
+  if (!program || !classLevel) return [];
+  return [{ program, class_level: classLevel }];
+}
+
+function poolItemMatchesFilter(item, program, classLevel) {
+  if (!program && !classLevel) return true;
+  return normalizePoolTargets(item).some(
+    (t) =>
+      (!program || t.program === program) &&
+      (!classLevel || t.class_level === classLevel)
+  );
+}
+
+function parsePoolTargetsInput(body) {
+  if (!Array.isArray(body?.targets)) return null;
+  const out = [];
+  const seen = new Set();
+  for (const raw of body.targets) {
+    const program = String(raw?.program || '').trim().toLowerCase();
+    const classLevel = String(raw?.class_level || '').trim();
+    if (!['lgs', 'tyt', 'ayt'].includes(program) || !classLevel) continue;
+    const key = `${program}:${classLevel}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ program, class_level: classLevel });
+  }
+  return out;
+}
+
 function teacherCanManagePool(actor, pool, tags) {
   if (tags.includes('admin') || tags.includes('super_admin')) return true;
   return String(pool.teacher_user_id) === String(actor.sub);
@@ -892,12 +932,10 @@ export default async function handler(req, res) {
         let q = supabaseAdmin.from('edu_animation_pool').select('*').order('created_at', { ascending: false });
         const inst = actor.institution_id || null;
         if (inst) q = q.eq('institution_id', inst);
-        const program = String(req.query?.program || '').trim();
+        const program = String(req.query?.program || '').trim().toLowerCase();
         const classLevel = String(req.query?.class_level || '').trim();
         const subjectName = String(req.query?.subject_name || '').trim();
         const search = String(req.query?.q || '').trim().toLowerCase();
-        if (program) q = q.eq('program', program);
-        if (classLevel) q = q.eq('class_level', classLevel);
         if (subjectName) q = q.eq('subject_name', subjectName);
         const { data, error } = await q;
         if (error) {
@@ -910,6 +948,9 @@ export default async function handler(req, res) {
           throw error;
         }
         let items = data || [];
+        if (program || classLevel) {
+          items = items.filter((item) => poolItemMatchesFilter(item, program, classLevel));
+        }
         if (search) {
           items = items.filter((item) => {
             const hay = [item.title, item.subject_name, item.topic_name]
@@ -924,18 +965,24 @@ export default async function handler(req, res) {
         if (!canTeach(tags)) return res.status(403).json({ error: 'forbidden' });
         const body = parseBody(req);
         const title = String(body.title || '').trim();
-        const program = String(body.program || '').trim().toLowerCase();
-        const classLevel = String(body.class_level || '').trim();
         const subjectName = String(body.subject_name || '').trim();
         const topicName = String(body.topic_name || '').trim();
         const fileName = String(body.file_name || 'animation.html').trim();
         const b64 = String(body.file_base64 || '');
-        if (!title || !program || !classLevel || !subjectName || !topicName || !b64) {
+        let targets = parsePoolTargetsInput(body);
+        if (!targets?.length) {
+          const program = String(body.program || '').trim().toLowerCase();
+          const classLevel = String(body.class_level || '').trim();
+          if (program && classLevel && ['lgs', 'tyt', 'ayt'].includes(program)) {
+            targets = [{ program, class_level: classLevel }];
+          }
+        }
+        if (!title || !targets?.length || !subjectName || !topicName || !b64) {
           return res.status(400).json({ error: 'pool_fields_required' });
         }
-        if (!['lgs', 'tyt', 'ayt'].includes(program)) {
-          return res.status(400).json({ error: 'invalid_program' });
-        }
+        const primary = targets[0];
+        const program = primary.program;
+        const classLevel = primary.class_level;
         const buf = Buffer.from(b64, 'base64');
         if (buf.length > 10 * 1024 * 1024) return res.status(400).json({ error: 'file_too_large' });
         const poolId = randomUUID();
@@ -946,23 +993,36 @@ export default async function handler(req, res) {
           buffer: buf,
           contentType: 'text/html; charset=utf-8'
         });
-        const { data, error } = await supabaseAdmin
+        const insertRow = {
+          id: poolId,
+          institution_id: actor.institution_id || null,
+          teacher_user_id: actor.sub,
+          title,
+          program,
+          class_level: classLevel,
+          targets,
+          subject_name: subjectName,
+          topic_name: topicName,
+          original_name: fileName,
+          storage_path: path,
+          file_size: buf.length
+        };
+        let { data, error } = await supabaseAdmin
           .from('edu_animation_pool')
-          .insert({
-            id: poolId,
-            institution_id: actor.institution_id || null,
-            teacher_user_id: actor.sub,
-            title,
-            program,
-            class_level: classLevel,
-            subject_name: subjectName,
-            topic_name: topicName,
-            original_name: fileName,
-            storage_path: path,
-            file_size: buf.length
-          })
+          .insert(insertRow)
           .select()
           .single();
+        if (error && isOptionalEduColumnMissing(error, 'targets')) {
+          const retryRow = { ...insertRow };
+          delete retryRow.targets;
+          const retry = await supabaseAdmin
+            .from('edu_animation_pool')
+            .insert(retryRow)
+            .select()
+            .single();
+          data = retry.data;
+          error = retry.error;
+        }
         if (error) {
           if (isPoolSchemaMissing(error)) {
             return res.status(503).json({
@@ -1000,15 +1060,33 @@ export default async function handler(req, res) {
         if (patch.program && !['lgs', 'tyt', 'ayt'].includes(String(patch.program).toLowerCase())) {
           return res.status(400).json({ error: 'invalid_program' });
         }
+        const targets = parsePoolTargetsInput(body);
+        if (targets?.length) {
+          patch.targets = targets;
+          patch.program = targets[0].program;
+          patch.class_level = targets[0].class_level;
+        }
         if (Object.keys(patch).length === 0) {
           return res.status(400).json({ error: 'nothing_to_update' });
         }
-        const { data, error } = await supabaseAdmin
+        let { data, error } = await supabaseAdmin
           .from('edu_animation_pool')
           .update(patch)
           .eq('id', pid)
           .select()
           .single();
+        if (error && isOptionalEduColumnMissing(error, 'targets')) {
+          const retryPatch = { ...patch };
+          delete retryPatch.targets;
+          const retry = await supabaseAdmin
+            .from('edu_animation_pool')
+            .update(retryPatch)
+            .eq('id', pid)
+            .select()
+            .single();
+          data = retry.data;
+          error = retry.error;
+        }
         if (error) throw error;
         const [enriched] = await enrichPoolItems([data]);
         return res.status(200).json({ data: enriched || data });

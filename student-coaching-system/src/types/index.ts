@@ -130,6 +130,7 @@ export interface Coach {
   subjects: string[]; // Uzmanlık alanları
   institutionId?: string;
   studentIds: string[]; // Bu koça atanan öğrenciler
+  maxStudents?: number;
   bio?: string; // Koç hakkında
   experience?: number; // Deneyim yılı
   createdAt: string;

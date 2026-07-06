@@ -594,8 +594,8 @@ export default async function handler(req, res) {
         waba_id_suffix: env.waba_id_suffix,
         meta_configured: env.configured,
         activated: activated.ok,
-        channel: activated.send_via || 'gateway',
-        send_via: activated.send_via || 'gateway',
+        channel: activated.send_via || 'meta_cloud_api',
+        send_via: activated.send_via || 'meta_cloud_api',
         send_plan: plan,
         meta_fallback: plan.metaFallback !== false,
         gateway,
@@ -606,15 +606,15 @@ export default async function handler(req, res) {
         hint: !gatewayHealth.ok && plan.tryMeta
           ? `VPS erişilemiyor (${gatewayHealth.error || 'fetch_failed'}) — kitap siparişleri Meta şablonu ile gider.`
           : !gatewayHealth.ok
-            ? `VPS erişilemiyor (${gatewayHealth.error || 'fetch_failed'}) — sunucuda pm2 restart whatsapp-gateway`
+            ? `VPS erişilemiyor (${gatewayHealth.error || 'fetch_failed'}) — kitap siparişleri Meta ile gider (gateway opsiyonel).`
             : gatewayLive?.error && plan.tryMeta
               ? `${gatewayLive.error} Gönderim Meta şablonu ile yapılır.`
               : gatewayLive?.error
                 ? gatewayLive.error
-                : plan.tryGateway && gatewayLive?.ok
-                  ? 'Kitap siparişleri önce WhatsApp gateway (Baileys), olmazsa Meta şablonu ile gider.'
-                  : plan.tryMeta
-                    ? 'Gateway bağlı değil — kitap siparişleri Meta şablonu (kitap_siparisi1) ile gider.'
+                : plan.tryMeta
+                  ? 'Kitap siparişleri kurumsal Meta şablonu (kitap_siparisi1) ile gider.'
+                  : plan.tryGateway && gatewayLive?.ok
+                    ? 'Kitap siparişleri BOOK_ORDER_WHATSAPP_CHANNEL=gateway — Baileys oturumu üzerinden.'
                     : gateway.hint
       });
     } catch (e) {

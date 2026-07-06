@@ -798,8 +798,11 @@ export default function Analytics() {
     setParentShareNotice('');
     setParentShareWaUrl(null);
     if (!selectedStudent) return;
+    if (!getAuthToken()) {
+      setParentShareNotice('Oturum süresi dolmuş olabilir — çıkış yapıp tekrar giriş yapın.');
+      return;
+    }
     const coachUserId = getGatewaySessionUserId(effectiveUser?.id);
-    if (!coachUserId) return;
     const parentPhone = formatWhatsAppPhone(selectedStudent.parentPhone || '');
     if (!parentPhone) {
       setParentShareNotice('Bu öğrenci için veli telefonu tanımlı değil.');
@@ -1053,7 +1056,11 @@ export default function Analytics() {
           {parentShareNotice ? (
             <div
               role="status"
-              className="rounded-lg border border-green-100 bg-green-50 px-3 py-2 text-sm text-green-900 whitespace-pre-wrap"
+              className={`rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap ${
+                parentShareWaUrl
+                  ? 'border-amber-200 bg-amber-50 text-amber-950'
+                  : 'border-green-100 bg-green-50 text-green-900'
+              }`}
             >
               {parentShareNotice}
               {parentShareWaUrl ? (

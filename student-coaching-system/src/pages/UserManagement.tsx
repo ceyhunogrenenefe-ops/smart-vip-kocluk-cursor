@@ -1976,9 +1976,11 @@ export default function UserManagement() {
                   name: fullName,
                   email: formData.email,
                   phone: formData.phone || '',
+                  password: pwdPlain,
                   subjects: [],
                   studentIds: [],
                   institutionId: instId || undefined,
+                  maxStudents: 5,
                   createdAt: new Date().toISOString()
                 };
                 const existingCoach = coaches.find(

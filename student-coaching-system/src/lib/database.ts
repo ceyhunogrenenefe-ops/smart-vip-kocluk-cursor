@@ -39,8 +39,31 @@ export interface QuotaSnapshot {
     max_students: number | null;
     assigned_students: number;
     usage_pct: number | null;
+    license_status?: string;
+    package_label?: string | null;
+    end_date?: string | null;
+    days_remaining?: number | null;
+    license_expired?: boolean;
   } | null;
 }
+
+export type CoachLicenseRow = {
+  coach_id: string;
+  coach_name: string;
+  coach_email: string;
+  user_id: string | null;
+  package: string | null;
+  package_label: string;
+  start_date: string | null;
+  end_date: string | null;
+  is_active: boolean;
+  last_login_at: string | null;
+  max_students: number | null;
+  used_students: number;
+  remaining_students: number | null;
+  days_remaining: number | null;
+  license_status: string;
+};
 type TopicRow = Database['public']['Tables']['topics']['Row'];
 type TopicProgressRow = Database['public']['Tables']['topic_progress']['Row'];
 
@@ -281,6 +304,33 @@ class DatabaseService {
         max_students: maxStudents
       })
     });
+  }
+
+  async getCoachLicenses(institutionId?: string | null): Promise<CoachLicenseRow[]> {
+    const q = new URLSearchParams({ coach_licenses: '1' });
+    if (institutionId) q.set('institution_id', String(institutionId));
+    return this.apiJson<CoachLicenseRow[]>(`/api/quota?${q.toString()}`);
+  }
+
+  async patchCoachLicense(
+    coachId: string,
+    patch: {
+      package?: string;
+      start_date?: string | null;
+      end_date?: string | null;
+      max_students?: number;
+      is_active?: boolean;
+    }
+  ): Promise<CoachLicenseRow> {
+    const j = await this.apiJson<{ data: CoachLicenseRow }>('/api/quota', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        scope: 'coach_license',
+        coach_id: coachId,
+        ...patch
+      })
+    });
+    return j.data;
   }
 
   /** Öğrencinin öğretmen bazlı canlı ders kotası (scheduled+completed sayılır) */

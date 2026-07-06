@@ -15,7 +15,7 @@ const DEMO_ACCOUNTS = [
 ];
 
 const USER_LOGIN_COLUMNS =
-  'id, name, email, phone, role, password_hash, institution_id, package, start_date, end_date, is_active, created_at';
+  'id, name, email, phone, role, password_hash, institution_id, package, start_date, end_date, is_active, created_at, last_login_at';
 
 async function lookupUserByEmail(normalizedEmail) {
   const { data, error } = await withDbTimeout(
@@ -179,6 +179,19 @@ export default async function handler(req, res) {
     if (user.password_hash !== passwordStr) return res.status(401).json({ error: 'invalid_credentials' });
     if (user.role === 'pending_approval') return res.status(403).json({ error: 'pending_approval' });
     if (user.is_active === false) return res.status(403).json({ error: 'inactive_user' });
+
+    try {
+      await withDbTimeout(
+        supabaseAdmin
+          .from('users')
+          .update({ last_login_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+          .eq('id', user.id),
+        4000,
+        'last_login_touch'
+      );
+    } catch {
+      /* last_login_at sütunu yoksa girişi engelleme */
+    }
 
     let studentId;
     let coachId;

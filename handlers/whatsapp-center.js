@@ -43,15 +43,15 @@ export const TEMPLATE_TYPE_TO_CRON_JOB_KEY = {
 export const KNOWN_CRON_JOBS = [
   { key: 'class_lesson_reminders', label: 'Grup dersi hatırlatma (~10 dk · koç gateway)', expectEveryMinutes: 5 },
   { key: 'teacher_lesson_reminders', label: 'Öğretmen ders hatırlatması (~15 dk · Meta API)', expectEveryMinutes: 5 },
-  { key: 'daily_report_reminder', label: 'Günlük rapor hatırlatması (22:00 TR · koç gateway)', expectEveryMinutes: 24 * 60 },
+  { key: 'daily_report_reminder', label: 'Günlük rapor hatırlatması (22:00 TR · Meta API)', expectEveryMinutes: 24 * 60 },
   { key: 'lesson_reminders', label: 'Birebir ders hatırlatma (~10 dk · Meta API)', expectEveryMinutes: 5 },
   { key: 'lesson_reminder_parent', label: 'Veli ders hatırlatma (koç gateway)', expectEveryMinutes: 5 },
-  { key: 'meeting_reminders', label: 'Görüşme 10 dk hatırlatma (koç gateway)', expectEveryMinutes: 5 },
+  { key: 'meeting_reminders', label: 'Görüşme 10 dk hatırlatma (Meta API)', expectEveryMinutes: 5 },
   { key: 'class_homework_notify', label: 'Grup ödev bildirimi', expectEveryMinutes: 10 },
   { key: 'coach_followup', label: 'Koç otomasyon (Meta şablon)', expectEveryMinutes: 15 },
   { key: 'study_evening_reminder', label: 'Akşam çalışma hatırlatması', expectEveryMinutes: 24 * 60 },
   { key: 'absent_student_notification', label: 'Devamsızlık bildirimi (anlık + başarısız yeniden deneme)', expectEveryMinutes: 15 },
-  { key: 'book_orders', label: 'Kitap siparişi — yalnızca başarısız WhatsApp yeniden deneme (onay anında)', expectEveryMinutes: 15 },
+  { key: 'book_orders', label: 'Kitap siparişi — Meta API (onay anında + başarısız yeniden deneme)', expectEveryMinutes: 15 },
   { key: 'veli_kayit_admin_notify', label: 'Yeni kayıt formu — admin Meta bildirimi (retry)', expectEveryMinutes: 10 },
   { key: 'veli_sign_ready_notify', label: 'Veli imza hazır — Meta bildirimi (retry)', expectEveryMinutes: 10 }
 ];

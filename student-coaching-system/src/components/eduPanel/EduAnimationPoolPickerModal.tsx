@@ -2,11 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
 import EduAnimationPoolCard from './EduAnimationPoolCard';
-import {
-  ANIMATION_POOL_PROGRAMS,
-  subjectsForPoolClass,
-  type AnimationPoolProgram
-} from '../../lib/eduPanel/eduAnimationPoolCatalog';
+import EduAnimationPoolClassNav from './EduAnimationPoolClassNav';
+import { classCardForLevel } from '../../lib/eduPanel/eduAnimationPoolCatalog';
 import { fetchEduAnimationPool } from '../../lib/eduPanel/eduPanelApi';
 import type { EduAnimationPoolItem } from '../../types/eduPanel.types';
 
@@ -30,15 +27,16 @@ export default function EduAnimationPoolPickerModal({
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<EduAnimationPoolItem[]>([]);
   const [search, setSearch] = useState('');
-  const [program, setProgram] = useState<AnimationPoolProgram | null>(null);
   const [classLevel, setClassLevel] = useState<string | null>(null);
   const [subjectName, setSubjectName] = useState<string | null>(null);
+
+  const activeClassCard = useMemo(() => classCardForLevel(classLevel), [classLevel]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const data = await fetchEduAnimationPool({
-        program: program || undefined,
+        program: activeClassCard?.program,
         class_level: classLevel || undefined,
         subject_name: subjectName || undefined,
         q: search.trim() || undefined
@@ -49,22 +47,12 @@ export default function EduAnimationPoolPickerModal({
     } finally {
       setLoading(false);
     }
-  }, [program, classLevel, subjectName, search]);
+  }, [activeClassCard?.program, classLevel, subjectName, search]);
 
   useEffect(() => {
     if (!open) return;
     void load();
   }, [open, load]);
-
-  const activeProgram = useMemo(
-    () => ANIMATION_POOL_PROGRAMS.find((p) => p.key === program) || null,
-    [program]
-  );
-
-  const subjects = useMemo(
-    () => (classLevel ? subjectsForPoolClass(classLevel) : []),
-    [classLevel]
-  );
 
   const showingSearchResults = search.trim().length > 0;
 
@@ -103,71 +91,18 @@ export default function EduAnimationPoolPickerModal({
           </div>
         </div>
 
-        {!showingSearchResults ? (
-          <div className="space-y-3 border-b border-slate-100 px-4 py-3">
-            <div className="flex flex-wrap gap-2">
-              {ANIMATION_POOL_PROGRAMS.map((p) => (
-                <button
-                  key={p.key}
-                  type="button"
-                  onClick={() => {
-                    setProgram(p.key);
-                    setClassLevel(null);
-                    setSubjectName(null);
-                  }}
-                  className={`rounded-full px-4 py-1.5 text-sm font-semibold ${
-                    program === p.key
-                      ? 'bg-violet-600 text-white'
-                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-
-            {activeProgram ? (
-              <div className="flex flex-wrap gap-2">
-                {activeProgram.levels.map((lvl) => (
-                  <button
-                    key={lvl.value}
-                    type="button"
-                    onClick={() => {
-                      setClassLevel(lvl.value);
-                      setSubjectName(null);
-                    }}
-                    className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
-                      classLevel === lvl.value
-                        ? 'bg-indigo-600 text-white'
-                        : 'bg-indigo-50 text-indigo-800 hover:bg-indigo-100'
-                    }`}
-                  >
-                    {lvl.label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-
-            {classLevel ? (
-              <div className="flex flex-wrap gap-2">
-                {subjects.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setSubjectName(s)}
-                    className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
-                      subjectName === s
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
-                    }`}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+        <div className="border-b border-slate-100 px-4 py-3">
+          <EduAnimationPoolClassNav
+            selectedClassLevel={classLevel}
+            selectedSubject={subjectName}
+            showingSearchResults={showingSearchResults}
+            onSelectClass={(level) => {
+              setClassLevel(level);
+              setSubjectName(null);
+            }}
+            onSelectSubject={setSubjectName}
+          />
+        </div>
 
         <div className="flex-1 overflow-y-auto p-4">
           {loading ? (
@@ -182,9 +117,7 @@ export default function EduAnimationPoolPickerModal({
                   ? 'Bu derste henüz animasyon yok.'
                   : classLevel
                     ? 'Bir ders seçin.'
-                    : program
-                      ? 'Bir sınıf seçin.'
-                      : 'Kategori seçin veya arama yapın.'}
+                    : 'Sınıf seçin veya arama yapın.'}
             </p>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

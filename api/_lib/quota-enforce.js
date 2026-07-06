@@ -10,7 +10,9 @@ export class QuotaError extends Error {
     this.code = code;
     this.detail = detail;
     const { current, max, kind } = detail;
-    if (Number.isFinite(current) && Number.isFinite(max)) {
+    if (kind === 'coach_students') {
+      this.userMessage = 'Kullanabileceğiniz öğrenci hakkınız dolmuştur.';
+    } else if (Number.isFinite(current) && Number.isFinite(max)) {
       const label =
         kind === 'coaches'
           ? 'Koç'

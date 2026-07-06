@@ -1,6 +1,6 @@
 /**
  * Günlük rapor hatırlatması — rapor girmeyen öğrencilere WhatsApp.
- * Kanal: ilgili koçun WhatsApp Gateway hesabı (Meta yedek yok).
+ * Kanal: kurum Meta WhatsApp API (notification-config report_reminder).
  */
 import { supabaseAdmin } from './supabase-admin.js';
 import { getIstanbulDateString, getIstanbulHour } from './istanbul-time.js';
@@ -45,6 +45,9 @@ async function coachCanSendDailyReport(coachId) {
     coachPrefsCache.set(cid, await coachDailyReportReminderEnabled(cid));
   }
   if (!coachPrefsCache.get(cid)) return { ok: false, reason: 'disabled_by_coach' };
+  if (reportReminderSendChannel() === 'meta') {
+    return { ok: true };
+  }
   if (!coachGatewayCache.has(cid)) {
     coachGatewayCache.set(cid, await getCoachGatewayHealth(cid));
   }

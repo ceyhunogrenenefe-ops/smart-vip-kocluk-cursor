@@ -352,7 +352,96 @@ export async function sendMetaTextMessage({ toE164, text }) {
 }
 
 /**
- * PDF / belge — önce Meta media upload, sonra document mesajı.
+ * Hazır HTTPS bağlantısı ile PDF/belge (oturum penceresi gerekir).
+ */
+export async function sendMetaDocumentWithLink({
+  toE164,
+  documentUrl,
+  filename = 'document.pdf',
+  caption = ''
+}) {
+  const pid = phoneNumberId();
+  const tok = token();
+  if (!pid || !tok) {
+    const err = new Error('missing_meta_whatsapp_env');
+    err.code = 'ENV';
+    throw err;
+  }
+
+  const to = normalizePhoneDigitsForMeta(toE164);
+  if (!to || to.length < 8) {
+    const err = new Error('invalid_phone');
+    err.code = 'PHONE';
+    throw err;
+  }
+
+  const link = String(documentUrl || '').trim();
+  if (!link) {
+    const err = new Error('document_url_required');
+    err.code = 'DOCUMENT';
+    throw err;
+  }
+
+  const safeName =
+    String(filename || 'document.pdf')
+      .trim()
+      .replace(/[^\w.\-() ]+/g, '_')
+      .slice(0, 120) || 'document.pdf';
+  const cap = String(caption || '').trim().slice(0, 1024);
+
+  /** @type {Record<string, unknown>} */
+  const document = { link, filename: safeName };
+  if (cap) document.caption = cap;
+
+  const sendUrl = `https://graph.facebook.com/${GRAPH()}/${pid}/messages`;
+  const sendRes = await fetch(sendUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${tok}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to,
+      type: 'document',
+      document
+    })
+  });
+  const sendJson = await sendRes.json().catch(() => ({}));
+  if (!sendRes.ok) {
+    const err = new Error(graphUserMessage(sendJson, sendRes.status));
+    err.status = sendRes.status;
+    err.meta = sendJson;
+    throw err;
+  }
+
+  const mid = sendJson?.messages?.[0]?.id || null;
+  if (!mid) {
+    const err = new Error('meta_accepted_without_message_id');
+    err.status = sendRes.status;
+    err.meta = sendJson;
+    throw err;
+  }
+
+  const contact = Array.isArray(sendJson?.contacts) ? sendJson.contacts[0] : null;
+  const contactWaId = contact?.wa_id ? String(contact.wa_id) : null;
+  if (!contactWaId) {
+    const err = new Error('recipient_not_on_whatsapp');
+    err.status = sendRes.status;
+    err.meta = sendJson;
+    throw err;
+  }
+
+  return {
+    messageId: mid,
+    contactWaId,
+    raw: sendJson
+  };
+}
+
+/**
+ * PDF / belge — önce depolamaya yükle, sonra document mesajı.
  * @param {object} opts
  * @param {string} opts.toE164
  * @param {string} opts.documentBase64
@@ -421,59 +510,17 @@ export async function sendMetaDocumentMessage({
     mimeType: mime
   });
 
-  /** @type {Record<string, unknown>} */
-  const document = {
-    link: hosted.signedUrl,
-    filename: hosted.filename || safeName
-  };
-  if (cap) document.caption = cap;
-
-  const payload = {
-    messaging_product: 'whatsapp',
-    recipient_type: 'individual',
-    to,
-    type: 'document',
-    document
-  };
-
-  const sendUrl = `https://graph.facebook.com/${GRAPH()}/${pid}/messages`;
-  const sendRes = await fetch(sendUrl, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${tok}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(payload)
+  const sent = await sendMetaDocumentWithLink({
+    toE164,
+    documentUrl: hosted.signedUrl,
+    filename: hosted.filename || safeName,
+    caption: cap
   });
-  const sendJson = await sendRes.json().catch(() => ({}));
-  if (!sendRes.ok) {
-    const err = new Error(graphUserMessage(sendJson, sendRes.status));
-    err.status = sendRes.status;
-    err.meta = sendJson;
-    throw err;
-  }
-
-  const mid = sendJson?.messages?.[0]?.id || null;
-  if (!mid) {
-    const err = new Error('meta_accepted_without_message_id');
-    err.status = sendRes.status;
-    err.meta = sendJson;
-    throw err;
-  }
-
-  const contact = Array.isArray(sendJson?.contacts) ? sendJson.contacts[0] : null;
-  const contactWaId = contact?.wa_id ? String(contact.wa_id) : null;
-  if (!contactWaId) {
-    const err = new Error('recipient_not_on_whatsapp');
-    err.status = sendRes.status;
-    err.meta = sendJson;
-    throw err;
-  }
 
   return {
-    messageId: mid,
-    contactWaId,
+    messageId: sent.messageId,
+    contactWaId: sent.contactWaId,
     storagePath: hosted.path,
-    raw: sendJson
+    raw: sent.raw
   };
 }

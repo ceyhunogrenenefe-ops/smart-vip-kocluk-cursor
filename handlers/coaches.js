@@ -171,7 +171,7 @@ export default async function handler(req, res) {
           {
             coach_id: merged.id,
             max_students:
-              Number.isFinite(maxStudentsQuota) && maxStudentsQuota >= 0 ? Math.floor(maxStudentsQuota) : 30,
+              Number.isFinite(maxStudentsQuota) && maxStudentsQuota >= 0 ? Math.floor(maxStudentsQuota) : 5,
             updated_at: new Date().toISOString()
           },
           { onConflict: 'coach_id' }
@@ -226,7 +226,7 @@ export default async function handler(req, res) {
         {
           coach_id: data.id,
           max_students:
-            Number.isFinite(maxStudentsQuota) && maxStudentsQuota >= 0 ? Math.floor(maxStudentsQuota) : 30,
+            Number.isFinite(maxStudentsQuota) && maxStudentsQuota >= 0 ? Math.floor(maxStudentsQuota) : 5,
           updated_at: new Date().toISOString()
         },
         { onConflict: 'coach_id' }

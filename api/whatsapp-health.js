@@ -86,11 +86,11 @@ export default async function handler(req, res) {
 
   let hint;
   if (gatewayConnected && metaReady) {
-    hint = 'Gateway (QR) bağlı + Meta hazır — kitap siparişi auto modda her iki kanal da kullanılabilir.';
+    hint = 'Meta hazır — kitap siparişi ve veli PDF kurumsal Meta ile gider. Gateway grup dersi / veli ders için.';
   } else if (gatewayConnected) {
-    hint = 'Gateway (Baileys) bağlı — kitap siparişi gateway ile gidebilir.';
+    hint = 'Gateway (Baileys) bağlı — grup dersi vb. Meta yoksa gateway kullanılır.';
   } else if (metaReady) {
-    hint = 'Gateway bağlı değil; Meta Cloud API hazır — kitap siparişi Meta yedek ile gidebilir.';
+    hint = 'Meta Cloud API hazır — kitap siparişi, veli PDF ve otomasyon bildirimleri Meta ile gider.';
   } else if (twilioReady) {
     hint = 'Twilio yapılandırılmış (eski yol). Otomasyon için Meta env önerilir.';
   } else {
@@ -130,10 +130,10 @@ export default async function handler(req, res) {
       template_type: 'report_reminder',
       env_channel: String(process.env.WHATSAPP_AUTOMATION_CHANNEL ?? 'gateway').trim() || 'gateway',
       hint:
-        reportReminderSendChannel() === 'gateway'
-          ? 'Günlük rapor: önce gateway (QR), başarısızsa Meta yedek (22:00 TR).'
-          : reportReminderSendChannel() === 'meta'
-            ? 'Gateway yapılandırılmamış — yalnızca Meta şablonu ile gider. message_templates.report_reminder aktif olmalı.'
+        reportReminderSendChannel() === 'meta'
+          ? 'Günlük rapor: kurum Meta şablonu (22:00 TR). message_templates.report_reminder aktif olmalı.'
+          : reportReminderSendChannel() === 'gateway'
+            ? 'Günlük rapor: koç gateway (eski kanal). WHATSAPP_AUTOMATION_CHANNEL=gateway.'
             : 'Gateway ve Meta yapılandırılmamış — mesaj gitmez.'
     },
     meta,

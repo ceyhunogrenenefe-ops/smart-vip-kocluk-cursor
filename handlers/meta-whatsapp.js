@@ -84,7 +84,7 @@ export default async function handler(req, res) {
       });
     }
 
-    if (role === 'coach' && !actor.coach_id) {
+    if (role === 'coach' && !actor.coach_id && !documentBase64) {
       return res.status(403).json({
         error: 'coach_id_required',
         hint: 'Koç hesabı veritabanıyla eşleşmedi. Çıkış yapıp tekrar giriş yapın veya yöneticinizin coaches kaydınızı e-postanızla eşlemesini isteyin.'
@@ -93,15 +93,6 @@ export default async function handler(req, res) {
 
     try {
       if (documentBase64) {
-        if (role !== 'super_admin') {
-          return res.status(403).json({
-            ok: false,
-            error: 'parent_pdf_meta_super_admin_only',
-            hint:
-              'PDF gönderimi koç ve admin için WhatsApp gateway kullanır. Koç WhatsApp ayarlarından QR ile bağlanın; veliye PDF panelden tekrar gönderin.'
-          });
-        }
-
         const sent = await sendParentPdfToWhatsapp({
           toE164: e164,
           documentBase64,
@@ -128,7 +119,9 @@ export default async function handler(req, res) {
             error: sent.error || 'parent_pdf_send_failed',
             hint: sent.hint || null,
             download_url: sent.download_url || null,
-            channel: sent.channel || 'parent_pdf'
+            channel: sent.channel || 'parent_pdf',
+            template_error: sent.template_error || null,
+            method: sent.method || null
           });
         }
         await insertWhatsAppAutomationLog({

@@ -3,28 +3,34 @@ import {
   Clapperboard,
   Loader2,
   Search,
-  Upload,
-  X
+  Upload
 } from 'lucide-react';
 import { toast } from 'sonner';
 import EduAnimationPoolCard from './EduAnimationPoolCard';
+import EduAnimationPoolClassNav from './EduAnimationPoolClassNav';
+import EduAnimationPoolHomeworkModal from './EduAnimationPoolHomeworkModal';
+import EduAnimationPoolTargetPicker, {
+  targetsToKeys
+} from './EduAnimationPoolTargetPicker';
 import {
-  ANIMATION_POOL_PROGRAMS,
+  classCardForLevel,
+  parsePoolTargetKey,
+  poolTargetKey,
   subjectsForPoolClass,
-  type AnimationPoolProgram
+  targetsFromKeys
 } from '../../lib/eduPanel/eduAnimationPoolCatalog';
 import {
-  attachPoolAnimationToLessonRow,
   deleteEduPoolAnimation,
   fetchEduAnimationPool,
   updateEduPoolAnimation,
   uploadEduPoolAnimation
 } from '../../lib/eduPanel/eduPanelApi';
-import type { EduAnimationPoolItem, EduLessonRow } from '../../types/eduPanel.types';
+import type { EduAnimationPoolItem, EduClass, EduLessonRow } from '../../types/eduPanel.types';
 import { useAuth } from '../../context/AuthContext';
 
 type Props = {
   rows: EduLessonRow[];
+  classes: EduClass[];
   busy: boolean;
   setBusy: (v: boolean) => void;
   onPreview: (item: EduAnimationPoolItem) => void;
@@ -33,6 +39,7 @@ type Props = {
 
 export default function EduAnimationPoolTab({
   rows,
+  classes,
   busy,
   setBusy,
   onPreview,
@@ -44,33 +51,34 @@ export default function EduAnimationPoolTab({
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<EduAnimationPoolItem[]>([]);
   const [search, setSearch] = useState('');
-  const [program, setProgram] = useState<AnimationPoolProgram | null>(null);
   const [classLevel, setClassLevel] = useState<string | null>(null);
   const [subjectName, setSubjectName] = useState<string | null>(null);
 
   const [showUpload, setShowUpload] = useState(false);
   const [uploadForm, setUploadForm] = useState({
     title: '',
-    program: 'tyt' as AnimationPoolProgram,
-    class_level: '9',
+    targetKeys: [poolTargetKey('tyt', '9')],
     subject_name: 'Matematik',
     topic_name: '',
     file: null as File | null
   });
 
-  const [attachItem, setAttachItem] = useState<EduAnimationPoolItem | null>(null);
+  const [homeworkItem, setHomeworkItem] = useState<EduAnimationPoolItem | null>(null);
   const [editItem, setEditItem] = useState<EduAnimationPoolItem | null>(null);
   const [editForm, setEditForm] = useState({
     title: '',
     topic_name: '',
-    subject_name: ''
+    subject_name: '',
+    targetKeys: [] as string[]
   });
+
+  const activeClassCard = useMemo(() => classCardForLevel(classLevel), [classLevel]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const data = await fetchEduAnimationPool({
-        program: program || undefined,
+        program: activeClassCard?.program,
         class_level: classLevel || undefined,
         subject_name: subjectName || undefined,
         q: search.trim() || undefined
@@ -81,26 +89,21 @@ export default function EduAnimationPoolTab({
     } finally {
       setLoading(false);
     }
-  }, [program, classLevel, subjectName, search]);
+  }, [activeClassCard?.program, classLevel, subjectName, search]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const activeProgram = useMemo(
-    () => ANIMATION_POOL_PROGRAMS.find((p) => p.key === program) || null,
-    [program]
-  );
+  const uploadPrimaryTarget = useMemo(() => {
+    const first = uploadForm.targetKeys[0];
+    return first ? parsePoolTargetKey(first) : null;
+  }, [uploadForm.targetKeys]);
 
-  const subjects = useMemo(
-    () => (classLevel ? subjectsForPoolClass(classLevel) : []),
-    [classLevel]
-  );
-
-  const uploadSubjects = useMemo(
-    () => subjectsForPoolClass(uploadForm.class_level),
-    [uploadForm.class_level]
-  );
+  const uploadSubjects = useMemo(() => {
+    const level = uploadPrimaryTarget?.class_level || '9';
+    return subjectsForPoolClass(level);
+  }, [uploadPrimaryTarget?.class_level]);
 
   const showingSearchResults = search.trim().length > 0;
 
@@ -112,16 +115,23 @@ export default function EduAnimationPoolTab({
       toast.error('Tüm alanları doldurun ve .html dosyası seçin');
       return;
     }
+    if (!uploadForm.targetKeys.length) {
+      toast.error('En az bir sınıf veya program seçin');
+      return;
+    }
     if (!uploadForm.file.name.toLowerCase().endsWith('.html')) {
       toast.error('Sadece .html dosyası');
       return;
     }
+    const targets = targetsFromKeys(uploadForm.targetKeys);
+    const primary = targets[0];
     setBusy(true);
     try {
       await uploadEduPoolAnimation({
         title: uploadForm.title.trim(),
-        program: uploadForm.program,
-        class_level: uploadForm.class_level,
+        program: primary.program,
+        class_level: primary.class_level,
+        targets,
         subject_name: uploadForm.subject_name,
         topic_name: uploadForm.topic_name.trim(),
         file: uploadForm.file
@@ -139,12 +149,17 @@ export default function EduAnimationPoolTab({
 
   const onSaveEdit = async () => {
     if (!editItem) return;
+    if (!editForm.targetKeys.length) {
+      toast.error('En az bir sınıf veya program seçin');
+      return;
+    }
     setBusy(true);
     try {
       await updateEduPoolAnimation(editItem.id, {
         title: editForm.title.trim(),
         topic_name: editForm.topic_name.trim(),
-        subject_name: editForm.subject_name.trim()
+        subject_name: editForm.subject_name.trim(),
+        targets: targetsFromKeys(editForm.targetKeys)
       });
       toast.success('Animasyon güncellendi');
       setEditItem(null);
@@ -171,36 +186,18 @@ export default function EduAnimationPoolTab({
     }
   };
 
-  const onAttachToTopic = async (rowId: string) => {
-    if (!attachItem) return;
-    setBusy(true);
-    try {
-      await attachPoolAnimationToLessonRow(rowId, attachItem.id);
-      toast.success(`「${attachItem.title}」 konuya eklendi`);
-      setAttachItem(null);
-      onAttached?.();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Eklenemedi');
-    } finally {
-      setBusy(false);
-    }
+  const onHomeworkCreated = () => {
+    toast.success('Animasyon ödeve eklendi ve yayınlandı');
+    onAttached?.();
   };
-
-  const attachCandidates = useMemo(() => {
-    if (!attachItem) return rows;
-    return rows.filter(
-      (r) =>
-        String(r.teacher_user_id) === String(user?.id) &&
-        (!attachItem.subject_name || r.subject_name === attachItem.subject_name)
-    );
-  }, [attachItem, rows, user?.id]);
 
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-violet-100 bg-violet-50/50 p-4">
         <p className="text-sm text-violet-900">
           Kurumdaki öğretmenlerin paylaştığı animasyonları buradan bulun. Aynı dosyayı tekrar
-          yüklemenize gerek kalmaz — havuzdan seçip doğrudan konuya veya ödeve ekleyebilirsiniz.
+          yüklemenize gerek kalmaz — havuzdan seçip konu havuzundaki uygun konuya ödev olarak
+          ekleyebilirsiniz.
         </p>
       </div>
 
@@ -240,49 +237,28 @@ export default function EduAnimationPoolTab({
                 onChange={(e) => setUploadForm((f) => ({ ...f, title: e.target.value }))}
               />
             </label>
-            <label className="block text-sm">
-              <span className="text-xs font-medium text-slate-600">Program *</span>
-              <select
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                value={uploadForm.program}
-                onChange={(e) => {
-                  const p = e.target.value as AnimationPoolProgram;
-                  const grp = ANIMATION_POOL_PROGRAMS.find((g) => g.key === p);
-                  setUploadForm((f) => ({
-                    ...f,
-                    program: p,
-                    class_level: grp?.levels[0]?.value || f.class_level
-                  }));
-                }}
-              >
-                {ANIMATION_POOL_PROGRAMS.map((p) => (
-                  <option key={p.key} value={p.key}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-xs font-medium text-slate-600">Sınıf *</span>
-              <select
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                value={uploadForm.class_level}
-                onChange={(e) =>
-                  setUploadForm((f) => ({
-                    ...f,
-                    class_level: e.target.value,
-                    subject_name: subjectsForPoolClass(e.target.value)[0] || f.subject_name
-                  }))
-                }
-              >
-                {(ANIMATION_POOL_PROGRAMS.find((g) => g.key === uploadForm.program)?.levels || []).map(
-                  (lvl) => (
-                    <option key={lvl.value} value={lvl.value}>
-                      {lvl.label}
-                    </option>
-                  )
-                )}
-              </select>
+            <label className="block text-sm sm:col-span-2">
+              <span className="text-xs font-medium text-slate-600">
+                Sınıf / Program (birden fazla seçilebilir) *
+              </span>
+              <div className="mt-2">
+                <EduAnimationPoolTargetPicker
+                  selected={uploadForm.targetKeys}
+                  onChange={(keys) => {
+                    const primary = keys[0] ? parsePoolTargetKey(keys[0]) : null;
+                    const subjects = primary
+                      ? subjectsForPoolClass(primary.class_level)
+                      : uploadSubjects;
+                    setUploadForm((f) => ({
+                      ...f,
+                      targetKeys: keys,
+                      subject_name: subjects.includes(f.subject_name)
+                        ? f.subject_name
+                        : subjects[0] || f.subject_name
+                    }));
+                  }}
+                />
+              </div>
             </label>
             <label className="block text-sm">
               <span className="text-xs font-medium text-slate-600">Ders *</span>
@@ -340,77 +316,16 @@ export default function EduAnimationPoolTab({
         </section>
       ) : null}
 
-      {!showingSearchResults ? (
-        <div className="space-y-4">
-          <div className="flex flex-wrap gap-2">
-            {ANIMATION_POOL_PROGRAMS.map((p) => (
-              <button
-                key={p.key}
-                type="button"
-                onClick={() => {
-                  setProgram(p.key);
-                  setClassLevel(null);
-                  setSubjectName(null);
-                }}
-                className={`rounded-full px-4 py-2 text-sm font-semibold ${
-                  program === p.key
-                    ? 'bg-violet-600 text-white shadow-sm'
-                    : 'bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50'
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-
-          {activeProgram ? (
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Sınıf</p>
-              <div className="flex flex-wrap gap-2">
-                {activeProgram.levels.map((lvl) => (
-                  <button
-                    key={lvl.value}
-                    type="button"
-                    onClick={() => {
-                      setClassLevel(lvl.value);
-                      setSubjectName(null);
-                    }}
-                    className={`rounded-xl px-4 py-2.5 text-sm font-medium ${
-                      classLevel === lvl.value
-                        ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'bg-white text-indigo-900 ring-1 ring-indigo-100 hover:bg-indigo-50'
-                    }`}
-                  >
-                    {lvl.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          {classLevel ? (
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ders</p>
-              <div className="flex flex-wrap gap-2">
-                {subjects.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setSubjectName(s)}
-                    className={`rounded-xl px-4 py-2.5 text-sm font-medium ${
-                      subjectName === s
-                        ? 'bg-emerald-600 text-white shadow-sm'
-                        : 'bg-white text-emerald-900 ring-1 ring-emerald-100 hover:bg-emerald-50'
-                    }`}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
+      <EduAnimationPoolClassNav
+        selectedClassLevel={classLevel}
+        selectedSubject={subjectName}
+        showingSearchResults={showingSearchResults}
+        onSelectClass={(level) => {
+          setClassLevel(level);
+          setSubjectName(null);
+        }}
+        onSelectSubject={setSubjectName}
+      />
 
       <div>
         {loading ? (
@@ -423,7 +338,9 @@ export default function EduAnimationPoolTab({
               ? 'Aramanızla eşleşen animasyon bulunamadı.'
               : subjectName
                 ? 'Bu derste henüz animasyon yok. İlk siz yükleyebilirsiniz.'
-                : 'Kategori seçin veya arama yapın.'}
+                : classLevel
+                  ? 'Bir ders seçin.'
+                  : 'Sınıf seçin veya arama yapın.'}
           </p>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -434,13 +351,14 @@ export default function EduAnimationPoolTab({
                 busy={busy}
                 canManage={canManage(item)}
                 onPreview={() => onPreview(item)}
-                onAddToHomework={() => setAttachItem(item)}
+                onAddToHomework={() => setHomeworkItem(item)}
                 onEdit={() => {
                   setEditItem(item);
                   setEditForm({
                     title: item.title,
                     topic_name: item.topic_name,
-                    subject_name: item.subject_name
+                    subject_name: item.subject_name,
+                    targetKeys: targetsToKeys(item.targets?.length ? item.targets : [{ program: item.program, class_level: item.class_level }])
                   });
                 }}
                 onDelete={() => void onDelete(item)}
@@ -450,45 +368,21 @@ export default function EduAnimationPoolTab({
         )}
       </div>
 
-      {attachItem ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="max-h-[80vh] w-full max-w-lg overflow-hidden rounded-xl bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b px-4 py-3">
-              <h3 className="font-bold text-slate-900">Konu seçin</h3>
-              <button type="button" onClick={() => setAttachItem(null)} className="p-1">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <p className="border-b px-4 py-2 text-xs text-slate-600">
-              「{attachItem.title}」 animasyonunu hangi konuya eklemek istiyorsunuz?
-            </p>
-            <div className="max-h-64 overflow-y-auto p-2">
-              {attachCandidates.length === 0 ? (
-                <p className="p-4 text-sm text-slate-500">Uygun konu bulunamadı. Önce konu oluşturun.</p>
-              ) : (
-                attachCandidates.map((row) => (
-                  <button
-                    key={row.id}
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void onAttachToTopic(row.id)}
-                    className="flex w-full flex-col rounded-lg px-3 py-2 text-left hover:bg-violet-50"
-                  >
-                    <span className="text-sm font-medium text-slate-800">{row.title}</span>
-                    <span className="text-xs text-slate-500">
-                      {row.subject_name} · {row.lesson_date}
-                    </span>
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <EduAnimationPoolHomeworkModal
+        item={homeworkItem}
+        classes={classes}
+        rows={rows}
+        busy={busy}
+        setBusy={setBusy}
+        filterClassLevel={classLevel}
+        filterProgram={activeClassCard?.program}
+        onClose={() => setHomeworkItem(null)}
+        onSubmit={onHomeworkCreated}
+      />
 
       {editItem ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-4 shadow-xl">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-4 shadow-xl">
             <h3 className="mb-3 font-bold text-slate-900">Animasyonu düzenle</h3>
             <div className="space-y-3">
               <label className="block text-sm">
@@ -499,6 +393,15 @@ export default function EduAnimationPoolTab({
                   onChange={(e) => setEditForm((f) => ({ ...f, title: e.target.value }))}
                 />
               </label>
+              <div className="block text-sm">
+                <span className="text-xs text-slate-600">Sınıf / Program</span>
+                <div className="mt-2">
+                  <EduAnimationPoolTargetPicker
+                    selected={editForm.targetKeys}
+                    onChange={(keys) => setEditForm((f) => ({ ...f, targetKeys: keys }))}
+                  />
+                </div>
+              </div>
               <label className="block text-sm">
                 <span className="text-xs text-slate-600">Ders</span>
                 <input

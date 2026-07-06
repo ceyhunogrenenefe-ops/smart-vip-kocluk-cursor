@@ -455,7 +455,9 @@ export async function sendGatewayTextMessage({
     number_not_on_whatsapp: 'Numara WhatsApp kayıtlı değil.',
     invalid_gateway_key: 'GATEWAY_API_KEY uyuşmuyor.',
     gateway_upstream_timeout: 'VPS gateway zaman aşımı — pm2 restart whatsapp-gateway.',
-    send_message_timeout: 'WhatsApp gönderimi zaman aşımına uğradı; tekrar denendi.'
+    send_message_timeout: 'WhatsApp gönderimi zaman aşımına uğradı; tekrar denendi.',
+    send_no_message_id:
+      'WhatsApp gateway mesaj kimliği dönmedi — QR oturumunu yenileyip tekrar deneyin.'
   };
 
   const payload = { phone: e164.replace(/^\+/, ''), message: text };
@@ -470,13 +472,31 @@ export async function sendGatewayTextMessage({
     });
 
     if (r.ok) {
+      const mid = String(r.data?.id || '').trim();
+      if (!mid) {
+        lastErr = 'send_no_message_id';
+        if (attempt >= maxAttempts) {
+          return {
+            ok: false,
+            channel: 'gateway',
+            error:
+              hints.send_no_message_id ||
+              'WhatsApp gateway mesaj kimliği dönmedi — gönderim doğrulanamadı.',
+            errorCode: 'SEND_NO_MESSAGE_ID',
+            gateway_session_id: sid,
+            attempts: attempt
+          };
+        }
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        continue;
+      }
       return {
         ok: true,
         channel: 'gateway',
-        sid: r.data?.id || null,
+        sid: mid,
         meta_message_id: null,
         bodyPreview: text.slice(0, 200),
-        gateway_message_id: r.data?.id || null,
+        gateway_message_id: mid,
         gateway_session_id: sid,
         attempts: attempt
       };

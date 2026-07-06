@@ -4,6 +4,7 @@ import { getSupabaseAdmin, hasSupabaseServiceRoleKey, supabaseAdmin } from '../a
 import { normalizeUuidOrGenerate } from '../api/_lib/uuid.js';
 import { rebuildCoachStudentIdsFromFk } from '../api/_lib/sync-coach-students.js';
 import { enforceStudentInsertQuotas, enforceCoachStudentQuota, QuotaError } from '../api/_lib/quota-enforce.js';
+import { enforceCoachLicenseForStudentInsert, LicenseError } from '../api/_lib/coach-license.js';
 import { getTeacherGroupClassStudentScope } from '../api/_lib/teacher-class-scope.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import { STUDENT_LIST_COLUMNS } from '../api/_lib/list-query-columns.js';
@@ -520,6 +521,13 @@ export default async function handler(req, res) {
         }
       }
 
+      if (resolvedCoachId) {
+        await enforceCoachLicenseForStudentInsert(resolvedCoachId, {
+          institutionId,
+          actorRole: actor.role
+        });
+      }
+
       await enforceStudentInsertQuotas({
         institutionId,
         coachId: resolvedCoachId || null,
@@ -585,6 +593,10 @@ export default async function handler(req, res) {
       const nextCoachId = patchBody.coach_id !== undefined ? patchBody.coach_id : existing.coach_id;
 
       if (String(prevCoachId || '') !== String(nextCoachId || '') && nextCoachId) {
+        await enforceCoachLicenseForStudentInsert(nextCoachId, {
+          institutionId: existing.institution_id,
+          actorRole: actor.role
+        });
         await enforceCoachStudentQuota(nextCoachId, {
           institutionId: existing.institution_id,
           actorRole: actor.role
@@ -644,6 +656,12 @@ export default async function handler(req, res) {
         error: e.userMessage || 'Kullanıcı limitiniz doldu',
         hint: e.userMessage || undefined,
         quota: e.detail || undefined
+      });
+    }
+    if (e instanceof LicenseError) {
+      return res.status(403).json({
+        error: e.code || 'license_expired',
+        hint: e.userMessage || 'Lisans süreniz sona ermiştir.'
       });
     }
     if (e && typeof e === 'object') {

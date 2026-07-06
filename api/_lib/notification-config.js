@@ -54,11 +54,11 @@ export const NOTIFICATION_DEFINITIONS = [
     id: 'report_reminder',
     templateType: 'report_reminder',
     nameTr: 'Günlük rapor hatırlatma',
-    descriptionTr: 'Koç gateway; koç panelinden aç/kapat.',
-    sendChannel: SEND_CHANNELS.COACH_GATEWAY,
+    descriptionTr: 'Rapor girmeyen öğrenci/veliye kurum Meta WhatsApp hesabından; koç panelinden aç/kapat.',
+    sendChannel: SEND_CHANNELS.META_API,
     mode: 'automatic',
     cronJobKey: 'daily_report_reminder',
-    coachScoped: true,
+    coachScoped: false,
     allowMetaFallback: false
   },
   {
@@ -88,11 +88,11 @@ export const NOTIFICATION_DEFINITIONS = [
     id: 'meeting_notification',
     templateType: 'meeting_notification',
     nameTr: 'Görüşme hatırlatma',
-    descriptionTr: 'Koç görüşmesi ~10 dk önce; koç gateway.',
-    sendChannel: SEND_CHANNELS.COACH_GATEWAY,
+    descriptionTr: 'Koç görüşmesi ~10 dk önce; kurum Meta WhatsApp hesabından.',
+    sendChannel: SEND_CHANNELS.META_API,
     mode: 'automatic',
     cronJobKey: 'meeting_reminders',
-    coachScoped: true,
+    coachScoped: false,
     allowMetaFallback: false,
     reminderMinutesBefore: 10
   },
@@ -141,11 +141,12 @@ export const NOTIFICATION_DEFINITIONS = [
     id: 'kitap_siparis_bildirim',
     templateType: 'kitap_siparis_bildirim',
     nameTr: 'Kitap siparişi bildirimi',
+    descriptionTr: 'Kitapçıya kurum Meta WhatsApp hesabından (onaylı şablon).',
     sendChannel: SEND_CHANNELS.META_API,
     mode: 'instant',
     cronJobKey: 'book_orders',
     coachScoped: false,
-    allowMetaFallback: true
+    allowMetaFallback: false
   }
 ];
 

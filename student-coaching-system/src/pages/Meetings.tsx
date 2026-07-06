@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { downloadMeetingsDayPng, localDateKey } from '../lib/meetingsDayPng';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
@@ -18,7 +19,10 @@ import {
   AlertCircle,
   BarChart3,
   Users,
-  User
+  User,
+  ChevronLeft,
+  ChevronRight,
+  Download
 } from 'lucide-react';
 
 type LiveClassOption = {
@@ -48,6 +52,12 @@ function addDays(d: Date, n: number): Date {
 
 function formatISO(d: Date) {
   return d.toISOString();
+}
+
+function meetingStatusLabel(status: MeetingStatus): string {
+  if (status === 'completed') return 'Tamamlandı';
+  if (status === 'missed') return 'Kaçırıldı';
+  return 'Planlı';
 }
 
 export default function Meetings() {
@@ -81,6 +91,9 @@ export default function Meetings() {
   const [classIdDraft, setClassIdDraft] = useState('');
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(() => new Set());
   const [classStudentsSearch, setClassStudentsSearch] = useState('');
+  const [weekAnchor, setWeekAnchor] = useState(() => startOfWeek(new Date()));
+  const [selectedDayKey, setSelectedDayKey] = useState(() => localDateKey(new Date()));
+  const [pngBusy, setPngBusy] = useState(false);
 
   const role = effectiveUser?.role || '';
 
@@ -204,8 +217,8 @@ export default function Meetings() {
     setSelectedStudentIds(new Set());
   };
 
-  const rangeFrom = useMemo(() => addDays(startOfWeek(new Date()), -7), []);
-  const rangeTo = useMemo(() => addDays(new Date(), 45), []);
+  const rangeFrom = useMemo(() => addDays(startOfWeek(new Date()), -56), []);
+  const rangeTo = useMemo(() => addDays(startOfWeek(new Date()), 180), []);
 
   const loadMeetings = useCallback(async () => {
     setLoading(true);
@@ -422,23 +435,86 @@ export default function Meetings() {
   };
 
   const weeklyBuckets = useMemo(() => {
-    const weekStart = startOfWeek(new Date());
+    const weekStart = startOfWeek(weekAnchor);
     const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-    const key = (d: Date) => d.toISOString().slice(0, 10);
     const bucket: Record<string, CoachingMeetingRecord[]> = {};
-    for (const d of days) bucket[key(d)] = [];
+    for (const d of days) bucket[localDateKey(d)] = [];
     for (const m of visibleMeetings) {
-      const k = new Date(m.start_time).toISOString().slice(0, 10);
+      const k = localDateKey(new Date(m.start_time));
       if (!bucket[k]) bucket[k] = [];
       bucket[k].push(m);
     }
-    return days.map((d) => ({
-      label: d.toLocaleDateString('tr-TR', { weekday: 'short', day: 'numeric', month: 'short' }),
-      date: d,
-      key: key(d),
-      items: (bucket[key(d)] || []).slice().sort((a, b) => +new Date(a.start_time) - +new Date(b.start_time))
-    }));
-  }, [visibleMeetings]);
+    return days.map((d) => {
+      const key = localDateKey(d);
+      return {
+        label: d.toLocaleDateString('tr-TR', { weekday: 'short', day: 'numeric', month: 'short' }),
+        date: d,
+        key,
+        isToday: key === localDateKey(new Date()),
+        items: (bucket[key] || []).slice().sort((a, b) => +new Date(a.start_time) - +new Date(b.start_time))
+      };
+    });
+  }, [visibleMeetings, weekAnchor]);
+
+  const weekRangeLabel = useMemo(() => {
+    const start = weeklyBuckets[0]?.date;
+    const end = weeklyBuckets[6]?.date;
+    if (!start || !end) return '';
+    const fmt = (d: Date) =>
+      d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: start.getFullYear() !== end.getFullYear() ? 'numeric' : undefined });
+    return `${fmt(start)} – ${end.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+  }, [weeklyBuckets]);
+
+  const selectedDayBucket = useMemo(
+    () => weeklyBuckets.find((slot) => slot.key === selectedDayKey) || weeklyBuckets[0] || null,
+    [weeklyBuckets, selectedDayKey]
+  );
+
+  const shiftWeek = (delta: number) => {
+    setWeekAnchor((prev) => addDays(prev, delta * 7));
+  };
+
+  const goToCurrentWeek = () => {
+    const todayKey = localDateKey(new Date());
+    setWeekAnchor(startOfWeek(new Date()));
+    setSelectedDayKey(todayKey);
+  };
+
+  const exportSelectedDayPng = async () => {
+    const slot = selectedDayBucket;
+    if (!slot) return;
+    setPngBusy(true);
+    setError(null);
+    try {
+      await downloadMeetingsDayPng({
+        isoKey: slot.key,
+        dayLabel: slot.date.toLocaleDateString('tr-TR', {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric'
+        }),
+        title: isStudent ? 'Görüşmelerim' : 'Online görüşmeler',
+        items: slot.items.map((m) => ({
+          meeting: m,
+          studentLabel: meetingStudentLabel(m),
+          coachLabel: meetingCoachLabel(m)
+        }))
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPngBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    const keys = weeklyBuckets.map((b) => b.key);
+    if (keys.length && !keys.includes(selectedDayKey)) {
+      const todayKey = localDateKey(new Date());
+      setSelectedDayKey(keys.includes(todayKey) ? todayKey : keys[0]);
+    }
+  }, [weekAnchor, weeklyBuckets, selectedDayKey]);
 
   const analytics = useMemo(() => {
     const planned = visibleMeetings.filter((m) => m.status === 'planned').length;
@@ -1004,44 +1080,146 @@ export default function Meetings() {
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-2 font-medium text-slate-800">
-            <CalendarIcon className="w-5 h-5" /> Haftalık takvim özeti
+            <CalendarIcon className="w-5 h-5" /> Haftalık takvim
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => shiftWeek(-1)}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+              aria-label="Önceki hafta"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              Önceki
+            </button>
+            <span className="text-sm font-medium text-slate-700 min-w-[10rem] text-center">{weekRangeLabel}</span>
+            <button
+              type="button"
+              onClick={() => shiftWeek(1)}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+              aria-label="Sonraki hafta"
+            >
+              Sonraki
+              <ChevronRight className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={goToCurrentWeek}
+              className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-emerald-700 hover:bg-emerald-50"
+            >
+              Bugün
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void loadMeetings()}
+              className="text-sm text-emerald-700 hover:underline px-1"
+            >
+              Yenile
+            </button>
+          </div>
+        </div>
+        <p className="text-xs text-slate-500 mb-3">
+          Günü seçin; seçili günün görüşmelerini PNG olarak indirebilirsiniz.
+        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+          <div className="text-sm text-slate-600">
+            Seçili gün:{' '}
+            <span className="font-semibold text-slate-900">
+              {selectedDayBucket?.date.toLocaleDateString('tr-TR', {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long'
+              }) || '—'}
+            </span>
+            {selectedDayBucket ? (
+              <span className="text-slate-400"> · {selectedDayBucket.items.length} görüşme</span>
+            ) : null}
           </div>
           <button
             type="button"
-            disabled={loading}
-            onClick={() => void loadMeetings()}
-            className="text-sm text-emerald-700 hover:underline"
+            disabled={pngBusy || !selectedDayBucket}
+            onClick={() => void exportSelectedDayPng()}
+            className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
           >
-            Yenile
+            <Download className="w-4 h-4" />
+            {pngBusy ? 'Hazırlanıyor…' : 'Günü PNG indir'}
           </button>
         </div>
         <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-7">
-          {weeklyBuckets.map((slot) => (
-            <div key={slot.key} className="min-h-[120px] rounded-lg border border-slate-100 bg-slate-50/80 p-2">
-              <div className="text-xs font-semibold text-slate-600 mb-1">{slot.label}</div>
-              <div className="space-y-1">
-                {slot.items.map((m) => (
-                  <div key={m.id} className="text-[11px] bg-white rounded border border-slate-100 px-1.5 py-1 truncate">
-                    {new Date(m.start_time).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}{' '}
-                    {meetingStudentLabel(m)}
-                    <span
-                      className={`ml-1 rounded px-0.5 ${
-                        m.status === 'completed'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : m.status === 'missed'
-                            ? 'bg-red-100 text-red-700'
-                            : 'bg-amber-100 text-amber-800'
-                      }`}
-                    >
-                      {m.status}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
+          {weeklyBuckets.map((slot) => {
+            const selected = slot.key === selectedDayKey;
+            return (
+              <button
+                key={slot.key}
+                type="button"
+                onClick={() => setSelectedDayKey(slot.key)}
+                className={`min-h-[160px] rounded-xl border p-2 text-left transition ${
+                  selected
+                    ? 'border-emerald-500 bg-emerald-50/60 ring-2 ring-emerald-200'
+                    : slot.isToday
+                      ? 'border-emerald-200 bg-emerald-50/30 hover:border-emerald-300'
+                      : 'border-slate-100 bg-slate-50/80 hover:border-slate-200'
+                }`}
+              >
+                <div className={`text-xs font-semibold mb-2 ${selected ? 'text-emerald-800' : 'text-slate-600'}`}>
+                  {slot.label}
+                  {slot.isToday ? <span className="ml-1 text-[10px] font-normal text-emerald-600">(bugün)</span> : null}
+                </div>
+                <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
+                  {slot.items.length === 0 ? (
+                    <div className="text-[11px] text-slate-400 italic px-1">Görüşme yok</div>
+                  ) : (
+                    slot.items.map((m) => {
+                      const joinUrl = coachingMeetingJoinUrl(m, role || 'student');
+                      return (
+                        <div
+                          key={m.id}
+                          className="rounded-lg border border-slate-200 bg-white p-2 shadow-sm space-y-1.5"
+                        >
+                          <div className="text-xs font-semibold text-slate-900">
+                            {new Date(m.start_time).toLocaleTimeString('tr-TR', {
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </div>
+                          <div className="text-[11px] text-slate-700 leading-snug">
+                            {meetingStudentLabel(m)}
+                            {!isStudent ? (
+                              <span className="block text-slate-500">{meetingCoachLabel(m)}</span>
+                            ) : null}
+                          </div>
+                          <span
+                            className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                              m.status === 'completed'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : m.status === 'missed'
+                                  ? 'bg-red-100 text-red-700'
+                                  : 'bg-amber-100 text-amber-800'
+                            }`}
+                          >
+                            {meetingStatusLabel(m.status)}
+                          </span>
+                          {joinUrl ? (
+                            <button
+                              type="button"
+                              onClick={() => void joinCoachingMeeting(m)}
+                              className="w-full inline-flex items-center justify-center gap-1 rounded-md bg-emerald-600 px-2 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              Katıl
+                            </button>
+                          ) : null}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 

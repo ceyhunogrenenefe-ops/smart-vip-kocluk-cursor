@@ -1238,9 +1238,18 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
       return sendTextWithTimeout(session.sock, jid, message);
     });
 
+    const mid = result?.key?.id ? String(result.key.id).trim() : '';
+    if (!mid) {
+      const err = new Error('send_no_message_id');
+      err.httpStatus = 502;
+      err.hint =
+        'WhatsApp sunucusu mesaj kimliği dönmedi. Koç WhatsApp ekranından oturumu yenileyip tekrar deneyin.';
+      throw err;
+    }
+
     res.json({
       ok: true,
-      id: result?.key?.id || null,
+      id: mid,
       phone: digits,
       shared_fallback: sendMeta.sharedFallback,
       gateway_session_id: sendMeta.usedCoachId,
@@ -1358,9 +1367,18 @@ app.post('/sessions/:coachId/send-document', requireGatewayAuth, requireCoachSco
       return sendDocumentWithTimeout(session.sock, jid, payload);
     });
 
+    const mid = result?.key?.id ? String(result.key.id).trim() : '';
+    if (!mid) {
+      const err = new Error('send_no_message_id');
+      err.httpStatus = 502;
+      err.hint =
+        'WhatsApp sunucusu belge kimliği dönmedi. Koç WhatsApp ekranından oturumu yenileyip tekrar deneyin.';
+      throw err;
+    }
+
     res.json({
       ok: true,
-      id: result?.key?.id || null,
+      id: mid,
       phone: digits,
       shared_fallback: sendMeta.sharedFallback,
       gateway_session_id: sendMeta.usedCoachId

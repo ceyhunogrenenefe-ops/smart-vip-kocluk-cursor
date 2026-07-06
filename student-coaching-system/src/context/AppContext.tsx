@@ -1176,18 +1176,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Koç giriş yapabilsin diye users tablosunda da karşılığı olmalı
       try {
         const existingUser = await db.getUserByEmail(coach.email);
-        const passwordToSave = coach.password || '123456';
+        const explicitPassword =
+          typeof coach.password === 'string' && coach.password.trim().length >= 6
+            ? coach.password.trim()
+            : null;
 
         if (existingUser) {
-          await db.updateUser(existingUser.id, {
+          const userPatch: Record<string, unknown> = {
             name: coach.name,
             phone: coach.phone || null,
             role: 'coach',
-            password_hash: passwordToSave,
             institution_id: resolvedInstitutionId,
             is_active: true
-          });
+          };
+          if (explicitPassword) {
+            userPatch.password_hash = explicitPassword;
+          }
+          await db.updateUser(existingUser.id, userPatch);
         } else {
+          const passwordToSave = explicitPassword || '123456';
           await db.createUser({
             email: coach.email.toLowerCase().trim(),
             name: coach.name,
@@ -1196,10 +1203,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
             password_hash: passwordToSave,
             institution_id: resolvedInstitutionId,
             is_active: true,
-            package: 'trial',
+            package: 'starter',
             start_date: new Date().toISOString(),
-            end_date: null
+            end_date: new Date(Date.now() + 365 * 86400000).toISOString()
           });
+        }
+
+        const coachIdForQuota = preferredRowId || created.id;
+        const maxStudents =
+          typeof coach.maxStudents === 'number' && coach.maxStudents >= 0
+            ? Math.floor(coach.maxStudents)
+            : 5;
+        try {
+          await db.patchCoachStudentQuota(coachIdForQuota, maxStudents);
+        } catch (quotaErr) {
+          console.warn('Koç öğrenci kotası ayarlanamadı:', quotaErr);
         }
       } catch (userSyncError) {
         console.error('Koç kullanıcı hesabı senkronizasyon hatası:', userSyncError);
@@ -1242,7 +1260,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             name: updatedCoach.name || existingUser.name,
             phone: updatedCoach.phone || existingUser.phone,
             role: 'coach',
-            password_hash: updatedCoach.password || existingUser.password_hash,
+            ...(updatedCoach.password ? { password_hash: updatedCoach.password } : {}),
             institution_id: updatedCoach.institutionId || existingUser.institution_id
           });
         }

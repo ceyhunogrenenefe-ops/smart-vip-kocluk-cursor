@@ -1,9 +1,11 @@
 // Türkçe: Eğitim Koçu Dashboard Sayfası - Sadece atanan öğrencileri gösterir
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { formatClassLevelLabel } from '../types';
+import { db } from '../lib/database';
+import { getAuthToken } from '../lib/session';
 import {
   Users,
   TrendingUp,
@@ -41,6 +43,8 @@ import { ScoresLoadingPlaceholder } from '../components/ui/ScoresLoadingPlacehol
 export default function CoachDashboard() {
   const navigate = useNavigate();
   const { user, effectiveUser } = useAuth();
+  const [licenseWarning, setLicenseWarning] = useState<string | null>(null);
+  const [quotaFull, setQuotaFull] = useState(false);
   const {
     students,
     weeklyEntries,
@@ -202,10 +206,51 @@ export default function CoachDashboard() {
     });
   }, [myStudents, getStudentStats]);
 
+  useEffect(() => {
+    if (effectiveUser?.role !== 'coach' || !getAuthToken()) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const snap = await db.getQuotaSnapshot(effectiveUser.institutionId);
+        const coach = snap.coach;
+        if (cancelled || !coach) return;
+        if (coach.license_expired) {
+          setLicenseWarning('Lisans süreniz sona ermiştir. Yeni öğrenci ekleyemezsiniz.');
+        } else if (
+          coach.max_students != null &&
+          coach.assigned_students >= coach.max_students
+        ) {
+          setQuotaFull(true);
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveUser?.role, effectiveUser?.institutionId]);
+
   if (!user) return null;
 
   return (
     <div className="space-y-6">
+      {licenseWarning ? (
+        <div className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+          <div>
+            <p className="font-semibold">{licenseWarning}</p>
+            <p className="mt-1 text-xs text-rose-800">
+              Mevcut öğrencilerinizi yönetmeye devam edebilirsiniz. Yenileme için kurum yöneticinize başvurun.
+            </p>
+          </div>
+        </div>
+      ) : quotaFull ? (
+        <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+          <p className="font-semibold">Kullanabileceğiniz öğrenci hakkınız dolmuştur.</p>
+        </div>
+      ) : null}
       {/* Hoşgeldin */}
       <div className="bg-gradient-to-r from-purple-600 to-purple-700 rounded-2xl p-6 text-white">
         <div className="flex items-center justify-between">

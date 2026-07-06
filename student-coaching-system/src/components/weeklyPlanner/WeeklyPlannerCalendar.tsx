@@ -50,7 +50,7 @@ import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { formatClassLevelLabel } from '../../types';
 import { formatWhatsAppPhone, sendWhatsAppOutbound, sendWhatsAppOutboundDocument, blobToBase64 } from '../../lib/whatsappOutbound';
-import { getGatewaySessionUserId } from '../../lib/session';
+import { getAuthToken, getGatewaySessionUserId } from '../../lib/session';
 import {
   buildParentWeeklyGoalsMessage,
   buildParentWeeklyPlanPdfCaption,
@@ -547,8 +547,12 @@ export function WeeklyPlannerCalendar({
     setParentShareNotice('');
     setParentShareWaUrl(null);
     const st = plannerStudent;
+    if (!st || !studentId) return;
+    if (!getAuthToken()) {
+      setParentShareNotice('Oturum süresi dolmuş olabilir — çıkış yapıp tekrar giriş yapın.');
+      return;
+    }
     const coachUserId = getGatewaySessionUserId(effectiveUser?.id);
-    if (!st || !coachUserId || !studentId) return;
     const parentPhone = formatWhatsAppPhone(st.parentPhone || '');
     if (!parentPhone) {
       setParentShareNotice('Bu öğrenci için veli telefonu tanımlı değil.');
@@ -1357,7 +1361,11 @@ export function WeeklyPlannerCalendar({
       {showCoachParentShare && parentShareNotice ? (
         <div
           role="status"
-          className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-950 whitespace-pre-wrap"
+          className={`rounded-xl border px-4 py-3 text-sm whitespace-pre-wrap ${
+            parentShareWaUrl
+              ? 'border-amber-200 bg-amber-50 text-amber-950'
+              : 'border-emerald-100 bg-emerald-50 text-emerald-950'
+          }`}
         >
           {parentShareNotice}
           {parentShareWaUrl ? (

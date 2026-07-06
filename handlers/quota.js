@@ -6,6 +6,11 @@ import {
   getCoachLimitRow,
   shouldSkipInstitutionQuota
 } from '../api/_lib/quota-enforce.js';
+import {
+  getCoachLicenseByCoachId,
+  getCoachLicensesForInstitution,
+  updateCoachLicense
+} from '../api/_lib/coach-license.js';
 
 async function countWhere(table, filters) {
   let q = supabaseAdmin.from(table).select('id', { count: 'exact', head: true });
@@ -73,6 +78,24 @@ export default async function handler(req, res) {
           ? String(req.query.coach_limit_for || '').trim()
           : '';
 
+      const coachLicensesList =
+        actor.role === 'super_admin' || actor.role === 'admin'
+          ? String(req.query.coach_licenses || '').trim() === '1'
+          : false;
+
+      if (coachLicensesList) {
+        const institutionId =
+          actor.role === 'super_admin'
+            ? String(req.query.institution_id || actor.institution_id || '').trim() || null
+            : actor.institution_id || null;
+        if (!institutionId) return res.status(400).json({ error: 'institution_required' });
+        if (actor.role === 'admin' && !hasInstitutionAccess(actor, institutionId)) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        const licenses = await getCoachLicensesForInstitution(institutionId);
+        return res.status(200).json({ data: licenses });
+      }
+
       if (coachLimitFor) {
         const { data: coach } = await supabaseAdmin
           .from('coaches')
@@ -113,11 +136,17 @@ export default async function handler(req, res) {
       if (actor.role === 'coach' && actor.coach_id) {
         const assigned = await countWhere('students', { coach_id: actor.coach_id });
         const row = await getCoachLimitRow(actor.coach_id);
+        const license = await getCoachLicenseByCoachId(actor.coach_id);
         base.coach = {
           coach_id: actor.coach_id,
           max_students: row?.max_students ?? null,
           assigned_students: assigned,
-          usage_pct: pct(assigned, row?.max_students ?? null)
+          usage_pct: pct(assigned, row?.max_students ?? null),
+          license_status: license?.license_status ?? 'active',
+          package_label: license?.package_label ?? null,
+          end_date: license?.end_date ?? null,
+          days_remaining: license?.days_remaining ?? null,
+          license_expired: license?.license_status === 'expired'
         };
       } else if (actor.role === 'coach') {
         base.coach = null;
@@ -194,6 +223,36 @@ export default async function handler(req, res) {
         );
 
         return res.status(200).json({ ok: true });
+      }
+
+      if (scope === 'coach_license') {
+        if (!(actor.role === 'super_admin' || actor.role === 'admin')) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+
+        const coachId = String(body.coach_id || '').trim();
+        if (!coachId) return res.status(400).json({ error: 'coach_id_required' });
+
+        const { data: coach } = await supabaseAdmin
+          .from('coaches')
+          .select('id, institution_id')
+          .eq('id', coachId)
+          .maybeSingle();
+        if (!coach) return res.status(404).json({ error: 'coach_not_found' });
+        if (actor.role === 'admin' && !hasInstitutionAccess(actor, coach.institution_id)) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+
+        const result = await updateCoachLicense({
+          coachId,
+          packageName: body.package,
+          startDate: body.start_date,
+          endDate: body.end_date,
+          maxStudents: body.max_students,
+          isActive: body.is_active
+        });
+        if (result.error) return res.status(404).json({ error: result.error });
+        return res.status(200).json({ data: result.data });
       }
 
       return res.status(400).json({ error: 'invalid_scope' });

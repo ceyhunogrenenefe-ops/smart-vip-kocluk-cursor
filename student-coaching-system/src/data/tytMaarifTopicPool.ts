@@ -6,6 +6,7 @@ export const MAARIF_CLASS_KEY = 'TYT-Maarif';
 export const MAARIF_SUBJECT_ORDER = [
   'TYT MAARİF TÜRKÇE',
   'TYT MAARİF MATEMATİK',
+  'TYT MAARİF GEOMETRİ',
   'TYT MAARİF FİZİK',
   'TYT MAARİF KİMYA',
   'TYT MAARİF BİYOLOJİ',
@@ -212,13 +213,6 @@ const RAW_MAARIF_TOPICS: Record<(typeof MAARIF_SUBJECT_ORDER)[number], string[]>
     'Ünite 8 · Rezonans ve Deprem'
   ],
   'TYT MAARİF MATEMATİK': [
-    '9. Sınıf · Üçgenler',
-    '9. Sınıf · Doğruda ve Üçgende Açılar',
-    '9. Sınıf · Üçgende Açı-Kenar Bağıntıları',
-    '9. Sınıf · Geometrik Dönüşümler',
-    '9. Sınıf · Üçgende Eşlik',
-    '9. Sınıf · Üçgenlerde Benzerlik',
-    '9. Sınıf · Dik Üçgen',
     '9. Sınıf · Sayılar',
     '9. Sınıf · Temel İşlem Yeteneği',
     '9. Sınıf · Üslü Sayılar',
@@ -235,14 +229,6 @@ const RAW_MAARIF_TOPICS: Record<(typeof MAARIF_SUBJECT_ORDER)[number], string[]>
     '9. Sınıf · Algoritmik Yapılar',
     '9. Sınıf · Matematiksel İspatlarda Mantık',
     '9. Sınıf · Cebirsel İşlemlerin Algoritmik Yapısı',
-    '10. Sınıf · Trigonometrik Oranlar ve Özdeşlikler',
-    '10. Sınıf · Açıortay',
-    '10. Sınıf · Kenarortay',
-    '10. Sınıf · Kenar-Orta Dikme ve Yükseklik',
-    '10. Sınıf · Üçgenin Alanı',
-    '10. Sınıf · Sinüs ve Kosinüs Teoremleri',
-    '10. Sınıf · Noktanın Analitiği',
-    '10. Sınıf · Doğrunun Analitiği',
     '10. Sınıf · Tanımlı Fonksiyonlar',
     '10. Sınıf · Karekök Fonksiyonları',
     '10. Sınıf · Rasyonel Fonksiyonlar',
@@ -258,6 +244,22 @@ const RAW_MAARIF_TOPICS: Record<(typeof MAARIF_SUBJECT_ORDER)[number], string[]>
     '10. Sınıf · Pascal Üçgeni ve Güvercin Yuvası İlkesi',
     '10. Sınıf · Olayların Olasılığı',
     '10. Sınıf · Koşullu Olasılık'
+  ],
+  'TYT MAARİF GEOMETRİ': [
+    '9. Sınıf · Doğruda ve Üçgende Açılar',
+    '9. Sınıf · Üçgende Açı Kenar Bağıntıları',
+    '9. Sınıf · Geometrik Dönüşümler',
+    '9. Sınıf · Üçgende Eşlik',
+    '9. Sınıf · Üçgenlerde Benzerlik',
+    '9. Sınıf · Dik Üçgen',
+    '10. Sınıf · Trigonometrik Oranlar ve Özdeşlikler',
+    '10. Sınıf · Üçgende Açıortay',
+    '10. Sınıf · Üçgende Kenarortay',
+    '10. Sınıf · Üçgende Kenar Orta Dikme ve Yükseklik',
+    '10. Sınıf · Üçgenin Alanı',
+    '10. Sınıf · Sinüs ve Kosinüs Teoremleri',
+    '10. Sınıf · Noktanın Analitik İncelenmesi',
+    '10. Sınıf · Doğrunun Analitik İncelenmesi'
   ]
 };
 
