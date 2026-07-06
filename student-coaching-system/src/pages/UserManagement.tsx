@@ -147,7 +147,7 @@ function quotaBlockMessage(
   role: UserRole,
   actorRole: UserRole | undefined
 ): string | null {
-  if (!quota || quota.quota_exempt || actorRole === 'super_admin') return null;
+  if (!quota || quota.quota_exempt) return null;
   const limits = quota.admin_limits;
   if (!limits) return null;
   if (role === 'student' && quota.counts.students >= limits.max_students) {
@@ -286,6 +286,7 @@ export default function UserManagement() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [quota, setQuota] = useState<QuotaSnapshot | null>(null);
   const [quotaRefreshKey, setQuotaRefreshKey] = useState(0);
+  const [quotaPickerInstitutionId, setQuotaPickerInstitutionId] = useState('');
   const [importBusy, setImportBusy] = useState(false);
   const [importResult, setImportResult] = useState<{
     created: number;
@@ -630,13 +631,25 @@ export default function UserManagement() {
   ]);
 
   useEffect(() => {
+    if (currentUser?.role === 'super_admin' && activeInstitutionId) {
+      setQuotaPickerInstitutionId(activeInstitutionId);
+    }
+  }, [currentUser?.role, activeInstitutionId]);
+
+  const quotaInstitutionId =
+    currentUser?.role === 'super_admin'
+      ? quotaPickerInstitutionId ||
+        activeInstitutionId ||
+        institution?.id ||
+        institutions[0]?.id ||
+        undefined
+      : currentUser?.institutionId || activeInstitutionId || institution?.id || undefined;
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       if (!getAuthToken() || !currentUser) return;
-      const inst =
-        currentUser.role === 'super_admin'
-          ? activeInstitutionId || institution?.id || undefined
-          : currentUser.institutionId || activeInstitutionId || institution?.id || undefined;
+      const inst = quotaInstitutionId;
       if (!inst) {
         if (!cancelled) setQuota(null);
         return;
@@ -651,12 +664,21 @@ export default function UserManagement() {
     return () => {
       cancelled = true;
     };
-  }, [currentUser, activeInstitutionId, institution?.id, quotaRefreshKey]);
+  }, [currentUser, quotaInstitutionId, quotaRefreshKey]);
 
-  const quotaInstitutionId =
-    currentUser?.role === 'super_admin'
-      ? activeInstitutionId || institution?.id || undefined
-      : currentUser?.institutionId || activeInstitutionId || institution?.id || undefined;
+  const quotaCoaches = useMemo(() => {
+    if (!quotaInstitutionId) return linkedCoaches;
+    return linkedCoaches.filter(
+      (c) => !c.institutionId || String(c.institutionId) === String(quotaInstitutionId)
+    );
+  }, [linkedCoaches, quotaInstitutionId]);
+
+  const quotaStudents = useMemo(() => {
+    if (!quotaInstitutionId) return linkedStudents;
+    return linkedStudents.filter(
+      (s) => !s.institutionId || String(s.institutionId) === String(quotaInstitutionId)
+    );
+  }, [linkedStudents, quotaInstitutionId]);
 
   const quotaInstitutionName = useMemo(() => {
     if (!quotaInstitutionId) return undefined;
@@ -2648,14 +2670,6 @@ export default function UserManagement() {
         ) : null}
       </PageCollapsibleSection>
 
-      {(currentUser?.role === 'super_admin' || currentUser?.role === 'admin') &&
-        !quotaInstitutionId &&
-        currentUser?.role === 'super_admin' && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            Kota yönetimi için önce üst menüden veya Kurum Yönetimi ekranından bir kurum seçin.
-          </div>
-        )}
-
       {(currentUser?.role === 'super_admin' || currentUser?.role === 'admin') && (
         <PageCollapsibleSection
           title="Onay bekleyen kayıtlar"
@@ -2761,9 +2775,17 @@ export default function UserManagement() {
             actorUserId={currentUser!.id}
             institutionId={quotaInstitutionId}
             institutionName={quotaInstitutionName}
+            institutions={
+              currentUser?.role === 'super_admin'
+                ? institutions.map((i) => ({ id: i.id, name: i.name }))
+                : undefined
+            }
+            onInstitutionChange={
+              currentUser?.role === 'super_admin' ? setQuotaPickerInstitutionId : undefined
+            }
             quota={quota}
-            coaches={coaches}
-            students={linkedStudents}
+            coaches={quotaCoaches}
+            students={quotaStudents}
             institutionAdmins={institutionAdmins}
             onQuotaUpdated={refreshQuotaSnapshot}
           />
@@ -2783,9 +2805,6 @@ export default function UserManagement() {
           }`}
         >
           <p className="font-medium mb-2">Plan kotası özeti</p>
-          {quota.quota_exempt ? (
-            <p className="text-sm">Ana platform kurumu — kurum öğrenci/koç kotası uygulanmaz.</p>
-          ) : null}
           <p className="text-sm">
             Öğrenci:{' '}
             <span className="font-semibold">
@@ -2806,7 +2825,7 @@ export default function UserManagement() {
           </p>
           <p className="text-xs mt-2 opacity-90">
             Kota öğrenci/koç profil kayıtlarını sayar (Öğrenciler / Koçlar sayfaları ile aynı:{' '}
-            {linkedStudents.length} öğrenci, {linkedCoaches.length} koç).
+            {quotaStudents.length} öğrenci, {quotaCoaches.length} koç).
           </p>
           {(quota.usage_pct?.students ?? 0) >= 90 || (quota.usage_pct?.coaches ?? 0) >= 90 ? (
             <p className="text-sm mt-2">

@@ -14,6 +14,8 @@ interface QuotaManagementPanelProps {
   actorUserId: string;
   institutionId?: string;
   institutionName?: string;
+  institutions?: { id: string; name: string }[];
+  onInstitutionChange?: (institutionId: string) => void;
   quota: QuotaSnapshot | null;
   coaches: Coach[];
   students: { coachId?: string | null }[];
@@ -26,6 +28,8 @@ export function QuotaManagementPanel({
   actorUserId,
   institutionId,
   institutionName,
+  institutions,
+  onInstitutionChange,
   quota,
   coaches,
   students,
@@ -160,14 +164,26 @@ export function QuotaManagementPanel({
         </div>
       </div>
 
+      {actorRole === 'super_admin' && institutions && institutions.length > 0 && onInstitutionChange ? (
+        <div className="rounded-lg border border-indigo-100 bg-white p-3">
+          <label className="text-xs font-medium text-slate-600">Kurum</label>
+          <select
+            value={institutionId || ''}
+            onChange={(e) => onInstitutionChange(e.target.value)}
+            className="mt-1 w-full max-w-md px-3 py-2 border border-gray-200 rounded-lg bg-white text-sm"
+          >
+            {institutions.map((i) => (
+              <option key={i.id} value={i.id}>
+                {i.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+
       {quota && (
         <div className="rounded-lg border border-indigo-100 bg-white p-3 text-sm text-slate-700">
           <p className="font-medium text-slate-800 mb-1">Mevcut kullanım</p>
-          {quota.quota_exempt ? (
-            <p className="text-xs text-slate-500 mb-2">
-              Ana platform kurumu — limitler bilgi amaçlı; ekleme engeli uygulanmaz.
-            </p>
-          ) : null}
           <p>
             Öğrenci:{' '}
             <span className="font-semibold">

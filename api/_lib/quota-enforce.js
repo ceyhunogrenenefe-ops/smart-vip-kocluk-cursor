@@ -1,6 +1,6 @@
 import { supabaseAdmin } from './supabase-admin.js';
 
-/** Ana platform kurumu — SaaS alt-kiracı kotası uygulanmaz */
+/** Ana platform kurumu (Online VIP Dershane) */
 export const PLATFORM_PRIMARY_INSTITUTION_ID = '73323d75-eea1-4552-8bba-d50555423589';
 
 /** Özel hata — handler 403 + mesaj için */
@@ -26,16 +26,10 @@ export class QuotaError extends Error {
   }
 }
 
-function isPrimaryInstitution(institutionId) {
-  return Boolean(
-    institutionId && String(institutionId) === PLATFORM_PRIMARY_INSTITUTION_ID
-  );
-}
-
-/** Kurum kotası ana platform / süper admin için uygulanmaz */
+/** Tüm kurumlarda kota uygulanır; süper admin ekleme sırasında muaf */
 export function shouldSkipInstitutionQuota({ institutionId, actorRole } = {}) {
-  if (String(actorRole || '').toLowerCase() === 'super_admin') return true;
-  return isPrimaryInstitution(institutionId);
+  void institutionId;
+  return String(actorRole || '').toLowerCase() === 'super_admin';
 }
 
 export async function getInstitutionAdminUserId(institutionId) {
@@ -63,20 +57,34 @@ export async function getCoachLimitRow(coachId) {
   return data ?? null;
 }
 
+export async function countStudentsForCoachingQuota(institutionId) {
+  return countStudentsInInstitution(institutionId);
+}
+
+export async function countCoachesForCoachingQuota(institutionId) {
+  return countCoachesInInstitution(institutionId);
+}
+
 async function countStudentsInInstitution(institutionId) {
-  const { count, error } = await supabaseAdmin
-    .from('students')
-    .select('id', { count: 'exact', head: true })
-    .eq('institution_id', institutionId);
+  let q = supabaseAdmin.from('students').select('id', { count: 'exact', head: true });
+  if (institutionId === PLATFORM_PRIMARY_INSTITUTION_ID) {
+    q = q.or(`institution_id.eq.${institutionId},institution_id.is.null`);
+  } else {
+    q = q.eq('institution_id', institutionId);
+  }
+  const { count, error } = await q;
   if (error) throw error;
   return count ?? 0;
 }
 
 async function countCoachesInInstitution(institutionId) {
-  const { count, error } = await supabaseAdmin
-    .from('coaches')
-    .select('id', { count: 'exact', head: true })
-    .eq('institution_id', institutionId);
+  let q = supabaseAdmin.from('coaches').select('id', { count: 'exact', head: true });
+  if (institutionId === PLATFORM_PRIMARY_INSTITUTION_ID) {
+    q = q.or(`institution_id.eq.${institutionId},institution_id.is.null`);
+  } else {
+    q = q.eq('institution_id', institutionId);
+  }
+  const { count, error } = await q;
   if (error) throw error;
   return count ?? 0;
 }
@@ -132,7 +140,8 @@ export async function enforceOrganizationCoachQuota(institutionId, options = {})
 
 /** Belirtilen koça atanmış öğrenci kotası (+1 gelecek INSERT için) */
 export async function enforceCoachStudentQuota(coachId, options = {}) {
-  if (!coachId || shouldSkipInstitutionQuota(options)) return;
+  if (!coachId) return;
+  if (shouldSkipInstitutionQuota({ actorRole: options.actorRole })) return;
   const row = await getCoachLimitRow(coachId);
   if (!row) return;
   const n = await countStudentsForCoach(coachId);

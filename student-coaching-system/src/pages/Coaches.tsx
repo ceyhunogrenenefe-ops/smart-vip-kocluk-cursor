@@ -52,7 +52,9 @@ export default function Coaches() {
     effectiveUser?.role === 'super_admin' || effectiveUser?.role === 'admin';
   const canManageLogin = canSetCoachQuota;
 
-  const { coaches, students, addCoach, updateCoach, deleteCoach, institution, activeInstitutionId } = useApp();
+  const { coaches, students, addCoach, updateCoach, deleteCoach, institution, activeInstitutionId, institutions } =
+    useApp();
+  const [licenseInstitutionFilter, setLicenseInstitutionFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingCoach, setEditingCoach] = useState<Coach | null>(null);
@@ -275,13 +277,20 @@ export default function Coaches() {
     }
   };
 
+  const licenseInstitutionId =
+    effectiveUser?.role === 'super_admin'
+      ? licenseInstitutionFilter === 'all'
+        ? undefined
+        : licenseInstitutionFilter
+      : activeInstitutionId || institution?.id || effectiveUser?.institutionId || undefined;
+
   useEffect(() => {
     if (!canSetCoachQuota || !getAuthToken()) return;
     let cancelled = false;
     setLicensesLoading(true);
     void (async () => {
       try {
-        const rows = await db.getCoachLicenses(activeInstitutionId || institution?.id);
+        const rows = await db.getCoachLicenses(licenseInstitutionId);
         if (!cancelled) setCoachLicenses(rows);
       } catch {
         if (!cancelled) setCoachLicenses([]);
@@ -292,11 +301,11 @@ export default function Coaches() {
     return () => {
       cancelled = true;
     };
-  }, [canSetCoachQuota, coaches.length, activeInstitutionId, institution?.id]);
+  }, [canSetCoachQuota, licenseInstitutionId]);
 
   const reloadLicenses = async () => {
     try {
-      const rows = await db.getCoachLicenses(activeInstitutionId || institution?.id);
+      const rows = await db.getCoachLicenses(licenseInstitutionId);
       setCoachLicenses(rows);
     } catch {
       /* ignore */
@@ -403,11 +412,26 @@ export default function Coaches() {
 
       {canSetCoachQuota ? (
         <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 px-4 py-3">
-            <h3 className="text-sm font-bold text-slate-800">Koç lisansları</h3>
-            <p className="text-xs text-slate-500">
-              Paket, süre ve öğrenci kotası — tek yerden yönetin
-            </p>
+          <div className="border-b border-slate-100 px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-slate-800">Koç lisansları</h3>
+              <p className="text-xs text-slate-500">Tüm koçlar — paket, süre ve öğrenci kotası</p>
+            </div>
+            {effectiveUser?.role === 'super_admin' && institutions.length > 0 ? (
+              <select
+                value={licenseInstitutionFilter}
+                onChange={(e) => setLicenseInstitutionFilter(e.target.value)}
+                className="px-3 py-2 border border-gray-200 rounded-lg bg-white text-sm min-w-[12rem]"
+                aria-label="Kurum filtresi"
+              >
+                <option value="all">Tüm kurumlar</option>
+                {institutions.map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {i.name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">

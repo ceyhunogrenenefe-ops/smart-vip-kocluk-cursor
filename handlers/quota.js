@@ -4,8 +4,11 @@ import {
   getInstitutionAdminUserId,
   getAdminLimits,
   getCoachLimitRow,
-  shouldSkipInstitutionQuota
+  shouldSkipInstitutionQuota,
+  countStudentsForCoachingQuota,
+  countCoachesForCoachingQuota
 } from '../api/_lib/quota-enforce.js';
+
 import {
   getCoachLicenseByCoachId,
   getCoachLicensesForInstitution,
@@ -30,8 +33,8 @@ function pct(current, max) {
 async function institutionSnapshot(institutionId, actorRole) {
   const adminUserId = await getInstitutionAdminUserId(institutionId);
   const limits = adminUserId ? await getAdminLimits(adminUserId) : null;
-  const students = await countWhere('students', { institution_id: institutionId });
-  const coaches = await countWhere('coaches', { institution_id: institutionId });
+  const students = await countStudentsForCoachingQuota(institutionId);
+  const coaches = await countCoachesForCoachingQuota(institutionId);
   const quotaExempt = shouldSkipInstitutionQuota({ institutionId, actorRole });
   return {
     institution_id: institutionId,
@@ -84,12 +87,13 @@ export default async function handler(req, res) {
           : false;
 
       if (coachLicensesList) {
-        const institutionId =
+        const instFromQuery =
           actor.role === 'super_admin'
-            ? String(req.query.institution_id || actor.institution_id || '').trim() || null
-            : actor.institution_id || null;
-        if (!institutionId) return res.status(400).json({ error: 'institution_required' });
-        if (actor.role === 'admin' && !hasInstitutionAccess(actor, institutionId)) {
+            ? String(req.query.institution_id || '').trim() || null
+            : null;
+        const institutionId =
+          instFromQuery || (actor.role === 'admin' ? actor.institution_id : null) || null;
+        if (actor.role === 'admin' && institutionId && !hasInstitutionAccess(actor, institutionId)) {
           return res.status(403).json({ error: 'forbidden' });
         }
         const licenses = await getCoachLicensesForInstitution(institutionId);
@@ -120,14 +124,13 @@ export default async function handler(req, res) {
       const instFromQuery =
         actor.role === 'super_admin' ? String(req.query.institution_id || '').trim() || null : null;
 
-      const institutionId =
-        instFromQuery || actor.institution_id || null;
+      const institutionId = instFromQuery || actor.institution_id || null;
 
       if (!institutionId) {
         return res.status(400).json({ error: 'institution_required' });
       }
 
-      if (actor.role !== 'super_admin' && !hasInstitutionAccess(actor, institutionId)) {
+      if (actor.role !== 'super_admin' && actor.role !== 'coach' && !hasInstitutionAccess(actor, institutionId)) {
         return res.status(403).json({ error: 'forbidden' });
       }
 

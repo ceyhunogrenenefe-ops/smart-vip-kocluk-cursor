@@ -1,5 +1,8 @@
 import { supabaseAdmin } from './supabase-admin.js';
-import { getCoachLimitRow, shouldSkipInstitutionQuota } from './quota-enforce.js';
+import {
+  getCoachLimitRow,
+  PLATFORM_PRIMARY_INSTITUTION_ID
+} from './quota-enforce.js';
 
 export class LicenseError extends Error {
   constructor(code = 'license_expired', userMessage = 'Lisans süreniz sona ermiştir.') {
@@ -100,16 +103,27 @@ export async function buildCoachLicenseRow(coach) {
   };
 }
 
-export async function getCoachLicensesForInstitution(institutionId) {
-  if (!institutionId) return [];
-  const { data: coaches, error } = await supabaseAdmin
+async function loadCoachesForLicenseScope(institutionId) {
+  let q = supabaseAdmin
     .from('coaches')
     .select('id, name, email, institution_id, created_at')
-    .eq('institution_id', institutionId)
     .order('name', { ascending: true });
+  if (institutionId) {
+    if (institutionId === PLATFORM_PRIMARY_INSTITUTION_ID) {
+      q = q.or(`institution_id.eq.${institutionId},institution_id.is.null`);
+    } else {
+      q = q.eq('institution_id', institutionId);
+    }
+  }
+  const { data, error } = await q;
   if (error) throw error;
+  return data || [];
+}
+
+export async function getCoachLicensesForInstitution(institutionId) {
+  const coaches = await loadCoachesForLicenseScope(institutionId || null);
   const rows = [];
-  for (const c of coaches || []) {
+  for (const c of coaches) {
     rows.push(await buildCoachLicenseRow(c));
   }
   return rows;
@@ -128,7 +142,8 @@ export async function getCoachLicenseByCoachId(coachId) {
 
 /** Öğrenci eklemeden önce — süresi dolmuş lisans engellenir (giriş serbest). */
 export async function enforceCoachLicenseForStudentInsert(coachId, options = {}) {
-  if (!coachId || shouldSkipInstitutionQuota(options)) return;
+  if (!coachId) return;
+  if (String(options.actorRole || '').toLowerCase() === 'super_admin') return;
   const license = await getCoachLicenseByCoachId(coachId);
   if (!license) return;
   if (!license.is_active) {
