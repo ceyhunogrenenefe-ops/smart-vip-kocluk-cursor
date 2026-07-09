@@ -3,7 +3,7 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import {
   actorIsTeacherForPanelScope,
-  getTeacherGroupClassStudentScope,
+  getTeacherPanelStudentScope,
   getTeacherPanelClassIds
 } from '../api/_lib/teacher-class-scope.js';
 import { STUDENT_LIST_COLUMNS } from '../api/_lib/list-query-columns.js';
@@ -26,7 +26,7 @@ export default async function handler(req, res) {
   }
 
   const classIds = await getTeacherPanelClassIds(actor.sub);
-  const { ids: studentIds } = await getTeacherGroupClassStudentScope(actor.sub);
+  const { ids: studentIds } = await getTeacherPanelStudentScope(actor.sub, inst);
   const inst = actor.institution_id || null;
 
   let classes = [];

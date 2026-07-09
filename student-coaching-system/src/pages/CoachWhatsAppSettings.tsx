@@ -31,6 +31,16 @@ type GatewayStatus = 'idle' | 'connecting' | 'qr_ready' | 'connected' | 'logged_
 
 const formatPhone = (value: string) => normalizeWhatsAppPhoneForSend(value);
 
+function formatLinkedPhoneDisplay(raw: string): string | null {
+  const d = String(raw || '').replace(/\D/g, '');
+  if (!d) return null;
+  if (d.startsWith('90') && d.length === 12) {
+    const m = d.slice(2);
+    return `+90 ${m.slice(0, 3)} ${m.slice(3, 6)} ${m.slice(6, 8)} ${m.slice(8)}`;
+  }
+  return `+${d}`;
+}
+
 function isValidGatewayEnvUrl(s: string): boolean {
   const t = s.trim();
   return /^https?:\/\/[^\s]+/i.test(t);
@@ -271,6 +281,8 @@ export default function CoachWhatsAppSettings() {
   /** VPS gateway (Baileys) bağlantı hatası — WhatsApp oturumu düşünce dolabilir */
   const [gatewaySessionError, setGatewaySessionError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState('');
+  const [testSendBusy, setTestSendBusy] = useState(false);
+  const [testSendNotice, setTestSendNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [healthCheckBusy, setHealthCheckBusy] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState('');
@@ -832,6 +844,8 @@ export default function CoachWhatsAppSettings() {
     linkedPhone?: string | null;
     sessionCoachId?: string | null;
     coachId?: string | null;
+    sendReady?: boolean;
+    conflictCoachId?: string | null;
   };
 
   useEffect(() => {
@@ -859,23 +873,13 @@ export default function CoachWhatsAppSettings() {
     setQrDataUrl(data.qr || null);
     setLastConnectedAt(data.connectedAt || null);
     const lp = String(data.linkedPhone || '').replace(/\D/g, '');
-    setLinkedPhone(
-      lp.startsWith('90') && lp.length >= 12
-        ? `+${lp.slice(0, 2)} ${lp.slice(2, 5)} ${lp.slice(5, 8)} ${lp.slice(8)}`
-        : lp
-          ? `+${lp}`
-          : null
-    );
+    setLinkedPhone(formatLinkedPhoneDisplay(lp));
     const err =
-      data.status === 'connected' ||
-      data.status === 'reconnecting' ||
-      data.status === 'connecting'
-        ? null
-        : typeof data.lastError === 'string' && data.lastError.trim()
-          ? data.lastError.trim()
-          : data.restoreBlocked && data.hint
-            ? data.hint
-            : null;
+      typeof data.lastError === 'string' && data.lastError.trim()
+        ? data.lastError.trim()
+        : data.restoreBlocked && data.hint
+          ? String(data.hint)
+          : null;
     setGatewaySessionError(err);
   };
 
@@ -1120,6 +1124,16 @@ export default function CoachWhatsAppSettings() {
         await new Promise((r) => setTimeout(r, 450));
       }
       await fetchStatus();
+      if (started?.status === 'connected' && !started?.qr) {
+        const lp =
+          formatLinkedPhoneDisplay(String(started.linkedPhone || '')) || linkedPhone;
+        setStatusMessage(
+          lp
+            ? `WhatsApp zaten bağlı (${lp}). Mesaj gönderebilirsiniz; farklı numara için önce Çıkış yapın.`
+            : 'WhatsApp zaten bağlı. Mesaj gönderebilirsiniz; yeniden QR için önce Çıkış yapın.'
+        );
+        return;
+      }
       setStatusMessage(
         sawQrOrConnected
           ? 'QR oluşturuldu. WhatsApp → Bağlı cihazlar’dan eski «Online VIP» oturumunu kaldırıp yeni QR’ı okutun.'
@@ -1195,9 +1209,8 @@ export default function CoachWhatsAppSettings() {
             /* warm retry */
           }
           await new Promise((r) => setTimeout(r, 1000));
-        } else if (status !== 'connected') {
-          await ensureGatewayReadyBeforeSend(5000);
         }
+        await ensureGatewayReadyBeforeSend(attempt === 1 ? 8000 : 12000);
 
         await callGateway(`/sessions/${coachId}/send`, {
           method: 'POST',
@@ -1229,31 +1242,29 @@ export default function CoachWhatsAppSettings() {
     throw lastError || new Error(msg);
   };
 
-  const ensureGatewayReadyBeforeSend = async (maxWaitMs = 5000): Promise<boolean> => {
+  const ensureGatewayReadyBeforeSend = async (maxWaitMs = 8000): Promise<boolean> => {
     if (!canUseGateway) return false;
-    if (status === 'connected') return true;
-    try {
-      const data = await callGateway<GatewayStatusPayload>(`/sessions/${coachId}/status`);
-      if (data.status === 'connected') {
+    const deadline = Date.now() + Math.max(2000, maxWaitMs);
+    while (Date.now() < deadline) {
+      try {
+        const data = await callGateway<GatewayStatusPayload>(`/sessions/${coachId}/status`);
         applyGatewayStatusPayload(data);
-        return true;
-      }
-      if (data.authOnDisk && !data.restoreBlocked) {
-        void callGateway(`/sessions/${coachId}/start`, {
-          method: 'POST',
-          body: JSON.stringify({ purge: false })
-        });
-        const deadline = Date.now() + Math.max(1500, maxWaitMs);
-        while (Date.now() < deadline) {
-          await new Promise((r) => setTimeout(r, 350));
-          const st = await callGateway<GatewayStatusPayload>(`/sessions/${coachId}/status`);
-          applyGatewayStatusPayload(st);
-          if (st.status === 'connected') return true;
-          if (st.status === 'qr_ready') return false;
+        if (data.status === 'connected' && data.sendReady !== false) return true;
+        if (data.status === 'connected' && data.sendReady === false) {
+          await new Promise((r) => setTimeout(r, 450));
+          continue;
         }
+        if (data.authOnDisk && !data.restoreBlocked) {
+          void callGateway(`/sessions/${coachId}/start`, {
+            method: 'POST',
+            body: JSON.stringify({ purge: false })
+          });
+        }
+        if (data.status === 'qr_ready') return false;
+      } catch {
+        /* VPS send endpoint may still warm */
       }
-    } catch {
-      /* VPS send endpoint may still warm */
+      await new Promise((r) => setTimeout(r, 400));
     }
     return status === 'connected';
   };
@@ -1523,28 +1534,47 @@ export default function CoachWhatsAppSettings() {
   const sendTestMessage = async () => {
     const target = formatPhone(phone);
     if (!target) {
-      setStatusMessage('Test için ülke kodlu telefon girin.');
+      const text = 'Test için ülke kodlu telefon girin (örn. 905551112233).';
+      setTestSendNotice({ ok: false, text });
+      setStatusMessage(text);
       return;
     }
+    if (!hasServerJwt) {
+      const text = 'Sunucu oturumu (JWT) gerekli — çıkış yapıp tekrar giriş yapın.';
+      setTestSendNotice({ ok: false, text });
+      setStatusMessage(text);
+      return;
+    }
+
     const message = 'Merhaba, koç paneli WhatsApp bağlantı test mesajı.';
+    setTestSendBusy(true);
+    setTestSendNotice(null);
     try {
-      if (canUseGateway) {
-        try {
-          await sendGatewayMessage(target, message);
-          setStatusMessage('Test mesajı bağlı oturumdan gönderildi.');
-          return;
-        } catch {
-          /* wa.me yedek */
-        }
+      const res = await apiFetch('/api/coach-whatsapp-test-send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: target, message })
+      });
+      const j = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        hint?: string;
+        message_id?: string;
+      };
+      if (!res.ok) {
+        throw new Error(j.hint || j.error || res.statusText);
       }
-      const { opened, url } = openWaFallback(target, message);
-      setStatusMessage(
-        opened
-          ? 'Oturum yok; whatsapp bağlantısı yeni sekmede açıldı.'
-          : `Tarayıcı yeni sekme açmayı engelledi. Bağlantı:\n${url}`
-      );
+      const okText = j.message_id
+        ? `Test mesajı WhatsApp sunucusu tarafından onaylandı (id: ${j.message_id}). Alıcı telefonda sohbeti kontrol etsin.`
+        : 'Test mesajı WhatsApp sunucusu tarafından onaylandı. Alıcı telefonda sohbeti kontrol etsin.';
+      setTestSendNotice({ ok: true, text: okText });
+      setStatusMessage(okText);
+      void fetchStatus();
     } catch (error) {
-      setStatusMessage(`Test mesajı gönderilemedi: ${(error as Error).message}`);
+      const msg = error instanceof Error ? error.message : String(error);
+      setTestSendNotice({ ok: false, text: msg });
+      setStatusMessage(`Test mesajı gönderilemedi: ${msg}`);
+    } finally {
+      setTestSendBusy(false);
     }
   };
 
@@ -2256,6 +2286,11 @@ export default function CoachWhatsAppSettings() {
               </p>
             </div>
           )}
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+            Tarayıcıda <strong>WAX / reklam engelleyici</strong> eklentileri QR veya bağlantıyı bozabilir. Sorun
+            yaşarsanız gizli pencerede deneyin veya eklentileri bu site için kapatın. Konsoldaki «Düğüm mevcut
+            sayfada bulunamadı» mesajı genelde eklentiden gelir; panel kodu değildir.
+          </div>
           {needsJwtForGateway && (
             <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-950">
               <p className="font-medium">WhatsApp için sunucu JWT’si gerekli (401 önler)</p>
@@ -2390,10 +2425,15 @@ export default function CoachWhatsAppSettings() {
                 <button
                   type="button"
                   onClick={() => void sendTestMessage()}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 py-2.5 text-sm font-medium text-white hover:bg-slate-800 px-6"
+                  disabled={testSendBusy || !hasServerJwt}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 py-2.5 text-sm font-medium text-white hover:bg-slate-800 px-6 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <MessageCircle className="h-4 w-4" />
-                  Test mesajı gönder
+                  {testSendBusy ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <MessageCircle className="h-4 w-4" />
+                  )}
+                  {testSendBusy ? 'Gönderiliyor…' : 'Test mesajı gönder'}
                 </button>
                 <button
                   type="button"
@@ -2405,11 +2445,30 @@ export default function CoachWhatsAppSettings() {
                   Sağlık testi
                 </button>
               </div>
+              {testSendNotice ? (
+                <div
+                  className={`rounded-xl border px-3 py-2 text-sm ${
+                    testSendNotice.ok
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                      : 'border-rose-200 bg-rose-50 text-rose-900'
+                  }`}
+                >
+                  {testSendNotice.text}
+                </div>
+              ) : null}
             </div>
             <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 p-4">
               <p className="mb-3 text-xs font-medium uppercase tracking-wide text-slate-500">QR kod</p>
               {qrDataUrl ? (
                 <img src={qrDataUrl} alt="WhatsApp QR" className="h-52 w-52 rounded-xl border border-white shadow-md" />
+              ) : isConnected ? (
+                <div className="flex h-52 w-52 flex-col items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 text-center text-emerald-900">
+                  <CheckCircle className="mb-2 h-10 w-10" />
+                  <span className="text-sm font-medium">Bağlı</span>
+                  <span className="mt-1 text-xs text-emerald-800">
+                    {linkedPhone || 'WhatsApp hattı aktif'}
+                  </span>
+                </div>
               ) : (
                 <div className="flex h-52 w-52 flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white text-slate-400">
                   <QrCode className="mb-2 h-12 w-12" />

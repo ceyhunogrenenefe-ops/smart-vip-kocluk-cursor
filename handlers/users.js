@@ -2,7 +2,7 @@ import { requireAuth, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { getSupabaseAdmin, hasSupabaseServiceRoleKey, supabaseAdmin } from '../api/_lib/supabase-admin.js';
-import { getTeacherGroupClassStudentScope } from '../api/_lib/teacher-class-scope.js';
+import { getTeacherPanelStudentScope } from '../api/_lib/teacher-class-scope.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import { normalizeUuidOrGenerate } from '../api/_lib/uuid.js';
 import { USER_LIST_COLUMNS, USER_LIST_OPTIONAL_COLUMNS } from '../api/_lib/list-query-columns.js';
@@ -105,7 +105,7 @@ async function coachAssignedStudentEmails(coachId) {
 }
 
 async function teacherScopeStudentEmails(teacherSub) {
-  const { ids } = await getTeacherGroupClassStudentScope(teacherSub);
+  const { ids } = await getTeacherPanelStudentScope(teacherSub, null);
   if (!ids.length) return new Set();
   const { data, error } = await supabaseAdmin.from('students').select('email').in('id', ids);
   if (error) throw error;

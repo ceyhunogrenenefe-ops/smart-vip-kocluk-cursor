@@ -1,10 +1,10 @@
 # WhatsApp Gateway — Teknik Servis Kurulum / Güncelleme
 
-**Sürüm:** 2026-06-01 (bağlantı stabilitesi güncellemesi)
+**Sürüm:** 2026-07-06 (`sendReady` durum alanı, mesaj gönderim hazırlığı)
 
 ## Bu paket ne içerir?
 
-- Güncel `src/server.js` (otomatik yeniden bağlanma, watchdog, uzun reconnect timeout)
+- Güncel `src/server.js` (otomatik yeniden bağlanma, `sendReady` API alanı, strict oturum gönderimi)
 - PM2 yapılandırması (`ecosystem.config.cjs`)
 - Bağımlılık listesi (`package.json`, `package-lock.json`)
 

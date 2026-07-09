@@ -47,12 +47,26 @@ export type EduHomeworkSubmission = {
   id: string;
   homework_id: string;
   student_user_id: string;
-  storage_path: string;
+  student_id?: string | null;
+  storage_path?: string | null;
+  photo_paths?: string[];
+  video_path?: string | null;
+  photo_urls?: string[];
+  video_url?: string | null;
+  has_media?: boolean;
+  student_name?: string;
   submitted_at: string;
   teacher_note?: string | null;
   grade?: string | null;
   status: SubmissionStatus;
 };
+
+export type EduHomeworkSubmitPayload = {
+  photos?: File[];
+  video?: File | null;
+};
+
+export type HomeworkAssigneeMode = 'class' | 'students';
 
 export type EduHomework = {
   id: string;
@@ -64,7 +78,19 @@ export type EduHomework = {
   due_date?: string | null;
   status: HomeworkStatus;
   pool_animation_id?: string | null;
+  /** Çoklu animasyon havuzu id’leri */
+  pool_animation_ids?: string[];
+  assignee_mode?: HomeworkAssigneeMode;
+  assignee_student_ids?: string[];
   submissions?: EduHomeworkSubmission[];
+  /** Kart istatistikleri (sunucu veya istemci) */
+  stats?: {
+    submitted: number;
+    pending: number;
+    late: number;
+    total: number;
+    rate: number;
+  };
 };
 
 export type EduLessonRow = {

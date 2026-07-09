@@ -38,14 +38,34 @@ export default async function handler(req, res) {
   let coachId = await resolveCoachIdForActor(actor, roles);
   const queryCoach = String(req.query?.coach_id || '').trim();
   if (isAdmin && queryCoach) coachId = queryCoach;
-  if (!coachId) {
-    return res.status(400).json({ error: 'coach_id_not_found' });
-  }
+  const gatewayUserId = String(actor.sub || '').trim();
 
   if (req.method === 'GET') {
     try {
+      if (!coachId && isAdmin) {
+        const gateway = await getCoachGatewayHealth(null, gatewayUserId);
+        return res.status(200).json({
+          coach_id: null,
+          gateway_user_id: gatewayUserId,
+          prefs: {
+            daily_report_enabled: false,
+            daily_report_scope: 'none',
+            updated_at: null
+          },
+          gateway,
+          recent_logs: [],
+          hint:
+            'Yönetici hesabı — günlük rapor tercihi koç kaydı gerektirir. Kişisel gateway QR bu kullanıcı id ile bağlanır.'
+        });
+      }
+      if (!coachId) {
+        return res.status(400).json({
+          error: 'coach_id_not_found',
+          hint: 'Koç profili bulunamadı. Yönetici iseniz gateway yine de QR ile bağlanabilir.'
+        });
+      }
       const prefs = await getCoachNotificationPrefs(coachId);
-      const gateway = await getCoachGatewayHealth(coachId, actor.sub);
+      const gateway = await getCoachGatewayHealth(coachId, gatewayUserId);
       let recentLogs = [];
       const { data: coachStudents } = await supabaseAdmin
         .from('students')
@@ -77,6 +97,12 @@ export default async function handler(req, res) {
   if (req.method === 'PATCH') {
     if (!isCoach && !isAdmin) {
       return res.status(403).json({ error: 'forbidden' });
+    }
+    if (!coachId) {
+      return res.status(400).json({
+        error: 'coach_id_not_found',
+        hint: 'Günlük rapor tercihi yalnızca koç hesapları için kaydedilir.'
+      });
     }
     try {
       const body = req.body && typeof req.body === 'object' ? req.body : {};

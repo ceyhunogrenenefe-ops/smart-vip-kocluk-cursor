@@ -39,6 +39,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/academic-center/bbb-join': ['super_admin', 'admin', 'coach', 'student', 'teacher'],
   '/super-admin': ['super_admin', 'admin'],
   '/user-management': ['super_admin', 'admin'],
+  '/private-lesson-assignments': ['super_admin', 'admin'],
   '/subscription': ['super_admin', 'admin'],
   '/system-management': ['super_admin', 'admin'],
   '/student-dashboard': ['student'],

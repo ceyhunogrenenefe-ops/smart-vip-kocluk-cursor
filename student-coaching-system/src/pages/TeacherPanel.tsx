@@ -64,8 +64,8 @@ export default function TeacherPanel() {
       <div className="bg-gradient-to-r from-violet-600 to-indigo-600 rounded-xl p-6 text-white">
         <h1 className="text-2xl font-bold">Öğretmen Paneli</h1>
         <p className="text-violet-100 text-sm mt-1">
-          Yalnızca atandığınız grup sınıflarındaki öğrencileri görüntüleyin, canlı özel ders oluşturun ve dersi
-          tamamlandı olarak işaretleyin.
+          Atandığınız grup sınıflarındaki ve özel ders öğrencilerinizi görüntüleyin; canlı özel ders oluşturun ve
+          dersi tamamlandı olarak işaretleyin.
         </p>
       </div>
 
@@ -122,13 +122,13 @@ export default function TeacherPanel() {
       </div>
 
       <div className="bg-white border border-slate-100 rounded-xl p-4">
-        <h2 className="font-semibold text-slate-800 mb-3">Atandığınız sınıflardaki öğrenciler</h2>
+        <h2 className="font-semibold text-slate-800 mb-3">Öğrencilerim</h2>
         {loading ? (
           <p className="text-sm text-slate-500">Yükleniyor…</p>
         ) : myStudents.length === 0 ? (
           <p className="text-sm text-slate-500">
-            Henüz bir grup sınıfına atanmadınız. Yöneticiniz sizi «Canlı Grup Dersi» sınıfına öğretmen olarak
-            eklemelidir.
+            Henüz size atanmış öğrenci yok. Yöneticiniz sizi bir grup sınıfına öğretmen olarak ekleyebilir veya
+            özel ders öğrencisi olarak atayabilir.
           </p>
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">

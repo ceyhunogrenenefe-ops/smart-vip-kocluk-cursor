@@ -137,11 +137,15 @@ class DatabaseService {
         payload && typeof payload === 'object' && 'hint' in payload
           ? String((payload as { hint?: string }).hint || '')
           : '';
+      const msg =
+        payload && typeof payload === 'object' && 'message' in payload
+          ? String((payload as { message?: string }).message || '')
+          : '';
       const err =
         payload && typeof payload === 'object' && 'error' in payload
           ? String((payload as { error?: string }).error || '')
           : '';
-      throw new Error(hint || err || `API error (${res.status})`);
+      throw new Error(hint || msg || err || `API error (${res.status})`);
     }
     return this.unwrapData<T>(payload) as T;
   }

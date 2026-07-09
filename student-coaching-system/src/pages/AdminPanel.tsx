@@ -44,6 +44,7 @@ import {
   type ExamEntryKey,
   type StudyEntryKey
 } from '../lib/academicCenterLinks';
+import { copyAcademicStudyGuestJoinShareText } from '../lib/bbbGuestJoin';
 
 interface MetaWhatsAppServerStatus {
   configured: boolean;
@@ -103,6 +104,7 @@ export default function AdminPanel() {
   const [academicLinksInstitutionId, setAcademicLinksInstitutionId] = useState<string>('');
   const [academicLinksMsg, setAcademicLinksMsg] = useState<string | null>(null);
   const [academicLinksBusy, setAcademicLinksBusy] = useState(false);
+  const [studyGuestLinkBusy, setStudyGuestLinkBusy] = useState<StudyEntryKey | null>(null);
   const academicLinksLoadSeq = useRef(0);
 
   const effectiveAcademicLinksInstitutionId = useMemo(() => {
@@ -174,55 +176,56 @@ export default function AdminPanel() {
     }
   }, [user?.role, user?.institutionId]);
 
-  useEffect(() => {
+  const refreshGlobalCounts = useCallback(async () => {
     if (!getAuthToken()) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const [uRes, cRes] = await Promise.all([
-          apiFetch('/api/users'),
-          apiFetch('/api/class-live-lessons?scope=classes')
-        ]);
-        const [uJson, cJson] = await Promise.all([uRes.json().catch(() => ({})), cRes.json().catch(() => ({}))]);
-        const users = Array.isArray(uJson.data) ? uJson.data : [];
-        const classes = Array.isArray(cJson.data) ? cJson.data : [];
-        const roleCounts = countApiUsersByRole(users);
-        const next = {
-          students: roleCounts.students,
-          teachers: roleCounts.teachers,
-          coaches: roleCounts.coaches,
-          classes: classes.length
-        };
-        if (!cancelled) setGlobalCounts(next);
-      } catch {
-        if (!cancelled) {
-          setGlobalCounts({ students: 0, teachers: 0, coaches: 0, classes: 0 });
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const [uRes, cRes] = await Promise.all([
+        apiFetch('/api/users'),
+        apiFetch('/api/class-live-lessons?scope=classes')
+      ]);
+      const [uJson, cJson] = await Promise.all([uRes.json().catch(() => ({})), cRes.json().catch(() => ({}))]);
+      const users = Array.isArray(uJson.data) ? uJson.data : [];
+      const classes = Array.isArray(cJson.data) ? cJson.data : [];
+      const roleCounts = countApiUsersByRole(users);
+      setGlobalCounts({
+        students: roleCounts.students,
+        teachers: roleCounts.teachers,
+        coaches: roleCounts.coaches,
+        classes: classes.length
+      });
+    } catch {
+      setGlobalCounts({ students: 0, teachers: 0, coaches: 0, classes: 0 });
+    }
   }, []);
 
-  useEffect(() => {
+  const refreshLiveCountsByInst = useCallback(async () => {
     if (!getAuthToken() || user?.role !== 'super_admin') return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const uRes = await apiFetch('/api/users');
-        const uJson = await uRes.json().catch(() => ({}));
-        const users = Array.isArray(uJson.data) ? uJson.data : [];
-        const m = buildLiveCountsByInstitution(users);
-        if (!cancelled) setLiveCountsByInst(m);
-      } catch {
-        if (!cancelled) setLiveCountsByInst({});
-      }
-    })();
-    return () => {
-      cancelled = true;
+    try {
+      const uRes = await apiFetch('/api/users');
+      const uJson = await uRes.json().catch(() => ({}));
+      const users = Array.isArray(uJson.data) ? uJson.data : [];
+      setLiveCountsByInst(buildLiveCountsByInstitution(users));
+    } catch {
+      setLiveCountsByInst({});
+    }
+  }, [user?.role]);
+
+  useEffect(() => {
+    void refreshGlobalCounts();
+  }, [refreshGlobalCounts]);
+
+  useEffect(() => {
+    void refreshLiveCountsByInst();
+  }, [refreshLiveCountsByInst, organizations.length, institutions.length]);
+
+  useEffect(() => {
+    const onUsersChanged = () => {
+      void refreshGlobalCounts();
+      void refreshLiveCountsByInst();
     };
-  }, [user?.role, organizations.length, institutions.length]);
+    window.addEventListener('scs:users-changed', onUsersChanged);
+    return () => window.removeEventListener('scs:users-changed', onUsersChanged);
+  }, [refreshGlobalCounts, refreshLiveCountsByInst]);
 
   const sendWhatsAppTest = async () => {
     const p = waPhone.trim();
@@ -301,6 +304,24 @@ export default function AdminPanel() {
 
   const setStudyEntryMode = (key: StudyEntryKey, mode: 'url' | 'bbb') => {
     setStudyEntryLink(key, mode === 'bbb' ? BBB_AUTO_MEETING_LINK : '');
+  };
+
+  const copyStudyGuestLink = async (key: StudyEntryKey) => {
+    setStudyGuestLinkBusy(key);
+    setAcademicLinksMsg(null);
+    try {
+      const instId = effectiveAcademicLinksInstitutionId || undefined;
+      if (user?.role === 'super_admin' && !instId) {
+        setAcademicLinksMsg('Davet linki için önce kurum seçin.');
+        return;
+      }
+      await copyAcademicStudyGuestJoinShareText(key, instId);
+      setAcademicLinksMsg('Davet metni panoya kopyalandı (WhatsApp için kısa link + etüt bilgisi).');
+    } catch (e) {
+      setAcademicLinksMsg(e instanceof Error ? e.message : 'Davet linki alınamadı.');
+    } finally {
+      setStudyGuestLinkBusy(null);
+    }
   };
 
   const sendTemplateTest = async () => {
@@ -557,18 +578,31 @@ export default function AdminPanel() {
               {STUDY_ENTRY_DEFS.map(({ key, label }) => {
                 const href = academicLinks.studyClasses[key];
                 const bbbMode = isBbbAutoMeetingLink(href);
+                const guestBusy = studyGuestLinkBusy === key;
                 return (
                   <div key={key} className="rounded-lg border border-slate-100 bg-slate-50/80 p-2">
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
                       <span className="text-xs font-medium text-slate-700">{label}</span>
-                      <select
-                        value={bbbMode ? 'bbb' : 'url'}
-                        onChange={(e) => setStudyEntryMode(key, e.target.value as 'url' | 'bbb')}
-                        className="rounded border border-slate-200 px-2 py-1 text-xs"
-                      >
-                        <option value="url">Zoom / Meet / link</option>
-                        <option value="bbb">BBB otomatik</option>
-                      </select>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          title="WhatsApp için kısa davet linki ve etüt bilgisi panoya kopyalanır"
+                          disabled={guestBusy || academicLinksBusy}
+                          onClick={() => void copyStudyGuestLink(key)}
+                          className="rounded-lg border border-violet-300 bg-white px-2 py-1 text-[11px] font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+                        >
+                          {guestBusy ? <Loader2 className="inline h-3 w-3 animate-spin" /> : null}
+                          Davet linki
+                        </button>
+                        <select
+                          value={bbbMode ? 'bbb' : 'url'}
+                          onChange={(e) => setStudyEntryMode(key, e.target.value as 'url' | 'bbb')}
+                          className="rounded border border-slate-200 px-2 py-1 text-xs"
+                        >
+                          <option value="url">Zoom / Meet / link</option>
+                          <option value="bbb">BBB otomatik</option>
+                        </select>
+                      </div>
                     </div>
                     {!bbbMode ? (
                       <input

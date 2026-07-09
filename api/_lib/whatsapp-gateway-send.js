@@ -457,7 +457,9 @@ export async function sendGatewayTextMessage({
     gateway_upstream_timeout: 'VPS gateway zaman aşımı — pm2 restart whatsapp-gateway.',
     send_message_timeout: 'WhatsApp gönderimi zaman aşımına uğradı; tekrar denendi.',
     send_no_message_id:
-      'WhatsApp gateway mesaj kimliği dönmedi — QR oturumunu yenileyip tekrar deneyin.'
+      'WhatsApp gateway mesaj kimliği dönmedi — QR oturumunu yenileyip tekrar deneyin.',
+    send_not_acknowledged:
+      'WhatsApp sunucusu mesajı onaylamadı — oturum kopuk olabilir; QR ile yeniden bağlanın.'
   };
 
   const payload = { phone: e164.replace(/^\+/, ''), message: text };

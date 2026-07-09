@@ -1,5 +1,6 @@
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
+import { createAcademicStudyGuestJoinShareLink } from '../api/_lib/bbb-guest-join-core.js';
 import {
   ACADEMIC_EXAM_ROOM_LABELS,
   ACADEMIC_STUDY_ROOM_LABELS,
@@ -10,7 +11,9 @@ import {
   buildBbbAttendeeJoinUrl,
   isBbbConfigured,
   isBbbAutoMeetingLink,
-  resolveBbbMeetingDurationMinutes
+  resolveBbbMeetingDurationMinutes,
+  bbbStudentEtutReportLogoutUrl,
+  bbbTeacherPostLessonLogoutUrl
 } from '../api/_lib/bbb.js';
 
 const VALID_EXAM_ROOMS = new Set(['lise', 'yos', 'class34', 'class56', 'class78']);
@@ -37,6 +40,38 @@ function resolveKind(raw) {
   return k === 'study' ? 'study' : 'exam';
 }
 
+function resolveInstitutionScope(actor, requestedId) {
+  const role = String(actor.role || '').trim();
+  const req = String(requestedId || '').trim();
+  if (role === 'super_admin') return req;
+  const own = String(actor.institution_id || '').trim();
+  if (role === 'admin') return own || req;
+  return own || req;
+}
+
+async function handleAcademicStudyGuestJoinLink(req, res, actor) {
+  const role = String(actor.role || '').trim();
+  if (role === 'student') return res.status(403).json({ error: 'Yetkiniz yok' });
+
+  const room = String(req.query?.room || '').trim().toLowerCase();
+  if (!VALID_STUDY_ROOMS.has(room)) {
+    return res.status(400).json({ error: 'Geçersiz etüt sınıfı.' });
+  }
+
+  const institutionId = resolveInstitutionScope(
+    actor,
+    req.query?.institution_id || actor.institution_id || ''
+  );
+
+  try {
+    const link = await createAcademicStudyGuestJoinShareLink({ institutionId, room });
+    return res.status(200).json({ ok: true, ...link });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return res.status(400).json({ error: msg || 'guest_join_link_failed' });
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     res.setHeader('Allow', 'GET, POST');
@@ -50,6 +85,11 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Missing token' });
   }
   actor = await enrichStudentActor(actor);
+
+  const op = String(req.query?.op || req.body?.op || '').trim();
+  if (op === 'guest-join-link') {
+    return handleAcademicStudyGuestJoinLink(req, res, actor);
+  }
 
   const kind = resolveKind(req.query?.kind || req.body?.kind);
   const room = String(req.query?.room || req.body?.room || '').trim().toLowerCase();
@@ -106,7 +146,11 @@ export default async function handler(req, res) {
       moderatorName: 'Moderatör',
       durationMinutes,
       meetingKeyPrefix: prefix,
-      storedMeetingId: null
+      storedMeetingId: null,
+      logoutUrl:
+        kind === 'study'
+          ? bbbStudentEtutReportLogoutUrl()
+          : bbbTeacherPostLessonLogoutUrl()
     });
 
     const joinUrl = buildBbbAttendeeJoinUrl({

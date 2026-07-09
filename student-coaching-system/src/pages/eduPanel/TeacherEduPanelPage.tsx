@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { EDU_HOMEWORK_ANIMATIONS_LABEL } from '../../components/layout/sidebar/navModel';
 import { BookOpen, Clapperboard, GraduationCap, Layers, Loader2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
@@ -6,12 +7,16 @@ import EduAnimationPreviewModal from '../../components/eduPanel/EduAnimationPrev
 import EduAnimationPoolPickerModal from '../../components/eduPanel/EduAnimationPoolPickerModal';
 import EduAnimationPoolTab from '../../components/eduPanel/EduAnimationPoolTab';
 import TeacherEduTopicCard from '../../components/eduPanel/TeacherEduTopicCard';
+import EduPostLessonHomeworkModal, {
+  consumePostLessonHomeworkPrompt
+} from '../../components/eduPanel/EduPostLessonHomeworkModal';
 import { useEduAnimationPreview } from '../../components/eduPanel/useEduAnimationPreview';
 import { useAuth } from '../../context/AuthContext';
 import type { EduAnimationPoolItem, EduClass, EduLessonRow, LessonRowFormValues, SubjectColor } from '../../types/eduPanel.types';
 import { buildLevelGroups, filterRows, subjectsForLevel } from '../../lib/eduPanel/eduPanelUi';
 import {
   EMPTY_HOMEWORK_DRAFT,
+  draftPoolAnimationIds,
   homeworkTitleForApi,
   validateHomeworkDraft,
   type EduHomeworkDraft
@@ -71,6 +76,8 @@ export default function TeacherEduPanelPage() {
 
   const [hwDraft, setHwDraft] = useState<Record<string, EduHomeworkDraft>>({});
   const [bookSuggestions, setBookSuggestions] = useState<string[]>([]);
+  const [postLessonOpen, setPostLessonOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
   const preview = useEduAnimationPreview();
 
   const load = useCallback(async () => {
@@ -106,6 +113,29 @@ export default function TeacherEduPanelPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    const fromLogout = searchParams.get('post_lesson') === '1';
+    const fromFlag = consumePostLessonHomeworkPrompt();
+    if (fromLogout || fromFlag) {
+      setPostLessonOpen(true);
+      if (fromLogout) {
+        const next = new URLSearchParams(searchParams);
+        next.delete('post_lesson');
+        setSearchParams(next, { replace: true });
+      }
+    }
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (searchParams.get('create_homework') !== '1' || loading || !rows.length) return;
+    const first = rows[0];
+    setExpandedId(first.id);
+    toast.message('Bir konu seçip ödev formundan ödev oluşturabilirsiniz.');
+    const next = new URLSearchParams(searchParams);
+    next.delete('create_homework');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, loading, rows]);
 
   const levelGroups = useMemo(() => buildLevelGroups(classes, rows), [classes, rows]);
 
@@ -256,8 +286,13 @@ export default function TeacherEduPanelPage() {
         title: homeworkTitleForApi(draft),
         book_name: draft.book_name.trim() || undefined,
         question_range: draft.question_range.trim() || undefined,
+        description: draft.description?.trim() || undefined,
+        due_date: draft.due_date?.trim() || undefined,
         status: 'draft',
-        pool_animation_id: draft.pool_animation_id
+        pool_animation_ids: draftPoolAnimationIds(draft),
+        assignee_mode: draft.assignee_mode || 'class',
+        assignee_student_ids:
+          draft.assignee_mode === 'students' ? draft.assignee_student_ids || [] : []
       });
       await publishEduHomework(hw.id);
       toast.success(`Ödev eklendi: ${homeworkTitleForApi(draft)}`);
@@ -630,16 +665,24 @@ export default function TeacherEduPanelPage() {
         }
         onSelect={(item: EduAnimationPoolItem) => {
           if (!poolPickerRowId) return;
-          setHwDraft((h) => ({
-            ...h,
-            [poolPickerRowId]: {
-              ...(h[poolPickerRowId] || EMPTY_HOMEWORK_DRAFT),
-              pool_animation_id: item.id,
-              pool_animation_title: item.title
+          setHwDraft((h) => {
+            const prev = h[poolPickerRowId] || EMPTY_HOMEWORK_DRAFT;
+            const list = [...(prev.pool_animations || [])];
+            if (!list.some((x) => x.id === item.id)) {
+              list.push({ id: item.id, title: item.title });
             }
-          }));
+            return {
+              ...h,
+              [poolPickerRowId]: {
+                ...prev,
+                pool_animations: list,
+                pool_animation_id: list[0]?.id,
+                pool_animation_title: list[0]?.title
+              }
+            };
+          });
           setPoolPickerRowId(null);
-          toast.success(`「${item.title}」 ödeve eklenecek`);
+          toast.success(`「${item.title}」 ödeve eklendi`);
         }}
       />
 
@@ -649,6 +692,8 @@ export default function TeacherEduPanelPage() {
         loading={preview.loading}
         onClose={preview.close}
       />
+
+      <EduPostLessonHomeworkModal open={postLessonOpen} onClose={() => setPostLessonOpen(false)} />
     </div>
   );
 }

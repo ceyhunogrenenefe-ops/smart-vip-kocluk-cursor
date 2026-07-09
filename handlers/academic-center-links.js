@@ -118,14 +118,6 @@ export default async function handler(req, res) {
 
     const body = parseBody(req);
     const institutionId = resolveInstitutionScope(actor, body.institution_id);
-    const linksPayload = extractLinksPayload(body);
-    if (!linksPayload || typeof linksPayload !== 'object' || !Object.keys(linksPayload).length) {
-      return res.status(400).json({
-        error: 'invalid_body',
-        hint: 'links (studyClasses, exams, questionPools) JSON gövdesi gerekli.'
-      });
-    }
-    const patch = coerceAcademicLinks(linksPayload);
 
     try {
       let store;
@@ -135,6 +127,14 @@ export default async function handler(req, res) {
         store = normalizeAcademicLinksStore(null);
       }
 
+      const linksPayload = extractLinksPayload(body);
+      if (!linksPayload || typeof linksPayload !== 'object' || !Object.keys(linksPayload).length) {
+        return res.status(400).json({
+          error: 'invalid_body',
+          hint: 'links (studyClasses, exams, questionPools) JSON gövdesi gerekli.'
+        });
+      }
+      const patch = coerceAcademicLinks(linksPayload);
       const nextStore = institutionId
         ? upsertInstitutionLinks(store, institutionId, patch)
         : upsertDefaultLinks(store, patch);

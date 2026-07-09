@@ -11,6 +11,7 @@ import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShe
 import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
 import { lessonJoinUrl, needsBbbJoinFlow, shouldUsePanelBbbJoin, isExternalMeetingPlatform } from '../lib/liveLessonUtils';
 import { openBbbJoin } from '../lib/bbbJoin';
+import { markPostLessonHomeworkPrompt } from '../components/eduPanel/EduPostLessonHomeworkModal';
 import { useCoachLessonsMeetingsLock } from '../lib/coachLessonsLock';
 import { CoachLessonsLockBanner } from '../components/coach/CoachLessonsLockBanner';
 import { copyGuestJoinShareText } from '../lib/bbbGuestJoin';
@@ -166,6 +167,9 @@ export default function LiveLessons() {
         return;
       }
       try {
+        if (shouldUsePanelBbbJoin(lesson, url) || needsBbbJoinFlow(url)) {
+          markPostLessonHomeworkPrompt();
+        }
         if (shouldUsePanelBbbJoin(lesson, url)) {
           await openBbbJoin('teacher-lessons', lesson.id);
           return;

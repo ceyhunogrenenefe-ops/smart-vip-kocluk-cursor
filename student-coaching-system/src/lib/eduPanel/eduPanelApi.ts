@@ -214,6 +214,9 @@ export async function createEduHomework(
     due_date?: string;
     status?: HomeworkStatus;
     pool_animation_id?: string;
+    pool_animation_ids?: string[];
+    assignee_mode?: 'class' | 'students';
+    assignee_student_ids?: string[];
   }
 ): Promise<EduHomework> {
   const res = await apiFetch('/api/edu-panel?resource=homework', {
@@ -244,18 +247,105 @@ export async function fetchMyEduSubmission(
 
 export async function submitEduHomework(
   homeworkId: string,
-  file: File
+  payload?: { photos?: File[]; video?: File | null }
 ): Promise<void> {
-  const image_base64 = await fileToBase64(file);
+  const photos = (payload?.photos || []).filter((f) => f && f.type.startsWith('image/'));
+  const video = payload?.video && payload.video.type.startsWith('video/') ? payload.video : null;
+
+  const body: Record<string, unknown> = { homework_id: homeworkId };
+  if (photos.length === 1 && !video) {
+    body.image_base64 = await fileToBase64(photos[0]);
+    body.mime = photos[0].type || 'image/jpeg';
+  } else {
+    if (photos.length) {
+      body.photos_base64 = await Promise.all(
+        photos.map(async (file) => ({
+          data: await fileToBase64(file),
+          mime: file.type || 'image/jpeg'
+        }))
+      );
+    }
+    if (video) {
+      body.video_base64 = await fileToBase64(video);
+      body.video_mime = video.type || 'video/mp4';
+    }
+  }
+
   const res = await apiFetch('/api/edu-panel?resource=submit', {
     method: 'POST',
-    body: JSON.stringify({
-      homework_id: homeworkId,
-      image_base64,
-      mime: file.type || 'image/jpeg'
-    })
+    body: JSON.stringify(body)
   });
   await parseJson(res);
+}
+
+export async function fetchEduHomeworkSubmissions(
+  homeworkId: string
+): Promise<EduHomeworkSubmission[]> {
+  const res = await apiFetch(
+    `/api/edu-panel?resource=submissions&homework_id=${encodeURIComponent(homeworkId)}`
+  );
+  const j = await parseJson<{ data: EduHomeworkSubmission[] }>(res);
+  return j.data || [];
+}
+
+export type EduTeacherStudentOption = {
+  id: string;
+  name: string;
+  user_id?: string | null;
+  class_id?: string | null;
+};
+
+export async function fetchEduTeacherStudents(
+  lessonRowId?: string | null
+): Promise<EduTeacherStudentOption[]> {
+  const q = lessonRowId
+    ? `&lesson_row_id=${encodeURIComponent(lessonRowId)}`
+    : '';
+  const res = await apiFetch(`/api/edu-panel?resource=teacher-students${q}`);
+  const j = await parseJson<{ data: EduTeacherStudentOption[] }>(res);
+  return j.data || [];
+}
+
+export type EduHomeworkStatsPayload = {
+  submitted: number;
+  pending: number;
+  late: number;
+  total: number;
+  rate: number;
+  earliest?: { name: string; at: string } | null;
+  latest?: { name: string; at: string } | null;
+  missingNames: string[];
+  photoCount: number;
+  videoCount: number;
+  roster: { id: string; name: string; user_id?: string | null; status: 'submitted' | 'pending' | 'late' }[];
+};
+
+export async function fetchEduHomeworkStats(homeworkId: string): Promise<EduHomeworkStatsPayload> {
+  const res = await apiFetch(
+    `/api/edu-panel?resource=homework-stats&homework_id=${encodeURIComponent(homeworkId)}`
+  );
+  const j = await parseJson<{ data: EduHomeworkStatsPayload }>(res);
+  return j.data;
+}
+
+export async function patchEduHomeworkSubmission(
+  submissionId: string,
+  patch: {
+    teacher_note?: string;
+    grade?: string;
+    status?: EduHomeworkSubmission['status'];
+    delete_media?: boolean;
+  }
+): Promise<EduHomeworkSubmission> {
+  const res = await apiFetch(
+    `/api/edu-panel?resource=submissions&id=${encodeURIComponent(submissionId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(patch)
+    }
+  );
+  const j = await parseJson<{ data: EduHomeworkSubmission }>(res);
+  return j.data;
 }
 
 export async function fetchMyEduProgress(): Promise<EduLessonRowProgress[]> {

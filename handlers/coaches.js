@@ -1,7 +1,7 @@
 import { requireAuth, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
-import { getTeacherGroupClassStudentScope } from '../api/_lib/teacher-class-scope.js';
+import { getTeacherPanelStudentScope } from '../api/_lib/teacher-class-scope.js';
 import { applyStudentIdsToCoachFk, rebuildCoachStudentIdsFromFk } from '../api/_lib/sync-coach-students.js';
 import { enforceOrganizationCoachQuota, QuotaError, getInstitutionAdminUserId } from '../api/_lib/quota-enforce.js';
 import { normalizeUuidOrGenerate, isUuid } from '../api/_lib/uuid.js';
@@ -118,7 +118,7 @@ export default async function handler(req, res) {
 
       if (actor.role === 'teacher') {
         if (!actor.institution_id) return res.status(200).json({ data: [] });
-        const { ids: studentIds } = await getTeacherGroupClassStudentScope(actor.sub);
+        const { ids: studentIds } = await getTeacherPanelStudentScope(actor.sub, actor.institution_id || null);
         if (!studentIds.length) return res.status(200).json({ data: [] });
         const { data: studs, error: se } = await supabaseAdmin
           .from('students')

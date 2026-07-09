@@ -27,11 +27,17 @@ export function guestShortPageUrl(code) {
   return `${base}/d/${encodeURIComponent(c)}`;
 }
 
+/** DB CHECK yalnızca class/private — academic-study JWT içinde kalır. */
+function storageKindForGuestJoin(kind) {
+  return kind === 'private' ? 'private' : 'class';
+}
+
 /** @returns {{ code: string, url: string } | null} */
 export async function upsertGuestJoinShortCode({ kind, resourceId, token, expiresAtIso }) {
   const rid = String(resourceId || '').trim();
   const tok = String(token || '').trim();
   if (!rid || !tok) return null;
+  const storageKind = storageKindForGuestJoin(kind);
 
   const nowIso = new Date().toISOString();
 
@@ -39,7 +45,7 @@ export async function upsertGuestJoinShortCode({ kind, resourceId, token, expire
     const { data: existing, error: findErr } = await supabaseAdmin
       .from('guest_join_short_codes')
       .select('code,expires_at')
-      .eq('kind', kind)
+      .eq('kind', storageKind)
       .eq('resource_id', rid)
       .gt('expires_at', nowIso)
       .order('created_at', { ascending: false })
@@ -62,7 +68,7 @@ export async function upsertGuestJoinShortCode({ kind, resourceId, token, expire
     try {
       const { error } = await supabaseAdmin.from('guest_join_short_codes').insert({
         code,
-        kind: kind === 'private' ? 'private' : 'class',
+        kind: storageKind,
         resource_id: rid,
         guest_token: tok,
         expires_at: expiresAtIso

@@ -57,7 +57,16 @@ import {
 } from '../api/_lib/class-sessions-from-slots.js';
 import { handleBbbJoinGet, handleBbbRecordingGet, patchRowMeetingLinks, patchRowRecordingLink } from '../api/_lib/bbb-join-handler.js';
 import { createGuestJoinShareLink } from '../api/_lib/bbb-guest-join-core.js';
-import { buildBbbAttendeeJoinUrl, buildStaffBbbJoinUrl, parseBbbJoinCredentials, parseBbbMeetingIdFromJoinUrl, parseBbbPasswordFromJoinUrl } from '../api/_lib/bbb.js';
+import {
+  resolveConsecutiveClassBbbReuse,
+  syncConsecutivePeerMeetingLinks,
+  backfillScheduledConsecutiveBbbAlignment
+} from '../api/_lib/consecutive-class-bbb-reuse.js';
+import {
+  resolveClassSessionBbbReuse,
+  backfillCombinedClassBbbAlignment
+} from '../api/_lib/combined-class-bbb-reuse.js';
+import { buildBbbAttendeeJoinUrl, buildStaffBbbJoinUrl, parseBbbJoinCredentials, parseBbbMeetingIdFromJoinUrl, parseBbbPasswordFromJoinUrl, resolveLiveBbbAttendeeCredentials } from '../api/_lib/bbb.js';
 import { pollBbbPresenceForSession, applyAutoAttendanceForClassSession } from '../api/_lib/bbb-attendance.js';
 import { isBbbAutoAttendanceEnabled } from '../api/_lib/bbb-auto-attendance-enabled.js';
 import { applyEarlyBbbAbsentCheck } from '../api/_lib/bbb-early-absent.js';
@@ -583,16 +592,26 @@ async function resolveStudentBbbJoinUrl(actor, row, ensured) {
   const fullName = String(student?.name || '').trim();
   if (!fullName) return null;
 
-  const attendeeLink = String(ensured.attendeeLink || row.meeting_link || '').trim();
-  const meetingId =
-    String(row.bbb_meeting_id || ensured.meetingId || '').trim() ||
-    parseBbbMeetingIdFromJoinUrl(attendeeLink) ||
-    '';
-  const attendeePw =
-    String(row.bbb_attendee_pw || ensured.attendeePW || '').trim() ||
-    parseBbbJoinCredentials(attendeeLink)?.attendeePassword ||
-    '';
+  const { meetingId, attendeePw } = await resolveLiveBbbAttendeeCredentials({ ensured, row });
   if (!meetingId || !attendeePw) return null;
+
+  const stalePw = String(row.bbb_attendee_pw || '').trim();
+  const staleMid = String(row.bbb_meeting_id || '').trim();
+  if (row.id && attendeePw && (stalePw !== attendeePw || (meetingId && staleMid && staleMid !== meetingId))) {
+    try {
+      await patchRowMeetingLinks('class_sessions', String(row.id), {
+        meeting_link: String(ensured.attendeeLink || row.meeting_link || 'bbb:auto'),
+        ...(ensured.moderatorLink ? { meeting_link_moderator: ensured.moderatorLink } : {}),
+        bbb_meeting_id: meetingId,
+        bbb_attendee_pw: attendeePw
+      });
+      row.bbb_attendee_pw = attendeePw;
+      row.bbb_meeting_id = meetingId;
+    } catch {
+      /* join akışını kesme */
+    }
+  }
+
   return buildBbbAttendeeJoinUrl({ meetingId, attendeePassword: attendeePw, fullName });
 }
 
@@ -608,7 +627,7 @@ async function resolveStaffBbbJoinUrl(actor, row, ensured) {
     parseBbbPasswordFromJoinUrl(String(ensured.moderatorLink || row.meeting_link_moderator || '')) ||
     '';
   const attendeePw =
-    String(row.bbb_attendee_pw || ensured.attendeePW || '').trim() ||
+    String(ensured.attendeePW || row.bbb_attendee_pw || '').trim() ||
     parseBbbJoinCredentials(String(ensured.attendeeLink || row.meeting_link || ''))?.attendeePassword ||
     '';
   return buildStaffBbbJoinUrl({
@@ -646,13 +665,35 @@ async function handleClassLiveBbbJoin(req, res, actor, role) {
         const mins = (eh * 60 + em) - (sh * 60 + sm);
         if (mins > 0) durationMinutes = resolveBbbMeetingDurationMinutes(mins);
       }
-      return {
+      const base = {
         meetingName: `${subject} — ${className || 'Grup dersi'}`,
         attendeeName: 'Öğrenci',
         moderatorName: await teacherDisplayName(String(row.teacher_id || '')),
         durationMinutes,
         meetingKeyPrefix: `cljoin${String(row.id || '').replace(/-/g, '')}`
       };
+      if (slotMode) return base;
+      try {
+        const consecutive = await resolveConsecutiveClassBbbReuse(row);
+        const reuse = await resolveClassSessionBbbReuse(row, consecutive);
+        if (!reuse) return base;
+        row.__bbbSyncPeers = reuse.peers;
+        if (reuse.chainDurationMinutes != null) {
+          base.durationMinutes = reuse.chainDurationMinutes;
+        }
+        if (reuse.meetingKeyPrefix) base.meetingKeyPrefix = reuse.meetingKeyPrefix;
+        if (reuse.seededFromPeer) {
+          if (reuse.seedAttendeeLink) base.attendeeLinkOverride = reuse.seedAttendeeLink;
+          if (reuse.seedModeratorLink != null) base.moderatorLinkOverride = reuse.seedModeratorLink;
+          if (reuse.storedMeetingId) base.storedMeetingId = reuse.storedMeetingId;
+          if (reuse.seedAttendeePw && !String(row.bbb_attendee_pw || '').trim()) {
+            row.bbb_attendee_pw = reuse.seedAttendeePw;
+          }
+        }
+      } catch {
+        /* fallback: mevcut tek-oturum davranışı */
+      }
+      return base;
     },
     patchLinks: (id, links) =>
       patchRowMeetingLinks(table, id, {
@@ -661,6 +702,18 @@ async function handleClassLiveBbbJoin(req, res, actor, role) {
         bbb_meeting_id: links.bbb_meeting_id,
         bbb_attendee_pw: links.bbb_attendee_pw
       }),
+    afterEnsure: slotMode
+      ? undefined
+      : async (row, ensured, linksPatch) => {
+          const peers = row.__bbbSyncPeers;
+          if (!peers?.length || !ensured?.attendeeLink) return;
+          await syncConsecutivePeerMeetingLinks(peers, String(row.id || ''), {
+            meeting_link: linksPatch.meeting_link || ensured.attendeeLink,
+            meeting_link_moderator: linksPatch.meeting_link_moderator || ensured.moderatorLink || undefined,
+            bbb_meeting_id: linksPatch.bbb_meeting_id || ensured.meetingId || undefined,
+            bbb_attendee_pw: linksPatch.bbb_attendee_pw || ensured.attendeePW || undefined
+          });
+        },
     resolveStudentJoinUrl: slotMode ? undefined : (act, row, ensured) => resolveStudentBbbJoinUrl(act, row, ensured),
     resolveStaffJoinUrl: async (act, row, ensured) => resolveStaffBbbJoinUrl(act, row, ensured)
   });
@@ -694,10 +747,17 @@ async function handleClassLiveBbbRecording(req, res, actor, role) {
     },
     canAccess: (act, row) => canAccessClassLiveRow(act, role, row),
     patchRecordingLink: slotMode ? undefined : (id, playbackUrl) => patchRowRecordingLink(table, id, playbackUrl),
-    getMeetingKeyPrefix: (row) =>
-      slotMode
-        ? `clslot${String(row.id || '').replace(/-/g, '')}`
-        : `cljoin${String(row.id || '').replace(/-/g, '')}`
+    getMeetingKeyPrefix: async (row) => {
+      if (slotMode) return `clslot${String(row.id || '').replace(/-/g, '')}`;
+      try {
+        const consecutive = await resolveConsecutiveClassBbbReuse(row);
+        const reuse = await resolveClassSessionBbbReuse(row, consecutive);
+        if (reuse?.meetingKeyPrefix) return reuse.meetingKeyPrefix;
+      } catch {
+        /* ignore */
+      }
+      return `cljoin${String(row.id || '').replace(/-/g, '')}`;
+    }
   });
 }
 
@@ -824,6 +884,14 @@ export default async function handler(req, res) {
             if (instId) await backfillClassSessionInstitutionId(classId, instId);
             await backfillClassWeeklySlotMeetingLinks(classId);
             await ensureClassSessionsForClassInRange(classId, from, to);
+            if (String(req.query.materialize || '') === '1') {
+              await backfillClassSessionMeetingLinksInRange(classId, from, to);
+              await backfillScheduledConsecutiveBbbAlignment(classId, from, to, { skipLiveCheck: true });
+              const teacherIds = details.teacher_ids || [];
+              await backfillCombinedClassBbbAlignment(classId, from, to, teacherIds, {
+                skipLiveCheck: true
+              });
+            }
           } catch (e) {
             console.warn('[class-live-lessons] ensure sessions on read', e instanceof Error ? e.message : e);
           }
@@ -1275,10 +1343,23 @@ export default async function handler(req, res) {
       await backfillClassWeeklySlotMeetingLinks(classId);
       const sessionResult = await ensureClassSessionsForClassInRange(classId, from, to);
       const linkBackfill = await backfillClassSessionMeetingLinksInRange(classId, from, to);
+      const consecutiveAlign = await backfillScheduledConsecutiveBbbAlignment(classId, from, to);
+      const combinedAlign = await backfillCombinedClassBbbAlignment(
+        classId,
+        from,
+        to,
+        details.teacher_ids || []
+      );
       return res.status(200).json({
         ok: true,
         ...sessionResult,
-        sessions_link_backfilled: linkBackfill.updated || 0
+        sessions_link_backfilled: linkBackfill.updated || 0,
+        consecutive_bbb_chains: consecutiveAlign.chains || 0,
+        consecutive_bbb_aligned: consecutiveAlign.reset || 0,
+        consecutive_bbb_skipped_live: consecutiveAlign.skipped_live || 0,
+        combined_bbb_groups: combinedAlign.groups || 0,
+        combined_bbb_aligned: combinedAlign.aligned || 0,
+        combined_bbb_skipped_live: combinedAlign.skipped_live || 0
       });
     }
 

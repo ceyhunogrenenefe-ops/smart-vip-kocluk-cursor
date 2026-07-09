@@ -71,20 +71,22 @@ export default function StudentEduPanelPage() {
     return { completed, totalPts, avgPts, topBadge, topicCount: rows.length };
   }, [progressList, rows.length]);
 
-  const onSubmitPhoto = async (hw: EduHomework, file: File | null) => {
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      toast.error('Lütfen bir fotoğraf seçin');
-      return;
-    }
+  const onSubmitHomework = async (
+    hw: EduHomework,
+    payload: { photos: File[]; video: File | null }
+  ) => {
     setBusyHw(hw.id);
     try {
-      await submitEduHomework(hw.id, file);
+      await submitEduHomework(hw.id, {
+        photos: payload.photos,
+        video: payload.video
+      });
       toast.success('Ödev teslim edildi');
       const sub = await fetchMyEduSubmission(hw.id);
       setSubmissions((s) => ({ ...s, [hw.id]: sub }));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Teslim edilemedi');
+      throw e;
     } finally {
       setBusyHw(null);
     }
@@ -171,7 +173,12 @@ export default function StudentEduPanelPage() {
                       toast.error(e instanceof Error ? e.message : 'Animasyon açılamadı')
                     )
                   }
-                  onSubmitHomework={(hw, file) => void onSubmitPhoto(hw, file)}
+                  onOpenPoolAnimation={(id) =>
+                    void preview.openPool(id).catch((e) =>
+                      toast.error(e instanceof Error ? e.message : 'Animasyon açılamadı')
+                    )
+                  }
+                  onSubmitHomework={(hw, payload) => onSubmitHomework(hw, payload)}
                   onSaveProgress={(p) => onSaveProgress(row.id, p)}
                 />
               ))}

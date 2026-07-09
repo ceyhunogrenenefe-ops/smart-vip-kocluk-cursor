@@ -3,6 +3,7 @@ import React, { useMemo, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
+import { userRoleTags } from '../config/rolePermissions';
 import { formatClassLevelLabel } from '../types';
 import { db } from '../lib/database';
 import { getAuthToken } from '../lib/session';
@@ -58,12 +59,11 @@ export default function CoachDashboard() {
     scoresDataReady,
   } = useApp();
 
-  // Koçun kayıtlı öğrencileri
-  const myStudents = useMemo(() => {
-    if (effectiveUser?.role !== 'coach') return [];
-    // AppContext coach rolünde zaten öğrencileri scope ediyor; burada doğrudan listeyi kullan.
-    return students;
-  }, [effectiveUser, students]);
+  const coachTags = useMemo(() => userRoleTags(effectiveUser), [effectiveUser]);
+  const isCoachUser = coachTags.includes('coach');
+
+  // AppContext koç etiketi olan kullanıcılar için öğrencileri zaten scope ediyor
+  const myStudents = students;
 
   // Koçun öğrenci ID'leri
   const myStudentIds = useMemo(() => myStudents.map(s => s.id), [myStudents]);
@@ -207,7 +207,7 @@ export default function CoachDashboard() {
   }, [myStudents, getStudentStats]);
 
   useEffect(() => {
-    if (effectiveUser?.role !== 'coach' || !getAuthToken()) return;
+    if (!isCoachUser || !getAuthToken()) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -229,7 +229,7 @@ export default function CoachDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [effectiveUser?.role, effectiveUser?.institutionId]);
+  }, [isCoachUser, effectiveUser?.institutionId]);
 
   if (!user) return null;
 

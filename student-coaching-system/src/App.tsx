@@ -36,6 +36,7 @@ import BookTracking from './pages/BookTracking';
 import WrittenExamTracking from './components/WrittenExamTracking';
 import Marketing from './pages/Marketing';
 import UserManagement from './pages/UserManagement';
+import PrivateLessonAssignments from './pages/PrivateLessonAssignments';
 import Subscription from './pages/Subscription';
 import SystemManagement from './pages/SystemManagement';
 import SupabaseConfigBanner from './components/SupabaseConfigBanner';
@@ -329,6 +330,14 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/user-management')}>
                 <Layout>
                   <UserManagement />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/private-lesson-assignments" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/private-lesson-assignments')}>
+                <Layout>
+                  <PrivateLessonAssignments />
                 </Layout>
               </ProtectedRoute>
             } />

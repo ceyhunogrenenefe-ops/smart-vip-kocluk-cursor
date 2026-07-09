@@ -43,6 +43,39 @@ function actorCanManage(actor, row) {
   return hasInstitutionAccess(actor, pendingInst);
 }
 
+/** Önceki onay denemesi yarım kaldıysa veya ret sonrası yetim kaldıysa aynı kişiyi yeniden kullan. */
+async function canReuseUserForPending(existingUser, pending) {
+  if (!existingUser?.id) return false;
+
+  const pendingTc = String(pending.tc_identity_no || '').trim();
+  const userTc = String(existingUser.tc_identity_no || '').trim();
+  if (pendingTc && userTc && pendingTc !== userTc) return false;
+
+  const { data: approvedOther } = await supabaseAdmin
+    .from('pending_registrations')
+    .select('id')
+    .eq('approved_user_id', existingUser.id)
+    .eq('status', 'approved')
+    .neq('id', pending.id)
+    .limit(1)
+    .maybeSingle();
+  if (approvedOther?.id) return false;
+
+  if (existingUser.is_active === false) return true;
+  if (pendingTc && userTc && pendingTc === userTc) return true;
+
+  const { data: anyApproved } = await supabaseAdmin
+    .from('pending_registrations')
+    .select('id')
+    .eq('approved_user_id', existingUser.id)
+    .eq('status', 'approved')
+    .limit(1)
+    .maybeSingle();
+  if (!anyApproved?.id) return true;
+
+  return false;
+}
+
 async function provisionSupabaseAuthUser(userRow, passwordPlain) {
   if (!hasSupabaseServiceRoleKey()) return;
   const pwd = String(passwordPlain || '').trim();
@@ -156,11 +189,18 @@ export default async function handler(req, res) {
 
       const { data: existingByEmail } = await supabaseAdmin
         .from('users')
-        .select('id')
+        .select('*')
         .eq('email', email)
         .maybeSingle();
-      if (existingByEmail?.id) {
-        return res.status(409).json({ error: 'email_zaten_kullanimda' });
+      const reuseExistingUser = existingByEmail?.id
+        ? await canReuseUserForPending(existingByEmail, pending)
+        : false;
+      if (existingByEmail?.id && !reuseExistingUser) {
+        return res.status(409).json({
+          error: 'email_zaten_kullanimda',
+          message:
+            'Bu e-posta başka bir aktif hesapta kayıtlı. Kullanıcılar listesinden kontrol edin veya kayıt sahibinden farklı e-posta ile yeniden başvurmasını isteyin.'
+        });
       }
 
       const institutionId = resolveApprovedInstitutionId(actor, pending, body.institution_id);
@@ -188,11 +228,9 @@ export default async function handler(req, res) {
         }
       }
 
-      const userId = normalizeUuidOrGenerate(null);
       const fullName = `${String(pending.first_name || '').trim()} ${String(pending.last_name || '').trim()}`.trim();
       const now = new Date().toISOString();
-      const insertUserPayload = {
-        id: userId,
+      const userFields = {
         email,
         name: fullName || email,
         phone: pending.phone_e164 || null,
@@ -202,20 +240,42 @@ export default async function handler(req, res) {
         password_hash: passwordPlain,
         institution_id: institutionId,
         is_active: true,
-        package: 'trial',
-        start_date: now,
-        end_date: null,
-        created_by: actor.sub,
-        created_at: now,
         updated_at: now
       };
 
-      const { data: createdUser, error: uErr } = await supabaseAdmin
-        .from('users')
-        .insert(insertUserPayload)
-        .select('*')
-        .single();
-      if (uErr) throw uErr;
+      let createdUser;
+      if (reuseExistingUser && existingByEmail?.id) {
+        const { data, error: uErr } = await supabaseAdmin
+          .from('users')
+          .update({
+            ...userFields,
+            package: existingByEmail.package || 'trial',
+            start_date: existingByEmail.start_date || now,
+            end_date: existingByEmail.end_date ?? null
+          })
+          .eq('id', existingByEmail.id)
+          .select('*')
+          .single();
+        if (uErr) throw uErr;
+        createdUser = data;
+      } else {
+        const userId = normalizeUuidOrGenerate(null);
+        const { data, error: uErr } = await supabaseAdmin
+          .from('users')
+          .insert({
+            id: userId,
+            ...userFields,
+            package: 'trial',
+            start_date: now,
+            end_date: null,
+            created_by: actor.sub,
+            created_at: now
+          })
+          .select('*')
+          .single();
+        if (uErr) throw uErr;
+        createdUser = data;
+      }
 
       try {
         await provisionSupabaseAuthUser(createdUser, passwordPlain);
@@ -235,7 +295,7 @@ export default async function handler(req, res) {
           tc_identity_no: tcIdentityNo,
           parent_name: parentName,
           parent_phone: parentPhone,
-          institution_id: insertUserPayload.institution_id,
+          institution_id: institutionId,
           user_id: createdUser.id,
           platform_user_id: createdUser.id,
           updated_at: now

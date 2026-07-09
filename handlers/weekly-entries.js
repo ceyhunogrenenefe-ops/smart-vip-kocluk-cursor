@@ -1,6 +1,6 @@
 import { requireAuth, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
-import { getTeacherGroupClassStudentScope } from '../api/_lib/teacher-class-scope.js';
+import { getTeacherPanelStudentScope } from '../api/_lib/teacher-class-scope.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { syncWeeklyEntryPlannerRow } from '../api/_lib/sync-weekly-entry-planner.js';
 import { syncStudentScreenTimeLog } from '../api/_lib/sync-student-screen-time-log.js';
@@ -42,7 +42,7 @@ export default async function handler(req, res) {
       }
       if (actor.role === 'teacher') {
         if (!actor.institution_id) return res.status(200).json({ data: [] });
-        const { ids } = await getTeacherGroupClassStudentScope(actor.sub);
+        const { ids } = await getTeacherPanelStudentScope(actor.sub, actor.institution_id || null);
         if (!ids.length) return res.status(200).json({ data: [] });
         query = query.eq('institution_id', actor.institution_id).in('student_id', ids);
       }

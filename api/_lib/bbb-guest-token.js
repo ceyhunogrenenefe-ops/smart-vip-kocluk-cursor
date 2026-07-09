@@ -23,7 +23,12 @@ export function signBbbGuestJoinToken(payload) {
   const header = { alg: 'HS256', typ: 'BBB_GUEST' };
   const body = {
     purpose: 'bbb_guest_join',
-    kind: payload.kind === 'private' ? 'private' : 'class',
+    kind:
+      payload.kind === 'private'
+        ? 'private'
+        : payload.kind === 'academic-study'
+          ? 'academic-study'
+          : 'class',
     id: String(payload.id || '').trim(),
     exp: Math.floor(Number(payload.exp) || 0)
   };
@@ -60,7 +65,12 @@ export function verifyBbbGuestJoinToken(token) {
   if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) {
     throw new Error('Davet bağlantısının süresi dolmuş.');
   }
-  const kind = payload.kind === 'private' ? 'private' : 'class';
+  const kind =
+    payload.kind === 'private'
+      ? 'private'
+      : payload.kind === 'academic-study'
+        ? 'academic-study'
+        : 'class';
   const id = String(payload.id || '').trim();
   if (!id) throw new Error('Geçersiz davet bağlantısı.');
   return { kind, id, exp: payload.exp };

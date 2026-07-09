@@ -88,6 +88,45 @@ function normalizePhoneField(raw) {
   return { local, e164: e164 || local };
 }
 
+function coachRowErrText(error) {
+  if (!error) return '';
+  if (typeof error.message === 'string') return error.message;
+  if (typeof error.details === 'string') return error.details;
+  return '';
+}
+
+function isMissingCoachesColumn(error, column) {
+  const t = coachRowErrText(error);
+  return (t.includes(`'${column}'`) && t.includes('schema cache')) || t.includes(`column coaches.${column}`);
+}
+
+/** Eski/yeni prod şemalarında eksik coaches sütunlarını atlayarak insert. */
+async function insertCoachProfileRow(payload) {
+  let p = { ...payload };
+  const dropIfMissing = [
+    'managed_by_admin_id',
+    'student_ids',
+    'subjects',
+    'specialties',
+    'lessons_meetings_locked'
+  ];
+  for (let step = 0; step < dropIfMissing.length + 3; step++) {
+    const { error } = await supabaseAdmin.from('coaches').insert(p);
+    if (!error) return;
+    const col = dropIfMissing.find(
+      (c) => isMissingCoachesColumn(error, c) && Object.prototype.hasOwnProperty.call(p, c)
+    );
+    if (col) {
+      const next = { ...p };
+      delete next[col];
+      p = next;
+      continue;
+    }
+    throw error;
+  }
+  throw new Error('coaches insert failed');
+}
+
 export async function upsertCoachProfile({ userId, fullName, email, phone, institutionId, now }) {
   const em = toLowerEmail(email);
   const { data: byEmail } = await supabaseAdmin.from('coaches').select('id').eq('email', em).maybeSingle();
@@ -105,14 +144,13 @@ export async function upsertCoachProfile({ userId, fullName, email, phone, insti
     if (error) throw error;
     return;
   }
-  const { error } = await supabaseAdmin.from('coaches').insert({
+  await insertCoachProfileRow({
     id: userId,
     ...patch,
-    subjects: [],
+    specialties: [],
     student_ids: [],
     created_at: now
   });
-  if (error) throw error;
 }
 
 async function upsertStudentProfile({

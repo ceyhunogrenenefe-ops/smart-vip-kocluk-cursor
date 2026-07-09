@@ -35,6 +35,18 @@ export async function teacherIdsForStudent({ studentId, classIds: classIdsIn }) 
   } catch {
     /* kota tablosu yoksa yoksay */
   }
+  try {
+    const { data: assigns } = await supabaseAdmin
+      .from('teacher_private_lesson_assignments')
+      .select('teacher_id')
+      .eq('student_id', studentId)
+      .eq('active', true);
+    for (const r of assigns || []) {
+      if (r.teacher_id) teachers.add(String(r.teacher_id));
+    }
+  } catch {
+    /* atama tablosu yoksa yoksay */
+  }
   return [...teachers];
 }
 
@@ -64,6 +76,20 @@ export async function studentIdsForTeacher(teacherUserId, institutionId = null) 
     if (institutionId) q = q.eq('institution_id', institutionId);
     const { data: quota } = await q;
     for (const r of quota || []) {
+      if (r.student_id) students.add(String(r.student_id));
+    }
+  } catch {
+    /* yoksay */
+  }
+  try {
+    let aq = supabaseAdmin
+      .from('teacher_private_lesson_assignments')
+      .select('student_id')
+      .eq('teacher_id', teacherUserId)
+      .eq('active', true);
+    if (institutionId) aq = aq.eq('institution_id', institutionId);
+    const { data: assigns } = await aq;
+    for (const r of assigns || []) {
       if (r.student_id) students.add(String(r.student_id));
     }
   } catch {

@@ -16,9 +16,10 @@ import {
 import { toast } from 'sonner';
 import { useApp } from '../../context/AppContext';
 import { displayInstitutionName } from '../../lib/appBrand';
-import type { EduClass, EduLessonRow, LessonRowFormValues } from '../../types/eduPanel.types';
+import type { EduClass, EduHomework, EduLessonRow, LessonRowFormValues } from '../../types/eduPanel.types';
 import TeacherEduStudentProgress from './TeacherEduStudentProgress';
 import TeacherEduTopicEditModal from './TeacherEduTopicEditModal';
+import EduHomeworkSubmissionsModal from './EduHomeworkSubmissionsModal';
 import { formatEduDateRange, formatLessonDate, STATUS_LABEL, SUBJECT_DOT } from '../../lib/eduPanel/eduPanelUi';
 import {
   buildEduTopicWhatsAppShareText,
@@ -29,6 +30,9 @@ import {
   formatEduHomeworkLabel,
   type EduHomeworkDraft
 } from '../../lib/eduPanel/eduHomeworkForm';
+import EduHomeworkAssigneePicker from './EduHomeworkAssigneePicker';
+import EduHomeworkStatusBar from './EduHomeworkStatusBar';
+import { homeworkPoolAnimationIds } from '../../lib/eduPanel/eduHomeworkStats';
 
 type Props = {
   row: EduLessonRow;
@@ -75,6 +79,7 @@ export default function TeacherEduTopicCard({
   const classLabel = classNames.length ? classNames.join(', ') : 'Sınıf';
   const dateRange = formatEduDateRange(row.available_from, row.available_until, row.lesson_date);
   const [editOpen, setEditOpen] = useState(false);
+  const [reviewHw, setReviewHw] = useState<EduHomework | null>(null);
 
   const onShareWhatsApp = async () => {
     const publishedHw = row.homework?.filter((h) => h.status === 'published') || [];
@@ -292,15 +297,51 @@ export default function TeacherEduTopicCard({
                           <p className="text-[11px] text-slate-500 mt-0.5">{h.title}</p>
                         ) : null}
                         <p className="text-[11px] text-slate-500 mt-0.5">
-                          {h.status === 'published' ? 'Yayında' : 'Taslak'} ·{' '}
-                          {h.submissions?.length || 0} teslim
+                          {h.status === 'published' ? 'Yayında' : 'Taslak'}
+                          {h.assignee_mode === 'students'
+                            ? ` · ${(h.assignee_student_ids || []).length} öğrenci`
+                            : ' · Sınıf'}
+                          {homeworkPoolAnimationIds(h).length
+                            ? ` · ${homeworkPoolAnimationIds(h).length} animasyon`
+                            : ''}
                         </p>
+                        {h.status === 'published' ? (
+                          <EduHomeworkStatusBar
+                            stats={
+                              h.stats || {
+                                submitted: h.submissions?.length || 0,
+                                pending: 0,
+                                late: 0,
+                                total: Math.max(h.submissions?.length || 0, 1),
+                                rate: 0
+                              }
+                            }
+                            compact
+                          />
+                        ) : null}
+                        {h.status === 'published' ? (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => setReviewHw(h)}
+                            className="mt-2 inline-flex items-center gap-1 rounded-md border border-amber-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-amber-900 hover:bg-amber-50"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                            Teslimleri incele
+                          </button>
+                        ) : null}
                       </div>
                     ))
                   )}
                 </div>
 
                 <div className="mt-3 space-y-2 rounded-lg border border-amber-100 bg-amber-50/20 p-3">
+                  <EduHomeworkAssigneePicker
+                    lessonRowId={row.id}
+                    draft={hwDraft}
+                    disabled={busy}
+                    onChange={(patch) => onHwDraftChange({ ...hwDraft, ...patch })}
+                  />
                   <label className="block text-sm">
                     <span className="text-xs font-medium text-amber-900">Kitap adı *</span>
                     <input
@@ -348,38 +389,55 @@ export default function TeacherEduTopicCard({
                       }
                     />
                   </label>
-                  {hwDraft.pool_animation_id ? (
-                    <div className="flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50/50 px-3 py-2 text-xs">
-                      <Clapperboard className="h-4 w-4 shrink-0 text-violet-600" />
-                      <span className="min-w-0 flex-1 truncate text-violet-900">
-                        {hwDraft.pool_animation_title || 'Seçili animasyon'}
-                      </span>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() =>
-                          onHwDraftChange({
-                            ...hwDraft,
-                            pool_animation_id: undefined,
-                            pool_animation_title: undefined
-                          })
-                        }
-                        className="rounded p-1 text-slate-500 hover:bg-white"
-                        title="Animasyonu kaldır"
+                  <label className="block text-sm">
+                    <span className="text-xs font-medium text-slate-600">Teslim tarihi (isteğe bağlı)</span>
+                    <input
+                      type="date"
+                      className="mt-1 w-full rounded-lg border border-amber-200 px-3 py-2 text-sm bg-white"
+                      value={hwDraft.due_date || ''}
+                      disabled={busy}
+                      onChange={(e) =>
+                        onHwDraftChange({ ...hwDraft, due_date: e.target.value })
+                      }
+                    />
+                  </label>
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-medium text-violet-900">Animasyon</p>
+                    {(hwDraft.pool_animations || []).map((a) => (
+                      <div
+                        key={a.id}
+                        className="flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50/50 px-3 py-2 text-xs"
                       >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  ) : null}
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={onOpenPoolPicker}
-                    className="flex w-full items-center justify-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-800 hover:bg-violet-100 disabled:opacity-50"
-                  >
-                    <Clapperboard className="h-4 w-4" />
-                    Animasyon Seç
-                  </button>
+                        <Clapperboard className="h-4 w-4 shrink-0 text-violet-600" />
+                        <span className="min-w-0 flex-1 truncate text-violet-900">{a.title}</span>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() =>
+                            onHwDraftChange({
+                              ...hwDraft,
+                              pool_animations: (hwDraft.pool_animations || []).filter(
+                                (x) => x.id !== a.id
+                              )
+                            })
+                          }
+                          className="rounded p-1 text-slate-500 hover:bg-white"
+                          title="Animasyonu kaldır"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={onOpenPoolPicker}
+                      className="flex w-full items-center justify-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-800 hover:bg-violet-100 disabled:opacity-50"
+                    >
+                      <Clapperboard className="h-4 w-4" />
+                      + Animasyon Ekle
+                    </button>
+                  </div>
                   <button
                     type="button"
                     disabled={
@@ -436,6 +494,12 @@ export default function TeacherEduTopicCard({
           </div>
         ) : null}
       </div>
+
+      <EduHomeworkSubmissionsModal
+        open={Boolean(reviewHw)}
+        homework={reviewHw}
+        onClose={() => setReviewHw(null)}
+      />
 
       <TeacherEduTopicEditModal
         open={editOpen}

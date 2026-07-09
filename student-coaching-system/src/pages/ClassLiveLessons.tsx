@@ -17,6 +17,7 @@ import { GripVertical, KeyRound, Loader2, Pencil, PlayCircle, Trash2, FileDown, 
 import BbbAutoLinkFieldHint from '../components/liveLessons/BbbAutoLinkFieldHint';
 import { isBbbJoinUrl, hasClassSessionRecordingAccess, isBbbPlaybackUrl, needsBbbJoinFlow, displayMeetingLinkForRow, meetingLinkForSave, shouldSkipClassLessonReminder, shouldUsePanelBbbJoin, isExternalMeetingPlatform, lessonJoinUrl } from '../lib/liveLessonUtils';
 import { openBbbJoin, openBbbRecording } from '../lib/bbbJoin';
+import { markPostLessonHomeworkPrompt } from '../components/eduPanel/EduPostLessonHomeworkModal';
 import ClassLiveClassManager from '../components/liveLessons/ClassLiveClassManager';
 import ClassLivePresenceModal from '../components/liveLessons/ClassLivePresenceModal';
 import {
@@ -378,6 +379,7 @@ export default function ClassLiveLessons() {
         : undefined;
     try {
       const kind = s.lesson_date ? 'session' : 'slot';
+      if (!isStudentView) markPostLessonHomeworkPrompt();
       if (shouldUsePanelBbbJoin(s, url)) {
         await openBbbJoin('class-live-lessons', s.id, { kind, etut: etutCtx });
         return;

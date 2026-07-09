@@ -4,7 +4,7 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { getIstanbulDateString, addCalendarDaysYmd } from '../api/_lib/istanbul-time.js';
 import { normalizePhoneToE164 } from '../api/_lib/phone-whatsapp.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
-import { getTeacherGroupClassStudentScope } from '../api/_lib/teacher-class-scope.js';
+import { getTeacherPanelStudentScope } from '../api/_lib/teacher-class-scope.js';
 import { getTemplateBindingKeys } from '../api/_lib/whatsapp-outbound.js';
 import {
   istanbulDayUtcRange,
@@ -251,7 +251,7 @@ export default async function handler(req, res) {
       (data || []).forEach((r) => idSet.add(r.id));
     }
     if (isTeacher && actor.sub) {
-      const { ids } = await getTeacherGroupClassStudentScope(actor.sub);
+      const { ids } = await getTeacherPanelStudentScope(actor.sub, actor.institution_id || null);
       (ids || []).forEach((id) => idSet.add(String(id)));
     }
     scopedStudentIds = [...idSet];

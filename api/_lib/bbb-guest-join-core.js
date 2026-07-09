@@ -6,13 +6,27 @@ import {
   parseBbbJoinCredentials,
   parseBbbMeetingIdFromJoinUrl,
   isBbbConfigured,
-  isBbbAutoMeetingLink
+  isBbbAutoMeetingLink,
+  bbbStudentEtutReportLogoutUrl,
+  resolveLiveBbbAttendeeCredentials
 } from './bbb.js';
 import { patchRowMeetingLinks } from './bbb-join-handler.js';
+import {
+  resolveConsecutiveClassBbbReuse,
+  syncConsecutivePeerMeetingLinks
+} from './consecutive-class-bbb-reuse.js';
+import { resolveClassSessionBbbReuse } from './combined-class-bbb-reuse.js';
 import { sessionEndUtcMs, wallTimeToUtcMs } from './class-session-end-ms.js';
 import { signBbbGuestJoinToken, guestJoinPageUrl } from './bbb-guest-token.js';
 import { upsertGuestJoinShortCode } from './guest-join-short-link.js';
 import { formatGuestInviteShareText } from './guest-join-share-text.js';
+import {
+  ACADEMIC_STUDY_ROOM_LABELS,
+  DEFAULT_ACADEMIC_LINKS
+} from './academic-center-links-store.js';
+
+const VALID_STUDY_ROOMS = new Set(['class56', 'class78', 'class911', 'yks']);
+const ACADEMIC_STUDY_GUEST_EXPIRE_DAYS = 90;
 
 const GUEST_JOIN_OPEN_MINUTES_BEFORE = 15;
 const GUEST_JOIN_CLOSE_MINUTES_AFTER = 60;
@@ -78,7 +92,7 @@ async function buildClassGuestJoinUrl(session, guestName) {
   if (!isBbbConfigured()) throw new Error('BBB sunucusu yapılandırılmamış.');
 
   const subject = String(session.subject || 'Grup dersi').trim();
-  const meetingKeyPrefix = `cljoin${String(session.id || '').replace(/-/g, '')}`;
+  let meetingKeyPrefix = `cljoin${String(session.id || '').replace(/-/g, '')}`;
   let durationMinutes = resolveBbbMeetingDurationMinutes(0);
   if (session.start_time && session.end_time) {
     const [sh, sm] = String(session.start_time).split(':').map(Number);
@@ -87,8 +101,30 @@ async function buildClassGuestJoinUrl(session, guestName) {
     if (mins > 0) durationMinutes = resolveBbbMeetingDurationMinutes(mins);
   }
 
-  const attendeeLink = String(session.meeting_link || '').trim();
-  const moderatorLink = session.meeting_link_moderator ? String(session.meeting_link_moderator).trim() : null;
+  let attendeeLink = String(session.meeting_link || '').trim();
+  let moderatorLink = session.meeting_link_moderator ? String(session.meeting_link_moderator).trim() : null;
+  let storedMeetingId = session.bbb_meeting_id;
+  let syncPeers = null;
+
+  try {
+    const consecutive = await resolveConsecutiveClassBbbReuse(session);
+    const reuse = await resolveClassSessionBbbReuse(session, consecutive);
+    if (reuse) {
+      syncPeers = reuse.peers;
+      if (reuse.meetingKeyPrefix) meetingKeyPrefix = reuse.meetingKeyPrefix;
+      if (reuse.chainDurationMinutes != null) durationMinutes = reuse.chainDurationMinutes;
+      if (reuse.seededFromPeer) {
+        if (reuse.seedAttendeeLink) attendeeLink = reuse.seedAttendeeLink;
+        if (reuse.seedModeratorLink != null) moderatorLink = reuse.seedModeratorLink;
+        if (reuse.storedMeetingId) storedMeetingId = reuse.storedMeetingId;
+        if (reuse.seedAttendeePw && !String(session.bbb_attendee_pw || '').trim()) {
+          session.bbb_attendee_pw = reuse.seedAttendeePw;
+        }
+      }
+    }
+  } catch {
+    /* mevcut tek-oturum guest join */
+  }
 
   const ensured = await ensureBbbMeetingAlive({
     attendeeLink: isBbbAutoMeetingLink(attendeeLink) ? attendeeLink : attendeeLink,
@@ -98,16 +134,18 @@ async function buildClassGuestJoinUrl(session, guestName) {
     moderatorName: await teacherDisplayName(String(session.teacher_id || '')),
     durationMinutes,
     meetingKeyPrefix,
-    storedMeetingId: session.bbb_meeting_id
+    storedMeetingId
   });
 
+  const linksPatch = {
+    meeting_link: ensured.attendeeLink,
+    ...(ensured.moderatorLink ? { meeting_link_moderator: ensured.moderatorLink } : {}),
+    ...(ensured.meetingId ? { bbb_meeting_id: ensured.meetingId } : {}),
+    ...(ensured.attendeePW ? { bbb_attendee_pw: ensured.attendeePW } : {})
+  };
+
   if (ensured.refreshed) {
-    await patchRowMeetingLinks('class_sessions', session.id, {
-      meeting_link: ensured.attendeeLink,
-      ...(ensured.moderatorLink ? { meeting_link_moderator: ensured.moderatorLink } : {}),
-      ...(ensured.meetingId ? { bbb_meeting_id: ensured.meetingId } : {}),
-      ...(ensured.attendeePW ? { bbb_attendee_pw: ensured.attendeePW } : {})
-    });
+    await patchRowMeetingLinks('class_sessions', session.id, linksPatch);
   } else if (ensured.meetingId && !String(session.bbb_meeting_id || '').trim()) {
     await patchRowMeetingLinks('class_sessions', session.id, {
       meeting_link: ensured.attendeeLink,
@@ -117,14 +155,18 @@ async function buildClassGuestJoinUrl(session, guestName) {
     });
   }
 
-  const meetingId =
-    String(ensured.meetingId || session.bbb_meeting_id || '').trim() ||
-    parseBbbMeetingIdFromJoinUrl(ensured.attendeeLink) ||
-    '';
-  const attendeePw =
-    String(ensured.attendeePW || session.bbb_attendee_pw || '').trim() ||
-    parseBbbJoinCredentials(ensured.attendeeLink)?.attendeePassword ||
-    '';
+  if (syncPeers?.length && ensured.attendeeLink) {
+    try {
+      await syncConsecutivePeerMeetingLinks(syncPeers, String(session.id || ''), linksPatch);
+    } catch {
+      /* peer sync guest join'i bozmasın */
+    }
+  }
+
+  const { meetingId, attendeePw } = await resolveLiveBbbAttendeeCredentials({
+    ensured,
+    row: session
+  });
 
   if (meetingId && attendeePw) {
     return buildBbbAttendeeJoinUrl({ meetingId, attendeePassword: attendeePw, fullName: guestName });
@@ -176,14 +218,10 @@ async function buildPrivateGuestJoinUrl(lesson, guestName) {
     });
   }
 
-  const meetingId =
-    String(ensured.meetingId || lesson.bbb_meeting_id || '').trim() ||
-    parseBbbMeetingIdFromJoinUrl(ensured.attendeeLink) ||
-    '';
-  const attendeePw =
-    String(ensured.attendeePW || lesson.bbb_attendee_pw || '').trim() ||
-    parseBbbJoinCredentials(ensured.attendeeLink)?.attendeePassword ||
-    '';
+  const { meetingId, attendeePw } = await resolveLiveBbbAttendeeCredentials({
+    ensured,
+    row: lesson
+  });
 
   if (meetingId && attendeePw) {
     return buildBbbAttendeeJoinUrl({ meetingId, attendeePassword: attendeePw, fullName: guestName });
@@ -193,6 +231,14 @@ async function buildPrivateGuestJoinUrl(lesson, guestName) {
 
 export async function resolveGuestBbbJoinUrl({ kind, id, guestName }) {
   const name = sanitizeGuestName(guestName);
+  if (kind === 'academic-study') {
+    const { institutionId, room } = parseAcademicStudyGuestId(id);
+    if (!VALID_STUDY_ROOMS.has(room)) throw new Error('Etüt sınıfı bulunamadı.');
+    const url = await buildAcademicStudyGuestJoinUrl({ institutionId, room, guestName: name });
+    const title =
+      ACADEMIC_STUDY_ROOM_LABELS[room] || DEFAULT_ACADEMIC_LINKS.studyClasses[room] || 'Etüt Sınıfı';
+    return { url, title };
+  }
   if (kind === 'private') {
     const lesson = await loadTeacherLesson(id);
     if (!lesson) throw new Error('Ders bulunamadı.');
@@ -211,6 +257,62 @@ async function loadClassName(classId) {
   if (!classId) return '';
   const { data } = await supabaseAdmin.from('classes').select('name').eq('id', classId).maybeSingle();
   return String(data?.name || '').trim();
+}
+
+function academicStudyGuestResourceId(institutionId, room) {
+  const inst = String(institutionId || 'platform').trim() || 'platform';
+  const r = String(room || '').trim().toLowerCase();
+  return `study:${inst}:${r}`;
+}
+
+function parseAcademicStudyGuestId(id) {
+  const s = String(id || '').trim();
+  const m = s.match(/^study:([^:]+):([a-z0-9]+)$/i);
+  if (m) {
+    return {
+      institutionId: m[1] === 'platform' ? '' : m[1],
+      room: m[2].toLowerCase()
+    };
+  }
+  return { institutionId: '', room: s.toLowerCase() };
+}
+
+function academicStudyMeetingKeyPrefix(institutionId, room) {
+  const inst = String(institutionId || 'platform')
+    .replace(/-/g, '')
+    .slice(0, 12);
+  return `etut${inst}${room}`;
+}
+
+async function buildAcademicStudyGuestJoinUrl({ institutionId, room, guestName }) {
+  if (!VALID_STUDY_ROOMS.has(room)) throw new Error('Geçersiz etüt sınıfı.');
+  if (!isBbbConfigured()) throw new Error('BBB sunucusu yapılandırılmamış.');
+
+  const meetingName =
+    ACADEMIC_STUDY_ROOM_LABELS[room] ||
+    DEFAULT_ACADEMIC_LINKS.studyClasses[room] ||
+    'Etüt Sınıfı';
+  const durationMinutes = resolveBbbMeetingDurationMinutes(180);
+  const prefix = academicStudyMeetingKeyPrefix(institutionId, room);
+
+  const ensured = await ensureBbbMeetingAlive({
+    attendeeLink: 'bbb:auto',
+    moderatorLink: null,
+    meetingName,
+    attendeeName: guestName,
+    moderatorName: 'Moderatör',
+    durationMinutes,
+    meetingKeyPrefix: prefix,
+    storedMeetingId: null,
+    logoutUrl: bbbStudentEtutReportLogoutUrl()
+  });
+
+  const meetingId = String(ensured.meetingId || '').trim();
+  const attendeePw = String(ensured.attendeePW || '').trim();
+  if (meetingId && attendeePw) {
+    return buildBbbAttendeeJoinUrl({ meetingId, attendeePassword: attendeePw, fullName: guestName });
+  }
+  throw new Error('BBB katılım bağlantısı oluşturulamadı.');
 }
 
 async function finalizeGuestInviteUrl({ kind, id, token, expiresAtIso, title, lessonDate, lessonTime, className }) {
@@ -240,6 +342,26 @@ async function finalizeGuestInviteUrl({ kind, id, token, expiresAtIso, title, le
     lessonDate,
     lessonTime
   };
+}
+
+export async function createAcademicStudyGuestJoinShareLink({ institutionId, room }) {
+  const r = String(room || '').trim().toLowerCase();
+  if (!VALID_STUDY_ROOMS.has(r)) throw new Error('Geçersiz etüt sınıfı.');
+  const resourceId = academicStudyGuestResourceId(institutionId, r);
+  const expSec = Math.floor(Date.now() / 1000) + ACADEMIC_STUDY_GUEST_EXPIRE_DAYS * 86400;
+  const token = signBbbGuestJoinToken({ kind: 'academic-study', id: resourceId, exp: expSec });
+  const title =
+    ACADEMIC_STUDY_ROOM_LABELS[r] || DEFAULT_ACADEMIC_LINKS.studyClasses[r] || 'Etüt Sınıfı';
+  return finalizeGuestInviteUrl({
+    kind: 'academic-study',
+    id: resourceId,
+    token,
+    expiresAtIso: new Date(expSec * 1000).toISOString(),
+    title,
+    lessonDate: '',
+    lessonTime: '',
+    className: 'Akademik Merkez — Etüt'
+  });
 }
 
 export async function createGuestJoinShareLink({ kind, id }) {

@@ -13,6 +13,8 @@ export type GatewayStatusPayload = {
   linkedPhone?: string | null;
   sessionCoachId?: string | null;
   coachId?: string | null;
+  /** VPS: sock hazır ve mesaj gönderilebilir */
+  sendReady?: boolean;
 };
 
 /** Gateway URL'lerindeki oturum id her zaman JWT sub (giriş yapan kullanıcı) olmalı. */

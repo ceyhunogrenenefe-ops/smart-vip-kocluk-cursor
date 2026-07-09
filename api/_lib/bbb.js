@@ -28,6 +28,30 @@ function asQuery(params) {
   return sp.toString();
 }
 
+/** Ortam tabanlı uygulama kök URL’si (BBB logout dönüşleri). */
+export function publicAppBaseForBbb() {
+  const u =
+    process.env.PUBLIC_APP_URL ||
+    process.env.VITE_APP_URL ||
+    process.env.APP_PUBLIC_URL ||
+    '';
+  return String(u || '').trim().replace(/\/+$/, '');
+}
+
+/** Öğretmen canlı ders sonrası ödev paneli. */
+export function bbbTeacherPostLessonLogoutUrl() {
+  const base = publicAppBaseForBbb();
+  if (!base) return null;
+  return `${base}/edu-panel?post_lesson=1`;
+}
+
+/** Öğrenci etüt sonrası rapor ekranı (öğretmen ödev popup’ı gibi). */
+export function bbbStudentEtutReportLogoutUrl() {
+  const base = publicAppBaseForBbb();
+  if (!base) return null;
+  return `${base}/weekly-planner?etut_report=1`;
+}
+
 const BBB_FETCH_TIMEOUT_MS = Math.max(
   5000,
   Number(process.env.BBB_FETCH_TIMEOUT_MS || 22000) || 22000
@@ -252,6 +276,66 @@ export function bbbMeetingLockParams() {
   };
 }
 
+/** Tüm öğrenci (viewer) katılımcılar için kamera/mikrofon erişimi — birleşik sınıf odaları dahil. */
+export function bbbMeetingViewerAccessParams() {
+  return {
+    webcamsOnlyForModerator: false,
+    guestPolicy: 'ALWAYS_ACCEPT',
+    muteOnStart: false
+  };
+}
+
+/**
+ * Ortak BBB odasında peer oturumların eski bbb_attendee_pw / meeting_link değerleri canlı odayı gölgeler.
+ * ensureBbbMeetingAlive sonrası ensured.* her zaman önceliklidir.
+ */
+export function resolveBbbAttendeeCredentials({ ensured = {}, row = {} } = {}) {
+  const ensuredLink = String(ensured.attendeeLink || '').trim();
+  const rowLink = String(row.meeting_link || '').trim();
+  const meetingId =
+    String(ensured.meetingId || '').trim() ||
+    String(row.bbb_meeting_id || '').trim() ||
+    parseBbbMeetingIdFromJoinUrl(ensuredLink) ||
+    parseBbbMeetingIdFromJoinUrl(rowLink) ||
+    '';
+
+  let attendeePw =
+    String(ensured.attendeePW || '').trim() ||
+    parseBbbJoinCredentials(ensuredLink)?.attendeePassword ||
+    '';
+
+  if (!attendeePw) {
+    const rowStoredPw = String(row.bbb_attendee_pw || '').trim();
+    const rowLinkPw = parseBbbJoinCredentials(rowLink)?.attendeePassword || '';
+    const rowMid = String(row.bbb_meeting_id || '').trim() || parseBbbMeetingIdFromJoinUrl(rowLink) || '';
+    if (rowStoredPw && (!meetingId || !rowMid || rowMid === meetingId)) {
+      attendeePw = rowStoredPw;
+    } else if (rowLinkPw && rowMid && meetingId && rowMid === meetingId) {
+      attendeePw = rowLinkPw;
+    } else if (!meetingId) {
+      attendeePw = rowStoredPw || rowLinkPw;
+    }
+  }
+
+  return { meetingId, attendeePw };
+}
+
+/** Canlı getMeetingInfo ile attendee şifresini doğrular (birleşik sınıf peer satırları). */
+export async function resolveLiveBbbAttendeeCredentials(opts) {
+  const base = resolveBbbAttendeeCredentials(opts);
+  if (base.meetingId && base.attendeePw) return base;
+  if (!base.meetingId) return base;
+  try {
+    const live = await fetchBbbMeetingInfo(base.meetingId);
+    if (live?.attendeePW) {
+      return { meetingId: base.meetingId, attendeePw: live.attendeePW };
+    }
+  } catch {
+    /* yoksay */
+  }
+  return base;
+}
+
 /** Öğrenciye moderator linki göstermeden join URL seçer. */
 export function enrichMeetingRowJoinLink(row, actorRole) {
   if (!row || typeof row !== 'object') return row;
@@ -446,6 +530,7 @@ export function buildBbbAttendeeJoinUrl({ meetingId, attendeePassword, fullName 
     fullName: String(fullName || 'Öğrenci').trim().slice(0, 64) || 'Öğrenci',
     meetingID: safeMeetingId,
     password: attendeePassword,
+    role: 'VIEWER',
     redirect: true
   });
   const joinChecksum = bbbChecksum('join', joinQuery, secret);
@@ -732,7 +817,8 @@ export async function ensureBbbMeetingAlive({
   moderatorName,
   durationMinutes,
   meetingKeyPrefix,
-  storedMeetingId
+  storedMeetingId,
+  logoutUrl = null
 }) {
   const attendee = String(attendeeLink || '').trim();
   const moderator = String(moderatorLink || '').trim();
@@ -750,7 +836,8 @@ export async function ensureBbbMeetingAlive({
       meetingName,
       attendeeName,
       moderatorName,
-      durationMinutes
+      durationMinutes,
+      logoutUrl
     });
     setCachedBbbRoom(stableMeetingId, bbb);
     return {
@@ -824,7 +911,8 @@ export async function createBbbMeetingAndJoinLink({
   meetingName,
   attendeeName,
   moderatorName,
-  durationMinutes = 60
+  durationMinutes = 60,
+  logoutUrl = null
 }) {
   const { apiBase, secret } = bbbApiConfig();
   if (!apiBase || !secret) {
@@ -838,6 +926,8 @@ export async function createBbbMeetingAndJoinLink({
   const moderatorPW = `m-${crypto.randomBytes(5).toString('hex')}`;
   const recording = bbbRecordingCreateParams();
   const lockParams = bbbMeetingLockParams();
+  const viewerAccess = bbbMeetingViewerAccessParams();
+  const resolvedLogout = String(logoutUrl || '').trim() || null;
 
   const createQuery = asQuery({
     name: meetingName || 'Koçluk görüşmesi',
@@ -849,7 +939,9 @@ export async function createBbbMeetingAndJoinLink({
     allowStartStopRecording: recording.allowStartStopRecording,
     autoStartRecording: recording.autoStartRecording,
     recordFullDurationMedia: recording.recordFullDurationMedia,
-    ...lockParams
+    ...(resolvedLogout ? { logoutURL: resolvedLogout } : {}),
+    ...lockParams,
+    ...viewerAccess
   });
   const createChecksum = bbbChecksum('create', createQuery, secret);
   const createUrl = `${apiBase}create?${createQuery}&checksum=${createChecksum}`;

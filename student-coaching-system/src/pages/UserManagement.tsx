@@ -100,6 +100,12 @@ function formHasTeacherRole(role: UserRole, alsoTeacher: boolean): boolean {
   return role === 'teacher' || alsoTeacher;
 }
 
+function notifyUsersDataChanged() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('scs:users-changed'));
+  }
+}
+
 function isAdminActor(user: SystemUser | null | undefined): boolean {
   return userHasAnyRole(user, ['admin', 'super_admin']);
 }
@@ -378,8 +384,27 @@ export default function UserManagement() {
     return ROLES.filter((x) => x.value !== 'super_admin');
   }, [currentUser]);
 
-  const linkedStudents = pageStudents.length > 0 ? pageStudents : students;
-  const linkedCoaches = pageCoaches.length > 0 ? pageCoaches : coaches;
+  const linkedStudents = useMemo(() => {
+    if (!pageStudents.length) return students;
+    const byId = new Map<string, Student>();
+    for (const s of pageStudents) byId.set(s.id, s);
+    for (const s of students) {
+      const prev = byId.get(s.id);
+      byId.set(s.id, prev ? { ...prev, ...s } : s);
+    }
+    return [...byId.values()];
+  }, [pageStudents, students]);
+
+  const linkedCoaches = useMemo(() => {
+    if (!pageCoaches.length) return coaches;
+    const byId = new Map<string, Coach>();
+    for (const c of pageCoaches) byId.set(c.id, c);
+    for (const c of coaches) {
+      const prev = byId.get(c.id);
+      byId.set(c.id, prev ? { ...prev, ...c } : c);
+    }
+    return [...byId.values()];
+  }, [pageCoaches, coaches]);
 
   const studentLinkIndex = useMemo(
     () => indexStudentsByPlatformLink(linkedStudents),
@@ -456,7 +481,7 @@ export default function UserManagement() {
     }
   }, [coachesForFilter, filterCoachId]);
 
-  const refreshUsers = useCallback(async () => {
+  const refreshUsers = useCallback(async (opts?: { broadcast?: boolean }) => {
     if (authLoading) return;
     if (getAuthToken()) {
       setListLoading(true);
@@ -499,6 +524,7 @@ export default function UserManagement() {
         startTransition(() => {
           setUsers([...fromApi, ...stubs.filter((s) => !seen.has(s.email.toLowerCase().trim()))]);
         });
+        if (opts?.broadcast) notifyUsersDataChanged();
         return;
       } catch (e) {
         console.error('[UserManagement] /api/users yüklenemedi:', e);
@@ -543,7 +569,7 @@ export default function UserManagement() {
     try {
       await db.approvePendingRegistration(row.id);
       setMessage({ type: 'success', text: 'Kayıt onaylandı ve hesap aktif edildi.' });
-      await refreshUsers();
+      await refreshUsers({ broadcast: true });
     } catch (e) {
       setMessage({
         type: 'error',
@@ -561,7 +587,7 @@ export default function UserManagement() {
     try {
       await db.rejectPendingRegistration(row.id, reason);
       setMessage({ type: 'success', text: 'Kayıt talebi reddedildi.' });
-      await refreshUsers();
+      await refreshUsers({ broadcast: true });
     } catch (e) {
       setMessage({
         type: 'error',
@@ -1003,6 +1029,16 @@ export default function UserManagement() {
     });
   }, []);
 
+  const mergePageCoach = useCallback((mapped: Coach) => {
+    setPageCoaches((prev) => {
+      const ix = prev.findIndex((c) => c.id === mapped.id);
+      if (ix === -1) return [...prev, mapped];
+      const copy = [...prev];
+      copy[ix] = { ...copy[ix], ...mapped };
+      return copy;
+    });
+  }, []);
+
   /** Düzenleme modalı için veli/doğum tarihi dahil tam öğrenci profili. */
   const resolveStudentProfileForUser = useCallback(
     async (user: Pick<SystemUser, 'id' | 'email' | 'studentId'>): Promise<Student | null> => {
@@ -1045,7 +1081,7 @@ export default function UserManagement() {
     setMessage(null);
     try {
       await updateStudent(st.id, { coachId: coachId.trim() || undefined });
-      await refreshUsers();
+      await refreshUsers({ broadcast: true });
     } catch (e) {
       setMessage({
         type: 'error',
@@ -1067,7 +1103,7 @@ export default function UserManagement() {
     setMessage(null);
     try {
       await updateStudent(st.id, { classLevel: next });
-      await refreshUsers();
+      await refreshUsers({ broadcast: true });
     } catch (e) {
       setMessage({
         type: 'error',
@@ -1089,7 +1125,7 @@ export default function UserManagement() {
     setMessage(null);
     try {
       await updateStudent(st.id, { school: next || undefined });
-      await refreshUsers();
+      await refreshUsers({ broadcast: true });
     } catch (e) {
       setMessage({
         type: 'error',
@@ -1115,7 +1151,7 @@ export default function UserManagement() {
       } else {
         await updateUser(user.id, { academic_year_label: next || null });
       }
-      await refreshUsers();
+      await refreshUsers({ broadcast: true });
     } catch (e) {
       setMessage({
         type: 'error',
@@ -1182,7 +1218,7 @@ export default function UserManagement() {
     }
 
     try {
-      await refreshUsers();
+      await refreshUsers({ broadcast: true });
       const errTail = errors.length ? ` ${errors.join(' · ')}` : '';
       setMessage({
         type: ok > 0 ? 'success' : 'error',
@@ -1611,7 +1647,7 @@ export default function UserManagement() {
               created_by: null
             });
             setMessage({ type: 'success', text: 'Koç için giriş hesabı oluşturuldu.' });
-            await refreshUsers();
+            await refreshUsers({ broadcast: true });
             setShowModal(false);
             openCreatedLoginCredentials({
               title: 'Koç giriş hesabı oluşturuldu',
@@ -1729,8 +1765,10 @@ export default function UserManagement() {
             try {
               if (st) {
                 await updateStudent(st.id, studentPayload);
+                mergePageStudent({ ...st, ...studentPayload, id: st.id });
               } else {
-                await addStudent(studentPayload);
+                const created = await addStudent(studentPayload);
+                mergePageStudent(created.student);
                 studentCardNote =
                   ' Öğrenci kartı oluşturuldu ve kullanıcıya bağlandı.';
               }
@@ -1827,7 +1865,7 @@ export default function UserManagement() {
               }
             }
           }
-          await refreshUsers();
+          await refreshUsers({ broadcast: true });
           setShowModal(false);
         }
       } else {
@@ -1886,16 +1924,17 @@ export default function UserManagement() {
             ? String(formData.studentInstitutionId).trim()
             : (resolvedInstitution ?? null);
 
-        const institutionIdForNewUser =
-          formData.role === 'student'
-            ? (resolvedStudentInstitution ?? null)
-            : superAdminChosenInst || (resolvedInstitution ?? null);
-
-        const studentInstForAdd =
+        const institutionForStudentProfile =
           (resolvedStudentInstitution ?? null) ||
           resolvedInstitution ||
           instFallback ||
-          currentUser?.institutionId;
+          currentUser?.institutionId ||
+          null;
+
+        const institutionIdForNewUser =
+          formData.role === 'student'
+            ? institutionForStudentProfile
+            : superAdminChosenInst || (resolvedInstitution ?? null);
 
         const quotaBlocked = quotaBlockMessage(quota, formData.role, currentUser?.role);
         if (quotaBlocked) {
@@ -1933,23 +1972,10 @@ export default function UserManagement() {
                 : undefined
             );
 
-            setMessage({ type: 'success', text: `${label} başarıyla oluşturuldu!` });
-            await refreshUsers();
-
             const instId =
               institutionIdForNewUser || resolvedInstitution || instFallback || currentUser?.institutionId;
             const createdEmail = formData.email.toLowerCase().trim();
             const createdRole = (staffRolesNew?.primary || formData.role) as UserRole;
-            setShowModal(false);
-            openCreatedLoginCredentials({
-              title: `${label} oluşturuldu`,
-              email: createdEmail,
-              password: pwdPlain,
-              role: createdRole,
-              roles: staffRolesNew?.roles ?? null,
-              institutionId: instId ?? null
-            });
-
             const newUserId = row.id;
             const newIsTeacher =
               formData.role === 'teacher' || (staffRolesNew?.roles || []).includes('teacher');
@@ -1979,7 +2005,7 @@ export default function UserManagement() {
                   classLevel: toClassLevel(formData.classLevel),
                   school: formData.branch.trim() || undefined,
                   coachId: formData.assignCoachId || undefined,
-                  institutionId: studentInstForAdd || undefined,
+                  institutionId: institutionForStudentProfile || undefined,
                   whatsappAutomationEnabled: formData.whatsappAutomationEnabled,
                   createdAt: new Date().toISOString()
                 };
@@ -1989,8 +2015,10 @@ export default function UserManagement() {
                 );
                 if (existingSt) {
                   await updateStudent(existingSt.id, studentPayload);
+                  mergePageStudent({ ...existingSt, ...studentPayload, id: existingSt.id });
                 } else {
-                  await addStudent(studentPayload);
+                  const created = await addStudent(studentPayload);
+                  mergePageStudent(created.student);
                 }
               } else if (formData.role === 'coach' || (staffRolesNew?.roles || []).includes('coach')) {
                 const coachPayload = {
@@ -2015,8 +2043,10 @@ export default function UserManagement() {
                     phone: coachPayload.phone,
                     institutionId: coachPayload.institutionId
                   });
+                  mergePageCoach({ ...existingCoach, ...coachPayload, id: existingCoach.id });
                 } else {
                   await addCoach(coachPayload);
+                  mergePageCoach(coachPayload);
                 }
               }
             } catch (syncErr) {
@@ -2027,7 +2057,21 @@ export default function UserManagement() {
                 type: 'error',
                 text: `Kullanıcı oluşturuldu ancak öğrenci/koç listesine eklenirken sorun oluştu: ${detail}. Öğrenci/Koç sayfasından tekrar deneyin.`
               });
+              setLoading(false);
+              return;
             }
+
+            await refreshUsers({ broadcast: true });
+            setMessage({ type: 'success', text: `${label} başarıyla oluşturuldu!` });
+            setShowModal(false);
+            openCreatedLoginCredentials({
+              title: `${label} oluşturuldu`,
+              email: createdEmail,
+              password: pwdPlain,
+              role: createdRole,
+              roles: staffRolesNew?.roles ?? null,
+              institutionId: instId ?? null
+            });
           } catch (err) {
             setMessage({
               type: 'error',
@@ -2242,7 +2286,7 @@ export default function UserManagement() {
         errors: Array.isArray(payload.errors) ? payload.errors : []
       });
 
-      await refreshUsers();
+      await refreshUsers({ broadcast: true });
       const ok = (Number(payload.created) || 0) + (Number(payload.updated) || 0);
       const errTail =
         Array.isArray(payload.errors) && payload.errors.length > 0

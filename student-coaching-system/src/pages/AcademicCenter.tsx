@@ -30,6 +30,7 @@ import {
   type ExamEntryKey,
   type StudyEntryKey
 } from '../lib/academicCenterLinks';
+import { copyAcademicStudyGuestJoinShareText } from '../lib/bbbGuestJoin';
 import { AppModal } from '../components/ui/AppModal';
 import { VirtualOpticInfoModal } from '../components/academic/VirtualOpticInfoModal';
 type TabKey = 'study' | 'exam' | 'pool';
@@ -228,6 +229,8 @@ export default function AcademicCenter() {
   );
   const [bbbBusyRoom, setBbbBusyRoom] = useState<ExamEntryKey | null>(null);
   const [bbbBusyStudy, setBbbBusyStudy] = useState<StudyEntryKey | null>(null);
+  const [studyGuestLinkBusy, setStudyGuestLinkBusy] = useState<StudyEntryKey | null>(null);
+  const [studyGuestNotice, setStudyGuestNotice] = useState<string | null>(null);
   const [examModal, setExamModal] = useState<ExamModalTarget | null>(null);
   const [opticModalOpen, setOpticModalOpen] = useState(false);
 
@@ -259,6 +262,19 @@ export default function AcademicCenter() {
       mounted = false;
     };
   }, [institutionId]);
+
+  const copyStudyGuestLink = async (key: StudyEntryKey) => {
+    setStudyGuestLinkBusy(key);
+    setStudyGuestNotice(null);
+    try {
+      await copyAcademicStudyGuestJoinShareText(key, institutionId);
+      setStudyGuestNotice('Davet metni panoya kopyalandı (WhatsApp için kısa link + etüt bilgisi).');
+    } catch (e) {
+      setStudyGuestNotice(e instanceof Error ? e.message : 'Davet linki alınamadı.');
+    } finally {
+      setStudyGuestLinkBusy(null);
+    }
+  };
 
   const openLink = (
     url: string,
@@ -414,10 +430,16 @@ export default function AcademicCenter() {
                   </div>
                 </div>
               </div>
+              {studyGuestNotice ? (
+                <p className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
+                  {studyGuestNotice}
+                </p>
+              ) : null}
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               {STUDY_ENTRY_DEFS.map((x) => {
                 const href = studyEntryUrl(links, x.key);
                 const busy = bbbBusyStudy === x.key;
+                const guestBusy = studyGuestLinkBusy === x.key;
                 return (
                 <div
                   key={x.key}
@@ -430,16 +452,30 @@ export default function AcademicCenter() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-base font-semibold text-slate-800">{x.label}</p>
-                      <button
-                        type="button"
-                        disabled={busy || !href}
-                        onClick={() => openLink(href, { room: x.key, kind: 'study' })}
-                        className="mt-3 inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-                      >
-                        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                        Etüte Katıl
-                        {!busy ? <ExternalLink className="h-4 w-4" /> : null}
-                      </button>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          disabled={busy || !href}
+                          onClick={() => openLink(href, { room: x.key, kind: 'study' })}
+                          className="inline-flex min-h-[44px] flex-1 touch-manipulation items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none"
+                        >
+                          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                          Etüte Katıl
+                          {!busy ? <ExternalLink className="h-4 w-4" /> : null}
+                        </button>
+                        {!isStudent ? (
+                          <button
+                            type="button"
+                            title="WhatsApp için kısa davet linki ve etüt bilgisi panoya kopyalanır"
+                            disabled={guestBusy}
+                            onClick={() => void copyStudyGuestLink(x.key)}
+                            className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-violet-300 bg-white px-4 py-2.5 text-sm font-semibold text-violet-700 shadow-sm transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {guestBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                            Davet linki
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 </div>

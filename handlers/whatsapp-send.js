@@ -7,6 +7,8 @@ import {
   sendMetaTextMessage,
   parseMetaSendError
 } from '../api/_lib/meta-whatsapp.js';
+import { SEND_CHANNELS } from '../api/_lib/notification-config.js';
+import { getGatewaySessionStatus, sendGatewayTextMessage } from '../api/_lib/whatsapp-gateway-send.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { getIstanbulDateString } from '../api/_lib/istanbul-time.js';
 
@@ -60,13 +62,51 @@ export default async function handler(req, res) {
 
   const today = getIstanbulDateString();
   const useMeta = metaWhatsAppConfigured();
+  const coachUserId = String(actor.sub || '').trim();
 
   if (!useMeta && !getTwilioEnvStatus().configured) {
+    const st = await getGatewaySessionStatus(coachUserId, { skipHealth: false });
+    if (st.ok && st.status === 'connected') {
+      const gw = await sendGatewayTextMessage({
+        phone: e164,
+        message,
+        sessionId: coachUserId,
+        sessionCandidates: [coachUserId],
+        allowSharedFallback: false
+      });
+      if (gw.ok) {
+        const sid = gw.sid || gw.gateway_message_id || null;
+        try {
+          await supabaseAdmin.from('message_logs').insert({
+            student_id: null,
+            kind: 'manual_whatsapp',
+            related_id: null,
+            message,
+            status: 'sent',
+            log_date: today,
+            error: null,
+            phone: e164,
+            meta_message_id: sid
+          });
+        } catch (logErr) {
+          console.warn('[whatsapp-send] log insert', logErr?.message || logErr);
+        }
+        return res.status(200).json({ ok: true, sid, channel: SEND_CHANNELS.COACH_GATEWAY });
+      }
+      return res.status(503).json({
+        ok: false,
+        error: gw.error || 'gateway_send_failed',
+        channel: SEND_CHANNELS.COACH_GATEWAY,
+        hint:
+          'Gateway bağlı görünüyor ancak gönderim başarısız. WhatsApp Ayarlarından oturumu yenileyin.'
+      });
+    }
     return res.status(503).json({
       ok: false,
       error: 'whatsapp_not_configured',
+      channel: 'none',
       hint:
-        'Vercel Production’da META_WHATSAPP_TOKEN ve META_PHONE_NUMBER_ID dolu olmalı (boş env satırı yetmez). Kaydettikten sonra Redeploy.'
+        'Meta yapılandırılmamış ve gateway oturumu bağlı değil. WhatsApp Ayarlarından QR ile bağlayın veya Vercel META_* değişkenlerini tanımlayın.'
     });
   }
 

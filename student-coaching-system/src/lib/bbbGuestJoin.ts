@@ -123,6 +123,50 @@ export async function copyGuestJoinShareText(kind: GuestJoinKind, id: string): P
   return data;
 }
 
+export async function fetchAcademicStudyGuestJoinShareUrl(
+  room: string,
+  institutionId?: string | null
+): Promise<GuestJoinShare> {
+  const qs = new URLSearchParams({ op: 'guest-join-link', room, kind: 'study' });
+  if (institutionId) qs.set('institution_id', institutionId);
+  const res = await apiFetch(`/api/academic-center-bbb-join?${qs.toString()}`);
+  const j = (await res.json().catch(() => ({}))) as {
+    url?: string;
+    shareText?: string;
+    longUrl?: string;
+    expiresAt?: string;
+    title?: string;
+    lessonDate?: string;
+    lessonTime?: string;
+    code?: string | null;
+    error?: string;
+  };
+  if (!res.ok) throw new Error(String(j.error || 'Davet linki alınamadı'));
+  const url = String(j.url || '').trim();
+  if (!url) throw new Error('Davet linki boş');
+  const shareText = String(j.shareText || '').trim() || url;
+  return {
+    url,
+    shareText,
+    longUrl: j.longUrl,
+    expiresAt: j.expiresAt,
+    title: j.title,
+    lessonDate: j.lessonDate,
+    lessonTime: j.lessonTime,
+    code: j.code
+  };
+}
+
+/** Etüt sınıfı için WhatsApp davet metni (canlı grup dersi davet linki gibi). */
+export async function copyAcademicStudyGuestJoinShareText(
+  room: string,
+  institutionId?: string | null
+): Promise<GuestJoinShare> {
+  const data = await fetchAcademicStudyGuestJoinShareUrl(room, institutionId);
+  await navigator.clipboard.writeText(data.shareText);
+  return data;
+}
+
 /** Panoya yalnızca davet URL'si. */
 export async function copyGuestJoinUrlOnly(kind: GuestJoinKind, id: string): Promise<string> {
   const { url } = await fetchGuestJoinShareUrl(kind, id);

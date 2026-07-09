@@ -16,10 +16,25 @@ import {
   parseBbbMeetingIdFromJoinUrl,
   isCompleteBbbJoinUrl,
   getBbbRecordingPlaybackUrlForMeetingIds,
-  collectBbbMeetingIdsForRecording
+  collectBbbMeetingIdsForRecording,
+  bbbStudentEtutReportLogoutUrl,
+  bbbTeacherPostLessonLogoutUrl
 } from './bbb.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
+
+function isEtutSubjectRow(row) {
+  const s = String(row?.subject || '')
+    .trim()
+    .toLocaleLowerCase('tr-TR');
+  return s === 'etüt' || s === 'etut' || s.includes('etüt') || s.includes('etut');
+}
+
+function resolveLogoutUrlForJoin({ isStudent, row }) {
+  if (isStudent && isEtutSubjectRow(row)) return bbbStudentEtutReportLogoutUrl();
+  if (!isStudent) return bbbTeacherPostLessonLogoutUrl();
+  return null;
+}
 
 function pickJoinUrl({ isStudent, attendeeLink, moderatorLink, joinLink }) {
   if (joinLink) return String(joinLink).trim();
@@ -91,30 +106,50 @@ export async function handleBbbJoinGet(req, res, config) {
 
   try {
     const ctx = await config.buildContext(row);
+    const storedMeetingId =
+      ctx.storedMeetingId != null && String(ctx.storedMeetingId).trim()
+        ? String(ctx.storedMeetingId).trim()
+        : row.bbb_meeting_id;
+    const joinAttendeeLink =
+      ctx.attendeeLinkOverride != null ? String(ctx.attendeeLinkOverride) : attendeeLink;
+    const joinModeratorLink =
+      ctx.moderatorLinkOverride != null ? ctx.moderatorLinkOverride : moderatorLink;
     const ensured = await ensureBbbMeetingAlive({
-      attendeeLink,
-      moderatorLink,
+      attendeeLink: joinAttendeeLink,
+      moderatorLink: joinModeratorLink,
       meetingName: ctx.meetingName,
       attendeeName: ctx.attendeeName,
       moderatorName: ctx.moderatorName,
       durationMinutes: ctx.durationMinutes,
       meetingKeyPrefix: ctx.meetingKeyPrefix,
-      storedMeetingId: row.bbb_meeting_id
+      storedMeetingId,
+      logoutUrl: resolveLogoutUrlForJoin({ isStudent, row })
     });
 
+    const linksPatch = {
+      meeting_link: ensured.attendeeLink,
+      ...(ensured.moderatorLink ? { meeting_link_moderator: ensured.moderatorLink } : {}),
+      ...(ensured.meetingId ? { bbb_meeting_id: ensured.meetingId } : {}),
+      ...(ensured.attendeePW ? { bbb_attendee_pw: ensured.attendeePW } : {})
+    };
+
     if (ensured.refreshed) {
-      await config.patchLinks(id, {
-        meeting_link: ensured.attendeeLink,
-        ...(ensured.moderatorLink ? { meeting_link_moderator: ensured.moderatorLink } : {}),
-        ...(ensured.meetingId ? { bbb_meeting_id: ensured.meetingId } : {}),
-        ...(ensured.attendeePW ? { bbb_attendee_pw: ensured.attendeePW } : {})
-      });
+      await config.patchLinks(id, linksPatch);
     } else if (ensured.meetingId && !String(row.bbb_meeting_id || '').trim()) {
       await config.patchLinks(id, {
         meeting_link: ensured.attendeeLink,
         ...(ensured.moderatorLink ? { meeting_link_moderator: ensured.moderatorLink } : {}),
-        bbb_meeting_id: ensured.meetingId
+        bbb_meeting_id: ensured.meetingId,
+        ...(ensured.attendeePW ? { bbb_attendee_pw: ensured.attendeePW } : {})
       });
+    }
+
+    if (typeof config.afterEnsure === 'function') {
+      try {
+        await config.afterEnsure(row, ensured, linksPatch);
+      } catch {
+        /* ardışık senkron gibi yan etkiler join'i bozmasın */
+      }
     }
 
     let url = pickJoinUrl({
@@ -141,7 +176,7 @@ export async function handleBbbJoinGet(req, res, config) {
           String(ensured.moderatorPW || '').trim() ||
           null;
         const attPw =
-          String(row.bbb_attendee_pw || ensured.attendeePW || '').trim() ||
+          String(ensured.attendeePW || row.bbb_attendee_pw || '').trim() ||
           parseBbbJoinCredentials(ensured.attendeeLink || '')?.attendeePassword ||
           '';
         const actorName = String(actor.name || actor.email || ctx.moderatorName || 'Öğretmen')
@@ -240,7 +275,14 @@ export async function handleBbbRecordingGet(req, res, config) {
     parseBbbMeetingIdFromJoinUrl(String(row.meeting_link_moderator || '')) ||
     '';
 
-  const keyPrefix = config.getMeetingKeyPrefix ? String(config.getMeetingKeyPrefix(row) || '').trim() : '';
+  let keyPrefix = '';
+  if (config.getMeetingKeyPrefix) {
+    try {
+      keyPrefix = String((await config.getMeetingKeyPrefix(row)) || '').trim();
+    } catch {
+      keyPrefix = '';
+    }
+  }
   const meetingIds = collectBbbMeetingIdsForRecording(row, keyPrefix);
   if (!meetingIds.length && !meetingId) {
     return jsonError(res, 400, 'BBB toplantı kimliği bulunamadı.', { code: 'bbb_meeting_id_missing' });

@@ -5,7 +5,7 @@ import { normalizeUuidOrGenerate } from '../api/_lib/uuid.js';
 import { rebuildCoachStudentIdsFromFk } from '../api/_lib/sync-coach-students.js';
 import { enforceStudentInsertQuotas, enforceCoachStudentQuota, QuotaError } from '../api/_lib/quota-enforce.js';
 import { enforceCoachLicenseForStudentInsert, LicenseError } from '../api/_lib/coach-license.js';
-import { getTeacherGroupClassStudentScope } from '../api/_lib/teacher-class-scope.js';
+import { getTeacherPanelStudentScope } from '../api/_lib/teacher-class-scope.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import { STUDENT_LIST_COLUMNS } from '../api/_lib/list-query-columns.js';
 
@@ -170,7 +170,7 @@ async function assertStudentVisibilityResolved(actor, student) {
   const instOk = actor.institution_id ? String(student.institution_id || '') === String(actor.institution_id) : true;
 
   if (rs.has('teacher') && instOk && actor.institution_id) {
-    const { ids } = await getTeacherGroupClassStudentScope(actor.sub);
+    const { ids } = await getTeacherPanelStudentScope(actor.sub, actor.institution_id || null);
     if (ids.includes(String(student.id || '').trim())) ok = true;
   }
 
@@ -194,7 +194,7 @@ async function listStudentsMergedCoachTeacher(actor, roleSet) {
   }
 
   if (primary === 'teacher' && roleSet.has('teacher') && inst) {
-    const { ids } = await getTeacherGroupClassStudentScope(actor.sub);
+    const { ids } = await getTeacherPanelStudentScope(actor.sub, actor.institution_id || null);
     if (!ids.length) return [];
     const { data, error } = await supabaseAdmin
       .from('students')
@@ -208,7 +208,7 @@ async function listStudentsMergedCoachTeacher(actor, roleSet) {
 
   /** İkincil etiket: birincil rol koç/öğretmen değilse dar kapsam */
   if (roleSet.has('teacher') && inst) {
-    const { ids } = await getTeacherGroupClassStudentScope(actor.sub);
+    const { ids } = await getTeacherPanelStudentScope(actor.sub, actor.institution_id || null);
     if (!ids.length) return [];
     const { data, error } = await supabaseAdmin
       .from('students')

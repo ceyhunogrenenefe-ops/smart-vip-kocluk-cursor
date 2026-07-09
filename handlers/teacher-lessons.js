@@ -20,7 +20,7 @@ import {
   CoachLessonsLockError
 } from '../api/_lib/coach-lessons-lock.js';
 import { resolveStudentRowForUser } from '../api/_lib/resolve-student-id.js';
-import { isStudentAllowedForTeacherGroupLessons } from '../api/_lib/teacher-class-scope.js';
+import { isStudentAllowedForTeacherPanel } from '../api/_lib/teacher-class-scope.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
 
@@ -171,7 +171,7 @@ async function canPlanLessonForStudent(actor, student) {
   if (actor.role === 'admin') return hasInstitutionAccess(actor, student.institution_id);
   if (actor.role === 'teacher') {
     if (!hasInstitutionAccess(actor, student.institution_id)) return false;
-    return isStudentAllowedForTeacherGroupLessons(actor.sub, student.id);
+    return isStudentAllowedForTeacherPanel(actor.sub, student.id, actor.institution_id || null);
   }
   if (actor.role === 'coach') return Boolean(actor.coach_id && student.coach_id === actor.coach_id);
   return false;

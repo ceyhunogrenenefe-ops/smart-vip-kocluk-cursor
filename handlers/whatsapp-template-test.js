@@ -3,7 +3,8 @@ import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { getIstanbulDateString } from '../api/_lib/istanbul-time.js';
 import { normalizePhoneToE164 } from '../api/_lib/phone-whatsapp.js';
-import { sendAutomatedWhatsApp } from '../api/_lib/whatsapp-outbound.js';
+import { sendNotification } from '../api/_lib/message-service.js';
+import { channelLabelTr, resolveEffectiveSendChannel } from '../api/_lib/notification-config.js';
 import {
   activateBookOrderMetaTemplate,
   sendBookOrderWhatsApp,
@@ -61,34 +62,57 @@ export default async function handler(req, res) {
     vars[String(k)] = v == null ? '' : String(v);
   }
 
-  const sent =
-    templateType === BOOK_ORDER_TEMPLATE_TYPE
-      ? await (async () => {
-          await activateBookOrderMetaTemplate().catch(() => {});
-          const sampleOrder = {
-            veli_ad_soyad: vars.veli_ad_soyad || 'Test Veli',
-            ogrenci_ad_soyad: vars.ogrenci_ad_soyad || 'Test Öğrenci',
-            sinif: vars.sinif || '11',
-            kitap_seti: vars.kitap_seti || '11.sınıf Vip Set',
-            ucret_durumu: vars.ucret_durumu || 'Ödendi',
-            telefon: vars.telefon || '05013715302',
-            adres: vars.adres || 'Test Mah. No:1',
-            ilce: vars.ilce || 'Köşk',
-            il: vars.il || 'Aydın',
-            siparis_notu: vars.siparis_notu || 'Test siparişi'
-          };
-          return sendBookOrderWhatsApp(e164, sampleOrder);
-        })()
-      : await sendAutomatedWhatsApp({
-          phone: e164,
-          templateType,
-          vars
-        });
+  const coachUserId = String(actor.sub || '').trim();
+  const coachId = actor.coach_id ? String(actor.coach_id) : null;
+  const effectiveChannel = resolveEffectiveSendChannel(templateType);
+
+  let sent;
+  if (templateType === BOOK_ORDER_TEMPLATE_TYPE) {
+    await activateBookOrderMetaTemplate().catch(() => {});
+    const sampleOrder = {
+      veli_ad_soyad: vars.veli_ad_soyad || 'Test Veli',
+      ogrenci_ad_soyad: vars.ogrenci_ad_soyad || 'Test Öğrenci',
+      sinif: vars.sinif || '11',
+      kitap_seti: vars.kitap_seti || '11.sınıf Vip Set',
+      ucret_durumu: vars.ucret_durumu || 'Ödendi',
+      telefon: vars.telefon || '05013715302',
+      adres: vars.adres || 'Test Mah. No:1',
+      ilce: vars.ilce || 'Köşk',
+      il: vars.il || 'Aydın',
+      siparis_notu: vars.siparis_notu || 'Test siparişi'
+    };
+    sent = await sendBookOrderWhatsApp(e164, sampleOrder);
+  } else {
+    const { data: templateRow, error: tErr } = await supabaseAdmin
+      .from('message_templates')
+      .select('*')
+      .eq('type', templateType)
+      .maybeSingle();
+    if (tErr) {
+      return res.status(500).json({ error: tErr.message || 'template_load_failed' });
+    }
+    if (!templateRow?.content) {
+      return res.status(400).json({
+        error: 'template_not_found',
+        hint: `message_templates içinde type=${templateType} kaydı yok.`
+      });
+    }
+    sent = await sendNotification({
+      notificationType: templateType,
+      phone: e164,
+      templateRow,
+      vars,
+      coachId,
+      coachUserId
+    });
+  }
 
   const today = getIstanbulDateString();
   const preview =
     sent.bodyPreview ||
     (sent.content_variables_json ? `[template vars] ${sent.content_variables_json}` : '');
+
+  const sid = sent.sid || sent.gateway_message_id || sent.meta_message_id || null;
 
   try {
     await supabaseAdmin.from('message_logs').insert({
@@ -103,7 +127,7 @@ export default async function handler(req, res) {
       twilio_sid: null,
       twilio_error_code: sent.errorCode || null,
       twilio_content_sid: null,
-      meta_message_id: sent.sid || null,
+      meta_message_id: sid,
       meta_template_name: sent.meta_template_name || null
     });
   } catch (e) {
@@ -115,15 +139,23 @@ export default async function handler(req, res) {
       ok: false,
       error: sent.error,
       errorCode: sent.errorCode,
+      channel: sent.channel || effectiveChannel,
+      channel_label: channelLabelTr(sent.channel || effectiveChannel),
+      gateway_status: sent.gateway_status || null,
       validation: sent.validation || undefined,
-      meta_template_name: sent.meta_template_name || null
+      meta_template_name: sent.meta_template_name || null,
+      hint:
+        sent.channel === 'coach_gateway' || effectiveChannel === 'coach_gateway'
+          ? 'Koç gateway kanalı — WhatsApp Ayarlarından kendi QR oturumunuzun bağlı olduğundan emin olun.'
+          : undefined
     });
   }
 
   return res.status(200).json({
     ok: true,
-    sid: sent.sid,
+    sid,
     channel: sent.channel,
+    channel_label: channelLabelTr(sent.channel),
     meta_template_name: sent.meta_template_name,
     content_variables_json: sent.content_variables_json || null,
     preview: sent.bodyPreview

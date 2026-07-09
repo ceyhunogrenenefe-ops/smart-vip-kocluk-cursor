@@ -276,6 +276,8 @@ export default function WhatsAppMerkeziPanel() {
       const j = (await res.json().catch(() => ({}))) as {
         error?: string;
         validation?: { missing?: string[]; empty?: string[] };
+        channel_label?: string;
+        hint?: string;
       };
       if (!res.ok) {
         const v = j?.validation;
@@ -283,9 +285,10 @@ export default function WhatsAppMerkeziPanel() {
           v && (v.missing?.length || v.empty?.length)
             ? ` (${[...(v.missing || []).map((m) => `eksik:${m}`), ...(v.empty || []).map((e) => `bos:${e}`)].join(', ')})`
             : '';
-        throw new Error((j?.error || res.statusText) + extra);
+        const hint = j?.hint ? ` — ${j.hint}` : '';
+        throw new Error((j?.error || res.statusText) + extra + hint);
       }
-      setTestMsg(`Gönderildi: ${tpl.name}`);
+      setTestMsg(`Gönderildi (${j?.channel_label || 'kanal bilinmiyor'}): ${tpl.name}`);
       void load();
     } catch (e) {
       setTestMsg(e instanceof Error ? e.message : String(e));

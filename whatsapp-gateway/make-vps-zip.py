@@ -2,7 +2,7 @@ import zipfile
 from pathlib import Path
 
 root = Path(__file__).resolve().parent
-out = root.parent / "whatsapp-gateway-vps.zip"
+out = root.parent / "whatsapp-gateway-vps-2026-07-06.zip"
 
 files = [
     "src/server.js",

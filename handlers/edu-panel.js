@@ -370,6 +370,63 @@ function studentCanAccessLessonRow(ctx, row, classIdsForRow = null) {
   return true;
 }
 
+function normalizeAssigneeStudentIds(raw) {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.map((x) => String(x || '').trim()).filter(Boolean))];
+}
+
+function normalizePoolAnimationIds(raw, legacyOne = null) {
+  const fromArr = Array.isArray(raw)
+    ? raw.map((x) => String(x || '').trim()).filter(Boolean)
+    : [];
+  if (fromArr.length) return [...new Set(fromArr)];
+  const one = String(legacyOne || '').trim();
+  return one ? [one] : [];
+}
+
+function normalizeHomeworkRow(h) {
+  if (!h || typeof h !== 'object') return h;
+  const pool_animation_ids = normalizePoolAnimationIds(h.pool_animation_ids, h.pool_animation_id);
+  const assignee_mode = h.assignee_mode === 'students' ? 'students' : 'class';
+  const assignee_student_ids = normalizeAssigneeStudentIds(h.assignee_student_ids);
+  return {
+    ...h,
+    pool_animation_ids,
+    pool_animation_id: pool_animation_ids[0] || h.pool_animation_id || null,
+    assignee_mode,
+    assignee_student_ids
+  };
+}
+
+function studentAssignedToHomework(hw, student) {
+  if (!hw || !student?.id) return false;
+  const mode = hw.assignee_mode === 'students' ? 'students' : 'class';
+  if (mode !== 'students') return true;
+  const ids = normalizeAssigneeStudentIds(hw.assignee_student_ids);
+  return ids.includes(String(student.id));
+}
+
+function homeworkPastDue(dueDate, now = Date.now()) {
+  const d = String(dueDate || '').trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+  return now > new Date(`${d}T23:59:59.999+03:00`).getTime();
+}
+
+function computeHwStats({ hw, rosterSize = 0, submissionCount = 0, now = Date.now() }) {
+  const mode = hw.assignee_mode === 'students' ? 'students' : 'class';
+  const total =
+    mode === 'students'
+      ? normalizeAssigneeStudentIds(hw.assignee_student_ids).length
+      : Math.max(Number(rosterSize) || 0, Number(submissionCount) || 0);
+  const submitted = Math.min(Number(submissionCount) || 0, total || Number(submissionCount) || 0);
+  const remaining = Math.max(0, (total || submitted) - submitted);
+  const late = homeworkPastDue(hw.due_date, now) ? remaining : 0;
+  const pending = homeworkPastDue(hw.due_date, now) ? 0 : remaining;
+  const denom = total || submitted || 0;
+  const rate = denom > 0 ? Math.round((submitted / denom) * 100) : 0;
+  return { submitted, pending, late, total: denom, rate };
+}
+
 async function fetchActiveLessonRowsForStudent(ctx) {
   const { classIds } = ctx;
   const { data: primary, error: pErr } = await supabaseAdmin
@@ -607,6 +664,77 @@ async function loadRow(id) {
   return data;
 }
 
+const EDU_MAX_SUBMISSION_PHOTOS = 5;
+const EDU_MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+const EDU_MAX_VIDEO_BYTES = 30 * 1024 * 1024;
+
+function submissionPhotoPaths(sub) {
+  const fromJson = Array.isArray(sub?.photo_paths)
+    ? sub.photo_paths.map((p) => String(p || '').trim()).filter(Boolean)
+    : [];
+  if (fromJson.length) return fromJson;
+  const legacy = String(sub?.storage_path || '').trim();
+  return legacy ? [legacy] : [];
+}
+
+function submissionAllMediaPaths(sub) {
+  const photos = submissionPhotoPaths(sub);
+  const video = String(sub?.video_path || '').trim();
+  return [...photos, ...(video ? [video] : [])];
+}
+
+function extFromMime(mime, fallback = 'jpg') {
+  const m = String(mime || '').toLowerCase();
+  if (m.includes('png')) return 'png';
+  if (m.includes('webp')) return 'webp';
+  if (m.includes('gif')) return 'gif';
+  if (m.includes('mp4')) return 'mp4';
+  if (m.includes('webm')) return 'webm';
+  if (m.includes('quicktime') || m.includes('mov')) return 'mov';
+  return fallback;
+}
+
+async function enrichSubmissionWithMediaUrls(sub) {
+  if (!sub) return sub;
+  const photoPaths = submissionPhotoPaths(sub);
+  const videoPath = String(sub.video_path || '').trim() || null;
+  const photo_urls = [];
+  for (const path of photoPaths) {
+    try {
+      const url = await signedEduUrl(EDU_SUBMISSIONS_BUCKET, path, 3600);
+      if (url) photo_urls.push(url);
+    } catch {
+      /* skip broken object */
+    }
+  }
+  let video_url = null;
+  if (videoPath) {
+    try {
+      video_url = await signedEduUrl(EDU_SUBMISSIONS_BUCKET, videoPath, 3600);
+    } catch {
+      /* skip */
+    }
+  }
+  return {
+    ...sub,
+    photo_paths: photoPaths,
+    photo_urls,
+    video_url,
+    has_media: photoPaths.length > 0 || Boolean(videoPath)
+  };
+}
+
+async function removeSubmissionMediaFiles(sub) {
+  const paths = submissionAllMediaPaths(sub);
+  for (const path of paths) {
+    try {
+      await removeEduObject(EDU_SUBMISSIONS_BUCKET, path);
+    } catch {
+      /* best effort */
+    }
+  }
+}
+
 async function enrichRows(rows, { viewerStudentUserId = null } = {}) {
   if (!rows?.length) return [];
   const ids = rows.map((r) => r.id);
@@ -631,10 +759,22 @@ async function enrichRows(rows, { viewerStudentUserId = null } = {}) {
     animations: (anims || []).filter((a) => a.lesson_row_id === row.id),
     homework: (hws || [])
       .filter((h) => h.lesson_row_id === row.id)
-      .map((h) => ({
-        ...h,
-        submissions: subs.filter((s) => s.homework_id === h.id)
-      }))
+      .map((h) => {
+        const norm = normalizeHomeworkRow(h);
+        const submissions = subs.filter((s) => s.homework_id === h.id);
+        return {
+          ...norm,
+          submissions,
+          stats: computeHwStats({
+            hw: norm,
+            rosterSize:
+              norm.assignee_mode === 'students'
+                ? normalizeAssigneeStudentIds(norm.assignee_student_ids).length
+                : 0,
+            submissionCount: submissions.length
+          })
+        };
+      })
   }));
 }
 
@@ -657,7 +797,10 @@ export default async function handler(req, res) {
           const enriched = await enrichRows(visible, { viewerStudentUserId: actor.sub });
           const published = enriched.map((row) => ({
             ...row,
-            homework: (row.homework || []).filter((h) => h.status === 'published')
+            homework: (row.homework || []).filter((h) => {
+              if (h.status !== 'published') return false;
+              return studentAssignedToHomework(h, ctx.student);
+            })
           }));
           return res.status(200).json({ data: published });
         }
@@ -673,7 +816,50 @@ export default async function handler(req, res) {
         }
         const { data, error } = await q;
         if (error) throw error;
-        return res.status(200).json({ data: await enrichRows(data || []) });
+        const enriched = await enrichRows(data || []);
+        /* Öğretmen kart istatistikleri: sınıf mevcudu / seçili öğrenci */
+        for (const row of enriched) {
+          let roster = null;
+          try {
+            const packed = await studentsForLessonRow(row, { actor, tags });
+            roster = packed.students || [];
+          } catch {
+            roster = [];
+          }
+          row.homework = (row.homework || []).map((h) => {
+            const norm = normalizeHomeworkRow(h);
+            const submissions = h.submissions || [];
+            const submittedStudentIds = new Set(
+              submissions.map((s) => String(s.student_id || '').trim()).filter(Boolean)
+            );
+            const submittedUserIds = new Set(
+              submissions.map((s) => String(s.student_user_id || '').trim()).filter(Boolean)
+            );
+            const pool =
+              norm.assignee_mode === 'students'
+                ? roster.filter((st) =>
+                    normalizeAssigneeStudentIds(norm.assignee_student_ids).includes(String(st.id))
+                  )
+                : roster;
+            let submitted = 0;
+            for (const st of pool) {
+              const uid = studentUserIdFromStudent(st);
+              if (submittedStudentIds.has(String(st.id)) || (uid && submittedUserIds.has(uid))) {
+                submitted += 1;
+              }
+            }
+            return {
+              ...norm,
+              submissions,
+              stats: computeHwStats({
+                hw: norm,
+                rosterSize: pool.length,
+                submissionCount: submitted
+              })
+            };
+          });
+        }
+        return res.status(200).json({ data: enriched });
       }
 
       if (req.method === 'POST') {
@@ -1134,32 +1320,59 @@ export default async function handler(req, res) {
         if (!row || String(row.teacher_user_id) !== String(actor.sub)) {
           return res.status(403).json({ error: 'forbidden' });
         }
-        const poolAnimationId = body.pool_animation_id
-          ? String(body.pool_animation_id).trim()
-          : null;
-        if (poolAnimationId) {
+        const poolAnimationIds = normalizePoolAnimationIds(
+          body.pool_animation_ids,
+          body.pool_animation_id
+        );
+        for (const poolAnimationId of poolAnimationIds) {
           const pool = await loadPoolItem(poolAnimationId);
           const access = await assertPoolInstitutionAccess(actor, pool, tags);
           if (access.error) return res.status(access.status).json({ error: access.error });
           await attachPoolAnimationToRow(lessonRowId, poolAnimationId);
         }
+
+        const assigneeMode = body.assignee_mode === 'students' ? 'students' : 'class';
+        const assigneeStudentIds =
+          assigneeMode === 'students' ? normalizeAssigneeStudentIds(body.assignee_student_ids) : [];
+        if (assigneeMode === 'students' && !assigneeStudentIds.length) {
+          return res.status(400).json({ error: 'assignee_students_required' });
+        }
+
         const insertHw = {
           lesson_row_id: lessonRowId,
           title,
           book_name: body.book_name ? String(body.book_name) : null,
           question_range: body.question_range ? String(body.question_range) : null,
           description: body.description ? String(body.description) : null,
-          due_date: body.due_date ? String(body.due_date) : null,
+          due_date: body.due_date ? String(body.due_date).slice(0, 10) : null,
           status: body.status === 'published' ? 'published' : 'draft'
         };
-        if (poolAnimationId) insertHw.pool_animation_id = poolAnimationId;
+        if (poolAnimationIds[0]) insertHw.pool_animation_id = poolAnimationIds[0];
+        insertHw.pool_animation_ids = poolAnimationIds;
+        insertHw.assignee_mode = assigneeMode;
+        insertHw.assignee_student_ids = assigneeStudentIds;
+
         let hwResult = await supabaseAdmin.from('edu_homework').insert(insertHw).select().single();
-        if (hwResult.error && poolAnimationId && isOptionalEduColumnMissing(hwResult.error, 'pool_animation_id')) {
-          delete insertHw.pool_animation_id;
-          hwResult = await supabaseAdmin.from('edu_homework').insert(insertHw).select().single();
+        if (hwResult.error) {
+          const dropOptional = [
+            'pool_animation_ids',
+            'assignee_mode',
+            'assignee_student_ids',
+            'pool_animation_id'
+          ];
+          let retried = false;
+          for (const col of dropOptional) {
+            if (isOptionalEduColumnMissing(hwResult.error, col) && insertHw[col] !== undefined) {
+              delete insertHw[col];
+              retried = true;
+            }
+          }
+          if (retried) {
+            hwResult = await supabaseAdmin.from('edu_homework').insert(insertHw).select().single();
+          }
         }
         if (hwResult.error) throw hwResult.error;
-        return res.status(201).json({ data: hwResult.data });
+        return res.status(201).json({ data: normalizeHomeworkRow(hwResult.data) });
       }
       if (req.method === 'PATCH') {
         const hwId = rowId || String(req.query?.homework_id || '').trim();
@@ -1175,6 +1388,20 @@ export default async function handler(req, res) {
         for (const k of ['title', 'book_name', 'question_range', 'description', 'due_date', 'status']) {
           if (body[k] !== undefined) patch[k] = body[k];
         }
+        if (body.assignee_mode !== undefined) {
+          patch.assignee_mode = body.assignee_mode === 'students' ? 'students' : 'class';
+        }
+        if (body.assignee_student_ids !== undefined) {
+          patch.assignee_student_ids = normalizeAssigneeStudentIds(body.assignee_student_ids);
+        }
+        if (body.pool_animation_ids !== undefined || body.pool_animation_id !== undefined) {
+          const ids = normalizePoolAnimationIds(body.pool_animation_ids, body.pool_animation_id);
+          patch.pool_animation_ids = ids;
+          patch.pool_animation_id = ids[0] || null;
+          for (const pid of ids) {
+            await attachPoolAnimationToRow(hw.lesson_row_id, pid);
+          }
+        }
         const { data, error } = await supabaseAdmin
           .from('edu_homework')
           .update(patch)
@@ -1182,7 +1409,7 @@ export default async function handler(req, res) {
           .select()
           .single();
         if (error) throw error;
-        return res.status(200).json({ data });
+        return res.status(200).json({ data: normalizeHomeworkRow(data) });
       }
       if (req.method === 'DELETE') {
         const hwId = rowId;
@@ -1214,7 +1441,39 @@ export default async function handler(req, res) {
           .eq('homework_id', hwId)
           .order('submitted_at', { ascending: false });
         if (error) throw error;
-        return res.status(200).json({ data: data || [] });
+        const subs = data || [];
+        const studentIds = [...new Set(subs.map((s) => s.student_id).filter(Boolean))];
+        const userIds = [...new Set(subs.map((s) => s.student_user_id).filter(Boolean))];
+        const nameByStudentId = {};
+        const nameByUserId = {};
+        if (studentIds.length) {
+          const { data: students } = await supabaseAdmin
+            .from('students')
+            .select('id, name, user_id, platform_user_id')
+            .in('id', studentIds);
+          for (const st of students || []) {
+            nameByStudentId[st.id] = st.name || 'Öğrenci';
+            const uid = String(st.platform_user_id || st.user_id || '').trim();
+            if (uid) nameByUserId[uid] = st.name || 'Öğrenci';
+          }
+        }
+        if (userIds.length) {
+          const { data: users } = await supabaseAdmin.from('users').select('id, name').in('id', userIds);
+          for (const u of users || []) {
+            if (!nameByUserId[u.id]) nameByUserId[u.id] = u.name || 'Öğrenci';
+          }
+        }
+        const enriched = await Promise.all(
+          subs.map(async (s) => {
+            const withUrls = await enrichSubmissionWithMediaUrls(s);
+            const student_name =
+              (s.student_id && nameByStudentId[s.student_id]) ||
+              nameByUserId[s.student_user_id] ||
+              'Öğrenci';
+            return { ...withUrls, student_name };
+          })
+        );
+        return res.status(200).json({ data: enriched });
       }
       if (req.method === 'PATCH') {
         const subId = rowId;
@@ -1239,6 +1498,12 @@ export default async function handler(req, res) {
         if (body.teacher_note !== undefined) patch.teacher_note = body.teacher_note;
         if (body.grade !== undefined) patch.grade = body.grade;
         if (body.status !== undefined) patch.status = body.status;
+        if (body.delete_media === true) {
+          await removeSubmissionMediaFiles(sub);
+          patch.storage_path = null;
+          patch.photo_paths = [];
+          patch.video_path = null;
+        }
         const { data, error } = await supabaseAdmin
           .from('edu_homework_submissions')
           .update(patch)
@@ -1246,7 +1511,8 @@ export default async function handler(req, res) {
           .select()
           .single();
         if (error) throw error;
-        return res.status(200).json({ data });
+        const enriched = await enrichSubmissionWithMediaUrls(data);
+        return res.status(200).json({ data: enriched });
       }
     }
 
@@ -1255,8 +1521,18 @@ export default async function handler(req, res) {
       actor = await enrichStudentActor(actor);
       const body = parseBody(req);
       const homeworkId = String(body.homework_id || '').trim();
-      const b64 = String(body.image_base64 || '');
-      if (!homeworkId || !b64) return res.status(400).json({ error: 'homework_id_and_file_required' });
+      if (!homeworkId) return res.status(400).json({ error: 'homework_id_required' });
+
+      const legacyB64 = String(body.image_base64 || '').trim();
+      const photosInput = Array.isArray(body.photos_base64) ? body.photos_base64 : [];
+      const videoB64 = String(body.video_base64 || '').trim();
+      const hasLegacyPhoto = Boolean(legacyB64);
+      const hasPhotos = photosInput.length > 0 || hasLegacyPhoto;
+      const hasVideo = Boolean(videoB64);
+      if (!hasPhotos && !hasVideo) {
+        /* Medya olmadan teslim — kayıt oluşturulur */
+      }
+
       const { data: hw } = await supabaseAdmin.from('edu_homework').select('*').eq('id', homeworkId).maybeSingle();
       if (!hw || hw.status !== 'published') {
         return res.status(403).json({ error: 'homework_not_available' });
@@ -1269,29 +1545,83 @@ export default async function handler(req, res) {
       if (!(await canStudentAccessRow(ctx, lessonRow))) {
         return res.status(403).json({ error: 'not_in_class' });
       }
+      if (!studentAssignedToHomework(normalizeHomeworkRow(hw), ctx.student)) {
+        return res.status(403).json({ error: 'not_assigned' });
+      }
       const student = ctx.student;
-      const buf = Buffer.from(b64, 'base64');
-      if (buf.length > 20 * 1024 * 1024) return res.status(400).json({ error: 'file_too_large' });
-      const path = `${homeworkId}/${actor.sub}-${Date.now()}.jpg`;
-      await uploadEduBuffer({
-        bucket: EDU_SUBMISSIONS_BUCKET,
-        path,
-        buffer: buf,
-        contentType: body.mime || 'image/jpeg'
-      });
+
+      const { data: existing } = await supabaseAdmin
+        .from('edu_homework_submissions')
+        .select('*')
+        .eq('homework_id', homeworkId)
+        .eq('student_user_id', actor.sub)
+        .maybeSingle();
+      if (existing) {
+        await removeSubmissionMediaFiles(existing);
+      }
+
+      const photoPaths = [];
+      let videoPath = null;
+      const ts = Date.now();
+
+      const uploadPhoto = async (b64, mime, index) => {
+        const buf = Buffer.from(b64, 'base64');
+        if (!buf.length) throw new Error('empty_photo');
+        if (buf.length > EDU_MAX_PHOTO_BYTES) throw new Error('photo_too_large');
+        const ext = extFromMime(mime, 'jpg');
+        const path = `${homeworkId}/${actor.sub}-${ts}-${index}.${ext}`;
+        await uploadEduBuffer({
+          bucket: EDU_SUBMISSIONS_BUCKET,
+          path,
+          buffer: buf,
+          contentType: mime || 'image/jpeg'
+        });
+        photoPaths.push(path);
+      };
+
+      if (hasLegacyPhoto) {
+        await uploadPhoto(legacyB64, body.mime || 'image/jpeg', 0);
+      } else {
+        const capped = photosInput.slice(0, EDU_MAX_SUBMISSION_PHOTOS);
+        for (let i = 0; i < capped.length; i++) {
+          const item = capped[i];
+          const b64 = typeof item === 'string' ? item : String(item?.data || item?.base64 || '').trim();
+          if (!b64) continue;
+          const mime = typeof item === 'object' && item?.mime ? String(item.mime) : 'image/jpeg';
+          await uploadPhoto(b64, mime, photoPaths.length);
+        }
+      }
+
+      if (hasVideo) {
+        const vBuf = Buffer.from(videoB64, 'base64');
+        if (!vBuf.length) return res.status(400).json({ error: 'empty_video' });
+        if (vBuf.length > EDU_MAX_VIDEO_BYTES) return res.status(400).json({ error: 'video_too_large' });
+        const vMime = String(body.video_mime || 'video/mp4');
+        if (!vMime.startsWith('video/')) return res.status(400).json({ error: 'invalid_video_type' });
+        const vExt = extFromMime(vMime, 'mp4');
+        videoPath = `${homeworkId}/${actor.sub}-${ts}-video.${vExt}`;
+        await uploadEduBuffer({
+          bucket: EDU_SUBMISSIONS_BUCKET,
+          path: videoPath,
+          buffer: vBuf,
+          contentType: vMime
+        });
+      }
+
+      const upsertRow = {
+        homework_id: homeworkId,
+        student_user_id: actor.sub,
+        student_id: student?.id || null,
+        storage_path: photoPaths[0] || null,
+        photo_paths: photoPaths,
+        video_path: videoPath,
+        submitted_at: new Date().toISOString(),
+        status: 'submitted'
+      };
+
       const { data, error } = await supabaseAdmin
         .from('edu_homework_submissions')
-        .upsert(
-          {
-            homework_id: homeworkId,
-            student_user_id: actor.sub,
-            student_id: student?.id || null,
-            storage_path: path,
-            submitted_at: new Date().toISOString(),
-            status: 'submitted'
-          },
-          { onConflict: 'homework_id,student_user_id' }
-        )
+        .upsert(upsertRow, { onConflict: 'homework_id,student_user_id' })
         .select()
         .single();
       if (error) throw error;
@@ -1427,7 +1757,158 @@ export default async function handler(req, res) {
         .eq('homework_id', homeworkId)
         .eq('student_user_id', actor.sub)
         .maybeSingle();
-      return res.status(200).json({ data: data || null });
+      const enriched = data ? await enrichSubmissionWithMediaUrls(data) : null;
+      return res.status(200).json({ data: enriched });
+    }
+
+    if (resource === 'teacher-students' && req.method === 'GET') {
+      if (!canTeach(tags)) return res.status(403).json({ error: 'forbidden' });
+      const lessonRowId = String(req.query?.lesson_row_id || '').trim();
+      if (lessonRowId) {
+        const row = await loadRow(lessonRowId);
+        if (!row) return res.status(404).json({ error: 'not_found' });
+        if (
+          String(row.teacher_user_id) !== String(actor.sub) &&
+          !tags.includes('admin') &&
+          !tags.includes('super_admin')
+        ) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        const { students } = await studentsForLessonRow(row, { actor, tags });
+        return res.status(200).json({
+          data: (students || []).map((st) => ({
+            id: st.id,
+            name: st.name || 'Öğrenci',
+            user_id: studentUserIdFromStudent(st) || null,
+            class_id: st.class_id || null
+          }))
+        });
+      }
+      let classQ = supabaseAdmin.from('classes').select('id, name').eq('status', 'active');
+      if (!tags.includes('super_admin') && actor.institution_id) {
+        classQ = classQ.eq('institution_id', actor.institution_id);
+      }
+      const { data: allClasses } = await classQ;
+      const accessible = [];
+      for (const cls of allClasses || []) {
+        if (await teacherCanAccessClass(actor, cls.id, tags)) accessible.push(cls);
+      }
+      if (!accessible.length) return res.status(200).json({ data: [] });
+      const classIds = accessible.map((c) => c.id);
+      const { data: cs } = await supabaseAdmin
+        .from('class_students')
+        .select('student_id, class_id')
+        .in('class_id', classIds);
+      const sids = [...new Set((cs || []).map((x) => String(x.student_id)).filter(Boolean))];
+      if (!sids.length) return res.status(200).json({ data: [] });
+      const { data: students } = await supabaseAdmin
+        .from('students')
+        .select('id, name, user_id, platform_user_id')
+        .in('id', sids)
+        .order('name');
+      const classByStudent = new Map();
+      for (const link of cs || []) {
+        if (!classByStudent.has(link.student_id)) classByStudent.set(link.student_id, link.class_id);
+      }
+      return res.status(200).json({
+        data: (students || []).map((st) => ({
+          id: st.id,
+          name: st.name || 'Öğrenci',
+          user_id: studentUserIdFromStudent(st) || null,
+          class_id: classByStudent.get(st.id) || null
+        }))
+      });
+    }
+
+    if (resource === 'homework-stats' && req.method === 'GET') {
+      if (!canTeach(tags)) return res.status(403).json({ error: 'forbidden' });
+      const hwId = String(req.query?.homework_id || '').trim();
+      if (!hwId) return res.status(400).json({ error: 'homework_id_required' });
+      const { data: hw } = await supabaseAdmin.from('edu_homework').select('*').eq('id', hwId).maybeSingle();
+      if (!hw) return res.status(404).json({ error: 'not_found' });
+      const hwRow = await loadRow(hw.lesson_row_id);
+      if (String(hwRow?.teacher_user_id) !== String(actor.sub) && !tags.includes('admin')) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const norm = normalizeHomeworkRow(hw);
+      const { students } = await studentsForLessonRow(hwRow, { actor, tags });
+      const roster =
+        norm.assignee_mode === 'students'
+          ? (students || []).filter((st) =>
+              normalizeAssigneeStudentIds(norm.assignee_student_ids).includes(String(st.id))
+            )
+          : students || [];
+      const { data: subs } = await supabaseAdmin
+        .from('edu_homework_submissions')
+        .select('*')
+        .eq('homework_id', hwId)
+        .order('submitted_at', { ascending: true });
+      const submissions = subs || [];
+      const submittedStudentIds = new Set(
+        submissions.map((s) => String(s.student_id || '').trim()).filter(Boolean)
+      );
+      const submittedUserIds = new Set(
+        submissions.map((s) => String(s.student_user_id || '').trim()).filter(Boolean)
+      );
+      let submitted = 0;
+      const missing = [];
+      for (const st of roster) {
+        const uid = studentUserIdFromStudent(st);
+        const ok = submittedStudentIds.has(String(st.id)) || (uid && submittedUserIds.has(uid));
+        if (ok) submitted += 1;
+        else missing.push(st.name || 'Öğrenci');
+      }
+      const stats = computeHwStats({
+        hw: norm,
+        rosterSize: roster.length,
+        submissionCount: submitted
+      });
+      const nameByStudent = Object.fromEntries(roster.map((s) => [s.id, s.name || 'Öğrenci']));
+      const sorted = [...submissions].sort(
+        (a, b) => new Date(a.submitted_at).getTime() - new Date(b.submitted_at).getTime()
+      );
+      const earliest = sorted[0]
+        ? {
+            name: nameByStudent[sorted[0].student_id] || 'Öğrenci',
+            at: sorted[0].submitted_at
+          }
+        : null;
+      const latest = sorted.length
+        ? {
+            name: nameByStudent[sorted[sorted.length - 1].student_id] || 'Öğrenci',
+            at: sorted[sorted.length - 1].submitted_at
+          }
+        : null;
+      let photoCount = 0;
+      let videoCount = 0;
+      for (const s of submissions) {
+        if (submissionPhotoPaths(s).length) photoCount += 1;
+        if (String(s.video_path || '').trim()) videoCount += 1;
+      }
+      const rosterStatus = roster.map((st) => {
+        const uid = studentUserIdFromStudent(st);
+        const ok = submittedStudentIds.has(String(st.id)) || (uid && submittedUserIds.has(uid));
+        let status = 'pending';
+        if (ok) status = 'submitted';
+        else if (homeworkPastDue(norm.due_date)) status = 'late';
+        return {
+          id: st.id,
+          name: st.name || 'Öğrenci',
+          user_id: uid || null,
+          status
+        };
+      });
+      return res.status(200).json({
+        data: {
+          ...stats,
+          earliest,
+          latest,
+          missingNames: missing,
+          photoCount,
+          videoCount,
+          roster: rosterStatus
+        }
+      });
     }
 
     return res.status(405).json({ error: 'method_not_allowed' });
@@ -1439,8 +1920,19 @@ export default async function handler(req, res) {
     if (isSchemaMissing(e)) {
       return res.status(503).json({
         error: 'edu_schema_missing',
-        hint: 'Supabase: sql/2026-05-37-edu-lesson-rows.sql ve Storage bucket edu-animations, edu-homework-submissions'
+        hint:
+          'Supabase: sql/2026-05-37-edu-lesson-rows.sql, sql/2026-07-07-edu-homework-solution-media.sql, sql/2026-07-08-edu-homework-enhancements.sql ve Storage bucket edu-homework-submissions'
       });
+    }
+    const mediaHints = {
+      photo_too_large: 'Fotoğraf en fazla 10 MB olabilir.',
+      video_too_large: 'Video en fazla 30 MB olabilir.',
+      empty_photo: 'Fotoğraf dosyası okunamadı.',
+      empty_video: 'Video dosyası okunamadı.',
+      invalid_video_type: 'Geçersiz video formatı (mp4, webm, mov).'
+    };
+    if (mediaHints[msg]) {
+      return res.status(400).json({ error: msg, hint: mediaHints[msg] });
     }
     return res.status(500).json({ error: msg });
   }

@@ -443,6 +443,120 @@ function ensurePhoneJid(phone) {
   return `${onlyDigits}@s.whatsapp.net`;
 }
 
+function phoneDigitsFromJid(jid) {
+  const userPart = String(jid || '').split('@')[0].split(':')[0];
+  return userPart.replace(/\D/g, '') || null;
+}
+
+function jidBare(jid) {
+  return String(jid || '').split(':')[0];
+}
+
+function messageKeysMatch(a, b) {
+  if (!a?.id || !b?.id || a.id !== b.id) return false;
+  return jidBare(a.remoteJid) === jidBare(b.remoteJid);
+}
+
+/** WhatsApp'ın döndürdüğü gerçek JID (PN veya LID); yoksa numara kayıtlı değil. */
+async function resolveRecipientJid(sock, digits) {
+  const fallbackPn = ensurePhoneJid(digits);
+  if (!fallbackPn) {
+    const err = new Error('invalid_phone');
+    err.httpStatus = 400;
+    throw err;
+  }
+
+  let onWaResults;
+  try {
+    onWaResults = await withTimeout(
+      () => sock.onWhatsApp(fallbackPn),
+      ON_WHATSAPP_TIMEOUT_MS,
+      'on_whatsapp_timeout'
+    );
+  } catch (checkErr) {
+    const msg = checkErr instanceof Error ? checkErr.message : String(checkErr);
+    if (msg === 'on_whatsapp_timeout' || /jid\.replace is not a function/i.test(msg)) {
+      logger.warn({ digits, err: msg }, 'onWhatsApp failed — PN jid ile denenecek');
+      return fallbackPn;
+    }
+    throw checkErr;
+  }
+
+  const hit = Array.isArray(onWaResults) ? onWaResults.find((r) => r?.exists) : null;
+  if (!hit) {
+    logger.warn({ digits }, 'onWhatsApp: numara bulunamadı — PN jid ile denenecek');
+    return fallbackPn;
+  }
+
+  let jid = String(hit.jid || hit.lid || '').trim();
+  if (!jid) jid = fallbackPn;
+
+  try {
+    const lid = await sock.signalRepository?.lidMapping?.getLIDForPN?.(jid);
+    if (lid && String(lid).includes('@')) {
+      jid = String(lid);
+    }
+  } catch {
+    /* LID eşlemesi yoksa PN jid yeterli */
+  }
+
+  return jid;
+}
+
+const WA_STATUS_SERVER_ACK = 1;
+
+function waitForMessageServerAck(sock, key, timeoutMs = 9000) {
+  return new Promise((resolve) => {
+    if (!key?.id) {
+      resolve(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      sock.ev.off('messages.update', handler);
+      resolve(false);
+    }, Math.max(2000, timeoutMs));
+
+    const handler = (updates) => {
+      for (const u of updates) {
+        if (!messageKeysMatch(u.key, key)) continue;
+        const st = u.update?.status;
+        if (st !== undefined && st !== null && Number(st) >= WA_STATUS_SERVER_ACK) {
+          clearTimeout(timer);
+          sock.ev.off('messages.update', handler);
+          resolve(true);
+          return;
+        }
+      }
+    };
+    sock.ev.on('messages.update', handler);
+  });
+}
+
+async function sendTextWithDeliveryCheck(sock, jid, message, retriesLeft = SEND_MESSAGE_RETRIES) {
+  const result = await sendTextWithTimeout(sock, jid, message, retriesLeft);
+  const mid = result?.key?.id ? String(result.key.id).trim() : '';
+  if (!mid) {
+    const err = new Error('send_no_message_id');
+    err.httpStatus = 502;
+    throw err;
+  }
+
+  const immediateStatus = result?.status;
+  if (immediateStatus !== undefined && immediateStatus !== null && Number(immediateStatus) >= WA_STATUS_SERVER_ACK) {
+    return result;
+  }
+
+  const acked = await waitForMessageServerAck(sock, result.key, 9000);
+  if (!acked) {
+    const err = new Error('send_not_acknowledged');
+    err.httpStatus = 502;
+    err.hint =
+      'WhatsApp sunucusu mesajı onaylamadı. Oturumu yenileyin (QR) veya birkaç saniye sonra tekrar deneyin.';
+    throw err;
+  }
+  return result;
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -680,22 +794,25 @@ async function stopStuckSessionIfNeeded(coachId) {
 function linkedPhoneFromSession(session) {
   const jid = session?.sock?.user?.id;
   if (!jid) return null;
-  const digits = String(jid).replace(/@.+$/, '').replace(/\D/g, '');
-  return digits || null;
+  return phoneDigitsFromJid(jid);
 }
 
 function sessionPayload(coachId, session, extra = {}) {
   const st = session?.status || 'idle';
   const linkedPhone = st === 'connected' ? linkedPhoneFromSession(session) : null;
+  const sendReady = isSessionReady(session);
+  const conflictCoachId = session?.conflictCoachId ? String(session.conflictCoachId) : null;
   return {
     ok: true,
     coachId,
     sessionCoachId: coachId,
     status: st,
+    sendReady,
     qr: session?.qr || null,
     connectedAt: session?.connectedAt || null,
     lastError: session?.lastError || null,
     linkedPhone,
+    conflictCoachId,
     ...extra,
   };
 }
@@ -844,7 +961,8 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
           sessionState.status = 'logged_out';
           sessionState.qr = null;
           sessionState.lastError =
-            'Bu WhatsApp numarası başka bir kullanıcı hesabına bağlı. O hesaptan çıkış yapın veya kendi numaranızı QR ile bağlayın.';
+            'Bu WhatsApp numarası başka bir panel kullanıcısına bağlı. O hesaptan WhatsApp çıkışı yapın veya farklı numara kullanın.';
+          sessionState.conflictCoachId = conflictCoach;
           try {
             await endSocket(sock);
           } catch {
@@ -1115,6 +1233,15 @@ app.get('/sessions/:coachId/status', requireGatewayAuth, requireCoachScope, asyn
     );
   }
 
+  if (session.status === 'connected' && !isSessionReady(session)) {
+    logger.warn({ coachId }, 'stale connected session — reconnecting');
+    session.status = 'reconnecting';
+    session.lastError = session.lastError || 'Oturum yeniden bağlanıyor…';
+    void setupSession(coachId, { allowDiskAuth: true }).catch((err) => {
+      logger.warn({ err, coachId }, 'stale session reconnect failed');
+    });
+  }
+
   return res.json(
     sessionPayload(coachId, session, {
       authOnDisk,
@@ -1192,13 +1319,13 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
     req.body?.strict_session === true ||
     String(req.headers['x-gateway-strict-session'] || '').trim() === '1';
   try {
-    const jid = ensurePhoneJid(digits);
     const message = String(req.body?.message || '').trim();
-    if (!jid || !message) {
+    if (!digits || !message) {
       return res.status(400).json({ ok: false, error: 'phone_and_message_required' });
     }
 
     let sendMeta = { sharedFallback: false, usedCoachId: coachId };
+    let resolvedJid = null;
     const result = await runInCoachSendQueue(coachId, async () => {
       const resolved = await resolveSendSession(coachId, { strictSession });
       sendMeta = {
@@ -1219,23 +1346,8 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
         throw err;
       }
 
-      try {
-        if (!SKIP_ON_WHATSAPP_CHECK) {
-          const onWa = await withTimeout(
-            () => session.sock.onWhatsApp(digits),
-            ON_WHATSAPP_TIMEOUT_MS,
-            'on_whatsapp_timeout'
-          );
-          const exists = Array.isArray(onWa) && onWa.some((r) => r?.exists);
-          if (!exists) {
-            logger.warn({ coachId, digits }, 'onWhatsApp precheck negative — trying send anyway');
-          }
-        }
-      } catch (checkErr) {
-        logger.warn({ err: checkErr, coachId, digits }, 'onWhatsApp check skipped — trying send anyway');
-      }
-
-      return sendTextWithTimeout(session.sock, jid, message);
+      resolvedJid = await resolveRecipientJid(session.sock, digits);
+      return sendTextWithDeliveryCheck(session.sock, resolvedJid, message);
     });
 
     const mid = result?.key?.id ? String(result.key.id).trim() : '';
@@ -1251,6 +1363,7 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
       ok: true,
       id: mid,
       phone: digits,
+      jid: resolvedJid || undefined,
       shared_fallback: sendMeta.sharedFallback,
       gateway_session_id: sendMeta.usedCoachId,
     });
@@ -1286,6 +1399,16 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
       status = 504;
       outError = 'send_precheck_timeout';
       hint = 'Numara doğrulama aşaması zaman aşımına uğradı; yeniden deneyin.';
+    }
+    if (outError === 'send_not_acknowledged') {
+      status = 502;
+      hint =
+        (typeof error === 'object' && error !== null && typeof error.hint === 'string' && error.hint) ||
+        'WhatsApp sunucusu mesajı onaylamadı. Oturumu sıfırlayıp QR ile yeniden bağlanın.';
+      const cur = sessions.get(coachId);
+      if (cur && cur.status === 'connected') {
+        scheduleReconnect(coachId, cur, cur.generation, 'send_not_acknowledged');
+      }
     }
 
     const logLevel = outError === 'number_not_on_whatsapp' ? 'warn' : 'error';

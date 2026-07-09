@@ -31,7 +31,8 @@ import {
   CalendarDays,
   Bot,
   CloudDownload,
-  ScrollText
+  ScrollText,
+  UserCheck
 } from 'lucide-react';
 import type { UserRole } from '../../../types';
 
@@ -159,6 +160,7 @@ const WHATSAPP_ORDER = ['/whatsapp', '/message-templates', '/coach-whatsapp-sett
 const ORG_SYSTEM_PATHS = new Set([
   '/super-admin',
   '/user-management',
+  '/private-lesson-assignments',
   '/notifications',
   '/system-management',
   '/veli-onay',
@@ -167,6 +169,7 @@ const ORG_SYSTEM_PATHS = new Set([
 const ORG_SYSTEM_ORDER = [
   '/super-admin',
   '/user-management',
+  '/private-lesson-assignments',
   '/notifications',
   '/system-management',
   '/veli-onay',
@@ -238,6 +241,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
       { path: '/teachers', icon: GraduationCap, label: 'Öğretmenler' },
       { path: '/coaches', icon: Users, label: 'Koçlar' },
+      { path: '/private-lesson-assignments', icon: UserCheck, label: 'Özel ders atama' },
       { path: '/super-admin', icon: Server, label: 'Kurum Yönetimi' },
       { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
       { path: '/notifications', icon: Bell, label: 'Bildirimler' },
@@ -275,6 +279,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
     { path: '/teachers', icon: GraduationCap, label: 'Öğretmenler' },
     { path: '/coaches', icon: Users, label: 'Koçlar' },
+    { path: '/private-lesson-assignments', icon: UserCheck, label: 'Özel ders atama' },
     { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
     { path: '/academic-center', icon: Sparkles, label: 'Akademik Merkez' },
     { path: '/book-tracking', icon: BookMarked, label: 'Kitap Takibi' },

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { resolveStudentRecordId } from '../../lib/coachResolve';
@@ -8,17 +9,16 @@ import {
   hasEtutReturnReportFlag,
 } from '../../lib/etutSession';
 import { EtutSessionReportModal } from './EtutSessionReportModal';
-import { EtutReportRedirectOverlay } from './EtutReportRedirectOverlay';
 import { userRoleTags } from '../../config/rolePermissions';
 
-const REDIRECT_MS = 1400;
-
 /**
- * Etüt odasından dönünce öğrenciye kısa rapor formu gösterir.
+ * Etüt odasından dönünce öğrenciye doğrudan rapor formu açılır.
+ * Küçük “Etütü bitirdim — rapor ver” bildirimi yok.
  */
 export function EtutSessionReturnGate() {
   const { effectiveUser } = useAuth();
   const { students } = useApp();
+  const [searchParams, setSearchParams] = useSearchParams();
   const tags = userRoleTags(effectiveUser);
   const isStudent = tags.includes('student');
 
@@ -40,10 +40,9 @@ export function EtutSessionReturnGate() {
   const [pending, setPending] = useState(() =>
     studentId ? pendingEtutSessionForStudent(studentId) : null
   );
-  const [showRedirect, setShowRedirect] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [wasHidden, setWasHidden] = useState(false);
-  const redirectTimer = useRef<number | null>(null);
+  const logoutHandled = useRef(false);
 
   const syncPending = useCallback(() => {
     if (!studentId) {
@@ -53,42 +52,38 @@ export function EtutSessionReturnGate() {
     setPending(pendingEtutSessionForStudent(studentId));
   }, [studentId]);
 
-  const openReportWithRedirect = useCallback(() => {
-    if (!studentId || !hasEtutReturnReportFlag()) return;
+  const openReportNow = useCallback(() => {
+    if (!studentId) return;
     const p = getPendingEtutSession();
     if (!p || p.studentId !== studentId) return;
+    if (!hasEtutReturnReportFlag() && searchParams.get('etut_report') !== '1') return;
     setPending(p);
-    setShowRedirect(true);
-    setShowReport(false);
-    if (redirectTimer.current) window.clearTimeout(redirectTimer.current);
-    redirectTimer.current = window.setTimeout(() => {
-      setShowRedirect(false);
-      setShowReport(true);
-      redirectTimer.current = null;
-    }, REDIRECT_MS);
-  }, [studentId]);
-
-  const openReportDirect = useCallback(() => {
-    if (redirectTimer.current) {
-      window.clearTimeout(redirectTimer.current);
-      redirectTimer.current = null;
-    }
-    setShowRedirect(false);
     setShowReport(true);
-  }, []);
+  }, [studentId, searchParams]);
 
   useEffect(() => {
     syncPending();
-    return () => {
-      if (redirectTimer.current) window.clearTimeout(redirectTimer.current);
-    };
   }, [syncPending]);
+
+  /** BBB logoutURL → doğrudan rapor */
+  useEffect(() => {
+    if (!studentId || logoutHandled.current) return;
+    if (searchParams.get('etut_report') !== '1') return;
+    const p = getPendingEtutSession();
+    if (!p || p.studentId !== studentId) return;
+    logoutHandled.current = true;
+    setPending(p);
+    setShowReport(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete('etut_report');
+    setSearchParams(next, { replace: true });
+  }, [studentId, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (!studentId) return;
     const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
-    if (nav?.type === 'back_forward') openReportWithRedirect();
-  }, [studentId, openReportWithRedirect]);
+    if (nav?.type === 'back_forward') openReportNow();
+  }, [studentId, openReportNow]);
 
   useEffect(() => {
     if (!studentId) return;
@@ -99,14 +94,14 @@ export function EtutSessionReturnGate() {
         return;
       }
       if (wasHidden) {
-        openReportWithRedirect();
+        openReportNow();
         setWasHidden(false);
       }
       syncPending();
     };
 
     const onPageShow = (e: PageTransitionEvent) => {
-      if (e.persisted) openReportWithRedirect();
+      if (e.persisted) openReportNow();
       syncPending();
     };
 
@@ -116,39 +111,21 @@ export function EtutSessionReturnGate() {
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('pageshow', onPageShow);
     };
-  }, [studentId, wasHidden, openReportWithRedirect, syncPending]);
+  }, [studentId, wasHidden, openReportNow, syncPending]);
 
-  if (!isStudent || !studentId || !pending) return null;
+  if (!isStudent || !studentId || !pending || !showReport) return null;
 
   return (
-    <>
-      {showRedirect ? <EtutReportRedirectOverlay /> : null}
-
-      {!showReport && !showRedirect ? (
-        <div className="pointer-events-none fixed inset-x-0 bottom-[max(4.5rem,env(safe-area-inset-bottom))] z-[240] flex justify-center px-3 sm:bottom-6">
-          <button
-            type="button"
-            onClick={openReportDirect}
-            className="pointer-events-auto inline-flex min-h-[44px] items-center gap-2 rounded-full border border-emerald-300 bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-900/20 transition hover:bg-emerald-700 active:scale-[0.98]"
-          >
-            Etütü bitirdim — rapor ver
-          </button>
-        </div>
-      ) : null}
-
-      {showReport && pending && !showRedirect ? (
-        <EtutSessionReportModal
-          session={pending}
-          onClose={() => {
-            setShowReport(false);
-            syncPending();
-          }}
-          onSaved={() => {
-            setShowReport(false);
-            setPending(null);
-          }}
-        />
-      ) : null}
-    </>
+    <EtutSessionReportModal
+      session={pending}
+      onClose={() => {
+        setShowReport(false);
+        syncPending();
+      }}
+      onSaved={() => {
+        setShowReport(false);
+        setPending(null);
+      }}
+    />
   );
 }

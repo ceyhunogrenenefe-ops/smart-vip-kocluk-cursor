@@ -1,12 +1,20 @@
 import React, { useMemo, useState } from 'react';
-import { BookOpen, CheckCircle2, Clapperboard, FolderOpen, Play, Upload } from 'lucide-react';
+import { BookOpen, CheckCircle2, Clapperboard, FolderOpen, Play, Send } from 'lucide-react';
 import type { EduHomework, EduLessonRow, EduLessonRowProgress } from '../../types/eduPanel.types';
 import type { EduHomeworkSubmission } from '../../types/eduPanel.types';
 import EduBadgeChip from './EduBadgeChip';
 import EduCompleteTopicModal from './EduCompleteTopicModal';
+import EduHomeworkCelebrateModal from './EduHomeworkCelebrateModal';
 import EduProgressRing from './EduProgressRing';
+import EduStudentHomeworkDetailModal from './EduStudentHomeworkDetailModal';
+import EduSubmitHomeworkModal from './EduSubmitHomeworkModal';
 import { formatEduDateRange, formatLessonDate, SUBJECT_BORDER } from '../../lib/eduPanel/eduPanelUi';
 import { formatEduHomeworkLabel } from '../../lib/eduPanel/eduHomeworkForm';
+import {
+  homeworkPoolAnimationIds,
+  statusTone,
+  submissionDeliveryStatus
+} from '../../lib/eduPanel/eduHomeworkStats';
 import { badgeForPoints, progressBreakdown } from '../../lib/eduPanel/eduPanelProgress';
 
 type Props = {
@@ -19,7 +27,11 @@ type Props = {
   busyHw: string | null;
   busyProgress?: boolean;
   onOpenAnimation: (id: string) => void;
-  onSubmitHomework: (hw: EduHomework, file: File | null) => void;
+  onOpenPoolAnimation?: (poolId: string) => void;
+  onSubmitHomework: (
+    hw: EduHomework,
+    payload: { photos: File[]; video: File | null }
+  ) => Promise<void>;
   onSaveProgress: (payload: {
     animation_completed: boolean;
     homework_percent: number;
@@ -37,6 +49,7 @@ export default function StudentEduTopicCard({
   busyHw,
   busyProgress,
   onOpenAnimation,
+  onOpenPoolAnimation,
   onSubmitHomework,
   onSaveProgress
 }: Props) {
@@ -46,6 +59,9 @@ export default function StudentEduTopicCard({
   const dateRange = formatEduDateRange(row.available_from, row.available_until, row.lesson_date);
   const [tab, setTab] = useState<'animation' | 'homework'>(hasAnim ? 'animation' : 'homework');
   const [completeOpen, setCompleteOpen] = useState(false);
+  const [submitHw, setSubmitHw] = useState<EduHomework | null>(null);
+  const [detailHw, setDetailHw] = useState<EduHomework | null>(null);
+  const [celebrate, setCelebrate] = useState(false);
 
   const submittedCount = publishedHw.filter((h) => submissions[h.id]).length;
   const breakdown = useMemo(
@@ -199,7 +215,7 @@ export default function StudentEduTopicCard({
                       className="flex items-center gap-2 rounded-lg bg-violet-50 px-4 py-3 text-left text-sm font-medium text-violet-800 hover:bg-violet-100 disabled:opacity-50"
                     >
                       <Play className="h-5 w-5 shrink-0" />
-                      <span className="truncate">{a.original_name}</span>
+                      <span className="truncate">▶ İzle — {a.original_name}</span>
                     </button>
                   ))}
                 </div>
@@ -218,47 +234,88 @@ export default function StudentEduTopicCard({
                 <div className="space-y-3">
                   {publishedHw.map((hw) => {
                     const sub = submissions[hw.id];
+                    const tone = statusTone(submissionDeliveryStatus(hw.due_date, Boolean(sub)));
+                    const poolIds = homeworkPoolAnimationIds(hw);
                     return (
                       <div
                         key={hw.id}
-                        className="rounded-lg border border-amber-100 bg-amber-50/30 p-3"
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setDetailHw(hw)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setDetailHw(hw);
+                          }
+                        }}
+                        className={`rounded-lg border border-amber-100 p-3 cursor-pointer hover:ring-1 hover:ring-amber-200 ${tone.bg}`}
                       >
-                      <p className="font-semibold text-slate-800 text-base">
-                        {formatEduHomeworkLabel(hw)}
-                      </p>
-                      {hw.book_name ? (
-                        <p className="text-xs text-amber-800 mt-1">
-                          📖 {hw.book_name}
-                          {hw.question_range ? ` · Sayfa ${hw.question_range}` : ''}
-                        </p>
-                      ) : hw.question_range ? (
-                        <p className="text-xs text-amber-800 mt-1">Sayfa {hw.question_range}</p>
-                      ) : null}
-                      {hw.title &&
-                      (hw.book_name || hw.question_range) &&
-                      hw.title !== formatEduHomeworkLabel(hw) ? (
-                        <p className="text-xs text-slate-500 mt-0.5">{hw.title}</p>
-                      ) : null}
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="font-semibold text-slate-800 text-base">
+                            {formatEduHomeworkLabel(hw)}
+                          </p>
+                          <span
+                            className={`shrink-0 rounded-md px-2 py-0.5 text-[10px] font-semibold ${tone.text} ${tone.bg}`}
+                          >
+                            {tone.emoji} {tone.label}
+                          </span>
+                        </div>
+                        {hw.book_name ? (
+                          <p className="text-xs text-amber-800 mt-1">
+                            📖 {hw.book_name}
+                            {hw.question_range ? ` · Sayfa ${hw.question_range}` : ''}
+                          </p>
+                        ) : hw.question_range ? (
+                          <p className="text-xs text-amber-800 mt-1">Sayfa {hw.question_range}</p>
+                        ) : null}
+                        {hw.title &&
+                        (hw.book_name || hw.question_range) &&
+                        hw.title !== formatEduHomeworkLabel(hw) ? (
+                          <p className="text-xs text-slate-500 mt-0.5">{hw.title}</p>
+                        ) : null}
                         {hw.due_date ? (
                           <p className="text-xs text-amber-700 mt-1">Son tarih: {hw.due_date}</p>
+                        ) : null}
+                        {poolIds.length > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {poolIds.map((id) => (
+                              <button
+                                key={id}
+                                type="button"
+                                disabled={animLoading || !onOpenPoolAnimation}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onOpenPoolAnimation?.(id);
+                                }}
+                                className="inline-flex items-center gap-1 rounded-md bg-violet-50 px-2.5 py-1.5 text-[11px] font-semibold text-violet-800 hover:bg-violet-100 disabled:opacity-50"
+                              >
+                                <Play className="h-3 w-3" />
+                                ▶ İzle
+                              </button>
+                            ))}
+                          </div>
                         ) : null}
                         {sub ? (
                           <p className="text-xs text-green-700 mt-2">
                             Teslim edildi ({new Date(sub.submitted_at).toLocaleString('tr-TR')})
                             {sub.grade ? ` · Not: ${sub.grade}` : ''}
+                            {sub.photo_paths?.length || sub.storage_path || sub.video_path ? (
+                              <span className="text-green-600"> · Medya eklendi</span>
+                            ) : null}
                           </p>
                         ) : (
-                          <label className="mt-2 flex cursor-pointer items-center gap-2 text-sm text-indigo-700">
-                            <Upload className="h-4 w-4" />
-                            {busyHw === hw.id ? 'Yükleniyor…' : 'Fotoğraf ile teslim et'}
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              disabled={busyHw === hw.id}
-                              onChange={(e) => onSubmitHomework(hw, e.target.files?.[0] || null)}
-                            />
-                          </label>
+                          <button
+                            type="button"
+                            disabled={busyHw === hw.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSubmitHw(hw);
+                            }}
+                            className="mt-2 inline-flex items-center gap-2 rounded-lg bg-amber-600 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+                          >
+                            <Send className="h-4 w-4" />
+                            {busyHw === hw.id ? 'Gönderiliyor…' : 'Ödevi Teslim Et'}
+                          </button>
                         )}
                       </div>
                     );
@@ -273,6 +330,37 @@ export default function StudentEduTopicCard({
           </div>
         ) : null}
       </article>
+
+      <EduStudentHomeworkDetailModal
+        open={Boolean(detailHw)}
+        homework={detailHw}
+        row={row}
+        submission={detailHw ? submissions[detailHw.id] : null}
+        busy={Boolean(detailHw && busyHw === detailHw.id)}
+        onClose={() => setDetailHw(null)}
+        onSubmit={() => {
+          if (!detailHw) return;
+          setSubmitHw(detailHw);
+          setDetailHw(null);
+        }}
+        onPreviewPoolAnimation={onOpenPoolAnimation}
+        onPreviewLessonAnimation={onOpenAnimation}
+      />
+
+      <EduSubmitHomeworkModal
+        open={Boolean(submitHw)}
+        homework={submitHw}
+        busy={Boolean(submitHw && busyHw === submitHw.id)}
+        onClose={() => setSubmitHw(null)}
+        onSubmit={async (payload) => {
+          if (!submitHw) return;
+          await onSubmitHomework(submitHw, payload);
+          setSubmitHw(null);
+          setCelebrate(true);
+        }}
+      />
+
+      <EduHomeworkCelebrateModal open={celebrate} onClose={() => setCelebrate(false)} />
 
       <EduCompleteTopicModal
         open={completeOpen}

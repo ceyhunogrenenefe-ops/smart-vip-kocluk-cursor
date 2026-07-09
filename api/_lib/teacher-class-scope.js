@@ -1,4 +1,5 @@
 import { supabaseAdmin } from './supabase-admin.js';
+import { studentIdsForTeacher } from './student-teacher-scope.js';
 
 /** Öğretmenin `class_teachers` tablosundaki resmi sınıf atamaları (panel / öğrenci listesi). */
 export async function getTeacherPanelClassIds(teacherUserId) {
@@ -54,6 +55,18 @@ export async function getTeacherGroupClassStudentScope(teacherUserId) {
 export async function isStudentAllowedForTeacherGroupLessons(teacherUserId, studentId) {
   const scope = await getTeacherGroupClassStudentScope(teacherUserId);
   return scope.ids.includes(String(studentId || '').trim());
+}
+
+/** Öğretmen paneli: grup sınıfı + özel ders ataması (+ kota) öğrenci id'leri */
+export async function getTeacherPanelStudentScope(teacherUserId, institutionId = null) {
+  const classIds = await getTeacherPanelClassIds(teacherUserId);
+  const ids = await studentIdsForTeacher(teacherUserId, institutionId);
+  return { ids, classIds };
+}
+
+export async function isStudentAllowedForTeacherPanel(teacherUserId, studentId, institutionId = null) {
+  const ids = await studentIdsForTeacher(teacherUserId, institutionId);
+  return ids.includes(String(studentId || '').trim());
 }
 
 /** JWT / users.roles — öğretmen paneli kapsamı uygulanmalı mı */
