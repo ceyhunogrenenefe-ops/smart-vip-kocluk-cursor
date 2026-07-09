@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { EDU_HOMEWORK_ANIMATIONS_LABEL } from '../../components/layout/sidebar/navModel';
-import { Award, BookMarked, Loader2 } from 'lucide-react';
+import { AlertCircle, Award, BookMarked, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import EduAnimationPreviewModal from '../../components/eduPanel/EduAnimationPreviewModal';
 import EduBadgeChip from '../../components/eduPanel/EduBadgeChip';
@@ -11,7 +11,7 @@ import type { EduHomeworkSubmission } from '../../types/eduPanel.types';
 import { groupRowsBySubject } from '../../lib/eduPanel/eduPanelUi';
 import { badgeForPoints } from '../../lib/eduPanel/eduPanelProgress';
 import {
-  fetchEduLessonRows,
+  fetchEduLessonRowsDetailed,
   fetchMyEduProgress,
   fetchMyEduSubmission,
   saveEduLessonProgress,
@@ -22,6 +22,8 @@ export default function StudentEduPanelPage() {
   const [rows, setRows] = useState<EduLessonRow[]>([]);
   const [progressList, setProgressList] = useState<EduLessonRowProgress[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [emptyHint, setEmptyHint] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [submissions, setSubmissions] = useState<Record<string, EduHomeworkSubmission | null>>({});
   const [busyHw, setBusyHw] = useState<string | null>(null);
@@ -36,22 +38,49 @@ export default function StudentEduPanelPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
+    setEmptyHint(null);
     try {
-      const [data, prog] = await Promise.all([fetchEduLessonRows(), fetchMyEduProgress()]);
+      const result = await fetchEduLessonRowsDetailed();
+      const data = result.data || [];
       setRows(data);
-      setProgressList(prog);
-      const subs: Record<string, EduHomeworkSubmission | null> = {};
-      for (const row of data) {
-        for (const hw of row.homework || []) {
-          if (hw.status === 'published') {
-            subs[hw.id] = await fetchMyEduSubmission(hw.id);
-          }
-        }
+      if (!data.length && result.message) {
+        setEmptyHint(result.message);
+      } else if (!data.length) {
+        setEmptyHint('Henüz size atanmış bir ödev bulunmamaktadır.');
       }
+
+      let prog: EduLessonRowProgress[] = [];
+      try {
+        prog = await fetchMyEduProgress();
+      } catch (progErr) {
+        console.warn('[edu-derslerim] progress yüklenemedi', progErr);
+      }
+      setProgressList(prog);
+
+      const subs: Record<string, EduHomeworkSubmission | null> = {};
+      await Promise.all(
+        data.flatMap((row) =>
+          (row.homework || [])
+            .filter((hw) => hw.status === 'published')
+            .map(async (hw) => {
+              try {
+                subs[hw.id] = await fetchMyEduSubmission(hw.id);
+              } catch (subErr) {
+                console.warn('[edu-derslerim] submission', hw.id, subErr);
+                subs[hw.id] = null;
+              }
+            })
+        )
+      );
       setSubmissions(subs);
       if (data.length === 1) setExpandedId(data[0].id);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Dersler yüklenemedi');
+      const msg = e instanceof Error ? e.message : 'Ödevler yüklenemedi';
+      console.error('[edu-derslerim] load failed', e);
+      setLoadError(msg);
+      setRows([]);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -145,9 +174,22 @@ export default function StudentEduPanelPage() {
         ) : null}
       </div>
 
-      {rows.length === 0 ? (
-        <p className="text-center text-sm text-slate-500 py-12">
-          Henüz yayınlanmış konu yok. Öğretmeniniz konuyu yayınladığında burada görünür.
+      {loadError ? (
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-10 text-center">
+          <AlertCircle className="h-8 w-8 text-red-500" />
+          <p className="text-sm font-medium text-red-800">Ödevler yüklenirken bir hata oluştu</p>
+          <p className="max-w-md text-sm text-red-700">{loadError}</p>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="mt-1 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+          >
+            Tekrar dene
+          </button>
+        </div>
+      ) : rows.length === 0 ? (
+        <p className="py-12 text-center text-sm text-slate-500">
+          {emptyHint || 'Henüz size atanmış bir ödev bulunmamaktadır.'}
         </p>
       ) : (
         subjectGroups.map((group) => (

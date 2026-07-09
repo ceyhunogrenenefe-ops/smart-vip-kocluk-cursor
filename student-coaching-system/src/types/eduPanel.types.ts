@@ -96,6 +96,7 @@ export type EduHomework = {
 export type EduLessonRow = {
   id: string;
   teacher_user_id: string;
+  teacher_name?: string | null;
   institution_id?: string | null;
   class_id: string;
   /** Junction tablosundan — birincil class_id dahil tüm sınıflar */

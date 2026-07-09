@@ -16,6 +16,7 @@ import {
   classIdsForStudent,
   teacherIdsForStudent
 } from '../api/_lib/student-teacher-scope.js';
+import { getIstanbulDateString } from '../api/_lib/istanbul-time.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -246,7 +247,7 @@ function mergedClassIdsForRow(row, linkMap) {
 }
 
 function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10);
+  return getIstanbulDateString();
 }
 
 function normalizeDateField(v, fallback = null) {
@@ -257,15 +258,20 @@ function normalizeDateField(v, fallback = null) {
 
 function defaultAvailableUntil(lessonDate) {
   const base = normalizeDateField(lessonDate, todayIsoDate());
-  const d = new Date(`${base}T12:00:00`);
+  const d = new Date(`${base}T12:00:00+03:00`);
   d.setDate(d.getDate() + 6);
-  return d.toISOString().slice(0, 10);
+  return getIstanbulDateString(d);
 }
 
+/**
+ * available_from/until yoksa (eski satırlar / şema eksik) yalnızca lesson_date'e
+ * sıkıştırmak ödevleri bir gün sonra öğrenciden gizler. Bitiş yoksa açık tut.
+ */
 function isRowAvailableNow(row) {
   const today = todayIsoDate();
-  const from = normalizeDateField(row.available_from, row.lesson_date);
-  const until = normalizeDateField(row.available_until, row.lesson_date);
+  const lesson = normalizeDateField(row.lesson_date, null);
+  const from = normalizeDateField(row.available_from, lesson);
+  const until = normalizeDateField(row.available_until, null);
   if (from && today < from) return false;
   if (until && today > until) return false;
   return true;
@@ -371,8 +377,16 @@ function studentCanAccessLessonRow(ctx, row, classIdsForRow = null) {
 }
 
 function normalizeAssigneeStudentIds(raw) {
-  if (!Array.isArray(raw)) return [];
-  return [...new Set(raw.map((x) => String(x || '').trim()).filter(Boolean))];
+  let list = raw;
+  if (typeof list === 'string') {
+    try {
+      list = JSON.parse(list);
+    } catch {
+      list = [];
+    }
+  }
+  if (!Array.isArray(list)) return [];
+  return [...new Set(list.map((x) => String(x || '').trim()).filter(Boolean))];
 }
 
 function normalizePoolAnimationIds(raw, legacyOne = null) {
@@ -753,8 +767,10 @@ async function enrichRows(rows, { viewerStudentUserId = null } = {}) {
     const { data } = await subQ;
     subs = data || [];
   }
+  const teacherNames = await resolveTeacherNames(rows.map((r) => r.teacher_user_id));
   return rows.map((row) => ({
     ...row,
+    teacher_name: teacherNames[String(row.teacher_user_id)] || null,
     class_ids: mergedClassIdsForRow(row, linkMap),
     animations: (anims || []).filter((a) => a.lesson_row_id === row.id),
     homework: (hws || [])
@@ -790,8 +806,19 @@ export default async function handler(req, res) {
         if (tags.includes('student')) {
           actor = await enrichStudentActor(actor);
           const ctx = await studentAccessContext(actor);
+          if (!ctx.student?.id) {
+            return res.status(200).json({
+              data: [],
+              hint: 'student_profile_missing',
+              message: 'Öğrenci profiliniz bulunamadı. Yöneticinizle iletişime geçin.'
+            });
+          }
           if (!ctx.classIds.length) {
-            return res.status(200).json({ data: [] });
+            return res.status(200).json({
+              data: [],
+              hint: 'student_not_in_class',
+              message: 'Henüz bir sınıfa kaydınız yok. Ödevler sınıf ataması sonrası burada görünür.'
+            });
           }
           const visible = await fetchActiveLessonRowsForStudent(ctx);
           const enriched = await enrichRows(visible, { viewerStudentUserId: actor.sub });

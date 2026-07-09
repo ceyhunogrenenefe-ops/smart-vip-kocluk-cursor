@@ -206,9 +206,15 @@ export function isEduTopicOpenNow(row: {
   available_until?: string | null;
   lesson_date?: string;
 }): boolean {
-  const today = new Date().toISOString().slice(0, 10);
-  const from = (row.available_from || row.lesson_date || '').slice(0, 10);
-  const until = (row.available_until || row.lesson_date || '').slice(0, 10);
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Istanbul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date());
+  const lesson = (row.lesson_date || '').slice(0, 10);
+  const from = (row.available_from || lesson || '').slice(0, 10);
+  const until = (row.available_until || '').slice(0, 10);
   if (from && today < from) return false;
   if (until && today > until) return false;
   return true;

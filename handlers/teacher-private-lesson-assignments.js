@@ -7,7 +7,9 @@ const jsonError = (res, status, error, extra) => res.status(status).json({ error
 
 function isMissingTableError(err) {
   const msg = errorMessage(err);
-  return /does not exist|schema cache/i.test(msg);
+  return /teacher_private_lesson_assignments|does not exist|schema cache|could not find the table|PGRST205|relation .* does not exist/i.test(
+    msg
+  );
 }
 
 async function assertAdminActor(actor) {
@@ -19,7 +21,7 @@ async function assertAdminActor(actor) {
 async function loadStudent(studentId) {
   const { data, error } = await supabaseAdmin
     .from('students')
-    .select('id, institution_id, name, email, first_name, last_name')
+    .select('id, institution_id, name, email')
     .eq('id', studentId)
     .maybeSingle();
   if (error) throw error;
@@ -77,28 +79,34 @@ async function enrichRows(rows) {
   const studentIds = [...new Set(rows.map((r) => r.student_id).filter(Boolean))];
   const teacherIds = [...new Set(rows.map((r) => r.teacher_id).filter(Boolean))];
 
-  const [{ data: studs }, { data: teachers }] = await Promise.all([
-    studentIds.length
-      ? supabaseAdmin.from('students').select('id, name, email, first_name, last_name').in('id', studentIds)
-      : Promise.resolve({ data: [] }),
-    teacherIds.length
-      ? supabaseAdmin.from('users').select('id, name, email').in('id', teacherIds)
-      : Promise.resolve({ data: [] })
-  ]);
+  let studs = [];
+  let teachers = [];
+  if (studentIds.length) {
+    const { data, error } = await supabaseAdmin
+      .from('students')
+      .select('id, name, email')
+      .in('id', studentIds);
+    if (error) throw error;
+    studs = data || [];
+  }
+  if (teacherIds.length) {
+    const { data, error } = await supabaseAdmin
+      .from('users')
+      .select('id, name, email')
+      .in('id', teacherIds);
+    if (error) throw error;
+    teachers = data || [];
+  }
 
-  const studMap = new Map((studs || []).map((s) => [String(s.id), s]));
-  const teachMap = new Map((teachers || []).map((t) => [String(t.id), t]));
+  const studMap = new Map(studs.map((s) => [String(s.id), s]));
+  const teachMap = new Map(teachers.map((t) => [String(t.id), t]));
 
   return rows.map((r) => {
     const st = studMap.get(String(r.student_id));
     const te = teachMap.get(String(r.teacher_id));
-    const studentName =
-      String(st?.name || '').trim() ||
-      [st?.first_name, st?.last_name].filter(Boolean).join(' ').trim() ||
-      r.student_id;
     return {
       ...r,
-      student_name: studentName,
+      student_name: String(st?.name || '').trim() || r.student_id,
       student_email: st?.email || null,
       teacher_name: te?.name || r.teacher_id,
       teacher_email: te?.email || null
@@ -282,6 +290,15 @@ export default async function handler(req, res) {
   } catch (e) {
     const msg = errorMessage(e);
     if (/Missing token|Invalid token|Token expired/i.test(msg)) return jsonError(res, 401, msg);
+    if (isMissingTableError(e)) {
+      return res.status(200).json({
+        data: [],
+        hint: 'teacher_private_lesson_assignments_sql_missing',
+        error:
+          'Atama tablosu henüz yok. Supabase SQL Editor’da sql/2026-07-10-teacher-private-lesson-assignments.sql çalıştırın.'
+      });
+    }
+    console.error('[teacher-private-lesson-assignments]', msg);
     return jsonError(res, 500, msg);
   }
 }

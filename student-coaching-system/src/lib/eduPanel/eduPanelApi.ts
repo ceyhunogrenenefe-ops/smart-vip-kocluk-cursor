@@ -21,10 +21,27 @@ async function parseJson<T>(res: Response): Promise<T> {
   return j;
 }
 
+export type EduLessonRowsResult = {
+  data: EduLessonRow[];
+  hint?: string;
+  message?: string;
+};
+
 export async function fetchEduLessonRows(): Promise<EduLessonRow[]> {
   const res = await apiFetch('/api/edu-panel?resource=rows');
-  const j = await parseJson<{ data: EduLessonRow[] }>(res);
+  const j = await parseJson<{ data: EduLessonRow[]; hint?: string; message?: string }>(res);
   return j.data || [];
+}
+
+/** Öğrenci paneli: boş liste ipucu / mesaj ile birlikte */
+export async function fetchEduLessonRowsDetailed(): Promise<EduLessonRowsResult> {
+  const res = await apiFetch('/api/edu-panel?resource=rows');
+  const j = await parseJson<{ data: EduLessonRow[]; hint?: string; message?: string }>(res);
+  return {
+    data: j.data || [],
+    hint: j.hint,
+    message: j.message
+  };
 }
 
 export async function createEduLessonRow(

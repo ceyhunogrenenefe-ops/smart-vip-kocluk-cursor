@@ -103,6 +103,9 @@ export default function StudentEduTopicCard({
             </p>
             <h2 className="text-lg font-semibold text-slate-800">{row.title}</h2>
             <p className="text-sm text-slate-600">{row.subject_name}</p>
+            {row.teacher_name ? (
+              <p className="text-xs text-slate-500 mt-0.5">Öğretmen: {row.teacher_name}</p>
+            ) : null}
             {row.notes ? <p className="mt-1 text-xs text-slate-500">{row.notes}</p> : null}
             <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
               {hasAnim ? (
