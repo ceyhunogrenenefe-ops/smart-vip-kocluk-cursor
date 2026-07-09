@@ -25,9 +25,9 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'forbidden' });
   }
 
+  const inst = actor.institution_id || null;
   const classIds = await getTeacherPanelClassIds(actor.sub);
   const { ids: studentIds } = await getTeacherPanelStudentScope(actor.sub, inst);
-  const inst = actor.institution_id || null;
 
   let classes = [];
   if (classIds.length) {

@@ -38,8 +38,10 @@ export default function TeacherPanel() {
         if (!cancelled) {
           setScopedStudents(Array.isArray(j.data?.students) ? j.data!.students! : []);
         }
-      } catch {
+      } catch (e) {
+        console.error('[TeacherPanel] teacher-scope', e);
         if (!cancelled) {
+          // API başarısızsa AppContext listesine düş (öğretmen için sunucu zaten filtreler)
           setScopedStudents(
             (contextStudents || []).map((s) => ({
               id: s.id,

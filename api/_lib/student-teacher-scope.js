@@ -82,13 +82,13 @@ export async function studentIdsForTeacher(teacherUserId, institutionId = null) 
     /* yoksay */
   }
   try {
-    let aq = supabaseAdmin
+    // institution_id filtresi burada uygulanmaz: atama satırında null kalmış olabilir.
+    // Kurum kapsamı aşağıda students tablosu üzerinden yapılır.
+    const { data: assigns } = await supabaseAdmin
       .from('teacher_private_lesson_assignments')
       .select('student_id')
       .eq('teacher_id', teacherUserId)
       .eq('active', true);
-    if (institutionId) aq = aq.eq('institution_id', institutionId);
-    const { data: assigns } = await aq;
     for (const r of assigns || []) {
       if (r.student_id) students.add(String(r.student_id));
     }
