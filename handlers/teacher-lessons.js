@@ -20,9 +20,17 @@ import {
   CoachLessonsLockError
 } from '../api/_lib/coach-lessons-lock.js';
 import { resolveStudentRowForUser } from '../api/_lib/resolve-student-id.js';
-import { isStudentAllowedForTeacherPanel } from '../api/_lib/teacher-class-scope.js';
+import { getTeacherPanelStudentScope, isStudentAllowedForTeacherPanel } from '../api/_lib/teacher-class-scope.js';
+import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
+
+async function actorRoleTagSet(actor) {
+  const tags = await normalizedUserRolesFromDb(actor?.sub);
+  const set = new Set((tags || []).map((r) => String(r || '').trim().toLowerCase()));
+  if (actor?.role) set.add(String(actor.role).trim().toLowerCase());
+  return set;
+}
 
 function respondSupabaseError(res, err) {
   const { status, body } = statusAndBodyFromSupabaseError(err);
@@ -169,11 +177,16 @@ async function canPlanLessonForStudent(actor, student) {
   if (!student) return false;
   if (actor.role === 'super_admin') return true;
   if (actor.role === 'admin') return hasInstitutionAccess(actor, student.institution_id);
-  if (actor.role === 'teacher') {
+  const tags = await actorRoleTagSet(actor);
+  if (tags.has('teacher')) {
     // Özel ders ataması: öğrenci institution_id null olsa bile panel kapsamında ise izin ver
-    return isStudentAllowedForTeacherPanel(actor.sub, student.id, actor.institution_id || null);
+    if (await isStudentAllowedForTeacherPanel(actor.sub, student.id, actor.institution_id || null)) {
+      return true;
+    }
   }
-  if (actor.role === 'coach') return Boolean(actor.coach_id && student.coach_id === actor.coach_id);
+  if (tags.has('coach')) {
+    return Boolean(actor.coach_id && student.coach_id === actor.coach_id);
+  }
   return false;
 }
 
@@ -218,20 +231,25 @@ async function handleList(req, res) {
       return b;
     };
 
-    /** Koç: yalnızca coach_id ile atanmış öğrencilerin dersleri (teacher_id eşleşmesi aranmaz) */
+    /** Koç (ve koç+öğretmen): koç öğrencileri ∪ özel ders/sınıf kapsamı */
     if (actor.role === 'coach') {
-      if (!actor.coach_id) {
-        return res.status(200).json({ data: [] });
+      const tags = await actorRoleTagSet(actor);
+      const idSet = new Set();
+      if (actor.coach_id) {
+        const { data: studs, error: se } = await supabaseAdmin
+          .from('students')
+          .select('id')
+          .eq('coach_id', actor.coach_id);
+        if (se) throw se;
+        for (const s of studs || []) {
+          if (s.id) idSet.add(String(s.id));
+        }
       }
-      const { data: studs, error: se } = await supabaseAdmin
-        .from('students')
-        .select('id')
-        .eq('coach_id', actor.coach_id);
-      if (se) throw se;
-      let studentIds = (studs || []).map((s) => s.id).filter(Boolean);
-      if (studentIds.length === 0) {
-        return res.status(200).json({ data: [] });
+      if (tags.has('teacher') && actor.sub) {
+        const { ids } = await getTeacherPanelStudentScope(actor.sub, actor.institution_id || null);
+        for (const id of ids || []) idSet.add(String(id));
       }
+      let studentIds = [...idSet];
       if (studentFilter) {
         if (!studentIds.includes(studentFilter)) {
           return res.status(200).json({ data: [] });
@@ -239,7 +257,7 @@ async function handleList(req, res) {
         studentIds = [studentFilter];
       }
 
-      const merged = [];
+      const byLessonId = new Map();
       for (let i = 0; i < studentIds.length; i += COACH_STUDENT_IN_CHUNK) {
         const slice = studentIds.slice(i, i + COACH_STUDENT_IN_CHUNK);
         let cq = teacherLessonsBaseSelect().in('student_id', slice);
@@ -251,8 +269,23 @@ async function handleList(req, res) {
           }
           return respondSupabaseError(res, pe);
         }
-        merged.push(...(part || []));
+        for (const row of part || []) byLessonId.set(String(row.id), row);
       }
+      // Koç+öğretmen: kendi teacher_id ile oluşturduğu dersler
+      if (tags.has('teacher') && actor.sub) {
+        let tq = teacherLessonsBaseSelect().eq('teacher_id', actor.sub);
+        if (platformFilter) tq = tq.eq('platform', platformFilter);
+        if (studentFilter) tq = tq.eq('student_id', studentFilter);
+        const { data: own, error: oe } = await tq;
+        if (oe) {
+          if (isTeacherLessonsRelationMissingError(oe)) {
+            return res.status(200).json({ data: [], hint: 'teacher_lessons_sql_missing' });
+          }
+          return respondSupabaseError(res, oe);
+        }
+        for (const row of own || []) byLessonId.set(String(row.id), row);
+      }
+      const merged = [...byLessonId.values()];
       merged.sort((a, b) => {
         const da = String(a.lesson_date || '').localeCompare(String(b.lesson_date || ''));
         if (da !== 0) return da;

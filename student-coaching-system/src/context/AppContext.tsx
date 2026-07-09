@@ -2958,16 +2958,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     } else if (tags.includes('admin')) {
       list = students.filter((s) => s.institutionId === effectiveUser.institutionId);
-    } else if (tags.includes('coach')) {
-      const cid = resolveCoachRecordId(
-        effectiveUser.role,
-        effectiveUser.coachId,
-        effectiveUser.email,
-        coaches,
-        { roles: tags, platformUserId: effectiveUser.id }
-      );
-      list = !cid ? [] : students.filter((s) => String(s.coachId || '') === String(cid));
-    } else if (tags.includes('teacher')) {
+    } else if (tags.includes('coach') || tags.includes('teacher')) {
+      // /api/students zaten koç ∪ sınıf/özel ders kapsamını döner; istemci tekrar coachId ile elemesin
       list = students;
     } else {
       list = students;

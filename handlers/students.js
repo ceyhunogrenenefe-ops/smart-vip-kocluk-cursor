@@ -178,51 +178,56 @@ async function assertStudentVisibilityResolved(actor, student) {
   return ok;
 }
 
-async function listStudentsByTeacherScope(actor) {
-  const { ids } = await getTeacherPanelStudentScope(actor.sub, actor.institution_id || null);
-  if (!ids.length) return [];
-  // Kurum filtresi uygulama — özel ders atanan öğrenciler institution_id null olabilir
+async function listStudentsByIds(ids) {
+  const unique = [...new Set((ids || []).map((id) => String(id || '').trim()).filter(Boolean))];
+  if (!unique.length) return [];
   const { data, error } = await supabaseAdmin
     .from('students')
     .select(STUDENT_LIST_COLUMNS)
-    .in('id', ids)
+    .in('id', unique)
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data || [];
 }
 
+async function listStudentsByTeacherScope(actor) {
+  const { ids } = await getTeacherPanelStudentScope(actor.sub, actor.institution_id || null);
+  // Kurum filtresi yok — özel ders atanan öğrenciler institution_id null olabilir
+  return listStudentsByIds(ids);
+}
+
+async function listStudentsByCoachId(coachId) {
+  if (!coachId) return [];
+  const { data, error } = await supabaseAdmin
+    .from('students')
+    .select(STUDENT_LIST_COLUMNS)
+    .eq('coach_id', coachId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+/** Koç + öğretmen aynı hesap: koç öğrencileri ∪ sınıf/özel ders kapsamı */
 async function listStudentsMergedCoachTeacher(actor, roleSet) {
-  const primary = normActorRole(actor.role);
+  const wantCoach = roleSet.has('coach') && Boolean(actor.coach_id);
+  const wantTeacher = roleSet.has('teacher') && Boolean(actor.sub);
 
-  if (primary === 'coach' && roleSet.has('coach') && actor.coach_id) {
-    const { data, error } = await supabaseAdmin
-      .from('students')
-      .select(STUDENT_LIST_COLUMNS)
-      .eq('coach_id', actor.coach_id)
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-    return data || [];
+  if (wantCoach && wantTeacher) {
+    const [coachRows, teacherRows] = await Promise.all([
+      listStudentsByCoachId(actor.coach_id),
+      listStudentsByTeacherScope(actor)
+    ]);
+    const byId = new Map();
+    for (const row of [...coachRows, ...teacherRows]) {
+      if (row?.id) byId.set(String(row.id), row);
+    }
+    return [...byId.values()].sort((a, b) =>
+      String(b.created_at || '').localeCompare(String(a.created_at || ''))
+    );
   }
 
-  if (primary === 'teacher' && roleSet.has('teacher')) {
-    return listStudentsByTeacherScope(actor);
-  }
-
-  /** İkincil etiket: birincil rol koç/öğretmen değilse dar kapsam */
-  if (roleSet.has('teacher')) {
-    return listStudentsByTeacherScope(actor);
-  }
-
-  if (roleSet.has('coach') && actor.coach_id) {
-    const { data, error } = await supabaseAdmin
-      .from('students')
-      .select(STUDENT_LIST_COLUMNS)
-      .eq('coach_id', actor.coach_id)
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-    return data || [];
-  }
-
+  if (wantTeacher) return listStudentsByTeacherScope(actor);
+  if (wantCoach) return listStudentsByCoachId(actor.coach_id);
   return [];
 }
 
