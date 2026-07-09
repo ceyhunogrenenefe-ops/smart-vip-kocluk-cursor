@@ -170,7 +170,7 @@ async function canPlanLessonForStudent(actor, student) {
   if (actor.role === 'super_admin') return true;
   if (actor.role === 'admin') return hasInstitutionAccess(actor, student.institution_id);
   if (actor.role === 'teacher') {
-    if (!hasInstitutionAccess(actor, student.institution_id)) return false;
+    // Özel ders ataması: öğrenci institution_id null olsa bile panel kapsamında ise izin ver
     return isStudentAllowedForTeacherPanel(actor.sub, student.id, actor.institution_id || null);
   }
   if (actor.role === 'coach') return Boolean(actor.coach_id && student.coach_id === actor.coach_id);

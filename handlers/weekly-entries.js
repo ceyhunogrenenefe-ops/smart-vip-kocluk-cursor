@@ -44,7 +44,8 @@ export default async function handler(req, res) {
         if (!actor.institution_id) return res.status(200).json({ data: [] });
         const { ids } = await getTeacherPanelStudentScope(actor.sub, actor.institution_id || null);
         if (!ids.length) return res.status(200).json({ data: [] });
-        query = query.eq('institution_id', actor.institution_id).in('student_id', ids);
+        // institution_id filtresi yok: özel ders satırları / öğrenci kurum alanı boş olabilir
+        query = query.in('student_id', ids);
       }
       if (actor.role === 'student') query = query.eq('student_id', actor.student_id);
       if (actor.role === 'coach') {

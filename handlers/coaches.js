@@ -123,8 +123,7 @@ export default async function handler(req, res) {
         const { data: studs, error: se } = await supabaseAdmin
           .from('students')
           .select('coach_id')
-          .in('id', studentIds)
-          .eq('institution_id', actor.institution_id);
+          .in('id', studentIds);
         if (se) throw se;
         const coachIds = [...new Set((studs || []).map((s) => s.coach_id).filter(Boolean))];
         if (!coachIds.length) return res.status(200).json({ data: [] });

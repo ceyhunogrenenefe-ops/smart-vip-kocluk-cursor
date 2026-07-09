@@ -40,13 +40,13 @@ export default async function handler(req, res) {
 
   let students = [];
   if (studentIds.length) {
-    let sq = supabaseAdmin
+    // Kurum filtresi YOK: özel ders ataması institution_id null/farklı olsa bile
+    // studentIdsForTeacher zaten kapsamı hesapladı; burada tekrar elersek liste boş kalır.
+    const { data, error } = await supabaseAdmin
       .from('students')
       .select(STUDENT_LIST_COLUMNS)
       .in('id', studentIds)
       .order('created_at', { ascending: false });
-    if (inst) sq = sq.eq('institution_id', inst);
-    const { data, error } = await sq;
     if (error) return res.status(500).json({ error: error.message });
     students = data || [];
   }

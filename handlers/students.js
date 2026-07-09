@@ -167,9 +167,8 @@ async function assertStudentVisibilityResolved(actor, student) {
   }
 
   let ok = false;
-  const instOk = actor.institution_id ? String(student.institution_id || '') === String(actor.institution_id) : true;
 
-  if (rs.has('teacher') && instOk && actor.institution_id) {
+  if (rs.has('teacher') && actor.sub) {
     const { ids } = await getTeacherPanelStudentScope(actor.sub, actor.institution_id || null);
     if (ids.includes(String(student.id || '').trim())) ok = true;
   }
@@ -179,8 +178,20 @@ async function assertStudentVisibilityResolved(actor, student) {
   return ok;
 }
 
+async function listStudentsByTeacherScope(actor) {
+  const { ids } = await getTeacherPanelStudentScope(actor.sub, actor.institution_id || null);
+  if (!ids.length) return [];
+  // Kurum filtresi uygulama — özel ders atanan öğrenciler institution_id null olabilir
+  const { data, error } = await supabaseAdmin
+    .from('students')
+    .select(STUDENT_LIST_COLUMNS)
+    .in('id', ids)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
 async function listStudentsMergedCoachTeacher(actor, roleSet) {
-  const inst = actor.institution_id || null;
   const primary = normActorRole(actor.role);
 
   if (primary === 'coach' && roleSet.has('coach') && actor.coach_id) {
@@ -193,31 +204,13 @@ async function listStudentsMergedCoachTeacher(actor, roleSet) {
     return data || [];
   }
 
-  if (primary === 'teacher' && roleSet.has('teacher') && inst) {
-    const { ids } = await getTeacherPanelStudentScope(actor.sub, actor.institution_id || null);
-    if (!ids.length) return [];
-    const { data, error } = await supabaseAdmin
-      .from('students')
-      .select(STUDENT_LIST_COLUMNS)
-      .in('id', ids)
-      .eq('institution_id', inst)
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-    return data || [];
+  if (primary === 'teacher' && roleSet.has('teacher')) {
+    return listStudentsByTeacherScope(actor);
   }
 
   /** İkincil etiket: birincil rol koç/öğretmen değilse dar kapsam */
-  if (roleSet.has('teacher') && inst) {
-    const { ids } = await getTeacherPanelStudentScope(actor.sub, actor.institution_id || null);
-    if (!ids.length) return [];
-    const { data, error } = await supabaseAdmin
-      .from('students')
-      .select(STUDENT_LIST_COLUMNS)
-      .in('id', ids)
-      .eq('institution_id', inst)
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-    return data || [];
+  if (roleSet.has('teacher')) {
+    return listStudentsByTeacherScope(actor);
   }
 
   if (roleSet.has('coach') && actor.coach_id) {
