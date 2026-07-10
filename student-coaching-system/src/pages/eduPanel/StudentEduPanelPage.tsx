@@ -41,38 +41,31 @@ export default function StudentEduPanelPage() {
     setLoadError(null);
     setEmptyHint(null);
     try {
-      const result = await fetchEduLessonRowsDetailed();
+      // rows zaten kendi teslimatlarını içerir; ödev başına my-submission (imzalı URL) çağırma
+      const [result, prog] = await Promise.all([
+        fetchEduLessonRowsDetailed(),
+        fetchMyEduProgress().catch((progErr) => {
+          console.warn('[edu-derslerim] progress yüklenemedi', progErr);
+          return [] as EduLessonRowProgress[];
+        })
+      ]);
       const data = result.data || [];
       setRows(data);
+      setProgressList(prog);
       if (!data.length && result.message) {
         setEmptyHint(result.message);
       } else if (!data.length) {
         setEmptyHint('Henüz size atanmış bir ödev bulunmamaktadır.');
       }
 
-      let prog: EduLessonRowProgress[] = [];
-      try {
-        prog = await fetchMyEduProgress();
-      } catch (progErr) {
-        console.warn('[edu-derslerim] progress yüklenemedi', progErr);
-      }
-      setProgressList(prog);
-
       const subs: Record<string, EduHomeworkSubmission | null> = {};
-      await Promise.all(
-        data.flatMap((row) =>
-          (row.homework || [])
-            .filter((hw) => hw.status === 'published')
-            .map(async (hw) => {
-              try {
-                subs[hw.id] = await fetchMyEduSubmission(hw.id);
-              } catch (subErr) {
-                console.warn('[edu-derslerim] submission', hw.id, subErr);
-                subs[hw.id] = null;
-              }
-            })
-        )
-      );
+      for (const row of data) {
+        for (const hw of row.homework || []) {
+          if (hw.status !== 'published') continue;
+          const mine = Array.isArray(hw.submissions) && hw.submissions.length ? hw.submissions[0] : null;
+          subs[hw.id] = mine;
+        }
+      }
       setSubmissions(subs);
       if (data.length === 1) setExpandedId(data[0].id);
     } catch (e) {
@@ -211,9 +204,19 @@ export default function StudentEduPanelPage() {
                   busyHw={busyHw}
                   busyProgress={busyProgressRow === row.id}
                   onOpenAnimation={(id) =>
-                    void preview.open(id).then(() => void load()).catch((e) =>
-                      toast.error(e instanceof Error ? e.message : 'Animasyon açılamadı')
-                    )
+                    void preview
+                      .open(id)
+                      .then(async () => {
+                        try {
+                          const prog = await fetchMyEduProgress();
+                          setProgressList(prog);
+                        } catch {
+                          /* progress yenileme opsiyonel */
+                        }
+                      })
+                      .catch((e) =>
+                        toast.error(e instanceof Error ? e.message : 'Animasyon açılamadı')
+                      )
                   }
                   onOpenPoolAnimation={(id) =>
                     void preview.openPool(id).catch((e) =>

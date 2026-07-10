@@ -12,10 +12,7 @@ import {
   signedEduUrl,
   removeEduObject
 } from '../api/_lib/edu-panel-storage.js';
-import {
-  classIdsForStudent,
-  teacherIdsForStudent
-} from '../api/_lib/student-teacher-scope.js';
+import { classIdsForStudent } from '../api/_lib/student-teacher-scope.js';
 import { getIstanbulDateString } from '../api/_lib/istanbul-time.js';
 
 function parseBody(req) {
@@ -197,18 +194,16 @@ async function resolveStudent(actor) {
 
 async function studentAccessContext(actor) {
   const st = await resolveStudent(actor);
-  if (!st?.id) return { student: null, classIds: [], teacherIds: [] };
+  if (!st?.id) return { student: null, classIds: [] };
   const classIds = await classIdsForStudent(st.id);
-  const teacherIds = await teacherIdsForStudent({ studentId: st.id, classIds });
-  return { student: st, classIds, teacherIds };
+  return { student: st, classIds };
 }
 
 async function studentClassIds(actor) {
   const ctx = await studentAccessContext(actor);
   return {
     student: ctx.student,
-    classIds: ctx.classIds,
-    teacherIds: ctx.teacherIds
+    classIds: ctx.classIds
   };
 }
 
@@ -477,10 +472,12 @@ async function fetchActiveLessonRowsForStudent(ctx) {
     if (!isJunctionMissing(e)) throw e;
   }
 
-  const linkMap = await loadRowClassIdsMap([...byId.keys()]);
-  return [...byId.values()].filter((row) =>
+  const allIds = [...byId.keys()];
+  const linkMap = await loadRowClassIdsMap(allIds);
+  const rows = [...byId.values()].filter((row) =>
     studentCanAccessLessonRow(ctx, row, mergedClassIdsForRow(row, linkMap))
   );
+  return { rows, linkMap };
 }
 
 async function canStudentAccessRow(ctx, row) {
@@ -749,13 +746,15 @@ async function removeSubmissionMediaFiles(sub) {
   }
 }
 
-async function enrichRows(rows, { viewerStudentUserId = null } = {}) {
+async function enrichRows(rows, { viewerStudentUserId = null, linkMap: linkMapIn = null } = {}) {
   if (!rows?.length) return [];
   const ids = rows.map((r) => r.id);
   const [{ data: anims }, { data: hws }, linkMap] = await Promise.all([
     supabaseAdmin.from('edu_animations').select('*').in('lesson_row_id', ids).order('display_order'),
     supabaseAdmin.from('edu_homework').select('*').in('lesson_row_id', ids).order('created_at'),
-    loadRowClassIdsMap(ids)
+    linkMapIn
+      ? Promise.resolve(linkMapIn)
+      : loadRowClassIdsMap(ids)
   ]);
   const hwIds = (hws || []).map((h) => h.id);
   let subs = [];
@@ -820,8 +819,11 @@ export default async function handler(req, res) {
               message: 'Henüz bir sınıfa kaydınız yok. Ödevler sınıf ataması sonrası burada görünür.'
             });
           }
-          const visible = await fetchActiveLessonRowsForStudent(ctx);
-          const enriched = await enrichRows(visible, { viewerStudentUserId: actor.sub });
+          const { rows: visible, linkMap } = await fetchActiveLessonRowsForStudent(ctx);
+          const enriched = await enrichRows(visible, {
+            viewerStudentUserId: actor.sub,
+            linkMap
+          });
           const published = enriched.map((row) => ({
             ...row,
             homework: (row.homework || []).filter((h) => {
