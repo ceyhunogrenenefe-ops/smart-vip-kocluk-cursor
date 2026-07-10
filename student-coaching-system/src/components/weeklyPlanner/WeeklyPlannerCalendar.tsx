@@ -38,6 +38,7 @@ import {
   resolveTopicLabelForTracking
 } from '../../lib/topicProgressSync';
 import { WeeklyPlannerStudyModal } from './WeeklyPlannerStudyModal';
+import { AppModal, AppModalBody, AppModalFooter, AppModalHeader } from '../ui/AppModal';
 import { EtutPlannerEntryModal } from '../etut/EtutPlannerEntryModal';
 import { isEtutSubject } from '../../lib/etutSession';
 import { DailyScreenTimeChart } from './DailyScreenTimeChart';
@@ -1754,7 +1755,12 @@ export function WeeklyPlannerCalendar({
                 </ul>
 
                 {canEditPlan ? (
-                  <div className="sticky bottom-0 z-10 space-y-2 rounded-xl border border-violet-200/90 bg-white/95 p-3 shadow-lg backdrop-blur-sm dark:border-violet-800/60 dark:bg-slate-900/95">
+                  <div
+                    className={cn(
+                      'sticky z-10 space-y-2 rounded-xl border border-violet-200/90 bg-white/95 p-3 shadow-lg backdrop-blur-sm dark:border-violet-800/60 dark:bg-slate-900/95',
+                      mobileAppShell ? 'bottom-[4.25rem]' : 'bottom-0'
+                    )}
+                  >
                     <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Yeni görev — saat seç</p>
                     <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5">
                       {timeSlots.map((slot, slotIdx) => {
@@ -2201,19 +2207,26 @@ export function WeeklyPlannerCalendar({
         />
       ) : null}
 
-      {/* Modal */}
-      {(modalMode === 'create' || modalMode === 'edit') && slotContext && (
-        <div className="fixed inset-0 z-[220] bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="flex max-h-[min(92dvh,900px)] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl bg-white shadow-xl sm:rounded-2xl dark:bg-slate-900">
-            <div className="flex shrink-0 items-center justify-between border-b border-slate-100 p-5 dark:border-slate-800">
+      <AppModal
+        open={(modalMode === 'create' || modalMode === 'edit') && Boolean(slotContext)}
+        onClose={closeModal}
+        panelClassName="max-w-lg"
+      >
+        {slotContext ? (
+          <>
+            <AppModalHeader className="p-5">
               <h4 className="font-semibold text-slate-800 dark:text-slate-100">
                 {modalMode === 'create' ? 'Yeni görev' : 'Görevi düzenle'}
               </h4>
-              <button type="button" onClick={closeModal} className="text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
+              <button
+                type="button"
+                onClick={closeModal}
+                className="text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+              >
                 ✕
               </button>
-            </div>
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
+            </AppModalHeader>
+            <AppModalBody className="space-y-4 p-5">
               <div>
                 <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Gün</label>
                 <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
@@ -2439,9 +2452,9 @@ export function WeeklyPlannerCalendar({
                   </button>
                 </div>
               ) : null}
-            </div>
+            </AppModalBody>
 
-            <div className="shrink-0 border-t border-slate-100 bg-white p-4 pb-safe dark:border-slate-800 dark:bg-slate-900">
+            <AppModalFooter className="p-4">
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -2472,10 +2485,10 @@ export function WeeklyPlannerCalendar({
                   </button>
                 ) : null}
               </div>
-            </div>
-          </div>
-        </div>
-      )}
+            </AppModalFooter>
+          </>
+        ) : null}
+      </AppModal>
     </div>
   );
 }

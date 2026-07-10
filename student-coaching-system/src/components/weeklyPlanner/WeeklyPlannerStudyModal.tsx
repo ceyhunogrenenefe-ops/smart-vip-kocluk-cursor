@@ -10,6 +10,7 @@ import {
   resolveTopicLabelForTracking
 } from '../../lib/topicProgressSync';
 import { subjectPlannerStyle } from './subjectPlannerStyle';
+import { AppModal, AppModalBody, AppModalFooter, AppModalHeader } from '../ui/AppModal';
 
 type Props = {
   plannerEntry: WeeklyPlannerEntryRow;
@@ -330,33 +331,28 @@ export function WeeklyPlannerStudyModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[200] bg-black/50 backdrop-blur-[2px] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
-      <div
-        className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-200/80 dark:border-slate-700 w-full max-w-lg max-h-[92vh] overflow-y-auto transition-transform duration-200"
-        role="dialog"
-        aria-labelledby="study-modal-title"
-      >
-        <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex justify-between items-start gap-3">
-          <div>
-            <p id="study-modal-title" className="text-lg font-semibold flex items-center gap-2">
-              <Target className="w-5 h-5 text-red-500" />
-              Çalışma kaydı
-            </p>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              {plannerEntry.planner_date} · {plannerEntry.start_time} – {plannerEntry.end_time}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-xl leading-none px-2"
-            aria-label="Kapat"
-          >
-            ✕
-          </button>
+    <AppModal open onClose={onClose} panelClassName="max-w-lg">
+      <AppModalHeader className="items-start gap-3 p-5">
+        <div>
+          <p id="study-modal-title" className="text-lg font-semibold flex items-center gap-2 text-slate-900 dark:text-slate-100">
+            <Target className="w-5 h-5 text-red-500" />
+            Çalışma kaydı
+          </p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            {plannerEntry.planner_date} · {plannerEntry.start_time} – {plannerEntry.end_time}
+          </p>
         </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-xl leading-none px-2"
+          aria-label="Kapat"
+        >
+          ✕
+        </button>
+      </AppModalHeader>
 
-        <div className="p-5 space-y-5">
+      <AppModalBody className="space-y-5 p-5">
           <div className={`rounded-xl border px-4 py-3 ${st.bar}`}>
             <p className="text-xs font-medium opacity-80">{subject}</p>
             <p className="font-semibold leading-snug">{topic}</p>
@@ -532,42 +528,43 @@ export function WeeklyPlannerStudyModal({
               {error}
             </div>
           ) : null}
+      </AppModalBody>
 
-          <div className="flex flex-col sm:flex-row gap-2 justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
-            {onEditPlanner ? (
-              <button
-                type="button"
-                onClick={() => {
-                  onEditPlanner(plannerEntry);
-                  onClose();
-                }}
-                className="text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 underline-offset-2 hover:underline order-2 sm:order-1"
-              >
-                Zaman veya miktarı düzenle
-              </button>
-            ) : (
-              <span />
-            )}
-            <div className="flex gap-2 order-1 sm:order-2 justify-end">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-4 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-600"
-              >
-                İptal
-              </button>
-              <button
-                type="button"
-                disabled={saving}
-                onClick={() => void submit()}
-                className="px-5 py-2 text-sm rounded-lg bg-red-600 hover:bg-red-700 text-white font-medium disabled:opacity-60"
-              >
-                {saving ? 'Kaydediliyor…' : 'Kaydet'}
-              </button>
-            </div>
+      <AppModalFooter className="p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          {onEditPlanner ? (
+            <button
+              type="button"
+              onClick={() => {
+                onEditPlanner(plannerEntry);
+                onClose();
+              }}
+              className="text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 underline-offset-2 hover:underline"
+            >
+              Zaman veya miktarı düzenle
+            </button>
+          ) : (
+            <span className="hidden sm:block" />
+          )}
+          <div className="flex gap-2 sm:justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-600 dark:border-slate-600 dark:text-slate-300 sm:flex-none sm:px-4 sm:py-2"
+            >
+              İptal
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => void submit()}
+              className="flex-[1.4] rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60 sm:flex-none sm:px-5 sm:py-2"
+            >
+              {saving ? 'Kaydediliyor…' : 'Kaydet'}
+            </button>
           </div>
         </div>
-      </div>
-    </div>
+      </AppModalFooter>
+    </AppModal>
   );
 }
