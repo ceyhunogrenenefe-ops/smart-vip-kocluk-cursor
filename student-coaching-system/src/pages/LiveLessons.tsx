@@ -15,6 +15,8 @@ import { markPostLessonHomeworkPrompt } from '../components/eduPanel/EduPostLess
 import { useCoachLessonsMeetingsLock } from '../lib/coachLessonsLock';
 import { CoachLessonsLockBanner } from '../components/coach/CoachLessonsLockBanner';
 import { copyGuestJoinShareText } from '../lib/bbbGuestJoin';
+import { copyTextToClipboard } from '../lib/copyToClipboard';
+import { toast } from 'sonner';
 import { Radio, Plus, Loader2, Filter, Clock, Pencil, Move, GripVertical, Trash2, FileDown } from 'lucide-react';
 import {
   AppModal,
@@ -200,18 +202,23 @@ export default function LiveLessons() {
     try {
       if (isBbb) {
         await copyGuestJoinShareText('private', lesson.id);
+        toast.success('Kopyalandı — davet metni panoya alındı');
         return;
       }
       const url = lessonJoinUrl(lesson);
       if (!url) {
         setError('Toplantı bağlantısı yok.');
+        toast.error('Toplantı bağlantısı yok.');
         return;
       }
-      await navigator.clipboard.writeText(
+      await copyTextToClipboard(
         [lesson.title, when ? `Tarih: ${when}` : '', '', `Katılım: ${url}`].filter(Boolean).join('\n')
       );
+      toast.success('Kopyalandı');
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      toast.error(msg);
     }
   }, []);
 

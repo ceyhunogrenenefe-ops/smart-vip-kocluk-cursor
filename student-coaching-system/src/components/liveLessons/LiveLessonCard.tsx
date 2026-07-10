@@ -1,7 +1,7 @@
 import React from 'react';
 import { Video, Link2, Copy, ExternalLink, Presentation, PlayCircle } from 'lucide-react';
 import type { TeacherLesson, TeacherLessonPlatform } from '../../types';
-import { isApproaching, isOngoing, PLATFORM_LABEL, hasBbbRecordingAccess } from '../../lib/liveLessonUtils';
+import { isApproaching, isOngoing, PLATFORM_LABEL, hasBbbRecordingAccess, needsBbbJoinFlow } from '../../lib/liveLessonUtils';
 
 type Props = {
   lesson: TeacherLesson;
@@ -140,10 +140,12 @@ export default function LiveLessonCard({
               type="button"
               onClick={onCopy}
               disabled={copyInactive}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-45 disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-45 disabled:cursor-not-allowed touch-manipulation"
             >
               <Copy className="w-4 h-4" />
-              Linki kopyala
+              {lesson.platform === 'bbb' || needsBbbJoinFlow(lesson.meeting_link)
+                ? 'Davet linki'
+                : 'Linki kopyala'}
             </button>
             {bbbRecordingAvailable ? (
               <button

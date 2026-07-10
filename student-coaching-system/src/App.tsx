@@ -81,6 +81,7 @@ import MyExamsPage from './pages/aiAgents/student/MyExamsPage';
 import TakeExamPage from './pages/aiAgents/student/TakeExamPage';
 import ExamResultPage from './pages/aiAgents/student/ExamResultPage';
 import { rolesForProtectedRoute, userRoleTags } from './config/rolePermissions';
+import { Toaster } from 'sonner';
 
 // Yönlendirme bileşeni
 function HomeRedirect() {
@@ -656,6 +657,7 @@ function App() {
       </OrganizationProvider>
       </NotificationAuthBridge>
     </AuthProvider>
+    <Toaster position="top-center" richColors closeButton duration={3500} />
     </>
   );
 }

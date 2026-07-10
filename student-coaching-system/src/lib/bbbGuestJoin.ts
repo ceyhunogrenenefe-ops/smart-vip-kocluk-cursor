@@ -1,4 +1,5 @@
 import { apiFetch } from './session';
+import { copyTextToClipboard } from './copyToClipboard';
 
 export type GuestJoinKind = 'class' | 'private';
 
@@ -119,7 +120,7 @@ export async function joinAsGuest(token: string, guestName: string): Promise<str
 /** WhatsApp için ders adı + tarih + kısa link metni. */
 export async function copyGuestJoinShareText(kind: GuestJoinKind, id: string): Promise<GuestJoinShare> {
   const data = await fetchGuestJoinShareUrl(kind, id);
-  await navigator.clipboard.writeText(data.shareText);
+  await copyTextToClipboard(data.shareText);
   return data;
 }
 
@@ -163,13 +164,13 @@ export async function copyAcademicStudyGuestJoinShareText(
   institutionId?: string | null
 ): Promise<GuestJoinShare> {
   const data = await fetchAcademicStudyGuestJoinShareUrl(room, institutionId);
-  await navigator.clipboard.writeText(data.shareText);
+  await copyTextToClipboard(data.shareText);
   return data;
 }
 
 /** Panoya yalnızca davet URL'si. */
 export async function copyGuestJoinUrlOnly(kind: GuestJoinKind, id: string): Promise<string> {
   const { url } = await fetchGuestJoinShareUrl(kind, id);
-  await navigator.clipboard.writeText(url);
+  await copyTextToClipboard(url);
   return url;
 }

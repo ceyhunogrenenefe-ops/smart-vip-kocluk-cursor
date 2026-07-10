@@ -27,6 +27,7 @@ import {
 import { useClassLivePresence } from '../hooks/useClassLivePresence';
 import { classIdsInLivePresenceWindow } from '../lib/classLiveWindow';
 import { copyGuestJoinShareText } from '../lib/bbbGuestJoin';
+import { toast } from 'sonner';
 import { isEtutSubject, startEtutSession } from '../lib/etutSession';
 import { useRecordingUnavailableAlert, recordingUnavailableText } from '../hooks/useRecordingUnavailableAlert';
 import {
@@ -353,9 +354,12 @@ export default function ClassLiveLessons() {
   const copySessionGuestLink = useCallback(async (s: SessionRow) => {
     try {
       await copyGuestJoinShareText('class', s.id);
-      setNotice('Davet metni panoya kopyalandı (WhatsApp için kısa link + ders bilgisi).');
+      setNotice(null);
+      toast.success('Kopyalandı — davet metni panoya alındı');
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      toast.error(msg);
     }
   }, []);
 
@@ -1825,6 +1829,7 @@ export default function ClassLiveLessons() {
             todayIso={todayIso()}
             onJoinSession={(s) => void joinClassSession(s)}
             onWatchSession={(s) => void watchClassSessionRecording(s)}
+            onCopyGuestLink={!isStudentView ? (s) => void copySessionGuestLink(s) : undefined}
             studentAppointmentDefaults={studentAppointmentDefaults}
           />
         )}

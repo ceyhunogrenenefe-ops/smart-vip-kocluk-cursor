@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { PlayCircle } from 'lucide-react';
+import { Copy, PlayCircle } from 'lucide-react';
 import { liveSubjectAccent } from './liveSubjectAccent';
 import { hasClassSessionRecordingAccess } from '../../lib/liveLessonUtils';
 import { cn } from '../../lib/utils';
@@ -46,6 +46,8 @@ export type ClassLiveStudentMobileCalendarProps = {
   todayIso: string;
   onJoinSession?: (s: SessionRow) => void;
   onWatchSession?: (s: SessionRow) => void;
+  /** Öğretmen/koç: WhatsApp davet metnini panoya kopyala */
+  onCopyGuestLink?: (s: SessionRow) => void;
   studentAppointmentDefaults?: { name?: string; class_level?: string };
 };
 
@@ -60,6 +62,7 @@ export function ClassLiveStudentMobileCalendar({
   todayIso,
   onJoinSession,
   onWatchSession,
+  onCopyGuestLink,
   studentAppointmentDefaults
 }: ClassLiveStudentMobileCalendarProps) {
   const [dayIdx, setDayIdx] = useState(() => {
@@ -153,6 +156,8 @@ export function ClassLiveStudentMobileCalendar({
             const canWatch = hasClassSessionRecordingAccess(s);
             const isSolutionLesson = isSolutionLessonSubject(s.subject);
             const teacherLabel = teacher?.name || s.teacher_name || 'Öğretmen';
+            const isRealSession = !String(s.id).startsWith('slot-');
+            const showGuestInvite = Boolean(onCopyGuestLink && canJoin && isRealSession);
             return (
               <li
                 key={s.id}
@@ -186,6 +191,16 @@ export function ClassLiveStudentMobileCalendar({
                   ) : null}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
+                  {showGuestInvite ? (
+                    <button
+                      type="button"
+                      onClick={() => onCopyGuestLink!(s)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-violet-300 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 touch-manipulation active:bg-violet-50"
+                    >
+                      <Copy className="h-3.5 w-3.5" aria-hidden />
+                      Davet linki
+                    </button>
+                  ) : null}
                   {isSolutionLesson ? (
                     <SolutionLessonStudentActions
                       session={s}
