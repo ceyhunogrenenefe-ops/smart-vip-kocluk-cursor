@@ -361,6 +361,9 @@ async function handleList(req, res) {
   } catch (e) {
     const msg = errorMessage(e);
     if (isAuthFailureMessage(msg)) return jsonError(res, 401, msg);
+    if (isTeacherLessonsBbbColumnsMissingError(e)) {
+      return res.status(503).json(teacherLessonsBbbColumnsMissingBody());
+    }
     return jsonError(res, 500, msg);
   }
 }
