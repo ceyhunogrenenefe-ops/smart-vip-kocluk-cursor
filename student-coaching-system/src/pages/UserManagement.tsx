@@ -26,6 +26,8 @@ import {
   Loader2,
   Briefcase,
   Download,
+  FileDown,
+  FileSpreadsheet,
   ChevronDown,
   LogIn
 } from 'lucide-react';
@@ -89,6 +91,12 @@ import {
   normalizeAcademicYearLabel
 } from '../lib/academicYearTerms';
 import { compareByFirstName, sortByFirstName } from '../lib/personNameSort';
+import {
+  buildUserExportFilterSummary,
+  buildUserExportRows,
+  exportUsersToExcel,
+  exportUsersToPdf
+} from '../lib/usersExport';
 
 function studentBranchSelectValue(school: string | undefined | null): string {
   const key = normalizeStudentBranchKey(school);
@@ -304,6 +312,7 @@ export default function UserManagement() {
   const [importMappingOpen, setImportMappingOpen] = useState(false);
   const [importGrid, setImportGrid] = useState<unknown[][]>([]);
   const [importFileName, setImportFileName] = useState('');
+  const [exportBusy, setExportBusy] = useState<'excel' | 'pdf' | null>(null);
   /** Satır içi koç ataması PATCH sırasında */
   const [coachAssignBusy, setCoachAssignBusy] = useState<string | null>(null);
   const [classAssignBusy, setClassAssignBusy] = useState<string | null>(null);
@@ -939,6 +948,126 @@ export default function UserManagement() {
     () => filteredUsers.filter((u) => userRoleTags(u as SystemUser).includes('student')),
     [filteredUsers]
   );
+
+  const institutionNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const i of institutions) m.set(i.id, i.name);
+    if (institution?.id && institution?.name) m.set(institution.id, institution.name);
+    return m;
+  }, [institutions, institution?.id, institution?.name]);
+
+  const buildFilteredExportRows = useCallback(() => {
+    return buildUserExportRows({
+      users: filteredUsers,
+      studentLinkIndex,
+      linkedStudents,
+      coaches: coachesForFilter,
+      institutionNameById
+    });
+  }, [filteredUsers, studentLinkIndex, linkedStudents, coachesForFilter, institutionNameById]);
+
+  const exportFilterSummaryLines = useMemo(() => {
+    const classLabel =
+      filterClassLevel === 'all'
+        ? ''
+        : CLASS_LEVELS.find((l) => String(l.value) === filterClassLevel)?.label ||
+          classLevelFilterOptions.find((o) => o.value === filterClassLevel)?.label ||
+          filterClassLevel;
+    return buildUserExportFilterSummary({
+      searchTerm,
+      filterRole,
+      filterStatus,
+      filterInstitutionName:
+        filterInstitutionId !== 'all'
+          ? institutionNameById.get(filterInstitutionId) || filterInstitutionId
+          : '',
+      filterClassLevelLabel: classLabel,
+      filterBranch,
+      filterAcademicYear,
+      filterCoachName:
+        filterCoachId !== 'all'
+          ? coachesForFilter.find((c) => c.id === filterCoachId)?.name || ''
+          : ''
+    });
+  }, [
+    searchTerm,
+    filterRole,
+    filterStatus,
+    filterInstitutionId,
+    filterClassLevel,
+    filterBranch,
+    filterAcademicYear,
+    filterCoachId,
+    institutionNameById,
+    classLevelFilterOptions,
+    coachesForFilter
+  ]);
+
+  const handleExportUsersExcel = useCallback(() => {
+    if (!filteredUsers.length) {
+      setMessage({ type: 'error', text: 'Dışa aktarılacak kullanıcı yok. Önce süzgeçleri kontrol edin.' });
+      return;
+    }
+    setExportBusy('excel');
+    setMessage(null);
+    try {
+      const rows = buildFilteredExportRows();
+      exportUsersToExcel(rows, 'kullanicilar');
+      setMessage({
+        type: 'success',
+        text: `${rows.length} kullanıcı Excel olarak indirildi (aktif süzgeçler uygulandı).`
+      });
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Excel oluşturulamadı'
+      });
+    } finally {
+      setExportBusy(null);
+    }
+  }, [filteredUsers.length, buildFilteredExportRows]);
+
+  const handleExportUsersPdf = useCallback(() => {
+    if (!filteredUsers.length) {
+      setMessage({ type: 'error', text: 'Dışa aktarılacak kullanıcı yok. Önce süzgeçleri kontrol edin.' });
+      return;
+    }
+    setExportBusy('pdf');
+    setMessage(null);
+    void (async () => {
+      try {
+        const rows = buildFilteredExportRows();
+        const brandingName =
+          filterInstitutionId !== 'all'
+            ? institutionNameById.get(filterInstitutionId)
+            : institution?.name;
+        await exportUsersToPdf({
+          rows,
+          filterSummaryLines: exportFilterSummaryLines,
+          fileLabel: 'kullanicilar',
+          institutionName: brandingName || undefined
+        });
+        setMessage({
+          type: 'success',
+          text: `${rows.length} kullanıcı PDF olarak indirildi (aktif süzgeçler uygulandı).`
+        });
+      } catch (e) {
+        setMessage({
+          type: 'error',
+          text: e instanceof Error ? e.message : 'PDF oluşturulamadı'
+        });
+      } finally {
+        setExportBusy(null);
+      }
+    })();
+  }, [
+    filteredUsers.length,
+    buildFilteredExportRows,
+    exportFilterSummaryLines,
+    filterInstitutionId,
+    institutionNameById,
+    institution?.name
+  ]);
 
   const allFilteredStudentsSelected =
     selectableStudents.length > 0 &&
@@ -3016,6 +3145,38 @@ export default function UserManagement() {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+            <span className="text-xs font-medium text-slate-500">
+              Dışa aktar ({filteredUsers.length} kayıt · aktif süzgeçler)
+            </span>
+            <button
+              type="button"
+              onClick={handleExportUsersExcel}
+              disabled={exportBusy !== null || filteredUsers.length === 0 || listLoading}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {exportBusy === 'excel' ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="h-4 w-4" />
+              )}
+              Excel
+            </button>
+            <button
+              type="button"
+              onClick={handleExportUsersPdf}
+              disabled={exportBusy !== null || filteredUsers.length === 0 || listLoading}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-900 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {exportBusy === 'pdf' ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FileDown className="h-4 w-4" />
+              )}
+              PDF
+            </button>
           </div>
         </div>
       </div>
