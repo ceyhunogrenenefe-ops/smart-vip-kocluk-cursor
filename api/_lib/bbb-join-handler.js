@@ -1,6 +1,7 @@
 import { requireAuthenticatedActor } from './auth.js';
 import { supabaseAdmin } from './supabase-admin.js';
 import { errorMessage } from './error-msg.js';
+import { updateOneOptionalModerator } from './supabase-optional-moderator.js';
 import {
   ensureBbbMeetingAlive,
   isBbbJoinUrl,
@@ -219,10 +220,15 @@ export async function patchRowMeetingLinks(table, id, links) {
   if (links.bbb_meeting_id) patch.bbb_meeting_id = links.bbb_meeting_id;
   if (links.bbb_attendee_pw) patch.bbb_attendee_pw = links.bbb_attendee_pw;
 
-  const { error } = await supabaseAdmin.from(table).update(patch).eq('id', id);
+  // Eski prod şemasında meeting_link_moderator / bbb_* kolonları olmayabilir.
+  const { error } = await updateOneOptionalModerator(table, patch, 'id', id);
   if (error) {
     const msg = errorMessage(error);
-    if (/meeting_link_moderator|PGRST204|schema cache/i.test(msg)) {
+    if (
+      /meeting_link_moderator|bbb_meeting_id|bbb_attendee_pw|PGRST204|schema cache|does not exist/i.test(
+        msg
+      )
+    ) {
       const { meeting_link_moderator: _m, bbb_meeting_id: _b, bbb_attendee_pw: _p, ...core } = patch;
       const { error: e2 } = await supabaseAdmin.from(table).update(core).eq('id', id);
       if (e2) throw e2;

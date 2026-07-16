@@ -294,6 +294,15 @@ export default function LiveLessons() {
           'Supabase veritabanında `teacher_lessons` tablosu yok (veya API şemayı henüz görmedi). SQL Editor’da `student-coaching-system/sql/2026-05-08-teacher-lessons.sql` içeriğini çalıştırın; dosyanın sonundaki şema bildirimi yeterli olmazsa birkaç dakika bekleyin veya projeyi yeniden deploy edin.'
         );
       }
+      if (
+        j.hint === 'teacher_lessons_bbb_columns_sql_missing' ||
+        j.code === 'teacher_lessons_bbb_columns_missing' ||
+        /bbb_meeting_id|bbb_attendee_pw/i.test(String(j.error || ''))
+      ) {
+        setSchemaHint(
+          'Supabase’de `teacher_lessons.bbb_meeting_id` kolonları eksik. SQL Editor’da `student-coaching-system/sql/RUN_IN_SUPABASE_teacher_lessons_bbb_columns.sql` dosyasını çalıştırın, sonra sayfayı yenileyin.'
+        );
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Hata');
       setLessons([]);
