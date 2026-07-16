@@ -8,8 +8,16 @@ import { isNativeApp } from '../lib/nativeApp';
 import { resolveCoachRecordId } from '../lib/coachResolve';
 import { useCoachLessonsMeetingsLock } from '../lib/coachLessonsLock';
 import { CoachLessonsLockBanner } from '../components/coach/CoachLessonsLockBanner';
-import { coachingMeetingJoinUrl, isBbbJoinUrl } from '../lib/liveLessonUtils';
+import {
+  coachingMeetingJoinUrl,
+  isBbbAutoMeetingLink,
+  isBbbJoinUrl,
+  needsBbbJoinFlow
+} from '../lib/liveLessonUtils';
 import { openBbbJoin } from '../lib/bbbJoin';
+import { copyGuestJoinShareText } from '../lib/bbbGuestJoin';
+import { copyTextToClipboard } from '../lib/copyToClipboard';
+import { toast } from 'sonner';
 import type { CoachingMeetingRecord, MeetingStatus } from '../types';
 import {
   Video,
@@ -17,6 +25,7 @@ import {
   Calendar as CalendarIcon,
   ExternalLink,
   Link2,
+  Copy,
   CheckCircle,
   AlertCircle,
   BarChart3,
@@ -26,6 +35,19 @@ import {
   ChevronRight,
   Download
 } from 'lucide-react';
+
+function meetingUsesBbbInvite(m: CoachingMeetingRecord): boolean {
+  const meet = String(m.meet_link || '').trim();
+  const bbb = String(m.link_bbb || '').trim();
+  return (
+    needsBbbJoinFlow(meet) ||
+    isBbbAutoMeetingLink(meet) ||
+    isBbbJoinUrl(meet) ||
+    needsBbbJoinFlow(bbb) ||
+    isBbbAutoMeetingLink(bbb) ||
+    isBbbJoinUrl(bbb)
+  );
+}
 
 type LiveClassOption = {
   id: string;
@@ -107,7 +129,7 @@ export default function Meetings() {
         return;
       }
       try {
-        if (isBbbJoinUrl(url)) {
+        if (isBbbJoinUrl(url) || isBbbAutoMeetingLink(url) || needsBbbJoinFlow(url)) {
           await openBbbJoin('meetings', m.id);
         } else {
           window.open(url, '_blank', 'noopener,noreferrer');
@@ -118,6 +140,25 @@ export default function Meetings() {
     },
     [role]
   );
+
+  const copyMeetingInviteLink = useCallback(async (m: CoachingMeetingRecord) => {
+    try {
+      if (meetingUsesBbbInvite(m)) {
+        await copyGuestJoinShareText('meeting', m.id);
+        toast.success('Kopyalandı — kısa davet linki panoya alındı');
+        return;
+      }
+      const url = String(m.meet_link || m.link_zoom || '').trim();
+      if (!url) {
+        setError('Kopyalanacak bağlantı yok.');
+        return;
+      }
+      await copyTextToClipboard(url);
+      toast.success('Bağlantı panoya kopyalandı');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
 
   const hasManualMeetingLinks =
     linkZoomDraft.trim().length > 0 || linkBbbDraft.trim().length > 0;
@@ -1385,6 +1426,16 @@ export default function Meetings() {
                   ) : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {!isStudent && (m.meet_link || m.link_bbb || m.link_zoom) ? (
+                    <button
+                      type="button"
+                      onClick={() => void copyMeetingInviteLink(m)}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      <Copy className="w-4 h-4" />
+                      {meetingUsesBbbInvite(m) ? 'Davet linki' : 'Linki kopyala'}
+                    </button>
+                  ) : null}
                   {coachingMeetingJoinUrl(m, effectiveUser?.role || 'student') ? (
                   <button
                     type="button"
@@ -1404,17 +1455,6 @@ export default function Meetings() {
                     >
                       <ExternalLink className="w-4 h-4" />
                       Zoom
-                    </a>
-                  ) : null}
-                  {isStudent && m.link_bbb && m.link_bbb !== m.meet_link ? (
-                    <a
-                      href={m.link_bbb}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-violet-600 text-white text-sm font-medium"
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                      BBB
                     </a>
                   ) : null}
                 </div>

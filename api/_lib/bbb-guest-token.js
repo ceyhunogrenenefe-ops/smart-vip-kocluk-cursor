@@ -18,7 +18,7 @@ function getSecret() {
   return 'dev-insecure-secret-change-me';
 }
 
-/** @param {{ kind: 'class' | 'private', id: string, exp: number }} payload */
+/** @param {{ kind: 'class' | 'private' | 'academic-study' | 'meeting', id: string, exp: number }} payload */
 export function signBbbGuestJoinToken(payload) {
   const header = { alg: 'HS256', typ: 'BBB_GUEST' };
   const body = {
@@ -28,7 +28,9 @@ export function signBbbGuestJoinToken(payload) {
         ? 'private'
         : payload.kind === 'academic-study'
           ? 'academic-study'
-          : 'class',
+          : payload.kind === 'meeting'
+            ? 'meeting'
+            : 'class',
     id: String(payload.id || '').trim(),
     exp: Math.floor(Number(payload.exp) || 0)
   };
@@ -70,7 +72,9 @@ export function verifyBbbGuestJoinToken(token) {
       ? 'private'
       : payload.kind === 'academic-study'
         ? 'academic-study'
-        : 'class';
+        : payload.kind === 'meeting'
+          ? 'meeting'
+          : 'class';
   const id = String(payload.id || '').trim();
   if (!id) throw new Error('Geçersiz davet bağlantısı.');
   return { kind, id, exp: payload.exp };

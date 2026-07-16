@@ -15,6 +15,17 @@ function shouldUseGuestShareLink(meetingLink, row) {
   return false;
 }
 
+/** Online görüşme: öğrenci meet_link BBB ise (veya yalnızca BBB varsa) kısa davet. */
+function shouldUseGuestShareLinkForMeeting(meeting) {
+  const raw = String(meeting?.meet_link || '').trim();
+  const bbbAlt = String(meeting?.link_bbb || '').trim();
+  if (shouldUseGuestShareLink(raw, meeting)) return true;
+  if (!raw && shouldUseGuestShareLink(bbbAlt, meeting)) return true;
+  if ((isBbbAutoMeetingLink(raw) || isBbbJoinUrl(raw)) && isBbbConfigured()) return true;
+  if (!raw && (isBbbAutoMeetingLink(bbbAlt) || isBbbJoinUrl(bbbAlt)) && isBbbConfigured()) return true;
+  return false;
+}
+
 /** Grup dersi hatırlatması / WhatsApp için kısa davet URL */
 export async function resolveGuestShareUrlForClassSession(session) {
   const raw = String(session?.meeting_link || '').trim();
@@ -41,4 +52,19 @@ export async function resolveGuestShareUrlForTeacherLesson(lesson) {
     }
   }
   return raw || fallbackAppUrl();
+}
+
+/** Online görüşme hatırlatması / WhatsApp için kısa davet URL */
+export async function resolveGuestShareUrlForMeeting(meeting) {
+  const raw = String(meeting?.meet_link || '').trim();
+  const bbbAlt = String(meeting?.link_bbb || '').trim();
+  if (shouldUseGuestShareLinkForMeeting(meeting)) {
+    try {
+      const link = await createGuestJoinShareLink({ kind: 'meeting', id: meeting.id });
+      if (link?.url) return String(link.url).trim();
+    } catch {
+      /* fall through */
+    }
+  }
+  return raw || bbbAlt || fallbackAppUrl();
 }
