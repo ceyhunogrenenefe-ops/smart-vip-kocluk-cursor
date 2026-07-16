@@ -3,14 +3,37 @@ import { getStudentPhones } from '../api/_lib/meetings-resolve.js';
 import { deliverWhatsAppWithLog } from '../api/_lib/meeting-notify.js';
 import { metaWhatsAppConfigured } from '../api/_lib/meta-whatsapp.js';
 import { authorizeVercelOrCronSecret, rejectUnauthorizedCron } from '../api/_lib/cron-auth.js';
+import { resolveGuestShareUrlForMeeting } from '../api/_lib/guest-join-share-url.js';
+import { isBbbAutoMeetingLink, isBbbJoinUrl } from '../api/_lib/bbb.js';
 
 const MAX_REMINDER_ATTEMPTS = 5;
 
+function isAppGuestInviteUrl(url) {
+  const s = String(url || '').trim();
+  return /\/d\/[a-z0-9]+/i.test(s) || /\/misafir-katil\//i.test(s);
+}
+
 /** @param {{ meet_link: string, link_zoom?: string | null, link_bbb?: string | null }} m */
-function reminderBodyText(m) {
-  let t = `10 dakika içinde görüşmeniz başlıyor: ${m.meet_link}`;
-  if (m.link_zoom) t += `\nZoom: ${m.link_zoom}`;
-  if (m.link_bbb) t += `\nBBB: ${m.link_bbb}`;
+async function reminderBodyText(m) {
+  const shareUrl = await resolveGuestShareUrlForMeeting(m);
+  let t = `10 dakika içinde görüşmeniz başlıyor:\n${shareUrl}`;
+  const zoom = String(m.link_zoom || '').trim();
+  if (zoom && zoom !== shareUrl && zoom !== String(m.meet_link || '').trim()) {
+    t += `\nZoom: ${zoom}`;
+  }
+  // Kısa davet / BBB akışı kullanıldıysa ham BBB join URL gönderme (WhatsApp'ta bozuluyor).
+  if (!isAppGuestInviteUrl(shareUrl)) {
+    const bbb = String(m.link_bbb || '').trim();
+    if (
+      bbb &&
+      bbb !== shareUrl &&
+      bbb !== String(m.meet_link || '').trim() &&
+      !isBbbAutoMeetingLink(bbb) &&
+      !isBbbJoinUrl(bbb)
+    ) {
+      t += `\nBBB: ${bbb}`;
+    }
+  }
   return t;
 }
 
@@ -64,7 +87,7 @@ export default async function handler(req, res) {
         continue;
       }
 
-      const bodyText = reminderBodyText(m);
+      const bodyText = await reminderBodyText(m);
       try {
         const r = await deliverWhatsAppWithLog({
           meetingId: m.id,
@@ -102,7 +125,7 @@ export default async function handler(req, res) {
           meetingId: meet.id,
           kind: 'whatsapp_reminder_10m',
           recipientE164: f.recipient_e164,
-          body: reminderBodyText(meet),
+          body: await reminderBodyText(meet),
           coachId: meet.coach_id || null
         });
         if (r.ok && !r.skipped) {
@@ -121,4 +144,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false, error: msg, log });
   }
 }
-

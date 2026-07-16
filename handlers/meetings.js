@@ -10,14 +10,48 @@ import {
   isBbbConfigured,
   enrichCoachingMeetingRows,
   applyAutoBbbMeetingLinks,
-  sanitizeBbbMeetingId
+  sanitizeBbbMeetingId,
+  isBbbAutoMeetingLink,
+  isBbbJoinUrl
 } from '../api/_lib/bbb.js';
 import { handleBbbJoinGet, patchCoachingMeetingLinks } from '../api/_lib/bbb-join-handler.js';
+import { createGuestJoinShareLink } from '../api/_lib/bbb-guest-join-core.js';
+import { resolveGuestShareUrlForMeeting } from '../api/_lib/guest-join-share-url.js';
 import {
   assertCoachLessonsMeetingsUnlocked,
   getCoachLessonsMeetingsLocked,
   CoachLessonsLockError
 } from '../api/_lib/coach-lessons-lock.js';
+
+function isAppGuestInviteUrl(url) {
+  const s = String(url || '').trim();
+  return /\/d\/[a-z0-9]+/i.test(s) || /\/misafir-katil\//i.test(s);
+}
+
+/** WhatsApp oluşturma metni — BBB için kısa /d/ davet linki. */
+async function meetingCreatedNotifyBody(prefix, meetingOrLinks) {
+  const shareUrl = meetingOrLinks?.id
+    ? await resolveGuestShareUrlForMeeting(meetingOrLinks)
+    : String(meetingOrLinks?.meet_link || meetingOrLinks?.meetLinkResult || '').trim();
+  const meetLink = String(meetingOrLinks?.meet_link || meetingOrLinks?.meetLinkResult || shareUrl).trim();
+  const linkZoom = meetingOrLinks?.link_zoom ?? meetingOrLinks?.linkZoom ?? null;
+  const linkBbb = meetingOrLinks?.link_bbb ?? meetingOrLinks?.linkBbb ?? null;
+  let body = `${prefix}\n${shareUrl || meetLink}`;
+  if (linkZoom && linkZoom !== shareUrl && linkZoom !== meetLink) {
+    body += `\nZoom: ${linkZoom}`;
+  }
+  if (
+    linkBbb &&
+    !isAppGuestInviteUrl(shareUrl) &&
+    linkBbb !== shareUrl &&
+    linkBbb !== meetLink &&
+    !isBbbAutoMeetingLink(linkBbb) &&
+    !isBbbJoinUrl(linkBbb)
+  ) {
+    body += `\nBBB: ${linkBbb}`;
+  }
+  return body;
+}
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
 
@@ -374,9 +408,7 @@ async function handleCreate(req, res) {
     if (insErr) throw insErr;
 
     const phones = await getStudentPhones(student);
-    let notifyBodyCreated = `Görüşmeniz planlandı: ${meetLinkResult}`;
-    if (linkZoom && linkZoom !== meetLinkResult) notifyBodyCreated += `\nZoom: ${linkZoom}`;
-    if (linkBbb && linkBbb !== meetLinkResult) notifyBodyCreated += `\nBBB: ${linkBbb}`;
+    const notifyBodyCreated = await meetingCreatedNotifyBody('Görüşmeniz planlandı:', meeting);
     let whatsappNote = '';
 
     const twilioReady =
@@ -650,15 +682,13 @@ async function handleCreateClass(req, res) {
     let whatsappSent = 0;
     let whatsappFailed = 0;
     if (twilioReady) {
-      let notifyBodyCreated = `Sınıf görüşmeniz planlandı: ${meetLinkResult}`;
-      if (linkZoom && linkZoom !== meetLinkResult) notifyBodyCreated += `\nZoom: ${linkZoom}`;
-      if (linkBbb && linkBbb !== meetLinkResult) notifyBodyCreated += `\nBBB: ${linkBbb}`;
       for (const meeting of created || []) {
         const student = (studentRows || []).find((s) => s.id === meeting.student_id);
         if (!student) continue;
         const phones = await getStudentPhones(student);
         if (!phones.length) continue;
         try {
+          const notifyBodyCreated = await meetingCreatedNotifyBody('Sınıf görüşmeniz planlandı:', meeting);
           const r = await deliverWhatsAppWithLog({
             meetingId: meeting.id,
             kind: 'whatsapp_created',
@@ -979,7 +1009,16 @@ async function handleCreateSeries(req, res) {
     let whatsappNote = '';
     if (firstId) {
       const phones = await getStudentPhones(student);
-      const notifyBodyCreated = `Görüşmeniz planlandı (tekrarlayan seri): ${meetLinkResult}`;
+      const { data: firstMeeting } = await supabaseAdmin.from('meetings').select('*').eq('id', firstId).maybeSingle();
+      const notifyBodyCreated = await meetingCreatedNotifyBody(
+        'Görüşmeniz planlandı (tekrarlayan seri):',
+        firstMeeting || {
+          id: firstId,
+          meet_link: meetLinkResult,
+          link_zoom: linkZoom,
+          link_bbb: linkBbb
+        }
+      );
       const twilioReady =
         process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM;
       if (twilioReady && phones.length > 0) {
@@ -1238,6 +1277,42 @@ async function handleMeetingBbbJoin(req, res) {
   });
 }
 
+async function canAccessMeetingForGuestLink(actor, row) {
+  if (actor.role === 'super_admin') return true;
+  if (actor.role === 'student') return false;
+  if (actor.role === 'coach' || actor.role === 'teacher') {
+    let cid = actor.coach_id || null;
+    if (!cid && actor.sub) cid = await resolveCoachIdByUserSub(actor.sub);
+    return cid && String(row.coach_id) === String(cid);
+  }
+  if (actor.role === 'admin') {
+    return actor.institution_id && String(row.institution_id) === String(actor.institution_id);
+  }
+  return false;
+}
+
+async function handleMeetingGuestJoinLink(req, res) {
+  let actor;
+  try {
+    actor = requireAuthenticatedActor(req);
+  } catch (e) {
+    return jsonError(res, 401, errorMessage(e) || 'Missing token');
+  }
+  if (actor.role === 'student') return jsonError(res, 403, 'Yetkiniz yok');
+  const id = String(req.query?.id || req.query?.meeting_id || '').trim();
+  if (!id) return jsonError(res, 400, 'id gerekli');
+  const { data: row, error } = await supabaseAdmin.from('meetings').select('*').eq('id', id).maybeSingle();
+  if (error) return jsonError(res, 500, errorMessage(error));
+  if (!row) return jsonError(res, 404, 'Görüşme bulunamadı');
+  if (!(await canAccessMeetingForGuestLink(actor, row))) return jsonError(res, 403, 'Yetkiniz yok');
+  try {
+    const link = await createGuestJoinShareLink({ kind: 'meeting', id });
+    return res.status(200).json({ ok: true, ...link });
+  } catch (e) {
+    return jsonError(res, 400, errorMessage(e));
+  }
+}
+
 /** Hobby plan: tek serverless dosyasında toplantı uçları (12 fonksiyon sınırı). */
 export default async function handler(req, res) {
   const raw = typeof req.query?.op === 'string' ? req.query.op : '';
@@ -1248,6 +1323,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ configured: isBbbConfigured() });
   }
   if (op === 'bbb-join') return handleMeetingBbbJoin(req, res);
+  if (op === 'guest-join-link') return handleMeetingGuestJoinLink(req, res);
   if (op === 'create') return handleCreate(req, res);
   if (op === 'create-class') return handleCreateClass(req, res);
   if (op === 'create-series') return handleCreateSeries(req, res);
@@ -1257,7 +1333,7 @@ export default async function handler(req, res) {
   return jsonError(
     res,
     400,
-    'Geçersiz veya eksik ?op parametresi (list|create|create-class|create-series|delete-series|update-status).'
+    'Geçersiz veya eksik ?op parametresi (list|create|create-class|create-series|delete-series|update-status|guest-join-link).'
   );
 }
 

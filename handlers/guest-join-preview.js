@@ -1,5 +1,8 @@
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
-import { resolveGuestJoinShortCode } from '../api/_lib/guest-join-short-link.js';
+import {
+  parseMeetingStorageResourceId,
+  resolveGuestJoinShortCode
+} from '../api/_lib/guest-join-short-link.js';
 import { publicAppBaseUrl } from '../api/_lib/bbb-guest-token.js';
 import { formatTrLessonDate } from '../api/_lib/guest-join-share-text.js';
 
@@ -12,6 +15,36 @@ function escapeHtml(s) {
 }
 
 async function loadPreviewMeta(kind, id) {
+  const meetingId = parseMeetingStorageResourceId(id);
+  if (meetingId || kind === 'meeting') {
+    const { data } = await supabaseAdmin
+      .from('meetings')
+      .select('title,notes,start_time,status')
+      .eq('id', meetingId || id)
+      .maybeSingle();
+    if (!data) return null;
+    const start = data.start_time ? new Date(data.start_time) : null;
+    const lessonDate =
+      start && !Number.isNaN(+start)
+        ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' }).format(start)
+        : '';
+    const lessonTime =
+      start && !Number.isNaN(+start)
+        ? new Intl.DateTimeFormat('tr-TR', {
+            timeZone: 'Europe/Istanbul',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+          }).format(start)
+        : '';
+    return {
+      title: String(data.title || data.notes || 'Online görüşme').trim(),
+      lessonDate,
+      lessonTime,
+      status: data.status,
+      labelPrefix: 'Online görüşme'
+    };
+  }
   if (kind === 'private') {
     const { data } = await supabaseAdmin
       .from('teacher_lessons')
@@ -23,7 +56,8 @@ async function loadPreviewMeta(kind, id) {
       title: String(data.title || 'Canlı özel ders').trim(),
       lessonDate: String(data.date || '').slice(0, 10),
       lessonTime: String(data.start_time || '').slice(0, 5),
-      status: data.status
+      status: data.status,
+      labelPrefix: 'Canlı ders'
     };
   }
   const { data } = await supabaseAdmin
@@ -36,7 +70,8 @@ async function loadPreviewMeta(kind, id) {
     title: String(data.subject || 'Grup dersi').trim(),
     lessonDate: String(data.lesson_date || '').slice(0, 10),
     lessonTime: String(data.start_time || '').slice(0, 5),
-    status: data.status
+    status: data.status,
+    labelPrefix: 'Canlı ders'
   };
 }
 
@@ -57,7 +92,8 @@ export default async function handler(req, res) {
   const datePart = formatTrLessonDate(meta.lessonDate);
   const timePart = meta.lessonTime ? meta.lessonTime.slice(0, 5) : '';
   const when = [datePart, timePart ? `saat ${timePart}` : ''].filter(Boolean).join(' · ');
-  const title = `Canlı ders: ${meta.title}`;
+  const label = meta.labelPrefix || 'Canlı ders';
+  const title = `${label}: ${meta.title}`;
   const description = when ? `${meta.title} — ${when}` : meta.title;
 
   const html = `<!DOCTYPE html>

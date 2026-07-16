@@ -1,7 +1,7 @@
 import { apiFetch } from './session';
 import { copyTextToClipboard } from './copyToClipboard';
 
-export type GuestJoinKind = 'class' | 'private';
+export type GuestJoinKind = 'class' | 'private' | 'meeting';
 
 export type GuestJoinShare = {
   url: string;
@@ -18,7 +18,9 @@ export async function fetchGuestJoinShareUrl(kind: GuestJoinKind, id: string): P
   const api =
     kind === 'class'
       ? `/api/class-live-lessons?op=guest-join-link&id=${encodeURIComponent(id)}`
-      : `/api/teacher-lessons?op=guest-join-link&id=${encodeURIComponent(id)}`;
+      : kind === 'meeting'
+        ? `/api/meetings?op=guest-join-link&id=${encodeURIComponent(id)}`
+        : `/api/teacher-lessons?op=guest-join-link&id=${encodeURIComponent(id)}`;
   const res = await apiFetch(api);
   const j = (await res.json().catch(() => ({}))) as {
     url?: string;
