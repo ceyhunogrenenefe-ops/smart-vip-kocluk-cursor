@@ -418,6 +418,19 @@ export type VeliImzaRegistrationHint = {
   ucret?: number | null;
   para_birimi?: ParaBirimi | string | null;
   taksit_sayisi?: number | null;
+  /** Kurum / öğrenci kartından otomatik doldurma */
+  ogrenci_ad?: string | null;
+  ogrenci_soyad?: string | null;
+  veli_ad?: string | null;
+  veli_soyad?: string | null;
+  veli_tel?: string | null;
+  ogrenci_tel?: string | null;
+  eposta?: string | null;
+  dogum_tarihi?: string | null;
+  okul_adi?: string | null;
+  il?: string | null;
+  ilce?: string | null;
+  adres_aciklama?: string | null;
 };
 
 export type VeliImzaPayload = {
