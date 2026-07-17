@@ -95,6 +95,11 @@ function setCachedBbbRoom(meetingId, creds) {
   });
 }
 
+function clearCachedBbbRoom(meetingId) {
+  const key = sanitizeBbbMeetingId(meetingId);
+  if (key) bbbRoomCredentialCache.delete(key);
+}
+
 function joinLinksFromRoomCreds({ meetingId, attendeePW, moderatorPW, attendeeName, moderatorName }) {
   const attendeeJoinLink = buildBbbAttendeeJoinUrl({
     meetingId,
@@ -283,6 +288,43 @@ export function bbbMeetingViewerAccessParams() {
     guestPolicy: 'ALWAYS_ACCEPT',
     muteOnStart: false
   };
+}
+
+/** Etüt gibi paylaşımlı odalarda viewer kamera erişimini işaretler (getMeetingInfo metadata). */
+export const BBB_VIEWER_CAMERAS_META_KEY = 'viewerCameras';
+export const BBB_VIEWER_CAMERAS_META_VALUE = 'enabled';
+
+/** Birleşik etüt odası meetingID öneki — sabit oda yeniden kullanımında kamera ayarı doğrulanır. */
+export function isSharedViewerCameraMeetingId(meetingId) {
+  return String(meetingId || '')
+    .toLowerCase()
+    .startsWith('etut');
+}
+
+function parseBbbBoolXmlTag(xml, tagName) {
+  const raw = parseXmlTagValues(xml, tagName)[0];
+  if (raw == null || String(raw).trim() === '') return null;
+  return String(raw).toLowerCase() === 'true';
+}
+
+function parseBbbMetadataXml(xml) {
+  const meta = {};
+  const block = String(xml || '').match(/<metadata>[\s\S]*?<\/metadata>/i)?.[0] || '';
+  if (!block) return meta;
+  const tagRe = /<([a-zA-Z0-9_]+)>(?:<!\[CDATA\[(.*?)\]\]>|([^<]*))<\/\1>/gi;
+  let match;
+  while ((match = tagRe.exec(block))) {
+    const key = String(match[1] || '').trim();
+    const val = String(match[2] ?? match[3] ?? '').trim();
+    if (key && val) meta[key] = val;
+  }
+  return meta;
+}
+
+function sharedViewerCameraRoomReady(live) {
+  if (!live?.attendeePW) return false;
+  if (live.webcamsOnlyForModerator === true) return false;
+  return live.metadata?.[BBB_VIEWER_CAMERAS_META_KEY] === BBB_VIEWER_CAMERAS_META_VALUE;
 }
 
 /**
@@ -771,15 +813,59 @@ export async function fetchBbbMeetingInfo(meetingId, { timeoutMs = BBB_JOIN_INFO
     if (!attendeePW) return null;
     const moderatorPW = String(parseXmlTagValues(text, 'moderatorPW')[0] || '').trim() || null;
     const runningRaw = (parseXmlTagValues(text, 'running')[0] || '').toLowerCase();
+    const participantCount = Math.max(0, Number(parseXmlTagValues(text, 'participantCount')[0]) || 0);
     return {
       meetingId: safeMeetingId,
       attendeePW,
       moderatorPW,
-      running: runningRaw === 'true'
+      running: runningRaw === 'true',
+      participantCount,
+      webcamsOnlyForModerator: parseBbbBoolXmlTag(text, 'webcamsOnlyForModerator'),
+      metadata: parseBbbMetadataXml(text)
     };
   } catch {
     return null;
   }
+}
+
+/** Çalışan veya kayıtlı BBB oturumunu sonlandırır (yeni create için). */
+export async function bbbEndMeeting(meetingId, { moderatorPW = null, timeoutMs = BBB_FETCH_TIMEOUT_MS } = {}) {
+  const { apiBase, secret } = bbbApiConfig();
+  if (!apiBase || !secret) return false;
+  const safeMeetingId = sanitizeBbbMeetingId(meetingId);
+  if (!safeMeetingId) return false;
+
+  const params = { meetingID: safeMeetingId };
+  const modPw = String(moderatorPW || '').trim();
+  if (modPw) params.password = modPw;
+  const query = asQuery(params);
+  const checksum = bbbChecksum('end', query, secret);
+  const url = `${apiBase}end?${query}&checksum=${checksum}`;
+
+  try {
+    const res = await bbbFetch(url, { timeoutMs });
+    const text = await res.text();
+    return res.ok && text.includes('<returncode>SUCCESS</returncode>');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Eski etüt odaları webcamsOnlyForModerator=true ile oluşturulmuş olabilir; viewer kamerası açılmaz.
+ * Metadata işareti yoksa veya kamera kısıtlıysa oturumu kapatıp yeniden create edilir.
+ */
+async function refreshSharedViewerCameraRoom(stableMeetingId, live) {
+  if (!isSharedViewerCameraMeetingId(stableMeetingId) || !live?.attendeePW) return live;
+  if (sharedViewerCameraRoomReady(live)) return live;
+
+  clearCachedBbbRoom(stableMeetingId);
+  const wasRunning = Boolean(live.running);
+  await bbbEndMeeting(stableMeetingId, { moderatorPW: live.moderatorPW });
+  if (wasRunning) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+  return null;
 }
 
 function ensuredFromRoomCreds(creds, { attendeeName, moderatorName, refreshed = false }) {
@@ -851,16 +937,22 @@ export async function ensureBbbMeetingAlive({
   };
 
   const tryReuseStableRoom = async () => {
-    const cached = getCachedBbbRoom(stableMeetingId);
-    if (cached?.attendeePW) {
-      return ensuredFromRoomCreds(cached, { attendeeName, moderatorName });
+    const needsViewerCameraCheck = isSharedViewerCameraMeetingId(stableMeetingId);
+    if (!needsViewerCameraCheck) {
+      const cached = getCachedBbbRoom(stableMeetingId);
+      if (cached?.attendeePW) {
+        return ensuredFromRoomCreds(cached, { attendeeName, moderatorName });
+      }
     }
+
     const live = await fetchBbbMeetingInfo(stableMeetingId);
-    if (live?.attendeePW) {
-      setCachedBbbRoom(stableMeetingId, live);
-      return ensuredFromRoomCreds(live, { attendeeName, moderatorName });
-    }
-    return null;
+    if (!live?.attendeePW) return null;
+
+    const validated = await refreshSharedViewerCameraRoom(stableMeetingId, live);
+    if (!validated) return null;
+
+    setCachedBbbRoom(stableMeetingId, validated);
+    return ensuredFromRoomCreds(validated, { attendeeName, moderatorName });
   };
 
   if (isBbbAutoMeetingLink(attendee) || isBbbAutoMeetingLink(moderator)) {
@@ -912,7 +1004,8 @@ export async function createBbbMeetingAndJoinLink({
   attendeeName,
   moderatorName,
   durationMinutes = 60,
-  logoutUrl = null
+  logoutUrl = null,
+  meetingMetadata = null
 }) {
   const { apiBase, secret } = bbbApiConfig();
   if (!apiBase || !secret) {
@@ -929,6 +1022,13 @@ export async function createBbbMeetingAndJoinLink({
   const viewerAccess = bbbMeetingViewerAccessParams();
   const resolvedLogout = String(logoutUrl || '').trim() || null;
 
+  const metaEntries = {
+    ...(meetingMetadata && typeof meetingMetadata === 'object' ? meetingMetadata : {})
+  };
+  if (isSharedViewerCameraMeetingId(safeMeetingId)) {
+    metaEntries[BBB_VIEWER_CAMERAS_META_KEY] = BBB_VIEWER_CAMERAS_META_VALUE;
+  }
+
   const createQuery = asQuery({
     name: meetingName || 'Koçluk görüşmesi',
     meetingID: safeMeetingId,
@@ -940,6 +1040,11 @@ export async function createBbbMeetingAndJoinLink({
     autoStartRecording: recording.autoStartRecording,
     recordFullDurationMedia: recording.recordFullDurationMedia,
     ...(resolvedLogout ? { logoutURL: resolvedLogout } : {}),
+    ...Object.fromEntries(
+      Object.entries(metaEntries)
+        .filter(([, v]) => v != null && String(v).trim() !== '')
+        .map(([k, v]) => [`meta_${k}`, String(v).trim()])
+    ),
     ...lockParams,
     ...viewerAccess
   });
