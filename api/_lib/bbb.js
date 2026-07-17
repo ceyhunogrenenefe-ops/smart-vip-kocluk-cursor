@@ -324,7 +324,35 @@ function parseBbbMetadataXml(xml) {
 function sharedViewerCameraRoomReady(live) {
   if (!live?.attendeePW) return false;
   if (live.webcamsOnlyForModerator === true) return false;
-  return live.metadata?.[BBB_VIEWER_CAMERAS_META_KEY] === BBB_VIEWER_CAMERAS_META_VALUE;
+  if (live.metadata?.[BBB_VIEWER_CAMERAS_META_KEY] === BBB_VIEWER_CAMERAS_META_VALUE) return true;
+  if (live.webcamsOnlyForModerator === false) return true;
+  // Metadata eksik eski oda ama içeride katılımcı var — her girişte kapatma (join kırılır)
+  if (live.running && live.participantCount > 0) return true;
+  return false;
+}
+
+function resolveBbbCreateCredentials(createText, fallback = {}) {
+  const attendeePW =
+    String(parseXmlTagValues(createText, 'attendeePW')[0] || '').trim() ||
+    String(fallback.attendeePW || '').trim();
+  const moderatorPW =
+    String(parseXmlTagValues(createText, 'moderatorPW')[0] || '').trim() ||
+    String(fallback.moderatorPW || '').trim() ||
+    null;
+  return { attendeePW, moderatorPW };
+}
+
+async function waitForBbbMeetingEnded(meetingId, { maxWaitMs = 10000 } = {}) {
+  const safeMeetingId = sanitizeBbbMeetingId(meetingId);
+  if (!safeMeetingId) return true;
+  const started = Date.now();
+  while (Date.now() - started < maxWaitMs) {
+    runningMeetingIdsCache = { at: 0, ids: new Set() };
+    const runningSet = await bbbGetRunningMeetingIdSet();
+    if (!runningSet.has(safeMeetingId)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return false;
 }
 
 /**
@@ -860,11 +888,9 @@ async function refreshSharedViewerCameraRoom(stableMeetingId, live) {
   if (sharedViewerCameraRoomReady(live)) return live;
 
   clearCachedBbbRoom(stableMeetingId);
-  const wasRunning = Boolean(live.running);
   await bbbEndMeeting(stableMeetingId, { moderatorPW: live.moderatorPW });
-  if (wasRunning) {
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-  }
+  runningMeetingIdsCache = { at: 0, ids: new Set() };
+  await waitForBbbMeetingEnded(stableMeetingId);
   return null;
 }
 
@@ -1057,10 +1083,21 @@ export async function createBbbMeetingAndJoinLink({
     throw new Error(`BBB create başarısız: ${createText.slice(0, 280)}`);
   }
 
+  let resolvedAttendeePW = attendeePW;
+  let resolvedModeratorPW = moderatorPW;
+  const fromCreate = resolveBbbCreateCredentials(createText, { attendeePW, moderatorPW });
+  if (fromCreate.attendeePW) resolvedAttendeePW = fromCreate.attendeePW;
+  if (fromCreate.moderatorPW) resolvedModeratorPW = fromCreate.moderatorPW;
+  if (!fromCreate.attendeePW || !fromCreate.moderatorPW) {
+    const live = await fetchBbbMeetingInfo(safeMeetingId);
+    if (live?.attendeePW) resolvedAttendeePW = live.attendeePW;
+    if (live?.moderatorPW) resolvedModeratorPW = live.moderatorPW;
+  }
+
   const joinQuery = asQuery({
     fullName: attendeeName || moderatorName || 'Katılımcı',
     meetingID: safeMeetingId,
-    password: attendeePW,
+    password: resolvedAttendeePW,
     redirect: true
   });
   const joinChecksum = bbbChecksum('join', joinQuery, secret);
@@ -1069,7 +1106,7 @@ export async function createBbbMeetingAndJoinLink({
   const coachJoinQuery = asQuery({
     fullName: moderatorName || attendeeName || 'Koç',
     meetingID: safeMeetingId,
-    password: moderatorPW,
+    password: resolvedModeratorPW,
     redirect: true
   });
   const coachJoinChecksum = bbbChecksum('join', coachJoinQuery, secret);
@@ -1079,7 +1116,7 @@ export async function createBbbMeetingAndJoinLink({
     attendeeJoinLink,
     moderatorJoinLink,
     meetingId: safeMeetingId,
-    attendeePW,
-    moderatorPW
+    attendeePW: resolvedAttendeePW,
+    moderatorPW: resolvedModeratorPW
   };
 }
