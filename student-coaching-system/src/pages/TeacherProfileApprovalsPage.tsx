@@ -52,7 +52,7 @@ export default function TeacherProfileApprovalsPage() {
       const qs = filter ? `?status=${encodeURIComponent(filter)}` : '';
       const res = await apiFetch(`/api/teacher-profiles-admin${qs}`);
       const j = await res.json();
-      if (!res.ok) throw new Error(j.error || res.statusText);
+      if (!res.ok) throw new Error(j.message || j.error || res.statusText);
       setRows(j.data || []);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Liste alınamadı');

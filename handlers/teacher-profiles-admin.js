@@ -324,8 +324,23 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'method_not_allowed' });
   } catch (e) {
     const msg = errorMessage(e);
-    if (msg.includes('Unauthorized') || msg.includes('auth')) {
-      return res.status(401).json({ error: 'Unauthorized' });
+    if (
+      msg.includes('Unauthorized') ||
+      msg.includes('Missing token') ||
+      msg.includes('Invalid token') ||
+      msg.includes('Invalid signature') ||
+      msg.includes('Token expired') ||
+      /\bauth\b/i.test(msg)
+    ) {
+      return res.status(401).json({ error: 'Unauthorized', message: msg });
+    }
+    // Supabase: tablo yok / schema cache
+    if (/teacher_profiles/i.test(msg) || /schema cache/i.test(msg) || msg.includes('42P01') || msg.includes('PGRST')) {
+      return res.status(503).json({
+        error: 'teacher_profiles_unavailable',
+        message: msg,
+        hint: 'Supabase SQL Editor\'da sql/2026-07-18-teacher-public-profiles.sql calistirildi mi?'
+      });
     }
     console.error('[teacher-profiles-admin]', msg);
     return res.status(500).json({ error: 'server_error', message: msg });
