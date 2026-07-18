@@ -1,49 +1,43 @@
-# Öğretmen vitrin profili entegrasyonu (Faz 1)
+﻿# Öğretmen vitrin profili entegrasyonu
 
-## Ne eklendi?
+## Faz 1 (panel) — hazır
 
-Ders Online VIP Koçluk panelinde öğretmen hesabı = tek kullanıcı (`users` + `teacher` rolü).
-Yeni tablo `teacher_profiles` bu kullanıcıya **1:1** bağlıdır (unique `user_id`).
+- SQL: `sql/2026-07-18-teacher-public-profiles.sql`
+- Bucket: `teacher-profiles`
+- Öğretmen: `/profilimi-duzenle`
+- Admin: `/ogretmen-profil-onaylari`
+- Public API: `GET /api/public/teachers` ve `?slug=`
 
-- Öğretmen hesabı açılınca profil otomatik oluşur (`incomplete`)
-- Öğretmen `/profilimi-duzenle` ile vitrin profilini doldurur → Onaya gönderir
-- Admin `/ogretmen-profil-onaylari` ile onaylar / reddeder / pasife alır
-- Onaylanınca `published_snapshot` oluşur
-- Public API: `GET /api/public/teachers` ve `GET /api/public/teachers?slug=`
-- Siteye webhook: `SITE_TEACHERS_WEBHOOK_URL` + `SITE_TEACHERS_WEBHOOK_SECRET` (HMAC)
+## Faz 2 (site) — hazır
 
-## Migration
-
-Supabase SQL Editor’da çalıştırın:
-
-`sql/2026-07-18-teacher-public-profiles.sql`
-
-## Storage (opsiyonel, foto/belge yükleme)
-
-Supabase Storage → bucket adı: `teacher-profiles`  
-(Env ile değiştirilebilir: `TEACHER_PROFILE_BUCKET`)
+| Parça | Açıklama |
+|-------|----------|
+| `GET /api/public-teachers` | Panel proxy |
+| `POST /api/teachers-sync` | HMAC sync ACK |
+| `/ozel-ders/ogretmen/{slug}` | Detay |
+| PayTR `teacher_slug` | tireli slug (`customer.teacherSlug`) |
 
 ## Environment
 
-| Değişken | Açıklama |
-|----------|----------|
-| `SITE_TEACHERS_WEBHOOK_URL` | onlinevipdershane.com inbound sync URL (Faz 2) |
-| `SITE_TEACHERS_WEBHOOK_SECRET` | Paylaşılan gizli anahtar |
-| `PUBLIC_TEACHERS_CORS_ORIGIN` | Varsayılan: onlinevipdershane.com domainleri |
-| `TEACHER_PROFILE_BUCKET` | Varsayılan: `teacher-profiles` |
-| `OZEL_DERS_WEBHOOK_SECRET` | Mevcut (site → panel talep webhook) |
+### Panel (dersonlinevipkocluk)
 
-## API özeti
+```
+SITE_TEACHERS_WEBHOOK_URL=https://onlinevipdershane.com/api/teachers-sync
+SITE_TEACHERS_WEBHOOK_SECRET=<aynı-uzun-secret>
+```
 
-| Endpoint | Rol |
-|----------|-----|
-| `GET/PATCH /api/teacher-profile` | teacher |
-| `POST /api/teacher-profile?op=submit` | teacher |
-| `GET/POST /api/teacher-profiles-admin` | admin, super_admin |
-| `GET /api/public/teachers` | public |
-| `POST /api/teacher-profile-media?op=sign\|confirm` | teacher / admin |
+### Site (onlinevipdershane)
 
-## Faz 2 (site)
+```
+KOCLUK_PANEL_URL=https://www.dersonlinevipkocluk.com
+OZEL_DERS_WEBHOOK_SECRET=<mevcut>
+SITE_TEACHERS_WEBHOOK_SECRET=<panel ile aynı>
+```
 
-`onlinevipdershane.com` `premium-teachers-ui.js` → public API’den liste çekecek;
-PayTR’ye açık `teacher_slug` alanı eklenecek.
+## Test
+
+1. Panel + site deploy + Redeploy (env sonrası)
+2. Öğretmen profil doldur → onaya gönder → admin onay
+3. Site `/ozel-ders#ogretmenler` → canlı kadro
+4. `/ozel-ders/ogretmen/{slug}`
+5. Ödeme → panelde `teacher_slug` tireli
