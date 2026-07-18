@@ -4,15 +4,29 @@ export function normRole(r) {
   return String(r || '').trim().toLowerCase();
 }
 
-/** JWT `role` + `roles[]` + DB `users.roles` birleşimi */
+/** JWT role + roles[] + DB users.roles — her zaman Set doner */
 export async function actorRoleSet(actor) {
-  const rs = await normalizedUserRolesFromDb(actor?.sub);
-  const set = new Set(rs.map(normRole));
-  if (actor?.role) set.add(normRole(actor.role));
-  if (Array.isArray(actor?.roles)) {
-    for (const r of actor.roles) set.add(normRole(r));
+  const set = new Set();
+  try {
+    const rs = await normalizedUserRolesFromDb(actor?.sub);
+    const list = Array.isArray(rs) ? rs : [];
+    for (const r of list) {
+      const n = normRole(r);
+      if (n) set.add(n);
+    }
+  } catch (e) {
+    console.warn('[actorRoleSet] db roles failed', e?.message || e);
   }
-  if (!set.size && actor?.role) set.add(normRole(actor.role));
+  if (actor?.role) {
+    const n = normRole(actor.role);
+    if (n) set.add(n);
+  }
+  if (Array.isArray(actor?.roles)) {
+    for (const r of actor.roles) {
+      const n = normRole(r);
+      if (n) set.add(n);
+    }
+  }
   return set;
 }
 
@@ -24,7 +38,7 @@ export function roleSetHasAdmin(set) {
   return Boolean(set && typeof set.has === 'function' && set.has('admin'));
 }
 
-/** Süper admin veya kurumu tanımlı kurum yöneticisi */
+/** Super admin veya kurumu tanimli kurum yoneticisi */
 export function actorIsInstitutionAdmin(actor, roleSet) {
   if (roleSetHasSuperAdmin(roleSet)) return true;
   return roleSetHasAdmin(roleSet) && Boolean(actor?.institution_id);

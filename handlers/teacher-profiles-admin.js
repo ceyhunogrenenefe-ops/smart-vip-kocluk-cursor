@@ -24,9 +24,38 @@ import {
   writeAuditLog
 } from '../api/_lib/teacher-profile.js';
 
-async function requireAdmin(actor) {
-  const roles = await actorRoleSet(actor);
-  return roleSetHasAdmin(roles) || roleSetHasSuperAdmin(roles);
+/** JWT rollerinden senkron admin kontrolu (Promise/Set hatasi uretmez). */
+function rolesFromActorJwt(actor) {
+  const roles = new Set();
+  const add = (r) => {
+    const v = String(r || '').trim().toLowerCase();
+    if (v) roles.add(v);
+  };
+  add(actor?.role);
+  if (Array.isArray(actor?.roles)) actor.roles.forEach(add);
+  return roles;
+}
+
+function isAdminFromJwt(actor) {
+  const roles = rolesFromActorJwt(actor);
+  return roles.has('admin') || roles.has('super_admin');
+}
+
+async function isAdminActor(actor) {
+  if (isAdminFromJwt(actor)) return true;
+  // JWT'de yoksa DB rollerine bak (await zorunlu)
+  try {
+    const dbRoles = await actorRoleSet(actor);
+    if (dbRoles instanceof Set) {
+      return dbRoles.has('admin') || dbRoles.has('super_admin');
+    }
+    if (Array.isArray(dbRoles)) {
+      return dbRoles.map((r) => String(r || '').toLowerCase()).some((r) => r === 'admin' || r === 'super_admin');
+    }
+  } catch (e) {
+    console.warn('[teacher-profiles-admin] actorRoleSet failed', e?.message || e);
+  }
+  return false;
 }
 
 function clientIp(req) {
@@ -51,7 +80,7 @@ async function loadProfile(id) {
 export default async function handler(req, res) {
   try {
     const actor = requireAuthenticatedActor(req);
-    if (!(await requireAdmin(actor))) return res.status(403).json({ error: 'forbidden' });
+    if (!(await isAdminActor(actor))) return res.status(403).json({ error: 'forbidden' });
 
     const id = String(req.query.id || '').trim();
     const op = String(req.query.op || '').trim();
@@ -66,7 +95,20 @@ export default async function handler(req, res) {
         .limit(200);
       if (statusFilter) q = q.eq('status', statusFilter);
       const { data, error } = await q;
-      if (error) throw error;
+      if (error) {
+        const em = String(error.message || error.code || error);
+        console.error('[teacher-profiles-admin] list error', em);
+        // Tablo yok / schema cache: 500 yerine bos liste + uyar
+        if (/teacher_profiles/i.test(em) || /schema cache/i.test(em) || /42P01|PGRST/i.test(em)) {
+          return res.status(200).json({
+            data: [],
+            warning: 'teacher_profiles_unavailable',
+            message: em,
+            hint: 'Supabase SQL Editor: sql/2026-07-18-teacher-public-profiles.sql'
+          });
+        }
+        throw error;
+      }
 
       const userIds = [...new Set((data || []).map((r) => r.user_id).filter(Boolean))];
       let usersById = {};

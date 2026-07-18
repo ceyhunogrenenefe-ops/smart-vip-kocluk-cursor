@@ -51,9 +51,25 @@ function safeExt(name, allowedExts) {
 export default async function handler(req, res) {
   try {
     const actor = requireAuthenticatedActor(req);
-    const roles = await actorRoleSet(actor);
-    const isTeacher = roles.has('teacher') || actor.role === 'teacher';
-    const isAdmin = roleSetHasAdmin(roles) || roleSetHasSuperAdmin(roles);
+    let roles;
+    try {
+      roles = await actorRoleSet(actor);
+    } catch (_) {
+      roles = new Set();
+    }
+    if (!(roles instanceof Set)) {
+      roles = new Set(Array.isArray(roles) ? roles.map(String) : []);
+    }
+    const jwtRole = String(actor.role || '').toLowerCase();
+    const jwtRoles = Array.isArray(actor.roles) ? actor.roles.map((r) => String(r || '').toLowerCase()) : [];
+    const isTeacher = roles.has('teacher') || jwtRole === 'teacher' || jwtRoles.includes('teacher');
+    const isAdmin =
+      roleSetHasAdmin(roles) ||
+      roleSetHasSuperAdmin(roles) ||
+      jwtRole === 'admin' ||
+      jwtRole === 'super_admin' ||
+      jwtRoles.includes('admin') ||
+      jwtRoles.includes('super_admin');
     if (!isTeacher && !isAdmin) return res.status(403).json({ error: 'forbidden' });
 
     if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' });

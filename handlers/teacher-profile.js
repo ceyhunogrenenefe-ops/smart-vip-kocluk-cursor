@@ -18,9 +18,21 @@ import {
   writeAuditLog
 } from '../api/_lib/teacher-profile.js';
 
+function jwtHasRole(actor, role) {
+  const want = String(role || '').toLowerCase();
+  if (String(actor?.role || '').toLowerCase() === want) return true;
+  if (Array.isArray(actor?.roles) && actor.roles.some((r) => String(r || '').toLowerCase() === want)) return true;
+  return false;
+}
+
 async function isTeacherActor(actor) {
-  const roles = await actorRoleSet(actor);
-  return roles.has('teacher') || String(actor.role) === 'teacher';
+  if (jwtHasRole(actor, 'teacher') || String(actor.role) === 'teacher') return true;
+  try {
+    const roles = await actorRoleSet(actor);
+    if (roles instanceof Set) return roles.has('teacher');
+    if (Array.isArray(roles)) return roles.map((r) => String(r || '').toLowerCase()).includes('teacher');
+  } catch (_) { /* ignore */ }
+  return false;
 }
 
 function clientIp(req) {
@@ -36,9 +48,9 @@ function clientIp(req) {
 export default async function handler(req, res) {
   try {
     const actor = requireAuthenticatedActor(req);
-    const roles = await actorRoleSet(actor);
     const teacherOk = await isTeacherActor(actor);
-    if (!teacherOk && !roles.has('super_admin') && !roles.has('admin')) {
+    const adminOk = jwtHasRole(actor, 'admin') || jwtHasRole(actor, 'super_admin');
+    if (!teacherOk && !adminOk) {
       return res.status(403).json({ error: 'forbidden' });
     }
     if (!teacherOk) return res.status(403).json({ error: 'teacher_only' });
