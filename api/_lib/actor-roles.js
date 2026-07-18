@@ -17,11 +17,11 @@ export async function actorRoleSet(actor) {
 }
 
 export function roleSetHasSuperAdmin(set) {
-  return set.has('super_admin');
+  return Boolean(set && typeof set.has === 'function' && set.has('super_admin'));
 }
 
 export function roleSetHasAdmin(set) {
-  return set.has('admin');
+  return Boolean(set && typeof set.has === 'function' && set.has('admin'));
 }
 
 /** Süper admin veya kurumu tanımlı kurum yöneticisi */
