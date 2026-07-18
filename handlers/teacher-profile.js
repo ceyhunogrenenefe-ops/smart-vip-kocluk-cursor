@@ -18,8 +18,8 @@ import {
   writeAuditLog
 } from '../api/_lib/teacher-profile.js';
 
-function isTeacherActor(actor) {
-  const roles = actorRoleSet(actor);
+async function isTeacherActor(actor) {
+  const roles = await actorRoleSet(actor);
   return roles.has('teacher') || String(actor.role) === 'teacher';
 }
 
@@ -36,11 +36,12 @@ function clientIp(req) {
 export default async function handler(req, res) {
   try {
     const actor = requireAuthenticatedActor(req);
-    if (!isTeacherActor(actor) && !actorRoleSet(actor).has('super_admin') && !actorRoleSet(actor).has('admin')) {
-      // admin may pass ?user_id= for preview via admin API; this endpoint is teacher-owned
-      if (!isTeacherActor(actor)) return res.status(403).json({ error: 'forbidden' });
+    const roles = await actorRoleSet(actor);
+    const teacherOk = await isTeacherActor(actor);
+    if (!teacherOk && !roles.has('super_admin') && !roles.has('admin')) {
+      return res.status(403).json({ error: 'forbidden' });
     }
-    if (!isTeacherActor(actor)) return res.status(403).json({ error: 'teacher_only' });
+    if (!teacherOk) return res.status(403).json({ error: 'teacher_only' });
 
     const uid = String(actor.sub || '').trim();
     const { data: user, error: uErr } = await supabaseAdmin

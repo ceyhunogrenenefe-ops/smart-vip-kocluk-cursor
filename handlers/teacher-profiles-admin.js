@@ -24,8 +24,8 @@ import {
   writeAuditLog
 } from '../api/_lib/teacher-profile.js';
 
-function requireAdmin(actor) {
-  const roles = actorRoleSet(actor);
+async function requireAdmin(actor) {
+  const roles = await actorRoleSet(actor);
   return roleSetHasAdmin(roles) || roleSetHasSuperAdmin(roles);
 }
 
@@ -51,7 +51,7 @@ async function loadProfile(id) {
 export default async function handler(req, res) {
   try {
     const actor = requireAuthenticatedActor(req);
-    if (!requireAdmin(actor)) return res.status(403).json({ error: 'forbidden' });
+    if (!(await requireAdmin(actor))) return res.status(403).json({ error: 'forbidden' });
 
     const id = String(req.query.id || '').trim();
     const op = String(req.query.op || '').trim();
