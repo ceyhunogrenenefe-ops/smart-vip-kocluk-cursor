@@ -28,9 +28,24 @@ export function isApproaching(lesson: TeacherLesson, nowMs: number = Date.now())
 export function isOngoing(lesson: TeacherLesson, nowMs: number = Date.now()): boolean {
   if (lesson.status !== 'scheduled') return false;
   const start = lessonInstantMs(lesson.date, lesson.start_time);
-  const end = lessonInstantMs(lesson.date, lesson.end_time);
-  if (start == null || end == null) return false;
-  return nowMs >= start && nowMs < end;
+  if (start == null) return false;
+  const end = lessonInstantMs(lesson.date, lesson.end_time || lesson.start_time);
+  if (end == null) return false;
+  return nowMs >= start && nowMs <= end;
+}
+
+/** Derse katılım / dersi başlat: başlangıçtan 15 dk önce → bitişten 30 dk sonra */
+export function isPrivateLessonJoinWindowOpen(
+  lesson: Pick<TeacherLesson, 'date' | 'start_time' | 'end_time' | 'status'>,
+  nowMs: number = Date.now(),
+  openMinutesBefore = 15,
+  closeMinutesAfter = 30
+): boolean {
+  if (lesson.status !== 'scheduled') return false;
+  const start = lessonInstantMs(lesson.date, lesson.start_time);
+  const end = lessonInstantMs(lesson.date, lesson.end_time || lesson.start_time);
+  if (start == null || end == null) return true;
+  return nowMs >= start - openMinutesBefore * 60_000 && nowMs <= end + closeMinutesAfter * 60_000;
 }
 
 export const PLATFORM_LABEL: Record<string, string> = {
@@ -56,7 +71,7 @@ export function isLikelyBbbJoinUrl(url: string): boolean {
   if (!s) return false;
   if (isBbbAutoMeetingLink(s)) return true;
   if (isBbbJoinUrl(s)) return true;
-  if (/bigbluebutton|biggerbluebutton/i.test(s) && /\/join/i.test(s)) return true;
+  if (/bigbluebutton|biggerbluebutton|dersonlinevipkocluk/i.test(s) && /\/join/i.test(s)) return true;
   return false;
 }
 
@@ -120,6 +135,21 @@ export function classSessionHasJoinLink(session: {
 }): boolean {
   const url = lessonJoinUrl(session);
   return Boolean(url);
+}
+
+/** WhatsApp davet linki: planlı oturum yeterli (BBB oda henüz açılmamış olabilir). */
+export function canShowSessionGuestInvite(
+  session: {
+    id?: string;
+    status?: string;
+  },
+  opts?: { includeTemplate?: boolean }
+): boolean {
+  if (String(session.status || '').toLowerCase() !== 'scheduled') return false;
+  const id = String(session.id || '').trim();
+  if (!id) return false;
+  if (id.startsWith('slot-')) return Boolean(opts?.includeTemplate);
+  return true;
 }
 
 /** Düzenleme kaydında panel URL'si ham BBB linkinin yerine yazılmasın. */

@@ -7,6 +7,8 @@ import {
   getTeacherPanelClassIds
 } from '../api/_lib/teacher-class-scope.js';
 import { STUDENT_LIST_COLUMNS } from '../api/_lib/list-query-columns.js';
+import { actorRoleSet } from '../api/_lib/actor-roles.js';
+import { resolveViewAsActorIfAllowed } from '../api/_lib/view-as-actor.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -20,14 +22,28 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Missing token' });
   }
 
-  const roleTags = await normalizedUserRolesFromDb(actor.sub);
-  if (!actorIsTeacherForPanelScope(actor, roleTags)) {
+  const viewAsUserId = req.query.view_as_user_id
+    ? String(req.query.view_as_user_id).trim()
+    : '';
+  let scopeActor = actor;
+  if (viewAsUserId) {
+    try {
+      const rs = await actorRoleSet(actor);
+      scopeActor = await resolveViewAsActorIfAllowed(actor, rs, viewAsUserId);
+    } catch (e) {
+      const status = Number(e?.status) || 500;
+      return res.status(status).json({ error: e?.code || e?.message || 'view_as_failed' });
+    }
+  }
+
+  const roleTags = await normalizedUserRolesFromDb(scopeActor.sub);
+  if (!actorIsTeacherForPanelScope(scopeActor, roleTags)) {
     return res.status(403).json({ error: 'forbidden' });
   }
 
-  const inst = actor.institution_id || null;
-  const classIds = await getTeacherPanelClassIds(actor.sub);
-  const { ids: studentIds } = await getTeacherPanelStudentScope(actor.sub, inst);
+  const inst = scopeActor.institution_id || null;
+  const classIds = await getTeacherPanelClassIds(scopeActor.sub);
+  const { ids: studentIds } = await getTeacherPanelStudentScope(scopeActor.sub, inst);
 
   let classes = [];
   if (classIds.length) {
@@ -57,6 +73,7 @@ export default async function handler(req, res) {
       studentIds,
       classes,
       students
-    }
+    },
+    ...(viewAsUserId ? { view_as_user_id: viewAsUserId } : {})
   });
 }

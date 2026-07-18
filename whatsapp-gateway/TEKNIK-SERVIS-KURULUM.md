@@ -68,6 +68,8 @@ Beklenen örnek yanıt:
 |---------|--------|
 | `logged_out` / Connection Failure | Panelden «Oturumu sıfırla ve QR al», telefonda eski Bağlı cihazı kaldır |
 | PM2 sürekli restart | `pm2 logs whatsapp-gateway` — `.env` içinde `APP_JWT_SECRET` ve `GATEWAY_API_KEY` kontrol |
-| Vercel'den erişilemiyor | Firewall'da 4010 açık mı, `WHATSAPP_GATEWAY_UPSTREAM` doğru IP:4010 mi |
+| Vercel'den erişilemiyor (502) | Gateway **nerede çalışıyorsa** o IP: `WHATSAPP_GATEWAY_UPSTREAM=http://PUBLIC_IP:4010` (Windows makineyse VPS IP değil) |
+| `Stream Errored (ack)` / `Bad MAC` / `Connection Closed` | Geçici Baileys hatası — süreç **çökmemeli**, otomatik reconnect. Güncel `server.js` (uncaught swallow). Hâlâ düşüyorsa `pm2 restart` |
+| Panel 502, gateway Windows’ta açık | Windows firewall 4010 inbound + public IP; Vercel env’yi Windows IP’ye çevirin |
 
 Detaylı rehber: `VPS-KURULUM.md`

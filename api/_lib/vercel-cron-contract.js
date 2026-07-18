@@ -10,13 +10,13 @@
  * Kanal: önce **gateway** (WHATSAPP_AUTOMATION_CHANNEL). Gateway başarısızsa Meta yedek.
  *
  * --- Canlı ders hatırlatma (handlers/cron-lesson-reminder.js) ---
- * Her 5 dk UTC; pencere: ders başlamadan 7–13 dk (≈10 dk). Kanal: gateway (varsayılan).
+ * KAPALI: vercel.json crons listesinden kaldırıldı (kullanılmıyor).
  *
  * --- Grup canlı ders hatırlatma (handlers/cron-class-lesson-reminders.js) ---
- * Her 5 dk UTC; aynı 7–13 dk penceresi. Ardışık aynı sınıf/konu/link oturumunda tekrar yok.
+ * KAPALI: vercel.json crons listesinden kaldırıldı (kullanılmıyor).
  *
  * --- Öğretmen ders hatırlatması (handlers/cron-teacher-lesson-reminders.js) ---
- * Her 5 dk UTC; ders başlamadan 13–17 dk (≈15 dk). Süper admin gateway (BOOK_ORDER_GATEWAY_SESSION_ID). */
+ * KAPALI: vercel.json crons listesinden kaldırıldı (kullanılmıyor). */
 
 /** vercel.json → crons → daily-report-reminders ile aynı olmalı (Meta 22:00 İstanbul) */
 export const CRON_DAILY_REPORT_REMINDERS_UTC = '0 19 * * *';

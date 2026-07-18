@@ -1,0 +1,393 @@
+[
+  {
+    "rowNumber": 2,
+    "firstName": "Ömer",
+    "lastName": "Arslan",
+    "fullName": "Ömer Arslan",
+    "email": "omeraslan@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "6",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "Seval Arslan",
+    "parentPhone": "05063008466"
+  },
+  {
+    "rowNumber": 3,
+    "firstName": "AZRA",
+    "lastName": "KARACA",
+    "fullName": "AZRA KARACA",
+    "email": "azra123@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "6",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "MACİDE KARACA",
+    "parentPhone": "05435865819"
+  },
+  {
+    "rowNumber": 4,
+    "firstName": "Elif sena",
+    "lastName": "Çomak",
+    "fullName": "Elif sena Çomak",
+    "email": "elifcomak@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "6",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "Sezgin çomak",
+    "parentPhone": "05433861610"
+  },
+  {
+    "rowNumber": 5,
+    "firstName": "Kerem",
+    "lastName": "Akbunar",
+    "fullName": "Kerem Akbunar",
+    "email": "akbunar@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "6",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "Gülay Akbunar",
+    "parentPhone": "05434144300"
+  },
+  {
+    "rowNumber": 6,
+    "firstName": "Rukiye",
+    "lastName": "Ekşioğlu",
+    "fullName": "Rukiye Ekşioğlu",
+    "email": "eksioglu@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "6",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "Şerife Ekşioğlu",
+    "parentPhone": "05315100644"
+  },
+  {
+    "rowNumber": 7,
+    "firstName": "Ayse melike",
+    "lastName": "İyilik",
+    "fullName": "Ayse melike İyilik",
+    "email": "iyilik@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "6",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "Rabia iyişik",
+    "parentPhone": "05321777203"
+  },
+  {
+    "rowNumber": 8,
+    "firstName": "ZEHRA",
+    "lastName": "BAŞARAN",
+    "fullName": "ZEHRA BAŞARAN",
+    "email": "zehra345@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "7",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "HÜLYA BAŞARAN",
+    "parentPhone": "05059553756"
+  },
+  {
+    "rowNumber": 9,
+    "firstName": "ZEYNEP",
+    "lastName": "ERDOĞAN",
+    "fullName": "ZEYNEP ERDOĞAN",
+    "email": "zeyneperdogan@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "7",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "ALİ ERDOĞAN",
+    "parentPhone": "05304571871"
+  },
+  {
+    "rowNumber": 10,
+    "firstName": "Kaan Ata",
+    "lastName": "Türkaydın",
+    "fullName": "Kaan Ata Türkaydın",
+    "email": "kaanata@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "Serdar Türkaydın",
+    "parentPhone": "05326946523"
+  },
+  {
+    "rowNumber": 11,
+    "firstName": "Nazlı",
+    "lastName": "Türkaydın",
+    "fullName": "Nazlı Türkaydın",
+    "email": "turkaydin@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "Dilek Türkaydın",
+    "parentPhone": "05058021958"
+  },
+  {
+    "rowNumber": 12,
+    "firstName": "Barbaros",
+    "lastName": "Çakıl",
+    "fullName": "Barbaros Çakıl",
+    "email": "cakil@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "Sibel balcı çakıl",
+    "parentPhone": "05363404133"
+  },
+  {
+    "rowNumber": 13,
+    "firstName": "Beyza ahsen",
+    "lastName": "Çakmak",
+    "fullName": "Beyza ahsen Çakmak",
+    "email": "cakmak@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "oman çakmak",
+    "parentPhone": "05545888700"
+  },
+  {
+    "rowNumber": 14,
+    "firstName": "Nusret Orhan",
+    "lastName": "KUŞ",
+    "fullName": "Nusret Orhan KUŞ",
+    "email": "nusretorhan@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "Hakan KUŞ",
+    "parentPhone": "05439751347"
+  },
+  {
+    "rowNumber": 15,
+    "firstName": "BETÜL ERVA",
+    "lastName": "KAPLAN",
+    "fullName": "BETÜL ERVA KAPLAN",
+    "email": "ervakaplan@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "HATİCE KAPLAN",
+    "parentPhone": "05057876275"
+  },
+  {
+    "rowNumber": 16,
+    "firstName": "Saffet Talha",
+    "lastName": "Deveci",
+    "fullName": "Saffet Talha Deveci",
+    "email": "saffet@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "Ayşe Deveci",
+    "parentPhone": "505864463"
+  },
+  {
+    "rowNumber": 17,
+    "firstName": "Erva",
+    "lastName": "İşci",
+    "fullName": "Erva İşci",
+    "email": "ervaisci@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "Şerife İşci",
+    "parentPhone": "05393253776"
+  },
+  {
+    "rowNumber": 18,
+    "firstName": "Eylül",
+    "lastName": "Karlatlı",
+    "fullName": "Eylül Karlatlı",
+    "email": "eylulkarlatli@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "Rahşan karlatlı",
+    "parentPhone": "05303416522"
+  },
+  {
+    "rowNumber": 19,
+    "firstName": "Şeyma",
+    "lastName": "Uslu",
+    "fullName": "Şeyma Uslu",
+    "email": "seymauslu@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "TURGUT USLU",
+    "parentPhone": "05336977106"
+  },
+  {
+    "rowNumber": 20,
+    "firstName": "ELİF BERİL",
+    "lastName": "TIĞLI",
+    "fullName": "ELİF BERİL TIĞLI",
+    "email": "elifberil@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "8",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "Belma  Tığlı",
+    "parentPhone": "05064246178"
+  },
+  {
+    "rowNumber": 21,
+    "firstName": "TEBESSÜM",
+    "lastName": "AKTÜRK",
+    "fullName": "TEBESSÜM AKTÜRK",
+    "email": "tebessumakturk@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "8",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "Elif Aktürk",
+    "parentPhone": "05305752301"
+  },
+  {
+    "rowNumber": 22,
+    "firstName": "ZEYNEP",
+    "lastName": "İNCE",
+    "fullName": "ZEYNEP İNCE",
+    "email": "zeynepince@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "8",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "RABİA İNCE",
+    "parentPhone": "05342662512"
+  },
+  {
+    "rowNumber": 23,
+    "firstName": "Cemre Zülal",
+    "lastName": "KARAKIŞ",
+    "fullName": "Cemre Zülal KARAKIŞ",
+    "email": "cemrezulal@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "8",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "ABDULLAH KARAKIŞ",
+    "parentPhone": "05327174878"
+  },
+  {
+    "rowNumber": 24,
+    "firstName": "Betul",
+    "lastName": "Ateşci",
+    "fullName": "Betul Ateşci",
+    "email": "atesci123@gmail.com",
+    "phone": "",
+    "birthDate": "",
+    "classLevel": "8",
+    "branch": "",
+    "roles": [
+      "student"
+    ],
+    "password": "152535",
+    "parentName": "Nur Atescı",
+    "parentPhone": "05077082133"
+  }
+]

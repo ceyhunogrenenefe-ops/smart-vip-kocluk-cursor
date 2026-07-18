@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Copy, PlayCircle } from 'lucide-react';
+import { ClipboardList, Copy, PlayCircle } from 'lucide-react';
 import { liveSubjectAccent } from './liveSubjectAccent';
 import { hasClassSessionRecordingAccess } from '../../lib/liveLessonUtils';
 import { cn } from '../../lib/utils';
@@ -48,6 +48,8 @@ export type ClassLiveStudentMobileCalendarProps = {
   onWatchSession?: (s: SessionRow) => void;
   /** Öğretmen/koç: WhatsApp davet metnini panoya kopyala */
   onCopyGuestLink?: (s: SessionRow) => void;
+  /** Öğretmen/koç: manuel yoklama */
+  onOpenAttendance?: (s: SessionRow) => void;
   studentAppointmentDefaults?: { name?: string; class_level?: string };
 };
 
@@ -63,6 +65,7 @@ export function ClassLiveStudentMobileCalendar({
   onJoinSession,
   onWatchSession,
   onCopyGuestLink,
+  onOpenAttendance,
   studentAppointmentDefaults
 }: ClassLiveStudentMobileCalendarProps) {
   const [dayIdx, setDayIdx] = useState(() => {
@@ -156,8 +159,12 @@ export function ClassLiveStudentMobileCalendar({
             const canWatch = hasClassSessionRecordingAccess(s);
             const isSolutionLesson = isSolutionLessonSubject(s.subject);
             const teacherLabel = teacher?.name || s.teacher_name || 'Öğretmen';
+            const isScheduled = String(s.status || '').toLowerCase() === 'scheduled';
             const isRealSession = !String(s.id).startsWith('slot-');
-            const showGuestInvite = Boolean(onCopyGuestLink && canJoin && isRealSession);
+            const showGuestInvite = Boolean(onCopyGuestLink && isScheduled && isRealSession);
+            const showAttendance =
+              Boolean(onOpenAttendance && isRealSession) &&
+              (s.status === 'scheduled' || s.status === 'completed');
             return (
               <li
                 key={s.id}
@@ -190,15 +197,27 @@ export function ClassLiveStudentMobileCalendar({
                     </span>
                   ) : null}
                 </div>
-                <div className="mt-2 flex flex-wrap gap-2">
+                <div className="mt-3 flex flex-wrap gap-2">
                   {showGuestInvite ? (
                     <button
                       type="button"
                       onClick={() => onCopyGuestLink!(s)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-violet-300 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 touch-manipulation active:bg-violet-50"
+                      title="WhatsApp için kısa davet linki panoya kopyalanır"
+                      className="inline-flex items-center gap-1 rounded-lg border border-violet-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-violet-700 touch-manipulation hover:bg-violet-50 active:bg-violet-100"
                     >
-                      <Copy className="h-3.5 w-3.5" aria-hidden />
+                      <Copy className="h-3.5 w-3.5 shrink-0" aria-hidden />
                       Davet linki
+                    </button>
+                  ) : null}
+                  {showAttendance ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenAttendance!(s)}
+                      title="Öğrenci katılımını işaretle; devamsızlar için veli WhatsApp"
+                      className="inline-flex items-center gap-1 rounded-lg border border-amber-400 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-900 touch-manipulation hover:bg-amber-100 active:bg-amber-200"
+                    >
+                      <ClipboardList className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                      Yoklama
                     </button>
                   ) : null}
                   {isSolutionLesson ? (

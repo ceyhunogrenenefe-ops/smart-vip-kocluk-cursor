@@ -1,4 +1,5 @@
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
+import { actorRoleSet, roleSetHasAdmin, roleSetHasSuperAdmin } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { normalizePhoneToE164 } from '../api/_lib/phone-whatsapp.js';
@@ -296,7 +297,15 @@ async function insertBookOrder(payload) {
 
 export default async function handler(req, res) {
   const op = String(req.query?.op || '').trim();
-  const scope = String(req.query?.scope || '').trim();
+  let scope = String(req.query?.scope || '').trim();
+  if (!scope && typeof req.url === 'string') {
+    try {
+      const u = new URL(req.url, 'http://local');
+      scope = String(u.searchParams.get('scope') || '').trim();
+    } catch {
+      /* ignore */
+    }
+  }
   const id = String(req.query?.id || '').trim();
 
   if (req.method === 'GET' && scope === 'public-kitap-sets') {
@@ -397,14 +406,49 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
-  const isSuper = actor.role === 'super_admin';
-  const isAdmin = ADMIN_ROLES.has(actor.role);
-  if (!isAdmin) return res.status(403).json({ error: 'forbidden' });
+  let roleSet = new Set();
+  try {
+    roleSet = await actorRoleSet(actor);
+  } catch (e) {
+    console.warn('[book-orders] actorRoleSet failed', errorMessage(e));
+    if (actor?.role) roleSet.add(String(actor.role).toLowerCase());
+    if (Array.isArray(actor?.roles)) {
+      for (const r of actor.roles) roleSet.add(String(r || '').toLowerCase());
+    }
+  }
+  const isSuper = roleSetHasSuperAdmin(roleSet) || actor.role === 'super_admin';
+  const isAdmin = isSuper || roleSetHasAdmin(roleSet) || ADMIN_ROLES.has(actor.role);
 
   const institutionFilter = isSuper
     ? String(req.query?.institution_id || '').trim() || null
     : String(req.query?.institution_id || actor.institution_id || PLATFORM_BOOK_ORDER_INSTITUTION_ID || '').trim() ||
       null;
+
+  /* Eğitim paneli: herhangi bir giriş yapmış kullanıcı set isimlerini okuyabilir */
+  if (req.method === 'GET' && (scope === 'kitap-sets' || scope === 'kitap_sets')) {
+    try {
+      let q = supabaseAdmin
+        .from('kitap_siparis_setleri')
+        .select('*')
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true });
+      if (institutionFilter) q = q.eq('institution_id', institutionFilter);
+      const { data, error } = await q;
+      if (error) throw error;
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(200).json({ data: data || [] });
+    } catch (e) {
+      if (isSchemaError(e)) {
+        return res.status(400).json({
+          error: 'schema_missing',
+          hint: "Supabase'de sql/2026-06-25-kitap-siparis-setleri.sql dosyasını çalıştırın."
+        });
+      }
+      return res.status(500).json({ error: errorMessage(e) });
+    }
+  }
+
+  if (!isAdmin) return res.status(403).json({ error: 'forbidden' });
 
   if (req.method === 'POST' && op === 'create') {
     const body = parseBody(req);
@@ -624,28 +668,6 @@ export default async function handler(req, res) {
         error: errorMessage(e),
         channel: 'gateway'
       });
-    }
-  }
-
-  if (req.method === 'GET' && scope === 'kitap-sets') {
-    try {
-      let q = supabaseAdmin
-        .from('kitap_siparis_setleri')
-        .select('*')
-        .order('sort_order', { ascending: true })
-        .order('name', { ascending: true });
-      if (institutionFilter) q = q.eq('institution_id', institutionFilter);
-      const { data, error } = await q;
-      if (error) throw error;
-      return res.status(200).json({ data: data || [] });
-    } catch (e) {
-      if (isSchemaError(e)) {
-        return res.status(400).json({
-          error: 'schema_missing',
-          hint: "Supabase'de sql/2026-06-25-kitap-siparis-setleri.sql dosyasını çalıştırın."
-        });
-      }
-      return res.status(500).json({ error: errorMessage(e) });
     }
   }
 

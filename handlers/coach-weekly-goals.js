@@ -1,8 +1,16 @@
-import { requireAuth, hasInstitutionAccess } from '../api/_lib/auth.js';
+import { requireAuth } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { addCalendarDaysYmd } from '../api/_lib/istanbul-time.js';
 import { authHttpStatus, isMissingTableError, isSchemaColumnError } from '../api/_lib/supabase-schema.js';
+import {
+  actorIsStudentRole,
+  assertCoachGoalWrite,
+  assertStudentPlannerRead,
+  buildAccessContext,
+  resolveCoachBatchStudentIds,
+  resolveGoalCoachId
+} from '../api/_lib/student-access-gate.js';
 
 const normalizeWeekStart = (v) => String(v || '').trim().slice(0, 10);
 
@@ -37,47 +45,6 @@ function ymdCalendarDayDiff(fromYmd, toYmd) {
   if (Number.isNaN(a) || Number.isNaN(b)) return 0;
   return Math.round((b - a) / 86400000);
 }
-
-const fetchStudentMinimal = async (studentId) => {
-  const { data, error } = await supabaseAdmin
-    .from('students')
-    .select('id,coach_id,institution_id')
-    .eq('id', studentId)
-    .maybeSingle();
-  if (error) throw error;
-  return data;
-};
-
-const assertCanReadStudentGoals = async (actor, studentId) => {
-  const st = await fetchStudentMinimal(studentId);
-  if (!st) return { ok: false, status: 404, student: null };
-  if (actor.role === 'super_admin') return { ok: true, student: st };
-  if (actor.role === 'admin') {
-    if (!hasInstitutionAccess(actor, st.institution_id)) return { ok: false, status: 403, student: st };
-    return { ok: true, student: st };
-  }
-  if (actor.role === 'coach') {
-    if (!actor.coach_id || st.coach_id !== actor.coach_id) return { ok: false, status: 403, student: st };
-    return { ok: true, student: st };
-  }
-  if (actor.role === 'student' && actor.student_id === studentId) return { ok: true, student: st };
-  return { ok: false, status: 403, student: st };
-};
-
-const assertGoalsWrite = async (actor, studentId, existingGoal = null) => {
-  const chk = await assertCanReadStudentGoals(actor, studentId);
-  if (!chk.ok || !chk.student) return chk;
-  const role = String(actor.role || '').trim();
-  if (role === 'coach' || role === 'admin' || role === 'super_admin') return chk;
-  if (role === 'student' && actor.student_id === studentId) {
-    /** Koç atanmamış öğrenci: tam self-coaching */
-    if (!chk.student.coach_id) return chk;
-    /** Koçlu öğrenci: yalnızca kendi oluşturduğu hedefler (coach_id null) */
-    if (existingGoal?.coach_id) return { ok: false, status: 403, student: chk.student };
-    return chk;
-  }
-  return { ok: false, status: 403, student: chk.student };
-};
 
 async function listLegacyWeekGoals(studentId, weekStart) {
   const { data, error } = await supabaseAdmin
@@ -294,40 +261,10 @@ async function listGoalsForStudentsRange(studentIds, rangeFrom, rangeTo) {
   }
 }
 
-async function resolveBatchStudentIds(actor, role, query) {
-  const explicit = String(query.student_ids || query.studentIds || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (role === 'coach') {
-    if (!actor.coach_id) return [];
-    const { data, error } = await supabaseAdmin.from('students').select('id').eq('coach_id', actor.coach_id);
-    if (error) throw error;
-    const allowed = new Set((data || []).map((r) => String(r.id)));
-    if (!explicit.length) return [...allowed];
-    return explicit.filter((id) => allowed.has(id));
-  }
-  if (role === 'admin') {
-    if (!actor.institution_id) return [];
-    const { data, error } = await supabaseAdmin
-      .from('students')
-      .select('id')
-      .eq('institution_id', actor.institution_id);
-    if (error) throw error;
-    const allowed = new Set((data || []).map((r) => String(r.id)));
-    if (!explicit.length) return [...allowed];
-    return explicit.filter((id) => allowed.has(id));
-  }
-  if (role === 'super_admin') {
-    if (!explicit.length) return [];
-    return explicit;
-  }
-  return [];
-}
-
 export default async function handler(req, res) {
   try {
-    const actor = requireAuth(req);
+    const ctx = await buildAccessContext(requireAuth(req));
+    const { actor, roleSet } = ctx;
 
     if (req.method === 'GET') {
       const rangeFrom = normalizeWeekStart(req.query.range_from || '');
@@ -338,25 +275,25 @@ export default async function handler(req, res) {
         if (ymdCmp(rangeFrom, rangeTo) > 0) {
           return res.status(400).json({ error: 'invalid_date_range' });
         }
-        const role = String(actor.role || '').trim();
-        if (role === 'student') {
+        if (actorIsStudentRole(roleSet)) {
           return res.status(403).json({ error: 'forbidden' });
         }
-        const studentIds = await resolveBatchStudentIds(actor, role, req.query);
+        const studentIds = await resolveCoachBatchStudentIds(ctx, req.query);
         if (!studentIds.length) return res.status(200).json({ data: {} });
         const data = await listGoalsForStudentsRange(studentIds, rangeFrom, rangeTo);
         return res.status(200).json({ data });
       }
 
-      const studentRaw =
-        actor.role === 'student' ? String(actor.student_id || '') : String(req.query.student_id || '').trim();
+      const studentRaw = actorIsStudentRole(roleSet)
+        ? String(actor.student_id || '')
+        : String(req.query.student_id || '').trim();
 
       if (rangeFrom && rangeTo) {
         if (!studentRaw) return res.status(400).json({ error: 'student_id_required' });
         if (ymdCmp(rangeFrom, rangeTo) > 0) {
           return res.status(400).json({ error: 'invalid_date_range' });
         }
-        const gate = await assertCanReadStudentGoals(actor, studentRaw);
+        const gate = await assertStudentPlannerRead(ctx, studentRaw);
         if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
 
         const data = await listGoalsForRange(studentRaw, rangeFrom, rangeTo);
@@ -367,7 +304,7 @@ export default async function handler(req, res) {
       const weekEnd = normalizeWeekStart(req.query.week_end || '') || addCalendarDaysYmd(weekStart, 6);
       if (!weekStart || !studentRaw) return res.status(400).json({ error: 'week_start_required' });
 
-      const gate = await assertCanReadStudentGoals(actor, studentRaw);
+      const gate = await assertStudentPlannerRead(ctx, studentRaw);
       if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
 
       const data = await listGoalsForWeek(studentRaw, weekStart, weekEnd);
@@ -387,7 +324,7 @@ export default async function handler(req, res) {
       goalStart = norm.goalStart;
       goalEnd = norm.goalEnd;
 
-      const gate = await assertGoalsWrite(actor, sid);
+      const gate = await assertCoachGoalWrite(ctx, sid);
       if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
       const st = gate.student;
 
@@ -401,14 +338,7 @@ export default async function handler(req, res) {
           ? String(body.id).trim()
           : `cwg-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 
-      const coachId =
-        actor.role === 'student'
-          ? null
-          : actor.role === 'coach'
-            ? actor.coach_id
-            : body.coach_id != null
-              ? body.coach_id
-              : st.coach_id;
+      const coachId = resolveGoalCoachId(ctx, st, body.coach_id);
       const institutionId = body.institution_id ?? st.institution_id ?? actor.institution_id ?? null;
 
       const now = new Date().toISOString();
@@ -453,7 +383,7 @@ export default async function handler(req, res) {
       if (exErr) throw exErr;
       if (!existing) return res.status(404).json({ error: 'not_found' });
 
-      const gate = await assertGoalsWrite(actor, existing.student_id, existing);
+      const gate = await assertCoachGoalWrite(ctx, existing.student_id, existing);
       if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
 
       const patch = { ...(req.body || {}), updated_at: new Date().toISOString() };
@@ -461,7 +391,7 @@ export default async function handler(req, res) {
       delete patch.student_id;
       delete patch.created_at;
       delete patch.weekStartDate;
-      if (actor.role === 'student') {
+      if (actorIsStudentRole(roleSet)) {
         delete patch.coach_id;
         delete patch.institution_id;
       }
@@ -537,7 +467,7 @@ export default async function handler(req, res) {
       if (exErr) throw exErr;
       if (!existing) return res.status(404).json({ error: 'not_found' });
 
-      const gate = await assertGoalsWrite(actor, existing.student_id, existing);
+      const gate = await assertCoachGoalWrite(ctx, existing.student_id, existing);
       if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
 
       const { error } = await supabaseAdmin.from('coach_weekly_goals').delete().eq('id', id);

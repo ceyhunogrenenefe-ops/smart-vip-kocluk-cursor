@@ -682,13 +682,15 @@ async function handleClassLiveBbbJoin(req, res, actor, role) {
           base.durationMinutes = reuse.chainDurationMinutes;
         }
         if (reuse.meetingKeyPrefix) base.meetingKeyPrefix = reuse.meetingKeyPrefix;
+        if (reuse.storedMeetingId) base.storedMeetingId = reuse.storedMeetingId;
         if (reuse.seededFromPeer) {
           if (reuse.seedAttendeeLink) base.attendeeLinkOverride = reuse.seedAttendeeLink;
           if (reuse.seedModeratorLink != null) base.moderatorLinkOverride = reuse.seedModeratorLink;
-          if (reuse.storedMeetingId) base.storedMeetingId = reuse.storedMeetingId;
           if (reuse.seedAttendeePw && !String(row.bbb_attendee_pw || '').trim()) {
             row.bbb_attendee_pw = reuse.seedAttendeePw;
           }
+        } else if (reuse.seedAttendeePw && !String(row.bbb_attendee_pw || '').trim()) {
+          row.bbb_attendee_pw = reuse.seedAttendeePw;
         }
       } catch {
         /* fallback: mevcut tek-oturum davranışı */
@@ -707,12 +709,19 @@ async function handleClassLiveBbbJoin(req, res, actor, role) {
       : async (row, ensured, linksPatch) => {
           const peers = row.__bbbSyncPeers;
           if (!peers?.length || !ensured?.attendeeLink) return;
-          await syncConsecutivePeerMeetingLinks(peers, String(row.id || ''), {
-            meeting_link: linksPatch.meeting_link || ensured.attendeeLink,
-            meeting_link_moderator: linksPatch.meeting_link_moderator || ensured.moderatorLink || undefined,
-            bbb_meeting_id: linksPatch.bbb_meeting_id || ensured.meetingId || undefined,
-            bbb_attendee_pw: linksPatch.bbb_attendee_pw || ensured.attendeePW || undefined
-          });
+          const multiClass =
+            new Set((peers || []).map((p) => String(p.class_id || '').trim()).filter(Boolean)).size >= 2;
+          await syncConsecutivePeerMeetingLinks(
+            peers,
+            String(row.id || ''),
+            {
+              meeting_link: linksPatch.meeting_link || ensured.attendeeLink,
+              meeting_link_moderator: linksPatch.meeting_link_moderator || ensured.moderatorLink || undefined,
+              bbb_meeting_id: linksPatch.bbb_meeting_id || ensured.meetingId || undefined,
+              bbb_attendee_pw: linksPatch.bbb_attendee_pw || ensured.attendeePW || undefined
+            },
+            { force: multiClass }
+          );
         },
     resolveStudentJoinUrl: slotMode ? undefined : (act, row, ensured) => resolveStudentBbbJoinUrl(act, row, ensured),
     resolveStaffJoinUrl: async (act, row, ensured) => resolveStaffBbbJoinUrl(act, row, ensured)
@@ -2415,7 +2424,17 @@ export default async function handler(req, res) {
         }
       }
       const { updated } = await cancelClassSessionsByIds([sessionId]);
-      if (!updated) return res.status(404).json({ error: 'session_not_found' });
+      if (!updated) {
+        const { data: again } = await supabaseAdmin
+          .from('class_sessions')
+          .select('id,status')
+          .eq('id', sessionId)
+          .maybeSingle();
+        if (again?.id && String(again.status || '') === 'cancelled') {
+          return res.status(200).json({ ok: true, cancelled: true, already_cancelled: true });
+        }
+        return res.status(404).json({ error: 'session_not_found' });
+      }
       return res.status(200).json({ ok: true, cancelled: true });
     }
     if (classId) {
@@ -2430,7 +2449,9 @@ export default async function handler(req, res) {
         .select('*')
         .eq('id', slotId)
         .maybeSingle();
-      if (!slot) return res.status(404).json({ error: 'slot_not_found' });
+      if (!slot) {
+        return res.status(200).json({ ok: true, already_deleted: true });
+      }
       const details = await getClassDetails(slot.class_id);
       if (!isAdminRole(role) && slot.teacher_id !== actor.sub && !details.teacher_ids.includes(actor.sub)) {
         return res.status(403).json({ error: 'forbidden' });

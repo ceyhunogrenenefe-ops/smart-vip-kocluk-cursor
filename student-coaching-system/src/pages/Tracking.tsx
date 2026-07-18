@@ -31,6 +31,7 @@ import {
   AppModalForm,
   AppModalHeader
 } from '../components/ui/AppModal';
+import { findSameDayFieldOwner } from '../lib/dailyReportTracking';
 
 // YKS sınıfları için uygun dersleri tanımla - mockData topicPool ile uyumlu
 const YKS_SUBJECTS: Record<string, string[]> = {
@@ -235,6 +236,20 @@ export default function Tracking() {
 
   const error = validationError();
 
+  const readingOwner = useMemo(
+    () =>
+      findSameDayFieldOwner(
+        weeklyEntries,
+        selectedStudentId || '',
+        selectedDate,
+        editingEntry?.id,
+        'reading'
+      ),
+    [weeklyEntries, selectedStudentId, selectedDate, editingEntry?.id]
+  );
+  const readingLocked = Boolean(readingOwner);
+
+
   // Başarı rengi
   const getSuccessColor = (rate: number) => {
     if (rate >= 90) return 'text-green-600 bg-green-50';
@@ -277,9 +292,9 @@ export default function Tracking() {
       wrongAnswers: formData.wrongAnswers,
       blankAnswers: formData.blankAnswers,
       coachComment: formData.coachComment,
-      readingMinutes: formData.readingMinutes || undefined,
-      bookId: formData.bookId || undefined,
-      bookTitle: selectedBook?.title || undefined
+      readingMinutes: readingLocked ? undefined : formData.readingMinutes || undefined,
+      bookId: readingLocked ? undefined : formData.bookId || undefined,
+      bookTitle: readingLocked ? undefined : selectedBook?.title || undefined
     };
 
     if (editingEntry) {
@@ -743,41 +758,56 @@ export default function Tracking() {
               </div>
 
               {/* Kitap Okuma */}
-              <div className="bg-green-50 rounded-xl p-4 border border-green-200">
+              <div className={`rounded-xl p-4 border ${readingLocked ? 'bg-slate-50 border-slate-200 opacity-80' : 'bg-green-50 border-green-200'}`}>
                 <div className="flex items-center justify-between mb-4">
-                  <h4 className="text-sm font-semibold text-green-800 flex items-center gap-2">
+                  <h4 className={`text-sm font-semibold flex items-center gap-2 ${readingLocked ? 'text-slate-600' : 'text-green-800'}`}>
                     <BookMarked className="w-4 h-4" />
                     Kitap Okuma (Opsiyonel)
                   </h4>
                 </div>
+                {readingLocked ? (
+                  <p className="mb-3 text-xs text-amber-700">
+                    Bu gün kitap okuma zaten{' '}
+                    <strong>
+                      {[readingOwner?.subject, readingOwner?.topic].filter(Boolean).join(' · ') || 'başka bir kayıtta'}
+                    </strong>{' '}
+                    girilmiş. Değiştirmek için o kaydı düzenleyin.
+                  </p>
+                ) : null}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Okuma Süresi */}
                   <div>
-                    <label className="block text-sm font-medium text-green-700 mb-1">
+                    <label className={`block text-sm font-medium mb-1 ${readingLocked ? 'text-slate-600' : 'text-green-700'}`}>
                       <Clock className="w-4 h-4 inline mr-1" />
                       Okuma Süresi (dakika)
                     </label>
                     <input
                       type="number"
                       min="0"
-                      value={formData.readingMinutes || ''}
+                      value={
+                        readingLocked
+                          ? readingOwner?.readingMinutes || readingOwner?.pagesRead || ''
+                          : formData.readingMinutes || ''
+                      }
                       onChange={(e) => setFormData({ ...formData, readingMinutes: parseInt(e.target.value) || 0 })}
-                      className="w-full px-4 py-2 border border-green-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                      disabled={readingLocked}
+                      className="w-full px-4 py-2 border border-green-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 disabled:cursor-not-allowed disabled:bg-slate-100"
                       placeholder="0"
                     />
                   </div>
 
                   {/* Kitap Seçimi */}
                   <div>
-                    <label className="block text-sm font-medium text-green-700 mb-1">
+                    <label className={`block text-sm font-medium mb-1 ${readingLocked ? 'text-slate-600' : 'text-green-700'}`}>
                       <BookOpen className="w-4 h-4 inline mr-1" />
                       Okunan Kitap
                     </label>
                     <div className="flex gap-2">
                       <select
-                        value={formData.bookId}
+                        value={readingLocked ? readingOwner?.bookId || '' : formData.bookId}
                         onChange={(e) => setFormData({ ...formData, bookId: e.target.value })}
-                        className="flex-1 px-4 py-2 border border-green-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                        disabled={readingLocked}
+                        className="flex-1 px-4 py-2 border border-green-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 disabled:cursor-not-allowed disabled:bg-slate-100"
                       >
                         <option value="">Genel Okuma</option>
                         {studentBooks.map((book) => (
@@ -789,7 +819,8 @@ export default function Tracking() {
                       <button
                         type="button"
                         onClick={() => setShowQuickBookAdd(true)}
-                        className="px-3 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                        disabled={readingLocked}
+                        className="px-3 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50"
                         title="Yeni Kitap Ekle"
                       >
                         <PlusCircle className="w-5 h-5" />
@@ -799,7 +830,7 @@ export default function Tracking() {
                 </div>
 
                 {/* Hızlı Kitap Ekleme Popup */}
-                {showQuickBookAdd && (
+                {!readingLocked && showQuickBookAdd && (
                   <div className="mt-4 p-4 bg-white rounded-lg border border-green-300">
                     <div className="flex items-center justify-between mb-3">
                       <h5 className="font-medium text-green-800">Hızlı Kitap Ekle</h5>

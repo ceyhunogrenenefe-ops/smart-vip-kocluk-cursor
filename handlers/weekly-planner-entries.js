@@ -1,6 +1,12 @@
-import { requireAuth, hasInstitutionAccess } from '../api/_lib/auth.js';
+import { requireAuth } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
+import {
+  actorIsStudentRole,
+  assertStudentPlannerRead,
+  assertStudentPlannerWrite,
+  buildAccessContext
+} from '../api/_lib/student-access-gate.js';
 
 const padDate = (v) => String(v || '').trim().slice(0, 10);
 
@@ -15,51 +21,6 @@ const toMinutes = (t) => {
 function timeRangesOverlap(s1, e1, s2, e2) {
   return s1 < e2 && s2 < e1;
 }
-
-const fetchStudentMinimal = async (studentId) => {
-  const { data, error } = await supabaseAdmin
-    .from('students')
-    .select('id,coach_id,institution_id')
-    .eq('id', studentId)
-    .maybeSingle();
-  if (error) throw error;
-  return data;
-};
-
-const assertCanReadPlanner = async (actor, studentId) => {
-  const st = await fetchStudentMinimal(studentId);
-  if (!st) return { ok: false, status: 404, student: null };
-  if (actor.role === 'super_admin') return { ok: true, student: st };
-  if (actor.role === 'admin') {
-    if (!hasInstitutionAccess(actor, st.institution_id)) return { ok: false, status: 403, student: st };
-    return { ok: true, student: st };
-  }
-  if (actor.role === 'coach') {
-    if (!actor.coach_id || st.coach_id !== actor.coach_id) return { ok: false, status: 403, student: st };
-    return { ok: true, student: st };
-  }
-  if (actor.role === 'student' && actor.student_id === studentId) return { ok: true, student: st };
-  return { ok: false, status: 403, student: st };
-};
-
-const assertPlannerMutate = async (actor, studentId) => {
-  const st = await fetchStudentMinimal(studentId);
-  if (!st) return { ok: false, status: 404, student: null };
-  if (actor.role === 'super_admin') return { ok: true, student: st };
-  if (actor.role === 'admin') {
-    if (!hasInstitutionAccess(actor, st.institution_id)) return { ok: false, status: 403, student: st };
-    return { ok: true, student: st };
-  }
-  if (actor.role === 'coach') {
-    if (!actor.coach_id || st.coach_id !== actor.coach_id) return { ok: false, status: 403, student: st };
-    return { ok: true, student: st };
-  }
-  if (actor.role === 'student') {
-    if (!actor.student_id || actor.student_id !== studentId) return { ok: false, status: 403, student: st };
-    return { ok: true, student: st };
-  }
-  return { ok: false, status: 403, student: st };
-};
 
 async function findOverlapConflict(studentId, plannerDate, startTime, endTime, excludeId) {
   const a1 = toMinutes(startTime);
@@ -86,20 +47,22 @@ async function findOverlapConflict(studentId, plannerDate, startTime, endTime, e
 
 export default async function handler(req, res) {
   try {
-    const actor = requireAuth(req);
+    const ctx = await buildAccessContext(requireAuth(req));
+    const { actor, roleSet } = ctx;
 
     if (req.method === 'GET') {
-      const studentRaw =
-        actor.role === 'student' ? String(actor.student_id || '') : String(req.query.student_id || '').trim();
+      const studentRaw = actorIsStudentRole(roleSet)
+        ? String(actor.student_id || '')
+        : String(req.query.student_id || '').trim();
       const from = padDate(req.query.from);
       const to = padDate(req.query.to);
       if (!studentRaw) return res.status(400).json({ error: 'student_id_required' });
       if (!from || !to) return res.status(400).json({ error: 'from_to_required' });
 
-      const gate = await assertCanReadPlanner(actor, studentRaw);
+      const gate = await assertStudentPlannerRead(ctx, studentRaw);
       if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
 
-      let q = supabaseAdmin
+      const { data, error } = await supabaseAdmin
         .from('weekly_planner_entries')
         .select('*')
         .eq('student_id', studentRaw)
@@ -107,20 +70,18 @@ export default async function handler(req, res) {
         .lte('planner_date', to)
         .order('planner_date', { ascending: true })
         .order('start_time', { ascending: true });
-      const { data, error } = await q;
       if (error) throw error;
       return res.status(200).json({ data: data || [] });
     }
 
     if (req.method === 'POST') {
       const body = req.body || {};
-      const sid =
-        actor.role === 'student'
-          ? String(actor.student_id || '')
-          : String(body.student_id || body.studentId || '').trim();
+      const sid = actorIsStudentRole(roleSet)
+        ? String(actor.student_id || '')
+        : String(body.student_id || body.studentId || '').trim();
       if (!sid) return res.status(400).json({ error: 'student_id_required' });
 
-      const mutate = await assertPlannerMutate(actor, sid);
+      const mutate = await assertStudentPlannerWrite(ctx, sid);
       if (!mutate.ok) return res.status(mutate.status).json({ error: 'forbidden' });
 
       const plannerDate = padDate(body.planner_date ?? body.plannerDate ?? body.date);
@@ -167,7 +128,7 @@ export default async function handler(req, res) {
         end_time: endTime,
         status,
         created_at: now,
-        updated_at: now,
+        updated_at: now
       };
 
       const { data, error } = await supabaseAdmin.from('weekly_planner_entries').insert(row).select().single();
@@ -187,14 +148,14 @@ export default async function handler(req, res) {
       if (exErr) throw exErr;
       if (!existing) return res.status(404).json({ error: 'not_found' });
 
-      const mutate = await assertPlannerMutate(actor, existing.student_id);
+      const mutate = await assertStudentPlannerWrite(ctx, existing.student_id);
       if (!mutate.ok) return res.status(mutate.status).json({ error: 'forbidden' });
 
       const merged = {
         planner_date: padDate(existing.planner_date),
         start_time: existing.start_time,
         end_time: existing.end_time,
-        ...(req.body || {}),
+        ...(req.body || {})
       };
       const nextDate =
         merged.planner_date ??
@@ -243,7 +204,7 @@ export default async function handler(req, res) {
       if (exErr) throw exErr;
       if (!existing) return res.status(404).json({ error: 'not_found' });
 
-      const mutate = await assertPlannerMutate(actor, existing.student_id);
+      const mutate = await assertStudentPlannerWrite(ctx, existing.student_id);
       if (!mutate.ok) return res.status(mutate.status).json({ error: 'forbidden' });
 
       const { error } = await supabaseAdmin.from('weekly_planner_entries').delete().eq('id', id);

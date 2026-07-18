@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { BookOpen, CheckCircle2, Clapperboard, FolderOpen, Play, Send } from 'lucide-react';
+import EduHomeworkPdfLink from './EduHomeworkPdfLink';
 import type { EduHomework, EduLessonRow, EduLessonRowProgress } from '../../types/eduPanel.types';
 import type { EduHomeworkSubmission } from '../../types/eduPanel.types';
 import EduBadgeChip from './EduBadgeChip';
 import EduCompleteTopicModal from './EduCompleteTopicModal';
-import EduHomeworkCelebrateModal from './EduHomeworkCelebrateModal';
 import EduProgressRing from './EduProgressRing';
 import EduStudentHomeworkDetailModal from './EduStudentHomeworkDetailModal';
 import EduSubmitHomeworkModal from './EduSubmitHomeworkModal';
@@ -15,7 +15,7 @@ import {
   statusTone,
   submissionDeliveryStatus
 } from '../../lib/eduPanel/eduHomeworkStats';
-import { badgeForPoints, progressBreakdown } from '../../lib/eduPanel/eduPanelProgress';
+import { badgeForPoints, milestoneBadges, progressBreakdown } from '../../lib/eduPanel/eduPanelProgress';
 
 type Props = {
   row: EduLessonRow;
@@ -61,16 +61,29 @@ export default function StudentEduTopicCard({
   const [completeOpen, setCompleteOpen] = useState(false);
   const [submitHw, setSubmitHw] = useState<EduHomework | null>(null);
   const [detailHw, setDetailHw] = useState<EduHomework | null>(null);
-  const [celebrate, setCelebrate] = useState(false);
 
   const submittedCount = publishedHw.filter((h) => submissions[h.id]).length;
+  const liveHwPercent =
+    progress?.homework_percent ??
+    (publishedHw.length ? Math.round((submittedCount / publishedHw.length) * 100) : 0);
   const breakdown = useMemo(
     () =>
       progressBreakdown(
         Boolean(progress?.animation_completed),
-        progress?.homework_percent ?? 0
+        progress?.homework_percent ?? liveHwPercent
       ),
-    [progress]
+    [progress, liveHwPercent]
+  );
+  const milestones = useMemo(
+    () =>
+      milestoneBadges({
+        animationCompleted: Boolean(progress?.animation_completed),
+        homeworkPercent: progress?.homework_percent ?? liveHwPercent,
+        topicCompleted: Boolean(progress?.topic_completed),
+        hasAnimation: hasAnim,
+        hasHomework: hasHw
+      }),
+    [progress, liveHwPercent, hasAnim, hasHw]
   );
 
   const handleComplete = async (payload: {
@@ -107,19 +120,21 @@ export default function StudentEduTopicCard({
               <p className="text-xs text-slate-500 mt-0.5">Öğretmen: {row.teacher_name}</p>
             ) : null}
             {row.notes ? <p className="mt-1 text-xs text-slate-500">{row.notes}</p> : null}
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
-              {hasAnim ? (
-                <span className="rounded-md bg-violet-50 px-2 py-0.5 text-violet-700">Animasyon</span>
-              ) : null}
-              {hasHw ? (
-                <span className="rounded-md bg-amber-50 px-2 py-0.5 text-amber-800">
-                  {publishedHw.length} ödev
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+              {milestones.map((m) => (
+                <span
+                  key={m.id}
+                  title={m.hint}
+                  className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${m.chipClass}`}
+                >
+                  <span aria-hidden>{m.emoji}</span>
+                  {m.earned ? m.label : `${m.label.split(' ')[0]}…`}
                 </span>
-              ) : null}
+              ))}
               {progress?.topic_completed ? (
                 <EduBadgeChip badge={breakdown.badge} compact />
-              ) : progress && progress.points > 0 ? (
-                <span className="text-slate-500">{progress.points}p</span>
+              ) : breakdown.total > 0 ? (
+                <span className="text-slate-500">{breakdown.total}p</span>
               ) : null}
             </div>
           </div>
@@ -155,18 +170,36 @@ export default function StudentEduTopicCard({
               )}
             </div>
 
-            <div className="mb-3 grid grid-cols-3 gap-2 rounded-xl bg-white p-3 text-center text-[10px] shadow-sm ring-1 ring-slate-100">
-              <div>
-                <p className="font-bold text-violet-700">{breakdown.animationPoints}p</p>
-                <p className="text-slate-500">Animasyon</p>
+            <div className="mb-3 rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-100">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                Bu konudaki başarıların
+              </p>
+              <div className="mb-3 flex flex-wrap gap-1.5">
+                {milestones.map((m) => (
+                  <span
+                    key={m.id}
+                    title={m.hint}
+                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset ${m.chipClass}`}
+                  >
+                    <span aria-hidden>{m.emoji}</span>
+                    {m.label}
+                    {m.earned ? ' ✓' : ' · kilitli'}
+                  </span>
+                ))}
               </div>
-              <div>
-                <p className="font-bold text-amber-700">{breakdown.homeworkPercent}%</p>
-                <p className="text-slate-500">Ödev</p>
-              </div>
-              <div>
-                <p className="font-bold text-indigo-700">{breakdown.total}p</p>
-                <p className="text-slate-500">Toplam</p>
+              <div className="grid grid-cols-3 gap-2 text-center text-[10px]">
+                <div>
+                  <p className="font-bold text-violet-700">{breakdown.animationPoints}p</p>
+                  <p className="text-slate-500">Animasyon</p>
+                </div>
+                <div>
+                  <p className="font-bold text-amber-700">{breakdown.homeworkPercent}%</p>
+                  <p className="text-slate-500">Ödev</p>
+                </div>
+                <div>
+                  <p className="font-bold text-indigo-700">{breakdown.total}p</p>
+                  <p className="text-slate-500">Toplam</p>
+                </div>
               </div>
             </div>
 
@@ -205,8 +238,14 @@ export default function StudentEduTopicCard({
                   <Clapperboard className="h-4 w-4" />
                   Bu konunun animasyonu
                   {progress?.animation_completed ? (
-                    <span className="ml-auto text-[10px] font-semibold text-green-600">İzlendi ✓</span>
-                  ) : null}
+                    <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-900">
+                      🎬 Animasyon Ustası ✓
+                    </span>
+                  ) : (
+                    <span className="ml-auto text-[10px] font-medium text-violet-600">
+                      İzle → +40p rozet
+                    </span>
+                  )}
                 </h3>
                 <div className="flex flex-col gap-2">
                   {(row.animations || []).map((a) => (
@@ -232,6 +271,9 @@ export default function StudentEduTopicCard({
                   Bu konunun ödevi
                   <span className="ml-auto text-[10px] font-medium text-amber-700">
                     {submittedCount}/{publishedHw.length} teslim
+                    {submittedCount >= publishedHw.length && publishedHw.length > 0
+                      ? ' · 📝 Kahraman ✓'
+                      : ''}
                   </span>
                 </h3>
                 <div className="space-y-3">
@@ -279,6 +321,10 @@ export default function StudentEduTopicCard({
                         {hw.due_date ? (
                           <p className="text-xs text-amber-700 mt-1">Son tarih: {hw.due_date}</p>
                         ) : null}
+                        <EduHomeworkPdfLink
+                          homework={hw}
+                          className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-amber-900 hover:bg-amber-50 disabled:opacity-50"
+                        />
                         {poolIds.length > 0 ? (
                           <div className="mt-2 flex flex-wrap gap-1.5">
                             {poolIds.map((id) => (
@@ -359,11 +405,8 @@ export default function StudentEduTopicCard({
           if (!submitHw) return;
           await onSubmitHomework(submitHw, payload);
           setSubmitHw(null);
-          setCelebrate(true);
         }}
       />
-
-      <EduHomeworkCelebrateModal open={celebrate} onClose={() => setCelebrate(false)} />
 
       <EduCompleteTopicModal
         open={completeOpen}
@@ -372,7 +415,7 @@ export default function StudentEduTopicCard({
         publishedHwCount={publishedHw.length}
         submittedHwCount={submittedCount}
         initialAnimationDone={Boolean(progress?.animation_completed)}
-        initialHomeworkPercent={progress?.homework_percent ?? 0}
+        initialHomeworkPercent={progress?.homework_percent ?? liveHwPercent}
         busy={busyProgress}
         onClose={() => setCompleteOpen(false)}
         onConfirm={(p) => void handleComplete(p)}

@@ -115,19 +115,27 @@ export default async function handler(req, res) {
       }
 
       const phones = await getStudentPhones(student);
-      const primaryPhone = getPrimaryAutomationPhone(student);
-      if (!primaryPhone) {
-        log.push({ lesson_id: lesson.id, note: 'no_phone' });
-        continue;
-      }
-
-      const recipients = classifyLessonReminderRecipients(student, phones).filter(
-        (r) => normalizePhoneToE164(r.phone) === primaryPhone
-      );
+      // Özel ders: öğrenci + veli (farklı numaralarda ikisine de Meta hatırlatma)
+      const recipients = classifyLessonReminderRecipients(student, phones);
       const recipientsOrdered =
         recipients.length > 0
           ? recipients
-          : [{ phone: primaryPhone, role: normalizePhoneToE164(student.parent_phone) === primaryPhone ? 'parent' : 'student' }];
+          : (() => {
+              const primaryPhone = getPrimaryAutomationPhone(student);
+              if (!primaryPhone) return [];
+              return [
+                {
+                  phone: primaryPhone,
+                  role:
+                    normalizePhoneToE164(student.parent_phone) === primaryPhone ? 'parent' : 'student'
+                }
+              ];
+            })();
+
+      if (!recipientsOrdered.length) {
+        log.push({ lesson_id: lesson.id, note: 'no_phone' });
+        continue;
+      }
 
       const timeLabel = new Intl.DateTimeFormat('tr-TR', {
         timeZone: 'Europe/Istanbul',

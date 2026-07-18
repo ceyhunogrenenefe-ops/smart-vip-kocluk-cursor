@@ -374,9 +374,11 @@ export async function backfillScheduledConsecutiveBbbAlignment(classId, dateFrom
  * @param {Array<Record<string, unknown>>} peers
  * @param {string} currentId
  * @param {{ meeting_link: string, meeting_link_moderator?: string, bbb_meeting_id?: string, bbb_attendee_pw?: string }} links
+ * @param {{ force?: boolean }} [opts] — birleşik sınıf: eski link olsa bile zorla hizala
  */
-export async function syncConsecutivePeerMeetingLinks(peers, currentId, links) {
+export async function syncConsecutivePeerMeetingLinks(peers, currentId, links, opts = {}) {
   if (!isConsecutiveBbbReuseEnabled() || !links?.meeting_link || !peers?.length) return;
+  const force = Boolean(opts.force);
   const meetingId = String(links.bbb_meeting_id || '').trim();
   const patch = {
     meeting_link: links.meeting_link,
@@ -389,7 +391,7 @@ export async function syncConsecutivePeerMeetingLinks(peers, currentId, links) {
     const pid = String(peer?.id || '').trim();
     if (!pid || pid === String(currentId || '')) continue;
     const peerMid = String(peer.bbb_meeting_id || '').trim();
-    if (meetingId && peerMid && peerMid === meetingId) {
+    if (!force && meetingId && peerMid && peerMid === meetingId) {
       const peerLink = String(peer.meeting_link || '').trim();
       if (peerLink && !isBbbAutoMeetingLink(peerLink) && isBbbJoinUrl(peerLink)) continue;
     }

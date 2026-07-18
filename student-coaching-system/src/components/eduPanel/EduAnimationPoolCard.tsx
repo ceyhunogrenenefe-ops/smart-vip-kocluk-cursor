@@ -36,6 +36,11 @@ export default function EduAnimationPoolCard({
         className={`relative flex h-36 items-center justify-center bg-gradient-to-br ${gradient} text-white`}
       >
         <Clapperboard className="h-12 w-12 opacity-90" />
+        {item.source_kind === 'link' || item.external_url ? (
+          <span className="absolute right-2 top-2 rounded-full bg-white/95 px-2 py-0.5 text-[10px] font-bold text-violet-800 shadow">
+            🔗 Link
+          </span>
+        ) : null}
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/50 to-transparent px-3 py-2">
           <p className="truncate text-sm font-semibold">{item.title}</p>
         </div>

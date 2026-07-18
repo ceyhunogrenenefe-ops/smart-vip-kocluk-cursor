@@ -2,13 +2,16 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
     "api/auth-login.js": {
-      "maxDuration": 120
+      "maxDuration": 120,
+      "memory": 1024
     },
     "api/wa-gateway.js": {
-      "maxDuration": 120
+      "maxDuration": 120,
+      "memory": 1024
     },
     "api/[[...segments]].js": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "memory": 1024
     }
   },
   "installCommand": "npm install && cd student-coaching-system && npm install",
@@ -42,31 +45,19 @@
     },
     {
       "path": "/api/cron/coach-whatsapp-auto",
-      "schedule": "*/5 * * * *"
+      "schedule": "*/10 * * * *"
     },
     {
       "path": "/api/cron/teacher-lessons",
-      "schedule": "*/10 * * * *"
-    },
-    {
-      "path": "/api/cron/lesson-reminders",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/cron/class-lesson-reminders",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/cron/teacher-lesson-reminders",
-      "schedule": "*/5 * * * *"
+      "schedule": "*/15 * * * *"
     },
     {
       "path": "/api/cron/class-sessions",
-      "schedule": "*/10 * * * *"
+      "schedule": "*/15 * * * *"
     },
     {
       "path": "/api/cron/class-homework-notify",
-      "schedule": "*/10 * * * *"
+      "schedule": "*/15 * * * *"
     },
     {
       "path": "/api/cron/edu-homework-media-cleanup",
@@ -78,7 +69,7 @@
     },
     {
       "path": "/api/cron/class-absent-notify-retry",
-      "schedule": "*/10 * * * *"
+      "schedule": "*/15 * * * *"
     },
     {
       "path": "/api/cron/daily-report-reminders",
@@ -86,19 +77,19 @@
     },
     {
       "path": "/api/cron/institution-events",
-      "schedule": "* * * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/cron/book-orders",
-      "schedule": "*/15 * * * *"
+      "schedule": "*/30 * * * *"
     },
     {
       "path": "/api/cron/veli-kayit-admin-notify-retry",
-      "schedule": "*/10 * * * *"
+      "schedule": "*/15 * * * *"
     },
     {
       "path": "/api/cron/veli-sign-ready-notify-retry",
-      "schedule": "*/10 * * * *"
+      "schedule": "*/15 * * * *"
     },
     {
       "path": "/api/cron/edesis-sync",

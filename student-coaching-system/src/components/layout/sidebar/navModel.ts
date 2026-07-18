@@ -25,14 +25,14 @@ import {
   FileText,
   Wallet,
   CircleHelp,
+  HelpCircle,
   Bell,
   Presentation,
   User,
   CalendarDays,
   Bot,
   CloudDownload,
-  ScrollText,
-  UserCheck
+  ScrollText
 } from 'lucide-react';
 import type { UserRole } from '../../../types';
 
@@ -43,6 +43,27 @@ export const NAV_KITAP_SIPARISLERI: FlatNavItem = {
   path: '/kitap-siparisleri',
   icon: BookOpen,
   label: 'Kitap siparişleri'
+};
+
+/** Admin / süper admin — web sitesinden gelen özel ders talepleri */
+export const NAV_OZEL_DERS_TALEPLERI: FlatNavItem = {
+  path: '/ozel-ders-talepleri',
+  icon: GraduationCap,
+  label: 'Özel ders talepleri'
+};
+
+/** Admin / süper admin — öğretmen vitrin profil onayları */
+export const NAV_TEACHER_PROFILE_APPROVALS: FlatNavItem = {
+  path: '/ogretmen-profil-onaylari',
+  icon: FileCheck,
+  label: 'Öğretmen profil onayları'
+};
+
+/** Öğretmen — özel ders vitrin profili */
+export const NAV_TEACHER_VITRINE_PROFILE: FlatNavItem = {
+  path: '/profilimi-duzenle',
+  icon: User,
+  label: 'Profilimi Düzenle'
 };
 
 /** Öğrenci — Akademik Merkez (Öğrenci Paneli üstünde, tek link) */
@@ -65,6 +86,19 @@ export const STUDENT_NAV_SORU_SOR: FlatNavItem = {
   label: 'Soru Sor'
 };
 
+export const STUDENT_NAV_YARDIM: FlatNavItem = {
+  path: '/yardim',
+  icon: HelpCircle,
+  label: 'Yardım'
+};
+
+/** Öğretmen / koç menüsünde ortak Yardım girişi */
+export const STAFF_NAV_YARDIM: FlatNavItem = {
+  path: '/yardim',
+  icon: HelpCircle,
+  label: 'Yardım'
+};
+
 /** Ödev + animasyon içerik sayfası (öğrenci / koç / öğretmen) */
 export const EDU_HOMEWORK_ANIMATIONS_LABEL = 'Ödevlerim ve Animasyonlarım';
 
@@ -74,6 +108,7 @@ export const STUDENT_LESSON_NAV_ITEMS: FlatNavItem[] = [
   { path: '/ai-agents', icon: Bot, label: 'AI Koçlarım' },
   { path: '/exams', icon: ClipboardList, label: 'AI Denemelerim' },
   { path: '/class-schedule', icon: Calendar, label: 'Canlı derslerim' },
+  { path: '/canli-ozel-ders', icon: Radio, label: 'Canlı özel derslerim' },
   { path: '/student-meetings', icon: Video, label: 'Görüşmelerim' }
 ];
 
@@ -96,6 +131,7 @@ const PANEL_PATHS = new Set([
 const LESSON_PATHS = new Set([
   '/class-live-lessons',
   '/schedule-planner',
+  '/canli-ozel-ders',
   '/live-lessons',
   '/meetings',
   '/class-schedule',
@@ -106,6 +142,17 @@ const LESSON_PATHS = new Set([
   '/ai-agents-admin',
   '/exams'
 ]);
+
+/** Sidebar’da tek giriş; alt sekmeler sayfa üst menüsünde (PrivateLiveLayout). */
+export function privateLiveNavForRoles(tags: UserRole[]): FlatNavItem[] {
+  const isStudentOnly =
+    tags.includes('student') &&
+    !tags.some((t) => ['super_admin', 'admin', 'coach', 'teacher'].includes(t));
+  if (isStudentOnly) {
+    return [{ path: '/canli-ozel-ders', icon: Radio, label: 'Canlı özel derslerim' }];
+  }
+  return [{ path: '/canli-ozel-ders', icon: Radio, label: 'Canlı Özel Ders' }];
+}
 
 /** Mobil alt sekme — Ders & Görüşmeler aktif eşleşmesi */
 export const MOBILE_LESSON_MATCH_PATHS = [...LESSON_PATHS] as const;
@@ -160,7 +207,6 @@ const WHATSAPP_ORDER = ['/whatsapp', '/message-templates', '/coach-whatsapp-sett
 const ORG_SYSTEM_PATHS = new Set([
   '/super-admin',
   '/user-management',
-  '/private-lesson-assignments',
   '/notifications',
   '/system-management',
   '/veli-onay',
@@ -169,7 +215,6 @@ const ORG_SYSTEM_PATHS = new Set([
 const ORG_SYSTEM_ORDER = [
   '/super-admin',
   '/user-management',
-  '/private-lesson-assignments',
   '/notifications',
   '/system-management',
   '/veli-onay',
@@ -182,6 +227,7 @@ const SETTINGS_ORDER = ['/my-profile', '/settings', '/webhooks'] as const;
 const LESSON_LABELS: Record<string, string> = {
   '/class-live-lessons': 'Canlı Grup Dersleri',
   '/schedule-planner': 'Ders Programı Planlayıcı',
+  '/canli-ozel-ders': 'Canlı Özel Ders',
   '/live-lessons': 'Canlı Özel Dersler',
   '/meetings': 'Online Görüşmeler',
   '/class-schedule': 'Canlı derslerim',
@@ -231,22 +277,25 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/dashboard', icon: LayoutDashboard, label: 'Ana Panel' },
       { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
       { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
+      { path: '/coach-stats', icon: BarChart3, label: 'Koç İstatistikleri' },
       { path: '/academic-center', icon: Sparkles, label: 'Akademik Merkez' },
-      { path: '/live-lessons', icon: Radio, label: 'Canlı özel dersler' },
+      ...privateLiveNavForRoles(['super_admin']),
       { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
       { path: '/schedule-planner', icon: CalendarDays, label: 'Ders Programı Planlayıcı' },
       { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
       { path: '/edu-panel', icon: Presentation, label: EDU_HOMEWORK_ANIMATIONS_LABEL },
+      STAFF_NAV_YARDIM,
       { path: '/ai-agents-admin', icon: Bot, label: 'AI Ders Ajanları' },
       { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
       { path: '/teachers', icon: GraduationCap, label: 'Öğretmenler' },
       { path: '/coaches', icon: Users, label: 'Koçlar' },
-      { path: '/private-lesson-assignments', icon: UserCheck, label: 'Özel ders atama' },
       { path: '/super-admin', icon: Server, label: 'Kurum Yönetimi' },
       { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
       { path: '/notifications', icon: Bell, label: 'Bildirimler' },
       { path: '/events', icon: CalendarDays, label: 'Etkinlikler' },
       NAV_KITAP_SIPARISLERI,
+      NAV_OZEL_DERS_TALEPLERI,
+      NAV_TEACHER_PROFILE_APPROVALS,
       { path: '/edesis', icon: CloudDownload, label: 'Edesis' },
       { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
       { path: '/subscription', icon: CreditCard, label: 'Abonelik / Paketler' },
@@ -270,16 +319,16 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
 
   const MENU_ADMIN: FlatNavItem[] = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Ana Panel' },
-    { path: '/live-lessons', icon: Radio, label: 'Canlı özel dersler' },
+    ...privateLiveNavForRoles(['admin']),
     { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
     { path: '/schedule-planner', icon: CalendarDays, label: 'Ders Programı Planlayıcı' },
     { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
     { path: '/edu-panel', icon: Presentation, label: EDU_HOMEWORK_ANIMATIONS_LABEL },
+    STAFF_NAV_YARDIM,
     { path: '/ai-agents-admin', icon: Bot, label: 'AI Ders Ajanları' },
     { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
     { path: '/teachers', icon: GraduationCap, label: 'Öğretmenler' },
     { path: '/coaches', icon: Users, label: 'Koçlar' },
-    { path: '/private-lesson-assignments', icon: UserCheck, label: 'Özel ders atama' },
     { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
     { path: '/academic-center', icon: Sparkles, label: 'Akademik Merkez' },
     { path: '/book-tracking', icon: BookMarked, label: 'Kitap Takibi' },
@@ -291,15 +340,18 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/message-templates', icon: MessageSquareText, label: 'Mesaj şablonları' },
     { path: '/topics', icon: BookOpen, label: 'Konu Havuzu' },
     { path: '/topic-tracking', icon: CheckSquare, label: 'Konu Takibi' },
-      { path: '/written-exam', icon: FileCheck, label: 'Yazılı Takip' },
-      { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
-      { path: '/analytics', icon: BarChart3, label: 'Analiz Paneli' },
+    { path: '/written-exam', icon: FileCheck, label: 'Yazılı Takip' },
+    { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
+    { path: '/coach-stats', icon: BarChart3, label: 'Koç İstatistikleri' },
+    { path: '/analytics', icon: BarChart3, label: 'Analiz Paneli' },
     { path: '/soru-havuzu', icon: CircleHelp, label: 'Soru Havuzu' },
     { path: '/webhooks', icon: Webhook, label: 'Webhook Ayarları' },
     { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
     { path: '/notifications', icon: Bell, label: 'Bildirimler' },
     { path: '/events', icon: CalendarDays, label: 'Etkinlikler' },
     NAV_KITAP_SIPARISLERI,
+    NAV_OZEL_DERS_TALEPLERI,
+    NAV_TEACHER_PROFILE_APPROVALS,
     { path: '/system-management', icon: Server, label: 'Sistem Yönetimi' },
     { path: '/veli-onay', icon: FileText, label: 'Veli onayı & e-imza' },
     { path: '/muhasebe', icon: Wallet, label: 'Muhasebe' },
@@ -308,12 +360,14 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
 
   const MENU_TEACHER: FlatNavItem[] = [
     { path: '/teacher-panel', icon: LayoutDashboard, label: 'Öğretmen Paneli' },
+    NAV_TEACHER_VITRINE_PROFILE,
     { path: '/teacher-solution-appointments', icon: Calendar, label: 'Bugünkü Randevular' },
     { path: '/edu-panel', icon: Presentation, label: EDU_HOMEWORK_ANIMATIONS_LABEL },
+    STAFF_NAV_YARDIM,
     { path: '/ai-agents-admin', icon: Bot, label: 'AI Ders Ajanları' },
     { path: '/soru-havuzu', icon: CircleHelp, label: 'Soru Havuzu' },
     { path: '/academic-center', icon: Sparkles, label: 'Akademik Merkez' },
-    { path: '/live-lessons', icon: Radio, label: 'Canlı özel dersler' },
+    ...privateLiveNavForRoles(['teacher']),
     { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
     { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
     { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
@@ -325,8 +379,9 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/coach-kilavuz', icon: ScrollText, label: 'Kullanım kılavuzu' },
     { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
     { path: '/edu-panel', icon: Presentation, label: EDU_HOMEWORK_ANIMATIONS_LABEL },
+    STAFF_NAV_YARDIM,
     { path: '/ai-agents-admin', icon: Bot, label: 'AI Ders Ajanları' },
-    { path: '/live-lessons', icon: Radio, label: 'Canlı özel dersler' },
+    ...privateLiveNavForRoles(['coach']),
     { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
     { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
     { path: '/teachers', icon: GraduationCap, label: 'Öğretmenler' },
@@ -420,7 +475,7 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
       });
       continue;
     }
-    if (LESSON_PATHS.has(it.path)) {
+    if (LESSON_PATHS.has(it.path) || it.path.startsWith('/canli-ozel-ders')) {
       lessons.push({
         ...it,
         label: LESSON_LABELS[it.path] ?? it.label

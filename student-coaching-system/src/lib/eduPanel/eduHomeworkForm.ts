@@ -14,6 +14,8 @@ export type EduHomeworkDraft = {
   /** @deprecated tekil alan — geriye uyum */
   pool_animation_id?: string;
   pool_animation_title?: string;
+  /** Öğretmen PDF eki (yayınlama anında yüklenir) */
+  pdf_file?: File | null;
 };
 
 export const EMPTY_HOMEWORK_DRAFT: EduHomeworkDraft = {
@@ -26,7 +28,8 @@ export const EMPTY_HOMEWORK_DRAFT: EduHomeworkDraft = {
   assignee_student_ids: [],
   pool_animations: [],
   pool_animation_id: undefined,
-  pool_animation_title: undefined
+  pool_animation_title: undefined,
+  pdf_file: null
 };
 
 export function formatEduHomeworkLabel(hw: {
@@ -46,15 +49,18 @@ export function formatEduHomeworkLabel(hw: {
 export function homeworkTitleForApi(draft: EduHomeworkDraft): string {
   const title = draft.title.trim();
   if (title) return title;
-  return formatEduHomeworkLabel(draft);
+  const pdfName = draft.pdf_file?.name?.trim();
+  if (pdfName) return pdfName.replace(/\.pdf$/i, '') || 'PDF Ödev';
+  return formatEduHomeworkLabel(draft) || 'Ödev';
 }
 
 export function validateHomeworkDraft(draft: EduHomeworkDraft): string | null {
   const book = draft.book_name.trim();
   const pages = draft.question_range.trim();
   const title = draft.title.trim();
-  if (!book && !title) return 'Kitap adı veya ödev başlığı girin';
-  if (!pages && !title) return 'Sayfa aralığı girin (örn. 45-48)';
+  const hasPdf = Boolean(draft.pdf_file);
+  if (!book && !title && !hasPdf) return 'Kitap adı, kısa not veya PDF ekleyin';
+  if (!pages && !title && !hasPdf) return 'Sayfa aralığı, kısa not veya PDF ekleyin';
   if (draft.assignee_mode === 'students' && !draft.assignee_student_ids.length) {
     return 'En az bir öğrenci seçin';
   }

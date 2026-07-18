@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Clapperboard,
   Eye,
+  FileText,
   FolderOpen,
   MessageCircle,
   Pencil,
@@ -20,7 +21,13 @@ import type { EduClass, EduHomework, EduLessonRow, LessonRowFormValues } from '.
 import TeacherEduStudentProgress from './TeacherEduStudentProgress';
 import TeacherEduTopicEditModal from './TeacherEduTopicEditModal';
 import EduHomeworkSubmissionsModal from './EduHomeworkSubmissionsModal';
-import { formatEduDateRange, formatLessonDate, STATUS_LABEL, SUBJECT_DOT } from '../../lib/eduPanel/eduPanelUi';
+import {
+  formatEduDateRange,
+  formatEduHomeworkDeadlineLabel,
+  formatLessonDate,
+  STATUS_LABEL,
+  SUBJECT_DOT
+} from '../../lib/eduPanel/eduPanelUi';
 import {
   buildEduTopicWhatsAppShareText,
   copyEduShareText,
@@ -32,7 +39,9 @@ import {
 } from '../../lib/eduPanel/eduHomeworkForm';
 import EduHomeworkAssigneePicker from './EduHomeworkAssigneePicker';
 import EduHomeworkStatusBar from './EduHomeworkStatusBar';
+import EduHomeworkPdfLink from './EduHomeworkPdfLink';
 import { homeworkPoolAnimationIds } from '../../lib/eduPanel/eduHomeworkStats';
+import { htmlStringToAnimationFile, externalLinkToAnimationFile } from '../../lib/eduPanel/eduPanelApi';
 
 type Props = {
   row: EduLessonRow;
@@ -44,7 +53,7 @@ type Props = {
   busy: boolean;
   hwDraft: EduHomeworkDraft;
   onHwDraftChange: (draft: EduHomeworkDraft) => void;
-  onUploadHtml: (file: File | null) => void;
+  onUploadHtml: (file: File | null, meta?: { external_url?: string }) => void;
   onPreview: (animationId: string) => void;
   onDeleteAnimation: (id: string) => void;
   onAddHomework: () => void;
@@ -80,9 +89,16 @@ export default function TeacherEduTopicCard({
   const dateRange = formatEduDateRange(row.available_from, row.available_until, row.lesson_date);
   const [editOpen, setEditOpen] = useState(false);
   const [reviewHw, setReviewHw] = useState<EduHomework | null>(null);
+  const [animUploadMode, setAnimUploadMode] = useState<'file' | 'code' | 'link'>('file');
+  const [animHtmlCode, setAnimHtmlCode] = useState('');
+  const [animLinkUrl, setAnimLinkUrl] = useState('');
 
   const onShareWhatsApp = async () => {
     const publishedHw = row.homework?.filter((h) => h.status === 'published') || [];
+    const deadlineLabel = formatEduHomeworkDeadlineLabel({
+      availableUntil: row.available_until,
+      homework: row.homework
+    });
     const text = buildEduTopicWhatsAppShareText({
       title: row.title,
       subjectName: row.subject_name,
@@ -93,7 +109,7 @@ export default function TeacherEduTopicCard({
         question_range: h.question_range
       })),
       hasAnimation: animCount > 0,
-      dateRangeLabel: dateRange,
+      dateRangeLabel: deadlineLabel,
       institutionName: displayInstitutionName(institution?.name)
     });
     try {
@@ -175,12 +191,12 @@ export default function TeacherEduTopicCard({
               Animasyon ve ödev burada birbirinden ayrıdır; başka konularla karışmaz.
             </p>
 
-            {row.status === 'draft' && animCount > 0 ? (
+            {row.status === 'draft' && animCount > 0 && hwCount === 0 ? (
               <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                 <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
                 <span>
-                  Animasyon yüklendi ama konu <strong>taslak</strong>. Öğrenciler görmesi için alttan{' '}
-                  <strong>«Konuyu öğrencilere yayınla»</strong> demelisiniz.
+                  Animasyon var ama konu henüz taslak. Ödevi yayınladığınızda konu otomatik açılır;
+                  sadece animasyon için alttan <strong>«Konuyu öğrencilere yayınla»</strong> deyin.
                 </span>
               </div>
             ) : null}
@@ -205,8 +221,10 @@ export default function TeacherEduTopicCard({
                     <Clapperboard className="h-4 w-4" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-violet-900">Konu animasyonu</h3>
-                    <p className="text-[11px] text-violet-600">Tek dosya .html — sadece bu konu</p>
+                    <h3 className="text-sm font-bold text-violet-900">Animasyon</h3>
+                    <p className="text-[11px] text-violet-600">
+                      HTML yükle → otomatik havuza eklenir (sınıf / ders kategorisi)
+                    </p>
                   </div>
                 </div>
 
@@ -224,7 +242,7 @@ export default function TeacherEduTopicCard({
                           {a.original_name}
                           {a.pool_id ? (
                             <span className="ml-1.5 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">
-                              Havuz
+                              Havuzda
                             </span>
                           ) : null}
                         </span>
@@ -251,22 +269,122 @@ export default function TeacherEduTopicCard({
                   )}
                 </div>
 
-                <label className="mt-3 flex cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed border-violet-300 bg-violet-50/30 px-3 py-3 text-sm font-medium text-violet-800 hover:bg-violet-50">
-                  <Upload className="h-4 w-4" />
-                  Bu konuya HTML yükle
-                  <input
-                    key={`upload-${row.id}`}
-                    type="file"
-                    accept=".html,text/html"
-                    className="hidden"
-                    disabled={busy}
-                    onChange={(e) => {
-                      const f = e.target.files?.[0] || null;
-                      e.target.value = '';
-                      onUploadHtml(f);
-                    }}
-                  />
-                </label>
+                <div className="mt-3 space-y-2">
+                  <div className="flex gap-1 rounded-lg bg-violet-50 p-1">
+                    <button
+                      type="button"
+                      onClick={() => setAnimUploadMode('file')}
+                      className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-semibold ${
+                        animUploadMode === 'file'
+                          ? 'bg-white text-violet-800 shadow-sm'
+                          : 'text-violet-700/70 hover:text-violet-900'
+                      }`}
+                    >
+                      .html
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAnimUploadMode('code')}
+                      className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-semibold ${
+                        animUploadMode === 'code'
+                          ? 'bg-white text-violet-800 shadow-sm'
+                          : 'text-violet-700/70 hover:text-violet-900'
+                      }`}
+                    >
+                      Kod
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAnimUploadMode('link')}
+                      className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-semibold ${
+                        animUploadMode === 'link'
+                          ? 'bg-white text-violet-800 shadow-sm'
+                          : 'text-violet-700/70 hover:text-violet-900'
+                      }`}
+                    >
+                      Link
+                    </button>
+                  </div>
+                  {animUploadMode === 'file' ? (
+                    <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed border-violet-300 bg-violet-50/30 px-3 py-3 text-sm font-medium text-violet-800 hover:bg-violet-50">
+                      <Upload className="h-4 w-4" />
+                      Animasyon yükle (.html) — havuza da eklenir
+                      <input
+                        key={`upload-${row.id}`}
+                        type="file"
+                        accept=".html,text/html"
+                        className="hidden"
+                        disabled={busy}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0] || null;
+                          e.target.value = '';
+                          onUploadHtml(f);
+                        }}
+                      />
+                    </label>
+                  ) : animUploadMode === 'code' ? (
+                    <div className="rounded-lg border border-violet-200 bg-violet-50/20 p-3 space-y-2">
+                      <textarea
+                        className="w-full rounded-lg border border-violet-200 bg-white px-3 py-2 font-mono text-[11px] leading-relaxed min-h-[140px]"
+                        placeholder={'<!DOCTYPE html>\n<html>…</html> veya body içeriği'}
+                        value={animHtmlCode}
+                        disabled={busy}
+                        onChange={(e) => setAnimHtmlCode(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        disabled={busy || !animHtmlCode.trim()}
+                        onClick={() => {
+                          try {
+                            const file = htmlStringToAnimationFile(
+                              animHtmlCode,
+                              `${(row.title || 'animasyon').slice(0, 32)}.html`
+                            );
+                            setAnimHtmlCode('');
+                            onUploadHtml(file);
+                          } catch (e) {
+                            toast.error(e instanceof Error ? e.message : 'HTML kodu işlenemedi');
+                          }
+                        }}
+                        className="w-full rounded-lg bg-violet-600 px-3 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
+                      >
+                        Koddan yükle — havuza da eklenir
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-violet-200 bg-violet-50/20 p-3 space-y-2">
+                      <input
+                        type="url"
+                        className="w-full rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm"
+                        placeholder="https://notebooklm.google.com/…"
+                        value={animLinkUrl}
+                        disabled={busy}
+                        onChange={(e) => setAnimLinkUrl(e.target.value)}
+                      />
+                      <p className="text-[10px] text-violet-700/80">
+                        NotebookLM veya başka bir https linki. Öğrenci «İzle» deyince açılış
+                        sayfasından linke geçer.
+                      </p>
+                      <button
+                        type="button"
+                        disabled={busy || !animLinkUrl.trim()}
+                        onClick={() => {
+                          try {
+                            const url = animLinkUrl.trim();
+                            const file = externalLinkToAnimationFile(url, row.title || 'NotebookLM');
+                            setAnimLinkUrl('');
+                            onUploadHtml(file, { external_url: url });
+                          } catch (e) {
+                            toast.error(e instanceof Error ? e.message : 'Link eklenemedi');
+                          }
+                        }}
+                        className="w-full rounded-lg bg-violet-600 px-3 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
+                      >
+                        Linki ekle — havuza da kaydolur
+                      </button>
+                    </div>
+                  )}
+                </div>
               </section>
 
               {/* Ödev bölümü */}
@@ -276,8 +394,10 @@ export default function TeacherEduTopicCard({
                     <BookOpen className="h-4 w-4" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-amber-900">Konu ödevi</h3>
-                    <p className="text-[11px] text-amber-700">Kitap adı + sayfa aralığı (örn. 45-48)</p>
+                    <h3 className="text-sm font-bold text-amber-900">Ödev ver</h3>
+                    <p className="text-[11px] text-amber-700">
+                      Kitap / PDF + isteğe bağlı havuz animasyonu
+                    </p>
                   </div>
                 </div>
 
@@ -319,6 +439,13 @@ export default function TeacherEduTopicCard({
                             compact
                           />
                         ) : null}
+                        {h.attachment_pdf_name || h.attachment_pdf_path || h.attachment_pdf_url ? (
+                          <EduHomeworkPdfLink
+                            homework={h}
+                            className="mt-2 inline-flex items-center gap-1 rounded-md border border-amber-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-amber-900 hover:bg-amber-50"
+                            label={`PDF: ${h.attachment_pdf_name || 'Ödev dosyası'}`}
+                          />
+                        ) : null}
                         {h.status === 'published' ? (
                           <button
                             type="button"
@@ -343,7 +470,7 @@ export default function TeacherEduTopicCard({
                     onChange={(patch) => onHwDraftChange({ ...hwDraft, ...patch })}
                   />
                   <label className="block text-sm">
-                    <span className="text-xs font-medium text-amber-900">Kitap adı *</span>
+                    <span className="text-xs font-medium text-amber-900">Kitap adı</span>
                     <input
                       className="mt-1 w-full rounded-lg border border-amber-200 px-3 py-2 text-sm bg-white focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-300"
                       placeholder="Örn. Classmate 5'li Deneme"
@@ -361,7 +488,7 @@ export default function TeacherEduTopicCard({
                     </datalist>
                   </label>
                   <label className="block text-sm">
-                    <span className="text-xs font-medium text-amber-900">Sayfa aralığı *</span>
+                    <span className="text-xs font-medium text-amber-900">Sayfa aralığı</span>
                     <input
                       className="mt-1 w-full rounded-lg border border-amber-200 px-3 py-2 text-sm bg-white focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-300"
                       placeholder="Örn. 45-48 veya 120-135"
@@ -402,7 +529,49 @@ export default function TeacherEduTopicCard({
                     />
                   </label>
                   <div className="space-y-1.5">
-                    <p className="text-xs font-medium text-violet-900">Animasyon</p>
+                    <p className="text-xs font-medium text-amber-900">PDF eki (isteğe bağlı)</p>
+                    {hwDraft.pdf_file ? (
+                      <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm">
+                        <FileText className="h-4 w-4 shrink-0 text-amber-700" />
+                        <span className="min-w-0 flex-1 truncate text-slate-800">{hwDraft.pdf_file.name}</span>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => onHwDraftChange({ ...hwDraft, pdf_file: null })}
+                          className="rounded p-1 text-slate-500 hover:bg-amber-50"
+                          title="PDF kaldır"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ) : null}
+                    <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed border-amber-300 bg-amber-50/40 px-3 py-3 text-sm font-medium text-amber-900 hover:bg-amber-50/80">
+                      <Upload className="h-4 w-4" />
+                      {hwDraft.pdf_file ? 'PDF değiştir' : 'PDF yükle (en fazla 15 MB)'}
+                      <input
+                        type="file"
+                        accept="application/pdf,.pdf"
+                        className="hidden"
+                        disabled={busy}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0] || null;
+                          e.target.value = '';
+                          if (!f) return;
+                          if (f.type !== 'application/pdf' && !f.name.toLowerCase().endsWith('.pdf')) {
+                            toast.error('Yalnızca PDF dosyası yükleyebilirsiniz');
+                            return;
+                          }
+                          if (f.size > 15 * 1024 * 1024) {
+                            toast.error('PDF en fazla 15 MB olabilir');
+                            return;
+                          }
+                          onHwDraftChange({ ...hwDraft, pdf_file: f });
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-medium text-violet-900">Animasyon havuzundan</p>
                     {(hwDraft.pool_animations || []).map((a) => (
                       <div
                         key={a.id}
@@ -435,15 +604,15 @@ export default function TeacherEduTopicCard({
                       className="flex w-full items-center justify-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-800 hover:bg-violet-100 disabled:opacity-50"
                     >
                       <Clapperboard className="h-4 w-4" />
-                      + Animasyon Ekle
+                      Havuzdan animasyon seç
                     </button>
                   </div>
                   <button
                     type="button"
                     disabled={
                       busy ||
-                      (!hwDraft.book_name.trim() && !hwDraft.title.trim()) ||
-                      !hwDraft.question_range.trim()
+                      ((!hwDraft.book_name.trim() && !hwDraft.title.trim() && !hwDraft.pdf_file) ||
+                        (!hwDraft.question_range.trim() && !hwDraft.title.trim() && !hwDraft.pdf_file))
                     }
                     onClick={onAddHomework}
                     className="w-full rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
@@ -470,7 +639,9 @@ export default function TeacherEduTopicCard({
                   WhatsApp grubuna paylaş
                 </button>
               ) : null}
-              {row.status !== 'active' ? (
+              {row.status === 'active' ? (
+                <span className="text-xs text-green-700">Öğrenciler bu konuyu görebilir</span>
+              ) : (row.homework || []).some((h) => h.status === 'published') ? (
                 <button
                   type="button"
                   disabled={busy}
@@ -480,7 +651,21 @@ export default function TeacherEduTopicCard({
                   Konuyu öğrencilere yayınla
                 </button>
               ) : (
-                <span className="text-xs text-green-700">Öğrenciler bu konuyu görebilir</span>
+                <>
+                  {animCount > 0 ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      className="text-sm font-medium text-green-700 hover:underline"
+                      onClick={onPublish}
+                    >
+                      Konuyu öğrencilere yayınla
+                    </button>
+                  ) : null}
+                  <span className="text-xs text-slate-500">
+                    «Ödevi yayınla» deyince konu da otomatik açılır
+                  </span>
+                </>
               )}
               <button
                 type="button"

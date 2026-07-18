@@ -12,6 +12,7 @@ import EduPostLessonHomeworkModal, {
 } from '../../components/eduPanel/EduPostLessonHomeworkModal';
 import { useEduAnimationPreview } from '../../components/eduPanel/useEduAnimationPreview';
 import { useAuth } from '../../context/AuthContext';
+import { useApp } from '../../context/AppContext';
 import type { EduAnimationPoolItem, EduClass, EduLessonRow, LessonRowFormValues, SubjectColor } from '../../types/eduPanel.types';
 import { buildLevelGroups, filterRows, subjectsForLevel } from '../../lib/eduPanel/eduPanelUi';
 import {
@@ -21,6 +22,12 @@ import {
   validateHomeworkDraft,
   type EduHomeworkDraft
 } from '../../lib/eduPanel/eduHomeworkForm';
+import {
+  joinEduPoolPrefix,
+  listTopicPoolSubjects,
+  listTopicPoolTopics,
+  resolveEduTopicPoolClassKey
+} from '../../lib/eduPanel/eduTopicPoolForm';
 import { listBookOrderSets } from '../../lib/bookOrdersApi';
 import {
   createEduHomework,
@@ -47,6 +54,7 @@ function defaultUntil(from: string): string {
 
 export default function TeacherEduPanelPage() {
   const { user } = useAuth();
+  const { getTopicsByClass } = useApp();
   const [rows, setRows] = useState<Awaited<ReturnType<typeof fetchEduLessonRows>>>([]);
   const [classes, setClasses] = useState<EduClass[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,6 +65,10 @@ export default function TeacherEduPanelPage() {
   const [busy, setBusy] = useState(false);
   const [pageTab, setPageTab] = useState<PageTab>('topics');
   const [poolPickerRowId, setPoolPickerRowId] = useState<string | null>(null);
+  const [subjectPrefix, setSubjectPrefix] = useState('');
+  const [titlePrefix, setTitlePrefix] = useState('');
+  const [poolSubject, setPoolSubject] = useState('');
+  const [poolTopic, setPoolTopic] = useState('');
 
   const [form, setForm] = useState<LessonRowFormValues>(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -93,16 +105,18 @@ export default function TeacherEduPanelPage() {
             : { ...f, class_id: c[0].id, class_ids: [c[0].id] }
         );
       }
-      try {
-        const sets = await listBookOrderSets(user?.institutionId);
-        setBookSuggestions(
-          [...new Set((sets || []).map((s) => s.name).filter(Boolean))].sort((a, b) =>
-            a.localeCompare(b, 'tr')
-          )
-        );
-      } catch {
-        /* kitap setleri opsiyonel */
-      }
+      // Kitap önerileri sayfa açılışını bloklamasın
+      void listBookOrderSets(user?.institutionId)
+        .then((sets) => {
+          setBookSuggestions(
+            [...new Set((sets || []).map((s) => s.name).filter(Boolean))].sort((a, b) =>
+              a.localeCompare(b, 'tr')
+            )
+          );
+        })
+        .catch(() => {
+          /* kitap setleri opsiyonel */
+        });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Yüklenemedi');
     } finally {
@@ -128,10 +142,15 @@ export default function TeacherEduPanelPage() {
   }, [searchParams, setSearchParams]);
 
   useEffect(() => {
-    if (searchParams.get('create_homework') !== '1' || loading || !rows.length) return;
-    const first = rows[0];
-    setExpandedId(first.id);
-    toast.message('Bir konu seçip ödev formundan ödev oluşturabilirsiniz.');
+    if (searchParams.get('create_homework') !== '1' || loading) return;
+    setPageTab('topics');
+    setShowCreate(true);
+    if (rows.length) {
+      setExpandedId(rows[0].id);
+      toast.message('Ödev formunu doldurun; havuzdan animasyon da ekleyebilirsiniz.');
+    } else {
+      toast.message('Ödev ver formunu doldurup sınıf ve konu oluşturun.');
+    }
     const next = new URLSearchParams(searchParams);
     next.delete('create_homework');
     setSearchParams(next, { replace: true });
@@ -173,6 +192,60 @@ export default function TeacherEduPanelPage() {
     () => (activeLevel ? activeLevel.classes : classes),
     [activeLevel, classes]
   );
+
+  const selectedFormClasses = useMemo(() => {
+    const ids = new Set(form.class_ids?.length ? form.class_ids : form.class_id ? [form.class_id] : []);
+    return classesForForm.filter((c) => ids.has(c.id));
+  }, [classesForForm, form.class_id, form.class_ids]);
+
+  const topicPoolClassKey = useMemo(
+    () => resolveEduTopicPoolClassKey(selectedFormClasses, levelKey),
+    [selectedFormClasses, levelKey]
+  );
+
+  const topicPoolBundle = useMemo(
+    () => getTopicsByClass(topicPoolClassKey),
+    [getTopicsByClass, topicPoolClassKey]
+  );
+
+  const poolSubjects = useMemo(() => listTopicPoolSubjects(topicPoolBundle), [topicPoolBundle]);
+
+  const poolTopics = useMemo(
+    () => listTopicPoolTopics(topicPoolBundle, poolSubject || form.subject_name),
+    [topicPoolBundle, poolSubject, form.subject_name]
+  );
+
+  useEffect(() => {
+    if (!poolSubjects.length) return;
+    setPoolSubject((prev) => {
+      if (prev && poolSubjects.includes(prev)) return prev;
+      return poolSubjects[0];
+    });
+  }, [poolSubjects]);
+
+  useEffect(() => {
+    if (!poolSubject) return;
+    setForm((f) => ({
+      ...f,
+      subject_name: joinEduPoolPrefix(subjectPrefix, poolSubject)
+    }));
+  }, [poolSubject, subjectPrefix]);
+
+  useEffect(() => {
+    if (!poolTopics.length) {
+      setPoolTopic('');
+      return;
+    }
+    setPoolTopic((prev) => (prev && poolTopics.includes(prev) ? prev : poolTopics[0]));
+  }, [poolTopics]);
+
+  useEffect(() => {
+    if (!poolTopic) return;
+    setForm((f) => ({
+      ...f,
+      title: joinEduPoolPrefix(titlePrefix, poolTopic)
+    }));
+  }, [poolTopic, titlePrefix]);
 
   const onSelectLevel = (key: string) => {
     setLevelKey(key);
@@ -220,24 +293,34 @@ export default function TeacherEduPanelPage() {
       : form.class_id
         ? [form.class_id]
         : [];
-    if (!classIds.length || !form.title.trim()) {
+    const subjectFinal = joinEduPoolPrefix(subjectPrefix, poolSubject || form.subject_name);
+    const titleFinal = joinEduPoolPrefix(titlePrefix, poolTopic || form.title);
+    if (!classIds.length || !titleFinal.trim()) {
       toast.error('En az bir sınıf ve konu başlığı zorunlu');
+      return;
+    }
+    if (!subjectFinal.trim()) {
+      toast.error('Ders seçin (konu havuzu)');
       return;
     }
     setBusy(true);
     try {
       const { data: created, warning, hint } = await createEduLessonRow({
         ...form,
+        title: titleFinal.trim(),
+        subject_name: subjectFinal.trim(),
         class_ids: classIds,
         class_id: classIds[0]
       });
-      toast.success(`「${form.title}」 konusu oluşturuldu`);
+      toast.success(`「${titleFinal}」 oluşturuldu — şimdi ödev formunu doldurun`);
       if (warning) {
         toast.warning(
           hint ||
             'Çoklu sınıf tablosu henüz yok — yalnızca birincil sınıf kaydedildi. Supabase\'de 2026-06-25-edu-lesson-row-classes.sql çalıştırın.'
         );
       }
+      setTitlePrefix('');
+      setPoolTopic('');
       setForm((f) => ({ ...f, title: '', notes: '' }));
       setExpandedId(created.id);
       setShowCreate(false);
@@ -249,16 +332,33 @@ export default function TeacherEduPanelPage() {
     }
   };
 
-  const onUploadHtml = async (rowId: string, rowTitle: string, file: File | null) => {
+  const onUploadHtml = async (
+    rowId: string,
+    rowTitle: string,
+    file: File | null,
+    meta?: { external_url?: string }
+  ) => {
     if (!file) return;
-    if (!file.name.toLowerCase().endsWith('.html')) {
-      toast.error('Sadece .html dosyası');
+    const nameOk =
+      file.name.toLowerCase().endsWith('.html') ||
+      file.name.toLowerCase().endsWith('.htm') ||
+      file.type.includes('html');
+    if (!nameOk) {
+      toast.error('Sadece HTML (.html) veya yapıştırılan kod / link kabul edilir');
       return;
     }
     setBusy(true);
     try {
-      const anim = await uploadEduAnimation(rowId, file);
-      toast.success(`Animasyon 「${rowTitle}」 konusuna eklendi`);
+      const anim = await uploadEduAnimation(rowId, file, {
+        external_url: meta?.external_url
+      });
+      if (meta?.external_url) {
+        toast.success(`「${rowTitle}」 — link eklendi (havuza da kaydedildi)`);
+      } else if (anim.pooled) {
+        toast.success(`「${rowTitle}」 — animasyon eklendi ve sınıf/ders kategorisiyle havuza kaydedildi`);
+      } else {
+        toast.success(`Animasyon 「${rowTitle}」 konusuna eklendi`);
+      }
       setExpandedId(rowId);
       void load();
       try {
@@ -282,20 +382,31 @@ export default function TeacherEduPanelPage() {
     }
     setBusy(true);
     try {
-      const hw = await createEduHomework(rowId, {
+      const { homework: hw, notified } = await createEduHomework(rowId, {
         title: homeworkTitleForApi(draft),
         book_name: draft.book_name.trim() || undefined,
         question_range: draft.question_range.trim() || undefined,
         description: draft.description?.trim() || undefined,
         due_date: draft.due_date?.trim() || undefined,
-        status: 'draft',
+        status: 'published',
         pool_animation_ids: draftPoolAnimationIds(draft),
         assignee_mode: draft.assignee_mode || 'class',
         assignee_student_ids:
-          draft.assignee_mode === 'students' ? draft.assignee_student_ids || [] : []
+          draft.assignee_mode === 'students' ? draft.assignee_student_ids || [] : [],
+        pdf_file: draft.pdf_file || null
       });
-      await publishEduHomework(hw.id);
-      toast.success(`Ödev eklendi: ${homeworkTitleForApi(draft)}`);
+      let notifyCount = notified;
+      if (hw.status !== 'published') {
+        const pub = await publishEduHomework(hw.id);
+        notifyCount = Math.max(notifyCount, pub.notified);
+      }
+      // Ödev yayınlanınca konu da açılsın — alttan ayrıca «Konuyu yayınla» gerekmesin
+      await updateEduLessonRow(rowId, { status: 'active' });
+      toast.success(
+        notifyCount > 0
+          ? `「${rowTitle}」 ödevi yayınlandı — ${notifyCount} öğrenciye bildirim gitti`
+          : `「${rowTitle}」 ödevi yayınlandı — öğrenciler görebilir`
+      );
       setHwDraft((h) => ({ ...h, [rowId]: { ...EMPTY_HOMEWORK_DRAFT } }));
       void load();
     } catch (e) {
@@ -318,8 +429,8 @@ export default function TeacherEduPanelPage() {
       <div className="rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 p-6 text-white">
         <h1 className="text-2xl font-bold">{EDU_HOMEWORK_ANIMATIONS_LABEL}</h1>
         <p className="mt-1 text-sm text-violet-100">
-          Önce sınıf kademesini, sonra dersi seçin. Her ders altındaki konu kartları öğrenciye yalnızca
-          ilgili sınıf ve ders bağlamında gösterilir.
+          Ödev verin, kitabı/PDF’i ekleyin; animasyonları havuzdan seçin veya yükleyin — yüklenen
+          animasyonlar kategoriye göre otomatik havuza düşer.
         </p>
       </div>
 
@@ -334,7 +445,7 @@ export default function TeacherEduPanelPage() {
           }`}
         >
           <BookOpen className="h-4 w-4" />
-          Animasyonlarım
+          Ödevlerim
         </button>
         <button
           type="button"
@@ -435,23 +546,25 @@ export default function TeacherEduPanelPage() {
         </section>
       ) : null}
 
-      {/* Yeni konu */}
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      {/* Ödev ver */}
+      <div className="rounded-xl border border-amber-200 bg-white shadow-sm overflow-hidden ring-1 ring-amber-100">
         <button
           type="button"
-          className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-slate-50"
+          className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-amber-50/60"
           onClick={() => setShowCreate((s) => !s)}
         >
           <span className="font-semibold text-slate-800 flex items-center gap-2">
-            <Plus className="h-4 w-4 text-violet-600" />
-            Yeni konu
+            <Plus className="h-4 w-4 text-amber-600" />
+            Ödev ver
           </span>
           <span className="text-xs text-slate-500">{showCreate ? 'Gizle' : 'Aç'}</span>
         </button>
         {showCreate ? (
-          <div className="border-t border-slate-100 p-4 space-y-3 bg-slate-50/50">
+          <div className="border-t border-amber-100 p-4 space-y-3 bg-amber-50/40">
             <p className="text-xs text-slate-600">
-              Konuyu bir veya birden fazla sınıfa bağlayın. Üst kademe seçici otomatik kullanılır.
+              Önce sınıf seçin; <strong>Ders</strong> ve <strong>Konu</strong> konu havuzundan gelir.
+              İsterseniz başına elle önek ekleyin. Kaydettikten sonra kartı açıp kitap/PDF ve
+              animasyon ekleyin — ödev yayınlanınca öğrenciye bildirim gider.
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="text-sm sm:col-span-2">
@@ -494,6 +607,15 @@ export default function TeacherEduPanelPage() {
                 {!classesForForm.length ? (
                   <p className="mt-1 text-xs text-slate-500">Önce sınıf oluşturun.</p>
                 ) : null}
+                {topicPoolClassKey ? (
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Konu havuzu kademesi: {topicPoolClassKey}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-[11px] text-amber-700">
+                    Seçili sınıflarda kademe yok — konu havuzu boş kalabilir.
+                  </p>
+                )}
               </div>
               <label className="text-sm">
                 <span className="text-slate-600">Ders tarihi</span>
@@ -530,15 +652,66 @@ export default function TeacherEduPanelPage() {
                   onChange={(e) => setForm((f) => ({ ...f, available_until: e.target.value }))}
                 />
               </label>
-              <label className="text-sm sm:col-span-2">
-                <span className="text-slate-600">Konu başlığı</span>
-                <input
-                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm bg-white"
-                  placeholder="Örn. Üslü sayılar"
-                  value={form.title}
-                  onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-                />
-              </label>
+              <div className="text-sm sm:col-span-2 space-y-2">
+                <span className="text-slate-600">Ders (konu havuzu)</span>
+                <div className="grid gap-2 sm:grid-cols-[minmax(0,9rem)_1fr]">
+                  <input
+                    className="w-full rounded-lg border px-3 py-2 text-sm bg-white"
+                    placeholder="Önek (elle)"
+                    value={subjectPrefix}
+                    onChange={(e) => setSubjectPrefix(e.target.value)}
+                  />
+                  <select
+                    className="w-full rounded-lg border px-3 py-2 text-sm bg-white"
+                    value={poolSubject}
+                    onChange={(e) => setPoolSubject(e.target.value)}
+                    disabled={!poolSubjects.length}
+                  >
+                    {!poolSubjects.length ? (
+                      <option value="">Konu havuzunda ders yok</option>
+                    ) : (
+                      poolSubjects.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Kayıt adı: {joinEduPoolPrefix(subjectPrefix, poolSubject) || '—'}
+                </p>
+              </div>
+              <div className="text-sm sm:col-span-2 space-y-2">
+                <span className="text-slate-600">Konu başlığı (konu havuzu)</span>
+                <div className="grid gap-2 sm:grid-cols-[minmax(0,9rem)_1fr]">
+                  <input
+                    className="w-full rounded-lg border px-3 py-2 text-sm bg-white"
+                    placeholder="Önek (elle)"
+                    value={titlePrefix}
+                    onChange={(e) => setTitlePrefix(e.target.value)}
+                  />
+                  <select
+                    className="w-full rounded-lg border px-3 py-2 text-sm bg-white"
+                    value={poolTopic}
+                    onChange={(e) => setPoolTopic(e.target.value)}
+                    disabled={!poolTopics.length}
+                  >
+                    {!poolTopics.length ? (
+                      <option value="">Önce ders seçin / konu yok</option>
+                    ) : (
+                      poolTopics.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Kayıt adı: {joinEduPoolPrefix(titlePrefix, poolTopic) || '—'}
+                </p>
+              </div>
               <label className="text-sm sm:col-span-2">
                 <span className="text-slate-600">Konu notu (isteğe bağlı)</span>
                 <textarea
@@ -547,21 +720,6 @@ export default function TeacherEduPanelPage() {
                   value={form.notes || ''}
                   onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
                 />
-              </label>
-              <label className="text-sm">
-                <span className="text-slate-600">Ders</span>
-                <input
-                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm bg-white"
-                  list="edu-subject-suggest"
-                  placeholder="Örn. Matematik"
-                  value={form.subject_name}
-                  onChange={(e) => setForm((f) => ({ ...f, subject_name: e.target.value }))}
-                />
-                <datalist id="edu-subject-suggest">
-                  {subjects.map((s) => (
-                    <option key={s.subjectName} value={s.subjectName} />
-                  ))}
-                </datalist>
               </label>
               <label className="text-sm">
                 <span className="text-slate-600">Renk</span>
@@ -587,7 +745,7 @@ export default function TeacherEduPanelPage() {
               className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white"
             >
               <Plus className="h-4 w-4" />
-              Konu oluştur
+              Oluştur ve ödev ver
             </button>
           </div>
         ) : null}
@@ -596,13 +754,13 @@ export default function TeacherEduPanelPage() {
       {/* Konular */}
       {filteredRows.length === 0 ? (
         <p className="text-center text-sm text-slate-500 py-8">
-          Bu seçim için henüz konu yok. «Yeni konu» bölümünden ekleyin.
+          Bu seçim için henüz ödev yok. «Ödev ver» ile başlayın.
         </p>
       ) : (
         <div className="space-y-3">
           <div className="flex items-center gap-2 text-xs text-slate-500">
             <GraduationCap className="h-3.5 w-3.5 text-violet-600" />
-            <span>{filteredRows.length} konu</span>
+            <span>{filteredRows.length} ödev / konu kartı</span>
           </div>
           {filteredRows.map((row) => (
             <TeacherEduTopicCard
@@ -618,7 +776,7 @@ export default function TeacherEduPanelPage() {
               onHwDraftChange={(draft) =>
                 setHwDraft((h) => ({ ...h, [row.id]: draft }))
               }
-              onUploadHtml={(file) => void onUploadHtml(row.id, row.title, file)}
+              onUploadHtml={(file, meta) => void onUploadHtml(row.id, row.title, file, meta)}
               onPreview={(id) =>
                 void preview.open(id).catch((e) =>
                   toast.error(e instanceof Error ? e.message : 'Önizleme açılamadı')
@@ -656,8 +814,8 @@ export default function TeacherEduPanelPage() {
       <EduAnimationPoolPickerModal
         open={Boolean(poolPickerRowId)}
         onClose={() => setPoolPickerRowId(null)}
-        title="Animasyon Seç"
-        selectLabel="Ödeve Ekle"
+        title="Havuzdan animasyon seç"
+        selectLabel="Ödeve ekle"
         onPreview={(item) =>
           void preview.openPool(item.id).catch((e) =>
             toast.error(e instanceof Error ? e.message : 'Önizleme açılamadı')

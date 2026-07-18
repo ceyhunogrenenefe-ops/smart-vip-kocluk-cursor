@@ -2,6 +2,7 @@ import { supabaseAdmin } from './supabase-admin.js';
 
 export const EDU_ANIMATIONS_BUCKET = 'edu-animations';
 export const EDU_SUBMISSIONS_BUCKET = 'edu-homework-submissions';
+export const EDU_HOMEWORK_ATTACHMENTS_BUCKET = 'edu-homework-attachments';
 
 export async function uploadEduBuffer({ bucket, path, buffer, contentType }) {
   const { error } = await supabaseAdmin.storage.from(bucket).upload(path, buffer, {
@@ -10,6 +11,22 @@ export async function uploadEduBuffer({ bucket, path, buffer, contentType }) {
     upsert: true
   });
   if (error) throw error;
+}
+
+/** Tarayıcıdan doğrudan Storage’a yükleme (Vercel 4.5MB body limitini aşar). */
+export async function createEduSignedUploadUrl({ bucket, path, upsert = true }) {
+  let result = await supabaseAdmin.storage.from(bucket).createSignedUploadUrl(path, { upsert });
+  if (result.error) {
+    // Bazı supabase-js sürümlerinde 2. argüman yok
+    result = await supabaseAdmin.storage.from(bucket).createSignedUploadUrl(path);
+  }
+  if (result.error) throw result.error;
+  const data = result.data;
+  return {
+    path: data?.path || path,
+    token: data?.token || null,
+    signedUrl: data?.signedUrl || null
+  };
 }
 
 export async function downloadEduBuffer(bucket, path) {

@@ -5,8 +5,12 @@ function trimSlash(v) {
 }
 
 function normalizeBbbApiBase(raw) {
-  const base = trimSlash(raw);
+  let base = trimSlash(raw);
   if (!base) return '';
+  // Özel BBB alan adı kök URL ile verilmişse /bigbluebutton/api yolunu tamamla.
+  if (/dersonlinevipkocluk\.com/i.test(base) && !/\/bigbluebutton\b/i.test(base)) {
+    base = `${base}/bigbluebutton`;
+  }
   if (base.includes('/api')) return `${base}/`;
   return `${base}/api/`;
 }
@@ -15,8 +19,34 @@ function sha1(input) {
   return crypto.createHash('sha1').update(input).digest('hex');
 }
 
+function sanitizeBbbSecret(raw) {
+  return String(raw || '')
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '');
+}
+
 function bbbChecksum(callName, query, secret) {
-  return sha1(`${callName}${query}${secret}`);
+  return sha1(`${callName}${query}${sanitizeBbbSecret(secret)}`);
+}
+
+function bbbApiUrl(apiBase, action, query, checksum) {
+  const q = String(query || '').trim();
+  return q ? `${apiBase}${action}?${q}&checksum=${checksum}` : `${apiBase}${action}?checksum=${checksum}`;
+}
+
+function parseBbbXmlError(text) {
+  const body = String(text || '');
+  const pick = (tag) => {
+    const m =
+      body.match(new RegExp(`<${tag}><!\\[CDATA\\[(.*?)\\]\\]></${tag}>`, 'i')) ||
+      body.match(new RegExp(`<${tag}>([^<]*)</${tag}>`, 'i'));
+    return m ? String(m[1] || '').trim() : '';
+  };
+  const returncode = pick('returncode');
+  const messageKey = pick('messageKey');
+  const message = pick('message');
+  if (!returncode && !messageKey && !message) return null;
+  return { returncode, messageKey, message };
 }
 
 function asQuery(params) {
@@ -171,7 +201,7 @@ export async function bbbGetRunningMeetingIdSet() {
 
   const query = asQuery({});
   const checksum = bbbChecksum('getMeetings', query, secret);
-  const url = `${apiBase}getMeetings?${query}&checksum=${checksum}`;
+  const url = bbbApiUrl(apiBase, 'getMeetings', query, checksum);
   try {
     const res = await bbbFetch(url, { timeoutMs: Math.min(BBB_FETCH_TIMEOUT_MS, 10000) });
     const text = await res.text();
@@ -196,7 +226,7 @@ export async function probeBbbApiReachable() {
   const started = Date.now();
   const query = asQuery({});
   const checksum = bbbChecksum('getMeetings', query, secret);
-  const url = `${apiBase}getMeetings?${query}&checksum=${checksum}`;
+  const url = bbbApiUrl(apiBase, 'getMeetings', query, checksum);
   try {
     const res = await bbbFetch(url, { timeoutMs: Math.min(BBB_FETCH_TIMEOUT_MS, 15000) });
     const text = await res.text();
@@ -205,9 +235,20 @@ export async function probeBbbApiReachable() {
       return { ok: false, error: `HTTP ${res.status}`, ms, status: res.status };
     }
     if (!text.includes('<returncode>SUCCESS</returncode>')) {
-      return { ok: false, error: 'BBB getMeetings başarısız', ms };
+      const bbbErr = parseBbbXmlError(text);
+      const err =
+        bbbErr?.messageKey === 'checksumError'
+          ? 'checksumError'
+          : bbbErr?.messageKey || bbbErr?.message || 'BBB getMeetings başarısız';
+      return {
+        ok: false,
+        error: err,
+        ms,
+        bbb: bbbErr,
+        endpoint: describeBbbApiEndpoint()
+      };
     }
-    return { ok: true, ms };
+    return { ok: true, ms, endpoint: describeBbbApiEndpoint() };
   } catch (e) {
     return {
       ok: false,
@@ -231,8 +272,21 @@ function bbbApiConfig() {
     '';
   return {
     apiBase: normalizeBbbApiBase(endpoint),
-    secret: String(secret || '').trim()
+    secret: sanitizeBbbSecret(secret),
+    endpointRaw: String(endpoint || '').trim()
   };
+}
+
+/** Teşhis için güvenli endpoint özeti (secret yok). */
+export function describeBbbApiEndpoint() {
+  const { apiBase, endpointRaw } = bbbApiConfig();
+  if (!apiBase) return { host: null, path: null, raw: endpointRaw || null };
+  try {
+    const u = new URL(apiBase);
+    return { host: u.host, path: u.pathname, raw: endpointRaw || apiBase };
+  } catch {
+    return { host: null, path: null, raw: endpointRaw || apiBase };
+  }
 }
 
 export function isBbbConfigured() {
@@ -410,14 +464,23 @@ export async function resolveLiveBbbAttendeeCredentials(opts) {
 export function enrichMeetingRowJoinLink(row, actorRole) {
   if (!row || typeof row !== 'object') return row;
   const isStudent = String(actorRole || '').toLowerCase() === 'student';
-  const moderator = String(row.meeting_link_moderator || '').trim();
-  const attendee = String(row.meeting_link || '').trim();
+  const moderator = rewriteBbbJoinUrlToConfiguredHost(String(row.meeting_link_moderator || '').trim());
+  const attendee = rewriteBbbJoinUrlToConfiguredHost(String(row.meeting_link || '').trim());
   const joinLink = !isStudent && moderator ? moderator : attendee;
   if (isStudent) {
     const { meeting_link_moderator: _drop, ...rest } = row;
-    return { ...rest, join_link: joinLink };
+    return {
+      ...rest,
+      meeting_link: attendee || rest.meeting_link,
+      join_link: joinLink
+    };
   }
-  return { ...row, join_link: joinLink };
+  return {
+    ...row,
+    meeting_link: attendee || row.meeting_link,
+    ...(moderator ? { meeting_link_moderator: moderator } : {}),
+    join_link: joinLink
+  };
 }
 
 export function enrichMeetingRowsJoinLink(rows, actorRole) {
@@ -437,13 +500,18 @@ export function sanitizeBbbMeetingId(raw) {
 export function enrichCoachingMeetingRow(row, actorRole) {
   if (!row || typeof row !== 'object') return row;
   const isStudent = String(actorRole || '').toLowerCase() === 'student';
-  const attendee = String(row.meet_link || '').trim();
-  const moderator = String(row.link_bbb || '').trim();
+  const attendee = rewriteBbbJoinUrlToConfiguredHost(String(row.meet_link || '').trim());
+  const moderator = rewriteBbbJoinUrlToConfiguredHost(String(row.link_bbb || '').trim());
   const joinLink = !isStudent && moderator ? moderator : attendee;
   if (isStudent) {
-    return { ...row, join_link: attendee };
+    return { ...row, meet_link: attendee || row.meet_link, join_link: attendee };
   }
-  return { ...row, join_link: joinLink };
+  return {
+    ...row,
+    meet_link: attendee || row.meet_link,
+    ...(moderator ? { link_bbb: moderator } : {}),
+    join_link: joinLink
+  };
 }
 
 export function enrichCoachingMeetingRows(rows, actorRole) {
@@ -464,13 +532,59 @@ export function isBbbJoinUrl(url) {
   return /meetingID=/i.test(s) && /\/join/i.test(s);
 }
 
+/**
+ * Yapılandırılmış BBB API kökü (join URL üretimi / host rewrite).
+ * Öncelik: BBB_PUBLIC_API_BASE → BBB_API_ENDPOINT → özel alan adı varsayılanı.
+ */
+export function resolveBbbJoinApiBase() {
+  const explicit = trimSlash(
+    process.env.BBB_PUBLIC_API_BASE ||
+      process.env.BBB_JOIN_HOST_REWRITE ||
+      process.env.BBB_CUSTOM_DOMAIN_API ||
+      ''
+  );
+  if (explicit) return normalizeBbbApiBase(explicit);
+  const { apiBase } = bbbApiConfig();
+  // Join URL'leri API ile aynı kökü kullanmalı (örn. /bigbluebutton/Ceyhun01/api/).
+  if (apiBase) return apiBase;
+  return '';
+}
+
+/**
+ * Kayıtlı join URL host'unu güncel BBB alan adına taşır (checksum host içermez).
+ * Örn. biggerbluebutton.com → ders.dersonlinevipkocluk.com
+ */
+export function rewriteBbbJoinUrlToConfiguredHost(url, apiBaseOverride = null) {
+  const s = String(url || '').trim();
+  if (!s || isBbbAutoMeetingLink(s)) return s;
+  const apiBase = normalizeBbbApiBase(apiBaseOverride || resolveBbbJoinApiBase());
+  if (!apiBase) return s;
+  if (!isBbbJoinUrl(s) && !isLikelyBbbJoinUrl(s)) return s;
+  try {
+    const u = new URL(s);
+    const hasMeeting = Boolean(u.searchParams.get('meetingID'));
+    const looksJoin = /\/join/i.test(u.pathname) || hasMeeting;
+    if (!looksJoin) return s;
+    const target = new URL(apiBase);
+    const currentOrigin = u.origin.toLowerCase();
+    const targetOrigin = target.origin.toLowerCase();
+    const currentPathBase = `${u.origin}${u.pathname.replace(/\/?join\/?$/i, '')}/`.toLowerCase();
+    const targetPathBase = apiBase.toLowerCase();
+    if (currentOrigin === targetOrigin && currentPathBase === targetPathBase) return s;
+    const qs = u.searchParams.toString();
+    return qs ? `${apiBase}join?${qs}` : `${apiBase}join`;
+  } catch {
+    return s;
+  }
+}
+
 /** Eksik parametreli veya biggerbluebutton host join URL'leri (ham açılınca şifre hatası verir). */
 export function isLikelyBbbJoinUrl(url) {
   const s = String(url || '').trim();
   if (!s) return false;
   if (isBbbAutoMeetingLink(s)) return true;
   if (isBbbJoinUrl(s)) return true;
-  if (/bigbluebutton|biggerbluebutton/i.test(s) && /\/join/i.test(s)) return true;
+  if (/bigbluebutton|biggerbluebutton|dersonlinevipkocluk/i.test(s) && /\/join/i.test(s)) return true;
   return false;
 }
 
@@ -593,14 +707,14 @@ export function buildStaffBbbJoinUrl({
 }
 
 export function buildBbbAttendeeJoinUrl({ meetingId, attendeePassword, fullName }) {
-  const { apiBase, secret } = bbbApiConfig();
+  const { secret } = bbbApiConfig();
+  const apiBase = resolveBbbJoinApiBase();
   if (!apiBase || !secret) throw new Error('BBB API ayarları eksik.');
   const safeMeetingId = sanitizeBbbMeetingId(meetingId);
   const joinQuery = asQuery({
     fullName: String(fullName || 'Öğrenci').trim().slice(0, 64) || 'Öğrenci',
     meetingID: safeMeetingId,
     password: attendeePassword,
-    role: 'VIEWER',
     redirect: true
   });
   const joinChecksum = bbbChecksum('join', joinQuery, secret);
@@ -608,7 +722,8 @@ export function buildBbbAttendeeJoinUrl({ meetingId, attendeePassword, fullName 
 }
 
 export function buildBbbModeratorJoinUrl({ meetingId, moderatorPassword, fullName }) {
-  const { apiBase, secret } = bbbApiConfig();
+  const { secret } = bbbApiConfig();
+  const apiBase = resolveBbbJoinApiBase();
   if (!apiBase || !secret) throw new Error('BBB API ayarları eksik.');
   const safeMeetingId = sanitizeBbbMeetingId(meetingId);
   const joinQuery = asQuery({
@@ -700,6 +815,8 @@ export async function bbbGetMeetingAttendeesDetailed(meetingId) {
 
 /**
  * Aday meetingID listesinde çalışan oturumu bulur.
+ * getMeetings listesinde yok diye hemen boş dönme — meetingID adaylarını
+ * getMeetingInfo ile dene (stale getMeetings / ID sanitize uyumsuzluğu).
  * @param {string[]} candidateIds
  */
 export async function bbbFindRunningMeetingAttendees(candidateIds) {
@@ -715,17 +832,17 @@ export async function bbbFindRunningMeetingAttendees(candidateIds) {
   if (!candidates.length) return empty;
 
   const runningSet = await bbbGetRunningMeetingIdSet();
+  const ordered = [];
   if (runningSet.size > 0) {
-    const matched = candidates.find((id) => runningSet.has(id));
-    if (!matched) return empty;
-    const info = await bbbGetMeetingAttendeesDetailed(matched);
-    if (info.running) {
-      return { meetingId: matched, running: true, attendees: info.attendees || [] };
+    for (const id of candidates) {
+      if (runningSet.has(id)) ordered.push(id);
     }
-    return empty;
+  }
+  for (const id of candidates) {
+    if (!ordered.includes(id)) ordered.push(id);
   }
 
-  for (const id of candidates) {
+  for (const id of ordered) {
     const info = await bbbGetMeetingAttendeesDetailed(id);
     if (info.running) {
       return { meetingId: id, running: true, attendees: info.attendees || [] };
@@ -999,7 +1116,11 @@ export async function ensureBbbMeetingAlive({
       if (reused) return reused;
       return createWithStableId();
     }
-    return { refreshed: false, attendeeLink: attendee, moderatorLink: moderator || null };
+    return {
+      refreshed: false,
+      attendeeLink: rewriteBbbJoinUrlToConfiguredHost(attendee),
+      moderatorLink: moderator ? rewriteBbbJoinUrlToConfiguredHost(moderator) : null
+    };
   }
 
   const rawMeetingId =
@@ -1080,6 +1201,14 @@ export async function createBbbMeetingAndJoinLink({
   const createRes = await bbbFetch(createUrl, { timeoutMs: BBB_CREATE_TIMEOUT_MS });
   const createText = await createRes.text();
   if (!createRes.ok || !createText.includes('<returncode>SUCCESS</returncode>')) {
+    const bbbErr = parseBbbXmlError(createText);
+    if (bbbErr?.messageKey === 'checksumError') {
+      const ep = describeBbbApiEndpoint();
+      throw new Error(
+        'BBB API secret uyuşmuyor (checksumError). Vercel → BBB_API_SECRET değerini BBB panelindeki Salt/API Secret ile birebir güncelleyin. ' +
+          `Endpoint: ${ep.host || '?'}${ep.path || ''}`
+      );
+    }
     throw new Error(`BBB create başarısız: ${createText.slice(0, 280)}`);
   }
 
@@ -1100,8 +1229,9 @@ export async function createBbbMeetingAndJoinLink({
     password: resolvedAttendeePW,
     redirect: true
   });
+  const joinBase = resolveBbbJoinApiBase() || apiBase;
   const joinChecksum = bbbChecksum('join', joinQuery, secret);
-  const attendeeJoinLink = `${apiBase}join?${joinQuery}&checksum=${joinChecksum}`;
+  const attendeeJoinLink = `${joinBase}join?${joinQuery}&checksum=${joinChecksum}`;
 
   const coachJoinQuery = asQuery({
     fullName: moderatorName || attendeeName || 'Koç',
@@ -1110,7 +1240,7 @@ export async function createBbbMeetingAndJoinLink({
     redirect: true
   });
   const coachJoinChecksum = bbbChecksum('join', coachJoinQuery, secret);
-  const moderatorJoinLink = `${apiBase}join?${coachJoinQuery}&checksum=${coachJoinChecksum}`;
+  const moderatorJoinLink = `${joinBase}join?${coachJoinQuery}&checksum=${coachJoinChecksum}`;
 
   return {
     attendeeJoinLink,

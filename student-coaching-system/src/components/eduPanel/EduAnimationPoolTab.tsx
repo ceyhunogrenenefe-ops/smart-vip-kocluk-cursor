@@ -55,12 +55,15 @@ export default function EduAnimationPoolTab({
   const [subjectName, setSubjectName] = useState<string | null>(null);
 
   const [showUpload, setShowUpload] = useState(false);
+  const [uploadMode, setUploadMode] = useState<'file' | 'code' | 'link'>('file');
   const [uploadForm, setUploadForm] = useState({
     title: '',
     targetKeys: [poolTargetKey('tyt', '9')],
     subject_name: 'Matematik',
     topic_name: '',
-    file: null as File | null
+    file: null as File | null,
+    html_code: '',
+    external_url: ''
   });
 
   const [homeworkItem, setHomeworkItem] = useState<EduAnimationPoolItem | null>(null);
@@ -111,16 +114,19 @@ export default function EduAnimationPoolTab({
     isAdmin || String(item.teacher_user_id) === String(user?.id);
 
   const onUpload = async () => {
-    if (!uploadForm.title.trim() || !uploadForm.topic_name.trim() || !uploadForm.file) {
-      toast.error('Tüm alanları doldurun ve .html dosyası seçin');
+    const hasFile = Boolean(uploadForm.file);
+    const hasCode = Boolean(uploadForm.html_code.trim());
+    const hasLink = Boolean(uploadForm.external_url.trim());
+    if (!uploadForm.title.trim() || !uploadForm.topic_name.trim() || (!hasFile && !hasCode && !hasLink)) {
+      toast.error('Tüm alanları doldurun; dosya, HTML kodu veya link ekleyin');
       return;
     }
     if (!uploadForm.targetKeys.length) {
       toast.error('En az bir sınıf veya program seçin');
       return;
     }
-    if (!uploadForm.file.name.toLowerCase().endsWith('.html')) {
-      toast.error('Sadece .html dosyası');
+    if (hasFile && uploadForm.file && !uploadForm.file.name.toLowerCase().endsWith('.html')) {
+      toast.error('Dosya için sadece .html kabul edilir');
       return;
     }
     const targets = targetsFromKeys(uploadForm.targetKeys);
@@ -134,11 +140,21 @@ export default function EduAnimationPoolTab({
         targets,
         subject_name: uploadForm.subject_name,
         topic_name: uploadForm.topic_name.trim(),
-        file: uploadForm.file
+        file: hasFile ? uploadForm.file : null,
+        html_code: !hasFile && hasCode ? uploadForm.html_code : undefined,
+        external_url: !hasFile && !hasCode && hasLink ? uploadForm.external_url : undefined
       });
-      toast.success('Animasyon havuza eklendi');
+      toast.success(hasLink ? 'Link havuza eklendi' : 'Animasyon havuza eklendi');
       setShowUpload(false);
-      setUploadForm((f) => ({ ...f, title: '', topic_name: '', file: null }));
+      setUploadMode('file');
+      setUploadForm((f) => ({
+        ...f,
+        title: '',
+        topic_name: '',
+        file: null,
+        html_code: '',
+        external_url: ''
+      }));
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Yüklenemedi');
@@ -283,18 +299,101 @@ export default function EduAnimationPoolTab({
                 onChange={(e) => setUploadForm((f) => ({ ...f, topic_name: e.target.value }))}
               />
             </label>
-            <label className="block text-sm sm:col-span-2">
-              <span className="text-xs font-medium text-slate-600">Animasyon dosyası (.html) *</span>
-              <input
-                type="file"
-                accept=".html,text/html"
-                className="mt-1 block w-full text-sm"
-                onChange={(e) => {
-                  const file = e.target.files?.[0] || null;
-                  setUploadForm((f) => ({ ...f, file }));
-                }}
-              />
-            </label>
+            <div className="sm:col-span-2 space-y-2">
+              <div className="flex gap-1 rounded-lg bg-slate-100 p-1">
+                <button
+                  type="button"
+                  onClick={() => setUploadMode('file')}
+                  className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-semibold ${
+                    uploadMode === 'file'
+                      ? 'bg-white text-violet-800 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-800'
+                  }`}
+                >
+                  .html dosya
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUploadMode('code')}
+                  className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-semibold ${
+                    uploadMode === 'code'
+                      ? 'bg-white text-violet-800 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-800'
+                  }`}
+                >
+                  HTML kodu
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUploadMode('link')}
+                  className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-semibold ${
+                    uploadMode === 'link'
+                      ? 'bg-white text-violet-800 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-800'
+                  }`}
+                >
+                  Link (NotebookLM)
+                </button>
+              </div>
+              {uploadMode === 'file' ? (
+                <label className="block text-sm">
+                  <span className="text-xs font-medium text-slate-600">Animasyon dosyası (.html) *</span>
+                  <input
+                    type="file"
+                    accept=".html,text/html"
+                    className="mt-1 block w-full text-sm"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] || null;
+                      setUploadForm((f) => ({ ...f, file, html_code: '', external_url: '' }));
+                    }}
+                  />
+                </label>
+              ) : uploadMode === 'code' ? (
+                <label className="block text-sm">
+                  <span className="text-xs font-medium text-slate-600">HTML kodu *</span>
+                  <textarea
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-xs leading-relaxed min-h-[160px]"
+                    placeholder={'<!DOCTYPE html>\n<html>\n...</html>\n\nveya sadece body içeriği'}
+                    value={uploadForm.html_code}
+                    onChange={(e) =>
+                      setUploadForm((f) => ({
+                        ...f,
+                        html_code: e.target.value,
+                        file: null,
+                        external_url: ''
+                      }))
+                    }
+                  />
+                  <span className="mt-1 block text-[10px] text-slate-500">
+                    Tam HTML veya sadece içerik yapıştırabilirsiniz; eksikse otomatik sarılır.
+                  </span>
+                </label>
+              ) : (
+                <label className="block text-sm">
+                  <span className="text-xs font-medium text-slate-600">
+                    Dış link (NotebookLM, Canva, Google Sites…) *
+                  </span>
+                  <input
+                    type="url"
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    placeholder="https://notebooklm.google.com/…"
+                    value={uploadForm.external_url}
+                    onChange={(e) =>
+                      setUploadForm((f) => ({
+                        ...f,
+                        external_url: e.target.value,
+                        file: null,
+                        html_code: ''
+                      }))
+                    }
+                  />
+                  <span className="mt-1 block text-[10px] text-slate-500">
+                    Öğrenci izlerken ortalanmış sayfada “NotebookLM’de aç” butonu görür (iframe
+                    engelli siteler için).
+                  </span>
+                </label>
+              )}
+            </div>
           </div>
           <div className="mt-4 flex gap-2">
             <button

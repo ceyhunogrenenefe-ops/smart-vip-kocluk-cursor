@@ -1,5 +1,5 @@
 /** Kısa TTL — aynı kullanıcının ardışık poll isteklerinde BBB/DB yükünü azaltır. */
-const CACHE_MS = Math.max(10_000, Number(process.env.LIVE_PRESENCE_CACHE_MS || 15_000) || 15_000);
+const CACHE_MS = Math.max(20_000, Number(process.env.LIVE_PRESENCE_CACHE_MS || 45_000) || 45_000);
 const MAX_ENTRIES = 200;
 
 /** @type {Map<string, { at: number, data: object }>} */

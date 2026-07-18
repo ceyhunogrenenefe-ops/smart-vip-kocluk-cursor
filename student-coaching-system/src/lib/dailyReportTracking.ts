@@ -36,7 +36,51 @@ export type DailyReportEntrySlice = Pick<
   | 'readingMinutes'
   | 'pagesRead'
   | 'screenTimeMinutes'
->;
+  | 'bookTitle'
+  | 'bookId'
+  | 'subject'
+  | 'topic'
+> & { id?: string };
+
+/** Kitap okuma bu satırda doldurulmuş mu? */
+export function entryHasBookReading(
+  e: Pick<DailyReportEntrySlice, 'readingMinutes' | 'pagesRead' | 'bookTitle' | 'bookId'>
+): boolean {
+  if ((e.pagesRead || 0) > 0) return true;
+  if ((e.readingMinutes || 0) > 0) return true;
+  if (String(e.bookTitle || '').trim()) return true;
+  if (String(e.bookId || '').trim()) return true;
+  return false;
+}
+
+/** Ekran süresi bu satırda doldurulmuş mu? */
+export function entryHasScreenTime(e: Pick<DailyReportEntrySlice, 'screenTimeMinutes'>): boolean {
+  return (e.screenTimeMinutes || 0) > 0;
+}
+
+/**
+ * Aynı öğrenci + gün içinde, mevcut kayıt hariç alanın dolu olduğu başka satır.
+ * Bulunursa diğer kayıtlarda alan pasif gösterilir.
+ */
+export function findSameDayFieldOwner<T extends DailyReportEntrySlice & { id?: string }>(
+  entries: T[],
+  studentId: string,
+  dateYmd: string,
+  currentEntryId: string | null | undefined,
+  field: 'reading' | 'screen'
+): T | null {
+  const day = String(dateYmd || '').slice(0, 10);
+  const sid = String(studentId || '').trim();
+  if (!day || !sid) return null;
+  for (const e of entries) {
+    if (String(e.studentId || '') !== sid) continue;
+    if (String(e.date || '').slice(0, 10) !== day) continue;
+    if (currentEntryId && e.id === currentEntryId) continue;
+    if (field === 'reading' && entryHasBookReading(e)) return e;
+    if (field === 'screen' && entryHasScreenTime(e)) return e;
+  }
+  return null;
+}
 
 export type DailyReportStudentStatus = {
   studentId: string;

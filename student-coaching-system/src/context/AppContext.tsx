@@ -170,6 +170,8 @@ interface AppState {
 
   // Öğrenciler
   students: Student[];
+  /** Öğretmen kapsamı (grup/özel ders); koç paneli istatistiklerinde kullanılmaz */
+  teacherScopeStudents: Student[];
   /** Kurum kapsamındaki tüm öğrenciler (sınıf atama, kullanıcı yönetimi ile uyumlu) */
   institutionStudents: Student[];
   addStudent: (student: Student) => Promise<{ student: Student; persisted: boolean }>;
@@ -303,7 +305,7 @@ interface AppState {
 const AppContext = createContext<AppState | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const { effectiveUser, linkedStudent } = useAuth();
+  const { effectiveUser, linkedStudent, isImpersonating } = useAuth();
   const { syncOrganizationsFromInstitutions } = useOrganization();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userRole, setUserRole] = useState<UserRole>('admin');
@@ -569,8 +571,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
             ? resolvedActiveId || defaultInstitutionId || undefined
             : undefined;
 
+        const viewAsRoleTags = userRoleTags(effectiveUser);
+        const viewAsUserId =
+          isImpersonating &&
+          effectiveUser?.id &&
+          (viewAsRoleTags.includes('coach') ||
+            viewAsRoleTags.includes('teacher') ||
+            viewAsRoleTags.includes('student') ||
+            viewAsRoleTags.includes('admin'))
+            ? effectiveUser.id
+            : undefined;
+
         const [dbStudents, myRow] = await Promise.all([
-          db.getStudents(institutionScope),
+          db.getStudents(institutionScope, viewAsUserId ? { viewAsUserId } : undefined),
           isStudentRole && getAuthToken()
             ? db.getMyStudent().catch((e) => {
                 console.warn('[AppContext] getMyStudent birleştirme atlandı:', e);
@@ -893,6 +906,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     effectiveUser?.role,
     effectiveUser?.id,
     effectiveUser?.studentId,
+    isImpersonating,
     syncOrganizationsFromInstitutions
   ]); // Öğrenci JWT student_id sonradan dolabiliyor
 
@@ -2959,13 +2973,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } else if (tags.includes('admin')) {
       list = students.filter((s) => s.institutionId === effectiveUser.institutionId);
     } else if (tags.includes('coach') || tags.includes('teacher')) {
-      // /api/students zaten koç ∪ sınıf/özel ders kapsamını döner; istemci tekrar coachId ile elemesin
+      // /api/students zaten koç ∪ öğretmen (özel ders ataması) birleşimini döner.
+      // client-side coachId filtresi özel derse atanmış ama başka koçtaki öğrenciyi silerdi.
       list = students;
     } else {
       list = students;
     }
     return sortByFirstName(list, (s) => s.name);
-  }, [students, effectiveUser, coaches, tenantScopeInstitutionId]);
+  }, [students, effectiveUser, tenantScopeInstitutionId]);
+
+  /** Canlı ders / öğretmen paneli: API'den gelen tam öğretmen kapsamı (grup + özel ders) */
+  const teacherScopeStudents = React.useMemo(() => {
+    if (!effectiveUser) return [];
+    const tags = userRoleTags(effectiveUser);
+    if (!tags.includes('teacher')) return [];
+    return sortByFirstName(students, (s) => s.name);
+  }, [students, effectiveUser]);
 
   const institutionStudents = React.useMemo(() => {
     if (!effectiveUser) return [];
@@ -3131,6 +3154,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       appDataLoading,
       scoresDataReady,
       students: scopedStudents,
+      teacherScopeStudents,
       institutionStudents,
       addStudent,
       updateStudent,

@@ -133,15 +133,18 @@ export async function studentIdsForTeacher(teacherUserId, institutionId = null) 
       if (r.student_id) students.add(String(r.student_id));
     }
   }
+  const quotaIds = new Set();
   try {
-    let q = supabaseAdmin
+    const { data: quota } = await supabaseAdmin
       .from('student_teacher_lesson_quota')
       .select('student_id')
       .eq('teacher_id', teacherUserId);
-    if (institutionId) q = q.eq('institution_id', institutionId);
-    const { data: quota } = await q;
     for (const r of quota || []) {
-      if (r.student_id) students.add(String(r.student_id));
+      if (r.student_id) {
+        const sid = String(r.student_id);
+        students.add(sid);
+        quotaIds.add(sid);
+      }
     }
   } catch {
     /* yoksay */
@@ -159,8 +162,8 @@ export async function studentIdsForTeacher(teacherUserId, institutionId = null) 
   return (stRows || [])
     .filter((s) => {
       const sid = String(s.id);
-      // Özel ders ataması: kurum null/farklı olsa bile öğretmen görsün
-      if (privateIds.has(sid)) return true;
+      // Özel ders / kota ataması: kurum null/farklı olsa bile öğretmen görsün
+      if (privateIds.has(sid) || quotaIds.has(sid)) return true;
       const si = s.institution_id == null ? '' : String(s.institution_id);
       return !si || si === String(institutionId);
     })

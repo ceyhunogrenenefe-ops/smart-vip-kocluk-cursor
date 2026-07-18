@@ -144,7 +144,7 @@ interface CenterPayload {
 
 type InnerTab = 'ozet' | 'bildirimler' | 'sablonlar' | 'cron' | 'log' | 'ogrenciler';
 
-const POLL_MS = 8000;
+const POLL_MS = 30000;
 
 function badgeTpl(t: TemplateRow) {
   if (t.badge === 'inactive') return { emoji: '🔴', label: 'Pasif' };

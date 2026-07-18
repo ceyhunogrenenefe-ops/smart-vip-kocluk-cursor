@@ -18,6 +18,8 @@ export type EduAnimation = {
   file_size: number;
   display_order: number;
   pool_id?: string | null;
+  external_url?: string | null;
+  source_kind?: 'html' | 'link' | string | null;
 };
 
 export type EduAnimationPoolTarget = {
@@ -39,6 +41,8 @@ export type EduAnimationPoolItem = {
   original_name: string;
   storage_path: string;
   file_size: number;
+  external_url?: string | null;
+  source_kind?: 'html' | 'link' | string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -82,6 +86,9 @@ export type EduHomework = {
   pool_animation_ids?: string[];
   assignee_mode?: HomeworkAssigneeMode;
   assignee_student_ids?: string[];
+  attachment_pdf_path?: string | null;
+  attachment_pdf_name?: string | null;
+  attachment_pdf_url?: string | null;
   submissions?: EduHomeworkSubmission[];
   /** Kart istatistikleri (sunucu veya istemci) */
   stats?: {
