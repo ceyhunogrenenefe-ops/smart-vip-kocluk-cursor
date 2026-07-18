@@ -408,7 +408,14 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
 
   const chunks: FlatNavItem[][] = [];
   if (tags.includes('admin')) chunks.push(MENU_ADMIN);
-  if (tags.includes('coach')) chunks.push(MENU_COACH);
+  if (tags.includes('coach')) {
+    // Koç+öğretmen: öğretmen paneli birleşmez ama vitrin profili kalsın
+    if (tags.includes('teacher')) {
+      chunks.push([MENU_COACH[0], NAV_TEACHER_VITRINE_PROFILE, ...MENU_COACH.slice(1)]);
+    } else {
+      chunks.push(MENU_COACH);
+    }
+  }
   /** Koç paneli varken öğretmen paneli menüsü birleştirilmez */
   if (tags.includes('teacher') && !tags.includes('coach')) chunks.push(MENU_TEACHER);
 
