@@ -9,6 +9,7 @@ import {
   isTopicMarkedCompleted,
   resolveTopicLabelForTracking
 } from '../../lib/topicProgressSync';
+import { findSameDayFieldOwner } from '../../lib/dailyReportTracking';
 import { subjectPlannerStyle } from './subjectPlannerStyle';
 import { AppModal, AppModalBody, AppModalFooter, AppModalHeader } from '../ui/AppModal';
 
@@ -82,6 +83,34 @@ export function WeeklyPlannerStudyModal({
     return isTopicMarkedCompleted(getStudentTopicProgress(sid), sid, subject, topic);
   }, [plannerEntry.student_id, subject, topic, getStudentTopicProgress]);
 
+  const entryDateYmd = String(plannerEntry.planner_date || linked?.date || '').slice(0, 10);
+  const currentEntryId = linked?.id || plannerEntry.weekly_entry_id || null;
+
+  const readingOwner = useMemo(
+    () =>
+      findSameDayFieldOwner(
+        weeklyEntries,
+        plannerEntry.student_id,
+        entryDateYmd,
+        currentEntryId,
+        'reading'
+      ),
+    [weeklyEntries, plannerEntry.student_id, entryDateYmd, currentEntryId]
+  );
+  const screenOwner = useMemo(
+    () =>
+      findSameDayFieldOwner(
+        weeklyEntries,
+        plannerEntry.student_id,
+        entryDateYmd,
+        currentEntryId,
+        'screen'
+      ),
+    [weeklyEntries, plannerEntry.student_id, entryDateYmd, currentEntryId]
+  );
+  const readingLocked = Boolean(readingOwner);
+  const screenLocked = Boolean(screenOwner);
+
   useEffect(() => {
     if (linked) {
       setCorrect(clampNonNeg(linked.correctAnswers ?? 0));
@@ -89,16 +118,25 @@ export function WeeklyPlannerStudyModal({
       setBlank(clampNonNeg(linked.blankAnswers ?? 0));
       const linkedTitle = linked.bookTitle ?? '';
       const plannerTitle = plannerEntry.title?.trim() || '';
-      setBookTitle(
-        linkedTitle ||
-          (isKitapOkumaContext(subject, plannerTitle) && plannerTitle !== subject ? plannerTitle : '')
-      );
-      const pages =
-        (linked as { pagesRead?: number }).pagesRead ??
-        (linked.readingMinutes != null ? linked.readingMinutes : undefined);
-      setPagesRead(pages != null && pages >= 0 ? pages : '');
+      if (readingLocked) {
+        setBookTitle('');
+        setPagesRead('');
+        setMarkBookFinished(false);
+      } else {
+        setBookTitle(
+          linkedTitle ||
+            (isKitapOkumaContext(subject, plannerTitle) && plannerTitle !== subject ? plannerTitle : '')
+        );
+        const pages =
+          (linked as { pagesRead?: number }).pagesRead ??
+          (linked.readingMinutes != null ? linked.readingMinutes : undefined);
+        setPagesRead(pages != null && pages >= 0 ? pages : '');
+      }
       const stm = (linked as { screenTimeMinutes?: number }).screenTimeMinutes;
-      if (stm != null && stm >= 0) {
+      if (screenLocked) {
+        setScreenH('');
+        setScreenM('');
+      } else if (stm != null && stm >= 0) {
         setScreenH(Math.floor(stm / 60));
         setScreenM(stm % 60);
       } else {
@@ -115,8 +153,17 @@ export function WeeklyPlannerStudyModal({
       setScreenH('');
       setScreenM('');
       setNotes('');
+      setMarkBookFinished(false);
     }
-  }, [linked, plannerEntry.id, plannerEntry.weekly_entry_id, plannerEntry.title, subject]);
+  }, [
+    linked,
+    plannerEntry.id,
+    plannerEntry.weekly_entry_id,
+    plannerEntry.title,
+    subject,
+    readingLocked,
+    screenLocked
+  ]);
 
   const st = useMemo(() => subjectPlannerStyle(subject, goalUnit), [subject, goalUnit]);
 
@@ -154,9 +201,17 @@ export function WeeklyPlannerStudyModal({
     const warnings: string[] = [];
     try {
       const solved = solvedPreview;
-      const pages =
-        pagesRead === '' ? null : clampNonNeg(Number(pagesRead));
-      const screen_time_minutes = screenTotalMin > 0 ? screenTotalMin : null;
+      const pages = readingLocked
+        ? null
+        : pagesRead === ''
+          ? null
+          : clampNonNeg(Number(pagesRead));
+      const screen_time_minutes = screenLocked
+        ? null
+        : screenTotalMin > 0
+          ? screenTotalMin
+          : null;
+      const bookTitleToSave = readingLocked ? '' : bookTitle.trim();
       const sid = plannerEntry.student_id;
       const today = new Date().toISOString().split('T')[0];
 
@@ -165,7 +220,7 @@ export function WeeklyPlannerStudyModal({
         topic.trim() &&
         (markTopicFinished || topicGoalMet);
 
-      if (markBookFinished && !bookTitle.trim()) {
+      if (!readingLocked && markBookFinished && !bookTitleToSave) {
         throw new Error('Kitabı bitirdim için kitap adı girin.');
       }
 
@@ -180,8 +235,8 @@ export function WeeklyPlannerStudyModal({
         }
       }
 
-      const titleNorm = bookTitle.trim().toLowerCase();
-      if (markBookFinished && titleNorm) {
+      const titleNorm = bookTitleToSave.toLowerCase();
+      if (!readingLocked && markBookFinished && titleNorm) {
         try {
           const pagesDone = pages ?? 0;
           const match =
@@ -211,7 +266,7 @@ export function WeeklyPlannerStudyModal({
             await addBook({
               id: '',
               studentId: sid,
-              title: bookTitle.trim(),
+              title: bookTitleToSave,
               pagesRead: pagesDone,
               startDate: plannerEntry.planner_date || today,
               endDate: today,
@@ -234,7 +289,7 @@ export function WeeklyPlannerStudyModal({
         solved > 0 ||
         (pages != null && pages > 0) ||
         (screen_time_minutes != null && screen_time_minutes > 0) ||
-        Boolean(bookTitle.trim());
+        Boolean(bookTitleToSave);
 
       if (linked?.id || plannerEntry.weekly_entry_id) {
         if (hasStudyMetrics) {
@@ -252,7 +307,7 @@ export function WeeklyPlannerStudyModal({
               reading_minutes: pages,
               pages_read: pages,
               screen_time_minutes,
-              book_title: bookTitle.trim() || null,
+              book_title: bookTitleToSave || null,
               notes: notes.trim() || null,
             });
           } catch (patchErr) {
@@ -275,7 +330,7 @@ export function WeeklyPlannerStudyModal({
             solved_questions: solved,
             pages_read: pages,
             screen_time_minutes,
-            book_title: bookTitle.trim() || null,
+            book_title: bookTitleToSave || null,
             notes: notes.trim() || null,
           });
           weeklyEntryId =
@@ -434,17 +489,33 @@ export function WeeklyPlannerStudyModal({
             <p className="text-xs text-slate-500 mt-2">Çözülen toplam: {solvedPreview}</p>
           </div>
 
-          <div className="rounded-xl border border-slate-100 dark:border-slate-700 p-4 space-y-3 bg-slate-50/80 dark:bg-slate-800/50">
+          <div
+            className={`rounded-xl border p-4 space-y-3 ${
+              readingLocked
+                ? 'border-slate-200 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-900/40 opacity-80'
+                : 'border-slate-100 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/50'
+            }`}
+          >
             <p className="text-xs font-semibold flex items-center gap-2 text-slate-700 dark:text-slate-200">
               <BookMarked className="w-4 h-4" />
               Kitap okuma
             </p>
+            {readingLocked ? (
+              <p className="text-[11px] text-amber-700 dark:text-amber-300/90">
+                Bu gün kitap okuma zaten{' '}
+                <strong>
+                  {[readingOwner?.subject, readingOwner?.topic].filter(Boolean).join(' · ') || 'başka bir kayıtta'}
+                </strong>{' '}
+                girilmiş. Değiştirmek için o kaydı açın.
+              </p>
+            ) : null}
             <label className="block">
               <span className="text-[11px] text-slate-500">Kitap adı</span>
               <input
-                value={bookTitle}
+                value={readingLocked ? String(readingOwner?.bookTitle || '') : bookTitle}
                 onChange={(e) => setBookTitle(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
+                disabled={readingLocked}
+                className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 dark:disabled:bg-slate-900/60"
                 placeholder="Opsiyonel"
               />
             </label>
@@ -454,14 +525,19 @@ export function WeeklyPlannerStudyModal({
                 type="number"
                 min={0}
                 inputMode="numeric"
-                value={pagesRead}
+                value={
+                  readingLocked
+                    ? readingOwner?.pagesRead ?? readingOwner?.readingMinutes ?? ''
+                    : pagesRead
+                }
                 onChange={(e) =>
                   setPagesRead(e.target.value === '' ? '' : clampNonNeg(Number(e.target.value)))
                 }
-                className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
+                disabled={readingLocked}
+                className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 dark:disabled:bg-slate-900/60"
               />
             </label>
-            {bookTitle.trim() ? (
+            {!readingLocked && bookTitle.trim() ? (
               <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-700 dark:text-slate-200">
                 <input
                   type="checkbox"
@@ -474,11 +550,26 @@ export function WeeklyPlannerStudyModal({
             ) : null}
           </div>
 
-          <div className="rounded-xl border border-slate-100 dark:border-slate-700 p-4 space-y-3 bg-slate-50/80 dark:bg-slate-800/50">
+          <div
+            className={`rounded-xl border p-4 space-y-3 ${
+              screenLocked
+                ? 'border-slate-200 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-900/40 opacity-80'
+                : 'border-slate-100 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/50'
+            }`}
+          >
             <p className="text-xs font-semibold flex items-center gap-2 text-slate-700 dark:text-slate-200">
               <Clock3 className="w-4 h-4" />
               Ekran süresi (telefon / tablet)
             </p>
+            {screenLocked ? (
+              <p className="text-[11px] text-amber-700 dark:text-amber-300/90">
+                Bu gün ekran süresi zaten{' '}
+                <strong>
+                  {[screenOwner?.subject, screenOwner?.topic].filter(Boolean).join(' · ') || 'başka bir kayıtta'}
+                </strong>{' '}
+                girilmiş. Değiştirmek için o kaydı açın.
+              </p>
+            ) : null}
             <div className="flex gap-2 items-center">
               <label className="flex-1">
                 <span className="text-[11px] text-slate-500">Saat</span>
@@ -486,11 +577,16 @@ export function WeeklyPlannerStudyModal({
                   type="number"
                   min={0}
                   inputMode="numeric"
-                  value={screenH}
+                  value={
+                    screenLocked
+                      ? Math.floor((screenOwner?.screenTimeMinutes || 0) / 60)
+                      : screenH
+                  }
                   onChange={(e) =>
                     setScreenH(e.target.value === '' ? '' : clampNonNeg(Number(e.target.value)))
                   }
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
+                  disabled={screenLocked}
+                  className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 dark:disabled:bg-slate-900/60"
                 />
               </label>
               <label className="flex-1">
@@ -500,16 +596,22 @@ export function WeeklyPlannerStudyModal({
                   min={0}
                   max={59}
                   inputMode="numeric"
-                  value={screenM}
+                  value={
+                    screenLocked ? (screenOwner?.screenTimeMinutes || 0) % 60 : screenM
+                  }
                   onChange={(e) =>
                     setScreenM(e.target.value === '' ? '' : Math.min(59, clampNonNeg(Number(e.target.value))))
                   }
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
+                  disabled={screenLocked}
+                  className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 dark:disabled:bg-slate-900/60"
                 />
               </label>
             </div>
-            {screenTotalMin > 0 ? (
+            {!screenLocked && screenTotalMin > 0 ? (
               <p className="text-xs text-slate-500">Toplam {screenTotalMin} dk</p>
+            ) : null}
+            {screenLocked && (screenOwner?.screenTimeMinutes || 0) > 0 ? (
+              <p className="text-xs text-slate-500">Toplam {screenOwner?.screenTimeMinutes} dk</p>
             ) : null}
           </div>
 

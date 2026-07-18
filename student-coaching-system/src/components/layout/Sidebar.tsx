@@ -24,6 +24,7 @@ import {
   STUDENT_LESSON_NAV_ITEMS,
   STUDENT_NAV_ACADEMIC_CENTER,
   STUDENT_NAV_SORU_SOR,
+  STUDENT_NAV_YARDIM,
   NAV_MY_PROFILE,
   NAV_KITAP_SIPARISLERI,
   type FlatNavItem
@@ -208,6 +209,16 @@ export default function Sidebar({
               }
               collapsed={railCollapsed}
               onNavigate={() => go(STUDENT_NAV_SORU_SOR.path)}
+            />
+            <SidebarNavLink
+              label={STUDENT_NAV_YARDIM.label}
+              icon={STUDENT_NAV_YARDIM.icon}
+              active={
+                location.pathname === STUDENT_NAV_YARDIM.path ||
+                location.pathname.startsWith(`${STUDENT_NAV_YARDIM.path}/`)
+              }
+              collapsed={railCollapsed}
+              onNavigate={() => go(STUDENT_NAV_YARDIM.path)}
             />
             <SidebarNavLink
               label={NAV_MY_PROFILE.label}

@@ -81,12 +81,15 @@ export async function assignPoolAnimationHomework(params: {
 
   await attachPoolAnimationToLessonRow(row.id, poolItem.id);
 
-  const hw = await createEduHomework(row.id, {
+  const { homework: hw, notified } = await createEduHomework(row.id, {
     title: poolItem.title.trim(),
-    status: 'draft',
+    status: 'published',
     pool_animation_id: poolItem.id
   });
-  await publishEduHomework(hw.id);
+  if (hw.status !== 'published') {
+    await publishEduHomework(hw.id);
+  }
+  void notified;
 
   return { lessonRowId: row.id, homeworkId: hw.id, createdRow };
 }

@@ -46,8 +46,18 @@ import MessageTemplates from './pages/MessageTemplates';
 import Meetings from './pages/Meetings';
 import LiveLessons from './pages/LiveLessons';
 import ClassLiveLessons from './pages/ClassLiveLessons';
+import PrivateLiveLayout from './pages/privateLive/PrivateLiveLayout';
+import PrivateLiveDashboardPage from './pages/privateLive/PrivateLiveDashboardPage';
+import PrivateLiveLessonsPage from './pages/privateLive/PrivateLiveLessonsPage';
+import PrivateLiveCalendarPage from './pages/privateLive/PrivateLiveCalendarPage';
+import PrivateLiveStudentsPage from './pages/privateLive/PrivateLiveStudentsPage';
+import PrivateLivePackagesPage from './pages/privateLive/PrivateLivePackagesPage';
+import PrivateLivePaymentsPage from './pages/privateLive/PrivateLivePaymentsPage';
+import PrivateLiveHistoryPage from './pages/privateLive/PrivateLiveHistoryPage';
+import PrivateLiveReportsPage from './pages/privateLive/PrivateLiveReportsPage';
 import SchedulePlannerPage from './pages/SchedulePlannerPage';
 import AttendanceReportPage from './pages/AttendanceReportPage';
+import CoachStatsPage from './pages/CoachStatsPage';
 import BbbPortalJoinPage from './pages/BbbPortalJoinPage';
 import BbbGuestJoinPage from './pages/BbbGuestJoinPage';
 import TeacherPanel from './pages/TeacherPanel';
@@ -66,11 +76,15 @@ import VeliKayitLegalDocPage from './pages/VeliKayitLegalDocPage';
 import PlayStoreLegalPage from './pages/PlayStoreLegalPage';
 import VerifyDocumentPage from './pages/VerifyDocumentPage';
 import StudentSoruSorPage from './pages/questionHelp/StudentSoruSorPage';
+import StudentHelpPage from './pages/StudentHelpPage';
 import TeacherSoruHavuzuPage from './pages/questionHelp/TeacherSoruHavuzuPage';
 import CoachSoruAnalitikPage from './pages/questionHelp/CoachSoruAnalitikPage';
 import NotificationsPage from './pages/NotificationsPage';
 import EventsPage from './pages/EventsPage';
 import BookOrdersPage from './pages/BookOrdersPage';
+import OzelDersTalepleriPage from './pages/OzelDersTalepleriPage';
+import TeacherVitrineProfilePage from './pages/TeacherVitrineProfilePage';
+import TeacherProfileApprovalsPage from './pages/TeacherProfileApprovalsPage';
 import KitapciPortalPage from './pages/KitapciPortalPage';
 import TeacherEduPanelPage from './pages/eduPanel/TeacherEduPanelPage';
 import StudentEduPanelPage from './pages/eduPanel/StudentEduPanelPage';
@@ -367,6 +381,30 @@ function App() {
               </ProtectedRoute>
             } />
 
+            <Route path="/ozel-ders-talepleri" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/ozel-ders-talepleri')}>
+                <Layout>
+                  <OzelDersTalepleriPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/ogretmen-profil-onaylari" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/ogretmen-profil-onaylari')}>
+                <Layout>
+                  <TeacherProfileApprovalsPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/profilimi-duzenle" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/profilimi-duzenle')}>
+                <Layout>
+                  <TeacherVitrineProfilePage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
             {/* Abonelik/Ödeme Sayfası */}
             <Route path="/subscription" element={
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/subscription')}>
@@ -465,13 +503,44 @@ function App() {
               </ProtectedRoute>
             } />
 
-            <Route path="/live-lessons" element={
-              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/live-lessons')}>
+            <Route path="/live-lessons" element={<Navigate to="/canli-ozel-ders/takvim" replace />} />
+
+            <Route path="/canli-ozel-ders" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/canli-ozel-ders')}>
                 <Layout>
-                  <LiveLessons />
+                  <PrivateLiveLayout />
                 </Layout>
               </ProtectedRoute>
-            } />
+            }>
+              <Route index element={<PrivateLiveDashboardPage />} />
+              <Route path="derslerim" element={
+                <ProtectedRoute allowedRoles={rolesForProtectedRoute('/canli-ozel-ders/derslerim')}>
+                  <PrivateLiveLessonsPage />
+                </ProtectedRoute>
+              } />
+              <Route path="takvim" element={<PrivateLiveCalendarPage />} />
+              <Route path="ogrenciler" element={
+                <ProtectedRoute allowedRoles={rolesForProtectedRoute('/canli-ozel-ders/ogrenciler')}>
+                  <PrivateLiveStudentsPage />
+                </ProtectedRoute>
+              } />
+              <Route path="paketler" element={
+                <ProtectedRoute allowedRoles={rolesForProtectedRoute('/canli-ozel-ders/paketler')}>
+                  <PrivateLivePackagesPage />
+                </ProtectedRoute>
+              } />
+              <Route path="odemeler" element={
+                <ProtectedRoute allowedRoles={rolesForProtectedRoute('/canli-ozel-ders/odemeler')}>
+                  <PrivateLivePaymentsPage />
+                </ProtectedRoute>
+              } />
+              <Route path="gecmis" element={<PrivateLiveHistoryPage />} />
+              <Route path="raporlar" element={
+                <ProtectedRoute allowedRoles={rolesForProtectedRoute('/canli-ozel-ders/raporlar')}>
+                  <PrivateLiveReportsPage />
+                </ProtectedRoute>
+              } />
+            </Route>
 
             <Route path="/teacher-panel" element={
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/teacher-panel')}>
@@ -509,6 +578,14 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/attendance-report')}>
                 <Layout>
                   <AttendanceReportPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/coach-stats" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/coach-stats')}>
+                <Layout>
+                  <CoachStatsPage />
                 </Layout>
               </ProtectedRoute>
             } />
@@ -569,6 +646,13 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/soru-sor')}>
                 <Layout>
                   <StudentSoruSorPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            <Route path="/yardim" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/yardim')}>
+                <Layout>
+                  <StudentHelpPage />
                 </Layout>
               </ProtectedRoute>
             } />

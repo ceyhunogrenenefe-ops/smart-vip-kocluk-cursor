@@ -204,12 +204,42 @@ async function sendViaMetaApi({ phone, text, templateRow, vars, notificationType
 
   const metaName = String(templateRow?.meta_template_name || '').trim();
   if (templateRow && metaName) {
-    const meta = await sendWhatsAppUsingTemplateRow({
+    // Devamsızlık / taksit ile aynı yol: önce doğrudan gönder.
+    // WABA ön-kontrolü (requirePhoneWaba) yeni şablonlarda yanlış "yok" diyebiliyor.
+    let meta = await sendWhatsAppUsingTemplateRow({
       phone,
       templateRow,
       vars,
-      templateType: notificationType
+      templateType: notificationType,
+      requirePhoneWabaTemplate: false
     });
+    if (!meta.ok) {
+      const err = String(meta.error || meta.errorCode || '');
+      if (/132001|translation|template name|dil kodu/i.test(err)) {
+        meta = await sendWhatsAppUsingTemplateRow({
+          phone,
+          templateRow,
+          vars,
+          templateType: notificationType,
+          requirePhoneWabaTemplate: true
+        });
+        // WABA listesinde bulunamazsa yine de dil adaylarıyla son bir doğrudan deneme
+        if (!meta.ok && /WABA|bulunamadı|yok\.|not_found/i.test(String(meta.error || ''))) {
+          const row2 = {
+            ...templateRow,
+            meta_template_language: 'tr_TR',
+            meta_named_body_parameters: false
+          };
+          meta = await sendWhatsAppUsingTemplateRow({
+            phone,
+            templateRow: row2,
+            vars,
+            templateType: notificationType,
+            requirePhoneWabaTemplate: false
+          });
+        }
+      }
+    }
     return {
       ...meta,
       channel: SEND_CHANNELS.META_API,

@@ -1,29 +1,52 @@
 import { requireAuthenticatedActor, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
+import {
+  actorIsAdminLike,
+  actorIsInstitutionAdmin,
+  actorRoleSet,
+  roleSetHasAdmin,
+  roleSetHasSuperAdmin
+} from '../api/_lib/actor-roles.js';
 import { sumLessonUnitsUsed } from '../api/_lib/count-teacher-lesson-usage.js';
+import {
+  deactivatePrivateLessonAssignmentRow,
+  upsertPrivateLessonAssignmentRow
+} from '../api/_lib/private-lesson-assignment-store.js';
+import { getTeacherPanelStudentScope } from '../api/_lib/teacher-class-scope.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
 
-function assertCanAccessStudent(actor, student) {
+async function assertCanAccessStudent(actor, student, roleSet) {
   if (!student) return false;
-  if (actor.role === 'super_admin') return true;
-  if (actor.role === 'admin') return hasInstitutionAccess(actor, student.institution_id);
-  if (actor.role === 'teacher') return hasInstitutionAccess(actor, student.institution_id);
-  if (actor.role === 'coach') return Boolean(actor.coach_id && student.coach_id === actor.coach_id);
+  if (roleSetHasSuperAdmin(roleSet)) return true;
+  if (roleSetHasAdmin(roleSet)) return hasInstitutionAccess(actor, student.institution_id);
+  if (roleSet.has('teacher') && actor.sub) {
+    if (hasInstitutionAccess(actor, student.institution_id)) return true;
+    const { ids } = await getTeacherPanelStudentScope(actor.sub, actor.institution_id || null);
+    return ids.includes(String(student.id || '').trim());
+  }
+  if (roleSet.has('coach')) {
+    return Boolean(actor.coach_id && String(student.coach_id || '') === String(actor.coach_id));
+  }
   return false;
+}
+
+function roleSetCanWriteQuota(roleSet) {
+  return ['super_admin', 'admin', 'teacher', 'coach'].some((r) => roleSet.has(r));
 }
 
 /** GET: ?student_id= & optional teacher_id | liste */
 export default async function handler(req, res) {
   try {
     const actor = requireAuthenticatedActor(req);
+    const roleSet = await actorRoleSet(actor);
 
     if (req.method === 'GET') {
       const studentId = typeof req.query?.student_id === 'string' ? req.query.student_id.trim() : '';
       const oneTeacher = typeof req.query?.teacher_id === 'string' ? req.query.teacher_id.trim() : '';
 
-      if (actor.role === 'student') {
+      if (roleSet.has('student')) {
         if (!actor.student_id) return jsonError(res, 403, 'student_profile_missing');
         if (studentId && studentId !== actor.student_id) return jsonError(res, 403, 'forbidden');
       }
@@ -36,9 +59,9 @@ export default async function handler(req, res) {
           .maybeSingle();
         if (se) throw se;
         if (!student) return jsonError(res, 404, 'Öğrenci bulunamadı.');
-        if (actor.role === 'student' && actor.student_id === studentId) {
+        if (roleSet.has('student') && actor.student_id === studentId) {
           /* ok */
-        } else if (!assertCanAccessStudent(actor, student)) {
+        } else if (!(await assertCanAccessStudent(actor, student, roleSet))) {
           return jsonError(res, 403, 'forbidden');
         }
 
@@ -75,12 +98,12 @@ export default async function handler(req, res) {
         return res.status(200).json({ data: enriched });
       }
 
-      if (!(actor.role === 'super_admin' || actor.role === 'admin')) {
+      if (!actorIsAdminLike(actor, roleSet)) {
         return jsonError(res, 400, 'student_id gerekli');
       }
 
       let q = supabaseAdmin.from('student_teacher_lesson_quota').select('*').order('updated_at', { ascending: false });
-      if (actor.role === 'admin') {
+      if (roleSetHasAdmin(roleSet) && !roleSetHasSuperAdmin(roleSet)) {
         if (!actor.institution_id) return res.status(200).json({ data: [] });
         q = q.eq('institution_id', actor.institution_id);
       }
@@ -111,7 +134,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
-      if (!['super_admin', 'admin', 'teacher', 'coach'].includes(actor.role)) {
+      if (!roleSetCanWriteQuota(roleSet)) {
         return jsonError(res, 403, 'forbidden');
       }
 
@@ -138,7 +161,9 @@ export default async function handler(req, res) {
         .maybeSingle();
       if (sErr) throw sErr;
       if (!student) return jsonError(res, 404, 'Öğrenci bulunamadı.');
-      if (!assertCanAccessStudent(actor, student)) return jsonError(res, 403, 'forbidden');
+      if (!(await assertCanAccessStudent(actor, student, roleSet))) {
+        return jsonError(res, 403, 'forbidden');
+      }
 
       const { data: teacherUser, error: tErr } = await supabaseAdmin
         .from('users')
@@ -151,7 +176,7 @@ export default async function handler(req, res) {
         return jsonError(res, 400, 'teacher_id bir öğretmen/koç/yönetici kullanıcısı olmalıdır.');
       }
 
-      if (actor.role === 'admin' && !hasInstitutionAccess(actor, student.institution_id)) {
+      if (roleSetHasAdmin(roleSet) && !roleSetHasSuperAdmin(roleSet) && !hasInstitutionAccess(actor, student.institution_id)) {
         return jsonError(res, 403, 'forbidden');
       }
 
@@ -183,6 +208,17 @@ export default async function handler(req, res) {
         throw upErr;
       }
 
+      try {
+        await upsertPrivateLessonAssignmentRow({
+          studentId,
+          teacherId,
+          institutionId,
+          assignedBy: actor.sub
+        });
+      } catch (syncErr) {
+        console.warn('[student-teacher-lesson-quota] private assignment sync failed', errorMessage(syncErr));
+      }
+
       const usedUnits = await sumLessonUnitsUsed(studentId, teacherId);
       const total = saved.credits_total;
       const unlimited = total == null;
@@ -201,7 +237,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'DELETE') {
-      if (!['super_admin', 'admin', 'teacher', 'coach'].includes(actor.role)) {
+      if (!roleSetCanWriteQuota(roleSet)) {
         return jsonError(res, 403, 'forbidden');
       }
       const studentId = String(req.query?.student_id || '').trim();
@@ -210,7 +246,9 @@ export default async function handler(req, res) {
 
       const { data: student } = await supabaseAdmin.from('students').select('*').eq('id', studentId).maybeSingle();
       if (!student) return jsonError(res, 404, 'Öğrenci bulunamadı.');
-      if (!assertCanAccessStudent(actor, student)) return jsonError(res, 403, 'forbidden');
+      if (!(await assertCanAccessStudent(actor, student, roleSet))) {
+        return jsonError(res, 403, 'forbidden');
+      }
 
       const { error: delErr } = await supabaseAdmin
         .from('student_teacher_lesson_quota')
@@ -218,6 +256,13 @@ export default async function handler(req, res) {
         .eq('student_id', studentId)
         .eq('teacher_id', teacherId);
       if (delErr) throw delErr;
+
+      try {
+        await deactivatePrivateLessonAssignmentRow({ studentId, teacherId });
+      } catch (syncErr) {
+        console.warn('[student-teacher-lesson-quota] private assignment deactivate failed', errorMessage(syncErr));
+      }
+
       return res.status(200).json({ ok: true });
     }
 

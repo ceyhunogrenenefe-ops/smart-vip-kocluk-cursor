@@ -40,7 +40,7 @@ export function NotificationProvider({
   children,
   userId,
   userRole,
-  pollingInterval = 30000
+  pollingInterval = 90000
 }: NotificationProviderProps) {
   const [notifications, setNotifications] = useState<PlatformNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);

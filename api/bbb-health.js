@@ -1,4 +1,9 @@
-import { isBbbConfigured, probeBbbApiReachable, resolveBbbMeetingDurationMinutes } from './_lib/bbb.js';
+import {
+  isBbbConfigured,
+  probeBbbApiReachable,
+  resolveBbbMeetingDurationMinutes,
+  describeBbbApiEndpoint
+} from './_lib/bbb.js';
 
 /**
  * BBB ortam değişkenleri tanımlı mı? (giriş gerekmez — Vercel teşhisi)
@@ -22,18 +27,25 @@ export default async function handler(req, res) {
     api_probe = await probeBbbApiReachable();
   }
 
+  const endpoint = describeBbbApiEndpoint();
+  const checksumFail =
+    api_probe?.error === 'checksumError' || api_probe?.bbb?.messageKey === 'checksumError';
   const healthy = configured && (!wantProbe || api_probe?.ok === true);
   return res.status(healthy ? 200 : wantProbe && configured ? 503 : 200).json({
     configured,
     has_endpoint: hasEndpoint,
     has_secret: hasSecret,
+    endpoint_host: endpoint.host,
+    endpoint_path: endpoint.path,
     meeting_duration_minutes: resolveBbbMeetingDurationMinutes(0),
     api_probe,
     healthy,
-    hint: configured
-      ? wantProbe && api_probe && !api_probe.ok
-        ? 'BBB env tanımlı ama sunucu yanıt vermiyor — BBB_API_ENDPOINT, firewall veya BBB sunucu yükünü kontrol edin.'
-        : 'BBB API env OK — otomatik oda açılabilir. Kayıt testi için ?probe=1 ekleyin.'
-      : 'Vercel → Settings → Environment Variables → Production: BBB_API_ENDPOINT + BBB_API_SECRET ekleyin ve Redeploy.'
+    hint: !configured
+      ? 'Vercel → Settings → Environment Variables → Production: BBB_API_ENDPOINT + BBB_API_SECRET ekleyin ve Redeploy.'
+      : checksumFail
+        ? 'checksumError: BBB_API_SECRET, BBB panelindeki Salt ile aynı olmalı. Endpoint: https://ders.dersonlinevipkocluk.com/bigbluebutton/api'
+        : wantProbe && api_probe && !api_probe.ok
+          ? 'BBB env tanımlı ama sunucu yanıt vermiyor — BBB_API_ENDPOINT veya firewall kontrol edin.'
+          : 'BBB API env OK — otomatik oda açılabilir. Kayıt testi için ?probe=1 ekleyin.'
   });
 }

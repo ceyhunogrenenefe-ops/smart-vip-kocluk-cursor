@@ -7,17 +7,20 @@ import { detectPlatform } from '../lib/detectMeetingPlatform';
 import type { TeacherLesson, TeacherStudentLessonSummaryRow, UserRole } from '../types';
 import BbbAutoLinkFieldHint from '../components/liveLessons/BbbAutoLinkFieldHint';
 import LiveLessonCard from '../components/liveLessons/LiveLessonCard';
+import { ClassLiveStudentMobileCalendar } from '../components/liveLessons/ClassLiveStudentMobileCalendar';
 import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShell';
+import { useMobileAppShell } from '../hooks/useMobileAppShell';
 import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
 import { lessonJoinUrl, needsBbbJoinFlow, shouldUsePanelBbbJoin, isExternalMeetingPlatform } from '../lib/liveLessonUtils';
 import { openBbbJoin } from '../lib/bbbJoin';
 import { markPostLessonHomeworkPrompt } from '../components/eduPanel/EduPostLessonHomeworkModal';
 import { useCoachLessonsMeetingsLock } from '../lib/coachLessonsLock';
+import { userRoleTags } from '../config/rolePermissions';
 import { CoachLessonsLockBanner } from '../components/coach/CoachLessonsLockBanner';
 import { copyGuestJoinShareText } from '../lib/bbbGuestJoin';
 import { copyTextToClipboard } from '../lib/copyToClipboard';
 import { toast } from 'sonner';
-import { Radio, Plus, Loader2, Filter, Clock, Pencil, Move, GripVertical, Trash2, FileDown } from 'lucide-react';
+import { Radio, Plus, Loader2, Filter, Clock, Pencil, Move, GripVertical, Trash2, FileDown, Copy } from 'lucide-react';
 import {
   AppModal,
   AppModalBody,
@@ -57,6 +60,13 @@ function todayLocalIso(): string {
   return isoFromLocalDate(new Date());
 }
 
+/** Pazartesi=1 … Pazar=7 */
+function dowSlotFromIso(iso: string): number {
+  const d = new Date(`${iso}T12:00:00`);
+  const day = d.getDay();
+  return day === 0 ? 7 : day;
+}
+
 function monthStartLocalIso(): string {
   const d = new Date();
   return isoFromLocalDate(new Date(d.getFullYear(), d.getMonth(), 1));
@@ -93,9 +103,14 @@ type StaffUser = {
   role: string;
 };
 
-export default function LiveLessons() {
+export default function LiveLessons({ hideCalendar = false }: { hideCalendar?: boolean } = {}) {
   const { effectiveUser } = useAuth();
-  const { students, institution, coaches } = useApp();
+  const { students, teacherScopeStudents, institution, coaches } = useApp();
+  const roleTags = useMemo(() => userRoleTags(effectiveUser), [effectiveUser]);
+  const liveLessonStudents = useMemo(
+    () => (roleTags.includes('teacher') ? teacherScopeStudents : students),
+    [roleTags, teacherScopeStudents, students]
+  );
   const role = (effectiveUser?.role || '') as UserRole;
 
   const [lessons, setLessons] = useState<TeacherLesson[]>([]);
@@ -139,6 +154,11 @@ export default function LiveLessons() {
   const [adminTeacherId, setAdminTeacherId] = useState('');
 
   const [editingLesson, setEditingLesson] = useState<TeacherLesson | null>(null);
+  const [pendingDeleteLesson, setPendingDeleteLesson] = useState<{
+    lesson: TeacherLesson;
+    peerCount: number;
+  } | null>(null);
+  const [deleteLessonBusy, setDeleteLessonBusy] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
   const [pdfSnapBusy, setPdfSnapBusy] = useState(false);
   const liveCalendarPdfRef = useRef<HTMLDivElement>(null);
@@ -152,6 +172,18 @@ export default function LiveLessons() {
 
   const canManage =
     role === 'super_admin' || role === 'admin' || role === 'teacher' || role === 'coach';
+  const mobileAppShell = useMobileAppShell();
+  const [isCompactMobile, setIsCompactMobile] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const sync = () => setIsCompactMobile(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+  const showMobileLessonCalendar = canManage && (mobileAppShell || isCompactMobile);
   const showAdminExtras = role === 'super_admin' || role === 'admin';
   const showTeacherPicker = role === 'super_admin' || role === 'admin';
   /** Düzenleme formunda öğretmen seçimi (koç dahil) */
@@ -223,16 +255,12 @@ export default function LiveLessons() {
   }, []);
 
   const sortedStudents = useMemo(
-    () => [...students].sort((a, b) => a.name.localeCompare(b.name, 'tr')),
-    [students]
+    () => [...liveLessonStudents].sort((a, b) => a.name.localeCompare(b.name, 'tr')),
+    [liveLessonStudents]
   );
 
-  const studentsForFilter = useMemo(() => {
-    if (role === 'coach' && effectiveUser?.coachId) {
-      return sortedStudents.filter((s) => s.coachId === effectiveUser.coachId);
-    }
-    return sortedStudents;
-  }, [sortedStudents, role, effectiveUser?.coachId]);
+  /** API kapsamına güven — ekstra coachId filtresi özel ders atamalarını gizler */
+  const studentsForFilter = useMemo(() => sortedStudents, [sortedStudents]);
 
   useEffect(() => {
     const id = window.setInterval(() => setUiTick((t) => t + 1), 30_000);
@@ -409,8 +437,8 @@ export default function LiveLessons() {
   }, [effectiveUser?.id, showTeacherPicker, adminTeacherId]);
 
   const studentName = useCallback(
-    (sid: string) => students.find((s) => s.id === sid)?.name || sid,
-    [students]
+    (sid: string) => liveLessonStudents.find((s) => s.id === sid)?.name || sid,
+    [liveLessonStudents]
   );
 
   const lessonListGroups = useMemo(() => {
@@ -459,6 +487,29 @@ export default function LiveLessons() {
       items: (bucket[key(d)] || []).slice().sort((a, b) => a.start_time.localeCompare(b.start_time))
     }));
   }, [lessons, calendarWeekAnchor]);
+
+  const weekColumnDates = useMemo(() => weeklyLessonBuckets.map((b) => b.key), [weeklyLessonBuckets]);
+
+  const privateMobileSessions = useMemo(
+    () =>
+      lessons
+        .filter((l) => l.status !== 'cancelled' && weekColumnDates.includes(l.date))
+        .map((l) => ({
+          id: l.id,
+          lesson_date: l.date,
+          start_time: l.start_time,
+          end_time: l.end_time,
+          subject: `${l.title}${studentName(l.student_id) ? ` · ${studentName(l.student_id)}` : ''}`,
+          teacher_id: l.teacher_id,
+          teacher_name: l.teacher_name,
+          status: l.status,
+          meeting_link: l.meeting_link,
+          join_link: l.join_link,
+          recording_link: l.recording_link,
+          bbb_meeting_id: l.bbb_meeting_id
+        })),
+    [lessons, weekColumnDates, studentName]
+  );
 
   const liveCalendarWeekRangeLabel = useMemo(() => {
     const ws = startOfWeek(calendarWeekAnchor);
@@ -642,25 +693,24 @@ export default function LiveLessons() {
     }
   };
 
-  const deleteLesson = async (lesson: TeacherLesson, scopeOverride?: 'single' | 'series') => {
+  const requestDeleteLesson = (lesson: TeacherLesson) => {
     const seriesPeers = lesson.series_id
       ? lessons.filter((l) => l.series_id === lesson.series_id && l.status === 'scheduled')
       : [];
-    let scope = scopeOverride || 'single';
-    if (!scopeOverride && seriesPeers.length > 1) {
-      const deleteAll = window.confirm(
-        `Bu ders tekrarlayan serinin parçası (${seriesPeers.length} planlı oturum).\n\nTamam → Tüm planlı oturumları sil\nİptal → Sadece ${lesson.date} dersini sil`
-      );
-      scope = deleteAll ? 'series' : 'single';
-    } else if (scopeOverride === 'series' && seriesPeers.length > 1) {
-      if (!window.confirm(`${seriesPeers.length} planlı ders silinsin mi?`)) return;
-    } else if (!window.confirm('Bu ders kaydını kalıcı olarak silmek istediğinize emin misiniz?')) {
+    if (seriesPeers.length > 1) {
+      setPendingDeleteLesson({ lesson, peerCount: seriesPeers.length });
       return;
     }
+    if (!window.confirm('Bu ders kaydını kalıcı olarak silmek istediğinize emin misiniz?')) return;
+    void executeDeleteLesson(lesson, 'single');
+  };
+
+  const executeDeleteLesson = async (lesson: TeacherLesson, scope: 'single' | 'series') => {
+    setDeleteLessonBusy(true);
     setError(null);
     try {
       const qs =
-        scope === 'series' && seriesPeers.length > 1
+        scope === 'series'
           ? `id=${encodeURIComponent(lesson.id)}&apply_scope=series`
           : `id=${encodeURIComponent(lesson.id)}`;
       const res = await apiFetch(`/api/teacher-lessons?${qs}`, {
@@ -671,11 +721,14 @@ export default function LiveLessons() {
         setError(String(j.error || 'Silinemedi'));
         return;
       }
+      setPendingDeleteLesson(null);
       setEditingLesson((cur) => (cur?.id === lesson.id ? null : cur));
       await loadLessons();
       if (showAdminExtras) void loadSummary();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeleteLessonBusy(false);
     }
   };
 
@@ -735,7 +788,7 @@ export default function LiveLessons() {
         <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap gap-4 items-end">
           <div className="flex items-center gap-2 text-slate-600">
             <Filter className="w-4 h-4" />
-            <span className="text-sm font-medium">Liste ve takvim</span>
+            <span className="text-sm font-medium">{hideCalendar ? 'Liste filtreleri' : 'Liste ve takvim'}</span>
           </div>
           {showTeacherPicker ? (
             <label className="flex flex-col gap-1 text-sm">
@@ -1190,6 +1243,7 @@ export default function LiveLessons() {
         <div className="rounded-lg bg-red-50 text-red-800 px-4 py-3 text-sm border border-red-100">{error}</div>
       )}
 
+      {!hideCalendar ? (
       <WeeklyLiveGridShell
         title="Haftalık canlı özel ders takvimi"
         subtitle="Sütunlar Pazartesi–Pazar (yerel tarih). WhatsApp hatırlatması: Meta şablonları lesson_reminder + lesson_reminder_parent; cron her 5 dk, varsayılan dersden en fazla 45 dk önce (LESSON_REMINDER_MAX_LEAD_MINUTES)."
@@ -1210,8 +1264,31 @@ export default function LiveLessons() {
             </span>
           </>
         }
-        hint="Kartlardan Katıl, Düzenle veya Sil; zaman ve bağlantı düzenlemesi için «Düzenle» ile formu açın. «PDF görüntü + ders listesi» önce takvim görüntüsü, sonraki sayfada bu haftanın derslerini metin yazar."
+        hint={
+          showMobileLessonCalendar
+            ? 'Gün seçin · Davet linki ile WhatsApp paylaşımı · Katıl ile bağlanın'
+            : 'Kartlardan Katıl, Düzenle veya Sil; zaman ve bağlantı düzenlemesi için «Düzenle» ile formu açın. «PDF görüntü + ders listesi» önce takvim görüntüsü, sonraki sayfada bu haftanın derslerini metin yazar.'
+        }
       >
+        {showMobileLessonCalendar ? (
+          <ClassLiveStudentMobileCalendar
+            weekColumnDates={weekColumnDates}
+            weekSessions={privateMobileSessions}
+            classSlots={[]}
+            teacherCandidates={mergedStaff.map((u) => ({ id: u.id, name: u.name }))}
+            formatDateDots={formatDdMmYyyyDotsGrid}
+            dowFromIso={dowSlotFromIso}
+            todayIso={todayLocalIso()}
+            onJoinSession={(s) => {
+              const lesson = lessons.find((l) => l.id === s.id);
+              if (lesson) void joinLiveLesson(lesson);
+            }}
+            onCopyGuestLink={(s) => {
+              const lesson = lessons.find((l) => l.id === s.id);
+              if (lesson) void copyLessonShareLink(lesson);
+            }}
+          />
+        ) : (
         <div ref={liveCalendarPdfRef} className="overflow-x-auto p-2 sm:p-3">
           <table className="w-full min-w-[900px] border-collapse text-xs">
             <thead>
@@ -1294,6 +1371,16 @@ export default function LiveLessons() {
                                     </div>
                                   </div>
                                   <div className="mt-2 flex flex-wrap gap-1 calendar-pdf-hide-ui">
+                                    {lesson.status === 'scheduled' ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => void copyLessonShareLink(lesson)}
+                                        className="inline-flex items-center gap-1 rounded-lg border border-violet-300 bg-white px-2 py-1 text-[10px] font-semibold text-violet-700 shadow-sm hover:bg-violet-50 touch-manipulation"
+                                      >
+                                        <Copy className="h-3 w-3" aria-hidden />
+                                        Davet linki
+                                      </button>
+                                    ) : null}
                                     {canJoin ? (
                                       <button
                                         type="button"
@@ -1314,7 +1401,7 @@ export default function LiveLessons() {
                                     {lesson.status === 'scheduled' ? (
                                       <button
                                         type="button"
-                                        onClick={() => void deleteLesson(lesson)}
+                                        onClick={() => requestDeleteLesson(lesson)}
                                         className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-50"
                                       >
                                         <Trash2 className="h-3 w-3" />
@@ -1335,7 +1422,73 @@ export default function LiveLessons() {
             </tbody>
           </table>
         </div>
+        )}
       </WeeklyLiveGridShell>
+      ) : null}
+
+      {pendingDeleteLesson ? (
+        <AppModal
+          open
+          onClose={() => (deleteLessonBusy ? undefined : setPendingDeleteLesson(null))}
+          panelClassName="max-w-md"
+        >
+          <AppModalHeader>
+            <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
+              <Trash2 className="h-5 w-5 text-red-600" />
+              Dersi sil
+            </h3>
+            <button
+              type="button"
+              className="text-sm text-slate-500 hover:text-slate-800 disabled:opacity-50"
+              disabled={deleteLessonBusy}
+              onClick={() => setPendingDeleteLesson(null)}
+            >
+              Kapat
+            </button>
+          </AppModalHeader>
+          <AppModalBody className="space-y-3">
+            <p className="text-sm text-slate-700">
+              <span className="font-semibold">{pendingDeleteLesson.lesson.title || 'Ders'}</span>
+              {' · '}
+              {formatDdMmYyyyDotsGrid(pendingDeleteLesson.lesson.date)}
+              {' · '}
+              {String(pendingDeleteLesson.lesson.start_time || '').slice(0, 5)}
+            </p>
+            <p className="text-sm text-slate-600">
+              Bu ders {pendingDeleteLesson.peerCount} planlı oturumluk tekrarlayan serinin parçası. Ne
+              silmek istediğinizi seçin:
+            </p>
+          </AppModalBody>
+          <AppModalFooter>
+            <div className="flex w-full flex-col gap-2">
+              <button
+                type="button"
+                disabled={deleteLessonBusy}
+                onClick={() => void executeDeleteLesson(pendingDeleteLesson.lesson, 'single')}
+                className="min-h-[44px] rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+              >
+                {deleteLessonBusy ? 'Siliniyor…' : 'Sadece bu periyodu sil'}
+              </button>
+              <button
+                type="button"
+                disabled={deleteLessonBusy}
+                onClick={() => void executeDeleteLesson(pendingDeleteLesson.lesson, 'series')}
+                className="min-h-[44px] rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-800 hover:bg-red-50 disabled:opacity-60"
+              >
+                Tüm planlı oturumları sil ({pendingDeleteLesson.peerCount})
+              </button>
+              <button
+                type="button"
+                disabled={deleteLessonBusy}
+                onClick={() => setPendingDeleteLesson(null)}
+                className="min-h-[44px] rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                Vazgeç
+              </button>
+            </div>
+          </AppModalFooter>
+        </AppModal>
+      ) : null}
 
       {editingLesson ? (
         <AppModal open onClose={() => setEditingLesson(null)} panelClassName="max-w-lg">
@@ -1538,6 +1691,7 @@ export default function LiveLessons() {
                     key={lesson.id}
                     lesson={lesson}
                     studentName={studentName(lesson.student_id)}
+                    joinAsModerator
                     onCopy={() => void copyLessonShareLink(lesson)}
                     onJoin={() => void joinLiveLesson(lesson)}
                     onMarkComplete={
@@ -1557,7 +1711,7 @@ export default function LiveLessons() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => void deleteLesson(lesson)}
+                            onClick={() => requestDeleteLesson(lesson)}
                             className="text-xs font-medium text-red-600 hover:underline"
                           >
                             Sil
@@ -1584,6 +1738,7 @@ export default function LiveLessons() {
               key={lesson.id}
               lesson={lesson}
               studentName={studentName(lesson.student_id)}
+              joinAsModerator
               onCopy={() => void copyLessonShareLink(lesson)}
               onJoin={() => void joinLiveLesson(lesson)}
               onMarkComplete={
@@ -1603,7 +1758,7 @@ export default function LiveLessons() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => void deleteLesson(lesson)}
+                      onClick={() => requestDeleteLesson(lesson)}
                       className="text-xs font-medium text-red-600 hover:underline"
                     >
                       Sil

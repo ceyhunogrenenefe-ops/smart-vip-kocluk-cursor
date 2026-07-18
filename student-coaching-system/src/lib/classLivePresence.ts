@@ -18,6 +18,8 @@ export type ClassLivePresenceSummary = {
   active: number;
   passive: number;
   absent: number;
+  cameras_on?: number;
+  microphones_on?: number;
 };
 
 export type ClassLivePresenceSnapshot = {

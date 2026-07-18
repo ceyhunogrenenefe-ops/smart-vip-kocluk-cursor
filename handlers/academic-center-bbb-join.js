@@ -15,6 +15,10 @@ import {
   bbbStudentEtutReportLogoutUrl,
   bbbTeacherPostLessonLogoutUrl
 } from '../api/_lib/bbb.js';
+import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
+import { getIstanbulDateString } from '../api/_lib/istanbul-time.js';
+import { isMissingTableError } from '../api/_lib/supabase-schema.js';
+import { errorMessage } from '../api/_lib/error-msg.js';
 
 const VALID_EXAM_ROOMS = new Set(['lise', 'yos', 'class34', 'class56', 'class78']);
 const VALID_STUDY_ROOMS = new Set(['class56', 'class78', 'class911', 'yks']);
@@ -158,6 +162,29 @@ export default async function handler(req, res) {
       attendeePassword: ensured.attendeePW,
       fullName: guestName
     });
+
+    // Öğrenci deneme/etüt giriş logu (koç istatistikleri) — join'i engellemez
+    void (async () => {
+      try {
+        const studentId = String(actor.student_id || '').trim() || null;
+        if (String(actor.role || '') !== 'student' && !studentId) return;
+        const { error: logErr } = await supabaseAdmin.from('academic_deneme_join_logs').insert({
+          student_id: studentId,
+          user_id: actor.sub || null,
+          institution_id: institutionId || actor.institution_id || null,
+          room,
+          kind,
+          meeting_id: ensured.meetingId || null,
+          display_name: guestName,
+          istanbul_date: getIstanbulDateString()
+        });
+        if (logErr && !isMissingTableError(logErr, 'academic_deneme_join_logs')) {
+          console.warn('[academic-center-bbb-join] log:', errorMessage(logErr));
+        }
+      } catch (logE) {
+        console.warn('[academic-center-bbb-join] log:', errorMessage(logE));
+      }
+    })();
 
     const redirect = String(req.query?.redirect || '').trim() === '1';
     if (redirect) {

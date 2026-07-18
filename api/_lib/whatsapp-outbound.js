@@ -12,7 +12,7 @@ import { supabaseAdmin } from './supabase-admin.js';
 function localLanguageCandidates(preferredLang) {
   const out = [];
   const seen = new Set();
-  for (const raw of [preferredLang, 'tr', 'tr_TR']) {
+  for (const raw of [preferredLang, 'tr', 'tr_TR', 'tr_tr', 'turkish']) {
     const code = normalizeMetaLanguageCode(raw);
     const key = code.toLowerCase();
     if (seen.has(key)) continue;
@@ -200,22 +200,15 @@ export async function sendWhatsAppUsingTemplateRow({
 
   if (requirePhoneWabaTemplate) {
     const live = await resolvePhoneWabaTemplateSendConfig(metaName, lang);
-    if (!live.ok) {
-      return {
-        ok: false,
-        channel: 'template',
-        error: live.hint || live.error || 'template_not_on_phone_waba',
-        errorCode: live.error || 'PHONE_WABA_TEMPLATE',
-        meta_template_name: metaName,
-        twilio_content_sid: null
-      };
+    if (live.ok) {
+      metaNameToSend = live.template_name || metaName;
+      langToSend = live.language || lang;
+      languageCandidates = live.language_candidates || languageCandidates;
+      if (live.meta_named_body_parameters === true) {
+        useNamedMetaBody = true;
+      }
     }
-    metaNameToSend = live.template_name || metaName;
-    langToSend = live.language || lang;
-    languageCandidates = live.language_candidates || languageCandidates;
-    if (live.meta_named_body_parameters === true) {
-      useNamedMetaBody = true;
-    }
+    // Liste API şablonu görmese bile gönderimi engelleme (devamsızlık yolu gibi)
   }
 
   async function attemptSend(useNamed) {

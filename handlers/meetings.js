@@ -5,6 +5,7 @@ import { resolveStudentRowForUser } from '../api/_lib/resolve-student-id.js';
 import { coachRowToPlatformUserId, getStudentPhones } from '../api/_lib/meetings-resolve.js';
 import { createMeetCalendarEvent } from '../api/_lib/google-calendar-meet.js';
 import { deliverWhatsAppWithLog } from '../api/_lib/meeting-notify.js';
+import { metaWhatsAppConfigured } from '../api/_lib/meta-whatsapp.js';
 import {
   createBbbMeetingAndJoinLink,
   isBbbConfigured,
@@ -18,6 +19,7 @@ import {
   getCoachLessonsMeetingsLocked,
   CoachLessonsLockError
 } from '../api/_lib/coach-lessons-lock.js';
+import { getIstanbulDateString, getIstanbulHour, getIstanbulMinute } from '../api/_lib/istanbul-time.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
 
@@ -379,15 +381,20 @@ async function handleCreate(req, res) {
     if (linkBbb && linkBbb !== meetLinkResult) notifyBodyCreated += `\nBBB: ${linkBbb}`;
     let whatsappNote = '';
 
-    const twilioReady =
-      process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM;
-    if (twilioReady && phones.length > 0) {
+    const whatsappReady =
+      metaWhatsAppConfigured() ||
+      Boolean(
+        process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM
+      );
+    if (whatsappReady && phones.length > 0) {
       try {
         const r = await deliverWhatsAppWithLog({
           meetingId: meeting.id,
           kind: 'whatsapp_created',
           recipientE164: phones[0],
-          body: notifyBodyCreated
+          isim: String(student.name || '').trim() || 'Öğrenci',
+          body: notifyBodyCreated,
+          coachId: meeting.coach_id || student.coach_id || null
         });
         whatsappNote = r.skipped ? 'whatsapp_skip' : r.ok ? 'whatsapp_sent' : `whatsapp_failed:${r.error}`;
         if (r.ok && !r.skipped) {
@@ -400,7 +407,7 @@ async function handleCreate(req, res) {
 
     return res.status(200).json({
       data: meeting,
-      whatsapp: whatsappNote || (phones.length ? 'missing_twilio_env' : 'no_student_phone'),
+      whatsapp: whatsappNote || (phones.length ? 'missing_whatsapp_env' : 'no_student_phone'),
       calendar: googleEventId ? { ok: true } : { skipped: true },
       auto_bbb: autoBbbLink ? { ok: true, provider: 'bbb' } : { skipped: true }
     });
@@ -645,11 +652,14 @@ async function handleCreateClass(req, res) {
     const { data: created, error: insErr } = await supabaseAdmin.from('meetings').insert(payloads).select('*');
     if (insErr) throw insErr;
 
-    const twilioReady =
-      process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM;
+    const whatsappReady =
+      metaWhatsAppConfigured() ||
+      Boolean(
+        process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM
+      );
     let whatsappSent = 0;
     let whatsappFailed = 0;
-    if (twilioReady) {
+    if (whatsappReady) {
       let notifyBodyCreated = `Sınıf görüşmeniz planlandı: ${meetLinkResult}`;
       if (linkZoom && linkZoom !== meetLinkResult) notifyBodyCreated += `\nZoom: ${linkZoom}`;
       if (linkBbb && linkBbb !== meetLinkResult) notifyBodyCreated += `\nBBB: ${linkBbb}`;
@@ -663,7 +673,9 @@ async function handleCreateClass(req, res) {
             meetingId: meeting.id,
             kind: 'whatsapp_created',
             recipientE164: phones[0],
-            body: notifyBodyCreated
+            isim: String(student.name || '').trim() || 'Öğrenci',
+            body: notifyBodyCreated,
+            coachId: meeting.coach_id || student.coach_id || null
           });
           if (r.ok && !r.skipped) {
             whatsappSent += 1;
@@ -980,15 +992,20 @@ async function handleCreateSeries(req, res) {
     if (firstId) {
       const phones = await getStudentPhones(student);
       const notifyBodyCreated = `Görüşmeniz planlandı (tekrarlayan seri): ${meetLinkResult}`;
-      const twilioReady =
-        process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM;
-      if (twilioReady && phones.length > 0) {
+      const whatsappReady =
+        metaWhatsAppConfigured() ||
+        Boolean(
+          process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM
+        );
+      if (whatsappReady && phones.length > 0) {
         try {
           const r = await deliverWhatsAppWithLog({
             meetingId: firstId,
             kind: 'whatsapp_created',
             recipientE164: phones[0],
-            body: notifyBodyCreated
+            isim: String(student.name || '').trim() || 'Öğrenci',
+            body: notifyBodyCreated,
+            coachId: student.coach_id || null
           });
           whatsappNote = r.skipped ? 'whatsapp_skip' : r.ok ? 'whatsapp_sent' : `whatsapp_failed:${r.error}`;
           if (r.ok && !r.skipped) {
@@ -1166,6 +1183,212 @@ async function handleUpdateStatus(req, res) {
   }
 }
 
+/**
+ * Saat / süre / bağlantı düzenleme.
+ * apply_scope=single → yalnızca bu oturum
+ * apply_scope=series → aynı series_id altındaki tüm status=planned oturumlar (+ meeting_series şablonu)
+ */
+async function handleUpdate(req, res) {
+  if (req.method !== 'POST' && req.method !== 'PATCH') return jsonError(res, 405, 'Method not allowed');
+  try {
+    let actor;
+    try {
+      actor = requireAuthenticatedActor(req);
+    } catch (authErr) {
+      return jsonError(res, 401, errorMessage(authErr) || 'Missing token');
+    }
+
+    if (!['coach', 'admin', 'super_admin'].includes(actor.role)) {
+      return jsonError(res, 403, 'Bu işlem için yetkiniz yok.');
+    }
+
+    const body = req.body || {};
+    const meetingId = String(body.meeting_id || body.id || '').trim();
+    if (!meetingId) return jsonError(res, 400, 'meeting_id gerekli');
+
+    const applyScope = String(body.apply_scope || body.applyScope || 'single')
+      .trim()
+      .toLowerCase();
+
+    const { data: row, error: fetchErr } = await supabaseAdmin
+      .from('meetings')
+      .select('*')
+      .eq('id', meetingId)
+      .maybeSingle();
+    if (fetchErr) throw fetchErr;
+    if (!row) return jsonError(res, 404, 'Toplantı bulunamadı.');
+
+    if (actor.role === 'coach' && actor.coach_id !== row.coach_id) {
+      return jsonError(res, 403, 'Bu toplantıyı güncelleyemezsiniz.');
+    }
+    if (actor.role === 'admin' && !hasInstitutionAccess(actor, row.institution_id)) {
+      return jsonError(res, 403, 'Bu toplantıyı güncelleyemezsiniz.');
+    }
+
+    try {
+      await assertCoachLessonsMeetingsUnlocked(row.coach_id);
+    } catch (lockErr) {
+      const locked = respondCoachLockError(res, lockErr);
+      if (locked) return locked;
+      throw lockErr;
+    }
+
+    const canEditSchedule = String(row.status || '') === 'planned';
+    const hasStart =
+      body.start_datetime != null || body.start_time != null || body.startDatetime != null;
+    const startRaw = body.start_datetime || body.start_time || body.startDatetime;
+    const durationRaw = body.duration_minutes ?? body.durationMinutes;
+    const wantsSchedule =
+      hasStart || (durationRaw != null && String(durationRaw).trim() !== '');
+
+    if (wantsSchedule && !canEditSchedule && applyScope !== 'series') {
+      return jsonError(res, 400, 'Tamamlanmış veya kaçırılmış oturumda saat değiştirilemez; yalnızca bağlantı güncellenebilir.');
+    }
+
+    let durationMinutes =
+      durationRaw != null && String(durationRaw).trim() !== ''
+        ? Math.max(15, Number(durationRaw) || 60)
+        : Math.max(
+            15,
+            Math.round(
+              (new Date(row.end_time).getTime() - new Date(row.start_time).getTime()) / 60_000
+            ) || 60
+          );
+
+    let newStartIso = null;
+    if (hasStart) {
+      const start = new Date(String(startRaw));
+      if (Number.isNaN(+start)) return jsonError(res, 400, 'Geçersiz başlangıç zamanı.');
+      newStartIso = start.toISOString();
+    }
+
+    const linkPatch = {};
+    if (body.meet_link !== undefined) {
+      const s = String(body.meet_link || '').trim();
+      if (s) {
+        try {
+          linkPatch.meet_link = normalizeOptionalMeetingUrl(s, 'Meet');
+        } catch (e) {
+          return jsonError(res, 400, e instanceof Error ? e.message : String(e));
+        }
+      }
+    }
+    if (body.link_zoom !== undefined) {
+      if (body.link_zoom === null || body.link_zoom === '') linkPatch.link_zoom = null;
+      else {
+        try {
+          linkPatch.link_zoom = normalizeOptionalMeetingUrl(body.link_zoom, 'Zoom');
+        } catch (e) {
+          return jsonError(res, 400, e instanceof Error ? e.message : String(e));
+        }
+      }
+    }
+    if (body.link_bbb !== undefined) {
+      if (body.link_bbb === null || body.link_bbb === '') linkPatch.link_bbb = null;
+      else {
+        try {
+          linkPatch.link_bbb = normalizeOptionalMeetingUrl(body.link_bbb, 'BBB');
+        } catch (e) {
+          return jsonError(res, 400, e instanceof Error ? e.message : String(e));
+        }
+      }
+    }
+
+    const seriesId = row.series_id ? String(row.series_id) : '';
+    const now = new Date().toISOString();
+
+    if (applyScope === 'series' && seriesId) {
+      const { data: peerRows, error: prErr } = await supabaseAdmin
+        .from('meetings')
+        .select('*')
+        .eq('series_id', seriesId)
+        .eq('status', 'planned');
+      if (prErr) throw prErr;
+      const peers = peerRows || [];
+      if (!peers.length) {
+        return jsonError(res, 400, 'Seride güncellenecek planlı oturum yok.');
+      }
+
+      const clockSource = newStartIso || row.start_time;
+      let updatedCount = 0;
+      for (const peer of peers) {
+        const patch = { updated_at: now, ...linkPatch };
+        if (wantsSchedule || newStartIso) {
+          const ymd = getIstanbulDateString(new Date(peer.start_time));
+          const h = getIstanbulHour(new Date(clockSource));
+          const m = getIstanbulMinute(new Date(clockSource));
+          const start = new Date(
+            `${ymd}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00+03:00`
+          );
+          const end = new Date(start.getTime() + durationMinutes * 60_000);
+          patch.start_time = start.toISOString();
+          patch.end_time = end.toISOString();
+        }
+        if (Object.keys(patch).length <= 1) continue;
+        const { error: upErr } = await supabaseAdmin.from('meetings').update(patch).eq('id', peer.id);
+        if (upErr) throw upErr;
+        updatedCount += 1;
+      }
+
+      const seriesPatch = { updated_at: now };
+      if (durationRaw != null && String(durationRaw).trim() !== '') {
+        seriesPatch.duration_minutes = durationMinutes;
+      }
+      if (linkPatch.meet_link !== undefined) seriesPatch.meet_link = linkPatch.meet_link;
+      if (linkPatch.link_zoom !== undefined) seriesPatch.link_zoom = linkPatch.link_zoom;
+      if (linkPatch.link_bbb !== undefined) seriesPatch.link_bbb = linkPatch.link_bbb;
+      if (Object.keys(seriesPatch).length > 1) {
+        await supabaseAdmin.from('meeting_series').update(seriesPatch).eq('id', seriesId);
+      }
+
+      const { data: primary } = await supabaseAdmin
+        .from('meetings')
+        .select('*')
+        .eq('id', meetingId)
+        .maybeSingle();
+
+      return res.status(200).json({
+        data: primary || row,
+        updated_count: updatedCount,
+        batch: true,
+        apply_scope: 'series'
+      });
+    }
+
+    const patch = { updated_at: now, ...linkPatch };
+    if (canEditSchedule && (newStartIso || durationRaw != null)) {
+      const start = new Date(newStartIso || row.start_time);
+      if (Number.isNaN(+start)) return jsonError(res, 400, 'Geçersiz başlangıç zamanı.');
+      patch.start_time = start.toISOString();
+      patch.end_time = new Date(start.getTime() + durationMinutes * 60_000).toISOString();
+    }
+
+    if (Object.keys(patch).length <= 1) {
+      return jsonError(res, 400, 'Güncellenecek alan yok.');
+    }
+
+    const { data: updated, error: upErr } = await supabaseAdmin
+      .from('meetings')
+      .update(patch)
+      .eq('id', meetingId)
+      .select('*')
+      .single();
+    if (upErr) throw upErr;
+
+    return res.status(200).json({ data: updated, apply_scope: 'single' });
+  } catch (e) {
+    const msg = errorMessage(e);
+    if (isAuthFailureMessage(msg)) return jsonError(res, 401, msg);
+    if (isSupabaseServerEnvError(msg)) {
+      return res.status(503).json({
+        error: 'Sunucu Supabase ortam değişkenleri eksik (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY).',
+        code: 'supabase_env_missing'
+      });
+    }
+    return jsonError(res, 500, msg);
+  }
+}
+
 async function handleMeetingBbbJoin(req, res) {
   return handleBbbJoinGet(req, res, {
     idParam: 'meeting_id',
@@ -1253,11 +1476,12 @@ export default async function handler(req, res) {
   if (op === 'create-series') return handleCreateSeries(req, res);
   if (op === 'delete-series') return handleDeleteSeries(req, res);
   if (op === 'update-status') return handleUpdateStatus(req, res);
+  if (op === 'update') return handleUpdate(req, res);
 
   return jsonError(
     res,
     400,
-    'Geçersiz veya eksik ?op parametresi (list|create|create-class|create-series|delete-series|update-status).'
+    'Geçersiz veya eksik ?op parametresi (list|create|create-class|create-series|delete-series|update-status|update).'
   );
 }
 

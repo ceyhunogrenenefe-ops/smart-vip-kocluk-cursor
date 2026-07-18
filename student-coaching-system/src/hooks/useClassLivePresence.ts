@@ -6,9 +6,9 @@ import {
   type ClassLivePresenceSnapshot
 } from '../lib/classLivePresence';
 
-const IDLE_MS = 180_000;
-const SLOW_MS = 60_000;
-const FAST_MS = 20_000;
+const IDLE_MS = 300_000;
+const SLOW_MS = 90_000;
+const FAST_MS = 45_000;
 
 type Options = {
   enabled: boolean;
@@ -21,7 +21,7 @@ function presenceFingerprint(data: ClassLivePresenceResponse): string {
   for (const [id, snap] of Object.entries(data.classes)) {
     const s = snap.summary;
     parts.push(
-      `${id}:${snap.meeting_running}:${s.joined}:${s.active}:${s.passive}:${s.absent}`
+      `${id}:${snap.meeting_running}:${s.joined}:${s.active}:${s.passive}:${s.absent}:${s.cameras_on ?? 0}:${s.microphones_on ?? 0}`
     );
   }
   return parts.join('|');

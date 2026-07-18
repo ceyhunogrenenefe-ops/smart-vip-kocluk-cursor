@@ -8,6 +8,7 @@ import { enforceCoachLicenseForStudentInsert, LicenseError } from '../api/_lib/c
 import { getTeacherPanelStudentScope } from '../api/_lib/teacher-class-scope.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import { STUDENT_LIST_COLUMNS } from '../api/_lib/list-query-columns.js';
+import { resolveViewAsActorIfAllowed } from '../api/_lib/view-as-actor.js';
 
 const normActorRole = (r) => String(r || '').trim().toLowerCase();
 
@@ -268,6 +269,50 @@ export default async function handler(req, res) {
           return res.status(200).json({ data: [] });
         }
         return res.status(200).json({ data: [row] });
+      }
+
+      /** Taklit: JWT süper admin/admin kalır; öğrenci listesi hedef koç/öğretmen kapsamı */
+      const viewAsUserId = req.query.view_as_user_id
+        ? String(req.query.view_as_user_id).trim()
+        : '';
+      if (viewAsUserId) {
+        let viewActor;
+        try {
+          viewActor = await resolveViewAsActorIfAllowed(actor, rs, viewAsUserId);
+        } catch (e) {
+          const status = Number(e?.status) || 500;
+          return res.status(status).json({ error: e?.code || e?.message || 'view_as_failed' });
+        }
+        const viewRs = await actorRoleSet(viewActor);
+
+        if (viewRs.has('teacher') || viewRs.has('coach')) {
+          const merged = await listStudentsMergedCoachTeacher(viewActor, viewRs);
+          return res.status(200).json({ data: merged, view_as_user_id: viewAsUserId });
+        }
+
+        if (viewRs.has('student')) {
+          const { data: linkOnly } = await supabaseAdmin
+            .from('students')
+            .select('*')
+            .or(`platform_user_id.eq.${viewActor.sub},user_id.eq.${viewActor.sub}`)
+            .maybeSingle();
+          if (linkOnly) {
+            return res.status(200).json({ data: [linkOnly], view_as_user_id: viewAsUserId });
+          }
+          return res.status(200).json({ data: [], view_as_user_id: viewAsUserId });
+        }
+
+        if (viewRs.has('admin') && viewActor.institution_id) {
+          const { data, error } = await supabaseAdmin
+            .from('students')
+            .select(STUDENT_LIST_COLUMNS)
+            .eq('institution_id', viewActor.institution_id)
+            .order('created_at', { ascending: false });
+          if (error) throw error;
+          return res.status(200).json({ data: data || [], view_as_user_id: viewAsUserId });
+        }
+
+        return res.status(200).json({ data: [], view_as_user_id: viewAsUserId });
       }
 
       if (rs.has('super_admin')) {

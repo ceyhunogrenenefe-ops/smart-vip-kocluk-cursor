@@ -8,7 +8,9 @@ import {
   isBbbAutoMeetingLink,
   fetchBbbMeetingInfo,
   BBB_AUTO_MEETING_LINK,
-  isBbbConfigured
+  isBbbConfigured,
+  sanitizeBbbMeetingId,
+  parseBbbMeetingIdFromJoinUrl
 } from './bbb.js';
 import { patchRowMeetingLinks } from './bbb-join-handler.js';
 import { errorMessage } from './error-msg.js';
@@ -50,6 +52,28 @@ function combinedSlotKey(row) {
     normTimeHms(row.start_time),
     normTimeHms(row.end_time)
   ].join('|');
+}
+
+/** Canlı katılım / join: aynı slottaki birleşik oturumlar için anchor oturum. */
+export function combinedClassSlotKey(row) {
+  return combinedSlotKey(row);
+}
+
+export function isCombinedMultiClassGroup(sessions) {
+  const ids = new Set((sessions || []).map((s) => String(s.class_id || '').trim()).filter(Boolean));
+  return ids.size >= 2;
+}
+
+export function pickCombinedAnchorSession(sessions) {
+  return sortSessionsById(sessions)[0] || null;
+}
+
+function canonicalCombinedMeetingId(anchor, meetingKeyPrefix, seedRow = null) {
+  const fromSeed = String(seedRow?.bbb_meeting_id || '').trim();
+  if (fromSeed) return fromSeed;
+  const fromAnchor = String(anchor?.bbb_meeting_id || '').trim();
+  if (fromAnchor) return fromAnchor;
+  return sanitizeBbbMeetingId(meetingKeyPrefix);
 }
 
 function stableJoinPrefix(sessionId) {
@@ -150,9 +174,16 @@ export async function resolveCombinedClassBbbReuse(session) {
           String(session.bbb_meeting_id || '').trim() !== String(seed.bbb_meeting_id || '').trim()
       );
 
+    const canonicalMeetingId = canonicalCombinedMeetingId(anchor, meetingKeyPrefix, liveSeed || seed);
+    const rowMid = String(session.bbb_meeting_id || '').trim();
+    const rowLinkMid = parseBbbMeetingIdFromJoinUrl(String(session.meeting_link || ''));
+    const needsCanonicalId =
+      rowMid && rowMid !== canonicalMeetingId && rowLinkMid && rowLinkMid !== canonicalMeetingId;
+
     return {
       peers: group,
       meetingKeyPrefix,
+      canonicalMeetingId,
       chainDurationMinutes: null,
       seedAttendeeLink: applySeedFromPeer ? String(seed.meeting_link || '').trim() || null : null,
       seedModeratorLink: applySeedFromPeer
@@ -160,10 +191,10 @@ export async function resolveCombinedClassBbbReuse(session) {
           ? String(seed.meeting_link_moderator).trim()
           : null
         : null,
-      storedMeetingId: applySeedFromPeer ? String(seed.bbb_meeting_id || '').trim() || null : null,
+      storedMeetingId: canonicalMeetingId,
       seedAttendeePw: applySeedFromPeer ? String(seed.bbb_attendee_pw || '').trim() || null : null,
       seededFromPeer: applySeedFromPeer,
-      syncMeetingLinksToRow: applySeedFromPeer
+      syncMeetingLinksToRow: applySeedFromPeer || needsCanonicalId
     };
   } catch (e) {
     console.warn('[combined-bbb] resolve failed, fallback to per-session:', errorMessage(e));

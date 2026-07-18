@@ -8,14 +8,13 @@ import StudentLiveLessonsPanel from '../components/liveLessons/StudentLiveLesson
 import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShell';
 import { ClassLiveStudentMobileCalendar } from '../components/liveLessons/ClassLiveStudentMobileCalendar';
 import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
-import { userHasAnyRole } from '../config/rolePermissions';
+import { userHasAnyRole, userRoleTags } from '../config/rolePermissions';
 import { useStudentMobileShell } from '../hooks/useStudentMobileShell';
-import { useMobileAppShell } from '../hooks/useMobileAppShell';
 import { isUuid } from '../utils/uuid';
 import { resolveStudentInList } from '../lib/classLiveBranchUtils';
 import { GripVertical, KeyRound, Loader2, Pencil, PlayCircle, Trash2, FileDown, Bell } from 'lucide-react';
 import BbbAutoLinkFieldHint from '../components/liveLessons/BbbAutoLinkFieldHint';
-import { isBbbJoinUrl, hasClassSessionRecordingAccess, isBbbPlaybackUrl, needsBbbJoinFlow, displayMeetingLinkForRow, meetingLinkForSave, shouldSkipClassLessonReminder, shouldUsePanelBbbJoin, isExternalMeetingPlatform, lessonJoinUrl } from '../lib/liveLessonUtils';
+import { isBbbJoinUrl, canShowSessionGuestInvite, hasClassSessionRecordingAccess, isBbbPlaybackUrl, needsBbbJoinFlow, displayMeetingLinkForRow, meetingLinkForSave, shouldSkipClassLessonReminder, shouldUsePanelBbbJoin, isExternalMeetingPlatform, lessonJoinUrl } from '../lib/liveLessonUtils';
 import { openBbbJoin, openBbbRecording } from '../lib/bbbJoin';
 import { markPostLessonHomeworkPrompt } from '../components/eduPanel/EduPostLessonHomeworkModal';
 import ClassLiveClassManager from '../components/liveLessons/ClassLiveClassManager';
@@ -138,9 +137,14 @@ const todayIso = () => isoFromLocalDate(new Date());
 
 export default function ClassLiveLessons() {
   const { effectiveUser } = useAuth();
-  const { students, institution, activeInstitutionId, coaches } = useApp();
+  const { students, teacherScopeStudents, institution, activeInstitutionId, coaches } = useApp();
   const [searchParams] = useSearchParams();
-  const safeStudents = Array.isArray(students) ? students : [];
+  const roleTags = useMemo(() => userRoleTags(effectiveUser), [effectiveUser]);
+  const classLessonStudents = useMemo(
+    () => (roleTags.includes('teacher') ? teacherScopeStudents : students),
+    [roleTags, teacherScopeStudents, students]
+  );
+  const safeStudents = Array.isArray(classLessonStudents) ? classLessonStudents : [];
   const role = String(effectiveUser?.role || '');
   const actorUserId = String(effectiveUser?.id || '');
   const canManageClasses = role === 'admin' || role === 'super_admin' || role === 'coach';
@@ -149,11 +153,22 @@ export default function ClassLiveLessons() {
   const isTeacherView = userHasAnyRole(effectiveUser, ['teacher']);
   const canViewPaymentSummary = role === 'admin' || role === 'super_admin';
   const isStudentView = role.toLowerCase() === 'student';
+  const canShareGuestInvite = userHasAnyRole(effectiveUser, ['super_admin', 'admin', 'coach', 'teacher']);
   const studentMobileShell = useStudentMobileShell();
-  const mobileAppShell = useMobileAppShell();
+  const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
+    typeof window !== 'undefined' ? !window.matchMedia('(min-width: 1024px)').matches : true
+  );
   const [isCompactMobile, setIsCompactMobile] = useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false
   );
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const sync = () => setIsNarrowViewport(!mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 767px)');
@@ -164,8 +179,8 @@ export default function ClassLiveLessons() {
   }, []);
 
   const showMobileCalendar =
-    (isStudentView && (studentMobileShell || isCompactMobile)) ||
-    (!isStudentView && mobileAppShell);
+    isNarrowViewport ||
+    (isStudentView && (studentMobileShell || isCompactMobile));
 
   const resolvedStudentId = useMemo(() => {
     const sid =
@@ -351,18 +366,6 @@ export default function ClassLiveLessons() {
     }
   };
 
-  const copySessionGuestLink = useCallback(async (s: SessionRow) => {
-    try {
-      await copyGuestJoinShareText('class', s.id);
-      setNotice(null);
-      toast.success('Kopyalandı — davet metni panoya alındı');
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setError(msg);
-      toast.error(msg);
-    }
-  }, []);
-
   const joinClassSession = useCallback(async (s: { id: string; subject?: string; join_link?: string; meeting_link?: string; lesson_date?: string; homework?: string | null }) => {
     const url = lessonJoinUrl(s);
     if (!url && !s.id) {
@@ -442,6 +445,11 @@ export default function ClassLiveLessons() {
 
   const [editingSession, setEditingSession] = useState<SessionRow | null>(null);
   const [editingSlotRow, setEditingSlotRow] = useState<SlotRow | null>(null);
+  const [pendingDeleteSession, setPendingDeleteSession] = useState<{
+    session: SessionRow;
+    peerCount: number;
+  } | null>(null);
+  const [deleteSessionBusy, setDeleteSessionBusy] = useState(false);
   const [sessionEditScope, setSessionEditScope] = useState<'single' | 'batch'>('single');
   const [sessionEditBusy, setSessionEditBusy] = useState(false);
   const [slotEditBusy, setSlotEditBusy] = useState(false);
@@ -527,7 +535,8 @@ export default function ClassLiveLessons() {
         class_id: selectedClassId,
         from,
         to,
-        materialize: '1'
+        materialize: '1',
+        include_cancelled: '1'
       });
       const res = await apiFetch(`/api/class-live-lessons?${qs.toString()}`);
       const j = await res.json().catch(() => ({}));
@@ -542,6 +551,49 @@ export default function ClassLiveLessons() {
       setCalendarLoading(false);
     }
   }, [selectedClassId, weekColumnDates, activeInstitutionId, institution?.id]);
+
+  const copySessionGuestLink = useCallback(
+    async (s: SessionRow) => {
+      try {
+        let sessionId = String(s.id || '').trim();
+        if (sessionId.startsWith('slot-')) {
+          if (!selectedClassId) throw new Error('Önce bir sınıf seçin.');
+          const from = weekColumnDates[0];
+          const to = weekColumnDates[6];
+          const qs = new URLSearchParams({
+            scope: 'sessions',
+            class_id: selectedClassId,
+            from,
+            to,
+            materialize: '1'
+          });
+          const res = await apiFetch(`/api/class-live-lessons?${qs.toString()}`);
+          const j = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(String(j.error || 'Oturum oluşturulamadı'));
+          const rows = (Array.isArray(j.data) ? j.data : []) as SessionRow[];
+          const match = rows.find(
+            (row) =>
+              row.lesson_date === s.lesson_date &&
+              String(row.start_time || '').slice(0, 5) === String(s.start_time || '').slice(0, 5) &&
+              row.subject === s.subject
+          );
+          if (!match?.id) {
+            throw new Error('Bu gün için oturum henüz oluşmadı. Yöneticiden tarihli oturum eklemesini isteyin.');
+          }
+          sessionId = match.id;
+          setWeekSessions(rows);
+        }
+        await copyGuestJoinShareText('class', sessionId);
+        setNotice(null);
+        toast.success('Kopyalandı — davet metni panoya alındı');
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(msg);
+        toast.error(msg);
+      }
+    },
+    [selectedClassId, weekColumnDates]
+  );
 
   const loadBatchSessionsPool = useCallback(async () => {
     if (!selectedClassId) {
@@ -983,43 +1035,68 @@ export default function ClassLiveLessons() {
     }
   };
 
-  const deleteSessionRow = async (session: SessionRow, scopeOverride?: 'single' | 'batch') => {
+  const requestDeleteSession = (session: SessionRow) => {
     const pool = batchSessionsPool.length ? batchSessionsPool : weekSessions;
     const peers = inferSessionBatchPeers(session, pool);
-    let scope = scopeOverride || 'single';
-    if (!scopeOverride && peers.length > 1) {
-      const deleteAll = window.confirm(
-        `Bu oturum ${peers.length} periyotluk plandan.\n\nTamam → Tüm planlı periyotları sil\nİptal → Sadece ${session.lesson_date} oturumunu sil`
-      );
-      scope = deleteAll ? 'batch' : 'single';
-    } else if (scopeOverride === 'batch' && peers.length > 1) {
-      if (!window.confirm(`${peers.length} planlı oturum silinsin mi?`)) return;
-    } else if (!window.confirm(`Bu tarihli (${session.lesson_date}) oturumu silmek istediğinize emin misiniz?`)) {
+    if (peers.length > 1) {
+      setPendingDeleteSession({ session, peerCount: peers.length });
       return;
     }
-    const qs =
-      scope === 'batch' && peers.length > 1
-        ? `session_id=${encodeURIComponent(session.id)}&apply_scope=batch`
-        : `session_id=${encodeURIComponent(session.id)}`;
-    const res = await apiFetch(`/api/class-live-lessons?${qs}`, {
-      method: 'DELETE'
-    });
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setError(String(j.error || 'Oturum silinemedi'));
+    if (!window.confirm(`Bu tarihli (${formatDdMmYyyyDots(session.lesson_date)}) oturumu silmek istediğinize emin misiniz?`)) {
       return;
     }
-    await loadWeekSessions();
-    await loadBatchSessionsPool();
+    void executeDeleteSession(session, 'single');
+  };
+
+  const executeDeleteSession = async (session: SessionRow, scope: 'single' | 'batch') => {
+    setDeleteSessionBusy(true);
+    setError(null);
+    try {
+      const qs =
+        scope === 'batch'
+          ? `session_id=${encodeURIComponent(session.id)}&apply_scope=batch`
+          : `session_id=${encodeURIComponent(session.id)}`;
+      const res = await apiFetch(`/api/class-live-lessons?${qs}`, {
+        method: 'DELETE'
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(String(j.error || 'Oturum silinemedi'));
+        return;
+      }
+      setPendingDeleteSession(null);
+      await loadWeekSessions();
+      await loadBatchSessionsPool();
+    } finally {
+      setDeleteSessionBusy(false);
+    }
   };
 
   const deleteSlot = async (id: string) => {
-    const res = await apiFetch(`/api/class-live-lessons?slot_id=${encodeURIComponent(id)}`, { method: 'DELETE' });
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setError(String(j.error || 'Slot silinemedi'));
+    const slotId = String(id || '')
+      .trim()
+      .replace(/^slot-/, '');
+    if (!slotId) return;
+    if (
+      !window.confirm(
+        'Bu haftalık şablon satırı silinecek (tüm haftalardaki tekrar). Yalnızca seçili günün oturumunu iptal etmek için oturum kartındaki Sil’i kullanın. Devam?'
+      )
+    ) {
       return;
     }
+    const res = await apiFetch(`/api/class-live-lessons?slot_id=${encodeURIComponent(slotId)}`, { method: 'DELETE' });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (res.status === 404) {
+        setSlots((prev) => prev.filter((s) => s.id !== slotId && s.id !== id));
+        await loadAll();
+        setError('Şablon zaten silinmiş veya güncellenmiş; liste yenilendi.');
+        return;
+      }
+      setError(String(j.error || 'Şablon silinemedi'));
+      return;
+    }
+    setSlots((prev) => prev.filter((s) => s.id !== slotId));
     await loadAll();
     await loadWeekSessions();
   };
@@ -1254,6 +1331,10 @@ export default function ClassLiveLessons() {
       )}
 
 
+      <div
+        className={showMobileCalendar && !isStudentView ? 'flex flex-col gap-4' : 'contents'}
+      >
+      <div className={showMobileCalendar && !isStudentView ? 'order-2' : undefined}>
       <ClassLiveClassManager
         classes={classes}
         selectedClassId={selectedClassId}
@@ -1269,6 +1350,7 @@ export default function ClassLiveLessons() {
         livePresenceLoading={livePresenceLoading}
         onPresenceStatClick={handlePresenceStatClick}
       />
+      </div>
 
       {CLASS_LIVE_PRESENCE_ENABLED ? (
         <ClassLivePresenceModal
@@ -1281,7 +1363,9 @@ export default function ClassLiveLessons() {
       ) : null}
 
       {selectedClass && canManageSlots && (
-        <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+        <div
+          className={`bg-white rounded-xl border border-slate-200 p-4 space-y-3${showMobileCalendar && !isStudentView ? ' order-3' : ''}`}
+        >
           <h2 className="font-semibold text-slate-800">Ders ekle — {selectedClass.name}</h2>
 
           <div className="flex flex-wrap gap-4 text-sm">
@@ -1444,11 +1528,14 @@ export default function ClassLiveLessons() {
         </div>
       )}
 
+      <div className={showMobileCalendar && !isStudentView ? 'order-1' : undefined}>
       <WeeklyLiveGridShell
         title={isStudentView ? 'Bu haftanın canlı grup dersleri' : 'Haftalık grup ders takvimi'}
         subtitle={
           showMobileCalendar
-            ? 'Gün seçin · Planlı derslerde Katıl ile bağlanın'
+            ? isStudentView
+              ? 'Gün seçin · Davet linki ile WhatsApp paylaşımı · Katıl ile bağlanın'
+              : 'Gün seçin · Yoklama · Davet linki · Katıl'
             : 'Sütunlar Pazartesi → Pazar (yerel hafta). Tarihli oturumlar ve haftalık şablon üzerinden tek ekranda planlayın.'
         }
         weekRangeLabel={weekRangeLabel}
@@ -1595,7 +1682,11 @@ export default function ClassLiveLessons() {
                         s.lesson_date === colIso &&
                         Number(String(s.start_time).slice(0, 2)) === hour
                     );
-                    const blockedSlotTeacherHours = new Set(sessionsHere.map((s) => `${s.teacher_id}|${hour}`));
+                    const blockedSlotTeacherHours = new Set(
+                      sessionsHere
+                        .filter((s) => s.status !== 'cancelled')
+                        .map((s) => `${s.teacher_id}|${hour}`)
+                    );
                     const templatesHere = classSlots.filter((s) => {
                       if (s.day_of_week !== dowSlotFromIso(colIso)) return false;
                       if (Number(String(s.start_time).slice(0, 2)) !== hour) return false;
@@ -1660,7 +1751,7 @@ export default function ClassLiveLessons() {
                                   </div>
                                 </div>
                                 <div className="mt-2 flex flex-wrap gap-1 calendar-pdf-hide-ui">
-                                  {canJoin && !isStudentView ? (
+                                  {canShowSessionGuestInvite(s) && canShareGuestInvite ? (
                                     <button
                                       type="button"
                                       title="WhatsApp için kısa davet linki ve ders bilgisi panoya kopyalanır"
@@ -1749,7 +1840,7 @@ export default function ClassLiveLessons() {
                                   {canManageSlots ? (
                                     <button
                                       type="button"
-                                      onClick={() => void deleteSessionRow(s)}
+                                      onClick={() => requestDeleteSession(s)}
                                       className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-50"
                                     >
                                       <Trash2 className="h-3 w-3" />
@@ -1829,11 +1920,78 @@ export default function ClassLiveLessons() {
             todayIso={todayIso()}
             onJoinSession={(s) => void joinClassSession(s)}
             onWatchSession={(s) => void watchClassSessionRecording(s)}
-            onCopyGuestLink={!isStudentView ? (s) => void copySessionGuestLink(s) : undefined}
+            onCopyGuestLink={canShareGuestInvite ? (s) => void copySessionGuestLink(s) : undefined}
+            onOpenAttendance={canMarkAttendance ? (s) => void openAttendanceForSession(s) : undefined}
             studentAppointmentDefaults={studentAppointmentDefaults}
           />
         )}
       </WeeklyLiveGridShell>
+      </div>
+      </div>
+
+      {pendingDeleteSession ? (
+        <AppModal
+          open
+          onClose={() => (deleteSessionBusy ? undefined : setPendingDeleteSession(null))}
+          panelClassName="max-w-md"
+        >
+          <AppModalHeader>
+            <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
+              <Trash2 className="h-5 w-5 text-red-600" />
+              Oturumu sil
+            </h3>
+            <button
+              type="button"
+              className="text-sm text-slate-500 hover:text-slate-800 disabled:opacity-50"
+              disabled={deleteSessionBusy}
+              onClick={() => setPendingDeleteSession(null)}
+            >
+              Kapat
+            </button>
+          </AppModalHeader>
+          <AppModalBody className="space-y-3">
+            <p className="text-sm text-slate-700">
+              <span className="font-semibold">{pendingDeleteSession.session.subject}</span>
+              {' · '}
+              {formatDdMmYyyyDots(pendingDeleteSession.session.lesson_date)}
+              {' · '}
+              {String(pendingDeleteSession.session.start_time || '').slice(0, 5)}
+            </p>
+            <p className="text-sm text-slate-600">
+              Bu ders {pendingDeleteSession.peerCount} planlı periyottan oluşan bir serinin parçası. Ne
+              silmek istediğinizi seçin:
+            </p>
+          </AppModalBody>
+          <AppModalFooter>
+            <div className="flex w-full flex-col gap-2">
+              <button
+                type="button"
+                disabled={deleteSessionBusy}
+                onClick={() => void executeDeleteSession(pendingDeleteSession.session, 'single')}
+                className="min-h-[44px] rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+              >
+                {deleteSessionBusy ? 'Siliniyor…' : 'Sadece bu periyodu sil'}
+              </button>
+              <button
+                type="button"
+                disabled={deleteSessionBusy}
+                onClick={() => void executeDeleteSession(pendingDeleteSession.session, 'batch')}
+                className="min-h-[44px] rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-800 hover:bg-red-50 disabled:opacity-60"
+              >
+                Tüm planlı periyotları sil ({pendingDeleteSession.peerCount})
+              </button>
+              <button
+                type="button"
+                disabled={deleteSessionBusy}
+                onClick={() => setPendingDeleteSession(null)}
+                className="min-h-[44px] rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                Vazgeç
+              </button>
+            </div>
+          </AppModalFooter>
+        </AppModal>
+      ) : null}
 
       {editingSession ? (
         <AppModal open onClose={() => setEditingSession(null)} panelClassName="max-w-lg">
@@ -2088,89 +2246,81 @@ export default function ClassLiveLessons() {
         </AppModal>
       ) : null}
 
-      {attendanceSession && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
-          role="presentation"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) closeAttendanceModal();
-          }}
-        >
-          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col border border-slate-200">
-            <div className="px-4 py-3 border-b border-slate-100 flex items-start justify-between gap-2">
-              <div>
-                <h3 className="font-semibold text-slate-900">Yoklama</h3>
-                <p className="text-xs text-slate-600 mt-0.5">
-                  {attendanceSession.subject} · {formatDdMmYyyyDots(attendanceSession.lesson_date)} ·{' '}
-                  {String(attendanceSession.start_time).slice(0, 5)}
-                </p>
-              </div>
-              <button
-                type="button"
-                className="text-slate-500 hover:text-slate-800 text-sm"
-                onClick={closeAttendanceModal}
-              >
-                Kapat
-              </button>
+      {attendanceSession ? (
+        <AppModal open onClose={closeAttendanceModal} panelClassName="max-w-lg">
+          <AppModalHeader>
+            <div>
+              <h3 className="font-semibold text-slate-900">Yoklama</h3>
+              <p className="text-xs text-slate-600 mt-0.5">
+                {attendanceSession.subject} · {formatDdMmYyyyDots(attendanceSession.lesson_date)} ·{' '}
+                {String(attendanceSession.start_time).slice(0, 5)}
+              </p>
             </div>
-            <div className="p-4 overflow-y-auto flex-1 space-y-2">
-              {attendanceModalLoading ? (
-                <p className="text-sm text-slate-500">Yükleniyor…</p>
-              ) : attendanceDraft.length === 0 ? (
-                <p className="text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                  Bu sınıfa henüz öğrenci atanmamış veya liste boş. Önce sınıf üyelerinden öğrenci ekleyin.
-                </p>
-              ) : (
-                attendanceDraft.map((row, idx) => {
-                  const stu = resolveStudentInList(safeStudents, row.student_id);
-                  const displayName = row.student_name || stu?.name || row.student_id;
-                  return (
-                    <div
-                      key={row.student_id}
-                      className="flex items-center justify-between gap-2 text-sm border border-slate-100 rounded-lg px-3 py-2"
+            <button
+              type="button"
+              className="text-sm text-slate-500 hover:text-slate-800 shrink-0"
+              onClick={closeAttendanceModal}
+            >
+              Kapat
+            </button>
+          </AppModalHeader>
+          <AppModalBody className="space-y-2 max-h-[min(55dvh,420px)] overflow-y-auto">
+            {attendanceModalLoading ? (
+              <p className="text-sm text-slate-500">Yükleniyor…</p>
+            ) : attendanceDraft.length === 0 ? (
+              <p className="text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                Bu sınıfa henüz öğrenci atanmamış veya liste boş. Önce sınıf üyelerinden öğrenci ekleyin.
+              </p>
+            ) : (
+              attendanceDraft.map((row, idx) => {
+                const stu = resolveStudentInList(safeStudents, row.student_id);
+                const displayName = row.student_name || stu?.name || row.student_id;
+                return (
+                  <div
+                    key={row.student_id}
+                    className="flex items-center justify-between gap-2 text-sm border border-slate-100 rounded-lg px-3 py-2.5"
+                  >
+                    <span className="text-slate-800 min-w-0 truncate">{displayName}</span>
+                    <select
+                      value={row.status}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        const v =
+                          raw === 'absent' ? ('absent' as const) : raw === 'late' ? ('late' as const) : ('present' as const);
+                        setAttendanceDraft((prev) =>
+                          prev.map((r, i) => (i === idx ? { ...r, status: v } : r))
+                        );
+                      }}
+                      className="shrink-0 border border-slate-200 rounded-lg px-2 py-2 text-xs min-h-[40px] touch-manipulation"
                     >
-                      <span className="text-slate-800">{displayName}</span>
-                      <select
-                        value={row.status}
-                        onChange={(e) => {
-                          const raw = e.target.value;
-                          const v =
-                            raw === 'absent' ? ('absent' as const) : raw === 'late' ? ('late' as const) : ('present' as const);
-                          setAttendanceDraft((prev) =>
-                            prev.map((r, i) => (i === idx ? { ...r, status: v } : r))
-                          );
-                        }}
-                        className="border border-slate-200 rounded px-2 py-1 text-xs"
-                      >
-                        <option value="present">Katıldı</option>
-                        <option value="late">Geç katıldı</option>
-                        <option value="absent">Katılmadı</option>
-                      </select>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-            <div className="px-4 py-3 border-t border-slate-100 flex justify-end gap-2 bg-slate-50/80">
-              <button
-                type="button"
-                className="px-3 py-1.5 rounded border border-slate-200 text-sm"
-                onClick={closeAttendanceModal}
-              >
-                İptal
-              </button>
-              <button
-                type="button"
-                disabled={attendanceModalLoading || attendanceDraft.length === 0 || attendanceSaving}
-                className="px-3 py-1.5 rounded bg-amber-600 text-white text-sm disabled:opacity-50"
-                onClick={() => void saveAttendance()}
-              >
-                {attendanceSaving ? 'Kaydediliyor…' : 'Kaydet'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+                      <option value="present">Katıldı</option>
+                      <option value="late">Geç katıldı</option>
+                      <option value="absent">Katılmadı</option>
+                    </select>
+                  </div>
+                );
+              })
+            )}
+          </AppModalBody>
+          <AppModalFooter className="gap-2">
+            <button
+              type="button"
+              className="min-h-[44px] flex-1 rounded-lg border border-slate-200 text-sm font-medium touch-manipulation"
+              onClick={closeAttendanceModal}
+            >
+              İptal
+            </button>
+            <button
+              type="button"
+              disabled={attendanceModalLoading || attendanceDraft.length === 0 || attendanceSaving}
+              className="min-h-[44px] flex-1 rounded-lg bg-amber-600 text-white text-sm font-semibold disabled:opacity-50 touch-manipulation"
+              onClick={() => void saveAttendance()}
+            >
+              {attendanceSaving ? 'Kaydediliyor…' : 'Kaydet'}
+            </button>
+          </AppModalFooter>
+        </AppModal>
+      ) : null}
         </>
       )}
       {recordingAlertModal}

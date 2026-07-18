@@ -50,9 +50,17 @@ export function guestJoinWindowForClassSession(session, nowMs = Date.now()) {
   return { ok: true, openFrom, openUntil };
 }
 
+/** teacher_lessons DB: lesson_date; API: date */
+function teacherLessonDate(lesson) {
+  return String(lesson?.lesson_date || lesson?.date || '')
+    .trim()
+    .slice(0, 10);
+}
+
 export function guestJoinWindowForTeacherLesson(lesson, nowMs = Date.now()) {
-  const startMs = wallTimeToUtcMs(lesson.date, lesson.start_time);
-  const endMs = sessionEndUtcMs(lesson.date, lesson.start_time, lesson.end_time);
+  const lessonDate = teacherLessonDate(lesson);
+  const startMs = wallTimeToUtcMs(lessonDate, lesson.start_time);
+  const endMs = sessionEndUtcMs(lessonDate, lesson.start_time, lesson.end_time);
   if (startMs == null || endMs == null) return { ok: false, reason: 'invalid_schedule' };
   const openFrom = startMs - GUEST_JOIN_OPEN_MINUTES_BEFORE * 60 * 1000;
   const openUntil = endMs + GUEST_JOIN_CLOSE_MINUTES_AFTER * 60 * 1000;
@@ -113,13 +121,15 @@ async function buildClassGuestJoinUrl(session, guestName) {
       syncPeers = reuse.peers;
       if (reuse.meetingKeyPrefix) meetingKeyPrefix = reuse.meetingKeyPrefix;
       if (reuse.chainDurationMinutes != null) durationMinutes = reuse.chainDurationMinutes;
+      if (reuse.storedMeetingId) storedMeetingId = reuse.storedMeetingId;
       if (reuse.seededFromPeer) {
         if (reuse.seedAttendeeLink) attendeeLink = reuse.seedAttendeeLink;
         if (reuse.seedModeratorLink != null) moderatorLink = reuse.seedModeratorLink;
-        if (reuse.storedMeetingId) storedMeetingId = reuse.storedMeetingId;
         if (reuse.seedAttendeePw && !String(session.bbb_attendee_pw || '').trim()) {
           session.bbb_attendee_pw = reuse.seedAttendeePw;
         }
+      } else if (reuse.seedAttendeePw && !String(session.bbb_attendee_pw || '').trim()) {
+        session.bbb_attendee_pw = reuse.seedAttendeePw;
       }
     }
   } catch {
@@ -157,7 +167,11 @@ async function buildClassGuestJoinUrl(session, guestName) {
 
   if (syncPeers?.length && ensured.attendeeLink) {
     try {
-      await syncConsecutivePeerMeetingLinks(syncPeers, String(session.id || ''), linksPatch);
+      const multiClass =
+        new Set((syncPeers || []).map((p) => String(p.class_id || '').trim()).filter(Boolean)).size >= 2;
+      await syncConsecutivePeerMeetingLinks(syncPeers, String(session.id || ''), linksPatch, {
+        force: multiClass
+      });
     } catch {
       /* peer sync guest join'i bozmasın */
     }
@@ -380,7 +394,7 @@ export async function createGuestJoinShareLink({ kind, id }) {
       token,
       expiresAtIso: new Date(expSec * 1000).toISOString(),
       title: String(lesson.title || 'Canlı özel ders'),
-      lessonDate: String(lesson.date || '').slice(0, 10),
+      lessonDate: teacherLessonDate(lesson),
       lessonTime: String(lesson.start_time || '').slice(0, 5),
       className: ''
     });

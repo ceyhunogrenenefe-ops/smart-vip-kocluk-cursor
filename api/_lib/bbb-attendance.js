@@ -72,37 +72,85 @@ export function stripBbbDisplayNameNoise(raw) {
  */
 export function findBbbAttendeeForStudentName(studentName, attendees) {
   const list = Array.isArray(attendees) ? attendees : [];
-  const studentNorm = normalizePersonNameForMatch(stripBbbDisplayNameNoise(studentName));
-  if (!studentNorm) return null;
+  const ranked = rankBbbAttendeesForStudentName(studentName, list);
+  return ranked[0]?.attendee || null;
+}
 
-  for (const a of list) {
-    const norm = normalizePersonNameForMatch(stripBbbDisplayNameNoise(a.fullName));
-    if (norm && norm === studentNorm) return a;
-  }
+/**
+ * Eşleşme skoru — yüksek = daha iyi. 0 = eşleşme yok.
+ * exact=100, token overlap, includes fallback.
+ */
+function scoreBbbAttendeeForStudentName(studentName, attendee) {
+  const studentNorm = normalizePersonNameForMatch(stripBbbDisplayNameNoise(studentName));
+  if (!studentNorm) return 0;
+  const norm = normalizePersonNameForMatch(stripBbbDisplayNameNoise(attendee?.fullName));
+  if (!norm) return 0;
+  if (norm === studentNorm) return 100;
 
   const studentTokens = studentNorm.split(' ').filter((t) => t.length >= 2);
+  const tokens = norm.split(' ').filter(Boolean);
   if (studentTokens.length) {
-    let best = null;
-    let bestScore = 0;
-    for (const a of list) {
-      const norm = normalizePersonNameForMatch(stripBbbDisplayNameNoise(a.fullName));
-      const tokens = norm.split(' ').filter(Boolean);
-      const score = studentTokens.filter((t) => tokens.includes(t)).length;
-      const need = Math.min(2, studentTokens.length);
-      if (score > bestScore && score >= need) {
-        bestScore = score;
-        best = a;
-      }
+    const score = studentTokens.filter((t) => tokens.includes(t)).length;
+    const need = Math.min(2, studentTokens.length);
+    if (score >= need) {
+      // ad+soyad tam ise yüksek; tek token daha düşük
+      return 40 + score * 10 + (norm.length === studentNorm.length ? 5 : 0);
     }
-    if (best) return best;
   }
 
-  for (const a of list) {
-    const norm = normalizePersonNameForMatch(stripBbbDisplayNameNoise(a.fullName));
-    if (!norm) continue;
-    if (norm.includes(studentNorm) || studentNorm.includes(norm)) return a;
+  if (norm.includes(studentNorm) || studentNorm.includes(norm)) {
+    const lenRatio = Math.min(norm.length, studentNorm.length) / Math.max(norm.length, studentNorm.length);
+    return Math.floor(20 * lenRatio);
   }
-  return null;
+  return 0;
+}
+
+export function rankBbbAttendeesForStudentName(studentName, attendees) {
+  const list = Array.isArray(attendees) ? attendees : [];
+  /** @type {{ attendee: any, score: number }[]} */
+  const ranked = [];
+  for (const a of list) {
+    const score = scoreBbbAttendeeForStudentName(studentName, a);
+    if (score > 0) ranked.push({ attendee: a, score });
+  }
+  ranked.sort((a, b) => b.score - a.score);
+  return ranked;
+}
+
+/**
+ * Roster ↔ BBB 1:1 eşleştirme (her BBB katılımcısı en fazla bir öğrenciye).
+ * @param {{ id: string, name: string }[]} roster
+ * @param {Array<{ fullName: string, userId?: string, hasVideo?: boolean, hasJoinedVoice?: boolean, isListeningOnly?: boolean }>} attendees
+ * @returns {Map<string, object>} studentId → attendee
+ */
+export function matchRosterToAttendeesUnique(roster, attendees) {
+  const list = Array.isArray(attendees) ? [...attendees] : [];
+  /** @type {{ studentId: string, name: string, attendee: any, score: number }[]} */
+  const pairs = [];
+  for (const student of roster || []) {
+    const sid = String(student?.id || '').trim();
+    if (!sid) continue;
+    for (const { attendee, score } of rankBbbAttendeesForStudentName(student.name, list)) {
+      pairs.push({ studentId: sid, name: student.name, attendee, score });
+    }
+  }
+  pairs.sort((a, b) => b.score - a.score);
+
+  /** @type {Map<string, object>} */
+  const byStudent = new Map();
+  const usedAttendeeKeys = new Set();
+  const attendeeKey = (a) =>
+    String(a?.userId || '').trim() ||
+    normalizePersonNameForMatch(stripBbbDisplayNameNoise(a?.fullName || ''));
+
+  for (const p of pairs) {
+    if (byStudent.has(p.studentId)) continue;
+    const key = attendeeKey(p.attendee);
+    if (!key || usedAttendeeKeys.has(key)) continue;
+    usedAttendeeKeys.add(key);
+    byStudent.set(p.studentId, p.attendee);
+  }
+  return byStudent;
 }
 
 export function mergeSeenNames(existing, incoming) {

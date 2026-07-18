@@ -201,6 +201,22 @@ export function formatEduDateRange(
   return one ? formatLessonDate(one) : '';
 }
 
+/** WhatsApp / bitiş satırı: ödev due_date (en geç olan), yoksa available_until. lesson_date kullanma. */
+export function formatEduHomeworkDeadlineLabel(opts: {
+  availableUntil?: string | null;
+  homework?: Array<{ status?: string | null; due_date?: string | null }>;
+}): string {
+  const dueDates = (opts.homework || [])
+    .filter((h) => h.status === 'published')
+    .map((h) => String(h.due_date || '').slice(0, 10))
+    .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+    .sort();
+  const latestDue = dueDates.length ? dueDates[dueDates.length - 1] : '';
+  const until = String(opts.availableUntil || '').slice(0, 10);
+  const end = latestDue || (/^\d{4}-\d{2}-\d{2}$/.test(until) ? until : '');
+  return end ? formatLessonDate(end) : '';
+}
+
 export function isEduTopicOpenNow(row: {
   available_from?: string | null;
   available_until?: string | null;

@@ -15,7 +15,21 @@ const DEMO_ACCOUNTS = [
 ];
 
 const USER_LOGIN_COLUMNS =
-  'id, name, email, phone, role, password_hash, institution_id, package, start_date, end_date, is_active, created_at, last_login_at';
+  'id, name, email, phone, role, roles, password_hash, institution_id, package, start_date, end_date, is_active, created_at, last_login_at';
+
+function normalizeLoginRoles(primaryRole, rolesArr) {
+  const set = new Set();
+  if (primaryRole) set.add(String(primaryRole).trim().toLowerCase());
+  if (Array.isArray(rolesArr)) {
+    for (const r of rolesArr) {
+      const n = String(r || '')
+        .trim()
+        .toLowerCase();
+      if (n) set.add(n);
+    }
+  }
+  return [...set];
+}
 
 async function lookupUserByEmail(normalizedEmail) {
   const { data, error } = await withDbTimeout(
@@ -90,14 +104,16 @@ function upsertDemoUserRowFireAndForget(demo, stableDemoId) {
 }
 
 function buildTokenResponse(userView, jwtRole, jwtInstitutionId, coachId, studentId) {
+  const roles = normalizeLoginRoles(jwtRole, userView?.roles);
   const token = signAuthToken({
     sub: userView.id,
     role: jwtRole,
+    roles,
     institution_id: jwtInstitutionId,
     coach_id: coachId || null,
     student_id: studentId || null
   });
-  return { token, user: userView };
+  return { token, user: { ...userView, roles } };
 }
 
 export default async function handler(req, res) {
@@ -139,6 +155,7 @@ export default async function handler(req, res) {
           email: normalizedEmail,
           phone: existingByEmail.phone || undefined,
           role: existingByEmail.role || demo.role,
+          roles: normalizeLoginRoles(existingByEmail.role || demo.role, existingByEmail.roles),
           studentId: studentId || undefined,
           coachId: coachId || undefined,
           institutionId: existingByEmail.institution_id ?? undefined,
@@ -221,6 +238,7 @@ export default async function handler(req, res) {
       email: user.email,
       phone: user.phone || undefined,
       role: user.role,
+      roles: normalizeLoginRoles(user.role, user.roles),
       studentId,
       coachId,
       institutionId: institutionId || undefined,

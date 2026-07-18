@@ -519,10 +519,10 @@ export async function resolvePhoneWabaTemplateSendConfig(templateName, preferred
       const full = await fetchTemplatesForWaba(phone.waba_id, tok);
       if (full.ok) {
         const kitapLike = (full.templates || [])
-          .filter((t) => /kitap/i.test(String(t.name || '')))
-          .slice(0, 10)
+          .filter((t) => /kitap|toplanti|meeting|hatirlat/i.test(String(t.name || '')))
+          .slice(0, 15)
           .map((t) => `${t.name} [${t.language}, ${t.status}]`);
-        if (kitapLike.length) hint += ` WABA kitap şablonları: ${kitapLike.join('; ')}.`;
+        if (kitapLike.length) hint += ` WABA benzer şablonlar: ${kitapLike.join('; ')}.`;
       }
     }
     return {

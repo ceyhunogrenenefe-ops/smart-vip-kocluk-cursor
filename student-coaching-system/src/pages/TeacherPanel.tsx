@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import { apiFetch } from '../lib/session';
 import { Users, Radio, CheckCircle2, Presentation } from 'lucide-react';
 
@@ -21,6 +22,7 @@ function studentDisplayName(s: ScopeStudent): string {
 export default function TeacherPanel() {
   const navigate = useNavigate();
   const { students: contextStudents } = useApp();
+  const { isImpersonating, effectiveUser } = useAuth();
   const [scopedStudents, setScopedStudents] = useState<ScopeStudent[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -29,7 +31,11 @@ export default function TeacherPanel() {
     void (async () => {
       setLoading(true);
       try {
-        const res = await apiFetch('/api/teacher-scope');
+        const qs =
+          isImpersonating && effectiveUser?.id
+            ? `?view_as_user_id=${encodeURIComponent(effectiveUser.id)}`
+            : '';
+        const res = await apiFetch(`/api/teacher-scope${qs}`);
         const j = (await res.json().catch(() => ({}))) as {
           data?: { students?: ScopeStudent[] };
           error?: string;
@@ -57,7 +63,7 @@ export default function TeacherPanel() {
     return () => {
       cancelled = true;
     };
-  }, [contextStudents]);
+  }, [contextStudents, isImpersonating, effectiveUser?.id]);
 
   const myStudents = useMemo(() => scopedStudents, [scopedStudents]);
 

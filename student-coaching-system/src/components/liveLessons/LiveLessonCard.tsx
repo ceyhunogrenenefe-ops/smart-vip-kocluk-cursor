@@ -1,7 +1,7 @@
 import React from 'react';
 import { Video, Link2, Copy, ExternalLink, Presentation, PlayCircle } from 'lucide-react';
 import type { TeacherLesson, TeacherLessonPlatform } from '../../types';
-import { isApproaching, isOngoing, PLATFORM_LABEL, hasBbbRecordingAccess, needsBbbJoinFlow } from '../../lib/liveLessonUtils';
+import { isApproaching, isOngoing, PLATFORM_LABEL, hasBbbRecordingAccess, needsBbbJoinFlow, isPrivateLessonJoinWindowOpen } from '../../lib/liveLessonUtils';
 
 type Props = {
   lesson: TeacherLesson;
@@ -18,6 +18,8 @@ type Props = {
    * Öğrenci paneli: tamamlanan derslerde toplantı linki tekrar kullanılmasın (yeni ders yeni link).
    */
   lockCompletedLink?: boolean;
+  /** true → «Dersi Başlat», false/undefined → «Derse Katıl» */
+  joinAsModerator?: boolean;
 };
 
 function PlatformIcon({ platform }: { platform: TeacherLessonPlatform }) {
@@ -43,13 +45,17 @@ export default function LiveLessonCard({
   onWatchRecording,
   onMarkComplete,
   extraActions,
-  lockCompletedLink = false
+  lockCompletedLink = false,
+  joinAsModerator = false
 }: Props) {
   const approaching = showApproaching && isApproaching(lesson);
   const ongoing = isOngoing(lesson);
+  const joinWindowOpen = isPrivateLessonJoinWindowOpen(lesson);
 
   const joinInactive =
-    lesson.status === 'cancelled' || (lockCompletedLink && lesson.status === 'completed');
+    lesson.status === 'cancelled' ||
+    (lockCompletedLink && lesson.status === 'completed') ||
+    (lesson.status === 'scheduled' && !joinWindowOpen);
 
   const bbbRecordingAvailable = lockCompletedLink && hasBbbRecordingAccess(lesson);
 
@@ -112,7 +118,7 @@ export default function LiveLessonCard({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 sm:flex-col sm:items-end sm:justify-center">
+      <div className="flex flex-wrap items-stretch gap-2 w-full sm:w-auto sm:flex-col sm:items-end sm:justify-center">
         {lesson.status === 'scheduled' && onMarkComplete ? (
           <button
             type="button"
@@ -135,12 +141,12 @@ export default function LiveLessonCard({
               </span>
             )
           ) : null}
-          <div className="flex flex-wrap gap-2 justify-end">
+          <div className="flex flex-wrap gap-2 justify-end w-full sm:w-auto">
             <button
               type="button"
               onClick={onCopy}
               disabled={copyInactive}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-45 disabled:cursor-not-allowed touch-manipulation"
+              className="inline-flex flex-1 sm:flex-none items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-violet-300 bg-white text-sm font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-45 disabled:cursor-not-allowed touch-manipulation min-h-[44px]"
             >
               <Copy className="w-4 h-4" />
               {lesson.platform === 'bbb' || needsBbbJoinFlow(lesson.meeting_link)
@@ -161,11 +167,21 @@ export default function LiveLessonCard({
               type="button"
               onClick={onJoin}
               disabled={joinInactive}
+              title={
+                lesson.status === 'scheduled' && !joinWindowOpen
+                  ? 'Ders saatinden 15 dk önce aktif olur'
+                  : undefined
+              }
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <ExternalLink className="w-4 h-4" />
-              Derse katıl
+              {joinAsModerator ? 'Dersi Başlat' : 'Derse Katıl'}
             </button>
+            {lesson.status === 'scheduled' && !joinWindowOpen ? (
+              <span className="text-[10px] text-slate-500 text-right max-w-[200px]">
+                Saatinden 15 dk önce açılır
+              </span>
+            ) : null}
           </div>
         </div>
       </div>

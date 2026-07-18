@@ -62,7 +62,7 @@ export default function CoachDashboard() {
   const coachTags = useMemo(() => userRoleTags(effectiveUser), [effectiveUser]);
   const isCoachUser = coachTags.includes('coach');
 
-  // AppContext koç etiketi olan kullanıcılar için öğrencileri zaten scope ediyor
+  // Koç paneli: yalnızca coach_id ile atanan öğrenciler (ders oturumu öğrencileri hariç)
   const myStudents = students;
 
   // Koçun öğrenci ID'leri

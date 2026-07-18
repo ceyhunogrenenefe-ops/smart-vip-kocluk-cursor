@@ -177,6 +177,16 @@ function ExamRulesModal(props: {
                 </li>
               ))}
             </ul>
+            <a
+              href="https://youtu.be/He-7YtJ5gr0"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-4 flex items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-3 py-2.5 text-sm font-semibold text-teal-900 transition hover:bg-teal-100"
+            >
+              <Video className="h-4 w-4 shrink-0" />
+              <span className="flex-1">Deneme sınavına nasıl girilir? — video izle</span>
+              <ExternalLink className="h-4 w-4 shrink-0 opacity-70" />
+            </a>
             {!hasLink ? (
               <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950">
                 Bu sınıf için henüz giriş bağlantısı tanımlanmamış. Yöneticinizden link eklemesini isteyin.
@@ -487,6 +497,24 @@ export default function AcademicCenter() {
 
           {activeTab === 'exam' && (
             <div className="space-y-6">
+              <a
+                href="https://youtu.be/He-7YtJ5gr0"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-start gap-3 rounded-2xl border border-teal-200 bg-gradient-to-r from-teal-50 to-emerald-50 p-4 shadow-sm transition hover:brightness-[0.98]"
+              >
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-600 text-white">
+                  <Video className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-teal-950">Deneme sınavına nasıl girilir?</p>
+                  <p className="mt-1 text-sm text-teal-900/80">
+                    Adım adım anlatan kısa videoyu izlemek için tıklayın.
+                  </p>
+                </div>
+                <ExternalLink className="mt-1 h-4 w-4 shrink-0 text-teal-700" />
+              </a>
+
               <PortalActionCard
                 accent="from-teal-500 to-emerald-600"
                 icon={<ScanLine className="h-5 w-5" />}

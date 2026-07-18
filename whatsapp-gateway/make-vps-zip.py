@@ -1,8 +1,12 @@
 import zipfile
 from pathlib import Path
+from datetime import date
 
 root = Path(__file__).resolve().parent
-out = root.parent / "whatsapp-gateway-vps-2026-07-06.zip"
+# İndirilenler klasörüne de kopyala — kolay erişim
+stamp = date.today().isoformat()
+out = root.parent / f"whatsapp-gateway-vps-{stamp}.zip"
+downloads = Path.home() / "Downloads" / f"whatsapp-gateway-vps-{stamp}.zip"
 
 files = [
     "src/server.js",
@@ -24,5 +28,7 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
         else:
             print(f"SKIP missing: {rel}")
 
+downloads.write_bytes(out.read_bytes())
 print(f"Created: {out}")
+print(f"Downloads: {downloads}")
 print(f"Size: {out.stat().st_size} bytes")

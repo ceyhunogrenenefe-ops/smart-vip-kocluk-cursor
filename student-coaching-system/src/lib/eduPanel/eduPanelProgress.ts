@@ -103,3 +103,91 @@ export function progressBreakdown(animationCompleted: boolean, homeworkPercent: 
     badge: badgeForPoints(total)
   };
 }
+
+/** Konu içi başarı rozetleri — animasyon / ödev / konu tamamlama */
+export type EduMilestoneId = 'animation' | 'homework' | 'topic';
+
+export type EduMilestoneBadge = {
+  id: EduMilestoneId;
+  label: string;
+  emoji: string;
+  hint: string;
+  earned: boolean;
+  chipClass: string;
+};
+
+export function milestoneBadges(opts: {
+  animationCompleted: boolean;
+  homeworkPercent: number;
+  topicCompleted?: boolean;
+  hasAnimation?: boolean;
+  hasHomework?: boolean;
+}): EduMilestoneBadge[] {
+  const hwDone = clampPercent(opts.homeworkPercent) >= 100;
+  const list: EduMilestoneBadge[] = [];
+  if (opts.hasAnimation !== false) {
+    list.push({
+      id: 'animation',
+      label: 'Animasyon Ustası',
+      emoji: '🎬',
+      hint: `Animasyonu izle → +${EDU_ANIMATION_POINTS}p`,
+      earned: Boolean(opts.animationCompleted),
+      chipClass: opts.animationCompleted
+        ? 'bg-violet-100 text-violet-900 ring-violet-300'
+        : 'bg-slate-50 text-slate-400 ring-slate-200'
+    });
+  }
+  if (opts.hasHomework !== false) {
+    list.push({
+      id: 'homework',
+      label: 'Ödev Kahramanı',
+      emoji: '📝',
+      hint: `Tüm ödevleri teslim et → +${EDU_HOMEWORK_POINTS_MAX}p`,
+      earned: hwDone,
+      chipClass: hwDone
+        ? 'bg-amber-100 text-amber-950 ring-amber-300'
+        : 'bg-slate-50 text-slate-400 ring-slate-200'
+    });
+  }
+  list.push({
+    id: 'topic',
+    label: 'Konu Tamam',
+    emoji: '🏅',
+    hint: 'Konuyu tamamladım ile kilidi aç',
+    earned: Boolean(opts.topicCompleted),
+    chipClass: opts.topicCompleted
+      ? 'bg-emerald-100 text-emerald-900 ring-emerald-300'
+      : 'bg-slate-50 text-slate-400 ring-slate-200'
+  });
+  return list;
+}
+
+export type EduCelebrateKind = 'animation' | 'homework' | 'topic';
+
+export function celebrateCopy(
+  kind: EduCelebrateKind,
+  breakdown: ReturnType<typeof progressBreakdown>
+): { title: string; subtitle: string; highlight: string } {
+  if (kind === 'animation') {
+    return {
+      title: 'Animasyon rozeti kazandın!',
+      subtitle: 'Konu animasyonunu izledin — bu başarı rozetine işlendi.',
+      highlight: `+${breakdown.animationPoints} puan · ${breakdown.badge.emoji} ${breakdown.badge.label}`
+    };
+  }
+  if (kind === 'homework') {
+    return {
+      title: breakdown.homeworkPercent >= 100 ? 'Ödev rozeti tamam!' : 'Ödev teslim edildi!',
+      subtitle:
+        breakdown.homeworkPercent >= 100
+          ? 'Bu konunun tüm ödevlerini yükledin — Kahraman rozeti senin.'
+          : 'Hocan ödevini inceleyecek. Eksik ödevleri de tamamlarsan rozeti açarsın.',
+      highlight: `Ödev %${breakdown.homeworkPercent} · ${breakdown.total}p · ${breakdown.badge.emoji} ${breakdown.badge.label}`
+    };
+  }
+  return {
+    title: 'Konu rozetin hazır!',
+    subtitle: 'Animasyon + ödev ilerlemen kayda geçti.',
+    highlight: `${breakdown.total}p · ${breakdown.badge.emoji} ${breakdown.badge.label}`
+  };
+}

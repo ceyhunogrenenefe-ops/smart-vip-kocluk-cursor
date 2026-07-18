@@ -7,6 +7,7 @@ import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import { normalizeUuidOrGenerate } from '../api/_lib/uuid.js';
 import { USER_LIST_COLUMNS, USER_LIST_OPTIONAL_COLUMNS } from '../api/_lib/list-query-columns.js';
 import { selectWithOptionalColumns } from '../api/_lib/supabase-optional-moderator.js';
+import { ensureTeacherProfileForUser } from '../api/_lib/teacher-profile.js';
 
 const USER_ROLES = ['super_admin', 'admin', 'coach', 'teacher', 'student'];
 const normalizeRoles = (raw, fallbackRole = 'student') => {
@@ -455,6 +456,15 @@ export default async function handler(req, res) {
         );
       }
 
+      const createdRoles = normalizeRoles(data.roles, data.role);
+      if (createdRoles.includes('teacher') || data.role === 'teacher') {
+        try {
+          await ensureTeacherProfileForUser(data, { actorId: actor.sub });
+        } catch (profileErr) {
+          console.error('[users] ensureTeacherProfileForUser', errorMessage(profileErr));
+        }
+      }
+
       return res.status(200).json({ data });
     }
 
@@ -519,6 +529,18 @@ export default async function handler(req, res) {
 
       const { data, error } = await updateUserRow(id, { ...body, updated_at: new Date().toISOString() });
       if (error) throw error;
+
+      const nextRoles = normalizeRoles(data.roles, data.role);
+      const prevHadTeacher = priorRoles.includes('teacher');
+      const nowTeacher = nextRoles.includes('teacher') || data.role === 'teacher';
+      if (nowTeacher && !prevHadTeacher) {
+        try {
+          await ensureTeacherProfileForUser(data, { actorId: actor.sub });
+        } catch (profileErr) {
+          console.error('[users] ensureTeacherProfileForUser patch', errorMessage(profileErr));
+        }
+      }
+
       return res.status(200).json({ data });
     }
 

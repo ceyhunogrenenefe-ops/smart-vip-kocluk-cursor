@@ -84,6 +84,8 @@ const ADMIN_HUB_MATCH = [
 
   '/kitap-siparisleri',
 
+  '/ozel-ders-talepleri',
+
   '/whatsapp',
 
   '/message-templates',

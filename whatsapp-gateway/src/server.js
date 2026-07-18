@@ -15,16 +15,31 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 
 const SILENCE_SIGNAL_SESSION_LOGS = String(process.env.SILENCE_SIGNAL_SESSION_LOGS || '1') !== '0';
-const SIGNAL_SESSION_SPAM_RE = /Closing session:\s*SessionEntry/i;
+/** libsignal / baileys gürültüsü — process stdout spam + oturum dump */
+const SIGNAL_SESSION_SPAM_RE =
+  /Closing session:\s*SessionEntry|Removing old closed session|Failed to decrypt message|Bad MAC|Session error:Error: Bad MAC/i;
+
+function shouldSilenceNoiseChunk(chunk) {
+  const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk ?? '');
+  return SIGNAL_SESSION_SPAM_RE.test(text);
+}
+
 if (SILENCE_SIGNAL_SESSION_LOGS) {
   const stdoutWrite = process.stdout.write.bind(process.stdout);
   process.stdout.write = (chunk, encoding, callback) => {
-    const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk ?? '');
-    if (SIGNAL_SESSION_SPAM_RE.test(text)) {
+    if (shouldSilenceNoiseChunk(chunk)) {
       if (typeof callback === 'function') callback();
       return true;
     }
     return stdoutWrite(chunk, encoding, callback);
+  };
+  const stderrWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk, encoding, callback) => {
+    if (shouldSilenceNoiseChunk(chunk)) {
+      if (typeof callback === 'function') callback();
+      return true;
+    }
+    return stderrWrite(chunk, encoding, callback);
   };
 }
 
@@ -187,10 +202,53 @@ function isRestartRequiredDisconnect(statusCode, message) {
 function isTransientStreamDisconnect(statusCode, message) {
   const msg = String(message || '').toLowerCase();
   if (msg.includes('stream errored')) return true;
+  if (msg.includes('connection closed')) return true;
+  if (msg.includes('connection lost')) return true;
+  if (msg.includes('timed out') || msg.includes('timeout')) return true;
   if (statusCode === DisconnectReason.timedOut) return true;
   if (statusCode === DisconnectReason.connectionLost) return true;
+  if (statusCode === DisconnectReason.connectionClosed) return true;
+  /** Boom: Connection Closed → 428 Precondition Required */
+  if (Number(statusCode) === 428) return true;
   return false;
 }
+
+function isBaileysNoiseError(err) {
+  if (!err) return false;
+  const msg = String(err?.message || err || '').toLowerCase();
+  const boomMsg = String(err?.output?.payload?.message || '').toLowerCase();
+  const status = Number(err?.output?.statusCode || err?.statusCode || 0);
+  if (msg.includes('connection closed') || boomMsg.includes('connection closed')) return true;
+  if (msg.includes('bad mac') || boomMsg.includes('bad mac')) return true;
+  if (msg.includes('failed to decrypt')) return true;
+  if (msg.includes('precondition required')) return true;
+  if (msg.includes('stream errored')) return true;
+  if (status === 428 || status === DisconnectReason.connectionClosed) return true;
+  return false;
+}
+
+process.on('unhandledRejection', (reason) => {
+  if (isBaileysNoiseError(reason)) {
+    logger.warn(
+      { errMsg: String(reason?.message || reason || '').slice(0, 160) },
+      'baileys unhandledRejection swallowed — process stays up'
+    );
+    return;
+  }
+  logger.error({ err: reason }, 'unhandledRejection');
+});
+
+process.on('uncaughtException', (err) => {
+  if (isBaileysNoiseError(err)) {
+    logger.warn(
+      { errMsg: String(err?.message || '').slice(0, 160) },
+      'baileys uncaughtException swallowed — process stays up'
+    );
+    return;
+  }
+  logger.fatal({ err }, 'uncaughtException — exiting');
+  process.exit(1);
+});
 
 function isQrScanTimeoutDisconnect(statusCode, message) {
   const msg = String(message || '').toLowerCase();
@@ -942,6 +1000,7 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
 
     sock.ev.on('creds.update', saveCreds);
     sock.ev.on('connection.update', async (update) => {
+      try {
       const cur = sessions.get(coachId);
       if (!cur || cur.generation !== generation) return;
 
@@ -1045,6 +1104,15 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
         sessionState.lastError = humanizeDisconnectError(errMsg);
         logger.warn({ coachId, code, errMsg }, 'WhatsApp disconnected — auto reconnect');
         scheduleReconnect(coachId, sessionState, generation, errMsg || String(code || 'disconnect'));
+      }
+      } catch (handlerErr) {
+        logger.warn(
+          { coachId, errMsg: String(handlerErr?.message || handlerErr || '').slice(0, 160) },
+          'connection.update handler error'
+        );
+        if (isBaileysNoiseError(handlerErr) || isTransientStreamDisconnect(null, handlerErr?.message)) {
+          scheduleReconnect(coachId, sessionState, generation, 'connection_update_handler');
+        }
       }
     });
 

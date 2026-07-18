@@ -378,12 +378,20 @@ class DatabaseService {
   // ========== ÖĞRENCİLER ==========
 
   // Tüm öğrencileri getir
-  async getStudents(institutionId?: string): Promise<StudentRow[]> {
+  async getStudents(
+    institutionId?: string,
+    opts?: { viewAsUserId?: string }
+  ): Promise<StudentRow[]> {
     const authSub = peekJwtClaims(getAuthToken())?.sub || 'anon';
-    const key = `students:${authSub}:${institutionId || '*'}`;
+    const viewAs = opts?.viewAsUserId ? String(opts.viewAsUserId).trim() : '';
+    const key = `students:${authSub}:${institutionId || '*'}:va:${viewAs || '-'}`;
     return this.dedupeGet(key, async () => {
-      const rows = await this.apiListJson<StudentRow>('/api/students', '/api/students');
-      if (!institutionId) return rows;
+      const path = viewAs
+        ? `/api/students?view_as_user_id=${encodeURIComponent(viewAs)}`
+        : '/api/students';
+      const rows = await this.apiListJson<StudentRow>(path, path);
+      // view_as: kurum filtresi özel ders öğrencilerini kesebilir — atla
+      if (!institutionId || viewAs) return rows;
       return rows.filter((s) => s.institution_id === institutionId);
     });
   }

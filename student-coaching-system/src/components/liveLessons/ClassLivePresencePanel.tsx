@@ -82,6 +82,14 @@ function ClassLivePresencePanel({ presence, loading, onStatClick }: Props) {
         <p className="text-[11px] text-slate-600 dark:text-slate-400">
           Derse katılan: <span className="font-bold text-slate-900 dark:text-slate-100">{s.joined}</span>
         </p>
+        <p className="text-[11px] text-slate-600 dark:text-slate-400">
+          Kamera açık:{' '}
+          <span className="font-bold text-slate-900 dark:text-slate-100">{s.cameras_on ?? 0}</span>
+        </p>
+        <p className="text-[11px] text-slate-600 dark:text-slate-400">
+          Mikrofon açık:{' '}
+          <span className="font-bold text-slate-900 dark:text-slate-100">{s.microphones_on ?? 0}</span>
+        </p>
         <StatButton label="🟢 Aktif" value={s.active} kind="active" onStatClick={onStatClick} />
         <StatButton label="🔴 Pasif" value={s.passive} kind="passive" onStatClick={onStatClick} />
         <StatButton label="⚪ Katılmayan" value={s.absent} kind="absent" onStatClick={onStatClick} />
@@ -106,7 +114,9 @@ function presencePanelPropsEqual(prev: Props, next: Props): boolean {
     sa.joined === sb.joined &&
     sa.active === sb.active &&
     sa.passive === sb.passive &&
-    sa.absent === sb.absent
+    sa.absent === sb.absent &&
+    (sa.cameras_on ?? 0) === (sb.cameras_on ?? 0) &&
+    (sa.microphones_on ?? 0) === (sb.microphones_on ?? 0)
   );
 }
 

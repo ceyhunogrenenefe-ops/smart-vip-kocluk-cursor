@@ -97,11 +97,28 @@ export async function listBookOrders(institutionId?: string): Promise<BookOrderR
 }
 
 export async function listBookOrderSets(institutionId?: string): Promise<BookOrderSetRow[]> {
+  const iid = String(institutionId || '').trim();
+  // Önce auth gerektirmeyen public scope — eğitim paneli 403 almasın
+  if (iid) {
+    const pub = await apiFetch(
+      `/api/book-orders?scope=public-kitap-sets&institution_id=${encodeURIComponent(iid)}`
+    );
+    if (pub.ok) {
+      const j = await pub.json().catch(() => ({}));
+      if (Array.isArray((j as { data?: unknown }).data)) {
+        return (j as { data: BookOrderSetRow[] }).data;
+      }
+    }
+  }
   const res = await apiFetch(
-    `/api/book-orders?scope=kitap-sets${institutionId ? `&institution_id=${encodeURIComponent(institutionId)}` : ''}`
+    `/api/book-orders?scope=kitap-sets${iid ? `&institution_id=${encodeURIComponent(iid)}` : ''}`
   );
   const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((j as { error?: string; hint?: string }).hint || (j as { error?: string }).error || 'Setler alınamadı');
+  if (!res.ok) {
+    // Öneri listesi opsiyonel — paneli kırma
+    console.warn('[listBookOrderSets]', (j as { error?: string }).error || res.status);
+    return [];
+  }
   return Array.isArray((j as { data?: unknown }).data) ? ((j as { data: BookOrderSetRow[] }).data) : [];
 }
 

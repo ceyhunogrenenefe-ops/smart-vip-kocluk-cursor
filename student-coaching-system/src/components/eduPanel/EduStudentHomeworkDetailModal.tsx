@@ -1,5 +1,6 @@
 import React from 'react';
-import { BookOpen, Calendar, Clapperboard, FileText, Loader2, Play, Send, X } from 'lucide-react';
+import { BookOpen, Calendar, Clapperboard, Loader2, Play, Send, X } from 'lucide-react';
+import EduHomeworkPdfLink from './EduHomeworkPdfLink';
 import type { EduHomework, EduHomeworkSubmission, EduLessonRow } from '../../types/eduPanel.types';
 import { formatEduHomeworkLabel } from '../../lib/eduPanel/eduHomeworkForm';
 import { homeworkPoolAnimationIds } from '../../lib/eduPanel/eduHomeworkStats';
@@ -29,7 +30,10 @@ export default function EduStudentHomeworkDetailModal({
 }: Props) {
   if (!open || !homework) return null;
 
-  const poolIds = homeworkPoolAnimationIds(homework);
+  const poolIds = homeworkPoolAnimationIds(homework).filter((id) => {
+    const attached = (row?.animations || []).some((a) => String(a.pool_id || '') === String(id));
+    return !attached;
+  });
   const lessonAnims = row?.animations || [];
 
   return (
@@ -72,6 +76,19 @@ export default function EduStudentHomeworkDetailModal({
               </p>
             ) : null}
           </section>
+
+          {(homework.attachment_pdf_path || homework.attachment_pdf_name || homework.attachment_pdf_url) ? (
+            <section>
+              <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+                Öğretmen PDF
+              </p>
+              <EduHomeworkPdfLink
+                homework={homework}
+                fullWidth
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-950 hover:bg-amber-100 disabled:opacity-50"
+              />
+            </section>
+          ) : null}
 
           {(poolIds.length > 0 || lessonAnims.length > 0) && (
             <section>

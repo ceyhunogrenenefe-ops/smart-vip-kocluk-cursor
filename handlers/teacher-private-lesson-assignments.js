@@ -1,7 +1,14 @@
 import { requireAuthenticatedActor, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
+import {
+  actorIsAdminLike,
+  actorIsInstitutionAdmin,
+  actorRoleSet,
+  roleSetHasAdmin,
+  roleSetHasSuperAdmin
+} from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
-import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
+import { upsertPrivateLessonAssignmentRow } from '../api/_lib/private-lesson-assignment-store.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
 
@@ -10,12 +17,6 @@ function isMissingTableError(err) {
   return /teacher_private_lesson_assignments|does not exist|schema cache|could not find the table|PGRST205|relation .* does not exist/i.test(
     msg
   );
-}
-
-async function assertAdminActor(actor) {
-  if (actor.role === 'super_admin') return true;
-  if (actor.role === 'admin' && actor.institution_id) return true;
-  return false;
 }
 
 async function loadStudent(studentId) {
@@ -46,7 +47,7 @@ function userIsTeacher(row) {
   return roles.some((r) => String(r || '').toLowerCase() === 'teacher');
 }
 
-async function validatePair(actor, studentId, teacherId) {
+async function validatePair(actor, studentId, teacherId, roleSet) {
   const student = await loadStudent(studentId);
   if (!student) return { ok: false, status: 404, error: 'Öğrenci bulunamadı.' };
 
@@ -54,7 +55,7 @@ async function validatePair(actor, studentId, teacherId) {
   if (!teacher) return { ok: false, status: 404, error: 'Öğretmen bulunamadı.' };
   if (!userIsTeacher(teacher)) return { ok: false, status: 400, error: 'Seçilen kullanıcı öğretmen değil.' };
 
-  if (actor.role === 'admin') {
+  if (roleSetHasAdmin(roleSet) && !roleSetHasSuperAdmin(roleSet)) {
     if (!hasInstitutionAccess(actor, student.institution_id)) {
       return { ok: false, status: 403, error: 'Öğrenci kurumunuzda değil.' };
     }
@@ -114,7 +115,7 @@ async function enrichRows(rows) {
   });
 }
 
-async function handleList(req, res, actor) {
+async function handleList(req, res, actor, roleSet) {
   const teacherFilter =
     typeof req.query?.teacher_id === 'string' ? req.query.teacher_id.trim() : '';
   const studentFilter =
@@ -126,7 +127,7 @@ async function handleList(req, res, actor) {
     .eq('active', true)
     .order('created_at', { ascending: false });
 
-  if (actor.role === 'admin') {
+  if (roleSetHasAdmin(roleSet) && !roleSetHasSuperAdmin(roleSet)) {
     if (!actor.institution_id) return res.status(200).json({ data: [] });
     q = q.eq('institution_id', actor.institution_id);
   }
@@ -144,48 +145,23 @@ async function handleList(req, res, actor) {
   return res.status(200).json({ data: enriched });
 }
 
-async function upsertAssignment(actor, studentId, teacherId) {
-  const check = await validatePair(actor, studentId, teacherId);
+async function upsertAssignment(actor, studentId, teacherId, roleSet) {
+  const check = await validatePair(actor, studentId, teacherId, roleSet);
   if (!check.ok) return check;
 
-  const now = new Date().toISOString();
-  const payload = {
-    institution_id: check.institution_id,
-    teacher_id: teacherId,
-    student_id: studentId,
-    active: true,
-    assigned_by: actor.sub && actor.sub !== 'anonymous' ? actor.sub : null,
-    updated_at: now
-  };
-
-  const { data: existing } = await supabaseAdmin
-    .from('teacher_private_lesson_assignments')
-    .select('id')
-    .eq('teacher_id', teacherId)
-    .eq('student_id', studentId)
-    .maybeSingle();
-
-  if (existing?.id) {
-    const { data, error } = await supabaseAdmin
-      .from('teacher_private_lesson_assignments')
-      .update(payload)
-      .eq('id', existing.id)
-      .select('*')
-      .single();
-    if (error) throw error;
-    return { ok: true, data, created: false };
+  const r = await upsertPrivateLessonAssignmentRow({
+    studentId,
+    teacherId,
+    institutionId: check.institution_id,
+    assignedBy: actor.sub
+  });
+  if (r.tableMissing) {
+    return { ok: false, status: 503, error: 'Atama tablosu henüz oluşturulmamış.' };
   }
-
-  const { data, error } = await supabaseAdmin
-    .from('teacher_private_lesson_assignments')
-    .insert({ ...payload, created_at: now })
-    .select('*')
-    .single();
-  if (error) throw error;
-  return { ok: true, data, created: true };
+  return { ok: true, data: r.data, created: r.created };
 }
 
-async function handleCreate(req, res, actor) {
+async function handleCreate(req, res, actor, roleSet) {
   const body = req.body || {};
 
   if (body.bulk === true) {
@@ -211,7 +187,7 @@ async function handleCreate(req, res, actor) {
     const errors = [];
     for (const pair of pairs) {
       try {
-        const r = await upsertAssignment(actor, pair.student_id, pair.teacher_id);
+        const r = await upsertAssignment(actor, pair.student_id, pair.teacher_id, roleSet);
         if (!r.ok) {
           errors.push({ ...pair, error: r.error || 'Atama başarısız' });
         } else {
@@ -235,13 +211,13 @@ async function handleCreate(req, res, actor) {
     return jsonError(res, 400, 'student_id ve teacher_id gerekli.');
   }
 
-  const r = await upsertAssignment(actor, studentId, teacherId);
+  const r = await upsertAssignment(actor, studentId, teacherId, roleSet);
   if (!r.ok) return jsonError(res, r.status || 400, r.error);
   const enriched = await enrichRows([r.data]);
   return res.status(r.created ? 201 : 200).json({ data: enriched[0] });
 }
 
-async function handleDelete(req, res, actor) {
+async function handleDelete(req, res, actor, roleSet) {
   const id =
     (typeof req.query?.id === 'string' ? req.query.id.trim() : '') ||
     String(req.body?.id || '').trim();
@@ -260,7 +236,7 @@ async function handleDelete(req, res, actor) {
   }
   if (!row) return jsonError(res, 404, 'Atama bulunamadı.');
 
-  if (actor.role === 'admin' && !hasInstitutionAccess(actor, row.institution_id)) {
+  if (roleSetHasAdmin(roleSet) && !roleSetHasSuperAdmin(roleSet) && !hasInstitutionAccess(actor, row.institution_id)) {
     return jsonError(res, 403, 'forbidden');
   }
 
@@ -272,19 +248,16 @@ async function handleDelete(req, res, actor) {
 export default async function handler(req, res) {
   try {
     const actor = requireAuthenticatedActor(req);
-    const roleTags = await normalizedUserRolesFromDb(actor.sub);
-    const isAdmin =
-      actor.role === 'super_admin' ||
-      actor.role === 'admin' ||
-      roleTags.includes('super_admin') ||
-      roleTags.includes('admin');
+    const roleSet = await actorRoleSet(actor);
 
-    if (!isAdmin) return jsonError(res, 403, 'forbidden');
-    if (!(await assertAdminActor(actor))) return jsonError(res, 403, 'institution_missing');
+    if (!actorIsAdminLike(actor, roleSet)) return jsonError(res, 403, 'forbidden');
+    if (!actorIsInstitutionAdmin(actor, roleSet)) {
+      return jsonError(res, 403, 'institution_missing');
+    }
 
-    if (req.method === 'GET') return handleList(req, res, actor);
-    if (req.method === 'POST') return handleCreate(req, res, actor);
-    if (req.method === 'DELETE') return handleDelete(req, res, actor);
+    if (req.method === 'GET') return handleList(req, res, actor, roleSet);
+    if (req.method === 'POST') return handleCreate(req, res, actor, roleSet);
+    if (req.method === 'DELETE') return handleDelete(req, res, actor, roleSet);
 
     return jsonError(res, 405, 'method_not_allowed');
   } catch (e) {
