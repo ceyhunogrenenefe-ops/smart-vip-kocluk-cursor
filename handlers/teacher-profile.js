@@ -25,12 +25,18 @@ function jwtHasRole(actor, role) {
   return false;
 }
 
-async function isTeacherActor(actor) {
-  if (jwtHasRole(actor, 'teacher') || String(actor.role) === 'teacher') return true;
+async function isVitrineActor(actor) {
+  if (jwtHasRole(actor, 'teacher') || jwtHasRole(actor, 'coach')) return true;
+  if (String(actor.role) === 'teacher' || String(actor.role) === 'coach') return true;
   try {
     const roles = await actorRoleSet(actor);
-    if (roles instanceof Set) return roles.has('teacher');
-    if (Array.isArray(roles)) return roles.map((r) => String(r || '').toLowerCase()).includes('teacher');
+    const list =
+      roles instanceof Set
+        ? [...roles]
+        : Array.isArray(roles)
+          ? roles.map((r) => String(r || '').toLowerCase())
+          : [];
+    return list.includes('teacher') || list.includes('coach');
   } catch (_) { /* ignore */ }
   return false;
 }
@@ -48,12 +54,12 @@ function clientIp(req) {
 export default async function handler(req, res) {
   try {
     const actor = requireAuthenticatedActor(req);
-    const teacherOk = await isTeacherActor(actor);
+    const vitrineOk = await isVitrineActor(actor);
     const adminOk = jwtHasRole(actor, 'admin') || jwtHasRole(actor, 'super_admin');
-    if (!teacherOk && !adminOk) {
+    if (!vitrineOk && !adminOk) {
       return res.status(403).json({ error: 'forbidden' });
     }
-    if (!teacherOk) return res.status(403).json({ error: 'teacher_only' });
+    if (!vitrineOk) return res.status(403).json({ error: 'teacher_or_coach_only' });
 
     const uid = String(actor.sub || '').trim();
     const { data: user, error: uErr } = await supabaseAdmin

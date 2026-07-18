@@ -172,8 +172,12 @@ export async function ensureTeacherProfileForUser(user, { actorId } = {}) {
   if (!user?.id) throw new Error('user_required');
   const roles = Array.isArray(user.roles) ? user.roles : [];
   const role = String(user.role || '');
-  const isTeacher = role === 'teacher' || roles.includes('teacher');
-  if (!isTeacher) return null;
+  const canHaveVitrine =
+    role === 'teacher' ||
+    role === 'coach' ||
+    roles.includes('teacher') ||
+    roles.includes('coach');
+  if (!canHaveVitrine) return null;
 
   const { data: existing } = await supabaseAdmin
     .from('teacher_profiles')

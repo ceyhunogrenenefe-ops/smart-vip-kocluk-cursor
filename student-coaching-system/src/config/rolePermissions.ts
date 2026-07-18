@@ -78,7 +78,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/kitap-siparisleri': ['super_admin', 'admin'],
   '/ozel-ders-talepleri': ['super_admin', 'admin'],
   '/ogretmen-profil-onaylari': ['super_admin', 'admin'],
-  '/profilimi-duzenle': ['teacher'],
+  '/profilimi-duzenle': ['teacher', 'coach'],
   '/edu-panel': ['super_admin', 'admin', 'coach', 'teacher'],
   '/edu-derslerim': ['student'],
   '/ai-agents-admin': ['super_admin', 'admin', 'teacher', 'coach'],
