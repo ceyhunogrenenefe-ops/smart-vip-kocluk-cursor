@@ -51,7 +51,7 @@ function safeExt(name, allowedExts) {
 export default async function handler(req, res) {
   try {
     const actor = requireAuthenticatedActor(req);
-    const roles = actorRoleSet(actor);
+    const roles = await actorRoleSet(actor);
     const isTeacher = roles.has('teacher') || actor.role === 'teacher';
     const isAdmin = roleSetHasAdmin(roles) || roleSetHasSuperAdmin(roles);
     if (!isTeacher && !isAdmin) return res.status(403).json({ error: 'forbidden' });
