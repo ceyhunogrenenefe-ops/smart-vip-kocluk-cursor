@@ -125,7 +125,9 @@ const PANEL_PATHS = new Set([
   '/dashboard',
   '/coach-dashboard',
   '/teacher-panel',
-  '/student-dashboard'
+  '/student-dashboard',
+  /** Koc/ogretmen vitrin profili — panel satirinda (rest'e dusmesin) */
+  '/profilimi-duzenle'
 ]);
 
 const LESSON_PATHS = new Set([
@@ -409,12 +411,8 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
   const chunks: FlatNavItem[][] = [];
   if (tags.includes('admin')) chunks.push(MENU_ADMIN);
   if (tags.includes('coach')) {
-    // Koç+öğretmen: öğretmen paneli birleşmez ama vitrin profili kalsın
-    if (tags.includes('teacher')) {
-      chunks.push([MENU_COACH[0], NAV_TEACHER_VITRINE_PROFILE, ...MENU_COACH.slice(1)]);
-    } else {
-      chunks.push(MENU_COACH);
-    }
+    // Koc (ve koc+ogretmen): vitrin profili her zaman Koc Paneli altinda
+    chunks.push([MENU_COACH[0], NAV_TEACHER_VITRINE_PROFILE, ...MENU_COACH.slice(1)]);
   }
   /** Koç paneli varken öğretmen paneli menüsü birleştirilmez */
   if (tags.includes('teacher') && !tags.includes('coach')) chunks.push(MENU_TEACHER);
@@ -477,7 +475,8 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
     if (PANEL_PATHS.has(it.path)) {
       panels.push({
         ...it,
-        icon: LayoutDashboard,
+        // Vitrine linki kendi ikonunu korusun; diger panel kokleri dashboard ikonu
+        icon: it.path === NAV_TEACHER_VITRINE_PROFILE.path ? it.icon : LayoutDashboard,
         label: it.label
       });
       continue;

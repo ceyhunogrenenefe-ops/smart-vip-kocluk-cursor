@@ -62,7 +62,13 @@ export default async function handler(req, res) {
     }
     const jwtRole = String(actor.role || '').toLowerCase();
     const jwtRoles = Array.isArray(actor.roles) ? actor.roles.map((r) => String(r || '').toLowerCase()) : [];
-    const isTeacher = roles.has('teacher') || jwtRole === 'teacher' || jwtRoles.includes('teacher');
+    const isVitrine =
+      roles.has('teacher') ||
+      roles.has('coach') ||
+      jwtRole === 'teacher' ||
+      jwtRole === 'coach' ||
+      jwtRoles.includes('teacher') ||
+      jwtRoles.includes('coach');
     const isAdmin =
       roleSetHasAdmin(roles) ||
       roleSetHasSuperAdmin(roles) ||
@@ -70,7 +76,7 @@ export default async function handler(req, res) {
       jwtRole === 'super_admin' ||
       jwtRoles.includes('admin') ||
       jwtRoles.includes('super_admin');
-    if (!isTeacher && !isAdmin) return res.status(403).json({ error: 'forbidden' });
+    if (!isVitrine && !isAdmin) return res.status(403).json({ error: 'forbidden' });
 
     if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' });
     const op = String(req.query.op || 'sign').trim();
@@ -85,7 +91,7 @@ export default async function handler(req, res) {
       .eq('id', profileUserId)
       .maybeSingle();
     if (!user) return res.status(404).json({ error: 'user_not_found' });
-    if (isTeacher && !isAdmin && String(user.id) !== String(actor.sub)) {
+    if (isVitrine && !isAdmin && String(user.id) !== String(actor.sub)) {
       return res.status(403).json({ error: 'forbidden' });
     }
 
