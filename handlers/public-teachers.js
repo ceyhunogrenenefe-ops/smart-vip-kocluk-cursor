@@ -3,7 +3,7 @@
  * GET /api/public/teachers
  * GET /api/public/teachers?slug=
  *
- * Auth yok. Yalnızca published + active + private_lesson_enabled.
+ * Auth yok. Yayında veya changes_pending (snapshot var) + active + private_lesson_enabled.
  * CORS: PUBLIC_TEACHERS_CORS_ORIGIN (virgülle birden fazla)
  */
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
@@ -40,7 +40,7 @@ export default async function handler(req, res) {
         .from('teacher_profiles')
         .select('*')
         .eq('slug', slug)
-        .eq('status', 'published')
+        .in('status', ['published', 'changes_pending'])
         .eq('is_active', true)
         .eq('private_lesson_enabled', true)
         .is('deleted_at', null)
@@ -72,7 +72,7 @@ export default async function handler(req, res) {
     const { data, error } = await supabaseAdmin
       .from('teacher_profiles')
       .select('*')
-      .eq('status', 'published')
+      .in('status', ['published', 'changes_pending'])
       .eq('is_active', true)
       .eq('private_lesson_enabled', true)
       .is('deleted_at', null)
@@ -80,10 +80,19 @@ export default async function handler(req, res) {
       .limit(100);
     if (error) throw error;
 
+    // Pasife / silinenler: slug bilinsin ki sitedeki eski statik katalog tekrar canlanmasin
+    const { data: managedRows, error: managedErr } = await supabaseAdmin
+      .from('teacher_profiles')
+      .select('slug')
+      .is('deleted_at', null)
+      .limit(500);
+    if (managedErr) throw managedErr;
+
     return res.status(200).json({
       teachers: (data || [])
         .filter((r) => r.published_snapshot)
-        .map((r) => publicCardFromSnapshot(r))
+        .map((r) => publicCardFromSnapshot(r)),
+      managed_slugs: (managedRows || []).map((r) => r.slug).filter(Boolean)
     });
   } catch (e) {
     console.error('[public-teachers]', errorMessage(e));
