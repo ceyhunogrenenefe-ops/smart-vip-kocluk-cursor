@@ -27,14 +27,31 @@ export function guestShortPageUrl(code) {
   return `${base}/d/${encodeURIComponent(c)}`;
 }
 
-/** DB CHECK yalnızca class/private — academic-study JWT içinde kalır. */
+/**
+ * DB CHECK yalnızca class/private.
+ * academic-study / meeting JWT kind'ı saklanır; storage'da class + isteğe bağlı önek kullanılır.
+ */
 function storageKindForGuestJoin(kind) {
   return kind === 'private' ? 'private' : 'class';
 }
 
+/** Meeting UUID'lerini class_sessions ile karıştırmamak için önek. */
+export function storageResourceIdForGuestJoin(kind, resourceId) {
+  const rid = String(resourceId || '').trim();
+  if (!rid) return '';
+  if (kind === 'meeting' && !rid.startsWith('meeting:')) return `meeting:${rid}`;
+  return rid;
+}
+
+export function parseMeetingStorageResourceId(resourceId) {
+  const rid = String(resourceId || '').trim();
+  if (rid.startsWith('meeting:')) return rid.slice('meeting:'.length);
+  return '';
+}
+
 /** @returns {{ code: string, url: string } | null} */
 export async function upsertGuestJoinShortCode({ kind, resourceId, token, expiresAtIso }) {
-  const rid = String(resourceId || '').trim();
+  const rid = storageResourceIdForGuestJoin(kind, resourceId);
   const tok = String(token || '').trim();
   if (!rid || !tok) return null;
   const storageKind = storageKindForGuestJoin(kind);

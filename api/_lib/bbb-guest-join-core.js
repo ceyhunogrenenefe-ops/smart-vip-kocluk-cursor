@@ -10,7 +10,7 @@ import {
   bbbStudentEtutReportLogoutUrl,
   resolveLiveBbbAttendeeCredentials
 } from './bbb.js';
-import { patchRowMeetingLinks } from './bbb-join-handler.js';
+import { patchRowMeetingLinks, patchCoachingMeetingLinks } from './bbb-join-handler.js';
 import {
   resolveConsecutiveClassBbbReuse,
   syncConsecutivePeerMeetingLinks
@@ -69,6 +69,19 @@ export function guestJoinWindowForTeacherLesson(lesson, nowMs = Date.now()) {
   return { ok: true, openFrom, openUntil };
 }
 
+export function guestJoinWindowForMeeting(meeting, nowMs = Date.now()) {
+  const startMs = meeting?.start_time ? new Date(meeting.start_time).getTime() : NaN;
+  const endMs = meeting?.end_time ? new Date(meeting.end_time).getTime() : NaN;
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+    return { ok: false, reason: 'invalid_schedule' };
+  }
+  const openFrom = startMs - GUEST_JOIN_OPEN_MINUTES_BEFORE * 60 * 1000;
+  const openUntil = endMs + GUEST_JOIN_CLOSE_MINUTES_AFTER * 60 * 1000;
+  if (nowMs < openFrom) return { ok: false, reason: 'too_early', openFrom, openUntil };
+  if (nowMs > openUntil) return { ok: false, reason: 'expired', openFrom, openUntil };
+  return { ok: true, openFrom, openUntil };
+}
+
 async function loadClassSession(id) {
   const { data, error } = await supabaseAdmin.from('class_sessions').select('*').eq('id', id).maybeSingle();
   if (error) throw error;
@@ -77,6 +90,12 @@ async function loadClassSession(id) {
 
 async function loadTeacherLesson(id) {
   const { data, error } = await supabaseAdmin.from('teacher_lessons').select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function loadMeeting(id) {
+  const { data, error } = await supabaseAdmin.from('meetings').select('*').eq('id', id).maybeSingle();
   if (error) throw error;
   return data;
 }
@@ -243,6 +262,70 @@ async function buildPrivateGuestJoinUrl(lesson, guestName) {
   throw new Error('BBB katılım bağlantısı oluşturulamadı. Lütfen panelden tekrar «Katıl» deneyin.');
 }
 
+async function buildMeetingGuestJoinUrl(meeting, guestName) {
+  if (String(meeting.status || '') === 'cancelled' || String(meeting.status || '') === 'missed') {
+    throw new Error('Bu görüşme iptal edilmiş veya kaçırılmış.');
+  }
+  const window = guestJoinWindowForMeeting(meeting);
+  if (!window.ok) {
+    if (window.reason === 'too_early') {
+      throw new Error('Görüşme henüz başlamadı. Görüşmeye 15 dakika kala tekrar deneyin.');
+    }
+    if (window.reason === 'expired') throw new Error('Bu görüşme için katılım süresi dolmuş.');
+    throw new Error('Görüşme zamanı geçersiz.');
+  }
+  if (!isBbbConfigured()) throw new Error('BBB sunucusu yapılandırılmamış.');
+
+  const [{ data: student }, { data: coach }] = await Promise.all([
+    supabaseAdmin.from('students').select('name').eq('id', meeting.student_id).maybeSingle(),
+    supabaseAdmin.from('coaches').select('name,email').eq('id', meeting.coach_id).maybeSingle()
+  ]);
+
+  const start = meeting.start_time ? new Date(meeting.start_time) : null;
+  const end = meeting.end_time ? new Date(meeting.end_time) : null;
+  let durationMinutes = 60;
+  if (start && end && !Number.isNaN(+start) && !Number.isNaN(+end)) {
+    durationMinutes = Math.max(15, Math.round((+end - +start) / 60_000));
+  }
+
+  const attendeeLink = String(meeting.meet_link || '').trim();
+  const moderatorLink = meeting.link_bbb ? String(meeting.link_bbb).trim() : null;
+  const meetingKeyPrefix = `mtgjoin${String(meeting.id || '').replace(/-/g, '')}`;
+
+  const ensured = await ensureBbbMeetingAlive({
+    attendeeLink,
+    moderatorLink,
+    meetingName: String(meeting.title || meeting.notes || 'Online görüşme'),
+    attendeeName: String(student?.name || guestName),
+    moderatorName: String(coach?.name || coach?.email || 'Koç'),
+    durationMinutes,
+    meetingKeyPrefix,
+    storedMeetingId: meeting.bbb_meeting_id || null
+  });
+
+  if (ensured.refreshed || (ensured.attendeeLink && ensured.attendeeLink !== attendeeLink)) {
+    await patchCoachingMeetingLinks(meeting.id, {
+      meeting_link: ensured.attendeeLink,
+      meeting_link_moderator: ensured.moderatorLink || ensured.attendeeLink
+    });
+  }
+
+  const { meetingId, attendeePw } = await resolveLiveBbbAttendeeCredentials({
+    ensured,
+    row: {
+      meeting_link: meeting.meet_link,
+      meeting_link_moderator: meeting.link_bbb,
+      bbb_meeting_id: meeting.bbb_meeting_id,
+      bbb_attendee_pw: meeting.bbb_attendee_pw
+    }
+  });
+
+  if (meetingId && attendeePw) {
+    return buildBbbAttendeeJoinUrl({ meetingId, attendeePassword: attendeePw, fullName: guestName });
+  }
+  throw new Error('BBB katılım bağlantısı oluşturulamadı. Lütfen panelden tekrar «Katıl» deneyin.');
+}
+
 export async function resolveGuestBbbJoinUrl({ kind, id, guestName }) {
   const name = sanitizeGuestName(guestName);
   if (kind === 'academic-study') {
@@ -259,6 +342,13 @@ export async function resolveGuestBbbJoinUrl({ kind, id, guestName }) {
     const url = await buildPrivateGuestJoinUrl(lesson, name);
     if (!url) throw new Error('Toplantı bağlantısı oluşturulamadı.');
     return { url, title: String(lesson.title || 'Canlı ders') };
+  }
+  if (kind === 'meeting') {
+    const meeting = await loadMeeting(id);
+    if (!meeting) throw new Error('Görüşme bulunamadı.');
+    const url = await buildMeetingGuestJoinUrl(meeting, name);
+    if (!url) throw new Error('Toplantı bağlantısı oluşturulamadı.');
+    return { url, title: String(meeting.title || meeting.notes || 'Online görüşme') };
   }
   const session = await loadClassSession(id);
   if (!session) throw new Error('Ders oturumu bulunamadı.');
@@ -396,6 +486,42 @@ export async function createGuestJoinShareLink({ kind, id }) {
       title: String(lesson.title || 'Canlı özel ders'),
       lessonDate: teacherLessonDate(lesson),
       lessonTime: String(lesson.start_time || '').slice(0, 5),
+      className: ''
+    });
+  }
+  if (kind === 'meeting') {
+    const meeting = await loadMeeting(id);
+    if (!meeting) throw new Error('Görüşme bulunamadı.');
+    if (String(meeting.status || '') === 'cancelled' || String(meeting.status || '') === 'missed') {
+      throw new Error('İptal edilmiş görüşme için link oluşturulamaz.');
+    }
+    const window = guestJoinWindowForMeeting(meeting);
+    const expSec = window.openUntil
+      ? Math.floor(window.openUntil / 1000)
+      : Math.floor(Date.now() / 1000) + 7 * 86400;
+    const token = signBbbGuestJoinToken({ kind: 'meeting', id, exp: expSec });
+    const start = meeting.start_time ? new Date(meeting.start_time) : null;
+    const lessonDate =
+      start && !Number.isNaN(+start)
+        ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' }).format(start)
+        : '';
+    const lessonTime =
+      start && !Number.isNaN(+start)
+        ? new Intl.DateTimeFormat('tr-TR', {
+            timeZone: 'Europe/Istanbul',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+          }).format(start)
+        : '';
+    return finalizeGuestInviteUrl({
+      kind: 'meeting',
+      id,
+      token,
+      expiresAtIso: new Date(expSec * 1000).toISOString(),
+      title: String(meeting.title || meeting.notes || 'Online görüşme'),
+      lessonDate,
+      lessonTime,
       className: ''
     });
   }

@@ -8,8 +8,16 @@ import { isNativeApp } from '../lib/nativeApp';
 import { resolveCoachRecordId } from '../lib/coachResolve';
 import { useCoachLessonsMeetingsLock } from '../lib/coachLessonsLock';
 import { CoachLessonsLockBanner } from '../components/coach/CoachLessonsLockBanner';
-import { coachingMeetingJoinUrl, isBbbJoinUrl } from '../lib/liveLessonUtils';
+import {
+  coachingMeetingJoinUrl,
+  isBbbAutoMeetingLink,
+  isBbbJoinUrl,
+  needsBbbJoinFlow
+} from '../lib/liveLessonUtils';
 import { openBbbJoin } from '../lib/bbbJoin';
+import { copyGuestJoinShareText } from '../lib/bbbGuestJoin';
+import { copyTextToClipboard } from '../lib/copyToClipboard';
+import { toast } from 'sonner';
 import type { CoachingMeetingRecord, MeetingStatus } from '../types';
 import {
   Video,
@@ -17,6 +25,7 @@ import {
   Calendar as CalendarIcon,
   ExternalLink,
   Link2,
+  Copy,
   CheckCircle,
   AlertCircle,
   BarChart3,
@@ -24,11 +33,21 @@ import {
   User,
   ChevronLeft,
   ChevronRight,
-  Download,
-  Pencil,
-  Loader2
+  Download
 } from 'lucide-react';
-import { AppModal, AppModalBody, AppModalHeader } from '../components/ui/AppModal';
+
+function meetingUsesBbbInvite(m: CoachingMeetingRecord): boolean {
+  const meet = String(m.meet_link || '').trim();
+  const bbb = String(m.link_bbb || '').trim();
+  return (
+    needsBbbJoinFlow(meet) ||
+    isBbbAutoMeetingLink(meet) ||
+    isBbbJoinUrl(meet) ||
+    needsBbbJoinFlow(bbb) ||
+    isBbbAutoMeetingLink(bbb) ||
+    isBbbJoinUrl(bbb)
+  );
+}
 
 type LiveClassOption = {
   id: string;
@@ -63,19 +82,6 @@ function meetingStatusLabel(status: MeetingStatus): string {
   if (status === 'completed') return 'Tamamlandı';
   if (status === 'missed') return 'Kaçırıldı';
   return 'Planlı';
-}
-
-function toDatetimeLocalValue(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(+d)) return '';
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function meetingDurationMinutes(m: CoachingMeetingRecord): number {
-  const ms = +new Date(m.end_time) - +new Date(m.start_time);
-  if (!Number.isFinite(ms) || ms <= 0) return 60;
-  return Math.max(15, Math.round(ms / 60_000));
 }
 
 export default function Meetings() {
@@ -113,18 +119,7 @@ export default function Meetings() {
   const [selectedDayKey, setSelectedDayKey] = useState(() => localDateKey(new Date()));
   const [pngBusy, setPngBusy] = useState(false);
 
-  const [editingMeeting, setEditingMeeting] = useState<CoachingMeetingRecord | null>(null);
-  const [editDatetimeLocal, setEditDatetimeLocal] = useState('');
-  const [editDurationMin, setEditDurationMin] = useState(60);
-  const [editMeetLink, setEditMeetLink] = useState('');
-  const [editLinkZoom, setEditLinkZoom] = useState('');
-  const [editLinkBbb, setEditLinkBbb] = useState('');
-  const [editApplyScope, setEditApplyScope] = useState<'single' | 'series'>('single');
-  const [editBusy, setEditBusy] = useState(false);
-
   const role = effectiveUser?.role || '';
-  const canEditMeetings =
-    !isStudent && (role === 'coach' || role === 'admin' || role === 'super_admin');
 
   const joinCoachingMeeting = useCallback(
     async (m: CoachingMeetingRecord) => {
@@ -134,7 +129,7 @@ export default function Meetings() {
         return;
       }
       try {
-        if (isBbbJoinUrl(url)) {
+        if (isBbbJoinUrl(url) || isBbbAutoMeetingLink(url) || needsBbbJoinFlow(url)) {
           await openBbbJoin('meetings', m.id);
         } else {
           window.open(url, '_blank', 'noopener,noreferrer');
@@ -145,6 +140,25 @@ export default function Meetings() {
     },
     [role]
   );
+
+  const copyMeetingInviteLink = useCallback(async (m: CoachingMeetingRecord) => {
+    try {
+      if (meetingUsesBbbInvite(m)) {
+        await copyGuestJoinShareText('meeting', m.id);
+        toast.success('Kopyalandı — kısa davet linki panoya alındı');
+        return;
+      }
+      const url = String(m.meet_link || m.link_zoom || '').trim();
+      if (!url) {
+        setError('Kopyalanacak bağlantı yok.');
+        return;
+      }
+      await copyTextToClipboard(url);
+      toast.success('Bağlantı panoya kopyalandı');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
 
   const hasManualMeetingLinks =
     linkZoomDraft.trim().length > 0 || linkBbbDraft.trim().length > 0;
@@ -723,62 +737,6 @@ export default function Meetings() {
     }
   };
 
-  const openEditMeeting = (m: CoachingMeetingRecord) => {
-    setEditingMeeting(m);
-    setEditDatetimeLocal(toDatetimeLocalValue(m.start_time));
-    setEditDurationMin(meetingDurationMinutes(m));
-    setEditMeetLink(m.meet_link || '');
-    setEditLinkZoom(m.link_zoom || '');
-    setEditLinkBbb(m.link_bbb || '');
-    setEditApplyScope('single');
-    setError(null);
-  };
-
-  const editingSeriesPeerCount = useMemo(() => {
-    if (!editingMeeting?.series_id) return 0;
-    return meetings.filter(
-      (x) => x.series_id === editingMeeting.series_id && x.status === 'planned'
-    ).length;
-  }, [editingMeeting, meetings]);
-
-  const saveEditMeeting = async () => {
-    if (!editingMeeting) return;
-    const startJs = editDatetimeLocal ? new Date(editDatetimeLocal) : null;
-    if (!startJs || Number.isNaN(+startJs)) {
-      setError('Geçerli bir başlangıç zamanı seçin.');
-      return;
-    }
-    setEditBusy(true);
-    setError(null);
-    try {
-      const canChangeSchedule =
-        editingMeeting.status === 'planned' || editApplyScope === 'series';
-      const body: Record<string, unknown> = {
-        meeting_id: editingMeeting.id,
-        apply_scope: editApplyScope,
-        meet_link: editMeetLink.trim() || undefined,
-        link_zoom: editLinkZoom.trim() || null,
-        link_bbb: editLinkBbb.trim() || null
-      };
-      if (canChangeSchedule) {
-        body.start_datetime = startJs.toISOString();
-        body.duration_minutes = editDurationMin;
-      }
-      const res = await apiFetch('/api/meetings?op=update', {
-        method: 'POST',
-        body: JSON.stringify(body)
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error || 'Güncelleme başarısız');
-      setEditingMeeting(null);
-      await loadMeetings();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setEditBusy(false);
-    }
-  };
-
   if (!effectiveUser) return null;
 
   const lessonsLock = useCoachLessonsMeetingsLock(effectiveUser, coaches, students);
@@ -1309,16 +1267,6 @@ export default function Meetings() {
                               Katıl
                             </button>
                           ) : null}
-                          {canEditMeetings ? (
-                            <button
-                              type="button"
-                              onClick={() => openEditMeeting(m)}
-                              className="w-full inline-flex items-center justify-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1.5 text-[11px] font-semibold text-indigo-800 hover:bg-indigo-100"
-                            >
-                              <Pencil className="w-3 h-3" />
-                              Düzenle
-                            </button>
-                          ) : null}
                         </div>
                       );
                     })
@@ -1385,25 +1333,13 @@ export default function Meetings() {
                         {m.status}
                       </span>
                     </span>
-                    <div className="flex flex-wrap gap-2">
-                      {canEditMeetings ? (
-                        <button
-                          type="button"
-                          onClick={() => openEditMeeting(m)}
-                          className="text-indigo-700 font-medium hover:underline inline-flex items-center gap-0.5"
-                        >
-                          <Pencil className="w-3 h-3" />
-                          Düzenle
-                        </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={() => void joinCoachingMeeting(m)}
-                        className="text-emerald-700 font-medium hover:underline"
-                      >
-                        Bağlantı
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void joinCoachingMeeting(m)}
+                      className="text-emerald-700 font-medium hover:underline"
+                    >
+                      Bağlantı
+                    </button>
                   </div>
                 ))}
               </div>
@@ -1490,14 +1426,14 @@ export default function Meetings() {
                   ) : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {canEditMeetings ? (
+                  {!isStudent && (m.meet_link || m.link_bbb || m.link_zoom) ? (
                     <button
                       type="button"
-                      onClick={() => openEditMeeting(m)}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-800 text-sm font-medium hover:bg-indigo-100"
+                      onClick={() => void copyMeetingInviteLink(m)}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50"
                     >
-                      <Pencil className="w-4 h-4" />
-                      Düzenle
+                      <Copy className="w-4 h-4" />
+                      {meetingUsesBbbInvite(m) ? 'Davet linki' : 'Linki kopyala'}
                     </button>
                   ) : null}
                   {coachingMeetingJoinUrl(m, effectiveUser?.role || 'student') ? (
@@ -1521,164 +1457,11 @@ export default function Meetings() {
                       Zoom
                     </a>
                   ) : null}
-                  {isStudent && m.link_bbb && m.link_bbb !== m.meet_link ? (
-                    <a
-                      href={m.link_bbb}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-violet-600 text-white text-sm font-medium"
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                      BBB
-                    </a>
-                  ) : null}
                 </div>
               </div>
             ))}
         </div>
       </div>
-
-      {editingMeeting ? (
-        <AppModal open onClose={() => !editBusy && setEditingMeeting(null)} panelClassName="max-w-lg" align="center">
-          <AppModalHeader>
-            <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
-              <Pencil className="w-5 h-5 text-indigo-600" />
-              Görüşmeyi düzenle
-            </h2>
-            <button
-              type="button"
-              disabled={editBusy}
-              onClick={() => setEditingMeeting(null)}
-              className="text-sm text-slate-500 hover:text-slate-800"
-            >
-              Kapat
-            </button>
-          </AppModalHeader>
-          <AppModalBody className="space-y-4">
-            {editingMeeting.status !== 'planned' ? (
-              <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                Bu oturum tamamlanmış veya kaçırılmış. Saat değişmez; bağlantıları güncelleyebilirsiniz. Seri
-                seçerseniz yalnızca planlı oturumların saati güncellenir.
-              </p>
-            ) : (
-              <p className="text-sm text-slate-600">
-                Saat, süre ve katılım linklerini güncelleyin.
-              </p>
-            )}
-
-            {editingMeeting.series_id && editingSeriesPeerCount > 1 ? (
-              <fieldset className="space-y-2 rounded-lg border border-violet-200 bg-violet-50/50 p-3">
-                <legend className="px-1 text-sm font-medium text-violet-900">Düzenleme kapsamı</legend>
-                <label className="flex cursor-pointer items-start gap-2 text-sm">
-                  <input
-                    type="radio"
-                    name="meetingEditScope"
-                    checked={editApplyScope === 'single'}
-                    onChange={() => setEditApplyScope('single')}
-                    className="mt-0.5"
-                  />
-                  <span>
-                    <span className="font-medium text-slate-800">Yalnızca bu oturum</span>
-                    <span className="block text-xs text-slate-500">
-                      {new Date(editingMeeting.start_time).toLocaleString('tr-TR')}
-                    </span>
-                  </span>
-                </label>
-                <label className="flex cursor-pointer items-start gap-2 text-sm">
-                  <input
-                    type="radio"
-                    name="meetingEditScope"
-                    checked={editApplyScope === 'series'}
-                    onChange={() => setEditApplyScope('series')}
-                    className="mt-0.5"
-                  />
-                  <span>
-                    <span className="font-medium text-slate-800">
-                      Serinin tamamı ({editingSeriesPeerCount} planlı oturum)
-                    </span>
-                    <span className="block text-xs text-slate-500">
-                      Saat ve link tüm planlı oturumlara uygulanır; her oturumun tarihi ayrı kalır.
-                    </span>
-                  </span>
-                </label>
-              </fieldset>
-            ) : null}
-
-            <label className="block text-sm">
-              <span className="text-slate-600">Başlangıç (tarih & saat)</span>
-              <input
-                type="datetime-local"
-                value={editDatetimeLocal}
-                onChange={(e) => setEditDatetimeLocal(e.target.value)}
-                disabled={editingMeeting.status !== 'planned' && editApplyScope === 'single'}
-                className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 disabled:bg-slate-100"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-600">Süre (dakika)</span>
-              <input
-                type="number"
-                min={15}
-                step={5}
-                value={editDurationMin}
-                onChange={(e) => setEditDurationMin(Math.max(15, Number(e.target.value) || 60))}
-                disabled={editingMeeting.status !== 'planned' && editApplyScope === 'single'}
-                className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 disabled:bg-slate-100"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-600">Ana bağlantı (Meet / BBB öğrenci)</span>
-              <input
-                type="url"
-                value={editMeetLink}
-                onChange={(e) => setEditMeetLink(e.target.value)}
-                placeholder="https://…"
-                className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-600">Zoom (isteğe bağlı)</span>
-              <input
-                type="url"
-                value={editLinkZoom}
-                onChange={(e) => setEditLinkZoom(e.target.value)}
-                placeholder="https://…"
-                className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-600">BBB moderatör (isteğe bağlı)</span>
-              <input
-                type="url"
-                value={editLinkBbb}
-                onChange={(e) => setEditLinkBbb(e.target.value)}
-                placeholder="https://…"
-                className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2"
-              />
-            </label>
-
-            <div className="flex flex-wrap gap-2 pt-1">
-              <button
-                type="button"
-                disabled={editBusy}
-                onClick={() => void saveEditMeeting()}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-60"
-              >
-                {editBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                Kaydet
-              </button>
-              <button
-                type="button"
-                disabled={editBusy}
-                onClick={() => setEditingMeeting(null)}
-                className="px-4 py-2 rounded-lg border border-slate-200 text-slate-700"
-              >
-                Vazgeç
-              </button>
-            </div>
-          </AppModalBody>
-        </AppModal>
-      ) : null}
     </div>
   );
 }

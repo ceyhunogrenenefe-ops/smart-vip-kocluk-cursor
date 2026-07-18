@@ -77,6 +77,156 @@ function splitVeliProgramAdi(s) {
     .filter(Boolean);
 }
 
+/** Kayıt formu henüz doldurulmadan yazılan geçici sözleşme alanları — veli formuna basılmaz. */
+function isRegFormPlaceholderName(ad, soyad, kind) {
+  const a = String(ad || '').trim().toLocaleLowerCase('tr-TR');
+  const s = String(soyad || '').trim().toLocaleLowerCase('tr-TR');
+  if (kind === 'ogrenci') {
+    return (a === 'kayıt' || a === 'kayit') && s.includes('bekleniyor');
+  }
+  if (kind === 'veli') {
+    return a === 'veli' && s.includes('bekleniyor');
+  }
+  return false;
+}
+
+function isRegFormPlaceholderPhone(tel) {
+  const d = String(tel || '').replace(/\D/g, '');
+  return !d || d === '05000000000' || d === '5000000000';
+}
+
+function isRegFormPlaceholderAdres(adres) {
+  const a = String(adres || '').trim().toLocaleLowerCase('tr-TR');
+  return !a || a.includes('kayıt formunda tamamlanacak') || a.includes('kayit formunda tamamlanacak');
+}
+
+function splitStoredAdresParts(adres) {
+  const raw = String(adres || '').trim();
+  if (!raw || isRegFormPlaceholderAdres(raw)) {
+    return { il: '', ilce: '', adres_aciklama: '' };
+  }
+  const parts = raw.split(/\s*·\s*/).map((x) => x.trim()).filter(Boolean);
+  if (parts.length >= 3) {
+    return {
+      il: parts[0],
+      ilce: parts[1],
+      adres_aciklama: parts.slice(2).join(' · ')
+    };
+  }
+  if (parts.length === 2) {
+    return { il: parts[0], ilce: parts[1], adres_aciklama: '' };
+  }
+  return { il: '', ilce: '', adres_aciklama: raw };
+}
+
+async function buildRegistrationHintForVeli(row) {
+  const program_adi = String(row.program_adi || '').trim();
+  const programlar = splitVeliProgramAdi(program_adi);
+  const hint = {
+    program_adi: program_adi || null,
+    programlar: programlar.length ? programlar : null,
+    sinif: row.sinif != null && String(row.sinif).trim() !== '' ? String(row.sinif) : null,
+    baslangic_tarihi: row.baslangic_tarihi || null,
+    bitis_tarihi: row.bitis_tarihi || null,
+    ucret: row.ucret,
+    para_birimi: resolveRowParaBirimi(row),
+    taksit_sayisi: row.taksit_sayisi
+  };
+
+  let ogrenci_ad = String(row.ogrenci_ad || '').trim();
+  let ogrenci_soyad = String(row.ogrenci_soyad || '').trim();
+  let veli_ad = String(row.veli_ad || '').trim();
+  let veli_soyad = String(row.veli_soyad || '').trim();
+  let telefon = String(row.telefon || '').trim();
+  let adres = String(row.adres || '').trim();
+  let eposta = '';
+  let ogrenci_tel = '';
+  let dogum_tarihi = '';
+  let okul_adi = '';
+
+  const studentId = String(row.student_id || '').trim();
+  if (studentId) {
+    try {
+      const { data: st } = await supabaseAdmin
+        .from('students')
+        .select('name,parent_name,parent_phone,phone,class_level,email,birth_date,school')
+        .eq('id', studentId)
+        .maybeSingle();
+      if (st) {
+        const op = splitAdSoyad(st.name);
+        const vp = splitAdSoyad(st.parent_name || '');
+        if (
+          (!ogrenci_ad || isRegFormPlaceholderName(ogrenci_ad, ogrenci_soyad, 'ogrenci')) &&
+          op.ad
+        ) {
+          ogrenci_ad = op.ad;
+          ogrenci_soyad = op.soyad || ogrenci_soyad;
+        }
+        if ((!veli_ad || isRegFormPlaceholderName(veli_ad, veli_soyad, 'veli')) && vp.ad) {
+          veli_ad = vp.ad;
+          veli_soyad = vp.soyad || veli_soyad;
+        }
+        const parentPhone = String(st.parent_phone || '').trim();
+        const studentPhone = String(st.phone || '').trim();
+        if (isRegFormPlaceholderPhone(telefon) && parentPhone) telefon = parentPhone;
+        if (studentPhone) ogrenci_tel = studentPhone;
+        if (st.email) eposta = String(st.email).trim();
+        if (st.birth_date) dogum_tarihi = String(st.birth_date).slice(0, 10);
+        if (st.school) okul_adi = String(st.school).trim();
+        if (!hint.sinif && st.class_level != null && String(st.class_level).trim() !== '') {
+          hint.sinif = String(st.class_level);
+        }
+      }
+    } catch {
+      /* öğrenci kartı yoksa sözleşme alanlarıyla devam */
+    }
+  }
+
+  const ogrenciUserId = String(row.ogrenci_user_id || '').trim();
+  if (ogrenciUserId && (isRegFormPlaceholderName(ogrenci_ad, ogrenci_soyad, 'ogrenci') || !ogrenci_ad)) {
+    try {
+      const { data: ur } = await supabaseAdmin
+        .from('users')
+        .select('name,phone,email')
+        .eq('id', ogrenciUserId)
+        .maybeSingle();
+      if (ur) {
+        const up = splitAdSoyad(ur.name);
+        if (up.ad) ogrenci_ad = up.ad;
+        if (up.soyad) ogrenci_soyad = up.soyad;
+        if (isRegFormPlaceholderPhone(telefon) && ur.phone) telefon = String(ur.phone).trim();
+        if (!eposta && ur.email) eposta = String(ur.email).trim();
+      }
+    } catch {
+      /* yoksay */
+    }
+  }
+
+  if (!isRegFormPlaceholderName(ogrenci_ad, ogrenci_soyad, 'ogrenci')) {
+    if (ogrenci_ad) hint.ogrenci_ad = ogrenci_ad;
+    if (ogrenci_soyad) hint.ogrenci_soyad = ogrenci_soyad;
+  }
+  if (!isRegFormPlaceholderName(veli_ad, veli_soyad, 'veli')) {
+    if (veli_ad) hint.veli_ad = veli_ad;
+    if (veli_soyad) hint.veli_soyad = veli_soyad;
+  }
+  if (!isRegFormPlaceholderPhone(telefon)) {
+    hint.veli_tel = telefon;
+    if (!ogrenci_tel) hint.ogrenci_tel = telefon;
+  }
+  if (ogrenci_tel) hint.ogrenci_tel = ogrenci_tel;
+  if (eposta) hint.eposta = eposta;
+  if (dogum_tarihi) hint.dogum_tarihi = dogum_tarihi;
+  if (okul_adi) hint.okul_adi = okul_adi;
+
+  const adresParts = splitStoredAdresParts(adres);
+  if (adresParts.il) hint.il = adresParts.il;
+  if (adresParts.ilce) hint.ilce = adresParts.ilce;
+  if (adresParts.adres_aciklama) hint.adres_aciklama = adresParts.adres_aciklama;
+
+  return hint;
+}
+
 function parseVeliProgramForms(body) {
   const rawArr = body.program_formlar;
   if (Array.isArray(rawArr) && rawArr.length) {
@@ -370,7 +520,7 @@ export default async function handler(req, res) {
       const { data: row, error } = await supabaseAdmin
         .from('parent_sign_contracts')
         .select(
-          'id,merged_html,contract_number,status,signed_at,institution_id,preset_id,signature_png_base64,kayit_formu_json,program_adi,sinif,baslangic_tarihi,bitis_tarihi,ucret,taksit_sayisi,para_birimi'
+          'id,merged_html,contract_number,status,signed_at,institution_id,preset_id,signature_png_base64,kayit_formu_json,program_adi,sinif,baslangic_tarihi,bitis_tarihi,ucret,taksit_sayisi,para_birimi,ogrenci_ad,ogrenci_soyad,veli_ad,veli_soyad,telefon,adres,student_id,ogrenci_user_id'
         )
         .eq('signing_token', signingToken)
         .maybeSingle();
@@ -404,6 +554,7 @@ export default async function handler(req, res) {
           program_icerik_href = resolveOptionalDocUrl(pr.program_icerik_url);
         }
       }
+      const registration_hint = await buildRegistrationHintForVeli(row);
       // Veli sayfası ücret sonrası güncellensin; CDN/tarayıcı GET önbelleği imzayı geciktirmesin.
       res.setHeader('Cache-Control', 'private, no-store, no-cache, must-revalidate, max-age=0');
       res.setHeader('Pragma', 'no-cache');
@@ -422,15 +573,7 @@ export default async function handler(req, res) {
           satis_doc_href,
           program_icerik_href,
           registration_phase: String(j.phase || '') || null,
-          registration_hint: {
-            program_adi: row.program_adi,
-            sinif: row.sinif,
-            baslangic_tarihi: row.baslangic_tarihi,
-            bitis_tarihi: row.bitis_tarihi,
-            ucret: row.ucret,
-            para_birimi: resolveRowParaBirimi(row),
-            taksit_sayisi: row.taksit_sayisi
-          }
+          registration_hint
         }
       });
     } catch (e) {

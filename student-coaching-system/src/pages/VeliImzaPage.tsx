@@ -149,10 +149,27 @@ export default function VeliImzaPage() {
       .map((p) => String(p || '').trim())
       .filter((p) => VELI_KAYIT_PROGRAM_SECENEKLERI.includes(p))
       .slice(0, VELI_KAYIT_MAX_PROGRAMS);
+    const pick = (current: string, next: unknown) => {
+      if (String(current || '').trim()) return current;
+      const v = String(next ?? '').trim();
+      return v || current;
+    };
     setRf((f) => ({
       ...f,
       program_forms: f.program_forms.length ? f.program_forms : hintedPrograms,
-      sinif_form: f.sinif_form.trim() ? f.sinif_form : String(regHint.sinif || '')
+      sinif_form: pick(f.sinif_form, regHint.sinif),
+      ogrenci_ad: pick(f.ogrenci_ad, regHint.ogrenci_ad),
+      ogrenci_soyad: pick(f.ogrenci_soyad, regHint.ogrenci_soyad),
+      veli_ad: pick(f.veli_ad, regHint.veli_ad),
+      veli_soyad: pick(f.veli_soyad, regHint.veli_soyad),
+      veli_tel: pick(f.veli_tel, regHint.veli_tel),
+      ogrenci_tel: pick(f.ogrenci_tel, regHint.ogrenci_tel || regHint.veli_tel),
+      eposta: pick(f.eposta, regHint.eposta),
+      dogum_tarihi: pick(f.dogum_tarihi, regHint.dogum_tarihi),
+      okul_adi: pick(f.okul_adi, regHint.okul_adi),
+      il: pick(f.il, regHint.il),
+      ilce: pick(f.ilce, regHint.ilce),
+      adres_aciklama: pick(f.adres_aciklama, regHint.adres_aciklama)
     }));
   }, [needsStudentForm, regHint]);
 
@@ -413,7 +430,8 @@ export default function VeliImzaPage() {
               <div className="rounded-2xl border border-white/10 bg-white text-slate-900 shadow-2xl p-4 mb-5 space-y-3 text-sm">
                 <p className="text-slate-700 font-semibold">Kayıt bilgisi gönder</p>
                 <p className="text-xs text-slate-500">
-                  Bilgilerinizi iletin; kurum ücret ve taksiti girdikten sonra bu bağlantıda e-sözleşme görünür ve
+                  Kurumun önceden girdiği veya öğrenci kartındaki bilgiler formda otomatik doludur; eksik alanları
+                  tamamlayıp gönderin. Kurum ücret ve taksiti girdikten sonra bu bağlantıda e-sözleşme görünür ve
                   imzalayabilirsiniz. <strong>Zorunlu alanlar:</strong> öğrenci adı/soyadı, veli adı/soyadı, öğrenci ve
                   veli telefonu (en az 10 rakam), e-posta, program seçimi (en fazla 2), adres, ilçe ve il. Bu alanlar doldurulmadan
                   form gönderilmez. Aşağıdaki onay satırlarındaki <span className="text-blue-700">mavi bağlantılar</span> ile

@@ -1,6 +1,7 @@
 import { requireAuthenticatedActor } from './auth.js';
 import { supabaseAdmin } from './supabase-admin.js';
 import { errorMessage } from './error-msg.js';
+import { updateOneOptionalModerator } from './supabase-optional-moderator.js';
 import {
   ensureBbbMeetingAlive,
   isBbbJoinUrl,
@@ -18,8 +19,7 @@ import {
   getBbbRecordingPlaybackUrlForMeetingIds,
   collectBbbMeetingIdsForRecording,
   bbbStudentEtutReportLogoutUrl,
-  bbbTeacherPostLessonLogoutUrl,
-  rewriteBbbJoinUrlToConfiguredHost
+  bbbTeacherPostLessonLogoutUrl
 } from './bbb.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
@@ -111,12 +111,10 @@ export async function handleBbbJoinGet(req, res, config) {
       ctx.storedMeetingId != null && String(ctx.storedMeetingId).trim()
         ? String(ctx.storedMeetingId).trim()
         : row.bbb_meeting_id;
-    const joinAttendeeLink = rewriteBbbJoinUrlToConfiguredHost(
-      ctx.attendeeLinkOverride != null ? String(ctx.attendeeLinkOverride) : attendeeLink
-    );
-    const joinModeratorLink = rewriteBbbJoinUrlToConfiguredHost(
-      ctx.moderatorLinkOverride != null ? ctx.moderatorLinkOverride : moderatorLink
-    );
+    const joinAttendeeLink =
+      ctx.attendeeLinkOverride != null ? String(ctx.attendeeLinkOverride) : attendeeLink;
+    const joinModeratorLink =
+      ctx.moderatorLinkOverride != null ? ctx.moderatorLinkOverride : moderatorLink;
     const ensured = await ensureBbbMeetingAlive({
       attendeeLink: joinAttendeeLink,
       moderatorLink: joinModeratorLink,
@@ -136,19 +134,9 @@ export async function handleBbbJoinGet(req, res, config) {
       ...(ensured.attendeePW ? { bbb_attendee_pw: ensured.attendeePW } : {})
     };
 
-    const hostRewritten =
-      (ensured.attendeeLink && ensured.attendeeLink !== attendeeLink) ||
-      (ensured.moderatorLink &&
-        joinModeratorLink &&
-        ensured.moderatorLink !== String(joinModeratorLink || '').trim());
-
-    if (ensured.refreshed || hostRewritten) {
+    if (ensured.refreshed) {
       await config.patchLinks(id, linksPatch);
-    } else if (
-      ensured.meetingId &&
-      (!String(row.bbb_meeting_id || '').trim() ||
-        String(row.bbb_meeting_id || '').trim() !== String(ensured.meetingId || '').trim())
-    ) {
+    } else if (ensured.meetingId && !String(row.bbb_meeting_id || '').trim()) {
       await config.patchLinks(id, {
         meeting_link: ensured.attendeeLink,
         ...(ensured.moderatorLink ? { meeting_link_moderator: ensured.moderatorLink } : {}),
@@ -213,7 +201,7 @@ export async function handleBbbJoinGet(req, res, config) {
     }
 
     return res.status(200).json({
-      url: rewriteBbbJoinUrlToConfiguredHost(url),
+      url,
       refreshed: ensured.refreshed,
       provider: 'bbb',
       meeting_id: ensured.meetingId || null
@@ -224,26 +212,30 @@ export async function handleBbbJoinGet(req, res, config) {
 }
 
 export async function patchRowMeetingLinks(table, id, links) {
-  const base = {
-    meeting_link: links.meeting_link
+  const patch = {
+    meeting_link: links.meeting_link,
+    updated_at: new Date().toISOString()
   };
-  if (links.meeting_link_moderator) base.meeting_link_moderator = links.meeting_link_moderator;
-  if (links.bbb_meeting_id) base.bbb_meeting_id = links.bbb_meeting_id;
-  if (links.bbb_attendee_pw) base.bbb_attendee_pw = links.bbb_attendee_pw;
+  if (links.meeting_link_moderator) patch.meeting_link_moderator = links.meeting_link_moderator;
+  if (links.bbb_meeting_id) patch.bbb_meeting_id = links.bbb_meeting_id;
+  if (links.bbb_attendee_pw) patch.bbb_attendee_pw = links.bbb_attendee_pw;
 
-  const tryUpdate = async (patch) => {
-    const { error } = await supabaseAdmin.from(table).update(patch).eq('id', id);
-    return error;
-  };
-
-  let error = await tryUpdate({ ...base, updated_at: new Date().toISOString() });
-  if (error && /updated_at|PGRST204|schema cache/i.test(errorMessage(error))) {
-    error = await tryUpdate(base);
+  // Eski prod şemasında meeting_link_moderator / bbb_* kolonları olmayabilir.
+  const { error } = await updateOneOptionalModerator(table, patch, 'id', id);
+  if (error) {
+    const msg = errorMessage(error);
+    if (
+      /meeting_link_moderator|bbb_meeting_id|bbb_attendee_pw|PGRST204|schema cache|does not exist/i.test(
+        msg
+      )
+    ) {
+      const { meeting_link_moderator: _m, bbb_meeting_id: _b, bbb_attendee_pw: _p, ...core } = patch;
+      const { error: e2 } = await supabaseAdmin.from(table).update(core).eq('id', id);
+      if (e2) throw e2;
+      return;
+    }
+    throw error;
   }
-  if (error && /meeting_link_moderator|bbb_meeting_id|bbb_attendee_pw|PGRST204|schema cache/i.test(errorMessage(error))) {
-    error = await tryUpdate({ meeting_link: base.meeting_link });
-  }
-  if (error) throw error;
 }
 
 /**
@@ -341,14 +333,11 @@ export async function handleBbbRecordingGet(req, res, config) {
 }
 
 export async function patchRowRecordingLink(table, id, recordingLink) {
-  const base = { recording_link: recordingLink };
-  let { error } = await supabaseAdmin
-    .from(table)
-    .update({ ...base, updated_at: new Date().toISOString() })
-    .eq('id', id);
-  if (error && /updated_at|PGRST204|schema cache/i.test(errorMessage(error))) {
-    ({ error } = await supabaseAdmin.from(table).update(base).eq('id', id));
-  }
+  const patch = {
+    recording_link: recordingLink,
+    updated_at: new Date().toISOString()
+  };
+  const { error } = await supabaseAdmin.from(table).update(patch).eq('id', id);
   if (error) {
     const msg = errorMessage(error);
     if (/recording_link|PGRST204|schema cache/i.test(msg)) return;

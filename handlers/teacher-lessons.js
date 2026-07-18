@@ -33,6 +33,9 @@ async function actorRoleTagSet(actor) {
 }
 
 function respondSupabaseError(res, err) {
+  if (isTeacherLessonsBbbColumnsMissingError(err)) {
+    return res.status(503).json(teacherLessonsBbbColumnsMissingBody());
+  }
   const { status, body } = statusAndBodyFromSupabaseError(err);
   return res.status(status).json(body);
 }
@@ -43,6 +46,20 @@ const teacherLessonsMissingBody = () => ({
   code: 'teacher_lessons_table_missing',
   hint: 'teacher_lessons_sql_missing'
 });
+
+const teacherLessonsBbbColumnsMissingBody = () => ({
+  error:
+    'Veritabanında `teacher_lessons.bbb_meeting_id` / `bbb_attendee_pw` kolonları yok. Supabase → SQL Editor’da `student-coaching-system/sql/RUN_IN_SUPABASE_teacher_lessons_bbb_columns.sql` (veya `2026-07-16-teacher-lessons-bbb-columns.sql`) dosyasını çalıştırın; ardından şema yenilenince sayfayı yenileyin.',
+  code: 'teacher_lessons_bbb_columns_missing',
+  hint: 'teacher_lessons_bbb_columns_sql_missing'
+});
+
+function isTeacherLessonsBbbColumnsMissingError(err) {
+  const msg = `${errorMessage(err)} ${err?.details || ''} ${err?.hint || ''}`;
+  return /teacher_lessons\.bbb_meeting_id|teacher_lessons\.bbb_attendee_pw|column\s+bbb_meeting_id\s+does not exist|column\s+bbb_attendee_pw\s+does not exist/i.test(
+    msg
+  );
+}
 
 const isAuthFailureMessage = (msg) =>
   ['Missing token', 'Invalid token', 'Invalid signature', 'Token expired'].includes(String(msg || ''));
@@ -344,6 +361,9 @@ async function handleList(req, res) {
   } catch (e) {
     const msg = errorMessage(e);
     if (isAuthFailureMessage(msg)) return jsonError(res, 401, msg);
+    if (isTeacherLessonsBbbColumnsMissingError(e)) {
+      return res.status(503).json(teacherLessonsBbbColumnsMissingBody());
+    }
     return jsonError(res, 500, msg);
   }
 }
