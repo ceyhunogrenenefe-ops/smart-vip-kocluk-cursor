@@ -84,6 +84,7 @@ import EventsPage from './pages/EventsPage';
 import BookOrdersPage from './pages/BookOrdersPage';
 import OzelDersTalepleriPage from './pages/OzelDersTalepleriPage';
 import TeacherVitrineProfilePage from './pages/TeacherVitrineProfilePage';
+import TeacherAvailabilityPage from './pages/TeacherAvailabilityPage';
 import TeacherProfileApprovalsPage from './pages/TeacherProfileApprovalsPage';
 import KitapciPortalPage from './pages/KitapciPortalPage';
 import TeacherEduPanelPage from './pages/eduPanel/TeacherEduPanelPage';
@@ -401,6 +402,14 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/profilimi-duzenle')}>
                 <Layout>
                   <TeacherVitrineProfilePage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/musaitlik-takvimim" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/musaitlik-takvimim')}>
+                <Layout>
+                  <TeacherAvailabilityPage />
                 </Layout>
               </ProtectedRoute>
             } />

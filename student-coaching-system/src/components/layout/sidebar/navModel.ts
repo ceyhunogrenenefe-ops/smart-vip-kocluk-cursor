@@ -66,6 +66,13 @@ export const NAV_TEACHER_VITRINE_PROFILE: FlatNavItem = {
   label: 'Profilimi Düzenle'
 };
 
+/** Öğretmen — özel ders müsaitlik takvimi */
+export const NAV_TEACHER_AVAILABILITY: FlatNavItem = {
+  path: '/musaitlik-takvimim',
+  icon: CalendarDays,
+  label: 'Müsaitlik Takvimim'
+};
+
 /** Öğrenci — Akademik Merkez (Öğrenci Paneli üstünde, tek link) */
 export const STUDENT_NAV_ACADEMIC_CENTER: FlatNavItem = {
   path: '/academic-center',
@@ -127,7 +134,8 @@ const PANEL_PATHS = new Set([
   '/teacher-panel',
   '/student-dashboard',
   /** Koc/ogretmen vitrin profili — panel satirinda (rest'e dusmesin) */
-  '/profilimi-duzenle'
+  '/profilimi-duzenle',
+  '/musaitlik-takvimim'
 ]);
 
 const LESSON_PATHS = new Set([
@@ -363,6 +371,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
   const MENU_TEACHER: FlatNavItem[] = [
     { path: '/teacher-panel', icon: LayoutDashboard, label: 'Öğretmen Paneli' },
     NAV_TEACHER_VITRINE_PROFILE,
+    NAV_TEACHER_AVAILABILITY,
     { path: '/teacher-solution-appointments', icon: Calendar, label: 'Bugünkü Randevular' },
     { path: '/edu-panel', icon: Presentation, label: EDU_HOMEWORK_ANIMATIONS_LABEL },
     STAFF_NAV_YARDIM,
@@ -412,7 +421,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
   if (tags.includes('admin')) chunks.push(MENU_ADMIN);
   if (tags.includes('coach')) {
     // Koc (ve koc+ogretmen): vitrin profili her zaman Koc Paneli altinda
-    chunks.push([MENU_COACH[0], NAV_TEACHER_VITRINE_PROFILE, ...MENU_COACH.slice(1)]);
+    chunks.push([MENU_COACH[0], NAV_TEACHER_VITRINE_PROFILE, NAV_TEACHER_AVAILABILITY, ...MENU_COACH.slice(1)]);
   }
   /** Koç paneli varken öğretmen paneli menüsü birleştirilmez */
   if (tags.includes('teacher') && !tags.includes('coach')) chunks.push(MENU_TEACHER);
@@ -476,7 +485,10 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
       panels.push({
         ...it,
         // Vitrine linki kendi ikonunu korusun; diger panel kokleri dashboard ikonu
-        icon: it.path === NAV_TEACHER_VITRINE_PROFILE.path ? it.icon : LayoutDashboard,
+        icon:
+          it.path === NAV_TEACHER_VITRINE_PROFILE.path || it.path === NAV_TEACHER_AVAILABILITY.path
+            ? it.icon
+            : LayoutDashboard,
         label: it.label
       });
       continue;

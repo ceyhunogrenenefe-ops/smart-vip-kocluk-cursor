@@ -3,12 +3,13 @@
  * GET /api/public/teachers
  * GET /api/public/teachers?slug=
  *
- * Auth yok. Yayında veya changes_pending (snapshot var) + active + private_lesson_enabled.
+ * Auth yok. Yayında veya update_pending/changes_pending (snapshot var) + active + private_lesson_enabled.
  * CORS: PUBLIC_TEACHERS_CORS_ORIGIN (virgülle birden fazla)
  */
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { publicCardFromSnapshot, publicDetailFromSnapshot } from '../api/_lib/teacher-profile.js';
+import { computePublicSlots, loadAvailabilityBundle } from '../api/_lib/teacher-availability.js';
 
 function applyCors(req, res) {
   const allowed = String(process.env.PUBLIC_TEACHERS_CORS_ORIGIN || 'https://onlinevipdershane.com,https://www.onlinevipdershane.com')
@@ -40,7 +41,7 @@ export default async function handler(req, res) {
         .from('teacher_profiles')
         .select('*')
         .eq('slug', slug)
-        .in('status', ['published', 'changes_pending'])
+        .in('status', ['published', 'update_pending', 'changes_pending'])
         .eq('is_active', true)
         .eq('private_lesson_enabled', true)
         .is('deleted_at', null)
@@ -55,6 +56,23 @@ export default async function handler(req, res) {
         .eq('is_public', true)
         .order('created_at', { ascending: false });
 
+      const allowPublicSlots =
+        data.is_active &&
+        data.published_snapshot &&
+        data.status !== 'passive' &&
+        data.status !== 'deleted' &&
+        !data.deleted_at;
+
+      let availability_slots = [];
+      if (allowPublicSlots) {
+        try {
+          const bundle = await loadAvailabilityBundle(data.user_id);
+          availability_slots = computePublicSlots(bundle);
+        } catch (slotErr) {
+          console.warn('[public-teachers] availability_slots', errorMessage(slotErr));
+        }
+      }
+
       return res.status(200).json({
         teacher: {
           ...publicDetailFromSnapshot(data),
@@ -64,7 +82,8 @@ export default async function handler(req, res) {
             title: d.title,
             description: d.description,
             mime_type: d.mime_type
-          }))
+          })),
+          availability_slots
         }
       });
     }
@@ -72,7 +91,7 @@ export default async function handler(req, res) {
     const { data, error } = await supabaseAdmin
       .from('teacher_profiles')
       .select('*')
-      .in('status', ['published', 'changes_pending'])
+      .in('status', ['published', 'update_pending', 'changes_pending'])
       .eq('is_active', true)
       .eq('private_lesson_enabled', true)
       .is('deleted_at', null)

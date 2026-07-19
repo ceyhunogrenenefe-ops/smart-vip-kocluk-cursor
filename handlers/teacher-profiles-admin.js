@@ -6,7 +6,12 @@
  * POST   /api/teacher-profiles-admin?op=reject&id=
  * POST   /api/teacher-profiles-admin?op=deactivate&id=
  * POST   /api/teacher-profiles-admin?op=activate&id=
+ * POST   /api/teacher-profiles-admin?op=republish&id=
  * POST   /api/teacher-profiles-admin?op=retry-sync&id=
+ * POST   /api/teacher-profiles-admin?op=enable-editing&id=
+ * POST   /api/teacher-profiles-admin?op=soft-delete&id=
+ * POST   /api/teacher-profiles-admin?op=restore&id=
+ * POST   /api/teacher-profiles-admin?op=hard-delete&id=
  * PATCH  /api/teacher-profiles-admin?id=  (admin edit)
  */
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
@@ -16,13 +21,16 @@ import { errorMessage } from '../api/_lib/error-msg.js';
 import {
   applyPatchToWorking,
   completionPercent,
+  EDITABLE_FIELDS,
   ensureTeacherProfileForUser,
+  isUpdatePendingStatus,
   missingRequiredFields,
   publicDetailFromSnapshot,
   pushSiteSync,
   workingPayloadFromRow,
   writeAuditLog
 } from '../api/_lib/teacher-profile.js';
+import { notifyTeacherProfileEvent } from '../api/_lib/teacher-profile-notify.js';
 
 /** JWT rollerinden senkron admin kontrolu (Promise/Set hatasi uretmez). */
 function rolesFromActorJwt(actor) {
@@ -41,19 +49,33 @@ function isAdminFromJwt(actor) {
   return roles.has('admin') || roles.has('super_admin');
 }
 
+function isSuperAdminFromJwt(actor) {
+  return rolesFromActorJwt(actor).has('super_admin');
+}
+
 async function isAdminActor(actor) {
   if (isAdminFromJwt(actor)) return true;
-  // JWT'de yoksa DB rollerine bak (await zorunlu)
   try {
     const dbRoles = await actorRoleSet(actor);
     if (dbRoles instanceof Set) {
-      return dbRoles.has('admin') || dbRoles.has('super_admin');
+      return roleSetHasAdmin(dbRoles) || roleSetHasSuperAdmin(dbRoles);
     }
     if (Array.isArray(dbRoles)) {
       return dbRoles.map((r) => String(r || '').toLowerCase()).some((r) => r === 'admin' || r === 'super_admin');
     }
   } catch (e) {
     console.warn('[teacher-profiles-admin] actorRoleSet failed', e?.message || e);
+  }
+  return false;
+}
+
+async function isSuperAdminActor(actor) {
+  if (isSuperAdminFromJwt(actor)) return true;
+  try {
+    const dbRoles = await actorRoleSet(actor);
+    return roleSetHasSuperAdmin(dbRoles);
+  } catch (e) {
+    console.warn('[teacher-profiles-admin] super_admin check failed', e?.message || e);
   }
   return false;
 }
@@ -66,16 +88,53 @@ function clientIp(req) {
   );
 }
 
-async function loadProfile(id) {
-  const { data, error } = await supabaseAdmin
-    .from('teacher_profiles')
-    .select('*')
-    .eq('id', id)
-    .is('deleted_at', null)
-    .maybeSingle();
+async function loadProfile(id, { includeDeleted = false } = {}) {
+  let q = supabaseAdmin.from('teacher_profiles').select('*').eq('id', id);
+  if (!includeDeleted) q = q.is('deleted_at', null);
+  const { data, error } = await q.maybeSingle();
   if (error) throw error;
   return data;
 }
+
+async function loadActorInstitutionId(actor) {
+  if (actor?.institution_id) return actor.institution_id;
+  const { data } = await supabaseAdmin
+    .from('users')
+    .select('institution_id')
+    .eq('id', actor.sub)
+    .maybeSingle();
+  return data?.institution_id || null;
+}
+
+function jsonEq(a, b) {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+/** Field-level diff keys between published snapshot and working/pending payload. */
+function fieldDiffKeys(published, pendingOrWorking) {
+  const a = published && typeof published === 'object' ? published : {};
+  const b = pendingOrWorking && typeof pendingOrWorking === 'object' ? pendingOrWorking : {};
+  const keys = new Set([...EDITABLE_FIELDS, ...Object.keys(a), ...Object.keys(b)]);
+  const changed = [];
+  for (const k of keys) {
+    if (k === 'id' || k === 'user_id' || k === 'slug') continue;
+    if (!jsonEq(a[k], b[k])) changed.push(k);
+  }
+  return changed;
+}
+
+const MUTATION_OPS = new Set([
+  'approve',
+  'reject',
+  'deactivate',
+  'activate',
+  'republish',
+  'retry-sync',
+  'enable-editing',
+  'soft-delete',
+  'restore',
+  'hard-delete'
+]);
 
 export default async function handler(req, res) {
   try {
@@ -84,21 +143,50 @@ export default async function handler(req, res) {
 
     const id = String(req.query.id || '').trim();
     const op = String(req.query.op || '').trim();
-    const statusFilter = String(req.query.status || '').trim();
+    let statusFilter = String(req.query.status || '').trim();
+    if (statusFilter === 'changes_pending') statusFilter = 'update_pending';
+
+    const actorIsSuper = await isSuperAdminActor(actor);
 
     if (req.method === 'GET' && !id) {
       let q = supabaseAdmin
         .from('teacher_profiles')
         .select('*')
-        .is('deleted_at', null)
         .order('updated_at', { ascending: false })
         .limit(200);
-      if (statusFilter) q = q.eq('status', statusFilter);
+
+      if (statusFilter === 'deleted') {
+        q = q.or('deleted_at.not.is.null,status.eq.deleted');
+      } else {
+        q = q.is('deleted_at', null);
+        if (statusFilter === 'update_pending') {
+          q = q.in('status', ['update_pending', 'changes_pending']);
+        } else if (statusFilter) {
+          q = q.eq('status', statusFilter);
+        }
+      }
+
+      if (!actorIsSuper) {
+        const instId = await loadActorInstitutionId(actor);
+        if (!instId) {
+          return res.status(200).json({ data: [] });
+        }
+        const { data: instUsers, error: uErr } = await supabaseAdmin
+          .from('users')
+          .select('id')
+          .eq('institution_id', instId);
+        if (uErr) throw uErr;
+        const userIdsScoped = (instUsers || []).map((u) => u.id).filter(Boolean);
+        if (!userIdsScoped.length) {
+          return res.status(200).json({ data: [] });
+        }
+        q = q.in('user_id', userIdsScoped);
+      }
+
       const { data, error } = await q;
       if (error) {
         const em = String(error.message || error.code || error);
         console.error('[teacher-profiles-admin] list error', em);
-        // Tablo yok / schema cache: 500 yerine bos liste + uyar
         if (/teacher_profiles/i.test(em) || /schema cache/i.test(em) || /42P01|PGRST/i.test(em)) {
           return res.status(200).json({
             data: [],
@@ -115,7 +203,7 @@ export default async function handler(req, res) {
       if (userIds.length) {
         const { data: users } = await supabaseAdmin
           .from('users')
-          .select('id, name, email, phone, is_active')
+          .select('id, name, email, phone, is_active, institution_id')
           .in('id', userIds);
         for (const u of users || []) usersById[u.id] = u;
       }
@@ -124,14 +212,20 @@ export default async function handler(req, res) {
         data: (data || []).map((p) => ({
           ...p,
           user: usersById[p.user_id] || null,
-          missing_required: missingRequiredFields(workingPayloadFromRow(p))
+          missing_required: missingRequiredFields(workingPayloadFromRow(p)),
+          status: isUpdatePendingStatus(p.status) ? 'update_pending' : p.status
         }))
       });
     }
 
     if (req.method === 'GET' && id) {
-      const profile = await loadProfile(id);
-      if (!profile) return res.status(404).json({ error: 'not_found' });
+      let profile = await loadProfile(id);
+      if (!profile) {
+        profile = await loadProfile(id, { includeDeleted: true });
+        if (!profile || (profile.status !== 'deleted' && !profile.deleted_at)) {
+          return res.status(404).json({ error: 'not_found' });
+        }
+      }
       const { data: revisions } = await supabaseAdmin
         .from('teacher_profile_revisions')
         .select('*')
@@ -140,22 +234,37 @@ export default async function handler(req, res) {
         .limit(20);
       const { data: user } = await supabaseAdmin
         .from('users')
-        .select('id, name, email, phone, is_active, role, roles')
+        .select('id, name, email, phone, is_active, role, roles, institution_id')
         .eq('id', profile.user_id)
         .maybeSingle();
+
+      const working = workingPayloadFromRow(profile);
+      const pending =
+        profile.pending_data ||
+        (revisions || []).find((r) => r.status === 'pending_approval' || r.status === 'draft')?.payload ||
+        null;
+      const publishedPreview = profile.published_snapshot
+        ? publicDetailFromSnapshot(profile)
+        : null;
+      const compareTarget = pending || working;
+      const publishedForDiff =
+        profile.published_snapshot && typeof profile.published_snapshot === 'object'
+          ? profile.published_snapshot
+          : {};
+
       return res.status(200).json({
         profile,
         user,
         revisions: revisions || [],
-        published_preview: profile.published_snapshot
-          ? publicDetailFromSnapshot(profile)
-          : null,
-        working: workingPayloadFromRow(profile)
+        published_preview: publishedPreview,
+        working,
+        approved_data: profile.published_snapshot || null,
+        pending_data: pending,
+        changed_fields: fieldDiffKeys(publishedForDiff, compareTarget)
       });
     }
 
     if (req.method === 'POST' && op === 'ensure' && id) {
-      // id = user_id
       const { data: user } = await supabaseAdmin
         .from('users')
         .select('id, name, email, role, roles')
@@ -166,10 +275,19 @@ export default async function handler(req, res) {
       return res.status(200).json({ profile });
     }
 
-    if (req.method === 'POST' && id && (op === 'approve' || op === 'reject' || op === 'deactivate' || op === 'activate' || op === 'retry-sync')) {
-      const profile = await loadProfile(id);
+    if (req.method === 'POST' && id && MUTATION_OPS.has(op)) {
+      const needsDeleted =
+        op === 'restore' || op === 'hard-delete' || op === 'soft-delete';
+      const profile = await loadProfile(id, { includeDeleted: needsDeleted || op === 'hard-delete' });
       if (!profile) return res.status(404).json({ error: 'not_found' });
       const body = req.body || {};
+
+      const { data: teacherUser } = await supabaseAdmin
+        .from('users')
+        .select('id, institution_id')
+        .eq('id', profile.user_id)
+        .maybeSingle();
+      const teacherInstitutionId = teacherUser?.institution_id || null;
 
       if (op === 'retry-sync') {
         const result = await pushSiteSync(profile, 'teacher_profile_upsert');
@@ -177,13 +295,63 @@ export default async function handler(req, res) {
         return res.status(200).json({ profile: fresh, sync: result });
       }
 
+      if (op === 'enable-editing') {
+        const now = new Date().toISOString();
+        const deadlineRaw = body.editing_deadline;
+        const patch = {
+          editing_enabled: true,
+          editing_enabled_at: now,
+          editing_enabled_by: actor.sub,
+          updated_at: now
+        };
+        if (deadlineRaw !== undefined) {
+          patch.editing_deadline = deadlineRaw ? new Date(deadlineRaw).toISOString() : null;
+        }
+        const { data: updated, error } = await supabaseAdmin
+          .from('teacher_profiles')
+          .update(patch)
+          .eq('id', id)
+          .select('*')
+          .single();
+        if (error) throw error;
+        await writeAuditLog({
+          profileId: id,
+          actorUserId: actor.sub,
+          action: 'enable_editing',
+          previousValue: {
+            editing_enabled: profile.editing_enabled,
+            editing_deadline: profile.editing_deadline
+          },
+          newValue: {
+            editing_enabled: true,
+            editing_deadline: updated.editing_deadline
+          },
+          ip: clientIp(req)
+        });
+        await notifyTeacherProfileEvent({
+          event: 'editing_enabled',
+          targetUserId: profile.user_id,
+          senderUserId: actor.sub,
+          institutionId: teacherInstitutionId,
+          extraBody: updated.editing_deadline
+            ? `Son tarih: ${updated.editing_deadline}`
+            : ''
+        });
+        return res.status(200).json({ profile: updated });
+      }
+
       if (op === 'deactivate') {
+        const reason = String(body.passivation_reason || body.reason || '').trim() || null;
+        const now = new Date().toISOString();
         const { data: updated, error } = await supabaseAdmin
           .from('teacher_profiles')
           .update({
             status: 'passive',
             is_active: false,
-            updated_at: new Date().toISOString()
+            passivated_at: now,
+            passivated_by: actor.sub,
+            passivation_reason: reason,
+            updated_at: now
           })
           .eq('id', id)
           .select('*')
@@ -194,21 +362,32 @@ export default async function handler(req, res) {
           actorUserId: actor.sub,
           action: 'deactivate',
           previousValue: { status: profile.status },
-          newValue: { status: 'passive' },
+          newValue: { status: 'passive', passivation_reason: reason },
           ip: clientIp(req)
         });
         await pushSiteSync(updated, 'teacher_profile_deactivate');
+        await notifyTeacherProfileEvent({
+          event: 'passive',
+          targetUserId: profile.user_id,
+          senderUserId: actor.sub,
+          institutionId: teacherInstitutionId,
+          extraBody: reason || ''
+        });
         return res.status(200).json({ profile: updated });
       }
 
-      if (op === 'activate') {
+      if (op === 'activate' || op === 'republish') {
         const canPublish = profile.published_snapshot && Object.keys(profile.published_snapshot).length;
+        const now = new Date().toISOString();
         const { data: updated, error } = await supabaseAdmin
           .from('teacher_profiles')
           .update({
             status: canPublish ? 'published' : profile.completion_pct >= 100 ? 'draft' : 'incomplete',
             is_active: true,
-            updated_at: new Date().toISOString()
+            passivated_at: null,
+            passivated_by: null,
+            passivation_reason: null,
+            updated_at: now
           })
           .eq('id', id)
           .select('*')
@@ -217,12 +396,20 @@ export default async function handler(req, res) {
         await writeAuditLog({
           profileId: id,
           actorUserId: actor.sub,
-          action: 'activate',
+          action: op === 'republish' ? 'republish' : 'activate',
           previousValue: { status: profile.status },
           newValue: { status: updated.status },
           ip: clientIp(req)
         });
-        if (updated.status === 'published') await pushSiteSync(updated, 'teacher_profile_upsert');
+        if (updated.status === 'published') {
+          await pushSiteSync(updated, 'teacher_profile_upsert');
+          await notifyTeacherProfileEvent({
+            event: 'republished',
+            targetUserId: profile.user_id,
+            senderUserId: actor.sub,
+            institutionId: teacherInstitutionId
+          });
+        }
         return res.status(200).json({ profile: updated });
       }
 
@@ -250,12 +437,15 @@ export default async function handler(req, res) {
         }
 
         const nextStatus = profile.published_snapshot ? 'published' : 'rejected';
+        const now = new Date().toISOString();
         const { data: updated, error } = await supabaseAdmin
           .from('teacher_profiles')
           .update({
             status: nextStatus,
             rejection_reason: reason,
-            updated_at: new Date().toISOString()
+            rejected_at: now,
+            rejected_by: actor.sub,
+            updated_at: now
           })
           .eq('id', id)
           .select('*')
@@ -270,11 +460,21 @@ export default async function handler(req, res) {
           newValue: { status: nextStatus, rejection_reason: reason },
           ip: clientIp(req)
         });
+        await notifyTeacherProfileEvent({
+          event: 'rejected',
+          targetUserId: profile.user_id,
+          senderUserId: actor.sub,
+          institutionId: teacherInstitutionId,
+          extraBody: reason
+        });
         return res.status(200).json({ profile: updated });
       }
 
       if (op === 'approve') {
         let snapshot = workingPayloadFromRow(profile);
+        if (profile.pending_data && typeof profile.pending_data === 'object') {
+          snapshot = { ...snapshot, ...profile.pending_data };
+        }
         const { data: pendingRev } = await supabaseAdmin
           .from('teacher_profile_revisions')
           .select('*')
@@ -297,24 +497,29 @@ export default async function handler(req, res) {
             .eq('id', pendingRev.id);
         }
 
+        const wasUpdatePending = isUpdatePendingStatus(profile.status);
+
         const missing = missingRequiredFields(snapshot);
         if (missing.length) {
           return res.status(400).json({ error: 'profile_incomplete', missing_required: missing });
         }
 
+        const now = new Date().toISOString();
         const { data: updated, error } = await supabaseAdmin
           .from('teacher_profiles')
           .update({
             ...snapshot,
             published_snapshot: snapshot,
+            pending_data: null,
             status: 'published',
             is_active: true,
             private_lesson_enabled: snapshot.private_lesson_enabled !== false,
             completion_pct: 100,
             rejection_reason: null,
-            approved_at: new Date().toISOString(),
+            editing_enabled: false,
+            approved_at: now,
             approved_by: actor.sub,
-            updated_at: new Date().toISOString()
+            updated_at: now
           })
           .eq('id', id)
           .select('*')
@@ -325,13 +530,121 @@ export default async function handler(req, res) {
           profileId: id,
           actorUserId: actor.sub,
           action: 'approve',
-          previousValue: { status: profile.status },
+          previousValue: { status: profile.status, update_pending: wasUpdatePending },
           newValue: { status: 'published', slug: updated.slug },
           ip: clientIp(req)
         });
 
         const sync = await pushSiteSync(updated, 'teacher_profile_upsert');
+        await notifyTeacherProfileEvent({
+          event: 'approved',
+          targetUserId: profile.user_id,
+          senderUserId: actor.sub,
+          institutionId: teacherInstitutionId
+        });
         return res.status(200).json({ profile: updated, sync });
+      }
+
+      if (op === 'soft-delete') {
+        if (profile.deleted_at || profile.status === 'deleted') {
+          return res.status(400).json({ error: 'already_deleted' });
+        }
+        const now = new Date().toISOString();
+        const { data: updated, error } = await supabaseAdmin
+          .from('teacher_profiles')
+          .update({
+            status: 'deleted',
+            deleted_at: now,
+            deleted_by: actor.sub,
+            is_active: false,
+            updated_at: now
+          })
+          .eq('id', id)
+          .select('*')
+          .single();
+        if (error) throw error;
+        await writeAuditLog({
+          profileId: id,
+          actorUserId: actor.sub,
+          action: 'soft_delete',
+          previousValue: { status: profile.status },
+          newValue: { status: 'deleted' },
+          ip: clientIp(req)
+        });
+        await pushSiteSync(updated, 'teacher_profile_deactivate');
+        await notifyTeacherProfileEvent({
+          event: 'deleted',
+          targetUserId: profile.user_id,
+          senderUserId: actor.sub,
+          institutionId: teacherInstitutionId
+        });
+        return res.status(200).json({ profile: updated });
+      }
+
+      if (op === 'restore') {
+        if (!profile.deleted_at && profile.status !== 'deleted') {
+          return res.status(400).json({ error: 'not_deleted' });
+        }
+        const now = new Date().toISOString();
+        const { data: updated, error } = await supabaseAdmin
+          .from('teacher_profiles')
+          .update({
+            status: 'passive',
+            deleted_at: null,
+            deleted_by: null,
+            is_active: false,
+            updated_at: now
+          })
+          .eq('id', id)
+          .select('*')
+          .single();
+        if (error) throw error;
+        await writeAuditLog({
+          profileId: id,
+          actorUserId: actor.sub,
+          action: 'restore',
+          previousValue: { status: profile.status, deleted_at: profile.deleted_at },
+          newValue: { status: 'passive' },
+          ip: clientIp(req)
+        });
+        await notifyTeacherProfileEvent({
+          event: 'restored',
+          targetUserId: profile.user_id,
+          senderUserId: actor.sub,
+          institutionId: teacherInstitutionId
+        });
+        return res.status(200).json({ profile: updated });
+      }
+
+      if (op === 'hard-delete') {
+        if (!(await isSuperAdminActor(actor))) {
+          return res.status(403).json({ error: 'super_admin_required' });
+        }
+        const { count: bookingCount, error: bErr } = await supabaseAdmin
+          .from('teacher_private_bookings')
+          .select('id', { count: 'exact', head: true })
+          .or(`profile_id.eq.${id},teacher_id.eq.${profile.user_id}`);
+        if (bErr) throw bErr;
+        if (bookingCount && bookingCount > 0) {
+          return res.status(409).json({
+            error: 'bookings_exist',
+            message: 'Profil hard-delete engellendi: teacher_private_bookings kaydı var'
+          });
+        }
+        await writeAuditLog({
+          profileId: id,
+          actorUserId: actor.sub,
+          action: 'hard_delete',
+          previousValue: { status: profile.status, user_id: profile.user_id, slug: profile.slug },
+          newValue: { deleted: true },
+          ip: clientIp(req)
+        });
+        const { error: delErr } = await supabaseAdmin
+          .from('teacher_profiles')
+          .delete()
+          .eq('id', id);
+        if (delErr) throw delErr;
+        return res.status(200).json({ ok: true, deleted_id: id });
       }
     }
 
@@ -376,7 +689,6 @@ export default async function handler(req, res) {
     ) {
       return res.status(401).json({ error: 'Unauthorized', message: msg });
     }
-    // Supabase: tablo yok / schema cache
     if (/teacher_profiles/i.test(msg) || /schema cache/i.test(msg) || msg.includes('42P01') || msg.includes('PGRST')) {
       return res.status(503).json({
         error: 'teacher_profiles_unavailable',
