@@ -102,6 +102,8 @@ export const routeLoaders = {
   'teacher-profile': () => import('../handlers/teacher-profile.js'),
   'teacher-profiles-admin': () => import('../handlers/teacher-profiles-admin.js'),
   'teacher-profile-media': () => import('../handlers/teacher-profile-media.js'),
+  'teacher-availability': () => import('../handlers/teacher-availability.js'),
+  'public-teacher-book': () => import('../handlers/public-teacher-book.js'),
   'public/teachers': () => import('../handlers/public-teachers.js'),
   'public-teachers': () => import('../handlers/public-teachers.js')
 };

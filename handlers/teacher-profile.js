@@ -1,7 +1,7 @@
 /**
  * Öğretmen kendi vitrin profili
  * GET  /api/teacher-profile
- * PATCH /api/teacher-profile
+ * PATCH /api/teacher-profile  (editing_enabled gerekir)
  * POST  /api/teacher-profile?op=submit
  */
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
@@ -13,10 +13,12 @@ import {
   completionPercent,
   deriveStatusAfterEdit,
   ensureTeacherProfileForUser,
+  isUpdatePendingStatus,
   missingRequiredFields,
   workingPayloadFromRow,
   writeAuditLog
 } from '../api/_lib/teacher-profile.js';
+import { notifyTeacherProfileEvent } from '../api/_lib/teacher-profile-notify.js';
 
 function jwtHasRole(actor, role) {
   const want = String(role || '').toLowerCase();
@@ -51,14 +53,22 @@ function clientIp(req) {
   );
 }
 
+function canEditProfile(profile) {
+  if (!profile) return false;
+  if (profile.status === 'passive' || profile.status === 'deleted') return false;
+  if (profile.deleted_at) return false;
+  if (profile.editing_enabled === false) return false;
+  if (profile.editing_deadline) {
+    const dl = new Date(profile.editing_deadline).getTime();
+    if (!Number.isNaN(dl) && Date.now() > dl) return false;
+  }
+  return true;
+}
+
 export default async function handler(req, res) {
   try {
     const actor = requireAuthenticatedActor(req);
     const vitrineOk = await isVitrineActor(actor);
-    const adminOk = jwtHasRole(actor, 'admin') || jwtHasRole(actor, 'super_admin');
-    if (!vitrineOk && !adminOk) {
-      return res.status(403).json({ error: 'forbidden' });
-    }
     if (!vitrineOk) return res.status(403).json({ error: 'teacher_or_coach_only' });
 
     const uid = String(actor.sub || '').trim();
@@ -72,6 +82,11 @@ export default async function handler(req, res) {
 
     let profile = await ensureTeacherProfileForUser(user, { actorId: uid });
     if (!profile) return res.status(400).json({ error: 'not_a_teacher' });
+
+    // Yalnızca kendi profili (ensure zaten user_id ile)
+    if (String(profile.user_id) !== uid) {
+      return res.status(403).json({ error: 'forbidden_other_profile' });
+    }
 
     const op = String(req.query.op || '').trim();
 
@@ -87,18 +102,27 @@ export default async function handler(req, res) {
 
       const working = workingPayloadFromRow(profile);
       const missing = missingRequiredFields(working);
+      const editable = canEditProfile(profile);
+      const submitStatuses = ['draft', 'incomplete', 'rejected', 'published', 'update_pending', 'changes_pending'];
       return res.status(200).json({
         profile,
         working,
+        approved_data: profile.published_snapshot || null,
+        pending_data: profile.pending_data || pendingRev?.payload || null,
         missing_required: missing,
         completion_pct: completionPercent(working),
-        can_submit: missing.length === 0 && ['draft', 'incomplete', 'rejected', 'published', 'changes_pending'].includes(profile.status),
+        editing_enabled: editable,
+        can_edit: editable,
+        can_submit: editable && missing.length === 0 && submitStatuses.includes(profile.status),
         pending_revision: pendingRev || null,
         account: { id: user.id, name: user.name, email: user.email, phone: user.phone }
       });
     }
 
     if (req.method === 'POST' && op === 'submit') {
+      if (!canEditProfile(profile)) {
+        return res.status(403).json({ error: 'editing_disabled' });
+      }
       const working = workingPayloadFromRow(profile);
       const missing = missingRequiredFields(working);
       if (missing.length) {
@@ -108,13 +132,22 @@ export default async function handler(req, res) {
           completion_pct: completionPercent(working)
         });
       }
+      if (!String(working.photo_url || working.photo_path || '').trim()) {
+        return res.status(400).json({
+          error: 'profile_incomplete',
+          missing_required: ['photo'],
+          message: 'Profil fotoğrafı zorunludur'
+        });
+      }
 
       const prev = { status: profile.status };
-      let nextStatus = 'pending_approval';
+      const hadPublished = !!(profile.published_snapshot && Object.keys(profile.published_snapshot).length);
+      let nextStatus = hadPublished || profile.status === 'published' || isUpdatePendingStatus(profile.status)
+        ? 'update_pending'
+        : 'pending_approval';
       let revision = null;
 
-      if (profile.status === 'published' || profile.status === 'changes_pending') {
-        // Yayındaki profil: revizyon oluştur, published_snapshot korunur
+      if (hadPublished || profile.status === 'published' || isUpdatePendingStatus(profile.status)) {
         const { data: openRev } = await supabaseAdmin
           .from('teacher_profile_revisions')
           .select('id')
@@ -151,19 +184,24 @@ export default async function handler(req, res) {
           if (rErr) throw rErr;
           revision = rev;
         }
-        nextStatus = 'changes_pending';
+        nextStatus = 'update_pending';
       }
 
+      const now = new Date().toISOString();
       const { data: updated, error } = await supabaseAdmin
         .from('teacher_profiles')
         .update({
           status: nextStatus,
-          submitted_at: new Date().toISOString(),
+          submitted_at: now,
+          last_submitted_at: now,
+          pending_data: working,
+          editing_enabled: false,
           rejection_reason: null,
           completion_pct: 100,
-          updated_at: new Date().toISOString()
+          updated_at: now
         })
         .eq('id', profile.id)
+        .eq('user_id', uid)
         .select('*')
         .single();
       if (error) throw error;
@@ -177,15 +215,30 @@ export default async function handler(req, res) {
         ip: clientIp(req)
       });
 
-      return res.status(200).json({ profile: updated, revision });
+      await notifyTeacherProfileEvent({
+        event: 'submitted',
+        targetUserId: uid,
+        senderUserId: uid,
+        institutionId: user.institution_id,
+        notifyAdmins: true
+      });
+
+      return res.status(200).json({
+        profile: updated,
+        revision,
+        message: 'Profiliniz yönetici onayına gönderildi'
+      });
     }
 
     if (req.method === 'PATCH') {
-      const body = req.body || {};
-      if (profile.status === 'passive') {
-        return res.status(403).json({ error: 'profile_passive' });
+      if (!canEditProfile(profile)) {
+        return res.status(403).json({ error: 'editing_disabled' });
+      }
+      if (profile.status === 'pending_approval') {
+        return res.status(403).json({ error: 'awaiting_approval' });
       }
 
+      const body = req.body || {};
       const nextWorking = applyPatchToWorking(profile, body);
       const pct = completionPercent(nextWorking);
       const nextStatus = deriveStatusAfterEdit(profile, pct);
@@ -197,9 +250,9 @@ export default async function handler(req, res) {
         updated_at: new Date().toISOString()
       };
 
-      // Yayında iken düzenleme → changes_pending; snapshot dokunulmaz
-      if (profile.status === 'published' || profile.status === 'changes_pending') {
-        patch.status = 'changes_pending';
+      // Yayında / güncelleme kuyruğunda: snapshot (approved_data) dokunulmaz
+      if (profile.status === 'published' || isUpdatePendingStatus(profile.status)) {
+        patch.status = 'update_pending';
         const { data: openRev } = await supabaseAdmin
           .from('teacher_profile_revisions')
           .select('id')
@@ -232,6 +285,7 @@ export default async function handler(req, res) {
         .from('teacher_profiles')
         .update(patch)
         .eq('id', profile.id)
+        .eq('user_id', uid)
         .select('*')
         .single();
       if (error) throw error;

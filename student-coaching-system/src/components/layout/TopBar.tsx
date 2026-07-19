@@ -87,6 +87,7 @@ export default function TopBar({ onMenuClick, drawerOpen = false, hideMenuButton
       '/ozel-ders-talepleri': 'Özel ders talepleri',
       '/ogretmen-profil-onaylari': 'Öğretmen profil onayları',
       '/profilimi-duzenle': 'Profilimi Düzenle',
+      '/musaitlik-takvimim': 'Müsaitlik Takvimim',
       '/login': 'Giriş',
       '/notifications': 'Bildirimler',
       '/my-profile': 'Profilim',

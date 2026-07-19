@@ -9,10 +9,22 @@ export const TEACHER_PROFILE_STATUSES = [
   'incomplete',
   'pending_approval',
   'published',
-  'changes_pending',
+  'update_pending',
+  'changes_pending', // legacy alias
   'rejected',
-  'passive'
+  'passive',
+  'deleted'
 ];
+
+/** Yayin sonrasi guncelleme kuyrugu (eski: changes_pending) */
+export function isUpdatePendingStatus(status) {
+  return status === 'update_pending' || status === 'changes_pending';
+}
+
+export function normalizeProfileStatus(status) {
+  if (status === 'changes_pending') return 'update_pending';
+  return status;
+}
 
 export const REQUIRED_PROFILE_KEYS = [
   'display_name',
@@ -143,11 +155,11 @@ export function completionPercent(payload) {
 
 export function deriveStatusAfterEdit(row, pct) {
   if (!row) return 'incomplete';
-  if (row.status === 'published' || row.status === 'changes_pending') return 'changes_pending';
   if (row.status === 'pending_approval') return 'pending_approval';
-  if (row.status === 'passive') return 'passive';
+  if (row.status === 'published' || isUpdatePendingStatus(row.status)) return 'update_pending';
   if (row.status === 'rejected') return pct >= 100 ? 'draft' : 'incomplete';
-  return pct >= 100 ? 'draft' : 'incomplete';
+  if (pct >= 100) return 'draft';
+  return 'incomplete';
 }
 
 async function uniqueSlug(base, excludeUserId) {

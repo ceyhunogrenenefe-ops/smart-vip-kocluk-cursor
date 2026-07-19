@@ -1,0 +1,4 @@
+-- RUN IN SUPABASE SQL EDITOR (production)
+-- Panel feature branch: feature/ozel-ders-vitrine-availability
+-- File: sql/2026-07-19-teacher-profile-editing-availability.sql
+-- Mevcut öğretmen/koç/ders verilerini silmez.
