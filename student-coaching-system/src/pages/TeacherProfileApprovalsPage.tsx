@@ -9,6 +9,7 @@ import {
   RotateCcw,
   Trash2,
   Undo2,
+  Upload,
   X
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -28,6 +29,22 @@ type Row = {
   deleted_at?: string | null;
   user?: { name?: string; email?: string } | null;
   missing_required?: string[];
+};
+
+type CatalogItem = {
+  slug: string;
+  name: string;
+  branch: string;
+  university?: string;
+  experience?: number;
+  photo_url?: string | null;
+  linked_profile?: {
+    id: string;
+    user_id: string;
+    status: string;
+    display_name?: string | null;
+    user?: { name?: string; email?: string } | null;
+  } | null;
 };
 
 type DetailPayload = {
@@ -112,6 +129,11 @@ export default function TeacherProfileApprovalsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailPayload | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [catalog, setCatalog] = useState<CatalogItem[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [showCatalog, setShowCatalog] = useState(false);
+  const [importEmails, setImportEmails] = useState<Record<string, string>>({});
+  const [importBusy, setImportBusy] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -127,6 +149,20 @@ export default function TeacherProfileApprovalsPage() {
       setLoading(false);
     }
   }, [filter]);
+
+  const loadCatalog = useCallback(async () => {
+    setCatalogLoading(true);
+    try {
+      const res = await apiFetch('/api/teacher-profiles-admin?op=site-catalog');
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.message || j.error || res.statusText);
+      setCatalog(j.catalog || []);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Site kadrosu alınamadı');
+    } finally {
+      setCatalogLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     void load();
@@ -186,6 +222,41 @@ export default function TeacherProfileApprovalsPage() {
     await act(id, op, body);
   };
 
+  const importFromSite = async (slug: string) => {
+    const email = String(importEmails[slug] || '').trim();
+    if (!email) {
+      toast.error('Kullanıcı e-postasını girin');
+      return;
+    }
+    setImportBusy(slug);
+    try {
+      const res = await apiFetch('/api/teacher-profiles-admin?op=import-site-catalog', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slug,
+          user_email: email,
+          fill_empty_only: true,
+          enable_editing: true
+        })
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.message || j.error || res.statusText);
+      const missing = Array.isArray(j.missing_required) ? j.missing_required.length : 0;
+      toast.success(
+        missing
+          ? `Aktarıldı. ${missing} zorunlu alan eksik — öğretmen tamamlayacak.`
+          : 'Aktarıldı. Profil onaya hazır.'
+      );
+      await loadCatalog();
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'İçe aktarım başarısız');
+    } finally {
+      setImportBusy('');
+    }
+  };
+
   const changedSet = useMemo(() => new Set(detail?.changed_fields || []), [detail]);
   const compareLeft = useMemo(() => detail?.approved_data || {}, [detail]);
   const compareRight = useMemo(
@@ -237,6 +308,86 @@ export default function TeacherProfileApprovalsPage() {
             {f ? STATUS_TR[f] || f : 'Tümü'}
           </button>
         ))}
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-bold text-slate-900">Sitedeki kadro → panele aktar</h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              onlinevipdershane.com kartındaki bilgiler silinmez; panele ön-doldurulur. Öğretmen eksikleri tamamlar.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const next = !showCatalog;
+              setShowCatalog(next);
+              if (next) void loadCatalog();
+            }}
+            className="inline-flex items-center gap-2 rounded-xl border border-[#1a3fad]/30 bg-[#1a3fad]/5 px-3 py-2 text-xs font-bold text-[#1a3fad]"
+          >
+            <Upload className="h-4 w-4" />
+            {showCatalog ? 'Kadro listesini gizle' : 'Site kadrosunu göster'}
+          </button>
+        </div>
+        {showCatalog ? (
+          catalogLoading ? (
+            <div className="flex justify-center py-8 text-slate-400">
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </div>
+          ) : (
+            <div className="mt-4 space-y-2">
+              {catalog.map((item) => (
+                <div
+                  key={item.slug}
+                  className="flex flex-col gap-2 rounded-xl border border-slate-100 bg-slate-50/80 p-3 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <div className="font-semibold text-slate-900">{item.name}</div>
+                    <div className="text-xs text-slate-500">
+                      {item.branch} · /{item.slug}
+                      {item.university ? ` · ${item.university}` : ''}
+                      {item.experience != null ? ` · ${item.experience} yıl` : ''}
+                    </div>
+                    {item.linked_profile ? (
+                      <div className="mt-1 text-xs font-semibold text-emerald-700">
+                        Bağlı: {item.linked_profile.user?.email || item.linked_profile.display_name} (
+                        {STATUS_TR[item.linked_profile.status] || item.linked_profile.status})
+                      </div>
+                    ) : (
+                      <div className="mt-1 text-xs font-semibold text-amber-700">Henüz panele bağlanmamış</div>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="email"
+                      placeholder="Kullanıcı e-posta"
+                      value={importEmails[item.slug] || ''}
+                      onChange={(e) =>
+                        setImportEmails((prev) => ({ ...prev, [item.slug]: e.target.value }))
+                      }
+                      className="min-w-[180px] flex-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs"
+                    />
+                    <button
+                      type="button"
+                      disabled={importBusy === item.slug}
+                      onClick={() => void importFromSite(item.slug)}
+                      className="inline-flex items-center gap-1 rounded-lg bg-[#1a3fad] px-3 py-1.5 text-xs font-bold text-white disabled:opacity-60"
+                    >
+                      {importBusy === item.slug ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Upload className="h-3.5 w-3.5" />
+                      )}
+                      {item.linked_profile ? 'Yeniden doldur' : 'İçe aktar'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        ) : null}
       </div>
 
       <div className={`grid gap-4 ${selectedId ? 'lg:grid-cols-[1fr_minmax(320px,420px)]' : ''}`}>

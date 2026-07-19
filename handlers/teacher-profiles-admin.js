@@ -31,6 +31,11 @@ import {
   writeAuditLog
 } from '../api/_lib/teacher-profile.js';
 import { notifyTeacherProfileEvent } from '../api/_lib/teacher-profile-notify.js';
+import {
+  SITE_TEACHER_CATALOG,
+  findSiteCatalogBySlug,
+  mapCatalogToProfilePatch
+} from '../api/_lib/site-teacher-catalog.js';
 
 /** JWT rollerinden senkron admin kontrolu (Promise/Set hatasi uretmez). */
 function rolesFromActorJwt(actor) {
@@ -147,6 +152,48 @@ export default async function handler(req, res) {
     if (statusFilter === 'changes_pending') statusFilter = 'update_pending';
 
     const actorIsSuper = await isSuperAdminActor(actor);
+
+    // Sitedeki statik kadro listesi + panel eşleşme durumu
+    if (req.method === 'GET' && op === 'site-catalog') {
+      const { data: profiles } = await supabaseAdmin
+        .from('teacher_profiles')
+        .select('id, user_id, slug, status, display_name, deleted_at')
+        .is('deleted_at', null)
+        .limit(500);
+      const bySlug = {};
+      for (const p of profiles || []) {
+        if (p.slug) bySlug[String(p.slug).toLowerCase()] = p;
+      }
+      const userIds = [...new Set((profiles || []).map((p) => p.user_id).filter(Boolean))];
+      let usersById = {};
+      if (userIds.length) {
+        const { data: users } = await supabaseAdmin
+          .from('users')
+          .select('id, name, email')
+          .in('id', userIds);
+        for (const u of users || []) usersById[u.id] = u;
+      }
+      return res.status(200).json({
+        catalog: SITE_TEACHER_CATALOG.map((t) => {
+          const linked = bySlug[t.slug] || null;
+          return {
+            ...t,
+            photo_url: t.photo
+              ? `${String(process.env.SITE_PUBLIC_ORIGIN || 'https://onlinevipdershane.com').replace(/\/$/, '')}/${String(t.photo).replace(/^\//, '')}`
+              : null,
+            linked_profile: linked
+              ? {
+                  id: linked.id,
+                  user_id: linked.user_id,
+                  status: linked.status,
+                  display_name: linked.display_name,
+                  user: usersById[linked.user_id] || null
+                }
+              : null
+          };
+        })
+      });
+    }
 
     if (req.method === 'GET' && !id) {
       let q = supabaseAdmin
@@ -273,6 +320,119 @@ export default async function handler(req, res) {
       if (!user) return res.status(404).json({ error: 'user_not_found' });
       const profile = await ensureTeacherProfileForUser(user, { actorId: actor.sub });
       return res.status(200).json({ profile });
+    }
+
+    // id = user_id (veya body.user_id / body.user_email) — sitedeki kadro bilgisini profile ön-doldur
+    if (req.method === 'POST' && op === 'import-site-catalog') {
+      const body = req.body || {};
+      const slug = String(body.slug || '').trim().toLowerCase();
+      const fillEmptyOnly = body.fill_empty_only !== false;
+      const enableEditing = body.enable_editing !== false;
+      const catalog = findSiteCatalogBySlug(slug);
+      if (!catalog) return res.status(404).json({ error: 'catalog_slug_not_found' });
+
+      let userId = id || String(body.user_id || '').trim();
+      if (!userId && body.user_email) {
+        const email = String(body.user_email || '').trim().toLowerCase();
+        const { data: byEmail } = await supabaseAdmin
+          .from('users')
+          .select('id, name, email, role, roles, institution_id')
+          .ilike('email', email)
+          .maybeSingle();
+        if (!byEmail) return res.status(404).json({ error: 'user_not_found', message: 'E-posta ile kullanıcı bulunamadı' });
+        userId = byEmail.id;
+      }
+      if (!userId) return res.status(400).json({ error: 'user_id_or_email_required' });
+
+      const { data: user } = await supabaseAdmin
+        .from('users')
+        .select('id, name, email, role, roles, institution_id')
+        .eq('id', userId)
+        .maybeSingle();
+      if (!user) return res.status(404).json({ error: 'user_not_found' });
+
+      if (!actorIsSuper) {
+        const instId = await loadActorInstitutionId(actor);
+        if (!instId || String(user.institution_id || '') !== String(instId)) {
+          return res.status(403).json({ error: 'institution_mismatch' });
+        }
+      }
+
+      let profile = await ensureTeacherProfileForUser(user, { actorId: actor.sub });
+      if (!profile) return res.status(400).json({ error: 'user_not_teacher_or_coach' });
+
+      const { data: slugOwner } = await supabaseAdmin
+        .from('teacher_profiles')
+        .select('id, user_id')
+        .eq('slug', slug)
+        .is('deleted_at', null)
+        .maybeSingle();
+      if (slugOwner && String(slugOwner.user_id) !== String(user.id)) {
+        return res.status(409).json({
+          error: 'slug_taken',
+          message: `Slug /${slug} başka bir profile bağlı`,
+          profile_id: slugOwner.id
+        });
+      }
+
+      const { patch, applied } = mapCatalogToProfilePatch(catalog, profile, { fillEmptyOnly });
+      if (!profile.published_snapshot || String(profile.slug) === slug || !slugOwner) {
+        if (!slugOwner || String(slugOwner.user_id) === String(user.id)) {
+          patch.slug = slug;
+          if (!applied.includes('slug')) applied.push('slug');
+        }
+      }
+
+      const now = new Date().toISOString();
+      const nextWorking = { ...workingPayloadFromRow(profile), ...patch };
+      const pct = completionPercent(nextWorking);
+      const updateRow = {
+        ...patch,
+        completion_pct: pct,
+        updated_at: now
+      };
+      if (enableEditing) {
+        updateRow.editing_enabled = true;
+        updateRow.editing_enabled_at = now;
+        updateRow.editing_enabled_by = actor.sub;
+      }
+      if (!profile.published_snapshot) {
+        updateRow.status = pct >= 100 ? 'draft' : 'incomplete';
+      }
+
+      const { data: updated, error } = await supabaseAdmin
+        .from('teacher_profiles')
+        .update(updateRow)
+        .eq('id', profile.id)
+        .select('*')
+        .single();
+      if (error) throw error;
+
+      await writeAuditLog({
+        profileId: profile.id,
+        actorUserId: actor.sub,
+        action: 'import_site_catalog',
+        previousValue: { slug: profile.slug, status: profile.status },
+        newValue: { slug: updated.slug, applied_fields: applied, catalog_slug: slug },
+        ip: clientIp(req)
+      });
+
+      if (enableEditing) {
+        await notifyTeacherProfileEvent({
+          event: 'editing_enabled',
+          targetUserId: user.id,
+          senderUserId: actor.sub,
+          institutionId: user.institution_id,
+          extraBody: `Sitedeki «${catalog.name}» kartındaki bilgiler profilinize aktarıldı. Eksik alanları tamamlayıp onaya gönderin.`
+        });
+      }
+
+      return res.status(200).json({
+        profile: updated,
+        applied_fields: applied,
+        missing_required: missingRequiredFields(workingPayloadFromRow(updated)),
+        catalog
+      });
     }
 
     if (req.method === 'POST' && id && MUTATION_OPS.has(op)) {
