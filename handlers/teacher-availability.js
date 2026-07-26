@@ -1,7 +1,7 @@
 /**
  * Öğretmen haftalık müsaitlik (özel ders vitrini — koçluk derslerinden bağımsız)
  * GET    /api/teacher-availability
- * POST   /api/teacher-availability?op=upsert|delete|close-day|reopen-day|exception|copy-week
+ * POST   /api/teacher-availability?op=upsert|delete|close-day|reopen-day|exception|toggle-slot|copy-week
  * GET    /api/teacher-availability?op=slots  (kendi önizleme)
  */
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
@@ -11,7 +11,8 @@ import { errorMessage } from '../api/_lib/error-msg.js';
 import {
   assertNoOverlap,
   computePublicSlots,
-  loadAvailabilityBundle
+  loadAvailabilityBundle,
+  toggleHourSlot
 } from '../api/_lib/teacher-availability.js';
 
 function jwtHasRole(actor, role) {
@@ -247,6 +248,33 @@ export default async function handler(req, res) {
         .single();
       if (error) throw error;
       return res.status(200).json({ exception: data });
+    }
+
+    if (op === 'toggle-slot') {
+      const date = String(body.exception_date || body.date || '').slice(0, 10);
+      const start = String(body.start_time || '').slice(0, 5);
+      const end = String(body.end_time || '').slice(0, 5);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'invalid_date' });
+      if (!start || !end) return res.status(400).json({ error: 'invalid_time' });
+
+      try {
+        const result = await toggleHourSlot({
+          teacherId: uid,
+          profileId: profile.id,
+          date,
+          startTime: start,
+          endTime: end
+        });
+        const bundle = await loadAvailabilityBundle(uid, { fromDate: date });
+        return res.status(200).json({ ...result, rules: bundle.rules, exceptions: bundle.exceptions });
+      } catch (e) {
+        const msg = errorMessage(e);
+        if (msg === 'past_slot') return res.status(400).json({ error: 'past_slot', message: 'Geçmiş saat değiştirilemez' });
+        if (msg === 'busy_slot') {
+          return res.status(409).json({ error: 'busy_slot', message: 'Bu saatte rezervasyon var' });
+        }
+        throw e;
+      }
     }
 
     if (op === 'copy-week') {
