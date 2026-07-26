@@ -12,7 +12,7 @@ import {
   Users,
   Video
 } from 'lucide-react';
-import { DEFAULT_BRAND_LOGO } from '../../lib/brandAssets';
+import BrandLogo from '../brand/BrandLogo';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { userRoleTags, userHasAnyRole } from '../../config/rolePermissions';
@@ -154,16 +154,17 @@ export default function Sidebar({
             className="h-9 w-9 shrink-0 rounded-lg bg-slate-100 object-contain p-0.5 ring-2 ring-slate-600/40 shadow-md"
           />
         ) : (
-          <img
-            src={DEFAULT_BRAND_LOGO}
-            alt="Online VIP Dershane"
-            className="h-9 w-9 shrink-0 rounded-lg bg-white object-contain p-0.5 ring-2 ring-slate-600/40 shadow-md"
+          <BrandLogo
+            variant="mark"
+            className="h-9 w-9 shrink-0 rounded-lg ring-2 ring-slate-600/40 shadow-md"
           />
         )}
         {(!railCollapsed || !isLg) && (
           <div className="ml-2.5 min-w-0 flex-1 max-lg:block lg:block">
             <p className="truncate text-sm font-semibold tracking-tight text-white">{institution.name}</p>
-            <p className="truncate text-[10px] font-medium uppercase tracking-wider text-slate-300/90">Smart Coach</p>
+            <p className="truncate text-[10px] font-medium uppercase tracking-wider text-slate-300/90">
+              Ders &amp; Koçluk
+            </p>
           </div>
         )}
       </div>

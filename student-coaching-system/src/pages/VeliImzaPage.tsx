@@ -18,6 +18,7 @@ import {
 } from '../lib/veliKayitLegalLinks';
 import { ODEME_TERCIHI_VELI_OPTIONS, type OdemeTercihiVeli } from '../lib/odemeSekli';
 import { CheckCircle2, Download, FileText, Loader2 } from 'lucide-react';
+import BrandLogo from '../components/brand/BrandLogo';
 
 type RegFields = {
   ogrenci_ad: string;
@@ -401,6 +402,7 @@ export default function VeliImzaPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-blue-950 to-slate-950 text-white px-4 py-8">
       <div className="max-w-lg mx-auto">
+        <BrandLogo variant="full" className="mb-5 w-full max-w-[300px] shadow-lg ring-1 ring-white/20" />
         <div className="flex items-center gap-2 mb-6">
           <FileText className="w-8 h-8 text-red-400" />
           <div>

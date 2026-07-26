@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom';
 import { GraduationCap, Lock, Mail, Phone, ArrowLeft, CheckCircle, AlertCircle } from 'lucide-react';
-import { DEFAULT_BRAND_LOGO } from '../lib/brandAssets';
+import BrandLogo from '../components/brand/BrandLogo';
 import { fetchPublicPost } from '../lib/session';
 import { db } from '../lib/database';
 
@@ -138,12 +138,7 @@ export default function Register() {
         <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
           {/* Header */}
           <div className="bg-gradient-to-r from-slate-800 to-slate-700 p-8 text-center">
-            <img
-              src={DEFAULT_BRAND_LOGO}
-              alt="Online VIP Dershane"
-              className="mx-auto mb-4 h-16 w-16 rounded-2xl bg-white object-contain p-1 shadow-lg"
-            />
-            <h1 className="text-xl font-bold leading-tight text-white sm:text-2xl">Online VIP Ders ve Koçluk</h1>
+            <BrandLogo variant="full" className="mx-auto mb-4 w-full max-w-[300px] shadow-lg ring-1 ring-white/20" />
             <p className="text-slate-300 mt-1">Öğrenci Takip Sistemi</p>
           </div>
 

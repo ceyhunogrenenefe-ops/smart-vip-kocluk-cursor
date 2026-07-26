@@ -13,6 +13,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { userRoleTags, userHasAnyRole } from '../../config/rolePermissions';
 import { cn } from '../../lib/utils';
+import BrandLogo from '../brand/BrandLogo';
 
 type Tab = { to: string; label: string; icon: React.ElementType; end?: boolean };
 
@@ -52,9 +53,7 @@ export default function PrivateLiveLayout() {
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 px-4 py-4 text-white shadow-sm sm:px-5">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-indigo-200/90">
-          Online VIP Dershane
-        </p>
+        <BrandLogo variant="full" className="mb-3 w-full max-w-[240px] shadow-md ring-1 ring-white/15" />
         <h1 className="mt-1 text-xl font-bold tracking-tight sm:text-2xl">Canlı Özel Ders</h1>
         <p className="mt-1 max-w-2xl text-sm text-slate-300">
           {isStudent

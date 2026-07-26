@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Dershane Kayıt Formu — Online VIP Dershane</title>
+<title>Kayıt Formu — Online VIP Ders ve Koçluk</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -14,7 +14,8 @@
   .card{width:100%;max-width:620px;background:var(--paper);border-radius:20px;overflow:hidden;box-shadow:0 26px 60px -28px rgba(11,30,79,.5);margin:12px 0 32px;}
   .hero{background:linear-gradient(155deg,var(--navy),var(--navy-2));color:#fff;padding:30px 32px 26px;position:relative;overflow:hidden;}
   .hero::after{content:"";position:absolute;right:-60px;top:-60px;width:200px;height:200px;background:radial-gradient(circle,rgba(255,255,255,.08),transparent 70%);}
-  .logo-chip{display:inline-block;background:#fff;border-radius:13px;padding:9px 15px;margin-bottom:18px;box-shadow:0 6px 18px -8px rgba(0,0,0,.35);font-weight:800;font-size:13px;color:var(--navy);letter-spacing:.02em;}
+  .logo-chip{display:inline-flex;align-items:center;justify-content:center;background:#fff;border-radius:13px;padding:8px 12px;margin-bottom:18px;box-shadow:0 6px 18px -8px rgba(0,0,0,.35);max-width:min(100%,320px);}
+  .logo-chip img{display:block;width:100%;height:auto;max-height:72px;object-fit:contain;}
   .hero h1{font-family:'Anton',sans-serif;font-weight:400;font-size:34px;line-height:1.05;letter-spacing:.01em;text-transform:uppercase;}
   .hero h1 .r{color:#ff5a60}
   .tag{margin-top:12px;font-size:14.5px;color:#c7d2ec;max-width:48ch;line-height:1.45}
@@ -66,8 +67,8 @@
   <div class="card">
     <div id="formWrap">
       <div class="hero">
-        <div class="logo-chip">Online VIP Dershane</div>
-        <h1>Dershane <span class="r">Kayıt</span> Formu</h1>
+        <div class="logo-chip"><img src="logo.png" alt="Online VIP Ders ve Koçluk"></div>
+        <h1>Ders &amp; Koçluk <span class="r">Kayıt</span> Formu</h1>
         <p class="tag">Veli bilgilerinizi doldurun; kaydınız kuruma iletilir, ücret onayından sonra e-sözleşmeyi imzalayabilirsiniz.</p>
       </div>
       <form id="regForm" novalidate>

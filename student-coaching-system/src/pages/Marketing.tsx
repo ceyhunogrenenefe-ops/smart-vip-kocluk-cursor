@@ -1,7 +1,7 @@
 // Türkçe: Pazarlama Sayfası - SaaS Landing Page
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { DEFAULT_BRAND_LOGO } from '../lib/brandAssets';
+import BrandLogo from '../components/brand/BrandLogo';
 import InstagramEmbed from '../components/marketing/InstagramEmbed';
 import {
   GraduationCap,
@@ -235,7 +235,7 @@ export default function Marketing() {
   const videoCategories = [
     {
       title: 'Veli Memnuniyet',
-      description: 'Velilerimizin Online VIP Dershane deneyimlerini dinleyin.',
+      description: 'Velilerimizin Online VIP Ders ve Koçluk deneyimlerini dinleyin.',
       videos: [
         {
           permalink: 'https://www.instagram.com/reel/DA3QXKaBSgi/',
@@ -304,13 +304,8 @@ export default function Marketing() {
       <nav className="fixed top-0 left-0 right-0 bg-white/95 backdrop-blur-md z-50 border-b border-gray-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-2">
-              <img
-                src={DEFAULT_BRAND_LOGO}
-                alt="Online VIP Dershane"
-                className="h-10 w-10 rounded-xl bg-white object-contain p-0.5"
-              />
-              <span className="text-xl font-bold text-gray-900">Online VIP Dershane</span>
+            <div className="flex items-center gap-2 min-w-0">
+              <BrandLogo variant="full" className="h-12 w-auto max-w-[220px] shadow-sm ring-1 ring-slate-200/80" />
             </div>
 
             {/* Desktop Menu */}

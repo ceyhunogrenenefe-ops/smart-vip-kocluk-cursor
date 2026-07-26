@@ -18,6 +18,7 @@ import {
   shipKitapciPortalOrder,
   type KitapciPortalOrder
 } from '../lib/kitapciPortalApi';
+import BrandLogo from '../components/brand/BrandLogo';
 function statusLabel(status: string) {
   switch (status) {
     case 'notified':
@@ -229,6 +230,7 @@ export default function KitapciPortalPage() {
     <div className="min-h-screen bg-gradient-to-b from-indigo-50 to-slate-50 px-4 py-6 sm:px-6">
       <div className="mx-auto max-w-2xl space-y-5">
         <header className="rounded-2xl border border-indigo-100 bg-white p-5 shadow-sm">
+          <BrandLogo variant="full" className="mb-4 w-full max-w-[260px] ring-1 ring-slate-200/80" />
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <div className="rounded-xl bg-indigo-600 p-2.5 text-white">
@@ -435,7 +437,7 @@ export default function KitapciPortalPage() {
           </ul>
         )}
 
-        <p className="text-center text-xs text-slate-400">Online VIP Dershane · Kitap sipariş paneli</p>
+        <p className="text-center text-xs text-slate-400">Online VIP Ders ve Koçluk · Kitap sipariş paneli</p>
       </div>
     </div>
   );
