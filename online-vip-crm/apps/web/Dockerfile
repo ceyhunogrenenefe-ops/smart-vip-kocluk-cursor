@@ -1,23 +1,12 @@
-# Online VIP CRM — Web (Next.js)
-FROM node:20-bookworm-slim AS base
+# Online VIP CRM — Next.js web (dev-friendly image; prefer monorepo root build in CI)
+FROM node:20-bookworm-slim
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
-
-FROM base AS deps
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml .npmrc ./
-COPY apps/web/package.json apps/web/
-RUN pnpm install --frozen-lockfile --filter @online-vip-crm/web...
-
-FROM deps AS build
-COPY apps/web apps/web
-ENV NEXT_TELEMETRY_DISABLED=1
-RUN pnpm --filter @online-vip-crm/web build
-
-FROM base AS runner
 ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
-COPY --from=build /app /app
-WORKDIR /app/apps/web
+ENV NEXT_TELEMETRY_DISABLED=1
+COPY apps/web/.next/standalone ./
+COPY apps/web/.next/static ./.next/static
+COPY apps/web/public ./public
 EXPOSE 3000
-CMD ["pnpm", "start"]
+CMD ["node", "server.js"]
