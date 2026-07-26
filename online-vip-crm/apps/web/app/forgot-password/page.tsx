@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 export default function ForgotPasswordPage() {
   return (
     <div className="login-atmosphere flex min-h-screen items-center justify-center px-4 py-10">
-      <div className="w-full max-w-md animate-fade-up rounded-3xl border border-white/10 bg-white/8 p-8 text-center shadow-soft backdrop-blur-md">
+      <div className="w-full max-w-md animate-fade-up rounded-3xl border border-white/10 bg-white/10 p-8 text-center shadow-soft backdrop-blur-md">
         <p className="font-display text-3xl font-semibold text-white">
           Online VIP CRM
         </p>

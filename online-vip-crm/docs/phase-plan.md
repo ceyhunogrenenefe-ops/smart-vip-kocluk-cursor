@@ -22,7 +22,7 @@
 - [x] Prisma şema + seed demo
 - [x] `apps/worker` kuyruklar + DLQ
 - [x] `docker compose up -d` → postgres + redis
-- [ ] `apps/web` gerçek UI (yer tutucu mevcut)
+- [x] `apps/web` Next.js UI iskeleti (login, inbox, leads, settings stub’ları)
 
 ## Sonraki öncelik (Faz 2)
 

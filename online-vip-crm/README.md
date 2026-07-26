@@ -12,7 +12,7 @@
 |--------|-----------|
 | API | NestJS (`apps/api`) |
 | Worker | BullMQ + TypeScript (`apps/worker`) |
-| Web | Yer tutucu → Next.js (`apps/web`) |
+| Web | Next.js (`apps/web`) |
 | DB | PostgreSQL 16 + Prisma |
 | Queue | Redis 7 |
 
@@ -38,7 +38,7 @@ pnpm db:seed
 # 4) Geliştirme
 pnpm --filter @online-vip-crm/api start:dev
 pnpm --filter @online-vip-crm/worker dev
-pnpm --filter @online-vip-crm/web dev   # yer tutucu :3000
+pnpm --filter @online-vip-crm/web dev     # Next.js :3000
 ```
 
 Tam stack container:

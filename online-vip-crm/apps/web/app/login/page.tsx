@@ -27,7 +27,7 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <div className="rounded-3xl border border-white/10 bg-white/8 p-6 shadow-soft backdrop-blur-md md:p-8">
+        <div className="rounded-3xl border border-white/10 bg-white/10 p-6 shadow-soft backdrop-blur-md md:p-8">
           <h1 className="mb-6 font-display text-2xl font-semibold text-white">
             Hesabınıza giriş yapın
           </h1>
