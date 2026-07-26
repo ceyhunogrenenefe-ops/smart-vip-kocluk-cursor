@@ -25,7 +25,6 @@ import {
   STUDENT_NAV_ACADEMIC_CENTER,
   STUDENT_NAV_SORU_SOR,
   STUDENT_NAV_YARDIM,
-  NAV_MY_PROFILE,
   NAV_KITAP_SIPARISLERI,
   type FlatNavItem
 } from './sidebar/navModel';

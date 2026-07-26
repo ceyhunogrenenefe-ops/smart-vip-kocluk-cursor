@@ -232,8 +232,8 @@ const ORG_SYSTEM_ORDER = [
   '/muhasebe'
 ] as const;
 
-const SETTINGS_PATHS = new Set(['/settings', '/webhooks', '/my-profile']);
-const SETTINGS_ORDER = ['/my-profile', '/settings', '/webhooks'] as const;
+const SETTINGS_PATHS = new Set(['/settings', '/webhooks']);
+const SETTINGS_ORDER = ['/settings', '/webhooks'] as const;
 
 const LESSON_LABELS: Record<string, string> = {
   '/class-live-lessons': 'Canlı Grup Dersleri',
@@ -267,8 +267,8 @@ const ACADEMIC_LABELS: Record<string, string> = {
 };
 
 function withProfileNav(items: FlatNavItem[]): FlatNavItem[] {
-  if (items.some((i) => i.path === NAV_MY_PROFILE.path)) return items;
-  return [...items, NAV_MY_PROFILE];
+  // Profilim sidebar’da yok — TopBar kullanıcı menüsünden açılır
+  return items.filter((i) => i.path !== NAV_MY_PROFILE.path);
 }
 
 function mergeSideMenus(groups: FlatNavItem[][]): FlatNavItem[] {
@@ -316,7 +316,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/muhasebe', icon: Wallet, label: 'Muhasebe' },
       { path: '/ai-coach', icon: Brain, label: 'AI KOÇ' },
       { path: '/settings', icon: Settings, label: 'Ayarlar' }
-    ].concat([NAV_MY_PROFILE]);
+    ];
   }
 
   const isStudentOnlyNav =
