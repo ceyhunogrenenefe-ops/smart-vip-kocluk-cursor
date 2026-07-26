@@ -6,10 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import {
-  ProcessingStatus,
-  Provider,
-} from '@online-vip-crm/database';
+import { ProcessingStatus, Provider, Prisma } from '@online-vip-crm/database';
 import { hashPayload } from '@online-vip-crm/shared';
 import type { EnvConfig } from '../../config/configuration';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -54,7 +51,10 @@ export class MetaWebhooksService {
   }
 
   /** Stub signature validation. Accepts when META_APP_SECRET is empty (dev). */
-  validateSignature(rawBody: Buffer | string, signatureHeader?: string): boolean {
+  validateSignature(
+    rawBody: Buffer | string,
+    signatureHeader?: string,
+  ): boolean {
     const secret = this.config.get('META_APP_SECRET', { infer: true });
     if (!secret) {
       this.logger.warn('META_APP_SECRET empty — skipping signature check (dev)');
@@ -64,7 +64,8 @@ export class MetaWebhooksService {
       return false;
     }
     const expected = signatureHeader.slice('sha256='.length);
-    const body = typeof rawBody === 'string' ? rawBody : rawBody.toString('utf8');
+    const body =
+      typeof rawBody === 'string' ? rawBody : rawBody.toString('utf8');
     const digest = createHmac('sha256', secret).update(body).digest('hex');
     try {
       return timingSafeEqual(
@@ -130,7 +131,6 @@ export class MetaWebhooksService {
       };
     }
 
-    // Also skip if same payload hash already processed (secondary idempotency)
     const byHash = await this.prisma.webhookEvent.findFirst({
       where: { provider, payloadHash },
     });
@@ -146,7 +146,7 @@ export class MetaWebhooksService {
           externalEventId: key.externalId,
           eventType: `meta.${channel}`,
           payloadHash,
-          payload,
+          payload: payload as Prisma.InputJsonValue,
           processingStatus: ProcessingStatus.PENDING,
         },
       });
@@ -165,34 +165,10 @@ export class MetaWebhooksService {
       throw new BadRequestException('Failed to persist webhook event');
     }
 
-    // Phase 3 stub: enqueue for worker (mark PROCESSING as queued proxy)
+    // Phase 3 stub: mark as queued for worker processing
     await this.prisma.webhookEvent.update({
       where: { id: event.id },
       data: { processingStatus: ProcessingStatus.PROCESSING },
-    });
-
-    await this.prisma.integrationJob.create({
-      data: {
-        institutionId:
-          (await this.prisma.institution.findFirst({
-            where: { deletedAt: null, status: 'ACTIVE' },
-            select: { id: true },
-          }))?.id ??
-          (
-            await this.prisma.institution.findFirst({
-              where: { deletedAt: null },
-              select: { id: true },
-            })
-          )?.id ??
-          undefined!,
-        provider,
-        jobType: 'webhook.process',
-        status: ProcessingStatus.PENDING,
-        payload: { webhookEventId: event.id, channel },
-      },
-    }).catch(() => {
-      // Institution may be missing in fresh env — webhook row still recorded
-      this.logger.warn(`Webhook ${event.id} recorded without integration job`);
     });
 
     this.logger.log(

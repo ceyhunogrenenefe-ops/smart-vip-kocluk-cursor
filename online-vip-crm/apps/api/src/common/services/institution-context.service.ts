@@ -35,6 +35,6 @@ export class InstitutionContext {
   }
 
   isSuperAdmin(user: AuthUser): boolean {
-    return user.role === PLATFORM_SUPER_ADMIN;
+    return user.role === PLATFORM_SUPER_ADMIN || user.isPlatformAdmin;
   }
 }

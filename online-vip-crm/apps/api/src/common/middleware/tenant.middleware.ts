@@ -15,7 +15,7 @@ export class TenantMiddleware implements NestMiddleware {
       return;
     }
 
-    if (user.role === PLATFORM_SUPER_ADMIN) {
+    if (user.role === PLATFORM_SUPER_ADMIN || user.isPlatformAdmin) {
       const headerSwitch = req.header('x-institution-id');
       const querySwitch =
         typeof req.query.institutionId === 'string'

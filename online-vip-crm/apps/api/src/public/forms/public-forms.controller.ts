@@ -1,7 +1,7 @@
 import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
-import { Public } from '../../../common/decorators/public.decorator';
-import { ApiKeyGuard } from '../../../common/guards/api-key.guard';
+import { Public } from '../../common/decorators/public.decorator';
+import { ApiKeyGuard } from '../../common/guards/api-key.guard';
 import { PublicFormsService } from './public-forms.service';
 import { PublicLeadFormDto } from './dto/public-lead.dto';
 

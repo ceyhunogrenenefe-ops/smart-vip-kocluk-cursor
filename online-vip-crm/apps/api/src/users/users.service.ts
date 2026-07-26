@@ -75,19 +75,17 @@ export class UsersService {
 
     const permissions = collectPermissions(
       uniqueRoles.filter((c): c is RoleCode =>
-        Object.values(RoleCode).includes(c as RoleCode),
+        (Object.values(RoleCode) as string[]).includes(c),
       ),
     );
 
-    // Ensure role defaults even if DB role links are incomplete
     if (!permissions.length) {
-      permissions.push(
-        ...getPermissionsForRole(
-          (primaryRole as RoleCode) in RoleCode
-            ? (primaryRole as RoleCode)
-            : RoleCode.READ_ONLY,
-        ),
-      );
+      const fallbackRole = (Object.values(RoleCode) as string[]).includes(
+        primaryRole,
+      )
+        ? (primaryRole as RoleCode)
+        : RoleCode.READ_ONLY;
+      permissions.push(...getPermissionsForRole(fallbackRole));
     }
 
     return {

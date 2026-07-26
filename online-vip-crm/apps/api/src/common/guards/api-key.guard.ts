@@ -5,18 +5,21 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InstitutionStatus } from '@online-vip-crm/database';
 import type { Request } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { EnvConfig } from '../../config/configuration';
+import { InstitutionsService } from '../../institutions/institutions.service';
 
 /**
  * Validates `x-api-key` for public form endpoints.
- * Matches institution.formApiKey or fallback PUBLIC_FORMS_API_KEY (dev).
+ * Matches institutionSettings.settings.formApiKey or PUBLIC_FORMS_API_KEY (dev).
  */
 @Injectable()
 export class ApiKeyGuard implements CanActivate {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly institutions: InstitutionsService,
     private readonly config: ConfigService<EnvConfig, true>,
   ) {}
 
@@ -27,14 +30,9 @@ export class ApiKeyGuard implements CanActivate {
       throw new UnauthorizedException('x-api-key header required');
     }
 
-    const institution = await this.prisma.institution.findFirst({
-      where: { formApiKey: apiKey, isActive: true },
-    });
-
+    const institution = await this.institutions.findActiveByFormApiKey(apiKey);
     if (institution) {
       request.institutionId = institution.id;
-      (request as Request & { formInstitution?: unknown }).formInstitution =
-        institution;
       return true;
     }
 
@@ -46,12 +44,14 @@ export class ApiKeyGuard implements CanActivate {
 
     if (fallback && apiKey === fallback && institutionId) {
       const byId = await this.prisma.institution.findFirst({
-        where: { id: institutionId, isActive: true },
+        where: {
+          id: institutionId,
+          deletedAt: null,
+          status: { in: [InstitutionStatus.ACTIVE, InstitutionStatus.TRIAL] },
+        },
       });
       if (byId) {
         request.institutionId = byId.id;
-        (request as Request & { formInstitution?: unknown }).formInstitution =
-          byId;
         return true;
       }
     }

@@ -3,6 +3,14 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
+import {
+  MessageDirection,
+  MessageStatus,
+  MessageType,
+  Provider,
+} from '@online-vip-crm/database';
+import { Provider as SharedProvider } from '@online-vip-crm/shared';
+import { MockProvider } from '@online-vip-crm/integrations';
 import { PrismaService } from '../prisma/prisma.service';
 import { InstitutionContext } from '../common/services/institution-context.service';
 import { AuditService } from '../audit/audit.service';
@@ -41,44 +49,44 @@ export class MockService {
     this.assertDevOnly();
     const institutionId = this.tenant.require(user, explicitInstitutionId);
 
-    let normalized: {
-      body: string;
-      channel: string;
-      contactPhone?: string;
-      contactName?: string;
-      externalId?: string;
-    };
+    const providerEnum =
+      dto.channel &&
+      Object.values(Provider).includes(dto.channel.toUpperCase() as Provider)
+        ? (dto.channel.toUpperCase() as Provider)
+        : Provider.MOCK;
 
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const integrations = require('@online-vip-crm/integrations') as {
-        MockProvider?: new () => {
-          normalizeInbound: (input: MockInboundMessageDto) => typeof normalized;
-        };
-      };
-      if (integrations.MockProvider) {
-        const provider = new integrations.MockProvider();
-        normalized = provider.normalizeInbound(dto);
-      } else {
-        throw new Error('MockProvider missing');
-      }
-    } catch {
-      normalized = {
-        body: dto.body,
-        channel: (dto.channel ?? 'MOCK').toUpperCase(),
-        contactPhone: dto.contactPhone,
-        contactName: dto.contactName,
-        externalId: dto.externalId,
-      };
-    }
+    const mock = new MockProvider({
+      institutionId,
+      provider:
+        providerEnum === Provider.MOCK
+          ? SharedProvider.WHATSAPP
+          : (providerEnum as unknown as SharedProvider),
+    });
+    await mock.connect({ mode: 'dev' });
+
+    const [normalized] = await mock.normalizeIncomingEvent({
+      institutionId,
+      text: dto.body,
+      provider:
+        providerEnum === Provider.MOCK
+          ? SharedProvider.WHATSAPP
+          : (providerEnum as unknown as SharedProvider),
+      externalMessageId: dto.externalId,
+      externalSenderId: dto.contactPhone ?? 'mock-user',
+    });
+
+    const channelProvider = normalized.provider as unknown as Provider;
 
     let contactId = dto.contactId;
     if (!contactId) {
+      const nameParts = (dto.contactName ?? 'Mock Contact').trim().split(/\s+/);
       const contact = await this.prisma.contact.create({
         data: {
           institutionId,
-          fullName: normalized.contactName ?? 'Mock Contact',
-          phone: normalized.contactPhone ?? null,
+          firstName: nameParts[0] ?? 'Mock',
+          lastName: nameParts.slice(1).join(' ') || 'Contact',
+          displayName: dto.contactName ?? 'Mock Contact',
+          primaryPhone: dto.contactPhone ?? null,
           source: 'mock',
         },
       });
@@ -89,7 +97,8 @@ export class MockService {
       where: {
         institutionId,
         contactId,
-        channel: normalized.channel,
+        provider: channelProvider,
+        deletedAt: null,
       },
     });
 
@@ -98,9 +107,11 @@ export class MockService {
         data: {
           institutionId,
           contactId,
-          channel: normalized.channel,
+          provider: channelProvider,
+          externalConversationId: normalized.externalConversationId,
           unreadCount: 1,
           lastMessageAt: new Date(),
+          lastMessagePreview: normalized.text?.slice(0, 180) ?? null,
         },
       });
     } else {
@@ -109,6 +120,7 @@ export class MockService {
         data: {
           unreadCount: { increment: 1 },
           lastMessageAt: new Date(),
+          lastMessagePreview: normalized.text?.slice(0, 180) ?? null,
         },
       });
     }
@@ -117,12 +129,14 @@ export class MockService {
       data: {
         institutionId,
         conversationId: conversation.id,
-        contactId,
-        direction: 'INBOUND',
-        channel: normalized.channel,
-        body: normalized.body,
-        externalId: normalized.externalId ?? null,
-        status: 'RECEIVED',
+        provider: channelProvider,
+        externalMessageId: normalized.externalMessageId,
+        direction: MessageDirection.INBOUND,
+        messageType: MessageType.TEXT,
+        textContent: normalized.text ?? dto.body,
+        senderContactId: contactId,
+        status: MessageStatus.RECEIVED,
+        providerTimestamp: normalized.sentAt,
       },
     });
 
@@ -134,7 +148,7 @@ export class MockService {
       entityId: message.id,
       metadata: {
         conversationId: conversation.id,
-        channel: normalized.channel,
+        provider: channelProvider,
       },
     });
 

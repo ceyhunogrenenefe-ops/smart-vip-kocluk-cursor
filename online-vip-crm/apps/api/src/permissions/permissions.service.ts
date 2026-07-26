@@ -1,9 +1,13 @@
 import { Injectable } from '@nestjs/common';
-import { resolvePermissionCatalog } from './permissions.constants';
+import { PERMISSION_CATALOG, PERMISSIONS } from '@online-vip-crm/shared';
 
 @Injectable()
 export class PermissionsService {
   listCatalog() {
-    return resolvePermissionCatalog();
+    return PERMISSION_CATALOG;
+  }
+
+  listKeys() {
+    return PERMISSIONS;
   }
 }

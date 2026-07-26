@@ -16,10 +16,14 @@ function user(partial: Partial<AuthUser>): AuthUser {
     id: 'u1',
     email: 'a@b.com',
     fullName: 'Test',
+    firstName: 'Test',
+    lastName: 'User',
     role: 'AGENT',
+    roles: ['AGENT'],
     institutionId: 'inst-1',
     permissions: ['inbox.view'],
     isActive: true,
+    isPlatformAdmin: false,
     ...partial,
   };
 }
@@ -31,7 +35,20 @@ describe('tenant isolation helpers', () => {
   });
 
   it('allows PLATFORM_SUPER_ADMIN to switch institution', () => {
-    const u = user({ role: PLATFORM_SUPER_ADMIN, institutionId: null });
+    const u = user({
+      role: PLATFORM_SUPER_ADMIN,
+      institutionId: null,
+      isPlatformAdmin: true,
+    });
+    expect(resolveInstitutionId(u, 'switched')).toBe('switched');
+  });
+
+  it('allows isPlatformAdmin flag to switch institution', () => {
+    const u = user({
+      role: 'INSTITUTION_ADMIN',
+      isPlatformAdmin: true,
+      institutionId: 'inst-1',
+    });
     expect(resolveInstitutionId(u, 'switched')).toBe('switched');
   });
 
