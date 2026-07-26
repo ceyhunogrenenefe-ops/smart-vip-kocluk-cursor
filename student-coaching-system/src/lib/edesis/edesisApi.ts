@@ -192,6 +192,7 @@ export type EdesisPlatformStudent = {
   name: string;
   email: string | null;
   edesis_ogrenci_id: string | null;
+  parent_phone?: string | null;
 };
 
 export type EdesisStudentResultsExam = {
@@ -248,6 +249,7 @@ export async function fetchEdesisStudentResultsHub(params: {
   edesisStudentId: string;
   platformStudentId: string | null;
   platformStudentName: string | null;
+  parent_phone?: string | null;
   count: number;
   exams: EdesisStudentResultsExam[];
   autoLinked?: boolean;

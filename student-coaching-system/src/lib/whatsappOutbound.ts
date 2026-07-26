@@ -322,7 +322,7 @@ function canUseMetaForParentPdf(): boolean {
   return r === 'super_admin' || r === 'admin' || r === 'coach' || r === 'teacher';
 }
 
-function buildParentPdfWaMeMessage(opts: {
+export function buildParentPdfWaMeMessage(opts: {
   studentName?: string;
   title?: string;
   caption?: string;

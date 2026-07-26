@@ -10,6 +10,7 @@ import {
   GraduationCap,
   Link2,
   Loader2,
+  MessageCircle,
   PenLine,
   Plug,
   RefreshCw,
@@ -18,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
+import { useAuth } from '../context/AuthContext';
 import EdesisSyncPanel from '../components/settings/EdesisSyncPanel';
 import {
   createEdesisClassroomHub,
@@ -39,6 +41,7 @@ import {
   type EdesisStatus,
   type EdesisStudentResultsExam
 } from '../lib/edesis/edesisApi';
+import { shareEdesisKarneWithParent } from '../lib/edesis/shareEdesisKarneWhatsApp';
 
 type TabId = 'baglanti' | 'ogrenciler' | 'donem' | 'sonuclar' | 'yazma';
 
@@ -70,6 +73,7 @@ function pickField(row: Record<string, unknown>, keys: string[]): string {
 }
 
 export default function EdesisPage() {
+  const { user } = useAuth();
   const [tab, setTab] = useState<TabId>('baglanti');
   const [status, setStatus] = useState<EdesisStatus | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
@@ -91,7 +95,10 @@ export default function EdesisPage() {
   const [resultExams, setResultExams] = useState<EdesisStudentResultsExam[]>([]);
   const [expandedExam, setExpandedExam] = useState<string | null>(null);
   const [karneBusyKey, setKarneBusyKey] = useState<string | null>(null);
+  const [karneWaBusyKey, setKarneWaBusyKey] = useState<string | null>(null);
   const [lastKarneUrl, setLastKarneUrl] = useState<string | null>(null);
+  const [resultsStudentName, setResultsStudentName] = useState<string | null>(null);
+  const [resultsParentPhone, setResultsParentPhone] = useState<string | null>(null);
   const [selectedTermId, setSelectedTermId] = useState('');
 
   const [writeLoading, setWriteLoading] = useState(false);
@@ -208,6 +215,21 @@ export default function EdesisPage() {
     return map;
   }, [hubStudents, platformStudents]);
 
+  const selectedPlatformStudent = useMemo(
+    () => platformStudents.find((p) => p.id === selectedPlatformId) || null,
+    [platformStudents, selectedPlatformId]
+  );
+
+  const resolvedParentPhone =
+    resultsParentPhone ||
+    selectedPlatformStudent?.parent_phone ||
+    null;
+  const resolvedStudentName =
+    resultsStudentName ||
+    selectedPlatformStudent?.name ||
+    hubStudents.find((s) => s.platformStudentId === selectedPlatformId)?.platformStudentName ||
+    'Öğrenci';
+
   const applyPlatformStudentSelection = (platformId: string) => {
     setSelectedPlatformId(platformId);
     if (!platformId) return;
@@ -267,6 +289,8 @@ export default function EdesisPage() {
       setResultExams(r.exams || []);
       if (r.platformStudentId) setSelectedPlatformId(r.platformStudentId);
       if (r.edesisStudentId) setSelectedEdesisId(r.edesisStudentId);
+      setResultsStudentName(r.platformStudentName || null);
+      setResultsParentPhone(r.parent_phone || null);
       if (r.autoLinked) {
         toast.success(`Edesis ID otomatik bağlandı (${r.edesisStudentId})`);
         void loadStudents();
@@ -309,6 +333,44 @@ export default function EdesisPage() {
       toast.error(e instanceof Error ? e.message : 'Karne oluşturulamadı');
     } finally {
       setKarneBusyKey(null);
+    }
+  };
+
+  const onKarneWhatsApp = async (exam: EdesisStudentResultsExam) => {
+    if (!exam.edesisExamId || !selectedEdesisId) {
+      toast.error('Karne için Edesis öğrenci ID ve sınav ID gerekli');
+      return;
+    }
+    if (!selectedPlatformId) {
+      toast.error('Veliye göndermek için platform öğrencisi seçin (veya öğrenci bağlayın)');
+      return;
+    }
+    if (!resolvedParentPhone) {
+      toast.error('Veli telefonu yok — öğrenci kaydında veli numarasını güncelleyin');
+      return;
+    }
+    if (!user?.id) {
+      toast.error('Oturum bulunamadı');
+      return;
+    }
+    const key = `${exam.edesisExamId}-${selectedEdesisId}`;
+    setKarneWaBusyKey(key);
+    try {
+      const r = await shareEdesisKarneWithParent({
+        exam,
+        edesisStudentId: selectedEdesisId,
+        platformStudentId: selectedPlatformId,
+        studentName: resolvedStudentName,
+        parentPhone: resolvedParentPhone,
+        coachUserId: user.id,
+        termId: selectedTermId || undefined
+      });
+      setLastKarneUrl(r.reportUrl);
+      toast.success(r.notice);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Veliye gönderilemedi');
+    } finally {
+      setKarneWaBusyKey(null);
     }
   };
 
@@ -733,6 +795,31 @@ export default function EdesisPage() {
                         <ExternalLink className="h-3 w-3" />
                       )}
                       Karne PDF
+                    </button>
+                    <button
+                      type="button"
+                      disabled={
+                        !selectedEdesisId ||
+                        !selectedPlatformId ||
+                        !resolvedParentPhone ||
+                        karneWaBusyKey === key
+                      }
+                      title={
+                        !selectedPlatformId
+                          ? 'Platform öğrencisi seçin'
+                          : !resolvedParentPhone
+                            ? 'Öğrenci kaydında veli telefonu gerekli'
+                            : 'Karne PDF veliye WhatsApp ile gönder'
+                      }
+                      onClick={() => void onKarneWhatsApp(exam)}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-green-200 bg-green-50 px-2 py-1 text-xs font-medium text-green-900 hover:bg-green-100 disabled:opacity-50"
+                    >
+                      {karneWaBusyKey === key ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <MessageCircle className="h-3 w-3" />
+                      )}
+                      Veliye WhatsApp
                     </button>
                     {selectedPlatformId && exam.edesisExamId ? (
                       <Link

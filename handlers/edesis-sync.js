@@ -658,7 +658,8 @@ export default async function handler(req, res) {
           id: s.id,
           name: s.name,
           email: s.email,
-          edesis_ogrenci_id: s.edesis_ogrenci_id || null
+          edesis_ogrenci_id: s.edesis_ogrenci_id || null,
+          parent_phone: s.parent_phone || null
         }))
       });
     }
@@ -760,6 +761,7 @@ export default async function handler(req, res) {
         edesisStudentId,
         platformStudentId: platformId,
         platformStudentName: matched?.name || null,
+        parent_phone: matched?.parent_phone || null,
         count: exams.length,
         fetchMode: fetchResult.fetchMode,
         autoLinked,
