@@ -1,0 +1,15 @@
+{
+  "name": "@online-vip-crm/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Online VIP CRM web UI placeholder (Next.js app lands in later phase)",
+  "scripts": {
+    "dev": "node server.js",
+    "build": "node -e \"console.log('web placeholder — no build step')\"",
+    "start": "node server.js",
+    "lint": "node -e \"process.exit(0)\"",
+    "typecheck": "node -e \"process.exit(0)\"",
+    "test": "node -e \"process.exit(0)\"",
+    "test:unit": "node -e \"process.exit(0)\""
+  }
+}
