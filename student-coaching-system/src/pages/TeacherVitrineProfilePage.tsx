@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Save, Send, AlertCircle, Lock } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Loader2, Save, Send, AlertCircle, Lock, Upload, ImagePlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '../lib/session';
 import TeacherAvailabilityPanel from '../components/teacher/TeacherAvailabilityPanel';
@@ -49,6 +49,9 @@ export default function TeacherVitrineProfilePage() {
   const [tab, setTab] = useState<'basic' | 'cv' | 'media' | 'lesson' | 'availability'>('basic');
   const [data, setData] = useState<ProfileResponse | null>(null);
   const [form, setForm] = useState<Record<string, unknown>>({});
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [localPhotoPreview, setLocalPhotoPreview] = useState<string | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -83,6 +86,115 @@ export default function TeacherVitrineProfilePage() {
 
   const canEdit = data?.can_edit ?? data?.editing_enabled ?? true;
   const editingDisabled = !canEdit;
+
+  const uploadProfilePhoto = async (file: File) => {
+    if (editingDisabled) {
+      toast.error('Profil düzenleme yetkiniz kapalı');
+      return;
+    }
+    const mime = String(file.type || '').toLowerCase();
+    const okMime = mime === 'image/jpeg' || mime === 'image/jpg' || mime === 'image/png';
+    const ext = String(file.name || '')
+      .split('.')
+      .pop()
+      ?.toLowerCase();
+    const okExt = ext === 'jpg' || ext === 'jpeg' || ext === 'png';
+    if (!okMime && !okExt) {
+      toast.error('Sadece JPG veya PNG yükleyebilirsiniz');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Dosya en fazla 5 MB olabilir');
+      return;
+    }
+
+    const contentType = mime === 'image/png' || ext === 'png' ? 'image/png' : 'image/jpeg';
+    const objectUrl = URL.createObjectURL(file);
+    setLocalPhotoPreview(objectUrl);
+    setPhotoUploading(true);
+    try {
+      const signRes = await apiFetch('/api/teacher-profile-media?op=sign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'photo',
+          fileName: file.name || `profil.${ext === 'png' ? 'png' : 'jpg'}`,
+          contentType,
+          size: file.size
+        })
+      });
+      const signJ = (await signRes.json()) as {
+        error?: string;
+        hint?: string;
+        signedUrl?: string | null;
+        token?: string | null;
+        path?: string;
+        contentType?: string;
+      };
+      if (!signRes.ok) {
+        throw new Error(signJ.hint || signJ.error || `Yükleme hazırlığı başarısız (${signRes.status})`);
+      }
+      if (!signJ.path || !signJ.signedUrl) {
+        throw new Error('Yükleme bağlantısı alınamadı. Storage (teacher-profiles) ayarını kontrol edin.');
+      }
+
+      const putHeaders: Record<string, string> = {
+        'Content-Type': signJ.contentType || contentType,
+        'x-upsert': 'true'
+      };
+      if (signJ.token) putHeaders.Authorization = `Bearer ${signJ.token}`;
+
+      const put = await fetch(signJ.signedUrl, {
+        method: 'PUT',
+        headers: putHeaders,
+        body: file
+      });
+      if (!put.ok) {
+        const t = await put.text().catch(() => '');
+        throw new Error(t.slice(0, 180) || `Dosya Storage’a yüklenemedi (${put.status})`);
+      }
+
+      const confirmRes = await apiFetch('/api/teacher-profile-media?op=confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'photo',
+          path: signJ.path,
+          contentType: signJ.contentType || contentType
+        })
+      });
+      const confirmJ = (await confirmRes.json()) as {
+        error?: string;
+        publicUrl?: string | null;
+        path?: string;
+        profile?: { photo_url?: string | null; photo_path?: string | null };
+      };
+      if (!confirmRes.ok) throw new Error(confirmJ.error || `Onay başarısız (${confirmRes.status})`);
+
+      const photoUrl =
+        confirmJ.publicUrl ||
+        confirmJ.profile?.photo_url ||
+        String(form.photo_url || '') ||
+        objectUrl;
+      const photoPath = confirmJ.path || confirmJ.profile?.photo_path || '';
+      setForm((prev) => ({
+        ...prev,
+        photo_url: photoUrl,
+        photo_path: photoPath || prev.photo_path
+      }));
+      toast.success('Profil fotoğrafı yüklendi');
+      await load();
+      URL.revokeObjectURL(objectUrl);
+      setLocalPhotoPreview(null);
+    } catch (e) {
+      URL.revokeObjectURL(objectUrl);
+      setLocalPhotoPreview(null);
+      toast.error(e instanceof Error ? e.message : 'Fotoğraf yüklenemedi');
+    } finally {
+      setPhotoUploading(false);
+      if (photoInputRef.current) photoInputRef.current.value = '';
+    }
+  };
 
   const save = async () => {
     if (editingDisabled) {
@@ -368,16 +480,54 @@ export default function TeacherVitrineProfilePage() {
 
           {tab === 'media' ? (
             <>
-              <Field
-                label="Profil fotoğrafı URL"
-                value={String(form.photo_url || '')}
-                onChange={(v) => setField('photo_url', v)}
-                placeholder="https://… veya yükleme sonrası URL"
-                disabled={editingDisabled}
-              />
-              <p className="text-xs text-slate-500">
-                Fotoğraf yükleme için Supabase <code>teacher-profiles</code> bucket gerekir. Şimdilik görsel URL’si de kabul edilir.
-              </p>
+              <div className="space-y-3">
+                <p className="text-sm font-semibold text-slate-700">Profil fotoğrafı</p>
+                <div className="flex flex-wrap items-end gap-4">
+                  <div className="flex h-40 w-32 items-center justify-center overflow-hidden rounded-xl border border-dashed border-slate-300 bg-slate-50">
+                    {localPhotoPreview || form.photo_url ? (
+                      <img
+                        src={String(localPhotoPreview || form.photo_url)}
+                        alt="Profil önizleme"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center gap-1 px-2 text-center text-slate-400">
+                        <ImagePlus className="h-8 w-8" />
+                        <span className="text-xs">JPG / PNG</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <input
+                      ref={photoInputRef}
+                      type="file"
+                      accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                      className="hidden"
+                      disabled={editingDisabled || photoUploading}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) void uploadProfilePhoto(file);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      disabled={editingDisabled || photoUploading}
+                      onClick={() => photoInputRef.current?.click()}
+                      className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {photoUploading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Upload className="h-4 w-4" />
+                      )}
+                      {photoUploading ? 'Yükleniyor…' : 'Foto yükle'}
+                    </button>
+                    <p className="max-w-xs text-xs text-slate-500">
+                      JPG veya PNG, en fazla 5 MB. Dosyayı seçince otomatik yüklenir.
+                    </p>
+                  </div>
+                </div>
+              </div>
               <Field
                 label="Tanıtım videosu (YouTube / Vimeo linki)"
                 value={String(form.video_url || '')}
@@ -385,9 +535,6 @@ export default function TeacherVitrineProfilePage() {
                 placeholder="https://www.youtube.com/watch?v=…"
                 disabled={editingDisabled}
               />
-              {form.photo_url ? (
-                <img src={String(form.photo_url)} alt="Önizleme" className="mt-2 h-40 w-32 rounded-xl object-cover" />
-              ) : null}
             </>
           ) : null}
 
