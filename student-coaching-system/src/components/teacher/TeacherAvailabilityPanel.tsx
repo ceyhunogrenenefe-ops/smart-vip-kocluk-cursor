@@ -477,7 +477,7 @@ export default function TeacherAvailabilityPanel({ embedded = false }: Props) {
               type="button"
               onClick={() => {
                 setActiveDay(dowFromYmd(selectedDate));
-                toast.message('Aşağıdan bu güne saat ekleyin');
+                toast('Aşağıdan bu güne saat ekleyin');
               }}
               className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-[#1a3fad]"
             >
