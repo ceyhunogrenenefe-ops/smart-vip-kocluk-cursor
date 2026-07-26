@@ -78,7 +78,12 @@ function istanbulDateAt(ymd, hm) {
   return new Date(Date.UTC(y, mo - 1, d, hh - 3, mm, 0));
 }
 
-export async function loadAvailabilityBundle(teacherId) {
+export async function loadAvailabilityBundle(teacherId, { fromDate } = {}) {
+  const todayYmd = istanbulParts().ymd;
+  const exceptionFrom = fromDate && /^\d{4}-\d{2}-\d{2}$/.test(String(fromDate))
+    ? String(fromDate).slice(0, 10)
+    : todayYmd;
+
   const [{ data: rules }, { data: exceptions }, { data: bookings }] = await Promise.all([
     supabaseAdmin
       .from('teacher_availability')
@@ -91,7 +96,7 @@ export async function loadAvailabilityBundle(teacherId) {
       .from('teacher_availability_exceptions')
       .select('*')
       .eq('teacher_id', teacherId)
-      .gte('exception_date', istanbulParts().ymd)
+      .gte('exception_date', exceptionFrom)
       .order('exception_date'),
     supabaseAdmin
       .from('teacher_private_bookings')

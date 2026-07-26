@@ -1,7 +1,7 @@
 /**
  * Öğretmen haftalık müsaitlik (özel ders vitrini — koçluk derslerinden bağımsız)
  * GET    /api/teacher-availability
- * POST   /api/teacher-availability?op=upsert|delete|close-day|exception|copy-week
+ * POST   /api/teacher-availability?op=upsert|delete|close-day|reopen-day|exception|copy-week
  * GET    /api/teacher-availability?op=slots  (kendi önizleme)
  */
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
@@ -55,10 +55,12 @@ export default async function handler(req, res) {
     const op = String(req.query.op || '').trim();
 
     if (req.method === 'GET' && (op === 'slots' || op === '')) {
-      const bundle = await loadAvailabilityBundle(uid);
+      const fromDate = String(req.query.from || '').slice(0, 10) || undefined;
+      const bundle = await loadAvailabilityBundle(uid, { fromDate });
       if (op === 'slots') {
+        const days = Math.min(60, Math.max(1, Number(req.query.days) || 14));
         return res.status(200).json({
-          slots: computePublicSlots(bundle),
+          slots: computePublicSlots({ ...bundle, days }),
           rules: bundle.rules,
           exceptions: bundle.exceptions
         });
@@ -168,6 +170,21 @@ export default async function handler(req, res) {
     if (op === 'close-day') {
       const date = String(body.exception_date || body.date || '').slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'invalid_date' });
+
+      // Aynı güne tam gün kapalı kaydı varsa yenile (çift kayıt önle)
+      const { data: existing } = await supabaseAdmin
+        .from('teacher_availability_exceptions')
+        .select('id')
+        .eq('teacher_id', uid)
+        .eq('exception_date', date)
+        .eq('exception_type', 'unavailable')
+        .is('start_time', null)
+        .is('end_time', null);
+      if (existing?.length) {
+        const ids = existing.map((r) => r.id);
+        await supabaseAdmin.from('teacher_availability_exceptions').delete().in('id', ids);
+      }
+
       const { data, error } = await supabaseAdmin
         .from('teacher_availability_exceptions')
         .insert({
@@ -183,6 +200,29 @@ export default async function handler(req, res) {
         .single();
       if (error) throw error;
       return res.status(200).json({ exception: data });
+    }
+
+    if (op === 'reopen-day') {
+      const date = String(body.exception_date || body.date || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'invalid_date' });
+
+      const { data: existing } = await supabaseAdmin
+        .from('teacher_availability_exceptions')
+        .select('id')
+        .eq('teacher_id', uid)
+        .eq('exception_date', date)
+        .eq('exception_type', 'unavailable')
+        .is('start_time', null)
+        .is('end_time', null);
+
+      if (!existing?.length) {
+        return res.status(200).json({ ok: true, removed: 0, message: 'Bu gün zaten açık' });
+      }
+
+      const ids = existing.map((r) => r.id);
+      const { error } = await supabaseAdmin.from('teacher_availability_exceptions').delete().in('id', ids);
+      if (error) throw error;
+      return res.status(200).json({ ok: true, removed: ids.length });
     }
 
     if (op === 'exception') {
