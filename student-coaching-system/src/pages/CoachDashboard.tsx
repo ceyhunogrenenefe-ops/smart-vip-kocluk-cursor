@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { userRoleTags } from '../config/rolePermissions';
 import { formatClassLevelLabel } from '../types';
+import { resolveCoachRecordId } from '../lib/coachResolve';
 import { db } from '../lib/database';
 import { getAuthToken } from '../lib/session';
 import {
@@ -62,8 +63,28 @@ export default function CoachDashboard() {
   const coachTags = useMemo(() => userRoleTags(effectiveUser), [effectiveUser]);
   const isCoachUser = coachTags.includes('coach');
 
-  // Koç paneli: yalnızca coach_id ile atanan öğrenciler (ders oturumu öğrencileri hariç)
+  // Koç paneli genel görünüm: API birleşimi (koç + ders öğrencileri) korunur
   const myStudents = students;
+
+  /** Günlük rapor takibi: yalnızca coach_id ile koçluk yapılan öğrenciler */
+  const myCoachRecordId = useMemo(
+    () =>
+      resolveCoachRecordId(
+        effectiveUser?.role,
+        effectiveUser?.coachId,
+        effectiveUser?.email,
+        coaches,
+        { roles: coachTags, platformUserId: effectiveUser?.id }
+      ) ||
+      effectiveUser?.coachId ||
+      '',
+    [effectiveUser?.role, effectiveUser?.coachId, effectiveUser?.email, effectiveUser?.id, coaches, coachTags]
+  );
+
+  const reportStudents = useMemo(() => {
+    if (!myCoachRecordId) return [];
+    return myStudents.filter((s) => String(s.coachId || '') === String(myCoachRecordId));
+  }, [myStudents, myCoachRecordId]);
 
   // Koçun öğrenci ID'leri
   const myStudentIds = useMemo(() => myStudents.map(s => s.id), [myStudents]);
@@ -328,10 +349,10 @@ export default function CoachDashboard() {
       </div>
 
       <DailyReportTrackingPanel
-        students={myStudents}
+        students={reportStudents}
         weeklyEntries={weeklyEntries}
         title="Günlük rapor takibi"
-        subtitle="Öğrencilerinizin seçili günde rapor doldurup doldurmadığını görün."
+        subtitle="Koçluk yaptığınız öğrencilerin seçili günde rapor doldurup doldurmadığını görün."
       />
 
       {/* Detaylı İstatistikler */}
