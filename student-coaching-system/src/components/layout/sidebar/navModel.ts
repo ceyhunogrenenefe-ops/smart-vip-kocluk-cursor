@@ -124,6 +124,7 @@ export const STUDENT_PANEL_SUBMENU_ITEMS: FlatNavItem[] = [
   { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
   { path: '/topic-tracking', icon: CheckSquare, label: 'Konu takibi' },
   { path: '/student-dashboard/denemeler', icon: ClipboardList, label: 'Deneme sınavları' },
+  { path: '/student-edesis', icon: CloudDownload, label: 'Edesis karnelerim' },
   { path: '/student-dashboard/yazili', icon: FileCheck, label: 'Yazılılarım' },
   { path: '/student-dashboard/kitaplar', icon: BookMarked, label: 'Kitaplarım' },
 ];
@@ -184,6 +185,7 @@ export const MOBILE_ACADEMIC_MATCH_PATHS = [
   '/soru-havuzu',
   '/soru-analitik',
   '/student-dashboard',
+  '/student-edesis',
   '/student-analytics',
   '/exam-tracking'
 ] as const;
@@ -255,6 +257,7 @@ const ACADEMIC_LABELS: Record<string, string> = {
   '/book-tracking': 'Kitap Takibi',
   '/exam-tracking': 'Sınav Takibi',
   '/edesis': 'Edesis',
+  '/student-edesis': 'Edesis karnelerim',
   '/written-exam': 'Yazılı Takibi',
   '/topic-tracking': 'Konu Takibi',
   '/academic-center': 'Akademik Merkez',
@@ -324,7 +327,8 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
   if (isStudentOnlyNav) {
     /** Akademik Merkez, Ders&Görüşme, panel ve Soru Sor Sidebar.tsx’te ayrı */
     return [{ path: '/student-analytics', icon: BarChart3, label: 'Analizlerim' },
-      { path: '/exam-tracking', icon: ClipboardList, label: 'Deneme analizi' }];
+      { path: '/exam-tracking', icon: ClipboardList, label: 'Deneme analizi' },
+      { path: '/student-edesis', icon: CloudDownload, label: 'Edesis karnelerim' }];
   }
 
   const MENU_ADMIN: FlatNavItem[] = [

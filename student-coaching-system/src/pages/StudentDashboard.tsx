@@ -1,12 +1,13 @@
 // Türkçe: Öğrenci Özel Dashboard — deneme, yazılı ve kitap takibi
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { userRoleTags } from '../config/rolePermissions';
 import { ScoresLoadingPlaceholder } from '../components/ui/ScoresLoadingPlaceholder';
 import { useApp } from '../context/AppContext';
 import { resolveStudentRecordId } from '../lib/coachResolve';
-import type { WrittenExamScore } from '../types';
+import { fetchEdesisKarnePdf } from '../lib/edesis/edesisApi';
+import type { ExamResult, WrittenExamScore } from '../types';
 import {
   GraduationCap,
   TrendingUp,
@@ -27,8 +28,11 @@ import {
   MessageCircle,
   BookMarked,
   Flame,
-  Timer
+  Timer,
+  CloudDownload,
+  Loader2
 } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   BarChart,
   Bar,
@@ -99,8 +103,8 @@ export default function StudentDashboard() {
     [linkedStudent?.id, effectiveUser?.role, effectiveUser?.studentId, effectiveUser?.email, students, studentTags]
   );
 
-  // Tab state — URL: /student-dashboard/:denemeler | yazili | kitaplar
   const [activeTab, setActiveTab] = useState<TabType>('exams');
+  const [karneBusyId, setKarneBusyId] = useState<string | null>(null);
 
   useEffect(() => {
     const mapped = tabKey ? SEGMENT_TAB[tabKey] : undefined;
@@ -125,6 +129,35 @@ export default function StudentDashboard() {
       .slice()
       .sort((a, b) => new Date(b.examDate).getTime() - new Date(a.examDate).getTime());
   }, [examResults, resolvedStudentId]);
+
+  const openEdesisKarne = async (result: ExamResult) => {
+    if (!result.edesisExamId) {
+      toast.error('Bu kayıtta Edesis sınav ID yok');
+      return;
+    }
+    if (!resolvedStudentId && !result.edesisStudentId) {
+      toast.error('Edesis öğrenci eşlemesi yok — Edesis karnelerim sayfasını deneyin');
+      return;
+    }
+    setKarneBusyId(result.id);
+    try {
+      const r = await fetchEdesisKarnePdf({
+        examId: result.edesisExamId,
+        edesisStudentId: String(result.edesisStudentId || '').trim() || undefined,
+        studentId: resolvedStudentId
+      });
+      if (r.reportUrl) {
+        window.open(r.reportUrl, '_blank', 'noopener,noreferrer');
+        toast.success(r.message || 'Karne PDF hazır');
+      } else {
+        toast.warning(r.message || r.hint || 'Karne linki dönmedi');
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Karne açılamadı');
+    } finally {
+      setKarneBusyId(null);
+    }
+  };
 
   // Öğrencinin istatistikleri
   const myStats = useMemo(() => {
@@ -395,6 +428,16 @@ export default function StudentDashboard() {
               <ScoresLoadingPlaceholder message="Deneme sınavları yükleniyor…" />
             ) : (
             <div className="space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm text-gray-600">Deneme sonuçlarınız</p>
+                <Link
+                  to="/student-edesis"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-100"
+                >
+                  <CloudDownload className="h-3.5 w-3.5" />
+                  Edesis karnelerim
+                </Link>
+              </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="bg-blue-50 rounded-xl p-4 text-center">
                   <ClipboardList className="w-8 h-8 text-blue-600 mx-auto mb-2" />
@@ -453,13 +496,18 @@ export default function StudentDashboard() {
                               >
                                 {result.examType}
                               </span>
+                              {(result.source === 'edesis' || result.edesisExamId) && (
+                                <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                                  Edesis
+                                </span>
+                              )}
                               <span className="text-sm text-gray-500 flex items-center gap-1">
                                 <Calendar className="w-4 h-4" />
                                 {new Date(result.examDate).toLocaleDateString('tr-TR')}
                               </span>
                             </div>
                           </div>
-                          <div className="text-right">
+                          <div className="text-right space-y-2">
                             <p className="text-2xl font-bold text-blue-600">{result.totalNet} net</p>
                             {netChange !== 0 && (
                               <span className={`flex items-center justify-end gap-1 text-sm ${
@@ -469,6 +517,21 @@ export default function StudentDashboard() {
                                 {netChange >= 0 ? '+' : ''}{netChange}
                               </span>
                             )}
+                            {result.edesisExamId ? (
+                              <button
+                                type="button"
+                                disabled={karneBusyId === result.id}
+                                onClick={() => void openEdesisKarne(result)}
+                                className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-bold text-white disabled:opacity-50"
+                              >
+                                {karneBusyId === result.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <FileText className="h-3.5 w-3.5" />
+                                )}
+                                Karne PDF
+                              </button>
+                            ) : null}
                           </div>
                         </div>
 

@@ -106,14 +106,14 @@ export async function refreshEdesisExamDetail(params: {
 export async function fetchEdesisKarnePdf(params: {
   examId: string;
   studentId?: string;
-  edesisStudentId: string;
+  edesisStudentId?: string;
   termId?: number | string;
 }): Promise<{ ok?: boolean; status?: string; reportUrl?: string | null; message?: string; hint?: string }> {
   const qs = new URLSearchParams({
     op: 'exam-karne-pdf',
-    examId: params.examId,
-    edesisStudentId: params.edesisStudentId
+    examId: params.examId
   });
+  if (params.edesisStudentId) qs.set('edesisStudentId', params.edesisStudentId);
   if (params.studentId) qs.set('studentId', params.studentId);
   if (params.termId != null) qs.set('termId', String(params.termId));
   const res = await apiFetch(`/api/edesis-sync?${qs.toString()}`, { method: 'POST' });

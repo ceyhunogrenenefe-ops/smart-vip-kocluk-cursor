@@ -20,6 +20,7 @@ import Topics from './pages/Topics';
 import TopicTracking from './pages/TopicTracking';
 import ExamTracking from './pages/ExamTracking';
 import EdesisPage from './pages/EdesisPage';
+import StudentEdesisReportsPage from './pages/StudentEdesisReportsPage';
 import PDFImport from './pages/PDFImport';
 import Analytics from './pages/Analytics';
 import AICoach from './pages/AICoach';
@@ -202,6 +203,13 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/edesis')}>
                 <Layout>
                   <EdesisPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            <Route path="/student-edesis" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/student-edesis')}>
+                <Layout>
+                  <StudentEdesisReportsPage />
                 </Layout>
               </ProtectedRoute>
             } />

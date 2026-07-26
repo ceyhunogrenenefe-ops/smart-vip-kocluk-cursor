@@ -21,6 +21,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/topic-tracking': ['admin', 'coach', 'student'],
   '/exam-tracking': ['admin', 'coach', 'student'],
   '/edesis': ['super_admin', 'admin', 'coach'],
+  '/student-edesis': ['student'],
   '/book-tracking': ['admin', 'coach'],
   '/written-exam': ['admin', 'coach'],
   '/pdf-import': ['admin', 'coach'],

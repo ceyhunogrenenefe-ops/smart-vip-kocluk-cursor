@@ -38,6 +38,34 @@ import {
 import { EDESIS_EMPTY_LIST_HELP } from '../api/_lib/edesis-client.js';
 
 const STAFF = new Set(['super_admin', 'admin', 'coach']);
+/** Öğrencinin kendi Edesis sonuç / karne okuma ops */
+const STUDENT_READ_OPS = new Set(['student-results', 'exam-karne-pdf', 'exam-detail']);
+
+function actorIsStudent(actor, tags) {
+  const role = String(actor?.role || '').toLowerCase();
+  return role === 'student' || (Array.isArray(tags) && tags.includes('student'));
+}
+
+async function resolveOwnPlatformStudent(actor) {
+  const uid = String(actor?.sub || '').trim();
+  const sidHint = String(actor?.student_id || '').trim();
+  if (sidHint) {
+    const { data } = await supabaseAdmin
+      .from('students')
+      .select('id, name, email, edesis_ogrenci_id, institution_id, user_id, platform_user_id')
+      .eq('id', sidHint)
+      .maybeSingle();
+    if (data) return data;
+  }
+  if (!uid || uid === 'anonymous') return null;
+  const { data: byUser } = await supabaseAdmin
+    .from('students')
+    .select('id, name, email, edesis_ogrenci_id, institution_id, user_id, platform_user_id')
+    .or(`platform_user_id.eq.${uid},user_id.eq.${uid}`)
+    .limit(1)
+    .maybeSingle();
+  return byUser || null;
+}
 
 function examResultToUpsertRow(exam, institutionId) {
   const totals = (exam.subjects || []).reduce(
@@ -375,8 +403,38 @@ export default async function handler(req, res) {
   try {
     const actor = requireAuthenticatedActor(req);
     const tags = await normalizedUserRolesFromDb(actor.sub);
-    const allowed = tags.some((t) => STAFF.has(t)) || STAFF.has(actor.role);
-    if (!allowed) return res.status(403).json({ error: 'forbidden' });
+    const isStaff = tags.some((t) => STAFF.has(t)) || STAFF.has(actor.role);
+    const isStudent = actorIsStudent(actor, tags);
+    const studentReadOp = STUDENT_READ_OPS.has(op);
+
+    if (!isStaff && !(isStudent && studentReadOp)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    /** Öğrenci yalnızca kendi kartına erişir; yabancı ID'leri yok sayar */
+    let studentSelf = null;
+    if (isStudent && !isStaff && studentReadOp) {
+      studentSelf = await resolveOwnPlatformStudent(actor);
+      if (!studentSelf) {
+        return res.status(400).json({
+          error: 'student_profile_missing',
+          hint: 'Öğrenci kartınız bulunamadı. Çıkış yapıp tekrar giriş yapın veya koçunuza başvurun.'
+        });
+      }
+      // Force ownership on query/body for downstream ops
+      if (req.query && typeof req.query === 'object') {
+        req.query.studentId = String(studentSelf.id);
+        const ownEdesis = String(studentSelf.edesis_ogrenci_id || '').trim();
+        if (ownEdesis) req.query.edesisStudentId = ownEdesis;
+        else delete req.query.edesisStudentId;
+      }
+      if (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) {
+        req.body.studentId = String(studentSelf.id);
+        const ownEdesis = String(studentSelf.edesis_ogrenci_id || '').trim();
+        if (ownEdesis) req.body.edesisStudentId = ownEdesis;
+        else delete req.body.edesisStudentId;
+      }
+    }
 
     if (op === 'status') {
       const cfg = getEdesisConfig();
