@@ -2,7 +2,15 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Student } from '../types';
-import { clearAuthToken, fetchPublicPost, setAuthToken, getAuthToken, peekJwtClaims, authLoginUnavailableMessage } from '../lib/session';
+import {
+  clearAuthToken,
+  fetchPublicPost,
+  setAuthToken,
+  getAuthToken,
+  peekJwtClaims,
+  authLoginUnavailableMessage,
+  isGuestPublicPath
+} from '../lib/session';
 import { db } from '../lib/database';
 import { studentRowToStudent } from '../lib/mapStudentRow';
 import type { UserRow } from '../lib/userRowToSystemUser';
@@ -399,6 +407,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const checkSession = () => {
       try {
+        // Veli e-imza / misafir linkleri: eski panel oturumu yüklenmesin (401 → /login tuzağı).
+        if (typeof window !== 'undefined' && isGuestPublicPath(window.location.pathname)) {
+          setIsLoading(false);
+          return;
+        }
         const savedUser = localStorage.getItem('coaching_user');
         if (savedUser) {
           const parsed = JSON.parse(savedUser);

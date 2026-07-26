@@ -1,13 +1,15 @@
 // Türkçe: Giriş Sayfası - Güvenlik Sistemi ile
 import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { PRIVACY_POLICY_PATH } from '../lib/playStoreLinks';
 import { useAuth } from '../context/AuthContext';
 import { GraduationCap, Lock, Mail, Eye, EyeOff, AlertCircle, CheckCircle, Shield, AlertTriangle } from 'lucide-react';
 import { DEFAULT_BRAND_LOGO } from '../lib/brandAssets';
+import { isGuestPublicPath } from '../lib/session';
 
 export default function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login, user } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -23,12 +25,30 @@ export default function Login() {
   ]);
   const isDemoEmail = demoEmails.has(String(email || '').toLowerCase().trim());
 
+  const fromPath =
+    typeof (location.state as { from?: { pathname?: string } } | null)?.from?.pathname === 'string'
+      ? String((location.state as { from?: { pathname?: string } }).from?.pathname || '')
+      : '';
+  const fromSearch =
+    typeof (location.state as { from?: { search?: string } } | null)?.from?.search === 'string'
+      ? String((location.state as { from?: { search?: string } }).from?.search || '')
+      : '';
+  const returnTo = fromPath ? `${fromPath}${fromSearch}` : '';
+  const lookingForVeliImza =
+    isGuestPublicPath(fromPath) ||
+    fromPath === '/veli-onay' ||
+    /veli-imza|sign-contract|veli.?onay|e-?imza/i.test(String(location.search || ''));
+
   // Zaten oturum varsa veya giriş başarılı olduktan sonra tek seferlik yönlendirme (çift navigate / throttling önlenir)
   useEffect(() => {
     if (user) {
-      navigate('/', { replace: true });
+      if (returnTo && isGuestPublicPath(fromPath)) {
+        navigate(returnTo, { replace: true });
+      } else {
+        navigate('/', { replace: true });
+      }
     }
-  }, [user, navigate]);
+  }, [user, navigate, returnTo, fromPath]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,7 +60,7 @@ export default function Login() {
 
       if (result.success) {
         setSuccess(result.message);
-        // Yönlendirme: user set edilince yukarıdaki useEffect navigate('/', { replace: true }) yapar — burada tekrarlamayın.
+        // Yönlendirme: user set edilince yukarıdaki useEffect navigate yapar — burada tekrarlamayın.
       } else {
         setError(result.message);
       }
@@ -75,6 +95,17 @@ export default function Login() {
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="p-8 space-y-5">
+            {lookingForVeliImza ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-amber-900 text-sm">
+                <p className="font-semibold">Veli misiniz?</p>
+                <p className="mt-1">
+                  Kayıt / e-imza için kullanıcı adı veya şifre gerekmez. Size gelen{' '}
+                  <code className="rounded bg-amber-100 px-1 text-xs">…/veli-imza/…</code> linkini
+                  tarayıcıda açın. Bu sayfa yalnızca kurum paneli girişidir.
+                </p>
+              </div>
+            ) : null}
+
             {/* Error Message */}
             {error && (
               <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3 text-red-700">

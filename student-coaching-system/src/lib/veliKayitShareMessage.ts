@@ -1,12 +1,33 @@
-/** Veli kayıt / e-imza sayfasının tam URL’si (tarayıcıda açık olan kök alan adı). */
+const DEFAULT_PUBLIC_ORIGIN = 'https://www.dersonlinevipkocluk.com';
+
+function resolvePublicOrigin(origin?: string): string {
+  const fromArg = String(origin || '').trim().replace(/\/$/, '');
+  if (fromArg) return fromArg;
+  const fromEnv = String(
+    (typeof import.meta !== 'undefined' &&
+      (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_PUBLIC_APP_URL) ||
+      ''
+  )
+    .trim()
+    .replace(/\/$/, '');
+  if (fromEnv) return fromEnv;
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    const o = window.location.origin.replace(/\/$/, '');
+    // Yerel / preview’da kopyalanan link veli telefonunda açılmaz — üretim alan adı kullan.
+    if (/localhost|127\.0\.0\.1|0\.0\.0\.0|vercel\.app/i.test(o)) {
+      return DEFAULT_PUBLIC_ORIGIN;
+    }
+    return o;
+  }
+  return DEFAULT_PUBLIC_ORIGIN;
+}
+
+/** Veli kayıt / e-imza sayfasının tam URL’si — giriş gerektirmez (`signing_token` yeter). */
 export function buildVeliImzaPublicUrl(signingToken: string, origin?: string): string {
   const token = String(signingToken || '').trim();
   if (!token) return '';
   const path = `/veli-imza/${encodeURIComponent(token)}`;
-  const base =
-    origin?.trim() ||
-    (typeof window !== 'undefined' && window.location?.origin ? window.location.origin : '');
-  return base ? `${base.replace(/\/$/, '')}${path}` : path;
+  return `${resolvePublicOrigin(origin)}${path}`;
 }
 
 /** Veliye gönderilecek kayıt / e-imza linki — kurum adı mesajda görünsün. */

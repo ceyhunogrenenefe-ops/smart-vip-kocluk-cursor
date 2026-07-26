@@ -799,11 +799,12 @@ export default function ParentSignFlowPage() {
           kayitFormuMu: ogrenciOnceKayitFormu,
           ogrenciAdi: `${ogrenciAd.trim()} ${ogrenciSoyad.trim()}`.trim()
         });
+        // Önce düz URL — veli giriş yapmadan açar; mesaj metni de panoya (WhatsApp için).
         await copyText(
           shareText,
           ogrenciOnceKayitFormu
-            ? 'Kayıt formu linki oluşturuldu ve panoya kopyalandı.'
-            : 'Veli e-imza linki oluşturuldu ve panoya kopyalandı.'
+            ? 'Kayıt formu linki panoya kopyalandı. Veli giriş yapmadan açar.'
+            : 'Veli e-imza linki panoya kopyalandı. Veli giriş yapmadan açar.'
         );
       } else {
         setMsg('Kayıt oluşturuldu; link için Kayıtlar listesindeki Link düğmesini kullanın.');
@@ -1192,10 +1193,11 @@ export default function ParentSignFlowPage() {
             oluşturduktan sonra otomatik panoya kopyalanır ve aşağıdaki <em>Kayıtlar</em> listesinde <strong>Link</strong>{' '}
             düğmesiyle tekrar kopyalanır; veli tarayıcıda{' '}
             <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-800">
-              …/veli-imza/uzun-kod
+              https://www.dersonlinevipkocluk.com/veli-imza/uzun-kod
             </code>{' '}
-            adresini açar (veya <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-800">/sign-contract/…</code>
-            ). İşaretli kayıtlarda veli önce <strong>kayıt formunu</strong> gönderir; kurum ücreti girince aynı linkte{' '}
+            adresini <strong>giriş yapmadan</strong> açar. <strong>Mesaj</strong> düğmesi kurum adı + link metnini
+            kopyalar. Panel adresi <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-800">/veli-onay</code>{' '}
+            veliye gönderilmez. İşaretli kayıtlarda veli önce <strong>kayıt formunu</strong> gönderir; kurum ücreti girince aynı linkte{' '}
             <strong>e-sözleşmeyi imzalar</strong>. İşaretsiz kayıtlarda veli doğrudan sözleşmeyi görür ve imzalar.
           </p>
           <p className="text-xs text-slate-500 dark:text-slate-500 mt-2 max-w-2xl border-l-2 border-blue-200 pl-3">
@@ -1865,6 +1867,19 @@ export default function ParentSignFlowPage() {
                   type="button"
                   onClick={() =>
                     void copyText(
+                      lastCreatedLink,
+                      'Veli e-imza linki panoya kopyalandı — giriş gerekmez.'
+                    )
+                  }
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400 bg-white px-3 py-2 text-xs font-semibold text-emerald-900 hover:bg-emerald-100 dark:bg-slate-900 dark:hover:bg-emerald-950"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  Linki kopyala
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void copyText(
                       formatVeliKayitShareMessage({
                         kurumAdi: headerKurumAdi || institution?.name?.trim() || 'Kurum',
                         url: lastCreatedLink,
@@ -1874,10 +1889,9 @@ export default function ParentSignFlowPage() {
                       'Veli mesajı panoya kopyalandı.'
                     )
                   }
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400 bg-white px-3 py-2 text-xs font-semibold text-emerald-900 hover:bg-emerald-100 dark:bg-slate-900 dark:hover:bg-emerald-950"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-100"
                 >
-                  <Copy className="w-3.5 h-3.5" />
-                  Kopyala
+                  Mesaj
                 </button>
                 <a
                   href={lastCreatedLink}
@@ -2299,11 +2313,25 @@ export default function ParentSignFlowPage() {
                       <button
                         type="button"
                         className="inline-flex items-center justify-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-semibold text-blue-800 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-100"
+                        title="Velinin tarayıcıda doğrudan açacağı e-imza linkini kopyalar (giriş gerekmez)"
+                        onClick={() =>
+                          void copyText(
+                            fullLink(r),
+                            'Veli e-imza linki panoya kopyalandı. WhatsApp’a yapıştırıp gönderin — veli giriş yapmadan açar.'
+                          )
+                        }
+                      >
+                        <Copy className="w-3.5 h-3.5" /> Link
+                      </button>
+                      <button
+                        type="button"
+                        className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                        title="Kurum adı + link metni"
                         onClick={() =>
                           void copyText(shareMessageForContract(r), 'Veli mesajı panoya kopyalandı.')
                         }
                       >
-                        <Copy className="w-3.5 h-3.5" /> Link
+                        Mesaj
                       </button>
                       <a
                         href={fullLink(r)}

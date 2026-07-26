@@ -1,5 +1,27 @@
 const TOKEN_KEY = 'coaching_auth_token';
 
+/** Giriş gerektirmeyen sayfalar — burada 401 ile /login’e atılmamalı (veli e-imza vb.). */
+export function isGuestPublicPath(pathname?: string): boolean {
+  const path =
+    pathname ??
+    (typeof window !== 'undefined' && window.location?.pathname ? window.location.pathname : '');
+  if (!path) return false;
+  return (
+    path.startsWith('/veli-imza/') ||
+    path.startsWith('/sign-contract/') ||
+    path.startsWith('/kitapci/') ||
+    path.startsWith('/verify-document') ||
+    path.startsWith('/veli-kayit-metin/') ||
+    path.startsWith('/d/') ||
+    path.startsWith('/misafir-katil') ||
+    path === '/marketing' ||
+    path === '/hakkimizda' ||
+    path === '/fiyat' ||
+    path === '/gizlilik' ||
+    path === '/kullanim-kosullari'
+  );
+}
+
 /**
  * VITE_API_BASE_URL tanımlıysa tüm /api istekleri bu adrese gider (kendi barındırdığınız API).
  * Boş bırakın: istekler aynı origin (ör. Vercel) üzerinden gider.
@@ -102,10 +124,14 @@ export const apiFetch = async (url: string, options: RequestInit = {}) => {
         err === 'Missing token';
 
       if (isTokenIssue && !authRedirectToLoginInProgress) {
-        authRedirectToLoginInProgress = true;
         clearAuthToken();
         localStorage.removeItem('coaching_user');
         localStorage.removeItem('coaching_acting_as');
+        // Veli e-imza / misafir sayfalarında eski JWT 401’i login’e zorlamasın.
+        if (isGuestPublicPath()) {
+          return res;
+        }
+        authRedirectToLoginInProgress = true;
         window.location.replace('/login');
       }
     } catch {

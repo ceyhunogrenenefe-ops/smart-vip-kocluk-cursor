@@ -610,7 +610,7 @@ export const COACH_GUIDE_FAQ: { q: string; a: string; icon?: string }[] = [
   },
   {
     q: 'Veli imza linki açılmıyor.',
-    a: 'Linkin tamamını kopyalayın (kesik URL çalışmaz). Süresi dolmuş sözleşmelerde veli onayı sayfasından yeni link üretin. Veli farklı tarayıcıda denesin.',
+    a: 'Linkin tamamını kopyalayın (kesik URL çalışmaz). Adres …/veli-imza/uzun-kod olmalı — /veli-onay panel sayfasıdır, veliye gönderilmez. Veli giriş yapmadan açar. Süresi dolmuş sözleşmelerde yeni link üretin. Veli farklı tarayıcıda denesin.',
     icon: 'FileText'
   },
   {
