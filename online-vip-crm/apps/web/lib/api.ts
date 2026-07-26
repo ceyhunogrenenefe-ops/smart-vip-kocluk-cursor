@@ -76,6 +76,32 @@ export const api = {
       `inbox/conversations${qs ? `?${qs}` : ''}`,
     );
   },
+  conversation: (id: string) =>
+    apiFetch<Conversation & { contact?: Contact | null }>(
+      `inbox/conversations/${id}`,
+    ),
+  messages: (conversationId: string, params?: { take?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.take) q.set('take', String(params.take));
+    const qs = q.toString();
+    return apiFetch<
+      Paginated<{
+        id: string;
+        direction: string;
+        textContent: string | null;
+        status: string;
+        createdAt: string;
+        provider: string;
+      }>
+    >(
+      `inbox/conversations/${conversationId}/messages${qs ? `?${qs}` : ''}`,
+    );
+  },
+  reply: (conversationId: string, text: string) =>
+    apiFetch<{ id: string; textContent: string | null }>(
+      `inbox/conversations/${conversationId}/reply`,
+      { method: 'POST', body: JSON.stringify({ text }) },
+    ),
   contacts: (params?: { q?: string; take?: number }) => {
     const q = new URLSearchParams();
     if (params?.q) q.set('q', params.q);

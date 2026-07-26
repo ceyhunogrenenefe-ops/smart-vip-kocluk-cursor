@@ -149,7 +149,7 @@ async function seedInstitutionAndUsers(passwordHash: string) {
           contactEmail: 'demo@onlinevipdershane.local',
           contactPhone: '+905550000000',
           websiteUrl: 'https://onlinevipdershane.com',
-          settings: { locale: 'tr-TR' },
+          settings: { locale: 'tr-TR', formApiKey: 'dev-public-forms-key' },
         },
       },
       subscription: {
@@ -169,8 +169,12 @@ async function seedInstitutionAndUsers(passwordHash: string) {
       brandName: 'Online VIP Dershane',
       brandColors: BRAND_CSS_VARIABLES,
       contactEmail: 'demo@onlinevipdershane.local',
+      settings: { locale: 'tr-TR', formApiKey: 'dev-public-forms-key' },
     },
-    update: { brandColors: BRAND_CSS_VARIABLES },
+    update: {
+      brandColors: BRAND_CSS_VARIABLES,
+      settings: { locale: 'tr-TR', formApiKey: 'dev-public-forms-key' },
+    },
   });
 
   const users = [

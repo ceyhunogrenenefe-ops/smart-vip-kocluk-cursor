@@ -2,33 +2,42 @@
 
 | Faz | Ad | Durum | Özet |
 |-----|-----|--------|------|
-| **0** | Analiz & izolasyon | **Tamamlandı (dokümantasyon)** | Mevcut coaching + QR gateway + Kommo envanteri; CRM ayrı monorepo; riskler ve teknik kararlar (`architecture.md`) |
-| **1** | Temel platform | **Devam / iskelet hazır** | Monorepo, Prisma şema, API auth, tenant guard, seed, docker postgres/redis, worker iskeleti |
-| **2** | Inbox & kanallar | **Planlandı** | Gerçek Meta webhook → conversation/message; outbound providers; kanal health |
-| **3** | Satış hunisi | **Kısmi iskelet** | Pipeline/lead API var; otomasyon, kayıp nedenleri UI, SLA sonraki |
-| **4** | Görev & bildirim | **Kısmi iskelet** | Tasks/notifications API + worker mock; gerçek push/email sonra |
-| **5** | Kommo migrasyon | **Planlandı — dikkat** | Paralel → soft → hard cutover; **otomatik disconnect yok** |
-| **6** | Production hardening | **Planlandı** | Checklist, KVKK, monitoring, DLQ ops, load test |
+| **0** | Analiz & izolasyon | **Tamamlandı** | Mevcut coaching + QR gateway + Kommo envanteri; CRM ayrı monorepo; riskler (`architecture.md`) |
+| **1** | Temel platform | **Tamamlandı (MVP iskelet)** | Monorepo, Prisma, auth/RBAC/tenant, seed, docker postgres/redis, worker, login + dashboard |
+| **2** | CRM çekirdeği | **Kısmi** | Contacts/leads/tasks API + UI; kanban listesi; pipeline seed |
+| **3** | Ortak gelen kutusu | **Kısmi** | Konuşma listesi, mesaj geçmişi, mock outbound reply, assign endpoint; WebSocket sonraki |
+| **4** | Web form + e-posta | **Kısmi** | `POST /public/forms/leads` (API key, honeypot, consent); EmailProvider adapter stub |
+| **5** | Meta kanalları | **Altyapı** | Webhook verify + idempotent event kaydı; WhatsApp/IG/FB provider stub; canlı taşıma yok |
+| **6** | Rapor & kalite | **Kısmi** | Dashboard özeti; dokümantasyon; unit testler; tenant isolation integration test |
 
 ## Faz 0 çıktıları
 
-- Bu repo izolasyonu
-- Risk: canlı WA / coaching bozulmasın
-- Karar: Cloud API, BullMQ, multi-tenant Postgres
+- CRM `online-vip-crm/` altında izole
+- Risk: canlı WA / coaching bozulmasın; Kommo otomatik kesilmez
+- Karar: Cloud API, BullMQ, multi-tenant Postgres, NestJS + Next.js
 
-## Faz 1 kabul kriterleri
+## Doğrulanan kabul maddeleri (yerel)
 
-- [x] `apps/api` login + tenant scoped CRUD iskeleti
-- [x] Prisma şema + seed demo
-- [x] `apps/worker` kuyruklar + DLQ
-- [x] `docker compose up -d` → postgres + redis
-- [x] `apps/web` Next.js UI iskeleti (login, inbox, leads, settings stub’ları)
+- [x] Güvenli giriş (JWT)
+- [x] Tenant scoped sorgular + isolation testleri
+- [x] Ortak gelen kutusu listesi
+- [x] Mock inbound mesaj + panelden reply
+- [x] Web form → contact + lead
+- [x] Meta webhook GET verify
+- [x] Duplicate webhook idempotency helper
+- [x] Seed demo verisi (sahte PII)
+- [x] Secret’lar kaynak kodunda yok
+- [ ] Gerçek Meta OAuth / token health (kurulum dokümanı hazır; hesap erişimi yok)
+- [ ] IMAP/SMTP canlı senkron
+- [ ] WebSocket gerçek zamanlı
+- [ ] E2E Playwright suite
 
-## Sonraki öncelik (Faz 2)
+## Sonraki öncelik
 
-1. Webhook → domain event mapping
-2. WhatsApp Cloud send
-3. Signature zorunlu prod flag
-4. Channel connection admin API
+1. WebSocket gateway + unread badge canlı güncelleme
+2. Worker’ın webhook_events işlemesi → NormalizedMessage → conversation
+3. Kanal ayarları UI (bağlantı durumu, test et)
+4. Lead kanban sürükle-bırak + stage history
+5. Playwright E2E (login → inbox → reply → lead)
 
 Durum tarihçesi: bu dosya her faz kapanışında güncellenir.

@@ -37,19 +37,34 @@ export class ApiKeyGuard implements CanActivate {
     }
 
     const fallback = this.config.get('PUBLIC_FORMS_API_KEY', { infer: true });
-    const institutionId =
-      typeof request.body?.institutionId === 'string'
-        ? request.body.institutionId
-        : undefined;
+    if (fallback && apiKey === fallback) {
+      const institutionId =
+        typeof request.body?.institutionId === 'string'
+          ? request.body.institutionId
+          : typeof request.body?.institution_id === 'string'
+            ? request.body.institution_id
+            : undefined;
 
-    if (fallback && apiKey === fallback && institutionId) {
-      const byId = await this.prisma.institution.findFirst({
-        where: {
-          id: institutionId,
-          deletedAt: null,
-          status: { in: [InstitutionStatus.ACTIVE, InstitutionStatus.TRIAL] },
-        },
-      });
+      const byId = institutionId
+        ? await this.prisma.institution.findFirst({
+            where: {
+              id: institutionId,
+              deletedAt: null,
+              status: {
+                in: [InstitutionStatus.ACTIVE, InstitutionStatus.TRIAL],
+              },
+            },
+          })
+        : await this.prisma.institution.findFirst({
+            where: {
+              deletedAt: null,
+              status: {
+                in: [InstitutionStatus.ACTIVE, InstitutionStatus.TRIAL],
+              },
+            },
+            orderBy: { createdAt: 'asc' },
+          });
+
       if (byId) {
         request.institutionId = byId.id;
         return true;
