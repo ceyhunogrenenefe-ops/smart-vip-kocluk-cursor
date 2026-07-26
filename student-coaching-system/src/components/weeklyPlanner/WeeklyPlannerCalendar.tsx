@@ -18,7 +18,10 @@ import {
   FileDown,
   MessageCircle,
   Loader2,
+  MousePointerClick,
+  Copy,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import type { CoachWeeklyGoalRow, WeeklyPlannerEntryRow } from '../../lib/weeklyPlannerApi';
 import {
   createCoachWeeklyGoal,
@@ -273,6 +276,33 @@ export function WeeklyPlannerCalendar({
   const [gridSlotMinutes, setGridSlotMinutes] = useState<PlannerGridStepMinutes>(() => loadPlannerGridStepMinutes());
   const [formStartTime, setFormStartTime] = useState('09:00');
   const [formEndTime, setFormEndTime] = useState('10:00');
+  /** Hücre seç → koç hedefini seçili hücrelere dağıt */
+  const [cellSelectMode, setCellSelectMode] = useState(false);
+  const [selectedCells, setSelectedCells] = useState<Set<string>>(() => new Set());
+  const [distributeBusyGoalId, setDistributeBusyGoalId] = useState<string | null>(null);
+  /** Bu haftanın planını diğer öğrencilere yapıştır */
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteTargetIds, setPasteTargetIds] = useState<Set<string>>(() => new Set());
+  const [pasteBusy, setPasteBusy] = useState(false);
+
+  const cellKey = (date: string, slot: PlannerTimeSlot) => `${date}|${slot.start}|${slot.end}`;
+
+  const toggleCellSelection = (date: string, slot: PlannerTimeSlot) => {
+    const key = cellKey(date, slot);
+    setSelectedCells((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const clearCellSelection = () => setSelectedCells(new Set());
+
+  const exitCellSelectMode = () => {
+    setCellSelectMode(false);
+    clearCellSelection();
+  };
 
   const timeSlots = useMemo(
     () => buildPlannerTimeSlots({ stepMinutes: gridSlotMinutes }),
@@ -395,9 +425,11 @@ export function WeeklyPlannerCalendar({
   }, [studentId]);
 
   useEffect(() => {
-    setNewGoalStart(weekStartStr);
-    setNewGoalEnd(weekEndStr);
-  }, [weekStartStr, weekEndStr]);
+    exitCellSelectMode();
+    setPasteOpen(false);
+    setPasteTargetIds(new Set());
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset when student/week changes
+  }, [studentId, weekStartStr]);
 
   useEffect(() => {
     const tick = () => {
@@ -789,6 +821,124 @@ export function WeeklyPlannerCalendar({
         alert(e instanceof Error ? e.message : 'Bölünemedi');
       }
     });
+  };
+
+  /** Seçili takvim hücrelerine kalan koç hedefini eşit dağıt */
+  const distributeGoalToSelectedCells = async (goal: CoachWeeklyGoalRow) => {
+    if (!canEditPlan || selectedCells.size === 0) {
+      toast.error('Önce “Hücre seç” ile takvimden hücreleri işaretleyin');
+      return;
+    }
+    setDistributeBusyGoalId(goal.id);
+    try {
+      await runPlannerMutation(async () => {
+        const agg = goalAggregates.find((a) => a.goal.id === goal.id);
+        const remaining = agg?.remaining ?? 0;
+        if (remaining <= 0) {
+          toast.error('Bölünecek kota kalmadı');
+          return;
+        }
+        const { start: gS, end: gE } = goalEffectiveSpan(goal, weekStartStr, weekEndStr);
+        const cells = [...selectedCells]
+          .map((key) => {
+            const [date, start, end] = key.split('|');
+            return { date, start, end };
+          })
+          .filter((c) => c.date && c.start && c.end && c.date >= gS && c.date <= gE)
+          .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start));
+
+        if (cells.length === 0) {
+          toast.error('Seçili hücreler bu hedefin tarih aralığında değil');
+          return;
+        }
+
+        const n = cells.length;
+        const base = Math.floor(remaining / n);
+        let extra = remaining % n;
+        for (let i = 0; i < n; i++) {
+          const q = base + (extra > 0 ? 1 : 0);
+          if (extra > 0) extra -= 1;
+          if (q <= 0) continue;
+          const cell = cells[i];
+          await createWeeklyPlannerEntry({
+            student_id: studentId,
+            planner_date: cell.date,
+            start_time: cell.start,
+            end_time: cell.end,
+            title: goal.title,
+            subject: goal.subject,
+            planned_quantity: q,
+            coach_goal_id: goal.id,
+            status: 'planned',
+            completed_quantity: 0,
+          });
+        }
+        await reload();
+        toast.success(`${cells.length} hücreye dağıtıldı`);
+        clearCellSelection();
+        setCellSelectMode(false);
+      });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Dağıtılamadı');
+    } finally {
+      setDistributeBusyGoalId(null);
+    }
+  };
+
+  /** Bu haftanın hedeflerini + plan bloklarını seçili öğrencilere kopyala */
+  const pastePlanToOtherStudents = async () => {
+    if (!canManageGoals || pasteTargetIds.size === 0) return;
+    setPasteBusy(true);
+    try {
+      const targets = [...pasteTargetIds].filter((id) => id && id !== studentId);
+      if (!targets.length) {
+        toast.error('En az bir öğrenci seçin');
+        return;
+      }
+      let okCount = 0;
+      for (const targetId of targets) {
+        const goalIdMap = new Map<string, string>();
+        for (const g of goals) {
+          const created = await createCoachWeeklyGoal({
+            student_id: targetId,
+            subject: g.subject,
+            title: g.title,
+            target_quantity: g.target_quantity,
+            week_start_date: weekStartStr,
+            goal_start_date: g.goal_start_date || weekStartStr,
+            goal_end_date: g.goal_end_date || weekEndStr,
+            quantity_unit: g.quantity_unit,
+          });
+          goalIdMap.set(g.id, created.id);
+        }
+        const weekEntries = entries.filter(
+          (e) => e.planner_date >= weekStartStr && e.planner_date <= weekEndStr
+        );
+        for (const en of weekEntries) {
+          const mappedGoalId = en.coach_goal_id ? goalIdMap.get(en.coach_goal_id) || null : null;
+          await createWeeklyPlannerEntry({
+            student_id: targetId,
+            planner_date: en.planner_date,
+            start_time: String(en.start_time).slice(0, 5),
+            end_time: String(en.end_time).slice(0, 5),
+            title: en.title,
+            subject: en.subject,
+            planned_quantity: Number(en.planned_quantity) || 0,
+            coach_goal_id: mappedGoalId,
+            status: 'planned',
+            completed_quantity: 0,
+          });
+        }
+        okCount += 1;
+      }
+      toast.success(`Plan ${okCount} öğrenciye yapıştırıldı`);
+      setPasteOpen(false);
+      setPasteTargetIds(new Set());
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Yapıştırılamadı');
+    } finally {
+      setPasteBusy(false);
+    }
   };
 
   const submitCreate = async () => {
@@ -1308,6 +1458,39 @@ export function WeeklyPlannerCalendar({
                   </select>
                 </label>
               ) : null}
+              {canEditPlan ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (cellSelectMode) exitCellSelectMode();
+                    else setCellSelectMode(true);
+                  }}
+                  className={cn(
+                    'inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition',
+                    cellSelectMode
+                      ? 'border-indigo-500 bg-indigo-600 text-white shadow-sm'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200'
+                  )}
+                  title="Hücreleri seçip koç hedeflerini bu hücrelere dağıtın"
+                >
+                  <MousePointerClick className="h-4 w-4" />
+                  {cellSelectMode ? `Hücre seç (${selectedCells.size})` : 'Hücreleri seç'}
+                </button>
+              ) : null}
+              {canManageGoals && !studentStudyLogUi ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPasteTargetIds(new Set());
+                    setPasteOpen(true);
+                  }}
+                  className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                  title="Bu öğrencinin haftalık planını diğer öğrencilere yapıştır"
+                >
+                  <Copy className="h-4 w-4" />
+                  Diğer öğrencilere yapıştır
+                </button>
+              ) : null}
               {canExportPdf ? (
                 <button
                   type="button"
@@ -1677,18 +1860,35 @@ export function WeeklyPlannerCalendar({
                               <button
                                 type="button"
                                 onClick={() => {
+                                  if (cellSelectMode) {
+                                    toggleCellSelection(mobileDayDate, slot);
+                                    return;
+                                  }
                                   setMobileCreateSlotIdx(slotIdx);
                                   openCreate(mobileDayDate, slot);
                                 }}
                                 className={cn(
                                   'flex w-full items-center gap-2 rounded-xl border border-dashed px-3 py-2.5 text-left text-xs touch-manipulation active:scale-[0.99]',
-                                  mobileCreateSlotIdx === slotIdx
-                                    ? 'border-violet-400 bg-violet-50 text-violet-900 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-100'
-                                    : 'border-slate-200 bg-white/70 text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400'
+                                  cellSelectMode && selectedCells.has(cellKey(mobileDayDate, slot))
+                                    ? 'border-indigo-500 bg-indigo-100 text-indigo-900 ring-2 ring-indigo-400 dark:border-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-100'
+                                    : mobileCreateSlotIdx === slotIdx
+                                      ? 'border-violet-400 bg-violet-50 text-violet-900 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-100'
+                                      : 'border-slate-200 bg-white/70 text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400'
                                 )}
                               >
-                                <Plus className="h-3.5 w-3.5 shrink-0" />
-                                Bu saate görev ekle
+                                {cellSelectMode ? (
+                                  <>
+                                    <MousePointerClick className="h-3.5 w-3.5 shrink-0" />
+                                    {selectedCells.has(cellKey(mobileDayDate, slot))
+                                      ? 'Seçildi — kaldır'
+                                      : 'Hücreyi seç'}
+                                  </>
+                                ) : (
+                                  <>
+                                    <Plus className="h-3.5 w-3.5 shrink-0" />
+                                    Bu saate görev ekle
+                                  </>
+                                )}
                               </button>
                             ) : (
                               <div className="rounded-xl border border-dashed border-slate-200/80 px-3 py-2.5 text-xs text-slate-400 dark:border-slate-700">
@@ -1895,10 +2095,17 @@ export function WeeklyPlannerCalendar({
                             canEditPlan &&
                               (studentStudyLogUi
                                 ? 'hover:bg-gradient-to-br hover:from-violet-50 hover:to-fuchsia-50/80 hover:shadow-[inset_0_0_0_2px_rgb(167,139,250,0.45)] cursor-pointer dark:hover:from-violet-950/40 dark:hover:to-fuchsia-950/25 dark:hover:shadow-[inset_0_0_0_1px_rgb(139,92,246,0.35)]'
-                                : 'hover:bg-violet-50/60 hover:shadow-[inset_0_0_0_1px_rgb(167,139,250,0.35)] cursor-pointer dark:hover:bg-violet-950/35 dark:hover:shadow-[inset_0_0_0_1px_rgb(139,92,246,0.25)]')
+                                : 'hover:bg-violet-50/60 hover:shadow-[inset_0_0_0_1px_rgb(167,139,250,0.35)] cursor-pointer dark:hover:bg-violet-950/35 dark:hover:shadow-[inset_0_0_0_1px_rgb(139,92,246,0.25)]'),
+                            cellSelectMode &&
+                              selectedCells.has(cellKey(date, slot)) &&
+                              'ring-2 ring-indigo-500 ring-inset bg-indigo-100/80 dark:bg-indigo-950/50'
                           )}
                           onClick={() => {
                             if (!canEditPlan) return;
+                            if (cellSelectMode) {
+                              toggleCellSelection(date, slot);
+                              return;
+                            }
                             if (list.length === 0) openCreate(date, slot);
                           }}
                           onDragOver={(e) => {
@@ -1944,6 +2151,10 @@ export function WeeklyPlannerCalendar({
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   if (!canEditPlan) return;
+                                  if (cellSelectMode) {
+                                    toggleCellSelection(date, slot);
+                                    return;
+                                  }
                                   openPlannerBlock(en);
                                 }}
                                 className={cn(
@@ -1989,11 +2200,24 @@ export function WeeklyPlannerCalendar({
               </span>
             </p>
             <p className="mb-3 hidden text-[11px] text-slate-500 dark:text-slate-400 sm:block">
-              Kartı takvim hücresine sürükleyerek plana yerleştirin (yalnızca hedefin başlangıç–bitiş
-              günleri) · Üstteki &quot;Önceki / Sonraki haftaya bırak&quot; ile hedefi ve plan bloklarını
-              kaydırın · Tarih aralığını karttaki kalemle istediğiniz günler olarak düzenleyin · Kalan kotayı
-              hedef süresindeki günlere bölebilirsiniz
+              Kartı takvim hücresine sürükleyerek plana yerleştirin · Üstteki{' '}
+              <strong>Hücreleri seç</strong> ile hücre işaretleyip{' '}
+              <strong>Seçili hücrelere dağıt</strong> ile kalan kotayı bölün ·{' '}
+              <strong>Diğer öğrencilere yapıştır</strong> ile bu planı kopyalayın
             </p>
+            {cellSelectMode ? (
+              <div className="mb-3 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-[11px] text-indigo-950 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-100">
+                <strong>Hücre seçim modu:</strong> Takvimden hücrelere tıklayın ({selectedCells.size} seçili).
+                Sonra hedef kartındaki <em>Seçili hücrelere dağıt</em> ile koç hedefini yerleştirin.
+                <button
+                  type="button"
+                  onClick={exitCellSelectMode}
+                  className="ml-2 font-bold underline"
+                >
+                  Bitir
+                </button>
+              </div>
+            ) : null}
             {goalAggregates.length === 0 ? (
               <p className="text-xs text-slate-500">
                 {canManageGoals
@@ -2159,14 +2383,28 @@ export function WeeklyPlannerCalendar({
                         ) : null}
                       </div>
                       {canEditPlan && remaining > 0 ? (
-                        <button
-                          type="button"
-                          disabled={plannerUiBusy}
-                          onClick={() => void splitGoalAcrossPresetDays(goal)}
-                          className="mt-2 w-full text-[11px] py-1.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
-                        >
-                          Kalanı günlere böl (ör. Pz-Sa-Pe-Cu)
-                        </button>
+                        <div className="mt-2 space-y-1.5">
+                          <button
+                            type="button"
+                            disabled={plannerUiBusy || distributeBusyGoalId === goal.id || selectedCells.size === 0}
+                            onClick={() => void distributeGoalToSelectedCells(goal)}
+                            className="w-full rounded-lg border border-indigo-300 bg-indigo-50 py-1.5 text-[11px] font-bold text-indigo-800 hover:bg-indigo-100 disabled:opacity-50 dark:border-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200"
+                          >
+                            {distributeBusyGoalId === goal.id
+                              ? 'Dağıtılıyor…'
+                              : selectedCells.size > 0
+                                ? `Seçili hücrelere dağıt (${selectedCells.size})`
+                                : 'Önce hücreleri seçin'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={plannerUiBusy}
+                            onClick={() => void splitGoalAcrossPresetDays(goal)}
+                            className="w-full rounded-lg border border-dashed border-slate-300 py-1.5 text-[11px] text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+                          >
+                            Kalanı günlere böl (ör. Pz-Sa-Pe-Cu)
+                          </button>
+                        </div>
                       ) : null}
                     </li>
                   );
@@ -2488,6 +2726,99 @@ export function WeeklyPlannerCalendar({
             </AppModalFooter>
           </>
         ) : null}
+      </AppModal>
+
+      <AppModal open={pasteOpen} onClose={() => !pasteBusy && setPasteOpen(false)} panelClassName="max-w-md">
+        <AppModalHeader className="p-5">
+          <h4 className="font-semibold text-slate-800 dark:text-slate-100">Planı diğer öğrencilere yapıştır</h4>
+          <button
+            type="button"
+            disabled={pasteBusy}
+            onClick={() => setPasteOpen(false)}
+            className="text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+          >
+            ✕
+          </button>
+        </AppModalHeader>
+        <AppModalBody className="space-y-3 px-5 pb-2">
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            <strong>{studentName || 'Bu öğrenci'}</strong> için {weekStartStr} – {weekEndStr} haftasındaki
+            hedefler ve takvim blokları seçtiğiniz öğrencilere kopyalanır.
+          </p>
+          <div className="max-h-64 space-y-1 overflow-y-auto rounded-xl border border-slate-200 p-2 dark:border-slate-700">
+            {students
+              .filter((s) => s.id !== studentId)
+              .map((s) => {
+                const checked = pasteTargetIds.has(s.id);
+                return (
+                  <label
+                    key={s.id}
+                    className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={pasteBusy}
+                      onChange={() => {
+                        setPasteTargetIds((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(s.id)) next.delete(s.id);
+                          else next.add(s.id);
+                          return next;
+                        });
+                      }}
+                    />
+                    <span className="font-medium text-slate-800 dark:text-slate-100">{s.name}</span>
+                  </label>
+                );
+              })}
+            {students.filter((s) => s.id !== studentId).length === 0 ? (
+              <p className="px-2 py-4 text-center text-xs text-slate-500">Başka öğrenci yok</p>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <button
+              type="button"
+              disabled={pasteBusy}
+              className="font-semibold text-indigo-700 underline"
+              onClick={() =>
+                setPasteTargetIds(
+                  new Set(students.filter((s) => s.id !== studentId).map((s) => s.id))
+                )
+              }
+            >
+              Tümünü seç
+            </button>
+            <button
+              type="button"
+              disabled={pasteBusy}
+              className="font-semibold text-slate-500 underline"
+              onClick={() => setPasteTargetIds(new Set())}
+            >
+              Temizle
+            </button>
+          </div>
+        </AppModalBody>
+        <AppModalFooter className="p-5">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={pasteBusy}
+              onClick={() => setPasteOpen(false)}
+              className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm font-medium disabled:opacity-50 dark:border-slate-600"
+            >
+              İptal
+            </button>
+            <button
+              type="button"
+              disabled={pasteBusy || pasteTargetIds.size === 0}
+              onClick={() => void pastePlanToOtherStudents()}
+              className="flex-[1.4] rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {pasteBusy ? 'Yapıştırılıyor…' : `Yapıştır (${pasteTargetIds.size})`}
+            </button>
+          </div>
+        </AppModalFooter>
       </AppModal>
     </div>
   );
