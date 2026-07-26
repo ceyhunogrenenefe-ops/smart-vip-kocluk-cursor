@@ -91,8 +91,12 @@ const FIELD_TR: Record<string, string> = {
   short_bio: 'Kısa tanıtım',
   full_bio: 'Özgeçmiş',
   city: 'Şehir',
+  photo: 'Fotoğraf',
   photo_url: 'Fotoğraf',
+  video: 'Tanıtım videosu',
   video_url: 'Video',
+  education: 'Eğitim',
+  experience: 'Deneyim',
   university: 'Üniversite',
   department: 'Bölüm',
   grade_levels: 'Seviyeler',
@@ -188,10 +192,14 @@ export default function TeacherProfileApprovalsPage() {
   const statsHint = useMemo(() => {
     if (filter === 'pending_approval') return 'İlk yayın onayı bekleyenler';
     if (filter === 'update_pending' || filter === 'changes_pending') return 'Yayındaki profilin güncelleme onayı';
+    if (filter === 'incomplete')
+      return 'Eksik alanlı profiller — admin yine de yayına alabilir';
     if (filter === 'deleted') return 'Silinmiş profiller';
     if (!filter) return 'Tüm öğretmen vitrin profilleri';
     return 'Filtreye göre öğretmen vitrin profilleri';
   }, [filter]);
+
+  const missingLabel = (key: string) => FIELD_TR[key] || key;
 
   const act = async (id: string, op: string, body?: Record<string, string>) => {
     setBusyId(id);
@@ -215,6 +223,18 @@ export default function TeacherProfileApprovalsPage() {
     } finally {
       setBusyId('');
     }
+  };
+
+  const approveProfile = async (row: Row) => {
+    const missing = Array.isArray(row.missing_required) ? row.missing_required : [];
+    if (missing.length) {
+      const labels = missing.map(missingLabel).join(', ');
+      const ok = window.confirm(
+        `Bu profilde eksik zorunlu alanlar var:\n${labels}\n\nYine de yayına almak istiyor musunuz?`
+      );
+      if (!ok) return;
+    }
+    await act(row.id, 'approve');
   };
 
   const confirmAct = async (id: string, op: string, message: string, body?: Record<string, string>) => {
@@ -273,11 +293,12 @@ export default function TeacherProfileApprovalsPage() {
   }, [compareLeft, compareRight, detail]);
 
   const isDeleted = (row: Row) => row.status === 'deleted' || !!row.deleted_at;
-  const isPending = (row: Row) =>
+  const canApprove = (row: Row) =>
     row.status === 'pending_approval' ||
     row.status === 'update_pending' ||
     row.status === 'changes_pending' ||
-    row.status === 'draft';
+    row.status === 'draft' ||
+    row.status === 'incomplete';
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
@@ -427,6 +448,19 @@ export default function TeacherProfileApprovalsPage() {
                           </span>
                         ) : null}
                       </div>
+                      {row.missing_required && row.missing_required.length > 0 ? (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          <span className="text-xs font-semibold text-amber-800">Eksikler:</span>
+                          {row.missing_required.map((k) => (
+                            <span
+                              key={k}
+                              className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800"
+                            >
+                              {missingLabel(k)}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                       {row.sync_error ? (
                         <div className="mt-2 text-xs text-amber-700">{row.sync_error}</div>
                       ) : null}
@@ -439,14 +473,17 @@ export default function TeacherProfileApprovalsPage() {
                       >
                         <Eye className="h-3.5 w-3.5" /> Görüntüle
                       </button>
-                      {isPending(row) && !isDeleted(row) ? (
+                      {canApprove(row) && !isDeleted(row) ? (
                         <button
                           type="button"
                           disabled={busyId === row.id}
-                          onClick={() => void act(row.id, 'approve')}
+                          onClick={() => void approveProfile(row)}
                           className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
                         >
-                          <Check className="h-3.5 w-3.5" /> Onayla
+                          <Check className="h-3.5 w-3.5" />{' '}
+                          {row.status === 'incomplete' || (row.missing_required?.length || 0) > 0
+                            ? 'Yayına Al'
+                            : 'Onayla'}
                         </button>
                       ) : null}
                       {(row.status === 'pending_approval' ||

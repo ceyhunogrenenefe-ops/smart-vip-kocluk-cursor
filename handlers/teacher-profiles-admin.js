@@ -659,10 +659,9 @@ export default async function handler(req, res) {
 
         const wasUpdatePending = isUpdatePendingStatus(profile.status);
 
+        // Admin eksik alanlara rağmen yayına alabilir (öğretmen submit kapalı kalır)
         const missing = missingRequiredFields(snapshot);
-        if (missing.length) {
-          return res.status(400).json({ error: 'profile_incomplete', missing_required: missing });
-        }
+        const pct = completionPercent(snapshot);
 
         const now = new Date().toISOString();
         const { data: updated, error } = await supabaseAdmin
@@ -674,7 +673,7 @@ export default async function handler(req, res) {
             status: 'published',
             is_active: true,
             private_lesson_enabled: snapshot.private_lesson_enabled !== false,
-            completion_pct: 100,
+            completion_pct: pct,
             rejection_reason: null,
             editing_enabled: false,
             approved_at: now,
@@ -691,7 +690,13 @@ export default async function handler(req, res) {
           actorUserId: actor.sub,
           action: 'approve',
           previousValue: { status: profile.status, update_pending: wasUpdatePending },
-          newValue: { status: 'published', slug: updated.slug },
+          newValue: {
+            status: 'published',
+            slug: updated.slug,
+            completion_pct: pct,
+            missing_required: missing,
+            force_publish_incomplete: missing.length > 0
+          },
           ip: clientIp(req)
         });
 
@@ -702,7 +707,15 @@ export default async function handler(req, res) {
           senderUserId: actor.sub,
           institutionId: teacherInstitutionId
         });
-        return res.status(200).json({ profile: updated, sync });
+        return res.status(200).json({
+          profile: updated,
+          sync,
+          missing_required: missing,
+          message:
+            missing.length > 0
+              ? `Yayına alındı (${missing.length} zorunlu alan eksik).`
+              : 'Yayına alındı'
+        });
       }
 
       if (op === 'soft-delete') {
