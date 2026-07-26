@@ -221,16 +221,6 @@ export default function Sidebar({
               collapsed={railCollapsed}
               onNavigate={() => go(STUDENT_NAV_YARDIM.path)}
             />
-            <SidebarNavLink
-              label={NAV_MY_PROFILE.label}
-              icon={NAV_MY_PROFILE.icon}
-              active={
-                location.pathname === NAV_MY_PROFILE.path ||
-                location.pathname.startsWith(`${NAV_MY_PROFILE.path}/`)
-              }
-              collapsed={railCollapsed}
-              onNavigate={() => go(NAV_MY_PROFILE.path)}
-            />
           </>
         ) : null}
 
