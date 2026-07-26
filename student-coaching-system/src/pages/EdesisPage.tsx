@@ -353,8 +353,8 @@ export default function EdesisPage() {
       toast.error('Oturum bulunamadı');
       return;
     }
-    const key = `${exam.edesisExamId}-${selectedEdesisId}`;
-    setKarneWaBusyKey(key);
+    const rowKey = String(exam.edesisExamId || exam.examTitle + exam.examDate);
+    setKarneWaBusyKey(rowKey);
     try {
       const r = await shareEdesisKarneWithParent({
         exam,
