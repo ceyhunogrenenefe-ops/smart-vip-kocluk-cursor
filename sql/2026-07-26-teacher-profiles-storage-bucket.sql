@@ -14,7 +14,6 @@ values (
     'image/webp',
     'application/pdf',
     'application/vnd.ms-powerpoint',
-    'application/vnd.openxmlformats.presentationml.presentation',
     'application/vnd.openxmlformats-officedocument.presentationml.presentation'
   ]
 )
