@@ -13,7 +13,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { userRoleTags, userHasAnyRole } from '../../config/rolePermissions';
 import { cn } from '../../lib/utils';
-import BrandLogo from '../brand/BrandLogo';
+import BrandLogo from '../../components/brand/BrandLogo';
 
 type Tab = { to: string; label: string; icon: React.ElementType; end?: boolean };
 

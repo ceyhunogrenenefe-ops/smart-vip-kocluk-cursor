@@ -1,5 +1,5 @@
-import { BRAND_ALT, DEFAULT_BRAND_LOGO, DEFAULT_BRAND_MARK } from '../lib/brandAssets';
-import { cn } from '../lib/utils';
+import { BRAND_ALT, DEFAULT_BRAND_LOGO, DEFAULT_BRAND_MARK } from '../../lib/brandAssets';
+import { cn } from '../../lib/utils';
 
 type BrandLogoProps = {
   /** full = ders & koçluk lockup; mark = kare online vip amblem */
