@@ -95,6 +95,7 @@ const FIELD_TR: Record<string, string> = {
   photo_url: 'Fotoğraf',
   video: 'Tanıtım videosu',
   video_url: 'Video',
+  videos: 'Tanıtım videoları',
   education: 'Eğitim',
   experience: 'Deneyim',
   university: 'Üniversite',
@@ -110,7 +111,19 @@ const FIELD_TR: Record<string, string> = {
 function fmtVal(v: unknown): string {
   if (v == null || v === '') return '—';
   if (typeof v === 'boolean') return v ? 'Evet' : 'Hayır';
-  if (Array.isArray(v)) return v.length ? v.join(', ') : '—';
+  if (Array.isArray(v)) {
+    if (!v.length) return '—';
+    if (v.every((x) => typeof x === 'string' || typeof x === 'number' || typeof x === 'boolean')) {
+      return v.join(', ');
+    }
+    return v
+      .map((item) => {
+        if (!item || typeof item !== 'object') return String(item);
+        const row = item as Record<string, unknown>;
+        return String(row.url || row.public_url || row.title || JSON.stringify(item));
+      })
+      .join(' · ');
+  }
   if (typeof v === 'object') {
     try {
       return JSON.stringify(v);

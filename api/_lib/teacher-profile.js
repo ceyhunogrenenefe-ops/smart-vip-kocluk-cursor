@@ -64,6 +64,7 @@ const EDITABLE_FIELDS = [
   'photo_url',
   'video_url',
   'video_path',
+  'videos',
   'lesson_duration_min',
   'lesson_format',
   'availability_note',
@@ -109,6 +110,33 @@ export function splitDisplayName(fullName) {
   return { first_name: parts.slice(0, -1).join(' '), last_name: parts[parts.length - 1] };
 }
 
+function normalizeTeacherVideos(raw, fallbackUrl = '') {
+  const list = Array.isArray(raw)
+    ? raw
+        .map((item, idx) => {
+          if (typeof item === 'string') {
+            const url = item.trim();
+            if (!url) return null;
+            return { id: `v-${idx + 1}`, url, title: '' };
+          }
+          if (!item || typeof item !== 'object') return null;
+          const url = String(item.url || item.public_url || item.video_url || '').trim();
+          if (!url) return null;
+          return {
+            id: String(item.id || `v-${idx + 1}`),
+            url,
+            title: String(item.title || '').trim()
+          };
+        })
+        .filter(Boolean)
+    : [];
+  if (!list.length) {
+    const legacy = String(fallbackUrl || '').trim();
+    if (legacy) return [{ id: 'v-1', url: legacy, title: '' }];
+  }
+  return list;
+}
+
 export function workingPayloadFromRow(row) {
   if (!row) return {};
   const out = {};
@@ -119,6 +147,10 @@ export function workingPayloadFromRow(row) {
     row.display_name ||
     [row.first_name, row.last_name].filter(Boolean).join(' ').trim() ||
     null;
+  out.videos = normalizeTeacherVideos(row.videos, row.video_url || row.video_path || '');
+  if (!String(out.video_url || '').trim() && out.videos[0]?.url) {
+    out.video_url = out.videos[0].url;
+  }
   return out;
 }
 
@@ -143,7 +175,8 @@ export function missingRequiredFields(payload) {
     (Array.isArray(p.experiences) && p.experiences.length > 0);
   if (!hasExp) missing.push('experience');
   if (!Array.isArray(p.grade_levels) || !p.grade_levels.length) missing.push('grade_levels');
-  if (!String(p.video_url || p.video_path || '').trim()) missing.push('video');
+  const videos = normalizeTeacherVideos(p.videos, p.video_url || p.video_path || '');
+  if (!String(p.video_url || p.video_path || '').trim() && !videos.length) missing.push('video');
   return missing;
 }
 
@@ -308,6 +341,7 @@ export function publicDetailFromSnapshot(row) {
     experiences: snap.experiences || [],
     subjects: snap.subjects || [],
     video_url: snap.video_url || null,
+    videos: normalizeTeacherVideos(snap.videos, snap.video_url || snap.video_path || ''),
     lesson_duration_min: snap.lesson_duration_min ?? null,
     lesson_format: snap.lesson_format || 'online',
     availability_note: snap.availability_note || null,
@@ -325,6 +359,8 @@ export function applyPatchToWorking(row, body) {
       v = Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : [];
     } else if (k === 'educations' || k === 'experiences') {
       v = Array.isArray(v) ? v : [];
+    } else if (k === 'videos') {
+      v = normalizeTeacherVideos(v, '');
     } else if (k === 'online_lessons' || k === 'accepting_students' || k === 'private_lesson_enabled') {
       v = Boolean(v);
     } else if (k === 'graduation_year' || k === 'experience_years' || k === 'lesson_duration_min') {
@@ -337,6 +373,19 @@ export function applyPatchToWorking(row, body) {
   }
   if (!next.display_name) {
     next.display_name = [next.first_name, next.last_name].filter(Boolean).join(' ').trim() || null;
+  }
+  next.videos = normalizeTeacherVideos(next.videos, next.video_url || next.video_path || '');
+  if (Object.prototype.hasOwnProperty.call(body, 'videos') || next.videos.length) {
+    const primary = next.videos[0]?.url || '';
+    if (primary) next.video_url = primary;
+    else if (Object.prototype.hasOwnProperty.call(body, 'videos')) next.video_url = '';
+  } else if (Object.prototype.hasOwnProperty.call(body, 'video_url')) {
+    const url = String(next.video_url || '').trim();
+    if (url && !next.videos.some((v) => v.url === url)) {
+      next.videos = [{ id: 'v-1', url, title: '' }, ...next.videos];
+    } else if (!url) {
+      next.videos = [];
+    }
   }
   return next;
 }

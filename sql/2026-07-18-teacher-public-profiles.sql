@@ -40,6 +40,7 @@ create table if not exists public.teacher_profiles (
   photo_url text,
   video_url text,
   video_path text,
+  videos jsonb not null default '[]'::jsonb,
   lesson_duration_min int,
   lesson_format text default 'online',
   availability_note text,

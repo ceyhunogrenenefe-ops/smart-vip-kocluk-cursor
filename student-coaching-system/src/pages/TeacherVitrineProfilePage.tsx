@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Save, Send, AlertCircle, Lock, Upload, ImagePlus } from 'lucide-react';
+import { Loader2, Save, Send, AlertCircle, Lock, Upload, ImagePlus, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '../lib/session';
 import TeacherAvailabilityPanel from '../components/teacher/TeacherAvailabilityPanel';
+
+type TeacherVideo = { id: string; url: string; title?: string };
 
 type ProfileResponse = {
   profile: Record<string, unknown>;
@@ -14,6 +16,31 @@ type ProfileResponse = {
   editing_enabled?: boolean;
   account?: { name?: string; email?: string };
 };
+
+function normalizeVideosFromWorking(working: Record<string, unknown>): TeacherVideo[] {
+  const raw = working.videos;
+  if (Array.isArray(raw) && raw.length) {
+    return raw
+      .map((item, idx) => {
+        if (typeof item === 'string') {
+          const url = item.trim();
+          return url ? { id: `v-${idx + 1}`, url, title: '' } : null;
+        }
+        if (!item || typeof item !== 'object') return null;
+        const row = item as Record<string, unknown>;
+        const url = String(row.url || row.public_url || row.video_url || '').trim();
+        if (!url) return null;
+        return {
+          id: String(row.id || `v-${idx + 1}`),
+          url,
+          title: String(row.title || '').trim()
+        };
+      })
+      .filter((v): v is TeacherVideo => Boolean(v));
+  }
+  const legacy = String(working.video_url || '').trim();
+  return legacy ? [{ id: 'v-1', url: legacy, title: '' }] : [];
+}
 
 const MISSING_LABELS: Record<string, string> = {
   display_name: 'Ad soyad',
@@ -60,7 +87,13 @@ export default function TeacherVitrineProfilePage() {
       const j = (await res.json()) as ProfileResponse & { error?: string };
       if (!res.ok) throw new Error(j.error || res.statusText);
       setData(j);
-      setForm({ ...(j.working || {}) });
+      const working = { ...(j.working || {}) };
+      const videos = normalizeVideosFromWorking(working);
+      setForm({
+        ...working,
+        videos,
+        video_url: videos[0]?.url || String(working.video_url || '')
+      });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Profil yüklenemedi');
     } finally {
@@ -74,6 +107,47 @@ export default function TeacherVitrineProfilePage() {
 
   const setField = (key: string, value: unknown) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const videosList: TeacherVideo[] = Array.isArray(form.videos)
+    ? (form.videos as TeacherVideo[])
+    : normalizeVideosFromWorking(form);
+
+  const setVideos = (next: TeacherVideo[]) => {
+    const cleaned = next
+      .map((v, idx) => ({
+        id: String(v.id || `v-${idx + 1}`),
+        url: String(v.url || '').trim(),
+        title: String(v.title || '').trim()
+      }))
+      .filter((v) => v.url);
+    setForm((prev) => ({
+      ...prev,
+      videos: cleaned,
+      video_url: cleaned[0]?.url || ''
+    }));
+  };
+
+  const addVideoRow = () => {
+    if (editingDisabled) return;
+    const next = [
+      ...videosList,
+      { id: `v-${Date.now()}`, url: '', title: '' }
+    ];
+    setForm((prev) => ({ ...prev, videos: next, video_url: next.find((v) => v.url)?.url || prev.video_url || '' }));
+  };
+
+  const updateVideoRow = (id: string, patch: Partial<TeacherVideo>) => {
+    const next = videosList.map((v) => (v.id === id ? { ...v, ...patch } : v));
+    setForm((prev) => ({
+      ...prev,
+      videos: next,
+      video_url: next.map((v) => String(v.url || '').trim()).find(Boolean) || ''
+    }));
+  };
+
+  const removeVideoRow = (id: string) => {
+    setVideos(videosList.filter((v) => v.id !== id));
   };
 
   const toggleArray = (key: string, value: string) => {
@@ -203,10 +277,12 @@ export default function TeacherVitrineProfilePage() {
     }
     setSaving(true);
     try {
+      const videos = normalizeVideosFromWorking(form).filter((v) => v.url);
+      const payload = { ...form, videos, video_url: videos[0]?.url || '' };
       const res = await apiFetch('/api/teacher-profile', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form)
+        body: JSON.stringify(payload)
       });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || j.message || res.statusText);
@@ -226,10 +302,12 @@ export default function TeacherVitrineProfilePage() {
     }
     setSubmitting(true);
     try {
+      const videos = normalizeVideosFromWorking(form).filter((v) => v.url);
+      const payload = { ...form, videos, video_url: videos[0]?.url || '' };
       const saveRes = await apiFetch('/api/teacher-profile', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form)
+        body: JSON.stringify(payload)
       });
       const saveJ = await saveRes.json();
       if (!saveRes.ok) throw new Error(saveJ.error || saveJ.message || saveRes.statusText);
@@ -528,13 +606,75 @@ export default function TeacherVitrineProfilePage() {
                   </div>
                 </div>
               </div>
-              <Field
-                label="Tanıtım videosu (YouTube / Vimeo linki)"
-                value={String(form.video_url || '')}
-                onChange={(v) => setField('video_url', v)}
-                placeholder="https://www.youtube.com/watch?v=…"
-                disabled={editingDisabled}
-              />
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-700">Tanıtım videoları</p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      YouTube veya Vimeo linki ekleyin. Birden fazla video ekleyebilirsiniz; ilki birincil tanıtım videosudur.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={editingDisabled}
+                    onClick={addVideoRow}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Video ekle
+                  </button>
+                </div>
+
+                {videosList.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+                    Henüz video yok. “Video ekle” ile ilk linki ekleyin.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {videosList.map((video, idx) => (
+                      <div
+                        key={video.id}
+                        className="space-y-2 rounded-xl border border-slate-200 bg-white p-3"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                            {idx === 0 ? 'Birincil video' : `Video ${idx + 1}`}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={editingDisabled}
+                            onClick={() => removeVideoRow(video.id)}
+                            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Sil
+                          </button>
+                        </div>
+                        <label className="block text-xs font-semibold text-slate-600">
+                          Video linki
+                          <input
+                            className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal disabled:opacity-60"
+                            value={video.url}
+                            placeholder="https://www.youtube.com/watch?v=…"
+                            disabled={editingDisabled}
+                            onChange={(e) => updateVideoRow(video.id, { url: e.target.value })}
+                          />
+                        </label>
+                        <label className="block text-xs font-semibold text-slate-600">
+                          Başlık (isteğe bağlı)
+                          <input
+                            className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal disabled:opacity-60"
+                            value={video.title || ''}
+                            placeholder="Örn. Tanıtım / Deneme çözümü"
+                            disabled={editingDisabled}
+                            onChange={(e) => updateVideoRow(video.id, { title: e.target.value })}
+                          />
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </>
           ) : null}
 
