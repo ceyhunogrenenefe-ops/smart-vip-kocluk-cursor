@@ -27,6 +27,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/pdf-import': ['admin', 'coach'],
   '/analytics': ['admin', 'coach'],
   '/attendance-report': ['super_admin', 'admin', 'coach', 'teacher'],
+  '/class-lesson-topic-progress': ['super_admin', 'admin', 'coach'],
   '/coach-stats': ['super_admin', 'admin'],
   '/ai-coach': ['super_admin', 'admin', 'coach'],
   '/reports': ['admin'],

@@ -28,6 +28,7 @@ import {
   HelpCircle,
   Bell,
   Presentation,
+  MapPin,
   User,
   CalendarDays,
   Bot,
@@ -181,6 +182,7 @@ export const MOBILE_ACADEMIC_MATCH_PATHS = [
   '/topic-tracking',
   '/analytics',
   '/attendance-report',
+  '/class-lesson-topic-progress',
   '/soru-sor',
   '/soru-havuzu',
   '/soru-analitik',
@@ -201,6 +203,7 @@ const ACADEMIC_PATHS = new Set([
   '/topic-tracking',
   '/analytics',
   '/attendance-report',
+  '/class-lesson-topic-progress',
   '/soru-sor',
   '/soru-havuzu',
   '/soru-analitik'
@@ -261,6 +264,7 @@ const ACADEMIC_LABELS: Record<string, string> = {
   '/academic-center': 'Akademik Merkez',
   '/analytics': 'Analiz Paneli',
   '/attendance-report': 'Yoklama raporu',
+  '/class-lesson-topic-progress': 'Grup dersi konu ilerlemesi',
   '/soru-sor': 'Soru Sor',
   '/soru-havuzu': 'Soru Havuzu',
   '/soru-analitik': 'Soru Analitiği'
@@ -288,6 +292,8 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/dashboard', icon: LayoutDashboard, label: 'Ana Panel' },
       { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
       { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
+    { path: '/class-lesson-topic-progress', icon: MapPin, label: 'Grup dersi konu ilerlemesi' },
+      { path: '/class-lesson-topic-progress', icon: MapPin, label: 'Grup dersi konu ilerlemesi' },
       { path: '/coach-stats', icon: BarChart3, label: 'Koç İstatistikleri' },
       { path: '/academic-center', icon: Sparkles, label: 'Akademik Merkez' },
       ...privateLiveNavForRoles(['super_admin']),
@@ -353,6 +359,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/topic-tracking', icon: CheckSquare, label: 'Konu Takibi' },
     { path: '/written-exam', icon: FileCheck, label: 'Yazılı Takip' },
     { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
+    { path: '/class-lesson-topic-progress', icon: MapPin, label: 'Grup dersi konu ilerlemesi' },
     { path: '/coach-stats', icon: BarChart3, label: 'Koç İstatistikleri' },
     { path: '/analytics', icon: BarChart3, label: 'Analiz Paneli' },
     { path: '/soru-havuzu', icon: CircleHelp, label: 'Soru Havuzu' },
@@ -382,6 +389,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     ...privateLiveNavForRoles(['teacher']),
     { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
     { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
+    { path: '/class-lesson-topic-progress', icon: MapPin, label: 'Grup dersi konu ilerlemesi' },
     { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
     { path: '/settings', icon: Settings, label: 'Ayarlar' }
   ];
@@ -412,6 +420,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
     { path: '/written-exam', icon: FileCheck, label: 'Yazılı Takip' },
     { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
+    { path: '/class-lesson-topic-progress', icon: MapPin, label: 'Grup dersi konu ilerlemesi' },
     { path: '/veli-onay', icon: FileText, label: 'Veli onayı & e-imza' }
   ];
 
@@ -560,7 +569,8 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
   '/analytics',
     '/topic-tracking',
     '/written-exam',
-    '/attendance-report'
+    '/attendance-report',
+    '/class-lesson-topic-progress'
   ] as const;
   const acRank = (p: string) => {
     const i = (academicOrder as readonly string[]).indexOf(p);

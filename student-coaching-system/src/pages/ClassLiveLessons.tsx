@@ -12,7 +12,7 @@ import { userHasAnyRole, userRoleTags } from '../config/rolePermissions';
 import { useStudentMobileShell } from '../hooks/useStudentMobileShell';
 import { isUuid } from '../utils/uuid';
 import { resolveStudentInList } from '../lib/classLiveBranchUtils';
-import { GripVertical, KeyRound, Loader2, Pencil, PlayCircle, Trash2, FileDown, Bell } from 'lucide-react';
+import { GripVertical, KeyRound, Loader2, Pencil, PlayCircle, Trash2, FileDown, Bell, MapPin } from 'lucide-react';
 import BbbAutoLinkFieldHint from '../components/liveLessons/BbbAutoLinkFieldHint';
 import { isBbbJoinUrl, canShowSessionGuestInvite, hasClassSessionRecordingAccess, isBbbPlaybackUrl, needsBbbJoinFlow, displayMeetingLinkForRow, meetingLinkForSave, shouldSkipClassLessonReminder, shouldUsePanelBbbJoin, isExternalMeetingPlatform, lessonJoinUrl } from '../lib/liveLessonUtils';
 import { openBbbJoin, openBbbRecording } from '../lib/bbbJoin';
@@ -40,6 +40,19 @@ import { inferSessionBatchPeers } from '../lib/classSessionBatchPeers';
 import { isSolutionLessonSubject } from '../lib/solutionAppointments/utils';
 import { useCoachLessonsMeetingsLock } from '../lib/coachLessonsLock';
 import { CoachLessonsLockBanner } from '../components/coach/CoachLessonsLockBanner';
+import ClassLessonTopicCheckpointModal, {
+  type TopicCheckpointSessionContext
+} from '../components/liveLessons/ClassLessonTopicCheckpointModal';
+import {
+  ClassLessonTopicCheckpoint,
+  fetchCheckpointsForSessions,
+  fetchLatestTopicCheckpoint,
+  formatCheckpointSummary
+} from '../lib/classLessonTopicCheckpointApi';
+import {
+  filterSameLessonDaySessions,
+  shouldPromptTopicCheckpoint
+} from '../lib/classLessonConsecutiveSessions';
 
 type ClassRow = {
   id: string;
@@ -231,6 +244,15 @@ export default function ClassLiveLessons() {
   const [weekSessions, setWeekSessions] = useState<SessionRow[]>([]);
   const [batchSessionsPool, setBatchSessionsPool] = useState<SessionRow[]>([]);
   const [calendarLoading, setCalendarLoading] = useState(false);
+  const [checkpointsBySession, setCheckpointsBySession] = useState<Record<string, ClassLessonTopicCheckpoint>>({});
+  const [priorCheckpointBySession, setPriorCheckpointBySession] = useState<
+    Record<string, ClassLessonTopicCheckpoint | null>
+  >({});
+  const [topicCheckpointModal, setTopicCheckpointModal] = useState<{
+    session: TopicCheckpointSessionContext;
+    initial?: ClassLessonTopicCheckpoint | null;
+  } | null>(null);
+  const topicPromptDismissedRef = useRef<Set<string>>(new Set());
   const classCalendarPdfRef = useRef<HTMLDivElement>(null);
   const [classPdfSnapBusy, setClassPdfSnapBusy] = useState(false);
 
@@ -310,6 +332,7 @@ export default function ClassLiveLessons() {
 
   const canMarkAttendance = canManageSlots && !isStudentView && Boolean(selectedClassId);
   const canSendLessonReminder = canMarkAttendance;
+  const canManageTopicCheckpoint = canManageSlots && !isStudentView;
 
   const hintLessonReminderError = (note: string) => {
     const n = String(note || '').toLowerCase();
@@ -551,6 +574,122 @@ export default function ClassLiveLessons() {
       setCalendarLoading(false);
     }
   }, [selectedClassId, weekColumnDates, activeInstitutionId, institution?.id]);
+
+  const buildTopicSessionContext = useCallback(
+    (s: SessionRow): TopicCheckpointSessionContext => {
+      const cls = classes.find((c) => c.id === s.class_id);
+      return {
+        id: s.id,
+        class_id: s.class_id,
+        subject: s.subject,
+        lesson_date: s.lesson_date,
+        teacher_id: s.teacher_id,
+        class_level: cls?.class_level ?? null,
+        class_name: cls?.name ?? null
+      };
+    },
+    [classes]
+  );
+
+  const refreshCheckpointsForWeek = useCallback(async (sessions: SessionRow[]) => {
+    const ids = sessions.map((s) => s.id).filter(Boolean);
+    if (!ids.length) {
+      setCheckpointsBySession({});
+      return;
+    }
+    const bySession = await fetchCheckpointsForSessions(ids);
+    setCheckpointsBySession(bySession);
+  }, []);
+
+  const resolvePriorCheckpointForSession = useCallback(
+    (s: SessionRow, bySession: Record<string, ClassLessonTopicCheckpoint>, priorMap: Record<string, ClassLessonTopicCheckpoint | null>) => {
+      const sameDay = filterSameLessonDaySessions(s, weekSessions);
+      const startMin = Number(String(s.start_time || '').slice(0, 2)) * 60 + Number(String(s.start_time || '').slice(3, 5));
+      for (let i = sameDay.length - 1; i >= 0; i -= 1) {
+        const peer = sameDay[i];
+        if (peer.id === s.id) continue;
+        const peerEnd =
+          Number(String(peer.end_time || '').slice(0, 2)) * 60 + Number(String(peer.end_time || '').slice(3, 5));
+        if (peerEnd <= startMin && bySession[peer.id]) return bySession[peer.id];
+      }
+      const key = `${s.class_id}|${s.subject}|${s.lesson_date}`;
+      return priorMap[key] ?? null;
+    },
+    [weekSessions]
+  );
+
+  useEffect(() => {
+    if (!canManageTopicCheckpoint) return;
+    void refreshCheckpointsForWeek(weekSessions);
+  }, [weekSessions, canManageTopicCheckpoint, refreshCheckpointsForWeek]);
+
+  useEffect(() => {
+    if (!canManageTopicCheckpoint || !weekSessions.length) {
+      setPriorCheckpointBySession({});
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const priorMap: Record<string, ClassLessonTopicCheckpoint | null> = {};
+      const seen = new Set<string>();
+      for (const s of weekSessions) {
+        const key = `${s.class_id}|${s.subject}|${s.lesson_date}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const row = await fetchLatestTopicCheckpoint(s.class_id, s.subject, s.lesson_date);
+        if (cancelled) return;
+        priorMap[key] = row;
+      }
+      if (!cancelled) setPriorCheckpointBySession(priorMap);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [weekSessions, canManageTopicCheckpoint]);
+
+  const openTopicCheckpointModal = useCallback(
+    (s: SessionRow, initial?: ClassLessonTopicCheckpoint | null) => {
+      setTopicCheckpointModal({
+        session: buildTopicSessionContext(s),
+        initial: initial ?? checkpointsBySession[s.id] ?? null
+      });
+    },
+    [buildTopicSessionContext, checkpointsBySession]
+  );
+
+  const maybeAutoPromptTopicCheckpoint = useCallback(
+    (s: SessionRow | null) => {
+      if (!s || !canManageTopicCheckpoint) return;
+      if (isTeacherView && s.teacher_id !== actorUserId) return;
+      if (topicPromptDismissedRef.current.has(s.id)) return;
+      if (checkpointsBySession[s.id]) return;
+      if (!shouldPromptTopicCheckpoint(s, weekSessions)) return;
+      openTopicCheckpointModal(s);
+    },
+    [
+      actorUserId,
+      canManageTopicCheckpoint,
+      checkpointsBySession,
+      isTeacherView,
+      openTopicCheckpointModal,
+      weekSessions
+    ]
+  );
+
+  useEffect(() => {
+    if (!canManageTopicCheckpoint) return;
+    for (const s of weekSessions) {
+      if (isTeacherView && s.teacher_id !== actorUserId) continue;
+      maybeAutoPromptTopicCheckpoint(s);
+    }
+  }, [
+    weekSessions,
+    checkpointsBySession,
+    canManageTopicCheckpoint,
+    isTeacherView,
+    actorUserId,
+    maybeAutoPromptTopicCheckpoint
+  ]);
 
   const copySessionGuestLink = useCallback(
     async (s: SessionRow) => {
@@ -1015,7 +1154,9 @@ export default function ClassLiveLessons() {
           return 'Meta Business’ta class_absent_notice_1 şablonu (dil tr) onaylı mı kontrol edin.';
         return String(note || 'Bilinmeyen hata');
       };
+      const savedSession = attendanceSession;
       closeAttendanceModal();
+      maybeAutoPromptTopicCheckpoint(savedSession);
       if (waFailed.length) {
         const parts = waFailed.map((row: { student_id?: string; note?: string }) => {
           const sid = String(row.student_id || '');
@@ -1715,6 +1856,15 @@ export default function ClassLiveLessons() {
                             const canWatchRecording = hasClassSessionRecordingAccess(s);
                             const isSolutionLesson = isSolutionLessonSubject(s.subject);
                             const teacherLabel = teacher?.name || s.teacher_name || s.teacher_id;
+                            const priorCp = resolvePriorCheckpointForSession(
+                              s,
+                              checkpointsBySession,
+                              priorCheckpointBySession
+                            );
+                            const sessionCp = checkpointsBySession[s.id];
+                            const canEditTopic =
+                              canManageTopicCheckpoint &&
+                              (!isTeacherView || s.teacher_id === actorUserId);
                             return (
                               <div
                                 key={s.id}
@@ -1748,6 +1898,16 @@ export default function ClassLiveLessons() {
                                       {String(s.start_time).slice(0, 5)}–{String(s.end_time).slice(0, 5)}
                                     </p>
                                     <p className="text-[10px] font-medium capitalize text-slate-400">{s.status}</p>
+                                    {priorCp ? (
+                                      <div className="mt-1.5 rounded-lg border border-emerald-200/80 bg-emerald-50/90 px-2 py-1.5">
+                                        <p className="text-[9px] font-bold uppercase tracking-wide text-emerald-800">
+                                          Nerede Kaldım?
+                                        </p>
+                                        <p className="text-[10px] font-medium leading-snug text-emerald-950">
+                                          {formatCheckpointSummary(priorCp)}
+                                        </p>
+                                      </div>
+                                    ) : null}
                                   </div>
                                 </div>
                                 <div className="mt-2 flex flex-wrap gap-1 calendar-pdf-hide-ui">
@@ -1815,6 +1975,19 @@ export default function ClassLiveLessons() {
                                         <Bell className="h-3 w-3 shrink-0" aria-hidden />
                                       )}
                                       Hatırlat
+                                    </button>
+                                  ) : null}
+                                  {canEditTopic &&
+                                  (s.status === 'scheduled' || s.status === 'completed') &&
+                                  (shouldPromptTopicCheckpoint(s, weekSessions) || sessionCp) ? (
+                                    <button
+                                      type="button"
+                                      title="Ders sonu konu / kitap / sayfa kaydı"
+                                      onClick={() => openTopicCheckpointModal(s, sessionCp)}
+                                      className="inline-flex items-center gap-0.5 rounded-lg border border-emerald-400 bg-white px-2 py-1 text-[10px] font-semibold text-emerald-800 hover:bg-emerald-50"
+                                    >
+                                      <MapPin className="h-3 w-3 shrink-0" />
+                                      {sessionCp ? 'Konu kaydı' : 'Nerede Kaldım?'}
                                     </button>
                                   ) : null}
                                   {canMarkAttendance && (s.status === 'scheduled' || s.status === 'completed') ? (
@@ -2320,6 +2493,24 @@ export default function ClassLiveLessons() {
             </button>
           </AppModalFooter>
         </AppModal>
+      ) : null}
+      {topicCheckpointModal ? (
+        <ClassLessonTopicCheckpointModal
+          open
+          session={topicCheckpointModal.session}
+          initialCheckpoint={topicCheckpointModal.initial}
+          onClose={() => {
+            const sid = topicCheckpointModal.session.id;
+            topicPromptDismissedRef.current.add(sid);
+            setTopicCheckpointModal(null);
+          }}
+          onSaved={(row) => {
+            if (row.class_session_id) {
+              setCheckpointsBySession((prev) => ({ ...prev, [String(row.class_session_id)]: row }));
+            }
+            void refreshCheckpointsForWeek(weekSessions);
+          }}
+        />
       ) : null}
         </>
       )}

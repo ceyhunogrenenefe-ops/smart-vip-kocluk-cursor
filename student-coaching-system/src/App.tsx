@@ -58,6 +58,7 @@ import PrivateLiveHistoryPage from './pages/privateLive/PrivateLiveHistoryPage';
 import PrivateLiveReportsPage from './pages/privateLive/PrivateLiveReportsPage';
 import SchedulePlannerPage from './pages/SchedulePlannerPage';
 import AttendanceReportPage from './pages/AttendanceReportPage';
+import ClassLessonTopicProgressPage from './pages/ClassLessonTopicProgressPage';
 import CoachStatsPage from './pages/CoachStatsPage';
 import BbbPortalJoinPage from './pages/BbbPortalJoinPage';
 import BbbGuestJoinPage from './pages/BbbGuestJoinPage';
@@ -595,6 +596,14 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/attendance-report')}>
                 <Layout>
                   <AttendanceReportPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/class-lesson-topic-progress" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/class-lesson-topic-progress')}>
+                <Layout>
+                  <ClassLessonTopicProgressPage />
                 </Layout>
               </ProtectedRoute>
             } />
