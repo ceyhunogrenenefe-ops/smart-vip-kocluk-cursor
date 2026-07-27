@@ -728,6 +728,20 @@ export default async function handler(req, res) {
       }
       const platformId = platformStudentId || matched?.id || null;
 
+      let parentPhone = matched?.parent_phone || null;
+      let platformStudentName = matched?.name || null;
+      if (platformId) {
+        const { data: stFresh } = await supabaseAdmin
+          .from('students')
+          .select('parent_phone, name')
+          .eq('id', platformId)
+          .maybeSingle();
+        if (stFresh) {
+          parentPhone = stFresh.parent_phone || parentPhone;
+          platformStudentName = stFresh.name || platformStudentName;
+        }
+      }
+
       const exams = (fetchResult.rows || []).map((row) => {
         const draft = mapEdesisRowToExamDraft(row, {
           studentId: platformId || `edesis-${edesisStudentId}`,
@@ -760,8 +774,9 @@ export default async function handler(req, res) {
         ok: true,
         edesisStudentId,
         platformStudentId: platformId,
-        platformStudentName: matched?.name || null,
-        parent_phone: matched?.parent_phone || null,
+        platformStudentName: platformStudentName || null,
+        parent_phone: parentPhone || null,
+        parent_phone_source: 'coaching_system',
         count: exams.length,
         fetchMode: fetchResult.fetchMode,
         autoLinked,

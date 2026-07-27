@@ -240,6 +240,8 @@ export default function EdesisPage() {
     }
     const p = platformStudents.find((x) => x.id === platformId);
     if (p?.edesis_ogrenci_id) setSelectedEdesisId(String(p.edesis_ogrenci_id));
+    setResultsParentPhone(p?.parent_phone || null);
+    setResultsStudentName(p?.name || null);
   };
 
   const onSync = async () => {
@@ -341,12 +343,10 @@ export default function EdesisPage() {
       toast.error('Karne için Edesis öğrenci ID ve sınav ID gerekli');
       return;
     }
-    if (!selectedPlatformId) {
-      toast.error('Veliye göndermek için platform öğrencisi seçin (veya öğrenci bağlayın)');
-      return;
-    }
     if (!resolvedParentPhone) {
-      toast.error('Veli telefonu yok — öğrenci kaydında veli numarasını güncelleyin');
+      toast.error(
+        'Veli telefonu koçluk sisteminde yok — Öğrenci yönetiminde öğrenci kartına veli numarası ekleyin (Edesis veli kaydı gerekmez).'
+      );
       return;
     }
     if (!user?.id) {
@@ -359,7 +359,7 @@ export default function EdesisPage() {
       const r = await shareEdesisKarneWithParent({
         exam,
         edesisStudentId: selectedEdesisId,
-        platformStudentId: selectedPlatformId,
+        platformStudentId: selectedPlatformId || undefined,
         studentName: resolvedStudentName,
         parentPhone: resolvedParentPhone,
         coachUserId: user.id,
@@ -681,6 +681,21 @@ export default function EdesisPage() {
             <code className="rounded bg-slate-100 px-1">GET /exams/results?StudentId=…</code> ve{' '}
             <code className="rounded bg-slate-100 px-1">POST /reports/exam-report</code>
           </p>
+          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+            <strong>Veliye WhatsApp:</strong> Numara Edesis&apos;ten alınmaz. Eşleşmiş Smart Koçluk öğrenci kartındaki{' '}
+            <strong>veli telefonu</strong> kullanılır; Edesis&apos;te veli kaydı şart değildir.
+          </p>
+          {resolvedParentPhone ? (
+            <p className="text-sm text-green-800">
+              Veli (koçluk sistemi): <span className="font-mono">{resolvedParentPhone}</span>
+              {resolvedStudentName ? ` · ${resolvedStudentName}` : ''}
+            </p>
+          ) : selectedPlatformId || selectedEdesisId ? (
+            <p className="text-sm text-amber-800">
+              Veli telefonu bulunamadı — öğrenciyi koçluk sisteminde bulup kartına veli numarası ekleyin, sonra
+              &quot;Sonuçları getir&quot; ile yenileyin.
+            </p>
+          ) : null}
           <div className="flex flex-wrap items-end gap-3">
             <label className="text-sm">
               <span className="mb-1 block text-slate-600">Edesis öğrenci ID</span>
@@ -800,16 +815,13 @@ export default function EdesisPage() {
                       type="button"
                       disabled={
                         !selectedEdesisId ||
-                        !selectedPlatformId ||
                         !resolvedParentPhone ||
                         karneWaBusyKey === key
                       }
                       title={
-                        !selectedPlatformId
-                          ? 'Platform öğrencisi seçin'
-                          : !resolvedParentPhone
-                            ? 'Öğrenci kaydında veli telefonu gerekli'
-                            : 'Karne PDF veliye WhatsApp ile gönder'
+                        !resolvedParentPhone
+                          ? 'Koçluk öğrenci kartında veli telefonu gerekli (Edesis veli kaydı şart değil)'
+                          : 'Karne PDF — veliye WhatsApp (koçluk sistemindeki veli numarası)'
                       }
                       onClick={() => void onKarneWhatsApp(exam)}
                       className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-green-200 bg-green-50 px-2 py-1 text-xs font-medium text-green-900 hover:bg-green-100 disabled:opacity-50"

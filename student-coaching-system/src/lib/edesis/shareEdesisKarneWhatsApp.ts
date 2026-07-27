@@ -19,7 +19,9 @@ export async function shareEdesisKarneWithParent(opts: {
 }): Promise<{ notice: string; reportUrl: string }> {
   const parentDigits = formatWhatsAppPhone(opts.parentPhone);
   if (!parentDigits) {
-    throw new Error('Veli telefonu tanımlı değil — öğrenci kartında veli numarasını güncelleyin.');
+    throw new Error(
+      'Veli telefonu koçluk sisteminde tanımlı değil — öğrenci kartına veli numarası ekleyin (Edesis veli kaydı gerekmez).'
+    );
   }
 
   const coachUserId = getGatewaySessionUserId(opts.coachUserId);
