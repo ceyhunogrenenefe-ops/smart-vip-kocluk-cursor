@@ -33,7 +33,8 @@ import {
   User,
   ChevronLeft,
   ChevronRight,
-  Download
+  Download,
+  Pencil
 } from 'lucide-react';
 
 function meetingUsesBbbInvite(m: CoachingMeetingRecord): boolean {
@@ -84,6 +85,145 @@ function meetingStatusLabel(status: MeetingStatus): string {
   return 'Planlı';
 }
 
+function toDatetimeLocalValue(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(+d)) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function meetingDurationMinutes(m: CoachingMeetingRecord): number {
+  const mins = Math.round((+new Date(m.end_time) - +new Date(m.start_time)) / 60000);
+  return Math.max(15, Math.min(240, mins || 60));
+}
+
+type MeetingScheduleSavePatch = {
+  start_time: string;
+  duration_minutes: number;
+  meet_link: string | null;
+  link_zoom: string | null;
+  link_bbb: string | null;
+  apply_to_series?: boolean;
+};
+
+function MeetingScheduleEditor({
+  meeting,
+  showSeriesOption,
+  busy,
+  onSave
+}: {
+  meeting: CoachingMeetingRecord;
+  showSeriesOption: boolean;
+  busy: boolean;
+  onSave: (patch: MeetingScheduleSavePatch) => Promise<void>;
+}) {
+  const [startLocal, setStartLocal] = useState(() => toDatetimeLocalValue(meeting.start_time));
+  const [duration, setDuration] = useState(() => String(meetingDurationMinutes(meeting)));
+  const [meetLink, setMeetLink] = useState(meeting.meet_link || '');
+  const [linkZoom, setLinkZoom] = useState(meeting.link_zoom || '');
+  const [linkBbb, setLinkBbb] = useState(meeting.link_bbb || '');
+  const [applySeries, setApplySeries] = useState(false);
+
+  useEffect(() => {
+    setStartLocal(toDatetimeLocalValue(meeting.start_time));
+    setDuration(String(meetingDurationMinutes(meeting)));
+    setMeetLink(meeting.meet_link || '');
+    setLinkZoom(meeting.link_zoom || '');
+    setLinkBbb(meeting.link_bbb || '');
+    setApplySeries(false);
+  }, [meeting.id, meeting.start_time, meeting.end_time, meeting.meet_link, meeting.link_zoom, meeting.link_bbb]);
+
+  return (
+    <div className="mt-2 space-y-2 rounded-lg border border-emerald-100 bg-emerald-50/40 p-3">
+      <p className="text-xs font-semibold text-emerald-900 flex items-center gap-1">
+        <Pencil className="h-3.5 w-3.5" />
+        Tarih, saat ve bağlantı
+      </p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className="block text-xs text-slate-600">
+          Başlangıç
+          <input
+            type="datetime-local"
+            className="mt-0.5 w-full rounded border border-slate-200 px-2 py-1.5 text-xs bg-white"
+            value={startLocal}
+            onChange={(e) => setStartLocal(e.target.value)}
+          />
+        </label>
+        <label className="block text-xs text-slate-600">
+          Süre (dk)
+          <select
+            className="mt-0.5 w-full rounded border border-slate-200 px-2 py-1.5 text-xs bg-white"
+            value={duration}
+            onChange={(e) => setDuration(e.target.value)}
+          >
+            {[15, 30, 45, 60, 90, 120].map((m) => (
+              <option key={m} value={String(m)}>
+                {m} dk
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <label className="block text-xs text-slate-600">
+        Meet / ana bağlantı
+        <input
+          className="mt-0.5 w-full rounded border border-slate-200 px-2 py-1.5 text-xs bg-white"
+          value={meetLink}
+          onChange={(e) => setMeetLink(e.target.value)}
+          placeholder="https://meet.google.com/…"
+        />
+      </label>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className="block text-xs text-slate-600">
+          Zoom
+          <input
+            className="mt-0.5 w-full rounded border border-slate-200 px-2 py-1.5 text-xs bg-white"
+            value={linkZoom}
+            onChange={(e) => setLinkZoom(e.target.value)}
+            placeholder="https://zoom.us/…"
+          />
+        </label>
+        <label className="block text-xs text-slate-600">
+          BBB (moderatör)
+          <input
+            className="mt-0.5 w-full rounded border border-slate-200 px-2 py-1.5 text-xs bg-white"
+            value={linkBbb}
+            onChange={(e) => setLinkBbb(e.target.value)}
+            placeholder="https://…"
+          />
+        </label>
+      </div>
+      {showSeriesOption ? (
+        <label className="flex items-center gap-2 text-xs text-slate-700">
+          <input
+            type="checkbox"
+            checked={applySeries}
+            onChange={(e) => setApplySeries(e.target.checked)}
+          />
+          Tüm tekrarlayan seriye uygula (tarih kayması + bağlantılar; süre tüm oturumlarda)
+        </label>
+      ) : null}
+      <button
+        type="button"
+        disabled={busy || !startLocal}
+        onClick={() =>
+          void onSave({
+            start_time: startLocal,
+            duration_minutes: Number(duration) || 60,
+            meet_link: meetLink.trim() || null,
+            link_zoom: linkZoom.trim() || null,
+            link_bbb: linkBbb.trim() || null,
+            apply_to_series: applySeries
+          })
+        }
+        className="inline-flex items-center gap-1 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+      >
+        {busy ? 'Kaydediliyor…' : 'Kaydet'}
+      </button>
+    </div>
+  );
+}
+
 export default function Meetings() {
   const { effectiveUser } = useAuth();
   const { students, coaches, tenantScopeInstitutionId } = useApp();
@@ -118,6 +258,7 @@ export default function Meetings() {
   const [weekAnchor, setWeekAnchor] = useState(() => startOfWeek(new Date()));
   const [selectedDayKey, setSelectedDayKey] = useState(() => localDateKey(new Date()));
   const [pngBusy, setPngBusy] = useState(false);
+  const [scheduleSaveBusyId, setScheduleSaveBusyId] = useState<string | null>(null);
 
   const role = effectiveUser?.role || '';
 
@@ -721,7 +862,15 @@ export default function Meetings() {
 
   const updateMeeting = async (
     meetingId: string,
-    patch: Partial<{ status: MeetingStatus; notes: string | null; attended: boolean | null; ai_summary: string | null }>
+    patch: Partial<{
+      status: MeetingStatus;
+      notes: string | null;
+      attended: boolean | null;
+      ai_summary: string | null;
+      meet_link: string | null;
+      link_zoom: string | null;
+      link_bbb: string | null;
+    }>
   ) => {
     setError(null);
     try {
@@ -734,6 +883,43 @@ export default function Meetings() {
       await loadMeetings();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const saveMeetingSchedule = async (meetingId: string, patch: MeetingScheduleSavePatch) => {
+    setScheduleSaveBusyId(meetingId);
+    setError(null);
+    try {
+      const startIso = new Date(patch.start_time);
+      if (Number.isNaN(+startIso)) throw new Error('Geçersiz tarih/saat');
+      const res = await apiFetch('/api/meetings?op=update-status', {
+        method: 'POST',
+        body: JSON.stringify({
+          meeting_id: meetingId,
+          start_time: startIso.toISOString(),
+          duration_minutes: patch.duration_minutes,
+          meet_link: patch.meet_link,
+          link_zoom: patch.link_zoom,
+          link_bbb: patch.link_bbb,
+          apply_to_series: patch.apply_to_series === true
+        })
+      });
+      const j = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        updated_series?: boolean;
+        series_count?: number;
+      };
+      if (!res.ok) throw new Error(j.error || 'Güncellenemedi');
+      if (j.updated_series) {
+        toast.success(`Serideki ${j.series_count ?? ''} oturum güncellendi`);
+      } else {
+        toast.success('Görüşme güncellendi');
+      }
+      await loadMeetings();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setScheduleSaveBusyId(null);
     }
   };
 
@@ -1341,6 +1527,14 @@ export default function Meetings() {
                       Bağlantı
                     </button>
                   </div>
+                  {!isStudent && (role === 'coach' || role === 'admin' || role === 'super_admin') ? (
+                    <MeetingScheduleEditor
+                      meeting={m}
+                      showSeriesOption
+                      busy={scheduleSaveBusyId === m.id}
+                      onSave={(p) => saveMeetingSchedule(m.id, p)}
+                    />
+                  ) : null}
                 ))}
               </div>
             </details>
@@ -1369,6 +1563,19 @@ export default function Meetings() {
                       </span>
                     ) : null}
                   </div>
+                  {!isStudent && (role === 'coach' || role === 'admin' || role === 'super_admin') ? (
+                    <details className="text-xs mt-2">
+                      <summary className="cursor-pointer font-medium text-emerald-800">
+                        Tarih, saat ve link düzenle
+                      </summary>
+                      <MeetingScheduleEditor
+                        meeting={m}
+                        showSeriesOption={Boolean(m.series_id)}
+                        busy={scheduleSaveBusyId === m.id}
+                        onSave={(p) => saveMeetingSchedule(m.id, p)}
+                      />
+                    </details>
+                  ) : null}
                   {!isStudent && (role === 'coach' || role === 'admin' || role === 'super_admin') ? (
                     <details className="text-xs mt-2">
                       <summary className="cursor-pointer text-slate-700">Katılım & notlar</summary>

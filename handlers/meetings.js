@@ -1182,6 +1182,88 @@ async function handleUpdateStatus(req, res) {
         }
       }
     }
+    if (body.meet_link !== undefined) {
+      if (body.meet_link === null || body.meet_link === '') patch.meet_link = null;
+      else {
+        try {
+          patch.meet_link = normalizeOptionalMeetingUrl(body.meet_link, 'Meet');
+        } catch (e) {
+          const em = e instanceof Error ? e.message : String(e);
+          return jsonError(res, 400, em);
+        }
+      }
+    }
+
+    const applyToSeries = body.apply_to_series === true && row.series_id;
+    let startDeltaMs = 0;
+    if (body.start_time != null && String(body.start_time).trim()) {
+      const ns = new Date(String(body.start_time));
+      if (Number.isNaN(+ns)) return jsonError(res, 400, 'Geçersiz başlangıç zamanı.');
+      patch.start_time = ns.toISOString();
+      startDeltaMs = +ns - +new Date(row.start_time);
+    }
+    if (body.end_time != null && String(body.end_time).trim()) {
+      const ne = new Date(String(body.end_time));
+      if (Number.isNaN(+ne)) return jsonError(res, 400, 'Geçersiz bitiş zamanı.');
+      patch.end_time = ne.toISOString();
+    } else if (body.duration_minutes != null && body.duration_minutes !== '') {
+      const mins = Math.max(15, Math.min(240, Number(body.duration_minutes) || 30));
+      const startBase = patch.start_time ? new Date(patch.start_time) : new Date(row.start_time);
+      patch.end_time = new Date(+startBase + mins * 60_000).toISOString();
+    }
+    if (patch.start_time && patch.end_time && +new Date(patch.end_time) <= +new Date(patch.start_time)) {
+      return jsonError(res, 400, 'Bitiş saati başlangıçtan sonra olmalı.');
+    }
+
+    if (applyToSeries) {
+      const { data: seriesRows, error: seriesErr } = await supabaseAdmin
+        .from('meetings')
+        .select('*')
+        .eq('series_id', row.series_id);
+      if (seriesErr) throw seriesErr;
+      const now = patch.updated_at;
+      const linkFields = {};
+      if (body.meet_link !== undefined) linkFields.meet_link = patch.meet_link ?? null;
+      if (body.link_zoom !== undefined) linkFields.link_zoom = patch.link_zoom ?? null;
+      if (body.link_bbb !== undefined) linkFields.link_bbb = patch.link_bbb ?? null;
+
+      for (const sib of seriesRows || []) {
+        const sibPatch = { updated_at: now, ...linkFields };
+        if (startDeltaMs !== 0) {
+          sibPatch.start_time = new Date(+new Date(sib.start_time) + startDeltaMs).toISOString();
+          sibPatch.end_time = new Date(+new Date(sib.end_time) + startDeltaMs).toISOString();
+        } else if (body.duration_minutes != null && body.duration_minutes !== '' && body.start_time == null) {
+          const mins = Math.max(15, Math.min(240, Number(body.duration_minutes) || 30));
+          const st = new Date(sib.start_time);
+          sibPatch.end_time = new Date(+st + mins * 60_000).toISOString();
+        } else if (sib.id === meetingId) {
+          if (patch.start_time) sibPatch.start_time = patch.start_time;
+          if (patch.end_time) sibPatch.end_time = patch.end_time;
+        }
+        if (status && sib.id === meetingId) sibPatch.status = status;
+        if (typeof body.notes === 'string' || body.notes === null) {
+          if (sib.id === meetingId) sibPatch.notes = patch.notes;
+        }
+        if (typeof body.attended === 'boolean' && sib.id === meetingId) sibPatch.attended = patch.attended;
+        if (typeof body.ai_summary === 'string' || body.ai_summary === null) {
+          if (sib.id === meetingId) sibPatch.ai_summary = patch.ai_summary;
+        }
+
+        const { error: sibUpErr } = await supabaseAdmin.from('meetings').update(sibPatch).eq('id', sib.id);
+        if (sibUpErr) throw sibUpErr;
+      }
+
+      const { data: updatedSeriesRow } = await supabaseAdmin
+        .from('meetings')
+        .select('*')
+        .eq('id', meetingId)
+        .maybeSingle();
+      return res.status(200).json({
+        data: updatedSeriesRow,
+        updated_series: true,
+        series_count: (seriesRows || []).length
+      });
+    }
 
     const { data: updated, error: upErr } = await supabaseAdmin
       .from('meetings')
