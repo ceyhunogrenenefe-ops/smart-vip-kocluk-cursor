@@ -1501,40 +1501,39 @@ export default function Meetings() {
               </summary>
               <div className="px-3 pb-3 pt-0 space-y-2 border-t border-violet-100/80">
                 {g.items.map((m) => (
-                  <div
-                    key={m.id}
-                    className="bg-white/90 border border-slate-100 rounded-md p-2 text-xs flex flex-wrap justify-between gap-2"
-                  >
-                    <span className="text-slate-700">
-                      {new Date(m.start_time).toLocaleString('tr-TR')}
-                      <span
-                        className={`ml-2 rounded px-1 ${
-                          m.status === 'completed'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : m.status === 'missed'
-                              ? 'bg-red-100 text-red-700'
-                              : 'bg-amber-100 text-amber-800'
-                        }`}
-                      >
-                        {m.status}
+                  <div key={m.id} className="space-y-2">
+                    <div className="bg-white/90 border border-slate-100 rounded-md p-2 text-xs flex flex-wrap justify-between gap-2">
+                      <span className="text-slate-700">
+                        {new Date(m.start_time).toLocaleString('tr-TR')}
+                        <span
+                          className={`ml-2 rounded px-1 ${
+                            m.status === 'completed'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : m.status === 'missed'
+                                ? 'bg-red-100 text-red-700'
+                                : 'bg-amber-100 text-amber-800'
+                          }`}
+                        >
+                          {m.status}
+                        </span>
                       </span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => void joinCoachingMeeting(m)}
-                      className="text-emerald-700 font-medium hover:underline"
-                    >
-                      Bağlantı
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => void joinCoachingMeeting(m)}
+                        className="text-emerald-700 font-medium hover:underline"
+                      >
+                        Bağlantı
+                      </button>
+                    </div>
+                    {!isStudent && (role === 'coach' || role === 'admin' || role === 'super_admin') ? (
+                      <MeetingScheduleEditor
+                        meeting={m}
+                        showSeriesOption
+                        busy={scheduleSaveBusyId === m.id}
+                        onSave={(p) => saveMeetingSchedule(m.id, p)}
+                      />
+                    ) : null}
                   </div>
-                  {!isStudent && (role === 'coach' || role === 'admin' || role === 'super_admin') ? (
-                    <MeetingScheduleEditor
-                      meeting={m}
-                      showSeriesOption
-                      busy={scheduleSaveBusyId === m.id}
-                      onSave={(p) => saveMeetingSchedule(m.id, p)}
-                    />
-                  ) : null}
                 ))}
               </div>
             </details>
