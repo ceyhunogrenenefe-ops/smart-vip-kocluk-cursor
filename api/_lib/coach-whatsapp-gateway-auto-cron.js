@@ -17,6 +17,7 @@ import {
   sendGatewayTextMessage,
   warmActiveCoachGatewaySessions
 } from './whatsapp-gateway-send.js';
+import { loadPeriodsForStudents, isActiveFromPeriods } from './student-activity.js';
 
 const KIND = 'coach_gateway_template';
 
@@ -244,6 +245,9 @@ export async function runCoachWhatsappGatewayAutoCron(opts = {}) {
 
     const logDetail = [];
     let sentCount = 0;
+    const periodsMap = await loadPeriodsForStudents((students || []).map((s) => s.id), {
+      coachId: schedule.coach_id
+    });
 
     for (const st of students || []) {
       try {
@@ -253,6 +257,14 @@ export async function runCoachWhatsappGatewayAutoCron(opts = {}) {
         }
         if (!studentAllowsWhatsappAutomation(st, institutionFlags)) {
           logDetail.push({ student_id: st.id, skipped: 'whatsapp_automation_disabled' });
+          continue;
+        }
+        if (
+          !isActiveFromPeriods(periodsMap.get(String(st.id)) || [], todayTr, {
+            coachId: schedule.coach_id
+          })
+        ) {
+          logDetail.push({ student_id: st.id, skipped: 'inactive_on_date' });
           continue;
         }
         if (!(await eligibleByRepeat(schedule, st.id, todayTr))) {

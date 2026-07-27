@@ -1,5 +1,5 @@
 // Türkçe: Ana Panel (Dashboard) Sayfası
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { DashboardStatsSkeleton } from '../components/ui/ScoresLoadingPlaceholder';
@@ -22,10 +22,20 @@ import {
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
 import { CLASS_LEVELS, formatClassLevelLabel } from '../types';
 import { DailyReportTrackingPanel } from '../components/dashboard/DailyReportTrackingPanel';
+import { fetchStudentActivity, type StudentActivityPeriod } from '../lib/studentActivityApi';
+import { getAuthToken } from '../lib/session';
 
 export default function Dashboard() {
   const { students, coaches, weeklyEntries, getStudentStats, institution, appDataLoading } = useApp();
   const navigate = useNavigate();
+  const [periodsByStudent, setPeriodsByStudent] = useState<Record<string, StudentActivityPeriod[]>>({});
+
+  useEffect(() => {
+    if (!getAuthToken() || !students.length) return;
+    void fetchStudentActivity({})
+      .then((r) => setPeriodsByStudent(r.periods_by_student || {}))
+      .catch(() => setPeriodsByStudent({}));
+  }, [students.length]);
 
   const weeklyStats = useMemo(
     () =>
@@ -240,6 +250,8 @@ export default function Dashboard() {
         weeklyEntries={weeklyEntries}
         title="Günlük rapor takibi"
         subtitle={`${institution?.name || 'Kurum'} öğrencilerinin günlük rapor durumu.`}
+        periodsByStudent={periodsByStudent}
+        showActivityScopeFilter
       />
 
       {/* Hızlı İstatistikler */}

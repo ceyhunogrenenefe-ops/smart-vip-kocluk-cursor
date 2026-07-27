@@ -10,36 +10,80 @@ import {
   getIstanbulDateString,
   addDaysToYmd
 } from '../../lib/dailyReportTracking';
+import {
+  isActiveFromPeriods,
+  type StudentActivityPeriod
+} from '../../lib/studentActivityApi';
 
 type Props = {
   students: Student[];
   weeklyEntries: WeeklyEntry[];
   title?: string;
   subtitle?: string;
+  /** student_id → dönemler; yoksa tümü aktif sayılır */
+  periodsByStudent?: Record<string, StudentActivityPeriod[]>;
+  coachId?: string;
+  /** Yönetici: aktiflik filtresi UI */
+  showActivityScopeFilter?: boolean;
 };
 
 type FilterMode = 'all' | 'filled' | 'missing';
+type ActivityScope = 'active_on_date' | 'passive_on_date' | 'all_students';
 
 export function DailyReportTrackingPanel({
   students,
   weeklyEntries,
   title = 'Günlük rapor takibi',
-  subtitle = 'Hangi öğrenciler seçili günde rapor doldurdu?'
+  subtitle = 'Hangi öğrenciler seçili günde rapor doldurdu?',
+  periodsByStudent,
+  coachId,
+  showActivityScopeFilter = false
 }: Props) {
   const navigate = useNavigate();
   const todayYmd = getIstanbulDateString();
   const [selectedDate, setSelectedDate] = useState(todayYmd);
   const [filter, setFilter] = useState<FilterMode>('all');
+  const [activityScope, setActivityScope] = useState<ActivityScope>('active_on_date');
   const [search, setSearch] = useState('');
 
-  const weekSummaries = useMemo(
-    () => buildLastNDaySummaries(students, weeklyEntries, selectedDate, 7),
-    [students, weeklyEntries, selectedDate]
-  );
+  const scopedStudents = useMemo(() => {
+    if (!periodsByStudent) return students;
+    return students.filter((s) => {
+      const periods = periodsByStudent[s.id] || [];
+      const active = isActiveFromPeriods(periods, selectedDate, coachId);
+      if (activityScope === 'active_on_date') return active;
+      if (activityScope === 'passive_on_date') return !active;
+      return true;
+    });
+  }, [students, periodsByStudent, selectedDate, coachId, activityScope]);
+
+  const weekSummaries = useMemo(() => {
+    // Haftalık özet kartları: her gün için o gün aktif olanlar
+    if (!periodsByStudent) {
+      return buildLastNDaySummaries(students, weeklyEntries, selectedDate, 7);
+    }
+    const out = [];
+    for (let i = 6; i >= 0; i -= 1) {
+      const date = addDaysToYmd(selectedDate, -i);
+      const dayStudents = students.filter((s) =>
+        isActiveFromPeriods(periodsByStudent[s.id] || [], date, coachId)
+      );
+      const statuses = buildDailyReportStatuses(dayStudents, weeklyEntries, date);
+      const filledCount = statuses.filter((x) => x.filled).length;
+      const totalStudents = dayStudents.length;
+      out.push({
+        date,
+        filledCount,
+        totalStudents,
+        rate: totalStudents > 0 ? Math.round((filledCount / totalStudents) * 100) : 0
+      });
+    }
+    return out;
+  }, [students, weeklyEntries, selectedDate, periodsByStudent, coachId]);
 
   const statuses = useMemo(
-    () => buildDailyReportStatuses(students, weeklyEntries, selectedDate),
-    [students, weeklyEntries, selectedDate]
+    () => buildDailyReportStatuses(scopedStudents, weeklyEntries, selectedDate),
+    [scopedStudents, weeklyEntries, selectedDate]
   );
 
   const statusByStudentId = useMemo(
@@ -48,12 +92,13 @@ export function DailyReportTrackingPanel({
   );
 
   const filledCount = statuses.filter((s) => s.filled).length;
-  const missingCount = students.length - filledCount;
-  const fillRate = students.length > 0 ? Math.round((filledCount / students.length) * 100) : 0;
+  const missingCount = scopedStudents.length - filledCount;
+  const fillRate =
+    scopedStudents.length > 0 ? Math.round((filledCount / scopedStudents.length) * 1000) / 10 : 0;
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return students
+    return scopedStudents
       .map((student) => ({
         student,
         status: statusByStudentId.get(student.id) ?? {
@@ -77,7 +122,7 @@ export function DailyReportTrackingPanel({
         if (a.status.filled !== b.status.filled) return a.status.filled ? 1 : -1;
         return a.student.name.localeCompare(b.student.name, 'tr');
       });
-  }, [students, statusByStudentId, filter, search]);
+  }, [scopedStudents, statusByStudentId, filter, search]);
 
   const shiftDate = (delta: number) => {
     setSelectedDate((d) => addDaysToYmd(d, delta));
@@ -95,6 +140,12 @@ export function DailyReportTrackingPanel({
               <h3 className="text-lg font-semibold text-slate-800">{title}</h3>
             </div>
             <p className="mt-1 text-sm text-gray-500">{subtitle}</p>
+            {periodsByStudent ? (
+              <p className="mt-1 text-xs text-slate-500">
+                Oran, seçili günde <strong>aktif</strong> öğrenciler üzerinden hesaplanır (pasifler dahil
+                edilmez).
+              </p>
+            ) : null}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -133,6 +184,31 @@ export function DailyReportTrackingPanel({
           </div>
         </div>
 
+        {(showActivityScopeFilter || periodsByStudent) && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {(
+              [
+                ['active_on_date', 'Rapor tarihinde aktif'],
+                ['passive_on_date', 'Yalnızca pasifler'],
+                ['all_students', 'Tüm öğrenciler']
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setActivityScope(key)}
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                  activityScope === key
+                    ? 'bg-slate-800 text-white'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
           {weekSummaries.map((day) => {
             const active = day.date === selectedDate;
@@ -158,17 +234,21 @@ export function DailyReportTrackingPanel({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 border-b border-gray-100 px-4 py-4 sm:grid-cols-3 sm:px-6">
+      <div className="grid grid-cols-2 gap-3 border-b border-gray-100 px-4 py-4 sm:grid-cols-4 sm:px-6">
+        <div className="rounded-xl bg-slate-50 px-4 py-3">
+          <p className="text-sm text-slate-600">Aktif öğrenci</p>
+          <p className="text-2xl font-bold text-slate-800">{scopedStudents.length}</p>
+        </div>
         <div className="rounded-xl bg-green-50 px-4 py-3">
-          <p className="text-sm text-green-700">Rapor doldurdu</p>
+          <p className="text-sm text-green-700">Dolduran</p>
           <p className="text-2xl font-bold text-green-800">{filledCount}</p>
         </div>
         <div className="rounded-xl bg-red-50 px-4 py-3">
-          <p className="text-sm text-red-700">Rapor doldurmadı</p>
+          <p className="text-sm text-red-700">Doldurmayan</p>
           <p className="text-2xl font-bold text-red-800">{missingCount}</p>
         </div>
         <div className="rounded-xl bg-indigo-50 px-4 py-3">
-          <p className="text-sm text-indigo-700">Tamamlanma</p>
+          <p className="text-sm text-indigo-700">Doldurma oranı</p>
           <p className="text-2xl font-bold text-indigo-800">%{fillRate}</p>
         </div>
       </div>
@@ -208,8 +288,10 @@ export function DailyReportTrackingPanel({
         </div>
       </div>
 
-      {students.length === 0 ? (
-        <p className="px-6 py-8 text-center text-sm text-gray-500">Gösterilecek öğrenci yok.</p>
+      {scopedStudents.length === 0 ? (
+        <p className="px-6 py-8 text-center text-sm text-gray-500">
+          Seçili günde bu filtreye uygun öğrenci yok.
+        </p>
       ) : rows.length === 0 ? (
         <p className="px-6 py-8 text-center text-sm text-gray-500">Arama veya filtreye uygun öğrenci yok.</p>
       ) : (

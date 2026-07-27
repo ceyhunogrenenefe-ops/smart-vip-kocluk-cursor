@@ -12,6 +12,7 @@ import {
   loadInstitutionWhatsappAutomationMap,
   studentAllowsWhatsappAutomation
 } from './whatsapp-automation-eligibility.js';
+import { loadPeriodsForStudents, isActiveFromPeriods } from './student-activity.js';
 
 const KIND = 'coach_auto_template';
 
@@ -163,10 +164,22 @@ export async function runCoachWhatsappAutoCron(opts = {}) {
 
     const logDetail = [];
 
+    const periodsMap = await loadPeriodsForStudents((students || []).map((s) => s.id), {
+      coachId: schedule.coach_id
+    });
+
     for (const st of students || []) {
       try {
         if (!studentAllowsWhatsappAutomation(st, institutionFlags)) {
           logDetail.push({ student_id: st.id, skipped: 'whatsapp_automation_disabled' });
+          continue;
+        }
+        if (
+          !isActiveFromPeriods(periodsMap.get(String(st.id)) || [], todayTr, {
+            coachId: schedule.coach_id
+          })
+        ) {
+          logDetail.push({ student_id: st.id, skipped: 'inactive_on_date' });
           continue;
         }
         if (await sentToday(schedule.id, st.id, todayTr)) {

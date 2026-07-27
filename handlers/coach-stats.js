@@ -21,6 +21,11 @@ import { getIstanbulDateString, addCalendarDaysYmd } from '../api/_lib/istanbul-
 import { isUuid } from '../api/_lib/uuid.js';
 import { isMissingTableError, isSchemaColumnError } from '../api/_lib/supabase-schema.js';
 import { aggregatePlannerGoalProgress } from '../api/_lib/coach-goal-progress.js';
+import {
+  loadPeriodsForStudents,
+  countActiveStudentDays,
+  isActiveFromPeriods
+} from '../api/_lib/student-activity.js';
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 const CHUNK = 200;
@@ -135,6 +140,8 @@ export default async function handler(req, res) {
     const dayList = daysInclusive(from, to);
     const dayCount = dayList.length || 1;
 
+    const periodsByStudent = await loadPeriodsForStudents(studentIds);
+
     /** @type {Map<string, Set<string>>} coachId -> filled "studentId|date" */
     const filledKeysByCoach = new Map();
     /** @type {Map<string, number>} */
@@ -189,6 +196,10 @@ export default async function handler(req, res) {
         const date = padYmd(row.date);
         if (!date) continue;
         if (!entryFilled(row)) continue;
+
+        // Rapor tarihinde pasif öğrencinin doldurması oranı düşürmez / beklenen slot'ta yok
+        const periods = periodsByStudent.get(sid) || [];
+        if (!isActiveFromPeriods(periods, date, { coachId: cid })) continue;
 
         if (!filledKeysByCoach.has(cid)) filledKeysByCoach.set(cid, new Set());
         filledKeysByCoach.get(cid).add(`${sid}|${date}`);
@@ -433,9 +444,14 @@ export default async function handler(req, res) {
       const cid = String(c.id);
       const roster = studentsByCoach.get(cid) || [];
       const studentCount = roster.length;
-      const expectedFillSlots = studentCount * dayCount;
+      const rosterIds = roster.map((s) => String(s.id));
+      const expectedFillSlots = countActiveStudentDays(rosterIds, dayList, periodsByStudent, cid);
       const filledSlots = filledKeysByCoach.get(cid)?.size || 0;
       const filledStudents = filledStudentsByCoach.get(cid)?.size || 0;
+      // Dönem ortalamasında en az bir gün aktif olanlar
+      const activeStudentCount = rosterIds.filter((sid) =>
+        dayList.some((d) => isActiveFromPeriods(periodsByStudent.get(sid) || [], d, { coachId: cid }))
+      ).length;
       const examStudents = examStudentsByCoach.get(cid)?.size || 0;
       const joinStudents = denemeJoinByCoach.get(cid)?.size || 0;
       const planner = plannerByCoach.get(cid) || {
@@ -450,15 +466,16 @@ export default async function handler(req, res) {
       const mTot = meetTotal.get(cid) || 0;
       const reportFillRate = pct(filledSlots, expectedFillSlots);
       const attendanceRate = pct(attP, attT);
-      const denemeEntryRate = pct(examStudents, studentCount);
-      const denemeJoinRate = pct(joinStudents, studentCount);
+      const denome = activeStudentCount || studentCount;
+      const denemeEntryRate = pct(examStudents, denome);
+      const denemeJoinRate = pct(joinStudents, denome);
       const plannerGoalRate = pct(planner.completed, planner.target);
       const plannerStudentsMetRate = pct(planner.studentsMet, planner.studentsWithGoals);
       const meetingCompletionRate = pct(mDone, mTot);
-      const reportStudentsRate = pct(filledStudents, studentCount);
+      const reportStudentsRate = pct(filledStudents, denome);
       const solvedTotal = solvedByCoach.get(cid) || 0;
       const avgSolvedPerStudent =
-        studentCount > 0 ? Math.round((10 * solvedTotal) / studentCount) / 10 : null;
+        denome > 0 ? Math.round((10 * solvedTotal) / denome) / 10 : null;
 
       const rates = [
         reportFillRate,
@@ -477,6 +494,7 @@ export default async function handler(req, res) {
         coach_email: c.email || null,
         institution_id: c.institution_id || null,
         student_count: studentCount,
+        active_student_count: activeStudentCount,
         report_fill_rate: reportFillRate,
         report_filled_slots: filledSlots,
         report_expected_slots: expectedFillSlots,

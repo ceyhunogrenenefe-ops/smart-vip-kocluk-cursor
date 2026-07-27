@@ -1,5 +1,5 @@
 // Türkçe: Eğitim Koçu Dashboard Sayfası - Sadece atanan öğrencileri gösterir
-import React, { useMemo, useEffect, useState } from 'react';
+import React, { useMemo, useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
@@ -8,6 +8,14 @@ import { formatClassLevelLabel } from '../types';
 import { resolveCoachRecordId } from '../lib/coachResolve';
 import { db } from '../lib/database';
 import { getAuthToken } from '../lib/session';
+import {
+  fetchStudentActivity,
+  type DisplayActivityStatus,
+  type StudentActivityPeriod,
+  type StudentActivitySummary
+} from '../lib/studentActivityApi';
+import { StudentActivityBadge } from '../components/students/StudentActivityBadge';
+import { StudentActivityStatusModal } from '../components/students/StudentActivityStatusModal';
 import {
   Users,
   TrendingUp,
@@ -85,6 +93,41 @@ export default function CoachDashboard() {
     if (!myCoachRecordId) return [];
     return myStudents.filter((s) => String(s.coachId || '') === String(myCoachRecordId));
   }, [myStudents, myCoachRecordId]);
+
+  const [activityByStudent, setActivityByStudent] = useState<Record<string, StudentActivitySummary>>({});
+  const [periodsByStudent, setPeriodsByStudent] = useState<Record<string, StudentActivityPeriod[]>>({});
+  const [rosterTab, setRosterTab] = useState<'active' | 'passive' | 'all'>('active');
+  const [statusModal, setStatusModal] = useState<{
+    studentId: string;
+    studentName: string;
+    status: 'active' | 'passive';
+  } | null>(null);
+
+  const loadActivity = useCallback(async () => {
+    if (!myCoachRecordId || !getAuthToken()) return;
+    try {
+      const r = await fetchStudentActivity({ coachId: myCoachRecordId });
+      const map: Record<string, StudentActivitySummary> = {};
+      for (const row of r.students || []) map[row.student_id] = row;
+      setActivityByStudent(map);
+      setPeriodsByStudent(r.periods_by_student || {});
+    } catch {
+      /* migration yoksa sessiz — varsayılan aktif */
+    }
+  }, [myCoachRecordId]);
+
+  useEffect(() => {
+    void loadActivity();
+  }, [loadActivity]);
+
+  const rosterStudents = useMemo(() => {
+    if (rosterTab === 'all') return myStudents;
+    return myStudents.filter((s) => {
+      const st = (activityByStudent[s.id]?.display_status || 'active') as DisplayActivityStatus;
+      if (rosterTab === 'active') return st === 'active' || st === 'scheduled';
+      return st === 'passive';
+    });
+  }, [myStudents, rosterTab, activityByStudent]);
 
   // Koçun öğrenci ID'leri
   const myStudentIds = useMemo(() => myStudents.map(s => s.id), [myStudents]);
@@ -353,6 +396,8 @@ export default function CoachDashboard() {
         weeklyEntries={weeklyEntries}
         title="Günlük rapor takibi"
         subtitle="Koçluk yaptığınız öğrencilerin seçili günde rapor doldurup doldurmadığını görün."
+        periodsByStudent={periodsByStudent}
+        coachId={myCoachRecordId || undefined}
       />
 
       {/* Detaylı İstatistikler */}
@@ -626,23 +671,53 @@ export default function CoachDashboard() {
 
       {/* Öğrenci Listesi */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-        <h3 className="text-lg font-semibold text-slate-800 mb-4">Öğrenci Listem</h3>
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h3 className="text-lg font-semibold text-slate-800">Öğrenci Listem</h3>
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                ['active', 'Aktif Öğrenciler'],
+                ['passive', 'Pasif Öğrenciler'],
+                ['all', 'Tüm Öğrenciler']
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setRosterTab(key)}
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                  rosterTab === key
+                    ? 'bg-violet-600 text-white'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-slate-50">
               <tr>
                 <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600">Öğrenci</th>
+                <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600">Aktiflik</th>
                 <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600">Sınıf</th>
                 <th className="px-4 py-2 text-center text-xs font-semibold text-gray-600">Koç hedefi</th>
                 <th className="px-4 py-2 text-center text-xs font-semibold text-gray-600">Çözülen</th>
                 <th className="px-4 py-2 text-center text-xs font-semibold text-gray-600">Doğru</th>
                 <th className="px-4 py-2 text-center text-xs font-semibold text-gray-600">Başarı %</th>
-                <th className="px-4 py-2 text-center text-xs font-semibold text-gray-600">Durum</th>
+                <th className="px-4 py-2 text-center text-xs font-semibold text-gray-600">İşlem</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {myStudents.map((student) => {
+              {rosterStudents.map((student) => {
                 const stats = getStudentStats(student.id);
+                const act = activityByStudent[student.id];
+                const displayStatus = (act?.display_status || 'active') as DisplayActivityStatus;
+                const currentActivity: 'active' | 'passive' =
+                  displayStatus === 'passive' ? 'passive' : 'active';
+                const toggleTo = currentActivity === 'passive' ? 'active' : 'passive';
                 return (
                   <tr key={student.id} className="hover:bg-gray-50">
                     <td className="px-4 py-2">
@@ -652,6 +727,13 @@ export default function CoachDashboard() {
                         </div>
                         <span className="text-sm font-medium text-gray-800">{student.name}</span>
                       </div>
+                    </td>
+                    <td className="px-4 py-2">
+                      <StudentActivityBadge
+                        status={displayStatus}
+                        label={act?.display_label}
+                        starts={act?.scheduled_start}
+                      />
                     </td>
                     <td className="px-4 py-2 text-sm text-gray-600">{formatClassLevelLabel(student.classLevel)}</td>
                     <td className="px-4 py-2 text-sm text-center text-gray-600">{stats?.totalTarget || 0}</td>
@@ -663,27 +745,45 @@ export default function CoachDashboard() {
                       </span>
                     </td>
                     <td className="px-4 py-2 text-center">
-                      {(stats?.successRate || 0) < 70 ? (
-                        <span className="inline-flex items-center gap-1 text-xs text-red-500">
-                          <AlertTriangle className="w-3 h-3" /> Dikkat
-                        </span>
-                      ) : (stats?.successRate || 0) >= 90 ? (
-                        <span className="inline-flex items-center gap-1 text-xs text-green-500">
-                          <Award className="w-3 h-3" /> Başarılı
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-xs text-yellow-500">
-                          İyi
-                        </span>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setStatusModal({
+                            studentId: student.id,
+                            studentName: student.name,
+                            status: currentActivity
+                          })
+                        }
+                        className="rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        {toggleTo === 'active' ? 'Aktif yap' : 'Pasif yap'}
+                      </button>
                     </td>
                   </tr>
                 );
               })}
+              {!rosterStudents.length ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-slate-500">
+                    Bu sekmede öğrenci yok.
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </div>
       </div>
+
+      {statusModal ? (
+        <StudentActivityStatusModal
+          studentId={statusModal.studentId}
+          studentName={statusModal.studentName}
+          coachId={myCoachRecordId || undefined}
+          initialStatus={statusModal.status}
+          onClose={() => setStatusModal(null)}
+          onSaved={() => void loadActivity()}
+        />
+      ) : null}
     </div>
   );
 }

@@ -10,6 +10,7 @@ export const routeLoaders = {
   'auth-reset-password': () => import('../handlers/auth-reset-password.js'),
   'setup-password-reset-table': () => import('../handlers/setup-password-reset-table.js'),
   students: () => import('../handlers/students.js'),
+  'student-activity': () => import('../handlers/student-activity.js'),
   'my-student': () => import('../handlers/my-student.js'),
   'my-profile': () => import('../handlers/my-profile.js'),
   coaches: () => import('../handlers/coaches.js'),

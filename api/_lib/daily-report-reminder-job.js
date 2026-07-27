@@ -15,6 +15,10 @@ import { normalizePhoneToE164 } from './phone-whatsapp.js';
 import { coachDailyReportReminderEnabled } from './coach-notification-prefs.js';
 import { getCoachGatewayHealth } from './message-service.js';
 import { sendAutomationTemplateMessage } from './whatsapp-automation-channel.js';
+import {
+  loadPeriodsForStudents,
+  isActiveFromPeriods
+} from './student-activity.js';
 import { resolveEffectiveSendChannel, SEND_CHANNELS } from './notification-config.js';
 
 export function reportReminderSendChannel() {
@@ -127,16 +131,25 @@ export async function runDailyReportReminderJob(opts = {}) {
     .limit(8000);
   if (sErr) throw sErr;
 
+  const studentIds = (students || []).map((s) => String(s.id));
+  const periodsByStudent = await loadPeriodsForStudents(studentIds);
+
   for (const student of students || []) {
     if (!studentAllowsWhatsappAutomation(student, institutionFlags)) {
       log.push({ student_id: student.id, note: 'whatsapp_automation_disabled' });
       continue;
     }
-    if (!studentNeedsReportReminder(student.id, entries || [], plannerStudentIds)) {
+
+    const sid = String(student.id);
+    const coachId = String(student.coach_id || '').trim();
+    if (!isActiveFromPeriods(periodsByStudent.get(sid) || [], today, { coachId })) {
+      log.push({ student_id: student.id, note: 'inactive_on_report_date' });
       continue;
     }
 
-    const coachId = String(student.coach_id || '').trim();
+    if (!studentNeedsReportReminder(student.id, entries || [], plannerStudentIds)) {
+      continue;
+    }
     const coachGate = await coachCanSendDailyReport(coachId);
     if (!coachGate.ok) {
       log.push({
