@@ -337,6 +337,52 @@ export function buildParentPdfWaMeMessage(opts: {
   );
 }
 
+/** Koç WhatsApp gateway (Baileys) — PDF belge gönderimi */
+export async function sendWhatsAppGatewayDocument(opts: {
+  coachUserId: string;
+  targetPhone: string;
+  filename: string;
+  base64: string;
+  caption?: string;
+  mimeType?: string;
+}): Promise<WhatsAppSendResult> {
+  const target = normalizeWhatsAppPhoneForSend(opts.targetPhone);
+  const coachUserId = String(opts.coachUserId || '').trim();
+  const base64 = String(opts.base64 || '').trim();
+  const filename = String(opts.filename || 'document.pdf').trim() || 'document.pdf';
+  const caption = String(opts.caption || '').trim();
+  if (!target) throw new Error('Geçerli telefon numarası yok');
+  if (!base64) throw new Error('Belge verisi boş');
+  if (!coachUserId) throw new Error('whatsapp_gateway_session_missing');
+
+  const gatewayUrl = resolveWhatsAppGatewayBase();
+  if (!gatewayUrl || !getAuthToken()) {
+    throw new Error('WhatsApp gateway yapılandırması veya oturum eksik — çıkış yapıp tekrar giriş yapın.');
+  }
+
+  const connected = await isGatewayWhatsAppConnected(coachUserId);
+  if (!connected) {
+    throw new Error('Koç WhatsApp gateway bağlı değil — WhatsApp merkezinden QR ile bağlanın.');
+  }
+
+  await callGateway(coachUserId, `/sessions/${coachUserId}/send-document`, {
+    method: 'POST',
+    body: JSON.stringify({
+      phone: target,
+      data_base64: base64,
+      filename,
+      caption: caption || undefined,
+      mimetype: opts.mimeType || 'application/pdf',
+      strict_session: true
+    })
+  });
+
+  return {
+    channel: 'gateway',
+    notice: 'Karne PDF veliye koç WhatsApp gateway üzerinden gönderildi.'
+  };
+}
+
 /** PDF — kurumsal Meta şablonu (parent_pdf_link); gateway kullanılmaz */
 export async function sendWhatsAppOutboundDocument(opts: {
   coachUserId: string;

@@ -683,7 +683,8 @@ export default function EdesisPage() {
           </p>
           <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
             <strong>Veliye WhatsApp:</strong> Numara Edesis&apos;ten alınmaz. Eşleşmiş Smart Koçluk öğrenci kartındaki{' '}
-            <strong>veli telefonu</strong> kullanılır; Edesis&apos;te veli kaydı şart değildir.
+            <strong>veli telefonu</strong> kullanılır. Karne PDF, bağlı <strong>koç WhatsApp gateway</strong> oturumundan
+            dosya olarak gider; büyükse otomatik sıkıştırılır.
           </p>
           {resolvedParentPhone ? (
             <p className="text-sm text-green-800">

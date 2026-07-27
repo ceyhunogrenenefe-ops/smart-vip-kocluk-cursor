@@ -1,12 +1,21 @@
 import { getGatewaySessionUserId } from '../session';
 import {
+  compressPdfBlobForWhatsApp
+} from '../pdfCompressForWhatsApp';
+import {
   blobToBase64,
   buildParentPdfWaMeMessage,
   formatWhatsAppPhone,
-  sendWhatsAppOutbound,
-  sendWhatsAppOutboundDocument
+  sendWhatsAppGatewayDocument,
+  sendWhatsAppOutbound
 } from '../whatsappOutbound';
 import { fetchEdesisKarnePdf, type EdesisStudentResultsExam } from './edesisApi';
+
+const GATEWAY_HARD_MAX_BYTES = 15 * 1024 * 1024;
+
+function isPayloadTooLargeError(msg: string): boolean {
+  return /payload_too_large|document_too_large|entity too large|payloadtoolarge/i.test(msg);
+}
 
 export async function shareEdesisKarneWithParent(opts: {
   exam: EdesisStudentResultsExam;
@@ -45,28 +54,69 @@ export async function shareEdesisKarneWithParent(opts: {
   const examTitle = String(opts.exam.examTitle || 'Deneme sınavı').trim() || 'Deneme sınavı';
   const pdfTitle = `${examTitle} — Edesis karne`;
   const caption = `Merhaba, ${studentName} için ${examTitle} deneme karnesi.`;
+  const safeStem = examTitle.replace(/[^\w\u00C0-\u024F\s-]/gi, '').trim().slice(0, 48) || 'edesis-karne';
+
+  const pdfRes = await fetch(reportUrl);
+  if (!pdfRes.ok) {
+    throw new Error(`Karne PDF indirilemedi (HTTP ${pdfRes.status})`);
+  }
+  const rawBlob = await pdfRes.blob();
+  if (rawBlob.size < 200) {
+    throw new Error('Karne PDF dosyası boş veya geçersiz');
+  }
+
+  let { blob: pdfBlob, compressed } = await compressPdfBlobForWhatsApp(rawBlob);
+  if (pdfBlob.size > GATEWAY_HARD_MAX_BYTES) {
+    throw new Error(
+      'Karne PDF sıkıştırıldıktan sonra bile çok büyük — Karne PDF ile indirip manuel paylaşın.'
+    );
+  }
+
+  let base64 = await blobToBase64(pdfBlob);
+  const filename = `${safeStem}.pdf`;
+
+  const sendOnce = async () =>
+    sendWhatsAppGatewayDocument({
+      coachUserId,
+      targetPhone: parentDigits,
+      filename,
+      base64,
+      caption,
+      mimeType: 'application/pdf'
+    });
 
   try {
-    const pdfRes = await fetch(reportUrl);
-    if (pdfRes.ok) {
-      const blob = await pdfRes.blob();
-      if (blob.size > 200) {
-        const safeStem = examTitle.replace(/[^\w\u00C0-\u024F\s-]/gi, '').trim().slice(0, 48) || 'edesis-karne';
-        const result = await sendWhatsAppOutboundDocument({
-          coachUserId,
-          targetPhone: parentDigits,
-          studentId: opts.platformStudentId,
-          studentName,
-          pdfTitle,
-          filename: `${safeStem}.pdf`,
-          base64: await blobToBase64(blob),
-          caption
-        });
-        return { notice: result.notice, reportUrl };
+    const result = await sendOnce();
+    const extra = compressed
+      ? ` (orijinal ${(rawBlob.size / (1024 * 1024)).toFixed(1)} MB → ${(pdfBlob.size / (1024 * 1024)).toFixed(1)} MB)`
+      : '';
+    return { notice: result.notice + extra, reportUrl };
+  } catch (e) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    if (!isPayloadTooLargeError(errMsg)) {
+      throw e instanceof Error ? e : new Error(errMsg);
+    }
+    const tighter = await compressPdfBlobForWhatsApp(rawBlob, Math.floor(1.4 * 1024 * 1024));
+    pdfBlob = tighter.blob;
+    compressed = true;
+    base64 = await blobToBase64(pdfBlob);
+    if (pdfBlob.size > GATEWAY_HARD_MAX_BYTES) {
+      throw new Error('PDF gateway limitine sığmıyor — Karne PDF bağlantısı ile manuel gönderin.');
+    }
+    try {
+      const retry = await sendOnce();
+      return {
+        notice:
+          retry.notice +
+          ` (sıkıştırılmış ${(pdfBlob.size / (1024 * 1024)).toFixed(1)} MB)`,
+        reportUrl
+      };
+    } catch (retryErr) {
+      const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+      if (!isPayloadTooLargeError(retryMsg)) {
+        throw retryErr instanceof Error ? retryErr : new Error(retryMsg);
       }
     }
-  } catch {
-    /* PDF indirilemedi — metin + link */
   }
 
   const message = buildParentPdfWaMeMessage({
@@ -75,10 +125,17 @@ export async function shareEdesisKarneWithParent(opts: {
     caption,
     downloadUrl: reportUrl
   });
-  const result = await sendWhatsAppOutbound({
+  const fallback = await sendWhatsAppOutbound({
     coachUserId,
     targetPhone: parentDigits,
-    message
+    message:
+      message +
+      '\n\n(PDF dosyası boyut sınırı nedeniyle eklenemedi; lütfen bağlantıdan indirin.)'
   });
-  return { notice: result.notice, reportUrl };
+  return {
+    notice:
+      fallback.notice +
+      ' PDF eklenemedi — bağlantı mesajı gönderildi. Gateway bağlıysa tekrar deneyin veya Karne PDF ile indirin.',
+    reportUrl
+  };
 }
