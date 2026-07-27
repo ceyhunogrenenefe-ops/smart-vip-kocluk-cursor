@@ -46,7 +46,7 @@ insert into public.student_activity_periods (
 )
 select
   s.id,
-  s.coach_id,
+  case when c.id is not null then s.coach_id else null end,
   coalesce((s.created_at at time zone 'Europe/Istanbul')::date, current_date),
   null,
   'active',
@@ -55,6 +55,7 @@ select
   now(),
   now()
 from public.students s
+left join public.coaches c on c.id = s.coach_id
 where s.coach_id is not null
   and not exists (
     select 1 from public.student_activity_periods p where p.student_id = s.id
