@@ -68,8 +68,10 @@ export function isActiveFromPeriods(
     }
     return false;
   }
-  if (relevant.some((p) => p.status === 'active')) return true;
-  return false;
+  const sorted = [...relevant].sort((a, b) =>
+    padYmd(b.start_date).localeCompare(padYmd(a.start_date))
+  );
+  return sorted[0].status === 'active';
 }
 
 export async function fetchStudentActivity(params: {

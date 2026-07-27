@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Loader2, X } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   PERIOD_TYPE_LABELS,
   type ActivityPeriodType,
@@ -49,6 +50,11 @@ export function StudentActivityStatusModal({
         note: note || null,
         coach_id: coachId
       });
+      toast.success(
+        nextStatus === 'passive'
+          ? `${studentName} pasife alındı — Pasif Öğrenciler sekmesinde görünür.`
+          : `${studentName} aktif yapıldı.`
+      );
       onSaved();
       onClose();
     } catch (e) {

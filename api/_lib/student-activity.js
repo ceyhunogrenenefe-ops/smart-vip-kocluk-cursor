@@ -55,10 +55,11 @@ export function isActiveFromPeriods(periods, reportDate, opts = {}) {
     return false;
   }
 
-  // Aynı tarihte aktif dönem varsa aktif; yalnızca passive varsa pasif
-  if (relevant.some((p) => String(p.status) === 'active')) return true;
-  if (relevant.every((p) => String(p.status) === 'passive')) return false;
-  return true;
+  // Aynı güne birden fazla dönem denk gelirse en son başlayan geçerli (pasife alma günü)
+  const sorted = [...relevant].sort((a, b) =>
+    padYmd(b.start_date).localeCompare(padYmd(a.start_date))
+  );
+  return String(sorted[0].status) === 'active';
 }
 
 /**

@@ -89,10 +89,13 @@ export default function CoachDashboard() {
     [effectiveUser?.role, effectiveUser?.coachId, effectiveUser?.email, effectiveUser?.id, coaches, coachTags]
   );
 
-  const reportStudents = useMemo(() => {
+  /** Koç olarak atandığınız öğrenciler (coach_id) — aktif/pasif yönetimi */
+  const assignedStudents = useMemo(() => {
     if (!myCoachRecordId) return [];
     return myStudents.filter((s) => String(s.coachId || '') === String(myCoachRecordId));
   }, [myStudents, myCoachRecordId]);
+
+  const reportStudents = assignedStudents;
 
   const [activityByStudent, setActivityByStudent] = useState<Record<string, StudentActivitySummary>>({});
   const [periodsByStudent, setPeriodsByStudent] = useState<Record<string, StudentActivityPeriod[]>>({});
@@ -109,25 +112,37 @@ export default function CoachDashboard() {
       const r = await fetchStudentActivity({ coachId: myCoachRecordId });
       const map: Record<string, StudentActivitySummary> = {};
       for (const row of r.students || []) map[row.student_id] = row;
+      // Atanan her öğrenci için kayıt yoksa varsayılan aktif göster
+      for (const s of assignedStudents) {
+        if (!map[s.id]) {
+          map[s.id] = {
+            student_id: s.id,
+            display_status: 'active',
+            display_label: 'Aktif',
+            active_on_today: true,
+            periods: []
+          };
+        }
+      }
       setActivityByStudent(map);
       setPeriodsByStudent(r.periods_by_student || {});
     } catch {
       /* migration yoksa sessiz — varsayılan aktif */
     }
-  }, [myCoachRecordId]);
+  }, [myCoachRecordId, assignedStudents]);
 
   useEffect(() => {
     void loadActivity();
   }, [loadActivity]);
 
   const rosterStudents = useMemo(() => {
-    if (rosterTab === 'all') return myStudents;
-    return myStudents.filter((s) => {
+    if (rosterTab === 'all') return assignedStudents;
+    return assignedStudents.filter((s) => {
       const st = (activityByStudent[s.id]?.display_status || 'active') as DisplayActivityStatus;
       if (rosterTab === 'active') return st === 'active' || st === 'scheduled';
       return st === 'passive';
     });
-  }, [myStudents, rosterTab, activityByStudent]);
+  }, [assignedStudents, rosterTab, activityByStudent]);
 
   // Koçun öğrenci ID'leri
   const myStudentIds = useMemo(() => myStudents.map(s => s.id), [myStudents]);
@@ -672,7 +687,13 @@ export default function CoachDashboard() {
       {/* Öğrenci Listesi */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h3 className="text-lg font-semibold text-slate-800">Öğrenci Listem</h3>
+          <div>
+            <h3 className="text-lg font-semibold text-slate-800">Öğrenci Listem (aktif / pasif)</h3>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Size koç olarak atanmış {assignedStudents.length} öğrenci. Canlı ders öğrencileri bu listede yer
+              almaz.
+            </p>
+          </div>
           <div className="flex flex-wrap gap-2">
             {(
               [

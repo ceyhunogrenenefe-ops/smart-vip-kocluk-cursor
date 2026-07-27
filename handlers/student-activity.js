@@ -12,6 +12,7 @@ import {
   roleSetHasSuperAdmin
 } from '../api/_lib/actor-roles.js';
 import { getIstanbulDateString } from '../api/_lib/istanbul-time.js';
+import { addCalendarDaysYmd } from '../api/_lib/istanbul-time.js';
 import { isMissingTableError } from '../api/_lib/supabase-schema.js';
 import {
   PERIOD_TYPES,
@@ -231,15 +232,33 @@ export default async function handler(req, res) {
         );
 
         if (want === 'passive') {
+          const passiveStart = today;
           for (const p of openActive) {
-            const end = padYmd(body.end_date) || today;
+            const closeEnd = addCalendarDaysYmd(passiveStart, -1);
+            const pStart = padYmd(p.start_date);
+            if (closeEnd < pStart) {
+              // Aktif dönem bugün/sonra başlamış → kaldır (tarih çakışmasın)
+              const { error: delErr } = await supabaseAdmin
+                .from('student_activity_periods')
+                .delete()
+                .eq('id', p.id);
+              if (delErr) throw delErr;
+              await writeActivityAudit({
+                studentId,
+                periodId: p.id,
+                actorUserId: actor.sub,
+                action: 'delete_active_for_passive',
+                previousValue: p,
+                newValue: null
+              });
+              continue;
+            }
             const { data: updated, error } = await supabaseAdmin
               .from('student_activity_periods')
               .update({
-                end_date: end < padYmd(p.start_date) ? padYmd(p.start_date) : end,
+                end_date: closeEnd,
                 updated_at: new Date().toISOString(),
-                passive_reason: fields.passive_reason,
-                note: fields.note
+                note: fields.note || p.note
               })
               .eq('id', p.id)
               .select('*')
@@ -255,19 +274,12 @@ export default async function handler(req, res) {
             });
           }
           // Pasif dönem kaydı (raporlama / neden)
-          await assertNoActiveOverlap({
-            studentId,
-            coachId,
-            startDate: today,
-            endDate: fields.end_date,
-            status: 'passive'
-          });
           const { data: inserted, error: insErr } = await supabaseAdmin
             .from('student_activity_periods')
             .insert({
               student_id: studentId,
               coach_id: coachId || null,
-              start_date: today,
+              start_date: passiveStart,
               end_date: fields.end_date,
               status: 'passive',
               period_type: fields.period_type,
@@ -279,7 +291,39 @@ export default async function handler(req, res) {
             })
             .select('*')
             .single();
-          if (insErr) throw insErr;
+          if (insErr) {
+            // Orphan coach_id FK → null ile dene
+            if (String(insErr.message || '').includes('coach_id') || String(insErr.code) === '23503') {
+              const { data: inserted2, error: insErr2 } = await supabaseAdmin
+                .from('student_activity_periods')
+                .insert({
+                  student_id: studentId,
+                  coach_id: null,
+                  start_date: passiveStart,
+                  end_date: fields.end_date,
+                  status: 'passive',
+                  period_type: fields.period_type,
+                  passive_reason: fields.passive_reason,
+                  note: fields.note,
+                  created_by: actor.sub,
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                })
+                .select('*')
+                .single();
+              if (insErr2) throw insErr2;
+              await writeActivityAudit({
+                studentId,
+                periodId: inserted2.id,
+                actorUserId: actor.sub,
+                action: 'set_passive',
+                previousValue: null,
+                newValue: inserted2
+              });
+              return res.status(200).json({ ok: true, period: inserted2, display_status: 'passive' });
+            }
+            throw insErr;
+          }
           await writeActivityAudit({
             studentId,
             periodId: inserted.id,
@@ -300,23 +344,31 @@ export default async function handler(req, res) {
           endDate: fields.end_date,
           status: 'active'
         });
-        const { data: inserted, error: insErr } = await supabaseAdmin
+        const activePayload = {
+          student_id: studentId,
+          coach_id: coachId || null,
+          start_date: start,
+          end_date: fields.end_date,
+          status: 'active',
+          period_type: fields.period_type,
+          passive_reason: null,
+          note: fields.note,
+          created_by: actor.sub,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        let { data: inserted, error: insErr } = await supabaseAdmin
           .from('student_activity_periods')
-          .insert({
-            student_id: studentId,
-            coach_id: coachId || null,
-            start_date: start,
-            end_date: fields.end_date,
-            status: 'active',
-            period_type: fields.period_type,
-            passive_reason: null,
-            note: fields.note,
-            created_by: actor.sub,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
+          .insert(activePayload)
           .select('*')
           .single();
+        if (insErr && (String(insErr.code) === '23503' || String(insErr.message || '').includes('coach_id'))) {
+          ({ data: inserted, error: insErr } = await supabaseAdmin
+            .from('student_activity_periods')
+            .insert({ ...activePayload, coach_id: null })
+            .select('*')
+            .single());
+        }
         if (insErr) throw insErr;
         await writeActivityAudit({
           studentId,
