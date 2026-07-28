@@ -258,21 +258,25 @@ export function effectivePlannerEntryDone(
   row: WeeklyPlannerEntryRow,
   weeklyEntries: WeeklyEntry[]
 ): number {
-  const wid = row.weekly_entry_id;
-  if (!wid) return 0;
-
-  const linked = weeklyEntries.find((w) => w.id === wid);
-  if (!linked) return 0;
-
   const planned = Math.max(0, Number(row.planned_quantity || 0));
   const kind = coachGoalUnitKind(g);
-  let done = 0;
-  if (kind === 'sayfa') done = effectivePagesRead(linked);
-  else if (kind === 'dakika') done = effectiveScreenMinutes(linked);
-  else done = Math.max(0, Number(linked.solvedQuestions || 0));
+  const clamp = (n: number) => (planned > 0 ? Math.min(n, planned) : n);
 
-  if (planned > 0) return Math.min(done, planned);
-  return done;
+  const wid = row.weekly_entry_id;
+  if (wid) {
+    const linked = weeklyEntries.find((w) => w.id === wid);
+    if (linked) {
+      let done = 0;
+      if (kind === 'sayfa') done = effectivePagesRead(linked);
+      else if (kind === 'dakika') done = effectiveScreenMinutes(linked);
+      else done = Math.max(0, Number(linked.solvedQuestions || 0));
+      return clamp(done);
+    }
+  }
+
+  // AppContext'te linked kayıt yoksa planner completed_quantity yedek (yeşil kaçmasın)
+  const fallback = Math.max(0, Number(row.completed_quantity || 0));
+  return clamp(fallback);
 }
 
 /** Yalnızca seçili analiz aralığı ∩ hedef takvimi içindeki plan blokları */

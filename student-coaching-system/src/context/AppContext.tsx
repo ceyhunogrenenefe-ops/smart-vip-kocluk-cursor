@@ -3143,8 +3143,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const detail = (ev as CustomEvent<{ entries?: WeeklyEntry[] }>).detail;
       if (detail?.entries?.length) mergeWeeklyEntries(detail.entries);
     };
+    const onStudySaved = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ entries?: WeeklyEntry[] }>).detail;
+      if (detail?.entries?.length) mergeWeeklyEntries(detail.entries);
+    };
     window.addEventListener('coaching:etut-report-saved', onEtutSaved);
-    return () => window.removeEventListener('coaching:etut-report-saved', onEtutSaved);
+    window.addEventListener('coaching:planner-study-saved', onStudySaved);
+    return () => {
+      window.removeEventListener('coaching:etut-report-saved', onEtutSaved);
+      window.removeEventListener('coaching:planner-study-saved', onStudySaved);
+    };
   }, [mergeWeeklyEntries]);
 
   return (

@@ -1,39 +1,13 @@
-import { requireAuth, hasInstitutionAccess } from '../api/_lib/auth.js';
+import { requireAuth } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { syncStudentScreenTimeLog } from '../api/_lib/sync-student-screen-time-log.js';
+import {
+  assertStudentPlannerWrite,
+  buildAccessContext
+} from '../api/_lib/student-access-gate.js';
 
 const padDate = (v) => String(v || '').trim().slice(0, 10);
-
-const fetchStudentMinimal = async (studentId) => {
-  const { data, error } = await supabaseAdmin
-    .from('students')
-    .select('id,coach_id,institution_id')
-    .eq('id', studentId)
-    .maybeSingle();
-  if (error) throw error;
-  return data;
-};
-
-/** weekly-entries ile aynı erişim modeli */
-const assertPlannerDailyMutate = async (actor, studentId) => {
-  const st = await fetchStudentMinimal(studentId);
-  if (!st) return { ok: false, status: 404, student: null };
-  if (actor.role === 'super_admin') return { ok: true, student: st };
-  if (actor.role === 'admin') {
-    if (!hasInstitutionAccess(actor, st.institution_id)) return { ok: false, status: 403, student: st };
-    return { ok: true, student: st };
-  }
-  if (actor.role === 'coach') {
-    if (!actor.coach_id || st.coach_id !== actor.coach_id) return { ok: false, status: 403, student: st };
-    return { ok: true, student: st };
-  }
-  if (actor.role === 'student') {
-    if (!actor.student_id || actor.student_id !== studentId) return { ok: false, status: 403, student: null };
-    return { ok: true, student: st };
-  }
-  return { ok: false, status: 403, student: null };
-};
 
 function plannerTitleFromTopic(subject, topic) {
   const sub = String(subject || '').trim() || 'Genel';
@@ -89,7 +63,8 @@ function derivePlannerStatus(plannerPlanned, targetFromBody, completedAmount) {
  */
 export default async function handler(req, res) {
   try {
-    const actor = requireAuth(req);
+    const ctx = await buildAccessContext(requireAuth(req));
+    const { actor } = ctx;
 
     if (req.method !== 'POST') {
       return res.status(405).json({ error: 'method_not_allowed' });
@@ -110,7 +85,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'already_linked_use_weekly_entries_patch' });
     }
 
-    const gate = await assertPlannerDailyMutate(actor, planner.student_id);
+    const gate = await assertStudentPlannerWrite(ctx, planner.student_id);
     if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
 
     const b = req.body || {};

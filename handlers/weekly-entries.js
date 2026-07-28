@@ -6,29 +6,60 @@ import { syncWeeklyEntryPlannerRow } from '../api/_lib/sync-weekly-entry-planner
 import { syncStudentScreenTimeLog } from '../api/_lib/sync-student-screen-time-log.js';
 import { authHttpStatus, isMissingTableError } from '../api/_lib/supabase-schema.js';
 import { withDbTimeout } from '../api/_lib/db-timeout.js';
+import {
+  assertStudentPlannerWrite,
+  buildAccessContext
+} from '../api/_lib/student-access-gate.js';
+import { roleSetHasAdmin, roleSetHasSuperAdmin } from '../api/_lib/actor-roles.js';
 
-const canAccessEntry = async (actor, entry) => {
-  if (actor.role === 'super_admin') return true;
-  if (actor.role === 'teacher') return false;
-  if (actor.role === 'admin') return hasInstitutionAccess(actor, entry.institution_id);
-  if (actor.role === 'coach') {
-    const { data: student } = await supabaseAdmin
-      .from('students')
-      .select('id,coach_id')
-      .eq('id', entry.student_id)
-      .maybeSingle();
-    return Boolean(student && actor.coach_id && student.coach_id === actor.coach_id);
+const WEEKLY_ENTRY_PATCH_KEYS = [
+  'subject',
+  'topic',
+  'date',
+  'target_questions',
+  'solved_questions',
+  'correct',
+  'wrong',
+  'blank',
+  'notes',
+  'reading_minutes',
+  'pages_read',
+  'screen_time_minutes',
+  'book_id',
+  'book_title',
+  'institution_id'
+];
+
+function sanitizeWeeklyEntryPatch(body) {
+  const src = body && typeof body === 'object' ? body : {};
+  const out = {};
+  for (const key of WEEKLY_ENTRY_PATCH_KEYS) {
+    if (src[key] !== undefined) out[key] = src[key];
   }
-  if (actor.role === 'student') return Boolean(actor.student_id && entry.student_id === actor.student_id);
-  return false;
-};
+  if (src.pagesRead !== undefined && out.pages_read === undefined) out.pages_read = src.pagesRead;
+  if (src.screenTimeMinutes !== undefined && out.screen_time_minutes === undefined) {
+    out.screen_time_minutes = src.screenTimeMinutes;
+  }
+  if (src.readingMinutes !== undefined && out.reading_minutes === undefined) {
+    out.reading_minutes = src.readingMinutes;
+  }
+  if (src.bookTitle !== undefined && out.book_title === undefined) out.book_title = src.bookTitle;
+  if (src.coachComment !== undefined && out.notes === undefined) out.notes = src.coachComment;
+  return out;
+}
 
 export default async function handler(req, res) {
   try {
-    const actor = requireAuth(req);
+    const ctx = await buildAccessContext(requireAuth(req));
+    const { actor, roleSet } = ctx;
+    const isCoach = roleSet.has('coach');
+    const isTeacher = roleSet.has('teacher');
+    const isStudent = roleSet.has('student');
+    const isAdmin = roleSetHasAdmin(roleSet);
+    const isSuper = roleSetHasSuperAdmin(roleSet);
 
     if (req.method === 'GET') {
-      if (actor.role === 'student' && !actor.student_id) {
+      if (isStudent && !isCoach && !isAdmin && !isSuper && !actor.student_id) {
         return res.status(200).json({ data: [] });
       }
       const from = String(req.query.from || '').trim().slice(0, 10);
@@ -36,19 +67,13 @@ export default async function handler(req, res) {
       const scopedStudentId = String(req.query.student_id || req.query.studentId || '').trim();
 
       let query = supabaseAdmin.from('weekly_entries').select('*').order('date', { ascending: false });
-      if (actor.role === 'admin') {
+
+      if (isSuper) {
+        // no institution filter
+      } else if (isAdmin && !isCoach) {
         if (!actor.institution_id) return res.status(200).json({ data: [] });
         query = query.eq('institution_id', actor.institution_id);
-      }
-      if (actor.role === 'teacher') {
-        if (!actor.institution_id) return res.status(200).json({ data: [] });
-        const { ids } = await getTeacherPanelStudentScope(actor.sub, actor.institution_id || null);
-        if (!ids.length) return res.status(200).json({ data: [] });
-        // institution_id filtresi yok: özel ders satırları / öğrenci kurum alanı boş olabilir
-        query = query.in('student_id', ids);
-      }
-      if (actor.role === 'student') query = query.eq('student_id', actor.student_id);
-      if (actor.role === 'coach') {
+      } else if (isCoach) {
         if (!actor.coach_id) return res.status(200).json({ data: [] });
         const { data: students, error: stErr } = await withDbTimeout(
           supabaseAdmin.from('students').select('id').eq('coach_id', actor.coach_id),
@@ -56,7 +81,14 @@ export default async function handler(req, res) {
           'weekly_entries_coach_students'
         );
         if (stErr) throw stErr;
-        const ids = (students || []).map((s) => s.id);
+        let ids = (students || []).map((s) => s.id);
+        if (isTeacher && actor.institution_id) {
+          const { ids: teacherIds } = await getTeacherPanelStudentScope(
+            actor.sub,
+            actor.institution_id || null
+          );
+          ids = [...new Set([...ids, ...(teacherIds || [])])];
+        }
         if (ids.length === 0) return res.status(200).json({ data: [] });
         if (ids.length <= 80) {
           query = query.in('student_id', ids);
@@ -72,6 +104,7 @@ export default async function handler(req, res) {
                 .order('date', { ascending: false });
               if (/^\d{4}-\d{2}-\d{2}$/.test(from)) q = q.gte('date', from);
               if (/^\d{4}-\d{2}-\d{2}$/.test(to)) q = q.lte('date', to);
+              if (scopedStudentId) q = q.eq('student_id', scopedStudentId);
               const { data: rows, error: pe } = await withDbTimeout(q, 12000, 'weekly_entries_list_chunk');
               if (pe) throw pe;
               return rows || [];
@@ -80,20 +113,24 @@ export default async function handler(req, res) {
           const merged = parts.flat().sort((a, b) => String(b.date).localeCompare(String(a.date)));
           return res.status(200).json({ data: merged });
         }
+      } else if (isTeacher) {
+        if (!actor.institution_id) return res.status(200).json({ data: [] });
+        const { ids } = await getTeacherPanelStudentScope(actor.sub, actor.institution_id || null);
+        if (!ids.length) return res.status(200).json({ data: [] });
+        query = query.in('student_id', ids);
+      } else if (isStudent) {
+        query = query.eq('student_id', actor.student_id);
+      } else {
+        return res.status(403).json({ error: 'forbidden' });
       }
+
       if (scopedStudentId) {
-        if (actor.role === 'student' && scopedStudentId !== String(actor.student_id)) {
+        if (isStudent && !isCoach && !isAdmin && !isSuper && scopedStudentId !== String(actor.student_id)) {
           return res.status(403).json({ error: 'forbidden' });
         }
-        if (actor.role === 'coach') {
-          const { data: st } = await supabaseAdmin
-            .from('students')
-            .select('coach_id')
-            .eq('id', scopedStudentId)
-            .maybeSingle();
-          if (!st || st.coach_id !== actor.coach_id) {
-            return res.status(403).json({ error: 'forbidden' });
-          }
+        if (isCoach) {
+          const gate = await assertStudentPlannerWrite(ctx, scopedStudentId);
+          if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
         }
         query = query.eq('student_id', scopedStudentId);
       }
@@ -113,7 +150,7 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
       const body = req.body || {};
 
-      if (actor.role === 'student') {
+      if (isStudent && !isCoach && !isAdmin && !isSuper) {
         if (!actor.student_id) return res.status(403).json({ error: 'student_profile_missing' });
         const stated =
           body.student_id != null && String(body.student_id).trim()
@@ -158,9 +195,9 @@ export default async function handler(req, res) {
         return res.status(200).json({ data });
       }
 
-      if (!['super_admin', 'admin', 'coach'].includes(actor.role)) return res.status(403).json({ error: 'forbidden' });
+      if (!(isSuper || isAdmin || isCoach)) return res.status(403).json({ error: 'forbidden' });
       const institutionId = body.institution_id || actor.institution_id || null;
-      if (actor.role === 'admin' && !hasInstitutionAccess(actor, institutionId)) {
+      if (isAdmin && !isSuper && !hasInstitutionAccess(actor, institutionId)) {
         return res.status(403).json({ error: 'institution_forbidden' });
       }
       const sidRaw =
@@ -172,6 +209,8 @@ export default async function handler(req, res) {
       if (!sidRaw) {
         return res.status(400).json({ error: 'student_id_required' });
       }
+      const gate = await assertStudentPlannerWrite(ctx, sidRaw);
+      if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
       const payload = {
         id: body.id || `entry-${Date.now()}`,
         student_id: sidRaw,
@@ -185,9 +224,11 @@ export default async function handler(req, res) {
         blank: body.blank,
         notes: body.notes ?? null,
         reading_minutes: body.reading_minutes ?? null,
+        pages_read: body.pages_read ?? body.pagesRead ?? null,
+        screen_time_minutes: body.screen_time_minutes ?? body.screenTimeMinutes ?? null,
         book_id: body.book_id ?? null,
         book_title: body.book_title ?? null,
-        institution_id: institutionId,
+        institution_id: institutionId || gate.student?.institution_id || null,
         created_at: body.created_at || new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
@@ -199,10 +240,13 @@ export default async function handler(req, res) {
     if (req.method === 'PATCH') {
       const id = String(req.query.id || '');
       const { data: existing } = await supabaseAdmin.from('weekly_entries').select('*').eq('id', id).maybeSingle();
-      if (!existing || !(await canAccessEntry(actor, existing))) return res.status(403).json({ error: 'forbidden' });
+      if (!existing) return res.status(403).json({ error: 'forbidden' });
+      const gate = await assertStudentPlannerWrite(ctx, existing.student_id);
+      if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
+      const patch = sanitizeWeeklyEntryPatch(req.body || {});
       const { data, error } = await supabaseAdmin
         .from('weekly_entries')
-        .update({ ...(req.body || {}), updated_at: new Date().toISOString() })
+        .update({ ...patch, updated_at: new Date().toISOString() })
         .eq('id', id)
         .select()
         .single();
@@ -228,7 +272,9 @@ export default async function handler(req, res) {
     if (req.method === 'DELETE') {
       const id = String(req.query.id || '');
       const { data: existing } = await supabaseAdmin.from('weekly_entries').select('*').eq('id', id).maybeSingle();
-      if (!existing || !(await canAccessEntry(actor, existing))) return res.status(403).json({ error: 'forbidden' });
+      if (!existing) return res.status(403).json({ error: 'forbidden' });
+      const gate = await assertStudentPlannerWrite(ctx, existing.student_id);
+      if (!gate.ok) return res.status(gate.status).json({ error: 'forbidden' });
       const { error } = await supabaseAdmin.from('weekly_entries').delete().eq('id', id);
       if (error) throw error;
       return res.status(200).json({ ok: true });
@@ -242,5 +288,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: errorMessage(e) });
   }
 }
-
-

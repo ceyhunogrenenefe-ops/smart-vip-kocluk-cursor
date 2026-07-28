@@ -31,6 +31,7 @@ import {
   deleteCoachWeeklyGoal,
   deleteWeeklyPlannerEntry,
   fetchCoachWeeklyGoals,
+  fetchWeeklyEntriesForStudentRange,
   fetchWeeklyPlannerEntries,
   patchCoachWeeklyGoal,
   patchWeeklyPlannerEntry,
@@ -159,6 +160,7 @@ export function WeeklyPlannerCalendar({
     getStudentTopicProgress,
     refreshTopicProgress,
     weeklyEntries,
+    mergeWeeklyEntries,
   } = useApp();
   const { effectiveUser } = useAuth();
   const [pdfBusy, setPdfBusy] = useState(false);
@@ -409,9 +411,10 @@ export function WeeklyPlannerCalendar({
       if (!opts?.silent) setLoading(true);
       setErr('');
       try {
-        const [g, eWeek] = await Promise.all([
+        const [g, eWeek, weeklyRows] = await Promise.all([
           fetchCoachWeeklyGoals(studentId, weekStartStr),
           fetchWeeklyPlannerEntries(studentId, weekStartStr, weekEndStr),
+          fetchWeeklyEntriesForStudentRange(studentId, weekStartStr, weekEndStr).catch(() => []),
         ]);
         if (seq !== reloadSeq.current) return;
 
@@ -425,12 +428,17 @@ export function WeeklyPlannerCalendar({
 
         setGoals(g);
         setEntries(eWeek);
+        if (weeklyRows.length) mergeWeeklyEntries(weeklyRows);
         if (!opts?.silent) setLoading(false);
 
         if (entryFrom < weekStartStr || entryTo > weekEndStr) {
-          const eExtended = await fetchWeeklyPlannerEntries(studentId, entryFrom, entryTo);
+          const [eExtended, weeklyExt] = await Promise.all([
+            fetchWeeklyPlannerEntries(studentId, entryFrom, entryTo),
+            fetchWeeklyEntriesForStudentRange(studentId, entryFrom, entryTo).catch(() => []),
+          ]);
           if (seq !== reloadSeq.current) return;
           setEntries(eExtended);
+          if (weeklyExt.length) mergeWeeklyEntries(weeklyExt);
         }
 
         void loadScreenTimeForWeek(seq);
@@ -440,7 +448,7 @@ export function WeeklyPlannerCalendar({
         if (!opts?.silent) setLoading(false);
       }
     },
-    [studentId, weekStartStr, weekEndStr, loadScreenTimeForWeek]
+    [studentId, weekStartStr, weekEndStr, loadScreenTimeForWeek, mergeWeeklyEntries]
   );
 
   useEffect(() => {
@@ -453,8 +461,17 @@ export function WeeklyPlannerCalendar({
       if (detail?.studentId && detail.studentId !== studentId) return;
       void reload({ silent: true });
     };
+    const onStudySaved = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ studentId?: string; entries?: unknown[] }>).detail;
+      if (detail?.studentId && detail.studentId !== studentId) return;
+      void reload({ silent: true });
+    };
     window.addEventListener('coaching:etut-report-saved', onEtutSaved);
-    return () => window.removeEventListener('coaching:etut-report-saved', onEtutSaved);
+    window.addEventListener('coaching:planner-study-saved', onStudySaved);
+    return () => {
+      window.removeEventListener('coaching:etut-report-saved', onEtutSaved);
+      window.removeEventListener('coaching:planner-study-saved', onStudySaved);
+    };
   }, [studentId, reload]);
 
   useEffect(() => {

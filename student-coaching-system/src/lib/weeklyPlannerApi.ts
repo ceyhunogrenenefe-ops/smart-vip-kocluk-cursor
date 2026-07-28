@@ -230,7 +230,7 @@ type WeeklyEntryScreenRow = {
   screen_time_minutes?: number | null;
 };
 
-type WeeklyEntryApiRow = {
+export type WeeklyEntryApiRow = {
   id: string;
   student_id: string;
   date: string;

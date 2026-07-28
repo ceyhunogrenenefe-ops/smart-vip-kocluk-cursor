@@ -1,7 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { BookMarked, CheckCircle2, Clock3, Target } from 'lucide-react';
 import type { WeeklyPlannerEntryRow } from '../../lib/weeklyPlannerApi';
-import { patchWeeklyEntryApi, patchWeeklyPlannerEntry, submitPlannerDailyLog } from '../../lib/weeklyPlannerApi';
+import {
+  mapWeeklyEntryApiRow,
+  patchWeeklyEntryApi,
+  patchWeeklyPlannerEntry,
+  submitPlannerDailyLog,
+  type WeeklyEntryApiRow
+} from '../../lib/weeklyPlannerApi';
 import { useApp } from '../../context/AppContext';
 import { completedQuantityForGoalUnit, goalUnitLabel, normalizeGoalUnit } from '../../lib/coachGoalUnits';
 import { isKitapOkumaContext } from '../../lib/studyTrackSubjects';
@@ -43,7 +49,8 @@ export function WeeklyPlannerStudyModal({
     markTopicCompleted,
     getStudentTopicProgress,
     refreshTopicProgress,
-    refreshBooks
+    refreshBooks,
+    mergeWeeklyEntries
   } = useApp();
   const goalUnit = normalizeGoalUnit(quantityUnit);
   const linked = plannerEntry.weekly_entry_id
@@ -224,14 +231,116 @@ export function WeeklyPlannerStudyModal({
         throw new Error('Kitabı bitirdim için kitap adı girin.');
       }
 
-      // Konu / kitap senkronu — günlük kayıt API hatası bunları engellemesin
+      const hasStudyMetrics =
+        solved > 0 ||
+        (pages != null && pages > 0) ||
+        (screen_time_minutes != null && screen_time_minutes > 0) ||
+        Boolean(bookTitleToSave);
+
+      // Önce doğru/yanlış ve günlük çalışma kaydı — konu/kitap hatası bunları engellemesin
+      let weeklyEntryId = linked?.id || plannerEntry.weekly_entry_id || undefined;
+      let savedWeeklyRow: ReturnType<typeof mapWeeklyEntryApiRow> | null = null;
+
+      if (linked?.id || plannerEntry.weekly_entry_id) {
+        if (hasStudyMetrics) {
+          const wid = linked?.id || plannerEntry.weekly_entry_id!;
+          const patched = await patchWeeklyEntryApi(wid, {
+            subject,
+            topic,
+            date: plannerEntry.planner_date,
+            target_questions: targetQuestions,
+            solved_questions: solved,
+            correct,
+            wrong,
+            blank,
+            reading_minutes: pages,
+            pages_read: pages,
+            screen_time_minutes,
+            book_title: bookTitleToSave || null,
+            notes: notes.trim() || null,
+          });
+          weeklyEntryId = wid;
+          if (patched && typeof patched === 'object' && (patched as { id?: string }).id) {
+            savedWeeklyRow = mapWeeklyEntryApiRow(patched as WeeklyEntryApiRow);
+          }
+        }
+      } else if (hasStudyMetrics || targetQuestions > 0) {
+        const created = await submitPlannerDailyLog(plannerEntry.id, {
+          subject,
+          topic,
+          target_questions: targetQuestions,
+          correct,
+          wrong,
+          blank,
+          solved_questions: solved,
+          pages_read: pages,
+          screen_time_minutes,
+          book_title: bookTitleToSave || null,
+          notes: notes.trim() || null,
+        });
+        weeklyEntryId =
+          created?.planner_entry?.weekly_entry_id ||
+          (created?.weekly_entry as { id?: string } | undefined)?.id ||
+          weeklyEntryId;
+        const rawEntry = created?.weekly_entry;
+        if (rawEntry && typeof rawEntry === 'object' && (rawEntry as { id?: string }).id) {
+          savedWeeklyRow = mapWeeklyEntryApiRow(rawEntry as WeeklyEntryApiRow);
+        }
+      }
+
+      if (savedWeeklyRow) {
+        mergeWeeklyEntries([savedWeeklyRow]);
+      } else if (hasStudyMetrics && weeklyEntryId) {
+        // API satır döndürmediyse en azından form değerleriyle context güncelle
+        mergeWeeklyEntries([
+          {
+            id: weeklyEntryId,
+            studentId: sid,
+            date: plannerEntry.planner_date,
+            subject,
+            topic,
+            targetQuestions,
+            solvedQuestions: solved,
+            correctAnswers: correct,
+            wrongAnswers: wrong,
+            blankAnswers: blank,
+            coachComment: notes.trim() || undefined,
+            readingMinutes: pages ?? undefined,
+            pagesRead: pages ?? undefined,
+            screenTimeMinutes: screen_time_minutes ?? undefined,
+            bookTitle: bookTitleToSave || undefined,
+            createdAt: linked?.createdAt || new Date().toISOString()
+          }
+        ]);
+      }
+
+      if (hasStudyMetrics) {
+        try {
+          const doneQty = progressAmount;
+          const plannedN = targetQuestions;
+          await patchWeeklyPlannerEntry(plannerEntry.id, {
+            completed_quantity: doneQty,
+            status:
+              plannedN > 0 && doneQty >= plannedN
+                ? 'completed'
+                : doneQty > 0
+                  ? 'partial'
+                  : plannerEntry.status,
+            ...(weeklyEntryId ? { weekly_entry_id: weeklyEntryId } : {})
+          });
+        } catch {
+          warnings.push('Takvim bloğundaki yapılan miktar güncellenemedi');
+        }
+      }
+
       if (shouldMarkTopic) {
         try {
-          await markTopicCompleted(sid, subject, topic, plannerEntry.weekly_entry_id || plannerEntry.id);
+          await markTopicCompleted(sid, subject, topic, weeklyEntryId || plannerEntry.id);
+          await refreshTopicProgress();
         } catch (topicErr) {
-          throw topicErr instanceof Error
-            ? topicErr
-            : new Error('Konu takibine kaydedilemedi');
+          warnings.push(
+            topicErr instanceof Error ? topicErr.message : 'Konu takibine kaydedilemedi'
+          );
         }
       }
 
@@ -277,104 +386,25 @@ export function WeeklyPlannerStudyModal({
           }
           await refreshBooks();
         } catch (bookErr) {
-          throw bookErr instanceof Error
-            ? bookErr
-            : new Error('Kitap takibine kaydedilemedi');
-        }
-      }
-
-      let weeklyEntryId = linked?.id || plannerEntry.weekly_entry_id || undefined;
-
-      const hasStudyMetrics =
-        solved > 0 ||
-        (pages != null && pages > 0) ||
-        (screen_time_minutes != null && screen_time_minutes > 0) ||
-        Boolean(bookTitleToSave);
-
-      if (linked?.id || plannerEntry.weekly_entry_id) {
-        if (hasStudyMetrics) {
-          try {
-            const wid = linked?.id || plannerEntry.weekly_entry_id!;
-            await patchWeeklyEntryApi(wid, {
-              subject,
-              topic,
-              date: plannerEntry.planner_date,
-              target_questions: targetQuestions,
-              solved_questions: solved,
-              correct,
-              wrong,
-              blank,
-              reading_minutes: pages,
-              pages_read: pages,
-              screen_time_minutes,
-              book_title: bookTitleToSave || null,
-              notes: notes.trim() || null,
-            });
-          } catch (patchErr) {
-            warnings.push(
-              patchErr instanceof Error
-                ? patchErr.message
-                : 'Günlük çalışma kaydı güncellenemedi'
-            );
-          }
-        }
-      } else if (hasStudyMetrics || targetQuestions > 0) {
-        try {
-          const created = await submitPlannerDailyLog(plannerEntry.id, {
-            subject,
-            topic,
-            target_questions: targetQuestions,
-            correct,
-            wrong,
-            blank,
-            solved_questions: solved,
-            pages_read: pages,
-            screen_time_minutes,
-            book_title: bookTitleToSave || null,
-            notes: notes.trim() || null,
-          });
-          weeklyEntryId =
-            created?.planner_entry?.weekly_entry_id ||
-            (created?.weekly_entry as { id?: string } | undefined)?.id ||
-            weeklyEntryId;
-        } catch (logErr) {
-          if (shouldMarkTopic || markBookFinished) {
-            warnings.push(
-              logErr instanceof Error
-                ? logErr.message
-                : 'Takvim kaydı oluşturulamadı; konu/kitap işaretlendi'
-            );
-          } else {
-            throw logErr;
-          }
-        }
-      }
-
-      if (shouldMarkTopic) {
-        await refreshTopicProgress();
-      }
-
-      if (hasStudyMetrics) {
-        try {
-          const doneQty = progressAmount;
-          const plannedN = targetQuestions;
-          await patchWeeklyPlannerEntry(plannerEntry.id, {
-            completed_quantity: doneQty,
-            status:
-              plannedN > 0 && doneQty >= plannedN
-                ? 'completed'
-                : doneQty > 0
-                  ? 'partial'
-                  : plannerEntry.status,
-          });
-        } catch {
-          warnings.push('Takvim bloğundaki yapılan miktar güncellenemedi');
+          warnings.push(
+            bookErr instanceof Error ? bookErr.message : 'Kitap takibine kaydedilemedi'
+          );
         }
       }
 
       if (warnings.length) {
         setError(warnings.join(' · '));
       }
+
+      window.dispatchEvent(
+        new CustomEvent('coaching:planner-study-saved', {
+          detail: {
+            studentId: sid,
+            date: plannerEntry.planner_date,
+            entries: savedWeeklyRow ? [savedWeeklyRow] : []
+          }
+        })
+      );
 
       onSaved();
       onClose();
