@@ -22,6 +22,8 @@ import {
   Copy,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { sortByFirstName } from '../../lib/personNameSort';
+import { userRoleTags } from '../../config/rolePermissions';
 import type { CoachWeeklyGoalRow, WeeklyPlannerEntryRow } from '../../lib/weeklyPlannerApi';
 import {
   createCoachWeeklyGoal,
@@ -172,6 +174,42 @@ export function WeeklyPlannerCalendar({
 
   const plannerStudent = useMemo(() => students.find((s) => s.id === studentId), [students, studentId]);
   const classLevel = plannerStudent?.classLevel;
+
+  /** Yapıştır hedefi: koç ise yalnızca kendi öğrencileri; ada göre sıralı; sınıfa göre gruplu */
+  const pasteCandidates = useMemo(() => {
+    const tags = userRoleTags(effectiveUser);
+    const coachId = String(effectiveUser?.coachId || '').trim();
+    let list = students.filter((s) => s.id !== studentId);
+    if (tags.includes('coach') && coachId && !tags.includes('super_admin')) {
+      list = list.filter((s) => String(s.coachId || '').trim() === coachId);
+    }
+    return sortByFirstName(list, (s) => s.name || '');
+  }, [students, studentId, effectiveUser]);
+
+  const pasteByClass = useMemo(() => {
+    const map = new Map<string, typeof pasteCandidates>();
+    for (const s of pasteCandidates) {
+      const key =
+        s.classLevel != null && s.classLevel !== ''
+          ? String(s.classLevel)
+          : s.school
+            ? String(s.school)
+            : '__none__';
+      const arr = map.get(key) || [];
+      arr.push(s);
+      map.set(key, arr);
+    }
+    const keys = [...map.keys()].sort((a, b) => {
+      if (a === '__none__') return 1;
+      if (b === '__none__') return -1;
+      return String(a).localeCompare(String(b), 'tr', { numeric: true });
+    });
+    return keys.map((key) => ({
+      key,
+      label: key === '__none__' ? 'Sınıf belirtilmemiş' : formatClassLevelLabel(key),
+      students: map.get(key) || []
+    }));
+  }, [pasteCandidates]);
 
   /** Öğrenci: koçsuz modda tüm hedefler; koçlu modda yalnızca kendi hedefleri (coach_id null) */
   const canEditGoal = useCallback(
@@ -2744,48 +2782,83 @@ export function WeeklyPlannerCalendar({
           <p className="text-sm text-slate-600 dark:text-slate-300">
             <strong>{studentName || 'Bu öğrenci'}</strong> için {weekStartStr} – {weekEndStr} haftasındaki
             hedefler ve takvim blokları seçtiğiniz öğrencilere kopyalanır.
+            {userRoleTags(effectiveUser).includes('coach') ? (
+              <span className="mt-1 block text-xs text-slate-500">Yalnızca size atanmış öğrenciler listelenir.</span>
+            ) : null}
           </p>
-          <div className="max-h-64 space-y-1 overflow-y-auto rounded-xl border border-slate-200 p-2 dark:border-slate-700">
-            {students
-              .filter((s) => s.id !== studentId)
-              .map((s) => {
-                const checked = pasteTargetIds.has(s.id);
-                return (
-                  <label
-                    key={s.id}
-                    className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
-                  >
+          <div className="max-h-72 space-y-3 overflow-y-auto rounded-xl border border-slate-200 p-2 dark:border-slate-700">
+            {pasteByClass.map((group) => {
+              const groupIds = group.students.map((s) => s.id);
+              const allChecked = groupIds.length > 0 && groupIds.every((id) => pasteTargetIds.has(id));
+              const someChecked = groupIds.some((id) => pasteTargetIds.has(id));
+              return (
+                <div key={group.key} className="space-y-1">
+                  <label className="flex cursor-pointer items-center gap-2 rounded-lg bg-slate-50 px-2 py-1.5 text-xs font-bold uppercase tracking-wide text-slate-600 dark:bg-slate-800/80 dark:text-slate-300">
                     <input
                       type="checkbox"
-                      checked={checked}
-                      disabled={pasteBusy}
+                      checked={allChecked}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someChecked && !allChecked;
+                      }}
+                      disabled={pasteBusy || groupIds.length === 0}
                       onChange={() => {
                         setPasteTargetIds((prev) => {
                           const next = new Set(prev);
-                          if (next.has(s.id)) next.delete(s.id);
-                          else next.add(s.id);
+                          if (allChecked) {
+                            for (const id of groupIds) next.delete(id);
+                          } else {
+                            for (const id of groupIds) next.add(id);
+                          }
                           return next;
                         });
                       }}
                     />
-                    <span className="font-medium text-slate-800 dark:text-slate-100">{s.name}</span>
+                    <span>
+                      {group.label} ({group.students.length})
+                    </span>
+                    <span className="font-normal normal-case text-indigo-600">
+                      {allChecked ? '· sınıfı kaldır' : '· sınıfı seç'}
+                    </span>
                   </label>
-                );
-              })}
-            {students.filter((s) => s.id !== studentId).length === 0 ? (
-              <p className="px-2 py-4 text-center text-xs text-slate-500">Başka öğrenci yok</p>
+                  {group.students.map((s) => {
+                    const checked = pasteTargetIds.has(s.id);
+                    return (
+                      <label
+                        key={s.id}
+                        className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 pl-7 text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={pasteBusy}
+                          onChange={() => {
+                            setPasteTargetIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(s.id)) next.delete(s.id);
+                              else next.add(s.id);
+                              return next;
+                            });
+                          }}
+                        />
+                        <span className="font-medium text-slate-800 dark:text-slate-100">{s.name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              );
+            })}
+            {pasteCandidates.length === 0 ? (
+              <p className="px-2 py-4 text-center text-xs text-slate-500">
+                Yapıştırılacak başka öğrenci yok (yalnızca koçluğunuzdaki öğrenciler).
+              </p>
             ) : null}
           </div>
           <div className="flex flex-wrap gap-2 text-xs">
             <button
               type="button"
-              disabled={pasteBusy}
-              className="font-semibold text-indigo-700 underline"
-              onClick={() =>
-                setPasteTargetIds(
-                  new Set(students.filter((s) => s.id !== studentId).map((s) => s.id))
-                )
-              }
+              disabled={pasteBusy || pasteCandidates.length === 0}
+              className="font-semibold text-indigo-700 underline disabled:opacity-50"
+              onClick={() => setPasteTargetIds(new Set(pasteCandidates.map((s) => s.id)))}
             >
               Tümünü seç
             </button>

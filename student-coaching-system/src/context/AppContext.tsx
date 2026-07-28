@@ -2970,11 +2970,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const matched = students.filter((s) => s.id === sid);
         list = matched.length > 0 ? matched : [];
       }
+    } else if (tags.includes('coach') && effectiveUser.coachId && !tags.includes('super_admin')) {
+      // Admin+koç hesaplarda da koç paneli listeleri yalnızca kendi öğrencilerini göstersin
+      list = students.filter((s) => String(s.coachId || '') === String(effectiveUser.coachId));
     } else if (tags.includes('admin')) {
       list = students.filter((s) => s.institutionId === effectiveUser.institutionId);
     } else if (tags.includes('coach') || tags.includes('teacher')) {
       // /api/students zaten koç ∪ öğretmen (özel ders ataması) birleşimini döner.
-      // client-side coachId filtresi özel derse atanmış ama başka koçtaki öğrenciyi silerdi.
       list = students;
     } else {
       list = students;

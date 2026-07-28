@@ -18,15 +18,25 @@ export default function WeeklyPlannerPage() {
 
   const isStudentUi = tags.includes('student');
   const isCoachUi = tags.includes('coach') && !tags.includes('student');
+  const coachId = String(effectiveUser?.coachId || '').trim();
+
+  /** Koç: yalnızca kendi öğrencileri (admin+koç hesaplarda kurum geneli listelenmesin) */
+  const rosterStudents = useMemo(() => {
+    if (isCoachUi && coachId && !tags.includes('super_admin')) {
+      return students.filter((s) => String(s.coachId || '').trim() === coachId);
+    }
+    return students;
+  }, [students, isCoachUi, coachId, tags]);
+
   const resolvedStudentId = useMemo(
     () =>
       linkedStudent?.id?.trim() ||
       effectiveUser?.studentId?.trim() ||
-      resolveStudentRecordId(effectiveUser?.role, effectiveUser?.studentId, effectiveUser?.email, students, {
+      resolveStudentRecordId(effectiveUser?.role, effectiveUser?.studentId, effectiveUser?.email, rosterStudents, {
         roles: tags
       })?.trim() ||
       '',
-    [linkedStudent?.id, effectiveUser?.role, effectiveUser?.studentId, effectiveUser?.email, students, tags]
+    [linkedStudent?.id, effectiveUser?.role, effectiveUser?.studentId, effectiveUser?.email, rosterStudents, tags]
   );
 
   /** Öğrenci: API / JWT ile çözülen kart id; koç/admin: seçilen liste öğesi */
@@ -39,17 +49,17 @@ export default function WeeklyPlannerPage() {
 
   useEffect(() => {
     if (isStudentUi) return;
-    if (!selectedId && students.length > 0) {
-      setSelectedId(students[0].id);
+    if (!selectedId && rosterStudents.length > 0) {
+      setSelectedId(rosterStudents[0].id);
     }
-  }, [isStudentUi, selectedId, students]);
+  }, [isStudentUi, selectedId, rosterStudents]);
 
   useEffect(() => {
     if (!isStudentUi || !resolvedStudentId) return;
     if (selectedId !== resolvedStudentId) setSelectedId(resolvedStudentId);
   }, [isStudentUi, resolvedStudentId, selectedId]);
 
-  const selected = useMemo(() => students.find((s) => s.id === activeStudentId), [students, activeStudentId]);
+  const selected = useMemo(() => rosterStudents.find((s) => s.id === activeStudentId), [rosterStudents, activeStudentId]);
 
   const hasAssignedCoach = Boolean(
     linkedStudent?.coachId || selected?.coachId
@@ -126,7 +136,7 @@ export default function WeeklyPlannerPage() {
                 className="min-w-[200px] rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium shadow-sm dark:border-slate-600 dark:bg-slate-900"
               >
                 <option value="">Öğrenci seçin</option>
-                {students.map((s) => (
+                {rosterStudents.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
                   </option>
@@ -147,7 +157,7 @@ export default function WeeklyPlannerPage() {
             className="mt-1 w-full rounded-lg border-0 bg-transparent p-0 text-sm font-semibold text-slate-900 focus:outline-none focus:ring-0 dark:text-slate-100"
           >
             <option value="">Öğrenci seçin</option>
-            {students.map((s) => (
+            {rosterStudents.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
               </option>

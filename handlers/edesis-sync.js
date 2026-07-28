@@ -100,10 +100,25 @@ function actorIsSuper(actor, tags) {
   return tags.includes('super_admin') || actor?.role === 'super_admin';
 }
 
+function actorIsCoach(actor, tags) {
+  return tags.includes('coach') || actor?.role === 'coach';
+}
+
+/** Kurum + (koç ise) yalnızca kendi öğrencileri; ada göre sıralı */
 function filterStudentsForActor(students, actor, tags) {
+  let list = Array.isArray(students) ? [...students] : [];
   const inst = actor?.institution_id;
-  if (!inst || actorIsSuper(actor, tags)) return students;
-  return students.filter((s) => !s.institution_id || s.institution_id === inst);
+  if (inst && !actorIsSuper(actor, tags)) {
+    list = list.filter((s) => !s.institution_id || s.institution_id === inst);
+  }
+  const coachId = actor?.coach_id ? String(actor.coach_id).trim() : '';
+  if (coachId && actorIsCoach(actor, tags) && !actorIsSuper(actor, tags)) {
+    list = list.filter((s) => String(s.coach_id || '').trim() === coachId);
+  }
+  list.sort((a, b) =>
+    String(a.name || '').localeCompare(String(b.name || ''), 'tr', { sensitivity: 'base' })
+  );
+  return list;
 }
 
 function matchEdesisStudentToPlatform(row, students) {
@@ -149,7 +164,7 @@ function matchEdesisStudentToPlatform(row, students) {
 async function assertStudentAccess(actor, tags, studentId) {
   const { data: st, error } = await supabaseAdmin
     .from('students')
-    .select('id, institution_id, edesis_ogrenci_id, name, email')
+    .select('id, institution_id, coach_id, edesis_ogrenci_id, name, email')
     .eq('id', studentId)
     .maybeSingle();
   if (error) throw error;
@@ -157,6 +172,12 @@ async function assertStudentAccess(actor, tags, studentId) {
   const inst = actor?.institution_id;
   if (inst && !actorIsSuper(actor, tags) && st.institution_id && st.institution_id !== inst) {
     throw new Error('forbidden_institution');
+  }
+  const coachId = actor?.coach_id ? String(actor.coach_id).trim() : '';
+  if (coachId && actorIsCoach(actor, tags) && !actorIsSuper(actor, tags)) {
+    if (String(st.coach_id || '').trim() !== coachId) {
+      throw new Error('forbidden_coach');
+    }
   }
   return st;
 }
@@ -208,14 +229,19 @@ async function resolveEdesisIdForPlatformStudent(platformStudentId, actor, tags)
 
 async function loadStudentsForMatching() {
   const cols =
-    'id, name, email, phone, parent_phone, institution_id, edesis_ogrenci_id, user_id, platform_user_id';
+    'id, name, email, phone, parent_phone, institution_id, coach_id, edesis_ogrenci_id, user_id, platform_user_id';
   let { data, error } = await supabaseAdmin.from('students').select(cols).limit(5000);
   if (error) {
     const msg = String(error.message || '');
     if (msg.includes('edesis_ogrenci_id')) {
       ({ data, error } = await supabaseAdmin
         .from('students')
-        .select('id, name, email, phone, parent_phone, institution_id, user_id, platform_user_id')
+        .select('id, name, email, phone, parent_phone, institution_id, coach_id, user_id, platform_user_id')
+        .limit(5000));
+    } else if (msg.includes('coach_id')) {
+      ({ data, error } = await supabaseAdmin
+        .from('students')
+        .select('id, name, email, phone, parent_phone, institution_id, edesis_ogrenci_id, user_id, platform_user_id')
         .limit(5000));
     } else {
       throw error;
@@ -401,7 +427,13 @@ export default async function handler(req, res) {
   }
 
   try {
-    const actor = requireAuthenticatedActor(req);
+    let actor = requireAuthenticatedActor(req);
+    try {
+      const { enrichStudentActor } = await import('../api/_lib/enrich-student-actor.js');
+      actor = await enrichStudentActor(actor);
+    } catch {
+      /* coach_id zenginleştirmesi opsiyonel */
+    }
     const tags = await normalizedUserRolesFromDb(actor.sub);
     const isStaff = tags.some((t) => STAFF.has(t)) || STAFF.has(actor.role);
     const isStudent = actorIsStudent(actor, tags);

@@ -20,6 +20,7 @@ import {
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
+import { sortByFirstName } from '../lib/personNameSort';
 import EdesisSyncPanel from '../components/settings/EdesisSyncPanel';
 import {
   createEdesisClassroomHub,
@@ -138,7 +139,7 @@ export default function EdesisPage() {
     try {
       const r = await fetchEdesisHubStudents();
       setHubStudents(r.items || []);
-      setPlatformStudents(r.platformStudents || []);
+      setPlatformStudents(sortByFirstName(r.platformStudents || [], (p) => p.name || ''));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Öğrenci listesi alınamadı');
     } finally {
