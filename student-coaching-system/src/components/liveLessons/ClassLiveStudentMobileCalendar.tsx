@@ -83,7 +83,7 @@ export function ClassLiveStudentMobileCalendar({
   const sessions = useMemo(
     () =>
       weekSessions
-        .filter((s) => s.lesson_date === dayIso)
+        .filter((s) => s.lesson_date === dayIso && s.status !== 'cancelled')
         .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time))),
     [weekSessions, dayIso]
   );
