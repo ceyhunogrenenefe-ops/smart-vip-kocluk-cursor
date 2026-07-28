@@ -1794,7 +1794,8 @@ export default function ClassLiveLessons() {
                       (s) =>
                         s.class_id === selectedClassId &&
                         s.lesson_date === colIso &&
-                        Number(String(s.start_time).slice(0, 2)) === hour
+                        Number(String(s.start_time).slice(0, 2)) === hour &&
+                        s.status !== 'cancelled'
                     );
                     const blockedSlotTeacherHours = new Set(
                       sessionsHere
@@ -1971,7 +1972,7 @@ export default function ClassLiveLessons() {
                                       Yoklama
                                     </button>
                                   ) : null}
-                                  {canManageSlots ? (
+                                  {canManageSlots && s.status !== 'cancelled' ? (
                                     <button
                                       type="button"
                                       onClick={() => openEditSession(s)}
@@ -1981,7 +1982,7 @@ export default function ClassLiveLessons() {
                                       Düzenle
                                     </button>
                                   ) : null}
-                                  {canManageSlots ? (
+                                  {canManageSlots && s.status !== 'cancelled' ? (
                                     <button
                                       type="button"
                                       onClick={() => requestDeleteSession(s)}
@@ -2056,7 +2057,9 @@ export default function ClassLiveLessons() {
         ) : (
           <ClassLiveStudentMobileCalendar
             weekColumnDates={weekColumnDates}
-            weekSessions={weekSessions.filter((s) => s.class_id === selectedClassId)}
+            weekSessions={weekSessions.filter(
+              (s) => s.class_id === selectedClassId && s.status !== 'cancelled'
+            )}
             classSlots={classSlots}
             teacherCandidates={teacherCandidates}
             formatDateDots={formatDdMmYyyyDots}
