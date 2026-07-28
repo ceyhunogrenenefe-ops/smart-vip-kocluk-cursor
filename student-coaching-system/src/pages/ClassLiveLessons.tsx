@@ -53,8 +53,7 @@ import {
   formatCheckpointSummary
 } from '../lib/classLessonTopicCheckpointApi';
 import {
-  filterSameLessonDaySessions,
-  shouldPromptTopicCheckpoint
+  filterSameLessonDaySessions
 } from '../lib/classLessonConsecutiveSessions';
 
 type ClassRow = {
@@ -1951,12 +1950,10 @@ export default function ClassLiveLessons() {
                                       Hatırlat
                                     </button>
                                   ) : null}
-                                  {canEditTopic &&
-                                  (s.status === 'scheduled' || s.status === 'completed') &&
-                                  (shouldPromptTopicCheckpoint(s, weekSessions) || sessionCp) ? (
+                                  {canEditTopic && (s.status === 'scheduled' || s.status === 'completed') ? (
                                     <button
                                       type="button"
-                                      title="Ders sonu konu / kitap / sayfa kaydı"
+                                      title="Konu, kitap ve sayfa kaydı (Nerede Kaldım?)"
                                       onClick={() => openTopicCheckpointModal(s, sessionCp)}
                                       className="inline-flex items-center gap-0.5 rounded-lg border border-emerald-400 bg-white px-2 py-1 text-[10px] font-semibold text-emerald-800 hover:bg-emerald-50"
                                     >
