@@ -243,12 +243,13 @@ export default async function handler(req, res) {
       }
       const email = req.query.email ? String(req.query.email).toLowerCase().trim() : null;
 
-      if (actor.role === 'coach') {
-        if (!actor.coach_id || !actor.institution_id) return res.status(200).json({ data: [] });
-        const assignedEmails = await coachAssignedStudentEmails(actor.coach_id);
+      // Koç (+ öğretmen etiketi olsa bile): kendi öğrencileri + kurumdaki tüm öğretmenler
+      // Not: actorPrivilege teacher'ı coach'tan önce seçer; bu yüzden actorRoleTags ile bakılır.
+      if (actor.role === 'coach' || actorRoleTags.includes('coach')) {
+        if (!actor.institution_id) return res.status(200).json({ data: [] });
+        const assignedEmails = actor.coach_id ? await coachAssignedStudentEmails(actor.coach_id) : [];
         const emailSet = new Set(assignedEmails);
-        const dbRoles = await normalizedUserRolesFromDb(actor.sub);
-        if (dbRoles.includes('teacher')) {
+        if (actorRoleTags.includes('teacher') || actor.role === 'teacher') {
           const tel = await teacherScopeStudentEmails(actor.sub);
           tel.forEach((e) => emailSet.add(e));
         }
@@ -272,7 +273,10 @@ export default async function handler(req, res) {
           filtered = coachUsers || [];
         }
 
-        const { data: teacherUsers, error: teacherErr } = await queryUsersList((q) => {
+        // Öğretmenleri doğrudan çek (tüm kurum kullanıcılarını çekip filtrelemek
+        // PostgREST satır limiti yüzünden öğretmenleri düşürebilir)
+        const teacherById = new Map();
+        const { data: byPrimaryRole, error: tErr1 } = await queryUsersList((q) => {
           let query = q
             .eq('institution_id', actor.institution_id)
             .eq('role', 'teacher')
@@ -280,29 +284,53 @@ export default async function handler(req, res) {
           if (email) query = query.eq('email', email);
           return query;
         });
-        if (teacherErr) throw teacherErr;
+        if (tErr1) throw tErr1;
+        for (const u of byPrimaryRole || []) teacherById.set(u.id, u);
+
+        const { data: byRolesArr, error: tErr2 } = await queryUsersList((q) => {
+          let query = q
+            .eq('institution_id', actor.institution_id)
+            .contains('roles', ['teacher'])
+            .order('created_at', { ascending: false });
+          if (email) query = query.eq('email', email);
+          return query;
+        });
+        // roles kolonu / contains bazı eski şemalarda başarısız olabilir — yoksay
+        if (!tErr2) {
+          for (const u of byRolesArr || []) teacherById.set(u.id, u);
+        }
 
         const byId = new Map();
         for (const u of filtered) byId.set(u.id, u);
-        for (const u of teacherUsers || []) byId.set(u.id, u);
+        for (const u of teacherById.values()) byId.set(u.id, u);
         return res.status(200).json({ data: [...byId.values()] });
       }
 
       if (actor.role === 'teacher') {
         if (!actor.institution_id) return res.status(200).json({ data: [] });
         const tel = await teacherScopeStudentEmails(actor.sub);
-        if (email && !tel.has(email)) return res.status(200).json({ data: [] });
+        if (email && !tel.has(email) && String(actor.email || '').toLowerCase() !== email) {
+          return res.status(200).json({ data: [] });
+        }
         const scopeEmails = email ? [email] : [...tel];
-        if (!scopeEmails.length) return res.status(200).json({ data: [] });
-        const { data, error } = await queryUsersList((q) =>
-          q
-            .eq('institution_id', actor.institution_id)
-            .eq('role', 'student')
-            .in('email', scopeEmails.slice(0, 500))
-            .order('created_at', { ascending: false })
-        );
-        if (error) throw error;
-        return res.status(200).json({ data: data || [] });
+        const out = [];
+        // Öğretmen kendi kaydını da görsün (ders atama listesi vb.)
+        const { data: selfRow } = await queryUsersList((q) => q.eq('id', actor.sub).limit(1));
+        if (selfRow?.[0]) out.push(selfRow[0]);
+        if (scopeEmails.length) {
+          const { data, error } = await queryUsersList((q) =>
+            q
+              .eq('institution_id', actor.institution_id)
+              .eq('role', 'student')
+              .in('email', scopeEmails.slice(0, 500))
+              .order('created_at', { ascending: false })
+          );
+          if (error) throw error;
+          for (const u of data || []) {
+            if (!out.some((x) => x.id === u.id)) out.push(u);
+          }
+        }
+        return res.status(200).json({ data: out });
       }
 
       if (actor.role === 'admin' && !actor.institution_id) return res.status(200).json({ data: [] });

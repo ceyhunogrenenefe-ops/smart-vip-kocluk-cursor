@@ -162,9 +162,9 @@ export default function ClassLiveLessons() {
   const safeStudents = Array.isArray(classLessonStudents) ? classLessonStudents : [];
   const role = String(effectiveUser?.role || '');
   const actorUserId = String(effectiveUser?.id || '');
-  const canManageClasses = role === 'admin' || role === 'super_admin' || role === 'coach';
+  const canManageClasses = userHasAnyRole(effectiveUser, ['admin', 'super_admin', 'coach']);
   const canOpenSchedulePlanner = role === 'admin' || role === 'super_admin';
-  const canManageSlots = canManageClasses || role === 'teacher';
+  const canManageSlots = canManageClasses || role === 'teacher' || userHasAnyRole(effectiveUser, ['teacher']);
   const isTeacherView = userHasAnyRole(effectiveUser, ['teacher']);
   const canViewPaymentSummary = role === 'admin' || role === 'super_admin';
   const isStudentView = role.toLowerCase() === 'student';
@@ -846,15 +846,55 @@ export default function ClassLiveLessons() {
             return roleRaw === 'teacher' || roleList.includes('teacher');
           })
           .map((r) => ({ id: String(r.id), name: String(r.name || r.email || r.id) }));
+
+        // Öğretmen: listede kendisi yoksa ekle
+        if (isTeacherView && actorUserId && !mapped.some((t) => t.id === actorUserId)) {
+          mapped.unshift({
+            id: actorUserId,
+            name: String(effectiveUser?.name || effectiveUser?.email || 'Ben')
+          });
+        }
+
+        // Ada göre sırala
+        mapped.sort((a, b) => a.name.localeCompare(b.name, 'tr', { sensitivity: 'base' }));
         if (!cancel) setTeacherOptions(mapped);
       } catch (e) {
-        if (!cancel) setError(e instanceof Error ? e.message : 'Öğretmenler yüklenemedi');
+        // API başarısız olsa bile öğretmen en azından kendini görsün
+        if (!cancel && isTeacherView && actorUserId) {
+          setTeacherOptions([
+            { id: actorUserId, name: String(effectiveUser?.name || effectiveUser?.email || 'Ben') }
+          ]);
+        } else if (!cancel) {
+          setTeacherOptions([]);
+          setError(e instanceof Error ? e.message : 'Öğretmenler yüklenemedi');
+        }
       }
     })();
     return () => {
       cancel = true;
     };
-  }, [isStudentView]);
+  }, [isStudentView, isTeacherView, actorUserId, effectiveUser?.name, effectiveUser?.email]);
+
+  /** Koç/admin ders eklerken tüm öğretmenler; yalnızca öğretmen ise kendisi */
+  const canPickAnyTeacher = canManageClasses;
+  const effectiveSlotTeacherId = canPickAnyTeacher
+    ? String(slotTeacherId || '').trim()
+    : isTeacherView
+      ? actorUserId
+      : String(slotTeacherId || '').trim();
+
+  const addLessonTeacherOptions = useMemo(() => {
+    if (canPickAnyTeacher) return teacherCandidates;
+    if (isTeacherView) {
+      const self = teacherCandidates.find((t) => t.id === actorUserId);
+      if (self) return [self];
+      if (actorUserId) {
+        return [{ id: actorUserId, name: String(effectiveUser?.name || effectiveUser?.email || 'Ben') }];
+      }
+      return [];
+    }
+    return teacherCandidates;
+  }, [canPickAnyTeacher, isTeacherView, teacherCandidates, actorUserId, effectiveUser?.name, effectiveUser?.email]);
 
   const handleCreateClass = async (payload: {
     name: string;
@@ -938,8 +978,6 @@ export default function ClassLiveLessons() {
     await loadAll();
     return true;
   };
-
-  const effectiveSlotTeacherId = role === 'teacher' ? actorUserId : slotTeacherId || selectedClass?.teacher_ids?.[0] || '';
 
   const createSlot = async () => {
     if (!selectedClassId || !slotSubject.trim() || scheduleBusy) return;
@@ -1587,13 +1625,13 @@ export default function ClassLiveLessons() {
             <div className="sm:col-span-2">
               <label className="block text-xs text-slate-500 mb-0.5">Öğretmen</label>
               <select
-                value={role === 'teacher' ? actorUserId : slotTeacherId}
+                value={canPickAnyTeacher ? slotTeacherId : actorUserId}
                 onChange={(e) => setSlotTeacherId(e.target.value)}
                 className="w-full border border-slate-200 rounded px-3 py-2 text-sm"
-                disabled={role === 'teacher'}
+                disabled={!canPickAnyTeacher}
               >
                 <option value="">Öğretmen seçin</option>
-                {(role === 'teacher' ? teacherCandidates.filter((t) => t.id === actorUserId) : teacherCandidates).map((t) => (
+                {addLessonTeacherOptions.map((t) => (
                   <option key={t.id} value={t.id}>{t.name}</option>
                 ))}
               </select>

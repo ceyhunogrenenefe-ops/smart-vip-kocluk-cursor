@@ -148,6 +148,13 @@ function isAdminRole(role) {
   return r === 'admin' || r === 'super_admin' || r === 'coach';
 }
 
+/** Koç/admin (JWT role veya roles[]): ders eklerken öğretmen seçebilir */
+function canAssignAnyClassTeacher(role, roleTags = []) {
+  if (isAdminRole(role)) return true;
+  const tags = Array.isArray(roleTags) ? roleTags : [];
+  return tags.includes('coach') || tags.includes('admin') || tags.includes('super_admin');
+}
+
 /** Sınıf listesinde kurum geneli: salt yönetici (öğretmen/koç etiketi varsa asla tam kurum) */
 function seesAllInstitutionClasses(role, roleTags = []) {
   const r = normalizeRole(role);
@@ -1628,12 +1635,21 @@ export default async function handler(req, res) {
       if (!classId) return res.status(400).json({ error: 'class_id_required' });
       const details = await getClassDetails(classId);
       if (!details.class) return res.status(404).json({ error: 'class_not_found' });
-      if (!isAdminRole(role) && !details.teacher_ids.includes(actor.sub)) {
+      if (!canAssignAnyClassTeacher(role, roleTags) && !details.teacher_ids.includes(actor.sub)) {
         return res.status(403).json({ error: 'forbidden' });
       }
       const teacherIdRaw = String(body.teacher_id || '').trim();
-      const teacherId = isAdminRole(role) ? teacherIdRaw || details.teacher_ids[0] || actor.sub : actor.sub;
+      if (canAssignAnyClassTeacher(role, roleTags) && !teacherIdRaw) {
+        return res.status(400).json({
+          error: 'teacher_required',
+          message: 'Öğretmen seçin. Sınıftaki ilk öğretmene otomatik atanmaz.'
+        });
+      }
+      const teacherId = canAssignAnyClassTeacher(role, roleTags) ? teacherIdRaw : actor.sub;
       if (!teacherId) return res.status(400).json({ error: 'teacher_required' });
+      if (canAssignAnyClassTeacher(role, roleTags) && details.teacher_ids.length && !details.teacher_ids.includes(teacherId)) {
+        await ensureClassTeacherLink(classId, teacherId);
+      }
       const date = String(body.lesson_date || '').trim();
       const start = hhmmss(body.start_time, '09:00:00');
       const duration = Math.max(15, Number(body.duration_minutes || 40));
@@ -1913,11 +1929,22 @@ export default async function handler(req, res) {
       if (!classId) return res.status(400).json({ error: 'class_id_required' });
       const details = await getClassDetails(classId);
       if (!details.class) return res.status(404).json({ error: 'class_not_found' });
-      if (!isAdminRole(role) && !details.teacher_ids.includes(actor.sub)) {
+      if (!canAssignAnyClassTeacher(role, roleTags) && !details.teacher_ids.includes(actor.sub)) {
         return res.status(403).json({ error: 'forbidden' });
       }
       const teacherIdRaw = String(body.teacher_id || '').trim();
-      const teacherId = isAdminRole(role) ? teacherIdRaw || details.teacher_ids[0] || actor.sub : actor.sub;
+      if (canAssignAnyClassTeacher(role, roleTags) && !teacherIdRaw) {
+        return res.status(400).json({
+          error: 'teacher_required',
+          message: 'Öğretmen seçin. Sınıftaki ilk öğretmene otomatik atanmaz.'
+        });
+      }
+      const teacherId = canAssignAnyClassTeacher(role, roleTags) ? teacherIdRaw : actor.sub;
+      if (!teacherId) return res.status(400).json({ error: 'teacher_required' });
+      if (canAssignAnyClassTeacher(role, roleTags) && details.teacher_ids.length && !details.teacher_ids.includes(teacherId)) {
+        // Sınıfa atanmamış öğretmeni de seçebilir; class_teachers'a ekle
+        await ensureClassTeacherLink(classId, teacherId);
+      }
       const dayOfWeek = Number(body.day_of_week);
       if (!Number.isInteger(dayOfWeek) || dayOfWeek < 1 || dayOfWeek > 7) {
         return res.status(400).json({ error: 'day_of_week_invalid' });
@@ -1990,12 +2017,21 @@ export default async function handler(req, res) {
       if (!classId) return res.status(400).json({ error: 'class_id_required' });
       const details = await getClassDetails(classId);
       if (!details.class) return res.status(404).json({ error: 'class_not_found' });
-      if (!isAdminRole(role) && !details.teacher_ids.includes(actor.sub)) {
+      if (!canAssignAnyClassTeacher(role, roleTags) && !details.teacher_ids.includes(actor.sub)) {
         return res.status(403).json({ error: 'forbidden' });
       }
       const teacherIdRaw = String(body.teacher_id || '').trim();
-      const teacherId = isAdminRole(role) ? teacherIdRaw || details.teacher_ids[0] || actor.sub : actor.sub;
+      if (canAssignAnyClassTeacher(role, roleTags) && !teacherIdRaw) {
+        return res.status(400).json({
+          error: 'teacher_required',
+          message: 'Öğretmen seçin. Sınıftaki ilk öğretmene otomatik atanmaz.'
+        });
+      }
+      const teacherId = canAssignAnyClassTeacher(role, roleTags) ? teacherIdRaw : actor.sub;
       if (!teacherId) return res.status(400).json({ error: 'teacher_required' });
+      if (canAssignAnyClassTeacher(role, roleTags) && details.teacher_ids.length && !details.teacher_ids.includes(teacherId)) {
+        await ensureClassTeacherLink(classId, teacherId);
+      }
 
       const startDate = String(body.lesson_date || body.lesson_date_start || '').trim().slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
