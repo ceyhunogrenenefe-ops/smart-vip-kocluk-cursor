@@ -34,9 +34,12 @@ create index if not exists idx_cltc_session
   on public.class_lesson_topic_checkpoints (class_session_id)
   where class_session_id is not null;
 
-create unique index if not exists uq_cltc_session_id
-  on public.class_lesson_topic_checkpoints (class_session_id)
-  where class_session_id is not null;
+alter table public.class_lesson_topic_checkpoints
+  drop constraint if exists class_lesson_topic_checkpoints_class_session_id_key;
+drop index if exists public.uq_cltc_session_id;
+
+alter table public.class_lesson_topic_checkpoints
+  add constraint class_lesson_topic_checkpoints_class_session_id_key unique (class_session_id);
 
 alter table public.class_lesson_topic_checkpoints enable row level security;
 

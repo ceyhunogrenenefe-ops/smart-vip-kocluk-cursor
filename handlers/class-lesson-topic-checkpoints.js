@@ -360,13 +360,21 @@ export default async function handler(req, res) {
           if (error) throw error;
           saved = data;
         } else if (payload.class_session_id) {
-          const { data, error } = await supabaseAdmin
-            .from(TABLE)
-            .upsert(row, { onConflict: 'class_session_id' })
-            .select('*')
-            .maybeSingle();
-          if (error) throw error;
-          saved = data;
+          const { row: existing } = await loadCheckpointBySessionId(payload.class_session_id);
+          if (existing?.id) {
+            const { data, error } = await supabaseAdmin
+              .from(TABLE)
+              .update(row)
+              .eq('id', existing.id)
+              .select('*')
+              .maybeSingle();
+            if (error) throw error;
+            saved = data;
+          } else {
+            const { data, error } = await supabaseAdmin.from(TABLE).insert(row).select('*').maybeSingle();
+            if (error) throw error;
+            saved = data;
+          }
         } else {
           const { data, error } = await supabaseAdmin.from(TABLE).insert(row).select('*').maybeSingle();
           if (error) throw error;
