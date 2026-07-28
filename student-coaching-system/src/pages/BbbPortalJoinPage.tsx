@@ -1,18 +1,26 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
+import { Loader2, MapPin } from 'lucide-react';
 import { fetchBbbJoinUrl } from '../lib/bbbJoin';
+import { useAuth } from '../context/AuthContext';
+import { userHasAnyRole } from '../config/rolePermissions';
 
 type Props = {
   kind: 'class' | 'private';
 };
 
+const GROUP_TEACHER_CHECKPOINT_HINT =
+  'Ders bitiminde ders kartı üzerindeki «Nerede Kaldım?» kısmını doldurmanız önemle rica olunur.';
+
 export default function BbbPortalJoinPage({ kind }: Props) {
+  const { effectiveUser } = useAuth();
   const params = useParams();
   const [searchParams] = useSearchParams();
   const id = String(kind === 'class' ? params.sessionId : params.lessonId || '').trim();
   const slotKind = searchParams.get('kind') === 'slot' ? 'slot' : 'session';
   const [error, setError] = useState('');
+  const showTeacherCheckpointHint =
+    kind === 'class' && userHasAnyRole(effectiveUser, ['teacher', 'admin', 'super_admin', 'coach']);
 
   useEffect(() => {
     if (!id) {
@@ -20,6 +28,7 @@ export default function BbbPortalJoinPage({ kind }: Props) {
       return;
     }
     let cancelled = false;
+    let redirectTimer: ReturnType<typeof setTimeout> | null = null;
     (async () => {
       try {
         const url =
@@ -27,15 +36,24 @@ export default function BbbPortalJoinPage({ kind }: Props) {
             ? await fetchBbbJoinUrl('class-live-lessons', id, { kind: slotKind })
             : await fetchBbbJoinUrl('teacher-lessons', id);
         if (cancelled) return;
-        window.location.replace(url);
+        // Öğretmen hatırlatmasını okuyabilsin diye kısa gecikme
+        const delayMs = showTeacherCheckpointHint ? 2800 : 0;
+        if (delayMs > 0) {
+          redirectTimer = setTimeout(() => {
+            if (!cancelled) window.location.replace(url);
+          }, delayMs);
+        } else {
+          window.location.replace(url);
+        }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Derse katılım başarısız.');
       }
     })();
     return () => {
       cancelled = true;
+      if (redirectTimer) clearTimeout(redirectTimer);
     };
-  }, [id, kind, slotKind]);
+  }, [id, kind, slotKind, showTeacherCheckpointHint]);
 
   const backPath = kind === 'class' ? '/class-live-lessons' : '/live-lessons';
 
@@ -66,6 +84,17 @@ export default function BbbPortalJoinPage({ kind }: Props) {
         <h1 className="mt-5 text-base font-bold leading-snug text-slate-900 sm:text-lg">
           Derse yönlendiriliyorsunuz
         </h1>
+        {showTeacherCheckpointHint ? (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-left">
+            <p className="flex items-start gap-2 text-sm font-semibold text-amber-950">
+              <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" aria-hidden />
+              Hatırlatma
+            </p>
+            <p className="mt-1.5 text-sm leading-relaxed text-amber-900/90">{GROUP_TEACHER_CHECKPOINT_HINT}</p>
+          </div>
+        ) : (
+          <p className="mt-2 text-sm text-slate-500">Lütfen bekleyiniz…</p>
+        )}
       </div>
     </div>
   );

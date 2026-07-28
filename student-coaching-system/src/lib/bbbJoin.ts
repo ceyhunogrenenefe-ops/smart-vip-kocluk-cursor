@@ -10,7 +10,14 @@ import { startEtutSession, todayYmd, type EtutSessionSource } from './etutSessio
 export type BbbJoinApi = 'teacher-lessons' | 'class-live-lessons' | 'meetings';
 
 const LESSON_JOIN_WAITING = {
-  title: 'Derse yönlendiriliyorsunuz'
+  title: 'Derse yönlendiriliyorsunuz',
+  subtitle: ''
+};
+
+const GROUP_LESSON_JOIN_WAITING = {
+  title: 'Derse yönlendiriliyorsunuz',
+  subtitle:
+    'Ders bitiminde ders kartı üzerindeki «Nerede Kaldım?» kısmını doldurmanız önemle rica olunur.'
 };
 
 function portalJoinPath(
@@ -68,7 +75,8 @@ export async function openBbbJoin(
     return;
   }
 
-  const popup = openBbbWaitingPopup(LESSON_JOIN_WAITING);
+  const waitingCopy = api === 'class-live-lessons' ? GROUP_LESSON_JOIN_WAITING : LESSON_JOIN_WAITING;
+  const popup = openBbbWaitingPopup(waitingCopy);
   try {
     const url = await fetchBbbJoinUrl(api, id, options);
     if (options?.sameTab) {
@@ -78,7 +86,7 @@ export async function openBbbJoin(
     assignBbbWaitingPopup(popup, url);
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Katılım bağlantısı alınamadı';
-    showBbbWaitingPopupError(popup, msg, { title: LESSON_JOIN_WAITING.title });
+    showBbbWaitingPopupError(popup, msg, { title: waitingCopy.title });
     throw e;
   }
 }

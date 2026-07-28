@@ -16,7 +16,10 @@ import { GripVertical, KeyRound, Loader2, Pencil, PlayCircle, Trash2, FileDown, 
 import BbbAutoLinkFieldHint from '../components/liveLessons/BbbAutoLinkFieldHint';
 import { isBbbJoinUrl, canShowSessionGuestInvite, hasClassSessionRecordingAccess, isBbbPlaybackUrl, needsBbbJoinFlow, displayMeetingLinkForRow, meetingLinkForSave, shouldSkipClassLessonReminder, shouldUsePanelBbbJoin, isExternalMeetingPlatform, lessonJoinUrl } from '../lib/liveLessonUtils';
 import { openBbbJoin, openBbbRecording } from '../lib/bbbJoin';
-import { markPostLessonHomeworkPrompt } from '../components/eduPanel/EduPostLessonHomeworkModal';
+import EduPostLessonHomeworkModal, {
+  consumePostLessonHomeworkPrompt,
+  markPostLessonHomeworkPrompt
+} from '../components/eduPanel/EduPostLessonHomeworkModal';
 import ClassLiveClassManager from '../components/liveLessons/ClassLiveClassManager';
 import ClassLivePresenceModal from '../components/liveLessons/ClassLivePresenceModal';
 import {
@@ -252,7 +255,7 @@ export default function ClassLiveLessons() {
     session: TopicCheckpointSessionContext;
     initial?: ClassLessonTopicCheckpoint | null;
   } | null>(null);
-  const topicPromptDismissedRef = useRef<Set<string>>(new Set());
+  const [postLessonHwOpen, setPostLessonHwOpen] = useState(false);
   const classCalendarPdfRef = useRef<HTMLDivElement>(null);
   const [classPdfSnapBusy, setClassPdfSnapBusy] = useState(false);
 
@@ -657,39 +660,12 @@ export default function ClassLiveLessons() {
     [buildTopicSessionContext, checkpointsBySession]
   );
 
-  const maybeAutoPromptTopicCheckpoint = useCallback(
-    (s: SessionRow | null) => {
-      if (!s || !canManageTopicCheckpoint) return;
-      if (isTeacherView && s.teacher_id !== actorUserId) return;
-      if (topicPromptDismissedRef.current.has(s.id)) return;
-      if (checkpointsBySession[s.id]) return;
-      if (!shouldPromptTopicCheckpoint(s, weekSessions)) return;
-      openTopicCheckpointModal(s);
-    },
-    [
-      actorUserId,
-      canManageTopicCheckpoint,
-      checkpointsBySession,
-      isTeacherView,
-      openTopicCheckpointModal,
-      weekSessions
-    ]
-  );
-
   useEffect(() => {
-    if (!canManageTopicCheckpoint) return;
-    for (const s of weekSessions) {
-      if (isTeacherView && s.teacher_id !== actorUserId) continue;
-      maybeAutoPromptTopicCheckpoint(s);
+    if (isStudentView) return;
+    if (consumePostLessonHomeworkPrompt()) {
+      setPostLessonHwOpen(true);
     }
-  }, [
-    weekSessions,
-    checkpointsBySession,
-    canManageTopicCheckpoint,
-    isTeacherView,
-    actorUserId,
-    maybeAutoPromptTopicCheckpoint
-  ]);
+  }, [isStudentView]);
 
   const copySessionGuestLink = useCallback(
     async (s: SessionRow) => {
@@ -1154,9 +1130,7 @@ export default function ClassLiveLessons() {
           return 'Meta Business’ta class_absent_notice_1 şablonu (dil tr) onaylı mı kontrol edin.';
         return String(note || 'Bilinmeyen hata');
       };
-      const savedSession = attendanceSession;
       closeAttendanceModal();
-      maybeAutoPromptTopicCheckpoint(savedSession);
       if (waFailed.length) {
         const parts = waFailed.map((row: { student_id?: string; note?: string }) => {
           const sid = String(row.student_id || '');
@@ -2499,11 +2473,7 @@ export default function ClassLiveLessons() {
           open
           session={topicCheckpointModal.session}
           initialCheckpoint={topicCheckpointModal.initial}
-          onClose={() => {
-            const sid = topicCheckpointModal.session.id;
-            topicPromptDismissedRef.current.add(sid);
-            setTopicCheckpointModal(null);
-          }}
+          onClose={() => setTopicCheckpointModal(null)}
           onSaved={(row) => {
             if (row.class_session_id) {
               setCheckpointsBySession((prev) => ({ ...prev, [String(row.class_session_id)]: row }));
@@ -2512,6 +2482,7 @@ export default function ClassLiveLessons() {
           }}
         />
       ) : null}
+      <EduPostLessonHomeworkModal open={postLessonHwOpen} onClose={() => setPostLessonHwOpen(false)} />
         </>
       )}
       {recordingAlertModal}
