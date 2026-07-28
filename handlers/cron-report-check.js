@@ -8,7 +8,7 @@ import {
 } from '../api/_lib/daily-report-reminder-job.js';
 
 /**
- * Günlük rapor hatırlatması — varsayılan: Meta şablonu 22:00 İstanbul.
+ * Günlük rapor hatırlatması — varsayılan: koç WhatsApp Gateway 22:00 İstanbul.
  * vercel.json: `0 19 * * *` (UTC) = 22:00 TR
  *
  * Bearer ile manuel tetikleme: saat filtresi atlanır.

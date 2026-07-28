@@ -1676,8 +1676,9 @@ export default function CoachWhatsAppSettings() {
           <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/80 p-4">
             <h3 className="text-sm font-semibold text-slate-900">Günlük rapor ayarları</h3>
             <p className="text-xs text-slate-600">
-              Rapor girmeyen öğrencilerinize saat 22:00 (İstanbul) civarında hatırlatma — yalnızca sizin gateway
-              hesabınızdan gider.
+              Rapor girmeyen <strong>kendi öğrencilerinize</strong> saat 22:00 (İstanbul) civarında hatırlatma —
+              yalnızca sizin bağlı gateway hattınızdan gider. Diğer koçların öğrencilerine veya Meta kurum
+              hattına gitmez.
             </p>
             {waPrefsLoading ? (
               <p className="flex items-center gap-2 text-sm text-slate-600">
@@ -1693,7 +1694,7 @@ export default function CoachWhatsAppSettings() {
                   onChange={(e) => void saveDailyReportPref(e.target.checked)}
                   className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
                 />
-                Günlük rapor hatırlatması (tüm öğrenciler)
+                Günlük rapor hatırlatması (yalnızca kendi öğrencilerim · gateway)
               </label>
             )}
             {waPrefsMsg ? <p className="text-xs text-slate-600">{waPrefsMsg}</p> : null}

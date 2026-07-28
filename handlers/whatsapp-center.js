@@ -43,7 +43,7 @@ export const TEMPLATE_TYPE_TO_CRON_JOB_KEY = {
 export const KNOWN_CRON_JOBS = [
   { key: 'class_lesson_reminders', label: 'Grup dersi hatırlatma (~10 dk · koç gateway)', expectEveryMinutes: 5 },
   { key: 'teacher_lesson_reminders', label: 'Öğretmen ders hatırlatması (~15 dk · Meta API)', expectEveryMinutes: 5 },
-  { key: 'daily_report_reminder', label: 'Günlük rapor hatırlatması (22:00 TR · Meta API)', expectEveryMinutes: 24 * 60 },
+  { key: 'daily_report_reminder', label: 'Günlük rapor hatırlatması (22:00 TR · Koç Gateway)', expectEveryMinutes: 24 * 60 },
   { key: 'lesson_reminders', label: 'Birebir ders hatırlatma (~10 dk · Meta API)', expectEveryMinutes: 5 },
   { key: 'lesson_reminder_parent', label: 'Veli ders hatırlatma (koç gateway)', expectEveryMinutes: 5 },
   { key: 'meeting_reminders', label: 'Görüşme 10 dk hatırlatma (Meta API)', expectEveryMinutes: 5 },

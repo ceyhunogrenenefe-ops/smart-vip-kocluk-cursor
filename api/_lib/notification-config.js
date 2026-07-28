@@ -54,22 +54,23 @@ export const NOTIFICATION_DEFINITIONS = [
     id: 'report_reminder',
     templateType: 'report_reminder',
     nameTr: 'Günlük rapor hatırlatma',
-    descriptionTr: 'Rapor girmeyen öğrenci/veliye kurum Meta WhatsApp hesabından; koç panelinden aç/kapat.',
-    sendChannel: SEND_CHANNELS.META_API,
+    descriptionTr:
+      'Rapor girmeyen öğrenciye 22:00 TR; yalnızca o öğrencinin koçunun WhatsApp gateway hesabından (koç panelinden aç/kapat).',
+    sendChannel: SEND_CHANNELS.COACH_GATEWAY,
     mode: 'automatic',
     cronJobKey: 'daily_report_reminder',
-    coachScoped: false,
+    coachScoped: true,
     allowMetaFallback: false
   },
   {
     id: 'lesson_reminder',
     templateType: 'lesson_reminder',
     nameTr: 'Birebir ders hatırlatma',
-    descriptionTr: 'Öğrenciye kurum Meta API üzerinden.',
-    sendChannel: SEND_CHANNELS.META_API,
+    descriptionTr: 'Öğrenciye ilgili koçun WhatsApp gateway hesabından (~10 dk önce).',
+    sendChannel: SEND_CHANNELS.COACH_GATEWAY,
     mode: 'automatic',
     cronJobKey: 'lesson_reminders',
-    coachScoped: false,
+    coachScoped: true,
     allowMetaFallback: false,
     reminderMinutesBefore: 10
   },
@@ -82,6 +83,17 @@ export const NOTIFICATION_DEFINITIONS = [
     mode: 'automatic',
     cronJobKey: 'lesson_reminder_parent',
     coachScoped: true,
+    allowMetaFallback: false
+  },
+  {
+    id: 'institution_event_invite',
+    templateType: 'institution_event_invite',
+    nameTr: 'Kurum etkinlik daveti',
+    descriptionTr: 'Kurum etkinlikleri; Meta WhatsApp API (koç gateway kullanılmaz).',
+    sendChannel: SEND_CHANNELS.META_API,
+    mode: 'automatic',
+    cronJobKey: 'institution_events',
+    coachScoped: false,
     allowMetaFallback: false
   },
   {

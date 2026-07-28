@@ -32,7 +32,19 @@ export default async function handler(req, res) {
 
   try {
     const metaOut = await runCoachWhatsappAutoCron();
-    const gatewayOut = await runCoachWhatsappGatewayAutoCron();
+
+    // Özel gateway zamanlayıcıları varsayılan KAPALI — günlük rapor + ders hatırlatma ayrı cron’larda.
+    // Açmak için: COACH_WHATSAPP_GATEWAY_SCHEDULES_ENABLED=1
+    const gatewaySchedulesOn =
+      String(process.env.COACH_WHATSAPP_GATEWAY_SCHEDULES_ENABLED || '0').trim() === '1';
+    const gatewayOut = gatewaySchedulesOn
+      ? await runCoachWhatsappGatewayAutoCron()
+      : {
+          ok: true,
+          skipped: true,
+          reason: 'COACH_WHATSAPP_GATEWAY_SCHEDULES_ENABLED is not 1',
+          summary: []
+        };
 
     const metaStats = countSendStats(metaOut.summary);
     const gatewayStats = countSendStats(gatewayOut.summary);

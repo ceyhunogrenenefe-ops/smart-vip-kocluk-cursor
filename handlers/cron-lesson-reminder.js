@@ -206,7 +206,7 @@ export default async function handler(req, res) {
             templateRow,
             vars: baseVars,
             templateType,
-            coachId: role === 'parent' ? student.coach_id || null : null
+            coachId: student.coach_id || null
           });
           const preview = sent.bodyPreview || '';
           const { error: insErr } = await supabaseAdmin.from('message_logs').insert({

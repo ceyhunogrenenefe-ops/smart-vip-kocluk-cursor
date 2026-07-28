@@ -131,9 +131,9 @@ export default async function handler(req, res) {
       env_channel: String(process.env.WHATSAPP_AUTOMATION_CHANNEL ?? 'gateway').trim() || 'gateway',
       hint:
         reportReminderSendChannel() === 'meta'
-          ? 'Günlük rapor: kurum Meta şablonu (22:00 TR). message_templates.report_reminder aktif olmalı.'
+          ? 'Günlük rapor: Meta API (NOTIFY_CHANNEL_REPORT_REMINDER=meta_api).'
           : reportReminderSendChannel() === 'gateway'
-            ? 'Günlük rapor: koç gateway (eski kanal). WHATSAPP_AUTOMATION_CHANNEL=gateway.'
+            ? 'Günlük rapor: koç gateway · yalnızca tik’i açık + gateway bağlı koçların kendi öğrencileri · 22:00 TR.'
             : 'Gateway ve Meta yapılandırılmamış — mesaj gitmez.'
     },
     meta,
