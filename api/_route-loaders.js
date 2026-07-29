@@ -107,5 +107,6 @@ export const routeLoaders = {
   'teacher-availability': () => import('../handlers/teacher-availability.js'),
   'public-teacher-book': () => import('../handlers/public-teacher-book.js'),
   'public/teachers': () => import('../handlers/public-teachers.js'),
-  'public-teachers': () => import('../handlers/public-teachers.js')
+  'public-teachers': () => import('../handlers/public-teachers.js'),
+  'teacher-applications': () => import('../handlers/teacher-applications.js')
 };

@@ -448,8 +448,13 @@ export default function TeacherProfileApprovalsPage() {
                       <div className="font-bold text-slate-900">
                         {row.display_name || row.user?.name || row.slug}
                       </div>
-                      <div className="mt-1 text-xs text-slate-500">
+                      <div class="mt-1 text-xs text-slate-500">
                         {row.branch || '—'} · /{row.slug} · %{row.completion_pct} · sync: {row.sync_status || '—'}
+                        {row.source_system === 'ovd_website_application' ? (
+                          <span className="ml-1 rounded bg-sky-100 px-1.5 py-0.5 font-bold text-sky-800">
+                            Web başvurusu
+                          </span>
+                        ) : null}
                       </div>
                       <div className="mt-2 flex flex-wrap gap-2">
                         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
