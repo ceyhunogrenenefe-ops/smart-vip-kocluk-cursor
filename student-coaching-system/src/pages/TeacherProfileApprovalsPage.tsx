@@ -3,6 +3,7 @@ import {
   Ban,
   Check,
   Eye,
+  KeyRound,
   Loader2,
   LockOpen,
   RefreshCw,
@@ -14,6 +15,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '../lib/session';
+import { Link } from 'react-router-dom';
 
 type Row = {
   id: string;
@@ -27,7 +29,8 @@ type Row = {
   rejection_reason?: string | null;
   editing_enabled?: boolean;
   deleted_at?: string | null;
-  user?: { name?: string; email?: string } | null;
+  source_system?: string | null;
+  user?: { name?: string; email?: string; phone?: string; is_active?: boolean } | null;
   missing_required?: string[];
 };
 
@@ -250,6 +253,48 @@ export default function TeacherProfileApprovalsPage() {
     await act(row.id, 'approve');
   };
 
+  const openPanelAccount = async (row: Row) => {
+    const email = row.user?.email || '';
+    const pwd = window.prompt(
+      `Panele aç — giriş şifresi belirleyin (min. 6 karakter).\nE-posta: ${email || '—'}\n\nÖğretmen bu şifreyle sisteme giriş yapabilecek.`
+    );
+    if (pwd == null) return;
+    if (String(pwd).trim().length < 6) {
+      toast.error('Şifre en az 6 karakter olmalı');
+      return;
+    }
+    setBusyId(row.id);
+    try {
+      const res = await apiFetch(
+        `/api/teacher-profiles-admin?op=open-panel&id=${encodeURIComponent(row.id)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: String(pwd).trim() })
+        }
+      );
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.message || j.error || res.statusText);
+      toast.success(j.message || 'Panel hesabı açıldı');
+      if (j.user_management_path) {
+        toast.message(
+          <span>
+            Kullanıcı Yönetimi:{' '}
+            <Link className="underline font-bold" to={j.user_management_path}>
+              kaydı aç
+            </Link>
+          </span>,
+          { duration: 8000 }
+        );
+      }
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Panele açılamadı');
+    } finally {
+      setBusyId('');
+    }
+  };
+
   const confirmAct = async (id: string, op: string, message: string, body?: Record<string, string>) => {
     if (!window.confirm(message)) return;
     await act(id, op, body);
@@ -448,11 +493,16 @@ export default function TeacherProfileApprovalsPage() {
                       <div className="font-bold text-slate-900">
                         {row.display_name || row.user?.name || row.slug}
                       </div>
-                      <div class="mt-1 text-xs text-slate-500">
+                      <div className="mt-1 text-xs text-slate-500">
                         {row.branch || '—'} · /{row.slug} · %{row.completion_pct} · sync: {row.sync_status || '—'}
                         {row.source_system === 'ovd_website_application' ? (
                           <span className="ml-1 rounded bg-sky-100 px-1.5 py-0.5 font-bold text-sky-800">
                             Web başvurusu
+                          </span>
+                        ) : null}
+                        {row.user?.is_active === false ? (
+                          <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 font-bold text-amber-900">
+                            Panel kapalı
                           </span>
                         ) : null}
                       </div>
@@ -503,6 +553,27 @@ export default function TeacherProfileApprovalsPage() {
                             ? 'Yayına Al'
                             : 'Onayla'}
                         </button>
+                      ) : null}
+                      {!isDeleted(row) &&
+                      (row.user?.is_active === false ||
+                        row.source_system === 'ovd_website_application') ? (
+                        <button
+                          type="button"
+                          disabled={busyId === row.id}
+                          onClick={() => void openPanelAccount(row)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-bold text-violet-800 disabled:opacity-50"
+                          title="Kullanıcı Yönetimi’nde aktif öğretmen hesabı açar (şifre belirlersiniz)"
+                        >
+                          <KeyRound className="h-3.5 w-3.5" /> Panele Aç
+                        </button>
+                      ) : null}
+                      {row.user?.email && !isDeleted(row) ? (
+                        <Link
+                          to={`/user-management?q=${encodeURIComponent(row.user.email)}`}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700"
+                        >
+                          Kullanıcı Yönetimi
+                        </Link>
                       ) : null}
                       {(row.status === 'pending_approval' ||
                         row.status === 'update_pending' ||

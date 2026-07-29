@@ -119,7 +119,7 @@ export function validateTeacherApplication(data) {
   if (!data.address_text) return 'Adres (en az il) zorunludur.';
   if (!data.short_bio || data.short_bio.length < 20) return 'Kısa tanıtım en az 20 karakter olmalıdır.';
   if (!data.full_bio || data.full_bio.length < 40) return 'Özgeçmiş en az 40 karakter olmalıdır.';
-  if (!isHttpUrl(data.photo_url)) return 'Profil fotoğrafı için geçerli bir link girin (Google Drive vb.).';
+  if (!isHttpUrl(data.photo_url)) return 'Profil fotoğrafı zorunlu — bilgisayardan yükleyin veya geçerli bir link girin.';
   if (!isHttpUrl(data.intro_video_url)) return 'Tanıtım videosu için YouTube veya Drive linki girin.';
   if (!isHttpUrl(data.lesson_video_url)) return 'Ders videosu için YouTube veya Drive linki girin.';
   if (!data.grade_levels?.length) return 'En az bir ders seviyesi seçin.';

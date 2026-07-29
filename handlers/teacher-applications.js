@@ -1,8 +1,10 @@
 /**
  * Dış öğretmen başvurusu (site)
  * POST /api/teacher-applications
+ * POST /api/teacher-applications  body.op=upload-photo  (bilgisayardan foto)
  * GET  /api/teacher-applications  (admin, liste)
  */
+import { randomUUID } from 'crypto';
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
@@ -14,7 +16,19 @@ import {
 
 const WINDOW_MS = 15 * 60 * 1000;
 const MAX_PER_WINDOW = 8;
+const PHOTO_WINDOW_MS = 15 * 60 * 1000;
+const MAX_PHOTO_PER_WINDOW = 20;
 const ipBuckets = new Map();
+const photoBuckets = new Map();
+
+const PHOTO_BUCKET = process.env.TEACHER_PROFILE_BUCKET || 'teacher-profiles';
+const PHOTO_MAX_BYTES = 2.5 * 1024 * 1024;
+const PHOTO_MIME = {
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp'
+};
 
 function applyCors(req, res) {
   const allowed = String(
@@ -42,17 +56,95 @@ function currentIp(req) {
   return String(req.socket?.remoteAddress || req.connection?.remoteAddress || 'unknown');
 }
 
-function isRateLimited(ip) {
+function isRateLimited(ip, buckets = ipBuckets, windowMs = WINDOW_MS, max = MAX_PER_WINDOW) {
   const now = Date.now();
-  const prev = ipBuckets.get(ip) || [];
-  const recent = prev.filter((ts) => now - ts < WINDOW_MS);
-  if (recent.length >= MAX_PER_WINDOW) {
-    ipBuckets.set(ip, recent);
+  const prev = buckets.get(ip) || [];
+  const recent = prev.filter((ts) => now - ts < windowMs);
+  if (recent.length >= max) {
+    buckets.set(ip, recent);
     return true;
   }
   recent.push(now);
-  ipBuckets.set(ip, recent);
+  buckets.set(ip, recent);
   return false;
+}
+
+function parseBase64Image(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  const m = s.match(/^data:(image\/(?:jpeg|jpg|png|webp));base64,(.+)$/i);
+  if (m) {
+    return { contentType: m[1].toLowerCase().replace('image/jpg', 'image/jpeg'), buffer: Buffer.from(m[2], 'base64') };
+  }
+  // ham base64
+  try {
+    return { contentType: null, buffer: Buffer.from(s, 'base64') };
+  } catch {
+    return null;
+  }
+}
+
+async function handlePhotoUpload(req, res, ip) {
+  if (isRateLimited(ip, photoBuckets, PHOTO_WINDOW_MS, MAX_PHOTO_PER_WINDOW)) {
+    return res.status(429).json({ error: 'too_many_requests', hint: 'Lütfen bir süre sonra tekrar deneyin.' });
+  }
+
+  const body = req.body || {};
+  const contentTypeHint = String(body.contentType || body.content_type || '').toLowerCase().trim();
+  const parsed = parseBase64Image(body.fileBase64 || body.file_base64 || body.dataUrl || body.data_url);
+  if (!parsed?.buffer?.length) {
+    return res.status(400).json({ error: 'file_required', message: 'Fotoğraf dosyası gerekli.' });
+  }
+  if (parsed.buffer.length > PHOTO_MAX_BYTES) {
+    return res.status(400).json({
+      error: 'file_too_large',
+      message: 'Fotoğraf en fazla 2.5 MB olabilir.',
+      max_bytes: PHOTO_MAX_BYTES
+    });
+  }
+
+  const contentType = (parsed.contentType || contentTypeHint || 'image/jpeg').replace('image/jpg', 'image/jpeg');
+  const ext = PHOTO_MIME[contentType];
+  if (!ext) {
+    return res.status(400).json({
+      error: 'invalid_mime',
+      message: 'Sadece JPG, PNG veya WEBP yükleyin.',
+      allowed: Object.keys(PHOTO_MIME)
+    });
+  }
+
+  const path = `applications/${randomUUID()}/photo.${ext}`;
+  const { error: upErr } = await supabaseAdmin.storage.from(PHOTO_BUCKET).upload(path, parsed.buffer, {
+    contentType,
+    upsert: true
+  });
+  if (upErr) {
+    console.error('[teacher-applications] photo upload', upErr.message || upErr);
+    return res.status(503).json({
+      error: 'storage_unavailable',
+      hint: `Supabase Storage'da "${PHOTO_BUCKET}" bucket oluşturun (public).`,
+      detail: upErr.message
+    });
+  }
+
+  let publicUrl = null;
+  try {
+    const { data: pub } = supabaseAdmin.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+    publicUrl = pub?.publicUrl || null;
+  } catch {
+    publicUrl = null;
+  }
+  if (!publicUrl) {
+    return res.status(503).json({ error: 'public_url_failed', message: 'Fotoğraf yüklendi ama URL alınamadı.' });
+  }
+
+  return res.status(200).json({
+    ok: true,
+    photo_url: publicUrl,
+    path,
+    bucket: PHOTO_BUCKET,
+    contentType
+  });
 }
 
 function isAdminActor(actor) {
@@ -100,6 +192,16 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' });
 
   const ip = currentIp(req);
+  const bodyOp = String(req.body?.op || req.query?.op || '').trim().toLowerCase();
+  if (bodyOp === 'upload-photo') {
+    try {
+      return await handlePhotoUpload(req, res, ip);
+    } catch (e) {
+      console.error('[teacher-applications] upload-photo', errorMessage(e));
+      return res.status(500).json({ error: 'server_error', message: errorMessage(e) });
+    }
+  }
+
   if (isRateLimited(ip)) {
     return res.status(429).json({ error: 'too_many_requests', hint: 'Lütfen bir süre sonra tekrar deneyin.' });
   }

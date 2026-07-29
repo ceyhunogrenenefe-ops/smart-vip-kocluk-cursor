@@ -293,6 +293,11 @@ export default function UserManagement() {
   const [filterBranch, setFilterBranch] = useState<string>('all');
   const [filterAcademicYear, setFilterAcademicYear] = useState<string>('all');
   const [filterCoachId, setFilterCoachId] = useState<string>('all');
+
+  useEffect(() => {
+    const q = (searchParams.get('q') || '').trim();
+    if (q) setSearchTerm(q);
+  }, [searchParams]);
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<'add' | 'edit'>('add');
   const [selectedUser, setSelectedUser] = useState<SystemUser | null>(null);

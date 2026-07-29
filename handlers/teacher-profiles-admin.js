@@ -16,7 +16,7 @@
  */
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { actorRoleSet, roleSetHasAdmin, roleSetHasSuperAdmin } from '../api/_lib/actor-roles.js';
-import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
+import { supabaseAdmin, getSupabaseAdmin, hasSupabaseServiceRoleKey } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import {
   applyPatchToWorking,
@@ -136,10 +136,36 @@ const MUTATION_OPS = new Set([
   'republish',
   'retry-sync',
   'enable-editing',
+  'open-panel',
   'soft-delete',
   'restore',
   'hard-delete'
 ]);
+
+async function provisionAuthForPanelUser({ id, email, passwordPlain, name, role }) {
+  if (!hasSupabaseServiceRoleKey()) return;
+  const pwd = String(passwordPlain || '').trim();
+  const em = String(email || '').toLowerCase().trim();
+  if (pwd.length < 6 || !em || !id) return;
+  try {
+    const sb = getSupabaseAdmin();
+    const { data: existing, error: getErr } = await sb.auth.admin.getUserById(String(id));
+    if (!getErr && existing?.user?.id) {
+      await sb.auth.admin.updateUserById(String(id), { password: pwd, email_confirm: true });
+      return;
+    }
+    const { error: cErr } = await sb.auth.admin.createUser({
+      id: String(id),
+      email: em,
+      password: pwd,
+      email_confirm: true,
+      user_metadata: { name: name || '', app_role: role || 'teacher' }
+    });
+    if (cErr) console.warn('[teacher-profiles-admin] open-panel auth:', cErr.message || cErr);
+  } catch (e) {
+    console.warn('[teacher-profiles-admin] open-panel auth:', e?.message || e);
+  }
+}
 
 export default async function handler(req, res) {
   try {
@@ -498,6 +524,100 @@ export default async function handler(req, res) {
             : ''
         });
         return res.status(200).json({ profile: updated });
+      }
+
+      if (op === 'open-panel') {
+        const password = String(body.password || body.password_hash || '').trim();
+        if (password.length < 6) {
+          return res.status(400).json({
+            error: 'password_min_6',
+            message: 'Panel girişi için en az 6 karakterlik şifre girin.'
+          });
+        }
+        const { data: userRow, error: uLoadErr } = await supabaseAdmin
+          .from('users')
+          .select('id, name, email, phone, role, roles, institution_id, is_active')
+          .eq('id', profile.user_id)
+          .maybeSingle();
+        if (uLoadErr) throw uLoadErr;
+        if (!userRow) return res.status(404).json({ error: 'user_not_found' });
+
+        let institutionId =
+          String(body.institution_id || '').trim() ||
+          String(userRow.institution_id || '').trim() ||
+          String(process.env.TEACHER_APPLICATION_INSTITUTION_ID || '').trim() ||
+          null;
+        if (!actorIsSuper && actor.institution_id) {
+          institutionId = String(actor.institution_id).trim();
+        }
+        if (!institutionId) {
+          return res.status(400).json({
+            error: 'institution_required',
+            message:
+              'Panele açmak için kurum gerekli. TEACHER_APPLICATION_INSTITUTION_ID tanımlayın veya body.institution_id gönderin.'
+          });
+        }
+
+        const now = new Date().toISOString();
+        const { data: updatedUser, error: uErr } = await supabaseAdmin
+          .from('users')
+          .update({
+            is_active: true,
+            password_hash: password,
+            role: 'teacher',
+            roles: ['teacher'],
+            institution_id: institutionId,
+            updated_at: now
+          })
+          .eq('id', userRow.id)
+          .select('id, name, email, phone, role, roles, institution_id, is_active')
+          .single();
+        if (uErr) throw uErr;
+
+        await provisionAuthForPanelUser({
+          id: updatedUser.id,
+          email: updatedUser.email,
+          passwordPlain: password,
+          name: updatedUser.name,
+          role: 'teacher'
+        });
+
+        const { data: updatedProfile, error: pErr } = await supabaseAdmin
+          .from('teacher_profiles')
+          .update({
+            editing_enabled: true,
+            editing_enabled_at: now,
+            editing_enabled_by: actor.sub,
+            updated_at: now
+          })
+          .eq('id', id)
+          .select('*')
+          .single();
+        if (pErr) throw pErr;
+
+        await writeAuditLog({
+          profileId: id,
+          actorUserId: actor.sub,
+          action: 'open_panel_account',
+          previousValue: { is_active: userRow.is_active, institution_id: userRow.institution_id },
+          newValue: { is_active: true, institution_id: institutionId, email: updatedUser.email },
+          ip: clientIp(req)
+        });
+
+        await notifyTeacherProfileEvent({
+          event: 'editing_enabled',
+          targetUserId: profile.user_id,
+          senderUserId: actor.sub,
+          institutionId,
+          extraBody: 'Panel hesabınız açıldı. Kullanıcı Yönetimi’nden giriş bilgilerinizle sisteme girebilirsiniz.'
+        });
+
+        return res.status(200).json({
+          profile: updatedProfile,
+          user: updatedUser,
+          message: 'Öğretmen paneli açıldı. Kullanıcı Yönetimi’nde aktif öğretmen olarak görünür.',
+          user_management_path: `/user-management?q=${encodeURIComponent(updatedUser.email || '')}`
+        });
       }
 
       if (op === 'deactivate') {
