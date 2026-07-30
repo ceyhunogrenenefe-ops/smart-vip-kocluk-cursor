@@ -4,10 +4,12 @@ import EduBadgeChip from './EduBadgeChip';
 import EduProgressRing from './EduProgressRing';
 import {
   celebrateCopy,
+  eduLevelLabel,
   milestoneBadges,
   progressBreakdown,
   type EduCelebrateKind
 } from '../../lib/eduPanel/eduPanelProgress';
+import type { EduRewardDelta } from '../../types/eduPanel.types';
 
 type Props = {
   open: boolean;
@@ -19,6 +21,7 @@ type Props = {
   topicCompleted?: boolean;
   hasAnimation?: boolean;
   hasHomework?: boolean;
+  rewards?: EduRewardDelta | null;
 };
 
 export default function EduHomeworkCelebrateModal({
@@ -30,18 +33,19 @@ export default function EduHomeworkCelebrateModal({
   homeworkPercent = 0,
   topicCompleted = false,
   hasAnimation = true,
-  hasHomework = true
+  hasHomework = true,
+  rewards = null
 }: Props) {
   useEffect(() => {
     if (!open) return;
-    const t = window.setTimeout(() => onClose(), 5200);
+    const t = window.setTimeout(() => onClose(), 6200);
     return () => window.clearTimeout(t);
   }, [open, onClose]);
 
   if (!open) return null;
 
-  const breakdown = progressBreakdown(animationCompleted, homeworkPercent);
-  const copy = celebrateCopy(kind, breakdown);
+  const breakdown = progressBreakdown(animationCompleted, homeworkPercent, hasAnimation);
+  const copy = celebrateCopy(kind, breakdown, rewards);
   const milestones = milestoneBadges({
     animationCompleted,
     homeworkPercent,
@@ -64,6 +68,8 @@ export default function EduHomeworkCelebrateModal({
         ? 'from-emerald-50 via-white to-sky-50'
         : 'from-amber-50 via-white to-orange-50';
 
+  const hasRewardDrop = Boolean(rewards && (rewards.gold > 0 || rewards.silver > 0 || rewards.levelUp));
+
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4">
       <div
@@ -73,9 +79,17 @@ export default function EduHomeworkCelebrateModal({
         className="relative w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-2xl"
       >
         <div className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${accent}`} />
+        {hasRewardDrop ? (
+          <div className="pointer-events-none absolute inset-0 overflow-hidden">
+            <span className="absolute left-[12%] top-6 animate-bounce text-2xl">✨</span>
+            <span className="absolute right-[14%] top-10 animate-pulse text-xl">🎉</span>
+            <span className="absolute bottom-16 left-[18%] animate-pulse text-lg">⭐</span>
+            <span className="absolute bottom-20 right-[20%] animate-bounce text-xl">🪙</span>
+          </div>
+        ) : null}
         <div className="relative px-5 pb-5 pt-6 text-center">
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-white text-4xl shadow-md ring-2 ring-white">
-            {kind === 'animation' ? '🎬' : kind === 'topic' ? '🏅' : '🎉'}
+            {rewards?.levelUp ? '🚀' : kind === 'animation' ? '🎬' : kind === 'topic' ? '🏅' : '🎉'}
           </div>
           <PartyPopper className="mx-auto mt-2 h-5 w-5 text-violet-600" />
           {topicTitle ? (
@@ -87,6 +101,35 @@ export default function EduHomeworkCelebrateModal({
             {copy.title}
           </h2>
           <p className="mt-1 text-sm text-slate-600">{copy.subtitle}</p>
+
+          {hasRewardDrop ? (
+            <div className="mt-4 rounded-xl bg-gradient-to-r from-amber-50 via-yellow-50 to-orange-50 p-3 ring-1 ring-amber-200">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-800">
+                Ödül kazandın!
+              </p>
+              <div className="mt-2 flex flex-wrap items-center justify-center gap-3 text-sm font-bold">
+                {rewards!.gold > 0 ? (
+                  <span className="inline-flex items-center gap-1 text-amber-700">
+                    🥇 +{rewards!.gold} altın
+                  </span>
+                ) : null}
+                {rewards!.silver > 0 ? (
+                  <span className="inline-flex items-center gap-1 text-slate-600">
+                    🥈 +{rewards!.silver} gümüş
+                  </span>
+                ) : null}
+              </div>
+              {rewards!.levelUp ? (
+                <p className="mt-2 text-xs font-semibold text-violet-700">
+                  Seviye {rewards!.newLevel} — {eduLevelLabel(rewards!.newLevel)}!
+                </p>
+              ) : null}
+              <p className="mt-2 text-[10px] text-slate-500">
+                Toplam: {rewards!.totals.gold} altın · {rewards!.totals.silver} gümüş · Seviye{' '}
+                {rewards!.totals.level}
+              </p>
+            </div>
+          ) : null}
 
           <div className="mt-4 flex items-center justify-center gap-4">
             <EduProgressRing
@@ -100,7 +143,9 @@ export default function EduHomeworkCelebrateModal({
               <EduBadgeChip badge={breakdown.badge} points={breakdown.total} />
               <p className="text-[11px] font-medium text-slate-600">{copy.highlight}</p>
               <p className="text-[10px] text-slate-500">
-                Animasyon {breakdown.animationPoints}p · Ödev {breakdown.homeworkPoints}p
+                {breakdown.hasAnimation
+                  ? `Animasyon ${breakdown.animationPoints}p · Ödev ${breakdown.homeworkPoints}p`
+                  : `Ödev ${breakdown.homeworkPoints}p (tam puan)`}
               </p>
             </div>
           </div>

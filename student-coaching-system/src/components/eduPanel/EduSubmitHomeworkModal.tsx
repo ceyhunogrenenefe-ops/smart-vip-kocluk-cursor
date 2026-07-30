@@ -5,7 +5,8 @@ import { formatEduHomeworkLabel } from '../../lib/eduPanel/eduHomeworkForm';
 import { isEduImageFile, isEduVideoFile } from '../../lib/eduPanel/eduPanelApi';
 
 const MAX_PHOTOS = 5;
-const MAX_VIDEO_SECONDS = 60;
+const MAX_VIDEO_SECONDS = 120;
+const MAX_VIDEO_MB = 30;
 
 type Props = {
   open: boolean;
@@ -31,6 +32,17 @@ function readVideoDuration(file: File): Promise<number> {
     };
     el.src = url;
   });
+}
+
+function videoChunkWarning(file: File, durationSec: number): string | null {
+  const mb = file.size / (1024 * 1024);
+  if (durationSec > MAX_VIDEO_SECONDS + 0.5) {
+    return `Video ${MAX_VIDEO_SECONDS} saniyeden uzun. Lütfen parça parça yükleyin (her parça en fazla 2 dakika).`;
+  }
+  if (mb > MAX_VIDEO_MB) {
+    return `Video ${MAX_VIDEO_MB} MB sınırını aşıyor. Lütfen daha kısa veya daha küçük parçalar halinde yükleyin.`;
+  }
+  return null;
 }
 
 export default function EduSubmitHomeworkModal({
@@ -102,8 +114,9 @@ export default function EduSubmitHomeworkModal({
     }
     try {
       const dur = await readVideoDuration(file);
-      if (dur > MAX_VIDEO_SECONDS + 0.5) {
-        setMediaError(`Video en fazla ${MAX_VIDEO_SECONDS} saniye olabilir.`);
+      const warn = videoChunkWarning(file, dur);
+      if (warn) {
+        setMediaError(warn);
         return;
       }
       setMediaError(null);
@@ -151,7 +164,8 @@ export default function EduSubmitHomeworkModal({
               İstersen çözdüğün sayfaların fotoğrafını veya kısa videosunu yükleyebilirsin.
             </p>
             <p className="mt-1 text-[10px] text-slate-400">
-              Birden fazla fotoğraf · Video en fazla {MAX_VIDEO_SECONDS} sn · Zorunlu değil
+              Birden fazla fotoğraf · Video en fazla {MAX_VIDEO_SECONDS} sn ({MAX_VIDEO_MB} MB) ·
+              Uzun videoları parça parça yükle · Zorunlu değil
             </p>
 
             <div className="mt-3 flex flex-wrap gap-2">

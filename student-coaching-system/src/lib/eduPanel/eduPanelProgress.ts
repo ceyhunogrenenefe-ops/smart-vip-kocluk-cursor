@@ -1,4 +1,6 @@
-/** EduPanel rozet / puan mantığı — animasyon %40 + ödev %60 */
+/** EduPanel rozet / puan mantığı — animasyon %40 + ödev %60 (animasyon yoksa ödev %100) */
+
+import { homeworkPoolAnimationIds } from './eduHomeworkStats';
 
 export type EduBadgeTier = {
   id: string;
@@ -11,6 +13,7 @@ export type EduBadgeTier = {
 
 export const EDU_ANIMATION_POINTS = 40;
 export const EDU_HOMEWORK_POINTS_MAX = 60;
+export const EDU_HOMEWORK_ONLY_POINTS_MAX = 100;
 
 export const EDU_BADGE_TIERS: EduBadgeTier[] = [
   {
@@ -63,13 +66,54 @@ export const EDU_BADGE_TIERS: EduBadgeTier[] = [
   }
 ];
 
+export type EduStudentRewards = {
+  gold: number;
+  silver: number;
+  xp: number;
+  level: number;
+};
+
+export type EduRewardDelta = {
+  gold: number;
+  silver: number;
+  levelUp: boolean;
+  previousLevel: number;
+  newLevel: number;
+  totals: EduStudentRewards;
+};
+
+export const EDU_LEVEL_THRESHOLDS = [0, 15, 35, 60, 90, 130, 180, 240, 310, 400];
+
 export function clampPercent(n: number): number {
   return Math.max(0, Math.min(100, Math.round(n)));
 }
 
-export function computeEduPoints(animationCompleted: boolean, homeworkPercent: number): number {
-  const anim = animationCompleted ? EDU_ANIMATION_POINTS : 0;
-  const hw = Math.round(clampPercent(homeworkPercent) * (EDU_HOMEWORK_POINTS_MAX / 100));
+/** Konuda izlenebilir animasyon var mı? (satır animasyonu veya ödeve bağlı havuz) */
+export function lessonRowHasAnimation(row: {
+  animations?: unknown[] | null;
+  homework?: {
+    status?: string;
+    pool_animation_id?: string | null;
+    pool_animation_ids?: string[] | null;
+  }[] | null;
+}): boolean {
+  if ((row.animations || []).length > 0) return true;
+  const published = (row.homework || []).filter((h) => h.status === 'published');
+  return published.some((h) => homeworkPoolAnimationIds(h).length > 0);
+}
+
+export function homeworkPointsMax(hasAnimation = true): number {
+  return hasAnimation ? EDU_HOMEWORK_POINTS_MAX : EDU_HOMEWORK_ONLY_POINTS_MAX;
+}
+
+export function computeEduPoints(
+  animationCompleted: boolean,
+  homeworkPercent: number,
+  hasAnimation = true
+): number {
+  const anim = hasAnimation && animationCompleted ? EDU_ANIMATION_POINTS : 0;
+  const hwMax = homeworkPointsMax(hasAnimation);
+  const hw = Math.round(clampPercent(homeworkPercent) * (hwMax / 100));
   return anim + hw;
 }
 
@@ -90,18 +134,56 @@ export function badgeForPoints(points: number): EduBadgeTier {
   return tier;
 }
 
-export function progressBreakdown(animationCompleted: boolean, homeworkPercent: number) {
+export function progressBreakdown(
+  animationCompleted: boolean,
+  homeworkPercent: number,
+  hasAnimation = true
+) {
   const hw = clampPercent(homeworkPercent);
-  const animPts = animationCompleted ? EDU_ANIMATION_POINTS : 0;
-  const hwPts = Math.round(hw * (EDU_HOMEWORK_POINTS_MAX / 100));
+  const animPts = hasAnimation && animationCompleted ? EDU_ANIMATION_POINTS : 0;
+  const hwMax = homeworkPointsMax(hasAnimation);
+  const hwPts = Math.round(hw * (hwMax / 100));
   const total = animPts + hwPts;
   return {
     animationPoints: animPts,
     homeworkPoints: hwPts,
     homeworkPercent: hw,
+    homeworkPointsMax: hwMax,
+    hasAnimation,
     total,
     badge: badgeForPoints(total)
   };
+}
+
+export function eduXpFromRewards(gold: number, silver: number): number {
+  return gold * 10 + silver * 5;
+}
+
+export function eduLevelFromXp(xp: number): number {
+  const safe = Math.max(0, Math.floor(Number(xp) || 0));
+  let level = 1;
+  for (let i = 1; i < EDU_LEVEL_THRESHOLDS.length; i += 1) {
+    if (safe >= EDU_LEVEL_THRESHOLDS[i]) level = i + 1;
+    else break;
+  }
+  return level;
+}
+
+export function eduLevelLabel(level: number): string {
+  const labels = [
+    'Çaylak',
+    'Meraklı',
+    'Azimli',
+    'Çalışkan',
+    'Usta',
+    'Şampiyon',
+    'Kahraman',
+    'Efsane',
+    'Yıldız',
+    'Altın Usta'
+  ];
+  const idx = Math.max(0, Math.min(labels.length - 1, Math.floor(level) - 1));
+  return labels[idx];
 }
 
 /** Konu içi başarı rozetleri — animasyon / ödev / konu tamamlama */
@@ -124,6 +206,7 @@ export function milestoneBadges(opts: {
   hasHomework?: boolean;
 }): EduMilestoneBadge[] {
   const hwDone = clampPercent(opts.homeworkPercent) >= 100;
+  const hwMax = homeworkPointsMax(opts.hasAnimation !== false);
   const list: EduMilestoneBadge[] = [];
   if (opts.hasAnimation !== false) {
     list.push({
@@ -142,7 +225,7 @@ export function milestoneBadges(opts: {
       id: 'homework',
       label: 'Ödev Kahramanı',
       emoji: '📝',
-      hint: `Tüm ödevleri teslim et → +${EDU_HOMEWORK_POINTS_MAX}p`,
+      hint: `Tüm ödevleri teslim et → +${hwMax}p`,
       earned: hwDone,
       chipClass: hwDone
         ? 'bg-amber-100 text-amber-950 ring-amber-300'
@@ -166,13 +249,26 @@ export type EduCelebrateKind = 'animation' | 'homework' | 'topic';
 
 export function celebrateCopy(
   kind: EduCelebrateKind,
-  breakdown: ReturnType<typeof progressBreakdown>
+  breakdown: ReturnType<typeof progressBreakdown>,
+  rewards?: EduRewardDelta | null
 ): { title: string; subtitle: string; highlight: string } {
+  const rewardLine = rewards
+    ? [
+        rewards.gold > 0 ? `+${rewards.gold} altın` : '',
+        rewards.silver > 0 ? `+${rewards.silver} gümüş` : '',
+        rewards.levelUp ? `Seviye ${rewards.newLevel}!` : ''
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : '';
+
   if (kind === 'animation') {
     return {
       title: 'Animasyon rozeti kazandın!',
       subtitle: 'Konu animasyonunu izledin — bu başarı rozetine işlendi.',
-      highlight: `+${breakdown.animationPoints} puan · ${breakdown.badge.emoji} ${breakdown.badge.label}`
+      highlight: [rewardLine, `+${breakdown.animationPoints} puan · ${breakdown.badge.emoji} ${breakdown.badge.label}`]
+        .filter(Boolean)
+        .join(' · ')
     };
   }
   if (kind === 'homework') {
@@ -180,14 +276,25 @@ export function celebrateCopy(
       title: breakdown.homeworkPercent >= 100 ? 'Ödev rozeti tamam!' : 'Ödev teslim edildi!',
       subtitle:
         breakdown.homeworkPercent >= 100
-          ? 'Bu konunun tüm ödevlerini yükledin — Kahraman rozeti senin.'
+          ? breakdown.hasAnimation
+            ? 'Bu konunun tüm ödevlerini yükledin — Kahraman rozeti senin.'
+            : 'Ödevini teslim ettin — bu konu için tam puanı aldın!'
           : 'Hocan ödevini inceleyecek. Eksik ödevleri de tamamlarsan rozeti açarsın.',
-      highlight: `Ödev %${breakdown.homeworkPercent} · ${breakdown.total}p · ${breakdown.badge.emoji} ${breakdown.badge.label}`
+      highlight: [
+        rewardLine,
+        `Ödev %${breakdown.homeworkPercent} · ${breakdown.total}p · ${breakdown.badge.emoji} ${breakdown.badge.label}`
+      ]
+        .filter(Boolean)
+        .join(' · ')
     };
   }
   return {
-    title: 'Konu rozetin hazır!',
-    subtitle: 'Animasyon + ödev ilerlemen kayda geçti.',
-    highlight: `${breakdown.total}p · ${breakdown.badge.emoji} ${breakdown.badge.label}`
+    title: rewards?.levelUp ? 'Seviye atladın!' : 'Konu rozetin hazır!',
+    subtitle: rewards?.levelUp
+      ? `${eduLevelLabel(rewards.newLevel)} seviyesine yükseldin — ödüllerin birikti!`
+      : 'Animasyon + ödev ilerlemen kayda geçti.',
+    highlight: [rewardLine, `${breakdown.total}p · ${breakdown.badge.emoji} ${breakdown.badge.label}`]
+      .filter(Boolean)
+      .join(' · ')
   };
 }
