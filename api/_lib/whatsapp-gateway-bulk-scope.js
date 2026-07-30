@@ -68,6 +68,50 @@ export function assertClassIdsAllowed(requestedIds, allowedIds) {
   return { ok: true, classIds: req };
 }
 
+function parseChannel(v) {
+  return String(v || '').trim().toLowerCase() === 'parent' ? 'parent' : 'student';
+}
+
+function parseStudentIds(v) {
+  if (!Array.isArray(v)) return null;
+  return [...new Set(v.map((x) => String(x || '').trim()).filter(Boolean))];
+}
+
+function phoneForChannel(st, channel) {
+  if (channel === 'parent') {
+    return normalizePhoneToE164(st.parent_phone) || null;
+  }
+  return normalizePhoneToE164(st.phone) || null;
+}
+
+async function loadActiveMembersForClasses(classIds) {
+  const { data: members, error: me } = await supabaseAdmin
+    .from('class_students')
+    .select('class_id, student_id')
+    .in('class_id', classIds);
+  if (me) throw me;
+
+  const studentIds = [...new Set((members || []).map((r) => r.student_id).filter(Boolean))];
+  if (!studentIds.length) {
+    return { members: [], students: [], periodsMap: new Map(), todayTr: getIstanbulDateString() };
+  }
+
+  const todayTr = getIstanbulDateString();
+  const periodsMap = await loadPeriodsForStudents(studentIds);
+  const { data: rows, error } = await supabaseAdmin
+    .from('students')
+    .select('id, name, phone, parent_phone, coach_id')
+    .in('id', studentIds);
+  if (error) throw error;
+
+  const students = (rows || []).filter((st) => {
+    const periods = periodsMap.get(String(st.id)) || [];
+    return isActiveFromPeriods(periods, todayTr, { coachId: st.coach_id });
+  });
+
+  return { members: members || [], students, periodsMap, todayTr };
+}
+
 export async function loadScopedClasses(actor) {
   const allowed = await getScopedClassIds(actor);
   let q = supabaseAdmin.from('classes').select('id, name, institution_id').order('name');
@@ -82,86 +126,124 @@ export async function loadScopedClasses(actor) {
   if (!classes?.length) return [];
 
   const classIds = classes.map((c) => c.id);
-  const { data: members, error: me } = await supabaseAdmin
-    .from('class_students')
-    .select('class_id, student_id')
-    .in('class_id', classIds);
-  if (me) throw me;
+  const { members, students } = await loadActiveMembersForClasses(classIds);
+  const studentById = new Map(students.map((s) => [String(s.id), s]));
 
-  const studentIds = [...new Set((members || []).map((r) => r.student_id).filter(Boolean))];
-  const todayTr = getIstanbulDateString();
-  const periodsMap = await loadPeriodsForStudents(studentIds);
-
-  const { data: studentRows, error: se } = studentIds.length
-    ? await supabaseAdmin
-        .from('students')
-        .select('id, phone, coach_id')
-        .in('id', studentIds)
-    : { data: [], error: null };
-  if (se) throw se;
-
-  const studentById = new Map((studentRows || []).map((s) => [String(s.id), s]));
-  const classCounts = new Map();
-  for (const m of members || []) {
+  const studentCounts = new Map();
+  const parentCounts = new Map();
+  for (const m of members) {
     const st = studentById.get(String(m.student_id));
     if (!st) continue;
-    const periods = periodsMap.get(String(st.id)) || [];
-    if (!isActiveFromPeriods(periods, todayTr, { coachId: st.coach_id })) continue;
-    const phone = normalizePhoneToE164(st.phone);
-    if (!phone) continue;
-    classCounts.set(m.class_id, (classCounts.get(m.class_id) || 0) + 1);
+    if (phoneForChannel(st, 'student')) {
+      studentCounts.set(m.class_id, (studentCounts.get(m.class_id) || 0) + 1);
+    }
+    if (phoneForChannel(st, 'parent')) {
+      parentCounts.set(m.class_id, (parentCounts.get(m.class_id) || 0) + 1);
+    }
   }
 
   return classes.map((c) => ({
     id: c.id,
     name: c.name || 'Sınıf',
-    active_student_count: classCounts.get(c.id) || 0
+    active_student_count: studentCounts.get(c.id) || 0,
+    active_parent_count: parentCounts.get(c.id) || 0
   }));
 }
 
-export async function resolveGatewayBulkRecipients(actor, classIds) {
+/** Seçilen sınıflardaki aktif öğrenciler (dropdown / kısmi seçim için) */
+export async function loadClassStudentsForBulk(actor, classIds, channel = 'student') {
   const allowed = await getScopedClassIds(actor);
   const check = assertClassIdsAllowed(classIds, allowed);
   if (!check.ok) return check;
 
-  const { data: members, error: me } = await supabaseAdmin
-    .from('class_students')
-    .select('class_id, student_id')
-    .in('class_id', check.classIds);
-  if (me) throw me;
+  const ch = parseChannel(channel);
+  const { members, students } = await loadActiveMembersForClasses(check.classIds);
+  const studentById = new Map(students.map((s) => [String(s.id), s]));
+  const seen = new Set();
+  const list = [];
 
-  const studentIds = [...new Set((members || []).map((r) => r.student_id).filter(Boolean))];
-  if (!studentIds.length) {
-    return { ok: true, recipients: [], total: 0 };
+  for (const m of members) {
+    const sid = String(m.student_id);
+    if (seen.has(sid)) continue;
+    if (!check.classIds.includes(m.class_id)) continue;
+    const st = studentById.get(sid);
+    if (!st) continue;
+    const phone = phoneForChannel(st, ch);
+    seen.add(sid);
+    list.push({
+      student_id: sid,
+      name: st.name || 'Öğrenci',
+      has_phone: Boolean(phone),
+      class_id: m.class_id
+    });
   }
 
-  const todayTr = getIstanbulDateString();
-  const periodsMap = await loadPeriodsForStudents(studentIds);
-  const { data: rows, error } = await supabaseAdmin
-    .from('students')
-    .select('id, name, phone, coach_id')
-    .in('id', studentIds);
-  if (error) throw error;
+  list.sort((a, b) => String(a.name).localeCompare(String(b.name), 'tr'));
+  return { ok: true, students: list, channel: ch };
+}
 
-  const seen = new Set();
+/**
+ * @param {object} actor
+ * @param {string[]} classIds
+ * @param {{ channel?: 'student'|'parent', studentIds?: string[]|null }} [opts]
+ *   studentIds null/undefined = sınıfın tamamı; boş dizi = kimse; dolu = yalnızca bunlar
+ */
+export async function resolveGatewayBulkRecipients(actor, classIds, opts = {}) {
+  const allowed = await getScopedClassIds(actor);
+  const check = assertClassIdsAllowed(classIds, allowed);
+  if (!check.ok) return check;
+
+  const channel = parseChannel(opts.channel);
+  const filterIds = parseStudentIds(opts.studentIds);
+  const filterSet = filterIds ? new Set(filterIds) : null;
+
+  const { members, students } = await loadActiveMembersForClasses(check.classIds);
+  const studentById = new Map(students.map((s) => [String(s.id), s]));
+
+  // Kısmi seçimde istenen id'lerin sınıfta ve yetkili olduğundan emin ol
+  if (filterSet) {
+    const allowedStudentIds = new Set();
+    for (const m of members) {
+      if (check.classIds.includes(m.class_id)) allowedStudentIds.add(String(m.student_id));
+    }
+    for (const sid of filterSet) {
+      if (!allowedStudentIds.has(sid)) {
+        return { ok: false, error: 'student_forbidden', student_id: sid };
+      }
+    }
+  }
+
+  const seenPhone = new Set();
+  const seenStudent = new Set();
   const recipients = [];
-  for (const st of rows || []) {
-    const sid = String(st.id);
-    if (seen.has(sid)) continue;
-    const periods = periodsMap.get(sid) || [];
-    if (!isActiveFromPeriods(periods, todayTr, { coachId: st.coach_id })) continue;
-    const phone = normalizePhoneToE164(st.phone);
+
+  for (const m of members) {
+    const sid = String(m.student_id);
+    if (!check.classIds.includes(m.class_id)) continue;
+    if (filterSet && !filterSet.has(sid)) continue;
+    if (seenStudent.has(sid)) continue;
+
+    const st = studentById.get(sid);
+    if (!st) continue;
+    const phone = phoneForChannel(st, channel);
     if (!phone) continue;
-    seen.add(sid);
+    if (seenPhone.has(phone)) {
+      seenStudent.add(sid);
+      continue;
+    }
+
+    seenStudent.add(sid);
+    seenPhone.add(phone);
     recipients.push({
       student_id: sid,
       name: st.name || 'Öğrenci',
       phone_e164: phone,
-      class_ids: (members || [])
-        .filter((m) => String(m.student_id) === sid && check.classIds.includes(m.class_id))
-        .map((m) => m.class_id)
+      channel,
+      class_ids: members
+        .filter((x) => String(x.student_id) === sid && check.classIds.includes(x.class_id))
+        .map((x) => x.class_id)
     });
   }
 
-  return { ok: true, recipients, total: recipients.length };
+  return { ok: true, recipients, total: recipients.length, channel };
 }
