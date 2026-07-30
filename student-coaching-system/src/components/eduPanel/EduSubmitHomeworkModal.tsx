@@ -7,7 +7,6 @@ import { isEduImageFile, isEduVideoFile } from '../../lib/eduPanel/eduPanelApi';
 const MAX_PHOTOS = 5;
 const MAX_VIDEOS = 5;
 const MAX_VIDEO_SECONDS = 120;
-const MAX_VIDEO_MB = 30;
 
 type Props = {
   open: boolean;
@@ -37,13 +36,9 @@ function readVideoDuration(file: File): Promise<number> {
   });
 }
 
-function videoChunkWarning(file: File, durationSec: number): string | null {
-  const mb = file.size / (1024 * 1024);
+function videoDurationWarning(durationSec: number): string | null {
   if (durationSec > MAX_VIDEO_SECONDS + 0.5) {
     return `Video ${MAX_VIDEO_SECONDS} saniyeden uzun. Lütfen parça parça yükleyin (her parça en fazla 2 dakika).`;
-  }
-  if (mb > MAX_VIDEO_MB) {
-    return `Video ${MAX_VIDEO_MB} MB sınırını aşıyor. Lütfen daha kısa veya daha küçük parçalar halinde yükleyin.`;
   }
   return null;
 }
@@ -121,7 +116,7 @@ export default function EduSubmitHomeworkModal({
       }
       try {
         const dur = await readVideoDuration(file);
-        const warn = videoChunkWarning(file, dur);
+        const warn = videoDurationWarning(dur);
         if (warn) {
           lastError = warn;
           continue;
@@ -186,8 +181,8 @@ export default function EduSubmitHomeworkModal({
               </p>
             ) : null}
             <p className="mt-1 text-[10px] text-slate-400">
-              En fazla {MAX_PHOTOS} fotoğraf · En fazla {MAX_VIDEOS} video · Her video en fazla{' '}
-              {MAX_VIDEO_SECONDS} sn ({MAX_VIDEO_MB} MB) · Uzun videoları parça parça yükle · Zorunlu
+              En fazla {MAX_PHOTOS} fotoğraf · En fazla {MAX_VIDEOS} video · Her video en fazla 2
+              dakika · Uzun videoları parça parça yükle · Boyut sınırı yok (2 dk içinde) · Zorunlu
               değil
             </p>
 

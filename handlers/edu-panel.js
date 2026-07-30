@@ -1444,10 +1444,11 @@ async function loadRow(id) {
 const EDU_MAX_SUBMISSION_PHOTOS = 5;
 const EDU_MAX_SUBMISSION_VIDEOS = 5;
 const EDU_MAX_PHOTO_BYTES = 10 * 1024 * 1024;
-const EDU_MAX_VIDEO_BYTES = 30 * 1024 * 1024;
+/** Mutlak güvenlik üst sınırı — asıl kural 2 dakika; 2 dk altı videolar 30 MB’a takılmaz */
+const EDU_MAX_VIDEO_BYTES = 500 * 1024 * 1024;
 const EDU_MAX_VIDEO_SECONDS = 120;
 const EDU_VIDEO_CHUNK_HINT =
-  'Video çok uzun veya büyük. Lütfen 2 dakikadan kısa parçalar halinde yükleyin.';
+  'Video 2 dakikadan uzun. Lütfen 2 dakikadan kısa parçalar halinde yükleyin.';
 const EDU_MAX_PDF_BYTES = 15 * 1024 * 1024;
 
 function submissionPhotoPaths(sub) {
@@ -3271,7 +3272,7 @@ export default async function handler(req, res) {
     }
     const mediaHints = {
       photo_too_large: 'Fotoğraf en fazla 10 MB olabilir.',
-      video_too_large: 'Video en fazla 30 MB olabilir.',
+      video_too_large: 'Video çok büyük. 2 dakikayı aşmayan parçalar halinde yükleyin.',
       empty_photo: 'Fotoğraf dosyası okunamadı.',
       empty_video: 'Video dosyası okunamadı.',
       invalid_video_type: 'Geçersiz video formatı (mp4, webm, mov).'

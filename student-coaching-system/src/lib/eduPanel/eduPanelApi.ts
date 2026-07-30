@@ -652,7 +652,7 @@ export async function submitEduHomework(
     body: JSON.stringify(body)
   });
   if (res.status === 413) {
-    throw new Error('Dosya çok büyük. Fotoğraf en fazla 10 MB, video 30 MB olabilir.');
+    throw new Error('Dosya çok büyük. Fotoğraf en fazla 10 MB olabilir; videoyu 2 dakikadan kısa parçalara bölün.');
   }
   const j = await parseJson<{ data: EduHomeworkSubmission }>(res);
   return j.data;
