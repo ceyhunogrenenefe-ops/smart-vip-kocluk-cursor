@@ -612,31 +612,40 @@ async function uploadSubmissionMediaDirect(
 
 export async function submitEduHomework(
   homeworkId: string,
-  payload?: { photos?: File[]; video?: File | null }
+  payload?: { photos?: File[]; videos?: File[]; video?: File | null }
 ): Promise<EduHomeworkSubmission> {
   const photos = (payload?.photos || []).filter((f) => f && isEduImageFile(f)).slice(0, 5);
-  const video = payload?.video && isEduVideoFile(payload.video) ? payload.video : null;
+  const videosFromList = (payload?.videos || []).filter((f) => f && isEduVideoFile(f));
+  const legacyVideo =
+    payload?.video && isEduVideoFile(payload.video) ? [payload.video] : [];
+  const videos = [...videosFromList, ...legacyVideo].slice(0, 5);
 
-  if ((payload?.photos?.length || 0) > 0 && photos.length === 0 && !video) {
+  if ((payload?.photos?.length || 0) > 0 && photos.length === 0 && videos.length === 0) {
     throw new Error('Fotoğraf formatı desteklenmiyor. JPG, PNG veya HEIC deneyin.');
   }
-  if (payload?.video && !video) {
+  if ((payload?.videos?.length || 0) > 0 && videos.length === 0 && !payload?.video) {
+    throw new Error('Video formatı desteklenmiyor. MP4 veya MOV deneyin.');
+  }
+  if (payload?.video && videos.length === 0 && !(payload?.videos?.length || 0)) {
     throw new Error('Video formatı desteklenmiyor. MP4 veya MOV deneyin.');
   }
 
   const photoPaths: string[] = [];
-  let videoPath: string | null = null;
+  const videoPaths: string[] = [];
 
   for (let i = 0; i < photos.length; i++) {
     photoPaths.push(await uploadSubmissionMediaDirect(homeworkId, photos[i], 'photo', i));
   }
-  if (video) {
-    videoPath = await uploadSubmissionMediaDirect(homeworkId, video, 'video', 0);
+  for (let i = 0; i < videos.length; i++) {
+    videoPaths.push(await uploadSubmissionMediaDirect(homeworkId, videos[i], 'video', i));
   }
 
   const body: Record<string, unknown> = { homework_id: homeworkId };
   if (photoPaths.length) body.photo_paths = photoPaths;
-  if (videoPath) body.video_path = videoPath;
+  if (videoPaths.length) {
+    body.video_paths = videoPaths;
+    body.video_path = videoPaths[0];
+  }
 
   const res = await apiFetch('/api/edu-panel?resource=submit', {
     method: 'POST',

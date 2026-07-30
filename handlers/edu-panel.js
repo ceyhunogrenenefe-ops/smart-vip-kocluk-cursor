@@ -1442,6 +1442,7 @@ async function loadRow(id) {
 }
 
 const EDU_MAX_SUBMISSION_PHOTOS = 5;
+const EDU_MAX_SUBMISSION_VIDEOS = 5;
 const EDU_MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 const EDU_MAX_VIDEO_BYTES = 30 * 1024 * 1024;
 const EDU_MAX_VIDEO_SECONDS = 120;
@@ -1458,10 +1459,26 @@ function submissionPhotoPaths(sub) {
   return legacy ? [legacy] : [];
 }
 
+function submissionVideoPaths(sub) {
+  const fromJson = Array.isArray(sub?.video_paths)
+    ? sub.video_paths.map((p) => String(p || '').trim()).filter(Boolean)
+    : [];
+  if (fromJson.length) return [...new Set(fromJson)];
+  const legacy = String(sub?.video_path || '').trim();
+  return legacy ? [legacy] : [];
+}
+
+function normalizeVideoPathsInput(videoPathsRaw, videoPathRaw) {
+  const fromArr = Array.isArray(videoPathsRaw)
+    ? videoPathsRaw.map((p) => String(p || '').trim()).filter(Boolean)
+    : [];
+  if (fromArr.length) return [...new Set(fromArr)].slice(0, EDU_MAX_SUBMISSION_VIDEOS);
+  const legacy = String(videoPathRaw || '').trim();
+  return legacy ? [legacy] : [];
+}
+
 function submissionAllMediaPaths(sub) {
-  const photos = submissionPhotoPaths(sub);
-  const video = String(sub?.video_path || '').trim();
-  return [...photos, ...(video ? [video] : [])];
+  return [...submissionPhotoPaths(sub), ...submissionVideoPaths(sub)];
 }
 
 function extFromMime(mime, fallback = 'jpg') {
@@ -1513,7 +1530,7 @@ async function assertStudentHomeworkSubmitAccess(actor, tags, homeworkId) {
 async function enrichSubmissionWithMediaUrls(sub) {
   if (!sub) return sub;
   const photoPaths = submissionPhotoPaths(sub);
-  const videoPath = String(sub.video_path || '').trim() || null;
+  const videoPaths = submissionVideoPaths(sub);
   const photo_urls = [];
   for (const path of photoPaths) {
     try {
@@ -1523,10 +1540,11 @@ async function enrichSubmissionWithMediaUrls(sub) {
       /* skip broken object */
     }
   }
-  let video_url = null;
-  if (videoPath) {
+  const video_urls = [];
+  for (const path of videoPaths) {
     try {
-      video_url = await signedEduUrl(EDU_SUBMISSIONS_BUCKET, videoPath, 3600);
+      const url = await signedEduUrl(EDU_SUBMISSIONS_BUCKET, path, 3600);
+      if (url) video_urls.push(url);
     } catch {
       /* skip */
     }
@@ -1534,9 +1552,12 @@ async function enrichSubmissionWithMediaUrls(sub) {
   return {
     ...sub,
     photo_paths: photoPaths,
+    video_paths: videoPaths,
+    video_path: videoPaths[0] || null,
     photo_urls,
-    video_url,
-    has_media: photoPaths.length > 0 || Boolean(videoPath)
+    video_urls,
+    video_url: video_urls[0] || null,
+    has_media: photoPaths.length > 0 || videoPaths.length > 0
   };
 }
 
@@ -2682,6 +2703,7 @@ export default async function handler(req, res) {
           patch.storage_path = null;
           patch.photo_paths = [];
           patch.video_path = null;
+          patch.video_paths = [];
         }
         const { data, error } = await supabaseAdmin
           .from('edu_homework_submissions')
@@ -2705,7 +2727,9 @@ export default async function handler(req, res) {
       const kind = String(body.kind || 'photo').trim() === 'video' ? 'video' : 'photo';
       const mime = String(body.mime || (kind === 'video' ? 'video/mp4' : 'image/jpeg')).trim();
       const fileSize = Number(body.file_size || 0);
-      const index = Math.max(0, Math.min(EDU_MAX_SUBMISSION_PHOTOS - 1, Number(body.index || 0)));
+      const maxIndex =
+        kind === 'video' ? EDU_MAX_SUBMISSION_VIDEOS - 1 : EDU_MAX_SUBMISSION_PHOTOS - 1;
+      const index = Math.max(0, Math.min(maxIndex, Number(body.index || 0)));
 
       if (kind === 'video') {
         if (fileSize > EDU_MAX_VIDEO_BYTES) {
@@ -2730,7 +2754,7 @@ export default async function handler(req, res) {
       const ext = extFromMime(mime, kind === 'video' ? 'mp4' : 'jpg');
       const path =
         kind === 'video'
-          ? `${homeworkId}/${actor.sub}-${ts}-video.${ext}`
+          ? `${homeworkId}/${actor.sub}-${ts}-video-${index}.${ext}`
           : `${homeworkId}/${actor.sub}-${ts}-${index}.${ext}`;
 
       try {
@@ -2768,14 +2792,16 @@ export default async function handler(req, res) {
       const legacyB64 = String(body.image_base64 || '').trim();
       const photosInput = Array.isArray(body.photos_base64) ? body.photos_base64 : [];
       const videoB64 = String(body.video_base64 || '').trim();
+      const videosB64Input = Array.isArray(body.videos_base64) ? body.videos_base64 : [];
       const photoPathsIncoming = Array.isArray(body.photo_paths)
         ? body.photo_paths.map((p) => String(p || '').trim()).filter(Boolean)
         : [];
-      const videoPathIncoming = String(body.video_path || '').trim() || null;
-      const hasDirectMedia = photoPathsIncoming.length > 0 || Boolean(videoPathIncoming);
+      const videoPathsIncoming = normalizeVideoPathsInput(body.video_paths, body.video_path);
+      const hasDirectMedia = photoPathsIncoming.length > 0 || videoPathsIncoming.length > 0;
       const hasLegacyPhoto = Boolean(legacyB64);
       const hasPhotos = photosInput.length > 0 || hasLegacyPhoto || photoPathsIncoming.length > 0;
-      const hasVideo = Boolean(videoB64) || Boolean(videoPathIncoming);
+      const hasVideo =
+        Boolean(videoB64) || videosB64Input.length > 0 || videoPathsIncoming.length > 0;
       if (!hasPhotos && !hasVideo) {
         /* Medya olmadan teslim — kayıt oluşturulur */
       }
@@ -2791,7 +2817,7 @@ export default async function handler(req, res) {
       }
 
       const photoPaths = [];
-      let videoPath = null;
+      const videoPaths = [];
       const ts = Date.now();
 
       if (hasDirectMedia) {
@@ -2802,11 +2828,11 @@ export default async function handler(req, res) {
           }
           photoPaths.push(p);
         }
-        if (videoPathIncoming) {
-          if (!isAllowedSubmissionMediaPath(videoPathIncoming, homeworkId, actor.sub)) {
+        for (const p of videoPathsIncoming) {
+          if (!isAllowedSubmissionMediaPath(p, homeworkId, actor.sub)) {
             return res.status(400).json({ error: 'invalid_video_path' });
           }
-          videoPath = videoPathIncoming;
+          videoPaths.push(p);
         }
       } else {
         const uploadPhoto = async (b64, mime, index) => {
@@ -2837,22 +2863,55 @@ export default async function handler(req, res) {
           }
         }
 
-        if (hasVideo && videoB64) {
-          const vBuf = Buffer.from(videoB64, 'base64');
-          if (!vBuf.length) return res.status(400).json({ error: 'empty_video' });
+        const uploadVideoB64 = async (b64, mime, index) => {
+          const vBuf = Buffer.from(b64, 'base64');
+          if (!vBuf.length) throw new Error('empty_video');
           if (vBuf.length > EDU_MAX_VIDEO_BYTES) {
-            return res.status(400).json({ error: 'video_too_large', hint: EDU_VIDEO_CHUNK_HINT });
+            const err = new Error('video_too_large');
+            err.hint = EDU_VIDEO_CHUNK_HINT;
+            throw err;
           }
-          const vMime = String(body.video_mime || 'video/mp4');
-          if (!vMime.startsWith('video/')) return res.status(400).json({ error: 'invalid_video_type' });
-          const vExt = extFromMime(vMime, 'mp4');
-          videoPath = `${homeworkId}/${actor.sub}-${ts}-video.${vExt}`;
+          if (!String(mime || '').startsWith('video/')) throw new Error('invalid_video_type');
+          const vExt = extFromMime(mime, 'mp4');
+          const path = `${homeworkId}/${actor.sub}-${ts}-video-${index}.${vExt}`;
           await uploadEduBuffer({
             bucket: EDU_SUBMISSIONS_BUCKET,
-            path: videoPath,
+            path,
             buffer: vBuf,
-            contentType: vMime
+            contentType: mime || 'video/mp4'
           });
+          videoPaths.push(path);
+        };
+
+        if (videosB64Input.length) {
+          const capped = videosB64Input.slice(0, EDU_MAX_SUBMISSION_VIDEOS);
+          for (let i = 0; i < capped.length; i++) {
+            const item = capped[i];
+            const b64 =
+              typeof item === 'string' ? item : String(item?.data || item?.base64 || '').trim();
+            if (!b64) continue;
+            const mime =
+              typeof item === 'object' && item?.mime
+                ? String(item.mime)
+                : String(body.video_mime || 'video/mp4');
+            try {
+              await uploadVideoB64(b64, mime, videoPaths.length);
+            } catch (e) {
+              if (e?.message === 'video_too_large') {
+                return res.status(400).json({ error: 'video_too_large', hint: EDU_VIDEO_CHUNK_HINT });
+              }
+              return res.status(400).json({ error: e?.message || 'video_upload_failed' });
+            }
+          }
+        } else if (hasVideo && videoB64) {
+          try {
+            await uploadVideoB64(videoB64, String(body.video_mime || 'video/mp4'), 0);
+          } catch (e) {
+            if (e?.message === 'video_too_large') {
+              return res.status(400).json({ error: 'video_too_large', hint: EDU_VIDEO_CHUNK_HINT });
+            }
+            return res.status(400).json({ error: e?.message || 'video_upload_failed' });
+          }
         }
       }
 
@@ -2862,7 +2921,8 @@ export default async function handler(req, res) {
         student_id: student?.id || null,
         storage_path: photoPaths[0] || null,
         photo_paths: photoPaths,
-        video_path: videoPath,
+        video_path: videoPaths[0] || null,
+        video_paths: videoPaths,
         submitted_at: new Date().toISOString(),
         status: 'submitted'
       };
@@ -3168,7 +3228,7 @@ export default async function handler(req, res) {
       let videoCount = 0;
       for (const s of submissions) {
         if (submissionPhotoPaths(s).length) photoCount += 1;
-        if (String(s.video_path || '').trim()) videoCount += 1;
+        if (submissionVideoPaths(s).length) videoCount += 1;
       }
       const rosterStatus = roster.map((st) => {
         const uid = studentUserIdFromStudent(st);

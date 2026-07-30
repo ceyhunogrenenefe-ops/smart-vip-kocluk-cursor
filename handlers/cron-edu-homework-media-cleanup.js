@@ -11,8 +11,12 @@ function submissionMediaPaths(sub) {
     : [];
   const legacy = String(sub?.storage_path || '').trim();
   const photos = fromJson.length ? fromJson : legacy ? [legacy] : [];
-  const video = String(sub?.video_path || '').trim();
-  return [...photos, ...(video ? [video] : [])];
+  const videosFromJson = Array.isArray(sub?.video_paths)
+    ? sub.video_paths.map((p) => String(p || '').trim()).filter(Boolean)
+    : [];
+  const legacyVideo = String(sub?.video_path || '').trim();
+  const videos = videosFromJson.length ? [...new Set(videosFromJson)] : legacyVideo ? [legacyVideo] : [];
+  return [...photos, ...videos];
 }
 
 export default async function handler(req, res) {
@@ -30,7 +34,7 @@ export default async function handler(req, res) {
   try {
     const { data: rows, error } = await supabaseAdmin
       .from('edu_homework_submissions')
-      .select('id, photo_paths, video_path, storage_path, submitted_at')
+      .select('id, photo_paths, video_path, video_paths, storage_path, submitted_at')
       .lt('submitted_at', cutoff)
       .limit(500);
     if (error) throw error;
@@ -48,7 +52,7 @@ export default async function handler(req, res) {
       }
       const { error: upErr } = await supabaseAdmin
         .from('edu_homework_submissions')
-        .update({ storage_path: null, photo_paths: [], video_path: null })
+        .update({ storage_path: null, photo_paths: [], video_path: null, video_paths: [] })
         .eq('id', sub.id);
       if (upErr) {
         errors.push({ id: sub.id, error: upErr.message });

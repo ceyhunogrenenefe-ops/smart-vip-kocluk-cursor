@@ -153,7 +153,9 @@ export function computeHomeworkTeacherAnalytics(opts: {
   for (const s of opts.submissions) {
     const photos = Array.isArray(s.photo_paths) ? s.photo_paths.filter(Boolean) : [];
     if (photos.length || s.storage_path || (s.photo_urls && s.photo_urls.length)) photoCount += 1;
-    if (s.video_path || s.video_url) videoCount += 1;
+    if (s.video_paths?.length || s.video_path || s.video_url || s.video_urls?.length) {
+      videoCount += 1;
+    }
   }
 
   return { ...base, earliest, latest, missingNames, photoCount, videoCount };

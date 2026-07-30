@@ -30,7 +30,7 @@ type Props = {
   onOpenPoolAnimation?: (poolId: string) => void;
   onSubmitHomework: (
     hw: EduHomework,
-    payload: { photos: File[]; video: File | null }
+    payload: { photos: File[]; videos: File[] }
   ) => Promise<void>;
   onSaveProgress: (payload: {
     animation_completed: boolean;
@@ -367,17 +367,38 @@ export default function StudentEduTopicCard({
                                   </span>
                                 ) : null}
                               </div>
-                            ) : sub.photo_paths?.length || sub.storage_path || sub.video_path ? (
+                            ) : sub.photo_paths?.length ||
+                              sub.storage_path ||
+                              sub.video_path ||
+                              sub.video_paths?.length ? (
                               <p className="text-[10px] text-green-600">Medya eklendi</p>
                             ) : null}
-                            {sub.video_url ? (
+                            {(sub.video_urls?.length
+                              ? sub.video_urls
+                              : sub.video_url
+                                ? [sub.video_url]
+                                : []
+                            ).map((url) => (
                               <video
-                                src={sub.video_url}
+                                key={url}
+                                src={url}
                                 controls
                                 playsInline
                                 className="max-h-28 w-full rounded-md border border-green-200 bg-black"
                               />
-                            ) : null}
+                            ))}
+                            <button
+                              type="button"
+                              disabled={busyHw === hw.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSubmitHw(hw);
+                              }}
+                              className="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-50 disabled:opacity-50"
+                            >
+                              <Send className="h-4 w-4" />
+                              {busyHw === hw.id ? 'Gönderiliyor…' : 'Yeniden düzenle'}
+                            </button>
                           </div>
                         ) : (
                           <button
@@ -427,6 +448,7 @@ export default function StudentEduTopicCard({
         open={Boolean(submitHw)}
         homework={submitHw}
         busy={Boolean(submitHw && busyHw === submitHw.id)}
+        isResubmit={Boolean(submitHw && submissions[submitHw.id])}
         onClose={() => setSubmitHw(null)}
         onSubmit={async (payload) => {
           if (!submitHw) return;

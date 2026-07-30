@@ -134,7 +134,10 @@ export default function EduStudentHomeworkDetailModal({
           ) : null}
 
           {submission &&
-          (submission.photo_urls?.length || submission.video_url || submission.has_media) ? (
+          (submission.photo_urls?.length ||
+            submission.video_url ||
+            submission.video_urls?.length ||
+            submission.has_media) ? (
             <section className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
               <p className="mb-2 text-xs font-semibold text-slate-700">Yüklediğin çözüm</p>
               {submission.photo_urls && submission.photo_urls.length > 0 ? (
@@ -154,21 +157,38 @@ export default function EduStudentHomeworkDetailModal({
               ) : submission.has_media ? (
                 <p className="text-xs text-amber-700">Fotoğraf kaydı var; önizleme yüklenemedi.</p>
               ) : null}
-              {submission.video_url ? (
+              {(submission.video_urls?.length
+                ? submission.video_urls
+                : submission.video_url
+                  ? [submission.video_url]
+                  : []
+              ).map((url) => (
                 <video
-                  src={submission.video_url}
+                  key={url}
+                  src={url}
                   controls
                   playsInline
                   className="mt-2 max-h-56 w-full rounded-lg border border-slate-200 bg-black"
                 />
-              ) : null}
+              ))}
             </section>
           ) : null}
 
           {submission ? (
-            <p className="text-sm font-medium text-green-700">
-              Teslim edildi ({new Date(submission.submitted_at).toLocaleString('tr-TR')})
-            </p>
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-green-700">
+                Teslim edildi ({new Date(submission.submitted_at).toLocaleString('tr-TR')})
+              </p>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={onSubmit}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-300 bg-white px-4 py-3 text-sm font-semibold text-amber-900 hover:bg-amber-50 disabled:opacity-50"
+              >
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                Yeniden düzenle / Tekrar teslim et
+              </button>
+            </div>
           ) : (
             <button
               type="button"

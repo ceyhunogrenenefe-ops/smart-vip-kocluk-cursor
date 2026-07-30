@@ -171,15 +171,15 @@ export default function StudentEduPanelPage() {
   const onSubmitHomework = async (
     row: EduLessonRow,
     hw: EduHomework,
-    payload: { photos: File[]; video: File | null }
+    payload: { photos: File[]; videos: File[] }
   ) => {
     setBusyHw(hw.id);
     try {
       const sub = await submitEduHomework(hw.id, {
         photos: payload.photos,
-        video: payload.video
+        videos: payload.videos
       });
-      toast.success('Ödev teslim edildi');
+      toast.success(submissions[hw.id] ? 'Ödev tekrar teslim edildi' : 'Ödev teslim edildi');
       const nextSubs = { ...submissions, [hw.id]: sub };
       setSubmissions(nextSubs);
 

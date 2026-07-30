@@ -79,7 +79,10 @@ export default function EduHomeworkSubmissionsModal({
   };
 
   const onDeleteMedia = async (sub: EduHomeworkSubmission) => {
-    if (!sub.has_media && !(sub.photo_urls?.length || sub.video_url)) {
+    if (
+      !sub.has_media &&
+      !(sub.photo_urls?.length || sub.video_url || sub.video_urls?.length)
+    ) {
       toast.message('Bu teslimde medya dosyası yok.');
       return;
     }
@@ -92,7 +95,14 @@ export default function EduHomeworkSubmissionsModal({
       setSubs((prev) =>
         prev.map((s) =>
           s.id === updated.id
-            ? { ...updated, student_name: s.student_name, photo_urls: [], video_url: null, has_media: false }
+            ? {
+                ...updated,
+                student_name: s.student_name,
+                photo_urls: [],
+                video_url: null,
+                video_urls: [],
+                has_media: false
+              }
             : s
         )
       );
@@ -262,7 +272,9 @@ function SubmissionDetail({
     setGrade(sub.grade || '');
   }, [sub.id, sub.teacher_note, sub.grade]);
 
-  const hasMedia = Boolean(sub.has_media || sub.photo_urls?.length || sub.video_url);
+  const hasMedia = Boolean(
+    sub.has_media || sub.photo_urls?.length || sub.video_url || sub.video_urls?.length
+  );
 
   return (
     <div className="min-h-0 overflow-y-auto p-4 space-y-4">
@@ -319,15 +331,18 @@ function SubmissionDetail({
               ))}
             </div>
           ) : null}
-          {sub.video_url ? (
-            <video
-              src={sub.video_url}
-              controls
-              playsInline
-              preload="metadata"
-              className="max-h-64 w-full rounded-lg border border-slate-200 bg-black"
-            />
-          ) : null}
+          {(sub.video_urls?.length ? sub.video_urls : sub.video_url ? [sub.video_url] : []).map(
+            (url) => (
+              <video
+                key={url}
+                src={url}
+                controls
+                playsInline
+                preload="metadata"
+                className="max-h-64 w-full rounded-lg border border-slate-200 bg-black"
+              />
+            )
+          )}
         </section>
       ) : (
         <p className="text-xs italic text-slate-500">Bu teslimde medya dosyası yok.</p>

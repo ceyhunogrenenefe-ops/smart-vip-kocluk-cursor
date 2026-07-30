@@ -5,6 +5,7 @@ import { formatEduHomeworkLabel } from '../../lib/eduPanel/eduHomeworkForm';
 import { isEduImageFile, isEduVideoFile } from '../../lib/eduPanel/eduPanelApi';
 
 const MAX_PHOTOS = 5;
+const MAX_VIDEOS = 5;
 const MAX_VIDEO_SECONDS = 120;
 const MAX_VIDEO_MB = 30;
 
@@ -12,8 +13,10 @@ type Props = {
   open: boolean;
   homework: EduHomework | null;
   busy?: boolean;
+  /** Daha önce teslim edilmişse yeniden düzenleme / tekrar teslim */
+  isResubmit?: boolean;
   onClose: () => void;
-  onSubmit: (payload: { photos: File[]; video: File | null }) => Promise<void>;
+  onSubmit: (payload: { photos: File[]; videos: File[] }) => Promise<void>;
 };
 
 function readVideoDuration(file: File): Promise<number> {
@@ -49,21 +52,22 @@ export default function EduSubmitHomeworkModal({
   open,
   homework,
   busy,
+  isResubmit,
   onClose,
   onSubmit
 }: Props) {
   const [photos, setPhotos] = useState<File[]>([]);
-  const [video, setVideo] = useState<File | null>(null);
+  const [videos, setVideos] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
-  const [videoPreview, setVideoPreview] = useState<string | null>(null);
+  const [videoPreviews, setVideoPreviews] = useState<string[]>([]);
   const [mediaError, setMediaError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
       setPhotos([]);
-      setVideo(null);
+      setVideos([]);
       setPhotoPreviews([]);
-      setVideoPreview(null);
+      setVideoPreviews([]);
       setMediaError(null);
     }
   }, [open]);
@@ -75,14 +79,10 @@ export default function EduSubmitHomeworkModal({
   }, [photos]);
 
   useEffect(() => {
-    if (!video) {
-      setVideoPreview(null);
-      return;
-    }
-    const url = URL.createObjectURL(video);
-    setVideoPreview(url);
-    return () => URL.revokeObjectURL(url);
-  }, [video]);
+    const urls = videos.map((f) => URL.createObjectURL(f));
+    setVideoPreviews(urls);
+    return () => urls.forEach((u) => URL.revokeObjectURL(u));
+  }, [videos]);
 
   if (!open || !homework) return null;
 
@@ -106,28 +106,41 @@ export default function EduSubmitHomeworkModal({
     setPhotos(next);
   };
 
-  const onPickVideo = async (file: File | null) => {
-    if (!file) return;
-    if (!isEduVideoFile(file)) {
-      setMediaError('Geçersiz video dosyası. MP4 veya MOV deneyin.');
-      return;
-    }
-    try {
-      const dur = await readVideoDuration(file);
-      const warn = videoChunkWarning(file, dur);
-      if (warn) {
-        setMediaError(warn);
-        return;
+  const onPickVideos = async (files: FileList | null) => {
+    if (!files?.length) return;
+    const next = [...videos];
+    let lastError: string | null = null;
+    for (const file of Array.from(files)) {
+      if (next.length >= MAX_VIDEOS) {
+        lastError = `En fazla ${MAX_VIDEOS} video yükleyebilirsin.`;
+        break;
       }
-      setMediaError(null);
-      setVideo(file);
-    } catch {
-      setMediaError('Video süresi okunamadı.');
+      if (!isEduVideoFile(file)) {
+        lastError = 'Geçersiz video dosyası. MP4 veya MOV deneyin.';
+        continue;
+      }
+      try {
+        const dur = await readVideoDuration(file);
+        const warn = videoChunkWarning(file, dur);
+        if (warn) {
+          lastError = warn;
+          continue;
+        }
+        next.push(file);
+      } catch {
+        lastError = 'Video süresi okunamadı.';
+      }
     }
+    setVideos(next);
+    setMediaError(lastError);
   };
 
   const removePhoto = (index: number) => {
     setPhotos((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const removeVideo = (index: number) => {
+    setVideos((prev) => prev.filter((_, i) => i !== index));
   };
 
   return (
@@ -135,7 +148,9 @@ export default function EduSubmitHomeworkModal({
       <div role="dialog" aria-modal="true" className="w-full max-w-md rounded-2xl bg-white shadow-xl">
         <div className="flex items-start justify-between border-b border-slate-100 px-4 py-3">
           <div>
-            <h3 className="text-base font-semibold text-slate-900">Ödevi Teslim Et</h3>
+            <h3 className="text-base font-semibold text-slate-900">
+              {isResubmit ? 'Ödevi Yeniden Düzenle' : 'Ödevi Teslim Et'}
+            </h3>
             <p className="mt-0.5 text-xs text-slate-500">{formatEduHomeworkLabel(homework)}</p>
           </div>
           <button
@@ -152,20 +167,28 @@ export default function EduSubmitHomeworkModal({
           <button
             type="button"
             disabled={busy}
-            onClick={() => void onSubmit({ photos, video })}
+            onClick={() => void onSubmit({ photos, videos })}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-600 py-2.5 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            {busy ? 'Gönderiliyor…' : 'Teslim Et'}
+            {busy ? 'Gönderiliyor…' : isResubmit ? 'Tekrar Teslim Et' : 'Teslim Et'}
           </button>
 
           <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
             <p className="text-[11px] leading-relaxed text-slate-600">
-              İstersen çözdüğün sayfaların fotoğrafını veya kısa videosunu yükleyebilirsin.
+              İstersen çözdüğün sayfaların fotoğrafını veya kısa videolarını yükleyebilirsin.
+              <span className="font-semibold text-slate-800"> Birden fazla video</span> seçebilirsin
+              (uzun çözümleri 2 dakikalık parçalara bölerek).
             </p>
+            {isResubmit ? (
+              <p className="mt-1 text-[11px] font-medium text-amber-800">
+                Tekrar teslimde önceki fotoğraf/videolar yenileriyle değiştirilir.
+              </p>
+            ) : null}
             <p className="mt-1 text-[10px] text-slate-400">
-              Birden fazla fotoğraf · Video en fazla {MAX_VIDEO_SECONDS} sn ({MAX_VIDEO_MB} MB) ·
-              Uzun videoları parça parça yükle · Zorunlu değil
+              En fazla {MAX_PHOTOS} fotoğraf · En fazla {MAX_VIDEOS} video · Her video en fazla{' '}
+              {MAX_VIDEO_SECONDS} sn ({MAX_VIDEO_MB} MB) · Uzun videoları parça parça yükle · Zorunlu
+              değil
             </p>
 
             <div className="mt-3 flex flex-wrap gap-2">
@@ -186,14 +209,15 @@ export default function EduSubmitHomeworkModal({
               </label>
               <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-violet-200 bg-white px-3 py-2 text-xs font-semibold text-violet-900 hover:bg-violet-50">
                 <Video className="h-4 w-4" />
-                Video
+                Video{videos.length ? ` (${videos.length}/${MAX_VIDEOS})` : ''}
                 <input
                   type="file"
                   accept="video/mp4,video/webm,video/quicktime"
+                  multiple
                   className="hidden"
-                  disabled={busy || Boolean(video)}
+                  disabled={busy || videos.length >= MAX_VIDEOS}
                   onChange={(e) => {
-                    void onPickVideo(e.target.files?.[0] || null);
+                    void onPickVideos(e.target.files);
                     e.target.value = '';
                   }}
                 />
@@ -222,24 +246,32 @@ export default function EduSubmitHomeworkModal({
               </div>
             ) : null}
 
-            {videoPreview ? (
-              <div className="relative mt-3 overflow-hidden rounded-lg border border-slate-200">
-                <video src={videoPreview} controls className="max-h-40 w-full bg-black" />
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => setVideo(null)}
-                  className="absolute right-2 top-2 rounded-full bg-black/50 p-1 text-white"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
+            {videoPreviews.length > 0 ? (
+              <div className="mt-3 space-y-2">
+                {videoPreviews.map((src, i) => (
+                  <div key={src} className="relative overflow-hidden rounded-lg border border-slate-200">
+                    <video src={src} controls className="max-h-40 w-full bg-black" />
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => removeVideo(i)}
+                      className="absolute right-2 top-2 rounded-full bg-black/50 p-1 text-white"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                    <span className="absolute bottom-2 left-2 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                      Video {i + 1}/{videos.length}
+                    </span>
+                  </div>
+                ))}
               </div>
             ) : null}
 
-            {photos.length > 0 || video ? (
+            {photos.length > 0 || videos.length > 0 ? (
               <p className="mt-2 flex items-center gap-1 text-[10px] text-slate-500">
                 <Camera className="h-3 w-3" />
-                {photos.length} fotoğraf{video ? ' · 1 video' : ''}
+                {photos.length} fotoğraf
+                {videos.length ? ` · ${videos.length} video` : ''}
               </p>
             ) : null}
           </div>

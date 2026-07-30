@@ -55,8 +55,10 @@ export type EduHomeworkSubmission = {
   storage_path?: string | null;
   photo_paths?: string[];
   video_path?: string | null;
+  video_paths?: string[];
   photo_urls?: string[];
   video_url?: string | null;
+  video_urls?: string[];
   has_media?: boolean;
   student_name?: string;
   submitted_at: string;
@@ -67,6 +69,8 @@ export type EduHomeworkSubmission = {
 
 export type EduHomeworkSubmitPayload = {
   photos?: File[];
+  videos?: File[];
+  /** @deprecated Tek video — videos kullanın */
   video?: File | null;
 };
 
