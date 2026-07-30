@@ -1125,10 +1125,185 @@ function isProgressTableMissing(err) {
   );
 }
 
-function computeProgressPoints(animationCompleted, homeworkPercent) {
-  const anim = animationCompleted ? 40 : 0;
-  const hw = Math.round(Math.max(0, Math.min(100, Number(homeworkPercent) || 0)) * 0.6);
+const EDU_ANIMATION_POINTS = 40;
+const EDU_HOMEWORK_POINTS_MAX = 60;
+const EDU_HOMEWORK_ONLY_POINTS_MAX = 100;
+const EDU_LEVEL_THRESHOLDS = [0, 15, 35, 60, 90, 130, 180, 240, 310, 400];
+
+function homeworkPoolIdsFromRow(hw) {
+  const fromArr = Array.isArray(hw?.pool_animation_ids)
+    ? hw.pool_animation_ids.map((x) => String(x || '').trim()).filter(Boolean)
+    : [];
+  if (fromArr.length) return [...new Set(fromArr)];
+  const one = String(hw?.pool_animation_id || '').trim();
+  return one ? [one] : [];
+}
+
+async function lessonRowHasAnimation(lessonRowId) {
+  const { data: anims } = await supabaseAdmin
+    .from('edu_animations')
+    .select('id')
+    .eq('lesson_row_id', lessonRowId)
+    .limit(1);
+  if (anims?.length) return true;
+  const { data: hws } = await supabaseAdmin
+    .from('edu_homework')
+    .select('pool_animation_ids, pool_animation_id, status')
+    .eq('lesson_row_id', lessonRowId)
+    .eq('status', 'published');
+  return (hws || []).some((hw) => homeworkPoolIdsFromRow(hw).length > 0);
+}
+
+function computeProgressPoints(animationCompleted, homeworkPercent, hasAnimation = true) {
+  const anim = hasAnimation && animationCompleted ? EDU_ANIMATION_POINTS : 0;
+  const hwMax = hasAnimation ? EDU_HOMEWORK_POINTS_MAX : EDU_HOMEWORK_ONLY_POINTS_MAX;
+  const hwPct = Math.max(0, Math.min(100, Number(homeworkPercent) || 0));
+  const hw = Math.round(hwPct * (hwMax / 100));
   return anim + hw;
+}
+
+function eduXpFromRewards(gold, silver) {
+  return gold * 10 + silver * 5;
+}
+
+function eduLevelFromXp(xp) {
+  const safe = Math.max(0, Math.floor(Number(xp) || 0));
+  let level = 1;
+  for (let i = 1; i < EDU_LEVEL_THRESHOLDS.length; i += 1) {
+    if (safe >= EDU_LEVEL_THRESHOLDS[i]) level = i + 1;
+    else break;
+  }
+  return level;
+}
+
+function isRewardsTableMissing(err) {
+  const msg = String(err?.message || err || '').toLowerCase();
+  return (
+    msg.includes('edu_student_rewards') &&
+    (msg.includes('does not exist') || msg.includes('schema cache'))
+  );
+}
+
+async function loadStudentRewards(studentUserId) {
+  const { data, error } = await supabaseAdmin
+    .from('edu_student_rewards')
+    .select('*')
+    .eq('student_user_id', studentUserId)
+    .maybeSingle();
+  if (error) {
+    if (isRewardsTableMissing(error)) return null;
+    throw error;
+  }
+  return data;
+}
+
+async function ensureStudentRewards(studentUserId, studentId = null) {
+  const existing = await loadStudentRewards(studentUserId);
+  if (existing) return existing;
+  const row = {
+    student_user_id: studentUserId,
+    student_id: studentId,
+    gold: 0,
+    silver: 0,
+    xp: 0,
+    level: 1,
+    updated_at: new Date().toISOString()
+  };
+  const { data, error } = await supabaseAdmin
+    .from('edu_student_rewards')
+    .insert(row)
+    .select()
+    .single();
+  if (error) {
+    if (isRewardsTableMissing(error)) return null;
+    throw error;
+  }
+  return data;
+}
+
+function computeRewardDelta(previous, next) {
+  let gold = 0;
+  let silver = 0;
+  const prevHw = Number(previous?.homework_percent || 0);
+  const nextHw = Number(next?.homework_percent || 0);
+  const prevAnim = Boolean(previous?.animation_completed);
+  const nextAnim = Boolean(next?.animation_completed);
+  const prevTopic = Boolean(previous?.topic_completed);
+  const nextTopic = Boolean(next?.topic_completed);
+
+  if (!prevAnim && nextAnim) silver += 1;
+  if (prevHw < 100 && nextHw >= 100) gold += 1;
+  else if (nextHw > prevHw) silver += 1;
+  if (!prevTopic && nextTopic) gold += 1;
+
+  return { gold, silver };
+}
+
+async function applyStudentRewards(studentUserId, studentId, delta) {
+  if (!delta || (delta.gold <= 0 && delta.silver <= 0)) return null;
+  const current = (await ensureStudentRewards(studentUserId, studentId)) || {
+    gold: 0,
+    silver: 0,
+    xp: 0,
+    level: 1
+  };
+  const previousLevel = Number(current.level || 1);
+  const gold = Number(current.gold || 0) + delta.gold;
+  const silver = Number(current.silver || 0) + delta.silver;
+  const xp = eduXpFromRewards(gold, silver);
+  const level = eduLevelFromXp(xp);
+  const now = new Date().toISOString();
+  const row = {
+    student_user_id: studentUserId,
+    student_id: studentId || current.student_id || null,
+    gold,
+    silver,
+    xp,
+    level,
+    updated_at: now
+  };
+  const { data, error } = await supabaseAdmin
+    .from('edu_student_rewards')
+    .upsert(row, { onConflict: 'student_user_id' })
+    .select()
+    .single();
+  if (error) {
+    if (isRewardsTableMissing(error)) return null;
+    throw error;
+  }
+  return {
+    gold: delta.gold,
+    silver: delta.silver,
+    levelUp: level > previousLevel,
+    previousLevel,
+    newLevel: level,
+    totals: {
+      gold: Number(data.gold || 0),
+      silver: Number(data.silver || 0),
+      xp: Number(data.xp || 0),
+      level: Number(data.level || 1)
+    }
+  };
+}
+
+async function normalizeProgressPoints(progressRows) {
+  if (!progressRows?.length) return [];
+  const rowIds = [...new Set(progressRows.map((p) => p.lesson_row_id))];
+  const animFlags = new Map();
+  await Promise.all(
+    rowIds.map(async (id) => {
+      animFlags.set(id, await lessonRowHasAnimation(id));
+    })
+  );
+  return progressRows.map((p) => {
+    const hasAnim = animFlags.get(p.lesson_row_id) ?? true;
+    const points = computeProgressPoints(
+      p.animation_completed,
+      p.homework_percent,
+      hasAnim
+    );
+    return points !== Number(p.points || 0) ? { ...p, points } : p;
+  });
 }
 
 async function loadProgressForRow(lessonRowId, studentUserId) {
@@ -1152,6 +1327,7 @@ async function upsertLessonRowProgress({
   patch
 }) {
   const existing = await loadProgressForRow(lessonRowId, studentUserId);
+  const hasAnimation = await lessonRowHasAnimation(lessonRowId);
   const animationCompleted =
     patch.animation_completed !== undefined
       ? Boolean(patch.animation_completed)
@@ -1165,6 +1341,17 @@ async function upsertLessonRowProgress({
       ? Boolean(patch.topic_completed)
       : Boolean(existing?.topic_completed);
   const now = new Date().toISOString();
+  const previous = existing || {
+    animation_completed: false,
+    homework_percent: 0,
+    topic_completed: false
+  };
+  const next = {
+    animation_completed: animationCompleted,
+    homework_percent: homeworkPercent,
+    topic_completed: topicCompleted
+  };
+  const rewardDelta = computeRewardDelta(previous, next);
   const row = {
     lesson_row_id: lessonRowId,
     student_user_id: studentUserId,
@@ -1180,10 +1367,11 @@ async function upsertLessonRowProgress({
       topicCompleted && !existing?.topic_completed
         ? now
         : existing?.topic_completed_at || (topicCompleted ? now : null),
-    points: computeProgressPoints(animationCompleted, homeworkPercent),
+    points: computeProgressPoints(animationCompleted, homeworkPercent, hasAnimation),
     updated_at: now
   };
 
+  let saved;
   if (existing?.id) {
     const { data, error } = await supabaseAdmin
       .from('edu_lesson_row_progress')
@@ -1192,16 +1380,19 @@ async function upsertLessonRowProgress({
       .select()
       .single();
     if (error) throw error;
-    return data;
+    saved = data;
+  } else {
+    const { data, error } = await supabaseAdmin
+      .from('edu_lesson_row_progress')
+      .insert(row)
+      .select()
+      .single();
+    if (error) throw error;
+    saved = data;
   }
 
-  const { data, error } = await supabaseAdmin
-    .from('edu_lesson_row_progress')
-    .insert(row)
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
+  const rewards = await applyStudentRewards(studentUserId, studentId, rewardDelta);
+  return { progress: saved, rewards };
 }
 
 async function studentsForLessonRow(row, { actor = null, tags = [], classId = null } = {}) {
@@ -1253,6 +1444,9 @@ async function loadRow(id) {
 const EDU_MAX_SUBMISSION_PHOTOS = 5;
 const EDU_MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 const EDU_MAX_VIDEO_BYTES = 30 * 1024 * 1024;
+const EDU_MAX_VIDEO_SECONDS = 120;
+const EDU_VIDEO_CHUNK_HINT =
+  'Video çok uzun veya büyük. Lütfen 2 dakikadan kısa parçalar halinde yükleyin.';
 const EDU_MAX_PDF_BYTES = 15 * 1024 * 1024;
 
 function submissionPhotoPaths(sub) {
@@ -1581,7 +1775,9 @@ export default async function handler(req, res) {
           }));
           return res.status(200).json({
             data: published,
-            progress: progressResult.error ? [] : progressResult.data || []
+            progress: progressResult.error
+              ? []
+              : await normalizeProgressPoints(progressResult.data || [])
           });
         }
 
@@ -2513,7 +2709,10 @@ export default async function handler(req, res) {
 
       if (kind === 'video') {
         if (fileSize > EDU_MAX_VIDEO_BYTES) {
-          return res.status(400).json({ error: 'video_too_large', hint: 'Video en fazla 30 MB olabilir' });
+          return res.status(400).json({
+            error: 'video_too_large',
+            hint: EDU_VIDEO_CHUNK_HINT
+          });
         }
         if (!mime.startsWith('video/')) {
           return res.status(400).json({ error: 'invalid_video_type' });
@@ -2641,7 +2840,9 @@ export default async function handler(req, res) {
         if (hasVideo && videoB64) {
           const vBuf = Buffer.from(videoB64, 'base64');
           if (!vBuf.length) return res.status(400).json({ error: 'empty_video' });
-          if (vBuf.length > EDU_MAX_VIDEO_BYTES) return res.status(400).json({ error: 'video_too_large' });
+          if (vBuf.length > EDU_MAX_VIDEO_BYTES) {
+            return res.status(400).json({ error: 'video_too_large', hint: EDU_VIDEO_CHUNK_HINT });
+          }
           const vMime = String(body.video_mime || 'video/mp4');
           if (!vMime.startsWith('video/')) return res.status(400).json({ error: 'invalid_video_type' });
           const vExt = extFromMime(vMime, 'mp4');
@@ -2676,6 +2877,35 @@ export default async function handler(req, res) {
       return res.status(201).json({ data: enriched });
     }
 
+    if (resource === 'rewards' && req.method === 'GET') {
+      if (!tags.includes('student')) return res.status(403).json({ error: 'forbidden' });
+      actor = await enrichStudentActor(actor);
+      const ctx = await studentAccessContext(actor);
+      try {
+        const rewards = await ensureStudentRewards(actor.sub, ctx.student?.id || null);
+        if (!rewards) {
+          return res.status(200).json({
+            data: { gold: 0, silver: 0, xp: 0, level: 1 }
+          });
+        }
+        return res.status(200).json({
+          data: {
+            gold: Number(rewards.gold || 0),
+            silver: Number(rewards.silver || 0),
+            xp: Number(rewards.xp || 0),
+            level: Number(rewards.level || 1)
+          }
+        });
+      } catch (e) {
+        if (isRewardsTableMissing(e)) {
+          return res.status(200).json({
+            data: { gold: 0, silver: 0, xp: 0, level: 1 }
+          });
+        }
+        throw e;
+      }
+    }
+
     if (resource === 'progress') {
       if (req.method === 'GET') {
         if (!tags.includes('student')) return res.status(403).json({ error: 'forbidden' });
@@ -2691,7 +2921,8 @@ export default async function handler(req, res) {
           if (isProgressTableMissing(error)) return res.status(200).json({ data: [] });
           throw error;
         }
-        return res.status(200).json({ data: data || [] });
+        const normalized = await normalizeProgressPoints(data || []);
+        return res.status(200).json({ data: normalized });
       }
       if (req.method === 'POST') {
         if (!tags.includes('student')) return res.status(403).json({ error: 'forbidden' });
@@ -2712,13 +2943,13 @@ export default async function handler(req, res) {
         if (body.homework_percent !== undefined) patch.homework_percent = body.homework_percent;
         if (body.topic_completed !== undefined) patch.topic_completed = Boolean(body.topic_completed);
         try {
-          const data = await upsertLessonRowProgress({
+          const result = await upsertLessonRowProgress({
             lessonRowId,
             studentUserId: actor.sub,
             studentId: ctx.student?.id || null,
             patch
           });
-          return res.status(200).json({ data });
+          return res.status(200).json({ data: result.progress, rewards: result.rewards || null });
         } catch (e) {
           if (isProgressTableMissing(e)) {
             return res.status(503).json({
@@ -2773,9 +3004,13 @@ export default async function handler(req, res) {
         if (!isProgressTableMissing(e)) throw e;
       }
       const byUser = new Map(progressRows.map((p) => [String(p.student_user_id), p]));
+      const hasAnimation = await lessonRowHasAnimation(lessonRowId);
       const merged = students.map((st) => {
         const uid = studentUserIdFromStudent(st);
         const p = uid ? byUser.get(uid) : null;
+        const points = p
+          ? computeProgressPoints(p.animation_completed, p.homework_percent, hasAnimation)
+          : 0;
         return {
           student_id: st.id,
           student_user_id: uid,
@@ -2784,7 +3019,7 @@ export default async function handler(req, res) {
           animation_completed: Boolean(p?.animation_completed),
           homework_percent: Number(p?.homework_percent || 0),
           topic_completed: Boolean(p?.topic_completed),
-          points: Number(p?.points || 0),
+          points,
           topic_completed_at: p?.topic_completed_at || null
         };
       });

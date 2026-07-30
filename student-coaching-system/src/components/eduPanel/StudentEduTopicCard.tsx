@@ -15,7 +15,7 @@ import {
   statusTone,
   submissionDeliveryStatus
 } from '../../lib/eduPanel/eduHomeworkStats';
-import { badgeForPoints, milestoneBadges, progressBreakdown } from '../../lib/eduPanel/eduPanelProgress';
+import { badgeForPoints, lessonRowHasAnimation, milestoneBadges, progressBreakdown } from '../../lib/eduPanel/eduPanelProgress';
 
 type Props = {
   row: EduLessonRow;
@@ -54,7 +54,7 @@ export default function StudentEduTopicCard({
   onSaveProgress
 }: Props) {
   const publishedHw = (row.homework || []).filter((h) => h.status === 'published');
-  const hasAnim = (row.animations || []).length > 0;
+  const hasAnim = lessonRowHasAnimation(row);
   const hasHw = publishedHw.length > 0;
   const dateRange = formatEduDateRange(row.available_from, row.available_until, row.lesson_date);
   const [tab, setTab] = useState<'animation' | 'homework'>(hasAnim ? 'animation' : 'homework');
@@ -70,9 +70,10 @@ export default function StudentEduTopicCard({
     () =>
       progressBreakdown(
         Boolean(progress?.animation_completed),
-        progress?.homework_percent ?? liveHwPercent
+        progress?.homework_percent ?? liveHwPercent,
+        hasAnim
       ),
-    [progress, liveHwPercent]
+    [progress, liveHwPercent, hasAnim]
   );
   const milestones = useMemo(
     () =>

@@ -146,6 +146,22 @@ export type EduRowStudentProgress = {
   topic_completed_at?: string | null;
 };
 
+export type EduStudentRewards = {
+  gold: number;
+  silver: number;
+  xp: number;
+  level: number;
+};
+
+export type EduRewardDelta = {
+  gold: number;
+  silver: number;
+  levelUp: boolean;
+  previousLevel: number;
+  newLevel: number;
+  totals: EduStudentRewards;
+};
+
 export type LessonRowFormValues = {
   class_id: string;
   /** Birden fazla sınıf — API birincil olarak class_id kullanır */

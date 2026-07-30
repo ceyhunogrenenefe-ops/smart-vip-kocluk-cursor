@@ -52,8 +52,8 @@ export default function EduCompleteTopicModal({
   }, [open, initialAnimationDone, initialHomeworkPercent, suggestedHw]);
 
   const breakdown = useMemo(
-    () => progressBreakdown(animationDone, hwPercent),
-    [animationDone, hwPercent]
+    () => progressBreakdown(animationDone, hwPercent, hasAnimation),
+    [animationDone, hwPercent, hasAnimation]
   );
 
   if (!open) return null;
@@ -107,7 +107,9 @@ export default function EduCompleteTopicModal({
             <div className="space-y-2 text-sm">
               <EduBadgeChip badge={breakdown.badge} points={breakdown.total} />
               <p className="text-xs text-slate-500">
-                Animasyon {breakdown.animationPoints}p + Ödev {breakdown.homeworkPoints}p
+                {hasAnimation
+                  ? `Animasyon ${breakdown.animationPoints}p + Ödev ${breakdown.homeworkPoints}p`
+                  : `Ödev ${breakdown.homeworkPoints}p (animasyon yok — tam puan)`}
               </p>
             </div>
           </div>

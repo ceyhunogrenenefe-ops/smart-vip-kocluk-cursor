@@ -7,12 +7,14 @@ import EduBadgeChip from '../../components/eduPanel/EduBadgeChip';
 import EduHomeworkCelebrateModal from '../../components/eduPanel/EduHomeworkCelebrateModal';
 import StudentEduTopicCard from '../../components/eduPanel/StudentEduTopicCard';
 import { useEduAnimationPreview } from '../../components/eduPanel/useEduAnimationPreview';
-import type { EduHomework, EduLessonRow, EduLessonRowProgress } from '../../types/eduPanel.types';
+import type { EduHomework, EduLessonRow, EduLessonRowProgress, EduRewardDelta, EduStudentRewards } from '../../types/eduPanel.types';
 import type { EduHomeworkSubmission } from '../../types/eduPanel.types';
 import { groupRowsBySubject } from '../../lib/eduPanel/eduPanelUi';
 import {
   badgeForPoints,
   homeworkPercentFromSubmissions,
+  eduLevelLabel,
+  lessonRowHasAnimation,
   milestoneBadges,
   progressBreakdown,
   type EduCelebrateKind
@@ -20,6 +22,7 @@ import {
 import {
   fetchEduLessonRowsDetailed,
   fetchMyEduProgress,
+  fetchMyEduRewards,
   saveEduLessonProgress,
   submitEduHomework
 } from '../../lib/eduPanel/eduPanelApi';
@@ -32,6 +35,7 @@ type CelebrateState = {
   topicCompleted: boolean;
   hasAnimation: boolean;
   hasHomework: boolean;
+  rewards?: EduRewardDelta | null;
 };
 
 export default function StudentEduPanelPage() {
@@ -45,6 +49,7 @@ export default function StudentEduPanelPage() {
   const [busyHw, setBusyHw] = useState<string | null>(null);
   const [busyProgressRow, setBusyProgressRow] = useState<string | null>(null);
   const [celebrate, setCelebrate] = useState<CelebrateState | null>(null);
+  const [rewards, setRewards] = useState<EduStudentRewards>({ gold: 0, silver: 0, xp: 0, level: 1 });
   const preview = useEduAnimationPreview();
 
   const progressByRow = useMemo(() => {
@@ -78,6 +83,12 @@ export default function StudentEduPanelPage() {
       }
       setSubmissions(subs);
       if (data.length === 1) setExpandedId(data[0].id);
+      try {
+        const rw = await fetchMyEduRewards();
+        setRewards(rw);
+      } catch {
+        /* ödüller opsiyonel */
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Ödevler yüklenemedi';
       console.error('[edu-derslerim] load failed', e);
@@ -132,7 +143,8 @@ export default function StudentEduPanelPage() {
   const openCelebrateForRow = (
     row: EduLessonRow,
     kind: EduCelebrateKind,
-    prog?: EduLessonRowProgress | null
+    prog?: EduLessonRowProgress | null,
+    rewardDrop?: EduRewardDelta | null
   ) => {
     const p = prog || progressByRow.get(row.id) || null;
     const published = (row.homework || []).filter((h) => h.status === 'published').length;
@@ -142,9 +154,11 @@ export default function StudentEduPanelPage() {
       animationCompleted: Boolean(p?.animation_completed),
       homeworkPercent: Number(p?.homework_percent || 0),
       topicCompleted: Boolean(p?.topic_completed),
-      hasAnimation: (row.animations || []).length > 0,
-      hasHomework: published > 0
+      hasAnimation: lessonRowHasAnimation(row),
+      hasHomework: published > 0,
+      rewards: rewardDrop || null
     });
+    if (rewardDrop?.totals) setRewards(rewardDrop.totals);
   };
 
   const syncProgressList = (saved: EduLessonRowProgress) => {
@@ -173,14 +187,15 @@ export default function StudentEduPanelPage() {
       const submittedCount = published.filter((h) => nextSubs[h.id]).length;
       const hwPct = homeworkPercentFromSubmissions(published.length, submittedCount);
       const prev = progressByRow.get(row.id);
+      const hasAnim = lessonRowHasAnimation(row);
       try {
-        const saved = await saveEduLessonProgress(row.id, {
+        const { progress: saved, rewards: rewardDrop } = await saveEduLessonProgress(row.id, {
           animation_completed: Boolean(prev?.animation_completed),
           homework_percent: hwPct,
           topic_completed: Boolean(prev?.topic_completed)
         });
         syncProgressList(saved);
-        openCelebrateForRow(row, 'homework', saved);
+        openCelebrateForRow(row, 'homework', saved, rewardDrop);
       } catch {
         openCelebrateForRow(row, 'homework', {
           ...(prev || ({} as EduLessonRowProgress)),
@@ -188,7 +203,7 @@ export default function StudentEduPanelPage() {
           homework_percent: hwPct,
           animation_completed: Boolean(prev?.animation_completed),
           topic_completed: Boolean(prev?.topic_completed),
-          points: progressBreakdown(Boolean(prev?.animation_completed), hwPct).total
+          points: progressBreakdown(Boolean(prev?.animation_completed), hwPct, hasAnim).total
         } as EduLessonRowProgress);
       }
     } catch (e) {
@@ -209,10 +224,10 @@ export default function StudentEduPanelPage() {
   ) => {
     setBusyProgressRow(row.id);
     try {
-      const saved = await saveEduLessonProgress(row.id, payload);
+      const { progress: saved, rewards: rewardDrop } = await saveEduLessonProgress(row.id, payload);
       syncProgressList(saved);
       toast.success('Rozetin kaydedildi — aferin!');
-      openCelebrateForRow(row, 'topic', saved);
+      openCelebrateForRow(row, 'topic', saved, rewardDrop);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Kaydedilemedi');
       throw e;
@@ -278,6 +293,21 @@ export default function StudentEduPanelPage() {
               <span className="text-indigo-100">·</span>
               <span>Ortalama {summary.avgPts}p</span>
               <EduBadgeChip badge={summary.topBadge} compact />
+            </div>
+            <div className="flex flex-wrap items-center gap-3 rounded-xl bg-white/10 px-4 py-3 text-sm backdrop-blur">
+              <span className="text-lg" aria-hidden>
+                🥇
+              </span>
+              <span className="font-semibold">{rewards.gold} altın</span>
+              <span className="text-indigo-100">·</span>
+              <span className="text-lg" aria-hidden>
+                🥈
+              </span>
+              <span className="font-semibold">{rewards.silver} gümüş</span>
+              <span className="text-indigo-100">·</span>
+              <span>
+                Seviye {rewards.level} — {eduLevelLabel(rewards.level)}
+              </span>
             </div>
             <div className="rounded-xl bg-white/10 px-4 py-3 backdrop-blur">
               <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-indigo-100">
@@ -383,6 +413,7 @@ export default function StudentEduPanelPage() {
         topicCompleted={celebrate?.topicCompleted}
         hasAnimation={celebrate?.hasAnimation}
         hasHomework={celebrate?.hasHomework}
+        rewards={celebrate?.rewards}
       />
     </div>
   );

@@ -7,7 +7,9 @@ import type {
   EduHomeworkSubmission,
   EduLessonRow,
   EduLessonRowProgress,
+  EduRewardDelta,
   EduRowStudentProgress,
+  EduStudentRewards,
   HomeworkStatus,
   LessonRowFormValues,
   LessonStatus
@@ -730,13 +732,22 @@ export async function saveEduLessonProgress(
     homework_percent?: number;
     topic_completed?: boolean;
   }
-): Promise<EduLessonRowProgress> {
+): Promise<{ progress: EduLessonRowProgress; rewards: EduRewardDelta | null }> {
   const res = await apiFetch('/api/edu-panel?resource=progress', {
     method: 'POST',
     body: JSON.stringify({ lesson_row_id: lessonRowId, ...patch })
   });
-  const j = await parseJson<{ data: EduLessonRowProgress }>(res);
-  return j.data;
+  const j = await parseJson<{
+    data: EduLessonRowProgress;
+    rewards?: EduRewardDelta | null;
+  }>(res);
+  return { progress: j.data, rewards: j.rewards || null };
+}
+
+export async function fetchMyEduRewards(): Promise<EduStudentRewards> {
+  const res = await apiFetch('/api/edu-panel?resource=rewards');
+  const j = await parseJson<{ data: EduStudentRewards }>(res);
+  return j.data || { gold: 0, silver: 0, xp: 0, level: 1 };
 }
 
 export async function markEduAnimationViewed(lessonRowId: string): Promise<void> {
