@@ -18,10 +18,13 @@ values (
   'edu-homework-submissions',
   'edu-homework-submissions',
   false,
-  31457280,
+  524288000,
   array[
     'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+    'image/heic', 'image/heif',
     'video/mp4', 'video/webm', 'video/quicktime'
   ]
 )
-on conflict (id) do nothing;
+on conflict (id) do update set
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
