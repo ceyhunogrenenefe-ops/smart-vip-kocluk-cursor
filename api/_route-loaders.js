@@ -42,6 +42,7 @@ export const routeLoaders = {
   'coach-whatsapp-schedule': () => import('../handlers/coach-whatsapp-schedule.js'),
   'coach-whatsapp-notification-prefs': () => import('../handlers/coach-whatsapp-notification-prefs.js'),
   'coach-whatsapp-gateway-schedules': () => import('../handlers/coach-whatsapp-gateway-schedules.js'),
+  'coach-whatsapp-gateway-bulk': () => import('../handlers/coach-whatsapp-gateway-bulk.js'),
   'coach-whatsapp-test-send': () => import('../handlers/coach-whatsapp-test-send.js'),
   'google/oauth': () => import('../handlers/google-oauth.js'),
   'google/callback': () => import('../handlers/google-callback.js'),
