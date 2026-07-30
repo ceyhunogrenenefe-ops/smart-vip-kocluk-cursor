@@ -1,5 +1,5 @@
 import React from 'react';
-import { BookOpen, Calendar, Clapperboard, Loader2, Play, Send, X } from 'lucide-react';
+import { BookOpen, Calendar, Clapperboard, FileText, Loader2, Play, Send, X } from 'lucide-react';
 import EduHomeworkPdfLink from './EduHomeworkPdfLink';
 import type { EduHomework, EduHomeworkSubmission, EduLessonRow } from '../../types/eduPanel.types';
 import { formatEduHomeworkLabel } from '../../lib/eduPanel/eduHomeworkForm';
@@ -129,6 +129,38 @@ export default function EduStudentHomeworkDetailModal({
               <p className="mt-1 text-sm text-green-900">{submission.teacher_note}</p>
               {submission.grade ? (
                 <p className="mt-1 text-xs text-green-800">Not: {submission.grade}</p>
+              ) : null}
+            </section>
+          ) : null}
+
+          {submission &&
+          (submission.photo_urls?.length || submission.video_url || submission.has_media) ? (
+            <section className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+              <p className="mb-2 text-xs font-semibold text-slate-700">Yüklediğin çözüm</p>
+              {submission.photo_urls && submission.photo_urls.length > 0 ? (
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {submission.photo_urls.map((url) => (
+                    <a
+                      key={url}
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block overflow-hidden rounded-lg border border-slate-200 bg-white"
+                    >
+                      <img src={url} alt="Ödev çözümü" className="aspect-square w-full object-cover" />
+                    </a>
+                  ))}
+                </div>
+              ) : submission.has_media ? (
+                <p className="text-xs text-amber-700">Fotoğraf kaydı var; önizleme yüklenemedi.</p>
+              ) : null}
+              {submission.video_url ? (
+                <video
+                  src={submission.video_url}
+                  controls
+                  playsInline
+                  className="mt-2 max-h-56 w-full rounded-lg border border-slate-200 bg-black"
+                />
               ) : null}
             </section>
           ) : null}
