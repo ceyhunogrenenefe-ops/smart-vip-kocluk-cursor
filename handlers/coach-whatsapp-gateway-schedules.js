@@ -76,6 +76,11 @@ function parseTargetStudentIds(v) {
   return [...new Set(v.map((x) => String(x || '').trim()).filter(Boolean))].slice(0, 500);
 }
 
+function parseTargetClassIds(v) {
+  if (!Array.isArray(v)) return [];
+  return [...new Set(v.map((x) => String(x || '').trim()).filter(Boolean))].slice(0, 100);
+}
+
 function parseRecipientChannel(v, preferParent, prev) {
   const raw = String(v || '').trim().toLowerCase();
   if (raw === 'parent' || raw === 'student') return raw;
@@ -167,6 +172,12 @@ function buildSchedulePayload(b, coachId, gatewayUserId, prev = null) {
     send_date_tr: repeatMode === 'once' ? sendDateTr : null,
     weekday_tr: repeatMode === 'weekly' ? weekdayTr : null,
     target_student_ids: parseTargetStudentIds(b.target_student_ids),
+    target_class_ids:
+      b.target_class_ids !== undefined
+        ? parseTargetClassIds(b.target_class_ids)
+        : Array.isArray(prev?.target_class_ids)
+          ? prev.target_class_ids
+          : [],
     target_class_level: targetClass,
     target_group_name: targetGroup,
     task_default: taskDefault,

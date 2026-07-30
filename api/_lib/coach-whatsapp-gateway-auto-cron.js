@@ -73,7 +73,14 @@ function repeatModeMatches(schedule, todayTr) {
   return true;
 }
 
-function studentMatchesTarget(st, schedule) {
+function studentMatchesTarget(st, schedule, classIdsForStudent = null) {
+  const classTargets = Array.isArray(schedule.target_class_ids)
+    ? schedule.target_class_ids.map((x) => String(x || '').trim()).filter(Boolean)
+    : [];
+  if (classTargets.length > 0) {
+    const studentClasses = classIdsForStudent || [];
+    if (!studentClasses.some((cid) => classTargets.includes(String(cid)))) return false;
+  }
   const ids = schedule.target_student_ids;
   if (Array.isArray(ids) && ids.length > 0) {
     if (!ids.includes(String(st.id))) return false;
@@ -168,7 +175,7 @@ export async function runCoachWhatsappGatewayAutoCron(opts = {}) {
   const { data: schedules, error: schErr } = await supabaseAdmin
     .from('coach_whatsapp_gateway_schedules')
     .select(
-      'id, coach_id, message_template, send_hour_tr, send_minute_tr, weekdays_only, interval_days, campaign_days, campaign_started_at, prefer_parent_phone, gateway_user_id, repeat_mode, send_date_tr, weekday_tr, target_student_ids, target_class_level, target_group_name, recipient_channel, task_default, template_var_date, template_var_time, template_var_link'
+      'id, coach_id, message_template, send_hour_tr, send_minute_tr, weekdays_only, interval_days, campaign_days, campaign_started_at, prefer_parent_phone, gateway_user_id, repeat_mode, send_date_tr, weekday_tr, target_student_ids, target_class_ids, target_class_level, target_group_name, recipient_channel, task_default, template_var_date, template_var_time, template_var_link'
     )
     .eq('is_active', true);
 
@@ -249,9 +256,30 @@ export async function runCoachWhatsappGatewayAutoCron(opts = {}) {
       coachId: schedule.coach_id
     });
 
+    const classTargets = Array.isArray(schedule.target_class_ids)
+      ? schedule.target_class_ids.map((x) => String(x || '').trim()).filter(Boolean)
+      : [];
+    let studentClassMap = new Map();
+    if (classTargets.length) {
+      const studentIds = (students || []).map((s) => s.id).filter(Boolean);
+      if (studentIds.length) {
+        const { data: csRows } = await supabaseAdmin
+          .from('class_students')
+          .select('student_id, class_id')
+          .in('student_id', studentIds)
+          .in('class_id', classTargets);
+        for (const row of csRows || []) {
+          const sid = String(row.student_id);
+          const arr = studentClassMap.get(sid) || [];
+          arr.push(row.class_id);
+          studentClassMap.set(sid, arr);
+        }
+      }
+    }
+
     for (const st of students || []) {
       try {
-        if (!studentMatchesTarget(st, schedule)) {
+        if (!studentMatchesTarget(st, schedule, studentClassMap.get(String(st.id)) || [])) {
           logDetail.push({ student_id: st.id, skipped: 'target_filter' });
           continue;
         }
