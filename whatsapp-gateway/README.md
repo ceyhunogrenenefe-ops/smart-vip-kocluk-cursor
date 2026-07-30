@@ -32,6 +32,9 @@ npm run dev
 
 - Bu servis Vercel serverless yerine sürekli çalışan bir sunucuda host edilmelidir.
 - Frontend içinde `VITE_WHATSAPP_GATEWAY_URL` ile erişim adresi verin.
+- **Mesaj bekleniyor / Waiting for this message:** Baileys `getMessage` zorunludur.
+  Bu sürümde giden mesajlar `message-store` ile saklanır; WhatsApp retry istediğinde içerik yeniden iletilir.
+  `pm2 restart whatsapp-gateway` sonrası yeni mesajlar düzelir. Eski “bekleyen” balonlar için ilgili sohbette yeniden gönderim gerekebilir.
 
 ## Production (PM2)
 

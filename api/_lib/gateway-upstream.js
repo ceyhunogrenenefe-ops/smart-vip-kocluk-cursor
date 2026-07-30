@@ -38,7 +38,7 @@ export async function probeGatewayHealth() {
   if (!upstream) {
     return { ok: false, error: 'upstream_missing', upstream: null };
   }
-  const timeoutMs = Math.min(15000, Math.max(5000, Number(process.env.WA_GATEWAY_HEALTH_TIMEOUT_MS) || 12000));
+  const timeoutMs = Math.min(5000, Math.max(2000, Number(process.env.WA_GATEWAY_HEALTH_TIMEOUT_MS) || 3500));
   const controller = new AbortController();
   const tid = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -55,6 +55,10 @@ export async function probeGatewayHealth() {
       connected_session_ids: Array.isArray(data?.connected_session_ids)
         ? data.connected_session_ids.map((x) => String(x || '').trim()).filter(Boolean)
         : [],
+      get_message_implemented: data?.get_message_implemented === true,
+      message_store: data?.message_store || null,
+      sessions_detail: Array.isArray(data?.sessions_detail) ? data.sessions_detail : null,
+      raw: data && typeof data === 'object' ? data : null,
       error: res.ok ? null : String(data?.error || `http_${res.status}`)
     };
     healthCache = { at: Date.now(), data: out };

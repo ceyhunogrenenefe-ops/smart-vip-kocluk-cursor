@@ -121,7 +121,14 @@ export default async function handler(req, res) {
       session_checks: sessionChecks,
       gateway_connected: gatewayConnected,
       book_order_channel: bookOrderChannel,
-      send_env: gatewayEnv
+      send_env: gatewayEnv,
+      get_message_implemented: gatewayHealth.get_message_implemented === true,
+      message_store: gatewayHealth.message_store || null,
+      sessions_detail: Array.isArray(gatewayHealth.sessions_detail)
+        ? gatewayHealth.sessions_detail
+        : null,
+      pending_message_fix_fix:
+        'Alıcıda «Mesaj bekleniyor» genelde Baileys getMessage eksikliğinden olur. Gateway sürümü message store kullanmalı.'
     },
     report_reminder: {
       channel: reportReminderSendChannel(),

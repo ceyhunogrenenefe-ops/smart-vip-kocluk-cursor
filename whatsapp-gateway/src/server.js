@@ -13,6 +13,7 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
 } from '@whiskeysockets/baileys';
+import { createMessageStore, createMsgRetryCounterCache } from './message-store.js';
 
 const SILENCE_SIGNAL_SESSION_LOGS = String(process.env.SILENCE_SIGNAL_SESSION_LOGS || '1') !== '0';
 /** libsignal / baileys gürültüsü — process stdout spam + oturum dump */
@@ -140,6 +141,24 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const dataRoot = process.env.WHATSAPP_DATA_DIR || path.resolve(__dirname, '../data');
 const port = Number(process.env.PORT || 4010);
+
+const messageStore = createMessageStore({ dataRoot, logger });
+/** Session başına retry sayacı — sonsuz retry döngüsünü keser */
+const msgRetryCaches = new Map();
+
+function msgRetryCacheFor(coachId) {
+  const id = String(coachId || '').trim() || '_';
+  let c = msgRetryCaches.get(id);
+  if (!c) {
+    c = createMsgRetryCounterCache();
+    msgRetryCaches.set(id, c);
+  }
+  return c;
+}
+
+function newCorrelationId() {
+  return `wa_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`;
+}
 
 function coachAuthDir(coachId) {
   return path.join(dataRoot, String(coachId || '').trim());
@@ -590,7 +609,7 @@ function waitForMessageServerAck(sock, key, timeoutMs = 9000) {
   });
 }
 
-async function sendTextWithDeliveryCheck(sock, jid, message, retriesLeft = SEND_MESSAGE_RETRIES) {
+async function sendTextWithDeliveryCheck(sock, jid, message, retriesLeft = SEND_MESSAGE_RETRIES, coachId = '') {
   const result = await sendTextWithTimeout(sock, jid, message, retriesLeft);
   const mid = result?.key?.id ? String(result.key.id).trim() : '';
   if (!mid) {
@@ -598,6 +617,8 @@ async function sendTextWithDeliveryCheck(sock, jid, message, retriesLeft = SEND_
     err.httpStatus = 502;
     throw err;
   }
+
+  await messageStore.put(result, { coachId });
 
   const immediateStatus = result?.status;
   if (immediateStatus !== undefined && immediateStatus !== null && Number(immediateStatus) >= WA_STATUS_SERVER_ACK) {
@@ -994,11 +1015,41 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
       defaultQueryTimeoutMs: 60_000,
       keepAliveIntervalMs: 10_000,
       retryRequestDelayMs: 250,
-      getMessage: async () => undefined,
+      maxMsgRetryCount: 5,
+      msgRetryCounterCache: msgRetryCacheFor(coachId),
+      // KRİTİK: undefined → alıcıda "Mesaj bekleniyor / Waiting for this message"
+      getMessage: async (key) => {
+        try {
+          const msg = await messageStore.getMessage(key);
+          if (msg) return msg;
+          logger.debug(
+            { coachId, id: key?.id ? String(key.id).slice(0, 12) : null },
+            'getMessage miss — retry content unavailable'
+          );
+          return undefined;
+        } catch (err) {
+          logger.warn({ err: err?.message || err, coachId }, 'getMessage failed');
+          return undefined;
+        }
+      },
     });
     sessionState.sock = sock;
 
     sock.ev.on('creds.update', saveCreds);
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+      try {
+        if (!Array.isArray(messages) || !messages.length) return;
+        // notify / append — retry için giden ve gelen içerikleri sakla
+        if (type && type !== 'notify' && type !== 'append') return;
+        for (const m of messages) {
+          if (m?.message && m?.key?.id) {
+            await messageStore.put(m, { coachId });
+          }
+        }
+      } catch (err) {
+        logger.warn({ err: err?.message || err, coachId }, 'messages.upsert store failed');
+      }
+    });
     sock.ev.on('connection.update', async (update) => {
       try {
       const cur = sessions.get(coachId);
@@ -1211,22 +1262,77 @@ app.get('/health', (_req, res) => {
   let reconnecting = 0;
   /** @type {string[]} */
   const connectedSessionIds = [];
+  /** @type {object[]} */
+  const sessionsDetail = [];
   for (const [coachId, session] of sessions.entries()) {
     if (session.status === 'connected') {
       connected += 1;
       connectedSessionIds.push(coachId);
     }
     if (session.status === 'reconnecting') reconnecting += 1;
+    sessionsDetail.push({
+      session_id_suffix: coachId.length > 12 ? `…${coachId.slice(-12)}` : coachId,
+      status: session.status,
+      send_ready: isSessionReady(session),
+      connected_at: session.connectedAt || null,
+      last_error: session.lastError ? String(session.lastError).slice(0, 120) : null,
+      linked_phone_suffix: (() => {
+        try {
+          const d = phoneDigitsFromJid(session.sock?.user?.id);
+          return d && d.length > 4 ? d.slice(-4) : null;
+        } catch {
+          return null;
+        }
+      })(),
+    });
   }
+  const storeStats = messageStore.stats();
   res.json({
     ok: true,
     service: 'whatsapp-gateway',
+    baileys: '@whiskeysockets/baileys',
     sessions: sessions.size,
     connected,
     reconnecting,
     connected_session_ids: connectedSessionIds,
+    sessions_detail: sessionsDetail,
+    message_store: storeStats,
+    message_store_healthy: storeStats.puts === 0 || storeStats.hits + storeStats.misses === 0 || storeStats.hits > 0 || storeStats.size > 0,
+    get_message_implemented: true,
     watchdogMs: SESSION_WATCHDOG_MS,
     keepaliveMs: SESSION_KEEPALIVE_MS,
+    pm2_instances_expected: 1,
+    data_root_set: Boolean(process.env.WHATSAPP_DATA_DIR || dataRoot),
+  });
+});
+
+/** Gateway key ile detaylı sağlık (admin paneli) */
+app.get('/admin/health', (req, res) => {
+  const key = String(req.headers['x-gateway-key'] || '').trim();
+  if (!gatewayApiKey || key !== gatewayApiKey) {
+    return res.status(401).json({ ok: false, error: 'unauthorized' });
+  }
+  const storeStats = messageStore.stats();
+  const list = [];
+  for (const [coachId, session] of sessions.entries()) {
+    list.push({
+      session_id: coachId,
+      status: session.status,
+      send_ready: isSessionReady(session),
+      connected_at: session.connectedAt || null,
+      last_error: session.lastError || null,
+      socket_open: isSocketOpen(session.sock),
+      linked_phone: phoneDigitsFromJid(session.sock?.user?.id),
+    });
+  }
+  res.json({
+    ok: true,
+    connected: list.filter((s) => s.status === 'connected').length,
+    sessions: list,
+    message_store: storeStats,
+    get_message_implemented: true,
+    note:
+      'Alıcıda «Mesaj bekleniyor» için getMessage + message store zorunlu. Bu sürümde aktiftir.',
   });
 });
 
@@ -1415,7 +1521,7 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
       }
 
       resolvedJid = await resolveRecipientJid(session.sock, digits);
-      return sendTextWithDeliveryCheck(session.sock, resolvedJid, message);
+      return sendTextWithDeliveryCheck(session.sock, resolvedJid, message, SEND_MESSAGE_RETRIES, sendMeta.usedCoachId);
     });
 
     const mid = result?.key?.id ? String(result.key.id).trim() : '';
@@ -1427,13 +1533,16 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
       throw err;
     }
 
+    const correlationId = newCorrelationId();
     res.json({
       ok: true,
       id: mid,
+      correlation_id: correlationId,
       phone: digits,
       jid: resolvedJid || undefined,
       shared_fallback: sendMeta.sharedFallback,
       gateway_session_id: sendMeta.usedCoachId,
+      message_store: 'ok',
     });
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'send_failed';
@@ -1567,12 +1676,16 @@ app.post('/sessions/:coachId/send-document', requireGatewayAuth, requireCoachSco
       throw err;
     }
 
+    await messageStore.put(result, { coachId: sendMeta.usedCoachId });
+
     res.json({
       ok: true,
       id: mid,
+      correlation_id: newCorrelationId(),
       phone: digits,
       shared_fallback: sendMeta.sharedFallback,
-      gateway_session_id: sendMeta.usedCoachId
+      gateway_session_id: sendMeta.usedCoachId,
+      message_store: 'ok'
     });
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'send_document_failed';

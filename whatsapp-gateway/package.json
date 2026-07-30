@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node ./src/server.js",
     "start": "node ./src/server.js",
+    "test": "node ./src/message-store.test.js",
     "pm2:start": "pm2 start ecosystem.config.cjs",
     "pm2:restart": "pm2 restart whatsapp-gateway",
     "pm2:logs": "pm2 logs whatsapp-gateway"

@@ -1508,6 +1508,9 @@ export default function CoachWhatsAppSettings() {
           upstream_reachable?: boolean;
           upstream_error?: string | null;
           connected_live_count?: number;
+          get_message_implemented?: boolean;
+          message_store?: { size?: number; puts?: number; hits?: number; misses?: number } | null;
+          sessions_detail?: { status?: string; send_ready?: boolean; linked_phone_suffix?: string | null }[] | null;
         };
       };
       const gw = j.gateway;
@@ -1521,6 +1524,14 @@ export default function CoachWhatsAppSettings() {
         parts.push(`${gw.connected_live_count ?? 1} oturum bağlı`);
       } else {
         parts.push('Bağlı QR oturumu yok — QR ile bağlayın');
+      }
+      if (gw?.get_message_implemented) {
+        parts.push('Mesaj store (retry) aktif');
+      } else if (gw?.upstream_reachable) {
+        parts.push('UYARI: getMessage/store yok — alıcıda «Mesaj bekleniyor» riski');
+      }
+      if (gw?.message_store && typeof gw.message_store.size === 'number') {
+        parts.push(`store: ${gw.message_store.size} kayıt`);
       }
       setStatusMessage(parts.join(' · '));
       void fetchStatus();
