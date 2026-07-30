@@ -14,7 +14,7 @@ import {
 } from '../api/_lib/whatsapp-gateway-bulk-scope.js';
 
 const GW_BULK_LABEL_PREFIX = 'GW_BULK:';
-const SEND_DELAY_MS = 400;
+const SEND_DELAY_MS = 700;
 
 function parseBody(req) {
   const b = req.body;

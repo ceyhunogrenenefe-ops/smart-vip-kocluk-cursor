@@ -17,6 +17,22 @@ async function main() {
   assert.ok(got);
   assert.equal(got.conversation, 'Merhaba test ğüşiöç 🎉');
 
+  // LID jid ile sorgu — id anahtarı ile bulunmalı (Mesaj bekleniyor retry)
+  const gotByIdOnly = await store.getMessage({ id: 'ABCD1234', remoteJid: '123456789012345@lid' });
+  assert.ok(gotByIdOnly);
+  assert.equal(gotByIdOnly.conversation, 'Merhaba test ğüşiöç 🎉');
+
+  // fallbackText ile boş message
+  assert.equal(
+    await store.put(
+      { key: { id: 'FALLBACK1', remoteJid: '905559998877@s.whatsapp.net', fromMe: true }, message: null },
+      { coachId: 'coach1', fallbackText: 'yedek metin' }
+    ),
+    true
+  );
+  const fb = await store.getMessage({ id: 'FALLBACK1' });
+  assert.equal(fb.conversation, 'yedek metin');
+
   const miss = await store.getMessage({ id: 'NOPE', remoteJid: '905551112233@s.whatsapp.net' });
   assert.equal(miss, undefined);
 
