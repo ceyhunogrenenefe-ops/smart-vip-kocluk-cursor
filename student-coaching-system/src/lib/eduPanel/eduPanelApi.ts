@@ -589,7 +589,7 @@ async function uploadSubmissionMediaDirect(
     });
     if (!put.ok) {
       const t = await put.text().catch(() => '');
-      throw new Error(t.slice(0, 200) || `Medya Storage’a yüklenemedi (${put.status})`);
+      throw new Error(friendlyStorageUploadError(put.status, t));
     }
     return path;
   }
@@ -605,9 +605,31 @@ async function uploadSubmissionMediaDirect(
       body: file
     });
     if (put.ok) return path;
+    const t = await put.text().catch(() => '');
+    throw new Error(friendlyStorageUploadError(put.status, t));
   }
 
   throw new Error('Medya yükleme bağlantısı alınamadı — Storage ayarını kontrol edin');
+}
+
+function friendlyStorageUploadError(status: number, body: string): string {
+  const raw = String(body || '');
+  const lower = raw.toLowerCase();
+  if (
+    status === 413 ||
+    lower.includes('entitytoolarge') ||
+    lower.includes('payload too large') ||
+    lower.includes('maximum allowed size')
+  ) {
+    return 'Video Storage limitini aşıyor. Sayfayı yenileyip tekrar deneyin; sorun sürerse videoyu daha kısa parçalara bölün.';
+  }
+  try {
+    const j = JSON.parse(raw) as { message?: string; error?: string };
+    if (j.message || j.error) return String(j.message || j.error);
+  } catch {
+    /* not json */
+  }
+  return raw.slice(0, 200) || `Medya Storage’a yüklenemedi (${status})`;
 }
 
 export async function submitEduHomework(
