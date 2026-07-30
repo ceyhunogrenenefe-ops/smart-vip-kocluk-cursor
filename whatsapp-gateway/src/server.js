@@ -18,7 +18,7 @@ import { createMessageStore, createMsgRetryCounterCache } from './message-store.
 const SILENCE_SIGNAL_SESSION_LOGS = String(process.env.SILENCE_SIGNAL_SESSION_LOGS || '1') !== '0';
 /** libsignal / baileys gürültüsü — process stdout spam + oturum dump */
 const SIGNAL_SESSION_SPAM_RE =
-  /Closing session:\s*SessionEntry|Removing old closed session|Failed to decrypt message|Bad MAC|Session error:Error: Bad MAC/i;
+  /Closing session:\s*SessionEntry|Removing old closed session|Failed to decrypt message|Bad MAC|Session error:Error: Bad MAC|Closing open session in favor of incoming prekey bundle/i;
 
 function shouldSilenceNoiseChunk(chunk) {
   const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk ?? '');
@@ -87,7 +87,7 @@ const SEND_MESSAGE_TIMEOUT_MS = Math.min(
 );
 const SEND_READY_DELAY_MS = Math.min(
   5_000,
-  Math.max(0, Number(process.env.WA_SEND_READY_DELAY_MS) || 500)
+  Math.max(0, Number(process.env.WA_SEND_READY_DELAY_MS) || 1800)
 );
 const SEND_WAIT_READY_MS = Math.min(
   30_000,
@@ -610,6 +610,21 @@ function waitForMessageServerAck(sock, key, timeoutMs = 9000) {
 }
 
 async function sendTextWithDeliveryCheck(sock, jid, message, retriesLeft = SEND_MESSAGE_RETRIES, coachId = '') {
+  // Signal oturumunu ısıt — ilk gönderimde "Mesaj bekleniyor" süresini kısaltır
+  try {
+    if (typeof sock.assertSessions === 'function') {
+      await withTimeout(() => sock.assertSessions([jid], true), 4_000, 'assert_sessions_timeout');
+    } else if (typeof sock.presenceSubscribe === 'function') {
+      await withTimeout(() => sock.presenceSubscribe(jid), 2_500, 'presence_timeout');
+      await sleep(250);
+    }
+  } catch (warmErr) {
+    logger.debug(
+      { coachId, err: warmErr?.message || warmErr },
+      'session warm skipped — sending anyway'
+    );
+  }
+
   const result = await sendTextWithTimeout(sock, jid, message, retriesLeft);
   const mid = result?.key?.id ? String(result.key.id).trim() : '';
   if (!mid) {
@@ -618,7 +633,14 @@ async function sendTextWithDeliveryCheck(sock, jid, message, retriesLeft = SEND_
     throw err;
   }
 
-  await messageStore.put(result, { coachId });
+  // Retry için içeriği hemen sakla (fallbackText: result.message boş/eksik olsa bile)
+  await messageStore.put(result, { coachId, fallbackText: message });
+  if (!result.message) {
+    await messageStore.put(
+      { key: result.key, message: { conversation: message } },
+      { coachId, fallbackText: message }
+    );
+  }
 
   const immediateStatus = result?.status;
   if (immediateStatus !== undefined && immediateStatus !== null && Number(immediateStatus) >= WA_STATUS_SERVER_ACK) {
@@ -633,6 +655,8 @@ async function sendTextWithDeliveryCheck(sock, jid, message, retriesLeft = SEND_
       'WhatsApp sunucusu mesajı onaylamadı. Oturumu yenileyin (QR) veya birkaç saniye sonra tekrar deneyin.';
     throw err;
   }
+  // ACK sonrası store'u tazele (bazen message alanı sonradan dolar)
+  await messageStore.put(result, { coachId, fallbackText: message });
   return result;
 }
 
@@ -739,7 +763,12 @@ function continueScheduleReconnect(coachId, session, generation, reason) {
     }, RECONNECT_COOLDOWN_MS);
     return;
   }
-  const delay = Math.min(30_000, 1500 + attempts * 1500);
+  // Aynı anda birçok oturum düşerse thundering herd → ek stream hataları; coachId bazlı jitter
+  let jitter = 0;
+  for (let i = 0; i < String(coachId || '').length; i += 1) {
+    jitter = (jitter + String(coachId).charCodeAt(i) * (i + 1)) % 3500;
+  }
+  const delay = Math.min(35_000, 2000 + attempts * 1500 + jitter);
   session.status = 'reconnecting';
   session.lastError = null;
   armConnectingTimeout(coachId, session, generation);
@@ -1042,12 +1071,25 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
         // notify / append — retry için giden ve gelen içerikleri sakla
         if (type && type !== 'notify' && type !== 'append') return;
         for (const m of messages) {
-          if (m?.message && m?.key?.id) {
+          if (m?.key?.id) {
             await messageStore.put(m, { coachId });
           }
         }
       } catch (err) {
         logger.warn({ err: err?.message || err, coachId }, 'messages.upsert store failed');
+      }
+    });
+    // Retry istekleri bazen messages.update ile gelir — içerik varsa sakla
+    sock.ev.on('messages.update', async (updates) => {
+      try {
+        if (!Array.isArray(updates)) return;
+        for (const u of updates) {
+          if (u?.key?.id && u?.update?.message) {
+            await messageStore.put({ key: u.key, message: u.update.message }, { coachId });
+          }
+        }
+      } catch {
+        /* yoksay */
       }
     });
     sock.ev.on('connection.update', async (update) => {

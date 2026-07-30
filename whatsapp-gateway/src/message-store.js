@@ -24,6 +24,20 @@ function cacheKey(id, remoteJid) {
   return jid ? `${mid}|${jid}` : mid;
 }
 
+/** Baileys IMessage — conversation / extendedText zorunlu alanları koru */
+function normalizeStoredMessage(message, fallbackText = '') {
+  if (message && typeof message === 'object') {
+    if (typeof message.conversation === 'string' && message.conversation.length) return message;
+    if (message.extendedTextMessage?.text) return message;
+    if (message.imageMessage || message.videoMessage || message.documentMessage || message.audioMessage) {
+      return message;
+    }
+  }
+  const text = String(fallbackText || '').trim();
+  if (text) return { conversation: text };
+  return message && typeof message === 'object' ? message : undefined;
+}
+
 export function createMessageStore({
   dataRoot,
   maxEntries = DEFAULT_MAX,
@@ -58,17 +72,27 @@ export function createMessageStore({
     }
   }
 
+  function indexEntry(entry) {
+    const id = String(entry?.key?.id || '').trim();
+    if (!id || !entry?.message) return;
+    mem.set(id, entry);
+    const jid = bareJid(entry.key?.remoteJid);
+    if (jid) mem.set(cacheKey(id, jid), entry);
+    // LID / PN farkı için yalnızca id anahtarı zaten var; ek jid yoksa id yeter
+  }
+
   /**
    * @param {object} waMessage - Baileys WAMessage ({ key, message })
-   * @param {{ coachId?: string }} [opts]
+   * @param {{ coachId?: string, fallbackText?: string }} [opts]
    */
   async function put(waMessage, opts = {}) {
     const key = waMessage?.key;
-    const message = waMessage?.message;
     const id = String(key?.id || '').trim();
-    if (!id || !message || typeof message !== 'object') return false;
+    if (!id) return false;
 
-    const ck = cacheKey(id, key.remoteJid);
+    const message = normalizeStoredMessage(waMessage?.message, opts.fallbackText);
+    if (!message || typeof message !== 'object') return false;
+
     const entry = {
       message,
       key: {
@@ -80,8 +104,7 @@ export function createMessageStore({
       savedAt: Date.now(),
       coachId: opts.coachId ? String(opts.coachId) : undefined,
     };
-    mem.set(ck, entry);
-    mem.set(id, entry);
+    indexEntry(entry);
     puts += 1;
     pruneExpired();
 
@@ -104,7 +127,7 @@ export function createMessageStore({
     }
     pruneExpired();
     const ck = cacheKey(id, key.remoteJid);
-    let entry = mem.get(ck) || mem.get(id);
+    let entry = (ck && mem.get(ck)) || mem.get(id);
     if (entry?.message) {
       hits += 1;
       return entry.message;
@@ -113,6 +136,7 @@ export function createMessageStore({
     if (diskEnabled && dataRoot) {
       try {
         const safe = id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
+        // Önce coach klasörü biliniyorsa tek dosya; yoksa tarama
         const dirs = await fs.readdir(dataRoot, { withFileTypes: true });
         for (const ent of dirs) {
           if (!ent.isDirectory()) continue;
@@ -120,8 +144,7 @@ export function createMessageStore({
             const raw = await fs.readFile(path.join(dataRoot, ent.name, 'msg-cache', `${safe}.json`), 'utf8');
             const parsed = JSON.parse(raw);
             if (parsed?.message) {
-              mem.set(ck, parsed);
-              mem.set(id, parsed);
+              indexEntry(parsed);
               hits += 1;
               return parsed.message;
             }
