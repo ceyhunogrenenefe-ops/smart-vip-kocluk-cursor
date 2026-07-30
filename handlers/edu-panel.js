@@ -1275,10 +1275,45 @@ function extFromMime(mime, fallback = 'jpg') {
   if (m.includes('png')) return 'png';
   if (m.includes('webp')) return 'webp';
   if (m.includes('gif')) return 'gif';
+  if (m.includes('heic') || m.includes('heif')) return 'heic';
   if (m.includes('mp4')) return 'mp4';
   if (m.includes('webm')) return 'webm';
   if (m.includes('quicktime') || m.includes('mov')) return 'mov';
   return fallback;
+}
+
+/** Öğrencinin yüklediği teslim medyası — yalnızca kendi homework klasörü */
+function isAllowedSubmissionMediaPath(path, homeworkId, studentUserId) {
+  const p = String(path || '').trim();
+  const hw = String(homeworkId || '').trim();
+  const uid = String(studentUserId || '').trim();
+  if (!p || !hw || !uid) return false;
+  if (p.includes('..')) return false;
+  const prefix = `${hw}/${uid}-`;
+  return p.startsWith(prefix);
+}
+
+async function assertStudentHomeworkSubmitAccess(actor, tags, homeworkId) {
+  if (!tags.includes('student')) return { error: 'forbidden', status: 403 };
+  const enriched = await enrichStudentActor(actor);
+  const hwId = String(homeworkId || '').trim();
+  if (!hwId) return { error: 'homework_id_required', status: 400 };
+  const { data: hw } = await supabaseAdmin.from('edu_homework').select('*').eq('id', hwId).maybeSingle();
+  if (!hw || hw.status !== 'published') {
+    return { error: 'homework_not_available', status: 403 };
+  }
+  const lessonRow = await loadRow(hw.lesson_row_id);
+  if (!lessonRow || lessonRow.status !== 'active') {
+    return { error: 'homework_not_available', status: 403 };
+  }
+  const ctx = await studentAccessContext(enriched);
+  if (!(await canStudentAccessRow(ctx, lessonRow))) {
+    return { error: 'not_in_class', status: 403 };
+  }
+  if (!studentAssignedToHomework(normalizeHomeworkRow(hw), ctx.student)) {
+    return { error: 'not_assigned', status: 403 };
+  }
+  return { actor: enriched, homework: hw, student: ctx.student };
 }
 
 async function enrichSubmissionWithMediaUrls(sub) {
@@ -1370,6 +1405,9 @@ async function enrichRows(
     enrichedHwsPromise
   ]);
   const subs = subsRaw || [];
+  const subsForView = viewerStudentUserId
+    ? await Promise.all(subs.map((s) => enrichSubmissionWithMediaUrls(s)))
+    : subs;
   const homeworkByRow = new Map();
   for (const h of enrichedHwsList || []) {
     const list = homeworkByRow.get(h.lesson_row_id) || [];
@@ -1384,7 +1422,7 @@ async function enrichRows(
     animations: (anims || []).filter((a) => a.lesson_row_id === row.id),
     homework: (homeworkByRow.get(row.id) || []).map((h) => {
       const norm = normalizeHomeworkRow(h);
-      const submissions = subs.filter((s) => s.homework_id === h.id);
+      const submissions = subsForView.filter((s) => s.homework_id === h.id);
       const out = {
         ...norm,
         attachment_pdf_url: h.attachment_pdf_url || null,
@@ -2461,39 +2499,87 @@ export default async function handler(req, res) {
       }
     }
 
-    if (resource === 'submit' && req.method === 'POST') {
-      if (!tags.includes('student')) return res.status(403).json({ error: 'forbidden' });
-      actor = await enrichStudentActor(actor);
+    if (resource === 'submission-media-upload' && req.method === 'POST') {
       const body = parseBody(req);
       const homeworkId = String(body.homework_id || '').trim();
-      if (!homeworkId) return res.status(400).json({ error: 'homework_id_required' });
+      const access = await assertStudentHomeworkSubmitAccess(actor, tags, homeworkId);
+      if (access.error) return res.status(access.status).json({ error: access.error });
+      actor = access.actor;
+
+      const kind = String(body.kind || 'photo').trim() === 'video' ? 'video' : 'photo';
+      const mime = String(body.mime || (kind === 'video' ? 'video/mp4' : 'image/jpeg')).trim();
+      const fileSize = Number(body.file_size || 0);
+      const index = Math.max(0, Math.min(EDU_MAX_SUBMISSION_PHOTOS - 1, Number(body.index || 0)));
+
+      if (kind === 'video') {
+        if (fileSize > EDU_MAX_VIDEO_BYTES) {
+          return res.status(400).json({ error: 'video_too_large', hint: 'Video en fazla 30 MB olabilir' });
+        }
+        if (!mime.startsWith('video/')) {
+          return res.status(400).json({ error: 'invalid_video_type' });
+        }
+      } else {
+        if (fileSize > EDU_MAX_PHOTO_BYTES) {
+          return res.status(400).json({ error: 'photo_too_large', hint: 'Fotoğraf en fazla 10 MB olabilir' });
+        }
+        if (!mime.startsWith('image/')) {
+          return res.status(400).json({ error: 'invalid_photo_type' });
+        }
+      }
+
+      const ts = Date.now();
+      const ext = extFromMime(mime, kind === 'video' ? 'mp4' : 'jpg');
+      const path =
+        kind === 'video'
+          ? `${homeworkId}/${actor.sub}-${ts}-video.${ext}`
+          : `${homeworkId}/${actor.sub}-${ts}-${index}.${ext}`;
+
+      try {
+        const signed = await createEduSignedUploadUrl({
+          bucket: EDU_SUBMISSIONS_BUCKET,
+          path,
+          upsert: true
+        });
+        return res.status(200).json({
+          data: {
+            bucket: EDU_SUBMISSIONS_BUCKET,
+            path: signed.path,
+            token: signed.token,
+            signedUrl: signed.signedUrl,
+            content_type: mime
+          }
+        });
+      } catch (e) {
+        return res.status(500).json({
+          error: 'signed_upload_failed',
+          hint: errorMessage(e)
+        });
+      }
+    }
+
+    if (resource === 'submit' && req.method === 'POST') {
+      if (!tags.includes('student')) return res.status(403).json({ error: 'forbidden' });
+      const body = parseBody(req);
+      const homeworkId = String(body.homework_id || '').trim();
+      const access = await assertStudentHomeworkSubmitAccess(actor, tags, homeworkId);
+      if (access.error) return res.status(access.status).json({ error: access.error });
+      actor = access.actor;
+      const student = access.student;
 
       const legacyB64 = String(body.image_base64 || '').trim();
       const photosInput = Array.isArray(body.photos_base64) ? body.photos_base64 : [];
       const videoB64 = String(body.video_base64 || '').trim();
+      const photoPathsIncoming = Array.isArray(body.photo_paths)
+        ? body.photo_paths.map((p) => String(p || '').trim()).filter(Boolean)
+        : [];
+      const videoPathIncoming = String(body.video_path || '').trim() || null;
+      const hasDirectMedia = photoPathsIncoming.length > 0 || Boolean(videoPathIncoming);
       const hasLegacyPhoto = Boolean(legacyB64);
-      const hasPhotos = photosInput.length > 0 || hasLegacyPhoto;
-      const hasVideo = Boolean(videoB64);
+      const hasPhotos = photosInput.length > 0 || hasLegacyPhoto || photoPathsIncoming.length > 0;
+      const hasVideo = Boolean(videoB64) || Boolean(videoPathIncoming);
       if (!hasPhotos && !hasVideo) {
         /* Medya olmadan teslim — kayıt oluşturulur */
       }
-
-      const { data: hw } = await supabaseAdmin.from('edu_homework').select('*').eq('id', homeworkId).maybeSingle();
-      if (!hw || hw.status !== 'published') {
-        return res.status(403).json({ error: 'homework_not_available' });
-      }
-      const lessonRow = await loadRow(hw.lesson_row_id);
-      if (!lessonRow || lessonRow.status !== 'active') {
-        return res.status(403).json({ error: 'homework_not_available' });
-      }
-      const ctx = await studentAccessContext(actor);
-      if (!(await canStudentAccessRow(ctx, lessonRow))) {
-        return res.status(403).json({ error: 'not_in_class' });
-      }
-      if (!studentAssignedToHomework(normalizeHomeworkRow(hw), ctx.student)) {
-        return res.status(403).json({ error: 'not_assigned' });
-      }
-      const student = ctx.student;
 
       const { data: existing } = await supabaseAdmin
         .from('edu_homework_submissions')
@@ -2509,48 +2595,64 @@ export default async function handler(req, res) {
       let videoPath = null;
       const ts = Date.now();
 
-      const uploadPhoto = async (b64, mime, index) => {
-        const buf = Buffer.from(b64, 'base64');
-        if (!buf.length) throw new Error('empty_photo');
-        if (buf.length > EDU_MAX_PHOTO_BYTES) throw new Error('photo_too_large');
-        const ext = extFromMime(mime, 'jpg');
-        const path = `${homeworkId}/${actor.sub}-${ts}-${index}.${ext}`;
-        await uploadEduBuffer({
-          bucket: EDU_SUBMISSIONS_BUCKET,
-          path,
-          buffer: buf,
-          contentType: mime || 'image/jpeg'
-        });
-        photoPaths.push(path);
-      };
-
-      if (hasLegacyPhoto) {
-        await uploadPhoto(legacyB64, body.mime || 'image/jpeg', 0);
-      } else {
-        const capped = photosInput.slice(0, EDU_MAX_SUBMISSION_PHOTOS);
-        for (let i = 0; i < capped.length; i++) {
-          const item = capped[i];
-          const b64 = typeof item === 'string' ? item : String(item?.data || item?.base64 || '').trim();
-          if (!b64) continue;
-          const mime = typeof item === 'object' && item?.mime ? String(item.mime) : 'image/jpeg';
-          await uploadPhoto(b64, mime, photoPaths.length);
+      if (hasDirectMedia) {
+        const cappedPhotos = photoPathsIncoming.slice(0, EDU_MAX_SUBMISSION_PHOTOS);
+        for (const p of cappedPhotos) {
+          if (!isAllowedSubmissionMediaPath(p, homeworkId, actor.sub)) {
+            return res.status(400).json({ error: 'invalid_photo_path' });
+          }
+          photoPaths.push(p);
         }
-      }
+        if (videoPathIncoming) {
+          if (!isAllowedSubmissionMediaPath(videoPathIncoming, homeworkId, actor.sub)) {
+            return res.status(400).json({ error: 'invalid_video_path' });
+          }
+          videoPath = videoPathIncoming;
+        }
+      } else {
+        const uploadPhoto = async (b64, mime, index) => {
+          const buf = Buffer.from(b64, 'base64');
+          if (!buf.length) throw new Error('empty_photo');
+          if (buf.length > EDU_MAX_PHOTO_BYTES) throw new Error('photo_too_large');
+          const ext = extFromMime(mime, 'jpg');
+          const path = `${homeworkId}/${actor.sub}-${ts}-${index}.${ext}`;
+          await uploadEduBuffer({
+            bucket: EDU_SUBMISSIONS_BUCKET,
+            path,
+            buffer: buf,
+            contentType: mime || 'image/jpeg'
+          });
+          photoPaths.push(path);
+        };
 
-      if (hasVideo) {
-        const vBuf = Buffer.from(videoB64, 'base64');
-        if (!vBuf.length) return res.status(400).json({ error: 'empty_video' });
-        if (vBuf.length > EDU_MAX_VIDEO_BYTES) return res.status(400).json({ error: 'video_too_large' });
-        const vMime = String(body.video_mime || 'video/mp4');
-        if (!vMime.startsWith('video/')) return res.status(400).json({ error: 'invalid_video_type' });
-        const vExt = extFromMime(vMime, 'mp4');
-        videoPath = `${homeworkId}/${actor.sub}-${ts}-video.${vExt}`;
-        await uploadEduBuffer({
-          bucket: EDU_SUBMISSIONS_BUCKET,
-          path: videoPath,
-          buffer: vBuf,
-          contentType: vMime
-        });
+        if (hasLegacyPhoto) {
+          await uploadPhoto(legacyB64, body.mime || 'image/jpeg', 0);
+        } else {
+          const capped = photosInput.slice(0, EDU_MAX_SUBMISSION_PHOTOS);
+          for (let i = 0; i < capped.length; i++) {
+            const item = capped[i];
+            const b64 = typeof item === 'string' ? item : String(item?.data || item?.base64 || '').trim();
+            if (!b64) continue;
+            const mime = typeof item === 'object' && item?.mime ? String(item.mime) : 'image/jpeg';
+            await uploadPhoto(b64, mime, photoPaths.length);
+          }
+        }
+
+        if (hasVideo && videoB64) {
+          const vBuf = Buffer.from(videoB64, 'base64');
+          if (!vBuf.length) return res.status(400).json({ error: 'empty_video' });
+          if (vBuf.length > EDU_MAX_VIDEO_BYTES) return res.status(400).json({ error: 'video_too_large' });
+          const vMime = String(body.video_mime || 'video/mp4');
+          if (!vMime.startsWith('video/')) return res.status(400).json({ error: 'invalid_video_type' });
+          const vExt = extFromMime(vMime, 'mp4');
+          videoPath = `${homeworkId}/${actor.sub}-${ts}-video.${vExt}`;
+          await uploadEduBuffer({
+            bucket: EDU_SUBMISSIONS_BUCKET,
+            path: videoPath,
+            buffer: vBuf,
+            contentType: vMime
+          });
+        }
       }
 
       const upsertRow = {
@@ -2570,7 +2672,8 @@ export default async function handler(req, res) {
         .select()
         .single();
       if (error) throw error;
-      return res.status(201).json({ data });
+      const enriched = await enrichSubmissionWithMediaUrls(data);
+      return res.status(201).json({ data: enriched });
     }
 
     if (resource === 'progress') {
@@ -2694,6 +2797,8 @@ export default async function handler(req, res) {
     }
 
     if (resource === 'my-submission' && req.method === 'GET') {
+      if (!tags.includes('student')) return res.status(403).json({ error: 'forbidden' });
+      actor = await enrichStudentActor(actor);
       const homeworkId = String(req.query?.homework_id || '').trim();
       if (!homeworkId) return res.status(400).json({ error: 'homework_id_required' });
       const { data } = await supabaseAdmin

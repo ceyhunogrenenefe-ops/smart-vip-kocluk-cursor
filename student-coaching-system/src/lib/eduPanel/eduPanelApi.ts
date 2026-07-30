@@ -513,37 +513,138 @@ export async function fetchMyEduSubmission(
   return j.data;
 }
 
+export function isEduImageFile(file: File): boolean {
+  if (file.type.startsWith('image/')) return true;
+  const ext = file.name.split('.').pop()?.toLowerCase() || '';
+  return ['jpg', 'jpeg', 'png', 'webp', 'gif', 'heic', 'heif'].includes(ext);
+}
+
+export function isEduVideoFile(file: File): boolean {
+  if (file.type.startsWith('video/')) return true;
+  const ext = file.name.split('.').pop()?.toLowerCase() || '';
+  return ['mp4', 'webm', 'mov', 'm4v', 'quicktime'].includes(ext);
+}
+
+function resolveEduMediaMime(file: File, kind: 'photo' | 'video'): string {
+  if (file.type) return file.type;
+  const ext = file.name.split('.').pop()?.toLowerCase() || '';
+  if (kind === 'photo') {
+    if (ext === 'png') return 'image/png';
+    if (ext === 'webp') return 'image/webp';
+    if (ext === 'gif') return 'image/gif';
+    if (ext === 'heic' || ext === 'heif') return 'image/heic';
+    return 'image/jpeg';
+  }
+  if (ext === 'webm') return 'video/webm';
+  if (ext === 'mov' || ext === 'quicktime') return 'video/quicktime';
+  return 'video/mp4';
+}
+
+async function uploadSubmissionMediaDirect(
+  homeworkId: string,
+  file: File,
+  kind: 'photo' | 'video',
+  index = 0
+): Promise<string> {
+  const mime = resolveEduMediaMime(file, kind);
+  const prep = await apiFetch('/api/edu-panel?resource=submission-media-upload', {
+    method: 'POST',
+    body: JSON.stringify({
+      homework_id: homeworkId,
+      kind,
+      mime,
+      file_size: file.size,
+      index
+    })
+  });
+  if (!prep.ok) {
+    const j = await prep.json().catch(() => ({}));
+    throw new Error(
+      (j as { hint?: string; error?: string }).hint ||
+        (j as { error?: string }).error ||
+        `Medya yükleme hazırlığı başarısız (${prep.status})`
+    );
+  }
+  const prepJson = (await prep.json()) as {
+    data: {
+      path: string;
+      signedUrl?: string | null;
+      token?: string | null;
+      content_type?: string;
+    };
+  };
+  const { path, signedUrl, token, content_type } = prepJson.data || ({} as { path: string });
+  if (!path) throw new Error('Medya yükleme yolu alınamadı');
+
+  if (signedUrl) {
+    const put = await fetch(signedUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': content_type || mime,
+        'x-upsert': 'true'
+      },
+      body: file
+    });
+    if (!put.ok) {
+      const t = await put.text().catch(() => '');
+      throw new Error(t.slice(0, 200) || `Medya Storage’a yüklenemedi (${put.status})`);
+    }
+    return path;
+  }
+
+  if (token && signedUrl) {
+    const put = await fetch(signedUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': content_type || mime,
+        Authorization: `Bearer ${token}`,
+        'x-upsert': 'true'
+      },
+      body: file
+    });
+    if (put.ok) return path;
+  }
+
+  throw new Error('Medya yükleme bağlantısı alınamadı — Storage ayarını kontrol edin');
+}
+
 export async function submitEduHomework(
   homeworkId: string,
   payload?: { photos?: File[]; video?: File | null }
-): Promise<void> {
-  const photos = (payload?.photos || []).filter((f) => f && f.type.startsWith('image/'));
-  const video = payload?.video && payload.video.type.startsWith('video/') ? payload.video : null;
+): Promise<EduHomeworkSubmission> {
+  const photos = (payload?.photos || []).filter((f) => f && isEduImageFile(f)).slice(0, 5);
+  const video = payload?.video && isEduVideoFile(payload.video) ? payload.video : null;
+
+  if ((payload?.photos?.length || 0) > 0 && photos.length === 0 && !video) {
+    throw new Error('Fotoğraf formatı desteklenmiyor. JPG, PNG veya HEIC deneyin.');
+  }
+  if (payload?.video && !video) {
+    throw new Error('Video formatı desteklenmiyor. MP4 veya MOV deneyin.');
+  }
+
+  const photoPaths: string[] = [];
+  let videoPath: string | null = null;
+
+  for (let i = 0; i < photos.length; i++) {
+    photoPaths.push(await uploadSubmissionMediaDirect(homeworkId, photos[i], 'photo', i));
+  }
+  if (video) {
+    videoPath = await uploadSubmissionMediaDirect(homeworkId, video, 'video', 0);
+  }
 
   const body: Record<string, unknown> = { homework_id: homeworkId };
-  if (photos.length === 1 && !video) {
-    body.image_base64 = await fileToBase64(photos[0]);
-    body.mime = photos[0].type || 'image/jpeg';
-  } else {
-    if (photos.length) {
-      body.photos_base64 = await Promise.all(
-        photos.map(async (file) => ({
-          data: await fileToBase64(file),
-          mime: file.type || 'image/jpeg'
-        }))
-      );
-    }
-    if (video) {
-      body.video_base64 = await fileToBase64(video);
-      body.video_mime = video.type || 'video/mp4';
-    }
-  }
+  if (photoPaths.length) body.photo_paths = photoPaths;
+  if (videoPath) body.video_path = videoPath;
 
   const res = await apiFetch('/api/edu-panel?resource=submit', {
     method: 'POST',
     body: JSON.stringify(body)
   });
-  await parseJson(res);
+  if (res.status === 413) {
+    throw new Error('Dosya çok büyük. Fotoğraf en fazla 10 MB, video 30 MB olabilir.');
+  }
+  const j = await parseJson<{ data: EduHomeworkSubmission }>(res);
+  return j.data;
 }
 
 export async function fetchEduHomeworkSubmissions(

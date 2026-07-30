@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Camera, ImagePlus, Loader2, Video, X } from 'lucide-react';
 import type { EduHomework } from '../../types/eduPanel.types';
 import { formatEduHomeworkLabel } from '../../lib/eduPanel/eduHomeworkForm';
+import { isEduImageFile, isEduVideoFile } from '../../lib/eduPanel/eduPanelApi';
 
 const MAX_PHOTOS = 5;
 const MAX_VIDEO_SECONDS = 60;
@@ -77,18 +78,26 @@ export default function EduSubmitHomeworkModal({
     if (!files?.length) return;
     setMediaError(null);
     const next = [...photos];
+    let skipped = 0;
     for (const f of Array.from(files)) {
-      if (!f.type.startsWith('image/')) continue;
+      if (!isEduImageFile(f)) {
+        skipped += 1;
+        continue;
+      }
       if (next.length >= MAX_PHOTOS) break;
       next.push(f);
+    }
+    if (skipped > 0 && next.length === photos.length) {
+      setMediaError('Fotoğraf formatı desteklenmiyor. JPG, PNG veya HEIC deneyin.');
+      return;
     }
     setPhotos(next);
   };
 
   const onPickVideo = async (file: File | null) => {
     if (!file) return;
-    if (!file.type.startsWith('video/')) {
-      setMediaError('Geçersiz video dosyası.');
+    if (!isEduVideoFile(file)) {
+      setMediaError('Geçersiz video dosyası. MP4 veya MOV deneyin.');
       return;
     }
     try {
@@ -151,7 +160,7 @@ export default function EduSubmitHomeworkModal({
                 Fotoğraf
                 <input
                   type="file"
-                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,.heic,.heif"
                   multiple
                   className="hidden"
                   disabled={busy || photos.length >= MAX_PHOTOS}

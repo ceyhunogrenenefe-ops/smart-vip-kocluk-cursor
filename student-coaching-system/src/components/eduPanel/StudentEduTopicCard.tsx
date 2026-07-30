@@ -345,13 +345,39 @@ export default function StudentEduTopicCard({
                           </div>
                         ) : null}
                         {sub ? (
-                          <p className="text-xs text-green-700 mt-2">
-                            Teslim edildi ({new Date(sub.submitted_at).toLocaleString('tr-TR')})
-                            {sub.grade ? ` · Not: ${sub.grade}` : ''}
-                            {sub.photo_paths?.length || sub.storage_path || sub.video_path ? (
-                              <span className="text-green-600"> · Medya eklendi</span>
+                          <div className="mt-2 space-y-2">
+                            <p className="text-xs text-green-700">
+                              Teslim edildi ({new Date(sub.submitted_at).toLocaleString('tr-TR')})
+                              {sub.grade ? ` · Not: ${sub.grade}` : ''}
+                            </p>
+                            {sub.photo_urls && sub.photo_urls.length > 0 ? (
+                              <div className="flex flex-wrap gap-1.5">
+                                {sub.photo_urls.slice(0, 3).map((url) => (
+                                  <img
+                                    key={url}
+                                    src={url}
+                                    alt=""
+                                    className="h-14 w-14 rounded-md border border-green-200 object-cover"
+                                  />
+                                ))}
+                                {sub.photo_urls.length > 3 ? (
+                                  <span className="self-center text-[10px] text-green-700">
+                                    +{sub.photo_urls.length - 3}
+                                  </span>
+                                ) : null}
+                              </div>
+                            ) : sub.photo_paths?.length || sub.storage_path || sub.video_path ? (
+                              <p className="text-[10px] text-green-600">Medya eklendi</p>
                             ) : null}
-                          </p>
+                            {sub.video_url ? (
+                              <video
+                                src={sub.video_url}
+                                controls
+                                playsInline
+                                className="max-h-28 w-full rounded-md border border-green-200 bg-black"
+                              />
+                            ) : null}
+                          </div>
                         ) : (
                           <button
                             type="button"

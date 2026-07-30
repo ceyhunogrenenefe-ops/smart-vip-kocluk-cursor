@@ -20,7 +20,6 @@ import {
 import {
   fetchEduLessonRowsDetailed,
   fetchMyEduProgress,
-  fetchMyEduSubmission,
   saveEduLessonProgress,
   submitEduHomework
 } from '../../lib/eduPanel/eduPanelApi';
@@ -162,12 +161,11 @@ export default function StudentEduPanelPage() {
   ) => {
     setBusyHw(hw.id);
     try {
-      await submitEduHomework(hw.id, {
+      const sub = await submitEduHomework(hw.id, {
         photos: payload.photos,
         video: payload.video
       });
       toast.success('Ödev teslim edildi');
-      const sub = await fetchMyEduSubmission(hw.id);
       const nextSubs = { ...submissions, [hw.id]: sub };
       setSubmissions(nextSubs);
 
