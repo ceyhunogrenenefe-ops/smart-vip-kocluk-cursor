@@ -182,8 +182,7 @@ export default function EduSubmitHomeworkModal({
             ) : null}
             <p className="mt-1 text-[10px] text-slate-400">
               En fazla {MAX_PHOTOS} fotoğraf · En fazla {MAX_VIDEOS} video · Her video en fazla 2
-              dakika · Uzun videoları parça parça yükle · Boyut sınırı yok (2 dk içinde) · Zorunlu
-              değil
+              dakika · Uzun videoları parça parça yükle · Zorunlu değil
             </p>
 
             <div className="mt-3 flex flex-wrap gap-2">
