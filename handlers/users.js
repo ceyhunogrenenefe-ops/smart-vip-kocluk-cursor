@@ -287,17 +287,45 @@ export default async function handler(req, res) {
         if (tErr1) throw tErr1;
         for (const u of byPrimaryRole || []) teacherById.set(u.id, u);
 
+        // roles jsonb — JS array `.contains(['teacher'])` Postgres text[] sözdizimi
+        // üretir ve jsonb'de hata verir; JSON string kullan.
         const { data: byRolesArr, error: tErr2 } = await queryUsersList((q) => {
           let query = q
             .eq('institution_id', actor.institution_id)
-            .contains('roles', ['teacher'])
+            .contains('roles', '["teacher"]')
             .order('created_at', { ascending: false });
           if (email) query = query.eq('email', email);
           return query;
         });
-        // roles kolonu / contains bazı eski şemalarda başarısız olabilir — yoksay
         if (!tErr2) {
           for (const u of byRolesArr || []) teacherById.set(u.id, u);
+        } else {
+          // Fallback: kurumdaki koçları çek, roles içinde teacher olanları ekle
+          const { data: coachRows } = await queryUsersList((q) => {
+            let query = q
+              .eq('institution_id', actor.institution_id)
+              .eq('role', 'coach')
+              .order('created_at', { ascending: false });
+            if (email) query = query.eq('email', email);
+            return query;
+          });
+          for (const u of coachRows || []) {
+            const roleList = Array.isArray(u.roles)
+              ? u.roles.map((x) => String(x || '').toLowerCase())
+              : [];
+            if (roleList.includes('teacher')) teacherById.set(u.id, u);
+          }
+        }
+
+        // Koç+öğretmen: kendi kaydı listede olsun (Canlı Grup Dersi vb.)
+        if (
+          (actorRoleTags.includes('teacher') || actor.role === 'teacher') &&
+          (!email || String(actor.email || '').toLowerCase() === email)
+        ) {
+          if (!teacherById.has(actor.sub)) {
+            const { data: selfRow } = await queryUsersList((q) => q.eq('id', actor.sub).limit(1));
+            if (selfRow?.[0]) teacherById.set(selfRow[0].id, selfRow[0]);
+          }
         }
 
         const byId = new Map();
