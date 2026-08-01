@@ -306,6 +306,7 @@ export function publicCardFromSnapshot(row) {
   const snap = row?.published_snapshot && typeof row.published_snapshot === 'object'
     ? row.published_snapshot
     : workingPayloadFromRow(row);
+  const videos = normalizeTeacherVideos(snap.videos, snap.video_url || snap.video_path || '');
   return {
     integration_uuid: row.integration_uuid,
     slug: row.slug,
@@ -321,7 +322,10 @@ export function publicCardFromSnapshot(row) {
     university: snap.university || null,
     online_lessons: snap.online_lessons !== false,
     accepting_students: snap.accepting_students !== false,
-    private_lesson_enabled: row.private_lesson_enabled !== false
+    private_lesson_enabled: row.private_lesson_enabled !== false,
+    // Liste (hover tanıtım) için zorunlu — detayda vardı, kartta yoktu
+    video_url: videos[0]?.url || snap.video_url || null,
+    videos
   };
 }
 
@@ -329,6 +333,7 @@ export function publicDetailFromSnapshot(row) {
   const snap = row?.published_snapshot && typeof row.published_snapshot === 'object'
     ? row.published_snapshot
     : workingPayloadFromRow(row);
+  const videos = normalizeTeacherVideos(snap.videos, snap.video_url || snap.video_path || '');
   return {
     ...publicCardFromSnapshot(row),
     full_bio: snap.full_bio || null,
@@ -340,8 +345,8 @@ export function publicDetailFromSnapshot(row) {
     educations: snap.educations || [],
     experiences: snap.experiences || [],
     subjects: snap.subjects || [],
-    video_url: snap.video_url || null,
-    videos: normalizeTeacherVideos(snap.videos, snap.video_url || snap.video_path || ''),
+    video_url: videos[0]?.url || snap.video_url || null,
+    videos,
     lesson_duration_min: snap.lesson_duration_min ?? null,
     lesson_format: snap.lesson_format || 'online',
     availability_note: snap.availability_note || null,
