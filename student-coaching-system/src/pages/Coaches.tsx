@@ -237,6 +237,8 @@ export default function Coaches() {
     const roles = Array.isArray(row?.roles)
       ? (row.roles.filter(Boolean) as SystemUser['roles'])
       : undefined;
+    const institutionId =
+      String(coach.institutionId || row?.institution_id || '').trim() || undefined;
     return {
       id: row?.id || coach.id,
       name: row?.name || coach.name,
@@ -245,7 +247,7 @@ export default function Coaches() {
       role: 'coach',
       roles: roles?.length ? roles : undefined,
       coachId: coach.id,
-      institutionId: coach.institutionId,
+      institutionId,
       package: 'trial',
       isActive: true,
       startDate: coach.createdAt || new Date().toISOString(),

@@ -372,11 +372,13 @@ export function pickInstitutionForActor(
 
 ): Institution | undefined {
 
-  const fallbackId = userMaySwitchInstitution(opts.role ?? undefined)
+  const canSwitch = userMaySwitchInstitution(opts.role ?? undefined);
+
+  const fallbackId = canSwitch
 
     ? resolveSuperAdminDefaultInstitutionId(institutions)
 
-    : institutions[0]?.id ?? null;
+    : null;
 
   const targetId = resolveInstitutionIdForActor({
 
@@ -398,9 +400,11 @@ export function pickInstitutionForActor(
 
   }
 
-  if (!userMaySwitchInstitution(opts.role ?? undefined) && opts.userInstitutionId) {
+  /** Kiracı (öğretmen/koç/öğrenci/admin): süper admin seçimine veya institutions[0]'a düşme. */
 
-    const id = String(opts.userInstitutionId).trim();
+  if (!canSwitch) {
+
+    const id = String(opts.userInstitutionId || '').trim();
 
     if (id) {
 
@@ -420,19 +424,17 @@ export function pickInstitutionForActor(
 
     }
 
-  }
-
-  if (userMaySwitchInstitution(opts.role ?? undefined)) {
-
-    const primary = institutions.find(isPrimaryOnlineVipInstitution);
-
-    if (primary) return primary;
-
-    const byId = institutions.find((i) => i.id === PLATFORM_PRIMARY_INSTITUTION_ID);
-
-    if (byId) return byId;
+    return undefined;
 
   }
+
+  const primary = institutions.find(isPrimaryOnlineVipInstitution);
+
+  if (primary) return primary;
+
+  const byId = institutions.find((i) => i.id === PLATFORM_PRIMARY_INSTITUTION_ID);
+
+  if (byId) return byId;
 
   return institutions[0];
 

@@ -826,9 +826,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const enrichRoleLinks = async (u: SystemUser): Promise<SystemUser> => {
     const email = u.email.toLowerCase().trim();
-    if (u.role === 'student') {
+    let next: SystemUser = { ...u };
+
+    /** Taklit / liste satırlarında institutionId sık düşüyor — Sidebar ve kiracı kapsamı için doldur. */
+    if (!String(next.institutionId || '').trim()) {
+      try {
+        let inst: string | null = null;
+        if (getAuthToken() && next.id && !String(next.id).startsWith('demo-')) {
+          const byId = await db.getUserById(next.id).catch(() => null);
+          inst = byId?.institution_id ? String(byId.institution_id).trim() : null;
+        }
+        if (!inst && getAuthToken()) {
+          const byEmail = await db.getUserByEmail(email).catch(() => null);
+          inst = byEmail?.institution_id ? String(byEmail.institution_id).trim() : null;
+        }
+        if (!inst) {
+          const { data: userRow } = await withTimeout(
+            supabase.from('users').select('institution_id').eq('email', email).maybeSingle()
+          );
+          inst = userRow?.institution_id ? String(userRow.institution_id).trim() : null;
+        }
+        if (inst) next = { ...next, institutionId: inst };
+      } catch {
+        /* yoksay */
+      }
+    }
+
+    if (next.role === 'student') {
       const { data: userRow } = await withTimeout(
-        supabase.from('users').select('id, email, institution_id').eq('id', u.id).maybeSingle()
+        supabase.from('users').select('id, email, institution_id').eq('id', next.id).maybeSingle()
       );
       if (userRow?.email) {
         const sid = await resolveStudentTableIdForUserLogin({
@@ -836,27 +862,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: String(userRow.email),
           institution_id: userRow.institution_id
         });
-        if (sid) return { ...u, studentId: sid };
+        if (sid) {
+          return {
+            ...next,
+            studentId: sid,
+            institutionId: next.institutionId || userRow.institution_id || undefined
+          };
+        }
       }
       const sidLoose = await resolveStudentTableIdForUserLogin({
-        id: u.id,
+        id: next.id,
         email,
-        institution_id: u.institutionId ?? null
+        institution_id: next.institutionId ?? null
       });
-      if (sidLoose) return { ...u, studentId: sidLoose };
+      if (sidLoose) return { ...next, studentId: sidLoose };
     }
-    if (u.role === 'coach') {
+    if (next.role === 'coach' || (next.roles || []).includes('coach')) {
       let { data: coachRow } = await withTimeout(
-        supabase.from('coaches').select('id').eq('email', email).maybeSingle()
+        supabase.from('coaches').select('id, institution_id').eq('email', email).maybeSingle()
       );
       if (!coachRow?.id) {
         ({ data: coachRow } = await withTimeout(
-          supabase.from('coaches').select('id').ilike('email', email).maybeSingle()
+          supabase.from('coaches').select('id, institution_id').ilike('email', email).maybeSingle()
         ));
       }
-      return { ...u, coachId: coachRow?.id || u.coachId };
+      return {
+        ...next,
+        coachId: coachRow?.id || next.coachId,
+        institutionId:
+          next.institutionId ||
+          (coachRow?.institution_id ? String(coachRow.institution_id).trim() : undefined)
+      };
     }
-    return u;
+    return next;
   };
 
   const loginAsEmail = useCallback(

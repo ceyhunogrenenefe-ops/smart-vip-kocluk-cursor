@@ -28,6 +28,12 @@ type TeacherUser = {
 
   roles?: string[];
 
+  /** API `users.institution_id` — taklitte Sidebar/logo için zorunlu */
+
+  institution_id?: string | null;
+
+  institutionId?: string | null;
+
 };
 
 
@@ -39,6 +45,10 @@ function toSystemUser(u: TeacherUser): SystemUser {
     ? (u.roles.filter(Boolean) as SystemUser['roles'])
 
     : undefined;
+
+  const institutionId =
+
+    String(u.institutionId || u.institution_id || '').trim() || undefined;
 
   return {
 
@@ -53,6 +63,8 @@ function toSystemUser(u: TeacherUser): SystemUser {
     role: 'teacher',
 
     roles: roles?.length ? roles : undefined,
+
+    institutionId,
 
     package: 'trial',
 

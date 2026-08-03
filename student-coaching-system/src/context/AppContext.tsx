@@ -556,8 +556,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
             } else if (!readActiveInstitutionIdForRole(effectiveUser?.role) && next) {
               writeActiveInstitutionIdForRole(next, effectiveUser?.role);
             }
-          } else if (!scopeInstitutionId || !knownIds.has(scopeInstitutionId)) {
-            setActiveInstitutionId(resolvedActiveId || defaultInstitutionId);
+          } else if (userInstId) {
+            // Kiracı: kullanıcı institution_id biliniyor ama liste henüz eşleşmiyor — yine kendi id'sini tut
+            if (activeInstitutionId !== userInstId) setActiveInstitutionId(userInstId);
+          } else {
+            // institutionId yokken institutions[0] / önceki süper admin seçimine düşme
+            if (activeInstitutionId) setActiveInstitutionId(null);
           }
         }
 
