@@ -725,6 +725,7 @@ export default async function handler(req, res) {
             rejection_reason: reason,
             rejected_at: now,
             rejected_by: actor.sub,
+            editing_enabled: true,
             updated_at: now
           })
           .eq('id', id)
@@ -795,7 +796,7 @@ export default async function handler(req, res) {
             private_lesson_enabled: snapshot.private_lesson_enabled !== false,
             completion_pct: pct,
             rejection_reason: null,
-            editing_enabled: false,
+            editing_enabled: true,
             approved_at: now,
             approved_by: actor.sub,
             updated_at: now

@@ -3,6 +3,9 @@
  */
 import { createHash, createHmac, randomUUID } from 'crypto';
 import { supabaseAdmin } from './supabase-admin.js';
+import { canEditProfile } from './teacher-profile-edit-access.js';
+
+export { canEditProfile };
 
 export const TEACHER_PROFILE_STATUSES = [
   'draft',

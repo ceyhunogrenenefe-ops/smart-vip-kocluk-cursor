@@ -14,6 +14,8 @@ type ProfileResponse = {
   can_submit?: boolean;
   can_edit?: boolean;
   editing_enabled?: boolean;
+  awaiting_approval?: boolean;
+  approved_data?: Record<string, unknown> | null;
   account?: { name?: string; email?: string };
 };
 
@@ -373,7 +375,22 @@ export default function TeacherVitrineProfilePage() {
         <div className="flex gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
           <Lock className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
           <div>
-            <div className="font-semibold">Profil düzenleme yetkiniz kapalı. Yönetici &apos;Düzenlemeye Aç&apos; yapmalı.</div>
+            <div className="font-semibold">
+              Bu profil pasif veya silinmiş; düzenleme kapalı. Yönetimle iletişime geçin.
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {!editingDisabled && (data?.awaiting_approval || status === 'pending_approval' || status === 'update_pending') ? (
+        <div className="flex gap-2 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-950">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-sky-700" />
+          <div>
+            <div className="font-semibold">Onay bekleniyor</div>
+            <p className="mt-1 text-sky-900/90">
+              Değişiklikleriniz admin onayına düştü. Onaylanana kadar sitede mevcut onaylı profil
+              gösterilmeye devam eder. İstediğiniz zaman düzenleyip yeniden onaya gönderebilirsiniz.
+            </p>
           </div>
         </div>
       ) : null}

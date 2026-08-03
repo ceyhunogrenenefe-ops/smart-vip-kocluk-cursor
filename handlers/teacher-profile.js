@@ -1,8 +1,8 @@
 /**
- * Öğretmen kendi vitrin profili
+ * Öğretmen/koç kendi vitrin profili
  * GET  /api/teacher-profile
- * PATCH /api/teacher-profile  (editing_enabled gerekir)
- * POST  /api/teacher-profile?op=submit
+ * PATCH /api/teacher-profile  (pasif/silinmiş hariç her zaman düzenlenebilir)
+ * POST  /api/teacher-profile?op=submit  (onaya gönder; yayına admin onayı gerekir)
  */
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { actorRoleSet } from '../api/_lib/actor-roles.js';
@@ -10,6 +10,7 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import {
   applyPatchToWorking,
+  canEditProfile,
   completionPercent,
   deriveStatusAfterEdit,
   ensureTeacherProfileForUser,
@@ -53,18 +54,6 @@ function clientIp(req) {
   );
 }
 
-function canEditProfile(profile) {
-  if (!profile) return false;
-  if (profile.status === 'passive' || profile.status === 'deleted') return false;
-  if (profile.deleted_at) return false;
-  if (profile.editing_enabled === false) return false;
-  if (profile.editing_deadline) {
-    const dl = new Date(profile.editing_deadline).getTime();
-    if (!Number.isNaN(dl) && Date.now() > dl) return false;
-  }
-  return true;
-}
-
 export default async function handler(req, res) {
   try {
     const actor = requireAuthenticatedActor(req);
@@ -103,7 +92,15 @@ export default async function handler(req, res) {
       const working = workingPayloadFromRow(profile);
       const missing = missingRequiredFields(working);
       const editable = canEditProfile(profile);
-      const submitStatuses = ['draft', 'incomplete', 'rejected', 'published', 'update_pending', 'changes_pending'];
+      const submitStatuses = [
+        'draft',
+        'incomplete',
+        'rejected',
+        'published',
+        'update_pending',
+        'changes_pending',
+        'pending_approval'
+      ];
       return res.status(200).json({
         profile,
         working,
@@ -114,6 +111,8 @@ export default async function handler(req, res) {
         editing_enabled: editable,
         can_edit: editable,
         can_submit: editable && missing.length === 0 && submitStatuses.includes(profile.status),
+        awaiting_approval:
+          profile.status === 'pending_approval' || isUpdatePendingStatus(profile.status),
         pending_revision: pendingRev || null,
         account: { id: user.id, name: user.name, email: user.email, phone: user.phone }
       });
@@ -195,7 +194,7 @@ export default async function handler(req, res) {
           submitted_at: now,
           last_submitted_at: now,
           pending_data: working,
-          editing_enabled: false,
+          editing_enabled: true,
           rejection_reason: null,
           completion_pct: 100,
           updated_at: now
@@ -234,43 +233,57 @@ export default async function handler(req, res) {
       if (!canEditProfile(profile)) {
         return res.status(403).json({ error: 'editing_disabled' });
       }
-      if (profile.status === 'pending_approval') {
-        return res.status(403).json({ error: 'awaiting_approval' });
-      }
 
       const body = req.body || {};
       const nextWorking = applyPatchToWorking(profile, body);
       const pct = completionPercent(nextWorking);
-      const nextStatus = deriveStatusAfterEdit(profile, pct);
+      let nextStatus = deriveStatusAfterEdit(profile, pct);
 
       const patch = {
         ...nextWorking,
         completion_pct: pct,
         status: nextStatus,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
+        editing_enabled: true
       };
 
-      // Yayında / güncelleme kuyruğunda: snapshot (approved_data) dokunulmaz
-      if (profile.status === 'published' || isUpdatePendingStatus(profile.status)) {
-        patch.status = 'update_pending';
+      const inApprovalQueue =
+        profile.status === 'pending_approval' ||
+        profile.status === 'published' ||
+        isUpdatePendingStatus(profile.status);
+      const hadPublished = !!(profile.published_snapshot && Object.keys(profile.published_snapshot).length);
+
+      // Yayındaki / onay kuyruğundaki: published_snapshot dokunulmaz
+      if (inApprovalQueue) {
+        patch.status = hadPublished || profile.status === 'published' || isUpdatePendingStatus(profile.status)
+          ? 'update_pending'
+          : 'pending_approval';
+        // Onay beklerken yapılan değişiklikler pending_data'ya yazılır; site snapshot'ı korunur
+        if (profile.status === 'pending_approval' || isUpdatePendingStatus(profile.status)) {
+          patch.pending_data = nextWorking;
+        }
         const { data: openRev } = await supabaseAdmin
           .from('teacher_profile_revisions')
-          .select('id')
+          .select('id,status')
           .eq('profile_id', profile.id)
           .in('status', ['draft', 'pending_approval'])
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
         if (openRev?.id) {
+          const revStatus =
+            openRev.status === 'pending_approval' || profile.status === 'pending_approval'
+              ? 'pending_approval'
+              : 'draft';
           await supabaseAdmin
             .from('teacher_profile_revisions')
             .update({
               payload: nextWorking,
-              status: 'draft',
+              status: revStatus,
               updated_at: new Date().toISOString()
             })
             .eq('id', openRev.id);
-        } else {
+        } else if (hadPublished || isUpdatePendingStatus(profile.status) || profile.status === 'published') {
           await supabaseAdmin.from('teacher_profile_revisions').insert({
             profile_id: profile.id,
             status: 'draft',
