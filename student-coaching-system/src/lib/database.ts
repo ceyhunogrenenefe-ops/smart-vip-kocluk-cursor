@@ -389,7 +389,18 @@ class DatabaseService {
       const path = viewAs
         ? `/api/students?view_as_user_id=${encodeURIComponent(viewAs)}`
         : '/api/students';
-      const rows = await this.apiListJson<StudentRow>(path, path);
+      let rows: StudentRow[];
+      try {
+        rows = await this.apiListJson<StudentRow>(path, path);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        // Koç taklidinde eski istemci view_as gönderirse — normal listeye düş
+        if (viewAs && (msg.includes('view_as_forbidden') || msg.includes('view_as_'))) {
+          rows = await this.apiListJson<StudentRow>('/api/students', '/api/students');
+        } else {
+          throw e;
+        }
+      }
       // view_as: kurum filtresi özel ders öğrencilerini kesebilir — atla
       if (!institutionId || viewAs) return rows;
       return rows.filter((s) => s.institution_id === institutionId);

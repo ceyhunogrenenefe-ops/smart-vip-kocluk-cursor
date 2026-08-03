@@ -305,7 +305,7 @@ interface AppState {
 const AppContext = createContext<AppState | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const { effectiveUser, linkedStudent, isImpersonating } = useAuth();
+  const { user, effectiveUser, linkedStudent, isImpersonating } = useAuth();
   const { syncOrganizationsFromInstitutions } = useOrganization();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userRole, setUserRole] = useState<UserRole>('admin');
@@ -572,8 +572,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
             : undefined;
 
         const viewAsRoleTags = userRoleTags(effectiveUser);
+        const realRoleTags = userRoleTags(user);
+        const realCanViewAs =
+          realRoleTags.includes('super_admin') || realRoleTags.includes('admin');
+        // view_as yalnızca gerçek JWT admin/süper admin iken (koç→öğrenci taklidinde 403 olur)
         const viewAsUserId =
           isImpersonating &&
+          realCanViewAs &&
           effectiveUser?.id &&
           (viewAsRoleTags.includes('coach') ||
             viewAsRoleTags.includes('teacher') ||
@@ -906,6 +911,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     effectiveUser?.role,
     effectiveUser?.id,
     effectiveUser?.studentId,
+    user?.id,
+    user?.role,
     isImpersonating,
     syncOrganizationsFromInstitutions
   ]); // Öğrenci JWT student_id sonradan dolabiliyor

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
+import { userRoleTags } from '../config/rolePermissions';
 import { apiFetch } from '../lib/session';
 import { Users, Radio, CheckCircle2, Presentation } from 'lucide-react';
 
@@ -22,7 +23,7 @@ function studentDisplayName(s: ScopeStudent): string {
 export default function TeacherPanel() {
   const navigate = useNavigate();
   const { students: contextStudents } = useApp();
-  const { isImpersonating, effectiveUser } = useAuth();
+  const { user, isImpersonating, effectiveUser } = useAuth();
   const [scopedStudents, setScopedStudents] = useState<ScopeStudent[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -31,8 +32,11 @@ export default function TeacherPanel() {
     void (async () => {
       setLoading(true);
       try {
+        const realTags = userRoleTags(user);
+        const realCanViewAs =
+          realTags.includes('super_admin') || realTags.includes('admin');
         const qs =
-          isImpersonating && effectiveUser?.id
+          isImpersonating && realCanViewAs && effectiveUser?.id
             ? `?view_as_user_id=${encodeURIComponent(effectiveUser.id)}`
             : '';
         const res = await apiFetch(`/api/teacher-scope${qs}`);
@@ -63,7 +67,7 @@ export default function TeacherPanel() {
     return () => {
       cancelled = true;
     };
-  }, [contextStudents, isImpersonating, effectiveUser?.id]);
+  }, [contextStudents, isImpersonating, effectiveUser?.id, user?.id]);
 
   const myStudents = useMemo(() => scopedStudents, [scopedStudents]);
 
