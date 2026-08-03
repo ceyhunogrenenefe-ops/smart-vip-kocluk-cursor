@@ -4,7 +4,7 @@ import { errorMessage } from '../api/_lib/error-msg.js';
 import { getSupabaseAdmin, hasSupabaseServiceRoleKey, supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { getTeacherPanelStudentScope } from '../api/_lib/teacher-class-scope.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
-import { normalizeUuidOrGenerate } from '../api/_lib/uuid.js';
+import { normalizeUuidOrGenerate, isUuid } from '../api/_lib/uuid.js';
 import { USER_LIST_COLUMNS, USER_LIST_OPTIONAL_COLUMNS } from '../api/_lib/list-query-columns.js';
 import { selectWithOptionalColumns } from '../api/_lib/supabase-optional-moderator.js';
 import { ensureTeacherProfileForUser } from '../api/_lib/teacher-profile.js';
@@ -367,6 +367,12 @@ export default async function handler(req, res) {
         let query = q.order('created_at', { ascending: false });
         if (actor.role === 'admin') {
           query = query.eq('institution_id', actor.institution_id);
+        } else if (actor.role === 'super_admin') {
+          // Süper admin: seçili kurum filtresi (öğretmen/koç listesi karışmasın)
+          const instFilter = String(req.query?.institution_id || '').trim();
+          if (instFilter && isUuid(instFilter)) {
+            query = query.eq('institution_id', instFilter);
+          }
         }
         if (email) query = query.eq('email', email);
         return query;

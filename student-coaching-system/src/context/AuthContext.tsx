@@ -14,7 +14,13 @@ import {
 import { db } from '../lib/database';
 import { studentRowToStudent } from '../lib/mapStudentRow';
 import type { UserRow } from '../lib/userRowToSystemUser';
-import { pinActiveInstitutionForUser, prepareInstitutionStorageForLogin, clearTenantSessionStorage } from '../lib/activeInstitutionScope';
+import {
+  pinActiveInstitutionForUser,
+  prepareInstitutionStorageForLogin,
+  clearTenantSessionStorage,
+  readActiveInstitutionIdForRole,
+  readActiveInstitutionIdFromStorage
+} from '../lib/activeInstitutionScope';
 
 // Demo mod - girişin her zaman çalışması için aktif
 const USE_DEMO_MODE = true;
@@ -809,6 +815,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         hydratedTarget = target;
       }
+      // Süper admin: hedef kurum boşsa veya seçili kurumdan farklıysa — seçili kurumu kullan
+      // (liste zaten seçili kuruma filtrelendi; logo Online VIP kalsın, Türkçe Uzmanı'na düşmesin)
+      if (user.role === 'super_admin') {
+        const selected =
+          readActiveInstitutionIdForRole('super_admin') ||
+          readActiveInstitutionIdFromStorage();
+        if (selected) {
+          const cur = String(hydratedTarget.institutionId || '').trim();
+          if (!cur || cur !== selected) {
+            hydratedTarget = { ...hydratedTarget, institutionId: selected };
+          }
+        }
+      }
       const hydrated = applyTrialAccountCoachOnly(hydratedTarget);
       if (typeof window !== 'undefined') {
         const path = `${window.location.pathname}${window.location.search}`;
@@ -828,25 +847,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const email = u.email.toLowerCase().trim();
     let next: SystemUser = { ...u };
 
-    /** Taklit / liste satırlarında institutionId sık düşüyor — Sidebar ve kiracı kapsamı için doldur. */
+    /** institutionId yoksa users tablosundan doldur — doluysa liste/seçili kurum değerini koru. */
     if (!String(next.institutionId || '').trim()) {
       try {
         let inst: string | null = null;
-        if (getAuthToken()) {
-          const byEmail = await db.getUserByEmail(email).catch(() => null);
-          inst = byEmail?.institution_id ? String(byEmail.institution_id).trim() : null;
-        }
-        if (!inst && next.id && !String(next.id).startsWith('demo-') && !String(next.id).startsWith('student-')) {
+        if (next.id && !String(next.id).startsWith('demo-') && !String(next.id).startsWith('student-')) {
           const { data: userRow } = await withTimeout(
             supabase.from('users').select('institution_id').eq('id', next.id).maybeSingle()
           );
-          inst = userRow?.institution_id ? String(userRow.institution_id).trim() : null;
+          if (userRow?.institution_id) inst = String(userRow.institution_id).trim();
+        }
+        if (!inst && getAuthToken()) {
+          const byEmail = await db.getUserByEmail(email).catch(() => null);
+          if (byEmail?.institution_id) inst = String(byEmail.institution_id).trim();
         }
         if (!inst) {
           const { data: userRow } = await withTimeout(
             supabase.from('users').select('institution_id').eq('email', email).maybeSingle()
           );
-          inst = userRow?.institution_id ? String(userRow.institution_id).trim() : null;
+          if (userRow?.institution_id) inst = String(userRow.institution_id).trim();
         }
         if (inst) next = { ...next, institutionId: inst };
       } catch {

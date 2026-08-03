@@ -82,10 +82,26 @@ export default function Coaches() {
   const [lockBusyId, setLockBusyId] = useState<string | null>(null);
   const [allCoachesForPage, setAllCoachesForPage] = useState<Coach[]>([]);
 
-  const coachesForPage =
-    effectiveUser?.role === 'super_admin' && allCoachesForPage.length > 0
-      ? allCoachesForPage
-      : coaches;
+  const coachesForPage = useMemo(() => {
+    const base =
+      effectiveUser?.role === 'super_admin' && allCoachesForPage.length > 0
+        ? allCoachesForPage
+        : coaches;
+    // Süper admin: seçili kuruma göre filtrele — başka kurum koçu karışmasın
+    if (effectiveUser?.role === 'super_admin') {
+      const inst = String(activeInstitutionId || institution?.id || '').trim();
+      if (inst) {
+        return base.filter((c) => String(c.institutionId || '').trim() === inst);
+      }
+    }
+    return base;
+  }, [
+    effectiveUser?.role,
+    allCoachesForPage,
+    coaches,
+    activeInstitutionId,
+    institution?.id
+  ]);
 
   const userByEmail = useMemo(() => {
     const m = new Map<string, ApiUserRow>();
@@ -267,7 +283,22 @@ export default function Coaches() {
       navigate(`/user-management?koc_giris=${encodeURIComponent(coach.id)}`);
       return;
     }
+    // Seçili kurum (süper admin) — taklitte logo/kapsam için
+    const selectedInst = String(activeInstitutionId || institution?.id || '').trim();
     const target = coachToSystemUser(coach, row);
+    if (!target.institutionId && selectedInst) {
+      target.institutionId = selectedInst;
+    }
+    // Koç satırı başka kurumdaysa engelle (süper admin seçili kurum dışına sızmasın)
+    if (
+      effectiveUser?.role === 'super_admin' &&
+      selectedInst &&
+      target.institutionId &&
+      target.institutionId !== selectedInst
+    ) {
+      alert('Bu koç seçili kuruma ait değil. Üstten doğru kurumu seçin.');
+      return;
+    }
     if (target.email.toLowerCase().trim() === effectiveUser?.email?.toLowerCase().trim()) {
       alert('Zaten bu hesapla oturum açmış durumdasınız.');
       return;
