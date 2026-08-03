@@ -207,9 +207,7 @@ async function loadClassForExport(classId, institutionId, actor) {
   }
 
   let belongs = await classBelongsToInstitution(classId, requestInstitutionId);
-  if (!belongs && !String(classRow.institution_id || '').trim()) {
-    belongs = true;
-  }
+  // Orphan sınıfları (institution_id null) otomatik başka kuruma bağlama — kurum karışmasını önler
   if (!belongs) {
     return {
       error: 'class_institution_mismatch',

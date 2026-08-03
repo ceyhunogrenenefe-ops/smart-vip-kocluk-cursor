@@ -840,14 +840,22 @@ export default async function handler(req, res) {
       if (!seesAllInstitutionClasses(role, roleTags)) {
         if (!allowedClassIds || !allowedClassIds.length) return res.status(200).json({ data: [] });
         q = q.in('id', allowedClassIds);
-      } else if (scopedClassInst && seesAllInstitutionClasses(role, roleTags)) {
+        // Koç/öğretmen: JWT kurumuna sıkı filtre — diğer kurum sınıfları karışmasın
+        if (scopedClassInst) {
+          q = q.eq('institution_id', scopedClassInst);
+        } else if (institutionId && isUuid(String(institutionId))) {
+          q = q.eq('institution_id', institutionId);
+        }
+      } else {
+        // Admin / süper admin: kurum zorunlu — filtresiz tüm kurumlar dönmesin
+        if (!scopedClassInst) {
+          return res.status(200).json({ data: [], error: 'institution_required' });
+        }
         const studentIds = await getInstitutionStudentIds(supabaseAdmin, scopedClassInst);
         const classIdSet = await loadInstitutionClassIdSet(supabaseAdmin, scopedClassInst, studentIds);
         const classIds = [...classIdSet];
         if (classIds.length) q = q.in('id', classIds);
         else q = q.eq('institution_id', scopedClassInst);
-      } else if (institutionId) {
-        q = q.eq('institution_id', institutionId);
       }
       const { data, error } = await q;
       if (error) return res.status(500).json({ error: error.message });
@@ -934,11 +942,21 @@ export default async function handler(req, res) {
       if (!seesAllInstitutionClasses(role, roleTags)) {
         if (!allowedClassIds || !allowedClassIds.length) return res.status(200).json({ data: [] });
         q = q.in('class_id', allowedClassIds);
-      } else if (institutionId && !classId) {
-        const studentIds = await getInstitutionStudentIds(supabaseAdmin, institutionId);
-        const classIds = await resolveInstitutionClassIds(supabaseAdmin, institutionId, studentIds);
+        const scopedSessInst = resolveScopedInstitutionId(req.query.institution_id, institutionId);
+        if (scopedSessInst) {
+          q = q.eq('institution_id', scopedSessInst);
+        } else if (institutionId && isUuid(String(institutionId)) && !classId) {
+          q = q.eq('institution_id', institutionId);
+        }
+      } else if (!classId) {
+        const scopedSessInst = resolveScopedInstitutionId(req.query.institution_id, institutionId);
+        if (!scopedSessInst) {
+          return res.status(200).json({ data: [], error: 'institution_required' });
+        }
+        const studentIds = await getInstitutionStudentIds(supabaseAdmin, scopedSessInst);
+        const classIds = await resolveInstitutionClassIds(supabaseAdmin, scopedSessInst, studentIds);
         if (classIds.length) q = q.in('class_id', classIds);
-        else q = q.eq('institution_id', institutionId);
+        else q = q.eq('institution_id', scopedSessInst);
       }
       const { data, error } = await q;
       if (error) return res.status(500).json({ error: error.message });
@@ -1189,6 +1207,11 @@ export default async function handler(req, res) {
       } else if (!seesAllInstitutionClasses(role, roleTags)) {
         if (!allowedClassIds || !allowedClassIds.length) return res.status(200).json({ data: [] });
         q = q.in('class_id', allowedClassIds);
+        if (scopedClassInst) {
+          q = q.eq('institution_id', scopedClassInst);
+        } else if (institutionId && isUuid(String(institutionId))) {
+          q = q.eq('institution_id', institutionId);
+        }
       } else if (scopedClassInst && (role === 'super_admin' || role === 'admin')) {
         const studentIds = await getInstitutionStudentIds(supabaseAdmin, scopedClassInst);
         const classIds = await resolveInstitutionClassIds(supabaseAdmin, scopedClassInst, studentIds);
@@ -1199,6 +1222,8 @@ export default async function handler(req, res) {
         const classIds = await resolveInstitutionClassIds(supabaseAdmin, institutionId, studentIds);
         if (classIds.length) q = q.in('class_id', classIds);
         else q = q.eq('institution_id', institutionId);
+      } else if (role === 'super_admin' || role === 'admin') {
+        return res.status(200).json({ data: [], error: 'institution_required' });
       }
       const { data, error } = await q;
       if (error) return res.status(500).json({ error: error.message });

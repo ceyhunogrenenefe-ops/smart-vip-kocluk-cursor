@@ -269,6 +269,11 @@ export default function ClassLiveLessons() {
     try {
       const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul' });
       const qs = new URLSearchParams({ scope: 'sessions', from: today, to: today });
+      const rawInst =
+        role === 'super_admin' || role === 'admin'
+          ? String(activeInstitutionId || institution?.id || '').trim()
+          : String(effectiveUser?.institution_id || activeInstitutionId || institution?.id || '').trim();
+      if (isUuid(rawInst)) qs.set('institution_id', rawInst);
       const res = await apiFetch(`/api/class-live-lessons?${qs.toString()}`);
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -279,7 +284,14 @@ export default function ClassLiveLessons() {
     } catch {
       setTodaySessionsForPresence([]);
     }
-  }, [canViewLivePresence, classes.length, activeInstitutionId, institution?.id]);
+  }, [
+    canViewLivePresence,
+    classes.length,
+    role,
+    activeInstitutionId,
+    institution?.id,
+    effectiveUser?.institution_id
+  ]);
 
   useEffect(() => {
     if (!canViewLivePresence) return;
@@ -563,6 +575,11 @@ export default function ClassLiveLessons() {
         materialize: '1',
         include_cancelled: '1'
       });
+      const rawInst =
+        role === 'super_admin' || role === 'admin'
+          ? String(activeInstitutionId || institution?.id || '').trim()
+          : String(effectiveUser?.institution_id || activeInstitutionId || institution?.id || '').trim();
+      if (isUuid(rawInst)) qs.set('institution_id', rawInst);
       const res = await apiFetch(`/api/class-live-lessons?${qs.toString()}`);
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -575,7 +592,14 @@ export default function ClassLiveLessons() {
     } finally {
       setCalendarLoading(false);
     }
-  }, [selectedClassId, weekColumnDates, activeInstitutionId, institution?.id]);
+  }, [
+    selectedClassId,
+    weekColumnDates,
+    role,
+    activeInstitutionId,
+    institution?.id,
+    effectiveUser?.institution_id
+  ]);
 
   const buildTopicSessionContext = useCallback(
     (s: SessionRow): TopicCheckpointSessionContext => {
@@ -760,10 +784,11 @@ export default function ClassLiveLessons() {
     setLoading(true);
     setError(null);
     try {
+      // Admin + süper admin: aktif kurum; diğer roller: JWT kurumu — kurumlar karışmasın
       const rawInstId =
-        role === 'super_admin'
-          ? String(activeInstitutionId || institution?.id || '').trim()
-          : '';
+        role === 'super_admin' || role === 'admin'
+          ? String(activeInstitutionId || institution?.id || effectiveUser?.institution_id || '').trim()
+          : String(effectiveUser?.institution_id || activeInstitutionId || institution?.id || '').trim();
       const instId = isUuid(rawInstId) ? rawInstId : '';
       const classQs = new URLSearchParams({ scope: 'classes' });
       const slotQs = new URLSearchParams({ scope: 'slots' });
@@ -802,13 +827,26 @@ export default function ClassLiveLessons() {
     } finally {
       setLoading(false);
     }
-  }, [role, activeInstitutionId, institution?.id, isStudentView, isTeacherView, resolvedStudentId]);
+  }, [
+    role,
+    activeInstitutionId,
+    institution?.id,
+    effectiveUser?.institution_id,
+    isStudentView,
+    isTeacherView,
+    resolvedStudentId
+  ]);
 
   const loadClassSlots = useCallback(async (classId: string) => {
     const cid = String(classId || '').trim();
     if (!cid) return;
     try {
       const qs = new URLSearchParams({ scope: 'slots', class_id: cid });
+      const slotInst =
+        role === 'super_admin' || role === 'admin'
+          ? String(activeInstitutionId || institution?.id || '').trim()
+          : String(effectiveUser?.institution_id || activeInstitutionId || '').trim();
+      if (isUuid(slotInst)) qs.set('institution_id', slotInst);
       const res = await apiFetch(`/api/class-live-lessons?${qs.toString()}`);
       const j = await res.json().catch(() => ({}));
       if (!res.ok) return;
@@ -817,7 +855,7 @@ export default function ClassLiveLessons() {
     } catch {
       /* sessiz */
     }
-  }, []);
+  }, [role, activeInstitutionId, institution?.id, effectiveUser?.institution_id]);
 
   useEffect(() => {
     void loadAll();

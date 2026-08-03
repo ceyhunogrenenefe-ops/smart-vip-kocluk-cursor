@@ -352,6 +352,12 @@ export default function SchedulePlannerPage() {
     planTouchedRef.current = false;
     planBootstrappedRef.current = false;
     planLoadGenRef.current += 1;
+    setSelectedPlanId('');
+    setPlanName('');
+    setPlans([]);
+    setClasses([]);
+    setPlannerGroups([]);
+    setExportResult(null);
   }, [institutionId]);
 
   useEffect(() => {
