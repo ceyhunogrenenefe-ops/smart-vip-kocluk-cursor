@@ -53,6 +53,10 @@ export function WeeklyPlannerStudyModal({
     mergeWeeklyEntries
   } = useApp();
   const goalUnit = normalizeGoalUnit(quantityUnit);
+  const subject = plannerEntry.subject?.trim() || 'Genel';
+  /** Kitap Okuma hedefi: yalnız kitap alanları; diğer hedefler: soru + ekran süresi */
+  const isKitapMode =
+    isKitapOkumaContext(subject, plannerEntry.title) || goalUnit === 'sayfa';
   const linked = plannerEntry.weekly_entry_id
     ? weeklyEntries.find((e) => e.id === plannerEntry.weekly_entry_id)
     : undefined;
@@ -72,7 +76,6 @@ export function WeeklyPlannerStudyModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const subject = plannerEntry.subject?.trim() || 'Genel';
   const rawTopic = plannerEntry.title?.trim() || subject;
   const studentRow = students.find((s) => s.id === plannerEntry.student_id);
   const topicPool = useMemo(() => {
@@ -207,18 +210,42 @@ export function WeeklyPlannerStudyModal({
     setError('');
     const warnings: string[] = [];
     try {
-      const solved = solvedPreview;
-      const pages = readingLocked
-        ? null
-        : pagesRead === ''
+      // Gizli alanlar mevcut kaydı silmesin
+      const correctToSave = isKitapMode ? clampNonNeg(linked?.correctAnswers ?? 0) : correct;
+      const wrongToSave = isKitapMode ? clampNonNeg(linked?.wrongAnswers ?? 0) : wrong;
+      const blankToSave = isKitapMode ? clampNonNeg(linked?.blankAnswers ?? 0) : blank;
+      const solved = isKitapMode
+        ? correctToSave + wrongToSave + blankToSave
+        : solvedPreview;
+
+      const pages = isKitapMode
+        ? readingLocked
           ? null
-          : clampNonNeg(Number(pagesRead));
-      const screen_time_minutes = screenLocked
-        ? null
-        : screenTotalMin > 0
-          ? screenTotalMin
+          : pagesRead === ''
+            ? null
+            : clampNonNeg(Number(pagesRead))
+        : linked
+          ? ((linked as { pagesRead?: number }).pagesRead ??
+            (linked.readingMinutes != null ? linked.readingMinutes : null))
           : null;
-      const bookTitleToSave = readingLocked ? '' : bookTitle.trim();
+
+      const linkedScreen = (linked as { screenTimeMinutes?: number } | undefined)?.screenTimeMinutes;
+      const screen_time_minutes = isKitapMode
+        ? linkedScreen != null && linkedScreen >= 0
+          ? linkedScreen
+          : null
+        : screenLocked
+          ? null
+          : screenTotalMin > 0
+            ? screenTotalMin
+            : null;
+
+      const bookTitleToSave = isKitapMode
+        ? readingLocked
+          ? ''
+          : bookTitle.trim()
+        : String(linked?.bookTitle || '').trim();
+
       const sid = plannerEntry.student_id;
       const today = new Date().toISOString().split('T')[0];
 
@@ -227,7 +254,7 @@ export function WeeklyPlannerStudyModal({
         topic.trim() &&
         (markTopicFinished || topicGoalMet);
 
-      if (!readingLocked && markBookFinished && !bookTitleToSave) {
+      if (isKitapMode && !readingLocked && markBookFinished && !bookTitleToSave) {
         throw new Error('Kitabı bitirdim için kitap adı girin.');
       }
 
@@ -250,9 +277,9 @@ export function WeeklyPlannerStudyModal({
             date: plannerEntry.planner_date,
             target_questions: targetQuestions,
             solved_questions: solved,
-            correct,
-            wrong,
-            blank,
+            correct: correctToSave,
+            wrong: wrongToSave,
+            blank: blankToSave,
             reading_minutes: pages,
             pages_read: pages,
             screen_time_minutes,
@@ -269,9 +296,9 @@ export function WeeklyPlannerStudyModal({
           subject,
           topic,
           target_questions: targetQuestions,
-          correct,
-          wrong,
-          blank,
+          correct: correctToSave,
+          wrong: wrongToSave,
+          blank: blankToSave,
           solved_questions: solved,
           pages_read: pages,
           screen_time_minutes,
@@ -301,9 +328,9 @@ export function WeeklyPlannerStudyModal({
             topic,
             targetQuestions,
             solvedQuestions: solved,
-            correctAnswers: correct,
-            wrongAnswers: wrong,
-            blankAnswers: blank,
+            correctAnswers: correctToSave,
+            wrongAnswers: wrongToSave,
+            blankAnswers: blankToSave,
             coachComment: notes.trim() || undefined,
             readingMinutes: pages ?? undefined,
             pagesRead: pages ?? undefined,
@@ -345,7 +372,7 @@ export function WeeklyPlannerStudyModal({
       }
 
       const titleNorm = bookTitleToSave.toLowerCase();
-      if (!readingLocked && markBookFinished && titleNorm) {
+      if (isKitapMode && !readingLocked && markBookFinished && titleNorm) {
         try {
           const pagesDone = pages ?? 0;
           const match =
@@ -480,45 +507,52 @@ export function WeeklyPlannerStudyModal({
                 </label>
               </div>
             )}
-            <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">Sonuçlar</p>
-            <div className="grid grid-cols-3 gap-2">
-              <label className="block">
-                <span className="text-[11px] text-slate-500">Doğru</span>
-                <input
-                  type="number"
-                  min={0}
-                  inputMode="numeric"
-                  value={correct}
-                  onChange={(e) => setCorrect(clampNonNeg(Number(e.target.value)))}
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
-                />
-              </label>
-              <label className="block">
-                <span className="text-[11px] text-slate-500">Yanlış</span>
-                <input
-                  type="number"
-                  min={0}
-                  inputMode="numeric"
-                  value={wrong}
-                  onChange={(e) => setWrong(clampNonNeg(Number(e.target.value)))}
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
-                />
-              </label>
-              <label className="block">
-                <span className="text-[11px] text-slate-500">Boş</span>
-                <input
-                  type="number"
-                  min={0}
-                  inputMode="numeric"
-                  value={blank}
-                  onChange={(e) => setBlank(clampNonNeg(Number(e.target.value)))}
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
-                />
-              </label>
-            </div>
-            <p className="text-xs text-slate-500 mt-2">Çözülen toplam: {solvedPreview}</p>
+            {!isKitapMode ? (
+              <>
+                <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">
+                  Soru sayısı
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  <label className="block">
+                    <span className="text-[11px] text-slate-500">Doğru</span>
+                    <input
+                      type="number"
+                      min={0}
+                      inputMode="numeric"
+                      value={correct}
+                      onChange={(e) => setCorrect(clampNonNeg(Number(e.target.value)))}
+                      className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-[11px] text-slate-500">Yanlış</span>
+                    <input
+                      type="number"
+                      min={0}
+                      inputMode="numeric"
+                      value={wrong}
+                      onChange={(e) => setWrong(clampNonNeg(Number(e.target.value)))}
+                      className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-[11px] text-slate-500">Boş</span>
+                    <input
+                      type="number"
+                      min={0}
+                      inputMode="numeric"
+                      value={blank}
+                      onChange={(e) => setBlank(clampNonNeg(Number(e.target.value)))}
+                      className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
+                    />
+                  </label>
+                </div>
+                <p className="text-xs text-slate-500 mt-2">Çözülen toplam: {solvedPreview}</p>
+              </>
+            ) : null}
           </div>
 
+          {isKitapMode ? (
           <div
             className={`rounded-xl border p-4 space-y-3 ${
               readingLocked
@@ -579,7 +613,9 @@ export function WeeklyPlannerStudyModal({
               </label>
             ) : null}
           </div>
+          ) : null}
 
+          {!isKitapMode ? (
           <div
             className={`rounded-xl border p-4 space-y-3 ${
               screenLocked
@@ -644,6 +680,7 @@ export function WeeklyPlannerStudyModal({
               <p className="text-xs text-slate-500">Toplam {screenOwner?.screenTimeMinutes} dk</p>
             ) : null}
           </div>
+          ) : null}
 
           <label className="block">
             <span className="text-[11px] text-slate-500">Not</span>
