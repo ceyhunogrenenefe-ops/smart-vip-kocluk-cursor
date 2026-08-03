@@ -15,7 +15,7 @@
     }
   },
   "installCommand": "npm install && cd student-coaching-system && npm install",
-  "buildCommand": "cd student-coaching-system && npm run build",
+  "buildCommand": "cd student-coaching-system && rm -rf dist && npm run build",
   "outputDirectory": "student-coaching-system/dist",
   "framework": null,
   "headers": [

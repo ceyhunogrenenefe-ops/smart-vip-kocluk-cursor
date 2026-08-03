@@ -104,6 +104,9 @@ export default function CoachStatsPage() {
   const { effectiveUser } = useAuth();
   const tags = userRoleTags(effectiveUser);
   const isSuper = tags.includes('super_admin');
+  const isCoachOnly =
+    tags.includes('coach') && !tags.includes('admin') && !tags.includes('super_admin');
+  const ownCoachId = String(effectiveUser?.coachId || '').trim();
 
   const [preset, setPreset] = useState<RangePreset>('this_week');
   const initial = rangeForPreset('this_week');
@@ -112,13 +115,17 @@ export default function CoachStatsPage() {
   const [institutionId, setInstitutionId] = useState(
     () => activeInstitutionId || effectiveUser?.institutionId || ''
   );
-  const [coachId, setCoachId] = useState('');
+  const [coachId, setCoachId] = useState(() => (isCoachOnly && ownCoachId ? ownCoachId : ''));
   const [classId, setClassId] = useState('');
   const [classOptions, setClassOptions] = useState<CoachStatsClassOption[]>([]);
   const [coachOptions, setCoachOptions] = useState<{ id: string; name: string }[]>([]);
   const [data, setData] = useState<CoachStatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isCoachOnly && ownCoachId && coachId !== ownCoachId) setCoachId(ownCoachId);
+  }, [isCoachOnly, ownCoachId, coachId]);
 
   const applyPreset = (p: RangePreset) => {
     setPreset(p);
@@ -268,21 +275,23 @@ export default function CoachStatsPage() {
             className="mt-1 block rounded-lg border border-slate-200 px-3 py-2 text-sm"
           />
         </label>
-        <label className="text-sm text-slate-600">
-          Koç
-          <select
-            value={coachId}
-            onChange={(e) => setCoachId(e.target.value)}
-            className="mt-1 block min-w-[160px] rounded-lg border border-slate-200 px-3 py-2 text-sm"
-          >
-            <option value="">Tüm koçlar</option>
-            {coachOptions.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        {!isCoachOnly ? (
+          <label className="text-sm text-slate-600">
+            Koç
+            <select
+              value={coachId}
+              onChange={(e) => setCoachId(e.target.value)}
+              className="mt-1 block min-w-[160px] rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            >
+              <option value="">Tüm koçlar</option>
+              {coachOptions.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <label className="text-sm text-slate-600">
           Sınıf
           <select

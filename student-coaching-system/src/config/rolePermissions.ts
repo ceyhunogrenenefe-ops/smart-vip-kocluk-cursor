@@ -28,7 +28,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/analytics': ['admin', 'coach'],
   '/attendance-report': ['super_admin', 'admin', 'coach', 'teacher'],
   '/class-lesson-topic-progress': ['super_admin', 'admin', 'coach'],
-  '/coach-stats': ['super_admin', 'admin'],
+  '/coach-stats': ['super_admin', 'admin', 'coach'],
   '/ai-coach': ['super_admin', 'admin', 'coach'],
   '/reports': ['admin'],
   '/whatsapp': ['admin'],

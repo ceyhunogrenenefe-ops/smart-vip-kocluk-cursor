@@ -146,18 +146,11 @@ export default function Sidebar({
           railCollapsed && isLg && 'lg:justify-center lg:px-2'
         )}
       >
-        {institution.logo ? (
-          <img
-            src={institution.logo}
-            alt=""
-            className="h-9 w-9 shrink-0 rounded-lg bg-slate-100 object-contain p-0.5 ring-2 ring-slate-600/40 shadow-md"
-          />
-        ) : (
-          <BrandLogo
-            variant="mark"
-            className="h-9 w-9 shrink-0 rounded-lg ring-2 ring-slate-600/40 shadow-md"
-          />
-        )}
+        {/* Ortak platform markası — kurum logosu override etmesin (tüm kurum/koçlar aynı UI) */}
+        <BrandLogo
+          variant="mark"
+          className="h-9 w-9 shrink-0 rounded-lg ring-2 ring-slate-600/40 shadow-md"
+        />
         {(!railCollapsed || !isLg) && (
           <div className="ml-2.5 min-w-0 flex-1 max-lg:block lg:block">
             <p className="truncate text-sm font-semibold tracking-tight text-white">{institution.name}</p>

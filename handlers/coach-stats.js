@@ -1,6 +1,7 @@
 /**
- * Admin / süper admin — koç bazlı performans KPI’ları
+ * Admin / süper admin / koç — koç bazlı performans KPI’ları
  * GET /api/coach-stats?from=&to=&institution_id=&coach_id=&class_id=
+ * Koç rolü: yalnızca kendi coach_id kapsamı.
  *
  * - report_fill_rate: günlük rapor doldurma (öğrenci×gün, pasif hariç)
  * - attendance_rate: grup canlı ders devamı (present+late / işaretlenen, pasif hariç)
@@ -116,8 +117,10 @@ export default async function handler(req, res) {
   try {
     const actor = requireAuthenticatedActor(req);
     const roleSet = await actorRoleSet(actor);
-    if (!actorIsAdminLike(actor, roleSet)) {
-      return res.status(403).json({ error: 'Yalnızca admin / süper admin erişebilir.' });
+    const isCoachOnly =
+      roleSet.has('coach') && !actorIsAdminLike(actor, roleSet) && !roleSetHasSuperAdmin(roleSet);
+    if (!actorIsAdminLike(actor, roleSet) && !roleSet.has('coach')) {
+      return res.status(403).json({ error: 'Yalnızca admin, süper admin veya koç erişebilir.' });
     }
 
     const today = getIstanbulDateString();
@@ -134,8 +137,17 @@ export default async function handler(req, res) {
 
     let institutionId = String(req.query?.institution_id || '').trim();
     if (!institutionId) institutionId = String(actor.institution_id || '').trim();
-    const filterCoachId = String(req.query?.coach_id || '').trim();
+    let filterCoachId = String(req.query?.coach_id || '').trim();
     const filterClassId = String(req.query?.class_id || '').trim();
+    /** Koç: yalnızca kendi KPI’ları (tüm kurum / diğer koçlar görünmesin) */
+    if (isCoachOnly) {
+      const ownCoachId = String(actor.coach_id || '').trim();
+      if (!ownCoachId || !isUuid(ownCoachId)) {
+        return res.status(403).json({ error: 'Koç kimliği bulunamadı.' });
+      }
+      filterCoachId = ownCoachId;
+      if (!institutionId) institutionId = String(actor.institution_id || '').trim();
+    }
     if (filterCoachId && !isUuid(filterCoachId)) {
       return res.status(400).json({ error: 'Geçersiz coach_id.' });
     }
