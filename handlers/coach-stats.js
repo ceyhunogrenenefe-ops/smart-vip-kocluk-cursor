@@ -156,7 +156,12 @@ export default async function handler(req, res) {
     }
 
     if (!roleSetHasSuperAdmin(roleSet)) {
-      if (!institutionId || !hasInstitutionAccess(actor, institutionId)) {
+      if (isCoachOnly) {
+        // Koç kendi öğrencileriyle sınırlı; institution_id boş olsa da coach_id yeter
+        if (institutionId && actor.institution_id && !hasInstitutionAccess(actor, institutionId)) {
+          return res.status(403).json({ error: 'Kurum erişimi yok.' });
+        }
+      } else if (!institutionId || !hasInstitutionAccess(actor, institutionId)) {
         return res.status(403).json({ error: 'Kurum erişimi yok.' });
       }
     } else if (institutionId && !isUuid(institutionId)) {
