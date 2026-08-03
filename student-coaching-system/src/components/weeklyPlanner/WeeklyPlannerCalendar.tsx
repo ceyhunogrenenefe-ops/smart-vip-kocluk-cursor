@@ -1513,85 +1513,6 @@ export function WeeklyPlannerCalendar({
                   </select>
                 </label>
               ) : null}
-              {canEditPlan ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (cellSelectMode) exitCellSelectMode();
-                    else setCellSelectMode(true);
-                  }}
-                  className={cn(
-                    'inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition',
-                    cellSelectMode
-                      ? 'border-indigo-500 bg-indigo-600 text-white shadow-sm'
-                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200'
-                  )}
-                  title="Hücreleri seçip koç hedeflerini bu hücrelere dağıtın"
-                >
-                  <MousePointerClick className="h-4 w-4" />
-                  {cellSelectMode ? `Hücre seç (${selectedCells.size})` : 'Hücreleri seç'}
-                </button>
-              ) : null}
-              {canManageGoals && !studentStudyLogUi ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPasteTargetIds(new Set());
-                    setPasteOpen(true);
-                  }}
-                  className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-                  title="Bu öğrencinin haftalık planını diğer öğrencilere yapıştır"
-                >
-                  <Copy className="h-4 w-4" />
-                  Diğer öğrencilere yapıştır
-                </button>
-              ) : null}
-              {canExportPdf ? (
-                <button
-                  type="button"
-                  disabled={pdfBusy}
-                  onClick={() => void exportPlannerPdf()}
-                  className={cn(
-                    'inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition disabled:opacity-50',
-                    studentStudyLogUi
-                      ? 'border-violet-200 bg-violet-50 text-violet-900 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-100'
-                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200'
-                  )}
-                >
-                  {pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
-                  PDF indir
-                </button>
-              ) : null}
-              {showCoachParentShare ? (
-                <>
-                  <button
-                    type="button"
-                    disabled={parentShareBusy || parentPdfShareBusy}
-                    onClick={() => void shareWeeklyGoalsWithParent()}
-                    className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900 transition hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
-                  >
-                    {parentShareBusy ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <MessageCircle className="h-4 w-4" />
-                    )}
-                    Veliye metin gönder
-                  </button>
-                  <button
-                    type="button"
-                    disabled={parentPdfShareBusy || parentShareBusy || pdfBusy}
-                    onClick={() => void shareWeeklyPdfWithParent()}
-                    className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-900 transition hover:bg-teal-100 disabled:opacity-50 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-100"
-                  >
-                    {parentPdfShareBusy ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <FileDown className="h-4 w-4" />
-                    )}
-                    Veliye PDF gönder
-                  </button>
-                </>
-              ) : null}
             </div>
           </div>
         </div>
@@ -1841,6 +1762,87 @@ export function WeeklyPlannerCalendar({
                     : 'Bloka tıkla → çalışma kaydı ve “Konuyu bitirdim” ile Konu Takibi güncellenir'
                   : 'Blokları sürükleyerek taşı · Boş saate tıklayarak yeni görev ekle'}
             </span>
+            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+              {canEditPlan ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (cellSelectMode) exitCellSelectMode();
+                    else setCellSelectMode(true);
+                  }}
+                  className={cn(
+                    'inline-flex min-h-[38px] items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition',
+                    cellSelectMode
+                      ? 'border-indigo-500 bg-indigo-600 text-white shadow-sm'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200'
+                  )}
+                  title="Hücreleri seçip koç hedeflerini bu hücrelere dağıtın"
+                >
+                  <MousePointerClick className="h-4 w-4" />
+                  {cellSelectMode ? `Hücre seç (${selectedCells.size})` : 'Hücreleri seç'}
+                </button>
+              ) : null}
+              {canManageGoals && !studentStudyLogUi ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPasteTargetIds(new Set());
+                    setPasteOpen(true);
+                  }}
+                  className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                  title="Bu öğrencinin haftalık planını diğer öğrencilere yapıştır"
+                >
+                  <Copy className="h-4 w-4" />
+                  Diğer öğrencilere yapıştır
+                </button>
+              ) : null}
+              {canExportPdf ? (
+                <button
+                  type="button"
+                  disabled={pdfBusy}
+                  onClick={() => void exportPlannerPdf()}
+                  className={cn(
+                    'inline-flex min-h-[38px] items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50',
+                    studentStudyLogUi
+                      ? 'border-violet-200 bg-violet-50 text-violet-900 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-100'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200'
+                  )}
+                >
+                  {pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
+                  PDF indir
+                </button>
+              ) : null}
+              {showCoachParentShare ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={parentShareBusy || parentPdfShareBusy}
+                    onClick={() => void shareWeeklyGoalsWithParent()}
+                    className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-900 transition hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
+                  >
+                    {parentShareBusy ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <MessageCircle className="h-4 w-4" />
+                    )}
+                    Veliye metin gönder
+                  </button>
+                  <button
+                    type="button"
+                    disabled={parentPdfShareBusy || parentShareBusy || pdfBusy}
+                    onClick={() => void shareWeeklyPdfWithParent()}
+                    className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-900 transition hover:bg-teal-100 disabled:opacity-50 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-100"
+                  >
+                    {parentPdfShareBusy ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <FileDown className="h-4 w-4" />
+                    )}
+                    Veliye PDF gönder
+                  </button>
+                </>
+              ) : null}
+            </div>
           </div>
           <div
             className={cn(
@@ -2255,8 +2257,8 @@ export function WeeklyPlannerCalendar({
               </span>
             </p>
             <p className="mb-3 hidden text-[11px] text-slate-500 dark:text-slate-400 sm:block">
-              Kartı takvim hücresine sürükleyerek plana yerleştirin · Üstteki{' '}
-              <strong>Hücreleri seç</strong> ile hücre işaretleyip{' '}
+              Kartı takvim hücresine sürükleyerek plana yerleştirin · Takvim
+              üzerindeki <strong>Hücreleri seç</strong> ile hücre işaretleyip{' '}
               <strong>Seçili hücrelere dağıt</strong> ile kalan kotayı bölün ·{' '}
               <strong>Diğer öğrencilere yapıştır</strong> ile bu planı kopyalayın
             </p>
