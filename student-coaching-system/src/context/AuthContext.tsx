@@ -832,13 +832,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!String(next.institutionId || '').trim()) {
       try {
         let inst: string | null = null;
-        if (getAuthToken() && next.id && !String(next.id).startsWith('demo-')) {
-          const byId = await db.getUserById(next.id).catch(() => null);
-          inst = byId?.institution_id ? String(byId.institution_id).trim() : null;
-        }
-        if (!inst && getAuthToken()) {
+        if (getAuthToken()) {
           const byEmail = await db.getUserByEmail(email).catch(() => null);
           inst = byEmail?.institution_id ? String(byEmail.institution_id).trim() : null;
+        }
+        if (!inst && next.id && !String(next.id).startsWith('demo-') && !String(next.id).startsWith('student-')) {
+          const { data: userRow } = await withTimeout(
+            supabase.from('users').select('institution_id').eq('id', next.id).maybeSingle()
+          );
+          inst = userRow?.institution_id ? String(userRow.institution_id).trim() : null;
         }
         if (!inst) {
           const { data: userRow } = await withTimeout(
