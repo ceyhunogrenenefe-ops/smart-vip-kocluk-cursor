@@ -6,6 +6,7 @@ export type CoachStatRow = {
   coach_email: string | null;
   institution_id: string | null;
   student_count: number;
+  active_student_count?: number;
   report_fill_rate: number | null;
   report_filled_slots: number;
   report_expected_slots: number;
@@ -14,6 +15,8 @@ export type CoachStatRow = {
   attendance_rate: number | null;
   attendance_present: number;
   attendance_total: number;
+  absence_rate?: number | null;
+  attendance_absent?: number;
   deneme_entry_rate: number | null;
   deneme_students: number;
   deneme_join_rate: number | null;
@@ -32,22 +35,40 @@ export type CoachStatRow = {
   composite_score: number | null;
 };
 
+export type CoachStatsExamDay = {
+  date: string;
+  weekday: string;
+  exam_names: string[];
+  participants: number;
+  active_students: number;
+  rate: number | null;
+};
+
 export type CoachStatsResponse = {
   from: string;
   to: string;
   day_count: number;
   institution_id: string | null;
+  filters?: {
+    coach_id: string | null;
+    class_id: string | null;
+  };
   summary: {
     coach_count: number;
     student_count: number;
+    active_student_count?: number;
+    deneme_participants?: number;
+    deneme_participation_rate?: number | null;
     avg_report_fill_rate: number | null;
     avg_attendance_rate: number | null;
+    avg_absence_rate?: number | null;
     avg_deneme_entry_rate: number | null;
     avg_deneme_join_rate: number | null;
     avg_planner_goal_rate: number | null;
     avg_meeting_completion_rate: number | null;
     avg_composite_score: number | null;
   };
+  exam_days?: CoachStatsExamDay[];
   coaches: CoachStatRow[];
   metric_notes?: Record<string, string>;
 };
@@ -65,12 +86,16 @@ export async function fetchCoachStats(opts: {
   from: string;
   to: string;
   institutionId?: string | null;
+  coachId?: string | null;
+  classId?: string | null;
 }): Promise<CoachStatsResponse> {
   const res = await apiFetch(
     `/api/coach-stats${qs({
       from: opts.from,
       to: opts.to,
-      institution_id: opts.institutionId || undefined
+      institution_id: opts.institutionId || undefined,
+      coach_id: opts.coachId || undefined,
+      class_id: opts.classId || undefined
     })}`
   );
   if (!res.ok) {
@@ -78,4 +103,24 @@ export async function fetchCoachStats(opts: {
     throw new Error(body?.error || `Koç istatistikleri alınamadı (${res.status})`);
   }
   return res.json();
+}
+
+export type CoachStatsClassOption = { id: string; name: string };
+
+export async function fetchCoachStatsClassOptions(
+  institutionId?: string | null
+): Promise<CoachStatsClassOption[]> {
+  const res = await apiFetch(
+    `/api/class-live-lessons${qs({
+      scope: 'classes',
+      institution_id: institutionId || undefined
+    })}`
+  );
+  if (!res.ok) return [];
+  const j = await res.json().catch(() => ({}));
+  const rows = (j?.data || j?.classes || []) as Array<{ id?: string; name?: string }>;
+  return rows
+    .filter((r) => r?.id)
+    .map((r) => ({ id: String(r.id), name: String(r.name || 'Sınıf') }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'tr'));
 }

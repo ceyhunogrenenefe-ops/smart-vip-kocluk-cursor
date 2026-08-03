@@ -23,7 +23,13 @@ import {
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { userRoleTags } from '../config/rolePermissions';
-import { fetchCoachStats, type CoachStatsResponse } from '../lib/coachStatsApi';
+import {
+  fetchCoachStats,
+  fetchCoachStatsClassOptions,
+  type CoachStatsClassOption,
+  type CoachStatsResponse
+} from '../lib/coachStatsApi';
+import CoachWeeklyComparison from '../components/coachStats/CoachWeeklyComparison';
 
 const TZ = 'Europe/Istanbul';
 
@@ -106,6 +112,10 @@ export default function CoachStatsPage() {
   const [institutionId, setInstitutionId] = useState(
     () => activeInstitutionId || effectiveUser?.institutionId || ''
   );
+  const [coachId, setCoachId] = useState('');
+  const [classId, setClassId] = useState('');
+  const [classOptions, setClassOptions] = useState<CoachStatsClassOption[]>([]);
+  const [coachOptions, setCoachOptions] = useState<{ id: string; name: string }[]>([]);
   const [data, setData] = useState<CoachStatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -124,7 +134,9 @@ export default function CoachStatsPage() {
       const res = await fetchCoachStats({
         from,
         to,
-        institutionId: institutionId || null
+        institutionId: institutionId || null,
+        coachId: coachId || null,
+        classId: classId || null
       });
       setData(res);
     } catch (e) {
@@ -137,8 +149,35 @@ export default function CoachStatsPage() {
 
   useEffect(() => {
     void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload on range/institution
-  }, [from, to, institutionId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload on filters
+  }, [from, to, institutionId, coachId, classId]);
+
+  useEffect(() => {
+    let cancel = false;
+    void (async () => {
+      const opts = await fetchCoachStatsClassOptions(institutionId || null);
+      if (!cancel) setClassOptions(opts);
+      try {
+        const r = rangeForPreset('this_week');
+        const stats = await fetchCoachStats({
+          from: r.from,
+          to: r.to,
+          institutionId: institutionId || null
+        });
+        if (cancel) return;
+        setCoachOptions(
+          (stats.coaches || [])
+            .map((c) => ({ id: c.coach_id, name: c.coach_name }))
+            .sort((a, b) => a.name.localeCompare(b.name, 'tr'))
+        );
+      } catch {
+        /* dropdown boş kalabilir */
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [institutionId]);
 
   const chartData = useMemo(
     () =>
@@ -150,7 +189,8 @@ export default function CoachStatsPage() {
           fullName: c.coach_name,
           rapor: c.report_fill_rate ?? 0,
           devam: c.attendance_rate ?? 0,
-          denemeOda: c.deneme_join_rate ?? 0,
+          yoklama: c.absence_rate ?? 0,
+          deneme: c.deneme_entry_rate ?? 0,
           plan: c.planner_goal_rate ?? 0,
           gorusme: c.meeting_completion_rate ?? 0
         })),
@@ -166,8 +206,8 @@ export default function CoachStatsPage() {
             Koç İstatistikleri
           </h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-600">
-            Haftalık rapor doldurma, canlı ders devamı, deneme girişi ve koç görüşmelerini
-            koç bazında karşılaştırın.
+            Haftalık rapor doldurma, canlı ders devamı, E-Desis deneme katılımı ve koç hedeflerini
+            karşılaştırın. Pasif öğrenciler hesaplamaya dahil edilmez.
           </p>
         </div>
         <button
@@ -228,6 +268,36 @@ export default function CoachStatsPage() {
             className="mt-1 block rounded-lg border border-slate-200 px-3 py-2 text-sm"
           />
         </label>
+        <label className="text-sm text-slate-600">
+          Koç
+          <select
+            value={coachId}
+            onChange={(e) => setCoachId(e.target.value)}
+            className="mt-1 block min-w-[160px] rounded-lg border border-slate-200 px-3 py-2 text-sm"
+          >
+            <option value="">Tüm koçlar</option>
+            {coachOptions.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-sm text-slate-600">
+          Sınıf
+          <select
+            value={classId}
+            onChange={(e) => setClassId(e.target.value)}
+            className="mt-1 block min-w-[160px] rounded-lg border border-slate-200 px-3 py-2 text-sm"
+          >
+            <option value="">Tüm sınıflar</option>
+            {classOptions.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
         {isSuper && institutions?.length ? (
           <label className="text-sm text-slate-600">
             Kurum
@@ -264,13 +334,20 @@ export default function CoachStatsPage() {
         </div>
       ) : null}
 
+      <CoachWeeklyComparison
+        institutionId={institutionId}
+        coachId={coachId}
+        classId={classId}
+        anchorTo={to}
+      />
+
       {data ? (
         <>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             <KpiCard
               label="Ort. rapor doluluk"
               value={fmtPct(data.summary.avg_report_fill_rate)}
-              hint="Öğrenci×gün"
+              hint="Aktif öğrenci×gün"
               icon={<ClipboardList className="h-5 w-5" />}
             />
             <KpiCard
@@ -280,10 +357,10 @@ export default function CoachStatsPage() {
               icon={<Users className="h-5 w-5" />}
             />
             <KpiCard
-              label="Ort. deneme oda"
-              value={fmtPct(data.summary.avg_deneme_join_rate)}
-              hint="BBB giriş logu"
-              icon={<BarChart3 className="h-5 w-5" />}
+              label="Ort. devamsızlık"
+              value={fmtPct(data.summary.avg_absence_rate)}
+              hint="Absent oranı"
+              icon={<Users className="h-5 w-5" />}
             />
             <KpiCard
               label="Ort. plan hedef"
@@ -292,9 +369,17 @@ export default function CoachStatsPage() {
               icon={<Target className="h-5 w-5" />}
             />
             <KpiCard
-              label="Ort. deneme sonuç"
-              value={fmtPct(data.summary.avg_deneme_entry_rate)}
-              hint="≥1 sonuç kaydı"
+              label="Deneme katılım"
+              value={fmtPct(
+                data.summary.deneme_participation_rate ?? data.summary.avg_deneme_entry_rate
+              )}
+              hint={`E-Desis · ${data.summary.deneme_participants ?? 0}/${data.summary.active_student_count ?? data.summary.student_count} aktif`}
+              icon={<BarChart3 className="h-5 w-5" />}
+            />
+            <KpiCard
+              label="Ort. deneme oda"
+              value={fmtPct(data.summary.avg_deneme_join_rate)}
+              hint="BBB giriş logu"
               icon={<BarChart3 className="h-5 w-5" />}
             />
             <KpiCard
@@ -306,7 +391,7 @@ export default function CoachStatsPage() {
             <KpiCard
               label="Ortalama skor"
               value={fmtPct(data.summary.avg_composite_score)}
-              hint={`${data.summary.coach_count} koç · ${data.summary.student_count} öğrenci`}
+              hint={`${data.summary.coach_count} koç · ${data.summary.active_student_count ?? data.summary.student_count} aktif`}
               icon={<Trophy className="h-5 w-5" />}
             />
           </div>
@@ -322,7 +407,14 @@ export default function CoachStatsPage() {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 48 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="name" angle={-25} textAnchor="end" interval={0} height={60} tick={{ fontSize: 11 }} />
+                    <XAxis
+                      dataKey="name"
+                      angle={-25}
+                      textAnchor="end"
+                      interval={0}
+                      height={60}
+                      tick={{ fontSize: 11 }}
+                    />
                     <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} />
                     <Tooltip
                       formatter={(v: number) => `%${v}`}
@@ -333,7 +425,8 @@ export default function CoachStatsPage() {
                     <Legend />
                     <Bar dataKey="rapor" name="Rapor" fill="#0d9488" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="devam" name="Devam" fill="#2563eb" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="denemeOda" name="Deneme oda" fill="#d97706" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="yoklama" name="Devamsızlık" fill="#e11d48" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="deneme" name="Deneme" fill="#d97706" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="plan" name="Plan hedef" fill="#059669" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="gorusme" name="Görüşme" fill="#7c3aed" radius={[4, 4, 0, 0]} />
                   </BarChart>
@@ -346,7 +439,7 @@ export default function CoachStatsPage() {
             <div className="border-b border-slate-100 px-4 py-3">
               <h2 className="text-lg font-bold text-slate-900">Koç detay tablosu</h2>
               <p className="text-xs text-slate-500">
-                Skor = rapor, devam, deneme oda (yoksa sonuç) ve plan hedef ortalaması
+                Skor = rapor, devam, deneme ve plan hedef ortalaması · Pasif öğrenciler hariç
               </p>
             </div>
             <div className="overflow-x-auto">
@@ -355,12 +448,12 @@ export default function CoachStatsPage() {
                   <tr>
                     <th className="px-3 py-2.5">#</th>
                     <th className="px-3 py-2.5">Koç</th>
-                    <th className="px-3 py-2.5">Öğrenci</th>
+                    <th className="px-3 py-2.5">Aktif</th>
                     <th className="px-3 py-2.5">Rapor %</th>
                     <th className="px-3 py-2.5">Devam %</th>
-                    <th className="px-3 py-2.5">Deneme oda %</th>
+                    <th className="px-3 py-2.5">Devamsızlık %</th>
+                    <th className="px-3 py-2.5">Deneme %</th>
                     <th className="px-3 py-2.5">Plan hedef %</th>
-                    <th className="px-3 py-2.5">Sonuç %</th>
                     <th className="px-3 py-2.5">Görüşme %</th>
                     <th className="px-3 py-2.5">Skor</th>
                   </tr>
@@ -377,7 +470,12 @@ export default function CoachStatsPage() {
                           </span>
                         ) : null}
                       </td>
-                      <td className="px-3 py-2.5">{c.student_count}</td>
+                      <td className="px-3 py-2.5">
+                        {c.active_student_count ?? c.student_count}
+                        <span className="mt-0.5 block text-[11px] text-slate-400">
+                          /{c.student_count} toplam
+                        </span>
+                      </td>
                       <td className="px-3 py-2.5">
                         {fmtPct(c.report_fill_rate)}
                         <span className="mt-0.5 block text-[11px] text-slate-400">
@@ -391,24 +489,21 @@ export default function CoachStatsPage() {
                         </span>
                       </td>
                       <td className="px-3 py-2.5">
-                        {fmtPct(c.deneme_join_rate)}
+                        {fmtPct(c.absence_rate)}
                         <span className="mt-0.5 block text-[11px] text-slate-400">
-                          {c.deneme_join_students}/{c.student_count}
+                          {c.attendance_absent ?? 0}/{c.attendance_total}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        {fmtPct(c.deneme_entry_rate)}
+                        <span className="mt-0.5 block text-[11px] text-slate-400">
+                          {c.deneme_students}/{c.active_student_count ?? c.student_count}
                         </span>
                       </td>
                       <td className="px-3 py-2.5">
                         {fmtPct(c.planner_goal_rate)}
                         <span className="mt-0.5 block text-[11px] text-slate-400">
                           {c.planner_goal_completed}/{c.planner_goal_target}
-                          {c.planner_students_with_goals > 0
-                            ? ` · ${c.planner_students_met}/${c.planner_students_with_goals} öğr.`
-                            : ''}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        {fmtPct(c.deneme_entry_rate)}
-                        <span className="mt-0.5 block text-[11px] text-slate-400">
-                          {c.deneme_students}/{c.student_count}
                         </span>
                       </td>
                       <td className="px-3 py-2.5">
@@ -431,15 +526,16 @@ export default function CoachStatsPage() {
             <p className="font-semibold text-slate-900">Notlar</p>
             <ul className="mt-1 list-inside list-disc space-y-0.5">
               <li>
-                <strong>Deneme oda:</strong> Akademik Merkez BBB deneme sınıfına giriş logu (SQL tablosu
-                gerekir). Tablo yoksa oran boş kalır; deploy sonrası SQL’i çalıştırın.
+                <strong>Deneme katılım:</strong> E-Desis’ten senkronlanan sonuçlar tercih edilir; aktif
+                öğrenci paydasına göre oranlanır.
               </li>
               <li>
-                <strong>Plan hedef:</strong> Koçun verdiği soru hedeflerine göre gerçekleşme (günlük rapor
-                kayıtları).
+                <strong>Haftalık karşılaştırma:</strong> Geçen hafta ile bu haftayı aynı filtrelerle
+                (koç, sınıf) yan yana gösterir; ortak deneme günleri haftanın gününe göre hizalanır.
               </li>
               <li>
-                Sonraki: konu takip, özel canlı ders yoklama, Soru Sor çözüm oranı.
+                <strong>Pasif öğrenciler:</strong> Aktivite dönemleri dışında kalan günler tüm
+                oranlardan çıkarılır.
               </li>
             </ul>
           </div>

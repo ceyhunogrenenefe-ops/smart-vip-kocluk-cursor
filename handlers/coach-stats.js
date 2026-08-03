@@ -1,13 +1,15 @@
 /**
  * Admin / süper admin — koç bazlı performans KPI’ları
- * GET /api/coach-stats?from=YYYY-MM-DD&to=YYYY-MM-DD&institution_id=
+ * GET /api/coach-stats?from=&to=&institution_id=&coach_id=&class_id=
  *
- * - report_fill_rate: günlük rapor doldurma (öğrenci×gün)
- * - attendance_rate: grup canlı ders yoklama (present / kayıtlar)
- * - deneme_entry_rate: dönemde ≥1 exam_results olan öğrenci oranı
+ * - report_fill_rate: günlük rapor doldurma (öğrenci×gün, pasif hariç)
+ * - attendance_rate: grup canlı ders devamı (present+late / işaretlenen, pasif hariç)
+ * - absence_rate: yoklama absent / işaretlenen (pasif hariç)
+ * - deneme_entry_rate: E-Desis deneme katılımı (aktif öğrenci paydası)
  * - deneme_join_rate: Akademik Merkez BBB deneme oda giriş oranı
  * - planner_goal_rate: haftalık plan (koç hedefi) gerçekleşme
  * - meeting_completion_rate: koç görüşmeleri completed / (planned+completed+missed)
+ * - exam_days: ortak deneme günleri (tarih bazlı katılım)
  */
 import { requireAuthenticatedActor, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
@@ -63,6 +65,37 @@ function entryFilled(row) {
   return extra > 0;
 }
 
+function isEdesisExamRow(row) {
+  const id = String(row?.id || '');
+  if (id.startsWith('edesis-')) return true;
+  const payload = row?.app_payload;
+  if (payload && typeof payload === 'object') {
+    return String(payload.source || '').toLowerCase() === 'edesis';
+  }
+  return false;
+}
+
+function weekdayLabelTr(ymd) {
+  const map = {
+    Mon: 'Pzt',
+    Tue: 'Sal',
+    Wed: 'Çar',
+    Thu: 'Per',
+    Fri: 'Cum',
+    Sat: 'Cmt',
+    Sun: 'Paz'
+  };
+  try {
+    const short = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Europe/Istanbul',
+      weekday: 'short'
+    }).format(new Date(`${ymd}T12:00:00+03:00`));
+    return map[short] || short;
+  } catch {
+    return '';
+  }
+}
+
 async function fetchInChunks(ids, run) {
   const list = [...ids];
   const all = [];
@@ -101,6 +134,14 @@ export default async function handler(req, res) {
 
     let institutionId = String(req.query?.institution_id || '').trim();
     if (!institutionId) institutionId = String(actor.institution_id || '').trim();
+    const filterCoachId = String(req.query?.coach_id || '').trim();
+    const filterClassId = String(req.query?.class_id || '').trim();
+    if (filterCoachId && !isUuid(filterCoachId)) {
+      return res.status(400).json({ error: 'Geçersiz coach_id.' });
+    }
+    if (filterClassId && !isUuid(filterClassId)) {
+      return res.status(400).json({ error: 'Geçersiz class_id.' });
+    }
 
     if (!roleSetHasSuperAdmin(roleSet)) {
       if (!institutionId || !hasInstitutionAccess(actor, institutionId)) {
@@ -115,6 +156,7 @@ export default async function handler(req, res) {
       .select('id,name,email,institution_id')
       .order('name', { ascending: true });
     if (institutionId) coachesQ = coachesQ.eq('institution_id', institutionId);
+    if (filterCoachId) coachesQ = coachesQ.eq('id', filterCoachId);
     const { data: coaches, error: coachesErr } = await coachesQ;
     if (coachesErr) throw coachesErr;
 
@@ -123,11 +165,33 @@ export default async function handler(req, res) {
       .select('id,name,coach_id,institution_id')
       .not('coach_id', 'is', null);
     if (institutionId) studentsQ = studentsQ.eq('institution_id', institutionId);
-    const { data: students, error: studentsErr } = await studentsQ;
+    if (filterCoachId) studentsQ = studentsQ.eq('coach_id', filterCoachId);
+    const { data: studentsRaw, error: studentsErr } = await studentsQ;
     if (studentsErr) throw studentsErr;
 
+    let studentList = (studentsRaw || []).filter((s) => s.coach_id);
+
+    if (filterClassId && studentList.length) {
+      const classStudentIds = new Set();
+      try {
+        const ids = studentList.map((s) => String(s.id));
+        const rows = await fetchInChunks(ids, async (chunk) => {
+          const { data, error } = await supabaseAdmin
+            .from('class_students')
+            .select('student_id')
+            .eq('class_id', filterClassId)
+            .in('student_id', chunk);
+          if (error) throw error;
+          return data || [];
+        });
+        for (const r of rows) classStudentIds.add(String(r.student_id));
+      } catch (e) {
+        if (!isMissingTableError(e, 'class_students')) throw e;
+      }
+      studentList = studentList.filter((s) => classStudentIds.has(String(s.id)));
+    }
+
     const coachList = coaches || [];
-    const studentList = (students || []).filter((s) => s.coach_id);
     const studentIds = studentList.map((s) => String(s.id));
     const coachByStudent = new Map(studentList.map((s) => [String(s.id), String(s.coach_id)]));
     const studentsByCoach = new Map();
@@ -305,21 +369,28 @@ export default async function handler(req, res) {
       }
     }
 
-    /** attendance: present / total marked */
+    /** attendance: present+late / total marked; absence: absent / total (pasif hariç) */
     const attPresent = new Map();
+    const attAbsent = new Map();
     const attTotal = new Map();
     try {
       let sessionsQ = supabaseAdmin
         .from('class_sessions')
-        .select('id,lesson_date,institution_id,status')
+        .select('id,lesson_date,institution_id,status,class_id')
         .gte('lesson_date', from)
         .lte('lesson_date', to);
       if (institutionId) sessionsQ = sessionsQ.eq('institution_id', institutionId);
+      if (filterClassId) sessionsQ = sessionsQ.eq('class_id', filterClassId);
       const { data: sessions, error: sessErr } = await sessionsQ;
       if (sessErr) throw sessErr;
-      const sessionIds = (sessions || [])
-        .filter((s) => String(s.status || '') !== 'cancelled')
-        .map((s) => String(s.id));
+      const sessionMeta = new Map();
+      const sessionIds = [];
+      for (const s of sessions || []) {
+        if (String(s.status || '') === 'cancelled') continue;
+        const sid = String(s.id);
+        sessionIds.push(sid);
+        sessionMeta.set(sid, padYmd(s.lesson_date));
+      }
 
       if (sessionIds.length && studentIds.length) {
         const attRows = await fetchInChunks(sessionIds, async (chunk) => {
@@ -334,11 +405,19 @@ export default async function handler(req, res) {
           const sid = String(row.student_id || '');
           const cid = coachByStudent.get(sid);
           if (!cid) continue;
+          const lessonDate = sessionMeta.get(String(row.session_id)) || '';
+          if (lessonDate) {
+            const periods = periodsByStudent.get(sid) || [];
+            if (!isActiveFromPeriods(periods, lessonDate, { coachId: cid })) continue;
+          }
           const st = String(row.status || '').toLowerCase();
           if (!['present', 'absent', 'late'].includes(st)) continue;
           attTotal.set(cid, (attTotal.get(cid) || 0) + 1);
           if (st === 'present' || st === 'late') {
             attPresent.set(cid, (attPresent.get(cid) || 0) + 1);
+          }
+          if (st === 'absent') {
+            attAbsent.set(cid, (attAbsent.get(cid) || 0) + 1);
           }
         }
       }
@@ -351,26 +430,61 @@ export default async function handler(req, res) {
       }
     }
 
-    /** deneme: ≥1 exam_results in range */
+    /** deneme: E-Desis exam_results (aktif öğrenci); exam_days tarih bazlı */
     const examStudentsByCoach = new Map();
+    /** @type {Map<string, { participants: Set<string>, names: Set<string> }>} date -> */
+    const examDayAgg = new Map();
+    let edesisExamRowCount = 0;
+    let anyExamRowCount = 0;
     try {
       if (studentIds.length) {
         const examRows = await fetchInChunks(studentIds, async (chunk) => {
           const { data, error } = await supabaseAdmin
             .from('exam_results')
-            .select('student_id,date')
+            .select('id,student_id,date,exam_name,app_payload')
             .in('student_id', chunk)
             .gte('date', from)
             .lte('date', to);
-          if (error) throw error;
+          if (error) {
+            if (isSchemaColumnError(error, 'app_payload')) {
+              const { data: d2, error: e2 } = await supabaseAdmin
+                .from('exam_results')
+                .select('id,student_id,date,exam_name')
+                .in('student_id', chunk)
+                .gte('date', from)
+                .lte('date', to);
+              if (e2) throw e2;
+              return d2 || [];
+            }
+            throw error;
+          }
           return data || [];
         });
-        for (const row of examRows) {
+
+        const edesisRows = examRows.filter(isEdesisExamRow);
+        const useRows = edesisRows.length ? edesisRows : examRows;
+        edesisExamRowCount = edesisRows.length;
+        anyExamRowCount = examRows.length;
+
+        for (const row of useRows) {
           const sid = String(row.student_id || '');
           const cid = coachByStudent.get(sid);
           if (!cid) continue;
+          const date = padYmd(row.date);
+          if (!date) continue;
+          const periods = periodsByStudent.get(sid) || [];
+          if (!isActiveFromPeriods(periods, date, { coachId: cid })) continue;
+
           if (!examStudentsByCoach.has(cid)) examStudentsByCoach.set(cid, new Set());
           examStudentsByCoach.get(cid).add(sid);
+
+          if (!examDayAgg.has(date)) {
+            examDayAgg.set(date, { participants: new Set(), names: new Set() });
+          }
+          const day = examDayAgg.get(date);
+          day.participants.add(sid);
+          const ename = String(row.exam_name || row.app_payload?.examName || '').trim();
+          if (ename) day.names.add(ename);
         }
       }
     } catch (e) {
@@ -398,6 +512,11 @@ export default async function handler(req, res) {
           const sid = String(row.student_id || '');
           const cid = coachByStudent.get(sid);
           if (!cid) continue;
+          const date = padYmd(row.istanbul_date);
+          if (date) {
+            const periods = periodsByStudent.get(sid) || [];
+            if (!isActiveFromPeriods(periods, date, { coachId: cid })) continue;
+          }
           if (!denemeJoinByCoach.has(cid)) denemeJoinByCoach.set(cid, new Set());
           denemeJoinByCoach.get(cid).add(sid);
         }
@@ -461,11 +580,13 @@ export default async function handler(req, res) {
         studentsMet: 0
       };
       const attP = attPresent.get(cid) || 0;
+      const attA = attAbsent.get(cid) || 0;
       const attT = attTotal.get(cid) || 0;
       const mDone = meetDone.get(cid) || 0;
       const mTot = meetTotal.get(cid) || 0;
       const reportFillRate = pct(filledSlots, expectedFillSlots);
       const attendanceRate = pct(attP, attT);
+      const absenceRate = pct(attA, attT);
       const denome = activeStudentCount || studentCount;
       const denemeEntryRate = pct(examStudents, denome);
       const denemeJoinRate = pct(joinStudents, denome);
@@ -503,6 +624,8 @@ export default async function handler(req, res) {
         attendance_rate: attendanceRate,
         attendance_present: attP,
         attendance_total: attT,
+        absence_rate: absenceRate,
+        attendance_absent: attA,
         deneme_entry_rate: denemeEntryRate,
         deneme_students: examStudents,
         deneme_join_rate: denemeJoinRate,
@@ -536,36 +659,82 @@ export default async function handler(req, res) {
       return Math.round((10 * vals.reduce((a, b) => a + b, 0)) / vals.length) / 10;
     };
 
+    const totalActiveStudents = coachesOut.reduce(
+      (sum, c) => sum + (Number(c.active_student_count) || 0),
+      0
+    );
+    const totalExamParticipants = coachesOut.reduce(
+      (sum, c) => sum + (Number(c.deneme_students) || 0),
+      0
+    );
+
+    const examDays = [...examDayAgg.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, agg]) => {
+        const activeOnDay = studentIds.filter((sid) => {
+          const cid = coachByStudent.get(sid);
+          return isActiveFromPeriods(periodsByStudent.get(sid) || [], date, {
+            coachId: cid || undefined
+          });
+        }).length;
+        const participants = agg.participants.size;
+        return {
+          date,
+          weekday: weekdayLabelTr(date),
+          exam_names: [...agg.names],
+          participants,
+          active_students: activeOnDay,
+          rate: pct(participants, activeOnDay)
+        };
+      });
+
     return res.status(200).json({
       from,
       to,
       day_count: dayCount,
       institution_id: institutionId || null,
+      filters: {
+        coach_id: filterCoachId || null,
+        class_id: filterClassId || null
+      },
       summary: {
         coach_count: coachesOut.length,
         student_count: studentList.length,
+        active_student_count: totalActiveStudents,
+        deneme_participants: totalExamParticipants,
+        deneme_participation_rate: pct(totalExamParticipants, totalActiveStudents),
         avg_report_fill_rate: avgOf('report_fill_rate'),
         avg_attendance_rate: avgOf('attendance_rate'),
+        avg_absence_rate: avgOf('absence_rate'),
         avg_deneme_entry_rate: avgOf('deneme_entry_rate'),
         avg_deneme_join_rate: avgOf('deneme_join_rate'),
         avg_planner_goal_rate: avgOf('planner_goal_rate'),
         avg_meeting_completion_rate: avgOf('meeting_completion_rate'),
         avg_composite_score: avgOf('composite_score')
       },
+      exam_days: examDays,
       coaches: coachesOut,
       metric_notes: {
         report_fill_rate:
-          'Doldurulan öğrenci×gün / (öğrenci sayısı × gün sayısı). Anlamlı soru/okuma/ekran girişi dolu sayılır.',
+          'Doldurulan öğrenci×gün / aktif öğrenci×gün. Pasif günler hariç. Anlamlı soru/okuma/ekran girişi dolu sayılır.',
         attendance_rate:
-          'Grup canlı ders yoklamasında present+late / tüm işaretlenen kayıtlar.',
+          'Grup canlı ders yoklamasında present+late / işaretlenen kayıtlar (pasif öğrenciler hariç).',
+        absence_rate:
+          'Grup canlı ders yoklamasında absent / işaretlenen kayıtlar (pasif öğrenciler hariç).',
         deneme_entry_rate:
-          'Dönemde en az 1 deneme sonucu (exam_results) olan öğrenci oranı.',
+          edesisExamRowCount > 0
+            ? 'E-Desis senkron deneme sonuçlarında en az 1 kaydı olan aktif öğrenci / aktif öğrenci sayısı.'
+            : anyExamRowCount > 0
+              ? 'E-Desis kaydı yok; yerel exam_results üzerinden aktif öğrenci katılım oranı.'
+              : 'Dönemde E-Desis / deneme sonucu bulunamadı.',
         deneme_join_rate:
           'Akademik Merkez BBB deneme odasına en az 1 kez giren öğrenci oranı (academic_deneme_join_logs).',
         planner_goal_rate:
           'Koç haftalık soru hedeflerinde gerçekleşen / hedef (subject eşleşmeli weekly_entries).',
         meeting_completion_rate:
-          'Koç–öğrenci görüşmelerinde completed / (planned+completed+missed).'
+          'Koç–öğrenci görüşmelerinde completed / (planned+completed+missed).',
+        exam_days:
+          'Deneme günü bazında katılan aktif öğrenci / o gün aktif öğrenci sayısı (E-Desis tercih edilir).'
       }
     });
   } catch (e) {
