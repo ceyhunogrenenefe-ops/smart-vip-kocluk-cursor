@@ -22,7 +22,7 @@ import {
 const SILENCE_SIGNAL_SESSION_LOGS = String(process.env.SILENCE_SIGNAL_SESSION_LOGS || '1') !== '0';
 /** libsignal / baileys gürültüsü — process stdout spam + oturum dump */
 const SIGNAL_SESSION_SPAM_RE =
-  /Closing session:\s*SessionEntry|Removing old closed session|Failed to decrypt message|Bad MAC|Session error:Error: Bad MAC|Closing open session in favor of incoming prekey bundle/i;
+  /Closing session:\s*SessionEntry|Removing old closed session|Failed to decrypt message|Bad MAC|Session error:Error: Bad MAC|Closing open session in favor of incoming prekey bundle|MessageCounterError|Key used already or never filled|Session error:MessageCounterError/i;
 
 function shouldSilenceNoiseChunk(chunk) {
   const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk ?? '');
@@ -117,8 +117,12 @@ const SHARED_SEND_FALLBACK = String(process.env.WA_SHARED_SEND_FALLBACK ?? '0') 
 /**
  * Idle sonrası Signal session soğur → ciphertext → alıcıda «Mesaj bekleniyor».
  * Bu eşiğin üstünde gönderim öncesi ZORUNLU warm-up.
+ * Üst sınır 10 dk — .env'de 1803000 (30 dk) gibi değerler soft-idle bırakıp sorunu geri getirir.
  */
-const IDLE_WARM_MS = Math.max(60_000, Number(process.env.WA_IDLE_WARM_MS || 3 * 60_1000));
+const IDLE_WARM_MS = Math.min(
+  10 * 60_000,
+  Math.max(60_000, Number(process.env.WA_IDLE_WARM_MS || 3 * 60_1000))
+);
 const WARM_ACK_MS = Math.max(800, Number(process.env.WA_WARM_ACK_MS || 2800));
 const SESSION_ASSERT_TIMEOUT_MS = Math.max(3000, Number(process.env.WA_SESSION_ASSERT_MS || 10_000));
 const WARM_MAX_WAIT_MS = Math.max(8000, Number(process.env.WA_WARM_MAX_WAIT_MS || 35_000));
