@@ -338,6 +338,45 @@ async function loadTeacherGroupLessonPayouts({ from, to, institutionId }) {
   return map;
 }
 
+const TEACHER_EXTRA_KINDS = new Set(['ders', 'rehberlik', 'ozel_ders', 'soru_cozumu', 'diger']);
+
+async function loadTeacherPaymentExtraItems({ from, to, institutionId, teacherId }) {
+  if (!from || !to) return [];
+  let q = supabaseAdmin
+    .from('teacher_payment_extra_items')
+    .select(
+      'id,teacher_id,institution_id,period_from,period_to,kind,label,quantity,unit_price_tl,amount_tl,note,created_by,created_at'
+    )
+    .eq('period_from', from)
+    .eq('period_to', to)
+    .order('created_at', { ascending: true });
+  if (institutionId) q = q.eq('institution_id', institutionId);
+  if (teacherId) q = q.eq('teacher_id', teacherId);
+  const { data, error } = await q;
+  if (error) {
+    if (String(error.message || '').toLowerCase().includes('teacher_payment_extra_items')) {
+      return { items: [], table_missing: true };
+    }
+    throw error;
+  }
+  return { items: data || [], table_missing: false };
+}
+
+function sumExtrasByTeacher(items) {
+  const map = new Map();
+  for (const row of items || []) {
+    const tid = String(row.teacher_id || '').trim();
+    if (!tid) continue;
+    const amt = Number(row.amount_tl);
+    if (!Number.isFinite(amt)) continue;
+    map.set(tid, (map.get(tid) || 0) + amt);
+  }
+  for (const [k, v] of map.entries()) {
+    map.set(k, Math.round(v * 100) / 100);
+  }
+  return map;
+}
+
 /** Eski `classes` şemasında eksik kolon (ör. class_level) nedeniyle oluşan PostgREST hataları */
 function isMissingClassesOptionalColumnError(error) {
   const m = String(error?.message || '').toLowerCase();
@@ -812,7 +851,8 @@ export default async function handler(req, res) {
     getScope === 'attendance-prefs' ||
     getScope === 'class-subjects' ||
     getScope === 'teacher-rates' ||
-    getScope === 'teacher-payouts';
+    getScope === 'teacher-payouts' ||
+    getScope === 'teacher-extras';
   const roleTags =
     getScope === 'live-presence'
       ? []
@@ -1008,6 +1048,33 @@ export default async function handler(req, res) {
       }
     }
 
+    if (scope === 'teacher-extras') {
+      if (!isPaymentSummaryAdmin(role)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const from = String(req.query.from || '').trim().slice(0, 10);
+      const to = String(req.query.to || '').trim().slice(0, 10);
+      const teacherId = String(req.query.teacher_id || '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        return res.status(400).json({ error: 'from_to_invalid', hint: 'YYYY-MM-DD' });
+      }
+      try {
+        const loaded = await loadTeacherPaymentExtraItems({
+          from,
+          to,
+          institutionId,
+          teacherId: teacherId || undefined
+        });
+        return res.status(200).json({
+          data: loaded.items,
+          table_missing: loaded.table_missing || false,
+          kinds: [...TEACHER_EXTRA_KINDS]
+        });
+      } catch (e) {
+        return res.status(500).json({ error: e instanceof Error ? e.message : 'extras_load_failed' });
+      }
+    }
+
     if (scope === 'summary') {
       if (!isPaymentSummaryAdmin(role)) {
         return res.status(403).json({ error: 'forbidden' });
@@ -1119,6 +1186,60 @@ export default async function handler(req, res) {
         teacherTotalsMap.set(tid, cur);
       }
 
+      let extraItems = [];
+      let extrasTableMissing = false;
+      if (from && to && /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        try {
+          const loaded = await loadTeacherPaymentExtraItems({
+            from,
+            to,
+            institutionId,
+            teacherId: teacherId || undefined
+          });
+          extraItems = loaded.items || [];
+          extrasTableMissing = Boolean(loaded.table_missing);
+        } catch {
+          extraItems = [];
+        }
+      }
+      const extraSumByTeacher = sumExtrasByTeacher(extraItems);
+      if (extraSumByTeacher.size) {
+        const missingIds = [...extraSumByTeacher.keys()].filter((tid) => !teacherTotalsMap.has(tid));
+        if (missingIds.length) {
+          const { data: users } = await supabaseAdmin
+            .from('users')
+            .select('id,name,email')
+            .in('id', missingIds);
+          for (const u of users || []) {
+            teacherNames[u.id] = u.name || u.email || u.id;
+          }
+        }
+        for (const [tid, extraAmt] of extraSumByTeacher.entries()) {
+          const cur = teacherTotalsMap.get(tid);
+          if (cur) {
+            cur.lesson_amount_tl = roundUnits(cur.total_amount_tl);
+            cur.extra_amount_tl = extraAmt;
+            cur.total_amount_tl = roundUnits(cur.total_amount_tl + extraAmt);
+          } else {
+            teacherTotalsMap.set(tid, {
+              teacher_id: tid,
+              teacher_name: teacherNames[tid] || tid,
+              completed_lesson_count: 0,
+              total_minutes: 0,
+              lesson_units_40: 0,
+              unit_price_tl: rateMap.get(tid) ?? defaultUnitPrice,
+              lesson_amount_tl: 0,
+              extra_amount_tl: extraAmt,
+              total_amount_tl: extraAmt
+            });
+          }
+        }
+      }
+      for (const cur of teacherTotalsMap.values()) {
+        if (cur.lesson_amount_tl == null) cur.lesson_amount_tl = roundUnits(cur.total_amount_tl);
+        if (cur.extra_amount_tl == null) cur.extra_amount_tl = 0;
+      }
+
       const teacher_totals = [...teacherTotalsMap.values()].sort((a, b) =>
         a.teacher_name.localeCompare(b.teacher_name, 'tr')
       );
@@ -1156,6 +1277,8 @@ export default async function handler(req, res) {
       return res.status(200).json({
         data: rows,
         teacher_totals,
+        extra_items: extraItems,
+        extras_table_missing: extrasTableMissing,
         unit_period_minutes: GROUP_LESSON_UNIT_MINUTES,
         default_unit_price_tl: defaultUnitPrice,
         sessions
@@ -2158,6 +2281,94 @@ export default async function handler(req, res) {
       );
       if (insErr) return res.status(500).json({ error: insErr.message });
       return res.status(201).json({ data: created || [], auto_bbb: autoBbb, skipped });
+    }
+
+    if (op === 'teacher-extra-item') {
+      if (!isPaymentSummaryAdmin(role)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const teacherId = String(body.teacher_id || '').trim();
+      const periodFrom = String(body.period_from || body.from || '').trim().slice(0, 10);
+      const periodTo = String(body.period_to || body.to || '').trim().slice(0, 10);
+      const kind = String(body.kind || '').trim().toLowerCase();
+      const label = String(body.label || '').trim().slice(0, 120) || null;
+      const note = String(body.note || '').trim().slice(0, 500) || null;
+      const quantity = Number(body.quantity);
+      const unitPrice = Number(body.unit_price_tl);
+      const amountOverride = body.amount_tl != null ? Number(body.amount_tl) : null;
+      if (!teacherId) return res.status(400).json({ error: 'teacher_id_required' });
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(periodFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(periodTo)) {
+        return res.status(400).json({ error: 'from_to_invalid', hint: 'YYYY-MM-DD' });
+      }
+      if (periodFrom > periodTo) return res.status(400).json({ error: 'from_after_to' });
+      if (!TEACHER_EXTRA_KINDS.has(kind)) {
+        return res.status(400).json({
+          error: 'invalid_kind',
+          hint: 'ders | rehberlik | ozel_ders | soru_cozumu | diger'
+        });
+      }
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        return res.status(400).json({ error: 'invalid_quantity' });
+      }
+      if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+        return res.status(400).json({ error: 'invalid_unit_price_tl' });
+      }
+      const computed = Math.round(quantity * unitPrice * 100) / 100;
+      const amountTl =
+        amountOverride != null && Number.isFinite(amountOverride) && amountOverride >= 0
+          ? Math.round(amountOverride * 100) / 100
+          : computed;
+      const { data, error } = await supabaseAdmin
+        .from('teacher_payment_extra_items')
+        .insert({
+          teacher_id: teacherId,
+          institution_id: institutionId || null,
+          period_from: periodFrom,
+          period_to: periodTo,
+          kind,
+          label,
+          quantity: Math.round(quantity * 100) / 100,
+          unit_price_tl: Math.round(unitPrice * 100) / 100,
+          amount_tl: amountTl,
+          note,
+          created_by: actor.sub || null
+        })
+        .select(
+          'id,teacher_id,institution_id,period_from,period_to,kind,label,quantity,unit_price_tl,amount_tl,note,created_by,created_at'
+        )
+        .maybeSingle();
+      if (error) {
+        if (String(error.message || '').toLowerCase().includes('teacher_payment_extra_items')) {
+          return res.status(503).json({
+            error: 'teacher_extras_table_missing',
+            hint: 'student-coaching-system/sql/2026-08-04-teacher-payment-extra-items.sql'
+          });
+        }
+        return res.status(500).json({ error: error.message });
+      }
+      return res.status(201).json({ data });
+    }
+
+    if (op === 'delete-teacher-extra-item') {
+      if (!isPaymentSummaryAdmin(role)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const id = String(body.id || body.extra_item_id || '').trim();
+      if (!id) return res.status(400).json({ error: 'id_required' });
+      let delQ = supabaseAdmin.from('teacher_payment_extra_items').delete().eq('id', id);
+      if (institutionId) delQ = delQ.eq('institution_id', institutionId);
+      const { data: deleted, error } = await delQ.select('id');
+      if (error) {
+        if (String(error.message || '').toLowerCase().includes('teacher_payment_extra_items')) {
+          return res.status(503).json({
+            error: 'teacher_extras_table_missing',
+            hint: 'student-coaching-system/sql/2026-08-04-teacher-payment-extra-items.sql'
+          });
+        }
+        return res.status(500).json({ error: error.message });
+      }
+      if (!deleted?.length) return res.status(404).json({ error: 'extra_item_not_found' });
+      return res.status(200).json({ ok: true, deleted: deleted.length });
     }
   }
 

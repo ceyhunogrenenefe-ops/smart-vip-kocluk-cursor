@@ -36,7 +36,36 @@ export type GroupLessonTeacherTotal = {
   lesson_units_40: number;
   unit_price_tl: number;
   total_amount_tl: number;
+  lesson_amount_tl?: number;
+  extra_amount_tl?: number;
 };
+
+export type TeacherPaymentExtraItem = {
+  id: string;
+  teacher_id: string;
+  kind: string;
+  label?: string | null;
+  quantity: number;
+  unit_price_tl: number;
+  amount_tl: number;
+  note?: string | null;
+  period_from?: string;
+  period_to?: string;
+};
+
+export const TEACHER_EXTRA_KIND_OPTIONS = [
+  { id: 'ders', label: 'Ders' },
+  { id: 'rehberlik', label: 'Rehberlik' },
+  { id: 'ozel_ders', label: 'Özel ders' },
+  { id: 'soru_cozumu', label: 'Soru çözümü' },
+  { id: 'diger', label: 'Diğer' }
+] as const;
+
+export function teacherExtraKindLabel(kind: string, label?: string | null): string {
+  if (label && String(label).trim()) return String(label).trim();
+  const hit = TEACHER_EXTRA_KIND_OPTIONS.find((k) => k.id === kind);
+  return hit?.label || kind || 'Kalem';
+}
 
 export type GroupLessonSummarySession = {
   id: string;
@@ -95,6 +124,18 @@ export function GroupLessonPaymentSummary({
   const [summarySessions, setSummarySessions] = useState<GroupLessonSummarySession[]>([]);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [showSessionDetails, setShowSessionDetails] = useState(true);
+  const [extraItems, setExtraItems] = useState<TeacherPaymentExtraItem[]>([]);
+  const [extrasTableMissing, setExtrasTableMissing] = useState(false);
+  const [extraBusy, setExtraBusy] = useState(false);
+  const [extraForm, setExtraForm] = useState({
+    teacherId: '',
+    kind: 'rehberlik',
+    label: '',
+    quantity: '1',
+    unitPrice: '500',
+    amount: '',
+    note: ''
+  });
   const [payoutByTeacher, setPayoutByTeacher] = useState<Map<string, TeacherPayoutRecord>>(new Map());
   const [payoutBusyId, setPayoutBusyId] = useState('');
   const [rateStore, setRateStore] = useState<TeacherUnitRatesStore>(() => loadTeacherUnitRates());
@@ -273,7 +314,12 @@ export function GroupLessonPaymentSummary({
   );
 
   const enrichWithLocalRates = useCallback(
-    (rows: GroupLessonSummaryRow[], sessions: GroupLessonSummarySession[]) => {
+    (
+      rows: GroupLessonSummaryRow[],
+      sessions: GroupLessonSummarySession[],
+      extras: TeacherPaymentExtraItem[] = [],
+      nameByTeacher: Record<string, string> = {}
+    ) => {
       const withRates = rows.map((r) => {
         const unitPrice = unitPriceForTeacher({ ...rateStore, defaultPrice: effectiveDefaultPrice }, r.teacher_id);
         const lessonUnits = r.lesson_units_40;
@@ -293,15 +339,51 @@ export function GroupLessonPaymentSummary({
           total_minutes: 0,
           lesson_units_40: 0,
           unit_price_tl: row.unit_price_tl,
-          total_amount_tl: 0
+          total_amount_tl: 0,
+          lesson_amount_tl: 0,
+          extra_amount_tl: 0
         };
         cur.completed_lesson_count += row.completed_lesson_count;
         cur.total_minutes += row.total_minutes;
         cur.lesson_units_40 = Math.round((cur.lesson_units_40 + row.lesson_units_40) * 100) / 100;
-        cur.total_amount_tl = Math.round((cur.total_amount_tl + row.total_amount_tl) * 100) / 100;
+        cur.lesson_amount_tl = Math.round(((cur.lesson_amount_tl || 0) + row.total_amount_tl) * 100) / 100;
+        cur.total_amount_tl = cur.lesson_amount_tl;
         cur.unit_price_tl = row.unit_price_tl;
         totalsMap.set(tid, cur);
       }
+
+      const extraByTeacher = new Map<string, number>();
+      for (const ex of extras) {
+        const tid = String(ex.teacher_id || '').trim();
+        if (!tid) continue;
+        const amt = Number(ex.amount_tl);
+        if (!Number.isFinite(amt)) continue;
+        extraByTeacher.set(tid, Math.round(((extraByTeacher.get(tid) || 0) + amt) * 100) / 100);
+      }
+      for (const [tid, extraAmt] of extraByTeacher.entries()) {
+        const cur = totalsMap.get(tid);
+        if (cur) {
+          cur.extra_amount_tl = extraAmt;
+          cur.total_amount_tl = Math.round(((cur.lesson_amount_tl || 0) + extraAmt) * 100) / 100;
+        } else {
+          totalsMap.set(tid, {
+            teacher_id: tid,
+            teacher_name: nameByTeacher[tid] || tid,
+            completed_lesson_count: 0,
+            total_minutes: 0,
+            lesson_units_40: 0,
+            unit_price_tl: unitPriceForTeacher({ ...rateStore, defaultPrice: effectiveDefaultPrice }, tid),
+            lesson_amount_tl: 0,
+            extra_amount_tl: extraAmt,
+            total_amount_tl: extraAmt
+          });
+        }
+      }
+      for (const cur of totalsMap.values()) {
+        if (cur.lesson_amount_tl == null) cur.lesson_amount_tl = 0;
+        if (cur.extra_amount_tl == null) cur.extra_amount_tl = 0;
+      }
+
       const sessionsEnriched = sessions.map((s) => {
         const unitPrice = unitPriceForTeacher({ ...rateStore, defaultPrice: effectiveDefaultPrice }, s.teacher_id);
         return {
@@ -321,6 +403,13 @@ export function GroupLessonPaymentSummary({
     [rateStore, effectiveDefaultPrice]
   );
 
+  const teacherNameLookup = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const t of teacherCandidates) map[t.id] = t.name;
+    for (const t of teacherTotals) map[t.teacher_id] = t.teacher_name;
+    return map;
+  }, [teacherCandidates, teacherTotals]);
+
   const loadPaymentSummary = useCallback(async () => {
     setSummaryLoading(true);
     try {
@@ -335,12 +424,19 @@ export function GroupLessonPaymentSummary({
         setSummaryRows([]);
         setTeacherTotals([]);
         setSummarySessions([]);
+        setExtraItems([]);
         onError(String(j.error || 'Grup ders ödeme özeti alınamadı'));
         return;
       }
       const rawRows = Array.isArray(j.data) ? (j.data as GroupLessonSummaryRow[]) : [];
       const rawSessions = Array.isArray(j.sessions) ? (j.sessions as GroupLessonSummarySession[]) : [];
-      const enriched = enrichWithLocalRates(rawRows, rawSessions);
+      const rawExtras = Array.isArray(j.extra_items) ? (j.extra_items as TeacherPaymentExtraItem[]) : [];
+      setExtrasTableMissing(Boolean(j.extras_table_missing));
+      setExtraItems(rawExtras);
+      const nameMap: Record<string, string> = {};
+      for (const t of teacherCandidates) nameMap[t.id] = t.name;
+      for (const row of rawRows) nameMap[row.teacher_id] = row.teacher_name;
+      const enriched = enrichWithLocalRates(rawRows, rawSessions, rawExtras, nameMap);
       setSummaryRows(enriched.rows);
       setTeacherTotals(enriched.teacherTotals);
       setSummarySessions(enriched.sessions);
@@ -348,6 +444,7 @@ export function GroupLessonPaymentSummary({
       setSummaryRows([]);
       setTeacherTotals([]);
       setSummarySessions([]);
+      setExtraItems([]);
       onError(e instanceof Error ? e.message : 'Grup ders ödeme özeti alınamadı');
     } finally {
       setSummaryLoading(false);
@@ -358,7 +455,8 @@ export function GroupLessonPaymentSummary({
     summaryTeacherId,
     summaryClassId,
     enrichWithLocalRates,
-    onError
+    onError,
+    teacherCandidates
   ]);
 
   useEffect(() => {
@@ -374,13 +472,98 @@ export function GroupLessonPaymentSummary({
   }, [loadPaymentSummary, summaryRefreshKey]);
 
   useEffect(() => {
-    if (summaryRows.length === 0 && summarySessions.length === 0) return;
-    const enriched = enrichWithLocalRates(summaryRows, summarySessions);
+    if (summaryRows.length === 0 && summarySessions.length === 0 && extraItems.length === 0) return;
+    const enriched = enrichWithLocalRates(summaryRows, summarySessions, extraItems, teacherNameLookup);
     setSummaryRows(enriched.rows);
     setTeacherTotals(enriched.teacherTotals);
     setSummarySessions(enriched.sessions);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- yalnızca ücret store / varsayılan değişince yeniden hesapla
-  }, [rateStore, effectiveDefaultPrice]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- yalnızca ücret store / varsayılan / ek kalem değişince yeniden hesapla
+  }, [rateStore, effectiveDefaultPrice, extraItems]);
+
+  const computedExtraAmount = useMemo(() => {
+    const q = Number(extraForm.quantity);
+    const p = Number(extraForm.unitPrice);
+    if (!Number.isFinite(q) || !Number.isFinite(p) || q <= 0 || p < 0) return 0;
+    return Math.round(q * p * 100) / 100;
+  }, [extraForm.quantity, extraForm.unitPrice]);
+
+  const addExtraItem = async () => {
+    if (!summaryFrom || !summaryTo) {
+      onError('Önce tarih aralığı seçin');
+      return;
+    }
+    const teacherId = String(extraForm.teacherId || summaryTeacherId || '').trim();
+    if (!teacherId) {
+      onError('Öğretmen seçin');
+      return;
+    }
+    const quantity = Number(extraForm.quantity);
+    const unitPrice = Number(extraForm.unitPrice);
+    const amountRaw = String(extraForm.amount || '').trim();
+    const amountTl = amountRaw ? Number(amountRaw) : computedExtraAmount;
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      onError('Birim (adet) geçersiz');
+      return;
+    }
+    if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+      onError('Birim fiyat geçersiz');
+      return;
+    }
+    if (!Number.isFinite(amountTl) || amountTl < 0) {
+      onError('Ücret geçersiz');
+      return;
+    }
+    setExtraBusy(true);
+    try {
+      const res = await apiFetch('/api/class-live-lessons?op=teacher-extra-item', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          teacher_id: teacherId,
+          period_from: summaryFrom,
+          period_to: summaryTo,
+          kind: extraForm.kind,
+          label: extraForm.kind === 'diger' ? extraForm.label : undefined,
+          quantity,
+          unit_price_tl: unitPrice,
+          amount_tl: amountTl,
+          note: extraForm.note || undefined
+        })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        onError(String(j.hint || j.error || 'Kalem eklenemedi'));
+        if (j.error === 'teacher_extras_table_missing') setExtrasTableMissing(true);
+        return;
+      }
+      onNotice('Ek kalem eklendi; toplam güncellendi.');
+      setExtraForm((f) => ({ ...f, label: '', note: '', amount: '', quantity: '1' }));
+      await loadPaymentSummary();
+    } finally {
+      setExtraBusy(false);
+    }
+  };
+
+  const deleteExtraItem = async (id: string) => {
+    if (!window.confirm('Bu ek kalem silinsin mi?')) return;
+    setExtraBusy(true);
+    try {
+      const res = await apiFetch('/api/class-live-lessons?op=delete-teacher-extra-item', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        onError(String(j.hint || j.error || 'Kalem silinemedi'));
+        return;
+      }
+      onNotice('Ek kalem silindi.');
+      await loadPaymentSummary();
+    } finally {
+      setExtraBusy(false);
+    }
+  };
 
   const grandTotal = useMemo(
     () => teacherTotals.reduce((acc, t) => acc + t.total_amount_tl, 0),
@@ -593,12 +776,88 @@ export function GroupLessonPaymentSummary({
         </table>
       </div>
 
-      {teacherTotals.length > 0 ? (
-        <div className="overflow-x-auto rounded-lg border border-emerald-100 bg-emerald-50/40">
+      {/* Ek kalem formu her zaman görünür (ödeme dönemine manuel satır) */}
+      {!(teacherTotals.length > 0 || extraItems.length > 0) ? (
+        <div className="rounded-lg border border-indigo-200 bg-white p-3 space-y-3">
+          <h3 className="text-sm font-bold text-indigo-900">Ek kalem ekle (ödeme)</h3>
+          <p className="text-xs text-slate-500">
+            Bu dönemde tamamlanan grup dersi yoksa bile rehberlik / özel ders / soru çözümü kalemi ekleyebilirsiniz.
+          </p>
+          {extrasTableMissing ? (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+              SQL tablosu eksik: <code className="font-mono">sql/2026-08-04-teacher-payment-extra-items.sql</code>
+            </p>
+          ) : null}
+          <div className="grid gap-2 md:grid-cols-6">
+            <select
+              value={extraForm.teacherId || summaryTeacherId}
+              onChange={(e) => setExtraForm((f) => ({ ...f, teacherId: e.target.value }))}
+              className="rounded border border-slate-200 px-2 py-2 text-sm md:col-span-2"
+            >
+              <option value="">Öğretmen seçin</option>
+              {teacherCandidates.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={extraForm.kind}
+              onChange={(e) => setExtraForm((f) => ({ ...f, kind: e.target.value }))}
+              className="rounded border border-slate-200 px-2 py-2 text-sm"
+            >
+              {TEACHER_EXTRA_KIND_OPTIONS.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.label}
+                </option>
+              ))}
+            </select>
+            <input
+              type="number"
+              min={0.5}
+              step={0.5}
+              value={extraForm.quantity}
+              onChange={(e) => setExtraForm((f) => ({ ...f, quantity: e.target.value }))}
+              className="rounded border border-slate-200 px-2 py-2 text-sm text-right"
+              placeholder="Birim"
+            />
+            <input
+              type="number"
+              min={0}
+              step={50}
+              value={extraForm.unitPrice}
+              onChange={(e) => setExtraForm((f) => ({ ...f, unitPrice: e.target.value }))}
+              className="rounded border border-slate-200 px-2 py-2 text-sm text-right"
+              placeholder="Birim fiyat"
+            />
+            <input
+              type="number"
+              min={0}
+              step={50}
+              value={extraForm.amount}
+              onChange={(e) => setExtraForm((f) => ({ ...f, amount: e.target.value }))}
+              className="rounded border border-slate-200 px-2 py-2 text-sm text-right"
+              placeholder={`Ücret (${formatTryAmount(computedExtraAmount)})`}
+            />
+          </div>
+          <button
+            type="button"
+            disabled={extraBusy || extrasTableMissing}
+            onClick={() => void addExtraItem()}
+            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+          >
+            {extraBusy ? 'Ekleniyor…' : 'Kalem ekle'}
+          </button>
+        </div>
+      ) : null}
+
+      {teacherTotals.length > 0 || extraItems.length > 0 ? (
+        <div className="space-y-3 rounded-lg border border-emerald-100 bg-emerald-50/40 p-3">
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-emerald-800">
-                <th className="px-3 py-2" colSpan={7}>
+                <th className="px-3 py-2" colSpan={8}>
                   Öğretmen toplamları
                 </th>
               </tr>
@@ -607,9 +866,10 @@ export function GroupLessonPaymentSummary({
                 <th className="px-3 py-2 text-right">Ders</th>
                 <th className="px-3 py-2 text-right">{GROUP_LESSON_UNIT_MINUTES}dk birim</th>
                 <th className="px-3 py-2 text-right">Birim ücret</th>
+                <th className="px-3 py-2 text-right">Grup dersi</th>
+                <th className="px-3 py-2 text-right">Ek kalem</th>
                 <th className="px-3 py-2 text-right">Toplam (₺)</th>
                 <th className="px-3 py-2 text-center">Ödendi</th>
-                <th className="px-3 py-2" />
               </tr>
             </thead>
             <tbody className="divide-y divide-emerald-100/80">
@@ -622,6 +882,12 @@ export function GroupLessonPaymentSummary({
                   <td className="px-3 py-2 text-right tabular-nums">{t.completed_lesson_count}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{formatLessonUnits(t.lesson_units_40)}</td>
                   <td className="px-3 py-2">{renderTeacherPriceCell(t.teacher_id, t.unit_price_tl)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">
+                    {formatTryAmount(t.lesson_amount_tl || 0)} ₺
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-indigo-700">
+                    {formatTryAmount(t.extra_amount_tl || 0)} ₺
+                  </td>
                   <td className="px-3 py-2 text-right tabular-nums font-bold text-emerald-800">
                     {formatTryAmount(t.total_amount_tl)} ₺
                   </td>
@@ -643,12 +909,11 @@ export function GroupLessonPaymentSummary({
                       )}
                     </label>
                   </td>
-                  <td className="px-3 py-2 text-xs text-slate-500 tabular-nums">{t.total_minutes} dk</td>
                 </tr>
               );
               })}
               <tr className="bg-emerald-100/60 font-bold">
-                <td className="px-3 py-2" colSpan={4}>
+                <td className="px-3 py-2" colSpan={6}>
                   Genel toplam
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums text-emerald-900">{formatTryAmount(grandTotal)} ₺</td>
@@ -656,10 +921,147 @@ export function GroupLessonPaymentSummary({
                   <div className="text-emerald-800">Ödenen: {formatTryAmount(paidTotal)} ₺</div>
                   <div className="text-amber-800">Bekleyen: {formatTryAmount(unpaidTotal)} ₺</div>
                 </td>
-                <td />
               </tr>
             </tbody>
           </table>
+          </div>
+
+          <div className="rounded-lg border border-indigo-200 bg-white p-3 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-bold text-indigo-900">Ek kalem ekle (ödeme)</h3>
+              <p className="text-xs text-slate-500">
+                Rehberlik, özel ders, soru çözümü vb. — birim × birim fiyat = ücret
+              </p>
+            </div>
+            {extrasTableMissing ? (
+              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                SQL tablosu eksik. Supabase’te çalıştırın:{' '}
+                <code className="font-mono">sql/2026-08-04-teacher-payment-extra-items.sql</code>
+              </p>
+            ) : null}
+            <div className="grid gap-2 md:grid-cols-6">
+              <select
+                value={extraForm.teacherId || summaryTeacherId}
+                onChange={(e) => setExtraForm((f) => ({ ...f, teacherId: e.target.value }))}
+                className="rounded border border-slate-200 px-2 py-2 text-sm md:col-span-2"
+              >
+                <option value="">Öğretmen seçin</option>
+                {teacherCandidates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={extraForm.kind}
+                onChange={(e) => setExtraForm((f) => ({ ...f, kind: e.target.value }))}
+                className="rounded border border-slate-200 px-2 py-2 text-sm"
+              >
+                {TEACHER_EXTRA_KIND_OPTIONS.map((k) => (
+                  <option key={k.id} value={k.id}>
+                    {k.label}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="number"
+                min={0.5}
+                step={0.5}
+                value={extraForm.quantity}
+                onChange={(e) => setExtraForm((f) => ({ ...f, quantity: e.target.value }))}
+                className="rounded border border-slate-200 px-2 py-2 text-sm text-right"
+                placeholder="Birim"
+                title="Birim (adet)"
+              />
+              <input
+                type="number"
+                min={0}
+                step={50}
+                value={extraForm.unitPrice}
+                onChange={(e) => setExtraForm((f) => ({ ...f, unitPrice: e.target.value }))}
+                className="rounded border border-slate-200 px-2 py-2 text-sm text-right"
+                placeholder="Birim fiyat"
+                title="Birim fiyat (₺)"
+              />
+              <input
+                type="number"
+                min={0}
+                step={50}
+                value={extraForm.amount}
+                onChange={(e) => setExtraForm((f) => ({ ...f, amount: e.target.value }))}
+                className="rounded border border-slate-200 px-2 py-2 text-sm text-right"
+                placeholder={`Ücret (${formatTryAmount(computedExtraAmount)})`}
+                title="Ücret (boşsa birim × fiyat)"
+              />
+            </div>
+            {extraForm.kind === 'diger' ? (
+              <input
+                value={extraForm.label}
+                onChange={(e) => setExtraForm((f) => ({ ...f, label: e.target.value }))}
+                className="w-full rounded border border-slate-200 px-2 py-2 text-sm"
+                placeholder="Diğer kalem adı"
+              />
+            ) : null}
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={extraForm.note}
+                onChange={(e) => setExtraForm((f) => ({ ...f, note: e.target.value }))}
+                className="flex-1 min-w-[180px] rounded border border-slate-200 px-2 py-2 text-sm"
+                placeholder="Not (opsiyonel)"
+              />
+              <button
+                type="button"
+                disabled={extraBusy || extrasTableMissing}
+                onClick={() => void addExtraItem()}
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+              >
+                {extraBusy ? 'Ekleniyor…' : 'Kalem ekle'}
+              </button>
+            </div>
+
+            {extraItems.length > 0 ? (
+              <div className="overflow-x-auto rounded border border-slate-200">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 text-left text-slate-500 uppercase tracking-wide">
+                      <th className="px-2 py-1.5">Öğretmen</th>
+                      <th className="px-2 py-1.5">Kalem</th>
+                      <th className="px-2 py-1.5 text-right">Birim</th>
+                      <th className="px-2 py-1.5 text-right">Birim fiyat</th>
+                      <th className="px-2 py-1.5 text-right">Ücret</th>
+                      <th className="px-2 py-1.5">Not</th>
+                      <th className="px-2 py-1.5" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {extraItems.map((ex) => (
+                      <tr key={ex.id}>
+                        <td className="px-2 py-1.5">{teacherNameLookup[ex.teacher_id] || ex.teacher_id}</td>
+                        <td className="px-2 py-1.5 font-medium">{teacherExtraKindLabel(ex.kind, ex.label)}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{formatLessonUnits(Number(ex.quantity))}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{formatTryAmount(Number(ex.unit_price_tl))} ₺</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums font-semibold">{formatTryAmount(Number(ex.amount_tl))} ₺</td>
+                        <td className="px-2 py-1.5 text-slate-500">{ex.note || '—'}</td>
+                        <td className="px-2 py-1.5 text-right">
+                          <button
+                            type="button"
+                            disabled={extraBusy}
+                            onClick={() => void deleteExtraItem(ex.id)}
+                            className="rounded p-1 text-red-600 hover:bg-red-50"
+                            title="Sil"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500">Bu dönemde henüz ek kalem yok.</p>
+            )}
+          </div>
         </div>
       ) : null}
 
