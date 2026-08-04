@@ -962,10 +962,18 @@ export function GroupLessonPaymentSummary({
             {extrasTableMissing ? (
               <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
                 SQL tablosu eksik. Supabase’te çalıştırın:{' '}
-                <code className="font-mono">sql/2026-08-04-teacher-payment-extra-items.sql</code>
+                <code className="font-mono">sql/2026-08-04-teacher-payment-extra-items.sql</code> ve{' '}
+                <code className="font-mono">sql/2026-08-04b-teacher-payment-extra-item-date.sql</code>
               </p>
             ) : null}
-            <div className="grid gap-2 md:grid-cols-6">
+            <div className="grid gap-2 md:grid-cols-7">
+              <input
+                type="date"
+                value={extraForm.itemDate}
+                onChange={(e) => setExtraForm((f) => ({ ...f, itemDate: e.target.value }))}
+                className="rounded border border-slate-200 px-2 py-2 text-sm"
+                title="Kalem tarihi"
+              />
               <select
                 value={extraForm.teacherId || summaryTeacherId}
                 onChange={(e) => setExtraForm((f) => ({ ...f, teacherId: e.target.value }))}
@@ -1050,6 +1058,7 @@ export function GroupLessonPaymentSummary({
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="bg-slate-50 text-left text-slate-500 uppercase tracking-wide">
+                      <th className="px-2 py-1.5">Tarih</th>
                       <th className="px-2 py-1.5">Öğretmen</th>
                       <th className="px-2 py-1.5">Kalem</th>
                       <th className="px-2 py-1.5 text-right">Birim</th>
@@ -1062,6 +1071,9 @@ export function GroupLessonPaymentSummary({
                   <tbody className="divide-y divide-slate-100">
                     {extraItems.map((ex) => (
                       <tr key={ex.id}>
+                        <td className="px-2 py-1.5 tabular-nums whitespace-nowrap">
+                          {ex.item_date || '—'}
+                        </td>
                         <td className="px-2 py-1.5">{teacherNameLookup[ex.teacher_id] || ex.teacher_id}</td>
                         <td className="px-2 py-1.5 font-medium">{teacherExtraKindLabel(ex.kind, ex.label)}</td>
                         <td className="px-2 py-1.5 text-right tabular-nums">{formatLessonUnits(Number(ex.quantity))}</td>
