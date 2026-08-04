@@ -651,8 +651,8 @@ export function GroupLessonPaymentSummary({
       <div>
         <h2 className="font-semibold text-slate-800">Grup dersi ödeme özeti (tamamlanan)</h2>
         <p className="text-xs text-slate-500 mt-1">
-          Hesaplama {GROUP_LESSON_UNIT_MINUTES} dakikalık birim ders periyoduna göre yapılır (ör. 40 dk = 1 birim, 80
-          dk = 2 birim). Admin ve süper admin oturumları düzenleyebilir veya silebilir.
+          Hesaplama {GROUP_LESSON_UNIT_MINUTES} dakikalık birim ders periyoduna göre yapılır. Ödeme sırasında
+          rehberlik / özel ders / soru çözümü gibi ek kalemleri birim fiyat ve ücretle ekleyebilirsiniz.
         </p>
       </div>
 
