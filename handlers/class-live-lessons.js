@@ -345,10 +345,11 @@ async function loadTeacherPaymentExtraItems({ from, to, institutionId, teacherId
   let q = supabaseAdmin
     .from('teacher_payment_extra_items')
     .select(
-      'id,teacher_id,institution_id,period_from,period_to,kind,label,quantity,unit_price_tl,amount_tl,note,created_by,created_at'
+      'id,teacher_id,institution_id,period_from,period_to,item_date,kind,label,quantity,unit_price_tl,amount_tl,note,created_by,created_at'
     )
     .eq('period_from', from)
     .eq('period_to', to)
+    .order('item_date', { ascending: true })
     .order('created_at', { ascending: true });
   if (institutionId) q = q.eq('institution_id', institutionId);
   if (teacherId) q = q.eq('teacher_id', teacherId);
@@ -2290,6 +2291,7 @@ export default async function handler(req, res) {
       const teacherId = String(body.teacher_id || '').trim();
       const periodFrom = String(body.period_from || body.from || '').trim().slice(0, 10);
       const periodTo = String(body.period_to || body.to || '').trim().slice(0, 10);
+      const itemDate = String(body.item_date || body.date || '').trim().slice(0, 10);
       const kind = String(body.kind || '').trim().toLowerCase();
       const label = String(body.label || '').trim().slice(0, 120) || null;
       const note = String(body.note || '').trim().slice(0, 500) || null;
@@ -2301,6 +2303,9 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'from_to_invalid', hint: 'YYYY-MM-DD' });
       }
       if (periodFrom > periodTo) return res.status(400).json({ error: 'from_after_to' });
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(itemDate)) {
+        return res.status(400).json({ error: 'item_date_required', hint: 'YYYY-MM-DD' });
+      }
       if (!TEACHER_EXTRA_KINDS.has(kind)) {
         return res.status(400).json({
           error: 'invalid_kind',
@@ -2325,6 +2330,7 @@ export default async function handler(req, res) {
           institution_id: institutionId || null,
           period_from: periodFrom,
           period_to: periodTo,
+          item_date: itemDate,
           kind,
           label,
           quantity: Math.round(quantity * 100) / 100,
@@ -2334,14 +2340,21 @@ export default async function handler(req, res) {
           created_by: actor.sub || null
         })
         .select(
-          'id,teacher_id,institution_id,period_from,period_to,kind,label,quantity,unit_price_tl,amount_tl,note,created_by,created_at'
+          'id,teacher_id,institution_id,period_from,period_to,item_date,kind,label,quantity,unit_price_tl,amount_tl,note,created_by,created_at'
         )
         .maybeSingle();
       if (error) {
-        if (String(error.message || '').toLowerCase().includes('teacher_payment_extra_items')) {
+        const msg = String(error.message || '').toLowerCase();
+        if (msg.includes('teacher_payment_extra_items')) {
           return res.status(503).json({
             error: 'teacher_extras_table_missing',
             hint: 'student-coaching-system/sql/2026-08-04-teacher-payment-extra-items.sql'
+          });
+        }
+        if (msg.includes('item_date')) {
+          return res.status(503).json({
+            error: 'item_date_column_missing',
+            hint: 'student-coaching-system/sql/2026-08-04b-teacher-payment-extra-item-date.sql'
           });
         }
         return res.status(500).json({ error: error.message });

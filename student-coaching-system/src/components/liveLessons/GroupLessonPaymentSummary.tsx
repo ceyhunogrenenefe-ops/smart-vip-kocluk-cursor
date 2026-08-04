@@ -49,6 +49,7 @@ export type TeacherPaymentExtraItem = {
   unit_price_tl: number;
   amount_tl: number;
   note?: string | null;
+  item_date?: string | null;
   period_from?: string;
   period_to?: string;
 };
@@ -129,6 +130,7 @@ export function GroupLessonPaymentSummary({
   const [extraBusy, setExtraBusy] = useState(false);
   const [extraForm, setExtraForm] = useState({
     teacherId: '',
+    itemDate: '',
     kind: 'rehberlik',
     label: '',
     quantity: '1',
@@ -487,6 +489,14 @@ export function GroupLessonPaymentSummary({
     return Math.round(q * p * 100) / 100;
   }, [extraForm.quantity, extraForm.unitPrice]);
 
+  useEffect(() => {
+    setExtraForm((f) => {
+      if (f.itemDate) return f;
+      const fallback = summaryTo || new Date().toISOString().slice(0, 10);
+      return { ...f, itemDate: fallback };
+    });
+  }, [summaryTo]);
+
   const addExtraItem = async () => {
     if (!summaryFrom || !summaryTo) {
       onError('Önce tarih aralığı seçin');
@@ -495,6 +505,11 @@ export function GroupLessonPaymentSummary({
     const teacherId = String(extraForm.teacherId || summaryTeacherId || '').trim();
     if (!teacherId) {
       onError('Öğretmen seçin');
+      return;
+    }
+    const itemDate = String(extraForm.itemDate || '').trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(itemDate)) {
+      onError('Kalem tarihi seçin');
       return;
     }
     const quantity = Number(extraForm.quantity);
@@ -522,6 +537,7 @@ export function GroupLessonPaymentSummary({
           teacher_id: teacherId,
           period_from: summaryFrom,
           period_to: summaryTo,
+          item_date: itemDate,
           kind: extraForm.kind,
           label: extraForm.kind === 'diger' ? extraForm.label : undefined,
           quantity,
@@ -533,7 +549,9 @@ export function GroupLessonPaymentSummary({
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
         onError(String(j.hint || j.error || 'Kalem eklenemedi'));
-        if (j.error === 'teacher_extras_table_missing') setExtrasTableMissing(true);
+        if (j.error === 'teacher_extras_table_missing' || j.error === 'item_date_column_missing') {
+          setExtrasTableMissing(true);
+        }
         return;
       }
       onNotice('Ek kalem eklendi; toplam güncellendi.');
@@ -785,10 +803,18 @@ export function GroupLessonPaymentSummary({
           </p>
           {extrasTableMissing ? (
             <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
-              SQL tablosu eksik: <code className="font-mono">sql/2026-08-04-teacher-payment-extra-items.sql</code>
+              SQL tablosu eksik: <code className="font-mono">sql/2026-08-04-teacher-payment-extra-items.sql</code> ve{' '}
+              <code className="font-mono">sql/2026-08-04b-teacher-payment-extra-item-date.sql</code>
             </p>
           ) : null}
-          <div className="grid gap-2 md:grid-cols-6">
+          <div className="grid gap-2 md:grid-cols-7">
+            <input
+              type="date"
+              value={extraForm.itemDate}
+              onChange={(e) => setExtraForm((f) => ({ ...f, itemDate: e.target.value }))}
+              className="rounded border border-slate-200 px-2 py-2 text-sm"
+              title="Kalem tarihi"
+            />
             <select
               value={extraForm.teacherId || summaryTeacherId}
               onChange={(e) => setExtraForm((f) => ({ ...f, teacherId: e.target.value }))}

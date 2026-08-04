@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS teacher_payment_extra_items (
   institution_id uuid NULL,
   period_from date NOT NULL,
   period_to date NOT NULL,
+  item_date date NOT NULL DEFAULT CURRENT_DATE,
   kind text NOT NULL
     CHECK (kind IN ('ders', 'rehberlik', 'ozel_ders', 'soru_cozumu', 'diger')),
   label text NULL,
@@ -26,6 +27,9 @@ CREATE INDEX IF NOT EXISTS idx_teacher_payment_extra_items_teacher
 
 CREATE INDEX IF NOT EXISTS idx_teacher_payment_extra_items_institution
   ON teacher_payment_extra_items (institution_id);
+
+CREATE INDEX IF NOT EXISTS idx_teacher_payment_extra_items_item_date
+  ON teacher_payment_extra_items (item_date);
 
 COMMENT ON TABLE teacher_payment_extra_items IS
   'Muhasebe öğretmen ödemeleri — grup dersi dışı ek kalemler (rehberlik, özel ders, soru çözümü, diğer)';
