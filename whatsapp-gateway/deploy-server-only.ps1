@@ -1,4 +1,4 @@
-# Yalnizca server.js yukle (hizli guncelleme)
+# src/ altini hizli yukle (server.js + message-store.js) — yalnizca server.js YETERLI DEGIL
 param(
   [string]$VpsHost = "27.102.134.199",
   [string]$SshUser = "root",
@@ -8,18 +8,41 @@ param(
 
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$serverJs = Join-Path $here "src\server.js"
-if (-not (Test-Path $serverJs)) { throw "server.js yok: $serverJs" }
+$srcDir = Join-Path $here "src"
+if (-not (Test-Path $srcDir)) { throw "src yok: $srcDir" }
 
-$remotePath = "${RemoteDir}/src/server.js"
-Write-Host ">> $serverJs -> ${SshUser}@${VpsHost}:$remotePath" -ForegroundColor Cyan
-
-if ($SshPort -ne 22) {
-  scp -P $SshPort $serverJs "${SshUser}@${VpsHost}:${remotePath}"
-  ssh -p $SshPort "${SshUser}@${VpsHost}" "cd '$RemoteDir' && pm2 restart whatsapp-gateway && curl -s http://127.0.0.1:4010/health"
-} else {
-  scp $serverJs "${SshUser}@${VpsHost}:${remotePath}"
-  ssh "${SshUser}@${VpsHost}" "cd '$RemoteDir' && pm2 restart whatsapp-gateway && curl -s http://127.0.0.1:4010/health"
+$files = @(
+  "server.js",
+  "message-store.js"
+)
+foreach ($name in $files) {
+  $local = Join-Path $srcDir $name
+  if (-not (Test-Path $local)) { throw "eksik: $local" }
 }
 
-Write-Host "Tamam." -ForegroundColor Green
+$remoteSrc = "${RemoteDir}/src"
+Write-Host ">> src/*.js -> ${SshUser}@${VpsHost}:$remoteSrc" -ForegroundColor Cyan
+
+$scpArgs = @()
+if ($SshPort -ne 22) { $scpArgs += @("-P", "$SshPort") }
+
+foreach ($name in $files) {
+  $local = Join-Path $srcDir $name
+  $remotePath = "${remoteSrc}/${name}"
+  Write-Host "   $name" -ForegroundColor DarkCyan
+  if ($SshPort -ne 22) {
+    scp -P $SshPort $local "${SshUser}@${VpsHost}:${remotePath}"
+  } else {
+    scp $local "${SshUser}@${VpsHost}:${remotePath}"
+  }
+}
+
+$healthCmd = "cd '$RemoteDir' && pm2 restart whatsapp-gateway && sleep 2 && curl -s http://127.0.0.1:4010/health"
+if ($SshPort -ne 22) {
+  ssh -p $SshPort "${SshUser}@${VpsHost}" $healthCmd
+} else {
+  ssh "${SshUser}@${VpsHost}" $healthCmd
+}
+
+Write-Host ""
+Write-Host "Tamam. Health'te message_store_version=2026-08-04-root-pending olmali." -ForegroundColor Green

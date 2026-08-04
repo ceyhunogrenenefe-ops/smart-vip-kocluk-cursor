@@ -13,7 +13,11 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
 } from '@whiskeysockets/baileys';
-import { createMessageStore, createMsgRetryCounterCache } from './message-store.js';
+import {
+  createMessageStore,
+  createMsgRetryCounterCache,
+  MESSAGE_STORE_VERSION,
+} from './message-store.js';
 
 const SILENCE_SIGNAL_SESSION_LOGS = String(process.env.SILENCE_SIGNAL_SESSION_LOGS || '1') !== '0';
 /** libsignal / baileys gürültüsü — process stdout spam + oturum dump */
@@ -110,6 +114,27 @@ const SEND_MESSAGE_RETRIES = Math.min(
 /** İstenen oturum bağlı değilse başka bağlı WhatsApp hattından gönder (otomasyon). Varsayılan kapalı — WA_SHARED_SEND_FALLBACK=1 ile açılır. */
 const SHARED_SEND_FALLBACK = String(process.env.WA_SHARED_SEND_FALLBACK ?? '0') !== '0';
 
+/**
+ * Idle sonrası Signal session soğur → ciphertext → alıcıda «Mesaj bekleniyor».
+ * Bu eşiğin üstünde gönderim öncesi ZORUNLU warm-up.
+ */
+const IDLE_WARM_MS = Math.max(60_000, Number(process.env.WA_IDLE_WARM_MS || 3 * 60_1000));
+const WARM_ACK_MS = Math.max(800, Number(process.env.WA_WARM_ACK_MS || 2800));
+const SESSION_ASSERT_TIMEOUT_MS = Math.max(3000, Number(process.env.WA_SESSION_ASSERT_MS || 10_000));
+const WARM_MAX_WAIT_MS = Math.max(8000, Number(process.env.WA_WARM_MAX_WAIT_MS || 35_000));
+const WARM_POLL_MS = Math.max(200, Number(process.env.WA_WARM_POLL_MS || 350));
+/**
+ * KÖK ÇÖZÜM: soft warm varsayılan KAPALI.
+ * Soft = «ısınamadı ama yine de gönder» → ciphertext → «Mesaj bekleniyor».
+ * WA_WARM_HARD_FAIL=false ile eski (kırık) soft davranışa dönülebilir.
+ */
+const WARM_HARD_FAIL = String(process.env.WA_WARM_HARD_FAIL || 'true').toLowerCase() !== 'false';
+const PRE_SEND_DELAY_MS = Math.max(0, Number(process.env.WA_PRE_SEND_DELAY_MS || 500));
+const WARM_PRESENCE_ROUNDS = Math.max(1, Math.min(5, Number(process.env.WA_WARM_PRESENCE_ROUNDS || 3)));
+const WARM_PRESENCE_GAP_MS = Math.max(80, Number(process.env.WA_WARM_PRESENCE_GAP_MS || 280));
+/** Son başarılı gönderim — idle warm için */
+const lastSendAtByCoach = new Map(); // coachId -> ms
+
 app.use(
   cors({
     origin(origin, callback) {
@@ -197,12 +222,19 @@ async function clearSessionMeta(coachId) {
 
 async function clearCoachAuth(coachId) {
   const id = String(coachId || '').trim();
-  if (!id) return;
+  if (!id || id.startsWith('_') || id.startsWith('.')) return;
   try {
+    // Yalnızca auth dizini — _msg-cache/{coachId} KASITLI korunur (QR reset store'u silmesin)
     await fs.rm(coachAuthDir(id), { recursive: true, force: true });
   } catch (err) {
     logger.warn({ err, coachId: id }, 'clearCoachAuth failed');
   }
+}
+
+/** dataRoot altındaki koç auth klasörleri — _msg-cache vb. sistem dizinlerini atla */
+function isCoachAuthDirName(name) {
+  const n = String(name || '').trim();
+  return Boolean(n) && !n.startsWith('.') && !n.startsWith('_');
 }
 
 function isRestoreBlocked(meta) {
@@ -609,21 +641,87 @@ function waitForMessageServerAck(sock, key, timeoutMs = 9000) {
   });
 }
 
-async function sendTextWithDeliveryCheck(sock, jid, message, retriesLeft = SEND_MESSAGE_RETRIES, coachId = '') {
-  // Signal oturumunu ısıt — ilk gönderimde "Mesaj bekleniyor" süresini kısaltır
-  try {
-    if (typeof sock.assertSessions === 'function') {
-      await withTimeout(() => sock.assertSessions([jid], true), 4_000, 'assert_sessions_timeout');
-    } else if (typeof sock.presenceSubscribe === 'function') {
-      await withTimeout(() => sock.presenceSubscribe(jid), 2_500, 'presence_timeout');
-      await sleep(250);
-    }
-  } catch (warmErr) {
-    logger.debug(
-      { coachId, err: warmErr?.message || warmErr },
-      'session warm skipped — sending anyway'
-    );
+/**
+ * Idle sonrası Signal session ısıtma.
+ * Soft skip YOK (varsayılan): ısınamazsa 503 — ciphertext / «Mesaj bekleniyor» önlenir.
+ */
+async function warmSessionForSend(sock, jid, coachId = '') {
+  const id = String(coachId || '').trim() || '_';
+  const now = Date.now();
+  const last = Number(lastSendAtByCoach.get(id) || 0);
+  const idleMs = last > 0 ? now - last : Number.POSITIVE_INFINITY;
+  if (last > 0 && idleMs < IDLE_WARM_MS) {
+    return { warmed: false, skipped: true, idleMs };
   }
+
+  const deadline = Date.now() + WARM_MAX_WAIT_MS;
+  let attempt = 0;
+  let lastErr = null;
+
+  while (Date.now() < deadline) {
+    attempt += 1;
+    try {
+      if (typeof sock.assertSessions === 'function') {
+        await withTimeout(
+          () => sock.assertSessions([jid], true),
+          SESSION_ASSERT_TIMEOUT_MS,
+          'assert_sessions_timeout'
+        );
+      }
+      if (typeof sock.presenceSubscribe === 'function') {
+        for (let i = 0; i < WARM_PRESENCE_ROUNDS; i++) {
+          await withTimeout(() => sock.presenceSubscribe(jid), WARM_ACK_MS, 'presence_timeout');
+          try {
+            if (typeof sock.sendPresenceUpdate === 'function') {
+              await sock.sendPresenceUpdate('available', jid);
+            }
+          } catch {
+            /* presence available opsiyonel */
+          }
+          if (i < WARM_PRESENCE_ROUNDS - 1) await sleep(WARM_PRESENCE_GAP_MS);
+        }
+      }
+      if (PRE_SEND_DELAY_MS > 0) await sleep(PRE_SEND_DELAY_MS);
+      logger.info(
+        { coachId: id, idleMs: Number.isFinite(idleMs) ? idleMs : null, attempt },
+        'session warm ok — sending'
+      );
+      return { warmed: true, skipped: false, idleMs, attempt };
+    } catch (err) {
+      lastErr = err;
+      const left = deadline - Date.now();
+      if (left <= WARM_POLL_MS) break;
+      await sleep(Math.min(WARM_POLL_MS, left));
+    }
+  }
+
+  const errMsg = lastErr instanceof Error ? lastErr.message : String(lastErr || 'warm_timeout');
+  if (WARM_HARD_FAIL) {
+    logger.warn(
+      { coachId: id, idleMs: Number.isFinite(idleMs) ? idleMs : null, attempt, err: errMsg },
+      'session warm FAILED — send blocked (WA_WARM_HARD_FAIL)'
+    );
+    const err = new Error('session_warm_failed');
+    err.httpStatus = 503;
+    err.hint =
+      'WhatsApp oturumu uzun süre boşta kaldı ve ısıtılamadı. Birkaç saniye sonra tekrar gönderin — «Mesaj bekleniyor» balonunu önlemek için gönderim durduruldu.';
+    throw err;
+  }
+
+  logger.warn(
+    { coachId: id, idleMs: Number.isFinite(idleMs) ? idleMs : null, attempt, err: errMsg },
+    'session warm soft-fail — sending anyway (WA_WARM_HARD_FAIL=false)'
+  );
+  return { warmed: false, skipped: false, softFail: true, idleMs, attempt };
+}
+
+function markCoachSendSuccess(coachId) {
+  const id = String(coachId || '').trim();
+  if (id) lastSendAtByCoach.set(id, Date.now());
+}
+
+async function sendTextWithDeliveryCheck(sock, jid, message, retriesLeft = SEND_MESSAGE_RETRIES, coachId = '') {
+  await warmSessionForSend(sock, jid, coachId);
 
   const result = await sendTextWithTimeout(sock, jid, message, retriesLeft);
   const mid = result?.key?.id ? String(result.key.id).trim() : '';
@@ -644,6 +742,7 @@ async function sendTextWithDeliveryCheck(sock, jid, message, retriesLeft = SEND_
 
   const immediateStatus = result?.status;
   if (immediateStatus !== undefined && immediateStatus !== null && Number(immediateStatus) >= WA_STATUS_SERVER_ACK) {
+    markCoachSendSuccess(coachId);
     return result;
   }
 
@@ -657,6 +756,7 @@ async function sendTextWithDeliveryCheck(sock, jid, message, retriesLeft = SEND_
   }
   // ACK sonrası store'u tazele (bazen message alanı sonradan dolar)
   await messageStore.put(result, { coachId, fallbackText: message });
+  markCoachSendSuccess(coachId);
   return result;
 }
 
@@ -1051,9 +1151,10 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
         try {
           const msg = await messageStore.getMessage(key);
           if (msg) return msg;
-          logger.debug(
-            { coachId, id: key?.id ? String(key.id).slice(0, 12) : null },
-            'getMessage miss — retry content unavailable'
+          // message-store zaten warn eder; burada coach bağlamı ekle
+          logger.warn(
+            { coachId, id: key?.id ? String(key.id).slice(0, 16) : null },
+            'getMessage MISS — retry decrypt içerik yok (Mesaj bekleniyor riski)'
           );
           return undefined;
         } catch (err) {
@@ -1333,14 +1434,26 @@ app.get('/health', (_req, res) => {
     ok: true,
     service: 'whatsapp-gateway',
     baileys: '@whiskeysockets/baileys',
+    build: MESSAGE_STORE_VERSION,
+    message_store_version: MESSAGE_STORE_VERSION,
     sessions: sessions.size,
     connected,
     reconnecting,
     connected_session_ids: connectedSessionIds,
     sessions_detail: sessionsDetail,
     message_store: storeStats,
-    message_store_healthy: storeStats.puts === 0 || storeStats.hits + storeStats.misses === 0 || storeStats.hits > 0 || storeStats.size > 0,
+    message_store_healthy:
+      storeStats.puts === 0 ||
+      storeStats.hits + storeStats.misses === 0 ||
+      storeStats.hits > 0 ||
+      storeStats.size > 0,
     get_message_implemented: true,
+    warm: {
+      idle_ms: IDLE_WARM_MS,
+      hard_fail: WARM_HARD_FAIL,
+      max_wait_ms: WARM_MAX_WAIT_MS,
+      presence_rounds: WARM_PRESENCE_ROUNDS,
+    },
     watchdogMs: SESSION_WATCHDOG_MS,
     keepaliveMs: SESSION_KEEPALIVE_MS,
     pm2_instances_expected: 1,
@@ -1372,9 +1485,15 @@ app.get('/admin/health', (req, res) => {
     connected: list.filter((s) => s.status === 'connected').length,
     sessions: list,
     message_store: storeStats,
+    message_store_version: MESSAGE_STORE_VERSION,
     get_message_implemented: true,
+    warm: {
+      idle_ms: IDLE_WARM_MS,
+      hard_fail: WARM_HARD_FAIL,
+      max_wait_ms: WARM_MAX_WAIT_MS,
+    },
     note:
-      'Alıcıda «Mesaj bekleniyor» için getMessage + message store zorunlu. Bu sürümde aktiftir.',
+      'Alıcıda «Mesaj bekleniyor» kök çözümü: getMessage + disk msg-store (_msg-cache) + idle hard warm. Soft warm kapalı.',
   });
 });
 
@@ -1629,6 +1748,12 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
         scheduleReconnect(coachId, cur, cur.generation, 'send_not_acknowledged');
       }
     }
+    if (outError === 'session_warm_failed') {
+      status = 503;
+      hint =
+        (typeof error === 'object' && error !== null && typeof error.hint === 'string' && error.hint) ||
+        'Oturum ısıtılamadı. Birkaç saniye sonra tekrar gönderin.';
+    }
 
     const logLevel = outError === 'number_not_on_whatsapp' ? 'warn' : 'error';
     logger[logLevel]({ err: error, coachId, phone: digits }, 'send message failed');
@@ -1706,7 +1831,15 @@ app.post('/sessions/:coachId/send-document', requireGatewayAuth, requireCoachSco
         fileName: filename
       };
       if (caption) payload.caption = caption;
-      return sendDocumentWithTimeout(session.sock, jid, payload);
+      const recipientJid = await resolveRecipientJid(session.sock, digits).catch(() => jid);
+      await warmSessionForSend(session.sock, recipientJid || jid, sendMeta.usedCoachId);
+      const sent = await sendDocumentWithTimeout(session.sock, recipientJid || jid, payload);
+      await messageStore.put(sent, {
+        coachId: sendMeta.usedCoachId,
+        fallbackText: caption || filename,
+      });
+      markCoachSendSuccess(sendMeta.usedCoachId);
+      return sent;
     });
 
     const mid = result?.key?.id ? String(result.key.id).trim() : '';
@@ -1717,8 +1850,6 @@ app.post('/sessions/:coachId/send-document', requireGatewayAuth, requireCoachSco
         'WhatsApp sunucusu belge kimliği dönmedi. Koç WhatsApp ekranından oturumu yenileyip tekrar deneyin.';
       throw err;
     }
-
-    await messageStore.put(result, { coachId: sendMeta.usedCoachId });
 
     res.json({
       ok: true,
@@ -1736,6 +1867,7 @@ app.post('/sessions/:coachId/send-document', requireGatewayAuth, requireCoachSco
         ? Number(error.httpStatus)
         : null;
     let status = dynamicStatus || (msg.includes('timeout') ? 504 : 500);
+    if (msg === 'session_warm_failed') status = 503;
     res.status(status).json({
       ok: false,
       error: msg,
@@ -1753,6 +1885,16 @@ app.post('/sessions/:coachId/send-document', requireGatewayAuth, requireCoachSco
 
 app.listen(port, async () => {
   await fs.mkdir(dataRoot, { recursive: true });
+  try {
+    await fs.mkdir(path.join(dataRoot, '_msg-cache'), { recursive: true });
+    const loaded = await messageStore.preload(500);
+    logger.info(
+      { loaded, version: MESSAGE_STORE_VERSION, diskRoot: '_msg-cache' },
+      'message-store preload'
+    );
+  } catch (err) {
+    logger.warn({ err: err?.message || err }, 'message-store preload failed');
+  }
 
   async function restorePersistedSessions() {
     const priorityId = String(process.env.BOOK_ORDER_GATEWAY_SESSION_ID || process.env.WHATSAPP_GATEWAY_SESSION_ID || '').trim();
@@ -1761,7 +1903,7 @@ app.listen(port, async () => {
     try {
       const entries = await fs.readdir(dataRoot, { withFileTypes: true });
       for (const ent of entries) {
-        if (ent.isDirectory() && ent.name && !ent.name.startsWith('.')) ids.add(ent.name);
+        if (ent.isDirectory() && isCoachAuthDirName(ent.name)) ids.add(ent.name);
       }
     } catch (err) {
       logger.warn({ err }, 'restorePersistedSessions readdir failed');
@@ -1817,7 +1959,7 @@ app.listen(port, async () => {
     try {
       const entries = await fs.readdir(dataRoot, { withFileTypes: true });
       for (const ent of entries) {
-        if (!ent.isDirectory() || !ent.name || ent.name.startsWith('.')) continue;
+        if (!ent.isDirectory() || !isCoachAuthDirName(ent.name)) continue;
         const coachId = ent.name;
         if (sessions.has(coachId)) continue;
         if (!shouldAutoRestoreSession(coachId)) continue;
@@ -1844,6 +1986,9 @@ app.listen(port, async () => {
     {
       port,
       dataRoot,
+      messageStoreVersion: MESSAGE_STORE_VERSION,
+      warmHardFail: WARM_HARD_FAIL,
+      idleWarmMs: IDLE_WARM_MS,
       allowedOriginsCount: allowedOrigins.length,
       apiKeyEnabled: Boolean(gatewayApiKey),
       jwtEnabled: Boolean(appJwtSecret),
