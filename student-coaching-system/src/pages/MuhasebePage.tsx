@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { LayoutDashboard, Users, Wallet } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
+import { userHasAnyRole } from '../config/rolePermissions';
 import { listParentSignContracts } from '../lib/parentSignApi';
 import { flattenTaksitRows, formatMultiCurrencySums, sumTaksitByCurrency } from '../lib/taksitMuhasebe';
 import { formatTryAmount } from '../lib/groupLessonPaymentUnits';
@@ -18,7 +19,8 @@ const TAB_ITEMS: { id: MuhasebeTab; label: string; icon: typeof Wallet }[] = [
   { id: 'ogretmen', label: 'Öğretmen ödemeleri', icon: Users }
 ];
 
-function parseTab(raw: string | null): MuhasebeTab {
+function parseTab(raw: string | null, teacherOnly: boolean): MuhasebeTab {
+  if (teacherOnly) return 'ogretmen';
   if (raw === 'tahsilat' || raw === 'ogretmen' || raw === 'ozet') return raw;
   return 'ozet';
 }
@@ -27,8 +29,10 @@ export default function MuhasebePage() {
   const { effectiveUser } = useAuth();
   const { activeInstitutionId } = useApp();
   const isSuper = effectiveUser?.role === 'super_admin';
+  const isAdminViewer = userHasAnyRole(effectiveUser, ['admin', 'super_admin']);
+  const teacherOnly = !isAdminViewer && userHasAnyRole(effectiveUser, ['teacher']);
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = parseTab(searchParams.get('tab'));
+  const tab = parseTab(searchParams.get('tab'), teacherOnly);
   const [tahsilatStats, setTahsilatStats] = useState<TahsilatStats | null>(null);
   const [teacherPayableTry, setTeacherPayableTry] = useState(0);
 
@@ -36,10 +40,19 @@ export default function MuhasebePage() {
     isSuper ? activeInstitutionId || effectiveUser?.institution_id || '' : effectiveUser?.institution_id || activeInstitutionId || ''
   ).trim();
 
+  useEffect(() => {
+    if (teacherOnly && searchParams.get('tab') !== 'ogretmen') {
+      setSearchParams({ tab: 'ogretmen' }, { replace: true });
+    }
+  }, [teacherOnly, searchParams, setSearchParams]);
+
   const loadOverviewStats = useCallback(async () => {
+    if (teacherOnly) return;
     try {
       const monthStart = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-01`;
-      const today = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
+      const today = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(
+        new Date().getDate()
+      ).padStart(2, '0')}`;
 
       if (institutionId) {
         const all = await listParentSignContracts();
@@ -69,23 +82,30 @@ export default function MuhasebePage() {
       const j = await res.json().catch(() => ({}));
       if (res.ok) {
         const totals = Array.isArray(j.teacher_totals) ? j.teacher_totals : [];
-        const sum = totals.reduce((acc: number, row: { total_amount_tl?: number }) => acc + Number(row.total_amount_tl || 0), 0);
+        const sum = totals.reduce(
+          (acc: number, row: { total_amount_tl?: number }) => acc + Number(row.total_amount_tl || 0),
+          0
+        );
         setTeacherPayableTry(Math.round(sum * 100) / 100);
       }
     } catch {
       /* overview istatistikleri opsiyonel */
     }
-  }, [institutionId]);
+  }, [institutionId, teacherOnly]);
 
   useEffect(() => {
-    if (tab === 'ozet') void loadOverviewStats();
-  }, [tab, loadOverviewStats]);
+    if (tab === 'ozet' && !teacherOnly) void loadOverviewStats();
+  }, [tab, loadOverviewStats, teacherOnly]);
 
   const setTab = useCallback(
     (next: MuhasebeTab) => {
+      if (teacherOnly) {
+        setSearchParams({ tab: 'ogretmen' }, { replace: true });
+        return;
+      }
       setSearchParams(next === 'ozet' ? {} : { tab: next }, { replace: true });
     },
-    [setSearchParams]
+    [setSearchParams, teacherOnly]
   );
 
   const overviewCards = useMemo(
@@ -118,40 +138,52 @@ export default function MuhasebePage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <Wallet className="w-8 h-8 text-emerald-600" />
-            Muhasebe
+            {teacherOnly ? 'Ders ödemelerim' : 'Muhasebe'}
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-1 max-w-2xl">
-            Kurum gelirleri (tahsilat & taksit) ile giderler (grup dersi öğretmen ödemeleri) tek panelde. Oturum
-            detaylarını buradan düzenleyebilirsiniz.
+            {teacherOnly
+              ? 'Kendi grup dersi oturumlarınızı görüntüleyin, düzenleyin veya toplu silin. Yeni ders eklemek için Canlı Grup Dersi sayfasını kullanın.'
+              : 'Kurum gelirleri (tahsilat & taksit) ile giderler (grup dersi öğretmen ödemeleri) tek panelde. Oturum detaylarından toplu seçim ve silme yapabilirsiniz.'}
           </p>
         </div>
-        <Link
-          to="/veli-onay"
-          className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
-        >
-          Veli sözleşmeleri
-        </Link>
-      </div>
-
-      <div className="flex flex-wrap gap-2 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200/80 dark:border-slate-700">
-        {TAB_ITEMS.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setTab(id)}
-            className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
-              tab === id
-                ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-sm'
-                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-            }`}
+        {teacherOnly ? (
+          <Link
+            to="/class-live-lessons"
+            className="inline-flex items-center rounded-xl bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
           >
-            <Icon className="w-4 h-4" />
-            {label}
-          </button>
-        ))}
+            Ders ekle →
+          </Link>
+        ) : (
+          <Link
+            to="/veli-onay"
+            className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+          >
+            Veli sözleşmeleri
+          </Link>
+        )}
       </div>
 
-      {tab === 'ozet' ? (
+      {!teacherOnly ? (
+        <div className="flex flex-wrap gap-2 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200/80 dark:border-slate-700">
+          {TAB_ITEMS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setTab(id)}
+              className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
+                tab === id
+                  ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-sm'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {tab === 'ozet' && !teacherOnly ? (
         <div className="space-y-6">
           <div className="grid gap-4 sm:grid-cols-3">
             {overviewCards.map((c) => (
@@ -190,7 +222,7 @@ export default function MuhasebePage() {
         </div>
       ) : null}
 
-      {tab === 'tahsilat' ? <TahsilatTaksitPanel onStatsChange={setTahsilatStats} /> : null}
+      {tab === 'tahsilat' && !teacherOnly ? <TahsilatTaksitPanel onStatsChange={setTahsilatStats} /> : null}
 
       {tab === 'ogretmen' ? <TeacherPaymentsPanel onTeacherTotalChange={setTeacherPayableTry} /> : null}
     </div>

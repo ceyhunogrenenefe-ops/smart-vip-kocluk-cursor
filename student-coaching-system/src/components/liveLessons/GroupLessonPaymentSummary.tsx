@@ -72,6 +72,10 @@ export type GroupLessonPaymentSummaryProps = {
   onError: (msg: string) => void;
   onNotice: (msg: string) => void;
   summaryRefreshKey?: number;
+  /** Öğretmen: ücret/ödeme düzenleyemez; yalnızca kendi oturumları */
+  teacherMode?: boolean;
+  /** Toplu seçim / silme (varsayılan true) */
+  allowBulkDelete?: boolean;
 };
 
 export function GroupLessonPaymentSummary({
@@ -88,13 +92,17 @@ export function GroupLessonPaymentSummary({
   onEditSession,
   onError,
   onNotice,
-  summaryRefreshKey = 0
+  summaryRefreshKey = 0,
+  teacherMode = false,
+  allowBulkDelete = true
 }: GroupLessonPaymentSummaryProps) {
   const [summaryRows, setSummaryRows] = useState<GroupLessonSummaryRow[]>([]);
   const [teacherTotals, setTeacherTotals] = useState<GroupLessonTeacherTotal[]>([]);
   const [summarySessions, setSummarySessions] = useState<GroupLessonSummarySession[]>([]);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [showSessionDetails, setShowSessionDetails] = useState(true);
+  const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(() => new Set());
+  const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false);
   const [payoutByTeacher, setPayoutByTeacher] = useState<Map<string, TeacherPayoutRecord>>(new Map());
   const [payoutBusyId, setPayoutBusyId] = useState('');
   const [rateStore, setRateStore] = useState<TeacherUnitRatesStore>(() => loadTeacherUnitRates());
@@ -422,10 +430,75 @@ export function GroupLessonPaymentSummary({
       return;
     }
     onNotice('Oturum silindi; özet yenilendi.');
+    setSelectedSessionIds((prev) => {
+      const next = new Set(prev);
+      next.delete(session.id);
+      return next;
+    });
     await loadPaymentSummary();
   };
 
+  const allSessionIds = useMemo(() => summarySessions.map((s) => s.id), [summarySessions]);
+  const allSelected =
+    allSessionIds.length > 0 && allSessionIds.every((id) => selectedSessionIds.has(id));
+  const someSelected = selectedSessionIds.size > 0;
+
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      setSelectedSessionIds(new Set());
+      return;
+    }
+    setSelectedSessionIds(new Set(allSessionIds));
+  };
+
+  const toggleSelectOne = (id: string) => {
+    setSelectedSessionIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const deleteSelectedSessions = async () => {
+    const ids = [...selectedSessionIds];
+    if (!ids.length || bulkDeleteBusy) return;
+    if (
+      !window.confirm(
+        `${ids.length} oturum silinecek (iptal edilecek). Bu işlem geri alınamaz. Devam edilsin mi?`
+      )
+    ) {
+      return;
+    }
+    setBulkDeleteBusy(true);
+    try {
+      const res = await apiFetch('/api/class-live-lessons?op=bulk-cancel-sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_ids: ids })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        onError(String(j.hint || j.error || 'Toplu silme başarısız'));
+        return;
+      }
+      const n = Number(j.cancelled_count || 0);
+      onNotice(`${n} oturum silindi; özet yenilendi.`);
+      setSelectedSessionIds(new Set());
+      await loadPaymentSummary();
+    } finally {
+      setBulkDeleteBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    setSelectedSessionIds(new Set());
+  }, [summaryFrom, summaryTo, summaryTeacherId, summaryClassId, summaryRefreshKey]);
+
   const renderTeacherPriceCell = (teacherId: string, current: number) => {
+    if (teacherMode) {
+      return <span className="tabular-nums text-right block">{formatTryAmount(current)} ₺</span>;
+    }
     const presetMatch = GROUP_LESSON_UNIT_PRICE_PRESETS.find((p) => p === current);
     const mode = presetMatch ? String(presetMatch) : 'custom';
     return (
@@ -469,10 +542,14 @@ export function GroupLessonPaymentSummary({
         <h2 className="font-semibold text-slate-800">Grup dersi ödeme özeti (tamamlanan)</h2>
         <p className="text-xs text-slate-500 mt-1">
           Hesaplama {GROUP_LESSON_UNIT_MINUTES} dakikalık birim ders periyoduna göre yapılır (ör. 40 dk = 1 birim, 80
-          dk = 2 birim). Admin ve süper admin oturumları düzenleyebilir veya silebilir.
+          dk = 2 birim).{' '}
+          {teacherMode
+            ? 'Kendi tamamlanan oturumlarınızı görüntüleyebilir, düzenleyebilir veya toplu silebilirsiniz. Yeni ders için Canlı Grup Dersi sayfasını kullanın.'
+            : 'Admin, süper admin ve öğretmenler oturumları düzenleyebilir / toplu silebilir. Öğretmenler yalnızca kendi oturumlarını yönetir.'}
         </p>
       </div>
 
+      {!teacherMode ? (
       <div className="flex flex-wrap items-end gap-2 rounded-lg border border-indigo-100 bg-indigo-50/60 p-3">
         <span className="text-xs font-semibold text-indigo-900 w-full sm:w-auto">Varsayılan birim ücret:</span>
         {GROUP_LESSON_UNIT_PRICE_PRESETS.map((p) => (
@@ -507,6 +584,7 @@ export function GroupLessonPaymentSummary({
           ₺
         </label>
       </div>
+      ) : null}
 
       <div className="grid md:grid-cols-5 gap-2">
         <input
@@ -525,8 +603,9 @@ export function GroupLessonPaymentSummary({
           value={summaryTeacherId}
           onChange={(e) => onSummaryTeacherIdChange(e.target.value)}
           className="border border-slate-200 rounded px-3 py-2"
+          disabled={teacherMode}
         >
-          <option value="">Tüm öğretmenler</option>
+          <option value="">{teacherMode ? 'Kendi oturumlarım' : 'Tüm öğretmenler'}</option>
           {teacherCandidates.map((t) => (
             <option key={t.id} value={t.id}>
               {t.name}
@@ -630,7 +709,7 @@ export function GroupLessonPaymentSummary({
                       <input
                         type="checkbox"
                         checked={isPaid}
-                        disabled={payoutBusyId === t.teacher_id}
+                        disabled={teacherMode || payoutBusyId === t.teacher_id}
                         onChange={(e) => void toggleTeacherPayout(t.teacher_id, t.total_amount_tl, e.target.checked)}
                         className="h-4 w-4 rounded border-slate-300 text-emerald-600"
                       />
@@ -663,7 +742,7 @@ export function GroupLessonPaymentSummary({
         </div>
       ) : null}
 
-      <div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <button
           type="button"
           onClick={() => setShowSessionDetails((v) => !v)}
@@ -672,6 +751,17 @@ export function GroupLessonPaymentSummary({
           {showSessionDetails ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
           Oturum detayı — düzenle / sil ({summarySessions.length})
         </button>
+        {allowBulkDelete && showSessionDetails && someSelected ? (
+          <button
+            type="button"
+            disabled={bulkDeleteBusy}
+            onClick={() => void deleteSelectedSessions()}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {bulkDeleteBusy ? 'Siliniyor…' : `Seçilenleri sil (${selectedSessionIds.size})`}
+          </button>
+        ) : null}
       </div>
 
       {showSessionDetails ? (
@@ -679,6 +769,19 @@ export function GroupLessonPaymentSummary({
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-slate-50 z-[1]">
               <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+                {allowBulkDelete ? (
+                  <th className="px-2 py-2 w-10">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      disabled={!allSessionIds.length}
+                      onChange={toggleSelectAll}
+                      className="h-4 w-4 rounded border-slate-300 text-indigo-600"
+                      title="Tümünü seç"
+                      aria-label="Tümünü seç"
+                    />
+                  </th>
+                ) : null}
                 <th className="px-3 py-2">Tarih</th>
                 <th className="px-3 py-2">Saat</th>
                 <th className="px-3 py-2">Konu</th>
@@ -692,13 +795,24 @@ export function GroupLessonPaymentSummary({
             <tbody className="divide-y divide-slate-100">
               {summarySessions.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-3 py-4 text-center text-slate-500">
+                  <td colSpan={allowBulkDelete ? 9 : 8} className="px-3 py-4 text-center text-slate-500">
                     Oturum yok.
                   </td>
                 </tr>
               ) : (
                 summarySessions.map((s) => (
-                  <tr key={s.id}>
+                  <tr key={s.id} className={selectedSessionIds.has(s.id) ? 'bg-indigo-50/50' : undefined}>
+                    {allowBulkDelete ? (
+                      <td className="px-2 py-2">
+                        <input
+                          type="checkbox"
+                          checked={selectedSessionIds.has(s.id)}
+                          onChange={() => toggleSelectOne(s.id)}
+                          className="h-4 w-4 rounded border-slate-300 text-indigo-600"
+                          aria-label={`${s.lesson_date} oturumunu seç`}
+                        />
+                      </td>
+                    ) : null}
                     <td className="px-3 py-2 tabular-nums whitespace-nowrap">{s.lesson_date}</td>
                     <td className="px-3 py-2 tabular-nums whitespace-nowrap">
                       {String(s.start_time).slice(0, 5)}–{String(s.end_time).slice(0, 5)}
