@@ -283,6 +283,18 @@ function isPaymentSummaryAdmin(role) {
   return r === 'admin' || r === 'super_admin';
 }
 
+/** Admin tam özet; öğretmen yalnızca kendi oturumlarını görür / toplu silebilir */
+function canAccessPaymentSummary(role, roleTags = []) {
+  if (isPaymentSummaryAdmin(role)) return true;
+  const tags = Array.isArray(roleTags) ? roleTags : [];
+  return isTeacherRole(role) || tags.includes('teacher');
+}
+
+function isTeacherOnlyPaymentViewer(role, roleTags = []) {
+  if (isPaymentSummaryAdmin(role)) return false;
+  return canAccessPaymentSummary(role, roleTags);
+}
+
 function buildCompletedSessionsQuery({ from, to, teacherId, classId, role, institutionId, scopedInstitutionId }) {
   let q = supabaseAdmin
     .from('class_sessions')
@@ -1009,15 +1021,20 @@ export default async function handler(req, res) {
     }
 
     if (scope === 'summary') {
-      if (!isPaymentSummaryAdmin(role)) {
+      if (!canAccessPaymentSummary(role, roleTags)) {
         return res.status(403).json({ error: 'forbidden' });
       }
       const from = String(req.query.from || '').trim();
       const to = String(req.query.to || '').trim();
-      const teacherId = String(req.query.teacher_id || '').trim();
+      let teacherId = String(req.query.teacher_id || '').trim();
       const classId = String(req.query.class_id || '').trim();
       const includeSessions = String(req.query.include_sessions || '').trim() === '1';
       const scopedInstitutionId = String(req.query.institution_id || '').trim();
+      const teacherOnly = isTeacherOnlyPaymentViewer(role, roleTags);
+      if (teacherOnly) {
+        teacherId = String(actor.sub || '').trim();
+        if (!teacherId) return res.status(403).json({ error: 'forbidden' });
+      }
       if (role === 'super_admin' && institutionId && scopedInstitutionId && !isUuid(scopedInstitutionId)) {
         return res.status(400).json({
           error: 'invalid_institution_uuid',
@@ -1030,9 +1047,9 @@ export default async function handler(req, res) {
         to,
         teacherId,
         classId,
-        role,
-        institutionId,
-        scopedInstitutionId
+        role: teacherOnly ? 'admin' : role,
+        institutionId: teacherOnly ? null : institutionId,
+        scopedInstitutionId: teacherOnly ? '' : scopedInstitutionId
       });
       if (error) return res.status(500).json({ error: error.message });
 
@@ -2158,6 +2175,52 @@ export default async function handler(req, res) {
       );
       if (insErr) return res.status(500).json({ error: insErr.message });
       return res.status(201).json({ data: created || [], auto_bbb: autoBbb, skipped });
+    }
+
+    if (op === 'bulk-cancel-sessions') {
+      const rawIds = Array.isArray(body.session_ids)
+        ? body.session_ids
+        : String(body.session_ids || '')
+            .split(',')
+            .map((x) => String(x || '').trim())
+            .filter(Boolean);
+      const ids = [...new Set(rawIds.map((x) => String(x || '').trim()).filter(Boolean))];
+      if (!ids.length) return res.status(400).json({ error: 'session_ids_required' });
+      if (ids.length > 200) return res.status(400).json({ error: 'session_ids_too_many', max: 200 });
+
+      const { data: sessions, error: loadErr } = await supabaseAdmin
+        .from('class_sessions')
+        .select('id,teacher_id,class_id,status')
+        .in('id', ids);
+      if (loadErr) return res.status(500).json({ error: loadErr.message });
+
+      const allowed = [];
+      const denied = [];
+      for (const session of sessions || []) {
+        if (String(session.status || '') === 'cancelled') continue;
+        const details = await getClassDetails(session.class_id);
+        const ok =
+          isAdminRole(role) ||
+          String(session.teacher_id || '') === String(actor.sub || '') ||
+          (details.teacher_ids || []).includes(actor.sub);
+        if (ok) allowed.push(String(session.id));
+        else denied.push(String(session.id));
+      }
+      if (!allowed.length) {
+        return res.status(403).json({
+          error: 'forbidden',
+          hint: 'Seçilen oturumlarda silme yetkiniz yok.',
+          denied_count: denied.length
+        });
+      }
+      const { updated } = await cancelClassSessionsByIds(allowed);
+      return res.status(200).json({
+        ok: true,
+        cancelled_count: updated,
+        requested: ids.length,
+        allowed: allowed.length,
+        denied: denied.length
+      });
     }
   }
 

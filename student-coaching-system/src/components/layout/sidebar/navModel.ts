@@ -388,6 +388,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/academic-center', icon: Sparkles, label: 'Akademik Merkez' },
     ...privateLiveNavForRoles(['teacher']),
     { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
+    { path: '/muhasebe', icon: Wallet, label: 'Ders ödemelerim' },
     { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
     { path: '/class-lesson-topic-progress', icon: MapPin, label: 'Grup dersi konu ilerlemesi' },
     { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
