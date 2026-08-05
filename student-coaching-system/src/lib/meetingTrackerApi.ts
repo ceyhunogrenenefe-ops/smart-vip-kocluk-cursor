@@ -200,6 +200,10 @@ export async function mtUpdateAgenda(body: Record<string, unknown>) {
   return j.data;
 }
 
+export async function mtDeleteAgenda(id: string) {
+  await mtFetch('delete-agenda', { method: 'DELETE', query: { id } });
+}
+
 export async function mtReorderAgenda(meetingId: string, orderedIds: string[]) {
   await mtFetch('reorder-agenda', {
     method: 'PATCH',

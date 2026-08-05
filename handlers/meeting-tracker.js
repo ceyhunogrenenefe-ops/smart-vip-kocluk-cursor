@@ -956,6 +956,28 @@ export default async function handler(req, res) {
       return res.status(200).json({ data });
     }
 
+    if (req.method === 'DELETE' && op === 'delete-agenda') {
+      const id = String(req.query.id || body.id || '').trim();
+      const { data: item } = await supabaseAdmin.from('mt_agenda_items').select('*').eq('id', id).maybeSingle();
+      if (!item) return res.status(404).json({ error: 'not_found' });
+      const bundle = await loadMeetingBundle(item.meeting_id);
+      if (!canManageType(actor, bundle?.type, roleTags)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const { error } = await supabaseAdmin.from('mt_agenda_items').delete().eq('id', id);
+      if (error) throw error;
+      await logActivity({
+        institutionId,
+        meetingId: item.meeting_id,
+        entityType: 'agenda',
+        entityId: id,
+        action: 'agenda_deleted',
+        actorUserId: actor.sub,
+        oldValue: { title: item.title }
+      });
+      return res.status(200).json({ ok: true });
+    }
+
     if (req.method === 'PATCH' && op === 'reorder-agenda') {
       const meetingId = String(body.meeting_id || '').trim();
       const order = Array.isArray(body.ordered_ids) ? body.ordered_ids : [];

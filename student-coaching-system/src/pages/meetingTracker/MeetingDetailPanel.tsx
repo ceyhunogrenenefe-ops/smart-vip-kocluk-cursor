@@ -26,6 +26,7 @@ import {
   mtCarryForward,
   mtCloseMeeting,
   mtCreateTask,
+  mtDeleteAgenda,
   mtReorderAgenda,
   mtUpdateAgenda,
   mtUpdateTask,
@@ -747,6 +748,20 @@ function AgendaDecisionRow({
     }
   };
 
+  const deleteAgenda = async () => {
+    if (!window.confirm(`"${item.title}" gündem maddesini silmek istediğinize emin misiniz?`)) return;
+    setSaving(true);
+    try {
+      await mtDeleteAgenda(item.id);
+      toast.success('Gündem maddesi silindi');
+      onReload();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Silinemedi');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const addTask = async () => {
     if (!newTaskTitle.trim()) return;
     setSaving(true);
@@ -795,10 +810,19 @@ function AgendaDecisionRow({
         </div>
         {isManager && (
           <div className="flex shrink-0 gap-0.5">
-            <button type="button" onClick={() => void onMove(-1)} className="p-1 text-slate-400">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => void deleteAgenda()}
+              title="Gündem maddesini sil"
+              className="p-1 text-red-400 hover:text-red-600 disabled:opacity-50"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+            <button type="button" onClick={() => void onMove(-1)} className="p-1 text-slate-400 hover:text-slate-600">
               <ChevronUp className="h-4 w-4" />
             </button>
-            <button type="button" onClick={() => void onMove(1)} className="p-1 text-slate-400">
+            <button type="button" onClick={() => void onMove(1)} className="p-1 text-slate-400 hover:text-slate-600">
               <ChevronDown className="h-4 w-4" />
             </button>
           </div>
