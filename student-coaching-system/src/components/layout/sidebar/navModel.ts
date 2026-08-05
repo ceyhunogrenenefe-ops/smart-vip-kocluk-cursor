@@ -34,7 +34,8 @@ import {
   Bot,
   CloudDownload,
   ScrollText,
-  ClipboardCheck
+  ClipboardCheck,
+  UserCheck
 } from 'lucide-react';
 import type { UserRole } from '../../../types';
 
@@ -298,6 +299,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/coach-stats', icon: BarChart3, label: 'Koç İstatistikleri' },
       { path: '/academic-center', icon: Sparkles, label: 'Akademik Merkez' },
       ...privateLiveNavForRoles(['super_admin']),
+      { path: '/private-lesson-assignments', icon: UserCheck, label: 'Özel ders atamaları' },
       { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
       { path: '/schedule-planner', icon: CalendarDays, label: 'Ders Programı Planlayıcı' },
       { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
@@ -339,6 +341,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
   const MENU_ADMIN: FlatNavItem[] = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Ana Panel' },
     ...privateLiveNavForRoles(['admin']),
+    { path: '/private-lesson-assignments', icon: UserCheck, label: 'Özel ders atamaları' },
     { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
     { path: '/schedule-planner', icon: CalendarDays, label: 'Ders Programı Planlayıcı' },
     { path: '/meetings', icon: Video, label: 'Online görüşmeler' },

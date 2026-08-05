@@ -69,11 +69,17 @@ export async function isStudentAllowedForTeacherPanel(teacherUserId, studentId, 
   return ids.includes(String(studentId || '').trim());
 }
 
-/** JWT / users.roles — öğretmen paneli kapsamı uygulanmalı mı */
+/** JWT / users.roles — özel ders / öğretmen paneli kapsamı uygulanmalı mı */
 export function actorIsTeacherForPanelScope(actor, roleTags = []) {
   const r = String(actor?.role || '').trim().toLowerCase();
   const tags = Array.isArray(roleTags) ? roleTags : [];
-  return r === 'teacher' || tags.includes('teacher');
+  // Koç da canlı özel ders teacher_id = users.id ile atanabilir
+  return (
+    r === 'teacher' ||
+    r === 'coach' ||
+    tags.includes('teacher') ||
+    tags.includes('coach')
+  );
 }
 
 /** Slot/oturum oluşturulunca class_teachers satırını garanti et (panel kapsamı). */
