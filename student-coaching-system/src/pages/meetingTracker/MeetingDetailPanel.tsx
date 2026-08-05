@@ -81,12 +81,15 @@ function StaffAssigneePicker({
   users,
   selected,
   onChange,
-  disabled
+  disabled,
+  compact
 }: {
   users: MtUser[];
   selected: string[];
   onChange: (ids: string[]) => void;
   disabled?: boolean;
+  /** Tek satır — görev satırı içi */
+  compact?: boolean;
 }) {
   const order = ['super_admin', 'admin', 'coach', 'teacher'] as const;
   const grouped = useMemo(() => {
@@ -96,35 +99,54 @@ function StaffAssigneePicker({
       if (!map[r]) map[r] = [];
       map[r].push(u);
     }
-    return order.filter((r) => map[r]?.length).flatMap((r) => map[r]);
+    return order
+      .filter((r) => map[r]?.length)
+      .map((r) => ({ role: r, users: map[r] }));
   }, [users]);
 
-  const toggle = (id: string) => {
-    if (disabled) return;
-    onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
-  };
+  const summary = useMemo(() => {
+    if (!selected.length) return 'Sorumlu seçin…';
+    const names = selected
+      .map((id) => users.find((u) => u.id === id)?.name || users.find((u) => u.id === id)?.email)
+      .filter(Boolean) as string[];
+    if (names.length <= 2) return names.join(', ');
+    return `${names.slice(0, 2).join(', ')} +${names.length - 2}`;
+  }, [selected, users]);
+
+  const rowCount = Math.min(5, Math.max(3, users.length));
 
   return (
-    <div className="flex flex-wrap gap-1">
-      {grouped.map((u) => {
-        const on = selected.includes(u.id);
-        return (
-          <button
-            key={u.id}
-            type="button"
-            disabled={disabled}
-            onClick={() => toggle(u.id)}
-            title={roleLabel(u.role)}
-            className={`rounded-full border px-2 py-0.5 text-[11px] ${
-              on
-                ? 'border-indigo-600 bg-indigo-600 text-white'
-                : 'border-slate-200 bg-white text-slate-700 hover:border-indigo-300 dark:border-slate-600 dark:bg-slate-800'
-            }`}
-          >
-            {u.name || u.email}
-          </button>
-        );
-      })}
+    <div className={compact ? 'space-y-1' : 'space-y-1.5'}>
+      <label className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Sorumlular</label>
+      <div className="relative">
+        <select
+          multiple
+          disabled={disabled}
+          value={selected}
+          size={compact ? Math.min(4, rowCount) : rowCount}
+          onChange={(e) => {
+            onChange(Array.from(e.target.selectedOptions, (o) => o.value));
+          }}
+          className={`w-full rounded-lg border border-slate-200 bg-white text-xs text-slate-800 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 ${
+            compact ? 'max-h-24 py-1' : 'py-1.5'
+          }`}
+          title={summary}
+        >
+          {grouped.map((g) => (
+            <optgroup key={g.role} label={roleLabel(g.role)}>
+              {g.users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name || u.email}
+                  {u.phone ? '' : ' (tel yok)'}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </div>
+      <p className="text-[10px] leading-tight text-slate-400">
+        {selected.length ? `Seçili: ${summary}` : 'Birden fazla kişi için Ctrl/Cmd ile tıklayın'}
+      </p>
     </div>
   );
 }
@@ -397,15 +419,9 @@ export default function MeetingDetailPanel({
               </button>
             </div>
             <StaffAssigneePicker users={users} selected={shareRecipients} onChange={setShareRecipients} />
-            <ul className="mt-3 space-y-1 text-xs text-slate-500">
-              {users
-                .filter((u) => shareRecipients.includes(u.id))
-                .map((u) => (
-                  <li key={u.id}>
-                    {u.name || u.email} — {u.phone ? '✓ telefon' : '⚠ telefon yok'}
-                  </li>
-                ))}
-            </ul>
+            <p className="mt-2 text-xs text-slate-500">
+              Telefonu olmayan kayıtlar listede &quot;(tel yok)&quot; olarak görünür.
+            </p>
             <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
@@ -857,24 +873,28 @@ function AgendaDecisionRow({
                 )}
               </div>
               {isManager ? (
-                <div className="mt-1.5">
+                <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
                   <StaffAssigneePicker
                     users={users}
                     selected={ids}
+                    compact
                     onChange={async (next) => {
                       await mtUpdateTask({ id: t.id, assignee_user_ids: next });
                       onReload();
                     }}
                   />
-                  <input
-                    type="date"
-                    value={t.due_date || ''}
-                    onChange={async (e) => {
-                      await mtUpdateTask({ id: t.id, due_date: e.target.value || null });
-                      onReload();
-                    }}
-                    className="mt-1 rounded border border-slate-200 px-2 py-0.5 text-[11px] dark:border-slate-600 dark:bg-slate-800"
-                  />
+                  <label className="flex flex-col justify-end text-[11px] text-slate-500">
+                    <span className="mb-1 font-medium">Son tarih</span>
+                    <input
+                      type="date"
+                      value={t.due_date || ''}
+                      onChange={async (e) => {
+                        await mtUpdateTask({ id: t.id, due_date: e.target.value || null });
+                        onReload();
+                      }}
+                      className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
+                    />
+                  </label>
                 </div>
               ) : (
                 <div className="mt-1 text-[11px] text-slate-500">
@@ -897,7 +917,7 @@ function AgendaDecisionRow({
               placeholder="Yapılacak iş…"
               className="mb-1.5 w-full rounded border border-slate-200 px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900"
             />
-            <StaffAssigneePicker users={users} selected={newTaskAssignees} onChange={setNewTaskAssignees} />
+            <StaffAssigneePicker users={users} selected={newTaskAssignees} onChange={setNewTaskAssignees} compact />
             <div className="mt-1.5 flex flex-wrap gap-2">
               <input
                 type="date"
