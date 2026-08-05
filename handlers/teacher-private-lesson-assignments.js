@@ -143,6 +143,8 @@ async function handleList(req, res, actor, roleSet) {
   if (roleSetHasAdmin(roleSet) && !roleSetHasSuperAdmin(roleSet)) {
     if (!actor.institution_id) return res.status(200).json({ data: [], sync: syncStats });
     q = q.eq('institution_id', actor.institution_id);
+  } else if (roleSet.has('coach') && !roleSetHasSuperAdmin(roleSet) && actor.institution_id) {
+    q = q.eq('institution_id', actor.institution_id);
   }
   if (teacherFilter) q = q.eq('teacher_id', teacherFilter);
   if (studentFilter) q = q.eq('student_id', studentFilter);
