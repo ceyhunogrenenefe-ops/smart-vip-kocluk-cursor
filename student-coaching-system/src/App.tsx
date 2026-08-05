@@ -83,6 +83,7 @@ import TeacherSoruHavuzuPage from './pages/questionHelp/TeacherSoruHavuzuPage';
 import CoachSoruAnalitikPage from './pages/questionHelp/CoachSoruAnalitikPage';
 import NotificationsPage from './pages/NotificationsPage';
 import EventsPage from './pages/EventsPage';
+import MeetingTrackerPage from './pages/MeetingTrackerPage';
 import BookOrdersPage from './pages/BookOrdersPage';
 import OzelDersTalepleriPage from './pages/OzelDersTalepleriPage';
 import TeacherVitrineProfilePage from './pages/TeacherVitrineProfilePage';
@@ -379,6 +380,22 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/events')}>
                 <Layout>
                   <EventsPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/toplanti-takip" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/toplanti-takip')}>
+                <Layout>
+                  <MeetingTrackerPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/toplantilarim" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/toplantilarim')}>
+                <Layout>
+                  <MeetingTrackerPage />
                 </Layout>
               </ProtectedRoute>
             } />

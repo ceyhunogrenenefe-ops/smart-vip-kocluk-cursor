@@ -82,6 +82,8 @@ const ADMIN_HUB_MATCH = [
 
   '/events',
 
+  '/toplanti-takip',
+
   '/kitap-siparisleri',
 
   '/ozel-ders-talepleri',

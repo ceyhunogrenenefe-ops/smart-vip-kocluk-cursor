@@ -33,7 +33,8 @@ import {
   CalendarDays,
   Bot,
   CloudDownload,
-  ScrollText
+  ScrollText,
+  ClipboardCheck
 } from 'lucide-react';
 import type { UserRole } from '../../../types';
 
@@ -310,6 +311,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
       { path: '/notifications', icon: Bell, label: 'Bildirimler' },
       { path: '/events', icon: CalendarDays, label: 'Etkinlikler' },
+      { path: '/toplanti-takip', icon: ClipboardCheck, label: 'Toplantı ve Gündem Takibi' },
       NAV_KITAP_SIPARISLERI,
       NAV_OZEL_DERS_TALEPLERI,
       NAV_TEACHER_PROFILE_APPROVALS,
@@ -367,6 +369,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
     { path: '/notifications', icon: Bell, label: 'Bildirimler' },
     { path: '/events', icon: CalendarDays, label: 'Etkinlikler' },
+    { path: '/toplanti-takip', icon: ClipboardCheck, label: 'Toplantı ve Gündem Takibi' },
     NAV_KITAP_SIPARISLERI,
     NAV_OZEL_DERS_TALEPLERI,
     NAV_TEACHER_PROFILE_APPROVALS,
@@ -381,6 +384,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     NAV_TEACHER_VITRINE_PROFILE,
     NAV_TEACHER_AVAILABILITY,
     { path: '/teacher-solution-appointments', icon: Calendar, label: 'Bugünkü Randevular' },
+    { path: '/toplantilarim', icon: ClipboardCheck, label: 'Toplantılarım' },
     { path: '/edu-panel', icon: Presentation, label: EDU_HOMEWORK_ANIMATIONS_LABEL },
     STAFF_NAV_YARDIM,
     { path: '/ai-agents-admin', icon: Bot, label: 'AI Ders Ajanları' },
@@ -403,6 +407,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/ai-agents-admin', icon: Bot, label: 'AI Ders Ajanları' },
     ...privateLiveNavForRoles(['coach']),
     { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
+    { path: '/toplantilarim', icon: ClipboardCheck, label: 'Toplantılarım' },
     { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
     { path: '/teachers', icon: GraduationCap, label: 'Öğretmenler' },
     { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
