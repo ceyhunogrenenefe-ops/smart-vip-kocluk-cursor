@@ -109,5 +109,6 @@ export const routeLoaders = {
   'public-teacher-book': () => import('../handlers/public-teacher-book.js'),
   'public/teachers': () => import('../handlers/public-teachers.js'),
   'public-teachers': () => import('../handlers/public-teachers.js'),
-  'teacher-applications': () => import('../handlers/teacher-applications.js')
+  'teacher-applications': () => import('../handlers/teacher-applications.js'),
+  'meeting-tracker': () => import('../handlers/meeting-tracker.js')
 };
