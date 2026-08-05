@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { LayoutDashboard, Users, Wallet } from 'lucide-react';
+import { ClipboardList, LayoutDashboard, Users, Wallet } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { listParentSignContracts } from '../lib/parentSignApi';
@@ -9,17 +9,19 @@ import { formatTryAmount } from '../lib/groupLessonPaymentUnits';
 import { apiFetch } from '../lib/session';
 import TahsilatTaksitPanel, { type TahsilatStats } from '../components/muhasebe/TahsilatTaksitPanel';
 import TeacherPaymentsPanel from '../components/muhasebe/TeacherPaymentsPanel';
+import StudentPaymentTrackerPanel from '../components/muhasebe/StudentPaymentTrackerPanel';
 
-type MuhasebeTab = 'ozet' | 'tahsilat' | 'ogretmen';
+type MuhasebeTab = 'ozet' | 'tahsilat' | 'ogrenci-odeme' | 'ogretmen';
 
 const TAB_ITEMS: { id: MuhasebeTab; label: string; icon: typeof Wallet }[] = [
   { id: 'ozet', label: 'Genel bakış', icon: LayoutDashboard },
   { id: 'tahsilat', label: 'Tahsilat & taksit', icon: Wallet },
+  { id: 'ogrenci-odeme', label: 'Öğrenci ödemeleri', icon: ClipboardList },
   { id: 'ogretmen', label: 'Öğretmen ödemeleri', icon: Users }
 ];
 
 function parseTab(raw: string | null): MuhasebeTab {
-  if (raw === 'tahsilat' || raw === 'ogretmen' || raw === 'ozet') return raw;
+  if (raw === 'tahsilat' || raw === 'ogretmen' || raw === 'ozet' || raw === 'ogrenci-odeme') return raw;
   return 'ozet';
 }
 
@@ -121,8 +123,7 @@ export default function MuhasebePage() {
             Muhasebe
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-1 max-w-2xl">
-            Kurum gelirleri (tahsilat & taksit) ile giderler (grup dersi öğretmen ödemeleri) tek panelde. Oturum
-            detaylarını buradan düzenleyebilirsiniz.
+            Kurum gelirleri (tahsilat, öğrenci ödemeleri) ile giderler (grup dersi öğretmen ödemeleri) tek panelde.
           </p>
         </div>
         <Link
@@ -165,7 +166,7 @@ export default function MuhasebePage() {
               </div>
             ))}
           </div>
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-3">
             <button
               type="button"
               onClick={() => setTab('tahsilat')}
@@ -174,6 +175,16 @@ export default function MuhasebePage() {
               <p className="font-bold text-emerald-900 dark:text-emerald-100">Tahsilat & taksit</p>
               <p className="text-sm text-emerald-800/80 dark:text-emerald-200/80 mt-1">
                 Veli taksitlerini işaretleyin, vadesi geçenleri takip edin.
+              </p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab('ogrenci-odeme')}
+              className="rounded-2xl border border-teal-200 bg-teal-50/60 p-5 text-left hover:bg-teal-50 dark:border-teal-900/50 dark:bg-teal-950/20"
+            >
+              <p className="font-bold text-teal-900 dark:text-teal-100">Öğrenci ödemeleri</p>
+              <p className="text-sm text-teal-800/80 dark:text-teal-200/80 mt-1">
+                Yazılı, kitap, hesap (Ziraat/Enpara), kalan borç ve WhatsApp.
               </p>
             </button>
             <button
@@ -191,6 +202,8 @@ export default function MuhasebePage() {
       ) : null}
 
       {tab === 'tahsilat' ? <TahsilatTaksitPanel onStatsChange={setTahsilatStats} /> : null}
+
+      {tab === 'ogrenci-odeme' ? <StudentPaymentTrackerPanel /> : null}
 
       {tab === 'ogretmen' ? <TeacherPaymentsPanel onTeacherTotalChange={setTeacherPayableTry} /> : null}
     </div>
