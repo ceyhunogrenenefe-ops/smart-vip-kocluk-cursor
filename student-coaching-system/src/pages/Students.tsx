@@ -177,14 +177,25 @@ export default function Students() {
         if (cancelled) return;
         const inst = selectedStudent.institutionId;
         const staff = users.filter((u) => {
-          if (!['teacher', 'coach', 'admin'].includes(String(u.role))) return false;
+          const primary = String(u.role || '').toLowerCase();
+          const roles = Array.isArray((u as { roles?: string[] }).roles)
+            ? ((u as { roles?: string[] }).roles || []).map((r) => String(r || '').toLowerCase())
+            : [];
+          const okStaff =
+            ['teacher', 'coach', 'admin', 'super_admin'].includes(primary) ||
+            roles.some((r) => ['teacher', 'coach', 'admin', 'super_admin'].includes(r));
+          if (!okStaff) return false;
           if (effectiveUser?.role === 'super_admin') return true;
           if (!inst) return true;
           return u.institution_id === inst || u.institution_id == null;
         });
         setPlatformStaff(
           staff
-            .map((u) => ({ id: u.id, name: u.name || u.email || u.id, role: String(u.role) }))
+            .map((u) => ({
+              id: u.id,
+              name: u.name || u.email || u.id,
+              role: String(u.role || (Array.isArray((u as { roles?: string[] }).roles) && (u as { roles?: string[] }).roles![0]) || '')
+            }))
             .sort((a, b) => a.name.localeCompare(b.name, 'tr'))
         );
         setLessonQuotas(qrows);

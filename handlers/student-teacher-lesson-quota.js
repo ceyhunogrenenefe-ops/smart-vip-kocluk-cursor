@@ -167,13 +167,22 @@ export default async function handler(req, res) {
 
       const { data: teacherUser, error: tErr } = await supabaseAdmin
         .from('users')
-        .select('id, role, institution_id')
+        .select('id, role, roles, institution_id')
         .eq('id', teacherId)
         .maybeSingle();
       if (tErr) throw tErr;
       if (!teacherUser) return jsonError(res, 404, 'Öğretmen kullanıcısı bulunamadı.');
-      if (!['teacher', 'coach', 'admin'].includes(String(teacherUser.role))) {
-        return jsonError(res, 400, 'teacher_id bir öğretmen/koç/yönetici kullanıcısı olmalıdır.');
+      {
+        const primary = String(teacherUser.role || '').toLowerCase();
+        const roles = Array.isArray(teacherUser.roles)
+          ? teacherUser.roles.map((r) => String(r || '').toLowerCase())
+          : [];
+        const okStaff =
+          ['teacher', 'coach', 'admin', 'super_admin'].includes(primary) ||
+          roles.some((r) => ['teacher', 'coach', 'admin', 'super_admin'].includes(r));
+        if (!okStaff) {
+          return jsonError(res, 400, 'teacher_id bir öğretmen/koç/yönetici kullanıcısı olmalıdır.');
+        }
       }
 
       if (roleSetHasAdmin(roleSet) && !roleSetHasSuperAdmin(roleSet) && !hasInstitutionAccess(actor, student.institution_id)) {

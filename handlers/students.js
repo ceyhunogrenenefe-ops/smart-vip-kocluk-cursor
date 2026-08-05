@@ -208,18 +208,27 @@ async function listStudentsByCoachId(coachId) {
   return data || [];
 }
 
-/** Koç + öğretmen aynı hesap: koç öğrencileri ∪ sınıf/özel ders kapsamı */
+/**
+ * Koç öğrencileri ∪ özel ders kapsamı (sınıf + kota + private assignment).
+ * Canlı özel ders kaydında teacher_id = users.id olduğu için koç rolünde
+ * (öğretmen etiketi olmasa bile) kota/atama öğrencileri de birleştirilir.
+ */
 async function listStudentsMergedCoachTeacher(actor, roleSet) {
   const wantCoach = roleSet.has('coach') && Boolean(actor.coach_id);
-  const wantTeacher = roleSet.has('teacher') && Boolean(actor.sub);
+  // Özel ders teacher_id users.id — teacher rolü şart değil (koç/admin de atanabilir)
+  const wantPrivateScope =
+    Boolean(actor.sub) &&
+    (roleSet.has('teacher') || roleSet.has('coach') || roleSet.has('admin'));
 
-  if (wantCoach && wantTeacher) {
-    const [coachRows, teacherRows] = await Promise.all([
-      listStudentsByCoachId(actor.coach_id),
-      listStudentsByTeacherScope(actor)
-    ]);
+  if (wantCoach || wantPrivateScope) {
+    const tasks = [];
+    if (wantCoach) tasks.push(listStudentsByCoachId(actor.coach_id));
+    else tasks.push(Promise.resolve([]));
+    if (wantPrivateScope) tasks.push(listStudentsByTeacherScope(actor));
+    else tasks.push(Promise.resolve([]));
+    const [coachRows, scopeRows] = await Promise.all(tasks);
     const byId = new Map();
-    for (const row of [...coachRows, ...teacherRows]) {
+    for (const row of [...coachRows, ...scopeRows]) {
       if (row?.id) byId.set(String(row.id), row);
     }
     return [...byId.values()].sort((a, b) =>
@@ -227,8 +236,6 @@ async function listStudentsMergedCoachTeacher(actor, roleSet) {
     );
   }
 
-  if (wantTeacher) return listStudentsByTeacherScope(actor);
-  if (wantCoach) return listStudentsByCoachId(actor.coach_id);
   return [];
 }
 

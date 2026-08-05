@@ -2981,13 +2981,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const matched = students.filter((s) => s.id === sid);
         list = matched.length > 0 ? matched : [];
       }
-    } else if (tags.includes('coach') && effectiveUser.coachId && !tags.includes('super_admin')) {
-      // Admin+koç hesaplarda da koç paneli listeleri yalnızca kendi öğrencilerini göstersin
+    } else if (
+      tags.includes('coach') &&
+      effectiveUser.coachId &&
+      !tags.includes('super_admin') &&
+      !tags.includes('teacher')
+    ) {
+      // Salt koç (öğretmen etiketi yok): koç paneli listeleri yalnızca kendi öğrencileri.
+      // Koç+öğretmen veya özel ders teacher_id ataması varsa API birleşimine güven —
+      // coachId filtresi özel derse atanmış ama başka koçtaki öğrenciyi siler.
       list = students.filter((s) => String(s.coachId || '') === String(effectiveUser.coachId));
     } else if (tags.includes('admin')) {
       list = students.filter((s) => s.institutionId === effectiveUser.institutionId);
     } else if (tags.includes('coach') || tags.includes('teacher')) {
-      // /api/students zaten koç ∪ öğretmen (özel ders ataması) birleşimini döner.
+      // /api/students zaten koç ∪ sınıf/kota/özel ders atamasını döner.
       list = students;
     } else {
       list = students;
@@ -2995,11 +3002,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return sortByFirstName(list, (s) => s.name);
   }, [students, effectiveUser, tenantScopeInstitutionId]);
 
-  /** Canlı ders / öğretmen paneli: API'den gelen tam öğretmen kapsamı (grup + özel ders) */
+  /**
+   * Canlı ders / öğretmen paneli: API'den gelen tam kapsam (grup + kota + özel ders).
+   * teacher veya coach — canlı özel ders teacher_id users.id ile bağlanır.
+   */
   const teacherScopeStudents = React.useMemo(() => {
     if (!effectiveUser) return [];
     const tags = userRoleTags(effectiveUser);
-    if (!tags.includes('teacher')) return [];
+    if (!tags.includes('teacher') && !tags.includes('coach')) return [];
     return sortByFirstName(students, (s) => s.name);
   }, [students, effectiveUser]);
 

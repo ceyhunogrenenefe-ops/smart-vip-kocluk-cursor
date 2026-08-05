@@ -224,28 +224,87 @@ export default async function handler(req, res) {
           return jsonError(res, 403, 'payments_forbidden_for_teacher');
         }
 
-        let q = supabaseAdmin.from('student_teacher_lesson_quota').select('*');
-
-        if (roleSet.has('student') && actor.student_id) {
-          q = q.eq('student_id', actor.student_id);
-        } else if (roleSet.has('teacher') && !actorIsAdminLike(actor, roleSet) && actor.sub) {
-          q = q.eq('teacher_id', actor.sub);
-        } else if (roleSet.has('coach') && !actorIsAdminLike(actor, roleSet) && actor.coach_id) {
-          const { data: students } = await supabaseAdmin
-            .from('students')
-            .select('id')
-            .eq('coach_id', actor.coach_id);
-          const ids = (students || []).map((s) => s.id);
-          if (!ids.length) return res.status(200).json({ data: [] });
-          q = q.in('student_id', ids);
-        } else if (roleSetHasAdmin(roleSet) && !roleSetHasSuperAdmin(roleSet) && actor.institution_id) {
-          q = q.eq('institution_id', actor.institution_id);
-        }
-
         const studentFilter =
           typeof req.query?.student_id === 'string' ? req.query.student_id.trim() : '';
         const teacherFilter =
           typeof req.query?.teacher_id === 'string' ? req.query.teacher_id.trim() : '';
+
+        /** Öğretmen/koç: teacher_id = ben ∪ (koç ise) kendi öğrencilerinin kayıtları */
+        if (
+          (roleSet.has('teacher') || roleSet.has('coach')) &&
+          !actorIsAdminLike(actor, roleSet) &&
+          actor.sub &&
+          !(roleSet.has('student') && actor.student_id)
+        ) {
+          const byId = new Map();
+
+          let tq = supabaseAdmin
+            .from('student_teacher_lesson_quota')
+            .select('*')
+            .eq('teacher_id', actor.sub);
+          if (studentFilter) tq = tq.eq('student_id', studentFilter);
+          if (!teacherFilter || teacherFilter === actor.sub) {
+            const { data: asTeacher, error: te } = await tq
+              .order('updated_at', { ascending: false })
+              .limit(500);
+            if (te) {
+              if (schemaMissing(te)) {
+                return res.status(200).json({ data: [], hint: 'private_live_pro_sql_missing' });
+              }
+              throw te;
+            }
+            for (const row of asTeacher || []) byId.set(String(row.id), row);
+          }
+
+          if (roleSet.has('coach') && actor.coach_id) {
+            const { data: coachStudents } = await supabaseAdmin
+              .from('students')
+              .select('id')
+              .eq('coach_id', actor.coach_id);
+            const coachStudentIds = (coachStudents || []).map((s) => s.id).filter(Boolean);
+            const chunk = 100;
+            for (let i = 0; i < coachStudentIds.length; i += chunk) {
+              const slice = coachStudentIds.slice(i, i + chunk);
+              let cq = supabaseAdmin
+                .from('student_teacher_lesson_quota')
+                .select('*')
+                .in('student_id', slice);
+              if (studentFilter) cq = cq.eq('student_id', studentFilter);
+              if (teacherFilter) cq = cq.eq('teacher_id', teacherFilter);
+              const { data: asCoach, error: ce } = await cq
+                .order('updated_at', { ascending: false })
+                .limit(500);
+              if (ce) {
+                if (schemaMissing(ce)) break;
+                throw ce;
+              }
+              for (const row of asCoach || []) byId.set(String(row.id), row);
+            }
+          }
+
+          const rows = [...byId.values()].sort((a, b) =>
+            String(b.updated_at || '').localeCompare(String(a.updated_at || ''))
+          );
+          const enriched = await enrichEnrollmentList(rows, roleSet);
+          if (scope === 'payments') {
+            return res.status(200).json({
+              data: enriched.map((r) => ({
+                ...r,
+                payment_status: derivePaymentStatus(r)
+              }))
+            });
+          }
+          return res.status(200).json({ data: enriched });
+        }
+
+        let q = supabaseAdmin.from('student_teacher_lesson_quota').select('*');
+
+        if (roleSet.has('student') && actor.student_id) {
+          q = q.eq('student_id', actor.student_id);
+        } else if (roleSetHasAdmin(roleSet) && !roleSetHasSuperAdmin(roleSet) && actor.institution_id) {
+          q = q.eq('institution_id', actor.institution_id);
+        }
+
         if (studentFilter) q = q.eq('student_id', studentFilter);
         if (teacherFilter) q = q.eq('teacher_id', teacherFilter);
 
@@ -282,17 +341,27 @@ export default async function handler(req, res) {
         const warnings = [];
         const candidateRows = [];
         for (const row of rows || []) {
-          if (roleSet.has('teacher') && row.teacher_id !== actor.sub) continue;
+          if (roleSet.has('teacher') && row.teacher_id !== actor.sub) {
+            // teacher etiketi: yalnızca kendi teacher_id satırları
+            // (koç birleşimi aşağıda ayrıca açılmaz — teacher öncelikli)
+            if (!(roleSet.has('coach') && actor.coach_id)) continue;
+          }
           if (roleSetHasAdmin(roleSet) && !roleSetHasSuperAdmin(roleSet) && actor.institution_id) {
             if (row.institution_id && row.institution_id !== actor.institution_id) continue;
           }
           if (roleSet.has('coach') && !actorIsAdminLike(actor, roleSet) && actor.coach_id) {
-            const { data: st } = await supabaseAdmin
-              .from('students')
-              .select('coach_id')
-              .eq('id', row.student_id)
-              .maybeSingle();
-            if (!st || String(st.coach_id) !== String(actor.coach_id)) continue;
+            if (String(row.teacher_id) === String(actor.sub)) {
+              /* kendi özel ders kaydı */
+            } else {
+              const { data: st } = await supabaseAdmin
+                .from('students')
+                .select('coach_id')
+                .eq('id', row.student_id)
+                .maybeSingle();
+              if (!st || String(st.coach_id) !== String(actor.coach_id)) continue;
+            }
+          } else if (roleSet.has('teacher') && row.teacher_id !== actor.sub) {
+            continue;
           }
           candidateRows.push(row);
         }
@@ -334,29 +403,26 @@ export default async function handler(req, res) {
 
         if (roleSet.has('student') && actor.student_id) {
           lessonQ = lessonQ.eq('student_id', actor.student_id);
-        } else if (roleSet.has('teacher') && !actorIsAdminLike(actor, roleSet) && actor.sub) {
-          lessonQ = lessonQ.eq('teacher_id', actor.sub);
-        } else if (roleSet.has('coach') && !actorIsAdminLike(actor, roleSet) && actor.coach_id) {
-          const { data: students } = await supabaseAdmin
-            .from('students')
-            .select('id')
-            .eq('coach_id', actor.coach_id);
-          const ids = (students || []).map((s) => s.id);
-          if (!ids.length) {
-            return res.status(200).json({
-              data: {
-                today: [],
-                tomorrow: [],
-                student_count: 0,
-                active_packages: 0,
-                upcoming_payments: [],
-                low_credits: [],
-                cancelled_recent: 0,
-                pending_makeups: 0
-              }
-            });
+        } else if (
+          (roleSet.has('teacher') || roleSet.has('coach')) &&
+          !actorIsAdminLike(actor, roleSet) &&
+          actor.sub
+        ) {
+          // teacher_id = ben; koç ise ayrıca kendi öğrencilerinin dersleri
+          if (roleSet.has('coach') && actor.coach_id) {
+            const { data: students } = await supabaseAdmin
+              .from('students')
+              .select('id')
+              .eq('coach_id', actor.coach_id);
+            const ids = (students || []).map((s) => s.id).filter(Boolean);
+            if (ids.length) {
+              lessonQ = lessonQ.or(`teacher_id.eq.${actor.sub},student_id.in.(${ids.join(',')})`);
+            } else {
+              lessonQ = lessonQ.eq('teacher_id', actor.sub);
+            }
+          } else {
+            lessonQ = lessonQ.eq('teacher_id', actor.sub);
           }
-          lessonQ = lessonQ.in('student_id', ids);
         } else if (roleSetHasAdmin(roleSet) && !roleSetHasSuperAdmin(roleSet) && actor.institution_id) {
           lessonQ = lessonQ.eq('institution_id', actor.institution_id);
         }
