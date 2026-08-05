@@ -1,6 +1,22 @@
-import { useMemo, useState } from 'react';
-import { ArrowLeft, ChevronDown, ChevronUp, Loader2, Plus, Trash2 } from 'lucide-react';
+import { useMemo, useRef, useState } from 'react';
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronUp,
+  ClipboardList,
+  FileDown,
+  Gavel,
+  Loader2,
+  MessageCircle,
+  Plus,
+  Scale,
+  Trash2,
+  X
+} from 'lucide-react';
 import { toast } from 'sonner';
+import MeetingSummaryDocument from '../../components/meetingTracker/MeetingSummaryDocument';
+import { buildMeetingSummaryPdfBlob } from '../../lib/pdfMeetingSummary';
+import { shareMeetingSummaryWhatsApp } from '../../lib/shareMeetingSummaryWhatsApp';
 import { parseAgendaPasteText, mergeAgendaDrafts, type ParsedAgendaDraft } from '../../lib/meetingAgendaParse';
 import {
   mtAddAgenda,
@@ -11,7 +27,6 @@ import {
   mtCloseMeeting,
   mtCreateTask,
   mtReorderAgenda,
-  mtSaveTemplate,
   mtUpdateAgenda,
   mtUpdateTask,
   type MtAgendaItem,
@@ -146,8 +161,82 @@ export default function MeetingDetailPanel({
   const [noteText, setNoteText] = useState('');
   const [busy, setBusy] = useState(false);
   const [selectedRow, setSelectedRow] = useState<string | null>(bundle.agenda[0]?.id || null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
+  const pdfRef = useRef<HTMLDivElement>(null);
+
+  const defaultRecipients = useMemo(() => {
+    const ids = new Set<string>();
+    if (m.manager_user_id) ids.add(m.manager_user_id);
+    for (const t of bundle.tasks) {
+      for (const a of t.assignees || t.mt_task_assignees || []) {
+        if (a.user_id) ids.add(String(a.user_id));
+      }
+    }
+    for (const p of bundle.participants) {
+      if (p.user_id) ids.add(String(p.user_id));
+    }
+    return [...ids];
+  }, [bundle.participants, bundle.tasks, m.manager_user_id]);
+
+  const [shareRecipients, setShareRecipients] = useState<string[]>(defaultRecipients);
 
   const managerName = userName(m.manager_user_id);
+
+  const buildPdf = async (compact = false) => {
+    if (!pdfRef.current) throw new Error('PDF alanı hazır değil');
+    const safe = m.title.replace(/[^\w\u00C0-\u024F\s-]/gi, '').trim().slice(0, 40) || 'toplanti';
+    const filename = `toplanti-ozeti-${safe}-${m.meeting_date}.pdf`;
+    return buildMeetingSummaryPdfBlob(pdfRef.current, filename, { compactForShare: compact });
+  };
+
+  const downloadPdf = async () => {
+    setPdfBusy(true);
+    try {
+      const { blob, filename } = await buildPdf(false);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('PDF indirildi');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'PDF oluşturulamadı');
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+
+  const sendWhatsApp = async () => {
+    if (!shareRecipients.length) {
+      toast.error('En az bir alıcı seçin');
+      return;
+    }
+    setShareBusy(true);
+    try {
+      const { blob, filename } = await buildPdf(true);
+      const result = await shareMeetingSummaryWhatsApp({
+        bundle,
+        users,
+        recipientIds: shareRecipients,
+        senderUserId: currentUserId,
+        pdfBlob: blob,
+        filename
+      });
+      if (result.sent > 0) toast.success(result.notice);
+      else toast.error(result.notice);
+      if (result.skipped.length) {
+        console.warn('WA skipped', result.skipped);
+      }
+      setShareOpen(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'WhatsApp gönderilemedi');
+    } finally {
+      setShareBusy(false);
+    }
+  };
 
   const closeMeeting = async (force = false) => {
     setBusy(true);
@@ -207,89 +296,174 @@ export default function MeetingDetailPanel({
   };
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-4 p-4 md:p-6">
-      <button type="button" onClick={onBack} className="inline-flex items-center gap-1 text-sm text-slate-600 dark:text-slate-400">
+    <div className="mx-auto max-w-[1400px] space-y-5 p-4 md:p-6">
+      <div className="pointer-events-none fixed -left-[10000px] top-0" aria-hidden>
+        <div ref={pdfRef}>
+          <MeetingSummaryDocument bundle={bundle} users={users} userName={userName} />
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={onBack}
+        className="inline-flex items-center gap-1 text-sm text-slate-600 hover:text-indigo-700 dark:text-slate-400"
+      >
         <ArrowLeft className="h-4 w-4" /> Geri
       </button>
 
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{m.title}</h1>
-          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-            {bundle.type?.name || '—'} · {m.meeting_date}
-            {m.start_time ? ` ${String(m.start_time).slice(0, 5)}` : ''} · {MEETING_STATUS[m.status] || m.status}
-          </p>
-          <p className="text-xs text-slate-500">Toplantı yöneticisi: {managerName}</p>
-        </div>
-        {isManager && m.status !== 'closed' && m.status !== 'cancelled' && (
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void closeMeeting(false)}
-              className="rounded-lg bg-slate-800 px-3 py-2 text-sm text-white"
-            >
-              Toplantıyı Kapat
-            </button>
-            <button
-              type="button"
-              onClick={async () => {
-                const name = window.prompt('Şablon adı:', `${m.title} şablonu`);
-                if (!name) return;
-                await mtSaveTemplate({
-                  name,
-                  meeting_type_id: m.meeting_type_id,
-                  agenda_json: bundle.agenda.map((a) => ({ title: a.title, description: a.description || '' }))
-                });
-                toast.success('Şablon kaydedildi');
-              }}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-600"
-            >
-              Şablon kaydet
-            </button>
+      <div className="overflow-hidden rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-600 via-indigo-700 to-violet-700 p-5 text-white shadow-lg shadow-indigo-200/40 dark:border-indigo-900 dark:shadow-none">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium uppercase tracking-widest text-indigo-200">Toplantı</p>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight md:text-3xl">{m.title}</h1>
+            <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-sm text-indigo-100">
+              <span>{bundle.type?.name || '—'}</span>
+              <span>·</span>
+              <span>{m.meeting_date}</span>
+              {m.start_time && (
+                <>
+                  <span>·</span>
+                  <span>{String(m.start_time).slice(0, 5)}</span>
+                </>
+              )}
+              <span>·</span>
+              <span>{MEETING_STATUS[m.status] || m.status}</span>
+            </p>
+            <p className="mt-1 text-xs text-indigo-200/90">Yönetici: {managerName}</p>
           </div>
-        )}
+          <div className="flex flex-wrap gap-2">
+            {isManager && (
+              <>
+                <button
+                  type="button"
+                  disabled={pdfBusy}
+                  onClick={() => void downloadPdf()}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-white/15 px-3 py-2 text-sm font-medium backdrop-blur hover:bg-white/25 disabled:opacity-60"
+                >
+                  {pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
+                  PDF indir
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShareRecipients(defaultRecipients);
+                    setShareOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 px-3 py-2 text-sm font-medium text-white shadow hover:bg-emerald-400"
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  WhatsApp gönder
+                </button>
+              </>
+            )}
+            {isManager && m.status !== 'closed' && m.status !== 'cancelled' && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void closeMeeting(false)}
+                className="rounded-xl bg-white px-3 py-2 text-sm font-medium text-indigo-800 hover:bg-indigo-50 disabled:opacity-60"
+              >
+                Toplantıyı kapat
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="mt-5">
+          <div className="mb-1 flex justify-between text-xs text-indigo-100">
+            <span>Gündem ilerleme</span>
+            <span>
+              {discussed}/{bundle.agenda.length} madde · %{progress}
+            </span>
+          </div>
+          <div className="h-2.5 overflow-hidden rounded-full bg-indigo-900/40">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-emerald-300 to-emerald-400 transition-all duration-500"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        </div>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
-        <div className="mb-1 flex justify-between text-xs text-slate-500">
-          <span>Gündem ilerleme</span>
-          <span>
-            {discussed}/{bundle.agenda.length} ({progress}%)
-          </span>
+      {shareOpen && isManager && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl dark:bg-slate-900">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-white">WhatsApp ile özet gönder</h3>
+                <p className="text-xs text-slate-500">Gateway üzerinden PDF — alıcıları seçin</p>
+              </div>
+              <button type="button" onClick={() => setShareOpen(false)} className="text-slate-400 hover:text-slate-700">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <StaffAssigneePicker users={users} selected={shareRecipients} onChange={setShareRecipients} />
+            <ul className="mt-3 space-y-1 text-xs text-slate-500">
+              {users
+                .filter((u) => shareRecipients.includes(u.id))
+                .map((u) => (
+                  <li key={u.id}>
+                    {u.name || u.email} — {u.phone ? '✓ telefon' : '⚠ telefon yok'}
+                  </li>
+                ))}
+            </ul>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShareOpen(false)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm dark:border-slate-600"
+              >
+                İptal
+              </button>
+              <button
+                type="button"
+                disabled={shareBusy}
+                onClick={() => void sendWhatsApp()}
+                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+              >
+                {shareBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCircle className="h-4 w-4" />}
+                Gönder
+              </button>
+            </div>
+          </div>
         </div>
-        <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700">
-          <div className="h-full bg-emerald-500" style={{ width: `${progress}%` }} />
-        </div>
-      </div>
+      )}
 
-      <div className="flex gap-1 border-b border-slate-200 dark:border-slate-700">
+      <div className="flex gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-800/80">
         {(
           [
-            { key: 'toplanti' as const, label: 'Gündem & Kararlar' },
-            { key: 'notlar' as const, label: 'Notlar' },
-            { key: 'gecmis' as const, label: 'İşlem Geçmişi' }
+            { key: 'toplanti' as const, label: 'Gündem & Kararlar', icon: ClipboardList },
+            { key: 'notlar' as const, label: 'Notlar', icon: Scale },
+            { key: 'gecmis' as const, label: 'Geçmiş', icon: Gavel }
           ] as const
-        ).map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => setTab(t.key)}
-            className={`px-3 py-2 text-sm ${
-              tab === t.key ? 'border-b-2 border-indigo-600 font-medium text-indigo-700' : 'text-slate-500'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
+        ).map((t) => {
+          const Icon = t.icon;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-sm transition sm:flex-none ${
+                tab === t.key
+                  ? 'bg-white font-medium text-indigo-700 shadow-sm dark:bg-slate-900 dark:text-indigo-300'
+                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-400'
+              }`}
+            >
+              <Icon className="h-4 w-4" />
+              {t.label}
+            </button>
+          );
+        })}
       </div>
 
       {tab === 'toplanti' && (
         <div className="space-y-4">
           {isManager && (
-            <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-800/50">
-              <div className="text-sm font-medium text-slate-800 dark:text-slate-200">Gündem metnini yapıştır</div>
-              <p className="mb-2 text-xs text-slate-500">Numaralı veya maddeli listeyi yapıştırın; sistem satır satır ayırır.</p>
+            <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                <ClipboardList className="h-4 w-4 text-indigo-600" />
+                Gündem ekle
+              </div>
+              <p className="mb-3 mt-1 text-xs text-slate-500">Listeyi yapıştırın veya tek tek madde ekleyin.</p>
               <textarea
                 value={paste}
                 onChange={(e) => setPaste(e.target.value)}
@@ -335,10 +509,16 @@ export default function MeetingDetailPanel({
             </div>
           )}
 
-          <div className="hidden overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 lg:block">
-            <div className="grid grid-cols-2 border-b border-slate-200 bg-slate-100 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-              <div className="px-3 py-2">Toplantı gündemi</div>
-              <div className="border-l border-slate-200 px-3 py-2 dark:border-slate-700">Alınan kararlar & yapılacaklar</div>
+          <div className="hidden overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-md dark:border-slate-700 dark:bg-slate-900 lg:block">
+            <div className="grid grid-cols-2 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-indigo-50/50 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:border-slate-700 dark:from-slate-800 dark:to-indigo-950/30 dark:text-slate-300">
+              <div className="flex items-center gap-2 px-4 py-3">
+                <ClipboardList className="h-4 w-4 text-indigo-600" />
+                Toplantı gündemi
+              </div>
+              <div className="flex items-center gap-2 border-l border-slate-200 px-4 py-3 dark:border-slate-700">
+                <Gavel className="h-4 w-4 text-emerald-600" />
+                Kararlar & yapılacaklar
+              </div>
             </div>
             {bundle.agenda.map((item, idx) => (
               <AgendaDecisionRow
@@ -574,8 +754,17 @@ function AgendaDecisionRow({
     }
   };
 
+  const rowAccent =
+    status === 'discussed'
+      ? 'border-l-emerald-500'
+      : status === 'in_discussion'
+        ? 'border-l-sky-500'
+        : status === 'deferred'
+          ? 'border-l-orange-500'
+          : 'border-l-amber-400';
+
   const left = (
-    <div className="space-y-2 p-3">
+    <div className={`space-y-2 border-l-4 ${rowAccent} p-4`}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -627,7 +816,7 @@ function AgendaDecisionRow({
   );
 
   const right = (
-    <div className="space-y-2 border-slate-200 p-3 dark:border-slate-700 lg:border-l">
+    <div className="space-y-2 border-l border-slate-100 bg-slate-50/40 p-4 dark:border-slate-700 dark:bg-slate-800/30 lg:border-l">
       {isManager ? (
         <textarea
           value={decision}
@@ -775,7 +964,9 @@ function AgendaDecisionRow({
   if (mobile) {
     return (
       <div
-        className={`rounded-xl border ${selected ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-slate-200 dark:border-slate-700'}`}
+        className={`overflow-hidden rounded-2xl border shadow-sm transition ${
+          selected ? 'border-indigo-400 ring-2 ring-indigo-100' : 'border-slate-200 dark:border-slate-700'
+        }`}
         onClick={onSelect}
       >
         {left}
@@ -786,8 +977,8 @@ function AgendaDecisionRow({
 
   return (
     <div
-      className={`grid grid-cols-2 border-b border-slate-200 last:border-b-0 dark:border-slate-700 ${
-        selected ? 'bg-indigo-50/40 dark:bg-indigo-950/20' : 'bg-white dark:bg-slate-900'
+      className={`grid grid-cols-2 border-b border-slate-100 transition last:border-b-0 hover:bg-slate-50/60 dark:border-slate-800 dark:hover:bg-slate-800/40 ${
+        selected ? 'bg-indigo-50/30 dark:bg-indigo-950/20' : 'bg-white dark:bg-slate-900'
       }`}
       onClick={onSelect}
     >

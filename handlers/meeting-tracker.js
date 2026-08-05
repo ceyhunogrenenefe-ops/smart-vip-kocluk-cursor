@@ -490,7 +490,7 @@ export default async function handler(req, res) {
       if (role !== 'super_admin' && role !== 'admin') {
         return res.status(403).json({ error: 'forbidden' });
       }
-      let q = supabaseAdmin.from('users').select('id, name, email, role, roles').order('name').limit(500);
+      let q = supabaseAdmin.from('users').select('id, name, email, phone, role, roles').order('name').limit(500);
       if (role === 'admin') q = q.eq('institution_id', institutionId);
       const { data, error } = await q;
       if (error) throw error;
