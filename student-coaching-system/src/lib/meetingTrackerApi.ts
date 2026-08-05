@@ -91,7 +91,14 @@ export type MtDashboard = {
   meetings: MtMeeting[];
 };
 
-export type MtUser = { id: string; name?: string | null; email?: string | null; role?: string; roles?: string[] };
+export type MtUser = {
+  id: string;
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  role?: string;
+  roles?: string[];
+};
 
 export type MtTemplate = {
   id: string;
