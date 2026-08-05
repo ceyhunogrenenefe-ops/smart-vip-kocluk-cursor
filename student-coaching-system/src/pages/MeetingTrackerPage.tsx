@@ -12,13 +12,13 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Trash2,
-  AlertTriangle
+  Trash2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
 import { userHasAnyRole } from '../config/rolePermissions';
 import { parseAgendaPasteText, mergeAgendaDrafts, type ParsedAgendaDraft } from '../lib/meetingAgendaParse';
+import MeetingDetailPanel from './meetingTracker/MeetingDetailPanel';
 import {
   mtAddAgenda,
   mtAddDecision,
@@ -97,7 +97,20 @@ function agendaBadge(status: string) {
   return 'bg-amber-100 text-amber-900';
 }
 
-type TabKey = 'gundem' | 'kararlar' | 'gorevler' | 'notlar' | 'dosyalar' | 'katilimcilar' | 'gecmis';
+function roleLabel(role?: string | null) {
+  const r = String(role || '').toLowerCase();
+  if (r === 'super_admin') return 'Süper Admin';
+  if (r === 'admin') return 'Yönetici';
+  if (r === 'coach') return 'Koç';
+  if (r === 'teacher') return 'Öğretmen';
+  return r || '—';
+}
+
+function staffManagers(users: MtUser[]) {
+  return users.filter((u) => ['super_admin', 'admin'].includes(String(u.role || '').toLowerCase()));
+}
+
+type TabKey = 'toplanti' | 'notlar' | 'gecmis';
 
 export default function MeetingTrackerPage() {
   const { effectiveUser } = useAuth();
@@ -119,7 +132,6 @@ export default function MeetingTrackerPage() {
   const [filterType, setFilterType] = useState('');
   const [filterMeetingStatus, setFilterMeetingStatus] = useState('');
   const [filterTaskStatus, setFilterTaskStatus] = useState('');
-  const [tab, setTab] = useState<TabKey>('gundem');
 
   const pageTitle = isManager ? 'Toplantı ve Gündem Takibi' : 'Toplantılarım';
 
@@ -153,7 +165,12 @@ export default function MeetingTrackerPage() {
     }
     setLoading(true);
     try {
-      setBundle(await mtGetMeeting(id));
+      const [b, u] = await Promise.all([
+        mtGetMeeting(id),
+        isManager ? mtGetUsers().catch(() => []) : Promise.resolve([])
+      ]);
+      setBundle(b);
+      if (u.length) setUsers(u);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Toplantı açılamadı');
       setBundle(null);
@@ -164,7 +181,7 @@ export default function MeetingTrackerPage() {
     } finally {
       setLoading(false);
     }
-  }, [setParams]);
+  }, [setParams, isManager]);
 
   useEffect(() => {
     void loadDash();
@@ -179,7 +196,6 @@ export default function MeetingTrackerPage() {
       p.set('id', id);
       return p;
     });
-    setTab('gundem');
   };
 
   const closeDetail = () => {
@@ -268,14 +284,12 @@ export default function MeetingTrackerPage() {
 
   if (bundle) {
     return (
-      <MeetingDetail
+      <MeetingDetailPanel
         bundle={bundle}
         isManager={isManager}
         users={users}
         meetings={dash?.meetings || []}
         currentUserId={String(effectiveUser?.id || '')}
-        tab={tab}
-        setTab={setTab}
         onBack={closeDetail}
         onReload={() => loadMeeting(bundle.meeting.id)}
         userName={userName}
@@ -599,7 +613,6 @@ function CreateMeetingModal({
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
   const [manager, setManager] = useState('');
-  const [participants, setParticipants] = useState<string[]>([]);
   const [openToRole, setOpenToRole] = useState(false);
   const [description, setDescription] = useState('');
   const [location, setLocation] = useState('');
@@ -649,7 +662,6 @@ function CreateMeetingModal({
         start_time: start || null,
         end_time: end || null,
         manager_user_id: manager || null,
-        participant_user_ids: participants,
         open_to_role: openToRole,
         description: description || null,
         location_or_link: location || null,
@@ -712,12 +724,12 @@ function CreateMeetingModal({
             </div>
           </label>
           <label className="block text-sm">
-            <span className="mb-1 block text-slate-600">Yönetici</span>
+            <span className="mb-1 block text-slate-600">Toplantı yöneticisi</span>
             <select value={manager} onChange={(e) => setManager(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-600 dark:bg-slate-800">
-              <option value="">Ben / varsayılan</option>
-              {users.map((u) => (
+              <option value="">Varsayılan (siz)</option>
+              {staffManagers(users).map((u) => (
                 <option key={u.id} value={u.id}>
-                  {u.name || u.email}
+                  {u.name || u.email} ({roleLabel(u.role)})
                 </option>
               ))}
             </select>
@@ -736,27 +748,8 @@ function CreateMeetingModal({
           </label>
           <label className="flex items-center gap-2 text-sm sm:col-span-2">
             <input type="checkbox" checked={openToRole} onChange={(e) => setOpenToRole(e.target.checked)} />
-            Bu roldeki herkese açık
+            Koç/öğretmen toplantısı — ilgili role açık (katılımcı seçmeye gerek yok)
           </label>
-          {!openToRole && (
-            <label className="block text-sm sm:col-span-2">
-              <span className="mb-1 block text-slate-600">Katılımcılar (Ctrl ile çoklu seçim)</span>
-              <select
-                multiple
-                value={participants}
-                onChange={(e) =>
-                  setParticipants(Array.from(e.target.selectedOptions).map((o) => o.value))
-                }
-                className="h-28 w-full rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-600 dark:bg-slate-800"
-              >
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name || u.email} ({u.role})
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
         </div>
 
         {templates.length > 0 && (
@@ -780,9 +773,9 @@ function CreateMeetingModal({
 
         <div className="mt-4">
           <label className="block text-sm font-medium text-slate-800 dark:text-slate-200">
-            Gündem Metnini Yapıştır
+            Gündem metnini yapıştır
           </label>
-          <p className="mb-1 text-xs text-slate-500">ChatGPT veya numaralı listeler — yapay zekâ zorunlu değil.</p>
+          <p className="mb-1 text-xs text-slate-500">Numaralı veya maddeli listeyi yapıştırın.</p>
           <textarea
             value={paste}
             onChange={(e) => setPaste(e.target.value)}
@@ -895,755 +888,6 @@ function AgendaPreviewEditor({
       >
         + Madde ekle
       </button>
-    </div>
-  );
-}
-
-function MeetingDetail({
-  bundle,
-  isManager,
-  users,
-  meetings,
-  currentUserId,
-  tab,
-  setTab,
-  onBack,
-  onReload,
-  userName
-}: {
-  bundle: MtMeetingBundle;
-  isManager: boolean;
-  users: MtUser[];
-  meetings: MtMeeting[];
-  currentUserId: string;
-  tab: TabKey;
-  setTab: (t: TabKey) => void;
-  onBack: () => void;
-  onReload: () => void;
-  userName: (id?: string | null) => string;
-}) {
-  const m = bundle.meeting;
-  const discussed = bundle.agenda.filter((a) => a.status === 'discussed').length;
-  const progress = bundle.agenda.length ? Math.round((discussed / bundle.agenda.length) * 100) : 0;
-  const [paste, setPaste] = useState('');
-  const [drafts, setDrafts] = useState<ParsedAgendaDraft[]>([]);
-  const [showPaste, setShowPaste] = useState(false);
-  const [taskForm, setTaskForm] = useState<{ agendaId: string } | null>(null);
-  const [noteText, setNoteText] = useState('');
-  const [carryTarget, setCarryTarget] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const tabs: { key: TabKey; label: string }[] = [
-    { key: 'gundem', label: 'Gündem' },
-    { key: 'kararlar', label: 'Alınan Kararlar' },
-    { key: 'gorevler', label: 'Yapılacaklar' },
-    { key: 'notlar', label: 'Toplantı Notları' },
-    { key: 'dosyalar', label: 'Dosyalar' },
-    { key: 'katilimcilar', label: 'Katılımcılar' },
-    { key: 'gecmis', label: 'İşlem Geçmişi' }
-  ];
-
-  const closeMeeting = async (force = false) => {
-    setBusy(true);
-    try {
-      await mtCloseMeeting(m.id, force);
-      toast.success('Toplantı kapatıldı (açık görevler tamamlanmadı)');
-      onReload();
-    } catch (e) {
-      const err = e as Error & { status?: number; warnings?: { type: string; title: string }[] };
-      if (err.status === 409 && err.warnings?.length) {
-        const msg = err.warnings.map((w) => w.title).slice(0, 8).join(', ');
-        const ok = window.confirm(
-          `Uyarılar var:\n${msg}\n\nYine de kapatılsın mı? Açık görevler tamamlanmış sayılmaz.`
-        );
-        if (ok) await closeMeeting(true);
-      } else {
-        toast.error(err.message || 'Kapatılamadı');
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const addPastedas = async () => {
-    if (!drafts.length) return;
-    setBusy(true);
-    try {
-      await mtAddAgenda(m.id, drafts);
-      toast.success(`${drafts.length} gündem eklendi`);
-      setShowPaste(false);
-      setPaste('');
-      setDrafts([]);
-      onReload();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Eklenemedi');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const saveAsTemplate = async () => {
-    const name = window.prompt('Şablon adı:', `${m.title} şablonu`);
-    if (!name) return;
-    try {
-      await mtSaveTemplate({
-        name,
-        meeting_type_id: m.meeting_type_id,
-        agenda_json: bundle.agenda.map((a) => ({ title: a.title, description: a.description || '' }))
-      });
-      toast.success('Şablon kaydedildi');
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Şablon kaydedilemedi');
-    }
-  };
-
-  return (
-    <div className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">
-      <button type="button" onClick={onBack} className="inline-flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400">
-        <ArrowLeft className="h-4 w-4" /> Geri
-      </button>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{m.title}</h1>
-          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-            {bundle.type?.name || '—'} · {m.meeting_date}
-            {m.start_time ? ` ${String(m.start_time).slice(0, 5)}` : ''}
-            {' · '}
-            {MEETING_STATUS[m.status] || m.status}
-          </p>
-          {m.location_or_link && (
-            <a href={m.location_or_link.startsWith('http') ? m.location_or_link : undefined} className="text-sm text-indigo-600" target="_blank" rel="noreferrer">
-              {m.location_or_link}
-            </a>
-          )}
-        </div>
-        {isManager && m.status !== 'closed' && m.status !== 'cancelled' && (
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => void saveAsTemplate()} className="rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-600">
-              Şablon kaydet
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void closeMeeting(false)}
-              className="rounded-lg bg-slate-800 px-3 py-2 text-sm text-white dark:bg-slate-600"
-            >
-              Toplantıyı Kapat
-            </button>
-            <button
-              type="button"
-              onClick={async () => {
-                if (!window.confirm('Arşivlensin mi?')) return;
-                await mtArchiveMeeting(m.id);
-                toast.success('Arşivlendi');
-                onBack();
-              }}
-              className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-700"
-            >
-              Arşivle
-            </button>
-          </div>
-        )}
-      </div>
-
-      <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
-        <div className="mb-1 flex justify-between text-xs text-slate-500">
-          <span>Gündem ilerleme</span>
-          <span>
-            {discussed}/{bundle.agenda.length} ({progress}%)
-          </span>
-        </div>
-        <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700">
-          <div className="h-full bg-emerald-500 transition-all" style={{ width: `${progress}%` }} />
-        </div>
-      </div>
-
-      <div className="flex gap-1 overflow-x-auto border-b border-slate-200 dark:border-slate-700">
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => setTab(t.key)}
-            className={`whitespace-nowrap px-3 py-2 text-sm ${
-              tab === t.key
-                ? 'border-b-2 border-indigo-600 font-medium text-indigo-700 dark:text-indigo-300'
-                : 'text-slate-600 dark:text-slate-400'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'gundem' && (
-        <div className="space-y-3">
-          {isManager && (
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setShowPaste((v) => !v)}
-                className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm dark:border-slate-600"
-              >
-                Gündem metni yapıştır
-              </button>
-            </div>
-          )}
-          {showPaste && (
-            <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-600">
-              <textarea
-                value={paste}
-                onChange={(e) => setPaste(e.target.value)}
-                rows={4}
-                className="w-full rounded border border-slate-200 px-2 py-1 font-mono text-sm dark:border-slate-600 dark:bg-slate-900"
-              />
-              <div className="mt-2 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDrafts(parseAgendaPasteText(paste));
-                  }}
-                  className="rounded bg-slate-800 px-3 py-1.5 text-sm text-white"
-                >
-                  Ön izleme
-                </button>
-                {drafts.length > 0 && (
-                  <button type="button" disabled={busy} onClick={() => void addPastedas()} className="rounded bg-indigo-600 px-3 py-1.5 text-sm text-white">
-                    {drafts.length} maddeyi ekle
-                  </button>
-                )}
-              </div>
-              {drafts.length > 0 && <AgendaPreviewEditor drafts={drafts} setDrafts={setDrafts} />}
-            </div>
-          )}
-
-          {bundle.agenda.map((a, idx) => (
-            <AgendaCard
-              key={a.id}
-              item={a}
-              index={idx}
-              isManager={isManager}
-              meetings={meetings}
-              carryTarget={carryTarget}
-              setCarryTarget={setCarryTarget}
-              onOpenTask={() => setTaskForm({ agendaId: a.id })}
-              onReload={onReload}
-              onMove={async (dir) => {
-                const ids = bundle.agenda.map((x) => x.id);
-                const j = idx + dir;
-                if (j < 0 || j >= ids.length) return;
-                [ids[idx], ids[j]] = [ids[j], ids[idx]];
-                await mtReorderAgenda(m.id, ids);
-                onReload();
-              }}
-            />
-          ))}
-          {!bundle.agenda.length && <p className="text-sm text-slate-500">Gündem maddesi yok.</p>}
-        </div>
-      )}
-
-      {tab === 'kararlar' && (
-        <div className="space-y-2">
-          {bundle.decisions.map((d) => (
-            <div key={d.id} className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
-              <div className="font-medium">{d.title}</div>
-              {d.body && <p className="mt-1 text-sm text-slate-600 dark:text-slate-400 whitespace-pre-wrap">{d.body}</p>}
-            </div>
-          ))}
-          {bundle.agenda
-            .filter((a) => a.decision_text)
-            .map((a) => (
-              <div key={`a-${a.id}`} className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 dark:border-emerald-800">
-                <div className="text-xs text-emerald-700">Gündem: {a.title}</div>
-                <p className="mt-1 text-sm whitespace-pre-wrap">{a.decision_text}</p>
-              </div>
-            ))}
-          {!bundle.decisions.length && !bundle.agenda.some((a) => a.decision_text) && (
-            <p className="text-sm text-slate-500">Henüz karar yok.</p>
-          )}
-        </div>
-      )}
-
-      {tab === 'gorevler' && (
-        <div className="space-y-2">
-          {bundle.tasks.map((t) => (
-            <TaskCard
-              key={t.id}
-              task={t}
-              agenda={bundle.agenda.find((a) => a.id === t.agenda_item_id)}
-              meetingTitle={m.title}
-              isManager={isManager}
-              currentUserId={currentUserId}
-              onReload={onReload}
-              userName={userName}
-              meetings={meetings}
-            />
-          ))}
-          {!bundle.tasks.length && <p className="text-sm text-slate-500">Görev yok.</p>}
-          {isManager && (
-            <button
-              type="button"
-              onClick={() => setTaskForm({ agendaId: '' })}
-              className="mt-2 inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white"
-            >
-              <Plus className="h-4 w-4" /> Görev oluştur
-            </button>
-          )}
-        </div>
-      )}
-
-      {tab === 'notlar' && (
-        <div className="space-y-3">
-          {bundle.notes.map((n) => (
-            <div key={n.id} className="rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700">
-              <div className="text-xs text-slate-500">
-                {userName(n.created_by)} · {new Date(n.created_at).toLocaleString('tr-TR')}
-              </div>
-              <p className="mt-1 whitespace-pre-wrap">{n.body}</p>
-            </div>
-          ))}
-          <textarea
-            value={noteText}
-            onChange={(e) => setNoteText(e.target.value)}
-            rows={3}
-            placeholder="Toplantı notu ekle…"
-            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
-          />
-          <button
-            type="button"
-            onClick={async () => {
-              if (!noteText.trim()) return;
-              await mtAddNote(m.id, noteText.trim());
-              setNoteText('');
-              toast.success('Not eklendi');
-              onReload();
-            }}
-            className="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white"
-          >
-            Not kaydet
-          </button>
-        </div>
-      )}
-
-      {tab === 'dosyalar' && (
-        <div className="space-y-2">
-          {bundle.attachments.map((f) => (
-            <a key={f.id} href={f.file_url} target="_blank" rel="noreferrer" className="block text-sm text-indigo-600">
-              {f.file_name}
-            </a>
-          ))}
-          {!bundle.attachments.length && (
-            <p className="text-sm text-slate-500">Dosya ekleri URL olarak kaydedilir (storage sonraki aşama).</p>
-          )}
-        </div>
-      )}
-
-      {tab === 'katilimcilar' && (
-        <ul className="space-y-1 text-sm">
-          {m.open_to_role && <li className="text-slate-600">Bu roldeki herkese açık</li>}
-          {bundle.participants.map((p) => (
-            <li key={p.id}>{userName(p.user_id)}</li>
-          ))}
-          {!bundle.participants.length && !m.open_to_role && <li className="text-slate-500">Katılımcı seçilmedi</li>}
-        </ul>
-      )}
-
-      {tab === 'gecmis' && (
-        <div className="space-y-2">
-          {bundle.activity.map((log) => (
-            <div key={log.id} className="rounded border border-slate-100 px-3 py-2 text-xs dark:border-slate-700">
-              <div className="font-medium text-slate-800 dark:text-slate-200">
-                {log.action} · {userName(log.actor_user_id)}
-              </div>
-              <div className="text-slate-500">{new Date(log.created_at).toLocaleString('tr-TR')}</div>
-            </div>
-          ))}
-          {!bundle.activity.length && <p className="text-sm text-slate-500">Kayıt yok.</p>}
-        </div>
-      )}
-
-      {taskForm && isManager && (
-        <CreateTaskModal
-          meetingId={m.id}
-          agendaItemId={taskForm.agendaId || null}
-          users={users}
-          onClose={() => setTaskForm(null)}
-          onCreated={() => {
-            setTaskForm(null);
-            onReload();
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
-function AgendaCard({
-  item,
-  index,
-  isManager,
-  meetings,
-  carryTarget,
-  setCarryTarget,
-  onOpenTask,
-  onReload,
-  onMove
-}: {
-  item: MtAgendaItem;
-  index: number;
-  isManager: boolean;
-  meetings: MtMeeting[];
-  carryTarget: string;
-  setCarryTarget: (v: string) => void;
-  onOpenTask: () => void;
-  onReload: () => void;
-  onMove: (dir: -1 | 1) => Promise<void>;
-}) {
-  const [note, setNote] = useState(item.discussion_note || '');
-  const [decision, setDecision] = useState(item.decision_text || '');
-  const [status, setStatus] = useState(item.status);
-
-  const save = async () => {
-    try {
-      await mtUpdateAgenda({
-        id: item.id,
-        discussion_note: note,
-        decision_text: decision,
-        status
-      });
-      if (decision.trim()) {
-        await mtAddDecision({
-          meeting_id: item.meeting_id,
-          agenda_item_id: item.id,
-          title: `Karar: ${item.title}`,
-          body: decision
-        }).catch(() => null);
-      }
-      toast.success('Gündem güncellendi');
-      onReload();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Kayıt başarısız');
-    }
-  };
-
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-slate-400">#{index + 1}</span>
-            <h3 className="font-semibold text-slate-900 dark:text-white">{item.title}</h3>
-            {item.is_carried_forward && (
-              <span className="rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-medium text-orange-800">
-                Önceki Toplantıdan Devreden
-              </span>
-            )}
-            <span className={`rounded px-1.5 py-0.5 text-[10px] ${agendaBadge(item.status)}`}>
-              {AGENDA_STATUS[item.status] || item.status}
-            </span>
-          </div>
-          {item.description && <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{item.description}</p>}
-        </div>
-        {isManager && (
-          <div className="flex gap-1">
-            <button type="button" onClick={() => void onMove(-1)} className="p-1 text-slate-500">
-              <ChevronUp className="h-4 w-4" />
-            </button>
-            <button type="button" onClick={() => void onMove(1)} className="p-1 text-slate-500">
-              <ChevronDown className="h-4 w-4" />
-            </button>
-          </div>
-        )}
-      </div>
-      {isManager && (
-        <div className="mt-3 grid gap-2">
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-            className="rounded border border-slate-200 px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900"
-          >
-            {Object.entries(AGENDA_STATUS).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
-          </select>
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            rows={2}
-            placeholder="Toplantı notu"
-            className="rounded border border-slate-200 px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900"
-          />
-          <textarea
-            value={decision}
-            onChange={(e) => setDecision(e.target.value)}
-            rows={2}
-            placeholder="Alınan karar"
-            className="rounded border border-slate-200 px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900"
-          />
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => void save()} className="rounded bg-indigo-600 px-3 py-1.5 text-sm text-white">
-              Kaydet
-            </button>
-            <button type="button" onClick={onOpenTask} className="rounded border border-slate-200 px-3 py-1.5 text-sm dark:border-slate-600">
-              Yapılacak Görev Oluştur
-            </button>
-            <select
-              value={carryTarget}
-              onChange={(e) => setCarryTarget(e.target.value)}
-              className="rounded border border-slate-200 px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900"
-            >
-              <option value="">Sonraki toplantıya aktar…</option>
-              {meetings
-                .filter((x) => x.id !== item.meeting_id && ['draft', 'planned'].includes(x.status))
-                .map((x) => (
-                  <option key={x.id} value={x.id}>
-                    {x.title} ({x.meeting_date})
-                  </option>
-                ))}
-            </select>
-            {carryTarget && (
-              <button
-                type="button"
-                onClick={async () => {
-                  await mtCarryForward({ target_meeting_id: carryTarget, agenda_item_id: item.id });
-                  toast.success('Aktarıldı — eski bağlantı korundu');
-                  setCarryTarget('');
-                  onReload();
-                }}
-                className="rounded bg-orange-600 px-3 py-1.5 text-sm text-white"
-              >
-                Aktar
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function TaskCard({
-  task,
-  agenda,
-  meetingTitle,
-  isManager,
-  currentUserId,
-  onReload,
-  userName,
-  meetings
-}: {
-  task: MtTask;
-  agenda?: MtAgendaItem;
-  meetingTitle: string;
-  isManager: boolean;
-  currentUserId: string;
-  onReload: () => void;
-  userName: (id?: string | null) => string;
-  meetings: MtMeeting[];
-}) {
-  const assignees = task.assignees || task.mt_task_assignees || [];
-  const isAssignee = assignees.some((a) => String(a.user_id) === String(currentUserId));
-  const canStatus = isManager || isAssignee;
-  const [carryTarget, setCarryTarget] = useState('');
-
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <div className="font-medium text-slate-900 dark:text-white">{task.title}</div>
-          <div className="mt-0.5 text-xs text-slate-500">
-            Toplantı: {meetingTitle}
-            {agenda ? ` · Gündem: ${agenda.title}` : ''}
-          </div>
-          <div className="mt-1 flex flex-wrap gap-1">
-            <span className={`rounded px-1.5 py-0.5 text-[10px] ${taskBadge(task.status)}`}>
-              {TASK_STATUS[task.status] || task.status}
-            </span>
-            {task.due_date && <span className="text-[10px] text-slate-500">Son: {task.due_date}</span>}
-            <span className="text-[10px] text-slate-500">
-              Sorumlu: {assignees.map((a) => userName(a.user_id)).join(', ') || '—'}
-            </span>
-          </div>
-        </div>
-        {canStatus && (
-          <select
-            value={task.status}
-            onChange={async (e) => {
-              try {
-                await mtUpdateTask({ id: task.id, status: e.target.value });
-                toast.success('Durum güncellendi');
-                onReload();
-              } catch (err) {
-                toast.error(err instanceof Error ? err.message : 'Güncellenemedi');
-              }
-            }}
-            className="rounded border border-slate-200 px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900"
-          >
-            {Object.entries(TASK_STATUS)
-              .filter(([k]) => (isManager ? true : !['cancelled', 'overdue'].includes(k)))
-              .map(([k, v]) => (
-                <option key={k} value={k}>
-                  {v}
-                </option>
-              ))}
-          </select>
-        )}
-      </div>
-      {isManager && (
-        <div className="mt-2 flex flex-wrap gap-2">
-          <select
-            value={carryTarget}
-            onChange={(e) => setCarryTarget(e.target.value)}
-            className="rounded border border-slate-200 px-2 py-1 text-xs dark:border-slate-600 dark:bg-slate-900"
-          >
-            <option value="">Sonraki toplantıya bağla…</option>
-            {meetings
-              .filter((x) => x.id !== task.meeting_id && ['draft', 'planned'].includes(x.status))
-              .map((x) => (
-                <option key={x.id} value={x.id}>
-                  {x.title}
-                </option>
-              ))}
-          </select>
-          {carryTarget && (
-            <button
-              type="button"
-              onClick={async () => {
-                await mtCarryForward({ target_meeting_id: carryTarget, task_id: task.id });
-                toast.success('Görev bağlantısı korundu (kopyalanmadı)');
-                setCarryTarget('');
-                onReload();
-              }}
-              className="rounded bg-orange-600 px-2 py-1 text-xs text-white"
-            >
-              Aktar
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CreateTaskModal({
-  meetingId,
-  agendaItemId,
-  users,
-  onClose,
-  onCreated
-}: {
-  meetingId: string;
-  agendaItemId: string | null;
-  users: MtUser[];
-  onClose: () => void;
-  onCreated: () => void;
-}) {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [assignees, setAssignees] = useState<string[]>([]);
-  const [start, setStart] = useState('');
-  const [due, setDue] = useState('');
-  const [priority, setPriority] = useState('normal');
-  const [reviewer, setReviewer] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-5 dark:bg-slate-900">
-        <h3 className="mb-3 text-lg font-semibold">Yapılacak Görev Oluştur</h3>
-        {agendaItemId && (
-          <p className="mb-2 flex items-center gap-1 text-xs text-slate-500">
-            <AlertTriangle className="h-3 w-3" /> Gündem maddesinden — görüşüldü ≠ görev tamamlandı
-          </p>
-        )}
-        <div className="space-y-2 text-sm">
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Görev başlığı"
-            className="w-full rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-600 dark:bg-slate-800"
-          />
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Açıklama"
-            rows={2}
-            className="w-full rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-600 dark:bg-slate-800"
-          />
-          <select
-            multiple
-            value={assignees}
-            onChange={(e) => setAssignees(Array.from(e.target.selectedOptions).map((o) => o.value))}
-            className="h-24 w-full rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-600 dark:bg-slate-800"
-          >
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name || u.email}
-              </option>
-            ))}
-          </select>
-          <div className="flex gap-2">
-            <input type="date" value={start} onChange={(e) => setStart(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-2 dark:border-slate-600 dark:bg-slate-800" />
-            <input type="date" value={due} onChange={(e) => setDue(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-2 dark:border-slate-600 dark:bg-slate-800" />
-          </div>
-          <select value={priority} onChange={(e) => setPriority(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-600 dark:bg-slate-800">
-            {Object.entries(PRIORITY).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
-          </select>
-          <select value={reviewer} onChange={(e) => setReviewer(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-600 dark:bg-slate-800">
-            <option value="">Kontrol edecek admin</option>
-            {users
-              .filter((u) => ['admin', 'super_admin'].includes(String(u.role || '')))
-              .map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name || u.email}
-                </option>
-              ))}
-          </select>
-        </div>
-        <div className="mt-4 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-lg border px-3 py-2 text-sm">
-            İptal
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={async () => {
-              if (!title.trim()) {
-                toast.error('Başlık gerekli');
-                return;
-              }
-              setBusy(true);
-              try {
-                await mtCreateTask({
-                  meeting_id: meetingId,
-                  agenda_item_id: agendaItemId || null,
-                  title: title.trim(),
-                  description,
-                  assignee_user_ids: assignees,
-                  start_date: start || null,
-                  due_date: due || null,
-                  priority,
-                  reviewer_user_id: reviewer || null
-                });
-                toast.success('Görev oluşturuldu');
-                onCreated();
-              } catch (e) {
-                toast.error(e instanceof Error ? e.message : 'Oluşturulamadı');
-              } finally {
-                setBusy(false);
-              }
-            }}
-            className="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white"
-          >
-            Kaydet
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

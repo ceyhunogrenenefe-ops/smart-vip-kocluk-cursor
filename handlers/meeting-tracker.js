@@ -494,7 +494,13 @@ export default async function handler(req, res) {
       if (role === 'admin') q = q.eq('institution_id', institutionId);
       const { data, error } = await q;
       if (error) throw error;
-      return res.status(200).json({ data: data || [] });
+      const STAFF = new Set(['super_admin', 'admin', 'coach', 'teacher']);
+      const staff = (data || []).filter((u) => {
+        const r = String(u.role || '').toLowerCase();
+        const tags = Array.isArray(u.roles) ? u.roles.map((x) => String(x || '').toLowerCase()) : [];
+        return STAFF.has(r) || tags.some((t) => STAFF.has(t));
+      });
+      return res.status(200).json({ data: staff });
     }
 
     // ——— POST create meeting ———
