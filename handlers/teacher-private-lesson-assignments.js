@@ -8,7 +8,7 @@ import {
   roleSetHasSuperAdmin
 } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
-import { upsertPrivateLessonAssignmentRow } from '../api/_lib/private-lesson-assignment-store.js';
+import { upsertPrivateLessonAssignmentRow, syncAllPrivateLessonLinks } from '../api/_lib/private-lesson-assignment-store.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
 
@@ -39,12 +39,14 @@ async function loadTeacherUser(teacherId) {
   return data;
 }
 
-function userIsTeacher(row) {
+function userIsPrivateLessonStaff(row) {
   if (!row) return false;
   const role = String(row.role || '').toLowerCase();
-  if (role === 'teacher') return true;
+  if (['teacher', 'coach', 'admin', 'super_admin'].includes(role)) return true;
   const roles = Array.isArray(row.roles) ? row.roles : [];
-  return roles.some((r) => String(r || '').toLowerCase() === 'teacher');
+  return roles.some((r) =>
+    ['teacher', 'coach', 'admin', 'super_admin'].includes(String(r || '').toLowerCase())
+  );
 }
 
 async function validatePair(actor, studentId, teacherId, roleSet) {
@@ -53,7 +55,9 @@ async function validatePair(actor, studentId, teacherId, roleSet) {
 
   const teacher = await loadTeacherUser(teacherId);
   if (!teacher) return { ok: false, status: 404, error: 'Öğretmen bulunamadı.' };
-  if (!userIsTeacher(teacher)) return { ok: false, status: 400, error: 'Seçilen kullanıcı öğretmen değil.' };
+  if (!userIsPrivateLessonStaff(teacher)) {
+    return { ok: false, status: 400, error: 'Seçilen kullanıcı öğretmen/koç/yönetici değil.' };
+  }
 
   if (roleSetHasAdmin(roleSet) && !roleSetHasSuperAdmin(roleSet)) {
     if (!hasInstitutionAccess(actor, student.institution_id)) {
@@ -120,6 +124,15 @@ async function handleList(req, res, actor, roleSet) {
     typeof req.query?.teacher_id === 'string' ? req.query.teacher_id.trim() : '';
   const studentFilter =
     typeof req.query?.student_id === 'string' ? req.query.student_id.trim() : '';
+  const doSync =
+    String(req.query?.sync || '').trim() === '1' ||
+    String(req.query?.sync || '').toLowerCase() === 'true';
+
+  let syncStats = null;
+  if (doSync) {
+    const inst = roleSetHasSuperAdmin(roleSet) ? null : actor.institution_id || null;
+    syncStats = await syncAllPrivateLessonLinks({ institutionId: inst });
+  }
 
   let q = supabaseAdmin
     .from('teacher_private_lesson_assignments')
@@ -128,7 +141,7 @@ async function handleList(req, res, actor, roleSet) {
     .order('created_at', { ascending: false });
 
   if (roleSetHasAdmin(roleSet) && !roleSetHasSuperAdmin(roleSet)) {
-    if (!actor.institution_id) return res.status(200).json({ data: [] });
+    if (!actor.institution_id) return res.status(200).json({ data: [], sync: syncStats });
     q = q.eq('institution_id', actor.institution_id);
   }
   if (teacherFilter) q = q.eq('teacher_id', teacherFilter);
@@ -137,12 +150,12 @@ async function handleList(req, res, actor, roleSet) {
   const { data, error } = await q;
   if (error) {
     if (isMissingTableError(error)) {
-      return res.status(200).json({ data: [], hint: 'teacher_private_lesson_assignments_sql_missing' });
+      return res.status(200).json({ data: [], hint: 'teacher_private_lesson_assignments_sql_missing', sync: syncStats });
     }
     throw error;
   }
   const enriched = await enrichRows(data || []);
-  return res.status(200).json({ data: enriched });
+  return res.status(200).json({ data: enriched, sync: syncStats });
 }
 
 async function upsertAssignment(actor, studentId, teacherId, roleSet) {
@@ -163,6 +176,16 @@ async function upsertAssignment(actor, studentId, teacherId, roleSet) {
 
 async function handleCreate(req, res, actor, roleSet) {
   const body = req.body || {};
+
+  /** Admin/koç: tüm kota ↔ atama çift yönlü senkron */
+  if (body.op === 'sync' || body.sync === true) {
+    const inst = roleSetHasSuperAdmin(roleSet) ? null : actor.institution_id || null;
+    const stats = await syncAllPrivateLessonLinks({ institutionId: inst });
+    if (stats.tableMissing) {
+      return jsonError(res, 503, 'Atama tablosu henüz oluşturulmamış.');
+    }
+    return res.status(200).json({ ok: true, data: stats });
+  }
 
   if (body.bulk === true) {
     const teacherId = String(body.teacher_id || '').trim();
@@ -250,14 +273,37 @@ export default async function handler(req, res) {
     const actor = requireAuthenticatedActor(req);
     const roleSet = await actorRoleSet(actor);
 
-    if (!actorIsAdminLike(actor, roleSet)) return jsonError(res, 403, 'forbidden');
-    if (!actorIsInstitutionAdmin(actor, roleSet)) {
+    const isStaff =
+      actorIsAdminLike(actor, roleSet) || roleSet.has('coach') || roleSet.has('teacher');
+    if (!isStaff) return jsonError(res, 403, 'forbidden');
+
+    /** Senkron: admin veya koç (kurum kapsamı) */
+    const body = req.method === 'POST' ? req.body || {} : {};
+    const isSyncOp =
+      req.method === 'POST' && (body.op === 'sync' || body.sync === true);
+    const isSyncGet =
+      req.method === 'GET' &&
+      (String(req.query?.sync || '').trim() === '1' ||
+        String(req.query?.sync || '').toLowerCase() === 'true');
+
+    if (isSyncOp || isSyncGet) {
+      if (!actorIsAdminLike(actor, roleSet) && !roleSet.has('coach')) {
+        return jsonError(res, 403, 'forbidden');
+      }
+    } else if (!actorIsAdminLike(actor, roleSet)) {
+      return jsonError(res, 403, 'forbidden');
+    }
+
+    if (actorIsAdminLike(actor, roleSet) && !actorIsInstitutionAdmin(actor, roleSet)) {
       return jsonError(res, 403, 'institution_missing');
     }
 
     if (req.method === 'GET') return handleList(req, res, actor, roleSet);
     if (req.method === 'POST') return handleCreate(req, res, actor, roleSet);
-    if (req.method === 'DELETE') return handleDelete(req, res, actor, roleSet);
+    if (req.method === 'DELETE') {
+      if (!actorIsAdminLike(actor, roleSet)) return jsonError(res, 403, 'forbidden');
+      return handleDelete(req, res, actor, roleSet);
+    }
 
     return jsonError(res, 405, 'method_not_allowed');
   } catch (e) {

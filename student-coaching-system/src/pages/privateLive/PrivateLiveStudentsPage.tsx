@@ -16,6 +16,7 @@ import {
   type PrivateEnrollment,
   type PrivateLessonPackage
 } from '../../lib/privateLiveApi';
+import { apiFetch } from '../../lib/session';
 import {
   AppModal,
   AppModalBody,
@@ -82,6 +83,14 @@ export default function PrivateLiveStudentsPage() {
     setLoading(true);
     setError('');
     try {
+      // Admin/koç: kota ↔ atama senkronunu bir kez çalıştır (eksik kayıtlar tamamlanır)
+      if (canEdit) {
+        await apiFetch('/api/teacher-private-lesson-assignments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ op: 'sync' })
+        }).catch(() => null);
+      }
       const [enr, pkgs] = await Promise.all([
         privateLiveApi().enrollments(),
         privateLiveApi()

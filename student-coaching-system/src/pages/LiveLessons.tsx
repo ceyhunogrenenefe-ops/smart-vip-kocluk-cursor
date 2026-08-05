@@ -104,16 +104,35 @@ type StaffUser = {
 };
 
 export default function LiveLessons({ hideCalendar = false }: { hideCalendar?: boolean } = {}) {
-  const { effectiveUser } = useAuth();
+  const { effectiveUser, user, isImpersonating } = useAuth();
   const { students, teacherScopeStudents, institution, coaches } = useApp();
   const roleTags = useMemo(() => userRoleTags(effectiveUser), [effectiveUser]);
-  const liveLessonStudents = useMemo(
-    () =>
-      roleTags.includes('teacher') || roleTags.includes('coach')
+  /** /api/teacher-scope — AppContext gecikmesi / filtreye bağlı kalmadan güncel kapsam */
+  const [apiScopeStudents, setApiScopeStudents] = useState<
+    Array<{ id: string; name: string; email?: string | null }>
+  >([]);
+  const liveLessonStudents = useMemo(() => {
+    const fromApi = apiScopeStudents.map((s) => ({
+      id: s.id,
+      name: s.name || s.id,
+      email: s.email || undefined
+    }));
+    if (fromApi.length) {
+      const byId = new Map(fromApi.map((s) => [String(s.id), s]));
+      // Context’tekileri de ekle (isim güncellemesi için)
+      for (const s of roleTags.includes('teacher') || roleTags.includes('coach')
         ? teacherScopeStudents
-        : students,
-    [roleTags, teacherScopeStudents, students]
-  );
+        : students) {
+        if (!byId.has(String(s.id))) {
+          byId.set(String(s.id), { id: s.id, name: s.name, email: s.email });
+        }
+      }
+      return [...byId.values()];
+    }
+    return roleTags.includes('teacher') || roleTags.includes('coach')
+      ? teacherScopeStudents
+      : students;
+  }, [apiScopeStudents, roleTags, teacherScopeStudents, students]);
   const role = (effectiveUser?.role || '') as UserRole;
 
   const [lessons, setLessons] = useState<TeacherLesson[]>([]);
@@ -273,6 +292,47 @@ export default function LiveLessons({ hideCalendar = false }: { hideCalendar?: b
   useEffect(() => {
     setPlatformDraft(detectPlatform(meetingLink));
   }, [meetingLink]);
+
+  /** Özel ders / sınıf kapsamını doğrudan API’den al — AppContext gecikmesine bağlı kalma */
+  useEffect(() => {
+    if (!roleTags.includes('teacher') && !roleTags.includes('coach')) {
+      setApiScopeStudents([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const realTags = userRoleTags(user);
+        const realCanViewAs =
+          realTags.includes('super_admin') || realTags.includes('admin');
+        const qs =
+          isImpersonating && realCanViewAs && effectiveUser?.id
+            ? `?view_as_user_id=${encodeURIComponent(effectiveUser.id)}`
+            : '';
+        const res = await apiFetch(`/api/teacher-scope${qs}`);
+        const j = (await res.json().catch(() => ({}))) as {
+          data?: { students?: Array<{ id: string; name?: string; email?: string | null }> };
+          error?: string;
+        };
+        if (!res.ok) throw new Error(String(j.error || 'teacher_scope_failed'));
+        if (cancelled) return;
+        const rows = Array.isArray(j.data?.students) ? j.data!.students! : [];
+        setApiScopeStudents(
+          rows.map((s) => ({
+            id: String(s.id),
+            name: String(s.name || '').trim() || String(s.id),
+            email: s.email ?? null
+          }))
+        );
+      } catch (e) {
+        console.warn('[LiveLessons] teacher-scope', e);
+        if (!cancelled) setApiScopeStudents([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [roleTags, effectiveUser?.id, user, isImpersonating]);
 
   const loadLessons = useCallback(async () => {
     if (!canManage) return;

@@ -60,16 +60,17 @@ export default function PrivateLessonAssignments() {
     const j = (await res.json().catch(() => ({}))) as { data?: PersonOption[]; error?: string };
     if (!res.ok) throw new Error(String(j.error || 'Öğretmen listesi alınamadı'));
     const data = Array.isArray(j.data) ? j.data : [];
-    const onlyTeachers = data.filter((u) => {
+    const staff = data.filter((u) => {
       const role = String((u as { role?: string }).role || '').toLowerCase();
       const roles = Array.isArray((u as { roles?: string[] }).roles)
         ? (u as { roles?: string[] }).roles!.map((x) => String(x || '').toLowerCase())
         : [];
-      return role === 'teacher' || roles.includes('teacher');
+      const allowed = ['teacher', 'coach', 'admin', 'super_admin'];
+      return allowed.includes(role) || roles.some((r) => allowed.includes(r));
     });
     setTeachers(
       sortByFirstName(
-        onlyTeachers.map((u) => ({
+        staff.map((u) => ({
           id: u.id,
           name: u.name || u.email || u.id,
           email: u.email
@@ -84,11 +85,13 @@ export default function PrivateLessonAssignments() {
     setError(null);
     setSchemaHint(null);
     try {
-      const res = await apiFetch('/api/teacher-private-lesson-assignments');
+      // sync=1: kota ↔ atama çift yönlü senkron (eksik kota/atama tamamlanır)
+      const res = await apiFetch('/api/teacher-private-lesson-assignments?sync=1');
       const j = (await res.json().catch(() => ({}))) as {
         data?: AssignmentRow[];
         error?: string;
         hint?: string;
+        sync?: { quota_to_assignment?: number; assignment_to_quota?: number; ok?: boolean };
       };
       if (!res.ok) throw new Error(String(j.error || 'Atamalar yüklenemedi'));
       if (j.hint === 'teacher_private_lesson_assignments_sql_missing') {
@@ -99,6 +102,12 @@ export default function PrivateLessonAssignments() {
         return;
       }
       setAssignments(Array.isArray(j.data) ? j.data : []);
+      const sync = j.sync;
+      if (sync && (sync.assignment_to_quota || sync.quota_to_assignment)) {
+        setSuccess(
+          `Senkron tamam: ${sync.quota_to_assignment || 0} kota→atama, ${sync.assignment_to_quota || 0} atama→kota.`
+        );
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Atamalar yüklenemedi');
     } finally {

@@ -4,7 +4,17 @@ import { sortByFirstName } from './personNameSort';
 
 export type StaffPerson = { id: string; name: string; email?: string | null };
 
-/** Öğretmen kullanıcıları (/api/users) — AppContext'te teachers yok. */
+function isPrivateLessonStaff(u: {
+  role?: string;
+  roles?: string[];
+}): boolean {
+  const role = String(u.role || '').toLowerCase();
+  const roles = Array.isArray(u.roles) ? u.roles.map((x) => String(x || '').toLowerCase()) : [];
+  const allowed = ['teacher', 'coach', 'admin', 'super_admin'];
+  return allowed.includes(role) || roles.some((r) => allowed.includes(r));
+}
+
+/** Canlı özel ders öğretmeni seçimi — öğretmen + koç + yönetici (users.id). */
 export function useTeacherOptions() {
   const [teachers, setTeachers] = useState<StaffPerson[]>([]);
   const [loading, setLoading] = useState(true);
@@ -17,14 +27,10 @@ export function useTeacherOptions() {
         data?: Array<{ id: string; name?: string; email?: string; role?: string; roles?: string[] }>;
       };
       const data = Array.isArray(j.data) ? j.data : [];
-      const onlyTeachers = data.filter((u) => {
-        const role = String(u.role || '').toLowerCase();
-        const roles = Array.isArray(u.roles) ? u.roles.map((x) => String(x || '').toLowerCase()) : [];
-        return role === 'teacher' || roles.includes('teacher');
-      });
+      const staff = data.filter(isPrivateLessonStaff);
       setTeachers(
         sortByFirstName(
-          onlyTeachers.map((u) => ({
+          staff.map((u) => ({
             id: u.id,
             name: u.name || u.email || u.id,
             email: u.email

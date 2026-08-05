@@ -77,8 +77,11 @@ async function assertCanAccessStudent(actor, student, roleSet) {
     const { ids } = await getTeacherPanelStudentScope(actor.sub, actor.institution_id || null);
     return ids.includes(String(student.id || '').trim());
   }
-  if (roleSet.has('coach')) {
-    return Boolean(actor.coach_id && String(student.coach_id || '') === String(actor.coach_id));
+  if (roleSet.has('coach') && actor.sub) {
+    if (actor.coach_id && String(student.coach_id || '') === String(actor.coach_id)) return true;
+    // Özel ders teacher_id = users.id — başka koçun öğrencisi de atanmış olabilir
+    const { ids } = await getTeacherPanelStudentScope(actor.sub, actor.institution_id || null);
+    return ids.includes(String(student.id || '').trim());
   }
   if (roleSet.has('student')) {
     return Boolean(actor.student_id && String(student.id) === String(actor.student_id));
@@ -1058,20 +1061,63 @@ export default async function handler(req, res) {
 
 /** Internal helper — aynı yetki filtreleriyle enrollment listesi */
 async function handlerGetEnrollmentsLite(actor, roleSet) {
-  let q = supabaseAdmin.from('student_teacher_lesson_quota').select('*');
+  const byId = new Map();
+
   if (roleSet.has('student') && actor.student_id) {
-    q = q.eq('student_id', actor.student_id);
-  } else if (roleSet.has('teacher') && !actorIsAdminLike(actor, roleSet) && actor.sub) {
-    q = q.eq('teacher_id', actor.sub);
-  } else if (roleSet.has('coach') && !actorIsAdminLike(actor, roleSet) && actor.coach_id) {
-    const { data: students } = await supabaseAdmin
-      .from('students')
-      .select('id')
-      .eq('coach_id', actor.coach_id);
-    const ids = (students || []).map((s) => s.id);
-    if (!ids.length) return { data: [] };
-    q = q.in('student_id', ids);
-  } else if (roleSetHasAdmin(roleSet) && !roleSetHasSuperAdmin(roleSet) && actor.institution_id) {
+    const { data: rows, error } = await supabaseAdmin
+      .from('student_teacher_lesson_quota')
+      .select('*')
+      .eq('student_id', actor.student_id)
+      .limit(500);
+    if (error) {
+      if (schemaMissing(error)) return { data: [], hint: 'private_live_pro_sql_missing' };
+      throw error;
+    }
+    return { data: await enrichEnrollmentList(rows || [], roleSet) };
+  }
+
+  if (
+    (roleSet.has('teacher') || roleSet.has('coach')) &&
+    !actorIsAdminLike(actor, roleSet) &&
+    actor.sub
+  ) {
+    const { data: asTeacher, error: te } = await supabaseAdmin
+      .from('student_teacher_lesson_quota')
+      .select('*')
+      .eq('teacher_id', actor.sub)
+      .limit(500);
+    if (te) {
+      if (schemaMissing(te)) return { data: [], hint: 'private_live_pro_sql_missing' };
+      throw te;
+    }
+    for (const row of asTeacher || []) byId.set(String(row.id), row);
+
+    if (roleSet.has('coach') && actor.coach_id) {
+      const { data: coachStudents } = await supabaseAdmin
+        .from('students')
+        .select('id')
+        .eq('coach_id', actor.coach_id);
+      const ids = (coachStudents || []).map((s) => s.id).filter(Boolean);
+      const chunk = 100;
+      for (let i = 0; i < ids.length; i += chunk) {
+        const slice = ids.slice(i, i + chunk);
+        const { data: asCoach, error: ce } = await supabaseAdmin
+          .from('student_teacher_lesson_quota')
+          .select('*')
+          .in('student_id', slice)
+          .limit(500);
+        if (ce) {
+          if (schemaMissing(ce)) break;
+          throw ce;
+        }
+        for (const row of asCoach || []) byId.set(String(row.id), row);
+      }
+    }
+    return { data: await enrichEnrollmentList([...byId.values()], roleSet) };
+  }
+
+  let q = supabaseAdmin.from('student_teacher_lesson_quota').select('*');
+  if (roleSetHasAdmin(roleSet) && !roleSetHasSuperAdmin(roleSet) && actor.institution_id) {
     q = q.eq('institution_id', actor.institution_id);
   }
   const { data: rows, error } = await q.limit(500);

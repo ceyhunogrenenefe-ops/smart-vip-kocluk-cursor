@@ -2985,11 +2985,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       tags.includes('coach') &&
       effectiveUser.coachId &&
       !tags.includes('super_admin') &&
-      !tags.includes('teacher')
+      !tags.includes('teacher') &&
+      !tags.includes('admin')
     ) {
-      // Salt koç (öğretmen etiketi yok): koç paneli listeleri yalnızca kendi öğrencileri.
-      // Koç+öğretmen veya özel ders teacher_id ataması varsa API birleşimine güven —
-      // coachId filtresi özel derse atanmış ama başka koçtaki öğrenciyi siler.
+      // Salt koç paneli (haftalık plan vb.): kendi koç öğrencileri.
+      // Not: canlı özel ders listesi teacherScopeStudents / teacher-scope API kullanır;
+      // /api/students zaten kota+atama birleşimini döner — burada yalnızca koç paneli daraltılır.
       list = students.filter((s) => String(s.coachId || '') === String(effectiveUser.coachId));
     } else if (tags.includes('admin')) {
       list = students.filter((s) => s.institutionId === effectiveUser.institutionId);
