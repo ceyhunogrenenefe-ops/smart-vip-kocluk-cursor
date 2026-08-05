@@ -108,7 +108,10 @@ export default function LiveLessons({ hideCalendar = false }: { hideCalendar?: b
   const { students, teacherScopeStudents, institution, coaches } = useApp();
   const roleTags = useMemo(() => userRoleTags(effectiveUser), [effectiveUser]);
   const liveLessonStudents = useMemo(
-    () => (roleTags.includes('teacher') ? teacherScopeStudents : students),
+    () =>
+      roleTags.includes('teacher') || roleTags.includes('coach')
+        ? teacherScopeStudents
+        : students,
     [roleTags, teacherScopeStudents, students]
   );
   const role = (effectiveUser?.role || '') as UserRole;

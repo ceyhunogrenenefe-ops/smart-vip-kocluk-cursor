@@ -195,11 +195,13 @@ async function canPlanLessonForStudent(actor, student) {
   if (actor.role === 'super_admin') return true;
   if (actor.role === 'admin') return hasInstitutionAccess(actor, student.institution_id);
   const tags = await actorRoleTagSet(actor);
-  if (tags.has('teacher')) {
-    // Özel ders ataması: öğrenci institution_id null olsa bile panel kapsamında ise izin ver
-    if (await isStudentAllowedForTeacherPanel(actor.sub, student.id, actor.institution_id || null)) {
-      return true;
-    }
+  // Kota / private assignment teacher_id = users.id — teacher etiketi şart değil
+  if (
+    (tags.has('teacher') || tags.has('coach')) &&
+    actor.sub &&
+    (await isStudentAllowedForTeacherPanel(actor.sub, student.id, actor.institution_id || null))
+  ) {
+    return true;
   }
   if (tags.has('coach')) {
     return Boolean(actor.coach_id && student.coach_id === actor.coach_id);
@@ -248,9 +250,8 @@ async function handleList(req, res) {
       return b;
     };
 
-    /** Koç (ve koç+öğretmen): koç öğrencileri ∪ özel ders/sınıf kapsamı */
+    /** Koç (ve koç+öğretmen): koç öğrencileri ∪ özel ders/sınıf/kota kapsamı */
     if (actor.role === 'coach') {
-      const tags = await actorRoleTagSet(actor);
       const idSet = new Set();
       if (actor.coach_id) {
         const { data: studs, error: se } = await supabaseAdmin
@@ -262,7 +263,8 @@ async function handleList(req, res) {
           if (s.id) idSet.add(String(s.id));
         }
       }
-      if (tags.has('teacher') && actor.sub) {
+      // Kota / private assignment teacher_id = users.id (öğretmen etiketi şart değil)
+      if (actor.sub) {
         const { ids } = await getTeacherPanelStudentScope(actor.sub, actor.institution_id || null);
         for (const id of ids || []) idSet.add(String(id));
       }
@@ -288,8 +290,8 @@ async function handleList(req, res) {
         }
         for (const row of part || []) byLessonId.set(String(row.id), row);
       }
-      // Koç+öğretmen: kendi teacher_id ile oluşturduğu dersler
-      if (tags.has('teacher') && actor.sub) {
+      // Kendi teacher_id ile oluşturduğu dersler
+      if (actor.sub) {
         let tq = teacherLessonsBaseSelect().eq('teacher_id', actor.sub);
         if (platformFilter) tq = tq.eq('platform', platformFilter);
         if (studentFilter) tq = tq.eq('student_id', studentFilter);
