@@ -6,6 +6,7 @@ import {
   CreditCard,
   Loader2,
   MessageCircle,
+  Pencil,
   Plus,
   RefreshCw,
   Trash2,
@@ -124,6 +125,8 @@ export default function StudentPaymentTrackerPanel() {
   const [onlyOverdue, setOnlyOverdue] = useState(false);
 
   const [formOpen, setFormOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingRow, setEditingRow] = useState<StudentPaymentRecord | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyForm);
 
@@ -199,8 +202,36 @@ export default function StudentPaymentTrackerPanel() {
     void reload();
   }, [reload]);
 
+  const closeForm = () => {
+    setFormOpen(false);
+    setEditingId(null);
+    setEditingRow(null);
+    setForm(emptyForm);
+  };
+
   const openCreate = () => {
+    setEditingId(null);
+    setEditingRow(null);
     setForm({ ...emptyForm, payment_account_id: '' });
+    setFormOpen(true);
+  };
+
+  const openEdit = (row: StudentPaymentRecord) => {
+    setEditingId(row.id);
+    setEditingRow(row);
+    setForm({
+      student_id: row.student_id,
+      payment_type: row.payment_type,
+      payment_account_id: row.payment_account_id || '',
+      title: row.title || '',
+      amount_total: String(row.amount_total ?? ''),
+      amount_paid: String(row.amount_paid ?? '0'),
+      due_date: row.due_date ? String(row.due_date).slice(0, 10) : '',
+      installment_count: '1',
+      contact_phone: row.contact_phone || row.contact_phone_resolved || '',
+      contact_name: row.contact_name || '',
+      notes: row.notes || ''
+    });
     setFormOpen(true);
   };
 
@@ -228,32 +259,48 @@ export default function StudentPaymentTrackerPanel() {
   };
 
   const submitRecord = async () => {
-    if (!form.student_id) {
+    if (!editingId && !form.student_id) {
       toast.error('Öğrenci seçin');
       return;
     }
     setSaving(true);
     try {
-      const installmentCount = Math.max(1, Math.min(48, Math.round(Number(form.installment_count) || 1)));
-      await createStudentPayment({
-        student_id: form.student_id,
-        institution_id: institutionId || null,
-        payment_type: form.payment_type,
-        payment_account_id: form.payment_account_id || null,
-        title: form.title || null,
-        amount_total: Number(form.amount_total || 0),
-        amount_paid: Number(form.amount_paid || 0),
-        due_date: form.due_date || null,
-        installment_count: installmentCount,
-        contact_phone: form.contact_phone || null,
-        contact_name: form.contact_name || null,
-        notes: form.notes || null
-      });
-      toast.success(installmentCount > 1 ? `${installmentCount} taksit oluşturuldu` : 'Ödeme kaydı eklendi');
-      setFormOpen(false);
+      if (editingId) {
+        await patchStudentPayment({
+          id: editingId,
+          payment_type: form.payment_type,
+          payment_account_id: form.payment_account_id || null,
+          title: form.title || null,
+          amount_total: Number(form.amount_total || 0),
+          amount_paid: Number(form.amount_paid || 0),
+          due_date: form.due_date || null,
+          contact_phone: form.contact_phone || null,
+          contact_name: form.contact_name || null,
+          notes: form.notes || null
+        });
+        toast.success('Ödeme kaydı güncellendi');
+      } else {
+        const installmentCount = Math.max(1, Math.min(48, Math.round(Number(form.installment_count) || 1)));
+        await createStudentPayment({
+          student_id: form.student_id,
+          institution_id: institutionId || null,
+          payment_type: form.payment_type,
+          payment_account_id: form.payment_account_id || null,
+          title: form.title || null,
+          amount_total: Number(form.amount_total || 0),
+          amount_paid: Number(form.amount_paid || 0),
+          due_date: form.due_date || null,
+          installment_count: installmentCount,
+          contact_phone: form.contact_phone || null,
+          contact_name: form.contact_name || null,
+          notes: form.notes || null
+        });
+        toast.success(installmentCount > 1 ? `${installmentCount} taksit oluşturuldu` : 'Ödeme kaydı eklendi');
+      }
+      closeForm();
       await reload();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Kayıt başarısız');
+      toast.error(e instanceof Error ? e.message : editingId ? 'Güncellenemedi' : 'Kayıt başarısız');
     } finally {
       setSaving(false);
     }
@@ -685,6 +732,14 @@ export default function StudentPaymentTrackerPanel() {
                     <div className="flex flex-wrap items-center justify-end gap-1">
                       <button
                         type="button"
+                        title="Düzenle"
+                        onClick={() => openEdit(r)}
+                        className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
                         title="WhatsApp"
                         onClick={() => openWhatsApp(r)}
                         className="rounded-lg p-1.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
@@ -718,33 +773,51 @@ export default function StudentPaymentTrackerPanel() {
         </div>
       )}
 
-      <AppModal open={formOpen} onClose={() => setFormOpen(false)} panelClassName="max-w-lg">
+      <AppModal open={formOpen} onClose={closeForm} panelClassName="max-w-lg">
         <AppModalHeader>
           <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-            {isCreditCard ? 'Yeni kredi kartı ödemesi' : 'Yeni banka hesabı ödemesi'}
+            {editingId
+              ? 'Ödeme kaydını düzenle'
+              : isCreditCard
+                ? 'Yeni kredi kartı ödemesi'
+                : 'Yeni banka hesabı ödemesi'}
           </h3>
-          <button type="button" className="text-sm text-slate-500" onClick={() => setFormOpen(false)}>
+          <button type="button" className="text-sm text-slate-500" onClick={closeForm}>
             Kapat
           </button>
         </AppModalHeader>
         <AppModalBody>
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="text-xs text-slate-600 sm:col-span-2">
-              Öğrenci
-              <select
-                value={form.student_id}
-                onChange={(e) => onPickStudent(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
-              >
-                <option value="">Seçin</option>
-                {scopedStudents.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                    {s.classLevel != null ? ` · ${formatClassLevelLabel(s.classLevel)}` : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {editingRow?.installment_no && editingRow?.installment_count ? (
+              <p className="text-xs text-indigo-700 dark:text-indigo-300 sm:col-span-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 dark:border-indigo-900 dark:bg-indigo-950/30">
+                Taksit {editingRow.installment_no}/{editingRow.installment_count} — yalnızca bu satır güncellenir.
+              </p>
+            ) : null}
+            {editingId ? (
+              <div className="text-xs text-slate-600 sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-600 dark:bg-slate-800/60">
+                <span className="text-slate-500">Öğrenci</span>
+                <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-white">
+                  {editingRow?.student_name || form.student_id}
+                </p>
+              </div>
+            ) : (
+              <label className="text-xs text-slate-600 sm:col-span-2">
+                Öğrenci
+                <select
+                  value={form.student_id}
+                  onChange={(e) => onPickStudent(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+                >
+                  <option value="">Seçin</option>
+                  {scopedStudents.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                      {s.classLevel != null ? ` · ${formatClassLevelLabel(s.classLevel)}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label className="text-xs text-slate-600">
               Ödeme türü
               <select
@@ -793,19 +866,21 @@ export default function StudentPaymentTrackerPanel() {
                 className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
               />
             </label>
+            {!editingId ? (
+              <label className="text-xs text-slate-600">
+                Taksit sayısı
+                <input
+                  type="number"
+                  min={1}
+                  max={48}
+                  value={form.installment_count}
+                  onChange={(e) => setForm((f) => ({ ...f, installment_count: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+                />
+              </label>
+            ) : null}
             <label className="text-xs text-slate-600">
-              Taksit sayısı
-              <input
-                type="number"
-                min={1}
-                max={48}
-                value={form.installment_count}
-                onChange={(e) => setForm((f) => ({ ...f, installment_count: e.target.value }))}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
-              />
-            </label>
-            <label className="text-xs text-slate-600">
-              Ödenen (₺) — tek kayıt / 1. taksit
+              Ödenen (₺){!editingId ? ' — tek kayıt / 1. taksit' : ''}
               <input
                 type="number"
                 min={0}
@@ -815,11 +890,20 @@ export default function StudentPaymentTrackerPanel() {
               />
             </label>
             <label className="text-xs text-slate-600">
-              İlk vade
+              {editingId ? 'Vade' : 'İlk vade'}
               <input
                 type="date"
                 value={form.due_date}
                 onChange={(e) => setForm((f) => ({ ...f, due_date: e.target.value }))}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+              />
+            </label>
+            <label className="text-xs text-slate-600">
+              İletişim adı
+              <input
+                value={form.contact_name}
+                onChange={(e) => setForm((f) => ({ ...f, contact_name: e.target.value }))}
+                placeholder="Veli adı"
                 className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
               />
             </label>
@@ -846,7 +930,7 @@ export default function StudentPaymentTrackerPanel() {
         <AppModalFooter>
           <button
             type="button"
-            onClick={() => setFormOpen(false)}
+            onClick={closeForm}
             className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium dark:border-slate-600"
           >
             Vazgeç
@@ -855,10 +939,12 @@ export default function StudentPaymentTrackerPanel() {
             type="button"
             disabled={saving}
             onClick={() => void submitRecord()}
-            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 ${
+              isCreditCard ? 'bg-violet-600' : 'bg-emerald-600'
+            }`}
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Kaydet
+            {editingId ? 'Güncelle' : 'Kaydet'}
           </button>
         </AppModalFooter>
       </AppModal>
