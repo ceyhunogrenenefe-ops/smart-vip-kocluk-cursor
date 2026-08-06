@@ -2685,7 +2685,35 @@ export default async function handler(req, res) {
   if (req.method === 'DELETE') {
     const classId = String(req.query.class_id || '').trim();
     const sessionId = String(req.query.session_id || '').trim();
+    const sessionIdsRaw = String(req.query.session_ids || '').trim();
     const slotId = String(req.query.slot_id || '').trim();
+
+    if (sessionIdsRaw) {
+      const ids = [
+        ...new Set(
+          sessionIdsRaw
+            .split(',')
+            .map((x) => x.trim())
+            .filter(Boolean)
+        )
+      ].slice(0, 200);
+      if (!ids.length) return res.status(400).json({ error: 'session_ids_required' });
+      if (!isAdminRole(role)) {
+        const { data: sessions } = await supabaseAdmin
+          .from('class_sessions')
+          .select('id, teacher_id, class_id')
+          .in('id', ids);
+        for (const session of sessions || []) {
+          const details = await getClassDetails(session.class_id);
+          if (session.teacher_id !== actor.sub && !details.teacher_ids.includes(actor.sub)) {
+            return res.status(403).json({ error: 'forbidden' });
+          }
+        }
+      }
+      const { updated } = await cancelClassSessionsByIds(ids);
+      return res.status(200).json({ ok: true, cancelled_count: updated, requested: ids.length });
+    }
+
     if (sessionId) {
       const { data: session } = await supabaseAdmin
         .from('class_sessions')
