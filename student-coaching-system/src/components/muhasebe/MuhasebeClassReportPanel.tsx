@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Loader2, Plus } from 'lucide-react';
+import { ChevronDown, ChevronRight, Loader2, Pencil, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
@@ -8,11 +8,13 @@ import { formatTryAmount } from '../../lib/groupLessonPaymentUnits';
 import { todayYmdLocal } from '../../lib/taksitMuhasebe';
 import {
   createStudentPayment,
+  patchStudentPayment,
   PAYMENT_TYPE_LABELS,
   type PaymentType
 } from '../../lib/studentPaymentTrackerApi';
 import {
   fetchClassPaymentReport,
+  type ClassReportPayment,
   type ClassReportStudent
 } from '../../lib/muhasebeLedgerApi';
 import {
@@ -42,6 +44,18 @@ function typeAmount(row: ClassReportStudent, type: string) {
   return Number(row.totals.by_type?.[type] || 0);
 }
 
+const emptyForm = {
+  student_id: '',
+  student_name: '',
+  is_external: false,
+  payment_type: 'kitap' as PaymentType,
+  title: '',
+  amount_total: '',
+  amount_paid: '',
+  due_date: todayYmdLocal(),
+  notes: ''
+};
+
 export default function MuhasebeClassReportPanel() {
   const { effectiveUser } = useAuth();
   const { activeInstitutionId, students } = useApp();
@@ -62,18 +76,9 @@ export default function MuhasebeClassReportPanel() {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
   const [formOpen, setFormOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    student_id: '',
-    student_name: '',
-    is_external: false,
-    payment_type: 'kitap' as PaymentType,
-    title: '',
-    amount_total: '',
-    amount_paid: '',
-    due_date: todayYmdLocal(),
-    notes: ''
-  });
+  const [form, setForm] = useState(emptyForm);
 
   const reload = useCallback(async () => {
     if (!classLevel) return;
@@ -101,31 +106,43 @@ export default function MuhasebeClassReportPanel() {
     void reload();
   }, [reload]);
 
+  const closeForm = () => {
+    setFormOpen(false);
+    setEditingId(null);
+    setForm({ ...emptyForm, due_date: todayYmdLocal() });
+  };
+
   const openAddForStudent = (row: ClassReportStudent) => {
+    setEditingId(null);
     setForm({
+      ...emptyForm,
       student_id: row.student_id || '',
       student_name: row.student_name,
       is_external: !row.student_id || Boolean(row.is_external),
-      payment_type: 'kitap',
-      title: '',
-      amount_total: '',
-      amount_paid: '',
-      due_date: todayYmdLocal(),
-      notes: ''
+      due_date: todayYmdLocal()
     });
     setFormOpen(true);
   };
 
   const openAddBlank = () => {
+    setEditingId(null);
+    setForm({ ...emptyForm, due_date: todayYmdLocal() });
+    setFormOpen(true);
+  };
+
+  const openEditPayment = (student: ClassReportStudent, payment: ClassReportPayment) => {
+    setEditingId(payment.id);
     setForm({
-      student_id: '',
-      student_name: '',
-      is_external: false,
-      payment_type: 'kitap',
-      title: '',
-      amount_total: '',
-      amount_paid: '',
-      due_date: todayYmdLocal(),
+      student_id: student.student_id || '',
+      student_name: student.student_name,
+      is_external: !student.student_id || Boolean(student.is_external),
+      payment_type: (REPORT_TYPES.includes(payment.payment_type as PaymentType)
+        ? payment.payment_type
+        : 'diger') as PaymentType,
+      title: payment.title || '',
+      amount_total: String(payment.amount_total ?? ''),
+      amount_paid: String(payment.amount_paid ?? '0'),
+      due_date: payment.due_date ? String(payment.due_date).slice(0, 10) : todayYmdLocal(),
       notes: ''
     });
     setFormOpen(true);
@@ -144,9 +161,34 @@ export default function MuhasebeClassReportPanel() {
       toast.error('Geçerli tutar girin');
       return;
     }
-    const paid = form.amount_paid === '' ? total : Number(form.amount_paid);
+    const paid =
+      form.amount_paid === '' && !editingId ? total : Number(form.amount_paid === '' ? 0 : form.amount_paid);
     if (!Number.isFinite(paid) || paid < 0) {
       toast.error('Geçerli ödenen tutar girin');
+      return;
+    }
+
+    if (editingId) {
+      setSaving(true);
+      try {
+        await patchStudentPayment({
+          id: editingId,
+          payment_type: form.payment_type,
+          title: form.title || null,
+          amount_total: total,
+          amount_paid: paid,
+          due_date: form.due_date || null,
+          class_level: classLevel,
+          external_student_name: form.is_external ? form.student_name.trim() || null : undefined
+        });
+        toast.success('Ödeme kalemi güncellendi');
+        closeForm();
+        await reload();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Güncellenemedi');
+      } finally {
+        setSaving(false);
+      }
       return;
     }
 
@@ -176,7 +218,7 @@ export default function MuhasebeClassReportPanel() {
         notes: form.notes || null
       });
       toast.success('Ödeme kalemi eklendi');
-      setFormOpen(false);
+      closeForm();
       await reload();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Kayıt başarısız');
@@ -350,9 +392,12 @@ export default function MuhasebeClassReportPanel() {
                           {r.payments.length === 0 ? (
                             <p className="text-xs text-slate-500">Bu öğrencide ödeme kalemi yok.</p>
                           ) : (
-                            <ul className="space-y-1 text-xs text-slate-700 dark:text-slate-200">
+                            <ul className="space-y-1.5 text-xs text-slate-700 dark:text-slate-200">
                               {r.payments.map((p) => (
-                                <li key={p.id} className="flex flex-wrap gap-x-3 gap-y-0.5">
+                                <li
+                                  key={p.id}
+                                  className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-slate-200/80 bg-white px-2.5 py-1.5 dark:border-slate-700 dark:bg-slate-900"
+                                >
                                   <span className="font-semibold">
                                     {PAYMENT_TYPE_LABELS[p.payment_type as PaymentType] || p.payment_type}
                                   </span>
@@ -361,6 +406,15 @@ export default function MuhasebeClassReportPanel() {
                                     {formatTryAmount(p.amount_total)} ₺ · ödenen {formatTryAmount(p.amount_paid)} ₺
                                   </span>
                                   {p.due_date ? <span className="text-slate-400">vade {p.due_date}</span> : null}
+                                  <button
+                                    type="button"
+                                    title="Düzenle"
+                                    onClick={() => openEditPayment(r, p)}
+                                    className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-50 dark:text-indigo-300 dark:hover:bg-indigo-950/40"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                    Düzenle
+                                  </button>
                                 </li>
                               ))}
                             </ul>
@@ -376,56 +430,66 @@ export default function MuhasebeClassReportPanel() {
         </div>
       )}
 
-      <AppModal open={formOpen} onClose={() => setFormOpen(false)} panelClassName="max-w-lg">
+      <AppModal open={formOpen} onClose={closeForm} panelClassName="max-w-lg">
         <AppModalHeader>
           <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-            Ödeme kalemi ekle — {formatClassLevelLabel(classLevel as never)}
+            {editingId ? 'Ödeme kalemini düzenle' : 'Ödeme kalemi ekle'} —{' '}
+            {formatClassLevelLabel(classLevel as never)}
           </h3>
-          <button type="button" className="text-sm text-slate-500" onClick={() => setFormOpen(false)}>
+          <button type="button" className="text-sm text-slate-500" onClick={closeForm}>
             Kapat
           </button>
         </AppModalHeader>
         <AppModalBody>
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="text-xs text-slate-600 sm:col-span-2">
-              Öğrenci
-              <select
-                value={form.is_external ? '__external__' : form.student_id}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v === '__external__') {
-                    setForm((f) => ({ ...f, is_external: true, student_id: '', student_name: f.student_name }));
-                  } else {
-                    const st = classStudents.find((s) => s.id === v);
-                    setForm((f) => ({
-                      ...f,
-                      is_external: false,
-                      student_id: v,
-                      student_name: st?.name || ''
-                    }));
-                  }
-                }}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
-              >
-                <option value="">Seçin</option>
-                {classStudents.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-                <option value="__external__">Dışarıdan / listede yok</option>
-              </select>
-            </label>
-            {form.is_external ? (
-              <label className="text-xs text-slate-600 sm:col-span-2">
-                Ad soyad *
-                <input
-                  value={form.student_name}
-                  onChange={(e) => setForm((f) => ({ ...f, student_name: e.target.value }))}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
-                />
-              </label>
-            ) : null}
+            {editingId ? (
+              <div className="text-xs text-slate-600 sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-600 dark:bg-slate-800/60">
+                <span className="text-slate-500">Öğrenci</span>
+                <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-white">{form.student_name}</p>
+              </div>
+            ) : (
+              <>
+                <label className="text-xs text-slate-600 sm:col-span-2">
+                  Öğrenci
+                  <select
+                    value={form.is_external ? '__external__' : form.student_id}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === '__external__') {
+                        setForm((f) => ({ ...f, is_external: true, student_id: '', student_name: f.student_name }));
+                      } else {
+                        const st = classStudents.find((s) => s.id === v);
+                        setForm((f) => ({
+                          ...f,
+                          is_external: false,
+                          student_id: v,
+                          student_name: st?.name || ''
+                        }));
+                      }
+                    }}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+                  >
+                    <option value="">Seçin</option>
+                    {classStudents.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                    <option value="__external__">Dışarıdan / listede yok</option>
+                  </select>
+                </label>
+                {form.is_external ? (
+                  <label className="text-xs text-slate-600 sm:col-span-2">
+                    Ad soyad *
+                    <input
+                      value={form.student_name}
+                      onChange={(e) => setForm((f) => ({ ...f, student_name: e.target.value }))}
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+                    />
+                  </label>
+                ) : null}
+              </>
+            )}
             <label className="text-xs text-slate-600">
               Kalem türü
               <select
@@ -469,13 +533,13 @@ export default function MuhasebeClassReportPanel() {
               />
             </label>
             <label className="text-xs text-slate-600">
-              Ödenen (₺) — boşsa tutarın tamamı
+              Ödenen (₺){editingId ? '' : ' — boşsa tutarın tamamı'}
               <input
                 type="number"
                 min={0}
                 value={form.amount_paid}
                 onChange={(e) => setForm((f) => ({ ...f, amount_paid: e.target.value }))}
-                placeholder="Tamamı için boş bırakın"
+                placeholder={editingId ? undefined : 'Tamamı için boş bırakın'}
                 className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
               />
             </label>
@@ -484,7 +548,7 @@ export default function MuhasebeClassReportPanel() {
         <AppModalFooter>
           <button
             type="button"
-            onClick={() => setFormOpen(false)}
+            onClick={closeForm}
             className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium dark:border-slate-600"
           >
             Vazgeç
@@ -496,7 +560,7 @@ export default function MuhasebeClassReportPanel() {
             className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Kaydet
+            {editingId ? 'Güncelle' : 'Kaydet'}
           </button>
         </AppModalFooter>
       </AppModal>
