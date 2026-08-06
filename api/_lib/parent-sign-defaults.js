@@ -113,10 +113,24 @@ export function institutionLegalSectionsHtml(legal, sozlesme_turu) {
     if (!body) return;
     parts.push(`<div class="legal-block"><h2>${esc(title)}</h2>${body}</div>`);
   };
-  if (tur === 'satis_sozlesmesi') push('Satış sözleşmesi', legal.satis_sozlesmesi);
-  if (tur === 'kullanici_sozlesmesi') push('Kullanıcı sözleşmesi', legal.kullanici_sozlesmesi);
+  const satisPlain = String(legal.satis_sozlesmesi || '').trim();
+  const kullaniciPlain = String(legal.kullanici_sozlesmesi || '').trim();
+  const satisFallback =
+    'Mesafeli satış sözleşmesinin güncel tam metni: https://onlinevipdershane.com/satis.html';
+  const kullaniciFallback =
+    'Kullanıcı sözleşmesinin güncel tam metni: https://onlinevipdershane.com/kullanici.html';
+
+  if (tur === 'satis_sozlesmesi') {
+    push('Satış sözleşmesi', satisPlain || satisFallback);
+    // Veli bilgilendirmesi için kullanıcı sözleşmesi linkini de ekle
+    push('Kullanıcı sözleşmesi', kullaniciPlain || kullaniciFallback);
+  }
+  if (tur === 'kullanici_sozlesmesi') {
+    push('Kullanıcı sözleşmesi', kullaniciPlain || kullaniciFallback);
+    push('Satış sözleşmesi', satisPlain || satisFallback);
+  }
   if (tur === 'diger') {
-    push('Sözleşme metni', legal.satis_sozlesmesi || legal.kullanici_sozlesmesi);
+    push('Sözleşme metni', satisPlain || kullaniciPlain || `${satisFallback}\n${kullaniciFallback}`);
   }
   push('Gizlilik politikası', legal.gizlilik_politikasi);
   push('KVKK aydınlatma metni', legal.kvkk_aydinlatma);

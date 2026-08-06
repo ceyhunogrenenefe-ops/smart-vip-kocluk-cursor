@@ -541,7 +541,7 @@ export default async function handler(req, res) {
       const needs_student_form = String(j.phase || '') === 'needs_form';
       const awaiting_admin_price = String(j.phase || '') === 'awaiting_admin_price';
       const legalRow = row.institution_id ? await loadInstitutionLegal(row.institution_id) : null;
-      const { kvkk_doc_href, satis_doc_href } = resolveLegalDocHrefs(legalRow);
+      const { kvkk_doc_href, satis_doc_href, kullanici_doc_href } = resolveLegalDocHrefs(legalRow);
       let program_icerik_href = null;
       const presetIdVeli = String(row.preset_id || '').trim();
       if (presetIdVeli) {
@@ -571,6 +571,7 @@ export default async function handler(req, res) {
           awaiting_admin_price,
           kvkk_doc_href,
           satis_doc_href,
+          kullanici_doc_href,
           program_icerik_href,
           registration_phase: String(j.phase || '') || null,
           registration_hint

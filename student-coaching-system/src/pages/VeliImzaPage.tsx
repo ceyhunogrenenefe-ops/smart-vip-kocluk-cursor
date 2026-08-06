@@ -11,8 +11,10 @@ import {
 import { isMaarifVeliProgram } from '../lib/veliKayitClassLevel';
 import { formatUcretWithCurrency } from '../lib/parentSignApi';
 import {
+  VELI_KAYIT_KULLANICI_DOC_HREF,
   VELI_KAYIT_KVKK_DOC_HREF,
   VELI_KAYIT_SATIS_ONBILGI_DOC_HREF,
+  resolveKullaniciDocUrl,
   resolveKvkkDocUrl,
   resolveSatisDocUrl
 } from '../lib/veliKayitLegalLinks';
@@ -89,6 +91,7 @@ export default function VeliImzaPage() {
   const [awaitingAdminPrice, setAwaitingAdminPrice] = useState(false);
   const [kvkkDocHref, setKvkkDocHref] = useState(VELI_KAYIT_KVKK_DOC_HREF);
   const [satisDocHref, setSatisDocHref] = useState(VELI_KAYIT_SATIS_ONBILGI_DOC_HREF);
+  const [kullaniciDocHref, setKullaniciDocHref] = useState(VELI_KAYIT_KULLANICI_DOC_HREF);
   const [programIcerikHref, setProgramIcerikHref] = useState<string | null>(null);
 
   useEffect(() => {
@@ -115,6 +118,7 @@ export default function VeliImzaPage() {
     setRegHint(d.registration_hint || null);
     setKvkkDocHref(resolveKvkkDocUrl(d.kvkk_doc_href || VELI_KAYIT_KVKK_DOC_HREF));
     setSatisDocHref(resolveSatisDocUrl(d.satis_doc_href || VELI_KAYIT_SATIS_ONBILGI_DOC_HREF));
+    setKullaniciDocHref(resolveKullaniciDocUrl(d.kullanici_doc_href || VELI_KAYIT_KULLANICI_DOC_HREF));
     const pic = d.program_icerik_href != null ? String(d.program_icerik_href).trim() : '';
     setProgramIcerikHref(pic || null);
     return d;
@@ -714,10 +718,21 @@ export default function VeliImzaPage() {
                       className="font-semibold text-blue-700 underline decoration-blue-400/70 underline-offset-2 hover:text-blue-900"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      Satış sözleşmesi ve ön bilgilendirme
+                      Satış sözleşmesi
                     </a>
                     {' '}
-                    metnini okudum; kayıt öncesi bilgilendirme ve sözleşme sürecine onay veriyorum.
+                    ve{' '}
+                    <a
+                      href={kullaniciDocHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold text-blue-700 underline decoration-blue-400/70 underline-offset-2 hover:text-blue-900"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      kullanıcı sözleşmesi
+                    </a>
+                    {' '}
+                    metinlerini okudum; kayıt öncesi bilgilendirme ve sözleşme sürecine onay veriyorum.
                   </span>
                 </label>
                 {err ? <p className="text-sm text-red-600">{err}</p> : null}
