@@ -1,6 +1,14 @@
 import { apiFetch } from './session';
 
-export type PaymentType = 'yazili' | 'kitap' | 'kurs' | 'ozel_ders' | 'dis_gelir' | 'diger';
+export type PaymentType =
+  | 'yazili'
+  | 'kitap'
+  | 'kurs'
+  | 'ozel_ders'
+  | 'donem_kayit'
+  | 'yaz_kayit'
+  | 'dis_gelir'
+  | 'diger';
 export type PaymentStatus = 'unpaid' | 'partial' | 'paid' | 'cancelled';
 export type PaymentAccountType = 'bank' | 'credit_card';
 
@@ -76,6 +84,8 @@ export const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
   kitap: 'Kitap ödemesi',
   kurs: 'Kurs / kayıt',
   ozel_ders: 'Özel ders',
+  donem_kayit: 'Dönem kaydı',
+  yaz_kayit: 'Yaz kaydı',
   dis_gelir: 'Dışarıdan gelir',
   diger: 'Diğer'
 };

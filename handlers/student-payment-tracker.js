@@ -10,7 +10,16 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
 
-const PAYMENT_TYPES = new Set(['yazili', 'kitap', 'kurs', 'ozel_ders', 'dis_gelir', 'diger']);
+const PAYMENT_TYPES = new Set([
+  'yazili',
+  'kitap',
+  'kurs',
+  'ozel_ders',
+  'donem_kayit',
+  'yaz_kayit',
+  'dis_gelir',
+  'diger'
+]);
 const STATUSES = new Set(['unpaid', 'partial', 'paid', 'cancelled']);
 const ACCOUNT_TYPES = new Set(['bank', 'credit_card']);
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
