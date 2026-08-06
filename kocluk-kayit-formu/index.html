@@ -120,7 +120,7 @@
 
         <div class="legal">
           <label id="f-kvkk"><input type="checkbox" id="kvkk"> <span><a id="kvkkLink" href="#" target="_blank" rel="noopener">6698 sayılı KVKK bilgilendirmesi</a> metnini okudum, onaylıyorum. <span class="req">*</span></span></label>
-          <label id="f-satis"><input type="checkbox" id="satis"> <span><a id="satisLink" href="#" target="_blank" rel="noopener">Satış / ön bilgilendirme</a> metnini okudum, onaylıyorum. <span class="req">*</span></span></label>
+          <label id="f-satis"><input type="checkbox" id="satis"> <span><a id="satisLink" href="https://onlinevipdershane.com/satis.html" target="_blank" rel="noopener">Satış sözleşmesi</a> ve <a id="kullaniciLink" href="https://onlinevipdershane.com/kullanici.html" target="_blank" rel="noopener">kullanıcı sözleşmesi</a> metinlerini okudum, onaylıyorum. <span class="req">*</span></span></label>
         </div>
 
         <button type="submit" class="submit">Kaydı Gönder</button>
@@ -164,7 +164,8 @@
   const MAX_PROGRAMS = 2;
 
   document.getElementById('kvkkLink').href = APP_BASE + '/veli-kayit-metin/kvkk';
-  document.getElementById('satisLink').href = APP_BASE + '/veli-kayit-metin/satis-onbilgilendirme';
+  document.getElementById('satisLink').href = 'https://onlinevipdershane.com/satis.html';
+  document.getElementById('kullaniciLink').href = 'https://onlinevipdershane.com/kullanici.html';
 
   const progList = document.getElementById('progList');
   PROGRAMS.forEach((name) => {

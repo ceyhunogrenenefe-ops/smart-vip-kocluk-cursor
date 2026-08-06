@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { CLASS_LEVELS } from '../types';
 import { VELI_KAYIT_PROGRAM_SECENEKLERI } from '../lib/veliKayitConstants';
 import {
+  VELI_KAYIT_KULLANICI_DOC_HREF,
   VELI_KAYIT_KVKK_DOC_HREF,
   VELI_KAYIT_SATIS_ONBILGI_DOC_HREF,
   absoluteVeliLegalDocUrl,
@@ -1267,7 +1268,26 @@ export default function ParentSignFlowPage() {
           {legalSectionOpen ? (
           <div className="px-5 pb-5 border-t border-violet-100 dark:border-violet-900/50">
           <p className="text-xs text-slate-500 mb-4 mt-4">
-            Harici PDF veya web sayfası için tam adres yapıştırın. Boş bırakırsanız site içi varsayılan sayfa kullanılır.
+            Harici PDF veya web sayfası için tam adres yapıştırın. Boş bırakırsanız Online VIP Dershane resmi
+            satış / kullanıcı sözleşmesi sayfaları kullanılır (
+            <a
+              href={VELI_KAYIT_SATIS_ONBILGI_DOC_HREF}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline"
+            >
+              satış
+            </a>
+            {' · '}
+            <a
+              href={VELI_KAYIT_KULLANICI_DOC_HREF}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline"
+            >
+              kullanıcı
+            </a>
+            ). Eski /sayfa/… linkleri otomatik düzeltilir.
           </p>
           {!effectiveInstitutionId ? (
             <p className="text-sm text-slate-500">Önce kurum seçin.</p>
@@ -1288,7 +1308,7 @@ export default function ParentSignFlowPage() {
                 </p>
               </div>
               <div>
-                <label className="text-xs text-slate-500">Satış sözleşmesi / ön bilgilendirme linki</label>
+                <label className="text-xs text-slate-500">Satış sözleşmesi linki</label>
                 <input
                   className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono dark:bg-slate-950 dark:border-slate-600"
                   value={legalSatisUrl}
@@ -1297,6 +1317,17 @@ export default function ParentSignFlowPage() {
                 />
                 <p className="mt-0.5 text-[10px] text-slate-400">
                   Velide açılacak: {satisDocHref}
+                </p>
+                <p className="mt-1 text-[10px] text-slate-500">
+                  Kullanıcı sözleşmesi (veli formunda otomatik):{' '}
+                  <a
+                    href={VELI_KAYIT_KULLANICI_DOC_HREF}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline"
+                  >
+                    {VELI_KAYIT_KULLANICI_DOC_HREF}
+                  </a>
                 </p>
               </div>
               <div className="flex flex-wrap gap-2 pt-1">

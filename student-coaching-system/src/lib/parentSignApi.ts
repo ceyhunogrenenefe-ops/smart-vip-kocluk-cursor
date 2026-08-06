@@ -447,6 +447,7 @@ export type VeliImzaPayload = {
   registration_hint?: VeliImzaRegistrationHint;
   kvkk_doc_href?: string;
   satis_doc_href?: string;
+  kullanici_doc_href?: string;
   program_icerik_href?: string | null;
 };
 
