@@ -35,7 +35,7 @@ import {
   type PaymentType,
   type StudentPaymentRecord
 } from '../../lib/studentPaymentTrackerApi';
-import { classifyTaksit, formatTrShortDate, type TaksitDurum } from '../../lib/taksitMuhasebe';
+import { classifyTaksit, formatTrShortDate, todayYmdLocal, type TaksitDurum } from '../../lib/taksitMuhasebe';
 import {
   AppModal,
   AppModalBody,
@@ -95,6 +95,10 @@ const emptyForm = {
   contact_name: '',
   notes: ''
 };
+
+function newPaymentForm() {
+  return { ...emptyForm, due_date: todayYmdLocal() };
+}
 
 export default function StudentPaymentTrackerPanel() {
   const { effectiveUser } = useAuth();
@@ -212,7 +216,7 @@ export default function StudentPaymentTrackerPanel() {
   const openCreate = () => {
     setEditingId(null);
     setEditingRow(null);
-    setForm({ ...emptyForm, payment_account_id: '' });
+    setForm({ ...newPaymentForm(), payment_account_id: '' });
     setFormOpen(true);
   };
 
@@ -289,7 +293,7 @@ export default function StudentPaymentTrackerPanel() {
           title: form.title || null,
           amount_total: Number(form.amount_total || 0),
           amount_paid: Number(form.amount_paid || 0),
-          due_date: form.due_date || null,
+          due_date: form.due_date || todayYmdLocal(),
           installment_count: installmentCount,
           contact_phone: form.contact_phone || null,
           contact_name: form.contact_name || null,
@@ -505,16 +509,7 @@ export default function StudentPaymentTrackerPanel() {
 
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 rounded-xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-800/40">
         <label className="text-xs text-slate-500">
-          Ara
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Öğrenci, koç, hesap, telefon…"
-            className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
-          />
-        </label>
-        <label className="text-xs text-slate-500">
-          Vade başlangıç
+          Tarih başlangıç
           <input
             type="date"
             value={dueFrom}
@@ -523,11 +518,20 @@ export default function StudentPaymentTrackerPanel() {
           />
         </label>
         <label className="text-xs text-slate-500">
-          Vade bitiş
+          Tarih bitiş
           <input
             type="date"
             value={dueTo}
             onChange={(e) => setDueTo(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+          />
+        </label>
+        <label className="text-xs text-slate-500">
+          Ara
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Öğrenci, koç, hesap, telefon…"
             className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
           />
         </label>
@@ -643,12 +647,12 @@ export default function StudentPaymentTrackerPanel() {
           <table className="min-w-full text-left text-sm">
             <thead className="border-b border-slate-100 bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:bg-slate-800">
               <tr>
+                <th className="px-3 py-2.5">Tarih</th>
                 <th className="px-3 py-2.5 w-10">Ödendi</th>
                 <th className="px-3 py-2.5">Öğrenci</th>
                 <th className="px-3 py-2.5">Sınıf / Koç</th>
                 <th className="px-3 py-2.5">Tür</th>
                 <th className="px-3 py-2.5">{isCreditCard ? 'Kart' : 'Hesap'}</th>
-                <th className="px-3 py-2.5">Vade</th>
                 <th className="px-3 py-2.5 text-right">Tutar</th>
                 <th className="px-3 py-2.5 text-right">Ödenen</th>
                 <th className="px-3 py-2.5 text-right">Kalan</th>
@@ -662,6 +666,21 @@ export default function StudentPaymentTrackerPanel() {
                 const vadeEtiket = vadeDurumEtiket(vadeDurum);
                 return (
                 <tr key={r.id} className="border-b border-slate-50 last:border-0 dark:border-slate-800">
+                  <td className="px-3 py-2.5 whitespace-nowrap">
+                    {r.due_date ? (
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-1 text-xs font-medium text-slate-800 dark:text-slate-200">
+                          <CalendarDays className="h-3 w-3 text-slate-400" />
+                          {formatTrShortDate(String(r.due_date).slice(0, 10))}
+                        </div>
+                        <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${vadeEtiket.cls}`}>
+                          {vadeEtiket.text}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-400">—</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2.5">
                     <input
                       type="checkbox"
@@ -692,21 +711,6 @@ export default function StudentPaymentTrackerPanel() {
                   </td>
                   <td className="px-3 py-2.5 text-xs text-slate-600 dark:text-slate-400">
                     {r.account_label || '—'}
-                  </td>
-                  <td className="px-3 py-2.5">
-                    {r.due_date ? (
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-1 text-xs text-slate-700 dark:text-slate-300">
-                          <CalendarDays className="h-3 w-3 text-slate-400" />
-                          {formatTrShortDate(String(r.due_date).slice(0, 10))}
-                        </div>
-                        <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${vadeEtiket.cls}`}>
-                          {vadeEtiket.text}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="text-xs text-slate-400">—</span>
-                    )}
                   </td>
                   <td className="px-3 py-2.5 text-right tabular-nums font-medium">{formatTry(r.amount_total)}</td>
                   <td className="px-3 py-2.5 text-right">
@@ -788,6 +792,15 @@ export default function StudentPaymentTrackerPanel() {
         </AppModalHeader>
         <AppModalBody>
           <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-xs text-slate-600 sm:col-span-2">
+              Tarih{!editingId && Number(form.installment_count) > 1 ? ' — 1. taksit vadesi' : ''}
+              <input
+                type="date"
+                value={form.due_date}
+                onChange={(e) => setForm((f) => ({ ...f, due_date: e.target.value }))}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+              />
+            </label>
             {editingRow?.installment_no && editingRow?.installment_count ? (
               <p className="text-xs text-indigo-700 dark:text-indigo-300 sm:col-span-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 dark:border-indigo-900 dark:bg-indigo-950/30">
                 Taksit {editingRow.installment_no}/{editingRow.installment_count} — yalnızca bu satır güncellenir.
@@ -886,15 +899,6 @@ export default function StudentPaymentTrackerPanel() {
                 min={0}
                 value={form.amount_paid}
                 onChange={(e) => setForm((f) => ({ ...f, amount_paid: e.target.value }))}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
-              />
-            </label>
-            <label className="text-xs text-slate-600">
-              {editingId ? 'Vade' : 'İlk vade'}
-              <input
-                type="date"
-                value={form.due_date}
-                onChange={(e) => setForm((f) => ({ ...f, due_date: e.target.value }))}
                 className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
               />
             </label>
