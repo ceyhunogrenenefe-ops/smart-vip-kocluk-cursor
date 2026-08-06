@@ -1,6 +1,6 @@
 import { apiFetch } from './session';
 
-export type PaymentType = 'yazili' | 'kitap' | 'kurs' | 'ozel_ders' | 'diger';
+export type PaymentType = 'yazili' | 'kitap' | 'kurs' | 'ozel_ders' | 'dis_gelir' | 'diger';
 export type PaymentStatus = 'unpaid' | 'partial' | 'paid' | 'cancelled';
 export type PaymentAccountType = 'bank' | 'credit_card';
 
@@ -20,7 +20,9 @@ export type PaymentAccount = {
 export type StudentPaymentRecord = {
   id: string;
   institution_id?: string | null;
-  student_id: string;
+  student_id?: string | null;
+  external_student_name?: string | null;
+  is_external?: boolean;
   coach_id?: string | null;
   class_level?: string | null;
   payment_type: PaymentType;
@@ -74,6 +76,7 @@ export const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
   kitap: 'Kitap ödemesi',
   kurs: 'Kurs / kayıt',
   ozel_ders: 'Özel ders',
+  dis_gelir: 'Dışarıdan gelir',
   diger: 'Diğer'
 };
 
@@ -188,7 +191,7 @@ export function buildPaymentWhatsAppMessage(row: StudentPaymentRecord): string {
     `Merhaba${row.contact_name ? ` ${row.contact_name}` : ''},`,
     '',
     `*Online VIP Dershane* — ödeme hatırlatması`,
-    `Öğrenci: ${row.student_name || row.student_id}`,
+    `Öğrenci: ${row.student_name || row.external_student_name || row.student_id || '—'}`,
     `Tür: ${typeLabel}${row.title ? ` (${row.title})` : ''}`,
     `Toplam: ${Number(row.amount_total).toLocaleString('tr-TR')} ₺`,
     `Ödenen: ${Number(row.amount_paid).toLocaleString('tr-TR')} ₺`,

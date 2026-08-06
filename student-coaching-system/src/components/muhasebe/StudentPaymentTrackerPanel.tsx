@@ -83,7 +83,9 @@ function rowVadeDurum(r: StudentPaymentRecord): TaksitDurum {
 }
 
 const emptyForm = {
+  student_mode: 'system' as 'system' | 'external',
   student_id: '',
+  external_student_name: '',
   payment_type: 'yazili' as PaymentType,
   payment_account_id: '',
   title: '',
@@ -186,7 +188,7 @@ export default function StudentPaymentTrackerPanel() {
       ]);
       if (rec.hint === 'student_payment_tracker_sql_missing' || acc.hint === 'student_payment_tracker_sql_missing') {
         setSchemaHint(
-          'Supabase SQL Editor’da `student-coaching-system/sql/2026-08-05-student-payment-tracker.sql` ve `2026-08-06-student-payment-installments.sql` dosyalarını çalıştırın.'
+          'Supabase SQL Editor’da `2026-08-05-student-payment-tracker.sql`, `2026-08-06-student-payment-installments.sql` ve `2026-08-06-student-payment-external.sql` dosyalarını çalıştırın.'
         );
       }
       setRows(rec.data);
@@ -244,10 +246,13 @@ export default function StudentPaymentTrackerPanel() {
   };
 
   const openEdit = (row: StudentPaymentRecord) => {
+    const isExt = Boolean(row.is_external) || !row.student_id || Boolean(row.external_student_name);
     setEditingId(row.id);
     setEditingRow(row);
     setForm({
-      student_id: row.student_id,
+      student_mode: isExt ? 'external' : 'system',
+      student_id: row.student_id || '',
+      external_student_name: row.external_student_name || row.student_name || '',
       payment_type: row.payment_type,
       payment_account_id: row.payment_account_id || '',
       title: row.title || '',
@@ -279,16 +284,34 @@ export default function StudentPaymentTrackerPanel() {
     const st = scopedStudents.find((s) => s.id === studentId);
     setForm((f) => ({
       ...f,
+      student_mode: 'system',
       student_id: studentId,
+      external_student_name: '',
       contact_phone: st?.parentPhone || st?.phone || f.contact_phone,
       contact_name: st?.parentName || f.contact_name
     }));
   };
 
+  const setStudentMode = (mode: 'system' | 'external') => {
+    setForm((f) => ({
+      ...f,
+      student_mode: mode,
+      student_id: mode === 'external' ? '' : f.student_id,
+      external_student_name: mode === 'system' ? '' : f.external_student_name,
+      payment_type: mode === 'external' && f.payment_type === 'yazili' ? 'dis_gelir' : f.payment_type
+    }));
+  };
+
   const submitRecord = async () => {
-    if (!editingId && !form.student_id) {
-      toast.error('Öğrenci seçin');
-      return;
+    if (!editingId) {
+      if (form.student_mode === 'system' && !form.student_id) {
+        toast.error('Öğrenci seçin');
+        return;
+      }
+      if (form.student_mode === 'external' && !form.external_student_name.trim()) {
+        toast.error('Öğrenci / kişi adını yazın');
+        return;
+      }
     }
     setSaving(true);
     try {
@@ -303,13 +326,20 @@ export default function StudentPaymentTrackerPanel() {
           due_date: form.due_date || null,
           contact_phone: form.contact_phone || null,
           contact_name: form.contact_name || null,
-          notes: form.notes || null
+          notes: form.notes || null,
+          external_student_name:
+            form.student_mode === 'external' || editingRow?.is_external
+              ? form.external_student_name.trim() || null
+              : undefined
         });
         toast.success('Ödeme kaydı güncellendi');
       } else {
         const installmentCount = Math.max(1, Math.min(48, Math.round(Number(form.installment_count) || 1)));
+        const isExternal = form.student_mode === 'external';
         await createStudentPayment({
-          student_id: form.student_id,
+          is_external: isExternal,
+          student_id: isExternal ? null : form.student_id,
+          external_student_name: isExternal ? form.external_student_name.trim() : null,
           institution_id: institutionId || null,
           payment_type: form.payment_type,
           payment_account_id: form.payment_account_id || null,
@@ -322,7 +352,15 @@ export default function StudentPaymentTrackerPanel() {
           contact_name: form.contact_name || null,
           notes: form.notes || null
         });
-        toast.success(installmentCount > 1 ? `${installmentCount} taksit oluşturuldu` : 'Ödeme kaydı eklendi');
+        toast.success(
+          isExternal
+            ? installmentCount > 1
+              ? `Dışarıdan gelir: ${installmentCount} taksit oluşturuldu`
+              : 'Dışarıdan gelir kaydı eklendi'
+            : installmentCount > 1
+              ? `${installmentCount} taksit oluşturuldu`
+              : 'Ödeme kaydı eklendi'
+        );
       }
       closeForm();
       await reload();
@@ -430,7 +468,7 @@ export default function StudentPaymentTrackerPanel() {
             Öğrenci ödeme takip
           </h2>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-0.5">
-            Banka hesabı ve kredi kartı ödemeleri ayrı takip edilir · taksit · tarih aralığı · WhatsApp
+          Yazılı, kitap, kurs · banka / kredi kartı · dışarıdan gelir · taksit · tarih aralığı · WhatsApp
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -757,8 +795,15 @@ export default function StudentPaymentTrackerPanel() {
                   </td>
                   <td className="px-3 py-2.5">
                     <div className="font-medium text-slate-900 dark:text-white">{r.student_name}</div>
-                    <div className="text-[11px] text-slate-500">
-                      {r.contact_phone_resolved || r.contact_phone || '—'}
+                    <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                      {r.is_external || !r.student_id ? (
+                        <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-900/40 dark:text-amber-100">
+                          Dışarıdan
+                        </span>
+                      ) : null}
+                      <span className="text-[11px] text-slate-500">
+                        {r.contact_phone_resolved || r.contact_phone || '—'}
+                      </span>
                     </div>
                   </td>
                   <td className="px-3 py-2.5 text-slate-700 dark:text-slate-300">
@@ -873,28 +918,79 @@ export default function StudentPaymentTrackerPanel() {
             ) : null}
             {editingId ? (
               <div className="text-xs text-slate-600 sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-600 dark:bg-slate-800/60">
-                <span className="text-slate-500">Öğrenci</span>
-                <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-white">
-                  {editingRow?.student_name || form.student_id}
-                </p>
+                <span className="text-slate-500">
+                  {editingRow?.is_external || !editingRow?.student_id ? 'Dışarıdan kişi' : 'Öğrenci'}
+                </span>
+                {editingRow?.is_external || !editingRow?.student_id ? (
+                  <input
+                    value={form.external_student_name}
+                    onChange={(e) => setForm((f) => ({ ...f, external_student_name: e.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm font-medium dark:border-slate-600 dark:bg-slate-900"
+                  />
+                ) : (
+                  <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-white">
+                    {editingRow?.student_name || form.student_id}
+                  </p>
+                )}
               </div>
             ) : (
-              <label className="text-xs text-slate-600 sm:col-span-2">
-                Öğrenci
-                <select
-                  value={form.student_id}
-                  onChange={(e) => onPickStudent(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
-                >
-                  <option value="">Seçin</option>
-                  {scopedStudents.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                      {s.classLevel != null ? ` · ${formatClassLevelLabel(s.classLevel)}` : ''}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="sm:col-span-2 space-y-2">
+                <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-600 dark:bg-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setStudentMode('system')}
+                    className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
+                      form.student_mode === 'system'
+                        ? 'bg-white text-emerald-800 shadow-sm dark:bg-slate-900 dark:text-emerald-200'
+                        : 'text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    Sistem öğrencisi
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStudentMode('external')}
+                    className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
+                      form.student_mode === 'external'
+                        ? 'bg-white text-amber-900 shadow-sm dark:bg-slate-900 dark:text-amber-200'
+                        : 'text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    Dışarıdan / sistemde yok
+                  </button>
+                </div>
+                {form.student_mode === 'system' ? (
+                  <label className="block text-xs text-slate-600">
+                    Öğrenci
+                    <select
+                      value={form.student_id}
+                      onChange={(e) => onPickStudent(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+                    >
+                      <option value="">Seçin</option>
+                      {scopedStudents.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                          {s.classLevel != null ? ` · ${formatClassLevelLabel(s.classLevel)}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <label className="block text-xs text-slate-600">
+                    Ad soyad *
+                    <input
+                      value={form.external_student_name}
+                      onChange={(e) => setForm((f) => ({ ...f, external_student_name: e.target.value }))}
+                      placeholder="Sistemde olmayan öğrenci / kişi adı"
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+                    />
+                    <span className="mt-1 block text-[11px] text-slate-500">
+                      Dışarıdan gelir — sisteme kayıtlı öğrenci seçmeden hesap ödemesi eklenir.
+                    </span>
+                  </label>
+                )}
+              </div>
             )}
             <label className="text-xs text-slate-600">
               Ödeme türü

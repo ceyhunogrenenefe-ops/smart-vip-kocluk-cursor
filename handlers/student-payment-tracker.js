@@ -10,7 +10,7 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
 
-const PAYMENT_TYPES = new Set(['yazili', 'kitap', 'kurs', 'ozel_ders', 'diger']);
+const PAYMENT_TYPES = new Set(['yazili', 'kitap', 'kurs', 'ozel_ders', 'dis_gelir', 'diger']);
 const STATUSES = new Set(['unpaid', 'partial', 'paid', 'cancelled']);
 const ACCOUNT_TYPES = new Set(['bank', 'credit_card']);
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
@@ -128,13 +128,15 @@ async function enrichRecords(rows) {
       amount_total: Number(r.amount_total) || 0,
       amount_paid: Number(r.amount_paid) || 0,
       remaining,
-      student_name: st?.name || r.student_id,
+      student_name: st?.name || r.external_student_name || r.student_id || 'Dış kayıt',
       student_email: st?.email || null,
       student_phone: st?.phone || null,
       parent_phone: st?.parent_phone || null,
       parent_name: st?.parent_name || null,
       class_level: r.class_level || st?.class_level || null,
       coach_name: ch?.name || null,
+      is_external: !r.student_id || Boolean(r.external_student_name),
+      external_student_name: r.external_student_name || null,
       account_label: acc?.label || null,
       account_bank: acc?.bank_name || null,
       account_holder: acc?.account_holder || null,
@@ -259,6 +261,7 @@ async function handleGetRecords(req, res, actor, roleSet) {
     enriched = enriched.filter((r) => {
       const blob = [
         r.student_name,
+        r.external_student_name,
         r.coach_name,
         r.account_label,
         r.title,
@@ -328,22 +331,31 @@ async function handleCreateAccount(req, res, actor, roleSet) {
 async function handleCreateRecord(req, res, actor, roleSet) {
   const body = req.body || {};
   const studentId = String(body.student_id || '').trim();
-  if (!studentId) return jsonError(res, 400, 'student_id_required');
+  const externalName = String(body.external_student_name || body.student_name || '').trim();
+  const isExternal = Boolean(body.is_external) || (!studentId && Boolean(externalName));
 
-  const paymentType = String(body.payment_type || 'diger').trim();
+  if (!isExternal && !studentId) return jsonError(res, 400, 'student_id_required');
+  if (isExternal && !externalName) return jsonError(res, 400, 'external_student_name_required');
+
+  const paymentType = String(body.payment_type || (isExternal ? 'dis_gelir' : 'diger')).trim();
   if (!PAYMENT_TYPES.has(paymentType)) return jsonError(res, 400, 'invalid_payment_type');
 
-  const { data: student, error: se } = await supabaseAdmin
-    .from('students')
-    .select('id, name, phone, parent_phone, parent_name, class_level, coach_id, institution_id')
-    .eq('id', studentId)
-    .maybeSingle();
-  if (se) throw se;
-  if (!student) return jsonError(res, 404, 'student_not_found');
+  let student = null;
+  if (!isExternal) {
+    const { data, error: se } = await supabaseAdmin
+      .from('students')
+      .select('id, name, phone, parent_phone, parent_name, class_level, coach_id, institution_id')
+      .eq('id', studentId)
+      .maybeSingle();
+    if (se) throw se;
+    if (!data) return jsonError(res, 404, 'student_not_found');
+    student = data;
+  }
 
-  let institutionId = body.institution_id || student.institution_id || actor.institution_id || null;
+  let institutionId =
+    body.institution_id || student?.institution_id || actor.institution_id || null;
   if (roleSetHasAdmin(roleSet) && !roleSetHasSuperAdmin(roleSet)) {
-    if (!hasInstitutionAccess(actor, student.institution_id)) {
+    if (student && !hasInstitutionAccess(actor, student.institution_id)) {
       return jsonError(res, 403, 'forbidden');
     }
     institutionId = actor.institution_id;
@@ -361,12 +373,13 @@ async function handleCreateRecord(req, res, actor, roleSet) {
 
   const baseRow = {
     institution_id: institutionId,
-    student_id: studentId,
-    coach_id: body.coach_id != null ? String(body.coach_id).trim() || null : student.coach_id || null,
+    student_id: isExternal ? null : studentId,
+    external_student_name: isExternal ? externalName : null,
+    coach_id: body.coach_id != null ? String(body.coach_id).trim() || null : student?.coach_id || null,
     class_level:
       body.class_level != null
         ? String(body.class_level).trim() || null
-        : student.class_level != null
+        : student?.class_level != null
           ? String(student.class_level)
           : null,
     payment_type: paymentType,
@@ -376,11 +389,11 @@ async function handleCreateRecord(req, res, actor, roleSet) {
     contact_phone:
       body.contact_phone != null
         ? String(body.contact_phone).trim() || null
-        : student.parent_phone || student.phone || null,
+        : student?.parent_phone || student?.phone || null,
     contact_name:
       body.contact_name != null
         ? String(body.contact_name).trim() || null
-        : student.parent_name || null,
+        : student?.parent_name || (isExternal ? externalName : null),
     notes: body.notes ? String(body.notes).trim() : null,
     created_by: actor.sub || null,
     updated_at: new Date().toISOString()
@@ -464,10 +477,14 @@ async function handlePatchRecord(req, res, actor, roleSet) {
     'paid_at',
     'contact_phone',
     'contact_name',
-    'notes'
+    'notes',
+    'external_student_name'
   ];
   for (const f of fields) {
     if (body[f] !== undefined) patch[f] = body[f] === '' || body[f] === null ? null : body[f];
+  }
+  if (body.external_student_name !== undefined && patch.external_student_name) {
+    patch.external_student_name = String(patch.external_student_name).trim() || null;
   }
   if (body.payment_type !== undefined) {
     const t = String(body.payment_type).trim();
