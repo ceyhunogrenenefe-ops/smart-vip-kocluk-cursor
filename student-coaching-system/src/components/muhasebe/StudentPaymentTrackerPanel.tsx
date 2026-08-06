@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   Building2,
+  CalendarDays,
+  CreditCard,
   Loader2,
   MessageCircle,
   Plus,
@@ -22,14 +24,17 @@ import {
   listPaymentAccounts,
   listStudentPayments,
   patchStudentPayment,
+  ACCOUNT_TYPE_LABELS,
   PAYMENT_STATUS_LABELS,
   PAYMENT_TYPE_LABELS,
   type PaymentAccount,
+  type PaymentAccountType,
   type PaymentStatus,
   type PaymentTrackerStats,
   type PaymentType,
   type StudentPaymentRecord
 } from '../../lib/studentPaymentTrackerApi';
+import { classifyTaksit, formatTrShortDate, type TaksitDurum } from '../../lib/taksitMuhasebe';
 import {
   AppModal,
   AppModalBody,
@@ -54,6 +59,28 @@ function statusBadge(status: PaymentStatus) {
   }
 }
 
+function vadeDurumEtiket(d: TaksitDurum): { text: string; cls: string } {
+  switch (d) {
+    case 'paid':
+      return { text: 'Ödendi', cls: 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200' };
+    case 'overdue':
+      return { text: 'Vadesi geçti', cls: 'bg-red-100 text-red-900 dark:bg-red-950/50 dark:text-red-200' };
+    case 'due_week':
+      return { text: '≤7 gün', cls: 'bg-amber-100 text-amber-950 dark:bg-amber-900/40 dark:text-amber-100' };
+    case 'due_month':
+      return { text: '≤30 gün', cls: 'bg-sky-100 text-sky-900 dark:bg-sky-900/40 dark:text-sky-100' };
+    default:
+      return { text: 'Gelecek', cls: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200' };
+  }
+}
+
+function rowVadeDurum(r: StudentPaymentRecord): TaksitDurum {
+  const odendi = r.status === 'paid';
+  const vade = String(r.due_date || '').slice(0, 10);
+  if (!vade) return odendi ? 'paid' : 'future';
+  return classifyTaksit(vade, odendi);
+}
+
 const emptyForm = {
   student_id: '',
   payment_type: 'yazili' as PaymentType,
@@ -62,6 +89,7 @@ const emptyForm = {
   amount_total: '',
   amount_paid: '0',
   due_date: '',
+  installment_count: '1',
   contact_phone: '',
   contact_name: '',
   notes: ''
@@ -89,6 +117,10 @@ export default function StudentPaymentTrackerPanel() {
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterCoach, setFilterCoach] = useState('');
+  const [filterAccount, setFilterAccount] = useState('');
+  const [dueFrom, setDueFrom] = useState('');
+  const [dueTo, setDueTo] = useState('');
+  const [onlyOverdue, setOnlyOverdue] = useState(false);
 
   const [formOpen, setFormOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -100,6 +132,7 @@ export default function StudentPaymentTrackerPanel() {
     label: '',
     bank_name: '',
     account_holder: '',
+    account_type: 'bank' as PaymentAccountType,
     iban: '',
     notes: ''
   });
@@ -125,13 +158,17 @@ export default function StudentPaymentTrackerPanel() {
           status: filterStatus || undefined,
           paymentType: filterType || undefined,
           coachId: filterCoach || undefined,
+          paymentAccountId: filterAccount || undefined,
+          dueFrom: dueFrom || undefined,
+          dueTo: dueTo || undefined,
+          onlyOverdue: onlyOverdue || undefined,
           q: q.trim() || undefined
         }),
         listPaymentAccounts(institutionId || undefined)
       ]);
       if (rec.hint === 'student_payment_tracker_sql_missing' || acc.hint === 'student_payment_tracker_sql_missing') {
         setSchemaHint(
-          'Supabase SQL Editor’da `student-coaching-system/sql/2026-08-05-student-payment-tracker.sql` dosyasını çalıştırın.'
+          'Supabase SQL Editor’da `student-coaching-system/sql/2026-08-05-student-payment-tracker.sql` ve `2026-08-06-student-payment-installments.sql` dosyalarını çalıştırın.'
         );
       }
       setRows(rec.data);
@@ -142,7 +179,7 @@ export default function StudentPaymentTrackerPanel() {
     } finally {
       setLoading(false);
     }
-  }, [institutionId, filterStatus, filterType, filterCoach, q]);
+  }, [institutionId, filterStatus, filterType, filterCoach, filterAccount, dueFrom, dueTo, onlyOverdue, q]);
 
   useEffect(() => {
     void reload();
@@ -170,6 +207,7 @@ export default function StudentPaymentTrackerPanel() {
     }
     setSaving(true);
     try {
+      const installmentCount = Math.max(1, Math.min(48, Math.round(Number(form.installment_count) || 1)));
       await createStudentPayment({
         student_id: form.student_id,
         institution_id: institutionId || null,
@@ -179,11 +217,12 @@ export default function StudentPaymentTrackerPanel() {
         amount_total: Number(form.amount_total || 0),
         amount_paid: Number(form.amount_paid || 0),
         due_date: form.due_date || null,
+        installment_count: installmentCount,
         contact_phone: form.contact_phone || null,
         contact_name: form.contact_name || null,
         notes: form.notes || null
       });
-      toast.success('Ödeme kaydı eklendi');
+      toast.success(installmentCount > 1 ? `${installmentCount} taksit oluşturuldu` : 'Ödeme kaydı eklendi');
       setFormOpen(false);
       await reload();
     } catch (e) {
@@ -204,18 +243,32 @@ export default function StudentPaymentTrackerPanel() {
         label: accountForm.label.trim(),
         bank_name: accountForm.bank_name || null,
         account_holder: accountForm.account_holder || null,
+        account_type: accountForm.account_type,
         iban: accountForm.iban || null,
         notes: accountForm.notes || null,
         institution_id: institutionId || null
       });
       toast.success('Ödeme hesabı eklendi');
       setAccountOpen(false);
-      setAccountForm({ label: '', bank_name: '', account_holder: '', iban: '', notes: '' });
+      setAccountForm({ label: '', bank_name: '', account_holder: '', account_type: 'bank', iban: '', notes: '' });
       await reload();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Hesap eklenemedi');
     } finally {
       setAccountSaving(false);
+    }
+  };
+
+  const togglePaid = async (row: StudentPaymentRecord, paid: boolean) => {
+    try {
+      await patchStudentPayment({
+        id: row.id,
+        amount_paid: paid ? row.amount_total : 0,
+        status: paid ? 'paid' : 'unpaid'
+      });
+      await reload();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Güncellenemedi');
     }
   };
 
@@ -276,7 +329,7 @@ export default function StudentPaymentTrackerPanel() {
             Öğrenci ödeme takip
           </h2>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-0.5">
-            Yazılı, kitap, kurs ve diğer ödemeler · hesap (Ziraat / Enpara) · kalan borç · WhatsApp
+            Yazılı, kitap, kurs ve diğer ödemeler · hesap (Ziraat / Enpara / TEB) · taksit · tarih aralığı · WhatsApp
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -318,10 +371,11 @@ export default function StudentPaymentTrackerPanel() {
       ) : null}
 
       {stats ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
           {[
             { label: 'Toplam kayıt', value: String(stats.total), sub: formatTry(stats.total_sum) },
             { label: 'Ödenmedi', value: String(stats.unpaid), sub: '' },
+            { label: 'Vadesi geçen', value: String(stats.overdue ?? 0), sub: '' },
             { label: 'Kısmi', value: String(stats.partial), sub: '' },
             { label: 'Ödendi', value: String(stats.paid), sub: formatTry(stats.paid_sum) },
             { label: 'Kalan borç', value: formatTry(stats.remaining_sum), sub: '' }
@@ -338,13 +392,31 @@ export default function StudentPaymentTrackerPanel() {
         </div>
       ) : null}
 
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 rounded-xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-800/40">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 rounded-xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-800/40">
         <label className="text-xs text-slate-500">
           Ara
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Öğrenci, koç, hesap, telefon…"
+            className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+          />
+        </label>
+        <label className="text-xs text-slate-500">
+          Vade başlangıç
+          <input
+            type="date"
+            value={dueFrom}
+            onChange={(e) => setDueFrom(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+          />
+        </label>
+        <label className="text-xs text-slate-500">
+          Vade bitiş
+          <input
+            type="date"
+            value={dueTo}
+            onChange={(e) => setDueTo(e.target.value)}
             className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
           />
         </label>
@@ -377,6 +449,21 @@ export default function StudentPaymentTrackerPanel() {
           </select>
         </label>
         <label className="text-xs text-slate-500">
+          Hesap
+          <select
+            value={filterAccount}
+            onChange={(e) => setFilterAccount(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+          >
+            <option value="">Tümü</option>
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-slate-500">
           Koç
           <select
             value={filterCoach}
@@ -391,6 +478,15 @@ export default function StudentPaymentTrackerPanel() {
             ))}
           </select>
         </label>
+        <label className="flex items-end gap-2 text-xs text-slate-600 pb-2 sm:col-span-2">
+          <input
+            type="checkbox"
+            checked={onlyOverdue}
+            onChange={(e) => setOnlyOverdue(e.target.checked)}
+            className="rounded border-slate-300"
+          />
+          Sadece vadesi geçenler
+        </label>
       </div>
 
       {accounts.length > 0 ? (
@@ -402,9 +498,13 @@ export default function StudentPaymentTrackerPanel() {
             <span
               key={a.id}
               className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
-              title={[a.bank_name, a.account_holder, a.iban].filter(Boolean).join(' · ')}
+              title={[a.bank_name, a.account_holder, a.iban, a.account_type ? ACCOUNT_TYPE_LABELS[a.account_type] : ''].filter(Boolean).join(' · ')}
             >
-              <Building2 className="h-3 w-3 text-emerald-600" />
+              {a.account_type === 'credit_card' ? (
+                <CreditCard className="h-3 w-3 text-violet-600" />
+              ) : (
+                <Building2 className="h-3 w-3 text-emerald-600" />
+              )}
               {a.label}
             </span>
           ))}
@@ -424,10 +524,12 @@ export default function StudentPaymentTrackerPanel() {
           <table className="min-w-full text-left text-sm">
             <thead className="border-b border-slate-100 bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:bg-slate-800">
               <tr>
+                <th className="px-3 py-2.5 w-10">Ödendi</th>
                 <th className="px-3 py-2.5">Öğrenci</th>
                 <th className="px-3 py-2.5">Sınıf / Koç</th>
                 <th className="px-3 py-2.5">Tür</th>
                 <th className="px-3 py-2.5">Hesap</th>
+                <th className="px-3 py-2.5">Vade</th>
                 <th className="px-3 py-2.5 text-right">Tutar</th>
                 <th className="px-3 py-2.5 text-right">Ödenen</th>
                 <th className="px-3 py-2.5 text-right">Kalan</th>
@@ -436,8 +538,20 @@ export default function StudentPaymentTrackerPanel() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {rows.map((r) => {
+                const vadeDurum = rowVadeDurum(r);
+                const vadeEtiket = vadeDurumEtiket(vadeDurum);
+                return (
                 <tr key={r.id} className="border-b border-slate-50 last:border-0 dark:border-slate-800">
+                  <td className="px-3 py-2.5">
+                    <input
+                      type="checkbox"
+                      checked={r.status === 'paid'}
+                      onChange={(e) => void togglePaid(r, e.target.checked)}
+                      title="Ödendi işaretle"
+                      className="rounded border-slate-300"
+                    />
+                  </td>
                   <td className="px-3 py-2.5">
                     <div className="font-medium text-slate-900 dark:text-white">{r.student_name}</div>
                     <div className="text-[11px] text-slate-500">
@@ -451,9 +565,29 @@ export default function StudentPaymentTrackerPanel() {
                   <td className="px-3 py-2.5">
                     <div>{PAYMENT_TYPE_LABELS[r.payment_type] || r.payment_type}</div>
                     {r.title ? <div className="text-[11px] text-slate-500">{r.title}</div> : null}
+                    {r.installment_no && r.installment_count ? (
+                      <span className="mt-0.5 inline-flex rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-900 dark:bg-indigo-900/40 dark:text-indigo-200">
+                        Taksit {r.installment_no}/{r.installment_count}
+                      </span>
+                    ) : null}
                   </td>
                   <td className="px-3 py-2.5 text-xs text-slate-600 dark:text-slate-400">
                     {r.account_label || '—'}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {r.due_date ? (
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-1 text-xs text-slate-700 dark:text-slate-300">
+                          <CalendarDays className="h-3 w-3 text-slate-400" />
+                          {formatTrShortDate(String(r.due_date).slice(0, 10))}
+                        </div>
+                        <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${vadeEtiket.cls}`}>
+                          {vadeEtiket.text}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-400">—</span>
+                    )}
                   </td>
                   <td className="px-3 py-2.5 text-right tabular-nums font-medium">{formatTry(r.amount_total)}</td>
                   <td className="px-3 py-2.5 text-right">
@@ -505,7 +639,8 @@ export default function StudentPaymentTrackerPanel() {
                     </div>
                   </td>
                 </tr>
-              ))}
+              );
+              })}
             </tbody>
           </table>
         </div>
@@ -585,7 +720,18 @@ export default function StudentPaymentTrackerPanel() {
               />
             </label>
             <label className="text-xs text-slate-600">
-              Ödenen (₺)
+              Taksit sayısı
+              <input
+                type="number"
+                min={1}
+                max={48}
+                value={form.installment_count}
+                onChange={(e) => setForm((f) => ({ ...f, installment_count: e.target.value }))}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+              />
+            </label>
+            <label className="text-xs text-slate-600">
+              Ödenen (₺) — tek kayıt / 1. taksit
               <input
                 type="number"
                 min={0}
@@ -595,7 +741,7 @@ export default function StudentPaymentTrackerPanel() {
               />
             </label>
             <label className="text-xs text-slate-600">
-              Vade
+              İlk vade
               <input
                 type="date"
                 value={form.due_date}
@@ -666,9 +812,23 @@ export default function StudentPaymentTrackerPanel() {
               <input
                 value={accountForm.bank_name}
                 onChange={(e) => setAccountForm((f) => ({ ...f, bank_name: e.target.value }))}
-                placeholder="Ziraat / Enpara / Garanti…"
+                placeholder="Ziraat / Enpara / TEB…"
                 className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
               />
+            </label>
+            <label className="text-xs text-slate-600">
+              Hesap türü
+              <select
+                value={accountForm.account_type}
+                onChange={(e) => setAccountForm((f) => ({ ...f, account_type: e.target.value as PaymentAccountType }))}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+              >
+                {Object.entries(ACCOUNT_TYPE_LABELS).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="text-xs text-slate-600">
               Hesap sahibi
@@ -680,11 +840,11 @@ export default function StudentPaymentTrackerPanel() {
               />
             </label>
             <label className="text-xs text-slate-600">
-              IBAN
+              IBAN {accountForm.account_type === 'credit_card' ? '(opsiyonel)' : ''}
               <input
                 value={accountForm.iban}
                 onChange={(e) => setAccountForm((f) => ({ ...f, iban: e.target.value }))}
-                placeholder="TR…"
+                placeholder={accountForm.account_type === 'credit_card' ? 'Kredi kartı için boş bırakılabilir' : 'TR…'}
                 className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
               />
             </label>

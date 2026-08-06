@@ -2,6 +2,7 @@ import { apiFetch } from './session';
 
 export type PaymentType = 'yazili' | 'kitap' | 'kurs' | 'ozel_ders' | 'diger';
 export type PaymentStatus = 'unpaid' | 'partial' | 'paid' | 'cancelled';
+export type PaymentAccountType = 'bank' | 'credit_card';
 
 export type PaymentAccount = {
   id: string;
@@ -10,6 +11,7 @@ export type PaymentAccount = {
   bank_name?: string | null;
   account_holder?: string | null;
   iban?: string | null;
+  account_type?: PaymentAccountType;
   notes?: string | null;
   active?: boolean;
   sort_order?: number;
@@ -44,6 +46,10 @@ export type StudentPaymentRecord = {
   account_bank?: string | null;
   account_holder?: string | null;
   account_iban?: string | null;
+  account_type?: PaymentAccountType | null;
+  installment_group_id?: string | null;
+  installment_no?: number | null;
+  installment_count?: number | null;
   contact_phone_resolved?: string | null;
 };
 
@@ -52,9 +58,15 @@ export type PaymentTrackerStats = {
   unpaid: number;
   partial: number;
   paid: number;
+  overdue?: number;
   remaining_sum: number;
   paid_sum: number;
   total_sum: number;
+};
+
+export const ACCOUNT_TYPE_LABELS: Record<PaymentAccountType, string> = {
+  bank: 'Banka hesabı',
+  credit_card: 'Kredi kartı'
 };
 
 export const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
@@ -96,6 +108,10 @@ export async function listStudentPayments(params: {
   paymentType?: string;
   studentId?: string;
   coachId?: string;
+  paymentAccountId?: string;
+  dueFrom?: string;
+  dueTo?: string;
+  onlyOverdue?: boolean;
   q?: string;
 } = {}) {
   const qs = new URLSearchParams();
@@ -104,6 +120,10 @@ export async function listStudentPayments(params: {
   if (params.paymentType) qs.set('payment_type', params.paymentType);
   if (params.studentId) qs.set('student_id', params.studentId);
   if (params.coachId) qs.set('coach_id', params.coachId);
+  if (params.paymentAccountId) qs.set('payment_account_id', params.paymentAccountId);
+  if (params.dueFrom) qs.set('due_from', params.dueFrom);
+  if (params.dueTo) qs.set('due_to', params.dueTo);
+  if (params.onlyOverdue) qs.set('only_overdue', '1');
   if (params.q) qs.set('q', params.q);
   const res = await apiFetch(`/api/student-payment-tracker?${qs}`);
   const j = await parseJson(res);
@@ -177,6 +197,9 @@ export function buildPaymentWhatsAppMessage(row: StudentPaymentRecord): string {
   }
   if (row.due_date) {
     lines.push(`Vade: ${new Date(row.due_date + 'T12:00:00').toLocaleDateString('tr-TR')}`);
+  }
+  if (row.installment_no && row.installment_count) {
+    lines.push(`Taksit: ${row.installment_no}/${row.installment_count}`);
   }
   lines.push('', 'Bilgi için yazabilirsiniz. İyi günler.');
   return lines.join('\n');

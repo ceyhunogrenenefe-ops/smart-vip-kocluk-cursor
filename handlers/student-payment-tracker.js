@@ -12,6 +12,64 @@ const jsonError = (res, status, error, extra) => res.status(status).json({ error
 
 const PAYMENT_TYPES = new Set(['yazili', 'kitap', 'kurs', 'ozel_ders', 'diger']);
 const STATUSES = new Set(['unpaid', 'partial', 'paid', 'cancelled']);
+const ACCOUNT_TYPES = new Set(['bank', 'credit_card']);
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+
+function todayYmd() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function shiftYmdByMonths(ymd, deltaMonths) {
+  const m = String(ymd || '').trim().slice(0, 10);
+  if (!YMD.test(m)) return null;
+  const [y, mo, d] = m.split('-').map((x) => parseInt(x, 10));
+  const t = new Date(y, mo - 1 + deltaMonths, 1);
+  const last = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate();
+  const day = Math.min(d, last);
+  const r = new Date(t.getFullYear(), t.getMonth(), day);
+  const yy = r.getFullYear();
+  const mm = String(r.getMonth() + 1).padStart(2, '0');
+  const dd = String(r.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+function taksitVadeleriMonthly(anchorYmd, count) {
+  const n = Math.max(1, Math.min(48, Math.round(count) || 1));
+  const raw = String(anchorYmd || '').trim().slice(0, 10);
+  const start = YMD.test(raw) ? raw : todayYmd();
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    out.push(shiftYmdByMonths(start, i) || start);
+  }
+  return out;
+}
+
+function splitTaksitTutarlari(ucret, count) {
+  const u = Number(ucret);
+  const n = Math.max(1, Math.min(48, Math.round(count) || 1));
+  if (!Number.isFinite(u) || u <= 0) return [];
+  const base = Math.floor(u / n);
+  let rem = u - base * n;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    let t = base;
+    if (rem > 0) {
+      t++;
+      rem--;
+    }
+    out.push(t);
+  }
+  return out;
+}
+
+function randomUuid() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
 
 function schemaMissing(err) {
   return /student_payment_records|payment_accounts|does not exist|schema cache|PGRST205|relation .* does not exist/i.test(
@@ -49,7 +107,10 @@ async function enrichRecords(rows) {
       ? supabaseAdmin.from('coaches').select('id, name, email, phone').in('id', coachIds)
       : Promise.resolve({ data: [] }),
     accountIds.length
-      ? supabaseAdmin.from('payment_accounts').select('id, label, bank_name, account_holder, iban').in('id', accountIds)
+      ? supabaseAdmin
+          .from('payment_accounts')
+          .select('id, label, bank_name, account_holder, iban, account_type')
+          .in('id', accountIds)
       : Promise.resolve({ data: [] })
   ]);
 
@@ -78,6 +139,7 @@ async function enrichRecords(rows) {
       account_bank: acc?.bank_name || null,
       account_holder: acc?.account_holder || null,
       account_iban: acc?.iban || null,
+      account_type: acc?.account_type || null,
       contact_phone_resolved: r.contact_phone || st?.parent_phone || st?.phone || null
     };
   });
@@ -121,6 +183,10 @@ async function handleGetRecords(req, res, actor, roleSet) {
   const paymentType = typeof req.query?.payment_type === 'string' ? req.query.payment_type.trim() : '';
   const studentId = typeof req.query?.student_id === 'string' ? req.query.student_id.trim() : '';
   const coachId = typeof req.query?.coach_id === 'string' ? req.query.coach_id.trim() : '';
+  const accountId = typeof req.query?.payment_account_id === 'string' ? req.query.payment_account_id.trim() : '';
+  const dueFrom = typeof req.query?.due_from === 'string' ? req.query.due_from.trim().slice(0, 10) : '';
+  const dueTo = typeof req.query?.due_to === 'string' ? req.query.due_to.trim().slice(0, 10) : '';
+  const onlyOverdue = String(req.query?.only_overdue || '') === '1';
   const qSearch = typeof req.query?.q === 'string' ? req.query.q.trim().toLowerCase() : '';
 
   let q = supabaseAdmin
@@ -138,6 +204,9 @@ async function handleGetRecords(req, res, actor, roleSet) {
   if (paymentType && PAYMENT_TYPES.has(paymentType)) q = q.eq('payment_type', paymentType);
   if (studentId) q = q.eq('student_id', studentId);
   if (coachId) q = q.eq('coach_id', coachId);
+  if (accountId) q = q.eq('payment_account_id', accountId);
+  if (dueFrom && YMD.test(dueFrom)) q = q.gte('due_date', dueFrom);
+  if (dueTo && YMD.test(dueTo)) q = q.lte('due_date', dueTo);
 
   const { data, error } = await q;
   if (error) {
@@ -148,6 +217,10 @@ async function handleGetRecords(req, res, actor, roleSet) {
   }
 
   let enriched = await enrichRecords(data || []);
+  if (onlyOverdue) {
+    const today = todayYmd();
+    enriched = enriched.filter((r) => r.status !== 'paid' && r.due_date && String(r.due_date).slice(0, 10) < today);
+  }
   if (qSearch) {
     enriched = enriched.filter((r) => {
       const blob = [
@@ -167,11 +240,15 @@ async function handleGetRecords(req, res, actor, roleSet) {
     });
   }
 
+  const today = todayYmd();
   const stats = {
     total: enriched.length,
     unpaid: enriched.filter((r) => r.status === 'unpaid').length,
     partial: enriched.filter((r) => r.status === 'partial').length,
     paid: enriched.filter((r) => r.status === 'paid').length,
+    overdue: enriched.filter(
+      (r) => r.status !== 'paid' && r.due_date && String(r.due_date).slice(0, 10) < today
+    ).length,
     remaining_sum: enriched.reduce((a, r) => a + (Number(r.remaining) || 0), 0),
     paid_sum: enriched.reduce((a, r) => a + (Number(r.amount_paid) || 0), 0),
     total_sum: enriched.reduce((a, r) => a + (Number(r.amount_total) || 0), 0)
@@ -190,12 +267,16 @@ async function handleCreateAccount(req, res, actor, roleSet) {
     institutionId = actor.institution_id;
   }
 
+  const accountType = String(body.account_type || 'bank').trim();
+  if (!ACCOUNT_TYPES.has(accountType)) return jsonError(res, 400, 'invalid_account_type');
+
   const row = {
     institution_id: institutionId,
     label,
     bank_name: body.bank_name ? String(body.bank_name).trim() : null,
     account_holder: body.account_holder ? String(body.account_holder).trim() : null,
     iban: body.iban ? String(body.iban).trim() : null,
+    account_type: accountType,
     notes: body.notes ? String(body.notes).trim() : null,
     active: body.active !== false,
     sort_order: Number(body.sort_order) || 0,
@@ -241,7 +322,10 @@ async function handleCreateRecord(req, res, actor, roleSet) {
 
   const status = deriveStatus(amountTotal, amountPaid, body.status ? String(body.status) : null);
 
-  const row = {
+  const installmentCount = Math.max(1, Math.min(48, Math.round(Number(body.installment_count) || 1)));
+  const firstDueDate = body.due_date || body.first_due_date || null;
+
+  const baseRow = {
     institution_id: institutionId,
     student_id: studentId,
     coach_id: body.coach_id != null ? String(body.coach_id).trim() || null : student.coach_id || null,
@@ -254,12 +338,7 @@ async function handleCreateRecord(req, res, actor, roleSet) {
     payment_type: paymentType,
     payment_account_id: body.payment_account_id ? String(body.payment_account_id).trim() : null,
     title: body.title ? String(body.title).trim() : null,
-    amount_total: amountTotal,
-    amount_paid: amountPaid,
     currency: body.currency ? String(body.currency).trim() : 'TRY',
-    status,
-    due_date: body.due_date || null,
-    paid_at: status === 'paid' ? body.paid_at || new Date().toISOString().slice(0, 10) : body.paid_at || null,
     contact_phone:
       body.contact_phone != null
         ? String(body.contact_phone).trim() || null
@@ -271,6 +350,47 @@ async function handleCreateRecord(req, res, actor, roleSet) {
     notes: body.notes ? String(body.notes).trim() : null,
     created_by: actor.sub || null,
     updated_at: new Date().toISOString()
+  };
+
+  if (installmentCount > 1) {
+    const groupId = randomUuid();
+    const amounts = splitTaksitTutarlari(amountTotal, installmentCount);
+    const vadeler = taksitVadeleriMonthly(firstDueDate || todayYmd(), installmentCount);
+    const rows = amounts.map((amt, i) => {
+      const rowStatus = i === 0 && amountPaid > 0 ? deriveStatus(amt, amountPaid, null) : 'unpaid';
+      const rowPaid = i === 0 && amountPaid > 0 ? Math.min(amountPaid, amt) : 0;
+      return {
+        ...baseRow,
+        amount_total: amt,
+        amount_paid: rowPaid,
+        status: rowStatus,
+        due_date: vadeler[i] || null,
+        paid_at: rowStatus === 'paid' ? body.paid_at || todayYmd() : null,
+        installment_group_id: groupId,
+        installment_no: i + 1,
+        installment_count: installmentCount
+      };
+    });
+
+    const { data, error } = await supabaseAdmin.from('student_payment_records').insert(rows).select('*');
+    if (error) {
+      if (schemaMissing(error)) return jsonError(res, 503, 'student_payment_tracker_sql_missing');
+      throw error;
+    }
+    const enriched = await enrichRecords(data || []);
+    return res.status(201).json({ data: enriched, count: enriched.length });
+  }
+
+  const row = {
+    ...baseRow,
+    amount_total: amountTotal,
+    amount_paid: amountPaid,
+    status,
+    due_date: firstDueDate,
+    paid_at: status === 'paid' ? body.paid_at || todayYmd() : body.paid_at || null,
+    installment_group_id: null,
+    installment_no: null,
+    installment_count: null
   };
 
   const { data, error } = await supabaseAdmin.from('student_payment_records').insert(row).select('*').single();
@@ -405,6 +525,11 @@ async function handlePatchAccount(req, res, actor, roleSet) {
   const patch = { updated_at: new Date().toISOString() };
   for (const f of ['label', 'bank_name', 'account_holder', 'iban', 'notes']) {
     if (body[f] !== undefined) patch[f] = body[f] === '' || body[f] === null ? null : String(body[f]).trim();
+  }
+  if (body.account_type !== undefined) {
+    const t = String(body.account_type).trim();
+    if (!ACCOUNT_TYPES.has(t)) return jsonError(res, 400, 'invalid_account_type');
+    patch.account_type = t;
   }
   if (body.active !== undefined) patch.active = Boolean(body.active);
   if (body.sort_order !== undefined) patch.sort_order = Number(body.sort_order) || 0;
