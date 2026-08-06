@@ -137,19 +137,25 @@ export async function fetchClassPaymentReport(params: {
   month?: string;
   from?: string;
   to?: string;
+  allTime?: boolean;
 }) {
   const qs = new URLSearchParams({ op: 'class-report', class_level: params.classLevel });
   if (params.institutionId) qs.set('institution_id', params.institutionId);
-  if (params.month) qs.set('month', params.month);
-  if (params.from) qs.set('from', params.from);
-  if (params.to) qs.set('to', params.to);
+  if (params.allTime) {
+    qs.set('all', '1');
+  } else {
+    if (params.month) qs.set('month', params.month);
+    if (params.from) qs.set('from', params.from);
+    if (params.to) qs.set('to', params.to);
+  }
   const res = await apiFetch(`/api/muhasebe-ledger?${qs}`);
   const j = await parseJson(res);
   if (!res.ok) throw new Error(String(j.error || 'Sınıf raporu yüklenemedi'));
   return {
     class_level: String(j.class_level || params.classLevel),
-    from: String(j.from || ''),
-    to: String(j.to || ''),
+    from: j.from != null ? String(j.from) : '',
+    to: j.to != null ? String(j.to) : '',
+    payment_count: Number(j.payment_count || 0),
     students: (Array.isArray(j.students) ? j.students : []) as ClassReportStudent[],
     summary: (j.summary || { total: 0, paid: 0, remaining: 0, student_count: 0 }) as {
       total: number;

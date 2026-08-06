@@ -54,9 +54,10 @@ export default function MuhasebeClassReportPanel() {
 
   const [classLevel, setClassLevel] = useState<string>('YKS-Sayısal');
   const [month, setMonth] = useState(currentMonthYm);
-  const [filterMonth, setFilterMonth] = useState(true);
+  const [filterMonth, setFilterMonth] = useState(false);
   const [rows, setRows] = useState<ClassReportStudent[]>([]);
   const [summary, setSummary] = useState({ total: 0, paid: 0, remaining: 0, student_count: 0 });
+  const [paymentCount, setPaymentCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
@@ -81,15 +82,16 @@ export default function MuhasebeClassReportPanel() {
       const data = await fetchClassPaymentReport({
         classLevel,
         institutionId: institutionId || undefined,
-        ...(filterMonth
-          ? { month }
-          : { from: '2020-01-01', to: '2099-12-31' })
+        allTime: !filterMonth,
+        month: filterMonth ? month : undefined
       });
       setRows(data.students);
       setSummary(data.summary);
+      setPaymentCount(data.payment_count || 0);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Rapor yüklenemedi');
       setRows([]);
+      setPaymentCount(0);
     } finally {
       setLoading(false);
     }
@@ -198,7 +200,7 @@ export default function MuhasebeClassReportPanel() {
         <div>
           <h2 className="text-lg font-bold text-slate-900 dark:text-white">Sınıf bazlı gelir raporu</h2>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-0.5">
-            Sınıf seçin → öğrenciler ve ödeme kalemleri (dönem / yaz / kitap…). Eksik kalemi elle ekleyin.
+            Muhasebe → Öğrenci ödemelerindeki tüm kayıtlar bu sınıfa göre listelenir. Eksik kalemi elle ekleyebilirsiniz.
           </p>
         </div>
         <button
@@ -232,7 +234,7 @@ export default function MuhasebeClassReportPanel() {
             onChange={(e) => setFilterMonth(e.target.checked)}
             className="rounded border-slate-300"
           />
-          Ay filtresi
+          Sadece seçili ay
         </label>
         {filterMonth ? (
           <label className="text-xs text-slate-500">
@@ -247,9 +249,10 @@ export default function MuhasebeClassReportPanel() {
         ) : null}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-5">
         {[
           { label: 'Öğrenci', value: String(summary.student_count) },
+          { label: 'Ödeme kaydı', value: String(paymentCount) },
           { label: 'Tahakkuk', value: `${formatTryAmount(summary.total)} ₺` },
           { label: 'Ödenen', value: `${formatTryAmount(summary.paid)} ₺` },
           { label: 'Kalan', value: `${formatTryAmount(summary.remaining)} ₺` }

@@ -312,58 +312,118 @@ async function handleClassReport(req, res, actor, roleSet) {
   const inst = scopeInstitution(actor, roleSet, req.query?.institution_id);
   const classLevel = typeof req.query?.class_level === 'string' ? req.query.class_level.trim() : '';
   if (!classLevel) return jsonError(res, 400, 'class_level_required');
-  const range = parseRange(req);
 
+  const allTime = String(req.query?.all || '') === '1' || String(req.query?.all_time || '') === '1';
+  const hasExplicitRange =
+    (typeof req.query?.from === 'string' && YMD.test(req.query.from.trim().slice(0, 10))) ||
+    (typeof req.query?.to === 'string' && YMD.test(req.query.to.trim().slice(0, 10))) ||
+    (typeof req.query?.month === 'string' && /^\d{4}-\d{2}$/.test(req.query.month.trim()));
+  const range = allTime || !hasExplicitRange ? null : parseRange(req);
+
+  // 1) Sınıftaki öğrenciler
   let stuQ = supabaseAdmin
     .from('students')
     .select('id, name, class_level, coach_id, phone, parent_phone, parent_name, institution_id')
     .eq('class_level', classLevel)
-    .limit(2000);
+    .limit(3000);
   if (inst) stuQ = stuQ.eq('institution_id', inst);
   const { data: students, error: se } = await stuQ;
   if (se) throw se;
 
-  const studentIds = (students || []).map((s) => String(s.id));
-  let payments = [];
-  if (studentIds.length) {
-    let pq = supabaseAdmin
-      .from('student_payment_records')
-      .select('*')
-      .neq('status', 'cancelled')
-      .in('student_id', studentIds)
-      .limit(5000);
-    if (inst) pq = pq.eq('institution_id', inst);
-    // Optional date filter on due_date when provided
-    if (range?.from) pq = pq.gte('due_date', range.from);
-    if (range?.to) pq = pq.lte('due_date', range.to);
-    const { data: pays, error: pe } = await pq;
-    if (pe) {
-      if (!schemaMissing(pe)) throw pe;
-    } else {
-      payments = pays || [];
-    }
-  }
+  const studentIds = [...new Set((students || []).map((s) => String(s.id)).filter(Boolean))];
 
-  // Also include external rows tagged with this class_level
-  let extQ = supabaseAdmin
+  // 2) Öğrenci ödemelerindeki TÜM kayıtlar (öğrenci ödemeleri paneliyle aynı kaynak)
+  //    a) Bu sınıftaki öğrencilerin tüm ödemeleri
+  //    b) class_level = seçilen sınıf olan ödemeler (dışarıdan / etiketli)
+  const paymentById = new Map();
+
+  const pushPays = (rows) => {
+    for (const p of rows || []) {
+      if (!p?.id) continue;
+      paymentById.set(String(p.id), p);
+    }
+  };
+
+  const inChunks = async (ids) => {
+    const chunkSize = 150;
+    for (let i = 0; i < ids.length; i += chunkSize) {
+      const chunk = ids.slice(i, i + chunkSize);
+      let pq = supabaseAdmin
+        .from('student_payment_records')
+        .select('*')
+        .neq('status', 'cancelled')
+        .in('student_id', chunk)
+        .limit(5000);
+      if (inst) pq = pq.or(`institution_id.eq.${inst},institution_id.is.null`);
+      const { data: pays, error: pe } = await pq;
+      if (pe) {
+        if (schemaMissing(pe)) return;
+        throw pe;
+      }
+      pushPays(pays);
+    }
+  };
+
+  if (studentIds.length) await inChunks(studentIds);
+
+  // class_level ile etiketlenen tüm ödemeler (öğrenci listesinde olmasa bile)
+  let byClassQ = supabaseAdmin
     .from('student_payment_records')
     .select('*')
     .neq('status', 'cancelled')
-    .is('student_id', null)
     .eq('class_level', classLevel)
-    .limit(1000);
-  if (inst) extQ = extQ.eq('institution_id', inst);
-  if (range?.from) extQ = extQ.gte('due_date', range.from);
-  if (range?.to) extQ = extQ.lte('due_date', range.to);
-  const { data: extPays } = await extQ;
-  for (const p of extPays || []) payments.push(p);
+    .limit(5000);
+  if (inst) byClassQ = byClassQ.or(`institution_id.eq.${inst},institution_id.is.null`);
+  const { data: byClassPays, error: bce } = await byClassQ;
+  if (bce) {
+    if (!schemaMissing(bce)) throw bce;
+  } else {
+    pushPays(byClassPays);
+  }
+
+  let payments = [...paymentById.values()];
+
+  // Opsiyonel tarih filtresi — due_date null olanları düşürme
+  if (range?.from && range?.to) {
+    const from = range.from;
+    const to = range.to;
+    payments = payments.filter((p) => {
+      const due = p.due_date ? String(p.due_date).slice(0, 10) : '';
+      const paidAt = p.paid_at ? String(p.paid_at).slice(0, 10) : '';
+      if (due && YMD.test(due)) return due >= from && due <= to;
+      if (paidAt && YMD.test(paidAt)) return paidAt >= from && paidAt <= to;
+      // tarihsiz kayıtlar "tüm veri" beklentisiyle dahil
+      return true;
+    });
+  }
+
+  // Ödemelerde görünen ama sınıf listesinde olmayan öğrencileri de çek
+  const missingStudentIds = [
+    ...new Set(
+      payments
+        .map((p) => (p.student_id ? String(p.student_id) : ''))
+        .filter((id) => id && !studentIds.includes(id))
+    )
+  ];
+  const extraStudents = [];
+  if (missingStudentIds.length) {
+    const chunkSize = 150;
+    for (let i = 0; i < missingStudentIds.length; i += chunkSize) {
+      const chunk = missingStudentIds.slice(i, i + chunkSize);
+      const { data: more } = await supabaseAdmin
+        .from('students')
+        .select('id, name, class_level, coach_id, phone, parent_phone, parent_name, institution_id')
+        .in('id', chunk);
+      for (const s of more || []) extraStudents.push(s);
+    }
+  }
 
   const byStudent = new Map();
-  for (const s of students || []) {
+  for (const s of [...(students || []), ...extraStudents]) {
     byStudent.set(String(s.id), {
       student_id: s.id,
       student_name: s.name,
-      class_level: s.class_level,
+      class_level: s.class_level || classLevel,
       contact_phone: s.parent_phone || s.phone || null,
       is_external: false,
       payments: [],
@@ -371,7 +431,7 @@ async function handleClassReport(req, res, actor, roleSet) {
     });
   }
 
-  const externalBucket = [];
+  const externalByName = new Map();
 
   for (const p of payments) {
     const sid = p.student_id ? String(p.student_id) : null;
@@ -388,35 +448,67 @@ async function handleClassReport(req, res, actor, roleSet) {
       remaining: rem,
       status: p.status,
       due_date: p.due_date,
-      payment_account_id: p.payment_account_id
+      paid_at: p.paid_at || null,
+      payment_account_id: p.payment_account_id,
+      notes: p.notes || null
     };
 
-    if (sid && byStudent.has(sid)) {
-      const bucket = byStudent.get(sid);
+    const addToBucket = (bucket) => {
       bucket.payments.push(row);
       bucket.totals.total += total;
       bucket.totals.paid += paid;
       bucket.totals.remaining += rem;
       bucket.totals.by_type[type] = (bucket.totals.by_type[type] || 0) + total;
-    } else {
-      externalBucket.push({
-        student_id: null,
-        student_name: p.external_student_name || 'Dış kayıt',
-        class_level: classLevel,
+    };
+
+    if (sid && byStudent.has(sid)) {
+      addToBucket(byStudent.get(sid));
+    } else if (sid) {
+      // Öğrenci satırı yoksa bile ödeme görünsün
+      const bucket = {
+        student_id: sid,
+        student_name: p.external_student_name || sid,
+        class_level: p.class_level || classLevel,
         contact_phone: p.contact_phone || null,
-        is_external: true,
-        payments: [row],
-        totals: {
-          total,
-          paid,
-          remaining: rem,
-          by_type: { [type]: total }
-        }
-      });
+        is_external: false,
+        payments: [],
+        totals: { total: 0, paid: 0, remaining: 0, by_type: {} }
+      };
+      byStudent.set(sid, bucket);
+      addToBucket(bucket);
+    } else {
+      const name = String(p.external_student_name || 'Dış kayıt').trim() || 'Dış kayıt';
+      const key = name.toLocaleLowerCase('tr-TR');
+      if (!externalByName.has(key)) {
+        externalByName.set(key, {
+          student_id: null,
+          student_name: name,
+          class_level: classLevel,
+          contact_phone: p.contact_phone || null,
+          is_external: true,
+          payments: [],
+          totals: { total: 0, paid: 0, remaining: 0, by_type: {} }
+        });
+      }
+      addToBucket(externalByName.get(key));
     }
   }
 
-  const rows = [...byStudent.values(), ...externalBucket].sort((a, b) =>
+  // Ödeme detaylarını tarihe göre sırala
+  for (const bucket of byStudent.values()) {
+    bucket.payments.sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || '')));
+    bucket.totals.total = Math.round(bucket.totals.total * 100) / 100;
+    bucket.totals.paid = Math.round(bucket.totals.paid * 100) / 100;
+    bucket.totals.remaining = Math.round(bucket.totals.remaining * 100) / 100;
+  }
+  for (const bucket of externalByName.values()) {
+    bucket.payments.sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || '')));
+    bucket.totals.total = Math.round(bucket.totals.total * 100) / 100;
+    bucket.totals.paid = Math.round(bucket.totals.paid * 100) / 100;
+    bucket.totals.remaining = Math.round(bucket.totals.remaining * 100) / 100;
+  }
+
+  const rows = [...byStudent.values(), ...externalByName.values()].sort((a, b) =>
     String(a.student_name || '').localeCompare(String(b.student_name || ''), 'tr')
   );
 
@@ -432,8 +524,10 @@ async function handleClassReport(req, res, actor, roleSet) {
 
   return res.status(200).json({
     class_level: classLevel,
-    from: range.from,
-    to: range.to,
+    from: range?.from || null,
+    to: range?.to || null,
+    all_time: !range,
+    payment_count: payments.length,
     students: rows,
     summary: {
       total: Math.round(summary.total * 100) / 100,
