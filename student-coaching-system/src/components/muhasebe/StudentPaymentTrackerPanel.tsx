@@ -126,6 +126,7 @@ export default function StudentPaymentTrackerPanel() {
   const [filterAccount, setFilterAccount] = useState('');
   const [dueFrom, setDueFrom] = useState('');
   const [dueTo, setDueTo] = useState('');
+  const [filterMonth, setFilterMonth] = useState('');
   const [onlyOverdue, setOnlyOverdue] = useState(false);
 
   const [formOpen, setFormOpen] = useState(false);
@@ -205,6 +206,28 @@ export default function StudentPaymentTrackerPanel() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  const applyMonthRange = (ym: string) => {
+    setFilterMonth(ym);
+    if (ym && /^\d{4}-\d{2}$/.test(ym)) {
+      const [y, m] = ym.split('-').map((x) => parseInt(x, 10));
+      const last = new Date(y, m, 0).getDate();
+      setDueFrom(`${ym}-01`);
+      setDueTo(`${ym}-${String(last).padStart(2, '0')}`);
+    } else {
+      setDueFrom('');
+      setDueTo('');
+    }
+  };
+
+  const clearDateRange = () => {
+    setFilterMonth('');
+    setDueFrom('');
+    setDueTo('');
+    setOnlyOverdue(false);
+  };
+
+  const hasDateRange = Boolean(dueFrom || dueTo || filterMonth || onlyOverdue);
 
   const closeForm = () => {
     setFormOpen(false);
@@ -507,25 +530,76 @@ export default function StudentPaymentTrackerPanel() {
         </div>
       ) : null}
 
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 rounded-xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-800/40">
-        <label className="text-xs text-slate-500">
-          Tarih başlangıç
-          <input
-            type="date"
-            value={dueFrom}
-            onChange={(e) => setDueFrom(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
-          />
-        </label>
-        <label className="text-xs text-slate-500">
-          Tarih bitiş
-          <input
-            type="date"
-            value={dueTo}
-            onChange={(e) => setDueTo(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
-          />
-        </label>
+      <div className="rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm dark:border-emerald-900/50 dark:bg-slate-900">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+            <CalendarDays className="h-4 w-4 text-emerald-600" />
+            Tarih aralığı
+          </p>
+          {hasDateRange ? (
+            <button
+              type="button"
+              onClick={clearDateRange}
+              className="text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline dark:hover:text-slate-200"
+            >
+              Aralığı temizle
+            </button>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="text-xs text-slate-500">
+            Ay
+            <input
+              type="month"
+              value={filterMonth}
+              onChange={(e) => applyMonthRange(e.target.value)}
+              className="mt-1 block rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-950"
+            />
+          </label>
+          <label className="text-xs text-slate-500">
+            Başlangıç
+            <input
+              type="date"
+              value={dueFrom}
+              onChange={(e) => {
+                setDueFrom(e.target.value);
+                setFilterMonth('');
+              }}
+              className="mt-1 block rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-950"
+            />
+          </label>
+          <label className="text-xs text-slate-500">
+            Bitiş
+            <input
+              type="date"
+              value={dueTo}
+              onChange={(e) => {
+                setDueTo(e.target.value);
+                setFilterMonth('');
+              }}
+              className="mt-1 block rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-950"
+            />
+          </label>
+          <label className="inline-flex items-center gap-2 pb-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={onlyOverdue}
+              onChange={(e) => setOnlyOverdue(e.target.checked)}
+              className="rounded border-slate-300"
+            />
+            Sadece vadesi geçenler
+          </label>
+          {dueFrom || dueTo ? (
+            <p className="pb-2 text-xs text-slate-500">
+              {dueFrom ? formatTrShortDate(dueFrom) : '…'}
+              {' — '}
+              {dueTo ? formatTrShortDate(dueTo) : '…'}
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 rounded-xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-800/40">
         <label className="text-xs text-slate-500">
           Ara
           <input
@@ -592,15 +666,6 @@ export default function StudentPaymentTrackerPanel() {
               </option>
             ))}
           </select>
-        </label>
-        <label className="flex items-end gap-2 text-xs text-slate-600 pb-2 sm:col-span-2">
-          <input
-            type="checkbox"
-            checked={onlyOverdue}
-            onChange={(e) => setOnlyOverdue(e.target.checked)}
-            className="rounded border-slate-300"
-          />
-          Sadece vadesi geçenler
         </label>
       </div>
 

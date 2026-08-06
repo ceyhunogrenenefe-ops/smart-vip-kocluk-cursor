@@ -74,6 +74,8 @@ export function TahsilatTaksitPanel({ compactHeader = false, onStatsChange }: Pr
   const [msg, setMsg] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [filterMonth, setFilterMonth] = useState('');
+  const [dueFrom, setDueFrom] = useState('');
+  const [dueTo, setDueTo] = useState('');
   const [onlyOverdue, setOnlyOverdue] = useState(false);
   const [search, setSearch] = useState('');
 
@@ -161,12 +163,20 @@ export function TahsilatTaksitPanel({ compactHeader = false, onStatsChange }: Pr
       );
     }
     if (onlyOverdue) f = f.filter((x) => !x.odendi && x.durum === 'overdue');
-    if (filterMonth.trim().length === 7) {
+    if (dueFrom.trim().length === 10) {
+      const from = dueFrom.trim();
+      f = f.filter((x) => x.vadeYmd >= from || (!x.odendi && x.durum === 'overdue'));
+    }
+    if (dueTo.trim().length === 10) {
+      const to = dueTo.trim();
+      f = f.filter((x) => x.vadeYmd <= to || (!x.odendi && x.durum === 'overdue'));
+    }
+    if (filterMonth.trim().length === 7 && !dueFrom && !dueTo) {
       const p = filterMonth.trim();
       f = f.filter((x) => x.vadeYmd.startsWith(p) || (!x.odendi && x.durum === 'overdue'));
     }
     return [...f].sort((a, b) => a.vadeYmd.localeCompare(b.vadeYmd) || a.contractNumber.localeCompare(b.contractNumber));
-  }, [flat, search, onlyOverdue, filterMonth]);
+  }, [flat, search, onlyOverdue, filterMonth, dueFrom, dueTo]);
 
   const toggle = async (contractId: string, index: number, odendi: boolean) => {
     setBusyKey(`${contractId}:${index}`);
@@ -291,12 +301,44 @@ export function TahsilatTaksitPanel({ compactHeader = false, onStatsChange }: Pr
 
       <div className="flex flex-wrap items-end gap-3 rounded-2xl border border-slate-200 bg-white p-4 dark:bg-slate-900 dark:border-slate-700">
         <div>
+          <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">Tarih aralığı</label>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <input
+              type="date"
+              className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm dark:bg-slate-950 dark:border-slate-600"
+              value={dueFrom}
+              onChange={(e) => {
+                setDueFrom(e.target.value);
+                if (e.target.value) setFilterMonth('');
+              }}
+              title="Başlangıç"
+            />
+            <span className="text-xs text-slate-400">—</span>
+            <input
+              type="date"
+              className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm dark:bg-slate-950 dark:border-slate-600"
+              value={dueTo}
+              onChange={(e) => {
+                setDueTo(e.target.value);
+                if (e.target.value) setFilterMonth('');
+              }}
+              title="Bitiş"
+            />
+          </div>
+        </div>
+        <div>
           <label className="text-xs text-slate-500 dark:text-slate-400">Ay filtresi</label>
           <input
             type="month"
             className="mt-1 block rounded-lg border border-slate-200 px-2 py-1.5 text-sm dark:bg-slate-950 dark:border-slate-600"
             value={filterMonth}
-            onChange={(e) => setFilterMonth(e.target.value)}
+            onChange={(e) => {
+              setFilterMonth(e.target.value);
+              if (e.target.value) {
+                setDueFrom('');
+                setDueTo('');
+              }
+            }}
           />
         </div>
         <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer">
@@ -312,6 +354,20 @@ export function TahsilatTaksitPanel({ compactHeader = false, onStatsChange }: Pr
             placeholder="Öğrenci / belge / program…"
           />
         </div>
+        {dueFrom || dueTo || filterMonth || onlyOverdue ? (
+          <button
+            type="button"
+            onClick={() => {
+              setDueFrom('');
+              setDueTo('');
+              setFilterMonth('');
+              setOnlyOverdue(false);
+            }}
+            className="text-xs font-medium text-slate-500 underline-offset-2 hover:underline pb-2"
+          >
+            Temizle
+          </button>
+        ) : null}
       </div>
 
       {loading && !rows.length ? (
