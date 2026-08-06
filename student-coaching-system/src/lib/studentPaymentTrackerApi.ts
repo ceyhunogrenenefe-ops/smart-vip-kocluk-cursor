@@ -88,9 +88,10 @@ async function parseJson(res: Response) {
   return (await res.json().catch(() => ({}))) as Record<string, unknown>;
 }
 
-export async function listPaymentAccounts(institutionId?: string) {
+export async function listPaymentAccounts(institutionId?: string, accountType?: PaymentAccountType) {
   const qs = new URLSearchParams({ op: 'accounts' });
   if (institutionId) qs.set('institution_id', institutionId);
+  if (accountType) qs.set('account_type', accountType);
   const res = await apiFetch(`/api/student-payment-tracker?${qs}`);
   const j = await parseJson(res);
   if (!res.ok && j.hint !== 'student_payment_tracker_sql_missing') {
@@ -109,6 +110,7 @@ export async function listStudentPayments(params: {
   studentId?: string;
   coachId?: string;
   paymentAccountId?: string;
+  accountType?: PaymentAccountType;
   dueFrom?: string;
   dueTo?: string;
   onlyOverdue?: boolean;
@@ -121,6 +123,7 @@ export async function listStudentPayments(params: {
   if (params.studentId) qs.set('student_id', params.studentId);
   if (params.coachId) qs.set('coach_id', params.coachId);
   if (params.paymentAccountId) qs.set('payment_account_id', params.paymentAccountId);
+  if (params.accountType) qs.set('account_type', params.accountType);
   if (params.dueFrom) qs.set('due_from', params.dueFrom);
   if (params.dueTo) qs.set('due_to', params.dueTo);
   if (params.onlyOverdue) qs.set('only_overdue', '1');

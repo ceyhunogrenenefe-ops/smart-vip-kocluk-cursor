@@ -114,6 +114,7 @@ export default function StudentPaymentTrackerPanel() {
   const [error, setError] = useState('');
 
   const [q, setQ] = useState('');
+  const [channel, setChannel] = useState<PaymentAccountType>('bank');
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterCoach, setFilterCoach] = useState('');
@@ -147,6 +148,14 @@ export default function StudentPaymentTrackerPanel() {
     return coaches.filter((c) => !c.institutionId || c.institutionId === institutionId);
   }, [coaches, institutionId]);
 
+  const channelAccounts = useMemo(
+    () => accounts.filter((a) => (a.account_type || 'bank') === channel),
+    [accounts, channel]
+  );
+
+  const channelLabel = ACCOUNT_TYPE_LABELS[channel];
+  const isCreditCard = channel === 'credit_card';
+
   const reload = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -159,12 +168,13 @@ export default function StudentPaymentTrackerPanel() {
           paymentType: filterType || undefined,
           coachId: filterCoach || undefined,
           paymentAccountId: filterAccount || undefined,
+          accountType: channel,
           dueFrom: dueFrom || undefined,
           dueTo: dueTo || undefined,
           onlyOverdue: onlyOverdue || undefined,
           q: q.trim() || undefined
         }),
-        listPaymentAccounts(institutionId || undefined)
+        listPaymentAccounts(institutionId || undefined, channel)
       ]);
       if (rec.hint === 'student_payment_tracker_sql_missing' || acc.hint === 'student_payment_tracker_sql_missing') {
         setSchemaHint(
@@ -179,15 +189,32 @@ export default function StudentPaymentTrackerPanel() {
     } finally {
       setLoading(false);
     }
-  }, [institutionId, filterStatus, filterType, filterCoach, filterAccount, dueFrom, dueTo, onlyOverdue, q]);
+  }, [institutionId, filterStatus, filterType, filterCoach, filterAccount, channel, dueFrom, dueTo, onlyOverdue, q]);
+
+  useEffect(() => {
+    setFilterAccount('');
+  }, [channel]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
 
   const openCreate = () => {
-    setForm(emptyForm);
+    setForm({ ...emptyForm, payment_account_id: '' });
     setFormOpen(true);
+  };
+
+  const openAccountModal = (type: PaymentAccountType) => {
+    setChannel(type);
+    setAccountForm({
+      label: '',
+      bank_name: '',
+      account_holder: '',
+      account_type: type,
+      iban: '',
+      notes: ''
+    });
+    setAccountOpen(true);
   };
 
   const onPickStudent = (studentId: string) => {
@@ -329,7 +356,7 @@ export default function StudentPaymentTrackerPanel() {
             Öğrenci ödeme takip
           </h2>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-0.5">
-            Yazılı, kitap, kurs ve diğer ödemeler · hesap (Ziraat / Enpara / TEB) · taksit · tarih aralığı · WhatsApp
+            Banka hesabı ve kredi kartı ödemeleri ayrı takip edilir · taksit · tarih aralığı · WhatsApp
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -340,21 +367,58 @@ export default function StudentPaymentTrackerPanel() {
           >
             <RefreshCw className="h-4 w-4" /> Yenile
           </button>
-          <button
-            type="button"
-            onClick={() => setAccountOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
-          >
-            <Building2 className="h-4 w-4" /> Hesap ekle
-          </button>
+          {isCreditCard ? (
+            <button
+              type="button"
+              onClick={() => openAccountModal('credit_card')}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-800 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200"
+            >
+              <CreditCard className="h-4 w-4" /> Kredi kartı ekle
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => openAccountModal('bank')}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+            >
+              <Building2 className="h-4 w-4" /> Banka hesabı ekle
+            </button>
+          )}
           <button
             type="button"
             onClick={openCreate}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+            className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold text-white ${
+              isCreditCard ? 'bg-violet-600 hover:bg-violet-700' : 'bg-emerald-600 hover:bg-emerald-700'
+            }`}
           >
-            <Plus className="h-4 w-4" /> Ödeme kaydı
+            <Plus className="h-4 w-4" /> {isCreditCard ? 'Kart ödemesi' : 'Hesap ödemesi'}
           </button>
         </div>
+      </div>
+
+      <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-800">
+        <button
+          type="button"
+          onClick={() => setChannel('bank')}
+          className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold transition ${
+            channel === 'bank'
+              ? 'bg-white text-emerald-800 shadow-sm dark:bg-slate-900 dark:text-emerald-200'
+              : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100'
+          }`}
+        >
+          <Building2 className="h-4 w-4" /> Banka hesabı
+        </button>
+        <button
+          type="button"
+          onClick={() => setChannel('credit_card')}
+          className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold transition ${
+            channel === 'credit_card'
+              ? 'bg-white text-violet-800 shadow-sm dark:bg-slate-900 dark:text-violet-200'
+              : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100'
+          }`}
+        >
+          <CreditCard className="h-4 w-4" /> Kredi kartı
+        </button>
       </div>
 
       {schemaHint ? (
@@ -449,14 +513,14 @@ export default function StudentPaymentTrackerPanel() {
           </select>
         </label>
         <label className="text-xs text-slate-500">
-          Hesap
+          {isCreditCard ? 'Kredi kartı' : 'Banka hesabı'}
           <select
             value={filterAccount}
             onChange={(e) => setFilterAccount(e.target.value)}
             className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
           >
             <option value="">Tümü</option>
-            {accounts.map((a) => (
+            {channelAccounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.label}
               </option>
@@ -489,18 +553,22 @@ export default function StudentPaymentTrackerPanel() {
         </label>
       </div>
 
-      {accounts.length > 0 ? (
+      {channelAccounts.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 self-center">
-            Hesaplar:
+            {isCreditCard ? 'Kredi kartları:' : 'Banka hesapları:'}
           </span>
-          {accounts.map((a) => (
+          {channelAccounts.map((a) => (
             <span
               key={a.id}
-              className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
-              title={[a.bank_name, a.account_holder, a.iban, a.account_type ? ACCOUNT_TYPE_LABELS[a.account_type] : ''].filter(Boolean).join(' · ')}
+              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs ${
+                isCreditCard
+                  ? 'border-violet-200 bg-violet-50 text-violet-900 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200'
+                  : 'border-slate-200 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200'
+              }`}
+              title={[a.bank_name, a.account_holder, a.iban].filter(Boolean).join(' · ')}
             >
-              {a.account_type === 'credit_card' ? (
+              {isCreditCard ? (
                 <CreditCard className="h-3 w-3 text-violet-600" />
               ) : (
                 <Building2 className="h-3 w-3 text-emerald-600" />
@@ -509,7 +577,11 @@ export default function StudentPaymentTrackerPanel() {
             </span>
           ))}
         </div>
-      ) : null}
+      ) : (
+        <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40">
+          Henüz {channelLabel.toLowerCase()} tanımlı değil. «{isCreditCard ? 'Kredi kartı ekle' : 'Banka hesabı ekle'}» ile başlayın.
+        </p>
+      )}
 
       {loading ? (
         <p className="flex items-center gap-2 text-sm text-slate-500">
@@ -517,7 +589,7 @@ export default function StudentPaymentTrackerPanel() {
         </p>
       ) : rows.length === 0 ? (
         <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40">
-          Henüz ödeme kaydı yok. «Ödeme kaydı» ile yazılı / kitap / kurs satırı ekleyin.
+          Bu kanalda henüz ödeme kaydı yok. «{isCreditCard ? 'Kart ödemesi' : 'Hesap ödemesi'}» ile ekleyin.
         </p>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
@@ -528,7 +600,7 @@ export default function StudentPaymentTrackerPanel() {
                 <th className="px-3 py-2.5">Öğrenci</th>
                 <th className="px-3 py-2.5">Sınıf / Koç</th>
                 <th className="px-3 py-2.5">Tür</th>
-                <th className="px-3 py-2.5">Hesap</th>
+                <th className="px-3 py-2.5">{isCreditCard ? 'Kart' : 'Hesap'}</th>
                 <th className="px-3 py-2.5">Vade</th>
                 <th className="px-3 py-2.5 text-right">Tutar</th>
                 <th className="px-3 py-2.5 text-right">Ödenen</th>
@@ -648,7 +720,9 @@ export default function StudentPaymentTrackerPanel() {
 
       <AppModal open={formOpen} onClose={() => setFormOpen(false)} panelClassName="max-w-lg">
         <AppModalHeader>
-          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Yeni ödeme kaydı</h3>
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
+            {isCreditCard ? 'Yeni kredi kartı ödemesi' : 'Yeni banka hesabı ödemesi'}
+          </h3>
           <button type="button" className="text-sm text-slate-500" onClick={() => setFormOpen(false)}>
             Kapat
           </button>
@@ -686,14 +760,14 @@ export default function StudentPaymentTrackerPanel() {
               </select>
             </label>
             <label className="text-xs text-slate-600">
-              Ödeme hesabı
+              {isCreditCard ? 'Kredi kartı' : 'Banka hesabı'}
               <select
                 value={form.payment_account_id}
                 onChange={(e) => setForm((f) => ({ ...f, payment_account_id: e.target.value }))}
                 className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
               >
-                <option value="">Seçin (opsiyonel)</option>
-                {accounts.map((a) => (
+                <option value="">Seçin{channelAccounts.length ? '' : ' — önce kart/hesap ekleyin'}</option>
+                {channelAccounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.label}
                   </option>
@@ -791,7 +865,9 @@ export default function StudentPaymentTrackerPanel() {
 
       <AppModal open={accountOpen} onClose={() => setAccountOpen(false)} panelClassName="max-w-md">
         <AppModalHeader>
-          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Ödeme hesabı ekle</h3>
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
+            {accountForm.account_type === 'credit_card' ? 'Kredi kartı ekle' : 'Banka hesabı ekle'}
+          </h3>
           <button type="button" className="text-sm text-slate-500" onClick={() => setAccountOpen(false)}>
             Kapat
           </button>
@@ -799,39 +875,30 @@ export default function StudentPaymentTrackerPanel() {
         <AppModalBody>
           <div className="grid gap-3">
             <label className="text-xs text-slate-600">
-              Hesap adı *
+              {accountForm.account_type === 'credit_card' ? 'Kart adı' : 'Hesap adı'} *
               <input
                 value={accountForm.label}
                 onChange={(e) => setAccountForm((f) => ({ ...f, label: e.target.value }))}
-                placeholder="Örn. Ziraat Bankası — Songül Öğrenenefe"
+                placeholder={
+                  accountForm.account_type === 'credit_card'
+                    ? 'Örn. TEB — Songül Öğrenenefe — Kredi Kartı'
+                    : 'Örn. Ziraat Bankası — Songül Öğrenenefe'
+                }
                 className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
               />
             </label>
             <label className="text-xs text-slate-600">
-              Banka
+              Banka / kurum
               <input
                 value={accountForm.bank_name}
                 onChange={(e) => setAccountForm((f) => ({ ...f, bank_name: e.target.value }))}
-                placeholder="Ziraat / Enpara / TEB…"
+                placeholder={accountForm.account_type === 'credit_card' ? 'TEB / Garanti…' : 'Ziraat / Enpara…'}
                 className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
               />
             </label>
+            <input type="hidden" value={accountForm.account_type} readOnly />
             <label className="text-xs text-slate-600">
-              Hesap türü
-              <select
-                value={accountForm.account_type}
-                onChange={(e) => setAccountForm((f) => ({ ...f, account_type: e.target.value as PaymentAccountType }))}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
-              >
-                {Object.entries(ACCOUNT_TYPE_LABELS).map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {v}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="text-xs text-slate-600">
-              Hesap sahibi
+              Kart / hesap sahibi
               <input
                 value={accountForm.account_holder}
                 onChange={(e) => setAccountForm((f) => ({ ...f, account_holder: e.target.value }))}
@@ -839,15 +906,17 @@ export default function StudentPaymentTrackerPanel() {
                 className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
               />
             </label>
-            <label className="text-xs text-slate-600">
-              IBAN {accountForm.account_type === 'credit_card' ? '(opsiyonel)' : ''}
-              <input
-                value={accountForm.iban}
-                onChange={(e) => setAccountForm((f) => ({ ...f, iban: e.target.value }))}
-                placeholder={accountForm.account_type === 'credit_card' ? 'Kredi kartı için boş bırakılabilir' : 'TR…'}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
-              />
-            </label>
+            {accountForm.account_type === 'bank' ? (
+              <label className="text-xs text-slate-600">
+                IBAN
+                <input
+                  value={accountForm.iban}
+                  onChange={(e) => setAccountForm((f) => ({ ...f, iban: e.target.value }))}
+                  placeholder="TR…"
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+                />
+              </label>
+            ) : null}
             <label className="text-xs text-slate-600">
               Not
               <input
@@ -870,7 +939,9 @@ export default function StudentPaymentTrackerPanel() {
             type="button"
             disabled={accountSaving}
             onClick={() => void submitAccount()}
-            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 ${
+              accountForm.account_type === 'credit_card' ? 'bg-violet-600' : 'bg-indigo-600'
+            }`}
           >
             {accountSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Ekle

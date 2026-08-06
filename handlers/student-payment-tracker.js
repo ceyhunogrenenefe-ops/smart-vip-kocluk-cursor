@@ -154,6 +154,7 @@ function scopeInstitution(actor, roleSet, queryInst) {
 
 async function handleGetAccounts(req, res, actor, roleSet) {
   const inst = scopeInstitution(actor, roleSet, req.query?.institution_id);
+  const accountType = typeof req.query?.account_type === 'string' ? req.query.account_type.trim() : '';
   let q = supabaseAdmin
     .from('payment_accounts')
     .select('*')
@@ -166,6 +167,9 @@ async function handleGetAccounts(req, res, actor, roleSet) {
   } else if (!roleSetHasSuperAdmin(roleSet)) {
     return res.status(200).json({ data: [] });
   }
+  if (accountType && ACCOUNT_TYPES.has(accountType)) {
+    q = q.eq('account_type', accountType);
+  }
 
   const { data, error } = await q;
   if (error) {
@@ -175,6 +179,27 @@ async function handleGetAccounts(req, res, actor, roleSet) {
     throw error;
   }
   return res.status(200).json({ data: data || [] });
+}
+
+async function accountIdsForType(inst, accountType) {
+  let q = supabaseAdmin.from('payment_accounts').select('id').eq('active', true).eq('account_type', accountType);
+  if (inst) q = q.or(`institution_id.eq.${inst},institution_id.is.null`);
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data || []).map((a) => a.id);
+}
+
+function emptyPaymentStats() {
+  return {
+    total: 0,
+    unpaid: 0,
+    partial: 0,
+    paid: 0,
+    overdue: 0,
+    remaining_sum: 0,
+    paid_sum: 0,
+    total_sum: 0
+  };
 }
 
 async function handleGetRecords(req, res, actor, roleSet) {
@@ -187,6 +212,7 @@ async function handleGetRecords(req, res, actor, roleSet) {
   const dueFrom = typeof req.query?.due_from === 'string' ? req.query.due_from.trim().slice(0, 10) : '';
   const dueTo = typeof req.query?.due_to === 'string' ? req.query.due_to.trim().slice(0, 10) : '';
   const onlyOverdue = String(req.query?.only_overdue || '') === '1';
+  const accountType = typeof req.query?.account_type === 'string' ? req.query.account_type.trim() : '';
   const qSearch = typeof req.query?.q === 'string' ? req.query.q.trim().toLowerCase() : '';
 
   let q = supabaseAdmin
@@ -207,6 +233,14 @@ async function handleGetRecords(req, res, actor, roleSet) {
   if (accountId) q = q.eq('payment_account_id', accountId);
   if (dueFrom && YMD.test(dueFrom)) q = q.gte('due_date', dueFrom);
   if (dueTo && YMD.test(dueTo)) q = q.lte('due_date', dueTo);
+
+  if (accountType && ACCOUNT_TYPES.has(accountType)) {
+    const typeIds = await accountIdsForType(inst, accountType);
+    if (!typeIds.length) {
+      return res.status(200).json({ data: [], stats: emptyPaymentStats() });
+    }
+    q = q.in('payment_account_id', typeIds);
+  }
 
   const { data, error } = await q;
   if (error) {
