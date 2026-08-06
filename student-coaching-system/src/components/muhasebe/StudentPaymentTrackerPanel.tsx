@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Building2,
@@ -9,13 +9,15 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Search,
   Trash2,
-  Wallet
+  Wallet,
+  X
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
-import { formatClassLevelLabel } from '../../types';
+import { formatClassLevelLabel, type Student } from '../../types';
 import { normalizeWhatsAppPhoneForSend } from '../../lib/whatsappOutbound';
 import {
   buildPaymentWhatsAppMessage,
@@ -45,6 +47,133 @@ import {
 
 function formatTry(n: number) {
   return `${Number(n || 0).toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ₺`;
+}
+
+function studentMatchesQuery(name: string, query: string) {
+  const n = String(name || '').toLocaleLowerCase('tr-TR');
+  const tokens = query
+    .trim()
+    .toLocaleLowerCase('tr-TR')
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!tokens.length) return true;
+  return tokens.every((t) => n.includes(t));
+}
+
+function studentOptionLabel(s: Pick<Student, 'name' | 'classLevel'>) {
+  return `${s.name}${s.classLevel != null ? ` · ${formatClassLevelLabel(s.classLevel)}` : ''}`;
+}
+
+type StudentSearchSelectProps = {
+  students: Student[];
+  value: string;
+  onChange: (studentId: string) => void;
+};
+
+function StudentSearchSelect({ students, value, onChange }: StudentSearchSelectProps) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const deferredQuery = useDeferredValue(query);
+
+  const selected = useMemo(() => students.find((s) => s.id === value) || null, [students, value]);
+
+  const filtered = useMemo(() => {
+    const list = deferredQuery.trim()
+      ? students.filter((s) => studentMatchesQuery(s.name, deferredQuery))
+      : students;
+    return list.slice(0, 80);
+  }, [students, deferredQuery]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) setQuery('');
+  }, [open, value]);
+
+  const pick = (id: string) => {
+    onChange(id);
+    setOpen(false);
+    setQuery('');
+  };
+
+  const clear = () => {
+    onChange('');
+    setQuery('');
+    setOpen(true);
+  };
+
+  return (
+    <div ref={wrapRef} className="relative mt-1">
+      {selected && !open ? (
+        <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 dark:border-slate-600 dark:bg-slate-900">
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="min-w-0 flex-1 text-left text-sm font-medium text-slate-900 dark:text-white"
+          >
+            {studentOptionLabel(selected)}
+          </button>
+          <button
+            type="button"
+            title="Temizle"
+            onClick={clear}
+            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ) : (
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setOpen(true);
+            }}
+            onFocus={() => setOpen(true)}
+            placeholder="İsim veya soyad yazın…"
+            autoComplete="off"
+            className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-2.5 text-sm dark:border-slate-600 dark:bg-slate-900"
+          />
+        </div>
+      )}
+      {open ? (
+        <ul className="absolute z-50 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-900">
+          {filtered.length === 0 ? (
+            <li className="px-3 py-2 text-xs text-slate-500">Eşleşen öğrenci yok</li>
+          ) : (
+            filtered.map((s) => (
+              <li key={s.id}>
+                <button
+                  type="button"
+                  onClick={() => pick(s.id)}
+                  className={`flex w-full px-3 py-2 text-left text-sm hover:bg-emerald-50 dark:hover:bg-emerald-950/40 ${
+                    s.id === value ? 'bg-emerald-50 font-semibold text-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-100' : 'text-slate-800 dark:text-slate-100'
+                  }`}
+                >
+                  {studentOptionLabel(s)}
+                </button>
+              </li>
+            ))
+          )}
+          {deferredQuery.trim() && students.filter((s) => studentMatchesQuery(s.name, deferredQuery)).length > 80 ? (
+            <li className="border-t border-slate-100 px-3 py-1.5 text-[11px] text-slate-400 dark:border-slate-700">
+              İlk 80 sonuç — aramayı daraltın
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
+    </div>
+  );
 }
 
 function statusBadge(status: PaymentStatus) {
@@ -962,19 +1091,14 @@ export default function StudentPaymentTrackerPanel() {
                 {form.student_mode === 'system' ? (
                   <label className="block text-xs text-slate-600">
                     Öğrenci
-                    <select
+                    <StudentSearchSelect
+                      students={scopedStudents}
                       value={form.student_id}
-                      onChange={(e) => onPickStudent(e.target.value)}
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
-                    >
-                      <option value="">Seçin</option>
-                      {scopedStudents.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
-                          {s.classLevel != null ? ` · ${formatClassLevelLabel(s.classLevel)}` : ''}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={onPickStudent}
+                    />
+                    <span className="mt-1 block text-[11px] text-slate-500">
+                      İsim veya soyad yazarak arayın; listeden seçin.
+                    </span>
                   </label>
                 ) : (
                   <label className="block text-xs text-slate-600">
