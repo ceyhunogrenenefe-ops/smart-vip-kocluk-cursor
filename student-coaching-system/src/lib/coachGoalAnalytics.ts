@@ -250,8 +250,9 @@ export function plannerFetchRangeForCoachGoals(
 }
 
 /**
- * Tek plan bloğu gerçekleşen — haftalık plan ile aynı:
- * Yalnızca öğrencinin kaydettiği günlük çalışma (weekly_entry); eski completed_quantity sayılmaz.
+ * Tek plan bloğu gerçekleşen — haftalık plan ile aynı.
+ * Günlük kayıt + planner.completed_quantity + status=completed birleşik (max);
+ * boş linked satır yeşili ezmesin.
  */
 export function effectivePlannerEntryDone(
   g: CoachWeeklyGoalRow,
@@ -260,23 +261,46 @@ export function effectivePlannerEntryDone(
 ): number {
   const planned = Math.max(0, Number(row.planned_quantity || 0));
   const kind = coachGoalUnitKind(g);
-  const clamp = (n: number) => (planned > 0 ? Math.min(n, planned) : n);
+  const clamp = (n: number) => (planned > 0 ? Math.min(Math.max(0, n), planned) : Math.max(0, n));
 
+  let fromWeekly = 0;
   const wid = row.weekly_entry_id;
   if (wid) {
     const linked = weeklyEntries.find((w) => w.id === wid);
     if (linked) {
-      let done = 0;
-      if (kind === 'sayfa') done = effectivePagesRead(linked);
-      else if (kind === 'dakika') done = effectiveScreenMinutes(linked);
-      else done = Math.max(0, Number(linked.solvedQuestions || 0));
-      return clamp(done);
+      if (kind === 'sayfa') fromWeekly = effectivePagesRead(linked);
+      else if (kind === 'dakika') fromWeekly = effectiveScreenMinutes(linked);
+      else fromWeekly = Math.max(0, Number(linked.solvedQuestions || 0));
     }
   }
 
-  // AppContext'te linked kayıt yoksa planner completed_quantity yedek (yeşil kaçmasın)
-  const fallback = Math.max(0, Number(row.completed_quantity || 0));
-  return clamp(fallback);
+  const fromPlanner = Math.max(0, Number(row.completed_quantity || 0));
+  let done = Math.max(fromWeekly, fromPlanner);
+
+  if (String(row.status || '').toLowerCase() === 'completed' && planned > 0) {
+    done = Math.max(done, planned);
+  }
+
+  return clamp(done);
+}
+
+/** Takvim hücresi: koç hedefli veya serbest blok için yapılan miktar */
+export function plannerBlockDoneQuantity(
+  row: WeeklyPlannerEntryRow,
+  goals: CoachWeeklyGoalRow[],
+  weeklyEntries: WeeklyEntry[]
+): number {
+  const planned = Math.max(0, Number(row.planned_quantity || 0));
+  const linkedGoal = row.coach_goal_id ? goals.find((g) => g.id === row.coach_goal_id) : undefined;
+  let done = linkedGoal
+    ? effectivePlannerEntryDone(linkedGoal, row, weeklyEntries)
+    : Math.max(0, Number(row.completed_quantity || 0));
+
+  if (String(row.status || '').toLowerCase() === 'completed' && planned > 0) {
+    done = Math.max(done, planned);
+  }
+
+  return planned > 0 ? Math.min(done, planned) : done;
 }
 
 /** Yalnızca seçili analiz aralığı ∩ hedef takvimi içindeki plan blokları */
@@ -338,18 +362,24 @@ function plannedFromPlannerForGoal(
 }
 
 /**
- * Koç hedefi gerçekleşen — koçun verdiği ders + hedef tarihleri içindeki günlük kayıt.
- * Öğrenci takvime blok koymuş olmasa da sayılır.
+ * Koç hedefi gerçekleşen — günlük kayıt + takvim bloklarındaki yapılan (max).
+ * Öğrenci takvime blok koymuş olmasa da günlük kayıttan sayılır; blokta
+ * completed_quantity varsa o da yeşile yansır.
  */
 export function completedForCoachGoal(
   g: CoachWeeklyGoalRow,
   entries: WeeklyEntry[],
   rangeFrom: string,
   rangeTo: string,
-  _plannerEntries: WeeklyPlannerEntryRow[] = []
+  plannerEntries: WeeklyPlannerEntryRow[] = []
 ): number {
   if (!goalOverlapsRange(g, rangeFrom, rangeTo)) return 0;
-  return completedFromEntriesForGoal(g, entries, rangeFrom, rangeTo);
+  const fromEntries = completedFromEntriesForGoal(g, entries, rangeFrom, rangeTo);
+  const fromPlanner =
+    plannerEntries.length > 0
+      ? completedFromPlannerForGoal(g, plannerEntries, entries, rangeFrom, rangeTo)
+      : 0;
+  return Math.max(fromEntries, fromPlanner);
 }
 
 /** Seçili aralıkta öğrencinin planladığı miktar (planlanan toplam) */

@@ -341,9 +341,9 @@ export function WeeklyPlannerStudyModal({
         ]);
       }
 
-      if (hasStudyMetrics) {
+      if (hasStudyMetrics || progressAmount > 0) {
         try {
-          const doneQty = progressAmount;
+          const doneQty = Math.max(progressAmount, 0);
           const plannedN = targetQuestions;
           await patchWeeklyPlannerEntry(plannerEntry.id, {
             completed_quantity: doneQty,
