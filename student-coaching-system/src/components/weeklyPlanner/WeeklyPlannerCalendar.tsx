@@ -37,7 +37,7 @@ import {
   patchWeeklyPlannerEntry,
 } from '../../lib/weeklyPlannerApi';
 import { COACH_GOAL_QUANTITY_UNITS } from '../../lib/coachGoalUnits';
-import { effectivePlannerEntryDone, completedForCoachGoal } from '../../lib/coachGoalAnalytics';
+import { plannerBlockDoneQuantity, completedForCoachGoal } from '../../lib/coachGoalAnalytics';
 import { defaultGoalUnitForSubject, sortSubjectsWithStudyTracks } from '../../lib/studyTrackSubjects';
 import {
   isTopicMarkedCompleted,
@@ -729,12 +729,7 @@ export function WeeklyPlannerCalendar({
     for (const e of entries) {
       if (e.planner_date < weekStartStr || e.planner_date > weekEndStr) continue;
       planned += Number(e.planned_quantity || 0);
-      const linkedGoal = e.coach_goal_id ? goals.find((g) => g.id === e.coach_goal_id) : undefined;
-      if (linkedGoal) {
-        done += effectivePlannerEntryDone(linkedGoal, e, studentWeeklyEntries);
-      } else {
-        done += Math.min(Number(e.completed_quantity || 0), Number(e.planned_quantity || 0));
-      }
+      done += plannerBlockDoneQuantity(e, goals, studentWeeklyEntries);
       minutes += slotMinutes(e.start_time, e.end_time);
     }
     const pct = planned > 0 ? Math.round((done / planned) * 100) : 0;
@@ -1063,7 +1058,7 @@ export function WeeklyPlannerCalendar({
       try {
         await patchWeeklyPlannerEntry(entry.id, {
           status: nextDone ? 'completed' : 'planned',
-          ...(nextDone ? {} : { completed_quantity: 0 }),
+          completed_quantity: nextDone ? plannedN : 0,
         });
         if (nextDone) {
           const sub = entry.subject?.trim() || 'Genel';
@@ -1957,21 +1952,16 @@ export function WeeklyPlannerCalendar({
                               const linkedGoal = goals.find((g) => g.id === en.coach_goal_id);
                               const st = subjectPlannerStyle(en.subject, linkedGoal?.quantity_unit);
                               const plannedN = Number(en.planned_quantity || 0);
-                              const doneQty = linkedGoal
-                                ? effectivePlannerEntryDone(linkedGoal, en, studentWeeklyEntries)
-                                : Math.min(
-                                    Number(en.completed_quantity || 0),
-                                    plannedN > 0 ? plannedN : Number(en.completed_quantity || 0)
-                                  );
+                              const doneQty = plannerBlockDoneQuantity(en, goals, studentWeeklyEntries);
                               const isRealized = doneQty > 0;
                               const miss = isPast && !isRealized && en.status === 'planned';
-                              const borderCls = isRealized
-                                ? 'border-emerald-500 ring-1 ring-emerald-200 bg-emerald-50/95 dark:bg-emerald-950/45'
+                              const toneCls = isRealized
+                                ? 'border-emerald-500 ring-1 ring-emerald-200 bg-emerald-50 text-emerald-950 dark:bg-emerald-950/50 dark:ring-emerald-900/50 dark:text-emerald-100'
                                 : plannedN > 0
-                                  ? 'border-orange-500 ring-1 ring-orange-200 bg-orange-50/95 dark:bg-orange-950/35'
+                                  ? 'border-orange-500 ring-1 ring-orange-200 bg-orange-50 text-orange-950 dark:bg-orange-950/40 dark:ring-orange-900/45 dark:text-orange-100'
                                   : miss
-                                    ? 'border-red-400 ring-1 ring-red-100'
-                                    : 'border-slate-200';
+                                    ? cn(st.chip, 'border-red-400 ring-1 ring-red-100')
+                                    : st.chip;
                               return (
                                 <button
                                   key={en.id}
@@ -1983,8 +1973,7 @@ export function WeeklyPlannerCalendar({
                                   }}
                                   className={cn(
                                     'w-full rounded-xl border px-3 py-3 text-left shadow-sm transition active:scale-[0.99]',
-                                    st.chip,
-                                    borderCls,
+                                    toneCls,
                                     canEditPlan ? 'touch-manipulation' : 'opacity-80'
                                   )}
                                 >
@@ -2180,22 +2169,17 @@ export function WeeklyPlannerCalendar({
                             const linkedGoal = goals.find((g) => g.id === en.coach_goal_id);
                             const st = subjectPlannerStyle(en.subject, linkedGoal?.quantity_unit);
                             const plannedN = Number(en.planned_quantity || 0);
-                            const doneQty = linkedGoal
-                              ? effectivePlannerEntryDone(linkedGoal, en, studentWeeklyEntries)
-                              : Math.min(
-                                  Number(en.completed_quantity || 0),
-                                  plannedN > 0 ? plannedN : Number(en.completed_quantity || 0)
-                                );
+                            const doneQty = plannerBlockDoneQuantity(en, goals, studentWeeklyEntries);
                             const isRealized = doneQty > 0;
                             const hasPlan = plannedN > 0;
                             const miss = isPast && !isRealized && en.status === 'planned';
-                            const borderCls = isRealized
-                              ? 'border-emerald-500 ring-1 ring-emerald-200 bg-emerald-50/95 dark:bg-emerald-950/45 dark:ring-emerald-900/50'
+                            const toneCls = isRealized
+                              ? 'border-emerald-500 ring-1 ring-emerald-200 bg-emerald-50 text-emerald-950 dark:bg-emerald-950/50 dark:ring-emerald-900/50 dark:text-emerald-100'
                               : hasPlan
-                                ? 'border-orange-500 ring-1 ring-orange-200 bg-orange-50/95 dark:bg-orange-950/35 dark:ring-orange-900/45'
+                                ? 'border-orange-500 ring-1 ring-orange-200 bg-orange-50 text-orange-950 dark:bg-orange-950/40 dark:ring-orange-900/45 dark:text-orange-100'
                                 : miss
-                                  ? 'border-red-400 ring-1 ring-red-100 dark:ring-red-900/35'
-                                  : st.chip.replace('bg-', 'border-').split(' ')[1] || 'border-slate-300';
+                                  ? cn(st.chip, 'border-red-400 ring-1 ring-red-100 dark:ring-red-900/35')
+                                  : st.chip;
                             return (
                               <div
                                 key={en.id}
@@ -2216,8 +2200,7 @@ export function WeeklyPlannerCalendar({
                                 }}
                                 className={cn(
                                   'text-[11px] leading-snug rounded-lg px-2 py-1.5 mb-1 border shadow-sm backdrop-blur-[1px] transition hover:brightness-[1.03] dark:hover:brightness-110',
-                                  st.chip,
-                                  borderCls,
+                                  toneCls,
                                   canEditPlan ? 'cursor-grab active:cursor-grabbing' : ''
                                 )}
                               >
@@ -2250,10 +2233,10 @@ export function WeeklyPlannerCalendar({
             <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-1">{goalsSectionTitle}</h4>
             <p className="mb-2 hidden flex-wrap gap-2 text-[10px] text-slate-500 dark:text-slate-400 sm:flex">
               <span className="inline-flex items-center gap-1 rounded-md border border-orange-300 bg-orange-50 px-1.5 py-0.5 text-orange-900 dark:border-orange-800 dark:bg-orange-950/40 dark:text-orange-200">
-                Turuncu: planlandı
+                Turuncu: planlandı (hedef girildi)
               </span>
               <span className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
-                Yeşil: yapıldı
+                Yeşil: çalışma kaydı / tamamlandı
               </span>
             </p>
             <p className="mb-3 hidden text-[11px] text-slate-500 dark:text-slate-400 sm:block">

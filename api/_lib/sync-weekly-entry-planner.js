@@ -32,6 +32,34 @@ function normSubject(s) {
     .toLocaleLowerCase('tr-TR');
 }
 
+function normalizeGoalUnit(raw) {
+  const u = String(raw || 'soru')
+    .trim()
+    .toLowerCase();
+  if (u === 'dk' || u === 'dakika' || u === 'süre' || u === 'sure' || u === 'dak') return 'dakika';
+  if (u === 'sayfa' || u === 'kitap') return 'sayfa';
+  if (u === 'paragraf' || u === 'paragraflar' || u === 'problem' || u === 'problemler') return 'soru';
+  if (u === 'sorular' || u === 'adet' || u === '') return 'soru';
+  return u;
+}
+
+function completedAmountForUnit(unit, entry) {
+  const u = normalizeGoalUnit(unit);
+  const solved = Math.max(0, Number(entry.solved_questions ?? 0));
+  const pages = Math.max(
+    0,
+    Number(
+      entry.pages_read != null && Number.isFinite(Number(entry.pages_read))
+        ? entry.pages_read
+        : entry.reading_minutes ?? 0
+    )
+  );
+  const screen = Math.max(0, Number(entry.screen_time_minutes ?? 0));
+  if (u === 'sayfa') return pages;
+  if (u === 'dakika') return screen;
+  return solved;
+}
+
 async function pickCoachGoalId(studentId, entryDate, subjectRaw) {
   const ws = weekStartMondayYMD(entryDate);
   const subj = normSubject(subjectRaw);
@@ -39,13 +67,13 @@ async function pickCoachGoalId(studentId, entryDate, subjectRaw) {
 
   const { data: goals, error } = await supabaseAdmin
     .from('coach_weekly_goals')
-    .select('id,subject,created_at')
+    .select('id,subject,quantity_unit,created_at')
     .eq('student_id', studentId)
     .eq('week_start_date', ws)
     .order('created_at', { ascending: true });
   if (error) throw error;
   const row = (goals || []).find((g) => normSubject(g.subject) === subj);
-  return row?.id || null;
+  return row || null;
 }
 
 async function resolveSlotTimes(
@@ -97,30 +125,66 @@ export async function syncWeeklyEntryPlannerRow(entry, opts = {}) {
 
   const solved = Number(entry.solved_questions ?? 0);
   const target = Number(entry.target_questions ?? 0);
-  if (!(solved > 0 || target > 0)) {
-    await supabaseAdmin.from('weekly_planner_entries').delete().eq('weekly_entry_id', entry.id);
+  const pages = Number(entry.pages_read ?? entry.reading_minutes ?? 0);
+  const screen = Number(entry.screen_time_minutes ?? 0);
+  const hasAnyProgress = solved > 0 || pages > 0 || screen > 0 || target > 0;
+
+  const { data: existing, error: exErr } = await supabaseAdmin
+    .from('weekly_planner_entries')
+    .select('id,planner_date,start_time,end_time,coach_goal_id,planned_quantity,status')
+    .eq('weekly_entry_id', entry.id)
+    .maybeSingle();
+  if (exErr) throw exErr;
+
+  // İlerleme yoksa: koç hedefli bloğu silme (hedef kutusu kaybolmasın); serbest senkron bloğunu temizle
+  if (!hasAnyProgress) {
+    if (existing?.coach_goal_id) {
+      await supabaseAdmin
+        .from('weekly_planner_entries')
+        .update({
+          completed_quantity: 0,
+          status: 'planned',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existing.id);
+      return existing;
+    }
+    if (existing?.id) {
+      await supabaseAdmin.from('weekly_planner_entries').delete().eq('id', existing.id);
+    }
     return null;
   }
 
-  const plannedQty = target > 0 ? Math.max(target, solved) : Math.max(solved, 1);
-  const completedQty = solved;
+  const matchedGoal = await pickCoachGoalId(entry.student_id, entry.date, entry.subject);
+  let goalUnit = 'soru';
+  let coachGoalId = existing?.coach_goal_id || matchedGoal?.id || null;
+  if (coachGoalId) {
+    const { data: goalRow } = await supabaseAdmin
+      .from('coach_weekly_goals')
+      .select('quantity_unit')
+      .eq('id', coachGoalId)
+      .maybeSingle();
+    if (goalRow?.quantity_unit) goalUnit = goalRow.quantity_unit;
+    else if (matchedGoal?.quantity_unit) goalUnit = matchedGoal.quantity_unit;
+  }
+
+  const completedQty = completedAmountForUnit(goalUnit, entry);
+  const plannedQty =
+    target > 0
+      ? Math.max(target, completedQty)
+      : existing?.planned_quantity > 0
+        ? Math.max(Number(existing.planned_quantity), completedQty, 1)
+        : Math.max(completedQty, 1);
+
   let status = 'planned';
-  if (completedQty > 0 && target > 0 && completedQty >= target) status = 'completed';
+  if (completedQty > 0 && plannedQty > 0 && completedQty >= plannedQty) status = 'completed';
   else if (completedQty > 0) status = 'partial';
 
   const plannerDate = padDate(entry.date);
-  const coachGoalId = await pickCoachGoalId(entry.student_id, entry.date, entry.subject);
 
   const topic = String(entry.topic || '').trim();
   const subject = String(entry.subject || '').trim() || 'Genel';
   const title = topic ? `📝 Günlük: ${topic}` : `📝 Günlük: ${subject}`;
-
-  const { data: existing, error: exErr } = await supabaseAdmin
-    .from('weekly_planner_entries')
-    .select('id,planner_date,start_time,end_time')
-    .eq('weekly_entry_id', entry.id)
-    .maybeSingle();
-  if (exErr) throw exErr;
 
   const dateChanged = existing && padDate(existing.planner_date) !== plannerDate;
   const preferredStart =
