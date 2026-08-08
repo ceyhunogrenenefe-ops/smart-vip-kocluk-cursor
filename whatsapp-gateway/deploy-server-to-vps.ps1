@@ -43,6 +43,7 @@ pm2 save
 echo '--- health ---'
 curl -s http://127.0.0.1:4010/health || true
 echo ''
+node -e "const fs=require('fs'); const p='src/message-store.js'; if(!fs.existsSync(p)){console.error('FATAL: message-store.js missing'); process.exit(1)} console.log('message-store.js OK')"
 "@
 
 Write-Host ">> VPS'te kurulum + pm2 restart..." -ForegroundColor Cyan
@@ -53,5 +54,6 @@ if ($SshPort -ne 22) {
 }
 
 Write-Host ""
-Write-Host "Tamam. Panelden Koç WhatsApp -> Saglik testi yapin." -ForegroundColor Green
+Write-Host "Tamam. Panelden Koc WhatsApp -> Saglik testi yapin." -ForegroundColor Green
+Write-Host "Health: message_store_version=2026-08-04-root-pending olmali." -ForegroundColor Yellow
 Write-Host "Vercel: WHATSAPP_GATEWAY_UPSTREAM=http://${VpsHost}:4010" -ForegroundColor Yellow

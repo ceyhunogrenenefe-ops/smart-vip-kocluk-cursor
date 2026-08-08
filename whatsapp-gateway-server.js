@@ -1,3 +1,13 @@
+/**
+ * @deprecated STALE — kullanmayın.
+ * Gerçek gateway: whatsapp-gateway/src/server.js (+ message-store.js).
+ * Bu dosyada getMessage: async () => undefined → alıcıda «Mesaj bekleniyor».
+ * PM2 ecosystem.config.cjs zaten ./src/server.js kullanır.
+ */
+throw new Error(
+  'STALE whatsapp-gateway-server.js — use whatsapp-gateway/src/server.js (getMessage + message-store)'
+);
+
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
