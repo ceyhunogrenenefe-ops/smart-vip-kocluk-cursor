@@ -10,6 +10,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Link2,
   Trash2,
   Wallet,
   X
@@ -37,6 +38,7 @@ import {
   type PaymentType,
   type StudentPaymentRecord
 } from '../../lib/studentPaymentTrackerApi';
+import { createGarantiPaymentLink } from '../../lib/garantiPosApi';
 import { classifyTaksit, formatTrShortDate, todayYmdLocal, type TaksitDurum } from '../../lib/taksitMuhasebe';
 import {
   AppModal,
@@ -588,6 +590,41 @@ export default function StudentPaymentTrackerPanel() {
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
   };
 
+  const createGarantiLink = async (row: StudentPaymentRecord) => {
+    const remaining = Number(row.remaining ?? Math.max(0, Number(row.amount_total) - Number(row.amount_paid)));
+    if (!(remaining > 0)) {
+      toast.error('Kalan tutar yok');
+      return;
+    }
+    try {
+      const { pay_url } = await createGarantiPaymentLink({
+        amount_try: remaining,
+        title: row.title || `${row.student_name || 'Öğrenci'} — tahsilat`,
+        customer_name: row.contact_name || row.student_name || undefined,
+        customer_phone: row.contact_phone_resolved || row.contact_phone || undefined,
+        student_payment_record_id: row.id,
+        institution_id: row.institution_id,
+        installment_max: 0
+      });
+      try {
+        await navigator.clipboard.writeText(pay_url);
+        toast.success('Garanti ödeme linki kopyalandı');
+      } catch {
+        toast.success('Ödeme linki oluşturuldu');
+      }
+      window.prompt('Garanti ödeme linki (kopyalayın):', pay_url);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'link_failed';
+      if (msg === 'garanti_not_configured') {
+        toast.error('Garanti POS env değişkenleri eksik (Vercel)');
+      } else if (msg === 'garanti_payment_orders_sql_missing') {
+        toast.error('SQL migration çalıştırın: 2026-08-08-garanti-payment-orders.sql');
+      } else {
+        toast.error(msg);
+      }
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -597,7 +634,7 @@ export default function StudentPaymentTrackerPanel() {
             Öğrenci ödeme takip
           </h2>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-0.5">
-          Yazılı, kitap, kurs · banka / kredi kartı · dışarıdan gelir · taksit · tarih aralığı · WhatsApp
+          Yazılı, kitap, kurs · banka / kredi kartı · Garanti POS link · taksit · WhatsApp
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -989,6 +1026,16 @@ export default function StudentPaymentTrackerPanel() {
                       >
                         <MessageCircle className="h-4 w-4" />
                       </button>
+                      {(r.remaining ?? 0) > 0 && r.status !== 'paid' && r.status !== 'cancelled' ? (
+                        <button
+                          type="button"
+                          title="Garanti ödeme linki"
+                          onClick={() => void createGarantiLink(r)}
+                          className="rounded-lg p-1.5 text-sky-600 hover:bg-sky-50 dark:hover:bg-sky-950/40"
+                        >
+                          <Link2 className="h-4 w-4" />
+                        </button>
+                      ) : null}
                       {r.status !== 'paid' ? (
                         <button
                           type="button"

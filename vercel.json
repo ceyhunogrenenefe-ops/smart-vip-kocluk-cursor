@@ -138,6 +138,10 @@
       "destination": "/api/deep-api?path=whatsapp/$1"
     },
     {
+      "source": "/api/garanti-pos/(.*)",
+      "destination": "/api/deep-api?path=garanti-pos/$1"
+    },
+    {
       "source": "/api/question-help/webhook",
       "destination": "/api/deep-api?path=question-help/webhook"
     },

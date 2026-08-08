@@ -90,6 +90,7 @@ import TeacherVitrineProfilePage from './pages/TeacherVitrineProfilePage';
 import TeacherAvailabilityPage from './pages/TeacherAvailabilityPage';
 import TeacherProfileApprovalsPage from './pages/TeacherProfileApprovalsPage';
 import KitapciPortalPage from './pages/KitapciPortalPage';
+import GarantiOdemePage, { GarantiOdemeSonucPage } from './pages/GarantiOdemePage';
 import TeacherEduPanelPage from './pages/eduPanel/TeacherEduPanelPage';
 import StudentEduPanelPage from './pages/eduPanel/StudentEduPanelPage';
 import AdminAgentsPage from './pages/aiAgents/AdminAgentsPage';
@@ -662,6 +663,8 @@ function App() {
             } />
 
             <Route path="/kitapci/:token" element={<KitapciPortalPage />} />
+            <Route path="/odeme/sonuc" element={<GarantiOdemeSonucPage />} />
+            <Route path="/odeme/:token" element={<GarantiOdemePage />} />
             <Route path="/veli-imza/:token" element={<VeliImzaPage />} />
             <Route path="/sign-contract/:token" element={<VeliImzaPage />} />
             <Route path="/veli-kayit-metin/:slug" element={<VeliKayitLegalDocPage />} />
