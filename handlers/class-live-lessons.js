@@ -205,6 +205,17 @@ function timeOverlap(aStart, aEnd, bStart, bEnd) {
   return A1 < B2 && A2 > B1;
 }
 
+/** Etüt / Din: birden fazla sınıf aynı öğretmen + aynı saatte (ortak Zoom/oda). */
+function isSharedMultiClassSubject(subject) {
+  const s = String(subject || '')
+    .trim()
+    .toLocaleUpperCase('tr-TR');
+  if (!s) return false;
+  if (s === 'ETÜT' || s.includes('ETUT') || s.includes('ETÜT')) return true;
+  if (s.includes('DİN')) return true;
+  return false;
+}
+
 /** yyyy-mm-dd ile gün ekler (UTC gün kökü – saat kayması yok) */
 function addDaysIsoDate(dateStr, days) {
   const s = String(dateStr || '').trim();
@@ -246,6 +257,7 @@ async function teacherTimeConflictOnDate({
   sameClassId = null
 }) {
   if (isSolutionLessonSubject(subject)) return { ok: true };
+  if (isSharedMultiClassSubject(subject)) return { ok: true };
   const ex = new Set(excludeSessionIds.map(String));
   const ownClassId = sameClassId ? String(sameClassId).trim() : '';
   const { data: sess, error: sErr } = await supabaseAdmin
@@ -2137,6 +2149,7 @@ export default async function handler(req, res) {
       if (cErr) return res.status(500).json({ error: cErr.message });
       if (
         !isSolutionLessonSubject(subject) &&
+        !isSharedMultiClassSubject(subject) &&
         (sameTeacherSlots || []).some((x) => timeOverlap(start, end, x.start_time, x.end_time))
       ) {
         return res.status(409).json({ error: 'Aynı öğretmen aynı saatte ders alamaz.', code: 'teacher_time_conflict' });
@@ -2624,6 +2637,7 @@ export default async function handler(req, res) {
       if (cErr) return res.status(500).json({ error: cErr.message });
       if (
         !isSolutionLessonSubject(subjectForCheck) &&
+        !isSharedMultiClassSubject(subjectForCheck) &&
         (sameTeacherSlots || []).some((x) => timeOverlap(start, end, x.start_time, x.end_time))
       ) {
         return res.status(409).json({ error: 'Aynı öğretmen aynı saatte ders alamaz.', code: 'teacher_time_conflict' });
