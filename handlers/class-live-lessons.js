@@ -1506,7 +1506,10 @@ export default async function handler(req, res) {
         String(details.class.institution_id || institutionId || body.institution_id || '').trim() || null;
       if (instId) await backfillClassSessionInstitutionId(classId, instId);
       await backfillClassWeeklySlotMeetingLinks(classId);
-      const sessionResult = await ensureClassSessionsForClassInRange(classId, from, to);
+      const sessionResult = await ensureClassSessionsForClassInRange(classId, from, to, {
+        ignoreCancelled: body.ignore_cancelled !== false && body.ignoreCancelled !== false,
+        purgeCancelled: Boolean(body.purge_cancelled ?? body.purgeCancelled)
+      });
       const linkBackfill = await backfillClassSessionMeetingLinksInRange(classId, from, to);
       const consecutiveAlign = await backfillScheduledConsecutiveBbbAlignment(classId, from, to);
       const combinedAlign = await backfillCombinedClassBbbAlignment(

@@ -56,14 +56,18 @@ function timeRangesOverlap(startA, endA, startB, endB) {
   return a0 < b1 && b0 < a1;
 }
 
-/** Şablondan oturum açma: aynı gün/sınıf için mevcut veya iptal edilmiş oturum varsa tekrar oluşturma. */
-function slotCoveredBySessions(slot, sessionsOnDay) {
+/** Şablondan oturum açma: aynı gün/sınıf için aktif (iptal edilmemiş) oturum varsa tekrar oluşturma. */
+function slotCoveredBySessions(slot, sessionsOnDay, opts = {}) {
+  const ignoreCancelled = opts.ignoreCancelled !== false;
   const slotKey = sessionKey(slot.class_id, slot.teacher_id, slot.start_time);
   const slotTeacher = String(slot.teacher_id || '').trim();
   const slotSubject = normSubjectKey(slot.subject);
 
   for (const s of sessionsOnDay || []) {
     if (String(s.class_id || '') !== String(slot.class_id || '')) continue;
+    const status = String(s.status || '').toLowerCase();
+    if (ignoreCancelled && status === 'cancelled') continue;
+
     const sessKey = sessionKey(s.class_id, s.teacher_id, s.start_time);
     if (sessKey === slotKey) return true;
 
@@ -123,7 +127,7 @@ export async function ensureClassSessionsFromWeeklySlots(lessonDate) {
   const toInsert = [];
   const sessionsOnDay = existing || [];
   for (const slot of slotList) {
-    if (slotCoveredBySessions(slot, sessionsOnDay)) continue;
+    if (slotCoveredBySessions(slot, sessionsOnDay, { ignoreCancelled: true })) continue;
     const row = sessionRowFromSlot(slot, date, instByClass.get(String(slot.class_id)) ?? null, null);
     if (!row.meeting_link) continue;
     toInsert.push(row);
@@ -206,6 +210,21 @@ export async function ensureClassSessionsForClassInRange(classId, dateFrom, date
   let alreadyExists = 0;
   let daysScanned = 0;
   const skipped = [];
+  const ignoreCancelled = opts.ignoreCancelled !== false;
+  /** true: tarih aralığındaki iptal edilmiş oturumları sil, şablondan yeniden üret */
+  const purgeCancelled = Boolean(opts.purgeCancelled);
+
+  if (purgeCancelled) {
+    const { error: delErr, count: delCount } = await supabaseAdmin
+      .from('class_sessions')
+      .delete({ count: 'exact' })
+      .eq('class_id', cid)
+      .eq('status', 'cancelled')
+      .gte('lesson_date', from)
+      .lte('lesson_date', to);
+    if (delErr) throw delErr;
+    opts._purgedCancelled = delCount || 0;
+  }
 
   let cur = from;
   while (cur <= to) {
@@ -227,7 +246,7 @@ export async function ensureClassSessionsForClassInRange(classId, dateFrom, date
     const sessionsOnDay = existing || [];
     const toInsert = [];
     for (const slot of daySlots) {
-      if (slotCoveredBySessions(slot, sessionsOnDay)) {
+      if (slotCoveredBySessions(slot, sessionsOnDay, { ignoreCancelled })) {
         alreadyExists += 1;
         continue;
       }
@@ -267,6 +286,7 @@ export async function ensureClassSessionsForClassInRange(classId, dateFrom, date
     already_exists: alreadyExists,
     days_scanned: daysScanned,
     skipped,
+    purged_cancelled: opts._purgedCancelled || 0,
     schedule_batch_ids: [...batchIdBySlotKey.values()]
   };
 }
