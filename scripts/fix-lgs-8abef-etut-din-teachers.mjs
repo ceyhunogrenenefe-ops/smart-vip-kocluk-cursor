@@ -82,7 +82,10 @@ async function ensureTeachersOnClass(token, cls) {
     {
       class_id: cls.id,
       teacher_ids: teacherIds,
-      student_ids: existingStudents
+      student_ids: existingStudents,
+      // Mevcut branş atamalarını silme
+      student_subjects:
+        cls.student_subjects && typeof cls.student_subjects === 'object' ? cls.student_subjects : undefined
     }
   );
   if (status >= 400) throw new Error(`members_fail ${status} ${JSON.stringify(json)}`);
