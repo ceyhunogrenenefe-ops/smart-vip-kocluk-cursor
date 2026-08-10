@@ -1873,15 +1873,19 @@ export default function ClassLiveLessons() {
                         Number(String(s.start_time).slice(0, 2)) === hour &&
                         s.status !== 'cancelled'
                     );
-                    const blockedSlotTeacherHours = new Set(
+                    // Aynı saat satırında (ör. 17:00 + 17:50 Etüt) yalnızca
+                    // tam başlangıç saati eşleşen oturum şablonu gizler; saat
+                    // bazlı bloklama 2. dilimi düşürürdü.
+                    const coveredTemplateStarts = new Set(
                       sessionsHere
                         .filter((s) => s.status !== 'cancelled')
-                        .map((s) => `${s.teacher_id}|${hour}`)
+                        .map((s) => `${s.teacher_id}|${String(s.start_time || '').slice(0, 5)}`)
                     );
                     const templatesHere = classSlots.filter((s) => {
                       if (s.day_of_week !== dowSlotFromIso(colIso)) return false;
                       if (Number(String(s.start_time).slice(0, 2)) !== hour) return false;
-                      if (blockedSlotTeacherHours.has(`${s.teacher_id}|${hour}`)) return false;
+                      const startHm = String(s.start_time || '').slice(0, 5);
+                      if (coveredTemplateStarts.has(`${s.teacher_id}|${startHm}`)) return false;
                       return true;
                     });
                     const colToday = colIso === todayIso();
