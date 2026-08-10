@@ -1,5 +1,6 @@
 import { apiFetch } from './session';
 import { copyTextToClipboard } from './copyToClipboard';
+import { isExternalMeetingPlatform, lessonJoinUrl } from './liveLessonUtils';
 
 export type GuestJoinKind = 'class' | 'private' | 'meeting';
 
@@ -13,6 +14,77 @@ export type GuestJoinShare = {
   lessonTime?: string;
   code?: string | null;
 };
+
+/** Zoom/Meet vb. harici link için WhatsApp davet metni. */
+export function formatExternalMeetingShareText(opts: {
+  title?: string;
+  lessonDate?: string;
+  lessonTime?: string;
+  url: string;
+  className?: string;
+}): string {
+  const subject = String(opts.title || '').trim();
+  const dateRaw = String(opts.lessonDate || '').trim().slice(0, 10);
+  let datePart = '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) {
+    const [y, m, d] = dateRaw.split('-');
+    datePart = `${d}.${m}.${y}`;
+  }
+  const timePart = String(opts.lessonTime || '').trim().slice(0, 5);
+  const when = [datePart, timePart].filter(Boolean).join(' · ');
+  const head = subject
+    ? opts.className
+      ? `${subject} (${opts.className})`
+      : subject
+    : 'Canlı ders';
+  const link = String(opts.url || '').trim();
+  if (when) return `${head}\n${when}\n${link}`;
+  return `${head}\n${link}`;
+}
+
+export async function copyExternalMeetingShareText(opts: {
+  title?: string;
+  lessonDate?: string;
+  lessonTime?: string;
+  url: string;
+  className?: string;
+}): Promise<GuestJoinShare> {
+  const url = String(opts.url || '').trim();
+  if (!url || !isExternalMeetingPlatform(url)) {
+    throw new Error('Harici toplantı bağlantısı yok');
+  }
+  const shareText = formatExternalMeetingShareText({ ...opts, url });
+  await copyTextToClipboard(shareText);
+  return { url, shareText, longUrl: url, code: null };
+}
+
+/** Satırda Zoom/Meet varsa onu kopyala; yoksa false. */
+export async function tryCopyExternalMeetingFromRow(
+  row: {
+    meeting_link?: string | null;
+    join_link?: string | null;
+    meet_link?: string | null;
+    link_zoom?: string | null;
+    subject?: string | null;
+    title?: string | null;
+    lesson_date?: string | null;
+    start_time?: string | null;
+    class_name?: string | null;
+  },
+  opts?: { className?: string; title?: string }
+): Promise<GuestJoinShare | null> {
+  const url = String(
+    row.meeting_link || row.join_link || row.meet_link || row.link_zoom || lessonJoinUrl(row) || ''
+  ).trim();
+  if (!isExternalMeetingPlatform(url)) return null;
+  return copyExternalMeetingShareText({
+    url,
+    title: opts?.title || row.subject || row.title || 'Canlı ders',
+    lessonDate: row.lesson_date || '',
+    lessonTime: String(row.start_time || '').slice(0, 5),
+    className: opts?.className || row.class_name || ''
+  });
+}
 
 export async function fetchGuestJoinShareUrl(kind: GuestJoinKind, id: string): Promise<GuestJoinShare> {
   const api =
@@ -160,11 +232,20 @@ export async function fetchAcademicStudyGuestJoinShareUrl(
   };
 }
 
-/** Etüt sınıfı için WhatsApp davet metni (canlı grup dersi davet linki gibi). */
+/** Etüt sınıfı için WhatsApp davet metni (Zoom ise ham Zoom; BBB ise kısa /d/ link). */
 export async function copyAcademicStudyGuestJoinShareText(
   room: string,
-  institutionId?: string | null
+  institutionId?: string | null,
+  opts?: { directUrl?: string | null; title?: string }
 ): Promise<GuestJoinShare> {
+  const direct = String(opts?.directUrl || '').trim();
+  if (isExternalMeetingPlatform(direct)) {
+    return copyExternalMeetingShareText({
+      url: direct,
+      title: opts?.title || 'Etüt',
+      className: 'Akademik Merkez — Etüt'
+    });
+  }
   const data = await fetchAcademicStudyGuestJoinShareUrl(room, institutionId);
   await copyTextToClipboard(data.shareText);
   return data;

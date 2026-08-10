@@ -274,11 +274,16 @@ export default function AcademicCenter() {
   }, [institutionId]);
 
   const copyStudyGuestLink = async (key: StudyEntryKey) => {
-    setStudyGuestLinkBusy(key);
     setStudyGuestNotice(null);
+    setStudyGuestLinkBusy(key);
     try {
-      await copyAcademicStudyGuestJoinShareText(key, institutionId);
-      setStudyGuestNotice('Davet metni panoya kopyalandı (WhatsApp için kısa link + etüt bilgisi).');
+      const href = studyEntryUrl(links, key);
+      const label = STUDY_ENTRY_DEFS.find((x) => x.key === key)?.label || 'Etüt';
+      await copyAcademicStudyGuestJoinShareText(key, institutionId, {
+        directUrl: href,
+        title: label
+      });
+      setStudyGuestNotice('Davet metni panoya kopyalandı (Zoom/Meet veya kısa davet linki).');
     } catch (e) {
       setStudyGuestNotice(e instanceof Error ? e.message : 'Davet linki alınamadı.');
     } finally {
