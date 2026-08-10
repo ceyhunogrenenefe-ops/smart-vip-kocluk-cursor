@@ -145,90 +145,418 @@ export async function rasterizeHtmlElementForPdf(el: HTMLElement, scale = 2): Pr
   return rasterizeElement(el, scale);
 }
 
-async function rasterizeElement(el: HTMLElement, scale = 2): Promise<HTMLCanvasElement> {
-  mountOffscreen(el);
+async function waitForLayoutPaint(): Promise<void> {
+  await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+  await new Promise((r) => setTimeout(r, 80));
+}
+
+/**
+ * html2canvas: hedef mutlaka document içinde olmalı; cloneNode ile önceden
+ * kopyalanmış düğümlerde «Node cannot be found in the current page» sık görülür.
+ */
+async function safeHtml2Canvas(
+  el: HTMLElement,
+  opts: {
+    scale?: number;
+    width?: number;
+    height?: number;
+    onclone?: (doc: Document, cloned: HTMLElement) => void;
+  } = {}
+): Promise<HTMLCanvasElement> {
+  if (!el.isConnected || !document.body.contains(el)) {
+    throw new Error('PDF için yakalanacak alan sayfada değil. Sayfayı yenileyip tekrar deneyin.');
+  }
+  const scale = opts.scale ?? 2;
+  const captureId = `pdf-cap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  el.setAttribute('data-pdf-capture-id', captureId);
   el.setAttribute('data-pdf-font-root', '1');
   injectPdfCaptureFontStyles(document);
   try {
     await document.fonts?.ready;
-    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-    await new Promise((r) => setTimeout(r, 120));
+    await waitForLayoutPaint();
+    const w = Math.max(opts.width || 0, el.scrollWidth, el.offsetWidth, 320);
+    const h = Math.max(opts.height || 0, el.scrollHeight, el.offsetHeight, 120);
     return await html2canvas(el, {
       scale,
       useCORS: true,
-      allowTaint: false,
-      /** true bazı Chromium sürümlerinde boş PNG/PDF üretebiliyor */
+      allowTaint: true,
       foreignObjectRendering: false,
       backgroundColor: '#ffffff',
       logging: false,
-      width: el.scrollWidth,
-      height: el.scrollHeight,
-      windowWidth: el.scrollWidth,
-      windowHeight: el.scrollHeight,
-      onclone: (clonedDoc) => {
-        injectPdfCaptureFontStyles(clonedDoc);
-        clonedDoc.querySelectorAll('.calendar-pdf-hide-ui').forEach((node) => {
-          (node as HTMLElement).style.setProperty('display', 'none', 'important');
-        });
-      }
-    });
-  } finally {
-    el.removeAttribute('data-pdf-font-root');
-    unmountOffscreen(el);
-  }
-}
-
-/** Canlı takvimi üst kabuktaki overflow/transform etkisinden ayırıp yakalar */
-async function captureCalendarForPdfSnapshot(calendarElement: HTMLElement, scale: number): Promise<HTMLCanvasElement> {
-  const clone = calendarElement.cloneNode(true) as HTMLElement;
-  const w = Math.max(calendarElement.scrollWidth, calendarElement.offsetWidth, 920);
-  clone.style.boxSizing = 'border-box';
-  clone.style.position = 'fixed';
-  clone.style.left = '-12000px';
-  clone.style.top = '0';
-  clone.style.zIndex = '2147483646';
-  clone.style.width = `${w}px`;
-  clone.style.minWidth = `${w}px`;
-  clone.style.background = '#ffffff';
-  clone.style.overflow = 'visible';
-  clone.classList.add('pdf-capture-root');
-  injectPdfCaptureFontStyles(document);
-  document.body.appendChild(clone);
-  try {
-    await document.fonts?.ready;
-    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-    await new Promise((r) => setTimeout(r, 140));
-    const ch = Math.max(
-      clone.scrollHeight,
-      clone.offsetHeight,
-      calendarElement.scrollHeight,
-      200
-    );
-    return await html2canvas(clone, {
-      scale,
-      useCORS: true,
-      allowTaint: false,
-      foreignObjectRendering: false,
-      backgroundColor: '#ffffff',
-      logging: false,
+      scrollX: 0,
+      scrollY: 0,
       width: w,
-      height: ch,
-      windowWidth: w,
-      windowHeight: ch,
+      height: h,
+      windowWidth: Math.max(w, document.documentElement.clientWidth || w),
+      windowHeight: Math.max(h, document.documentElement.clientHeight || h),
+      ignoreElements: (node) => {
+        if (!(node instanceof HTMLElement)) return false;
+        if (node.classList?.contains('calendar-pdf-hide-ui')) return true;
+        if (node.getAttribute?.('data-pdf-hide') === '1') return true;
+        return false;
+      },
       onclone: (clonedDoc) => {
         injectPdfCaptureFontStyles(clonedDoc);
-        clonedDoc.querySelectorAll('.calendar-pdf-hide-ui').forEach((node) => {
+        clonedDoc.querySelectorAll('.calendar-pdf-hide-ui, [data-pdf-hide="1"]').forEach((node) => {
           (node as HTMLElement).style.setProperty('display', 'none', 'important');
         });
-        const root = clonedDoc.querySelector('.pdf-capture-root') as HTMLElement | null;
-        if (root) {
-          root.style.fontFamily = '"Noto Sans", "Segoe UI", system-ui, sans-serif';
+        const cloned =
+          (clonedDoc.querySelector(`[data-pdf-capture-id="${captureId}"]`) as HTMLElement | null) ||
+          (clonedDoc.body.firstElementChild as HTMLElement | null);
+        if (cloned) {
+          cloned.style.overflow = 'visible';
+          cloned.style.maxHeight = 'none';
+          cloned.style.transform = 'none';
+          cloned.style.fontFamily = '"Noto Sans", "Segoe UI", system-ui, sans-serif';
+          opts.onclone?.(clonedDoc, cloned);
         }
       }
     });
   } finally {
-    clone.remove();
+    el.removeAttribute('data-pdf-capture-id');
+    el.removeAttribute('data-pdf-font-root');
   }
+}
+
+async function rasterizeElement(el: HTMLElement, scale = 2): Promise<HTMLCanvasElement> {
+  mountOffscreen(el);
+  try {
+    const w = Math.max(el.scrollWidth, el.offsetWidth, 320);
+    const h = Math.max(el.scrollHeight, el.offsetHeight, 80);
+    return await safeHtml2Canvas(el, { scale, width: w, height: h });
+  } finally {
+    unmountOffscreen(el);
+  }
+}
+
+/** Canlı takvimi sayfadaki orijinal düğüm üzerinden yakalar (cloneNode kullanmaz). */
+async function captureCalendarForPdfSnapshot(calendarElement: HTMLElement, scale: number): Promise<HTMLCanvasElement> {
+  if (!calendarElement?.isConnected) {
+    throw new Error('Takvim alanı bulunamadı. Sayfayı yenileyip tekrar deneyin.');
+  }
+
+  const prev = {
+    overflow: calendarElement.style.overflow,
+    overflowX: calendarElement.style.overflowX,
+    overflowY: calendarElement.style.overflowY,
+    maxHeight: calendarElement.style.maxHeight,
+    width: calendarElement.style.width,
+    minWidth: calendarElement.style.minWidth,
+    background: calendarElement.style.background
+  };
+
+  const w = Math.max(calendarElement.scrollWidth, calendarElement.offsetWidth, 920);
+  calendarElement.classList.add('pdf-capture-root');
+  calendarElement.style.overflow = 'visible';
+  calendarElement.style.overflowX = 'visible';
+  calendarElement.style.overflowY = 'visible';
+  calendarElement.style.maxHeight = 'none';
+  calendarElement.style.width = `${w}px`;
+  calendarElement.style.minWidth = `${w}px`;
+  calendarElement.style.background = '#ffffff';
+
+  try {
+    calendarElement.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    await waitForLayoutPaint();
+    const h = Math.max(calendarElement.scrollHeight, calendarElement.offsetHeight, 200);
+    return await safeHtml2Canvas(calendarElement, {
+      scale,
+      width: w,
+      height: h,
+      onclone: (_doc, cloned) => {
+        cloned.querySelectorAll('svg').forEach((svg) => {
+          // Lucide ikonları html2canvas yol eşlemesini bozabiliyor
+          svg.remove();
+        });
+        cloned.querySelectorAll('button, a').forEach((node) => {
+          (node as HTMLElement).style.setProperty('display', 'none', 'important');
+        });
+      }
+    });
+  } finally {
+    calendarElement.classList.remove('pdf-capture-root');
+    calendarElement.style.overflow = prev.overflow;
+    calendarElement.style.overflowX = prev.overflowX;
+    calendarElement.style.overflowY = prev.overflowY;
+    calendarElement.style.maxHeight = prev.maxHeight;
+    calendarElement.style.width = prev.width;
+    calendarElement.style.minWidth = prev.minWidth;
+    calendarElement.style.background = prev.background;
+  }
+}
+
+export type ShareableWeekCard = {
+  timeRange: string;
+  subject: string;
+  teacher?: string;
+  kind?: 'session' | 'template';
+};
+
+/** Veli/öğretmen paylaşımı için temiz haftalık tablo (ekran UI’sız). */
+export function buildShareableWeekCalendarElement(opts: {
+  columns: WeekGridColumn[];
+  hours: number[];
+  /** [hourIndex][dayIndex] → kartlar */
+  cells: ShareableWeekCard[][][];
+  title?: string;
+}): HTMLElement {
+  const { columns, hours, cells, title } = opts;
+  const root = document.createElement('div');
+  root.setAttribute('data-pdf-font-root', '1');
+  root.className = 'pdf-capture-root';
+  root.style.boxSizing = 'border-box';
+  root.style.width = '1280px';
+  root.style.padding = '20px 22px 28px';
+  root.style.fontFamily = '"Noto Sans", "Segoe UI", system-ui, sans-serif';
+  root.style.background = '#ffffff';
+  root.style.border = '1px solid #e2e8f0';
+  root.style.borderRadius = '14px';
+
+  if (title?.trim()) {
+    const h = document.createElement('div');
+    h.textContent = title.trim();
+    h.style.fontSize = '18px';
+    h.style.fontWeight = '700';
+    h.style.color = '#0f172a';
+    h.style.marginBottom = '14px';
+    root.appendChild(h);
+  }
+
+  const table = document.createElement('table');
+  table.style.width = '100%';
+  table.style.borderCollapse = 'collapse';
+  table.style.tableLayout = 'fixed';
+  table.style.fontSize = '12px';
+
+  const thead = document.createElement('thead');
+  const hr = document.createElement('tr');
+  const thTime = document.createElement('th');
+  thTime.textContent = 'Saat';
+  thTime.style.width = '64px';
+  thTime.style.padding = '10px 8px';
+  thTime.style.textAlign = 'left';
+  thTime.style.background = '#f1f5f9';
+  thTime.style.color = '#64748b';
+  thTime.style.fontSize = '10px';
+  thTime.style.fontWeight = '700';
+  thTime.style.textTransform = 'uppercase';
+  thTime.style.borderBottom = '2px solid #e2e8f0';
+  hr.appendChild(thTime);
+
+  columns.forEach((c) => {
+    const th = document.createElement('th');
+    th.style.padding = '10px 8px';
+    th.style.textAlign = 'left';
+    th.style.verticalAlign = 'bottom';
+    th.style.background = '#f8fafc';
+    th.style.borderBottom = '2px solid #e2e8f0';
+    th.style.borderLeft = '1px solid #e2e8f0';
+    const day = document.createElement('div');
+    day.textContent = c.headLine;
+    day.style.fontSize = '12px';
+    day.style.fontWeight = '700';
+    day.style.color = '#1e293b';
+    const sub = document.createElement('div');
+    sub.textContent = c.subLine;
+    sub.style.marginTop = '2px';
+    sub.style.fontSize = '10px';
+    sub.style.color = '#64748b';
+    sub.style.fontWeight = '500';
+    th.appendChild(day);
+    th.appendChild(sub);
+    hr.appendChild(th);
+  });
+  thead.appendChild(hr);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  hours.forEach((hour, hi) => {
+    const tr = document.createElement('tr');
+    const tdH = document.createElement('td');
+    tdH.textContent = `${String(hour).padStart(2, '0')}:00`;
+    tdH.style.padding = '8px';
+    tdH.style.textAlign = 'right';
+    tdH.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+    tdH.style.fontWeight = '700';
+    tdH.style.fontSize = '11px';
+    tdH.style.color = '#475569';
+    tdH.style.background = '#f8fafc';
+    tdH.style.borderTop = '1px solid #e2e8f0';
+    tdH.style.verticalAlign = 'top';
+    tr.appendChild(tdH);
+
+    for (let di = 0; di < 7; di++) {
+      const td = document.createElement('td');
+      td.style.padding = '6px';
+      td.style.verticalAlign = 'top';
+      td.style.borderTop = '1px solid #e2e8f0';
+      td.style.borderLeft = '1px solid #e2e8f0';
+      td.style.minHeight = '48px';
+      const cards = cells[hi]?.[di] || [];
+      if (!cards.length) {
+        td.innerHTML = '&nbsp;';
+      } else {
+        const wrap = document.createElement('div');
+        wrap.style.display = 'flex';
+        wrap.style.flexDirection = 'column';
+        wrap.style.gap = '6px';
+        for (const card of cards) {
+          const box = document.createElement('div');
+          const isTpl = card.kind === 'template';
+          box.style.borderRadius = '10px';
+          box.style.padding = '8px 9px';
+          box.style.border = isTpl ? '1px dashed #a5b4fc' : '1px solid #bbf7d0';
+          box.style.background = isTpl
+            ? 'linear-gradient(135deg, #eef2ff 0%, #ffffff 70%)'
+            : 'linear-gradient(135deg, #ecfdf5 0%, #ffffff 70%)';
+          box.style.borderLeft = isTpl ? '4px solid #6366f1' : '4px solid #10b981';
+          const subj = document.createElement('div');
+          subj.textContent = card.subject;
+          subj.style.fontWeight = '700';
+          subj.style.fontSize = '12px';
+          subj.style.color = '#0f172a';
+          subj.style.lineHeight = '1.25';
+          box.appendChild(subj);
+          if (card.teacher) {
+            const t = document.createElement('div');
+            t.textContent = card.teacher;
+            t.style.marginTop = '2px';
+            t.style.fontSize = '10px';
+            t.style.fontWeight = '600';
+            t.style.color = '#334155';
+            box.appendChild(t);
+          }
+          const tm = document.createElement('div');
+          tm.textContent = card.timeRange;
+          tm.style.marginTop = '2px';
+          tm.style.fontSize = '10px';
+          tm.style.color = '#64748b';
+          tm.style.fontVariantNumeric = 'tabular-nums';
+          box.appendChild(tm);
+          wrap.appendChild(box);
+        }
+        td.appendChild(wrap);
+      }
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  root.appendChild(table);
+  return root;
+}
+
+function triggerBlobDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+/** Paylaşılabilir haftalık takvim → PNG */
+export async function downloadShareableWeekCalendarPng(opts: {
+  columns: WeekGridColumn[];
+  hours: number[];
+  cells: ShareableWeekCard[][][];
+  title?: string;
+  filename: string;
+}): Promise<void> {
+  await ensureNotoSansForPdfCapture();
+  const el = buildShareableWeekCalendarElement(opts);
+  const canvas = await rasterizeElement(el, 2);
+  assertPdfCanvas(canvas, 'Takvim PNG');
+  await new Promise<void>((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error('PNG oluşturulamadı'));
+          return;
+        }
+        triggerBlobDownload(blob, opts.filename.endsWith('.png') ? opts.filename : `${opts.filename}.png`);
+        resolve();
+      },
+      'image/png',
+      0.95
+    );
+  });
+}
+
+/** Paylaşılabilir haftalık takvim görseli + metin listesi PDF */
+export async function downloadShareableWeekCalendarPdf(opts: {
+  columns: WeekGridColumn[];
+  hours: number[];
+  cells: ShareableWeekCard[][][];
+  calendarTitle?: string;
+  filename: string;
+  titleLine: string;
+  subtitleLines?: string[];
+  listHeading: string;
+  lessonLines: string[];
+  footerNote?: string;
+  branding?: PdfBranding;
+}): Promise<void> {
+  const {
+    columns,
+    hours,
+    cells,
+    calendarTitle,
+    filename,
+    titleLine,
+    subtitleLines = [],
+    listHeading,
+    lessonLines,
+    footerNote,
+    branding
+  } = opts;
+
+  await ensureNotoSansForPdfCapture();
+
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 10;
+  const contentW = pageW - 2 * margin;
+
+  const headerEl = await buildHeaderElement(titleLine, subtitleLines, branding);
+  const headerCanvas = await rasterizeElement(headerEl, 2);
+  assertPdfCanvas(headerCanvas, 'PDF başlığı');
+  let y = margin;
+  y += addCanvasFitWidth(doc, headerCanvas, margin, y, contentW, 24) + 5;
+
+  const calEl = buildShareableWeekCalendarElement({
+    columns,
+    hours,
+    cells,
+    title: calendarTitle
+  });
+  const calCanvas = await rasterizeElement(calEl, 2);
+  assertPdfCanvas(calCanvas, 'Takvim görüntüsü');
+  if (pageH - margin - y < 40) {
+    doc.addPage();
+    y = margin;
+  }
+  addCanvasFitWidth(doc, calCanvas, margin, y, contentW, pageH - margin - y);
+
+  doc.addPage();
+  const listEl = buildLessonListElement(listHeading, lessonLines);
+  const listCanvas = await rasterizeElement(listEl, 2);
+  assertPdfCanvas(listCanvas, 'Ders listesi');
+  addCanvasPaginated(doc, listCanvas, margin, contentW);
+
+  if (footerNote?.trim()) {
+    doc.addPage();
+    const footEl = buildFooterElement(footerNote);
+    const footCanvas = await rasterizeElement(footEl, 2);
+    assertPdfCanvas(footCanvas, 'PDF alt notu');
+    addCanvasFitWidth(doc, footCanvas, margin, margin, contentW, pageH - 2 * margin);
+  }
+
+  doc.save(filename);
 }
 
 function addCanvasFitWidth(
@@ -689,7 +1017,15 @@ export async function downloadCalendarPdfWithSnapshot(opts: {
   y += headerUsed + 5;
 
   const scale = Math.min(2, typeof window !== 'undefined' ? window.devicePixelRatio || 2 : 2);
-  const calCanvas = await captureCalendarForPdfSnapshot(calendarElement, scale);
+  let calCanvas: HTMLCanvasElement;
+  try {
+    calCanvas = await captureCalendarForPdfSnapshot(calendarElement, scale);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(
+      `Takvim görüntüsü alınamadı (${msg}). Sayfayı yenileyip «PDF görüntü»yi tekrar deneyin; gerekirse PNG paylaşımını kullanın.`
+    );
+  }
   assertPdfCanvas(calCanvas, 'Takvim görüntüsü');
 
   const roomCal = pageH - margin - y;
