@@ -78,9 +78,9 @@ function subjectTeacherMap(slots) {
 
 function pickTeacher({ subject, classKey, classTeachers, prefMap, etutTeachers, denemeTeachers, dinOverrides }) {
   const sub = String(subject || '').trim().toLocaleUpperCase('tr-TR');
-  if (sub === 'ETÜT' || sub.includes('ETUT')) return etutTeachers[classKey];
+  if (sub === 'ETÜT' || sub.includes('ETUT') || sub.includes('ETÜT')) return etutTeachers[classKey];
   if (sub.includes('DENEME')) return denemeTeachers[classKey];
-  if (sub.includes('DİN') && dinOverrides[classKey]) return dinOverrides[classKey];
+  if ((sub.includes('DİN') || sub.includes('DIN')) && dinOverrides[classKey]) return dinOverrides[classKey];
 
   const pref = prefMap.get(sub)?.tid;
   if (pref && classTeachers.includes(pref)) return pref;
@@ -88,10 +88,19 @@ function pickTeacher({ subject, classKey, classTeachers, prefMap, etutTeachers, 
   // yakın eşleşme: FEN BİLGİSİ ↔ FEN BİLİMLERİ
   for (const [k, v] of prefMap) {
     if (sub.includes('FEN') && k.includes('FEN') && classTeachers.includes(v.tid)) return v.tid;
-    if (sub.includes('DİN') && k.includes('DİN') && classTeachers.includes(v.tid)) return v.tid;
+    if ((sub.includes('DİN') || sub.includes('DIN')) && (k.includes('DİN') || k.includes('DIN')) && classTeachers.includes(v.tid))
+      return v.tid;
     if (sub.includes('İNKILAP') && k.includes('İNKILAP') && classTeachers.includes(v.tid)) return v.tid;
   }
   return classTeachers[0] || null;
+}
+
+/** Etüt / Din için alternatif öğretmene düşme — çakışma yok sayılır, atanması zorunlu */
+function subjectForcesTeacher(subject) {
+  const sub = String(subject || '').trim().toLocaleUpperCase('tr-TR');
+  if (sub === 'ETÜT' || sub.includes('ETUT') || sub.includes('ETÜT')) return true;
+  if (sub.includes('DİN') || sub.includes('DIN')) return true;
+  return false;
 }
 
 async function main() {
@@ -234,10 +243,14 @@ async function main() {
         continue;
       }
 
-      const alts = [teacherId, ...classTeachers.filter((t) => t !== teacherId)];
+      const alts =
+        subjectForcesTeacher(row.subject)
+          ? [teacherId]
+          : [teacherId, ...classTeachers.filter((t) => t !== teacherId)];
       let ok = false;
       let lastErr = null;
       for (const tid of alts) {
+        // Etüt / Din: çakışmayı yok say (ortak Zoom / birleşik sınıf)
         const { status, json } = await api('POST', '/api/class-live-lessons?op=create-slot', token, {
           class_id: classId,
           institution_id: INST,
