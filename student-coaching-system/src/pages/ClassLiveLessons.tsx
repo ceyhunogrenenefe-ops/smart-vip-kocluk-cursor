@@ -43,10 +43,10 @@ import { inferSessionBatchPeers } from '../lib/classSessionBatchPeers';
 import { isSolutionLessonSubject } from '../lib/solutionAppointments/utils';
 import {
   downloadShareableWeekCalendarPdf,
-  downloadShareableWeekCalendarPng,
   type ShareableWeekCard,
   type WeekGridColumn
 } from '../lib/pdfLiveWeekGrid';
+import { downloadBrandedClassSchedulePng } from '../lib/classScheduleBrandedPng';
 import { useCoachLessonsMeetingsLock } from '../lib/coachLessonsLock';
 import { CoachLessonsLockBanner } from '../components/coach/CoachLessonsLockBanner';
 import ClassLessonTopicCheckpointModal, {
@@ -1893,7 +1893,7 @@ export default function ClassLiveLessons() {
         hint={
           showMobileCalendar
             ? undefined
-            : 'Yeşil kartlar gerçek oturumdur. Kesik çizgili kartlar şablondur. «PNG görsel» veya «PDF görüntü + ders listesi» veli/öğretmen paylaşımı için temiz haftalık program üretir.'
+            : 'Yeşil kartlar gerçek oturumdur. Kesik çizgili kartlar şablondur. «PNG görsel» planlayıcı stili (logo + haftalık tablo) indirir; PDF de metin listesi üretir.'
         }
       >
         {!showMobileCalendar ? (
@@ -1901,19 +1901,29 @@ export default function ClassLiveLessons() {
         <div className="flex flex-wrap items-center justify-end gap-2 border-b border-slate-100 bg-slate-50/80 px-2 py-2 sm:px-3">
           <button
             type="button"
-            disabled={!selectedClassId || classPngBusy}
+            disabled={!selectedClassId || classPngBusy || !classSlots.length}
             onClick={() => {
               void (async () => {
-                const built = buildShareableWeekExport();
-                if (!built) return;
+                if (!selectedClassId || !selectedClass) return;
                 setClassPngBusy(true);
                 try {
-                  await downloadShareableWeekCalendarPng({
-                    columns: built.columns,
-                    hours: built.hours,
-                    cells: built.cells,
-                    title: `${selectedClass?.name || 'Sınıf'} — ${weekRangeLabel}`,
-                    filename: `grup-ders-programi-${weekColumnDates[0]}_${weekColumnDates[6]}.png`
+                  const slots = classSlots.map((s) => {
+                    const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
+                    return {
+                      day_of_week: s.day_of_week,
+                      start_time: String(s.start_time || ''),
+                      end_time: String(s.end_time || ''),
+                      subject: String(s.subject || ''),
+                      teacher_name: teacher?.name || s.teacher_name || null
+                    };
+                  });
+                  await downloadBrandedClassSchedulePng({
+                    className: selectedClass.name || 'Sınıf',
+                    slots,
+                    logoUrl: institution?.logo?.trim() || null,
+                    filename: `${String(selectedClass.name || 'ders-programi')
+                      .replace(/[\\/:*?"<>|]+/g, ' ')
+                      .trim()} - ders programi.png`
                   });
                   toast.success('PNG indirildi — veli/öğretmenle paylaşabilirsiniz');
                 } catch (e) {
@@ -1926,6 +1936,7 @@ export default function ClassLiveLessons() {
               })();
             }}
             className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-wait disabled:opacity-50"
+            title="Ders Program Planlayıcısı stili: logo + haftalık tablo PNG"
           >
             {classPngBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileDown className="h-3.5 w-3.5" />}
             PNG görsel
