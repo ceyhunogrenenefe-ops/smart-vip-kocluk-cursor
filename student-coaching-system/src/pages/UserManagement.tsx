@@ -50,7 +50,6 @@ import {
   type StudentPlatformLink,
   type UserRow
 } from '../lib/userRowToSystemUser';
-import { studentRowToStudent } from '../lib/mapStudentRow';
 import {
   CopyableLoginCredentialsModal,
   type LoginCredentialsData

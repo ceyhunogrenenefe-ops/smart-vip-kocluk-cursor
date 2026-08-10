@@ -24,7 +24,6 @@ import {
   UserCircle,
   LogIn,
   Loader2,
-  ChevronDown,
   Lock,
   Unlock
 } from 'lucide-react';
