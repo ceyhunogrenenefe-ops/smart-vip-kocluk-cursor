@@ -2519,6 +2519,15 @@ export default async function handler(req, res) {
       const existing = String(session.meeting_link || '').trim();
       if (manual) {
         patch.meeting_link = manual;
+        // Zoom/Meet vb. harici link: BBB alanlarını temizle ki Katıl BBB'ye düşmesin
+        const isExternal =
+          /zoom\.us|meet\.google|teams\.microsoft|webex\.com|whereby\.com/i.test(manual) ||
+          (manual !== 'bbb:auto' && !/bigbluebutton|\/bigbluebutton\//i.test(manual) && /^https?:\/\//i.test(manual));
+        if (isExternal && manual !== 'bbb:auto') {
+          patch.meeting_link_moderator = null;
+          patch.bbb_meeting_id = null;
+          patch.bbb_attendee_pw = null;
+        }
       } else if (!existing) {
         const teacherIdForBbb = String((patch.teacher_id ?? session.teacher_id) || '');
         const subjectForBbb = String((patch.subject ?? session.subject) || 'Ders');

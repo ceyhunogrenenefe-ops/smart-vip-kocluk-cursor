@@ -5,11 +5,27 @@
  * day_of_week: 1=Pazartesi … 6=Cumartesi
  */
 
-/** @typedef {{ day_of_week: number, start_time: string, end_time: string, subject: string, duration_minutes: number }} SlotDef */
+/** @typedef {{ day_of_week: number, start_time: string, end_time: string, subject: string, duration_minutes: number, meeting_link?: string }} SlotDef */
+
+/** 8A/8B/8E/8F akşam etütleri — ortak Zoom (BBB değil). */
+export const LGS_8ABEF_ETUT_ZOOM_URL =
+  'https://us06web.zoom.us/j/6946337643?pwd=SHkwQzNnaEkrOXVNajJMR1Z6UCtCUT09';
 
 const ETUT = [
-  { start_time: '17:00:00', end_time: '17:40:00', subject: 'Etüt', duration_minutes: 40 },
-  { start_time: '17:50:00', end_time: '18:30:00', subject: 'Etüt', duration_minutes: 40 }
+  {
+    start_time: '17:00:00',
+    end_time: '17:40:00',
+    subject: 'Etüt',
+    duration_minutes: 40,
+    meeting_link: LGS_8ABEF_ETUT_ZOOM_URL
+  },
+  {
+    start_time: '17:50:00',
+    end_time: '18:30:00',
+    subject: 'Etüt',
+    duration_minutes: 40,
+    meeting_link: LGS_8ABEF_ETUT_ZOOM_URL
+  }
 ];
 
 /** @param {number} day @param {Array<{start:string,end:string,subject:string}>} lessons */
@@ -22,7 +38,8 @@ function weekday(day, lessons) {
       start_time: e.start_time,
       end_time: e.end_time,
       subject: e.subject,
-      duration_minutes: e.duration_minutes
+      duration_minutes: e.duration_minutes,
+      ...(e.meeting_link ? { meeting_link: e.meeting_link } : {})
     });
   }
   for (const l of lessons) {

@@ -243,7 +243,8 @@ async function main() {
           end_time: row.end_time,
           subject: row.subject,
           teacher_id: tid,
-          duration_minutes: row.duration_minutes
+          duration_minutes: row.duration_minutes,
+          ...(row.meeting_link ? { meeting_link: row.meeting_link } : {})
         });
         if (status < 400) {
           created += 1;
