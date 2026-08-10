@@ -205,6 +205,21 @@ function timeOverlap(aStart, aEnd, bStart, bEnd) {
   return A1 < B2 && A2 > B1;
 }
 
+/** Birleşik sınıf (aynı branş/konu): aynı öğretmen aynı saatte birden fazla sınıfta olabilir. */
+function normSubjectForOverlap(subject) {
+  return String(subject || '')
+    .trim()
+    .toLocaleLowerCase('tr-TR')
+    .replace(/\s+/g, ' ');
+}
+
+function subjectsAllowTeacherTimeOverlap(subjectA, subjectB) {
+  const a = normSubjectForOverlap(subjectA);
+  const b = normSubjectForOverlap(subjectB);
+  if (!a || !b) return false;
+  return a === b;
+}
+
 /** yyyy-mm-dd ile gün ekler (UTC gün kökü – saat kayması yok) */
 function addDaysIsoDate(dateStr, days) {
   const s = String(dateStr || '').trim();
@@ -250,13 +265,14 @@ async function teacherTimeConflictOnDate({
   const ownClassId = sameClassId ? String(sameClassId).trim() : '';
   const { data: sess, error: sErr } = await supabaseAdmin
     .from('class_sessions')
-    .select('id,start_time,end_time,status')
+    .select('id,start_time,end_time,status,subject')
     .eq('teacher_id', teacherId)
     .eq('lesson_date', lessonDate)
     .neq('status', 'cancelled');
   if (sErr) throw sErr;
   for (const r of sess || []) {
     if (ex.has(r.id)) continue;
+    if (subjectsAllowTeacherTimeOverlap(subject, r.subject)) continue;
     if (timeOverlap(start, end, r.start_time, r.end_time)) {
       return { ok: false, reason: `Bu öğretmenin ${lessonDate} tarihinde çakışan bir oturumu var.` };
     }
@@ -265,12 +281,13 @@ async function teacherTimeConflictOnDate({
   if (dow == null) return { ok: true };
   const { data: slots, error: slErr } = await supabaseAdmin
     .from('class_weekly_slots')
-    .select('class_id,start_time,end_time')
+    .select('class_id,start_time,end_time,subject')
     .eq('teacher_id', teacherId)
     .eq('day_of_week', dow);
   if (slErr) throw slErr;
   for (const x of slots || []) {
     if (ownClassId && String(x.class_id || '') === ownClassId) continue;
+    if (subjectsAllowTeacherTimeOverlap(subject, x.subject)) continue;
     if (timeOverlap(start, end, x.start_time, x.end_time)) {
       return { ok: false, reason: `Bu öğretmenin aynı gün/saatte haftalık şablon dersi var (${lessonDate}).` };
     }
@@ -2131,13 +2148,17 @@ export default async function handler(req, res) {
 
       const { data: sameTeacherSlots, error: cErr } = await supabaseAdmin
         .from('class_weekly_slots')
-        .select('id,start_time,end_time')
+        .select('id,start_time,end_time,subject')
         .eq('teacher_id', teacherId)
         .eq('day_of_week', dayOfWeek);
       if (cErr) return res.status(500).json({ error: cErr.message });
       if (
         !isSolutionLessonSubject(subject) &&
-        (sameTeacherSlots || []).some((x) => timeOverlap(start, end, x.start_time, x.end_time))
+        (sameTeacherSlots || []).some(
+          (x) =>
+            timeOverlap(start, end, x.start_time, x.end_time) &&
+            !subjectsAllowTeacherTimeOverlap(subject, x.subject)
+        )
       ) {
         return res.status(409).json({ error: 'Aynı öğretmen aynı saatte ders alamaz.', code: 'teacher_time_conflict' });
       }
@@ -2576,12 +2597,9 @@ export default async function handler(req, res) {
       if (!tid) {
         return res.status(400).json({ error: 'teacher_id_required', code: 'teacher_id_invalid' });
       }
+      // Oluşturma ile aynı: atanan öğretmen sınıfta yoksa class_teachers'a ekle
       if (!details.teacher_ids.includes(tid)) {
-        return res.status(400).json({
-          error:
-            'Bu öğretmen sınıfın atanmış öğretmenleri arasında değil. Önce sınıf ayarlarından öğretmeni ekleyin.',
-          code: 'teacher_not_in_class'
-        });
+        await ensureClassTeacherLink(session.class_id, tid);
       }
       patch.teacher_id = tid;
     }
@@ -2617,14 +2635,18 @@ export default async function handler(req, res) {
       const subjectForCheck = String((patch.subject ?? session.subject) || '');
       const { data: sameTeacherSlots, error: cErr } = await supabaseAdmin
         .from('class_weekly_slots')
-        .select('id,start_time,end_time')
+        .select('id,start_time,end_time,subject')
         .eq('teacher_id', teacherId)
         .eq('day_of_week', dayOfWeek)
         .neq('id', rowId);
       if (cErr) return res.status(500).json({ error: cErr.message });
       if (
         !isSolutionLessonSubject(subjectForCheck) &&
-        (sameTeacherSlots || []).some((x) => timeOverlap(start, end, x.start_time, x.end_time))
+        (sameTeacherSlots || []).some(
+          (x) =>
+            timeOverlap(start, end, x.start_time, x.end_time) &&
+            !subjectsAllowTeacherTimeOverlap(subjectForCheck, x.subject)
+        )
       ) {
         return res.status(409).json({ error: 'Aynı öğretmen aynı saatte ders alamaz.', code: 'teacher_time_conflict' });
       }

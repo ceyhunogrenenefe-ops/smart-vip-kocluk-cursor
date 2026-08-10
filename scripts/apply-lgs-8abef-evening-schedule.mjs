@@ -121,10 +121,10 @@ async function main() {
   const classes = cJson.data || [];
 
   const etutTeachers = {
-    '8A': 'b39225b7-5705-4d38-956f-ab1cc55dc5af', // DOĞAN
-    '8B': '0696c045-c341-4bfe-b65c-5fa93e93f968', // Nadide
-    '8E': 'f9241cc1-89dc-4e19-b42f-8785ef6fa15a', // Sultan
-    '8F': 'db8395cf-eb36-436c-bdc0-9f9be5e3b066' // Muzaffer
+    '8A': 'b39225b7-5705-4d38-956f-ab1cc55dc5af', // DOĞAN AKTÜRK
+    '8B': 'b39225b7-5705-4d38-956f-ab1cc55dc5af',
+    '8E': 'b39225b7-5705-4d38-956f-ab1cc55dc5af',
+    '8F': 'b39225b7-5705-4d38-956f-ab1cc55dc5af'
   };
   const denemeTeachers = {
     '8A': '0696c045-c341-4bfe-b65c-5fa93e93f968',
@@ -132,10 +132,13 @@ async function main() {
     '8E': 'db8395cf-eb36-436c-bdc0-9f9be5e3b066',
     '8F': 'b39225b7-5705-4d38-956f-ab1cc55dc5af'
   };
-  // Aynı saatte DİN çakışmasın
+  // DİN KÜLTÜRÜ — tüm sınıflarda Büşra Öztürk (birleşik ders; aynı saat serbest)
+  const DIN_BUSRA = '57b3de8c-2590-46ad-bd84-566be618b448';
   const dinOverrides = {
-    '8B': '0696c045-c341-4bfe-b65c-5fa93e93f968', // Nadide (Büşra 8A'da)
-    '8F': 'f9241cc1-89dc-4e19-b42f-8785ef6fa15a' // Sultan (Büşra 8E'de)
+    '8A': DIN_BUSRA,
+    '8B': DIN_BUSRA,
+    '8E': DIN_BUSRA,
+    '8F': DIN_BUSRA
   };
 
   const today = ymd(new Date());
