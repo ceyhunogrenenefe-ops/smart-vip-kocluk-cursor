@@ -41,7 +41,12 @@ import {
 import { SolutionLessonStudentActions } from '../components/solutionAppointments/SolutionLessonStudentActions';
 import { inferSessionBatchPeers } from '../lib/classSessionBatchPeers';
 import { isSolutionLessonSubject } from '../lib/solutionAppointments/utils';
-import { downloadCalendarPdfWithSnapshot } from '../lib/pdfLiveWeekGrid';
+import {
+  downloadShareableWeekCalendarPdf,
+  downloadShareableWeekCalendarPng,
+  type ShareableWeekCard,
+  type WeekGridColumn
+} from '../lib/pdfLiveWeekGrid';
 import { useCoachLessonsMeetingsLock } from '../lib/coachLessonsLock';
 import { CoachLessonsLockBanner } from '../components/coach/CoachLessonsLockBanner';
 import ClassLessonTopicCheckpointModal, {
@@ -258,6 +263,7 @@ export default function ClassLiveLessons() {
   const [postLessonHwOpen, setPostLessonHwOpen] = useState(false);
   const classCalendarPdfRef = useRef<HTMLDivElement>(null);
   const [classPdfSnapBusy, setClassPdfSnapBusy] = useState(false);
+  const [classPngBusy, setClassPngBusy] = useState(false);
 
   const canViewLivePresence = !isStudentView;
   const [todaySessionsForPresence, setTodaySessionsForPresence] = useState<SessionRow[]>([]);
@@ -558,6 +564,123 @@ export default function ClassLiveLessons() {
     const b = formatDdMmYyyyDots(weekColumnDates[6]);
     return `${a} – ${b}`;
   }, [weekColumnDates]);
+
+  const buildShareableWeekExport = useCallback(() => {
+    if (!selectedClassId || weekColumnDates.length !== 7) return null;
+    const columns: WeekGridColumn[] = weekColumnDates.map((iso, i) => ({
+      iso,
+      headLine: DAY_LABELS[i] || iso,
+      subLine: formatDdMmYyyyDots(iso)
+    }));
+    const hoursRaw = calendarHours.length ? calendarHours : [17, 18, 19, 20, 21];
+    // Paylaşım PDF/PNG: boş sabah satırlarını düşür, dolu saatleri koru
+    const hours = hoursRaw.filter((hour) =>
+      weekColumnDates.some((colIso) => {
+        const hasSession = weekSessions.some(
+          (s) =>
+            s.class_id === selectedClassId &&
+            s.lesson_date === colIso &&
+            Number(String(s.start_time).slice(0, 2)) === hour &&
+            s.status !== 'cancelled'
+        );
+        if (hasSession) return true;
+        return classSlots.some(
+          (s) =>
+            s.day_of_week === dowSlotFromIso(colIso) &&
+            Number(String(s.start_time).slice(0, 2)) === hour
+        );
+      })
+    );
+    const hoursFinal = hours.length ? hours : hoursRaw.filter((h) => h >= 10 && h <= 21);
+    const cells: ShareableWeekCard[][][] = hoursFinal.map((hour) =>
+      weekColumnDates.map((colIso) => {
+        const sessionsHere = weekSessions.filter(
+          (s) =>
+            s.class_id === selectedClassId &&
+            s.lesson_date === colIso &&
+            Number(String(s.start_time).slice(0, 2)) === hour &&
+            s.status !== 'cancelled'
+        );
+        const covered = new Set(
+          sessionsHere.map((s) => `${s.teacher_id}|${String(s.start_time || '').slice(0, 5)}`)
+        );
+        const templatesHere = classSlots.filter((s) => {
+          if (s.day_of_week !== dowSlotFromIso(colIso)) return false;
+          if (Number(String(s.start_time).slice(0, 2)) !== hour) return false;
+          const startHm = String(s.start_time || '').slice(0, 5);
+          if (covered.has(`${s.teacher_id}|${startHm}`)) return false;
+          return true;
+        });
+        const cards: ShareableWeekCard[] = [
+          ...sessionsHere
+            .slice()
+            .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)))
+            .map((s) => {
+              const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
+              return {
+                timeRange: `${String(s.start_time).slice(0, 5)}–${String(s.end_time).slice(0, 5)}`,
+                subject: s.subject || 'Ders',
+                teacher: teacher?.name || s.teacher_name || undefined,
+                kind: 'session' as const
+              };
+            }),
+          ...templatesHere
+            .slice()
+            .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)))
+            .map((s) => {
+              const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
+              return {
+                timeRange: `${String(s.start_time).slice(0, 5)}–${String(s.end_time).slice(0, 5)}`,
+                subject: s.subject || 'Şablon',
+                teacher: teacher?.name || s.teacher_name || undefined,
+                kind: 'template' as const
+              };
+            })
+        ];
+        return cards;
+      })
+    );
+
+    const dateSet = new Set(weekColumnDates);
+    const sessionLines = weekSessions
+      .filter((s) => s.class_id === selectedClassId && dateSet.has(s.lesson_date))
+      .sort(
+        (a, b) =>
+          a.lesson_date.localeCompare(b.lesson_date) ||
+          String(a.start_time).localeCompare(String(b.start_time))
+      )
+      .map((s) => {
+        const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
+        return `${s.lesson_date} ${String(s.start_time).slice(0, 5)}–${String(s.end_time).slice(0, 5)} | ${s.subject} | ${teacher?.name || s.teacher_name || s.teacher_id} | ${s.status}`;
+      });
+    const templateLines = classSlots
+      .filter((s) => s.class_id === selectedClassId)
+      .sort(
+        (a, b) =>
+          a.day_of_week - b.day_of_week || String(a.start_time).localeCompare(String(b.start_time))
+      )
+      .map((s) => {
+        const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
+        return `[Şablon] ${DAY_LABELS[s.day_of_week - 1]} ${String(s.start_time).slice(0, 5)} | ${s.subject} | ${teacher?.name || s.teacher_name || s.teacher_id}`;
+      });
+    const lessonLines = [
+      `— Bu haftanın tarihli oturumları (${sessionLines.length}) —`,
+      ...(sessionLines.length ? sessionLines : ['(Bu hafta için oturum yok)']),
+      '',
+      `— Haftalık şablon satırları (${templateLines.length}) —`,
+      ...(templateLines.length ? templateLines : ['(Şablon yok)'])
+    ];
+
+    return { columns, hours: hoursFinal, cells, lessonLines };
+  }, [
+    selectedClassId,
+    weekColumnDates,
+    calendarHours,
+    weekSessions,
+    classSlots,
+    teacherCandidates
+  ]);
+
 
   const loadWeekSessions = useCallback(async () => {
     if (!selectedClassId) {
@@ -1770,7 +1893,7 @@ export default function ClassLiveLessons() {
         hint={
           showMobileCalendar
             ? undefined
-            : 'Yeşil kartlar gerçek oturumdur (planlı: Katıl; «Yoklama» ile manuel devamsızlık; tamamlanınca kayıt linki varsa Kaydı izle). Kesik çizgili kartlar şablondur. «PDF görüntü + ders listesi» önce takvim görüntüsü, sonra metin listesi üretir.'
+            : 'Yeşil kartlar gerçek oturumdur. Kesik çizgili kartlar şablondur. «PNG görsel» veya «PDF görüntü + ders listesi» veli/öğretmen paylaşımı için temiz haftalık program üretir.'
         }
       >
         {!showMobileCalendar ? (
@@ -1778,62 +1901,69 @@ export default function ClassLiveLessons() {
         <div className="flex flex-wrap items-center justify-end gap-2 border-b border-slate-100 bg-slate-50/80 px-2 py-2 sm:px-3">
           <button
             type="button"
+            disabled={!selectedClassId || classPngBusy}
+            onClick={() => {
+              void (async () => {
+                const built = buildShareableWeekExport();
+                if (!built) return;
+                setClassPngBusy(true);
+                try {
+                  await downloadShareableWeekCalendarPng({
+                    columns: built.columns,
+                    hours: built.hours,
+                    cells: built.cells,
+                    title: `${selectedClass?.name || 'Sınıf'} — ${weekRangeLabel}`,
+                    filename: `grup-ders-programi-${weekColumnDates[0]}_${weekColumnDates[6]}.png`
+                  });
+                  toast.success('PNG indirildi — veli/öğretmenle paylaşabilirsiniz');
+                } catch (e) {
+                  const msg = e instanceof Error ? e.message : 'PNG oluşturulamadı';
+                  window.alert(msg);
+                  toast.error(msg);
+                } finally {
+                  setClassPngBusy(false);
+                }
+              })();
+            }}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-wait disabled:opacity-50"
+          >
+            {classPngBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileDown className="h-3.5 w-3.5" />}
+            PNG görsel
+          </button>
+          <button
+            type="button"
             disabled={!selectedClassId || classPdfSnapBusy}
             onClick={() => {
               void (async () => {
-                const el = classCalendarPdfRef.current;
-                if (!selectedClassId || !el || weekColumnDates.length !== 7) return;
+                const built = buildShareableWeekExport();
+                if (!built || weekColumnDates.length !== 7) return;
                 setClassPdfSnapBusy(true);
                 try {
-                  const dateSet = new Set(weekColumnDates);
-                  const sessionLines = weekSessions
-                    .filter((s) => s.class_id === selectedClassId && dateSet.has(s.lesson_date))
-                    .sort(
-                      (a, b) =>
-                        a.lesson_date.localeCompare(b.lesson_date) ||
-                        String(a.start_time).localeCompare(String(b.start_time))
-                    )
-                    .map((s) => {
-                      const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
-                      return `${s.lesson_date} ${String(s.start_time).slice(0, 5)}–${String(s.end_time).slice(0, 5)} | ${s.subject} | ${teacher?.name || s.teacher_name || s.teacher_id} | ${s.status}`;
-                    });
-                  const templateLines = classSlots
-                    .filter((s) => s.class_id === selectedClassId)
-                    .sort(
-                      (a, b) =>
-                        a.day_of_week - b.day_of_week ||
-                        String(a.start_time).localeCompare(String(b.start_time))
-                    )
-                    .map((s) => {
-                      const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
-                      return `[Şablon] ${DAY_LABELS[s.day_of_week - 1]} ${String(s.start_time).slice(0, 5)} | ${s.subject} | ${teacher?.name || s.teacher_name || s.teacher_id}`;
-                    });
-                  const lessonLines: string[] = [
-                    `— Bu haftanın tarihli oturumları (${sessionLines.length}) —`,
-                    ...(sessionLines.length ? sessionLines : ['(Bu hafta için oturum yok)']),
-                    '',
-                    `— Haftalık şablon satırları (${templateLines.length}) —`,
-                    ...(templateLines.length ? templateLines : ['(Şablon yok)'])
-                  ];
-                  await downloadCalendarPdfWithSnapshot({
-                    calendarElement: el,
+                  await downloadShareableWeekCalendarPdf({
+                    columns: built.columns,
+                    hours: built.hours,
+                    cells: built.cells,
+                    calendarTitle: `${selectedClass?.name || 'Sınıf'} haftalık program`,
                     filename: `grup-canli-ders-takvim-${weekColumnDates[0]}_${weekColumnDates[6]}.pdf`,
                     titleLine: `Grup canlı ders takvimi — ${selectedClass?.name || 'Sınıf'}`,
                     subtitleLines: [
                       weekRangeLabel,
-                      '1. sayfa: ekrandaki takvim görüntüsü. Sonrası: oturum ve şablon listesi (metin).'
+                      '1. sayfa: haftalık program görseli. Sonrası: oturum ve şablon listesi.'
                     ],
                     listHeading: 'Ders / oturum listesi (metin)',
-                    lessonLines,
+                    lessonLines: built.lessonLines,
                     footerNote:
-                      'Veli ve öğrenciyle paylaşabilirsiniz. Canlı derse katılım için uygulamadaki bağlantıları kullanın.',
+                      'Veli ve öğretmenle paylaşabilirsiniz. Canlı derse katılım için uygulamadaki bağlantıları kullanın.',
                     branding: {
                       institutionName: institution?.name || 'Kurum',
                       logoUrl: institution?.logo?.trim() || null
                     }
                   });
+                  toast.success('PDF indirildi');
                 } catch (e) {
-                  window.alert(e instanceof Error ? e.message : 'PDF oluşturulamadı');
+                  const msg = e instanceof Error ? e.message : 'PDF oluşturulamadı';
+                  window.alert(msg);
+                  toast.error(msg);
                 } finally {
                   setClassPdfSnapBusy(false);
                 }
