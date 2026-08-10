@@ -41,6 +41,7 @@ import {
 import { SolutionLessonStudentActions } from '../components/solutionAppointments/SolutionLessonStudentActions';
 import { inferSessionBatchPeers } from '../lib/classSessionBatchPeers';
 import { isSolutionLessonSubject } from '../lib/solutionAppointments/utils';
+import { downloadCalendarPdfWithSnapshot } from '../lib/pdfLiveWeekGrid';
 import { useCoachLessonsMeetingsLock } from '../lib/coachLessonsLock';
 import { CoachLessonsLockBanner } from '../components/coach/CoachLessonsLockBanner';
 import ClassLessonTopicCheckpointModal, {
