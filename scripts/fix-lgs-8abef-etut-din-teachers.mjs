@@ -26,10 +26,17 @@ function addDays(ymdStr, n) {
   return dt.toISOString().slice(0, 10);
 }
 function isEtut(s) {
-  return /et[uü]t/i.test(String(s || ''));
+  const u = String(s || '')
+    .trim()
+    .toLocaleUpperCase('tr-TR');
+  return u === 'ETÜT' || u.includes('ETÜT') || u.includes('ETUT');
 }
 function isDin(s) {
-  return /d[iı]n/i.test(String(s || ''));
+  const u = String(s || '')
+    .trim()
+    .toLocaleUpperCase('tr-TR');
+  // "DİN" (U+0130) — ASCII [iı] regex Türkçe büyük İ'de başarısız olur
+  return u.includes('DİN') || /\bDIN\b/.test(u.replace(/İ/g, 'I'));
 }
 function targetTeacher(subject) {
   if (isEtut(subject)) return DOGAN;
