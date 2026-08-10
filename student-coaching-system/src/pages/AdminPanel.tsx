@@ -315,8 +315,13 @@ export default function AdminPanel() {
         setAcademicLinksMsg('Davet linki için önce kurum seçin.');
         return;
       }
-      await copyAcademicStudyGuestJoinShareText(key, instId);
-      setAcademicLinksMsg('Davet metni panoya kopyalandı (WhatsApp için kısa link + etüt bilgisi).');
+      const href = String(academicLinks.studyClasses[key] || '').trim();
+      const label = STUDY_ENTRY_DEFS.find((x) => x.key === key)?.label || 'Etüt';
+      await copyAcademicStudyGuestJoinShareText(key, instId, {
+        directUrl: href,
+        title: label
+      });
+      setAcademicLinksMsg('Davet metni panoya kopyalandı (Zoom/Meet veya kısa davet linki).');
     } catch (e) {
       setAcademicLinksMsg(e instanceof Error ? e.message : 'Davet linki alınamadı.');
     } finally {

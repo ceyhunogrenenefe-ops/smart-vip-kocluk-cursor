@@ -7,6 +7,8 @@ import {
   parseBbbMeetingIdFromJoinUrl,
   isBbbConfigured,
   isBbbAutoMeetingLink,
+  isBbbJoinUrl,
+  isLikelyBbbJoinUrl,
   bbbStudentEtutReportLogoutUrl,
   resolveLiveBbbAttendeeCredentials
 } from './bbb.js';
@@ -22,14 +24,65 @@ import { upsertGuestJoinShortCode } from './guest-join-short-link.js';
 import { formatGuestInviteShareText } from './guest-join-share-text.js';
 import {
   ACADEMIC_STUDY_ROOM_LABELS,
-  DEFAULT_ACADEMIC_LINKS
+  DEFAULT_ACADEMIC_LINKS,
+  linksForInstitution,
+  normalizeAcademicLinksStore
 } from './academic-center-links-store.js';
+import { isDirectExternalMeetingLink } from './detect-meeting-platform.js';
 
 const VALID_STUDY_ROOMS = new Set(['class56', 'class78', 'class911', 'yks']);
 const ACADEMIC_STUDY_GUEST_EXPIRE_DAYS = 90;
 
 const GUEST_JOIN_OPEN_MINUTES_BEFORE = 15;
 const GUEST_JOIN_CLOSE_MINUTES_AFTER = 60;
+
+/** Zoom/Meet vb. — BBB kısa davet yerine ham link paylaşılır. */
+function isShareableExternalMeetingLink(link) {
+  const s = String(link || '').trim();
+  if (!s) return false;
+  if (isBbbAutoMeetingLink(s) || isBbbJoinUrl(s) || isLikelyBbbJoinUrl(s)) return false;
+  return isDirectExternalMeetingLink(s);
+}
+
+function externalInviteSharePayload({ url, title, lessonDate, lessonTime, className }) {
+  const link = String(url || '').trim();
+  const shareText = formatGuestInviteShareText({
+    title,
+    lessonDate,
+    lessonTime,
+    url: link,
+    className
+  });
+  return {
+    token: null,
+    url: link,
+    longUrl: link,
+    code: null,
+    shareText,
+    expiresAt: null,
+    title: String(title || '').trim(),
+    lessonDate: String(lessonDate || '').trim(),
+    lessonTime: String(lessonTime || '').trim(),
+    external: true,
+    platform: 'external'
+  };
+}
+
+async function loadAcademicStudyRoomUrl(institutionId, room) {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('platform_academic_center_links')
+      .select('links, payload')
+      .eq('id', 1)
+      .maybeSingle();
+    if (error) throw error;
+    const store = normalizeAcademicLinksStore(data?.links ?? data?.payload);
+    const links = linksForInstitution(store, institutionId);
+    return String(links?.studyClasses?.[room] || '').trim();
+  } catch {
+    return '';
+  }
+}
 
 function sanitizeGuestName(raw) {
   const name = String(raw || '')
@@ -116,6 +169,12 @@ async function buildClassGuestJoinUrl(session, guestName) {
     if (window.reason === 'expired') throw new Error('Bu ders için katılım süresi dolmuş.');
     throw new Error('Ders zamanı geçersiz.');
   }
+
+  const externalLink = String(session.meeting_link || '').trim();
+  if (isShareableExternalMeetingLink(externalLink)) {
+    return externalLink;
+  }
+
   if (!isBbbConfigured()) throw new Error('BBB sunucusu yapılandırılmamış.');
 
   const subject = String(session.subject || 'Grup dersi').trim();
@@ -217,6 +276,12 @@ async function buildPrivateGuestJoinUrl(lesson, guestName) {
     if (window.reason === 'expired') throw new Error('Bu ders için katılım süresi dolmuş.');
     throw new Error('Ders zamanı geçersiz.');
   }
+
+  const externalLink = String(lesson.meeting_link || '').trim();
+  if (isShareableExternalMeetingLink(externalLink)) {
+    return externalLink;
+  }
+
   if (!isBbbConfigured()) throw new Error('BBB sunucusu yapılandırılmamış.');
 
   const { data: student } = await supabaseAdmin
@@ -390,6 +455,12 @@ function academicStudyMeetingKeyPrefix(institutionId, room) {
 
 async function buildAcademicStudyGuestJoinUrl({ institutionId, room, guestName }) {
   if (!VALID_STUDY_ROOMS.has(room)) throw new Error('Geçersiz etüt sınıfı.');
+
+  const stored = await loadAcademicStudyRoomUrl(institutionId, room);
+  if (isShareableExternalMeetingLink(stored)) {
+    return stored;
+  }
+
   if (!isBbbConfigured()) throw new Error('BBB sunucusu yapılandırılmamış.');
 
   const meetingName =
@@ -451,11 +522,23 @@ async function finalizeGuestInviteUrl({ kind, id, token, expiresAtIso, title, le
 export async function createAcademicStudyGuestJoinShareLink({ institutionId, room }) {
   const r = String(room || '').trim().toLowerCase();
   if (!VALID_STUDY_ROOMS.has(r)) throw new Error('Geçersiz etüt sınıfı.');
+  const title =
+    ACADEMIC_STUDY_ROOM_LABELS[r] || DEFAULT_ACADEMIC_LINKS.studyClasses[r] || 'Etüt Sınıfı';
+
+  const stored = await loadAcademicStudyRoomUrl(institutionId, r);
+  if (isShareableExternalMeetingLink(stored)) {
+    return externalInviteSharePayload({
+      url: stored,
+      title,
+      lessonDate: '',
+      lessonTime: '',
+      className: 'Akademik Merkez — Etüt'
+    });
+  }
+
   const resourceId = academicStudyGuestResourceId(institutionId, r);
   const expSec = Math.floor(Date.now() / 1000) + ACADEMIC_STUDY_GUEST_EXPIRE_DAYS * 86400;
   const token = signBbbGuestJoinToken({ kind: 'academic-study', id: resourceId, exp: expSec });
-  const title =
-    ACADEMIC_STUDY_ROOM_LABELS[r] || DEFAULT_ACADEMIC_LINKS.studyClasses[r] || 'Etüt Sınıfı';
   return finalizeGuestInviteUrl({
     kind: 'academic-study',
     id: resourceId,
@@ -473,6 +556,16 @@ export async function createGuestJoinShareLink({ kind, id }) {
     const lesson = await loadTeacherLesson(id);
     if (!lesson) throw new Error('Ders bulunamadı.');
     if (String(lesson.status || '') === 'cancelled') throw new Error('İptal edilmiş ders için link oluşturulamaz.');
+    const externalLink = String(lesson.meeting_link || '').trim();
+    if (isShareableExternalMeetingLink(externalLink)) {
+      return externalInviteSharePayload({
+        url: externalLink,
+        title: String(lesson.title || 'Canlı özel ders'),
+        lessonDate: teacherLessonDate(lesson),
+        lessonTime: String(lesson.start_time || '').slice(0, 5),
+        className: ''
+      });
+    }
     const window = guestJoinWindowForTeacherLesson(lesson);
     const expSec = window.openUntil
       ? Math.floor(window.openUntil / 1000)
@@ -494,6 +587,30 @@ export async function createGuestJoinShareLink({ kind, id }) {
     if (!meeting) throw new Error('Görüşme bulunamadı.');
     if (String(meeting.status || '') === 'cancelled' || String(meeting.status || '') === 'missed') {
       throw new Error('İptal edilmiş görüşme için link oluşturulamaz.');
+    }
+    const meetLink = String(meeting.meet_link || meeting.link_zoom || '').trim();
+    if (isShareableExternalMeetingLink(meetLink)) {
+      const start = meeting.start_time ? new Date(meeting.start_time) : null;
+      const lessonDate =
+        start && !Number.isNaN(+start)
+          ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' }).format(start)
+          : '';
+      const lessonTime =
+        start && !Number.isNaN(+start)
+          ? new Intl.DateTimeFormat('tr-TR', {
+              timeZone: 'Europe/Istanbul',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false
+            }).format(start)
+          : '';
+      return externalInviteSharePayload({
+        url: meetLink,
+        title: String(meeting.title || meeting.notes || 'Online görüşme'),
+        lessonDate,
+        lessonTime,
+        className: ''
+      });
     }
     const window = guestJoinWindowForMeeting(meeting);
     const expSec = window.openUntil
@@ -528,6 +645,19 @@ export async function createGuestJoinShareLink({ kind, id }) {
   const session = await loadClassSession(id);
   if (!session) throw new Error('Ders oturumu bulunamadı.');
   if (String(session.status || '') === 'cancelled') throw new Error('İptal edilmiş ders için link oluşturulamaz.');
+
+  const externalLink = String(session.meeting_link || '').trim();
+  if (isShareableExternalMeetingLink(externalLink)) {
+    const className = await loadClassName(String(session.class_id || ''));
+    return externalInviteSharePayload({
+      url: externalLink,
+      title: String(session.subject || 'Grup dersi'),
+      lessonDate: String(session.lesson_date || '').slice(0, 10),
+      lessonTime: String(session.start_time || '').slice(0, 5),
+      className
+    });
+  }
+
   const window = guestJoinWindowForClassSession(session);
   const expSec = window.openUntil
     ? Math.floor(window.openUntil / 1000)

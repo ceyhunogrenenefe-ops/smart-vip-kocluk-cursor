@@ -28,7 +28,7 @@ import {
 } from '../lib/classLivePresence';
 import { useClassLivePresence } from '../hooks/useClassLivePresence';
 import { classIdsInLivePresenceWindow } from '../lib/classLiveWindow';
-import { copyGuestJoinShareText } from '../lib/bbbGuestJoin';
+import { copyGuestJoinShareText, tryCopyExternalMeetingFromRow } from '../lib/bbbGuestJoin';
 import { toast } from 'sonner';
 import { isEtutSubject, startEtutSession } from '../lib/etutSession';
 import { useRecordingUnavailableAlert, recordingUnavailableText } from '../hooks/useRecordingUnavailableAlert';
@@ -694,6 +694,16 @@ export default function ClassLiveLessons() {
   const copySessionGuestLink = useCallback(
     async (s: SessionRow) => {
       try {
+        const external = await tryCopyExternalMeetingFromRow(s, {
+          title: s.subject || 'Etüt',
+          className: selectedClass?.name || ''
+        });
+        if (external) {
+          setNotice(null);
+          toast.success('Kopyalandı — Zoom/Meet davet metni panoya alındı');
+          return;
+        }
+
         let sessionId = String(s.id || '').trim();
         if (sessionId.startsWith('slot-')) {
           if (!selectedClassId) throw new Error('Önce bir sınıf seçin.');
@@ -721,6 +731,15 @@ export default function ClassLiveLessons() {
           }
           sessionId = match.id;
           setWeekSessions(rows);
+          const matchExternal = await tryCopyExternalMeetingFromRow(match, {
+            title: match.subject || 'Etüt',
+            className: selectedClass?.name || ''
+          });
+          if (matchExternal) {
+            setNotice(null);
+            toast.success('Kopyalandı — Zoom/Meet davet metni panoya alındı');
+            return;
+          }
         }
         await copyGuestJoinShareText('class', sessionId);
         setNotice(null);
@@ -731,7 +750,7 @@ export default function ClassLiveLessons() {
         toast.error(msg);
       }
     },
-    [selectedClassId, weekColumnDates]
+    [selectedClassId, weekColumnDates, selectedClass?.name]
   );
 
   const loadBatchSessionsPool = useCallback(async () => {
