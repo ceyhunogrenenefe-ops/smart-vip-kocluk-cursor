@@ -61,7 +61,6 @@ function slotCoveredBySessions(slot, sessionsOnDay, opts = {}) {
   const ignoreCancelled = opts.ignoreCancelled !== false;
   const slotKey = sessionKey(slot.class_id, slot.teacher_id, slot.start_time);
   const slotTeacher = String(slot.teacher_id || '').trim();
-  const slotSubject = normSubjectKey(slot.subject);
 
   for (const s of sessionsOnDay || []) {
     if (String(s.class_id || '') !== String(slot.class_id || '')) continue;
@@ -72,10 +71,11 @@ function slotCoveredBySessions(slot, sessionsOnDay, opts = {}) {
     if (sessKey === slotKey) return true;
 
     const sessTeacher = String(s.teacher_id || '').trim();
-    const sessSubject = normSubjectKey(s.subject);
-    if (sessTeacher === slotTeacher && sessSubject === slotSubject) return true;
-
+    // Aynı öğretmen + çakışan saat → kapalı. Aynı ders/öğretmen farklı saatte engellemez
+    // (ör. sabah tamamlanan İngilizce, akşam İngilizce slotunu kilitlemesin).
     if (
+      sessTeacher &&
+      slotTeacher &&
       sessTeacher === slotTeacher &&
       timeRangesOverlap(slot.start_time, slot.end_time, s.start_time, s.end_time)
     ) {
