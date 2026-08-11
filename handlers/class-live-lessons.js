@@ -2624,6 +2624,10 @@ export default async function handler(req, res) {
     if (body.start_time) patch.start_time = hhmmss(body.start_time);
     if (body.end_time) patch.end_time = hhmmss(body.end_time);
     if (body.subject) patch.subject = String(body.subject).trim();
+    if (Object.prototype.hasOwnProperty.call(body, 'recording_link')) {
+      const rec = String(body.recording_link || '').trim();
+      patch.recording_link = rec || null;
+    }
     if (Object.prototype.hasOwnProperty.call(body, 'meeting_link')) {
       const manual = String(body.meeting_link || '').trim();
       const existing = String(session.meeting_link || '').trim();
