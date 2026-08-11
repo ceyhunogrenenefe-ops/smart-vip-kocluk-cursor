@@ -1,5 +1,5 @@
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
-import { enrichMeetingRowsJoinLink, resolveBbbMeetingDurationMinutes, resolveBbbRecordingPlaybackForSessionRow } from '../api/_lib/bbb.js';
+import { enrichMeetingRowsJoinLink, resolveBbbMeetingDurationMinutes, resolveBbbRecordingPlaybackForSessionRow, listBbbRecordingsBetween, ensureBbbRecordingPublishedAndReady, isBbbRecordingMediaReady, extractBbbRecordIdFromPlaybackUrl, buildBbbPresentationPlaybackUrl } from '../api/_lib/bbb.js';
 import { resolveBbbOrManualMeetingLink } from '../api/_lib/resolve-bbb-meeting-link.js';
 import { detectPlatform } from '../api/_lib/detect-meeting-platform.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
@@ -1549,6 +1549,7 @@ export default async function handler(req, res) {
       const classId = String(body.class_id || '').trim();
       const from = String(body.date_from || body.from || '').trim().slice(0, 10);
       const to = String(body.date_to || body.to || '').trim().slice(0, 10);
+      const repair = body.repair === true || body.force === true || String(body.repair || '') === '1';
       if (!classId) return res.status(400).json({ error: 'class_id_required' });
       if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
         return res.status(400).json({ error: 'date_range_invalid' });
@@ -1571,11 +1572,41 @@ export default async function handler(req, res) {
       let linked = 0;
       let skipped = 0;
       let missing = 0;
+      let repaired = 0;
+      let cleared = 0;
       const detailsOut = [];
       for (const row of sessions || []) {
-        if (String(row.recording_link || '').trim()) {
+        const existing = String(row.recording_link || '').trim();
+        if (existing && !repair) {
           skipped += 1;
           continue;
+        }
+        if (existing && repair) {
+          const rid = extractBbbRecordIdFromPlaybackUrl(existing);
+          if (rid) {
+            const ready = await isBbbRecordingMediaReady(rid);
+            if (ready.ok) {
+              skipped += 1;
+              continue;
+            }
+            await ensureBbbRecordingPublishedAndReady(rid, { attempts: 4, waitMs: 2500 });
+            const again = await isBbbRecordingMediaReady(rid);
+            if (again.ok) {
+              skipped += 1;
+              repaired += 1;
+              detailsOut.push({
+                id: row.id,
+                subject: row.subject,
+                lesson_date: row.lesson_date,
+                status: 'repaired_publish',
+                recordId: rid
+              });
+              continue;
+            }
+          }
+          await patchRowRecordingLink('class_sessions', row.id, null);
+          cleared += 1;
+          row.recording_link = null;
         }
         const join = String(row.meeting_link || '').trim();
         const platform = detectPlatform(join);
@@ -1603,6 +1634,27 @@ export default async function handler(req, res) {
               bbb_meeting_id: row.bbb_meeting_id || null
             });
             continue;
+          }
+          const rid = extractBbbRecordIdFromPlaybackUrl(resolved.playbackUrl);
+          if (rid) {
+            const ready = await isBbbRecordingMediaReady(rid);
+            if (!ready.ok) {
+              await ensureBbbRecordingPublishedAndReady(rid, { attempts: 3, waitMs: 2000 });
+              const again = await isBbbRecordingMediaReady(rid);
+              if (!again.ok) {
+                missing += 1;
+                detailsOut.push({
+                  id: row.id,
+                  subject: row.subject,
+                  lesson_date: row.lesson_date,
+                  start_time: row.start_time,
+                  status: 'recording_media_not_ready',
+                  recordId: rid,
+                  bbb_meeting_id: row.bbb_meeting_id || null
+                });
+                continue;
+              }
+            }
           }
           await patchRowRecordingLink('class_sessions', row.id, resolved.playbackUrl);
           linked += 1;
@@ -1636,6 +1688,8 @@ export default async function handler(req, res) {
         linked,
         skipped,
         missing,
+        repaired,
+        cleared,
         details: detailsOut
       });
     }
@@ -1648,24 +1702,83 @@ export default async function handler(req, res) {
       }
       const dayStart = Date.parse(`${day}T00:00:00+03:00`);
       const dayEnd = Date.parse(`${day}T23:59:59+03:00`);
-      const { listBbbRecordingsBetween } = await import('../api/_lib/bbb.js');
       const rows = await listBbbRecordingsBetween(dayStart - 3600_000, dayEnd + 3600_000);
-      return res.status(200).json({
-        ok: true,
-        date: day,
-        count: rows.length,
-        recordings: rows.map((r) => ({
+      const enriched = [];
+      for (const r of rows) {
+        let mediaReady = null;
+        if (r.recordId) {
+          mediaReady = (await isBbbRecordingMediaReady(r.recordId)).ok;
+        }
+        enriched.push({
           meetingId: r.meetingId,
           recordId: r.recordId,
           name: r.name,
           published: r.published,
+          hasFormatUrl: Boolean(r.hasFormatUrl),
+          mediaReady,
           startTimeMs: r.startTimeMs,
           endTimeMs: r.endTimeMs,
           start_tr: r.startTimeMs
             ? new Date(r.startTimeMs).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' })
             : null,
           playbackUrl: r.playbackUrl
-        }))
+        });
+      }
+      return res.status(200).json({
+        ok: true,
+        date: day,
+        count: enriched.length,
+        recordings: enriched
+      });
+    }
+
+    if (op === 'publish-bbb-recordings-day') {
+      if (!isAdminRole(role)) return res.status(403).json({ error: 'forbidden' });
+      const day = String(body.date || body.day || '').trim().slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+        return res.status(400).json({ error: 'date_invalid', hint: 'YYYY-MM-DD' });
+      }
+      const dayStart = Date.parse(`${day}T00:00:00+03:00`);
+      const dayEnd = Date.parse(`${day}T23:59:59+03:00`);
+      const rows = await listBbbRecordingsBetween(dayStart - 3600_000, dayEnd + 3600_000);
+      const out = [];
+      let ready = 0;
+      let published = 0;
+      let stillMissing = 0;
+      for (const r of rows) {
+        if (!r.recordId) continue;
+        const before = await isBbbRecordingMediaReady(r.recordId);
+        if (before.ok) {
+          ready += 1;
+          out.push({ recordId: r.recordId, name: r.name, status: 'already_ready' });
+          continue;
+        }
+        const result = await ensureBbbRecordingPublishedAndReady(r.recordId, {
+          attempts: Number(body.attempts || 5),
+          waitMs: Number(body.wait_ms || 3000)
+        });
+        if (result.published) published += 1;
+        if (result.ready) {
+          ready += 1;
+          out.push({
+            recordId: r.recordId,
+            name: r.name,
+            status: 'published_ready',
+            playbackUrl: buildBbbPresentationPlaybackUrl(r.recordId)
+          });
+        } else {
+          stillMissing += 1;
+          out.push({ recordId: r.recordId, name: r.name, status: 'media_missing', published: result.published });
+        }
+      }
+      return res.status(200).json({
+        ok: true,
+        date: day,
+        scanned: rows.length,
+        ready,
+        published_attempts: published,
+        still_missing: stillMissing,
+        details: out
       });
     }
 
