@@ -52,19 +52,23 @@ function weekday(day, lessons) {
 /**
  * Salı–Cuma akşam (görsel). S.Ç → SORU ÇÖZÜM (mevcut isimlendirme + çözüm dersi kuralları).
  * Ardışık aynı branş dilimleri BBB oda paylaşımı için peş peşe bırakıldı.
+ *
+ * Fizik ↔ Biyoloji yer değişimi (işaretli dilimler):
+ * - Çarşamba 17:50–19:20 → FİZİK (Ali)
+ * - Salı 19:30–21:00 → BİYOLOJİ (Tayyibe)
  */
 export const YKS_YILDIZLAR_EVENING_SCHEDULE = [
   // Salı
   ...weekday(2, [
     { start: '17:50', end: '18:30', subject: 'MATEMATİK', teacher_key: 'YILMAZ_ISIK' },
     { start: '18:40', end: '19:20', subject: 'MATEMATİK', teacher_key: 'YILMAZ_ISIK' },
-    { start: '19:30', end: '20:10', subject: 'FİZİK', teacher_key: 'ALI_AKTAS' },
-    { start: '20:20', end: '21:00', subject: 'FİZİK', teacher_key: 'ALI_AKTAS' }
+    { start: '19:30', end: '20:10', subject: 'BİYOLOJİ', teacher_key: 'TAYYIBE' },
+    { start: '20:20', end: '21:00', subject: 'BİYOLOJİ', teacher_key: 'TAYYIBE' }
   ]),
   // Çarşamba
   ...weekday(3, [
-    { start: '17:50', end: '18:30', subject: 'BİYOLOJİ', teacher_key: 'TAYYIBE' },
-    { start: '18:40', end: '19:20', subject: 'BİYOLOJİ', teacher_key: 'TAYYIBE' },
+    { start: '17:50', end: '18:30', subject: 'FİZİK', teacher_key: 'ALI_AKTAS' },
+    { start: '18:40', end: '19:20', subject: 'FİZİK', teacher_key: 'ALI_AKTAS' },
     { start: '19:30', end: '20:10', subject: 'GEOMETRİ', teacher_key: 'NURULLAH' },
     { start: '20:20', end: '21:00', subject: 'GEOMETRİ', teacher_key: 'NURULLAH' }
   ]),
