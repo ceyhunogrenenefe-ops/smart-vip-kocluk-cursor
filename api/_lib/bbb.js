@@ -741,6 +741,34 @@ export function isBbbAudioOnlyPlaybackUrl(url) {
   return /podcast|\.mp3(?:\?|$)|audioonly|audio_only|\/audio\//.test(s);
 }
 
+/**
+ * BBB getRecordings bazen &lt;format&gt;&lt;url&gt; döndürmez; recordID ile playback URL üret.
+ * Örn. https://ders.dersonlinevipkocluk.com/playback/presentation/2.3/{recordID}
+ */
+export function buildBbbPresentationPlaybackUrl(recordId) {
+  const rid = String(recordId || '').trim();
+  if (!rid || /[<>\s]/.test(rid)) return null;
+  let origin = '';
+  try {
+    const joinBase = resolveBbbJoinApiBase();
+    if (joinBase) origin = new URL(joinBase).origin;
+  } catch {
+    /* ignore */
+  }
+  if (!origin) {
+    try {
+      const { apiBase } = bbbApiConfig();
+      if (apiBase) origin = new URL(apiBase).origin;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!origin || /biggerbluebutton\.com/i.test(origin)) {
+    origin = 'https://ders.dersonlinevipkocluk.com';
+  }
+  return `${origin.replace(/\/$/, '')}/playback/presentation/2.3/${encodeURIComponent(rid)}`;
+}
+
 function parseXmlTagValues(xml, tagName) {
   const names = [];
   const cdataRe = new RegExp(`<${tagName}><!\\[CDATA\\[(.*?)\\]\\]></${tagName}>`, 'gi');
@@ -1021,7 +1049,9 @@ function parseBbbRecordingsXml(text, expectedMeetingId) {
   for (const block of recordingBlocks) {
     const blockMeetingId = sanitizeBbbMeetingId(parseXmlTagValues(block, 'meetingID')[0] || '');
     if (expectedMeetingId && blockMeetingId && blockMeetingId !== expectedMeetingId) continue;
-    const recordId = parseXmlTagValues(block, 'recordID')[0] || parseXmlTagValues(block, 'recordId')[0] || '';
+    const recordId = String(
+      parseXmlTagValues(block, 'recordID')[0] || parseXmlTagValues(block, 'recordId')[0] || ''
+    ).trim();
     const publishedRaw = (parseXmlTagValues(block, 'published')[0] || '').toLowerCase();
     const published = publishedRaw === 'true';
     const name =
@@ -1046,15 +1076,28 @@ function parseBbbRecordingsXml(text, expectedMeetingId) {
       if ((type === 'podcast' || type === 'audio') && !fallbackUrl) fallbackUrl = playback;
       else if (!fallbackUrl && !isBbbAudioOnlyPlaybackUrl(playback)) fallbackUrl = playback;
     }
-    const chosen = playbackUrl || fallbackUrl || parseXmlTagValues(block, 'url')[0] || null;
+    // Bazı sunucular format/url yerine doğrudan playback linki veya boş format döner
+    if (!playbackUrl && !fallbackUrl) {
+      const hrefMatch = String(block).match(
+        /https?:\/\/[^\s"'<>]+\/playback\/presentation\/[0-9.]+\/[A-Za-z0-9-]+/i
+      );
+      if (hrefMatch?.[0]) playbackUrl = hrefMatch[0];
+    }
+    let chosen = playbackUrl || fallbackUrl || parseXmlTagValues(block, 'url')[0] || null;
+    if (chosen && isBbbAudioOnlyPlaybackUrl(chosen)) {
+      chosen = playbackUrl && !isBbbAudioOnlyPlaybackUrl(playbackUrl) ? playbackUrl : null;
+    }
+    if (!chosen && recordId) {
+      chosen = buildBbbPresentationPlaybackUrl(recordId);
+    }
     results.push({
       meetingId: blockMeetingId || null,
-      recordId: String(recordId || '').trim(),
+      recordId,
       published,
       name: String(name || '').trim(),
       startTimeMs,
       endTimeMs,
-      playbackUrl: chosen && !isBbbAudioOnlyPlaybackUrl(chosen) ? chosen : playbackUrl || null
+      playbackUrl: chosen || null
     });
   }
   return results;
