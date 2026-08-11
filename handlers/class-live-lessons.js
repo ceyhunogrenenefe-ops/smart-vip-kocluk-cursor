@@ -1640,6 +1640,35 @@ export default async function handler(req, res) {
       });
     }
 
+    if (op === 'list-bbb-recordings-day') {
+      if (!isAdminRole(role)) return res.status(403).json({ error: 'forbidden' });
+      const day = String(body.date || body.day || '').trim().slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+        return res.status(400).json({ error: 'date_invalid', hint: 'YYYY-MM-DD' });
+      }
+      const dayStart = Date.parse(`${day}T00:00:00+03:00`);
+      const dayEnd = Date.parse(`${day}T23:59:59+03:00`);
+      const { listBbbRecordingsBetween } = await import('../api/_lib/bbb.js');
+      const rows = await listBbbRecordingsBetween(dayStart - 3600_000, dayEnd + 3600_000);
+      return res.status(200).json({
+        ok: true,
+        date: day,
+        count: rows.length,
+        recordings: rows.map((r) => ({
+          meetingId: r.meetingId,
+          recordId: r.recordId,
+          name: r.name,
+          published: r.published,
+          startTimeMs: r.startTimeMs,
+          endTimeMs: r.endTimeMs,
+          start_tr: r.startTimeMs
+            ? new Date(r.startTimeMs).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' })
+            : null,
+          playbackUrl: r.playbackUrl
+        }))
+      });
+    }
+
     if (op === 'set-attendance-prefs') {
       if (role !== 'admin' && role !== 'super_admin') {
         return res.status(403).json({ error: 'forbidden' });
