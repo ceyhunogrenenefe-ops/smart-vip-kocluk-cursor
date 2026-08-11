@@ -1735,46 +1735,63 @@ export default async function handler(req, res) {
     if (op === 'publish-bbb-recordings-day') {
       if (!isAdminRole(role)) return res.status(403).json({ error: 'forbidden' });
       const day = String(body.date || body.day || '').trim().slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
-        return res.status(400).json({ error: 'date_invalid', hint: 'YYYY-MM-DD' });
+      const explicitIds = Array.isArray(body.record_ids)
+        ? body.record_ids.map((x) => String(x || '').trim()).filter(Boolean)
+        : [];
+      let targets = [];
+      if (explicitIds.length) {
+        targets = explicitIds.slice(0, 30).map((recordId) => ({ recordId, name: null }));
+      } else {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+          return res.status(400).json({ error: 'date_invalid', hint: 'YYYY-MM-DD veya record_ids' });
+        }
+        const dayStart = Date.parse(`${day}T00:00:00+03:00`);
+        const dayEnd = Date.parse(`${day}T23:59:59+03:00`);
+        const rows = await listBbbRecordingsBetween(dayStart - 3600_000, dayEnd + 3600_000);
+        // Yalnızca format URL'si olmayanlar (CDN'de genelde eksik olanlar)
+        targets = rows
+          .filter((r) => r.recordId && !r.hasFormatUrl)
+          .slice(0, Number(body.limit || 25))
+          .map((r) => ({ recordId: r.recordId, name: r.name }));
       }
-      const dayStart = Date.parse(`${day}T00:00:00+03:00`);
-      const dayEnd = Date.parse(`${day}T23:59:59+03:00`);
-      const rows = await listBbbRecordingsBetween(dayStart - 3600_000, dayEnd + 3600_000);
       const out = [];
       let ready = 0;
       let published = 0;
       let stillMissing = 0;
-      for (const r of rows) {
-        if (!r.recordId) continue;
-        const before = await isBbbRecordingMediaReady(r.recordId);
+      for (const t of targets) {
+        const before = await isBbbRecordingMediaReady(t.recordId, { timeoutMs: 4000 });
         if (before.ok) {
           ready += 1;
-          out.push({ recordId: r.recordId, name: r.name, status: 'already_ready' });
+          out.push({ recordId: t.recordId, name: t.name, status: 'already_ready' });
           continue;
         }
-        const result = await ensureBbbRecordingPublishedAndReady(r.recordId, {
-          attempts: Number(body.attempts || 5),
-          waitMs: Number(body.wait_ms || 3000)
+        const result = await ensureBbbRecordingPublishedAndReady(t.recordId, {
+          attempts: Math.min(3, Number(body.attempts || 2)),
+          waitMs: Math.min(1500, Number(body.wait_ms || 600))
         });
         if (result.published) published += 1;
         if (result.ready) {
           ready += 1;
           out.push({
-            recordId: r.recordId,
-            name: r.name,
+            recordId: t.recordId,
+            name: t.name,
             status: 'published_ready',
-            playbackUrl: buildBbbPresentationPlaybackUrl(r.recordId)
+            playbackUrl: buildBbbPresentationPlaybackUrl(t.recordId)
           });
         } else {
           stillMissing += 1;
-          out.push({ recordId: r.recordId, name: r.name, status: 'media_missing', published: result.published });
+          out.push({
+            recordId: t.recordId,
+            name: t.name,
+            status: 'media_missing',
+            published: result.published
+          });
         }
       }
       return res.status(200).json({
         ok: true,
-        date: day,
-        scanned: rows.length,
+        date: day || null,
+        scanned: targets.length,
         ready,
         published_attempts: published,
         still_missing: stillMissing,
