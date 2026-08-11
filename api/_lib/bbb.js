@@ -813,18 +813,19 @@ export async function isBbbRecordingMediaReady(recordId, { timeoutMs = 8000 } = 
 /**
  * Yayınla + media hazır olana kadar kısa poll.
  * BiggerBlueButton bazen published=true der ama /presentation altında dosya yoktur.
+ * Not: Vercel timeout için attempts düşük tutulmalı; uzun bekleme client script'te yapılır.
  */
-export async function ensureBbbRecordingPublishedAndReady(recordId, { attempts = 4, waitMs = 2500 } = {}) {
+export async function ensureBbbRecordingPublishedAndReady(recordId, { attempts = 2, waitMs = 800 } = {}) {
   const rid = String(recordId || '').trim();
   if (!rid) return { ok: false, published: false, ready: false };
   let published = false;
   for (let i = 0; i < attempts; i += 1) {
     published = (await bbbPublishRecording(rid)) || published;
-    const ready = await isBbbRecordingMediaReady(rid);
+    const ready = await isBbbRecordingMediaReady(rid, { timeoutMs: 5000 });
     if (ready.ok) return { ok: true, published: true, ready: true, metadataUrl: ready.metadataUrl };
-    if (i < attempts - 1) await new Promise((r) => setTimeout(r, waitMs));
+    if (i < attempts - 1 && waitMs > 0) await new Promise((r) => setTimeout(r, waitMs));
   }
-  const ready = await isBbbRecordingMediaReady(rid);
+  const ready = await isBbbRecordingMediaReady(rid, { timeoutMs: 5000 });
   return { ok: ready.ok, published, ready: ready.ok, metadataUrl: ready.metadataUrl };
 }
 
@@ -961,14 +962,14 @@ export async function getBbbRecordingPlaybackUrl(meetingId) {
       continue;
     }
     if (!rec.published || !rec.hasFormatUrl) {
-      await ensureBbbRecordingPublishedAndReady(rec.recordId, { attempts: 3, waitMs: 2000 });
+      await ensureBbbRecordingPublishedAndReady(rec.recordId, { attempts: 2, waitMs: 500 });
     } else {
-      const ready = await isBbbRecordingMediaReady(rec.recordId);
+      const ready = await isBbbRecordingMediaReady(rec.recordId, { timeoutMs: 5000 });
       if (!ready.ok) {
-        await ensureBbbRecordingPublishedAndReady(rec.recordId, { attempts: 3, waitMs: 2000 });
+        await ensureBbbRecordingPublishedAndReady(rec.recordId, { attempts: 2, waitMs: 500 });
       }
     }
-    const ready = await isBbbRecordingMediaReady(rec.recordId);
+    const ready = await isBbbRecordingMediaReady(rec.recordId, { timeoutMs: 5000 });
     if (!ready.ok) continue;
     const url =
       (rec.playbackUrl && !isBbbAudioOnlyPlaybackUrl(rec.playbackUrl) && rec.hasFormatUrl
@@ -1076,6 +1077,9 @@ export async function resolveBbbRecordingPlaybackForSessionRow(row, extraMeeting
     if (url) return { playbackUrl: url, matchedBy: 'meeting_id', meetingId: id };
   }
 
+  // meetingID biliniyorsa ama media hazır değilse gün boyu tarama yapma (Vercel timeout)
+  if (ids.length) return null;
+
   const date = String(row?.lesson_date || '').slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
   const startHm = String(row?.start_time || '00:00:00').slice(0, 8);
@@ -1093,18 +1097,7 @@ export async function resolveBbbRecordingPlaybackForSessionRow(row, extraMeeting
   const scored = [];
   for (const rec of range) {
     if (!rec.playbackUrl || isBbbAudioOnlyPlaybackUrl(rec.playbackUrl)) continue;
-    if (rec.recordId) {
-      const ready = await isBbbRecordingMediaReady(rec.recordId);
-      if (!ready.ok) {
-        if (!rec.hasFormatUrl) {
-          await ensureBbbRecordingPublishedAndReady(rec.recordId, { attempts: 2, waitMs: 1500 });
-          const again = await isBbbRecordingMediaReady(rec.recordId);
-          if (!again.ok) continue;
-        } else {
-          continue;
-        }
-      }
-    }
+    // Ham skor — media probe sadece ilk adaylarda
     let score = 0;
     if (ids.includes(rec.meetingId)) score += 100;
     const name = normRecName(rec.name);
@@ -1121,21 +1114,36 @@ export async function resolveBbbRecordingPlaybackForSessionRow(row, extraMeeting
         score += 10;
       }
     }
+    if (rec.hasFormatUrl) score += 5;
     if (score > 0) scored.push({ rec, score });
   }
   scored.sort((a, b) => b.score - a.score);
-  const best = scored[0];
-  if (!best || best.score < 40) return null;
-  if (!best.rec.published && best.rec.recordId) {
-    await bbbPublishRecording(best.rec.recordId);
+
+  for (const { rec, score } of scored.slice(0, 5)) {
+    if (score < 40) break;
+    if (rec.recordId) {
+      let ready = await isBbbRecordingMediaReady(rec.recordId, { timeoutMs: 4000 });
+      if (!ready.ok && !rec.hasFormatUrl) {
+        await ensureBbbRecordingPublishedAndReady(rec.recordId, { attempts: 2, waitMs: 500 });
+        ready = await isBbbRecordingMediaReady(rec.recordId, { timeoutMs: 4000 });
+      }
+      if (!ready.ok) continue;
+    }
+    if (!rec.published && rec.recordId) {
+      await bbbPublishRecording(rec.recordId);
+    }
+    const playbackUrl =
+      (rec.hasFormatUrl && rec.playbackUrl) || buildBbbPresentationPlaybackUrl(rec.recordId);
+    if (!playbackUrl || isBbbAudioOnlyPlaybackUrl(playbackUrl)) continue;
+    return {
+      playbackUrl,
+      matchedBy: 'time_name',
+      meetingId: rec.meetingId || null,
+      score,
+      name: rec.name || null
+    };
   }
-  return {
-    playbackUrl: best.rec.playbackUrl,
-    matchedBy: 'time_name',
-    meetingId: best.rec.meetingId || null,
-    score: best.score,
-    name: best.rec.name || null
-  };
+  return null;
 }
 
 function parseBbbRecordingsXml(text, expectedMeetingId) {

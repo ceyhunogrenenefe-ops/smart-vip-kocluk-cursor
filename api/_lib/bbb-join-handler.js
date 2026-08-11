@@ -280,7 +280,7 @@ export async function handleBbbRecordingGet(req, res, config) {
     if (rid) {
       const ready = await isBbbRecordingMediaReady(rid);
       if (!ready.ok) {
-        await ensureBbbRecordingPublishedAndReady(rid, { attempts: 3, waitMs: 2000 });
+        await ensureBbbRecordingPublishedAndReady(rid, { attempts: 2, waitMs: 600 });
         const again = await isBbbRecordingMediaReady(rid);
         if (!again.ok) {
           // bozuk cache — yeniden çözümle
