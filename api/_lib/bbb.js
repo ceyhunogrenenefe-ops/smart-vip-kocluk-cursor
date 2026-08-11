@@ -769,6 +769,71 @@ export function buildBbbPresentationPlaybackUrl(recordId) {
   return `${origin.replace(/\/$/, '')}/playback/presentation/2.3/${encodeURIComponent(rid)}`;
 }
 
+/** Playback media kökleri — player data.biggerbluebutton.com veya özel alan adı kullanır. */
+export function bbbRecordingMediaProbeUrls(recordId) {
+  const rid = String(recordId || '').trim();
+  if (!rid) return [];
+  const enc = encodeURIComponent(rid);
+  return [
+    `https://data.biggerbluebutton.com/presentation/${enc}/metadata.xml`,
+    `https://ders.dersonlinevipkocluk.com/presentation/${enc}/metadata.xml`,
+    `https://biggerbluebutton.com/presentation/${enc}/metadata.xml`
+  ];
+}
+
+/**
+ * Kayıt dosyaları CDN'de gerçekten yayında mı? (playback HTML 200 olsa bile media 404 olabilir)
+ */
+export async function isBbbRecordingMediaReady(recordId, { timeoutMs = 8000 } = {}) {
+  const urls = bbbRecordingMediaProbeUrls(recordId);
+  for (const url of urls) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), timeoutMs);
+      const res = await fetch(url, {
+        method: 'GET',
+        redirect: 'follow',
+        signal: ctrl.signal,
+        headers: { Accept: 'application/xml,text/xml,*/*' }
+      });
+      clearTimeout(t);
+      if (!res.ok) continue;
+      const ct = String(res.headers.get('content-type') || '').toLowerCase();
+      const text = (await res.text()).slice(0, 200);
+      if (ct.includes('xml') || text.includes('<?xml') || text.includes('<recording')) {
+        return { ok: true, metadataUrl: url };
+      }
+    } catch {
+      /* sonraki host */
+    }
+  }
+  return { ok: false, metadataUrl: null };
+}
+
+/**
+ * Yayınla + media hazır olana kadar kısa poll.
+ * BiggerBlueButton bazen published=true der ama /presentation altında dosya yoktur.
+ */
+export async function ensureBbbRecordingPublishedAndReady(recordId, { attempts = 4, waitMs = 2500 } = {}) {
+  const rid = String(recordId || '').trim();
+  if (!rid) return { ok: false, published: false, ready: false };
+  let published = false;
+  for (let i = 0; i < attempts; i += 1) {
+    published = (await bbbPublishRecording(rid)) || published;
+    const ready = await isBbbRecordingMediaReady(rid);
+    if (ready.ok) return { ok: true, published: true, ready: true, metadataUrl: ready.metadataUrl };
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, waitMs));
+  }
+  const ready = await isBbbRecordingMediaReady(rid);
+  return { ok: ready.ok, published, ready: ready.ok, metadataUrl: ready.metadataUrl };
+}
+
+export function extractBbbRecordIdFromPlaybackUrl(url) {
+  const s = String(url || '').trim();
+  const m = s.match(/\/playback\/presentation\/[0-9.]+\/([A-Za-z0-9-]+)/i);
+  return m?.[1] || null;
+}
+
 function parseXmlTagValues(xml, tagName) {
   const names = [];
   const cdataRe = new RegExp(`<${tagName}><!\\[CDATA\\[(.*?)\\]\\]></${tagName}>`, 'gi');
@@ -883,15 +948,33 @@ const BBB_RECORDING_STATES = ['published', 'unpublished', 'processed', 'processi
 
 /**
  * BBB getRecordings — yayımlanmamış / işlenen kayıtlar dahil; gerekirse publishRecordings.
+ * Media CDN'de yoksa URL döndürmez (boş player / 404 önlenir).
  * @returns {Promise<string | null>}
  */
 export async function getBbbRecordingPlaybackUrl(meetingId) {
   const list = await listBbbRecordingsForMeetingId(meetingId);
   for (const rec of list) {
-    if (!rec.published && rec.recordId) {
-      await bbbPublishRecording(rec.recordId);
+    if (!rec.recordId) {
+      if (rec.playbackUrl && !isBbbAudioOnlyPlaybackUrl(rec.playbackUrl) && rec.hasFormatUrl) {
+        return rec.playbackUrl;
+      }
+      continue;
     }
-    if (rec.playbackUrl && !isBbbAudioOnlyPlaybackUrl(rec.playbackUrl)) return rec.playbackUrl;
+    if (!rec.published || !rec.hasFormatUrl) {
+      await ensureBbbRecordingPublishedAndReady(rec.recordId, { attempts: 3, waitMs: 2000 });
+    } else {
+      const ready = await isBbbRecordingMediaReady(rec.recordId);
+      if (!ready.ok) {
+        await ensureBbbRecordingPublishedAndReady(rec.recordId, { attempts: 3, waitMs: 2000 });
+      }
+    }
+    const ready = await isBbbRecordingMediaReady(rec.recordId);
+    if (!ready.ok) continue;
+    const url =
+      (rec.playbackUrl && !isBbbAudioOnlyPlaybackUrl(rec.playbackUrl) && rec.hasFormatUrl
+        ? rec.playbackUrl
+        : null) || buildBbbPresentationPlaybackUrl(rec.recordId);
+    if (url && !isBbbAudioOnlyPlaybackUrl(url)) return url;
   }
   return null;
 }
@@ -1010,6 +1093,18 @@ export async function resolveBbbRecordingPlaybackForSessionRow(row, extraMeeting
   const scored = [];
   for (const rec of range) {
     if (!rec.playbackUrl || isBbbAudioOnlyPlaybackUrl(rec.playbackUrl)) continue;
+    if (rec.recordId) {
+      const ready = await isBbbRecordingMediaReady(rec.recordId);
+      if (!ready.ok) {
+        if (!rec.hasFormatUrl) {
+          await ensureBbbRecordingPublishedAndReady(rec.recordId, { attempts: 2, waitMs: 1500 });
+          const again = await isBbbRecordingMediaReady(rec.recordId);
+          if (!again.ok) continue;
+        } else {
+          continue;
+        }
+      }
+    }
     let score = 0;
     if (ids.includes(rec.meetingId)) score += 100;
     const name = normRecName(rec.name);
@@ -1087,6 +1182,8 @@ function parseBbbRecordingsXml(text, expectedMeetingId) {
     if (chosen && isBbbAudioOnlyPlaybackUrl(chosen)) {
       chosen = playbackUrl && !isBbbAudioOnlyPlaybackUrl(playbackUrl) ? playbackUrl : null;
     }
+    const hasFormatUrl = Boolean(chosen);
+    // format/url yoksa URL uydurma — CDN'de dosya olmayabilir; publish+probe sonrası eklenir
     if (!chosen && recordId) {
       chosen = buildBbbPresentationPlaybackUrl(recordId);
     }
@@ -1097,13 +1194,14 @@ function parseBbbRecordingsXml(text, expectedMeetingId) {
       name: String(name || '').trim(),
       startTimeMs,
       endTimeMs,
+      hasFormatUrl,
       playbackUrl: chosen || null
     });
   }
   return results;
 }
 
-async function bbbPublishRecording(recordId) {
+export async function bbbPublishRecording(recordId) {
   const { apiBase, secret } = bbbApiConfig();
   if (!apiBase || !secret || !recordId) return false;
   const query = asQuery({ recordID: recordId, publish: 'true' });

@@ -20,7 +20,10 @@ import {
   resolveBbbRecordingPlaybackForSessionRow,
   collectBbbMeetingIdsForRecording,
   bbbStudentEtutReportLogoutUrl,
-  bbbTeacherPostLessonLogoutUrl
+  bbbTeacherPostLessonLogoutUrl,
+  extractBbbRecordIdFromPlaybackUrl,
+  isBbbRecordingMediaReady,
+  ensureBbbRecordingPublishedAndReady
 } from './bbb.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
@@ -273,7 +276,23 @@ export async function handleBbbRecordingGet(req, res, config) {
 
   const cached = String(row.recording_link || '').trim();
   if (cached && (isBbbPlaybackUrl(cached) || !isBbbJoinUrl(cached))) {
-    return res.status(200).json({ ok: true, playbackUrl: cached, cached: true });
+    const rid = extractBbbRecordIdFromPlaybackUrl(cached);
+    if (rid) {
+      const ready = await isBbbRecordingMediaReady(rid);
+      if (!ready.ok) {
+        await ensureBbbRecordingPublishedAndReady(rid, { attempts: 3, waitMs: 2000 });
+        const again = await isBbbRecordingMediaReady(rid);
+        if (!again.ok) {
+          // bozuk cache — yeniden çözümle
+        } else {
+          return res.status(200).json({ ok: true, playbackUrl: cached, cached: true, repaired: true });
+        }
+      } else {
+        return res.status(200).json({ ok: true, playbackUrl: cached, cached: true });
+      }
+    } else if (!isBbbJoinUrl(cached)) {
+      return res.status(200).json({ ok: true, playbackUrl: cached, cached: true });
+    }
   }
 
   const meetingId =
