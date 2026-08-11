@@ -467,7 +467,13 @@ export default function ClassLiveLessons() {
           window.open(cached, '_blank', 'noopener,noreferrer');
           return;
         }
-        if (needsBbbJoinFlow(sessionLink)) {
+        if (sessionLink && isExternalMeetingPlatform(sessionLink)) {
+          showRecordingUnavailable(
+            'Bu ders Zoom/Meet üzerinden yapıldı. BBB video kaydı yok; Zoom bulut kaydı açıksa Zoom hesabından izlenebilir.'
+          );
+          return;
+        }
+        if (needsBbbJoinFlow(sessionLink) || Boolean(String((s as { bbb_meeting_id?: string }).bbb_meeting_id || '').trim())) {
           await openBbbRecording('class-live-lessons', s.id);
           return;
         }

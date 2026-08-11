@@ -17,6 +17,7 @@ import {
   parseBbbMeetingIdFromJoinUrl,
   isCompleteBbbJoinUrl,
   getBbbRecordingPlaybackUrlForMeetingIds,
+  resolveBbbRecordingPlaybackForSessionRow,
   collectBbbMeetingIdsForRecording,
   bbbStudentEtutReportLogoutUrl,
   bbbTeacherPostLessonLogoutUrl
@@ -290,14 +291,21 @@ export async function handleBbbRecordingGet(req, res, config) {
     }
   }
   const meetingIds = collectBbbMeetingIdsForRecording(row, keyPrefix);
-  if (!meetingIds.length && !meetingId) {
+  if (!meetingIds.length && meetingId) meetingIds.push(meetingId);
+  if (!meetingIds.length && !String(row.subject || '').trim()) {
     return jsonError(res, 400, 'BBB toplantı kimliği bulunamadı.', { code: 'bbb_meeting_id_missing' });
   }
 
   try {
-    const playbackUrl = await getBbbRecordingPlaybackUrlForMeetingIds(
-      meetingIds.length ? meetingIds : [meetingId]
-    );
+    let playbackUrl = null;
+    let matchedBy = 'meeting_id';
+    const resolved = await resolveBbbRecordingPlaybackForSessionRow(row, meetingIds);
+    if (resolved?.playbackUrl) {
+      playbackUrl = resolved.playbackUrl;
+      matchedBy = resolved.matchedBy || 'meeting_id';
+    } else if (meetingIds.length) {
+      playbackUrl = await getBbbRecordingPlaybackUrlForMeetingIds(meetingIds);
+    }
     if (!playbackUrl) {
       return jsonError(res, 404, 'Ders kaydı henüz hazır değil. BBB\'de kayıt başlatıldığından emin olun; ders bitince 5–15 dk bekleyin veya BBB yönetiminden kayıt URL\'sini oturuma yapıştırın.', {
         code: 'recording_not_found'
@@ -317,7 +325,7 @@ export async function handleBbbRecordingGet(req, res, config) {
       }
     }
 
-    return res.status(200).json({ ok: true, playbackUrl, cached: false });
+    return res.status(200).json({ ok: true, playbackUrl, cached: false, matched_by: matchedBy });
   } catch (e) {
     const code = String(e?.code || e?.name || '');
     if (code === 'bbb_timeout' || code === 'BbbApiTimeoutError') {

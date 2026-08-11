@@ -1,6 +1,7 @@
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
-import { enrichMeetingRowsJoinLink, resolveBbbMeetingDurationMinutes } from '../api/_lib/bbb.js';
+import { enrichMeetingRowsJoinLink, resolveBbbMeetingDurationMinutes, resolveBbbRecordingPlaybackForSessionRow } from '../api/_lib/bbb.js';
 import { resolveBbbOrManualMeetingLink } from '../api/_lib/resolve-bbb-meeting-link.js';
+import { detectPlatform } from '../api/_lib/detect-meeting-platform.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { renderMessageTemplate } from '../api/_lib/template-engine.js';
@@ -1540,6 +1541,102 @@ export default async function handler(req, res) {
         combined_bbb_groups: combinedAlign.groups || 0,
         combined_bbb_aligned: combinedAlign.aligned || 0,
         combined_bbb_skipped_live: combinedAlign.skipped_live || 0
+      });
+    }
+
+    if (op === 'sync-recordings-range') {
+      if (!isAdminRole(role)) return res.status(403).json({ error: 'forbidden' });
+      const classId = String(body.class_id || '').trim();
+      const from = String(body.date_from || body.from || '').trim().slice(0, 10);
+      const to = String(body.date_to || body.to || '').trim().slice(0, 10);
+      if (!classId) return res.status(400).json({ error: 'class_id_required' });
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        return res.status(400).json({ error: 'date_range_invalid' });
+      }
+      const details = await getClassDetails(classId);
+      if (!details.class) return res.status(404).json({ error: 'class_not_found' });
+      if (!(await canManageOrViewClassSessions(actor, role, details))) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+
+      const { data: sessions, error: sErr } = await supabaseAdmin
+        .from('class_sessions')
+        .select('*')
+        .eq('class_id', classId)
+        .gte('lesson_date', from)
+        .lte('lesson_date', to)
+        .eq('status', 'completed');
+      if (sErr) return res.status(500).json({ error: sErr.message });
+
+      let linked = 0;
+      let skipped = 0;
+      let missing = 0;
+      const detailsOut = [];
+      for (const row of sessions || []) {
+        if (String(row.recording_link || '').trim()) {
+          skipped += 1;
+          continue;
+        }
+        const join = String(row.meeting_link || '').trim();
+        const platform = detectPlatform(join);
+        if (platform === 'zoom' || platform === 'meet' || platform === 'teams') {
+          skipped += 1;
+          detailsOut.push({
+            id: row.id,
+            subject: row.subject,
+            lesson_date: row.lesson_date,
+            status: 'skipped_external',
+            platform
+          });
+          continue;
+        }
+        try {
+          const resolved = await resolveBbbRecordingPlaybackForSessionRow(row);
+          if (!resolved?.playbackUrl) {
+            missing += 1;
+            detailsOut.push({
+              id: row.id,
+              subject: row.subject,
+              lesson_date: row.lesson_date,
+              start_time: row.start_time,
+              status: 'recording_not_found',
+              bbb_meeting_id: row.bbb_meeting_id || null
+            });
+            continue;
+          }
+          await patchRowRecordingLink('class_sessions', row.id, resolved.playbackUrl);
+          linked += 1;
+          detailsOut.push({
+            id: row.id,
+            subject: row.subject,
+            lesson_date: row.lesson_date,
+            start_time: row.start_time,
+            status: 'linked',
+            matched_by: resolved.matchedBy,
+            playbackUrl: resolved.playbackUrl
+          });
+        } catch (e) {
+          missing += 1;
+          detailsOut.push({
+            id: row.id,
+            subject: row.subject,
+            lesson_date: row.lesson_date,
+            status: 'error',
+            error: e instanceof Error ? e.message : String(e)
+          });
+        }
+      }
+
+      return res.status(200).json({
+        ok: true,
+        class_id: classId,
+        from,
+        to,
+        scanned: (sessions || []).length,
+        linked,
+        skipped,
+        missing,
+        details: detailsOut
       });
     }
 
