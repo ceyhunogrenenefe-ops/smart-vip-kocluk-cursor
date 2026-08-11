@@ -851,34 +851,168 @@ export async function bbbFindRunningMeetingAttendees(candidateIds) {
   return empty;
 }
 
+const BBB_RECORDING_STATES = ['published', 'unpublished', 'processed', 'processing', 'any'];
+
 /**
- * BBB getRecordings — yayımlanmamış kayıtlar dahil (state=any), gerekirse publishRecordings.
+ * BBB getRecordings — yayımlanmamış / işlenen kayıtlar dahil; gerekirse publishRecordings.
  * @returns {Promise<string | null>}
  */
 export async function getBbbRecordingPlaybackUrl(meetingId) {
+  const list = await listBbbRecordingsForMeetingId(meetingId);
+  for (const rec of list) {
+    if (!rec.published && rec.recordId) {
+      await bbbPublishRecording(rec.recordId);
+    }
+    if (rec.playbackUrl && !isBbbAudioOnlyPlaybackUrl(rec.playbackUrl)) return rec.playbackUrl;
+  }
+  return null;
+}
+
+/** meetingID ile kayıt listesi (zengin alanlar). */
+export async function listBbbRecordingsForMeetingId(meetingId) {
   const { apiBase, secret } = bbbApiConfig();
   if (!apiBase || !secret) throw new Error('BBB API ayarları eksik (BBB_API_ENDPOINT ve BBB_API_SECRET).');
   const safeMeetingId = sanitizeBbbMeetingId(meetingId);
-  if (!safeMeetingId) return null;
+  if (!safeMeetingId) return [];
 
-  for (const state of ['published', 'any']) {
+  const out = [];
+  const seen = new Set();
+  for (const state of BBB_RECORDING_STATES) {
     const query = asQuery({ meetingID: safeMeetingId, state });
     const checksum = bbbChecksum('getRecordings', query, secret);
     const url = `${apiBase}getRecordings?${query}&checksum=${checksum}`;
-
-    const res = await bbbFetch(url);
-    const text = await res.text();
-    if (!res.ok || !text.includes('<returncode>SUCCESS</returncode>')) continue;
-
-    const parsed = parseBbbRecordingsXml(text, safeMeetingId);
-    for (const rec of parsed) {
-      if (!rec.published && rec.recordId) {
-        await bbbPublishRecording(rec.recordId);
+    try {
+      const res = await bbbFetch(url, { timeoutMs: 25000 });
+      const text = await res.text();
+      if (!res.ok || !text.includes('<returncode>SUCCESS</returncode>')) continue;
+      for (const rec of parseBbbRecordingsXml(text, safeMeetingId)) {
+        const key = rec.recordId || rec.playbackUrl || `${rec.meetingId}|${rec.startTimeMs}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(rec);
       }
-      if (rec.playbackUrl && !isBbbAudioOnlyPlaybackUrl(rec.playbackUrl)) return rec.playbackUrl;
+    } catch {
+      /* state denemeye devam */
     }
   }
-  return null;
+  return out;
+}
+
+/**
+ * Tarih aralığındaki BBB kayıtlarını listeler (meetingID şart değil).
+ * BBB startTime/endTime: epoch ms.
+ */
+export async function listBbbRecordingsBetween(startMs, endMs) {
+  const { apiBase, secret } = bbbApiConfig();
+  if (!apiBase || !secret) throw new Error('BBB API ayarları eksik (BBB_API_ENDPOINT ve BBB_API_SECRET).');
+  const from = Number(startMs);
+  const to = Number(endMs);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) return [];
+
+  const out = [];
+  const seen = new Set();
+  for (const state of ['published', 'any', 'processed', 'unpublished']) {
+    const query = asQuery({
+      state,
+      startTime: String(Math.floor(from)),
+      endTime: String(Math.floor(to))
+    });
+    const checksum = bbbChecksum('getRecordings', query, secret);
+    const url = `${apiBase}getRecordings?${query}&checksum=${checksum}`;
+    try {
+      const res = await bbbFetch(url, { timeoutMs: 45000 });
+      const text = await res.text();
+      if (!res.ok || !text.includes('<returncode>SUCCESS</returncode>')) continue;
+      for (const rec of parseBbbRecordingsXml(text, null)) {
+        const key = rec.recordId || rec.playbackUrl || `${rec.meetingId}|${rec.startTimeMs}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(rec);
+      }
+      if (out.length) break;
+    } catch {
+      /* sonraki state */
+    }
+  }
+  return out;
+}
+
+function normRecName(s) {
+  return String(s || '')
+    .trim()
+    .toLocaleUpperCase('tr-TR')
+    .replace(/\s+/g, ' ');
+}
+
+/**
+ * Oturum satırı için kayıt URL'si: önce meetingID, yoksa gün+saat+branş eşlemesi.
+ * @param {{ bbb_meeting_id?: string, meeting_link?: string, meeting_link_moderator?: string, subject?: string, lesson_date?: string, start_time?: string, end_time?: string }} row
+ * @param {string[]} extraMeetingIds
+ */
+export async function resolveBbbRecordingPlaybackForSessionRow(row, extraMeetingIds = []) {
+  const ids = [];
+  const push = (v) => {
+    const id = sanitizeBbbMeetingId(String(v || '').trim());
+    if (id && !ids.includes(id)) ids.push(id);
+  };
+  for (const x of extraMeetingIds || []) push(x);
+  push(row?.bbb_meeting_id);
+  push(parseBbbMeetingIdFromJoinUrl(String(row?.meeting_link_moderator || '')));
+  push(parseBbbMeetingIdFromJoinUrl(String(row?.meeting_link || '')));
+
+  for (const id of ids.slice(0, 6)) {
+    const url = await getBbbRecordingPlaybackUrl(id);
+    if (url) return { playbackUrl: url, matchedBy: 'meeting_id', meetingId: id };
+  }
+
+  const date = String(row?.lesson_date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const startHm = String(row?.start_time || '00:00:00').slice(0, 8);
+  const endHm = String(row?.end_time || startHm).slice(0, 8);
+  const dayStart = Date.parse(`${date}T00:00:00+03:00`);
+  const dayEnd = Date.parse(`${date}T23:59:59+03:00`);
+  if (!Number.isFinite(dayStart) || !Number.isFinite(dayEnd)) return null;
+
+  const lessonStart = Date.parse(`${date}T${/^\d{2}:\d{2}$/.test(startHm) ? `${startHm}:00` : startHm}+03:00`);
+  const lessonEnd = Date.parse(`${date}T${/^\d{2}:\d{2}$/.test(endHm) ? `${endHm}:00` : endHm}+03:00`);
+  const subject = normRecName(row?.subject);
+  const range = await listBbbRecordingsBetween(dayStart - 3600_000, dayEnd + 3600_000);
+  if (!range.length) return null;
+
+  const scored = [];
+  for (const rec of range) {
+    if (!rec.playbackUrl || isBbbAudioOnlyPlaybackUrl(rec.playbackUrl)) continue;
+    let score = 0;
+    if (ids.includes(rec.meetingId)) score += 100;
+    const name = normRecName(rec.name);
+    if (subject && name && (name.includes(subject) || subject.includes(name))) score += 40;
+    if (Number.isFinite(lessonStart) && Number.isFinite(rec.startTimeMs) && rec.startTimeMs > 0) {
+      const delta = Math.abs(rec.startTimeMs - lessonStart);
+      if (delta <= 20 * 60_000) score += 35;
+      else if (delta <= 90 * 60_000) score += 15;
+      else if (delta <= 4 * 3600_000) score += 5;
+      else score -= 20;
+    }
+    if (Number.isFinite(lessonEnd) && Number.isFinite(rec.endTimeMs) && rec.endTimeMs > 0) {
+      if (rec.endTimeMs >= lessonStart - 10 * 60_000 && rec.startTimeMs <= lessonEnd + 10 * 60_000) {
+        score += 10;
+      }
+    }
+    if (score > 0) scored.push({ rec, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  const best = scored[0];
+  if (!best || best.score < 40) return null;
+  if (!best.rec.published && best.rec.recordId) {
+    await bbbPublishRecording(best.rec.recordId);
+  }
+  return {
+    playbackUrl: best.rec.playbackUrl,
+    matchedBy: 'time_name',
+    meetingId: best.rec.meetingId || null,
+    score: best.score,
+    name: best.rec.name || null
+  };
 }
 
 function parseBbbRecordingsXml(text, expectedMeetingId) {
@@ -890,6 +1024,13 @@ function parseBbbRecordingsXml(text, expectedMeetingId) {
     const recordId = parseXmlTagValues(block, 'recordID')[0] || parseXmlTagValues(block, 'recordId')[0] || '';
     const publishedRaw = (parseXmlTagValues(block, 'published')[0] || '').toLowerCase();
     const published = publishedRaw === 'true';
+    const name =
+      parseXmlTagValues(block, 'name')[0] ||
+      parseXmlTagValues(block, 'meetingName')[0] ||
+      parseXmlTagValues(block, 'meeting_name')[0] ||
+      '';
+    const startTimeMs = Number(parseXmlTagValues(block, 'startTime')[0] || 0) || 0;
+    const endTimeMs = Number(parseXmlTagValues(block, 'endTime')[0] || 0) || 0;
     const formatBlocks = block.match(/<format>[\s\S]*?<\/format>/gi) || [];
     let playbackUrl = null;
     let fallbackUrl = null;
@@ -907,8 +1048,12 @@ function parseBbbRecordingsXml(text, expectedMeetingId) {
     }
     const chosen = playbackUrl || fallbackUrl || parseXmlTagValues(block, 'url')[0] || null;
     results.push({
+      meetingId: blockMeetingId || null,
       recordId: String(recordId || '').trim(),
       published,
+      name: String(name || '').trim(),
+      startTimeMs,
+      endTimeMs,
       playbackUrl: chosen && !isBbbAudioOnlyPlaybackUrl(chosen) ? chosen : playbackUrl || null
     });
   }

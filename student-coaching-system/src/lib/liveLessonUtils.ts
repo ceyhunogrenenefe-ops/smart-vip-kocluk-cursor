@@ -209,10 +209,12 @@ export function hasClassSessionRecordingAccess(session: {
   const recordingLink = String(session.recording_link || '').trim();
   if (recordingLink) return true;
   const joinUrl = String(session.join_link || session.meeting_link || '').trim();
-  if (!joinUrl) return false;
+  // Zoom/Meet vb. harici platformlarda BBB kaydı yok — buton yanıltmasın
+  if (joinUrl && isExternalMeetingPlatform(joinUrl)) return false;
+  if (!joinUrl) return Boolean(String(session.bbb_meeting_id || '').trim());
   if (isBbbJoinUrl(joinUrl) || isBbbAutoMeetingLink(joinUrl)) return true;
   if (String(session.bbb_meeting_id || '').trim()) return true;
-  return !isBbbJoinUrl(joinUrl);
+  return false;
 }
 
 /**
