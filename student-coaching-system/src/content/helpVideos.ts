@@ -32,10 +32,18 @@ export const STUDENT_HELP_VIDEOS: HelpVideo[] = [
       'Canlı derslere panel üzerinden nasıl katılacağınızı adım adım gösteren kısa video.',
     viewUrl: 'https://youtu.be/SoOumaTj3Fo',
     embedUrl: 'https://www.youtube.com/embed/SoOumaTj3Fo'
+  },
+  {
+    id: 'soru-havuzu-nasil-kullanilir',
+    title: 'Soru Havuzu nasıl kullanılır?',
+    description:
+      'Öğrenci ve öğretmen panelinde Soru Havuzu’nu nasıl kullanacağınızı adım adım gösteren kısa video.',
+    viewUrl: 'https://drive.google.com/file/d/1JK8H4Qd8XcwzHcRwasIz9F83UMDB8msP/view?usp=sharing',
+    embedUrl: 'https://drive.google.com/file/d/1JK8H4Qd8XcwzHcRwasIz9F83UMDB8msP/preview'
   }
 ];
 
-/** Öğretmen & koç — Ödevlerim ve Animasyonlarım */
+/** Öğretmen & koç — Ödev / animasyon / soru havuzu */
 export const TEACHER_COACH_HELP_VIDEOS: HelpVideo[] = [
   {
     id: 'odev-ve-animasyon',
@@ -44,6 +52,14 @@ export const TEACHER_COACH_HELP_VIDEOS: HelpVideo[] = [
       'Ödevlerim ve Animasyonlarım ekranında konu oluşturma, ödev verme, HTML / havuz / NotebookLM ile animasyon ekleme adımlarını gösteren kısa video.',
     viewUrl: 'https://www.youtube.com/watch?v=N-4LfPn01Kk',
     embedUrl: 'https://www.youtube.com/embed/N-4LfPn01Kk'
+  },
+  {
+    id: 'soru-havuzu-nasil-kullanilir',
+    title: 'Soru Havuzu nasıl kullanılır?',
+    description:
+      'Öğrenci ve öğretmen panelinde Soru Havuzu’nu nasıl kullanacağınızı adım adım gösteren kısa video.',
+    viewUrl: 'https://drive.google.com/file/d/1JK8H4Qd8XcwzHcRwasIz9F83UMDB8msP/view?usp=sharing',
+    embedUrl: 'https://drive.google.com/file/d/1JK8H4Qd8XcwzHcRwasIz9F83UMDB8msP/preview'
   }
 ];
 
