@@ -37,6 +37,7 @@ export type AttendanceHubRow = {
   student_phone: string | null;
   parent_phone: string | null;
   status: 'present' | 'absent' | 'late';
+  camera_status?: 'on' | 'off' | 'n_a' | null;
   marked_at: string | null;
   marked_by: string | null;
 };
@@ -102,7 +103,7 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
   const [studentId, setStudentId] = useState('');
   const [sessionId, setSessionId] = useState('');
   const [teacherId, setTeacherId] = useState('');
-  const [status, setStatus] = useState<'all' | 'absent' | 'present' | 'late'>('all');
+  const [status, setStatus] = useState<'all' | 'absent' | 'present' | 'late' | 'camera_off'>('all');
   const [lessonType, setLessonType] = useState<'all' | 'group' | 'private'>('group');
   const [absentToday, setAbsentToday] = useState(false);
   const [includeStats, setIncludeStats] = useState(true);
@@ -115,10 +116,15 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
   const [stats, setStats] = useState<StatsPayload | null>(null);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [preset, setPreset] = useState<'absent_standard' | 'next_time' | 'missing_record'>('absent_standard');
+  const [preset, setPreset] = useState<
+    'absent_veli' | 'camera_off' | 'absent_standard' | 'next_time' | 'missing_record'
+  >('absent_veli');
   const [channels, setChannels] = useState<'parent' | 'student' | 'both'>('parent');
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
+  const [customPreview, setCustomPreview] = useState(
+    'Sayın velimiz, öğrencimiz {{student_name}}, {{subject}} dersine katılmamıştır. Bilginize.'
+  );
 
   const [autoWa, setAutoWa] = useState(true);
   const [prefsLoading, setPrefsLoading] = useState(false);
@@ -271,6 +277,24 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
   }, [loadReport]);
 
   const absentRows = useMemo(() => rows.filter((r) => r.status === 'absent'), [rows]);
+  const cameraOffRows = useMemo(
+    () => rows.filter((r) => (r.status === 'present' || r.status === 'late') && r.camera_status === 'off'),
+    [rows]
+  );
+
+  const fillPreviewFromPreset = (nextPreset: typeof preset) => {
+    if (nextPreset === 'camera_off') {
+      setCustomPreview(
+        'Sayın velimiz, öğrencimiz {{student_name}}, {{subject}} dersine katılmış ancak ders sırasında kamerasını açmamıştır. Bilginize.'
+      );
+      return;
+    }
+    if (nextPreset === 'absent_veli') {
+      setCustomPreview('Sayın velimiz, öğrencimiz {{student_name}}, {{subject}} dersine katılmamıştır. Bilginize.');
+      return;
+    }
+    setCustomPreview('');
+  };
 
   const toggleSel = (key: string) => {
     setSelected((prev) => {
@@ -283,6 +307,12 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
 
   const selectAllAbsent = () => {
     setSelected(new Set(absentRows.map((r) => `${r.session_id}|${r.student_id}`)));
+    fillPreviewFromPreset('absent_veli');
+  };
+
+  const selectAllCameraOff = () => {
+    setSelected(new Set(cameraOffRows.map((r) => `${r.session_id}|${r.student_id}`)));
+    fillPreviewFromPreset('camera_off');
   };
 
   const clearSel = () => setSelected(new Set());
@@ -318,8 +348,20 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
       const res = await apiFetch('/api/class-live-lessons?op=bulk-attendance-notify', {
         method: 'POST',
         body: JSON.stringify({
-          targets,
+          targets: targets.map((t) => {
+            const row = ctxMap.get(t.student_id);
+            return {
+              ...t,
+              subject: row?.subject,
+              lesson_date: row?.lesson_date,
+              lesson_time: row ? String(row.start_time).slice(0, 5) : '',
+              class_name: row?.class_name,
+              teacher_name: row?.teacher_name,
+              custom_message: customPreview.trim() || undefined
+            };
+          }),
           message_preset: preset,
+          custom_message: customPreview.trim() || undefined,
           session_context: first ? sessionContextFromRow(first) : {}
         })
       });
@@ -345,6 +387,7 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
       'Öğretmen',
       'Öğrenci',
       'Durum',
+      'Kamera',
       'Yoklama saati'
     ];
     const lines = rows.map((r) =>
@@ -357,6 +400,7 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
         r.teacher_name,
         r.student_name,
         r.status === 'present' ? 'katıldı' : r.status === 'late' ? 'geç katıldı' : 'katılmadı',
+        r.camera_status === 'off' ? 'kapalı' : r.camera_status === 'on' ? 'açık' : r.status === 'absent' ? 'uygulanamaz' : '',
         r.marked_at ? new Date(r.marked_at).toLocaleString('tr-TR') : ''
       ]
         .map((c) => `"${String(c).replace(/"/g, '""')}"`)
@@ -417,6 +461,7 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
             <option value="absent">Katılmadı</option>
             <option value="present">Katıldı</option>
             <option value="late">Geç katıldı</option>
+            <option value="camera_off">Kamera kapalı</option>
           </select>
         </label>
         <label className="w-full text-xs sm:w-auto">
@@ -688,16 +733,23 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 lg:flex-row lg:items-end lg:justify-between">
+      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div className="flex flex-wrap gap-3">
           <label className="text-xs">
-            <span className="font-medium text-slate-500">Şablon</span>
+            <span className="font-medium text-slate-500">Sabit şablon</span>
             <select
               value={preset}
-              onChange={(e) => setPreset(e.target.value as typeof preset)}
+              onChange={(e) => {
+                const next = e.target.value as typeof preset;
+                setPreset(next);
+                fillPreviewFromPreset(next);
+              }}
               className="mt-1 block rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
             >
-              <option value="absent_standard">Katılım sağlamamıştır</option>
+              <option value="absent_veli">Derse katılmayan öğrenci (veli)</option>
+              <option value="camera_off">Katıldı — kamera kapalı (veli)</option>
+              <option value="absent_standard">Katılım sağlamamıştır (eski)</option>
               <option value="next_time">Sonraki derse zamanında katılım</option>
               <option value="missing_record">Eksik ders kaydı</option>
             </select>
@@ -723,6 +775,13 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
           >
             Katılmayanların tümünü seç
           </button>
+          <button
+            type="button"
+            onClick={selectAllCameraOff}
+            className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Kamerası kapalıları seç
+          </button>
           <button type="button" onClick={clearSel} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
             Seçimi temizle
           </button>
@@ -736,6 +795,17 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
             Toplu WhatsApp
           </button>
         </div>
+        </div>
+        <label className="block text-xs">
+          <span className="font-medium text-slate-500">Mesaj önizleme / düzenle (&#123;&#123;student_name&#125;&#125; ve &#123;&#123;subject&#125;&#125; otomatik dolar)</span>
+          <textarea
+            value={customPreview}
+            onChange={(e) => setCustomPreview(e.target.value)}
+            rows={3}
+            placeholder="Şablon seçince mesaj burada görünür; göndermeden önce düzenleyebilirsiniz."
+            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+          />
+        </label>
       </div>
       {bulkMsg ? <p className="text-sm text-slate-700">{bulkMsg}</p> : null}
 
@@ -753,7 +823,9 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
         ) : (
           rows.map((r) => {
             const key = `${r.session_id}|${r.student_id}`;
-            const canSelect = r.status === 'absent';
+            const canSelect =
+              r.status === 'absent' ||
+              ((r.status === 'present' || r.status === 'late') && r.camera_status === 'off');
             return (
               <article
                 key={key}
@@ -778,6 +850,15 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
                       >
                         {r.status === 'present' ? 'Katıldı' : r.status === 'late' ? 'Geç' : 'Katılmadı'}
                       </span>
+                      {r.camera_status === 'off' ? (
+                        <span className="ml-1 rounded px-2 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-900">
+                          Kamera kapalı
+                        </span>
+                      ) : r.camera_status === 'on' ? (
+                        <span className="ml-1 text-[10px] text-slate-400">Kamera açık</span>
+                      ) : r.status === 'absent' ? (
+                        <span className="ml-1 text-[10px] text-slate-400">Kamera yok</span>
+                      ) : null}
                     </div>
                     <p className="mt-1 text-sm text-slate-700">
                       {r.lesson_date} · {String(r.start_time).slice(0, 5)}
@@ -811,27 +892,30 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
               <th className="px-2 py-2">Öğretmen</th>
               <th className="px-2 py-2">Öğrenci</th>
               <th className="px-2 py-2">Durum</th>
+              <th className="px-2 py-2">Kamera</th>
               <th className="px-2 py-2">Yoklama saati</th>
             </tr>
           </thead>
           <tbody>
             {loading && !rows.length ? (
               <tr>
-                <td colSpan={9} className="px-4 py-10 text-center text-slate-500">
+                <td colSpan={10} className="px-4 py-10 text-center text-slate-500">
                   <Loader2 className="mr-2 inline h-5 w-5 animate-spin" />
                   Yükleniyor…
                 </td>
               </tr>
             ) : !rows.length ? (
               <tr>
-                <td colSpan={9} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
                   Kayıt yok veya filtrelere uyan sonuç yok.
                 </td>
               </tr>
             ) : (
               rows.map((r) => {
                 const key = `${r.session_id}|${r.student_id}`;
-                const canSelect = r.status === 'absent';
+                const canSelect =
+                  r.status === 'absent' ||
+                  ((r.status === 'present' || r.status === 'late') && r.camera_status === 'off');
                 return (
                   <tr key={key} className="border-b border-slate-100 hover:bg-slate-50/80">
                     <td className="px-2 py-2">
@@ -853,6 +937,15 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
                       <span className={`inline-flex rounded px-2 py-0.5 text-xs font-semibold ${statusStyle(r.status)}`}>
                         {r.status === 'present' ? 'Katıldı' : r.status === 'late' ? 'Geç katıldı' : 'Katılmadı'}
                       </span>
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-2 text-xs">
+                      {r.camera_status === 'off'
+                        ? 'Kapalı'
+                        : r.camera_status === 'on'
+                          ? 'Açık'
+                          : r.status === 'absent'
+                            ? 'Uygulanamaz'
+                            : '—'}
                     </td>
                     <td className="whitespace-nowrap px-2 py-2 text-xs text-slate-500">
                       {r.marked_at ? new Date(r.marked_at).toLocaleString('tr-TR') : '—'}

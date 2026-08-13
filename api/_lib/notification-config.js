@@ -130,6 +130,28 @@ export const NOTIFICATION_DEFINITIONS = [
     allowMetaFallback: false
   },
   {
+    id: 'class_absent_parent_notice',
+    templateType: 'class_absent_parent_notice',
+    nameTr: 'Yoklama — katılmayan öğrenci (veli)',
+    descriptionTr: 'Sabit şablon; öğretmen yoklamada önizler ve düzenler.',
+    sendChannel: SEND_CHANNELS.META_API,
+    mode: 'instant',
+    cronJobKey: 'absent_student_notification',
+    coachScoped: false,
+    allowMetaFallback: false
+  },
+  {
+    id: 'class_camera_off_notice',
+    templateType: 'class_camera_off_notice',
+    nameTr: 'Yoklama — kamera kapalı (veli)',
+    descriptionTr: 'Katıldı + kamera kapalı; öğretmen önizler ve düzenler.',
+    sendChannel: SEND_CHANNELS.META_API,
+    mode: 'instant',
+    cronJobKey: 'absent_student_notification',
+    coachScoped: false,
+    allowMetaFallback: false
+  },
+  {
     id: 'veli_sign_ready_notify',
     templateType: 'veli_sign_ready_notify',
     nameTr: 'Veli imza bildirimi',
