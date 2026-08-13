@@ -39,7 +39,7 @@ export default function StudentHelpPage() {
             <h1 className="text-2xl font-bold tracking-tight text-slate-900">Yardım</h1>
             <p className="text-sm text-slate-600">
               {isStaffVideos
-                ? 'Ödev, animasyon ve soru havuzu için kısa video rehberler'
+                ? 'Ödev, animasyon, soru havuzu ve karne için kısa video rehberler'
                 : 'Panel kullanımını kolaylaştıran kısa video rehberler'}
             </p>
           </div>

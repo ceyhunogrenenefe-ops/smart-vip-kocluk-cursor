@@ -40,6 +40,14 @@ export const STUDENT_HELP_VIDEOS: HelpVideo[] = [
       'Öğrenci ve öğretmen panelinde Soru Havuzu’nu nasıl kullanacağınızı adım adım gösteren kısa video.',
     viewUrl: 'https://drive.google.com/file/d/1JK8H4Qd8XcwzHcRwasIz9F83UMDB8msP/view?usp=sharing',
     embedUrl: 'https://drive.google.com/file/d/1JK8H4Qd8XcwzHcRwasIz9F83UMDB8msP/preview'
+  },
+  {
+    id: 'analiz-karne-hata-kitapcigi',
+    title: 'Toplu analiz karnesi ve hata kitapçığımı nasıl görebilirim?',
+    description:
+      'Toplu analiz karnesi ve hata kitapçığına panel üzerinden nasıl ulaşacağınızı adım adım gösteren kısa video.',
+    viewUrl: 'https://youtu.be/dkfrcVlTZAI',
+    embedUrl: 'https://www.youtube.com/embed/dkfrcVlTZAI'
   }
 ];
 
@@ -60,6 +68,14 @@ export const TEACHER_COACH_HELP_VIDEOS: HelpVideo[] = [
       'Öğrenci ve öğretmen panelinde Soru Havuzu’nu nasıl kullanacağınızı adım adım gösteren kısa video.',
     viewUrl: 'https://drive.google.com/file/d/1JK8H4Qd8XcwzHcRwasIz9F83UMDB8msP/view?usp=sharing',
     embedUrl: 'https://drive.google.com/file/d/1JK8H4Qd8XcwzHcRwasIz9F83UMDB8msP/preview'
+  },
+  {
+    id: 'analiz-karne-hata-kitapcigi',
+    title: 'Toplu analiz karnesi ve hata kitapçığı nasıl görülür?',
+    description:
+      'Öğrencinin toplu analiz karnesi ve hata kitapçığına panel üzerinden nasıl ulaşılacağını gösteren kısa video.',
+    viewUrl: 'https://youtu.be/dkfrcVlTZAI',
+    embedUrl: 'https://www.youtube.com/embed/dkfrcVlTZAI'
   }
 ];
 
