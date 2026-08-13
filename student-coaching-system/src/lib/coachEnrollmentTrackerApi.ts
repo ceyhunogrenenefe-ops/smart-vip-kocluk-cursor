@@ -15,15 +15,22 @@ export type CoachEnrollmentRow = {
   student_count: number | null;
   student_count_auto?: number;
   yaz_kayitli: number | null;
+  yaz_kayitli_auto?: number;
   yaz_kayit_olan: number | null;
+  yaz_kayit_olan_auto?: number;
   gecis_8_9: number | null;
+  gecis_8_9_auto?: number;
   gecis_8_9_kayit: number | null;
+  gecis_8_9_kayit_auto?: number;
   veli_sayisi: number | null;
+  veli_sayisi_auto?: number;
   referans_istenen: number | null;
   referans_alinan: number | null;
   veli_memnuniyet_video: number | null;
   notes?: string | null;
   updated_at?: string | null;
+  auto?: Record<string, number>;
+  overridden?: Record<string, boolean>;
 };
 
 export type CoachEnrollmentMatrix = {
@@ -31,6 +38,8 @@ export type CoachEnrollmentMatrix = {
   rows: CoachEnrollmentRow[];
   totals: Record<string, number> | null;
   can_edit?: boolean;
+  auto_keys?: string[];
+  manual_keys?: string[];
   error?: string;
   message?: string;
   sql_file?: string;
