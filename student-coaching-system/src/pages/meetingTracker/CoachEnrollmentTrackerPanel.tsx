@@ -9,25 +9,33 @@ import {
   type CoachEnrollmentRow
 } from '../../lib/coachEnrollmentTrackerApi';
 
-const COLUMNS: { key: keyof CoachEnrollmentRow; label: string; hint?: string }[] = [
-  { key: 'student_count', label: 'Öğrenci sayısı', hint: 'Sistemden otomatik; düzenlenebilir' },
-  { key: 'yaz_kayitli', label: 'Yaz kaydına kayıtlı', hint: 'Yaz kampı / yaz kaydı havuzundaki öğrenci' },
-  { key: 'yaz_kayit_olan', label: 'Yaz — kaydolan', hint: 'Kaçı kaydoldu' },
-  { key: 'gecis_8_9', label: '8→9 geçen', hint: '8. sınıftan 9. sınıfa geçen' },
-  { key: 'gecis_8_9_kayit', label: '8→9 kaydolan', hint: 'Geçişlerden kaçı kaydoldu' },
-  { key: 'veli_sayisi', label: 'Veli sayısı' },
-  { key: 'referans_istenen', label: 'Referans istenen', hint: 'Kaç veliden referans istendi' },
-  { key: 'referans_alinan', label: 'Referans alınan', hint: 'Kaçından referans alındı' },
-  { key: 'veli_memnuniyet_video', label: 'Memnuniyet videosu', hint: 'Kaçından veli memnuniyet videosu alındı' }
+const AUTO_COLUMNS: { key: keyof CoachEnrollmentRow; label: string; hint?: string }[] = [
+  { key: 'student_count', label: 'Öğrenci sayısı', hint: 'students.coach_id üzerinden otomatik' },
+  { key: 'yaz_kayitli', label: 'Yaz kaydına kayıtlı', hint: 'Yaz kampı sözleşmesi / yaz ödeme / yaz aktiflik' },
+  { key: 'yaz_kayit_olan', label: 'Yaz — kaydolan', hint: 'İmzalı yaz kampı sözleşmesi veya ödenmiş yaz kayıt' },
+  { key: 'gecis_8_9', label: '8→9 geçen', hint: 'LGS / 8. sınıf öğrencileri' },
+  { key: 'gecis_8_9_kayit', label: '8→9 kaydolan', hint: '8→9 havuzundan imzalı 9. sınıf / dönem kaydı' },
+  { key: 'veli_sayisi', label: 'Veli sayısı', hint: 'Benzersiz veli telefonu / adı' }
 ];
+
+const MANUAL_COLUMNS: { key: keyof CoachEnrollmentRow; label: string; hint?: string }[] = [
+  { key: 'referans_istenen', label: 'Referans istenen', hint: 'Manuel — sistemde otomatik kaynak yok' },
+  { key: 'referans_alinan', label: 'Referans alınan', hint: 'Manuel' },
+  { key: 'veli_memnuniyet_video', label: 'Memnuniyet videosu', hint: 'Manuel' }
+];
+
+const COLUMNS = [...AUTO_COLUMNS, ...MANUAL_COLUMNS];
+const AUTO_KEY_SET = new Set(AUTO_COLUMNS.map((c) => c.key as string));
 
 function NumCell({
   value,
   disabled,
+  muted,
   onCommit
 }: {
   value: number | null;
   disabled?: boolean;
+  muted?: boolean;
   onCommit: (n: number | null) => void;
 }) {
   const [draft, setDraft] = useState(value == null ? '' : String(value));
@@ -55,7 +63,11 @@ function NumCell({
         }
         if (n !== value) onCommit(n);
       }}
-      className="w-full min-w-[4.5rem] rounded-md border border-slate-200 bg-white px-2 py-1.5 text-center text-sm tabular-nums disabled:bg-slate-50 disabled:text-slate-500 dark:border-slate-600 dark:bg-slate-900 dark:disabled:bg-slate-800"
+      className={`w-full min-w-[4.5rem] rounded-md border px-2 py-1.5 text-center text-sm tabular-nums disabled:bg-slate-50 disabled:text-slate-500 dark:border-slate-600 dark:bg-slate-900 dark:disabled:bg-slate-800 ${
+        muted
+          ? 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800/60'
+          : 'border-slate-200 bg-white dark:border-slate-600'
+      }`}
     />
   );
 }
@@ -123,11 +135,24 @@ export default function CoachEnrollmentTrackerPanel({ isManager, institutionId }
         coach_id: row.coach_id,
         [key]: value
       });
+      // Otomatik alanlarda override temizlenince yeniden yükle (auto değeri gelsin)
+      if (AUTO_KEY_SET.has(key) && value == null) {
+        await load();
+        return;
+      }
       setMatrix((prev) => {
         if (!prev) return prev;
         return {
           ...prev,
-          rows: prev.rows.map((r) => (r.coach_id === row.coach_id ? { ...r, [key]: value } : r))
+          rows: prev.rows.map((r) =>
+            r.coach_id === row.coach_id
+              ? {
+                  ...r,
+                  [key]: value,
+                  overridden: { ...(r.overridden || {}), [key]: value != null }
+                }
+              : r
+          )
         };
       });
     } catch (e) {
@@ -164,8 +189,9 @@ export default function CoachEnrollmentTrackerPanel({ isManager, institutionId }
             Koç kayıt takibi
           </h2>
           <p className="mt-1 max-w-3xl text-sm text-slate-600 dark:text-slate-400">
-            {matrix?.period?.label || 'Dönem'} — yaz kaydı, 8→9 geçiş, referans ve veli memnuniyet videosu
-            sayıları. Koçluk toplantısında bu tabloyu doldurun.
+            {matrix?.period?.label || 'Dönem'} — koçlar ve sayılar sistemden otomatik gelir (öğrenci, veli,
+            yaz kampı sözleşmesi/ödeme, LGS→9). Referans ve memnuniyet videosu manuel girilir. Otomatik
+            hücreyi silerseniz tekrar sistem değerine döner.
           </p>
         </div>
         <button
@@ -195,42 +221,56 @@ export default function CoachEnrollmentTrackerPanel({ isManager, institutionId }
                   className="whitespace-nowrap px-2 py-3 text-center font-semibold text-slate-700 dark:text-slate-200"
                 >
                   {c.label}
+                  {AUTO_KEY_SET.has(c.key as string) ? (
+                    <span className="mt-0.5 block text-[10px] font-normal text-emerald-600 dark:text-emerald-400">
+                      otomatik
+                    </span>
+                  ) : (
+                    <span className="mt-0.5 block text-[10px] font-normal text-amber-600 dark:text-amber-400">
+                      manuel
+                    </span>
+                  )}
                 </th>
               ))}
-              <th className="px-2 py-3 text-center text-slate-400"> </th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={COLUMNS.length + 2} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={COLUMNS.length + 1} className="px-4 py-8 text-center text-slate-500">
                   Bu kurumda koç kaydı bulunamadı.
                 </td>
               </tr>
             ) : (
               rows.map((row) => (
-                <tr
-                  key={row.coach_id}
-                  className="border-b border-slate-100 dark:border-slate-800"
-                >
+                <tr key={row.coach_id} className="border-b border-slate-100 dark:border-slate-800">
                   <td className="sticky left-0 z-10 bg-white px-3 py-2 font-medium text-slate-900 dark:bg-slate-900 dark:text-slate-50">
                     {row.coach_name}
                     {savingId === row.coach_id ? (
                       <Save className="ml-2 inline h-3.5 w-3.5 animate-pulse text-indigo-500" />
                     ) : null}
+                    {row.overridden &&
+                    Object.entries(row.overridden).some(
+                      ([k, v]) => v && AUTO_KEY_SET.has(k)
+                    ) ? (
+                      <span className="ml-2 text-[10px] font-normal text-amber-600">manuel düzeltme</span>
+                    ) : null}
                   </td>
-                  {COLUMNS.map((c) => (
-                    <td key={c.key as string} className="px-1.5 py-1.5">
-                      <NumCell
-                        value={row[c.key] as number | null}
-                        disabled={!isManager}
-                        onCommit={(n) => void saveField(row, c.key as string, n)}
-                      />
-                    </td>
-                  ))}
-                  <td className="px-2 text-center text-xs text-slate-400">
-                    {row.student_count_auto != null ? `oto:${row.student_count_auto}` : ''}
-                  </td>
+                  {COLUMNS.map((c) => {
+                    const key = c.key as string;
+                    const isAuto = AUTO_KEY_SET.has(key);
+                    const overridden = Boolean(row.overridden?.[key]);
+                    return (
+                      <td key={key} className="px-1.5 py-1.5">
+                        <NumCell
+                          value={row[c.key] as number | null}
+                          disabled={!isManager}
+                          muted={isAuto && !overridden}
+                          onCommit={(n) => void saveField(row, key, n)}
+                        />
+                      </td>
+                    );
+                  })}
                 </tr>
               ))
             )}
@@ -238,7 +278,9 @@ export default function CoachEnrollmentTrackerPanel({ isManager, institutionId }
           {rows.length > 0 ? (
             <tfoot>
               <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold dark:border-slate-600 dark:bg-slate-800/60">
-                <td className="sticky left-0 z-10 bg-slate-50 px-3 py-2.5 dark:bg-slate-800">Toplam</td>
+                <td className="sticky left-0 z-10 bg-slate-50 px-3 py-2.5 dark:bg-slate-800">
+                  Toplam ({rows.length} koç)
+                </td>
                 {COLUMNS.map((c) => (
                   <td
                     key={c.key as string}
@@ -247,7 +289,6 @@ export default function CoachEnrollmentTrackerPanel({ isManager, institutionId }
                     {totals[c.key as string] ?? 0}
                   </td>
                 ))}
-                <td />
               </tr>
             </tfoot>
           ) : null}
