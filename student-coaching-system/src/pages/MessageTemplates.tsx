@@ -138,6 +138,8 @@ const TYPE_LABELS: Record<string, string> = {
   class_homework_notice: 'Grup ödev bildirimi (cron)',
   class_absent_notice_1: 'Grup devamsızlık — veli (yoklama)',
   class_absent_notice: 'Grup devamsızlık — veli (yoklama, eski type)',
+  class_absent_parent_notice: 'Yoklama — derse katılmayan öğrenci (veli)',
+  class_camera_off_notice: 'Yoklama — kamerası kapalı öğrenci (veli)',
   meeting_reminder: 'Görüşme hatırlatma (Meta: toplant_hatrlatma)',
   meeting_notification: 'Toplantı hatırlatma — Meta: toplant_hatrlatma (cron ~10 dk)',
   class_lesson_reminder_legacy: 'Grup dersi hatırlatma'

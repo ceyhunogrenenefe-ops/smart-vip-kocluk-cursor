@@ -4,7 +4,6 @@ import { resolveBbbOrManualMeetingLink } from '../api/_lib/resolve-bbb-meeting-l
 import { detectPlatform } from '../api/_lib/detect-meeting-platform.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
-import { renderMessageTemplate } from '../api/_lib/template-engine.js';
 import { normalizePhoneToE164 } from '../api/_lib/phone-whatsapp.js';
 import { metaWhatsAppConfigured } from '../api/_lib/meta-whatsapp.js';
 import { sendAutomatedWhatsApp } from '../api/_lib/whatsapp-outbound.js';
@@ -19,6 +18,13 @@ import {
   resolveInstitutionClassIds
 } from '../api/_lib/attendance-report-query.js';
 import { sendMetaTextMessage } from '../api/_lib/meta-whatsapp.js';
+import {
+  normalizeAttendanceStatus,
+  normalizeCameraStatus,
+  attendanceNoticeKind,
+  renderAttendanceNotice,
+  buildAttendanceNotifyText
+} from '../api/_lib/attendance-notice-templates.js';
 import { isUuid } from '../api/_lib/uuid.js';
 import { randomUUID } from 'crypto';
 
@@ -575,27 +581,17 @@ async function actorMayAccessClassId(actor, role, classId, roleTags = []) {
   return Array.isArray(allowed) && allowed.includes(cid);
 }
 
-function normalizeAttendanceStatus(raw) {
-  const v = String(raw || '').trim().toLowerCase();
-  if (v === 'present' || v === 'absent' || v === 'late') return v;
-  return 'absent';
-}
-
-function buildAttendanceNotifyText(preset, custom, vars) {
-  const c = String(custom || '').trim();
-  if (c) return renderMessageTemplate(c, vars || {});
-  const student = vars.student_name || 'Öğrenci';
-  const subj = vars.subject || 'Ders';
-  const time = vars.lesson_time || '';
-  const teacher = vars.teacher_name || 'Öğretmen';
-  const date = vars.lesson_date || '';
-  if (preset === 'next_time') {
-    return `${student} için ${date} tarihli ${subj} dersine (${time}) zamanında katılım rica olunur. Öğretmen: ${teacher}`;
+async function upsertAttendanceRows(prepared) {
+  const { error } = await supabaseAdmin
+    .from('class_session_attendance')
+    .upsert(prepared, { onConflict: 'session_id,student_id' });
+  if (!error) return { error: null };
+  const msg = String(error.message || '').toLowerCase();
+  if (msg.includes('camera_status')) {
+    const stripped = prepared.map(({ camera_status: _c, ...rest }) => rest);
+    return supabaseAdmin.from('class_session_attendance').upsert(stripped, { onConflict: 'session_id,student_id' });
   }
-  if (preset === 'missing_record') {
-    return `${student} — ${date} ${subj} (${time}) için eksik ders kaydı / devamsızlık oluşmuştur. Öğretmen: ${teacher}`;
-  }
-  return `${student} bugün (${date}) ${subj} dersine (${time}) katılım sağlamamıştır. Öğretmen: ${teacher}`;
+  return { error };
 }
 
 async function canAccessClassLiveRow(actor, role, row) {
@@ -1868,9 +1864,16 @@ export default async function handler(req, res) {
         const channels = String(t.channels || 'parent').trim().toLowerCase();
         const vars = {
           ...varsBase,
-          student_name: stu.name || varsBase.student_name
+          student_name: stu.name || varsBase.student_name,
+          subject: String(t.subject || varsBase.subject || ''),
+          lesson_date: String(t.lesson_date || varsBase.lesson_date || ''),
+          lesson_time: String(t.lesson_time || varsBase.lesson_time || ''),
+          class_name: String(t.class_name || varsBase.class_name || ''),
+          teacher_name: String(t.teacher_name || varsBase.teacher_name || '')
         };
-        const text = buildAttendanceNotifyText(preset, custom, vars);
+        const rowPreset = String(t.message_preset || preset).trim();
+        const rowCustom = String(t.custom_message || custom || '').trim();
+        const text = buildAttendanceNotifyText(rowPreset, rowCustom, vars);
         const sendOne = async (phoneRaw) => {
           const e164 = normalizePhoneToE164(phoneRaw);
           if (!e164) return { ok: false, error: 'invalid_phone' };
@@ -1895,6 +1898,25 @@ export default async function handler(req, res) {
           rowResult.parts.push({ to: 'parent', ...r });
         }
         rowResult.ok = rowResult.parts.some((p) => p.ok);
+        rowResult.message = text;
+        try {
+          const kind =
+            rowPreset === 'camera_off' || rowPreset === 'class_camera_off_notice'
+              ? 'class_camera_off_notice'
+              : 'class_absent_parent_notice';
+          await supabaseAdmin.from('message_logs').insert({
+            student_id: sid,
+            kind,
+            related_id: String(ctx.session_id || t.session_id || '') || null,
+            message: text,
+            status: rowResult.ok ? 'sent' : 'failed',
+            log_date: new Date().toISOString().slice(0, 10),
+            error: rowResult.ok ? null : rowResult.parts.map((p) => p.error).filter(Boolean).join('; ') || 'send_failed',
+            phone: normalizePhoneToE164(stu.parent_phone) || normalizePhoneToE164(stu.phone)
+          });
+        } catch {
+          /* gönderimi bozma */
+        }
         results.push(rowResult);
       }
       return res.status(200).json({ ok: true, results });
@@ -2263,57 +2285,92 @@ export default async function handler(req, res) {
 
       const { data: priorRows } = await supabaseAdmin
         .from('class_session_attendance')
-        .select('student_id,status')
+        .select('student_id,status,camera_status')
         .eq('session_id', sessionId);
       const priorStatusByStudent = new Map((priorRows || []).map((r) => [String(r.student_id), String(r.status || '')]));
 
       const prepared = rows
-        .map((r) => ({
-          session_id: sessionId,
-          student_id: String(r.student_id || '').trim(),
-          status: normalizeAttendanceStatus(r.status),
-          marked_by: actor.sub,
-          marked_at: new Date().toISOString()
-        }))
+        .map((r) => {
+          const status = normalizeAttendanceStatus(r.status);
+          return {
+            session_id: sessionId,
+            student_id: String(r.student_id || '').trim(),
+            status,
+            camera_status: normalizeCameraStatus(status, r.camera_status),
+            marked_by: actor.sub,
+            marked_at: new Date().toISOString()
+          };
+        })
         .filter((r) => r.student_id);
 
-      const { error } = await supabaseAdmin
-        .from('class_session_attendance')
-        .upsert(prepared, { onConflict: 'session_id,student_id' });
+      const { error } = await upsertAttendanceRows(prepared);
       if (error) return res.status(500).json({ error: error.message });
 
       const instKey = session.institution_id != null ? String(session.institution_id).trim() : '';
       const className = details.class?.name || 'Sınıf';
+      const subject = String(session.subject || '').trim() || 'ders';
+      const studentIds = prepared.map((r) => r.student_id);
+      const nameById = new Map();
+      if (studentIds.length) {
+        const { data: studs } = await supabaseAdmin.from('students').select('id,name').in('id', studentIds);
+        for (const s of studs || []) nameById.set(String(s.id), s.name || s.id);
+      }
+      for (const r of rows) {
+        const id = String(r.student_id || '').trim();
+        const nm = String(r.student_name || '').trim();
+        if (id && nm && !nameById.get(id)) nameById.set(id, nm);
+      }
+
+      const pending_notices = prepared
+        .map((row) => {
+          const kind = attendanceNoticeKind(row.status, row.camera_status);
+          if (!kind) return null;
+          const student_name = nameById.get(row.student_id) || 'Öğrencimiz';
+          return {
+            student_id: row.student_id,
+            student_name,
+            kind,
+            message_preset: kind === 'camera_off' ? 'camera_off' : 'absent_veli',
+            message: renderAttendanceNotice(kind, { student_name, subject }),
+            channels: 'parent'
+          };
+        })
+        .filter(Boolean);
+
       /** @type {{ student_id: string, ok: boolean, note?: string|null, error_code?: string|null, skipped?: string }[]} */
       const absent_whatsapp = [];
-      for (const row of prepared) {
-        if (row.status !== 'absent') continue;
-        if (priorStatusByStudent.get(row.student_id) === 'absent') continue;
-        try {
-          const r = await sendAbsentNoticeForStudent({
-            session,
-            className,
-            studentId: row.student_id,
-            institutionId: instKey
-          });
-          absent_whatsapp.push({
-            student_id: row.student_id,
-            ok: Boolean(r.ok),
-            note: r.ok ? null : r.note || null,
-            error_code: r.ok ? null : r.error_code || null,
-            skipped: r.skipped
-          });
-        } catch (e) {
-          absent_whatsapp.push({
-            student_id: row.student_id,
-            ok: false,
-            note: e instanceof Error ? e.message : 'exception'
-          });
+      const autoSend = body.auto_send === true;
+      if (autoSend) {
+        for (const row of prepared) {
+          if (row.status !== 'absent') continue;
+          if (priorStatusByStudent.get(row.student_id) === 'absent') continue;
+          try {
+            const r = await sendAbsentNoticeForStudent({
+              session,
+              className,
+              studentId: row.student_id,
+              institutionId: instKey
+            });
+            absent_whatsapp.push({
+              student_id: row.student_id,
+              ok: Boolean(r.ok),
+              note: r.ok ? null : r.note || null,
+              error_code: r.ok ? null : r.error_code || null,
+              skipped: r.skipped
+            });
+          } catch (e) {
+            absent_whatsapp.push({
+              student_id: row.student_id,
+              ok: false,
+              note: e instanceof Error ? e.message : 'exception'
+            });
+          }
         }
       }
       return res.status(200).json({
         ok: true,
-        suggest_notify: prepared.some((r) => r.status === 'absent'),
+        suggest_notify: pending_notices.length > 0,
+        pending_notices,
         absent_whatsapp
       });
     }

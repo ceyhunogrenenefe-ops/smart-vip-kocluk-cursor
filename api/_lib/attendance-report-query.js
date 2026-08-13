@@ -489,7 +489,8 @@ export async function buildAttendanceReport({
         parent_phone: phones.parent_phone || null,
         status: st,
         marked_at: a.marked_at || null,
-        marked_by: a.marked_by || null
+        marked_by: a.marked_by || null,
+        camera_status: String(a.camera_status || '').trim() || (st === 'absent' ? 'n_a' : null)
       };
     })
     .filter(Boolean);
@@ -498,6 +499,9 @@ export async function buildAttendanceReport({
   if (statusFilter === 'absent') out = out.filter((r) => r.status === 'absent');
   else if (statusFilter === 'present') out = out.filter((r) => r.status === 'present');
   else if (statusFilter === 'late') out = out.filter((r) => r.status === 'late');
+  else if (statusFilter === 'camera_off') {
+    out = out.filter((r) => (r.status === 'present' || r.status === 'late') && r.camera_status === 'off');
+  }
 
   if (lessonType === 'private') {
     out = [];
