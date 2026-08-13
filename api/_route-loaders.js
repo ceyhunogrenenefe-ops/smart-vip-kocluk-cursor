@@ -24,6 +24,7 @@ export const routeLoaders = {
   'etut-session-report': () => import('../handlers/etut-session-report.js'),
   'coach-weekly-goals': () => import('../handlers/coach-weekly-goals.js'),
   'coach-stats': () => import('../handlers/coach-stats.js'),
+  'coach-enrollment-tracker': () => import('../handlers/coach-enrollment-tracker.js'),
   'student-screen-time': () => import('../handlers/student-screen-time.js'),
   'whatsapp/center': () => import('../handlers/whatsapp-center.js'),
   'book-readings': () => import('../handlers/book-readings.js'),
