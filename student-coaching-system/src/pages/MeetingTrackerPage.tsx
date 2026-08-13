@@ -19,6 +19,7 @@ import { useAuth } from '../context/AuthContext';
 import { userHasAnyRole } from '../config/rolePermissions';
 import { parseAgendaPasteText, mergeAgendaDrafts, type ParsedAgendaDraft } from '../lib/meetingAgendaParse';
 import MeetingDetailPanel from './meetingTracker/MeetingDetailPanel';
+import CoachEnrollmentTrackerPanel from './meetingTracker/CoachEnrollmentTrackerPanel';
 import {
   mtAddAgenda,
   mtAddDecision,
@@ -110,13 +111,32 @@ function staffManagers(users: MtUser[]) {
   return users.filter((u) => ['super_admin', 'admin'].includes(String(u.role || '').toLowerCase()));
 }
 
-type TabKey = 'toplanti' | 'notlar' | 'gecmis';
+type PageTab = 'toplanti' | 'koc-takip';
+
+function parsePageTab(raw: string | null): PageTab {
+  if (raw === 'koc-takip') return 'koc-takip';
+  return 'toplanti';
+}
 
 export default function MeetingTrackerPage() {
   const { effectiveUser } = useAuth();
   const isManager = userHasAnyRole(effectiveUser, ['super_admin', 'admin']);
   const [params, setParams] = useSearchParams();
   const meetingId = params.get('id') || '';
+  const pageTab = parsePageTab(params.get('tab'));
+
+  const setPageTab = useCallback(
+    (next: PageTab) => {
+      setParams((p) => {
+        const n = new URLSearchParams(p);
+        n.delete('id');
+        if (next === 'toplanti') n.delete('tab');
+        else n.set('tab', next);
+        return n;
+      });
+    },
+    [setParams]
+  );
 
   const [loading, setLoading] = useState(true);
   const [dash, setDash] = useState<MtDashboard | null>(null);
@@ -303,38 +323,80 @@ export default function MeetingTrackerPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{pageTitle}</h1>
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-            Gündem, karar ve görev takibi — önceki toplantılardan devreden işler korunur.
+            {pageTab === 'koc-takip'
+              ? 'Koç bazlı yaz kayıt, geçiş, referans ve memnuniyet videosu takibi.'
+              : 'Gündem, karar ve görev takibi — önceki toplantılardan devreden işler korunur.'}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => void loadDash()}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
-          >
-            <RefreshCw className="h-4 w-4" /> Yenile
-          </button>
-          {isManager && (
+          {pageTab === 'toplanti' ? (
             <>
               <button
                 type="button"
-                onClick={() => setShowReports((v) => !v)}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
+                onClick={() => void loadDash()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
               >
-                Raporlar
+                <RefreshCw className="h-4 w-4" /> Yenile
               </button>
-              <button
-                type="button"
-                onClick={() => setShowCreate(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-              >
-                <Plus className="h-4 w-4" /> Yeni Toplantı
-              </button>
+              {isManager && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowReports((v) => !v)}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
+                  >
+                    Raporlar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowCreate(true)}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+                  >
+                    <Plus className="h-4 w-4" /> Yeni Toplantı
+                  </button>
+                </>
+              )}
             </>
-          )}
+          ) : null}
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200/80 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-800">
+        <button
+          type="button"
+          onClick={() => setPageTab('toplanti')}
+          className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors ${
+            pageTab === 'toplanti'
+              ? 'bg-white text-indigo-700 shadow-sm dark:bg-slate-900 dark:text-indigo-300'
+              : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
+          }`}
+        >
+          <ClipboardList className="h-4 w-4" />
+          Toplantılar
+        </button>
+        <button
+          type="button"
+          onClick={() => setPageTab('koc-takip')}
+          className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors ${
+            pageTab === 'koc-takip'
+              ? 'bg-white text-indigo-700 shadow-sm dark:bg-slate-900 dark:text-indigo-300'
+              : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
+          }`}
+        >
+          <LayoutGrid className="h-4 w-4" />
+          Koç kayıt takibi
+        </button>
+      </div>
+
+      {pageTab === 'koc-takip' ? (
+        <CoachEnrollmentTrackerPanel
+          isManager={isManager}
+          institutionId={effectiveUser?.institutionId || null}
+        />
+      ) : null}
+
+      {pageTab === 'toplanti' ? (
+      <>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
         {[
           { label: 'Yaklaşan', value: dash?.upcoming?.length ?? 0, tone: 'text-violet-700' },
@@ -590,6 +652,8 @@ export default function MeetingTrackerPage() {
           }}
         />
       )}
+      </>
+      ) : null}
     </div>
   );
 }
