@@ -77,7 +77,7 @@ import { buildBbbAttendeeJoinUrl, buildStaffBbbJoinUrl, parseBbbJoinCredentials,
 import { pollBbbPresenceForSession, applyAutoAttendanceForClassSession } from '../api/_lib/bbb-attendance.js';
 import { isBbbAutoAttendanceEnabled } from '../api/_lib/bbb-auto-attendance-enabled.js';
 import { applyEarlyBbbAbsentCheck } from '../api/_lib/bbb-early-absent.js';
-import { sendAbsentNoticeForStudent } from '../api/_lib/class-attendance-notify.js';
+import { sendAbsentNoticeForStudent, sendAttendanceNoticeToStaff } from '../api/_lib/class-attendance-notify.js';
 import {
   completedSessionMinutes,
   sessionLessonUnits40,
@@ -1854,7 +1854,7 @@ export default async function handler(req, res) {
         }
         const { data: stu } = await supabaseAdmin
           .from('students')
-          .select('id,name,phone,parent_phone')
+          .select('id,name,phone,parent_phone,coach_id')
           .eq('id', sid)
           .maybeSingle();
         if (!stu) {
@@ -1884,18 +1884,75 @@ export default async function handler(req, res) {
             return { ok: false, error: e instanceof Error ? e.message : 'send_failed' };
           }
         };
-        const rowResult = { student_id: sid, channels: [], parts: [] };
-        if (channels === 'student' || channels === 'both') {
+        const rowResult = { student_id: sid, channels: [], parts: [], staff: [] };
+        const notifyParent =
+          channels === 'parent' ||
+          channels === 'both' ||
+          channels === 'parent_staff' ||
+          (channels !== 'student' && channels !== 'parent' && channels !== 'both' && channels !== 'staff');
+        const notifyStudent = channels === 'student' || channels === 'both';
+        const notifyStaff =
+          channels === 'staff' ||
+          channels === 'parent_staff' ||
+          notifyParent; /* veliye giden yoklama → koç/öğretmene de */
+
+        if (notifyStudent) {
           const r = await sendOne(stu.phone);
           rowResult.parts.push({ to: 'student', ...r });
         }
-        if (channels === 'parent' || channels === 'both') {
+        let parentPhoneSent = null;
+        if (notifyParent) {
           const r = await sendOne(stu.parent_phone);
           rowResult.parts.push({ to: 'parent', ...r });
+          parentPhoneSent = normalizePhoneToE164(stu.parent_phone);
         }
-        if (channels !== 'student' && channels !== 'parent' && channels !== 'both') {
-          const r = await sendOne(stu.parent_phone);
-          rowResult.parts.push({ to: 'parent', ...r });
+        if (notifyStaff) {
+          const sessionStub = {
+            id: String(ctx.session_id || t.session_id || '') || null,
+            class_id: String(ctx.class_id || t.class_id || '') || null,
+            teacher_id: String(ctx.teacher_id || t.teacher_id || '') || null,
+            lesson_date: vars.lesson_date,
+            start_time: vars.lesson_time,
+            subject: vars.subject
+          };
+          // session_id varsa sınıf/öğretmen bilgisi için oturumu tamamla
+          if (sessionStub.id) {
+            const { data: sess } = await supabaseAdmin
+              .from('class_sessions')
+              .select('id,class_id,teacher_id,lesson_date,start_time,subject')
+              .eq('id', sessionStub.id)
+              .maybeSingle();
+            if (sess) {
+              sessionStub.class_id = sess.class_id || sessionStub.class_id;
+              sessionStub.teacher_id = sess.teacher_id || sessionStub.teacher_id;
+              sessionStub.lesson_date = sess.lesson_date || sessionStub.lesson_date;
+              sessionStub.start_time = sess.start_time || sessionStub.start_time;
+              sessionStub.subject = sess.subject || sessionStub.subject;
+            }
+          }
+          const staffKind =
+            rowPreset === 'camera_off' || rowPreset === 'class_camera_off_notice'
+              ? 'class_camera_off_notice_staff'
+              : 'class_absent_notice_staff';
+          try {
+            const staffRes = await sendAttendanceNoticeToStaff({
+              studentId: sid,
+              session: sessionStub,
+              message: text,
+              excludePhones: parentPhoneSent ? [parentPhoneSent] : [],
+              kind: staffKind
+            });
+            rowResult.staff = staffRes.staff || [];
+            for (const s of rowResult.staff) {
+              rowResult.parts.push({ to: s.role, ok: s.ok, error: s.note || undefined });
+            }
+          } catch (e) {
+            rowResult.parts.push({
+              to: 'staff',
+              ok: false,
+              error: e instanceof Error ? e.message : 'staff_send_failed'
+            });
+          }
         }
         rowResult.ok = rowResult.parts.some((p) => p.ok);
         rowResult.message = text;

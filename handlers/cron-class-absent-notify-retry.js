@@ -7,6 +7,7 @@ import {
   resolveAutomationSendChannel,
   sendAutomationTemplateMessage
 } from '../api/_lib/whatsapp-automation-channel.js';
+import { sendAttendanceNoticeToStaff } from '../api/_lib/class-attendance-notify.js';
 
 const TEMPLATE_TYPE = 'class_absent_notice_1';
 const ABSENT_KINDS = ['class_absent_notice_1', 'class_absent_notice'];
@@ -161,6 +162,17 @@ export default async function handler(req, res) {
           twilio_error_code: sent.errorCode != null ? String(sent.errorCode) : null
         })
         .eq('id', row.id);
+      try {
+        await sendAttendanceNoticeToStaff({
+          studentId,
+          session,
+          message: preview,
+          excludePhones: [parentPhone],
+          kind: 'class_absent_notice_staff'
+        });
+      } catch {
+        /* veli gönderimi başarılıysa staff hatası retry'i bozmasın */
+      }
       log.push({ id: row.id, ok: true, meta_message_id: sent.sid });
     } else {
       sentFail += 1;
