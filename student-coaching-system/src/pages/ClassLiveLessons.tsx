@@ -1452,7 +1452,9 @@ export default function ClassLiveLessons() {
             subject: attendanceSession.subject,
             lesson_date: attendanceSession.lesson_date,
             lesson_time: String(attendanceSession.start_time).slice(0, 5),
-            session_id: attendanceSession.id
+            session_id: attendanceSession.id,
+            class_id: attendanceSession.class_id,
+            teacher_id: attendanceSession.teacher_id
           }
         })
       });
@@ -2769,7 +2771,8 @@ export default function ClassLiveLessons() {
               <AppModalBody className="space-y-3 max-h-[min(60dvh,520px)] overflow-y-auto">
                 <p className="text-sm text-slate-600">
                   Yoklama kaydedildi. Katılmayan ve kamerası kapalı öğrenciler için mesajlar hazırlandı.
-                  Göndermeden önce düzenleyebilirsiniz. Kamerası açık katılanlar için mesaj oluşturulmaz.
+                  Göndermeden önce düzenleyebilirsiniz. Mesaj velilere ve aynı anda koç / öğretmene gider.
+                  Kamerası açık katılanlar için mesaj oluşturulmaz.
                 </p>
                 {attendanceNotices.map((n, idx) => (
                   <div key={`${n.student_id}-${idx}`} className="rounded-lg border border-slate-200 p-3 space-y-2">
@@ -2811,7 +2814,7 @@ export default function ClassLiveLessons() {
                   className="min-h-[44px] flex-1 rounded-lg bg-green-600 text-white text-sm font-semibold disabled:opacity-50 touch-manipulation"
                   onClick={() => void sendAttendanceNotices()}
                 >
-                  {attendanceNoticeSending ? 'Gönderiliyor…' : `Velilere gönder (${attendanceNotices.length})`}
+                  {attendanceNoticeSending ? 'Gönderiliyor…' : `Veli + koç/öğretmene gönder (${attendanceNotices.length})`}
                 </button>
               </AppModalFooter>
             </>

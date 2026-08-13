@@ -323,7 +323,10 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
     teacher_name: r.teacher_name,
     lesson_date: r.lesson_date,
     class_name: r.class_name,
-    student_name: r.student_name
+    student_name: r.student_name,
+    session_id: r.session_id,
+    class_id: r.class_id,
+    teacher_id: r.teacher_id
   });
 
   const bulkSend = async () => {
