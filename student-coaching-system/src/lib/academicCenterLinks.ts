@@ -85,6 +85,8 @@ export function examRoomsForClassLevel(classLevel: unknown): ExamEntryKey[] | nu
   return null;
 }
 
+export { BBB_AUTO_MEETING_LINK, isBbbAutoMeetingLink };
+
 export const defaultAcademicCenterLinks: AcademicCenterLinks = {
   studyClasses: {
     class56: 'https://kurumsal.ornek.edu/tr/etut-56',
