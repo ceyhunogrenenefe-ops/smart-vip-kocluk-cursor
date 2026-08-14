@@ -115,7 +115,7 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     assert.equal(
       catalogLooksStudentFiltered(
         Array.from({ length: 40 }, (_, i) => ({ id: i + 1 })),
-        Array.from({ length: 38 }, (_, i) => ({ id: i + 1 }))
+        Array.from({ length: 40 }, (_, i) => ({ id: i + 1 }))
       ),
       false
     );
@@ -126,6 +126,35 @@ describe('buildStudentAvailableEdesisExamItems', () => {
       ),
       true
     );
+  });
+
+  it('trusts a proper id subset even when ratio is high (small catalog)', () => {
+    assert.equal(
+      catalogLooksStudentFiltered(
+        Array.from({ length: 5 }, (_, i) => ({ id: i + 1 })),
+        [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }]
+      ),
+      true
+    );
+  });
+
+  it('detects nested result.ogrenciIds assignment', () => {
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [
+        {
+          id: 91,
+          name: 'Safiye atanan',
+          examType: 'LGS',
+          resultStatus: 'None',
+          examDate: '2026-08-14',
+          result: { ogrenciIds: [7105077] }
+        }
+      ],
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' })
+    });
+    assert.deepEqual(items.map((x) => x.examId), ['91']);
   });
 
   it('hides a recent exam assigned to other students', () => {
