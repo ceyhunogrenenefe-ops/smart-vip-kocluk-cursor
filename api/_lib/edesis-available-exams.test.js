@@ -42,6 +42,77 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     assert.equal(items.length, 0);
   });
 
+  it('offers a recently defined open exam with no result row yet', () => {
+    const now = new Date('2026-08-14T12:00:00Z');
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: catalog,
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      now
+    });
+    assert.deepEqual(items.map((x) => x.examId).sort(), ['4']);
+    assert.equal(items[0].canTake, true);
+    assert.equal(items[0].hasStudentResult, false);
+    assert.equal(items[0].name, 'LGS Yeni');
+  });
+
+  it('does not offer last year\'s open LGS catalog exams', () => {
+    const now = new Date('2026-08-14T12:00:00Z');
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [
+        { id: 40, name: 'LGS Eski', examType: 'LGS', resultStatus: 'None', examDate: '2026-03-01' }
+      ],
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      now
+    });
+    assert.equal(items.length, 0);
+  });
+
+  it('offers an old-dated exam when studentIds includes this student', () => {
+    const now = new Date('2026-08-14T12:00:00Z');
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [
+        {
+          id: 41,
+          name: 'Safiye LGS',
+          examType: 'LGS',
+          resultStatus: 'None',
+          examDate: '2026-03-01',
+          studentIds: [7105077, 99]
+        }
+      ],
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      now
+    });
+    assert.deepEqual(items.map((x) => x.examId), ['41']);
+  });
+
+  it('hides a recent exam assigned to other students', () => {
+    const now = new Date('2026-08-14T12:00:00Z');
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [
+        {
+          id: 42,
+          name: 'Başka öğrenci LGS',
+          examType: 'LGS',
+          resultStatus: 'None',
+          examDate: '2026-08-14',
+          studentIds: [111]
+        }
+      ],
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      now
+    });
+    assert.equal(items.length, 0);
+  });
+
   it('includes only the student result exam, not other LGS catalog rows', () => {
     const items = buildStudentAvailableEdesisExamItems({
       catalogRows: catalog,

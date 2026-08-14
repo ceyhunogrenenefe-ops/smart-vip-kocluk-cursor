@@ -116,20 +116,42 @@ async function loadStudentClassLevel(platformStudentId, knownStudent) {
 }
 
 async function resolveStudentProgramKeys({ edesisStudentId, platformStudentId, studentHint, cfg }) {
+  const scope = await resolveStudentEdesisScope({ edesisStudentId, platformStudentId, studentHint, cfg });
+  return scope.programKeys;
+}
+
+async function resolveStudentEdesisScope({ edesisStudentId, platformStudentId, studentHint, cfg }) {
   const classLevel = await loadStudentClassLevel(platformStudentId, studentHint);
   let gradeName = '';
   let className = '';
+  let classroomId = '';
   try {
     const es = await fetchEdesisStudentByOgrenciId(edesisStudentId, cfg);
     gradeName = es?.gradeName || '';
     className = es?.className || '';
+    classroomId = es?.classroomId || '';
   } catch {
     /* sınıf Edesis’ten gelmezse class_level yeter */
   }
-  return inferEdesisExamProgramKeys({ gradeName, className, classLevel });
+  return {
+    programKeys: inferEdesisExamProgramKeys({ gradeName, className, classLevel }),
+    classroomId,
+    gradeName,
+    className,
+    classLevel
+  };
 }
 
-/** Öğrenci sayfası: yalnızca bu öğrencinin kademesine uygun tanımlı denemeler */
+function catalogLooksStudentFiltered(fullRows, studentRows) {
+  const full = Array.isArray(fullRows) ? fullRows : [];
+  const student = Array.isArray(studentRows) ? studentRows : [];
+  if (!student.length) return false;
+  if (!full.length) return student.length > 0;
+  if (student.length >= full.length) return false;
+  return true;
+}
+
+/** Öğrenci sayfası: tanımlı + henüz girilmemiş denemeler (eski Ready katalog dökülmez) */
 async function loadAvailableEdesisExamsForStudent({
   edesisStudentId,
   platformStudentId,
@@ -137,18 +159,24 @@ async function loadAvailableEdesisExamsForStudent({
   studentHint,
   cfg
 }) {
-  const [catalog, studentResults, programKeys] = await Promise.all([
+  const [catalog, studentCatalog, studentResults, scope] = await Promise.all([
     fetchEdesisExamsCatalog(cfg).catch(() => ({ rows: [] })),
+    fetchEdesisExamsCatalog(cfg, { StudentId: edesisStudentId }).catch(() => ({ rows: [] })),
     fetchEdesisStudentResults(edesisStudentId, cfg, { enrichSubjects: false }).catch(() => ({
       rows: []
     })),
-    resolveStudentProgramKeys({ edesisStudentId, platformStudentId, studentHint, cfg })
+    resolveStudentEdesisScope({ edesisStudentId, platformStudentId, studentHint, cfg })
   ]);
+  const fullRows = catalog.rows || [];
+  const studentRows = studentCatalog.rows || [];
+  const assignedCatalogRows = catalogLooksStudentFiltered(fullRows, studentRows) ? studentRows : null;
   return buildStudentAvailableEdesisExamItems({
-    catalogRows: catalog.rows || [],
+    catalogRows: fullRows,
+    assignedCatalogRows,
     resultRows: studentResults.rows || [],
     edesisStudentId,
-    programKeys,
+    programKeys: scope.programKeys,
+    classroomId: scope.classroomId,
     studentId: platformStudentId || `edesis-${edesisStudentId}`,
     institutionId: actor?.institution_id || null
   });

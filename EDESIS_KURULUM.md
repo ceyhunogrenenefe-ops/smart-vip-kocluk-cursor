@@ -67,7 +67,7 @@ Sayfalama: `MaxResultCount` (liste max 1000, kırılım max 100), `SkipCount`
 
 1. Koç **Edesis** sayfasından öğrenciyi `edesis_ogrenci_id` ile bağlar.
 2. Öğrenci: **Akademik Merkez → Deneme / Optik** (`/academic-center?tab=exam`) → **Sınava gir** / **Sonuçlarım** / **Analizlerim**.
-   Liste **kurumun tüm denemelerini göstermez**. Kaynak `GET /exams/results?StudentId=` ve öğrencinin **sınıf / programı** (LGS öğrencisine 5. sınıf denemesi düşmez).
+   Liste **kurumun tüm denemelerini göstermez**. Kaynak: öğrencinin sonuçları (`GET /exams/results?StudentId=`) **ve** henüz girilmemiş açık denemeler (None/Processing) — öğrenci/şube ataması veya son 21 günde tanımlanmış + sınıf programı (LGS öğrencisine 5. sınıf denemesi düşmez).
    Optik, Edesis **Sınav Uygulaması** düzenidir: üstte **Kitapçık türü A/B/C/D**, **Kaydet**, **Bitir**; solda ders sekmeleri (tek tek tıklanır); sağda kitapçık PDF.
 3. Kitapçık PDF `GET /exams/{id}` + `/booklets` / `/files` / `/pdf` üzerinden alınır; CDN çoğu zaman `.pdf` uzantısız UUID’dir. Öğrenci JWT’si iframe’e gitmediği için PDF **`op=exam-booklet-pdf&download=1`** ile proxy edilir.
 4. Kitapçık seçilir, her ders için optik işaretlenir (`cevaplar` uzunluğu = `questionCount`).
