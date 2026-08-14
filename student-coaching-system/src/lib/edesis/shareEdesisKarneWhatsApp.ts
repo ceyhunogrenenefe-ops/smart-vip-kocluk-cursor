@@ -139,3 +139,29 @@ export async function shareEdesisKarneWithParent(opts: {
     reportUrl
   };
 }
+
+export async function shareEdesisReportLinkWithParent(opts: {
+  studentName: string;
+  parentPhone: string;
+  coachUserId: string;
+  examTitle: string;
+  reportLabel: string;
+  reportUrl: string;
+}): Promise<{ notice: string }> {
+  const parentDigits = formatWhatsAppPhone(opts.parentPhone);
+  if (!parentDigits) {
+    throw new Error('Veli telefonu tanımlı değil — öğrenci kartına veli numarası ekleyin.');
+  }
+  const coachUserId = getGatewaySessionUserId(opts.coachUserId);
+  if (!coachUserId) throw new Error('Oturum bulunamadı');
+  const message =
+    `Sayın Velimiz, ${opts.studentName} öğrencimizin ${opts.examTitle} sınavına ait ${opts.reportLabel} hazırlanmıştır. ` +
+    `Öğrencimizin sınav sonuçlarını ve gelişim analizini aşağıdaki bağlantıdan inceleyebilirsiniz:\n${opts.reportUrl}\n\n` +
+    `Online VIP Dershane\nOlduğunuz yerden, olmak istediğiniz yere.`;
+  const result = await sendWhatsAppOutbound({
+    coachUserId,
+    targetPhone: parentDigits,
+    message
+  });
+  return { notice: result.notice };
+}

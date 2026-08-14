@@ -179,6 +179,7 @@ export const MOBILE_ACADEMIC_MATCH_PATHS = [
   '/book-tracking',
   '/exam-tracking',
   '/edesis',
+  '/edesis-analiz',
   '/written-exam',
   '/topic-tracking',
   '/analytics',
@@ -200,6 +201,7 @@ const ACADEMIC_PATHS = new Set([
   '/book-tracking',
   '/exam-tracking',
   '/edesis',
+  '/edesis-analiz',
   '/written-exam',
   '/topic-tracking',
   '/analytics',
@@ -260,6 +262,7 @@ const ACADEMIC_LABELS: Record<string, string> = {
   '/book-tracking': 'Kitap Takibi',
   '/exam-tracking': 'Sınav Takibi',
   '/edesis': 'Edesis',
+  '/edesis-analiz': 'Edesis sınav analizi',
   '/written-exam': 'Yazılı Takibi',
   '/topic-tracking': 'Konu Takibi',
   '/academic-center': 'Akademik Merkez',
@@ -317,6 +320,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       NAV_OZEL_DERS_TALEPLERI,
       NAV_TEACHER_PROFILE_APPROVALS,
       { path: '/edesis', icon: CloudDownload, label: 'Edesis' },
+      { path: '/edesis-analiz', icon: BarChart3, label: 'Edesis sınav analizi' },
       { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
       { path: '/subscription', icon: CreditCard, label: 'Abonelik / Paketler' },
       { path: '/topics', icon: BookOpen, label: 'Konu Havuzu' },
@@ -334,7 +338,8 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
   if (isStudentOnlyNav) {
     /** Akademik Merkez, Ders&Görüşme, panel ve Soru Sor Sidebar.tsx’te ayrı */
     return [{ path: '/student-analytics', icon: BarChart3, label: 'Analizlerim' },
-      { path: '/exam-tracking', icon: ClipboardList, label: 'Deneme analizi' }];
+      { path: '/exam-tracking', icon: ClipboardList, label: 'Deneme analizi' },
+      { path: '/edesis-analiz', icon: BarChart3, label: 'Edesis sınav analizi' }];
   }
 
   const MENU_ADMIN: FlatNavItem[] = [
@@ -355,6 +360,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/book-tracking', icon: BookMarked, label: 'Kitap Takibi' },
     { path: '/exam-tracking', icon: ClipboardList, label: 'Sınav Takibi (Denemelerim)' },
     { path: '/edesis', icon: CloudDownload, label: 'Edesis' },
+    { path: '/edesis-analiz', icon: BarChart3, label: 'Edesis sınav analizi' },
     { path: '/reports', icon: FileCheck, label: 'Raporlar' },
     { path: '/ai-coach', icon: Brain, label: 'AI KOÇ' },
     { path: '/whatsapp', icon: MessageCircle, label: 'Mesaj gönder' },
@@ -392,6 +398,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/ai-agents-admin', icon: Bot, label: 'AI Ders Ajanları' },
     { path: '/soru-havuzu', icon: CircleHelp, label: 'Soru Havuzu' },
     { path: '/academic-center', icon: Sparkles, label: 'Akademik Merkez' },
+    { path: '/edesis-analiz', icon: BarChart3, label: 'Edesis sınav analizi' },
     ...privateLiveNavForRoles(['teacher']),
     { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
     { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
@@ -417,6 +424,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/book-tracking', icon: BookMarked, label: 'Kitap Takibi' },
     { path: '/exam-tracking', icon: ClipboardList, label: 'Sınav Takibi (Denemelerim)' },
     { path: '/edesis', icon: CloudDownload, label: 'Edesis' },
+    { path: '/edesis-analiz', icon: BarChart3, label: 'Edesis sınav analizi' },
     { path: '/topic-tracking', icon: CheckSquare, label: 'Konu Takibi' },
     { path: '/analytics', icon: BarChart3, label: 'Analiz Paneli' },
     { path: '/coach-stats', icon: BarChart3, label: 'Koç İstatistikleri' },

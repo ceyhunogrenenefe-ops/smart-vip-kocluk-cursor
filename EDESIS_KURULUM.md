@@ -57,7 +57,7 @@ Ham optik **gönderimi** (öğrencinin panelden sınava girmesi) için ayrıca:
 | Konu kırılımı | GET | `/api/external/v1/exams/{id}/results/subjects` |
 | Ham cevap gönder | POST | `/api/external/v1/exams/{id}/results` — gövde `{ replace, results }` → **202 + jobId** |
 | Değerlendirme durumu | GET | `/api/external/v1/exams/{id}/results/status?jobId=` — geçersiz job: **200 + state NotFound** (404 değil) |
-| PDF karne | POST | `/api/external/v1/reports/exam-report` (reportCodes: 102) |
+| PDF karne | POST | `/api/external/v1/reports/exam-report` (reportCodes: **102**, **104** BK-5, **105** BK-10) |
 | Hata karnesi PDF | GET | `/api/external/v1/analytics/reports/student/{id}` + gerekirse Edesis `GetAlnalizOlustur?IsHataKarnesi=true&SoruTuru=3` (boş + yanlış sorular; **hata kitapçığı değil**) |
 
 Senkron sırasında toplu sonuçta ders/konu yoksa sistem otomatik olarak **öğrenci bazlı sonuç** ve **analytics** endpoint'lerini dener.
@@ -79,7 +79,21 @@ Sayfalama: `MaxResultCount` (liste max 1000, kırılım max 100), `SkipCount`
 6. `jobId` ile durum izlenir (`Pending` / `Running` / `Completed` / `Failed` / `NotFound`).
 7. Bittiğinde **Sonuçlarım** (net + **Karne PDF** puan özeti + **Hata karnesi** boş/yanlış soru PDF’si) ve **Analizlerim** (**Hata karnesi** PDF + **Deneme analizi**) açılır.
 
-**Karne PDF (102)** puan / net karnesidir. **Hata karnesi** Edesis’in boş ve yanlış soruları derlediği PDF’dir. **Hata kitapçığı** (soru bankası derlemesi) ayrı üründür; öğrenci panelinde gösterilmez.
+**Karne PDF (102)** puan / net karnesidir. **BK-5 (104)** son 5, **BK-10 (105)** son 10 deneme analiz PDF’sidir. **Hata karnesi** Edesis’in boş ve yanlış soruları derlediği PDF’dir. **Hata kitapçığı** ayrı üründür.
+
+## Edesis sınav analizi modülü (`/edesis-analiz`)
+
+SQL: `student-coaching-system/sql/2026-08-14-edesis-exam-analysis-module.sql` (Supabase SQL Editor’da çalıştırın).
+
+Webhook: `POST /api/edesis-webhook` — `EDESIS_WEBHOOK_SECRET` (yoksa `EDESIS_API_KEY`). İmza timing-safe. Aynı `eventId` tekrar işlenmez. Yoklama/ödev/program olayları yok sayılır.
+
+- Öğrenci / koç / öğretmen / admin: son 5–10 karşılaştırma (aynı sınav türü), ders-konu kırılımı, değerlendirme editörü + sürüm, 102/104/105 PDF arşivi, veli WhatsApp paylaşımı.
+- API: `/api/edesis-analysis?op=` (JWT). Anahtar tarayıcıya gitmez.
+- LGS öğrencilerinde varsayılan tür LGS’dir; TYT ile karıştırılmaz. Katılmayan sınav sıfır net sayılmaz.
+- Onaysız otomatik taslak öğrenciye/veliye gitmez.
+- Yoklama, ödev, ders programı, rehberlik Edesis’e yazılmaz.
+
+## Edesis Analiz (eski özet)
 
 Koç/admin ham ingest’te gövdede `"replace": true` kullanabilir. Query `?replace=true` **yok sayılır** ve 409 döner.
 
@@ -87,14 +101,9 @@ Bilinen Edesis sınırı: soru numarası 1’den başlamayan dersler (ör. seçm
 
 ## Edesis Analiz (uygulama)
 
-Menü: **Edesis Analiz** (`/edesis-analiz`)
+Menü: **Edesis sınav analizi** (`/edesis-analiz`) — koç, öğretmen, admin, öğrenci.
 
-- **Ders analizi** — tüm denemelerde ders bazlı ortalama, trend grafiği
-- **Karne** — seçili denemede D/Y/B/net (konu varsa alt satır)
-- **Hata karnesi** — öğrenci panelinde Edesis **hata karnesi PDF** (boş + yanlış sorular). D/Y/B tablosu yalnızca özet. Hata kitapçığı değildir.
-- **Tüm denemeler** — deneme × ders matrisi
-
-Ders detayı gelmiyorsa: deneme seç → **Edesis detayını çek** (sınav bazlı `/exams/{id}/results`).
+Öğrenci Akademik Merkez → Analizlerim’den de aynı sayfaya geçer. Hata karnesi PDF (boş+yanlış) Akademik Merkez’de kalır; karne 102 / BK-5 / BK-10 buradan üretilir.
 
 ## Öğrenci eşleme sırası
 
