@@ -1,4 +1,4 @@
-import React, { Suspense, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   BookOpen,
@@ -33,8 +33,7 @@ import {
 import { copyAcademicStudyGuestJoinShareText } from '../lib/bbbGuestJoin';
 import { AppModal } from '../components/ui/AppModal';
 import { VirtualOpticInfoModal } from '../components/academic/VirtualOpticInfoModal';
-
-const StudentEdesisExamPanel = React.lazy(() => import('../components/edesis/StudentEdesisExamPanel'));
+import StudentEdesisExamPanel from '../components/edesis/StudentEdesisExamPanel';
 
 type TabKey = 'study' | 'exam' | 'pool';
 
@@ -510,17 +509,9 @@ export default function AcademicCenter() {
 
           {activeTab === 'exam' && (
             <div className="space-y-6">
-              {isStudent ? (
-                <Suspense
-                  fallback={
-                    <div className="flex min-h-[16vh] items-center justify-center text-slate-500">
-                      <Loader2 className="h-6 w-6 animate-spin" />
-                    </div>
-                  }
-                >
-                  <StudentEdesisExamPanel onActiveExamChange={setEdesisTaking} />
-                </Suspense>
-              ) : null}
+              <div className="rounded-2xl border-2 border-emerald-200 bg-gradient-to-br from-emerald-50/90 to-white p-4 shadow-sm sm:p-5">
+                <StudentEdesisExamPanel onActiveExamChange={setEdesisTaking} />
+              </div>
 
               {edesisTaking ? null : (
                 <>
