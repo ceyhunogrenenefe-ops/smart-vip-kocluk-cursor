@@ -14,11 +14,9 @@ import {
   generateEdesisExamReport,
   fetchEdesisDefaultTermId,
   fetchEdesisStudentsList,
-  fetchEdesisStudentByOgrenciId,
   fetchEdesisTermsList,
   fetchEdesisExamsCatalog,
   fetchEdesisStudentResults,
-  inferEdesisExamProgramKeys,
   buildStudentAvailableEdesisExamItems,
   fetchEdesisGradesList,
   fetchEdesisDepartmentsList,
@@ -98,45 +96,23 @@ async function resolveOwnPlatformStudent(actor) {
   );
 }
 
-async function loadStudentClassLevel(platformStudentId, knownStudent) {
-  const fromKnown = String(knownStudent?.class_level || '').trim();
-  if (fromKnown) return fromKnown;
-  if (!platformStudentId) return '';
-  const { data, error } = await supabaseAdmin
-    .from('students')
-    .select('class_level')
-    .eq('id', platformStudentId)
-    .maybeSingle();
-  if (error && String(error.message || '').includes('class_level')) return '';
-  if (error) throw error;
-  return data?.class_level != null ? String(data.class_level).trim() : '';
-}
-
-/** Öğrenci sayfası: yalnızca Edesis’te bu öğrenciye tanımlı / kendi programındaki açık denemeler */
+/** Öğrenci sayfası: yalnızca Edesis’te bu öğrenciye tanımlı denemeler */
 async function loadAvailableEdesisExamsForStudent({
   edesisStudentId,
   platformStudentId,
   actor,
-  studentHint,
   cfg
 }) {
-  const [catalog, studentResults, edesisStudent] = await Promise.all([
+  const [catalog, studentResults] = await Promise.all([
     fetchEdesisExamsCatalog(cfg).catch(() => ({ rows: [] })),
     fetchEdesisStudentResults(edesisStudentId, cfg, { enrichSubjects: false }).catch(() => ({
       rows: []
-    })),
-    fetchEdesisStudentByOgrenciId(edesisStudentId, cfg).catch(() => null)
+    }))
   ]);
-  const classLevel = await loadStudentClassLevel(platformStudentId, studentHint);
-  const programKeys = inferEdesisExamProgramKeys({
-    gradeName: edesisStudent?.gradeName,
-    className: edesisStudent?.className,
-    classLevel
-  });
   return buildStudentAvailableEdesisExamItems({
     catalogRows: catalog.rows || [],
     resultRows: studentResults.rows || [],
-    programKeys,
+    edesisStudentId,
     studentId: platformStudentId || `edesis-${edesisStudentId}`,
     institutionId: actor?.institution_id || null
   });
@@ -1122,11 +1098,9 @@ export default async function handler(req, res) {
         req.query?.edesisStudentId || req.body?.edesisStudentId || ''
       ).trim();
       const platformStudentId = String(req.query?.studentId || req.body?.studentId || '').trim();
-      let studentHint = studentSelf || null;
       if (!edesisStudentId && platformStudentId) {
         const resolved = await resolveEdesisIdForPlatformStudent(platformStudentId, actor, tags);
         edesisStudentId = resolved.edesisStudentId || '';
-        studentHint = resolved.student || studentHint;
       }
       if (!edesisStudentId) {
         return res.status(400).json({
@@ -1139,7 +1113,6 @@ export default async function handler(req, res) {
         edesisStudentId,
         platformStudentId,
         actor,
-        studentHint,
         cfg
       });
 
@@ -1183,7 +1156,6 @@ export default async function handler(req, res) {
         edesisStudentId,
         platformStudentId,
         actor,
-        studentHint: studentSelf,
         cfg
       });
       if (!assigned.some((ex) => String(ex.examId) === examId)) {

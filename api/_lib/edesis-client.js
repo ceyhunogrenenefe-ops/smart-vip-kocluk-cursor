@@ -413,9 +413,13 @@ export function edesisCatalogExamMatchesProgram(exam, programKeys) {
   return false;
 }
 
-function isOpenEdesisCatalogExam(exam) {
-  const status = String(exam?.resultStatus || 'None').trim();
-  return /^(none|processing)$/i.test(status);
+/** Sonuç satırı bu Edesis öğrencisine mi ait (API StudentId’yi yok sayarsa yedek süzgeç) */
+export function resultRowBelongsToStudent(row, edesisStudentId) {
+  const sid = normEdesisId(edesisStudentId);
+  if (!sid) return false;
+  const rowSid = pickStr(flattenEdesisRow(row), ['studentId', 'ogrenciId', 'ogrenci_id']);
+  if (!rowSid) return true;
+  return normEdesisId(rowSid) === sid;
 }
 
 export function formatEdesisAvailableExamItem(examId, catalog, resultRow, meta = {}) {
@@ -445,15 +449,13 @@ export function formatEdesisAvailableExamItem(examId, catalog, resultRow, meta =
 }
 
 /**
- * Öğrenciye gösterilecek denemeler:
- * 1) GET /exams/results?StudentId= satırlarındaki sınavlar (Edesis’te tanımlı / girilmiş)
- * 2) Aynı programdaki henüz işlenmemiş katalog denemeleri (None/Processing) — ilk giriş
- * Kurumun tüm Ready kataloğu (TYT+YÖS+ilkokul+eski LGS) eklenmez.
+ * Öğrenciye gösterilecek denemeler: yalnızca GET /exams/results?StudentId= satırları.
+ * Katalog sadece ad / tarih zenginleştirir; kurumun diğer denemeleri eklenmez.
  */
 export function buildStudentAvailableEdesisExamItems({
   catalogRows = [],
   resultRows = [],
-  programKeys = new Set(),
+  edesisStudentId,
   studentId,
   institutionId
 } = {}) {
@@ -465,42 +467,19 @@ export function buildStudentAvailableEdesisExamItems({
 
   const resultByExam = new Map();
   for (const row of resultRows || []) {
+    if (edesisStudentId && !resultRowBelongsToStudent(row, edesisStudentId)) continue;
     const examId = pickEdesisResultExamId(row);
     if (examId && !resultByExam.has(examId)) resultByExam.set(examId, row);
   }
 
-  const keys = new Set(programKeys || []);
-  for (const [examId] of resultByExam) {
-    const cat = catalogById.get(examId) || {};
-    const row = resultByExam.get(examId);
-    for (const k of inferEdesisExamProgramKeys({
-      examType: cat.examType || row?.examType,
-      examName: cat.name || cat.examName || row?.examName
-    })) {
-      keys.add(k);
-    }
-  }
-
   const items = [];
-  const seen = new Set();
-  const push = (examId, catalog, resultRow) => {
-    if (!examId || seen.has(examId)) return;
-    seen.add(examId);
-    items.push(
-      formatEdesisAvailableExamItem(examId, catalog, resultRow, { studentId, institutionId })
-    );
-  };
-
   for (const [examId, resultRow] of resultByExam) {
-    push(examId, catalogById.get(examId) || null, resultRow);
-  }
-
-  for (const ex of catalogRows || []) {
-    const examId = pickEdesisCatalogExamId(ex);
-    if (!examId || seen.has(examId)) continue;
-    if (isOpenEdesisCatalogExam(ex) && edesisCatalogExamMatchesProgram(ex, keys)) {
-      push(examId, ex, null);
-    }
+    items.push(
+      formatEdesisAvailableExamItem(examId, catalogById.get(examId) || null, resultRow, {
+        studentId,
+        institutionId
+      })
+    );
   }
 
   items.sort((a, b) => String(b.examDate || '').localeCompare(String(a.examDate || '')));
@@ -1519,7 +1498,7 @@ export async function fetchEdesisStudentResults(edesisStudentId, cfgOverride = {
     ...dateRange,
     ...(enrichSubjects ? EXAM_DETAIL_QUERY : {})
   });
-  let rows = bulk.rows || [];
+  let rows = (bulk.rows || []).filter((row) => resultRowBelongsToStudent(row, sid));
   if (rows.length && enrichSubjects) {
     const enriched = await enrichEdesisRowsWithSubjectDetails(rows, localCfg, { maxStudents: 25 });
     rows = enriched.rows;
