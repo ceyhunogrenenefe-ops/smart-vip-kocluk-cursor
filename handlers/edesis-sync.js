@@ -874,11 +874,18 @@ export default async function handler(req, res) {
       let parentPhone = matched?.parent_phone || null;
       let platformStudentName = matched?.name || null;
       if (platformId) {
-        const { data: stFresh } = await supabaseAdmin
+        let { data: stFresh, error: stErr } = await supabaseAdmin
           .from('students')
           .select('parent_phone, name, class_level')
           .eq('id', platformId)
           .maybeSingle();
+        if (stErr && String(stErr.message || '').includes('class_level')) {
+          ({ data: stFresh, error: stErr } = await supabaseAdmin
+            .from('students')
+            .select('parent_phone, name')
+            .eq('id', platformId)
+            .maybeSingle());
+        }
         if (stFresh) {
           parentPhone = stFresh.parent_phone || parentPhone;
           platformStudentName = stFresh.name || platformStudentName;
