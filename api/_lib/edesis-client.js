@@ -536,7 +536,21 @@ export function isRecentOpenCatalogExam(exam, now = new Date(), windowDays = OPE
   return diffDays <= windowDays;
 }
 
-/** Henüz sonucu olmayan, öğrenciye düşmesi gereken katalog denemesi */
+/**
+ * GET /exams?StudentId= gerçekten süzdü mü?
+ * Yok sayılıp tam katalog (veya neredeyse tam) dönüyorsa false.
+ */
+export function catalogLooksStudentFiltered(fullRows, studentRows) {
+  const full = Array.isArray(fullRows) ? fullRows : [];
+  const student = Array.isArray(studentRows) ? studentRows : [];
+  if (!student.length) return false;
+  if (!full.length) return student.length > 0 && student.length <= 25;
+  if (student.length >= full.length) return false;
+  if (student.length > Math.floor(full.length * 0.75)) return false;
+  return true;
+}
+
+/** Henüz sonucu olmayan, bu öğrenciye tanımlanmış katalog denemesi */
 export function shouldOfferUntakenCatalogExam(exam, scope = {}, now = new Date()) {
   if (!exam || !isOpenEdesisCatalogExam(exam)) return false;
   const keys = scope.programKeys instanceof Set ? scope.programKeys : new Set(scope.programKeys || []);
@@ -544,9 +558,9 @@ export function shouldOfferUntakenCatalogExam(exam, scope = {}, now = new Date()
   if (assigned === false) return false;
   if (keys.size && !edesisCatalogExamMatchesProgram(exam, keys)) return false;
   if (assigned === true) return true;
-  if (!keys.size) return false;
+  // Atama alanı yok: yalnızca Edesis StudentId listesi gerçekten kısaldıysa güven.
   if (scope.assignedCatalogOnly) return true;
-  return isRecentOpenCatalogExam(exam, now);
+  return false;
 }
 
 const BOOKLET_URL_KEYS = [
@@ -801,8 +815,8 @@ export function formatEdesisAvailableExamItem(examId, catalog, resultRow, meta =
  * Öğrenciye gösterilecek denemeler:
  * 1) GET /exams/results?StudentId= satırları (girilmiş / Edesis sonuç kaydı)
  * 2) Henüz sonuç yoksa: açık (None/Processing) katalog denemeleri —
- *    öğrenci/şube ataması varsa veya son 21 günde tanımlanmışsa.
- * Kurumun eski Ready kataloğu ve başka kademedeki denemeler eklenmez.
+ *    yalnızca öğrenci/şube ataması veya GET /exams?StudentId= süzülmüş liste.
+ * Tarih recency ile kurum kataloğu dökülmez.
  */
 export function buildStudentAvailableEdesisExamItems({
   catalogRows = [],

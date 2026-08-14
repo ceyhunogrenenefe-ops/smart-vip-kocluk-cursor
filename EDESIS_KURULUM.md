@@ -67,7 +67,7 @@ Sayfalama: `MaxResultCount` (liste max 1000, kırılım max 100), `SkipCount`
 
 1. Koç **Edesis** sayfasından öğrenciyi `edesis_ogrenci_id` ile bağlar.
 2. Öğrenci: **Akademik Merkez → Deneme / Optik** (`/academic-center?tab=exam`) → **Sınava gir** / **Sonuçlarım** / **Analizlerim**.
-   Liste **kurumun tüm denemelerini göstermez**. Kaynak: öğrencinin sonuçları (`GET /exams/results?StudentId=`) **ve** henüz girilmemiş açık denemeler (None/Processing) — öğrenci/şube ataması veya son 21 günde tanımlanmış + sınıf programı (LGS öğrencisine 5. sınıf denemesi düşmez).
+   Liste **kurumun tüm denemelerini göstermez**. Kaynak: öğrencinin sonuçları (`GET /exams/results?StudentId=`) **ve** henüz girilmemiş açık denemeler — **yalnızca bu öğrenciye/şubesine tanımlanmış** olanlar (`ogrenciIds` / `classroomId`, veya Edesis `GET /exams?StudentId=` gerçekten süzülmüşse o liste). Tarih recency ile başkasının denemesi düşmez. LGS öğrencisine 5. sınıf denemesi düşmez.
    Optik, Edesis **Sınav Uygulaması** düzenidir: üstte **Kaydet** / **Bitir**, solda ders sekmeleri, sağda kitapçık PDF.
    Kitapçık türü **sınava göre** değişir:
    - **YKS / TYT / AYT:** tek satır `Kitapçık Türü:` A–D, optik şıkları **A–E**, sekmeler `TYT-TÜRKÇE` gibi yatay.

@@ -39,6 +39,7 @@ import {
   V1_PATHS,
   isAuthConnectedResponse,
   isReachableEdesisResponse,
+  catalogLooksStudentFiltered,
   mapEdesisRowToExamDraft,
   flattenEdesisRows,
   studentMatchKeysFromEdesisRow
@@ -143,16 +144,7 @@ async function resolveStudentEdesisScope({ edesisStudentId, platformStudentId, s
   };
 }
 
-function catalogLooksStudentFiltered(fullRows, studentRows) {
-  const full = Array.isArray(fullRows) ? fullRows : [];
-  const student = Array.isArray(studentRows) ? studentRows : [];
-  if (!student.length) return false;
-  if (!full.length) return student.length > 0;
-  if (student.length >= full.length) return false;
-  return true;
-}
-
-/** Öğrenci sayfası: tanımlı + henüz girilmemiş denemeler (eski Ready katalog dökülmez) */
+/** Öğrenci sayfası: yalnızca bu öğrenciye tanımlanmış + henüz girilmemiş denemeler */
 async function loadAvailableEdesisExamsForStudent({
   edesisStudentId,
   platformStudentId,
