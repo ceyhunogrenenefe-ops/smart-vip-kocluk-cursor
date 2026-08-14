@@ -41,6 +41,9 @@ import {
   isAuthConnectedResponse,
   isReachableEdesisResponse,
   catalogLooksStudentFiltered,
+  catalogExamAssignedToStudent,
+  isOpenEdesisCatalogExam,
+  edesisCatalogExamMatchesProgram,
   mapEdesisRowToExamDraft,
   flattenEdesisRows,
   studentMatchKeysFromEdesisRow
@@ -154,17 +157,77 @@ async function loadAvailableEdesisExamsForStudent({
   studentHint,
   cfg
 }) {
-  const [catalog, studentCatalog, studentResults, scope] = await Promise.all([
+  const scope = await resolveStudentEdesisScope({
+    edesisStudentId,
+    platformStudentId,
+    studentHint,
+    cfg
+  });
+  const catalogFetches = [
     fetchEdesisExamsCatalog(cfg).catch(() => ({ rows: [] })),
     fetchEdesisExamsCatalog(cfg, { StudentId: edesisStudentId }).catch(() => ({ rows: [] })),
     fetchEdesisStudentResults(edesisStudentId, cfg, { enrichSubjects: false }).catch(() => ({
       rows: []
-    })),
-    resolveStudentEdesisScope({ edesisStudentId, platformStudentId, studentHint, cfg })
-  ]);
+    }))
+  ];
+  if (scope.classroomId) {
+    catalogFetches.push(
+      fetchEdesisExamsCatalog(cfg, { ClassroomId: scope.classroomId }).catch(() => ({ rows: [] }))
+    );
+  }
+  const [catalog, studentCatalog, studentResults, classroomCatalog] = await Promise.all(catalogFetches);
   const fullRows = catalog.rows || [];
   const studentRows = studentCatalog.rows || [];
-  const assignedCatalogRows = catalogLooksStudentFiltered(fullRows, studentRows) ? studentRows : null;
+  const classroomRows = classroomCatalog?.rows || [];
+
+  const assignedMap = new Map();
+  const pushAssigned = (rows) => {
+    for (const ex of rows || []) {
+      const id = String(ex?.id ?? ex?.examId ?? '').trim();
+      if (!id) continue;
+      assignedMap.set(id, ex);
+    }
+  };
+  if (catalogLooksStudentFiltered(fullRows, studentRows)) pushAssigned(studentRows);
+  if (scope.classroomId && catalogLooksStudentFiltered(fullRows, classroomRows)) {
+    pushAssigned(classroomRows);
+  }
+
+  // Liste DTO’sunda ogrenciIds yoksa: açık + program uyan adaylarda detay çek (rate limit)
+  const assignScope = {
+    edesisStudentId,
+    classroomId: scope.classroomId,
+    programKeys: scope.programKeys
+  };
+  const needDetail = (fullRows.length ? fullRows : studentRows)
+    .filter((ex) => {
+      if (!isOpenEdesisCatalogExam(ex)) return false;
+      if (scope.programKeys?.size && !edesisCatalogExamMatchesProgram(ex, scope.programKeys)) return false;
+      return catalogExamAssignedToStudent(ex, assignScope) === null;
+    })
+    .slice(0, 20);
+  if (needDetail.length && cfg?.apiKey) {
+    const localCfg = { ...getEdesisConfig(), ...cfg, baseUrl: (cfg.baseUrl || getEdesisConfig().baseUrl) };
+    for (const ex of needDetail) {
+      const id = String(ex?.id ?? ex?.examId ?? '').trim();
+      if (!id || assignedMap.has(id)) continue;
+      try {
+        const r = await fetchEdesisJson(localCfg, V1_PATHS.examById(id));
+        if (!isReachableEdesisResponse(r)) continue;
+        const detailBody =
+          r.json?.result && typeof r.json.result === 'object' && !Array.isArray(r.json.result)
+            ? { ...ex, ...r.json, ...r.json.result }
+            : { ...ex, ...(r.json && typeof r.json === 'object' ? r.json : {}) };
+        if (catalogExamAssignedToStudent(detailBody, assignScope) === true) {
+          assignedMap.set(id, detailBody);
+        }
+      } catch {
+        /* rate / 404 */
+      }
+    }
+  }
+
+  const assignedCatalogRows = assignedMap.size ? [...assignedMap.values()] : null;
   return buildStudentAvailableEdesisExamItems({
     catalogRows: fullRows,
     assignedCatalogRows,

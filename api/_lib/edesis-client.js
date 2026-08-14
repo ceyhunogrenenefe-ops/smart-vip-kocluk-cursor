@@ -463,7 +463,9 @@ const OPEN_CATALOG_WINDOW_DAYS = 21;
 
 export function isOpenEdesisCatalogExam(exam) {
   const status = String(exam?.resultStatus || exam?.status || 'None').trim();
-  return /^(none|processing)$/i.test(status);
+  // Closed only — Ready = kurumda sonuç var; atanmış öğrenci hâlâ girebilir (Edesis Online gibi)
+  if (/^(closed|cancelled|canceled|archived|deleted|inactive)$/i.test(status)) return false;
+  return true;
 }
 
 function collectEdesisIdList(obj, keys) {
@@ -474,7 +476,7 @@ function collectEdesisIdList(obj, keys) {
     if (Array.isArray(v)) {
       for (const it of v) {
         if (it != null && typeof it === 'object') {
-          const id = pickStr(it, ['id', 'studentId', 'ogrenciId', 'classroomId']);
+          const id = pickStr(it, ['id', 'studentId', 'ogrenciId', 'classroomId', 'sinifId']);
           if (id) out.push(id);
         } else if (String(it).trim()) {
           out.push(String(it).trim());
@@ -495,27 +497,44 @@ function collectEdesisIdList(obj, keys) {
  */
 export function catalogExamAssignedToStudent(exam, scope = {}) {
   const flat = flattenEdesisRow(exam);
-  const studentIds = collectEdesisIdList(flat, [
-    'studentIds',
-    'ogrenciIds',
-    'assignedStudentIds',
-    'ogrenciIdList',
-    'studentIdList'
-  ]);
-  const wantStudent = normEdesisId(scope.edesisStudentId);
-  if (studentIds.length && wantStudent) {
-    return studentIds.some((id) => normEdesisId(id) === wantStudent);
-  }
-  const classroomIds = collectEdesisIdList(flat, [
-    'classroomIds',
-    'sinifIds',
-    'classroomId',
-    'sinifId',
-    'classId'
-  ]);
-  const wantClass = normEdesisId(scope.classroomId);
-  if (classroomIds.length && wantClass) {
-    return classroomIds.some((id) => normEdesisId(id) === wantClass);
+  const nested =
+    flat.exam && typeof flat.exam === 'object'
+      ? flattenEdesisRow(flat.exam)
+      : flat.sinav && typeof flat.sinav === 'object'
+        ? flattenEdesisRow(flat.sinav)
+        : null;
+  const sources = nested ? [flat, nested] : [flat];
+
+  for (const src of sources) {
+    if (src.isAllClasses === true || src.allClasses === true || src.tumSiniflar === true) {
+      return true;
+    }
+    const studentIds = collectEdesisIdList(src, [
+      'studentIds',
+      'ogrenciIds',
+      'assignedStudentIds',
+      'ogrenciIdList',
+      'studentIdList',
+      'students',
+      'ogrenciler'
+    ]);
+    const wantStudent = normEdesisId(scope.edesisStudentId);
+    if (studentIds.length && wantStudent) {
+      return studentIds.some((id) => normEdesisId(id) === wantStudent);
+    }
+    const classroomIds = collectEdesisIdList(src, [
+      'classroomIds',
+      'sinifIds',
+      'classroomId',
+      'sinifId',
+      'classId',
+      'classIds',
+      'subeIds'
+    ]);
+    const wantClass = normEdesisId(scope.classroomId);
+    if (classroomIds.length && wantClass) {
+      return classroomIds.some((id) => normEdesisId(id) === wantClass);
+    }
   }
   return null;
 }
@@ -555,8 +574,10 @@ export function catalogLooksStudentFiltered(fullRows, studentRows) {
   const full = Array.isArray(fullRows) ? fullRows : [];
   const student = Array.isArray(studentRows) ? studentRows : [];
   if (!student.length) return false;
-  if (!full.length) return student.length > 0 && student.length <= 25;
+  if (!full.length) return student.length > 0 && student.length <= 40;
   if (student.length >= full.length) return false;
+  // Küçük atanmış liste (Online Sınavlar gibi) — oran yüksek olsa bile güven
+  if (student.length <= 25 && student.length < full.length) return true;
   if (student.length > Math.floor(full.length * 0.75)) return false;
   return true;
 }
@@ -640,7 +661,14 @@ function coerceFileUrl(u) {
   if (s.startsWith('//')) return `https:${s}`;
   if (/^https?:\/\//i.test(s)) return s;
   if (s.startsWith('/')) return s;
-  if (/\.pdf(\?|$)/i.test(s) || /^(files|uploads|cdn|storage)\//i.test(s)) {
+  // Edesis CDN: uzantısız UUID (rehber: denemeUrl çoğu zaman .pdf’siz)
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(\.pdf)?$/i.test(s)) {
+    return `/files/${s}`;
+  }
+  if (/\.pdf(\?|$)/i.test(s) || /^(files|uploads|cdn|storage|file)\//i.test(s)) {
+    return `/${s.replace(/^\/+/, '')}`;
+  }
+  if (/^[a-z0-9][a-z0-9_./%-]*\.(pdf|bin)(\?|$)/i.test(s)) {
     return `/${s.replace(/^\/+/, '')}`;
   }
   return '';
@@ -732,8 +760,15 @@ export function resolveEdesisFileUrl(fileUrl, cfg = {}) {
   const s = coerceFileUrl(fileUrl);
   if (!s) return '';
   if (/^https?:\/\//i.test(s)) return s;
-  const base = String(cfg.baseUrl || getEdesisConfig().baseUrl || '').replace(/\/+$/, '');
-  return s.startsWith('/') ? `${base}${s}` : '';
+  const bases = [
+    String(cfg.baseUrl || getEdesisConfig().baseUrl || '').replace(/\/+$/, ''),
+    String(process.env.EDESIS_FILE_BASE_URL || '').replace(/\/+$/, ''),
+    String(process.env.EDESIS_CDN_BASE_URL || '').replace(/\/+$/, '')
+  ].filter(Boolean);
+  const path = s.startsWith('/') ? s : `/${s}`;
+  if (!bases.length) return path;
+  // API host + /files/{uuid} — Edesis çoğu zaman aynı domain üzerinden verir
+  return `${bases[0]}${path}`;
 }
 
 function dedupeBookletFiles(files) {
@@ -2265,7 +2300,10 @@ async function probeEdesisExamBookletSources(examId, localCfg) {
   const paths = [
     V1_PATHS.examById(id),
     V1_PATHS.examBooklets(id),
-    V1_PATHS.examFiles(id)
+    V1_PATHS.examFiles(id),
+    V1_PATHS.examPdf(id),
+    `${V1_PATHS.examPdf(id)}?kitapcikTuru=A`,
+    `${V1_PATHS.examPdf(id)}?kitapcikTuru=B`
   ];
   const collected = [];
   let examMeta = {};
@@ -2326,9 +2364,14 @@ export async function loadEdesisExamBookletPdf(examId, kitapcikTuru, cfgOverride
   const kt = String(kitapcikTuru || '').trim();
   const tryUrls = [];
   if (file?.url) tryUrls.push(file.url);
+  for (const f of files || []) {
+    if (f?.url) tryUrls.push(f.url);
+  }
   if (kt) tryUrls.push(joinUrl(localCfg.baseUrl, `${V1_PATHS.examPdf(id)}?kitapcikTuru=${encodeURIComponent(kt)}`));
   tryUrls.push(joinUrl(localCfg.baseUrl, V1_PATHS.examPdf(id)));
   tryUrls.push(joinUrl(localCfg.baseUrl, V1_PATHS.examFiles(id)));
+  tryUrls.push(joinUrl(localCfg.baseUrl, V1_PATHS.examBooklets(id)));
+  tryUrls.push(joinUrl(localCfg.baseUrl, V1_PATHS.examById(id)));
 
   const seen = new Set();
   for (const raw of tryUrls) {
@@ -2339,6 +2382,32 @@ export async function loadEdesisExamBookletPdf(examId, kitapcikTuru, cfgOverride
       const got = await fetchEdesisUrlBuffer(url, localCfg);
       if (got.ok && got.looksPdf) {
         return { ok: true, files, file, buf: got.buf, contentType: got.contentType, url: got.url, looksPdf: true, status: got.status };
+      }
+      // JSON yanıtında gömülü PDF url varsa topla ve dene
+      if (got.ok && got.contentType.includes('json')) {
+        try {
+          const json = JSON.parse(got.buf.toString('utf8'));
+          for (const nested of collectEdesisBookletFiles(json)) {
+            const nestedUrl = resolveEdesisFileUrl(nested.url, localCfg);
+            if (!nestedUrl || seen.has(nestedUrl)) continue;
+            seen.add(nestedUrl);
+            const nestedGot = await fetchEdesisUrlBuffer(nestedUrl, localCfg);
+            if (nestedGot.ok && nestedGot.looksPdf) {
+              return {
+                ok: true,
+                files: dedupeBookletFiles([...files, nested]),
+                file: nested,
+                buf: nestedGot.buf,
+                contentType: nestedGot.contentType,
+                url: nestedGot.url,
+                looksPdf: true,
+                status: nestedGot.status
+              };
+            }
+          }
+        } catch {
+          /* ignore */
+        }
       }
     } catch {
       /* sonraki aday */
