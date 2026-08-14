@@ -54,6 +54,47 @@ function readSaved(storageKey: string): Record<string, string> {
   }
 }
 
+function foldLessonName(s: string): string {
+  return String(s || '')
+    .toLocaleLowerCase('tr-TR')
+    .replace(/ı/g, 'i')
+    .replace(/İ/g, 'i')
+    .replace(/ş/g, 's')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/** LGS sanal optik — Edesis 2 sütun düzeni (satır satır): Türkçe|İnkılap, Din|İngilizce, Matematik|Fen */
+const LGS_LESSON_ORDER: { rank: number; test: (n: string) => boolean }[] = [
+  { rank: 0, test: (n) => /\bturkce\b/.test(n) },
+  { rank: 1, test: (n) => /\binkilap\b|\btarih\b/.test(n) && !/\bdin\b/.test(n) },
+  { rank: 2, test: (n) => /\bdin\b/.test(n) },
+  { rank: 3, test: (n) => /\bingilizce\b|\benglish\b/.test(n) },
+  { rank: 4, test: (n) => /\bmatematik\b|\bmath\b/.test(n) },
+  { rank: 5, test: (n) => /\bfen\b/.test(n) }
+];
+
+function lgsLessonRank(lessonName: string): number {
+  const n = foldLessonName(lessonName);
+  for (const row of LGS_LESSON_ORDER) {
+    if (row.test(n)) return row.rank;
+  }
+  return 50;
+}
+
+export function sortLgsOpticalLessons<T extends { lessonName?: string | null }>(lessons: T[]): T[] {
+  return [...(lessons || [])].sort((a, b) => {
+    const ra = lgsLessonRank(String(a.lessonName || ''));
+    const rb = lgsLessonRank(String(b.lessonName || ''));
+    if (ra !== rb) return ra - rb;
+    return String(a.lessonName || '').localeCompare(String(b.lessonName || ''), 'tr');
+  });
+}
+
 function lessonTabLabel(lesson: EdesisExamStructureLesson, examType?: string | null): string {
   const name = String(lesson.lessonName || 'Ders').trim();
   const prefix = String(examType || '').trim();
@@ -168,6 +209,10 @@ export default function EdesisOpticalSheet({
   const family = detectFamily(examTitle, examType, examFamily);
   const dual = bookletMode === 'dual-sozel-sayisal' || family === 'lgs';
   const choices = useMemo(() => opticalChoices(family, choiceCount), [family, choiceCount]);
+  const orderedLessons = useMemo(
+    () => (dual ? sortLgsOpticalLessons(lessons) : lessons),
+    [dual, lessons]
+  );
   const [answers, setAnswers] = useState<Record<string, string>>(() => readSaved(storageKey));
   const [savedFlash, setSavedFlash] = useState(false);
   const [activeLessonKey, setActiveLessonKey] = useState('');
@@ -179,13 +224,13 @@ export default function EdesisOpticalSheet({
   const lessonKey = (lesson: EdesisExamStructureLesson) => `${lesson.lessonId}:${lesson.dersGrupId}`;
 
   const filled = useMemo(() => {
-    return lessons.map((lesson) => {
+    return orderedLessons.map((lesson) => {
       const key = lessonKey(lesson);
       const cevaplar = padAnswers(answers[key] || '', lesson.questionCount, choices);
       const marked = cevaplar.replace(/ /g, '').length;
       return { lesson, cevaplar, marked };
     });
-  }, [lessons, answers, choices]);
+  }, [orderedLessons, answers, choices]);
 
   useEffect(() => {
     if (!filled.length) {
@@ -299,7 +344,7 @@ export default function EdesisOpticalSheet({
           <div
             className={
               dual
-                ? 'grid grid-cols-2 gap-1 border-b border-slate-200 px-2 py-2 sm:grid-cols-3'
+                ? 'grid grid-cols-2 gap-1 border-b border-slate-200 px-2 py-2'
                 : 'flex gap-1 overflow-x-auto border-b border-slate-200 px-2 pt-2'
             }
           >
