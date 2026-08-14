@@ -1,7 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-/** Mirror of EdesisOpticalSheet LGS sort — keep in sync with UI */
 function foldLessonName(s) {
   return String(s || '')
     .toLocaleLowerCase('tr-TR')
@@ -25,24 +24,37 @@ const LGS_LESSON_ORDER = [
   { rank: 5, test: (n) => /\bfen\b/.test(n) }
 ];
 
-function lgsLessonRank(lessonName) {
+const TYT_LESSON_ORDER = [
+  { rank: 0, test: (n) => /\bturkce\b/.test(n) },
+  { rank: 1, test: (n) => /\bsosyal\b/.test(n) },
+  { rank: 2, test: (n) => /\bmatematik\b|\bmath\b/.test(n) },
+  { rank: 3, test: (n) => /\bfen\b/.test(n) },
+  { rank: 1.1, test: (n) => /\btarih\b/.test(n) },
+  { rank: 1.2, test: (n) => /\bcografya\b/.test(n) },
+  { rank: 1.3, test: (n) => /\bfelsefe\b/.test(n) },
+  { rank: 1.4, test: (n) => /\bdin\b/.test(n) }
+];
+
+function lessonRankForFamily(family, lessonName) {
   const n = foldLessonName(lessonName);
-  for (const row of LGS_LESSON_ORDER) {
+  const table = family === 'lgs' ? LGS_LESSON_ORDER : family === 'yks' || family === 'tyt' ? TYT_LESSON_ORDER : null;
+  if (!table) return 50;
+  for (const row of table) {
     if (row.test(n)) return row.rank;
   }
   return 50;
 }
 
-function sortLgsOpticalLessons(lessons) {
+function sortOpticalLessonsByFamily(lessons, family) {
   return [...(lessons || [])].sort((a, b) => {
-    const ra = lgsLessonRank(String(a.lessonName || ''));
-    const rb = lgsLessonRank(String(b.lessonName || ''));
+    const ra = lessonRankForFamily(family, String(a.lessonName || ''));
+    const rb = lessonRankForFamily(family, String(b.lessonName || ''));
     if (ra !== rb) return ra - rb;
     return String(a.lessonName || '').localeCompare(String(b.lessonName || ''), 'tr');
   });
 }
 
-describe('sortLgsOpticalLessons', () => {
+describe('sortOpticalLessonsByFamily', () => {
   it('orders LGS tabs as Türkçe|İnkılap / Din|İngilizce / Matematik|Fen', () => {
     const shuffled = [
       { lessonName: 'LGS-FEN BİLİMLERİ' },
@@ -53,7 +65,7 @@ describe('sortLgsOpticalLessons', () => {
       { lessonName: 'LGS-İNKILAP TARİHİ' }
     ];
     assert.deepEqual(
-      sortLgsOpticalLessons(shuffled).map((x) => x.lessonName),
+      sortOpticalLessonsByFamily(shuffled, 'lgs').map((x) => x.lessonName),
       [
         'LGS-TÜRKÇE',
         'LGS-İNKILAP TARİHİ',
@@ -62,6 +74,19 @@ describe('sortLgsOpticalLessons', () => {
         'LGS-MATEMATİK',
         'LGS-FEN BİLİMLERİ'
       ]
+    );
+  });
+
+  it('orders TYT tabs as Türkçe|Sosyal / Matematik|Fen', () => {
+    const shuffled = [
+      { lessonName: 'TYT-FEN BİLİMLERİ' },
+      { lessonName: 'TYT-MATEMATİK' },
+      { lessonName: 'TYT-SOSYAL BİLİMLER' },
+      { lessonName: 'TYT-TÜRKÇE' }
+    ];
+    assert.deepEqual(
+      sortOpticalLessonsByFamily(shuffled, 'yks').map((x) => x.lessonName),
+      ['TYT-TÜRKÇE', 'TYT-SOSYAL BİLİMLER', 'TYT-MATEMATİK', 'TYT-FEN BİLİMLERİ']
     );
   });
 });

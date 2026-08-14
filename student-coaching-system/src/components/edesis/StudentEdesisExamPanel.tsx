@@ -243,7 +243,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
               : r.examFamily || 'generic';
       const mode =
         family === 'lgs' || r.bookletMode === 'dual-sozel-sayisal' ? 'dual-sozel-sayisal' : r.bookletMode || 'single';
-      const firstLetter = books[0].kitapcikTuru || 'A';
+      const firstLetter = String(books[0]?.kitapcikTuru || 'A').trim().toUpperCase() || 'A';
       setActiveExam(exam);
       setBooklets(books);
       setBookletPdfs(r.bookletPdfs || exam.bookletPdfs || []);
