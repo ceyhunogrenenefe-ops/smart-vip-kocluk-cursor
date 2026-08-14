@@ -497,13 +497,10 @@ function collectEdesisIdList(obj, keys) {
  */
 export function catalogExamAssignedToStudent(exam, scope = {}) {
   const flat = flattenEdesisRow(exam);
-  const nested =
-    flat.exam && typeof flat.exam === 'object'
-      ? flattenEdesisRow(flat.exam)
-      : flat.sinav && typeof flat.sinav === 'object'
-        ? flattenEdesisRow(flat.sinav)
-        : null;
-  const sources = nested ? [flat, nested] : [flat];
+  const nestedCandidates = [flat.exam, flat.sinav, flat.result, flat.data]
+    .filter((x) => x && typeof x === 'object' && !Array.isArray(x))
+    .map((x) => flattenEdesisRow(x));
+  const sources = [flat, ...nestedCandidates];
 
   for (const src of sources) {
     if (src.isAllClasses === true || src.allClasses === true || src.tumSiniflar === true) {
@@ -516,7 +513,11 @@ export function catalogExamAssignedToStudent(exam, scope = {}) {
       'ogrenciIdList',
       'studentIdList',
       'students',
-      'ogrenciler'
+      'ogrenciler',
+      'sinavOgrenciler',
+      'examStudents',
+      'ogrenciListesi',
+      'assignedStudents'
     ]);
     const wantStudent = normEdesisId(scope.edesisStudentId);
     if (studentIds.length && wantStudent) {
@@ -529,7 +530,8 @@ export function catalogExamAssignedToStudent(exam, scope = {}) {
       'sinifId',
       'classId',
       'classIds',
-      'subeIds'
+      'subeIds',
+      'sinifIdList'
     ]);
     const wantClass = normEdesisId(scope.classroomId);
     if (classroomIds.length && wantClass) {
@@ -537,6 +539,11 @@ export function catalogExamAssignedToStudent(exam, scope = {}) {
     }
   }
   return null;
+}
+
+/** Detay zenginleştirme sırası — yeni tanımlanan denemeler önce */
+export function sortCatalogExamsByRecencyDesc(rows) {
+  return [...(rows || [])].sort((a, b) => catalogExamRecencyMs(b) - catalogExamRecencyMs(a));
 }
 
 function catalogExamRecencyMs(exam) {
@@ -566,20 +573,37 @@ export function isRecentOpenCatalogExam(exam, now = new Date(), windowDays = OPE
   return diffDays <= windowDays;
 }
 
+function catalogRowExamId(row) {
+  return String(row?.id ?? row?.examId ?? row?.sinavId ?? '').trim();
+}
+
 /**
- * GET /exams?StudentId= gerçekten süzdü mü?
- * Yok sayılıp tam katalog (veya neredeyse tam) dönüyorsa false.
+ * GET /exams?StudentId= / ClassroomId= gerçekten süzdü mü?
+ * Tam katalog dökümü (aynı id kümesi) → false.
+ * Küçük kurumlarda oran yüksek olsa bile id alt kümesi → true (eski %75 kuralı atanmışları kaçırıyordu).
  */
 export function catalogLooksStudentFiltered(fullRows, studentRows) {
   const full = Array.isArray(fullRows) ? fullRows : [];
   const student = Array.isArray(studentRows) ? studentRows : [];
   if (!student.length) return false;
-  if (!full.length) return student.length > 0 && student.length <= 40;
-  if (student.length >= full.length) return false;
-  // Küçük atanmış liste (Online Sınavlar gibi) — oran yüksek olsa bile güven
-  if (student.length <= 25 && student.length < full.length) return true;
-  if (student.length > Math.floor(full.length * 0.75)) return false;
-  return true;
+
+  const fullIds = new Set(full.map(catalogRowExamId).filter(Boolean));
+  const studentIds = [...new Set(student.map(catalogRowExamId).filter(Boolean))];
+  if (!studentIds.length) return false;
+  if (!fullIds.size) return studentIds.length > 0 && studentIds.length <= 80;
+
+  // API StudentId’yi yok sayıp tüm kataloğu döndü
+  if (studentIds.length >= fullIds.size) {
+    const same = studentIds.every((id) => fullIds.has(id));
+    if (same) return false;
+  }
+
+  const subsetOfFull = studentIds.every((id) => fullIds.has(id));
+  if (subsetOfFull && studentIds.length < fullIds.size) return true;
+
+  // Farklı şekil ama belirgin şekilde daha kısa liste
+  if (studentIds.length < full.length && studentIds.length <= 80) return true;
+  return false;
 }
 
 /** Henüz sonucu olmayan, bu öğrenciye tanımlanmış katalog denemesi */
