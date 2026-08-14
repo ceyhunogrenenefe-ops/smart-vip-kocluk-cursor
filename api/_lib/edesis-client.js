@@ -448,6 +448,107 @@ export function filterEdesisExamsForStudentProgram(items, programKeys) {
   );
 }
 
+const OPEN_CATALOG_WINDOW_DAYS = 21;
+
+export function isOpenEdesisCatalogExam(exam) {
+  const status = String(exam?.resultStatus || exam?.status || 'None').trim();
+  return /^(none|processing)$/i.test(status);
+}
+
+function collectEdesisIdList(obj, keys) {
+  const out = [];
+  for (const k of keys) {
+    const v = obj?.[k];
+    if (v == null || v === '') continue;
+    if (Array.isArray(v)) {
+      for (const it of v) {
+        if (it != null && typeof it === 'object') {
+          const id = pickStr(it, ['id', 'studentId', 'ogrenciId', 'classroomId']);
+          if (id) out.push(id);
+        } else if (String(it).trim()) {
+          out.push(String(it).trim());
+        }
+      }
+    } else if (typeof v === 'string' && v.includes(',')) {
+      out.push(...v.split(',').map((s) => s.trim()).filter(Boolean));
+    } else if (String(v).trim()) {
+      out.push(String(v).trim());
+    }
+  }
+  return out;
+}
+
+/**
+ * Katalog satırı bu öğrenciye atanmış mı?
+ * true / false / null (alan yok, bilinmiyor)
+ */
+export function catalogExamAssignedToStudent(exam, scope = {}) {
+  const flat = flattenEdesisRow(exam);
+  const studentIds = collectEdesisIdList(flat, [
+    'studentIds',
+    'ogrenciIds',
+    'assignedStudentIds',
+    'ogrenciIdList',
+    'studentIdList'
+  ]);
+  const wantStudent = normEdesisId(scope.edesisStudentId);
+  if (studentIds.length && wantStudent) {
+    return studentIds.some((id) => normEdesisId(id) === wantStudent);
+  }
+  const classroomIds = collectEdesisIdList(flat, [
+    'classroomIds',
+    'sinifIds',
+    'classroomId',
+    'sinifId',
+    'classId'
+  ]);
+  const wantClass = normEdesisId(scope.classroomId);
+  if (classroomIds.length && wantClass) {
+    return classroomIds.some((id) => normEdesisId(id) === wantClass);
+  }
+  return null;
+}
+
+function catalogExamRecencyMs(exam) {
+  const flat = flattenEdesisRow(exam);
+  let best = 0;
+  for (const k of [
+    'lastModificationTime',
+    'modifiedDate',
+    'updatedAt',
+    'resultsUpdatedAt',
+    'creationTime',
+    'createdDate',
+    'createdAt',
+    'examDate',
+    'date'
+  ]) {
+    const t = Date.parse(flat[k]);
+    if (Number.isFinite(t) && t > best) best = t;
+  }
+  return best;
+}
+
+export function isRecentOpenCatalogExam(exam, now = new Date(), windowDays = OPEN_CATALOG_WINDOW_DAYS) {
+  const ms = catalogExamRecencyMs(exam);
+  if (!ms) return false;
+  const diffDays = (now.getTime() - ms) / 86400000;
+  return diffDays <= windowDays;
+}
+
+/** Henüz sonucu olmayan, öğrenciye düşmesi gereken katalog denemesi */
+export function shouldOfferUntakenCatalogExam(exam, scope = {}, now = new Date()) {
+  if (!exam || !isOpenEdesisCatalogExam(exam)) return false;
+  const keys = scope.programKeys instanceof Set ? scope.programKeys : new Set(scope.programKeys || []);
+  const assigned = catalogExamAssignedToStudent(exam, scope);
+  if (assigned === false) return false;
+  if (keys.size && !edesisCatalogExamMatchesProgram(exam, keys)) return false;
+  if (assigned === true) return true;
+  if (!keys.size) return false;
+  if (scope.assignedCatalogOnly) return true;
+  return isRecentOpenCatalogExam(exam, now);
+}
+
 const BOOKLET_URL_KEYS = [
   'bookletUrl',
   'bookletPDFUrl',
@@ -631,21 +732,31 @@ export function formatEdesisAvailableExamItem(examId, catalog, resultRow, meta =
 }
 
 /**
- * Öğrenciye gösterilecek denemeler: yalnızca GET /exams/results?StudentId= satırları.
- * Katalog sadece ad / tarih zenginleştirir; kurumun diğer denemeleri eklenmez.
+ * Öğrenciye gösterilecek denemeler:
+ * 1) GET /exams/results?StudentId= satırları (girilmiş / Edesis sonuç kaydı)
+ * 2) Henüz sonuç yoksa: açık (None/Processing) katalog denemeleri —
+ *    öğrenci/şube ataması varsa veya son 21 günde tanımlanmışsa.
+ * Kurumun eski Ready kataloğu ve başka kademedeki denemeler eklenmez.
  */
 export function buildStudentAvailableEdesisExamItems({
   catalogRows = [],
   resultRows = [],
+  assignedCatalogRows = null,
   edesisStudentId,
   programKeys = new Set(),
+  classroomId = '',
   studentId,
-  institutionId
+  institutionId,
+  now = new Date()
 } = {}) {
   const catalogById = new Map();
   for (const ex of catalogRows || []) {
     const id = pickEdesisCatalogExamId(ex);
     if (id) catalogById.set(id, ex);
+  }
+  for (const ex of assignedCatalogRows || []) {
+    const id = pickEdesisCatalogExamId(ex);
+    if (id && !catalogById.has(id)) catalogById.set(id, ex);
   }
 
   const resultByExam = new Map();
@@ -656,17 +767,40 @@ export function buildStudentAvailableEdesisExamItems({
   }
 
   const items = [];
-  for (const [examId, resultRow] of resultByExam) {
+  const seen = new Set();
+  const push = (examId, catalog, resultRow) => {
+    if (!examId || seen.has(examId)) return;
+    seen.add(examId);
     items.push(
-      formatEdesisAvailableExamItem(examId, catalogById.get(examId) || null, resultRow, {
+      formatEdesisAvailableExamItem(examId, catalog, resultRow, {
         studentId,
         institutionId
       })
     );
+  };
+
+  for (const [examId, resultRow] of resultByExam) {
+    push(examId, catalogById.get(examId) || null, resultRow);
+  }
+
+  const keys = programKeys instanceof Set ? programKeys : new Set(programKeys || []);
+  const assignedOnly = Array.isArray(assignedCatalogRows);
+  const offerRows = assignedOnly ? assignedCatalogRows : catalogRows || [];
+  const scope = {
+    edesisStudentId,
+    classroomId,
+    programKeys: keys,
+    assignedCatalogOnly: assignedOnly
+  };
+  for (const ex of offerRows) {
+    const examId = pickEdesisCatalogExamId(ex);
+    if (!examId || seen.has(examId)) continue;
+    if (!shouldOfferUntakenCatalogExam(ex, scope, now)) continue;
+    push(examId, catalogById.get(examId) || ex, null);
   }
 
   items.sort((a, b) => String(b.examDate || '').localeCompare(String(a.examDate || '')));
-  return filterEdesisExamsForStudentProgram(items, programKeys);
+  return filterEdesisExamsForStudentProgram(items, keys);
 }
 
 function looksLikeSubjectRow(s) {
@@ -1658,6 +1792,9 @@ export async function fetchEdesisExamsCatalog(cfgOverride = {}, query = {}) {
   const q = {};
   if (query.Filter) q.Filter = query.Filter;
   if (query.resultsUpdatedAfter) q.resultsUpdatedAfter = query.resultsUpdatedAfter;
+  if (query.StudentId) q.StudentId = query.StudentId;
+  if (query.studentId) q.studentId = query.studentId;
+  if (query.ClassroomId) q.ClassroomId = query.ClassroomId;
   const bulk = await fetchAllPaged(localCfg, V1_PATHS.exams, q);
   return {
     rows: bulk.rows || [],
