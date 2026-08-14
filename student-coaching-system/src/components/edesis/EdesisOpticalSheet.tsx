@@ -80,8 +80,8 @@ export default function EdesisOpticalSheet({ lessons, busy, submitLabel = 'Cevap
                         onClick={() => setChoice(lesson, i, ch)}
                         className={`h-6 w-6 rounded-full text-[10px] font-bold ${
                           selected === ch
-                            ? 'bg-indigo-600 text-white'
-                            : 'bg-white text-slate-600 hover:bg-indigo-50'
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-white text-slate-600 hover:bg-emerald-50'
                         }`}
                         aria-label={`Soru ${i + 1} ${ch}`}
                       >
@@ -99,7 +99,7 @@ export default function EdesisOpticalSheet({ lessons, busy, submitLabel = 'Cevap
         type="button"
         disabled={busy || !lessons.length}
         onClick={handleSubmit}
-        className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white disabled:opacity-50 sm:w-auto"
+        className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white disabled:opacity-50 sm:w-auto"
       >
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
         {submitLabel}

@@ -1168,8 +1168,8 @@ export default function EdesisPage() {
             <code className="rounded bg-slate-100 px-1">POST /exams/{'{id}'}/results</code>.{' '}
             <strong>replace gövde alanıdır</strong> — <code>?replace=true</code> yok sayılır. Scope:{' '}
             <code>exam_results:write</code> (admin/custom). Öğrenciler kendi optiklerini{' '}
-            <Link to="/student-edesis" className="font-semibold text-indigo-700 hover:underline">
-              Edesis sınavlarım
+            <Link to="/academic-center?tab=exam" className="font-semibold text-indigo-700 hover:underline">
+              Akademik Merkez → Deneme / Optik
             </Link>{' '}
             sayfasından gönderir.
           </p>

@@ -66,7 +66,7 @@ Sayfalama: `MaxResultCount` (liste max 1000, kırılım max 100), `SkipCount`
 ## Öğrencinin panelden sınava girmesi
 
 1. Koç **Edesis** sayfasından öğrenciyi `edesis_ogrenci_id` ile bağlar.
-2. Öğrenci menü: **Edesis sınavlarım** (`/student-edesis`) → **Sınava gir**.
+2. Öğrenci: **Akademik Merkez → Deneme / Optik** (`/academic-center?tab=exam`) → **Sınava gir** / **Sonuçlarım**.
 3. Kitapçık seçilir, her ders için optik işaretlenir (`cevaplar` uzunluğu = `questionCount`).
 4. Sistem `ogrenciId` + `kitapcikTuru` + tüm `dersCevaplari` ile POST eder (`replace` gövdede).
 5. `jobId` ile durum izlenir (`Pending` / `Running` / `Completed` / `Failed` / `NotFound`).
