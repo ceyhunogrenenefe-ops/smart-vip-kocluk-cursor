@@ -236,9 +236,58 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     assert.equal(items[0].canTake, true);
     assert.equal(items[0].hasStudentResult, false);
   });
+
+  it('offers Ready exams when this student is in studentIds (classmate already finished)', () => {
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [
+        {
+          id: 77,
+          name: 'LGS TÜRKÇE KTT 1',
+          examType: 'LGS',
+          resultStatus: 'Ready',
+          examDate: '2026-04-18',
+          studentIds: [7105077]
+        }
+      ],
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' })
+    });
+    assert.deepEqual(items.map((x) => x.examId), ['77']);
+    assert.equal(items[0].canTake, true);
+  });
+
+  it('offers classroom-assigned open exams', () => {
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [
+        {
+          id: 88,
+          name: '7 SINIF PAYLAŞIM MİS-3',
+          examType: 'LGS',
+          resultStatus: 'None',
+          examDate: '2026-04-18',
+          classroomId: 501
+        }
+      ],
+      resultRows: [],
+      edesisStudentId: '7105077',
+      classroomId: '501',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '7' })
+    });
+    assert.deepEqual(items.map((x) => x.examId), ['88']);
+  });
 });
 
 describe('collectEdesisBookletFiles', () => {
+  it('collects bare UUID denemeUrl as booklet file', () => {
+    const files = collectEdesisBookletFiles({
+      denemeUrl: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+      sinavUrl: 'https://cdn.example.com/kitapcik.pdf'
+    });
+    assert.equal(files.some((f) => f.url.includes('a1b2c3d4-e5f6-7890-abcd-ef1234567890')), true);
+    assert.equal(files.some((f) => /kitapcik\.pdf/i.test(f.url)), true);
+  });
+
   it('extracts bookletUrl even without .pdf extension', () => {
     const files = collectEdesisBookletFiles({
       bookletUrl: 'https://cdn.edesis.com/files/1e373580-3cda-4595-a424-26fdb363cc670',
