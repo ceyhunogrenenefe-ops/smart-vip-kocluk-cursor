@@ -206,35 +206,46 @@ export function parseEdesisResponseText(text) {
 
 export async function fetchEdesisJson(cfg, path, { method = 'GET', body, timeoutMs = 30000 } = {}) {
   const url = joinUrl(cfg.baseUrl, path);
-  const init = {
-    method,
-    headers: buildHeaders(cfg, { forGet: method === 'GET' }),
-    signal: AbortSignal.timeout(timeoutMs)
-  };
-  if (body !== undefined && method !== 'GET') {
-    init.body = typeof body === 'string' ? body : JSON.stringify(body);
-  }
-
-  const res = await fetch(url, init);
-  const text = await res.text();
-  const contentType = res.headers.get('content-type') || '';
-  const parsed = parseEdesisResponseText(text);
-  const json = parsed.parseOk ? parsed.json : { _raw: parsed.rawPreview, _invalidBody: parsed.invalidBody };
-
-  return {
-    ok: res.ok,
-    status: res.status,
-    url,
-    json,
-    parseOk: parsed.parseOk,
-    contentType,
-    rawPreview: parsed.rawPreview,
-    text: stripResponseText(text)?.slice(0, 300),
-    rateLimit: {
-      limit: res.headers.get('x-ratelimit-limit'),
-      remaining: res.headers.get('x-ratelimit-remaining')
+  const maxAttempts = 3;
+  let last = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const init = {
+      method,
+      headers: buildHeaders(cfg, { forGet: method === 'GET' }),
+      signal: AbortSignal.timeout(timeoutMs)
+    };
+    if (body !== undefined && method !== 'GET') {
+      init.body = typeof body === 'string' ? body : JSON.stringify(body);
     }
-  };
+
+    const res = await fetch(url, init);
+    const text = await res.text();
+    const contentType = res.headers.get('content-type') || '';
+    const parsed = parseEdesisResponseText(text);
+    const json = parsed.parseOk ? parsed.json : { _raw: parsed.rawPreview, _invalidBody: parsed.invalidBody };
+
+    last = {
+      ok: res.ok,
+      status: res.status,
+      url,
+      json,
+      parseOk: parsed.parseOk,
+      contentType,
+      rawPreview: parsed.rawPreview,
+      text: stripResponseText(text)?.slice(0, 300),
+      rateLimit: {
+        limit: res.headers.get('x-ratelimit-limit'),
+        remaining: res.headers.get('x-ratelimit-remaining')
+      }
+    };
+
+    if (res.status !== 429 || attempt === maxAttempts - 1) return last;
+    const retryAfterRaw = res.headers.get('retry-after');
+    const retryAfter = Number(retryAfterRaw);
+    const waitMs = Number.isFinite(retryAfter) ? Math.min(Math.max(retryAfter, 1) * 1000, 20000) : 2000 * (attempt + 1);
+    await sleep(waitMs);
+  }
+  return last;
 }
 
 function isEdesisErrorBody(json) {
@@ -1186,7 +1197,7 @@ function extractJobId(json) {
   );
 }
 
-async function pollEdesisReportJob(cfg, jobId, { maxAttempts = 30, delayMs = 2000 } = {}) {
+export async function pollEdesisReportJob(cfg, jobId, { maxAttempts = 30, delayMs = 2000 } = {}) {
   const jid = String(jobId || '').trim();
   if (!jid) throw new Error('report_job_id_missing');
 

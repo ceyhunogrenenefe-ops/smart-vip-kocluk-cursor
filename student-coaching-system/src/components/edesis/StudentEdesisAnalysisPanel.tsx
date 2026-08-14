@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { AlertTriangle, BarChart3, ExternalLink, FileText, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ExamResult } from '../../types';
@@ -139,6 +140,13 @@ export default function StudentEdesisAnalysisPanel({ exams, studentId, edesisStu
 
   return (
     <div className="space-y-4">
+      <Link
+        to="/edesis-analiz"
+        className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900"
+      >
+        <BarChart3 className="h-4 w-4" />
+        Son 5 / 10 gelişim ve koç değerlendirmesi
+      </Link>
       <div className="flex gap-2">
         <button
           type="button"

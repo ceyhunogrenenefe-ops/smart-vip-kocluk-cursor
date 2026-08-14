@@ -420,6 +420,36 @@ async function upsertExams(exams) {
 }
 
 async function runSync(actor) {
+  const started = new Date().toISOString();
+  let result;
+  try {
+    result = await runSyncInner(actor);
+  } catch (e) {
+    result = { ok: false, error: errorMessage(e) };
+  }
+  try {
+    await supabaseAdmin.from('edesis_sync_logs').insert({
+      institution_id: actor?.institution_id || null,
+      started_at: started,
+      finished_at: new Date().toISOString(),
+      status: result?.ok ? 'completed' : 'failed',
+      source: actor?.role === 'cron' ? 'cron' : 'manual',
+      fetched: result?.fetched || 0,
+      matched: result?.matched || 0,
+      imported: result?.imported || 0,
+      error_message: result?.error || result?.diagnosis || null,
+      payload: {
+        unmatchedCount: result?.unmatchedCount || 0,
+        httpStatus: result?.httpStatus || null
+      }
+    });
+  } catch {
+    /* tablo yoksa senkron yine de döner */
+  }
+  return result;
+}
+
+async function runSyncInner(actor) {
   const cfg = getEdesisConfig();
   if (!cfg.apiKey) {
     return { ok: false, error: 'EDESIS_API_KEY_missing', hint: 'Vercel Environment Variables' };
@@ -1026,13 +1056,18 @@ export default async function handler(req, res) {
       }
 
       try {
+        const codesRaw = req.query?.reportCodes ?? req.body?.reportCodes ?? [102];
+        const reportCodes = (Array.isArray(codesRaw) ? codesRaw : String(codesRaw).split(','))
+          .map((c) => Number(c))
+          .filter((c) => [102, 104, 105].includes(c));
+        const forceNew = String(req.query?.forceNew || req.body?.forceNew || '') === '1' || req.body?.forceNew === true;
         const report = await generateEdesisExamReport(
           {
             examId,
             termId,
             studentIds: [edesisStudentId],
-            reportCodes: [102],
-            forceNew: false
+            reportCodes: reportCodes.length ? reportCodes : [102],
+            forceNew
           },
           cfg
         );
@@ -1602,3 +1637,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false, error: msg });
   }
 }
+
+export { runSync };
