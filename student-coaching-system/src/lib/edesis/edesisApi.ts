@@ -104,6 +104,12 @@ export async function refreshEdesisExamDetail(params: {
   return j;
 }
 
+function blobLooksLikePdf(buf: ArrayBuffer): boolean {
+  if (!buf || buf.byteLength < 5) return false;
+  const head = new TextDecoder('latin1').decode(new Uint8Array(buf).subarray(0, 8));
+  return head.includes('%PDF-');
+}
+
 export async function fetchEdesisKarnePdf(params: {
   examId: string;
   studentId?: string;
@@ -121,6 +127,45 @@ export async function fetchEdesisKarnePdf(params: {
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j.error || j.message || j.hint || res.statusText);
   return j;
+}
+
+export async function fetchEdesisHataKarnesiPdf(params: {
+  examId: string;
+  studentId?: string;
+  edesisStudentId?: string;
+}): Promise<{ blob?: Blob; reportUrl?: string | null; message?: string; hint?: string; source?: string }> {
+  const qs = new URLSearchParams({
+    op: 'exam-hata-karnesi-pdf',
+    examId: params.examId,
+    download: '1'
+  });
+  if (params.edesisStudentId) qs.set('edesisStudentId', params.edesisStudentId);
+  if (params.studentId) qs.set('studentId', params.studentId);
+  const res = await apiFetch(`/api/edesis-sync?${qs.toString()}`, {
+    method: 'POST',
+    headers: { Accept: 'application/pdf,application/json' }
+  });
+  const buf = await res.arrayBuffer();
+  if (blobLooksLikePdf(buf)) {
+    return { blob: new Blob([buf], { type: 'application/pdf' }), message: 'Hata karnesi PDF hazır' };
+  }
+  const text = new TextDecoder().decode(buf);
+  let j: Record<string, unknown> = {};
+  try {
+    j = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+  } catch {
+    j = {};
+  }
+  const reportUrl = typeof j.reportUrl === 'string' ? j.reportUrl : '';
+  if (reportUrl) {
+    return {
+      blob: undefined,
+      reportUrl,
+      message: typeof j.message === 'string' ? j.message : 'Hata karnesi PDF hazır',
+      source: typeof j.source === 'string' ? j.source : undefined
+    };
+  }
+  throw new Error(String(j.hint || j.message || j.error || 'Hata karnesi PDF alınamadı'));
 }
 
 export async function fetchEdesisHubGrades(): Promise<{ ok: boolean; count: number; items: Record<string, unknown>[] }> {
@@ -419,12 +464,6 @@ export async function fetchEdesisExamStructure(examId: string): Promise<{
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j.error || j.message || j.hint || res.statusText);
   return j;
-}
-
-function blobLooksLikePdf(buf: ArrayBuffer): boolean {
-  if (!buf || buf.byteLength < 5) return false;
-  const head = new TextDecoder('latin1').decode(new Uint8Array(buf).subarray(0, 8));
-  return head.includes('%PDF-');
 }
 
 export async function fetchEdesisExamBookletPdf(params: {

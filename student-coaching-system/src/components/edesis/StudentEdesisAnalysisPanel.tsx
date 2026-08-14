@@ -1,7 +1,11 @@
-import { useMemo, useState } from 'react';
-import { AlertTriangle, BarChart3 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, BarChart3, ExternalLink, FileText, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import type { ExamResult } from '../../types';
-import type { EdesisStudentResultsExam } from '../../lib/edesis/edesisApi';
+import {
+  fetchEdesisHataKarnesiPdf,
+  type EdesisStudentResultsExam
+} from '../../lib/edesis/edesisApi';
 import {
   buildExamSubjectMatrix,
   buildHataKarnesi,
@@ -46,20 +50,80 @@ type AnalysisSub = 'hata' | 'deneme';
 type Props = {
   exams: EdesisStudentResultsExam[];
   studentId: string;
+  edesisStudentId?: string;
 };
 
-export default function StudentEdesisAnalysisPanel({ exams, studentId }: Props) {
+export default function StudentEdesisAnalysisPanel({ exams, studentId, edesisStudentId }: Props) {
   const mapped = useMemo(
     () => exams.map((exam) => edesisHubExamToResult(exam, studentId || 'student')),
     [exams, studentId]
   );
   const [sub, setSub] = useState<AnalysisSub>('hata');
   const [selectedId, setSelectedId] = useState(mapped[0]?.id || '');
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   const selected = mapped.find((e) => e.id === selectedId) || mapped[0] || null;
   const hata = selected ? buildHataKarnesi(selected) : [];
   const subjectRows = useMemo(() => summarizeSubjects(mapped), [mapped]);
   const matrix = useMemo(() => buildExamSubjectMatrix(mapped), [mapped]);
+
+  useEffect(() => {
+    return () => {
+      if (pdfUrl && pdfUrl.startsWith('blob:')) URL.revokeObjectURL(pdfUrl);
+    };
+  }, [pdfUrl]);
+
+  useEffect(() => {
+    if (sub !== 'hata' || !selected?.edesisExamId) {
+      return;
+    }
+    let cancelled = false;
+    const examId = selected.edesisExamId;
+    setPdfBusy(true);
+    setPdfError(null);
+    setPdfUrl((prev) => {
+      if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+      return null;
+    });
+    void (async () => {
+      try {
+        const r = await fetchEdesisHataKarnesiPdf({
+          examId,
+          studentId: studentId || undefined,
+          edesisStudentId: edesisStudentId || undefined
+        });
+        if (cancelled) return;
+        if (r.blob && r.blob.size > 8) {
+          setPdfUrl(URL.createObjectURL(r.blob));
+          return;
+        }
+        if (r.reportUrl) {
+          setPdfUrl(r.reportUrl);
+          return;
+        }
+        setPdfError(r.hint || r.message || 'Hata karnesi PDF bulunamadı');
+      } catch (e) {
+        if (!cancelled) {
+          setPdfError(e instanceof Error ? e.message : 'Hata karnesi PDF alınamadı');
+        }
+      } finally {
+        if (!cancelled) setPdfBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sub, selected?.edesisExamId, studentId, edesisStudentId]);
+
+  const openPdfTab = () => {
+    if (!pdfUrl) {
+      toast.warning(pdfError || 'Hata karnesi henüz hazır değil');
+      return;
+    }
+    window.open(pdfUrl, '_blank', 'noopener,noreferrer');
+  };
 
   const tabOn = 'bg-emerald-600 text-white';
   const tabOff = 'border border-slate-200 bg-white text-slate-700';
@@ -116,11 +180,45 @@ export default function StudentEdesisAnalysisPanel({ exams, studentId }: Props) 
           </label>
           {selected ? (
             <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-              <div className="border-b border-amber-100 bg-amber-50 px-4 py-3">
-                <div className="font-bold text-slate-900">{selected.examTitle || selected.examType}</div>
-                <p className="text-xs text-slate-600">Yanlış ve boşlara göre sıralı hata karnesi</p>
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-amber-100 bg-amber-50 px-4 py-3">
+                <div>
+                  <div className="font-bold text-slate-900">{selected.examTitle || selected.examType}</div>
+                  <p className="text-xs text-slate-600">
+                    Edesis hata karnesi — boş ve yanlış yaptığınız soruların PDF’i
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={pdfBusy || !pdfUrl}
+                  onClick={openPdfTab}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-amber-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                >
+                  {pdfBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ExternalLink className="h-3.5 w-3.5" />}
+                  Yeni sekmede aç
+                </button>
               </div>
-              <div className="overflow-x-auto">
+              <div className="min-h-[420px] bg-slate-100">
+                {pdfBusy ? (
+                  <div className="flex h-[420px] flex-col items-center justify-center gap-2 text-sm text-slate-600">
+                    <Loader2 className="h-6 w-6 animate-spin text-amber-600" />
+                    Hata karnesi PDF yükleniyor…
+                  </div>
+                ) : pdfUrl ? (
+                  <iframe title="Hata karnesi PDF" src={pdfUrl} className="h-[640px] w-full border-0 bg-white" />
+                ) : (
+                  <div className="flex h-[420px] flex-col items-center justify-center gap-2 px-6 text-center text-sm text-slate-600">
+                    <FileText className="h-8 w-8 text-slate-400" />
+                    <p>{pdfError || 'Bu deneme için Edesis hata karnesi PDF’si henüz yok.'}</p>
+                    <p className="text-xs text-slate-500">
+                      Karne PDF (puan özeti) ayrıdır. Burada yalnızca boş ve yanlış soruların karnesi gösterilir.
+                    </p>
+                  </div>
+                )}
+              </div>
+              <div className="overflow-x-auto border-t border-slate-100">
+                <div className="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Ders özeti
+                </div>
                 <table className="min-w-full text-sm">
                   <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                     <tr>

@@ -29,6 +29,7 @@ import {
   createEdesisParent,
   fetchEdesisExamStructure,
   loadEdesisExamBookletPdf,
+  loadEdesisHataKarnesiPdf,
   pickEdesisBookletLessons,
   fetchEdesisExamSubjects,
   fetchEdesisExamResultsLessons,
@@ -56,6 +57,7 @@ const STAFF = new Set(['super_admin', 'admin', 'coach']);
 const STUDENT_ALLOWED_OPS = new Set([
   'student-results',
   'exam-karne-pdf',
+  'exam-hata-karnesi-pdf',
   'exam-detail',
   'exam-structure',
   'exam-booklet-pdf',
@@ -1053,6 +1055,66 @@ export default async function handler(req, res) {
       }
     }
 
+    if (op === 'exam-hata-karnesi-pdf') {
+      const examId = String(req.query?.examId || req.body?.examId || '').trim();
+      const download = String(req.query?.download || req.body?.download || '') === '1';
+      if (!examId) return res.status(400).json({ error: 'examId_required' });
+
+      const cfg = getEdesisConfig();
+      if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
+
+      let edesisStudentId = String(req.query?.edesisStudentId || req.body?.edesisStudentId || '').trim();
+      const studentId = String(req.query?.studentId || req.body?.studentId || '').trim();
+      if (!edesisStudentId && studentId) {
+        const { data: st } = await supabaseAdmin
+          .from('students')
+          .select('edesis_ogrenci_id')
+          .eq('id', studentId)
+          .maybeSingle();
+        edesisStudentId = String(st?.edesis_ogrenci_id || '').trim();
+      }
+      if (!edesisStudentId) {
+        return res.status(400).json({
+          error: 'edesis_student_id_missing',
+          hint: 'Edesis öğrenci ID girin veya students.edesis_ogrenci_id doldurun'
+        });
+      }
+
+      try {
+        const pdf = await loadEdesisHataKarnesiPdf({ examId, edesisStudentId }, cfg);
+        if (download && pdf.buf && pdf.looksPdf) {
+          res.setHeader('Content-Type', 'application/pdf');
+          res.setHeader('Content-Disposition', 'inline; filename="hata-karnesi.pdf"');
+          res.setHeader('Cache-Control', 'private, max-age=120');
+          return res.status(200).send(pdf.buf);
+        }
+        if (!pdf.ok && !pdf.reportUrl) {
+          return res.status(404).json({
+            ok: false,
+            error: 'hata_karnesi_pdf_missing',
+            message: pdf.message,
+            hint: pdf.hint
+          });
+        }
+        return res.status(200).json({
+          ok: true,
+          examId,
+          edesisStudentId,
+          reportUrl: pdf.reportUrl || null,
+          source: pdf.source || null,
+          fileName: pdf.fileName || 'hata-karnesi.pdf',
+          message: pdf.message,
+          hint: pdf.hint || null
+        });
+      } catch (e) {
+        return res.status(502).json({
+          error: 'hata_karnesi_pdf_failed',
+          message: errorMessage(e),
+          hint: 'Edesis hata karnesi (boş + yanlış sorular) — hata kitapçığı değildir'
+        });
+      }
+    }
+
     if (op === 'list-grades') {
       const cfg = getEdesisConfig();
       if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
@@ -1509,6 +1571,7 @@ export default async function handler(req, res) {
         'import',
         'exam-detail',
         'exam-karne-pdf',
+        'exam-hata-karnesi-pdf',
         'exam-structure',
         'exam-booklet-pdf',
         'exam-subjects',
