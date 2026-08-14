@@ -59,11 +59,11 @@ export type SubjectSummaryRow = {
 
 export function summarizeSubjects(exams: ExamResult[]): SubjectSummaryRow[] {
   const names = collectSubjectNames(exams);
-  const sorted = sortExamsByDateDesc(exams);
+  // Gelen sıra = Sonuçlarım (en son girilen üstte); examDate ile yeniden sıralanmaz.
   return names.map((name) => {
     const nets: number[] = [];
     let totalWrong = 0;
-    for (const exam of sorted) {
+    for (const exam of exams) {
       const sub = (exam.subjects || []).find((s) => normalizeSubjectLabel(s.name) === name);
       if (!sub) continue;
       nets.push(sub.net);
@@ -120,7 +120,8 @@ export type ExamMatrixRow = {
 
 export function buildExamSubjectMatrix(exams: ExamResult[]): { subjects: string[]; rows: ExamMatrixRow[] } {
   const subjects = collectSubjectNames(exams);
-  const rows = sortExamsByDateDesc(exams).map((exam) => {
+  // Sonuçlarım ile aynı sıra: en son girilen deneme üstte (hub listesi).
+  const rows = exams.map((exam) => {
     const cells: Record<string, { net: number; wrong: number } | null> = {};
     for (const subName of subjects) {
       const sub = (exam.subjects || []).find((s) => normalizeSubjectLabel(s.name) === subName);
