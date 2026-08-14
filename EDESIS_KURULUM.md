@@ -68,10 +68,13 @@ Sayfalama: `MaxResultCount` (liste max 1000, kırılım max 100), `SkipCount`
 1. Koç **Edesis** sayfasından öğrenciyi `edesis_ogrenci_id` ile bağlar.
 2. Öğrenci: **Akademik Merkez → Deneme / Optik** (`/academic-center?tab=exam`) → **Sınava gir** / **Sonuçlarım** / **Analizlerim**.
    Liste **kurumun tüm denemelerini göstermez**. Kaynak: öğrencinin sonuçları (`GET /exams/results?StudentId=`) **ve** henüz girilmemiş açık denemeler (None/Processing) — öğrenci/şube ataması veya son 21 günde tanımlanmış + sınıf programı (LGS öğrencisine 5. sınıf denemesi düşmez).
-   Optik, Edesis **Sınav Uygulaması** düzenidir: üstte **Kitapçık türü A/B/C/D**, **Kaydet**, **Bitir**; solda ders sekmeleri (tek tek tıklanır); sağda kitapçık PDF.
-3. Kitapçık PDF `GET /exams/{id}` + `/booklets` / `/files` / `/pdf` üzerinden alınır; CDN çoğu zaman `.pdf` uzantısız UUID’dir. Öğrenci JWT’si iframe’e gitmediği için PDF **`op=exam-booklet-pdf&download=1`** ile proxy edilir.
-4. Kitapçık seçilir, her ders için optik işaretlenir (`cevaplar` uzunluğu = `questionCount`).
-5. Sistem `ogrenciId` + `kitapcikTuru` + tüm `dersCevaplari` ile POST eder. **Öğrenci girilmiş sınava tekrar giremez** (`replace` yok; 409 `already_submitted`).
+   Optik, Edesis **Sınav Uygulaması** düzenidir: üstte **Kaydet** / **Bitir**, solda ders sekmeleri, sağda kitapçık PDF.
+   Kitapçık türü **sınava göre** değişir:
+   - **YKS / TYT / AYT:** tek satır `Kitapçık Türü:` A–D, optik şıkları **A–E**, sekmeler `TYT-TÜRKÇE` gibi yatay.
+   - **LGS:** `Sözel:` A–D ve `Sayısal:` A–D ayrı seçilir, optik şıkları **A–D**, dersler ızgara (`LGS-TÜRKÇE`, `LGS-FEN BİLİMLERİ` …). Gönderimde `kitapcikTuru` + `kitapcikTuruSay`.
+3. Kitapçık PDF `GET /exams/{id}` alanları **`denemeUrl` / `sinavUrl`** ve `/booklets` / `/files` / `/pdf` üzerinden alınır; CDN çoğu zaman `.pdf` uzantısız UUID’dir. Öğrenci JWT’si iframe’e gitmediği için PDF **`op=exam-booklet-pdf&download=1`** ile proxy edilir (`%PDF-` sihirli bayt).
+4. Kitapçık seçilir, her ders için optik işaretlenir (`cevaplar` uzunluğu = `questionCount`). LGS’de harf değişince ders satırları değişmez (A/B aynı yapı).
+5. Sistem `ogrenciId` + `kitapcikTuru` (+ LGS’de `kitapcikTuruSay`) + tüm `dersCevaplari` ile POST eder. **Öğrenci girilmiş sınava tekrar giremez** (`replace` yok; 409 `already_submitted`).
 6. `jobId` ile durum izlenir (`Pending` / `Running` / `Completed` / `Failed` / `NotFound`).
 7. Bittiğinde **Sonuçlarım** (net + karne PDF) ve **Analizlerim** (**Hata karnesi** + **Deneme analizi**) açılır.
 

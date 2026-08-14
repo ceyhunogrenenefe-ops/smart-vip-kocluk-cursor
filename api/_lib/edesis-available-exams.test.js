@@ -8,7 +8,11 @@ import {
   pickEdesisResultExamId,
   resultRowBelongsToStudent,
   collectEdesisBookletFiles,
-  pickEdesisBookletFile
+  pickEdesisBookletFile,
+  detectEdesisExamFamily,
+  edesisOpticalUi,
+  pickEdesisBookletLessons,
+  looksLikePdfBuffer
 } from './edesis-client.js';
 
 describe('inferEdesisExamProgramKeys', () => {
@@ -224,5 +228,61 @@ describe('collectEdesisBookletFiles', () => {
     const picked = pickEdesisBookletFile(files, 'A');
     assert.equal(picked?.kitapcikTuru, 'A');
     assert.match(picked.url, /a\.pdf/);
+  });
+
+  it('extracts denemeUrl and sinavUrl from exam entity', () => {
+    const files = collectEdesisBookletFiles({
+      denemeUrl: 'https://cdn.edesis.com/deneme/abc-guid',
+      sinavUrl: 'https://cdn.edesis.com/sinav/tyt-a.pdf',
+      kitapcikTuru: 'A'
+    });
+    assert.ok(files.some((f) => /deneme\/abc-guid/.test(f.url)));
+    assert.ok(files.some((f) => /tyt-a\.pdf/.test(f.url)));
+  });
+
+  it('extracts nested result.denemeUrl', () => {
+    const files = collectEdesisBookletFiles({
+      result: { denemeUrl: 'https://files.edesis.com/kitapcik/yos-a', name: 'YÖS A' }
+    });
+    assert.equal(files.length, 1);
+    assert.match(files[0].url, /yos-a/);
+  });
+});
+
+describe('detectEdesisExamFamily', () => {
+  it('maps LGS to dual sözel/sayısal A–D', () => {
+    assert.equal(detectEdesisExamFamily('LGS Sarmal 4', 'LGS'), 'lgs');
+    assert.equal(edesisOpticalUi('lgs').bookletMode, 'dual-sozel-sayisal');
+    assert.equal(edesisOpticalUi('lgs').choiceCount, 4);
+  });
+
+  it('maps TYT/YKS to single kitapçık A–E', () => {
+    assert.equal(detectEdesisExamFamily('TYT Deneme 12', 'TYT'), 'yks');
+    assert.equal(edesisOpticalUi('yks').bookletMode, 'single');
+    assert.equal(edesisOpticalUi('yks').choiceCount, 5);
+  });
+});
+
+describe('pickEdesisBookletLessons', () => {
+  it('falls back to first booklet when selected letter is missing', () => {
+    const structure = {
+      rows: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 10, lessonName: 'Türkçe', questionCount: 20 }],
+      booklets: [
+        {
+          kitapcikTuru: 'A',
+          lessons: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 10, lessonName: 'Türkçe', questionCount: 20 }]
+        }
+      ]
+    };
+    const lessons = pickEdesisBookletLessons(structure, 'C');
+    assert.equal(lessons.length, 1);
+    assert.equal(lessons[0].lessonName, 'Türkçe');
+  });
+});
+
+describe('looksLikePdfBuffer', () => {
+  it('accepts %PDF magic even without content-type', () => {
+    assert.equal(looksLikePdfBuffer(Buffer.from('%PDF-1.7\n...')), true);
+    assert.equal(looksLikePdfBuffer(Buffer.from('{"error":"no"}')), false);
   });
 });
