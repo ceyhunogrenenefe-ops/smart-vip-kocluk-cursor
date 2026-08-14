@@ -1,6 +1,6 @@
-# Edesis External API v1.2 — Kurulum
+# Edesis External API v1.5 — Kurulum
 
-Resmi rehber: `edesis-external-api-v1.pdf`
+Resmi rehber: `edesis-external-api-v1.5-rehber.pdf` (4 Temmuz 2026)
 
 ## Sizin yapılandırmanızda yapılan hatalar (düzeltildi)
 
@@ -11,6 +11,7 @@ Resmi rehber: `edesis-external-api-v1.pdf`
 | `KurumKodu` header | **Sadece** `X-API-Key` (key kuruma özel) |
 | `kurumKodu=...` query | Gerekmez |
 | Base URL + path karışık | Base: `https://onlinevipdershane.api.edesis.com` |
+| `?replace=true` query | **Yok sayılır** — `replace` gövde alanıdır |
 
 ## Vercel ortam değişkenleri
 
@@ -29,28 +30,51 @@ Redeploy sonrası Ayarlar → Edesis → **Bağlantıyı test et**.
 
 ## API key paketi (scope)
 
-Sınav sonuçları için key paketi şunlardan biri olmalı:
+Sınav **okuma** için key paketi şunlardan biri olmalı:
 - **exams** — sınav + sonuç + analiz
 - **student_dashboard** — sınav, ödev, program, karne
 - **full_read** — tüm okuma
 
 `basic` paketi sınav sonucu **vermez** → 403.
 
-## v1 endpoint'ler
+Ham optik **gönderimi** (öğrencinin panelden sınava girmesi) için ayrıca:
+- **admin** paketi veya **custom** key + `exam_results:write`
+- Salt okuma key ile `POST /exams/{id}/results` → 403
 
-| Veri | GET |
-|------|-----|
-| Öğrenciler | `/api/external/v1/students` |
-| Sınavlar | `/api/external/v1/exams` |
-| Tüm sonuçlar | `/api/external/v1/exams/results?StartDate=&EndDate=` |
-| Öğrenci bazlı (ders detayı) | `/api/external/v1/exams/results?StudentId={edesisId}` |
-| Analiz raporları | `/api/external/v1/analytics/reports/student/{studentId}` |
-| Sınav sonucu | `/api/external/v1/exams/{examId}/results` |
-| PDF karne | `POST /api/external/v1/reports/exam-report` (reportCodes: 102) |
+`students:read_pii` (TC No düz metin) hiçbir hazır pakette yoktur; custom + KVKK onayı gerekir.
 
-Senkron sırasında toplu sonuçta ders/konu yoksa sistem otomatik olarak **öğrenci bazlı sonuç** ve **analytics** endpoint'lerini dener (Türkçe, Matematik vb. D/Y/B + konu kırılımı).
+## v1.5 endpoint'ler
 
-Sayfalama: `MaxResultCount` (max 1000), `SkipCount`
+| Veri | Method | Path |
+|------|--------|------|
+| Öğrenciler | GET | `/api/external/v1/students` — filtre: `TermId`, `StudentState`, `ClassroomId`, `IsActive`, `ModifiedAfter` |
+| Sınavlar | GET | `/api/external/v1/exams` — artımlı: `resultsUpdatedAfter` |
+| Sınav yapısı (kitapçık×ders) | GET | `/api/external/v1/exams/{id}/structure` |
+| Konu listesi | GET | `/api/external/v1/exams/{id}/subjects` |
+| Tüm sonuçlar | GET | `/api/external/v1/exams/results?StartDate=&EndDate=` — artımlı: `updatedAfter` |
+| Öğrenci bazlı sonuç | GET | `/api/external/v1/exams/results?StudentId={edesisId}` |
+| Ders kırılımı | GET | `/api/external/v1/exams/{id}/results/lessons` (sayfa max 100) |
+| Konu kırılımı | GET | `/api/external/v1/exams/{id}/results/subjects` |
+| Ham cevap gönder | POST | `/api/external/v1/exams/{id}/results` — gövde `{ replace, results }` → **202 + jobId** |
+| Değerlendirme durumu | GET | `/api/external/v1/exams/{id}/results/status?jobId=` — geçersiz job: **200 + state NotFound** (404 değil) |
+| PDF karne | POST | `/api/external/v1/reports/exam-report` (reportCodes: 102) |
+
+Senkron sırasında toplu sonuçta ders/konu yoksa sistem otomatik olarak **öğrenci bazlı sonuç** ve **analytics** endpoint'lerini dener.
+
+Sayfalama: `MaxResultCount` (liste max 1000, kırılım max 100), `SkipCount`
+
+## Öğrencinin panelden sınava girmesi
+
+1. Koç **Edesis** sayfasından öğrenciyi `edesis_ogrenci_id` ile bağlar.
+2. Öğrenci: **Akademik Merkez → Deneme / Optik** (`/academic-center?tab=exam`) → **Sınava gir** / **Sonuçlarım**.
+3. Kitapçık seçilir, her ders için optik işaretlenir (`cevaplar` uzunluğu = `questionCount`).
+4. Sistem `ogrenciId` + `kitapcikTuru` + tüm `dersCevaplari` ile POST eder (`replace` gövdede).
+5. `jobId` ile durum izlenir (`Pending` / `Running` / `Completed` / `Failed` / `NotFound`).
+6. Bittiğinde **Sonuçlarım** ve karne PDF açılır.
+
+Mevcut sonuç varken tekrar gönderim: gövdede `"replace": true`. Query `?replace=true` **yok sayılır** ve 409 döner.
+
+Bilinen Edesis sınırı: soru numarası 1’den başlamayan dersler (ör. seçmeli 21–25) UI optik import ile aynı şekilde 0/0/0 kalabilir.
 
 ## Edesis Analiz (uygulama)
 
@@ -65,7 +89,7 @@ Ders detayı gelmiyorsa: deneme seç → **Edesis detayını çek** (sınav bazl
 
 ## Öğrenci eşleme sırası
 
-1. `edesis_ogrenci_id` = Edesis `studentId`
+1. `edesis_ogrenci_id` = Edesis `studentId` / `id`
 2. **email**
 3. **phone** / veli telefonu
 4. **ad soyad** (`studentName` veya firstName+lastName)
@@ -115,13 +139,19 @@ v1 alanları veya eski Türkçe alanlar desteklenir:
 ]
 ```
 
+Koç **Sınav gönderimi** sekmesinden ham cevap JSON’u da gönderebilir (`ogrenciId` sayısal olmalı).
+
 ## Teşhis
 
 | HTTP | Anlam |
 |------|--------|
+| 202 | Ingest kabul — `jobId` ile poll edin |
 | 401 | Key yok/geçersiz |
-| 403 | Scope yetersiz — exams paketi gerekli |
+| 403 | Scope yetersiz — okuma: exams; yazma: `exam_results:write` |
+| 409 | Mevcut sonuç var ve `replace` gövdede false |
+| 422 | Hiçbir satır kabul edilmedi — `rejected[]` |
 | 200 + JSON `items:[]` | Bağlantı OK, sonuç yok |
+| 200 + `state: NotFound` | Geçersiz/süresi dolmuş ingest `jobId` (404 değil) |
 | 200 + HTML 404 | **Eski path** kullanılıyor — v1'e geçin |
 
 Destek: bilgi@sinavza.com

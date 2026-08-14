@@ -4,6 +4,7 @@ import {
   Brain,
   ChevronDown,
   ChevronRight,
+  ClipboardList,
   CloudDownload,
   ExternalLink,
   FileText,
@@ -35,6 +36,8 @@ import {
   fetchEdesisKarnePdf,
   fetchEdesisStatus,
   fetchEdesisStudentResultsHub,
+  fetchEdesisExamStructure,
+  ingestEdesisExamResults,
   linkEdesisStudent,
   syncEdesis,
   type EdesisHubStudent,
@@ -44,14 +47,15 @@ import {
 } from '../lib/edesis/edesisApi';
 import { shareEdesisKarneWithParent } from '../lib/edesis/shareEdesisKarneWhatsApp';
 
-type TabId = 'baglanti' | 'ogrenciler' | 'donem' | 'sonuclar' | 'yazma';
+type TabId = 'baglanti' | 'ogrenciler' | 'donem' | 'sonuclar' | 'yazma' | 'sinav';
 
 const WRITE_STEPS = [
   { n: 1, title: 'Sınıf seviyeleri', desc: 'GET /grades — gradeId şube oluşturmak için gerekli.' },
   { n: 2, title: 'Bölümler', desc: 'GET /departments — lise öğrencisi için bolumId zorunlu.' },
   { n: 3, title: 'Şube oluştur', desc: 'POST /classrooms — dönen id öğrenci atamasında kullanılır.' },
   { n: 4, title: 'Öğrenci ekle', desc: 'POST /students — classroomId + bolumId ile profil ve kullanıcı.' },
-  { n: 5, title: 'Veli ekle', desc: 'POST /parents — studentId ile veli bağlantısı.' }
+  { n: 5, title: 'Veli ekle', desc: 'POST /parents — studentId ile veli bağlantısı.' },
+  { n: 6, title: 'Ham cevap gönder', desc: 'GET /structure sonra POST /exams/{id}/results — replace gövdede.' }
 ];
 
 const SYNC_TIP =
@@ -62,7 +66,8 @@ const STEPS = [
   { n: 2, title: 'Öğrenci listesi', desc: 'GET /students — Edesis id’lerini sisteme kaydedin.' },
   { n: 3, title: 'Dönem & sınav', desc: 'GET /terms ve GET /exams ile katalog bilgisini görün.' },
   { n: 4, title: 'Sınav sonuçları', desc: 'GET /exams/results?StudentId=… ile öğrenci sonuçlarını sorgulayın.' },
-  { n: 5, title: 'Karne PDF', desc: 'POST /reports/exam-report — reportUrl ile PDF indirin.' }
+  { n: 5, title: 'Karne PDF', desc: 'POST /reports/exam-report — reportUrl ile PDF indirin.' },
+  { n: 6, title: 'Sınava gir', desc: 'Öğrenci GET /structure + POST ham cevap; değerlendirme Edesis’te.' }
 ];
 
 function pickField(row: Record<string, unknown>, keys: string[]): string {
@@ -121,6 +126,11 @@ export default function EdesisPage() {
     phone: '',
     studentId: ''
   });
+  const [ingestExamId, setIngestExamId] = useState('');
+  const [ingestReplace, setIngestReplace] = useState(false);
+  const [ingestJson, setIngestJson] = useState('');
+  const [ingestBusy, setIngestBusy] = useState(false);
+  const [structurePreview, setStructurePreview] = useState<string>('');
 
   const reloadStatus = useCallback(async () => {
     try {
@@ -191,6 +201,7 @@ export default function EdesisPage() {
       void loadStudents();
     }
     if (tab === 'yazma' && !grades.length && status?.configured) void loadWriteCatalog();
+    if (tab === 'sinav' && !exams.length && status?.configured) void loadTermsAndExams();
   }, [tab, hubStudents.length, terms.length, exams.length, platformStudents.length, grades.length, status?.configured, loadStudents, loadTermsAndExams, loadWriteCatalog]);
 
   const filteredStudents = useMemo(() => {
@@ -448,6 +459,63 @@ export default function EdesisPage() {
     }
   };
 
+  const onLoadStructure = async () => {
+    const examId = ingestExamId.trim();
+    if (!examId) {
+      toast.error('Sınav seçin veya examId girin');
+      return;
+    }
+    setIngestBusy(true);
+    try {
+      const r = await fetchEdesisExamStructure(examId);
+      const lines = (r.items || []).map(
+        (row) =>
+          `${row.kitapcikTuru} · ${row.lessonName} (lessonId=${row.lessonId}, dersGrupId=${row.dersGrupId}, ${row.questionCount} soru)`
+      );
+      setStructurePreview(lines.join('\n') || 'Yapı boş');
+      toast.success(`${r.count} kitapçık×ders satırı`);
+    } catch (e) {
+      setStructurePreview('');
+      toast.error(e instanceof Error ? e.message : 'Yapı alınamadı');
+    } finally {
+      setIngestBusy(false);
+    }
+  };
+
+  const onIngestResults = async () => {
+    const examId = ingestExamId.trim();
+    if (!examId) {
+      toast.error('Sınav seçin');
+      return;
+    }
+    let results: Record<string, unknown>[] = [];
+    try {
+      const parsed = JSON.parse(ingestJson || '[]');
+      results = Array.isArray(parsed) ? parsed : Array.isArray(parsed.results) ? parsed.results : [];
+    } catch {
+      toast.error('results JSON geçersiz');
+      return;
+    }
+    if (!results.length) {
+      toast.error('results dizisi boş');
+      return;
+    }
+    setIngestBusy(true);
+    try {
+      const r = await ingestEdesisExamResults({ examId, replace: ingestReplace, results });
+      if (r.conflict) {
+        toast.warning(r.hint || r.message || 'Mevcut sonuç var — replace kutusunu işaretleyin (gövde alanı)');
+        return;
+      }
+      const rejected = r.rejected?.length ? ` · reddedilen ${r.rejected.length}` : '';
+      toast.success(`${r.accepted || 0} satır kabul${rejected} · ${r.job?.state || r.message || 'iş kuyruğa alındı'}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Gönderim başarısız');
+    } finally {
+      setIngestBusy(false);
+    }
+  };
+
   const tabBtn = (id: TabId, label: string, icon: React.ReactNode) => (
     <button
       type="button"
@@ -469,7 +537,7 @@ export default function EdesisPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Edesis</h1>
           <p className="mt-1 text-sm text-slate-600">
-            Edesis External API v1 — öğrenci eşleme, sınav sonuçları ve karne PDF
+            Edesis External API v1.5 — eşleme, sonuçlar, karne ve ham cevap gönderimi
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -510,6 +578,7 @@ export default function EdesisPage() {
         {tabBtn('donem', 'Dönem & Sınavlar', <GraduationCap className="h-4 w-4" />)}
         {tabBtn('sonuclar', 'Sonuçlar & Karne', <FileText className="h-4 w-4" />)}
         {tabBtn('yazma', 'Veri Yazma', <PenLine className="h-4 w-4" />)}
+        {tabBtn('sinav', 'Sınav gönderimi', <ClipboardList className="h-4 w-4" />)}
       </div>
 
       {tab === 'baglanti' && <EdesisSyncPanel />}
@@ -545,6 +614,7 @@ export default function EdesisPage() {
                 <tr className="border-b text-left text-slate-500">
                   <th className="px-2 py-2">Edesis ID</th>
                   <th className="px-2 py-2">Ad</th>
+                  <th className="px-2 py-2">Durum</th>
                   <th className="px-2 py-2">E-posta</th>
                   <th className="px-2 py-2">Platform eşleşme</th>
                   <th className="px-2 py-2">Bağla</th>
@@ -555,6 +625,10 @@ export default function EdesisPage() {
                   <tr key={String(item.edesisId || item.name)} className="border-b border-slate-100">
                     <td className="px-2 py-2 font-mono text-xs">{item.edesisId || '—'}</td>
                     <td className="px-2 py-2">{item.name || '—'}</td>
+                    <td className="px-2 py-2 text-xs text-slate-600">
+                      {item.studentState || '—'}
+                      {item.termName ? ` · ${item.termName}` : ''}
+                    </td>
                     <td className="px-2 py-2">{item.email || '—'}</td>
                     <td className="px-2 py-2">
                       {item.linked ? (
@@ -666,6 +740,8 @@ export default function EdesisPage() {
                     <p className="text-xs text-slate-500">
                       ID: {pickField(ex, ['id', 'examId', 'sinavId'])} ·{' '}
                       {pickField(ex, ['examDate', 'sinavTarihi', 'date', 'tarih'])}
+                      {ex.resultStatus ? ` · ${String(ex.resultStatus)}` : ''}
+                      {ex.totalQuestions != null ? ` · ${String(ex.totalQuestions)} soru` : ''}
                     </p>
                   </li>
                 ))}
@@ -1082,6 +1158,85 @@ export default function EdesisPage() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {tab === 'sinav' && (
+        <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <p className="text-sm text-slate-600">
+            v1.5 ingest: <code className="rounded bg-slate-100 px-1">GET /exams/{'{id}'}/structure</code> sonra{' '}
+            <code className="rounded bg-slate-100 px-1">POST /exams/{'{id}'}/results</code>.{' '}
+            <strong>replace gövde alanıdır</strong> — <code>?replace=true</code> yok sayılır. Scope:{' '}
+            <code>exam_results:write</code> (admin/custom). Öğrenciler kendi optiklerini{' '}
+            <Link to="/academic-center?tab=exam" className="font-semibold text-indigo-700 hover:underline">
+              Akademik Merkez → Deneme / Optik
+            </Link>{' '}
+            sayfasından gönderir.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-sm">
+              <span className="mb-1 block text-slate-600">Sınav</span>
+              <select
+                value={ingestExamId}
+                onChange={(e) => setIngestExamId(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              >
+                <option value="">Seçin…</option>
+                {exams.map((ex, i) => {
+                  const id = pickField(ex, ['id', 'examId']);
+                  if (id === '—') return null;
+                  return (
+                    <option key={`${id}-${i}`} value={id}>
+                      {pickField(ex, ['name', 'examName', 'title'])} ({id})
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+            <label className="flex items-end gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={ingestReplace}
+                onChange={(e) => setIngestReplace(e.target.checked)}
+              />
+              <span>replace: true (mevcut sonucun üzerine yaz)</span>
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={ingestBusy}
+              onClick={() => void onLoadStructure()}
+              className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 px-3 py-2 text-sm text-indigo-900 hover:bg-indigo-50 disabled:opacity-50"
+            >
+              {ingestBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Yapıyı çek
+            </button>
+            <button
+              type="button"
+              disabled={ingestBusy}
+              onClick={() => void onIngestResults()}
+              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {ingestBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardList className="h-4 w-4" />}
+              Ham cevapları gönder
+            </button>
+          </div>
+          {structurePreview ? (
+            <pre className="max-h-40 overflow-auto rounded-lg bg-slate-50 p-3 text-xs text-slate-700">{structurePreview}</pre>
+          ) : null}
+          <label className="block text-sm">
+            <span className="mb-1 block text-slate-600">
+              results JSON — ogrenciId (sayı), kitapcikTuru, dersCevaplari[].cevaplar uzunluğu structure.questionCount
+            </span>
+            <textarea
+              value={ingestJson}
+              onChange={(e) => setIngestJson(e.target.value)}
+              rows={10}
+              placeholder={`[\n  {\n    "ogrenciId": 7203743,\n    "kitapcikTuru": "A",\n    "dersCevaplari": [\n      { "lessonId": 1, "dersGrupId": 1, "cevaplar": "ABCDE..." }\n    ]\n  }\n]`}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-xs"
+            />
+          </label>
         </div>
       )}
     </div>

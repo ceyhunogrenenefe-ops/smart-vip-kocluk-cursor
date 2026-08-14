@@ -1,6 +1,8 @@
 /**
- * Edesis External API v1.2 — https://{domain}/api/external/v1
+ * Edesis External API v1.5 — https://{domain}/api/external/v1
  * Auth: X-API-Key header only (key is tenant-scoped; no KurumKodu).
+ * v1.5: GET /exams/{id}/structure, POST /exams/{id}/results (ingest), GET /results/status
+ * v1.4: GET /students TermId, StudentState, ClassroomId, IsActive, ModifiedAfter
  */
 
 const API_V1_PREFIX = '/api/external/v1';
@@ -15,6 +17,11 @@ export const V1_PATHS = {
   parents: `${API_V1_PREFIX}/parents`,
   examResults: `${API_V1_PREFIX}/exams/results`,
   examResultsByExam: (examId) => `${API_V1_PREFIX}/exams/${encodeURIComponent(examId)}/results`,
+  examStructure: (examId) => `${API_V1_PREFIX}/exams/${encodeURIComponent(examId)}/structure`,
+  examSubjects: (examId) => `${API_V1_PREFIX}/exams/${encodeURIComponent(examId)}/subjects`,
+  examResultsStatus: (examId) => `${API_V1_PREFIX}/exams/${encodeURIComponent(examId)}/results/status`,
+  examResultsLessons: (examId) => `${API_V1_PREFIX}/exams/${encodeURIComponent(examId)}/results/lessons`,
+  examResultsSubjects: (examId) => `${API_V1_PREFIX}/exams/${encodeURIComponent(examId)}/results/subjects`,
   analyticsReports: `${API_V1_PREFIX}/analytics/reports`,
   analyticsStudent: (studentId) =>
     `${API_V1_PREFIX}/analytics/reports/student/${encodeURIComponent(studentId)}`,
@@ -27,7 +34,8 @@ const DEFAULT_BASES = [
   'https://onlinevipdershane.edesis.com'
 ];
 
-const PAGE_SIZE = 1000; // PDF max
+const PAGE_SIZE = 1000; // liste uçları
+const BREAKDOWN_PAGE_SIZE = 100; // /results/lessons ve /results/subjects max 100
 const MAX_PAGES = 50;
 
 /** Edesis bazen konu kırılımını yalnızca detay bayraklarıyla döner */
@@ -136,7 +144,7 @@ export function getEdesisConfig() {
     baseUrl: baseUrl || bases[0],
     bases,
     authMode,
-    apiVersion: 'v1',
+    apiVersion: 'v1.5',
     legacyResultsPath: legacyResults || null,
     legacyExamsPath: legacyExams || null
   };
@@ -293,14 +301,15 @@ function buildQuery(params) {
   return parts.length ? `?${parts.join('&')}` : '';
 }
 
-/** v1 sayfalı liste — MaxResultCount max 1000 */
-async function fetchAllPaged(cfg, path, query = {}) {
+/** v1 sayfalı liste — MaxResultCount max 1000; kırılım uçlarında max 100 */
+async function fetchAllPaged(cfg, path, query = {}, { pageSize = PAGE_SIZE } = {}) {
   const items = [];
   let skip = 0;
+  let lastTotal = null;
   for (let page = 0; page < MAX_PAGES; page++) {
     const qs = buildQuery({
       ...query,
-      MaxResultCount: PAGE_SIZE,
+      MaxResultCount: pageSize,
       SkipCount: skip
     });
     const r = await fetchEdesisJson(cfg, `${path}${qs}`);
@@ -310,17 +319,23 @@ async function fetchAllPaged(cfg, path, query = {}) {
       throw err;
     }
     if (!isReachableEdesisResponse(r)) {
-      if (page === 0) return { rows: [], response: r, error: r.json?.error || 'fetch_failed' };
+      if (page === 0) return { rows: [], response: r, error: r.json?.error || 'fetch_failed', totalCount: 0 };
       break;
     }
     const batch = unwrapList(r.json);
     items.push(...batch);
     const total = Number(r.json?.totalCount);
-    if (!batch.length || batch.length < PAGE_SIZE) break;
+    if (Number.isFinite(total)) lastTotal = total;
+    if (!batch.length || batch.length < pageSize) break;
     if (Number.isFinite(total) && items.length >= total) break;
     skip += batch.length;
   }
-  return { rows: items, response: null, error: null };
+  return {
+    rows: items,
+    response: null,
+    error: null,
+    totalCount: lastTotal != null ? lastTotal : items.length
+  };
 }
 
 function num(v, fallback = 0) {
@@ -1207,17 +1222,79 @@ export async function createEdesisParent(body, cfgOverride = {}) {
   return postEdesisResource(V1_PATHS.parents, body, cfgOverride);
 }
 
-/** GET /students — kurum öğrenci listesi */
-export async function fetchEdesisStudentsList(cfgOverride = {}) {
+function pickStudentListFilters(filters = {}) {
+  const q = {};
+  const src = filters && typeof filters === 'object' ? filters : {};
+  if (src.TermId != null && src.TermId !== '') q.TermId = src.TermId;
+  if (src.StudentState) q.StudentState = src.StudentState;
+  if (src.ClassroomId != null && src.ClassroomId !== '') q.ClassroomId = src.ClassroomId;
+  if (src.IsActive != null && src.IsActive !== '') q.IsActive = src.IsActive;
+  if (src.ModifiedAfter) q.ModifiedAfter = src.ModifiedAfter;
+  if (src.Filter) q.Filter = src.Filter;
+  return q;
+}
+
+function toEdesisInt(v) {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function normalizeEdesisStructureRow(row) {
+  const r = row && typeof row === 'object' ? row : {};
+  return {
+    kitapcikTuru: String(r.kitapcikTuru || r.booklet || 'A').trim() || 'A',
+    lessonId: toEdesisInt(r.lessonId),
+    lessonName: String(r.lessonName || r.dersAdi || r.name || '').trim(),
+    dersGrupId: toEdesisInt(r.dersGrupId),
+    questionCount: Number(r.questionCount) || 0
+  };
+}
+
+export function groupEdesisStructureByBooklet(rows) {
+  const map = new Map();
+  for (const row of rows || []) {
+    const key = String(row.kitapcikTuru || 'A');
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(row);
+  }
+  return [...map.entries()].map(([kitapcikTuru, lessons]) => ({ kitapcikTuru, lessons }));
+}
+
+function normalizeIngestLessonAnswer(item) {
+  const lessonId = toEdesisInt(item?.lessonId);
+  const dersGrupId = toEdesisInt(item?.dersGrupId);
+  const cevaplar = String(item?.cevaplar ?? '');
+  return { lessonId, dersGrupId, cevaplar };
+}
+
+function normalizeIngestResultRow(row) {
+  const out = {
+    kitapcikTuru: String(row?.kitapcikTuru || '').trim(),
+    dersCevaplari: Array.isArray(row?.dersCevaplari) ? row.dersCevaplari.map(normalizeIngestLessonAnswer) : []
+  };
+  const ogrenciId = toEdesisInt(row?.ogrenciId ?? row?.studentId);
+  const okulNumarasi = toEdesisInt(row?.okulNumarasi);
+  const tcNo = toEdesisInt(row?.tcNo);
+  if (ogrenciId != null) out.ogrenciId = ogrenciId;
+  if (okulNumarasi != null) out.okulNumarasi = okulNumarasi;
+  if (tcNo != null) out.tcNo = tcNo;
+  return out;
+}
+
+/** GET /students — kurum öğrenci listesi (v1.4 sunucu filtreleri) */
+export async function fetchEdesisStudentsList(cfgOverride = {}, filters = {}) {
   const cfg = { ...getEdesisConfig(), ...cfgOverride };
   if (!cfg.apiKey) throw new Error('EDESIS_API_KEY_missing');
   const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
-  const bulk = await fetchAllPaged(localCfg, V1_PATHS.students, {});
+  const query = pickStudentListFilters(filters);
+  const bulk = await fetchAllPaged(localCfg, V1_PATHS.students, query);
   return {
     rows: bulk.rows || [],
     totalCount: bulk.totalCount ?? bulk.rows?.length ?? 0,
     httpStatus: bulk.response?.status ?? null,
-    error: bulk.error || null
+    error: bulk.error || null,
+    filters: query
   };
 }
 
@@ -1235,12 +1312,15 @@ export async function fetchEdesisTermsList(cfgOverride = {}) {
   };
 }
 
-/** GET /exams — sınav kataloğu */
-export async function fetchEdesisExamsCatalog(cfgOverride = {}) {
+/** GET /exams — sınav kataloğu (resultsUpdatedAfter artımlı senkron) */
+export async function fetchEdesisExamsCatalog(cfgOverride = {}, query = {}) {
   const cfg = { ...getEdesisConfig(), ...cfgOverride };
   if (!cfg.apiKey) throw new Error('EDESIS_API_KEY_missing');
   const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
-  const bulk = await fetchAllPaged(localCfg, V1_PATHS.exams, {});
+  const q = {};
+  if (query.Filter) q.Filter = query.Filter;
+  if (query.resultsUpdatedAfter) q.resultsUpdatedAfter = query.resultsUpdatedAfter;
+  const bulk = await fetchAllPaged(localCfg, V1_PATHS.exams, q);
   return {
     rows: bulk.rows || [],
     totalCount: bulk.totalCount ?? bulk.rows?.length ?? 0,
@@ -1276,13 +1356,189 @@ export async function fetchEdesisStudentResults(edesisStudentId, cfgOverride = {
   };
 }
 
+/** GET /exams/{examId}/structure — kitapçık × ders (ingest öncesi) */
+export async function fetchEdesisExamStructure(examId, cfgOverride = {}) {
+  const id = String(examId || '').trim();
+  if (!id) throw new Error('examId_required');
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  if (!cfg.apiKey) throw new Error('EDESIS_API_KEY_missing');
+  const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+  const r = await fetchEdesisJson(localCfg, V1_PATHS.examStructure(id));
+  if (!isReachableEdesisResponse(r)) {
+    return {
+      rows: [],
+      booklets: [],
+      httpStatus: r.status,
+      error: r.json?.error || r.json?.message || `structure_${r.status}`
+    };
+  }
+  const rows = unwrapList(r.json).map(normalizeEdesisStructureRow);
+  return {
+    rows,
+    booklets: groupEdesisStructureByBooklet(rows),
+    httpStatus: r.status,
+    error: null
+  };
+}
+
+/** GET /exams/{examId}/subjects — konu kırılımı (düz dizi) */
+export async function fetchEdesisExamSubjects(examId, cfgOverride = {}) {
+  const id = String(examId || '').trim();
+  if (!id) throw new Error('examId_required');
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  if (!cfg.apiKey) throw new Error('EDESIS_API_KEY_missing');
+  const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+  const r = await fetchEdesisJson(localCfg, V1_PATHS.examSubjects(id));
+  if (!isReachableEdesisResponse(r)) {
+    return { rows: [], httpStatus: r.status, error: r.json?.error || `subjects_${r.status}` };
+  }
+  return { rows: unwrapList(r.json), httpStatus: r.status, error: null };
+}
+
+/** GET /exams/{examId}/results/lessons — öğrenci × ders (max 100/sayfa) */
+export async function fetchEdesisExamResultsLessons(examId, { studentId } = {}, cfgOverride = {}) {
+  const id = String(examId || '').trim();
+  if (!id) throw new Error('examId_required');
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  if (!cfg.apiKey) throw new Error('EDESIS_API_KEY_missing');
+  const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+  const query = {};
+  if (studentId) query.studentId = studentId;
+  const bulk = await fetchAllPaged(localCfg, V1_PATHS.examResultsLessons(id), query, {
+    pageSize: BREAKDOWN_PAGE_SIZE
+  });
+  return {
+    rows: bulk.rows || [],
+    totalCount: bulk.totalCount ?? bulk.rows?.length ?? 0,
+    httpStatus: bulk.response?.status ?? null,
+    error: bulk.error || null
+  };
+}
+
+/** GET /exams/{examId}/results/subjects — öğrenci × konu (max 100/sayfa) */
+export async function fetchEdesisExamResultsSubjects(examId, { studentId } = {}, cfgOverride = {}) {
+  const id = String(examId || '').trim();
+  if (!id) throw new Error('examId_required');
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  if (!cfg.apiKey) throw new Error('EDESIS_API_KEY_missing');
+  const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+  const query = {};
+  if (studentId) query.studentId = studentId;
+  const bulk = await fetchAllPaged(localCfg, V1_PATHS.examResultsSubjects(id), query, {
+    pageSize: BREAKDOWN_PAGE_SIZE
+  });
+  return {
+    rows: bulk.rows || [],
+    totalCount: bulk.totalCount ?? bulk.rows?.length ?? 0,
+    httpStatus: bulk.response?.status ?? null,
+    error: bulk.error || null
+  };
+}
+
+/**
+ * POST /exams/{examId}/results — ham optik ingest.
+ * replace GÖVDE alanıdır; query string yok sayılır.
+ * 202 = kabul (jobId); 409 = mevcut sonuç; 422 = hiçbir satır kabul edilmedi.
+ */
+export async function submitEdesisExamResults(examId, payload = {}, cfgOverride = {}) {
+  const id = String(examId || '').trim();
+  if (!id) throw new Error('examId_required');
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  if (!cfg.apiKey) throw new Error('EDESIS_API_KEY_missing');
+  const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+
+  const results = Array.isArray(payload.results) ? payload.results.map(normalizeIngestResultRow) : [];
+  const body = {
+    replace: Boolean(payload.replace),
+    results
+  };
+
+  const r = await fetchEdesisJson(localCfg, V1_PATHS.examResultsByExam(id), { method: 'POST', body });
+  const json = r.json && typeof r.json === 'object' && !Array.isArray(r.json) ? r.json : {};
+  const accepted = Number(json.accepted) || 0;
+  const rejected = Array.isArray(json.rejected) ? json.rejected : [];
+  const jobId = json.jobId || null;
+  const statusUrl = json.statusUrl || (jobId ? `${V1_PATHS.examResultsStatus(id)}?jobId=${encodeURIComponent(jobId)}` : null);
+
+  const out = {
+    ok: r.status === 202 || (r.ok && accepted > 0 && jobId),
+    httpStatus: r.status,
+    accepted,
+    rejected,
+    jobId,
+    statusUrl,
+    message: json.message || json.error || null,
+    conflict: r.status === 409,
+    raw: json
+  };
+
+  if (r.status === 202) {
+    out.ok = true;
+    out.message = out.message || 'Değerlendirme başlatıldı.';
+  } else if (r.status === 409) {
+    out.ok = false;
+    out.message =
+      out.message ||
+      'Bu öğrencinin bu sınavda mevcut sonucu var. Gövdeye replace:true koyarak üzerine yazın (query ?replace=true yok sayılır).';
+  } else if (r.status === 422) {
+    out.ok = false;
+    out.message = out.message || 'Kabul edilen öğrenci sonucu yok.';
+  } else if (r.status === 403) {
+    out.ok = false;
+    out.message = out.message || "exam_results:write scope gerekli (admin paketi veya custom key)";
+  } else if (!r.ok && r.status !== 202) {
+    out.ok = false;
+    out.message = out.message || `ingest_${r.status}`;
+  }
+  return out;
+}
+
+/** GET /exams/{examId}/results/status?jobId= — geçersiz jobId 200 + state NotFound */
+export async function fetchEdesisIngestJobStatus(examId, jobId, cfgOverride = {}) {
+  const id = String(examId || '').trim();
+  const jid = String(jobId || '').trim();
+  if (!id) throw new Error('examId_required');
+  if (!jid) throw new Error('jobId_required');
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  if (!cfg.apiKey) throw new Error('EDESIS_API_KEY_missing');
+  const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+  const r = await fetchEdesisJson(localCfg, `${V1_PATHS.examResultsStatus(id)}${buildQuery({ jobId: jid })}`);
+  const json = r.json && typeof r.json === 'object' ? r.json : {};
+  return {
+    ok: r.ok,
+    httpStatus: r.status,
+    jobId: json.jobId || jid,
+    state: json.state || json.status || null,
+    message: json.message || json.error || null,
+    raw: json
+  };
+}
+
+export async function pollEdesisIngestJob(
+  examId,
+  jobId,
+  { maxAttempts = 12, delayMs = 5000 } = {},
+  cfgOverride = {}
+) {
+  let last = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    last = await fetchEdesisIngestJobStatus(examId, jobId, cfgOverride);
+    const state = String(last.state || '');
+    if (['Completed', 'Failed', 'NotFound'].includes(state)) return last;
+    if (!last.ok && last.httpStatus !== 200) return last;
+    await sleep(delayMs);
+  }
+  return last;
+}
+
 export const EDESIS_EMPTY_LIST_HELP = {
   tr: {
-    title: 'Edesis v1 — sonuç gelmiyorsa',
+    title: 'Edesis v1.5 — sonuç gelmiyorsa',
     steps: [
       'Base URL: https://{kurum}.api.edesis.com (path EKLEMEYİN — /api/external/v1 kodda)',
       'Header: yalnızca X-API-Key (KurumKodu header GEREKMEZ)',
       'API key paketi: exams, student_dashboard veya full_read (exam_results:read scope)',
+      'Ham cevap gönderimi: admin veya custom key + exam_results:write',
       'Endpoint: GET /api/external/v1/exams/results?StartDate=...&EndDate=...',
       'Öğrenci eşleme: studentId veya email — GET /api/external/v1/students ile id eşleştirin',
       'Destek: bilgi@sinavza.com'

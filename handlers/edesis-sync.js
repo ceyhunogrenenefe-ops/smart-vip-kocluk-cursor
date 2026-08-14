@@ -23,6 +23,13 @@ import {
   createEdesisClassroom,
   createEdesisStudent,
   createEdesisParent,
+  fetchEdesisExamStructure,
+  fetchEdesisExamSubjects,
+  fetchEdesisExamResultsLessons,
+  fetchEdesisExamResultsSubjects,
+  submitEdesisExamResults,
+  fetchEdesisIngestJobStatus,
+  pollEdesisIngestJob,
   V1_PATHS,
   isAuthConnectedResponse,
   isReachableEdesisResponse,
@@ -38,8 +45,16 @@ import {
 import { EDESIS_EMPTY_LIST_HELP } from '../api/_lib/edesis-client.js';
 
 const STAFF = new Set(['super_admin', 'admin', 'coach']);
-/** Öğrencinin kendi Edesis sonuç / karne okuma ops */
-const STUDENT_READ_OPS = new Set(['student-results', 'exam-karne-pdf', 'exam-detail']);
+/** Öğrencinin kendi Edesis sonuç / karne / sınava giriş ops */
+const STUDENT_ALLOWED_OPS = new Set([
+  'student-results',
+  'exam-karne-pdf',
+  'exam-detail',
+  'exam-structure',
+  'available-exams',
+  'submit-exam',
+  'ingest-status'
+]);
 
 function actorIsStudent(actor, tags) {
   const role = String(actor?.role || '').toLowerCase();
@@ -145,9 +160,15 @@ function matchEdesisStudentToPlatform(row, students) {
   }
 
   const platform = platformStudentId ? students.find((s) => s.id === platformStudentId) : null;
+  const flat = row && typeof row === 'object' ? row : {};
   return {
     edesisId: keys.edesisStudentId || null,
     name: keys.name || null,
+    termId: flat.termId ?? null,
+    termName: flat.termName ?? null,
+    studentState: flat.studentState ?? null,
+    classroomId: flat.classroomId ?? null,
+    modifiedDate: flat.modifiedDate ?? null,
     email: keys.email || null,
     schoolNo: keys.schoolNo || null,
     platformStudentId,
@@ -437,15 +458,15 @@ export default async function handler(req, res) {
     const tags = await normalizedUserRolesFromDb(actor.sub);
     const isStaff = tags.some((t) => STAFF.has(t)) || STAFF.has(actor.role);
     const isStudent = actorIsStudent(actor, tags);
-    const studentReadOp = STUDENT_READ_OPS.has(op);
+    const studentAllowedOp = STUDENT_ALLOWED_OPS.has(op);
 
-    if (!isStaff && !(isStudent && studentReadOp)) {
+    if (!isStaff && !(isStudent && studentAllowedOp)) {
       return res.status(403).json({ error: 'forbidden' });
     }
 
     /** Öğrenci yalnızca kendi kartına erişir; yabancı ID'leri yok sayar */
     let studentSelf = null;
-    if (isStudent && !isStaff && studentReadOp) {
+    if (isStudent && !isStaff && studentAllowedOp) {
       studentSelf = await resolveOwnPlatformStudent(actor);
       if (!studentSelf) {
         return res.status(400).json({
@@ -477,21 +498,24 @@ export default async function handler(req, res) {
       const keyOk = Boolean(cfg.apiKey);
       return res.status(200).json({
         configured: keyOk,
-        apiVersion: 'v1',
+        apiVersion: 'v1.5',
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
         endpoints: {
           students: '/api/external/v1/students',
           exams: '/api/external/v1/exams',
-          examResults: '/api/external/v1/exams/results'
+          examResults: '/api/external/v1/exams/results',
+          examStructure: '/api/external/v1/exams/{id}/structure',
+          examIngest: 'POST /api/external/v1/exams/{id}/results',
+          ingestStatus: '/api/external/v1/exams/{id}/results/status'
         },
         studentsInDb: students.length,
         studentsWithEdesisId: withEdesisId,
         studentsWithEmail: withEmail,
         matchingGuide: EDESIS_MATCHING_GUIDE.tr,
         hint: keyOk
-          ? 'probe veya sync — v1 API; KurumKodu header gerekmez'
+          ? 'probe veya sync — v1.5 API; ham cevap gönderimi için exam_results:write (admin/custom)'
           : 'Vercel: EDESIS_API_KEY + EDESIS_API_BASE_URL=https://onlinevipdershane.api.edesis.com + EDESIS_AUTH_MODE=x-api-key'
       });
     }
@@ -536,7 +560,7 @@ export default async function handler(req, res) {
           apiError: r.json?.error ?? null
         });
       }
-      return res.status(200).json({ apiVersion: 'v1', baseUrl: cfg.baseUrl, attempts: out });
+      return res.status(200).json({ apiVersion: 'v1.5', baseUrl: cfg.baseUrl, attempts: out });
     }
 
     if (op === 'probe') {
@@ -679,7 +703,15 @@ export default async function handler(req, res) {
     if (op === 'list-students') {
       const cfg = getEdesisConfig();
       if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
-      const fetchResult = await fetchEdesisStudentsList();
+      const filters = {
+        TermId: req.query?.TermId ?? req.query?.termId ?? req.body?.TermId,
+        StudentState: req.query?.StudentState ?? req.query?.studentState ?? req.body?.StudentState,
+        ClassroomId: req.query?.ClassroomId ?? req.query?.classroomId ?? req.body?.ClassroomId,
+        IsActive: req.query?.IsActive ?? req.query?.isActive ?? req.body?.IsActive,
+        ModifiedAfter: req.query?.ModifiedAfter ?? req.query?.modifiedAfter ?? req.body?.ModifiedAfter,
+        Filter: req.query?.Filter ?? req.query?.filter ?? req.body?.Filter
+      };
+      const fetchResult = await fetchEdesisStudentsList(cfg, filters);
       const students = filterStudentsForActor(await loadStudentsForMatching(), actor, tags);
       const items = (fetchResult.rows || []).map((row) => matchEdesisStudentToPlatform(row, students));
       return res.status(200).json({
@@ -710,7 +742,11 @@ export default async function handler(req, res) {
     if (op === 'list-exams') {
       const cfg = getEdesisConfig();
       if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
-      const fetchResult = await fetchEdesisExamsCatalog();
+      const fetchResult = await fetchEdesisExamsCatalog(cfg, {
+        Filter: req.query?.Filter ?? req.query?.filter ?? req.body?.Filter,
+        resultsUpdatedAfter:
+          req.query?.resultsUpdatedAfter ?? req.body?.resultsUpdatedAfter ?? null
+      });
       return res.status(200).json({
         ok: true,
         count: fetchResult.totalCount,
@@ -969,6 +1005,305 @@ export default async function handler(req, res) {
       }
     }
 
+    if (op === 'exam-structure') {
+      const examId = String(req.query?.examId || req.body?.examId || '').trim();
+      if (!examId) return res.status(400).json({ error: 'examId_required' });
+      const cfg = getEdesisConfig();
+      if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
+      const structure = await fetchEdesisExamStructure(examId, cfg);
+      if (structure.error && !structure.rows?.length) {
+        return res.status(structure.httpStatus && structure.httpStatus >= 400 ? structure.httpStatus : 502).json({
+          error: 'exam_structure_failed',
+          message: structure.error,
+          hint: 'GET /exams/{id}/structure — exams:read gerekli'
+        });
+      }
+      return res.status(200).json({
+        ok: true,
+        examId,
+        count: structure.rows.length,
+        items: structure.rows,
+        booklets: structure.booklets
+      });
+    }
+
+    if (op === 'exam-subjects') {
+      if (!isStaff) return res.status(403).json({ error: 'forbidden' });
+      const examId = String(req.query?.examId || req.body?.examId || '').trim();
+      if (!examId) return res.status(400).json({ error: 'examId_required' });
+      const cfg = getEdesisConfig();
+      if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
+      const subjects = await fetchEdesisExamSubjects(examId, cfg);
+      return res.status(200).json({ ok: true, examId, count: subjects.rows.length, items: subjects.rows });
+    }
+
+    if (op === 'exam-results-lessons' || op === 'exam-results-subjects') {
+      if (!isStaff) return res.status(403).json({ error: 'forbidden' });
+      const examId = String(req.query?.examId || req.body?.examId || '').trim();
+      if (!examId) return res.status(400).json({ error: 'examId_required' });
+      const cfg = getEdesisConfig();
+      if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
+      const studentId = String(req.query?.edesisStudentId || req.query?.studentId || req.body?.edesisStudentId || '').trim();
+      const fetchFn = op === 'exam-results-lessons' ? fetchEdesisExamResultsLessons : fetchEdesisExamResultsSubjects;
+      const result = await fetchFn(examId, { studentId: studentId || undefined }, cfg);
+      return res.status(200).json({
+        ok: true,
+        examId,
+        count: result.totalCount,
+        items: result.rows || []
+      });
+    }
+
+    if (op === 'available-exams') {
+      const cfg = getEdesisConfig();
+      if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
+
+      let edesisStudentId = String(
+        req.query?.edesisStudentId || req.body?.edesisStudentId || ''
+      ).trim();
+      const platformStudentId = String(req.query?.studentId || req.body?.studentId || '').trim();
+      if (!edesisStudentId && platformStudentId) {
+        const resolved = await resolveEdesisIdForPlatformStudent(platformStudentId, actor, tags);
+        edesisStudentId = resolved.edesisStudentId || '';
+      }
+      if (!edesisStudentId) {
+        return res.status(400).json({
+          error: 'edesis_student_id_missing',
+          hint: 'Sınava girmek için Edesis öğrenci eşlemesi gerekli — koçunuzdan Edesis ID bağlatın'
+        });
+      }
+
+      const catalog = await fetchEdesisExamsCatalog(cfg);
+      let resultByExam = new Map();
+      try {
+        const studentResults = await fetchEdesisStudentResults(edesisStudentId, cfg);
+        for (const row of studentResults.rows || []) {
+          const draft = mapEdesisRowToExamDraft(row, {
+            studentId: platformStudentId || `edesis-${edesisStudentId}`,
+            institutionId: actor?.institution_id || null
+          });
+          if (draft.edesisExamId) resultByExam.set(String(draft.edesisExamId), draft);
+        }
+      } catch {
+        resultByExam = new Map();
+      }
+
+      const items = (catalog.rows || []).map((ex) => {
+        const examId = String(ex.id ?? ex.examId ?? '');
+        const result = resultByExam.get(examId);
+        const resultStatus = String(ex.resultStatus || (result ? 'Ready' : 'None'));
+        return {
+          examId,
+          name: ex.name || ex.examName || 'Deneme',
+          examDate: ex.examDate || ex.date || null,
+          examType: ex.examType || null,
+          totalQuestions: ex.totalQuestions ?? null,
+          studentCount: ex.studentCount ?? null,
+          resultStatus,
+          hasStudentResult: Boolean(result),
+          studentNet: result?.totalNet ?? null,
+          canTake: Boolean(examId)
+        };
+      });
+
+      return res.status(200).json({
+        ok: true,
+        edesisStudentId,
+        count: items.length,
+        items
+      });
+    }
+
+    if (op === 'submit-exam' && req.method === 'POST') {
+      const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+      const examId = String(body.examId || req.query?.examId || '').trim();
+      const kitapcikTuru = String(body.kitapcikTuru || '').trim();
+      const replace = Boolean(body.replace);
+      if (!examId) return res.status(400).json({ error: 'examId_required' });
+      if (!kitapcikTuru) return res.status(400).json({ error: 'kitapcikTuru_required' });
+
+      const cfg = getEdesisConfig();
+      if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
+
+      let edesisStudentId = String(body.edesisStudentId || req.query?.edesisStudentId || '').trim();
+      const platformStudentId = String(body.studentId || req.query?.studentId || '').trim();
+      if (!edesisStudentId && platformStudentId) {
+        const resolved = await resolveEdesisIdForPlatformStudent(platformStudentId, actor, tags);
+        edesisStudentId = resolved.edesisStudentId || '';
+      }
+      if (!edesisStudentId) {
+        return res.status(400).json({
+          error: 'edesis_student_id_missing',
+          hint: 'Sınava girmek için Edesis öğrenci eşlemesi gerekli'
+        });
+      }
+
+      const structure = await fetchEdesisExamStructure(examId, cfg);
+      const bookletLessons = (structure.rows || []).filter(
+        (r) => String(r.kitapcikTuru) === kitapcikTuru
+      );
+      if (!bookletLessons.length) {
+        return res.status(400).json({
+          error: 'invalid_kitapcik',
+          hint: `Bu sınavda kitapçık türü bulunamadı: ${kitapcikTuru}`,
+          booklets: structure.booklets
+        });
+      }
+
+      const incoming = Array.isArray(body.dersCevaplari) ? body.dersCevaplari : [];
+      const byKey = new Map();
+      for (const d of incoming) {
+        byKey.set(`${Number(d.lessonId)}:${Number(d.dersGrupId)}`, d);
+      }
+      const dersCevaplari = [];
+      for (const lesson of bookletLessons) {
+        const hit = byKey.get(`${lesson.lessonId}:${lesson.dersGrupId}`);
+        const cevaplar = String(hit?.cevaplar ?? '');
+        if (cevaplar.length !== lesson.questionCount) {
+          return res.status(400).json({
+            error: 'answer_length_mismatch',
+            hint: `${lesson.lessonName || 'Ders'} için ${lesson.questionCount} cevap bekleniyor, ${cevaplar.length} geldi`,
+            lessonId: lesson.lessonId,
+            dersGrupId: lesson.dersGrupId,
+            expected: lesson.questionCount,
+            actual: cevaplar.length
+          });
+        }
+        dersCevaplari.push({
+          lessonId: lesson.lessonId,
+          dersGrupId: lesson.dersGrupId,
+          cevaplar
+        });
+      }
+
+      const ingest = await submitEdesisExamResults(
+        examId,
+        {
+          replace,
+          results: [
+            {
+              ogrenciId: Number(edesisStudentId),
+              kitapcikTuru,
+              dersCevaplari
+            }
+          ]
+        },
+        cfg
+      );
+
+      if (ingest.conflict) {
+        return res.status(409).json({
+          ok: false,
+          conflict: true,
+          error: 'existing_result',
+          message: ingest.message,
+          hint: 'Aynı sınava tekrar girmek için replace: true gönderin'
+        });
+      }
+      if (!ingest.ok) {
+        const status = ingest.httpStatus && ingest.httpStatus >= 400 ? ingest.httpStatus : 422;
+        return res.status(status).json({
+          ok: false,
+          error: 'ingest_rejected',
+          message: ingest.message,
+          accepted: ingest.accepted,
+          rejected: ingest.rejected,
+          hint:
+            ingest.httpStatus === 403
+              ? 'API key exam_results:write kapsamına sahip olmalı (admin veya custom paket)'
+              : ingest.rejected?.[0]?.reason || ingest.message
+        });
+      }
+
+      let job = {
+        jobId: ingest.jobId,
+        state: ingest.jobId ? 'Pending' : null,
+        message: ingest.message
+      };
+      if (ingest.jobId) {
+        job = await pollEdesisIngestJob(examId, ingest.jobId, { maxAttempts: 10, delayMs: 4000 }, cfg);
+      }
+
+      return res.status(202).json({
+        ok: true,
+        accepted: ingest.accepted,
+        rejected: ingest.rejected,
+        jobId: ingest.jobId,
+        statusUrl: ingest.statusUrl,
+        job,
+        message: ingest.message
+      });
+    }
+
+    if (op === 'ingest-results' && req.method === 'POST') {
+      if (!isStaff) return res.status(403).json({ error: 'forbidden' });
+      const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+      const examId = String(body.examId || req.query?.examId || '').trim();
+      if (!examId) return res.status(400).json({ error: 'examId_required' });
+      if (!Array.isArray(body.results) || !body.results.length) {
+        return res.status(400).json({ error: 'results_required', hint: 'results dizisinde en az bir öğrenci satırı olmalı' });
+      }
+      const cfg = getEdesisConfig();
+      if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
+
+      const ingest = await submitEdesisExamResults(
+        examId,
+        { replace: Boolean(body.replace), results: body.results },
+        cfg
+      );
+      if (ingest.conflict) {
+        return res.status(409).json({
+          ok: false,
+          conflict: true,
+          error: 'existing_result',
+          message: ingest.message,
+          hint: 'replace gövde alanıdır; ?replace=true query string yok sayılır'
+        });
+      }
+      if (!ingest.ok) {
+        const status = ingest.httpStatus && ingest.httpStatus >= 400 ? ingest.httpStatus : 422;
+        return res.status(status).json({
+          ok: false,
+          error: 'ingest_rejected',
+          message: ingest.message,
+          accepted: ingest.accepted,
+          rejected: ingest.rejected
+        });
+      }
+
+      let job = null;
+      if (ingest.jobId && body.poll !== false) {
+        job = await pollEdesisIngestJob(examId, ingest.jobId, { maxAttempts: 8, delayMs: 4000 }, cfg);
+      }
+
+      return res.status(202).json({
+        ok: true,
+        accepted: ingest.accepted,
+        rejected: ingest.rejected,
+        jobId: ingest.jobId,
+        statusUrl: ingest.statusUrl,
+        job,
+        message: ingest.message
+      });
+    }
+
+    if (op === 'ingest-status') {
+      const examId = String(req.query?.examId || req.body?.examId || '').trim();
+      const jobId = String(req.query?.jobId || req.body?.jobId || '').trim();
+      if (!examId) return res.status(400).json({ error: 'examId_required' });
+      if (!jobId) return res.status(400).json({ error: 'jobId_required' });
+      const cfg = getEdesisConfig();
+      if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
+      const job = await fetchEdesisIngestJobStatus(examId, jobId, cfg);
+      return res.status(200).json({
+        ok: true,
+        examId,
+        jobId: job.jobId,
+        state: job.state,
+        message: job.message
+      });
+    }
+
     return res.status(400).json({
       error: 'unknown_op',
       allowed: [
@@ -980,6 +1315,14 @@ export default async function handler(req, res) {
         'import',
         'exam-detail',
         'exam-karne-pdf',
+        'exam-structure',
+        'exam-subjects',
+        'exam-results-lessons',
+        'exam-results-subjects',
+        'available-exams',
+        'submit-exam',
+        'ingest-results',
+        'ingest-status',
         'list-students',
         'list-terms',
         'list-exams',

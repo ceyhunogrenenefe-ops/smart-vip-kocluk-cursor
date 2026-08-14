@@ -49,6 +49,7 @@ export type EdesisStatus = {
   baseUrl: string;
   examsPath: string | null;
   authMode: string;
+  apiVersion?: string;
   studentsInDb?: number;
   studentsWithEdesisId?: number;
   studentsWithEmail?: number;
@@ -181,6 +182,11 @@ export type EdesisHubStudent = {
   name: string | null;
   email: string | null;
   schoolNo: string | null;
+  termId?: number | string | null;
+  termName?: string | null;
+  studentState?: string | null;
+  classroomId?: number | string | null;
+  modifiedDate?: string | null;
   platformStudentId: string | null;
   platformStudentName: string | null;
   matchMethod: string | null;
@@ -351,5 +357,145 @@ export async function linkEdesisStudent(params: {
   });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j.error || j.hint || res.statusText);
+  return j;
+}
+
+export type EdesisExamStructureLesson = {
+  kitapcikTuru: string;
+  lessonId: number | null;
+  lessonName: string;
+  dersGrupId: number | null;
+  questionCount: number;
+};
+
+export type EdesisExamBooklet = {
+  kitapcikTuru: string;
+  lessons: EdesisExamStructureLesson[];
+};
+
+export type EdesisAvailableExam = {
+  examId: string;
+  name: string;
+  examDate: string | null;
+  examType: string | null;
+  totalQuestions: number | null;
+  studentCount: number | null;
+  resultStatus: string;
+  hasStudentResult: boolean;
+  studentNet: number | null;
+  canTake: boolean;
+};
+
+export type EdesisIngestJob = {
+  jobId?: string | null;
+  state?: string | null;
+  message?: string | null;
+};
+
+export async function fetchEdesisExamStructure(examId: string): Promise<{
+  ok: boolean;
+  examId: string;
+  count: number;
+  items: EdesisExamStructureLesson[];
+  booklets: EdesisExamBooklet[];
+}> {
+  const qs = new URLSearchParams({ op: 'exam-structure', examId });
+  const res = await apiFetch(`/api/edesis-sync?${qs.toString()}`);
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || j.message || j.hint || res.statusText);
+  return j;
+}
+
+export async function fetchEdesisAvailableExams(params: {
+  studentId?: string;
+  edesisStudentId?: string;
+}): Promise<{
+  ok: boolean;
+  edesisStudentId: string;
+  count: number;
+  items: EdesisAvailableExam[];
+}> {
+  const qs = new URLSearchParams({ op: 'available-exams' });
+  if (params.studentId) qs.set('studentId', params.studentId);
+  if (params.edesisStudentId) qs.set('edesisStudentId', params.edesisStudentId);
+  const res = await apiFetch(`/api/edesis-sync?${qs.toString()}`);
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || j.message || j.hint || res.statusText);
+  return j;
+}
+
+export async function submitEdesisStudentExam(params: {
+  examId: string;
+  kitapcikTuru: string;
+  dersCevaplari: { lessonId: number | null; dersGrupId: number | null; cevaplar: string }[];
+  replace?: boolean;
+  studentId?: string;
+}): Promise<{
+  ok: boolean;
+  conflict?: boolean;
+  accepted?: number;
+  rejected?: { index?: number; reason?: string }[];
+  jobId?: string | null;
+  statusUrl?: string | null;
+  job?: EdesisIngestJob | null;
+  message?: string;
+  error?: string;
+  hint?: string;
+}> {
+  const res = await apiFetch('/api/edesis-sync?op=submit-exam', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  });
+  const j = await res.json().catch(() => ({}));
+  if (res.status === 409) return { ...j, ok: false, conflict: true };
+  if (!res.ok && res.status !== 202) {
+    throw new Error(j.hint || j.message || j.error || res.statusText);
+  }
+  return j;
+}
+
+export async function ingestEdesisExamResults(params: {
+  examId: string;
+  replace?: boolean;
+  results: Record<string, unknown>[];
+  poll?: boolean;
+}): Promise<{
+  ok: boolean;
+  conflict?: boolean;
+  accepted?: number;
+  rejected?: { index?: number; reason?: string }[];
+  jobId?: string | null;
+  statusUrl?: string | null;
+  job?: EdesisIngestJob | null;
+  message?: string;
+  error?: string;
+  hint?: string;
+}> {
+  const res = await apiFetch('/api/edesis-sync?op=ingest-results', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  });
+  const j = await res.json().catch(() => ({}));
+  if (res.status === 409) return { ...j, ok: false, conflict: true };
+  if (!res.ok && res.status !== 202) {
+    throw new Error(j.hint || j.message || j.error || res.statusText);
+  }
+  return j;
+}
+
+export async function fetchEdesisIngestStatus(params: {
+  examId: string;
+  jobId: string;
+}): Promise<{ ok: boolean; examId: string; jobId: string; state: string | null; message: string | null }> {
+  const qs = new URLSearchParams({
+    op: 'ingest-status',
+    examId: params.examId,
+    jobId: params.jobId
+  });
+  const res = await apiFetch(`/api/edesis-sync?${qs.toString()}`);
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || j.message || j.hint || res.statusText);
   return j;
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   BookOpen,
@@ -33,6 +33,9 @@ import {
 import { copyAcademicStudyGuestJoinShareText } from '../lib/bbbGuestJoin';
 import { AppModal } from '../components/ui/AppModal';
 import { VirtualOpticInfoModal } from '../components/academic/VirtualOpticInfoModal';
+
+const StudentEdesisExamPanel = React.lazy(() => import('../components/edesis/StudentEdesisExamPanel'));
+
 type TabKey = 'study' | 'exam' | 'pool';
 
 const EXAM_CLASS_INTRO =
@@ -243,11 +246,16 @@ export default function AcademicCenter() {
   const [studyGuestNotice, setStudyGuestNotice] = useState<string | null>(null);
   const [examModal, setExamModal] = useState<ExamModalTarget | null>(null);
   const [opticModalOpen, setOpticModalOpen] = useState(false);
+  const [edesisTaking, setEdesisTaking] = useState(false);
 
   useEffect(() => {
     const t = searchParams.get('tab');
     if (t === 'study' || t === 'exam' || t === 'pool') setActiveTab(t);
   }, [searchParams]);
+
+  useEffect(() => {
+    if (activeTab !== 'exam') setEdesisTaking(false);
+  }, [activeTab]);
 
   const selectTab = (id: TabKey) => {
     setActiveTab(id);
@@ -502,6 +510,25 @@ export default function AcademicCenter() {
 
           {activeTab === 'exam' && (
             <div className="space-y-6">
+              {isStudent ? (
+                <Suspense
+                  fallback={
+                    <div className="flex min-h-[16vh] items-center justify-center text-slate-500">
+                      <Loader2 className="h-6 w-6 animate-spin" />
+                    </div>
+                  }
+                >
+                  <StudentEdesisExamPanel onActiveExamChange={setEdesisTaking} />
+                </Suspense>
+              ) : null}
+
+              {edesisTaking ? null : (
+                <>
+              {isStudent ? (
+                <h2 className="border-t border-slate-100 pt-6 text-lg font-bold text-slate-900">
+                  Canlı deneme sınıfı ve harici optik
+                </h2>
+              ) : null}
               <a
                 href="https://youtu.be/He-7YtJ5gr0"
                 target="_blank"
@@ -560,6 +587,8 @@ export default function AcademicCenter() {
                   })}
                 </div>
               </div>
+                </>
+              )}
             </div>
           )}
 

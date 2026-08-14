@@ -128,7 +128,7 @@ export default function EdesisSyncPanel() {
           <div>
             <h4 className="font-semibold text-indigo-950">Edesis entegrasyonu</h4>
             <p className="mt-1 text-sm text-indigo-800">
-              Edesis External API <strong>v1</strong> — tam panel için{' '}
+              Edesis External API <strong>v1.5</strong> — tam panel için{' '}
               <Link to="/edesis" className="font-medium underline hover:text-indigo-950">
                 Edesis sayfasına
               </Link>{' '}
