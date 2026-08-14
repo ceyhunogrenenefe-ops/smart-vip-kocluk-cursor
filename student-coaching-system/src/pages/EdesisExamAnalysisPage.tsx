@@ -43,6 +43,7 @@ import { shareEdesisReportLinkWithParent } from '../lib/edesis/shareEdesisKarneW
 type Tab = 'analiz' | 'degerlendirme' | 'pdf' | 'panel';
 
 const FAMILIES = [
+  { id: 'all', label: 'Tümü' },
   { id: 'tyt', label: 'TYT' },
   { id: 'ayt', label: 'AYT' },
   { id: 'lgs', label: 'LGS' },
@@ -51,21 +52,6 @@ const FAMILIES = [
   { id: 'yos', label: 'YÖS' },
   { id: 'okul', label: 'Okul sınavı' }
 ];
-
-function inferFamilyFromClass(classLevel?: unknown): string {
-  const raw = String(classLevel ?? '').trim();
-  const s = raw.toLocaleLowerCase('tr-TR');
-  if (s === 'lgs' || s === '8' || s.includes('lgs')) return 'lgs';
-  if (s.includes('yos')) return 'yos';
-  if (s.includes('eşit') || s.includes('yks-ea')) return 'yks-ea';
-  if (s.includes('sayısal') || s.includes('yks-say')) return 'yks-say';
-  if (s.includes('ayt') || s.startsWith('yks')) return 'ayt';
-  if (s.includes('tyt')) return 'tyt';
-  const n = Number(raw);
-  if (n === 8) return 'lgs';
-  if (n >= 3 && n <= 7) return 'okul';
-  return 'tyt';
-}
 
 export default function EdesisExamAnalysisPage() {
   const { effectiveUser, linkedStudent } = useAuth();
@@ -97,7 +83,7 @@ export default function EdesisExamAnalysisPage() {
 
   const [tab, setTab] = useState<Tab>('analiz');
   const [studentId, setStudentId] = useState(ownStudentId || visibleStudents[0]?.id || '');
-  const [family, setFamily] = useState(() => inferFamilyFromClass(visibleStudents[0]?.classLevel));
+  const [family, setFamily] = useState('all');
   const [windowKey, setWindowKey] = useState('last10');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -133,7 +119,6 @@ export default function EdesisExamAnalysisPage() {
         to: dateTo || undefined
       });
       setPayload(j);
-      if (j.inferredFamily && !family) setFamily(String(j.inferredFamily));
       const draft = (j.analysis?.draft || {}) as Record<string, string>;
       setSections((prev) => (Object.keys(prev).some((k) => (prev[k] || '').trim()) ? prev : draft));
       const [ev, pf] = await Promise.all([
@@ -152,7 +137,6 @@ export default function EdesisExamAnalysisPage() {
   useEffect(() => {
     if (!studentId && visibleStudents[0]?.id) {
       setStudentId(visibleStudents[0].id);
-      setFamily(inferFamilyFromClass(visibleStudents[0].classLevel));
     }
   }, [visibleStudents, studentId]);
 
@@ -340,8 +324,6 @@ export default function EdesisExamAnalysisPage() {
               setStudentId(e.target.value);
               setReportId('');
               setSections({});
-              const st = visibleStudents.find((s) => s.id === e.target.value);
-              if (st?.classLevel) setFamily(inferFamilyFromClass(st.classLevel));
             }}
             disabled={isStudent}
             className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal"
