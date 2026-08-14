@@ -286,6 +286,10 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
   };
 
   const activeLessons = booklets.find((b) => b.kitapcikTuru === kitapcik)?.lessons || [];
+  const takeable = useMemo(
+    () => available.filter((exam) => !exam.hasStudentResult && exam.canTake !== false),
+    [available]
+  );
   const tabOn = 'bg-emerald-600 text-white';
   const tabOff = 'border border-slate-200 bg-white text-slate-700';
 
@@ -405,52 +409,42 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
           </div>
         ) : (
           <div className="space-y-3">
-            {hint && !available.length ? (
+            {hint && !takeable.length && !available.length ? (
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{hint}</div>
             ) : null}
-            {available.map((exam) => {
-              const taken = exam.hasStudentResult || exam.canTake === false;
-              return (
-                <div key={exam.examId} className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 sm:p-5">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="font-bold text-slate-900">{exam.name}</div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        {exam.examDate ? new Date(exam.examDate).toLocaleDateString('tr-TR') : '—'}
-                        {exam.totalQuestions ? ` · ${exam.totalQuestions} soru` : ''}
-                        {exam.resultStatus ? ` · ${exam.resultStatus}` : ''}
-                      </div>
-                      {taken ? (
-                        <div className="mt-1 text-xs font-semibold text-emerald-700">
-                          Girildi{exam.studentNet != null ? ` · netiniz: ${exam.studentNet}` : ''}
-                        </div>
-                      ) : (
-                        <div className="mt-1 text-xs text-slate-500">Henüz sonucunuz yok — optik formu doldurabilirsiniz</div>
-                      )}
+            {takeable.map((exam) => (
+              <div key={exam.examId} className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 sm:p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="font-bold text-slate-900">{exam.name}</div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {exam.examDate ? new Date(exam.examDate).toLocaleDateString('tr-TR') : '—'}
+                      {exam.totalQuestions ? ` · ${exam.totalQuestions} soru` : ''}
+                      {exam.resultStatus ? ` · ${exam.resultStatus}` : ''}
                     </div>
-                    {taken ? (
-                      <span className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-500">
-                        Girildi
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={structureBusy}
-                        onClick={() => void openExam(exam)}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
-                      >
-                        {structureBusy ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <ClipboardList className="h-3.5 w-3.5" />
-                        )}
-                        Sınava gir
-                      </button>
-                    )}
+                    <div className="mt-1 text-xs text-slate-500">Henüz sonucunuz yok — optik formu doldurabilirsiniz</div>
                   </div>
+                  <button
+                    type="button"
+                    disabled={structureBusy}
+                    onClick={() => void openExam(exam)}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                  >
+                    {structureBusy ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <ClipboardList className="h-3.5 w-3.5" />
+                    )}
+                    Sınava gir
+                  </button>
                 </div>
-              );
-            })}
+              </div>
+            ))}
+            {!takeable.length && available.length ? (
+              <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                Girilecek deneme kalmadı. Girdiğiniz sınavlar Sonuçlarım ve Analizlerim sekmelerinde.
+              </p>
+            ) : null}
             {!available.length && !hint ? (
               <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
                 Edesis’te size tanımlanmış deneme yok. Koçunuz sınavı tanımladıktan sonra burada görünür.
