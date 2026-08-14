@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   BookOpen,
@@ -20,6 +20,7 @@ import { startEtutSession } from '../lib/etutSession';
 import {
   defaultAcademicCenterLinks,
   examEntryUrl,
+  examRoomsForClassLevel,
   EXAM_ENTRY_DEFS,
   fetchAcademicCenterLinksFromServer,
   loadAcademicCenterLinks,
@@ -234,6 +235,17 @@ export default function AcademicCenter() {
         { roles: tags }
       )?.trim() || ''
     : '';
+  const studentClassLevel = useMemo(() => {
+    if (!studentId) return '';
+    const row = students.find((s) => s.id === studentId);
+    return row?.classLevel != null ? String(row.classLevel) : '';
+  }, [studentId, students]);
+  const visibleExamDefs = useMemo(() => {
+    if (!isStudent) return EXAM_ENTRY_DEFS;
+    const keys = examRoomsForClassLevel(studentClassLevel);
+    if (!keys) return EXAM_ENTRY_DEFS;
+    return EXAM_ENTRY_DEFS.filter((x) => keys.includes(x.key));
+  }, [isStudent, studentClassLevel]);
   const institutionId = institution?.id || activeInstitutionId || null;
   const [activeTab, setActiveTab] = useState<TabKey>('study');
   const [links, setLinks] = useState<AcademicCenterLinks>(
@@ -560,7 +572,7 @@ export default function AcademicCenter() {
                 <h2 className="text-lg font-bold text-slate-900">Deneme Sınavı Sınıfları</h2>
 
                 <div className="grid grid-cols-1 items-stretch gap-4 md:grid-cols-2">
-                  {EXAM_ENTRY_DEFS.map((x) => {
+                  {visibleExamDefs.map((x) => {
                     const busy = bbbBusyRoom === x.key;
                     return (
                       <PortalActionCard

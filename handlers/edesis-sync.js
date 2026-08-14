@@ -14,9 +14,12 @@ import {
   generateEdesisExamReport,
   fetchEdesisDefaultTermId,
   fetchEdesisStudentsList,
+  fetchEdesisStudentByOgrenciId,
   fetchEdesisTermsList,
   fetchEdesisExamsCatalog,
   fetchEdesisStudentResults,
+  inferEdesisExamProgramKeys,
+  filterEdesisExamsForStudentProgram,
   buildStudentAvailableEdesisExamItems,
   fetchEdesisGradesList,
   fetchEdesisDepartmentsList,
@@ -96,23 +99,54 @@ async function resolveOwnPlatformStudent(actor) {
   );
 }
 
-/** Öğrenci sayfası: yalnızca Edesis’te bu öğrenciye tanımlı denemeler */
+async function loadStudentClassLevel(platformStudentId, knownStudent) {
+  const fromKnown = String(knownStudent?.class_level || knownStudent?.classLevel || '').trim();
+  if (fromKnown) return fromKnown;
+  if (!platformStudentId) return '';
+  const { data, error } = await supabaseAdmin
+    .from('students')
+    .select('class_level')
+    .eq('id', platformStudentId)
+    .maybeSingle();
+  if (error && String(error.message || '').includes('class_level')) return '';
+  if (error) throw error;
+  return data?.class_level != null ? String(data.class_level).trim() : '';
+}
+
+async function resolveStudentProgramKeys({ edesisStudentId, platformStudentId, studentHint, cfg }) {
+  const classLevel = await loadStudentClassLevel(platformStudentId, studentHint);
+  let gradeName = '';
+  let className = '';
+  try {
+    const es = await fetchEdesisStudentByOgrenciId(edesisStudentId, cfg);
+    gradeName = es?.gradeName || '';
+    className = es?.className || '';
+  } catch {
+    /* sınıf Edesis’ten gelmezse class_level yeter */
+  }
+  return inferEdesisExamProgramKeys({ gradeName, className, classLevel });
+}
+
+/** Öğrenci sayfası: yalnızca bu öğrencinin kademesine uygun tanımlı denemeler */
 async function loadAvailableEdesisExamsForStudent({
   edesisStudentId,
   platformStudentId,
   actor,
+  studentHint,
   cfg
 }) {
-  const [catalog, studentResults] = await Promise.all([
+  const [catalog, studentResults, programKeys] = await Promise.all([
     fetchEdesisExamsCatalog(cfg).catch(() => ({ rows: [] })),
     fetchEdesisStudentResults(edesisStudentId, cfg, { enrichSubjects: false }).catch(() => ({
       rows: []
-    }))
+    })),
+    resolveStudentProgramKeys({ edesisStudentId, platformStudentId, studentHint, cfg })
   ]);
   return buildStudentAvailableEdesisExamItems({
     catalogRows: catalog.rows || [],
     resultRows: studentResults.rows || [],
     edesisStudentId,
+    programKeys,
     studentId: platformStudentId || `edesis-${edesisStudentId}`,
     institutionId: actor?.institution_id || null
   });
@@ -285,9 +319,14 @@ async function resolveEdesisIdForPlatformStudent(platformStudentId, actor, tags)
 }
 
 async function loadStudentsForMatching() {
+  const withLevel =
+    'id, name, email, phone, parent_phone, institution_id, coach_id, edesis_ogrenci_id, user_id, platform_user_id, class_level';
   const cols =
     'id, name, email, phone, parent_phone, institution_id, coach_id, edesis_ogrenci_id, user_id, platform_user_id';
-  let { data, error } = await supabaseAdmin.from('students').select(cols).limit(5000);
+  let { data, error } = await supabaseAdmin.from('students').select(withLevel).limit(5000);
+  if (error && String(error.message || '').includes('class_level')) {
+    ({ data, error } = await supabaseAdmin.from('students').select(cols).limit(5000));
+  }
   if (error) {
     const msg = String(error.message || '');
     if (msg.includes('edesis_ogrenci_id')) {
@@ -835,18 +874,26 @@ export default async function handler(req, res) {
       let parentPhone = matched?.parent_phone || null;
       let platformStudentName = matched?.name || null;
       if (platformId) {
-        const { data: stFresh } = await supabaseAdmin
+        let { data: stFresh, error: stErr } = await supabaseAdmin
           .from('students')
-          .select('parent_phone, name')
+          .select('parent_phone, name, class_level')
           .eq('id', platformId)
           .maybeSingle();
+        if (stErr && String(stErr.message || '').includes('class_level')) {
+          ({ data: stFresh, error: stErr } = await supabaseAdmin
+            .from('students')
+            .select('parent_phone, name')
+            .eq('id', platformId)
+            .maybeSingle());
+        }
         if (stFresh) {
           parentPhone = stFresh.parent_phone || parentPhone;
           platformStudentName = stFresh.name || platformStudentName;
+          if (stFresh.class_level != null) matched = { ...(matched || {}), class_level: stFresh.class_level };
         }
       }
 
-      const exams = (fetchResult.rows || []).map((row) => {
+      const mappedExams = (fetchResult.rows || []).map((row) => {
         const draft = mapEdesisRowToExamDraft(row, {
           studentId: platformId || `edesis-${edesisStudentId}`,
           institutionId: institutionId || matched?.institution_id || null
@@ -862,6 +909,7 @@ export default async function handler(req, res) {
         return {
           edesisExamId: draft.edesisExamId || null,
           examTitle: draft.examTitle || draft.examType,
+          examType: draft.examType,
           examDate: draft.examDate,
           totalNet: draft.totalNet,
           correct: totals.correct,
@@ -873,6 +921,16 @@ export default async function handler(req, res) {
           draft
         };
       });
+      const programKeys = await resolveStudentProgramKeys({
+        edesisStudentId,
+        platformStudentId: platformId,
+        studentHint: matched || studentSelf,
+        cfg: getEdesisConfig()
+      });
+      const exams = filterEdesisExamsForStudentProgram(
+        mappedExams.map((ex) => ({ ...ex, name: ex.examTitle })),
+        programKeys
+      );
 
       return res.status(200).json({
         ok: true,
@@ -1098,9 +1156,11 @@ export default async function handler(req, res) {
         req.query?.edesisStudentId || req.body?.edesisStudentId || ''
       ).trim();
       const platformStudentId = String(req.query?.studentId || req.body?.studentId || '').trim();
+      let studentHint = studentSelf || null;
       if (!edesisStudentId && platformStudentId) {
         const resolved = await resolveEdesisIdForPlatformStudent(platformStudentId, actor, tags);
         edesisStudentId = resolved.edesisStudentId || '';
+        studentHint = resolved.student || studentHint;
       }
       if (!edesisStudentId) {
         return res.status(400).json({
@@ -1113,6 +1173,7 @@ export default async function handler(req, res) {
         edesisStudentId,
         platformStudentId,
         actor,
+        studentHint,
         cfg
       });
 
@@ -1156,6 +1217,7 @@ export default async function handler(req, res) {
         edesisStudentId,
         platformStudentId,
         actor,
+        studentHint: studentSelf,
         cfg
       });
       if (!assigned.some((ex) => String(ex.examId) === examId)) {

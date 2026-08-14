@@ -65,6 +65,26 @@ export const STUDY_ENTRY_DEFS: {
   { key: 'yks', label: 'YKS etüt sınıfı', accent: 'from-amber-500 to-orange-600' }
 ];
 
+export function examRoomsForClassLevel(classLevel: unknown): ExamEntryKey[] | null {
+  const blob = String(classLevel ?? '')
+    .toLocaleLowerCase('tr-TR')
+    .replace(/ı/g, 'i')
+    .replace(/ş/g, 's')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c');
+  if (!blob.trim()) return null;
+  if (/\byos\b/.test(blob)) return ['yos'];
+  if (/\b(tyt|ayt|yks|lise|mezun)\b/.test(blob) || /(?:^|[^\d])(9|10|11|12)(?:\.|\s|$)/.test(blob)) {
+    return ['lise'];
+  }
+  if (/\blgs\b/.test(blob) || /(?:^|[^\d])(7|8)(?:\.|\s|$)/.test(blob)) return ['class78'];
+  if (/(?:^|[^\d])(5|6)(?:\.|\s|$)/.test(blob)) return ['class56'];
+  if (/(?:^|[^\d])(3|4)(?:\.|\s|$)/.test(blob)) return ['class34'];
+  return null;
+}
+
 export { BBB_AUTO_MEETING_LINK, isBbbAutoMeetingLink };
 
 export const defaultAcademicCenterLinks: AcademicCenterLinks = {
