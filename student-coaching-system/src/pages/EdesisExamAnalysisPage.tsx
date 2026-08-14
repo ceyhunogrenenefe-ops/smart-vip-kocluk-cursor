@@ -222,9 +222,18 @@ export default function EdesisExamAnalysisPage() {
   };
 
   const makePdf = async () => {
-    const examId = String(table.find((r) => r.attended)?.edesisExamId || table[0]?.edesisExamId || '');
+    const pickExamId = () => {
+      for (const row of table) {
+        const direct = String(row.edesisExamId || '').trim();
+        if (/^\d+$/.test(direct)) return direct;
+        const fromId = String(row.id || '').match(/^edesis-(\d+)/);
+        if (fromId) return fromId[1];
+      }
+      return '';
+    };
+    const examId = pickExamId();
     if (!examId) {
-      toast.error('Edesis sınav ID yok');
+      toast.error('Bu öğrencinin denemelerinde Edesis sınav numarası yok — senkron çalıştırın.');
       return;
     }
     try {
