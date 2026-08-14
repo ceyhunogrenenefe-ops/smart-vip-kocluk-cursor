@@ -29,6 +29,7 @@ import {
   createEdesisParent,
   fetchEdesisExamStructure,
   loadEdesisExamBookletPdf,
+  pickEdesisBookletLessons,
   fetchEdesisExamSubjects,
   fetchEdesisExamResultsLessons,
   fetchEdesisExamResultsSubjects,
@@ -1148,7 +1149,13 @@ export default async function handler(req, res) {
         count: structure.rows.length,
         items: structure.rows,
         booklets: structure.booklets,
-        bookletPdfs: structure.bookletPdfs || []
+        bookletPdfs: structure.bookletPdfs || [],
+        examFamily: structure.examFamily || 'generic',
+        bookletMode: structure.bookletMode || 'single',
+        choiceCount: structure.choiceCount || 4,
+        remainingSeconds: structure.remainingSeconds || 0,
+        examTitle: structure.examTitle || '',
+        examType: structure.examType || ''
       });
     }
 
@@ -1170,16 +1177,8 @@ export default async function handler(req, res) {
             hint: 'Kitapçık PDF için Edesis öğrenci eşlemesi gerekli'
           });
         }
-        const assigned = await loadAvailableEdesisExamsForStudent({
-          edesisStudentId,
-          platformStudentId: String(studentSelf?.id || ''),
-          actor,
-          studentHint: studentSelf,
-          cfg
-        });
-        if (!assigned.some((ex) => String(ex.examId) === examId)) {
-          return res.status(403).json({ error: 'exam_not_assigned', hint: 'Bu deneme size tanımlanmamış' });
-        }
+        // Kitapçık kurum paylaşımıdır; atama listesi gecikince 403 boş PDF üretmesin.
+        // Öğrenci kimliği + sınav UUID yeter (structure zaten aynı id ile açılır).
       }
 
       const pdf = await loadEdesisExamBookletPdf(examId, kitapcikTuru, cfg);
@@ -1293,6 +1292,7 @@ export default async function handler(req, res) {
       const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
       const examId = String(body.examId || req.query?.examId || '').trim();
       const kitapcikTuru = String(body.kitapcikTuru || '').trim();
+      const kitapcikTuruSay = String(body.kitapcikTuruSay || '').trim();
       const replace = Boolean(body.replace);
       if (!examId) return res.status(400).json({ error: 'examId_required' });
       if (!kitapcikTuru) return res.status(400).json({ error: 'kitapcikTuru_required' });
@@ -1339,9 +1339,7 @@ export default async function handler(req, res) {
       const replaceForIngest = isStudent && !isStaff ? false : replace;
 
       const structure = await fetchEdesisExamStructure(examId, cfg);
-      const bookletLessons = (structure.rows || []).filter(
-        (r) => String(r.kitapcikTuru) === kitapcikTuru
-      );
+      const bookletLessons = pickEdesisBookletLessons(structure, kitapcikTuru);
       if (!bookletLessons.length) {
         return res.status(400).json({
           error: 'invalid_kitapcik',
@@ -1384,6 +1382,7 @@ export default async function handler(req, res) {
             {
               ogrenciId: Number(edesisStudentId),
               kitapcikTuru,
+              ...(kitapcikTuruSay ? { kitapcikTuruSay } : {}),
               dersCevaplari
             }
           ]

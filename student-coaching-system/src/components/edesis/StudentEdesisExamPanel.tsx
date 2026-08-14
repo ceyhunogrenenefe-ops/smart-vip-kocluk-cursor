@@ -26,6 +26,7 @@ import {
   submitEdesisStudentExam,
   type EdesisAvailableExam,
   type EdesisExamBooklet,
+  type EdesisBookletPdf,
   type EdesisStudentResultsExam
 } from '../../lib/edesis/edesisApi';
 
@@ -81,7 +82,13 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
 
   const [activeExam, setActiveExam] = useState<EdesisAvailableExam | null>(null);
   const [booklets, setBooklets] = useState<EdesisExamBooklet[]>([]);
+  const [bookletPdfs, setBookletPdfs] = useState<EdesisBookletPdf[]>([]);
   const [kitapcik, setKitapcik] = useState('');
+  const [kitapcikSayisal, setKitapcikSayisal] = useState('');
+  const [examFamily, setExamFamily] = useState('generic');
+  const [bookletMode, setBookletMode] = useState('single');
+  const [choiceCount, setChoiceCount] = useState(4);
+  const [remainingSeconds, setRemainingSeconds] = useState(0);
   const [structureBusy, setStructureBusy] = useState(false);
   const [submitBusy, setSubmitBusy] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -95,9 +102,19 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
 
   useEffect(() => {
     return () => {
-      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+      if (pdfUrl && pdfUrl.startsWith('blob:')) URL.revokeObjectURL(pdfUrl);
     };
   }, [pdfUrl]);
+
+  const pickFallbackPdfUrl = (files: EdesisBookletPdf[] | undefined, letter: string) => {
+    const list = files || [];
+    const want = String(letter || '').trim().toUpperCase();
+    const hit =
+      list.find((f) => String(f.kitapcikTuru || '').trim().toUpperCase() === want) ||
+      list.find((f) => f.url) ||
+      null;
+    return hit?.url || '';
+  };
 
   const load = useCallback(async () => {
     if (!studentId) {
@@ -152,7 +169,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
     setPdfBusy(true);
     setPdfError(null);
     setPdfUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
+      if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
       return null;
     });
     void (async () => {
@@ -162,20 +179,33 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
           kitapcikTuru: kitapcik
         });
         if (cancelled) return;
-        if (r.blob && r.blob.size > 0 && (r.blob.type.includes('pdf') || r.blob.size > 8)) {
+        if (r.blob && r.blob.size > 8) {
           const next = URL.createObjectURL(r.blob);
           if (cancelled) {
             URL.revokeObjectURL(next);
             return;
           }
           setPdfUrl(next);
-        } else if (r.url) {
-          setPdfUrl(r.url);
+          return;
+        }
+        const fallback =
+          r.url ||
+          pickFallbackPdfUrl(r.files, kitapcik) ||
+          pickFallbackPdfUrl(bookletPdfs, kitapcik) ||
+          pickFallbackPdfUrl(activeExam.bookletPdfs, kitapcik);
+        if (fallback) {
+          setPdfUrl(fallback);
         } else {
           setPdfError('Bu sınav için kitapçık PDF’si bulunamadı');
         }
       } catch (e) {
-        if (!cancelled) {
+        if (cancelled) return;
+        const fallback =
+          pickFallbackPdfUrl(bookletPdfs, kitapcik) || pickFallbackPdfUrl(activeExam.bookletPdfs, kitapcik);
+        if (fallback) {
+          setPdfUrl(fallback);
+          setPdfError(null);
+        } else {
           setPdfError(e instanceof Error ? e.message : 'Kitapçık PDF alınamadı');
         }
       } finally {
@@ -185,7 +215,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [activeExam, kitapcik]);
+  }, [activeExam, kitapcik, bookletPdfs]);
 
   const openExam = async (exam: EdesisAvailableExam) => {
     if (exam.hasStudentResult || exam.canTake === false) {
@@ -200,9 +230,26 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
         toast.error('Bu sınavın cevap anahtarı yapısı Edesis’te henüz yok');
         return;
       }
+      const family =
+        r.examFamily && r.examFamily !== 'generic'
+          ? r.examFamily
+          : /\blgs\b/i.test(`${exam.name || ''} ${exam.examType || ''}`)
+            ? 'lgs'
+            : /\b(tyt|ayt|yks)\b/i.test(`${exam.name || ''} ${exam.examType || ''}`)
+              ? 'yks'
+              : r.examFamily || 'generic';
+      const mode =
+        family === 'lgs' || r.bookletMode === 'dual-sozel-sayisal' ? 'dual-sozel-sayisal' : r.bookletMode || 'single';
+      const firstLetter = books[0].kitapcikTuru || 'A';
       setActiveExam(exam);
       setBooklets(books);
-      setKitapcik(books[0].kitapcikTuru);
+      setBookletPdfs(r.bookletPdfs || exam.bookletPdfs || []);
+      setExamFamily(family);
+      setBookletMode(mode);
+      setChoiceCount(family === 'yks' || family === 'yos' || family === 'ayt' ? 5 : r.choiceCount || 4);
+      setRemainingSeconds(r.remainingSeconds || 0);
+      setKitapcik(firstLetter);
+      setKitapcikSayisal(firstLetter);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Sınav yapısı alınamadı');
     } finally {
@@ -219,6 +266,9 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
       const r = await submitEdesisStudentExam({
         examId: activeExam.examId,
         kitapcikTuru: kitapcik,
+        ...(bookletMode === 'dual-sozel-sayisal' || examFamily === 'lgs'
+          ? { kitapcikTuruSay: kitapcikSayisal || kitapcik }
+          : {}),
         dersCevaplari,
         studentId
       });
@@ -285,7 +335,8 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
     }
   };
 
-  const activeLessons = booklets.find((b) => b.kitapcikTuru === kitapcik)?.lessons || [];
+  const activeLessons =
+    booklets.find((b) => b.kitapcikTuru === kitapcik)?.lessons || booklets[0]?.lessons || [];
   const takeable = useMemo(
     () => available.filter((exam) => !exam.hasStudentResult && exam.canTake !== false),
     [available]
@@ -387,8 +438,9 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
               <div className="font-bold text-slate-900">{activeExam.name}</div>
               <p className="mt-1 text-xs text-slate-600">
-                Kitapçık türünü seçin. Soldan ders sekmesine tıklayıp optiği doldurun; Kaydet ile saklanır, Bitir ile
-                Edesis’e gider.
+                {bookletMode === 'dual-sozel-sayisal' || examFamily === 'lgs'
+                  ? 'LGS’de Sözel ve Sayısal kitapçık harflerini ayrı seçin. Ders sekmeleri değişmez; Kaydet taslak, Bitir Edesis’e gider.'
+                  : 'Kitapçık türünü seçin. Soldan ders sekmesine tıklayıp optiği doldurun; Kaydet ile saklanır, Bitir ile Edesis’e gider.'}
               </p>
             </div>
             <EdesisOpticalSheet
@@ -396,9 +448,15 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
               booklets={booklets}
               kitapcik={kitapcik}
               onKitapcikChange={setKitapcik}
+              kitapcikSayisal={kitapcikSayisal}
+              onKitapcikSayisalChange={setKitapcikSayisal}
               examTitle={activeExam.name}
               examType={activeExam.examType}
-              storageKey={`edesis-optic:${studentId}:${activeExam.examId}:${kitapcik}`}
+              examFamily={examFamily}
+              bookletMode={bookletMode}
+              choiceCount={choiceCount}
+              remainingSeconds={remainingSeconds}
+              storageKey={`edesis-optic:${studentId}:${activeExam.examId}`}
               busy={submitBusy}
               submitLabel="Bitir"
               pdfUrl={pdfUrl}
