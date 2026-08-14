@@ -358,7 +358,10 @@ export default async function handler(req, res) {
     if (op === 'student-analysis') {
       const exams = await loadStudentExams(studentId);
       const requestedFamily = String(req.query?.family || req.body?.family || '').trim();
-      const family = requestedFamily || inferExamFamilyFromClassLevel(student.class_level);
+      const family =
+        !requestedFamily || requestedFamily === 'all' || requestedFamily === 'hepsi'
+          ? null
+          : requestedFamily;
       const window = String(req.query?.window || req.body?.window || 'last10').trim();
       const from = req.query?.from || req.body?.from || null;
       const to = req.query?.to || req.body?.to || null;
