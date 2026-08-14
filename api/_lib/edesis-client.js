@@ -18,6 +18,10 @@ export const V1_PATHS = {
   examResults: `${API_V1_PREFIX}/exams/results`,
   examResultsByExam: (examId) => `${API_V1_PREFIX}/exams/${encodeURIComponent(examId)}/results`,
   examStructure: (examId) => `${API_V1_PREFIX}/exams/${encodeURIComponent(examId)}/structure`,
+  examById: (examId) => `${API_V1_PREFIX}/exams/${encodeURIComponent(examId)}`,
+  examBooklets: (examId) => `${API_V1_PREFIX}/exams/${encodeURIComponent(examId)}/booklets`,
+  examFiles: (examId) => `${API_V1_PREFIX}/exams/${encodeURIComponent(examId)}/files`,
+  examPdf: (examId) => `${API_V1_PREFIX}/exams/${encodeURIComponent(examId)}/pdf`,
   examSubjects: (examId) => `${API_V1_PREFIX}/exams/${encodeURIComponent(examId)}/subjects`,
   examResultsStatus: (examId) => `${API_V1_PREFIX}/exams/${encodeURIComponent(examId)}/results/status`,
   examResultsLessons: (examId) => `${API_V1_PREFIX}/exams/${encodeURIComponent(examId)}/results/lessons`,
@@ -444,6 +448,126 @@ export function filterEdesisExamsForStudentProgram(items, programKeys) {
   );
 }
 
+const BOOKLET_URL_KEYS = [
+  'bookletUrl',
+  'bookletPDFUrl',
+  'bookletPdfUrl',
+  'kitapcikUrl',
+  'kitapcikPdfUrl',
+  'examPdfUrl',
+  'sinavPdfUrl',
+  'pdfFileUrl',
+  'fileUrl',
+  'pdfUrl',
+  'downloadUrl',
+  'signedUrl',
+  'storageUrl',
+  'blobUrl',
+  'cdnUrl'
+];
+
+const SKIP_BOOKLET_URL_KEYS = /reporturl|statusurl|karne|analytics|thumbnail|imageurl|logo|avatar/i;
+
+export function collectEdesisBookletFiles(json, out = [], seen = new Set()) {
+  if (!json || typeof json !== 'object') return out;
+  if (seen.has(json)) return out;
+  seen.add(json);
+  if (Array.isArray(json)) {
+    for (const it of json) collectEdesisBookletFiles(it, out, seen);
+    return dedupeBookletFiles(out);
+  }
+
+  const kitapcikTuru =
+    pickStr(json, ['kitapcikTuru', 'booklet', 'bookletType', 'bookletCode', 'kitapcik']) || '';
+  const name = pickStr(json, ['bookletName', 'fileName', 'filename', 'name', 'title']) || 'Kitapçık PDF';
+  const mime = pickStr(json, ['mimeType', 'contentType', 'fileType', 'content_type', 'mime']).toLowerCase();
+
+  const dedicated = pickStr(json, BOOKLET_URL_KEYS);
+  const generic = pickStr(json, ['url', 'href', 'link']);
+  let url = coerceFileUrl(dedicated);
+  if (!url && generic && looksLikeBookletFile({ url: generic, mime, name, kitapcikTuru })) {
+    url = coerceFileUrl(generic);
+  }
+  if (url) {
+    out.push({ url, kitapcikTuru, name });
+  }
+
+  for (const [k, v] of Object.entries(json)) {
+    if (typeof v === 'string' && /booklet|kitapcik|pdf/i.test(k) && !SKIP_BOOKLET_URL_KEYS.test(k)) {
+      const nestedUrl = coerceFileUrl(v);
+      if (nestedUrl) {
+        const letter = (k.match(/(?:^|[^A-Z])([ABCD])(?:$|[^A-Z])/i) || [])[1] || kitapcikTuru;
+        out.push({ url: nestedUrl, kitapcikTuru: letter || '', name: k });
+      }
+    }
+    if (v && typeof v === 'object') collectEdesisBookletFiles(v, out, seen);
+  }
+  return dedupeBookletFiles(out);
+}
+
+function coerceFileUrl(u) {
+  const s = String(u || '').trim();
+  if (!s || s === 'null' || s === 'undefined') return '';
+  if (s.startsWith('//')) return `https:${s}`;
+  if (/^https?:\/\//i.test(s)) return s;
+  if (s.startsWith('/')) return s;
+  return '';
+}
+
+function looksLikePdfUrl(u) {
+  const s = String(u || '').toLowerCase();
+  return (
+    /^(https?:)?\/\//.test(s) &&
+    (s.includes('.pdf') ||
+      s.includes('/pdf') ||
+      s.includes('booklet') ||
+      s.includes('kitapcik') ||
+      s.includes('blob.core.windows.net') ||
+      s.includes('cdn.') ||
+      /\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(s))
+  );
+}
+
+function looksLikeBookletFile({ url, mime, name, kitapcikTuru }) {
+  if (mime.includes('pdf')) return true;
+  const n = String(name || '').toLowerCase();
+  if (n.includes('.pdf') || n.includes('kitapcik') || n.includes('booklet')) return true;
+  if (kitapcikTuru && coerceFileUrl(url)) return true;
+  return looksLikePdfUrl(url);
+}
+
+export function resolveEdesisFileUrl(fileUrl, cfg = {}) {
+  const s = coerceFileUrl(fileUrl);
+  if (!s) return '';
+  if (/^https?:\/\//i.test(s)) return s;
+  const base = String(cfg.baseUrl || getEdesisConfig().baseUrl || '').replace(/\/+$/, '');
+  return s.startsWith('/') ? `${base}${s}` : '';
+}
+
+function dedupeBookletFiles(files) {
+  const seen = new Set();
+  const out = [];
+  for (const f of files || []) {
+    const key = `${String(f.kitapcikTuru || '').toUpperCase()}|${f.url}`;
+    if (!f.url || seen.has(key)) continue;
+    seen.add(key);
+    out.push(f);
+  }
+  return out;
+}
+
+export function pickEdesisBookletFile(files, kitapcikTuru) {
+  const list = Array.isArray(files) ? files : [];
+  const want = String(kitapcikTuru || '').trim().toUpperCase();
+  if (want) {
+    const hit = list.find((f) => String(f.kitapcikTuru || '').trim().toUpperCase() === want);
+    if (hit) return hit;
+    const loose = list.find((f) => String(f.name || '').toUpperCase().includes(want));
+    if (loose) return loose;
+  }
+  return list[0] || null;
+}
+
 /** Sonuç satırı bu Edesis öğrencisine mi ait (API StudentId’yi yok sayarsa yedek süzgeç) */
 export function resultRowBelongsToStudent(row, edesisStudentId) {
   const sid = normEdesisId(edesisStudentId);
@@ -453,7 +577,33 @@ export function resultRowBelongsToStudent(row, edesisStudentId) {
   return normEdesisId(rowSid) === sid;
 }
 
+/** Sonuç satırında gerçek değerlendirme var mı — atama kaydı tek başına tekrar giriş sayılmaz */
+export function edesisResultLooksSubmitted(row) {
+  if (!row || typeof row !== 'object') return false;
+  const src = flattenEdesisRow(row);
+  const scoreKeys = [
+    'score',
+    'toplamNet',
+    'totalNet',
+    'net',
+    'genelNet',
+    'correctCount',
+    'wrongCount',
+    'emptyCount',
+    'correct',
+    'wrong',
+    'blank',
+    'dogru',
+    'yanlis',
+    'bos'
+  ];
+  if (scoreKeys.some((k) => src[k] != null && String(src[k]).trim() !== '')) return true;
+  const status = String(src.resultStatus || src.status || src.evaluationStatus || '').toLowerCase();
+  return ['ready', 'completed', 'evaluated', 'published', 'success'].includes(status);
+}
+
 export function formatEdesisAvailableExamItem(examId, catalog, resultRow, meta = {}) {
+  const submitted = edesisResultLooksSubmitted(resultRow);
   const draft = resultRow
     ? mapEdesisRowToExamDraft(resultRow, {
         studentId: meta.studentId || 'edesis-student',
@@ -472,10 +622,11 @@ export function formatEdesisAvailableExamItem(examId, catalog, resultRow, meta =
     examType: (catalog && (catalog.examType || catalog.sinavTuru)) || draft?.examType || null,
     totalQuestions: catalog?.totalQuestions ?? null,
     studentCount: catalog?.studentCount ?? null,
-    resultStatus: String((catalog && catalog.resultStatus) || (draft ? 'Ready' : 'None')),
-    hasStudentResult: Boolean(draft),
-    studentNet: draft?.totalNet ?? null,
-    canTake: Boolean(examId)
+    resultStatus: String((catalog && catalog.resultStatus) || (submitted ? 'Ready' : 'None')),
+    hasStudentResult: submitted,
+    studentNet: submitted ? draft?.totalNet ?? null : null,
+    canTake: Boolean(examId) && !submitted,
+    bookletPdfs: catalog ? collectEdesisBookletFiles(catalog) : []
   };
 }
 
@@ -1561,11 +1712,103 @@ export async function fetchEdesisExamStructure(examId, cfgOverride = {}) {
     };
   }
   const rows = unwrapList(r.json).map(normalizeEdesisStructureRow);
+  let bookletPdfs = collectEdesisBookletFiles(r.json);
+  if (!bookletPdfs.length) {
+    try {
+      bookletPdfs = await fetchEdesisExamBookletPdfs(id, localCfg);
+    } catch {
+      bookletPdfs = [];
+    }
+  }
   return {
     rows,
     booklets: groupEdesisStructureByBooklet(rows),
+    bookletPdfs,
     httpStatus: r.status,
     error: null
+  };
+}
+
+/** Sınav kitapçık PDF’leri — GET /exams/{id} ve kitapçık uçları */
+export async function fetchEdesisExamBookletPdfs(examId, cfgOverride = {}) {
+  const id = String(examId || '').trim();
+  if (!id) return [];
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  if (!cfg.apiKey) throw new Error('EDESIS_API_KEY_missing');
+  const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+  const paths = [
+    V1_PATHS.examById(id),
+    V1_PATHS.examBooklets(id),
+    V1_PATHS.examFiles(id),
+    V1_PATHS.examPdf(id)
+  ];
+  const collected = [];
+  for (const path of paths) {
+    const r = await fetchEdesisJson(localCfg, path);
+    if (!isReachableEdesisResponse(r)) continue;
+    collected.push(...collectEdesisBookletFiles(r.json));
+  }
+  return dedupeBookletFiles(collected);
+}
+
+export async function fetchEdesisUrlBuffer(fileUrl, cfgOverride = {}) {
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  const url = resolveEdesisFileUrl(fileUrl, cfg);
+  if (!url) throw new Error('pdf_url_missing');
+  const headers = buildHeaders(cfg, { forGet: true });
+  headers.Accept = 'application/pdf,application/octet-stream,*/*';
+  const res = await fetch(url, { method: 'GET', headers, signal: AbortSignal.timeout(45000) });
+  const buf = Buffer.from(await res.arrayBuffer());
+  const contentType = res.headers.get('content-type') || '';
+  return {
+    ok: res.ok,
+    status: res.status,
+    contentType,
+    buf,
+    url,
+    looksPdf: contentType.includes('pdf') || buf.slice(0, 5).toString() === '%PDF-'
+  };
+}
+
+/** Kitapçık PDF’sini Edesis’ten indir (öğrenci paneli proxy’si) */
+export async function loadEdesisExamBookletPdf(examId, kitapcikTuru, cfgOverride = {}) {
+  const id = String(examId || '').trim();
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  if (!id) return { ok: false, status: 400, files: [], file: null, buf: null, looksPdf: false, url: '' };
+  if (!cfg.apiKey) throw new Error('EDESIS_API_KEY_missing');
+  const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+  const files = await fetchEdesisExamBookletPdfs(id, localCfg);
+  const file = pickEdesisBookletFile(files, kitapcikTuru);
+  const kt = String(kitapcikTuru || '').trim();
+  const tryUrls = [];
+  if (file?.url) tryUrls.push(file.url);
+  if (kt) tryUrls.push(joinUrl(localCfg.baseUrl, `${V1_PATHS.examPdf(id)}?kitapcikTuru=${encodeURIComponent(kt)}`));
+  tryUrls.push(joinUrl(localCfg.baseUrl, V1_PATHS.examPdf(id)));
+  tryUrls.push(joinUrl(localCfg.baseUrl, V1_PATHS.examFiles(id)));
+
+  const seen = new Set();
+  for (const raw of tryUrls) {
+    const url = resolveEdesisFileUrl(raw, localCfg);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    try {
+      const got = await fetchEdesisUrlBuffer(url, localCfg);
+      if (got.ok && got.looksPdf) {
+        return { ok: true, files, file, buf: got.buf, contentType: got.contentType, url: got.url, looksPdf: true, status: got.status };
+      }
+    } catch {
+      /* sonraki aday */
+    }
+  }
+  return {
+    ok: false,
+    status: 404,
+    files,
+    file,
+    buf: null,
+    looksPdf: false,
+    url: file?.url ? resolveEdesisFileUrl(file.url, localCfg) : '',
+    contentType: ''
   };
 }
 

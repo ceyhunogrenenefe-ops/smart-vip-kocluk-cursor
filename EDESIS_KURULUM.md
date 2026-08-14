@@ -66,14 +66,16 @@ Sayfalama: `MaxResultCount` (liste max 1000, kırılım max 100), `SkipCount`
 ## Öğrencinin panelden sınava girmesi
 
 1. Koç **Edesis** sayfasından öğrenciyi `edesis_ogrenci_id` ile bağlar.
-2. Öğrenci: **Akademik Merkez → Deneme / Optik** (`/academic-center?tab=exam`) → **Sınava gir** / **Sonuçlarım**.
-   Liste **kurumun tüm denemelerini göstermez**. Kaynak `GET /exams/results?StudentId=` ve öğrencinin **sınıf / programı** (LGS öğrencisine 5. sınıf denemesi düşmez). Optik, eski sanal optik gibi solda işaretleme / sağda kitapçık alanıdır.
-3. Kitapçık seçilir, her ders için optik işaretlenir (`cevaplar` uzunluğu = `questionCount`).
-4. Sistem `ogrenciId` + `kitapcikTuru` + tüm `dersCevaplari` ile POST eder (`replace` gövdede).
-5. `jobId` ile durum izlenir (`Pending` / `Running` / `Completed` / `Failed` / `NotFound`).
-6. Bittiğinde **Sonuçlarım** ve karne PDF açılır.
+2. Öğrenci: **Akademik Merkez → Deneme / Optik** (`/academic-center?tab=exam`) → **Sınava gir** / **Sonuçlarım** / **Analizlerim**.
+   Liste **kurumun tüm denemelerini göstermez**. Kaynak `GET /exams/results?StudentId=` ve öğrencinin **sınıf / programı** (LGS öğrencisine 5. sınıf denemesi düşmez).
+   Optik, Edesis **Sınav Uygulaması** düzenidir: üstte **Kitapçık türü A/B/C/D**, **Kaydet**, **Bitir**; solda ders sekmeleri (tek tek tıklanır); sağda kitapçık PDF.
+3. Kitapçık PDF `GET /exams/{id}` + `/booklets` / `/files` / `/pdf` üzerinden alınır; CDN çoğu zaman `.pdf` uzantısız UUID’dir. Öğrenci JWT’si iframe’e gitmediği için PDF **`op=exam-booklet-pdf&download=1`** ile proxy edilir.
+4. Kitapçık seçilir, her ders için optik işaretlenir (`cevaplar` uzunluğu = `questionCount`).
+5. Sistem `ogrenciId` + `kitapcikTuru` + tüm `dersCevaplari` ile POST eder. **Öğrenci girilmiş sınava tekrar giremez** (`replace` yok; 409 `already_submitted`).
+6. `jobId` ile durum izlenir (`Pending` / `Running` / `Completed` / `Failed` / `NotFound`).
+7. Bittiğinde **Sonuçlarım** (net + karne PDF) ve **Analizlerim** (**Hata karnesi** + **Deneme analizi**) açılır.
 
-Mevcut sonuç varken tekrar gönderim: gövdede `"replace": true`. Query `?replace=true` **yok sayılır** ve 409 döner.
+Koç/admin ham ingest’te gövdede `"replace": true` kullanabilir. Query `?replace=true` **yok sayılır** ve 409 döner.
 
 Bilinen Edesis sınırı: soru numarası 1’den başlamayan dersler (ör. seçmeli 21–25) UI optik import ile aynı şekilde 0/0/0 kalabilir.
 
