@@ -39,6 +39,7 @@ import {
   archiveEdesisEvaluation
 } from '../lib/edesis/edesisAnalysisApi';
 import { shareEdesisReportLinkWithParent } from '../lib/edesis/shareEdesisKarneWhatsApp';
+import EdesisResultsKarnePanel from '../components/edesis/EdesisResultsKarnePanel';
 
 type Tab = 'analiz' | 'degerlendirme' | 'pdf' | 'panel';
 
@@ -93,7 +94,7 @@ export default function EdesisExamAnalysisPage() {
   const [reportId, setReportId] = useState('');
   const [evals, setEvals] = useState<Record<string, unknown>[]>([]);
   const [pdfs, setPdfs] = useState<Record<string, unknown>[]>([]);
-  const [pdfCodes, setPdfCodes] = useState<number[]>([102]);
+  const [pdfCodes, setPdfCodes] = useState<number[]>([104, 105]);
   const [dash, setDash] = useState<Record<string, unknown> | null>(null);
   const [forceNew, setForceNew] = useState(false);
   const [versions, setVersions] = useState<Record<string, unknown>[]>([]);
@@ -301,8 +302,8 @@ export default function EdesisExamAnalysisPage() {
         <div>
           <h1 className="text-xl font-bold text-slate-900">Edesis sınav analizi</h1>
           <p className="mt-1 text-sm text-slate-600">
-            Son 5 / son 10 deneme, ders-konu kırılımı, değerlendirme ve Edesis karne / BK-5 / BK-10 PDF. Yoklama bu
-            ekranda yoktur.
+            Son 5 / son 10 deneme, ders-konu kırılımı, değerlendirme; Karne sekmesinde Edesis sonuçları + karne PDF
+            ve BK-5 / BK-10. Yoklama bu ekranda yoktur.
           </p>
         </div>
         <button
@@ -680,12 +681,27 @@ export default function EdesisExamAnalysisPage() {
 
       {tab === 'pdf' ? (
         <div className="space-y-4">
+          <EdesisResultsKarnePanel
+            platformStudentId={studentId}
+            edesisStudentId={String(studentMeta.edesisStudentId || '').trim() || null}
+            studentName={String(studentMeta.name || visibleStudents.find((s) => s.id === studentId)?.name || '')}
+            parentPhone={
+              String(studentMeta.parentPhone || '').trim() ||
+              String(visibleStudents.find((s) => s.id === studentId)?.parentPhone || '').trim() ||
+              null
+            }
+            coachUserId={String(effectiveUser?.id || '')}
+            isStaff={isStaff}
+            autoLoad={Boolean(studentId)}
+          />
           {isStaff ? (
             <div className="rounded-2xl border border-slate-200 bg-white p-4">
-              <div className="font-semibold">Edesis PDF oluştur</div>
+              <div className="font-semibold">BK-5 / BK-10 raporları</div>
+              <p className="mt-1 text-sm text-slate-600">
+                Edesis rapor kodları 104 (BK-5) ve 105 (BK-10). Deneme karnesi için yukarıdaki «Karne PDF» kullanılır.
+              </p>
               <div className="mt-2 flex flex-wrap gap-3 text-sm">
                 {[
-                  [102, 'Karne (102)'],
                   [104, 'BK-5 (104)'],
                   [105, 'BK-10 (105)']
                 ].map(([code, label]) => (
