@@ -20,6 +20,7 @@ import {
   payloadToExam,
   buildFullStudentAnalysis,
   inferExamFamilyFromClassLevel,
+  resolveEdesisExamId,
   EDESIS_REPORT_CODES,
   EDESIS_REPORT_LABELS,
   ANALYSIS_STATUS_LABELS,
@@ -146,7 +147,15 @@ async function loadStudentExams(studentId) {
     .order('date', { ascending: false })
     .limit(200);
   if (error) throw error;
-  return (data || []).map(payloadToExam);
+  return (data || [])
+    .map((row) => {
+      try {
+        return payloadToExam(row);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
 }
 
 async function loadThresholds(institutionId) {
@@ -171,12 +180,12 @@ function changedFields(prev, next) {
 }
 
 async function dashboardFor(actor, tags) {
-  let q = supabaseAdmin.from('exam_results').select('id, student_id, date, net_score, app_payload, institution_id');
+  let q = supabaseAdmin.from('exam_results').select('id, student_id, date, net_score, institution_id');
   if (!isSuper(tags) && actor.institution_id) q = q.eq('institution_id', actor.institution_id);
   const { data: exams, error } = await q.limit(3000);
   if (error) throw error;
 
-  let studentsQ = supabaseAdmin.from('students').select('id, name, coach_id, institution_id, is_active, edesis_ogrenci_id');
+  let studentsQ = supabaseAdmin.from('students').select('id, name, coach_id, institution_id, edesis_ogrenci_id');
   if (!isSuper(tags) && actor.institution_id) studentsQ = studentsQ.eq('institution_id', actor.institution_id);
   if (isCoach(tags) && !isAdmin(tags) && actor.coach_id) studentsQ = studentsQ.eq('coach_id', actor.coach_id);
   const { data: students, error: se } = await studentsQ.limit(3000);
@@ -192,7 +201,12 @@ async function dashboardFor(actor, tags) {
 
   const byStudent = new Map();
   for (const e of scopedExams) {
-    const exam = payloadToExam(e);
+    const exam = {
+      examDate: e.date,
+      date: e.date,
+      totalNet: e.net_score,
+      net: e.net_score
+    };
     if (!byStudent.has(e.student_id)) byStudent.set(e.student_id, []);
     byStudent.get(e.student_id).push(exam);
   }
@@ -230,8 +244,24 @@ async function dashboardFor(actor, tags) {
     }
   }
 
-  const { data: shares } = await supabaseAdmin.from('report_share_logs').select('id, delivery_status').limit(500);
-  const { data: pdfs } = await supabaseAdmin.from('generated_exam_reports').select('id, status').is('deleted_at', null).limit(500);
+  let shares = [];
+  let pdfs = [];
+  try {
+    const { data, error: shErr } = await supabaseAdmin.from('report_share_logs').select('id, delivery_status').limit(500);
+    if (!shErr) shares = data || [];
+  } catch {
+    shares = [];
+  }
+  try {
+    const { data, error: pdfErr } = await supabaseAdmin
+      .from('generated_exam_reports')
+      .select('id, status')
+      .is('deleted_at', null)
+      .limit(500);
+    if (!pdfErr) pdfs = data || [];
+  } catch {
+    pdfs = [];
+  }
 
   return {
     role: tags.find((t) => STAFF.has(t) || t === 'student') || actor.role,
@@ -266,8 +296,29 @@ export default async function handler(req, res) {
     }
 
     if (op === 'dashboard') {
-      const dash = await dashboardFor(actor, tags);
-      return res.status(200).json({ ok: true, dashboard: dash });
+      try {
+        const dash = await dashboardFor(actor, tags);
+        return res.status(200).json({ ok: true, dashboard: dash });
+      } catch (e) {
+        return res.status(200).json({
+          ok: true,
+          dashboard: {
+            role: actor.role,
+            studentCount: 0,
+            syncedStudents: 0,
+            examCount: 0,
+            falling: [],
+            rising: [],
+            pendingEvaluations: [],
+            reportsAwaitingApproval: 0,
+            unpublishedReports: 0,
+            pdfCount: 0,
+            shareCount: 0,
+            shareFailed: 0,
+            hint: turkishError(errorMessage(e), 500)
+          }
+        });
+      }
     }
 
     if (op === 'connection-status') {
@@ -528,12 +579,25 @@ export default async function handler(req, res) {
       if (studentOnly) return res.status(403).json({ error: 'forbidden' });
       const cfg = getEdesisConfig();
       if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
-      const examId = String(req.body?.examId || req.query?.examId || '').trim();
+      let examId = String(req.body?.examId || req.query?.examId || '').trim();
       const codesRaw = req.body?.reportCodes || req.query?.reportCodes || [102];
       const reportCodes = (Array.isArray(codesRaw) ? codesRaw : String(codesRaw).split(','))
         .map((c) => Number(c))
         .filter((c) => [EDESIS_REPORT_CODES.KARNE, EDESIS_REPORT_CODES.BK5, EDESIS_REPORT_CODES.BK10].includes(c));
-      if (!examId) return res.status(400).json({ error: 'examId_required', hint: 'Edesis sınav ID gerekli.' });
+      if (!/^\d+$/.test(examId)) {
+        const exams = await loadStudentExams(studentId);
+        const fromRow = exams.find((e) => String(e.id || '') === examId);
+        examId =
+          resolveEdesisExamId(fromRow || { id: examId }) ||
+          exams.map((e) => resolveEdesisExamId(e)).find(Boolean) ||
+          '';
+      }
+      if (!examId) {
+        return res.status(400).json({
+          error: 'examId_required',
+          hint: 'Bu öğrencinin sonuçlarında Edesis sınav numarası yok. Senkron çalıştırın veya sınavı tablodan seçin.'
+        });
+      }
       if (!student.edesis_ogrenci_id) {
         return res.status(400).json({
           error: 'edesis_student_id_missing',

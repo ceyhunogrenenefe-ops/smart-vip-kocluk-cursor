@@ -15,7 +15,9 @@ import {
   buildAutoEvaluationDraft,
   buildFullStudentAnalysis,
   buildLastVsPrevComparison,
-  filterBreakdownByBranch
+  filterBreakdownByBranch,
+  resolveEdesisExamId,
+  payloadToExam
 } from './edesis-exam-analysis.js';
 
 function exam(partial) {
@@ -58,6 +60,26 @@ describe('filterBreakdownByBranch', () => {
       'Matematik'
     );
     assert.deepEqual(rows.map((r) => r.name), ['Matematik']);
+  });
+});
+
+describe('resolveEdesisExamId + payloadToExam', () => {
+  it('reads exam number from id, examId and notes when edesisExamId is missing', () => {
+    assert.equal(resolveEdesisExamId({ id: 'edesis-1264223-abc' }), '1264223');
+    assert.equal(resolveEdesisExamId({ examId: 1264223 }), '1264223');
+    assert.equal(resolveEdesisExamId({ notes: 'Edesis v1 exam #99001' }), '99001');
+    const mapped = payloadToExam({
+      id: 'edesis-555-student',
+      student_id: 's1',
+      app_payload: {
+        id: 'edesis-555-student',
+        studentId: 's1',
+        examId: 555,
+        subjects: { 0: { name: 'Türkçe', correct: 1, wrong: 0, blank: 0 } }
+      }
+    });
+    assert.equal(mapped.edesisExamId, '555');
+    assert.equal(Array.isArray(mapped.subjects), true);
   });
 });
 

@@ -122,10 +122,35 @@ export function examHasResult(exam) {
   const net = exam.totalNet ?? exam.net ?? exam.net_score;
   if (correct + wrong + blank > 0) return true;
   if (net != null && String(net).trim() !== '') return true;
-  if (Array.isArray(exam.subjects) && exam.subjects.some((s) => num(s.correct) + num(s.wrong) + num(s.blank) > 0)) {
+  if (asSubjectList(exam).some((s) => num(s.correct) + num(s.wrong) + num(s.blank) > 0)) {
     return true;
   }
   return false;
+}
+
+export function resolveEdesisExamId(exam) {
+  if (!exam || typeof exam !== 'object') return '';
+  const payload = exam.app_payload && typeof exam.app_payload === 'object' ? exam.app_payload : null;
+  const sources = [exam, payload].filter(Boolean);
+  for (const src of sources) {
+    for (const key of ['edesisExamId', 'examId', 'sinavId', 'sinav_id', 'ExamId']) {
+      const raw = String(src[key] ?? '').trim();
+      if (/^\d+$/.test(raw)) return raw;
+    }
+    const id = String(src.id || '');
+    const fromId = id.match(/^edesis-(\d+)(?:-|$)/);
+    if (fromId) return fromId[1];
+    const notes = String(src.notes || '');
+    const fromNotes = notes.match(/exam\s*#(\d+)/i);
+    if (fromNotes) return fromNotes[1];
+  }
+  return '';
+}
+
+function asSubjectList(exam) {
+  if (Array.isArray(exam?.subjects)) return exam.subjects;
+  if (exam?.subjects && typeof exam.subjects === 'object') return Object.values(exam.subjects);
+  return [];
 }
 
 export function sortExamsByExamDateDesc(exams) {
@@ -234,7 +259,7 @@ export function buildSubjectBreakdown(exams) {
   const map = new Map();
   for (const exam of exams || []) {
     if (!examHasResult(exam)) continue;
-    for (const s of exam.subjects || []) {
+    for (const s of asSubjectList(exam)) {
       const name = String(s.name || '').trim();
       if (!name) continue;
       const key = name.toLocaleUpperCase('tr-TR');
@@ -294,8 +319,8 @@ export function buildTopicBreakdown(exams, thresholds = DEFAULT_TOPIC_THRESHOLDS
   const map = new Map();
   for (const exam of exams || []) {
     if (!examHasResult(exam)) continue;
-    for (const s of exam.subjects || []) {
-      for (const t of s.topics || []) {
+    for (const s of asSubjectList(exam)) {
+      for (const t of Array.isArray(s.topics) ? s.topics : []) {
         const topicName = String(t.name || '').trim();
         if (!topicName) continue;
         const key = `${String(s.name || '').toLocaleUpperCase('tr-TR')}::${topicName.toLocaleUpperCase('tr-TR')}`;
@@ -433,7 +458,7 @@ export function buildExamTableRows(exams) {
     const tot = num(e.correct) + num(e.wrong) + num(e.blank);
     return {
       id: e.id || null,
-      edesisExamId: e.edesisExamId || null,
+      edesisExamId: resolveEdesisExamId(e) || null,
       examTitle: e.examTitle || e.examName || e.examType || 'Deneme',
       examDate: e.examDate || e.date || '',
       examType: e.examType || '',
@@ -450,24 +475,29 @@ export function buildExamTableRows(exams) {
 }
 
 export function payloadToExam(row) {
-  if (row?.app_payload && typeof row.app_payload === 'object') {
-    return { ...row.app_payload, id: row.app_payload.id || row.id, studentId: row.app_payload.studentId || row.student_id };
+  let exam;
+  if (row?.app_payload && typeof row.app_payload === 'object' && !Array.isArray(row.app_payload)) {
+    exam = { ...row.app_payload, id: row.app_payload.id || row.id, studentId: row.app_payload.studentId || row.student_id };
+  } else {
+    exam = {
+      id: row?.id,
+      studentId: row?.student_id,
+      examTitle: row?.exam_name,
+      examName: row?.exam_name,
+      examDate: row?.date,
+      examType: row?.app_payload?.examType || '',
+      totalNet: num(row?.net_score),
+      correct: num(row?.correct),
+      wrong: num(row?.wrong),
+      blank: num(row?.blank),
+      subjects: [],
+      source: row?.app_payload?.source || 'edesis',
+      edesisExamId: null
+    };
   }
-  return {
-    id: row?.id,
-    studentId: row?.student_id,
-    examTitle: row?.exam_name,
-    examName: row?.exam_name,
-    examDate: row?.date,
-    examType: row?.app_payload?.examType || '',
-    totalNet: num(row?.net_score),
-    correct: num(row?.correct),
-    wrong: num(row?.wrong),
-    blank: num(row?.blank),
-    subjects: Array.isArray(row?.app_payload?.subjects) ? row.app_payload.subjects : [],
-    source: row?.app_payload?.source || 'edesis',
-    edesisExamId: row?.app_payload?.edesisExamId
-  };
+  exam.subjects = asSubjectList(exam);
+  exam.edesisExamId = resolveEdesisExamId({ ...exam, app_payload: row?.app_payload }) || exam.edesisExamId || null;
+  return exam;
 }
 
 export function buildFullStudentAnalysis(exams, opts = {}) {
