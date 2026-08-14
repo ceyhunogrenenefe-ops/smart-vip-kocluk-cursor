@@ -204,12 +204,12 @@ export function parseEdesisResponseText(text) {
   }
 }
 
-export async function fetchEdesisJson(cfg, path, { method = 'GET', body } = {}) {
+export async function fetchEdesisJson(cfg, path, { method = 'GET', body, timeoutMs = 30000 } = {}) {
   const url = joinUrl(cfg.baseUrl, path);
   const init = {
     method,
     headers: buildHeaders(cfg, { forGet: method === 'GET' }),
-    signal: AbortSignal.timeout(30000)
+    signal: AbortSignal.timeout(timeoutMs)
   };
   if (body !== undefined && method !== 'GET') {
     init.body = typeof body === 'string' ? body : JSON.stringify(body);
@@ -1267,6 +1267,291 @@ export async function generateEdesisExamReport(
     message: payload.message || (reportUrl ? 'Rapor hazır.' : 'reportUrl bulunamadı — admin paketi ve termId kontrol edin'),
     termId: resolvedTermId,
     raw: payload
+  };
+}
+
+function flattenHataKarnesiCandidate(item) {
+  if (!item || typeof item !== 'object') return item || {};
+  const nested = item.ogrenciAnalizRapor;
+  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+    return { ...item, ...nested };
+  }
+  return item;
+}
+
+function hataKarnesiHaystack(item) {
+  const row = flattenHataKarnesiCandidate(item);
+  return foldTrAscii(
+    [
+      row.reportType,
+      row.raporTuru,
+      row.fileName,
+      row.analysisName,
+      row.analizAdi,
+      row.name,
+      row.title,
+      row.reportName,
+      row.hataKarnesiAdi
+    ]
+      .filter((v) => v != null && String(v).trim())
+      .join(' ')
+  );
+}
+
+/** Hata kitapçığı (soru bankası derlemesi) — öğrenci hata karnesi PDF’si değildir */
+export function isEdesisHataKitapcigiReport(item) {
+  const blob = hataKarnesiHaystack(item);
+  if (/hata.?kitapcig/.test(blob)) return true;
+  if (/kitapcig/.test(blob) && !/hata.?karn/.test(blob)) return true;
+  return false;
+}
+
+/**
+ * Edesis hata karnesi = boş + yanlış soruların PDF’i.
+ * Karne (102) ve hata kitapçığı hariç.
+ */
+export function isEdesisHataKarnesiReport(item) {
+  if (!item || typeof item !== 'object') return false;
+  if (isEdesisHataKitapcigiReport(item)) return false;
+  const row = flattenHataKarnesiCandidate(item);
+  if (row.isHataKarnesi === true || row.IsHataKarnesi === true) return true;
+  const raporTuru = row.raporTuru ?? row.reportType ?? row.RaporTuru;
+  const typeFold = foldTrAscii(String(raporTuru ?? ''));
+  if (typeFold === 'hatakarnesi' || typeFold === 'hata_karnesi' || typeFold === 'hata-karnesi') return true;
+  if ((raporTuru === 1 || raporTuru === '1') && ('isHataKarnesi' in row || row.ogrenciAnalizRapor || item.ogrenciAnalizRapor)) {
+    return true;
+  }
+  const blob = hataKarnesiHaystack(row);
+  if (/oncelikli.?konu|sinif.?analiz|kurum.?analiz|cevap.?anahtar/.test(blob)) return false;
+  return /hata.?karn|hatakarnesi|bosvehatali|bos.?ve.?hatali|hatali.?soru|yanlis.?ve.?bos/.test(blob);
+}
+
+export function pickEdesisHataKarnesiReport(items, { examId, edesisStudentId } = {}) {
+  const list = (Array.isArray(items) ? items : []).filter(isEdesisHataKarnesiReport);
+  if (!list.length) return null;
+  const exam = String(examId || '').trim();
+  const sid = String(edesisStudentId || '').trim();
+  const matchesExam = (it) => {
+    const row = flattenHataKarnesiCandidate(it);
+    const id = pickStr(row, ['examId', 'sinavId', 'sinav_id', 'exam_id']);
+    return exam && id && String(id) === exam;
+  };
+  const matchesStudent = (it) => {
+    if (!sid) return true;
+    const row = flattenHataKarnesiCandidate(it);
+    const id = pickStr(row, ['studentId', 'ogrenciId', 'ogrenci_id']);
+    return !id || String(id) === sid;
+  };
+  const scoped = list.filter(matchesStudent);
+  const pool = scoped.length ? scoped : list;
+  const byExam = exam ? pool.filter(matchesExam) : [];
+  const chosen = byExam.length ? byExam : pool;
+  const sorted = chosen.slice().sort((a, b) => {
+    const ta = Date.parse(flattenHataKarnesiCandidate(a).creationTime || a.tamamlanmaZamani || a.createdAt || a.processedTime || 0) || 0;
+    const tb = Date.parse(flattenHataKarnesiCandidate(b).creationTime || b.tamamlanmaZamani || b.createdAt || b.processedTime || 0) || 0;
+    return tb - ta;
+  });
+  return sorted[0] || null;
+}
+
+function collectEdesisAnalysisIds(items) {
+  const ids = [];
+  for (const it of items || []) {
+    const row = flattenHataKarnesiCandidate(it);
+    const id = pickStr(row, ['analysisId', 'analizId', 'AnalizId']);
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+function unwrapAbpPayload(json) {
+  if (!json || typeof json !== 'object') return json;
+  if (json.result && typeof json.result === 'object') return json.result;
+  return json;
+}
+
+function fileDtoFromJson(json) {
+  const payload = unwrapAbpPayload(json);
+  if (!payload || typeof payload !== 'object') return null;
+  const fileName = pickStr(payload, ['fileName', 'FileName']);
+  const fileToken = pickStr(payload, ['fileToken', 'FileToken', 'token']);
+  const fileType = pickStr(payload, ['fileType', 'FileType']) || 'application/pdf';
+  if (!fileToken) return null;
+  return { fileName: fileName || 'hata-karnesi.pdf', fileToken, fileType };
+}
+
+async function tryDownloadEdesisFileDto(cfg, dto) {
+  if (!dto?.fileToken) return null;
+  const fileName = encodeURIComponent(dto.fileName || 'hata-karnesi.pdf');
+  const token = encodeURIComponent(dto.fileToken);
+  const fileType = encodeURIComponent(dto.fileType || 'application/pdf');
+  const paths = [
+    `/File/DownloadTempFile?fileToken=${token}&fileName=${fileName}&fileType=${fileType}`,
+    `/api/File/DownloadTempFile?fileToken=${token}&fileName=${fileName}&fileType=${fileType}`,
+    `/File/DownloadBinaryFile?fileToken=${token}`
+  ];
+  for (const path of paths) {
+    try {
+      const url = joinUrl(cfg.baseUrl, path);
+      const got = await fetchEdesisUrlBuffer(url, cfg);
+      if (got.ok && got.looksPdf) {
+        return {
+          ok: true,
+          reportUrl: got.url,
+          buf: got.buf,
+          looksPdf: true,
+          fileName: dto.fileName,
+          source: 'file-dto'
+        };
+      }
+    } catch {
+      /* sonraki aday */
+    }
+  }
+  return null;
+}
+
+async function tryGenerateEdesisHataKarnesiPdf(cfg, { edesisStudentId, analysisIds }) {
+  const sid = String(edesisStudentId || '').trim();
+  const ids = [...new Set((analysisIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
+  let abpReachable = true;
+
+  try {
+    const r = await fetchEdesisJson(
+      cfg,
+      `/api/services/app/OgrenciAnalizRapor/GetAnalizByOgrenciId?ogrenciId=${encodeURIComponent(sid)}`
+    );
+    if (r.status === 401 || r.status === 403) abpReachable = false;
+    if (isReachableEdesisResponse(r)) {
+      const items = unwrapList(r.json);
+      const hataItems = items.filter(isEdesisHataKarnesiReport);
+      for (const it of hataItems) {
+        const row = flattenHataKarnesiCandidate(it);
+        const url = extractReportUrl(row);
+        if (url) {
+          return { ok: true, reportUrl: url, buf: null, looksPdf: false, source: 'ogrenci-analiz-rapor', fileName: row.fileName || 'hata-karnesi.pdf' };
+        }
+        const dto = fileDtoFromJson(row) || (row.token ? { fileName: row.fileName || 'hata-karnesi.pdf', fileToken: row.token, fileType: 'application/pdf' } : null);
+        const downloaded = dto ? await tryDownloadEdesisFileDto(cfg, dto) : null;
+        if (downloaded) return { ...downloaded, source: 'ogrenci-analiz-rapor' };
+        const hid = pickStr(row, ['analysisId', 'analizId', 'AnalizId']);
+        if (hid) {
+          const at = ids.indexOf(hid);
+          if (at >= 0) ids.splice(at, 1);
+          ids.unshift(hid);
+        }
+      }
+      for (const it of items) {
+        const id = pickStr(flattenHataKarnesiCandidate(it), ['analysisId', 'analizId', 'AnalizId']);
+        if (id && !ids.includes(id)) ids.push(id);
+      }
+    }
+  } catch {
+    /* ABP uçları X-API-Key ile 401 olabilir */
+  }
+
+  if (!abpReachable) {
+    return { ok: false, reportUrl: null, buf: null, looksPdf: false, source: null };
+  }
+
+  for (const analizId of ids.slice(0, 2)) {
+    const qs = new URLSearchParams({
+      AnalizId: String(analizId),
+      OgrenciId: sid,
+      IsHataKarnesi: 'true',
+      SoruTuru: '3',
+      RaporTuru: '3'
+    });
+    try {
+      const r = await fetchEdesisJson(cfg, `/api/services/app/Analizs/GetAlnalizOlustur?${qs.toString()}`, {
+        timeoutMs: 55000
+      });
+      if (!isReachableEdesisResponse(r) && !fileDtoFromJson(r.json)) continue;
+      const dto = fileDtoFromJson(r.json);
+      if (!dto) continue;
+      const downloaded = await tryDownloadEdesisFileDto(cfg, dto);
+      if (downloaded) {
+        return { ...downloaded, source: 'analiz-olustur', analysisId: analizId };
+      }
+    } catch {
+      /* sonraki analiz */
+    }
+  }
+  return { ok: false, reportUrl: null, buf: null, looksPdf: false, source: null };
+}
+
+/**
+ * Öğrenci hata karnesi PDF — boş ve yanlış sorular (hata kitapçığı / karne 102 değil).
+ */
+export async function loadEdesisHataKarnesiPdf({ examId, edesisStudentId }, cfgOverride = {}) {
+  const sid = String(edesisStudentId || '').trim();
+  const exam = String(examId || '').trim();
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  if (!sid) throw new Error('edesis_student_id_missing');
+  if (!cfg.apiKey) throw new Error('EDESIS_API_KEY_missing');
+  const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+
+  const reports = [];
+  const analytics = await fetchEdesisJson(localCfg, V1_PATHS.analyticsStudent(sid));
+  if (isReachableEdesisResponse(analytics)) {
+    reports.push(...unwrapList(analytics.json));
+  }
+
+  const picked = pickEdesisHataKarnesiReport(reports, { examId: exam, edesisStudentId: sid });
+  let reportUrl = picked ? extractReportUrl(flattenHataKarnesiCandidate(picked)) : null;
+  let source = picked && reportUrl ? 'analytics' : null;
+  let buf = null;
+  let fileName = picked ? pickStr(flattenHataKarnesiCandidate(picked), ['fileName', 'analysisName', 'analizAdi']) : '';
+
+  if (reportUrl) {
+    try {
+      const got = await fetchEdesisUrlBuffer(reportUrl, localCfg);
+      if (got.ok && got.looksPdf) {
+        buf = got.buf;
+        reportUrl = got.url || reportUrl;
+      }
+    } catch {
+      /* imzalı URL tarayıcıda açılabilir */
+    }
+  }
+
+  if (!buf) {
+    const analysisIds = collectEdesisAnalysisIds(picked ? [picked, ...reports] : reports);
+    const generated = await tryGenerateEdesisHataKarnesiPdf(localCfg, {
+      edesisStudentId: sid,
+      analysisIds
+    });
+    if (generated.buf || generated.reportUrl) {
+      return {
+        ok: true,
+        reportUrl: generated.reportUrl || reportUrl,
+        buf: generated.buf || buf,
+        looksPdf: Boolean(generated.buf && looksLikePdfBuffer(generated.buf)),
+        source: generated.source || source,
+        fileName: generated.fileName || fileName || 'hata-karnesi.pdf',
+        analysisId: generated.analysisId || picked?.analysisId || null,
+        reportType: picked?.reportType || picked?.raporTuru || 'HataKarnesi',
+        message: 'Hata karnesi PDF hazır'
+      };
+    }
+  }
+
+  const ok = Boolean(reportUrl || (buf && looksLikePdfBuffer(buf)));
+  return {
+    ok,
+    reportUrl: reportUrl || null,
+    buf,
+    looksPdf: Boolean(buf && looksLikePdfBuffer(buf)),
+    source,
+    fileName: fileName || 'hata-karnesi.pdf',
+    analysisId: picked?.analysisId || picked?.analizId || null,
+    reportType: picked?.reportType || picked?.raporTuru || null,
+    message: ok
+      ? 'Hata karnesi PDF hazır'
+      : 'Edesis hata karnesi PDF bulunamadı (hata kitapçığı değil; boş ve yanlış soru karnesi). Analiz Edesis’te üretilmiş olmalı.',
+    hint: ok
+      ? null
+      : 'Edesis panelinde öğrencinin hata karnesini oluşturun. Bu, hata kitapçığı değildir.'
   };
 }
 

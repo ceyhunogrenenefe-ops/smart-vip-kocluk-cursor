@@ -58,6 +58,7 @@ Ham optik **gönderimi** (öğrencinin panelden sınava girmesi) için ayrıca:
 | Ham cevap gönder | POST | `/api/external/v1/exams/{id}/results` — gövde `{ replace, results }` → **202 + jobId** |
 | Değerlendirme durumu | GET | `/api/external/v1/exams/{id}/results/status?jobId=` — geçersiz job: **200 + state NotFound** (404 değil) |
 | PDF karne | POST | `/api/external/v1/reports/exam-report` (reportCodes: 102) |
+| Hata karnesi PDF | GET | `/api/external/v1/analytics/reports/student/{id}` + gerekirse Edesis `GetAlnalizOlustur?IsHataKarnesi=true&SoruTuru=3` (boş + yanlış sorular; **hata kitapçığı değil**) |
 
 Senkron sırasında toplu sonuçta ders/konu yoksa sistem otomatik olarak **öğrenci bazlı sonuç** ve **analytics** endpoint'lerini dener.
 
@@ -76,7 +77,9 @@ Sayfalama: `MaxResultCount` (liste max 1000, kırılım max 100), `SkipCount`
 4. Kitapçık seçilir, her ders için optik işaretlenir (`cevaplar` uzunluğu = `questionCount`). LGS’de harf değişince ders satırları değişmez (A/B aynı yapı).
 5. Sistem `ogrenciId` + `kitapcikTuru` (+ LGS’de `kitapcikTuruSay`) + tüm `dersCevaplari` ile POST eder. **Öğrenci girilmiş sınava tekrar giremez** (`replace` yok; 409 `already_submitted`).
 6. `jobId` ile durum izlenir (`Pending` / `Running` / `Completed` / `Failed` / `NotFound`).
-7. Bittiğinde **Sonuçlarım** (net + karne PDF) ve **Analizlerim** (**Hata karnesi** + **Deneme analizi**) açılır.
+7. Bittiğinde **Sonuçlarım** (net + **Karne PDF** puan özeti + **Hata karnesi** boş/yanlış soru PDF’si) ve **Analizlerim** (**Hata karnesi** PDF + **Deneme analizi**) açılır.
+
+**Karne PDF (102)** puan / net karnesidir. **Hata karnesi** Edesis’in boş ve yanlış soruları derlediği PDF’dir. **Hata kitapçığı** (soru bankası derlemesi) ayrı üründür; öğrenci panelinde gösterilmez.
 
 Koç/admin ham ingest’te gövdede `"replace": true` kullanabilir. Query `?replace=true` **yok sayılır** ve 409 döner.
 
@@ -88,7 +91,7 @@ Menü: **Edesis Analiz** (`/edesis-analiz`)
 
 - **Ders analizi** — tüm denemelerde ders bazlı ortalama, trend grafiği
 - **Karne** — seçili denemede D/Y/B/net (konu varsa alt satır)
-- **Hata karnesi** — yanlış/boş odaklı özet
+- **Hata karnesi** — öğrenci panelinde Edesis **hata karnesi PDF** (boş + yanlış sorular). D/Y/B tablosu yalnızca özet. Hata kitapçığı değildir.
 - **Tüm denemeler** — deneme × ders matrisi
 
 Ders detayı gelmiyorsa: deneme seç → **Edesis detayını çek** (sınav bazlı `/exams/{id}/results`).

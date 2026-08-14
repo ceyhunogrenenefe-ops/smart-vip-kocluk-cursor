@@ -6,7 +6,7 @@ import { userRoleTags } from '../config/rolePermissions';
 import { ScoresLoadingPlaceholder } from '../components/ui/ScoresLoadingPlaceholder';
 import { useApp } from '../context/AppContext';
 import { resolveStudentRecordId } from '../lib/coachResolve';
-import { fetchEdesisKarnePdf } from '../lib/edesis/edesisApi';
+import { fetchEdesisHataKarnesiPdf, fetchEdesisKarnePdf } from '../lib/edesis/edesisApi';
 import type { ExamResult, WrittenExamScore } from '../types';
 import {
   GraduationCap,
@@ -30,7 +30,8 @@ import {
   Flame,
   Timer,
   CloudDownload,
-  Loader2
+  Loader2,
+  AlertTriangle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -105,6 +106,7 @@ export default function StudentDashboard() {
 
   const [activeTab, setActiveTab] = useState<TabType>('exams');
   const [karneBusyId, setKarneBusyId] = useState<string | null>(null);
+  const [hataBusyId, setHataBusyId] = useState<string | null>(null);
 
   useEffect(() => {
     const mapped = tabKey ? SEGMENT_TAB[tabKey] : undefined;
@@ -156,6 +158,34 @@ export default function StudentDashboard() {
       toast.error(e instanceof Error ? e.message : 'Karne açılamadı');
     } finally {
       setKarneBusyId(null);
+    }
+  };
+
+  const openEdesisHataKarnesi = async (result: ExamResult) => {
+    if (!result.edesisExamId) {
+      toast.error('Bu kayıtta Edesis sınav ID yok');
+      return;
+    }
+    setHataBusyId(result.id);
+    try {
+      const r = await fetchEdesisHataKarnesiPdf({
+        examId: result.edesisExamId,
+        edesisStudentId: String(result.edesisStudentId || '').trim() || undefined,
+        studentId: resolvedStudentId
+      });
+      if (r.blob && r.blob.size > 8) {
+        window.open(URL.createObjectURL(r.blob), '_blank', 'noopener,noreferrer');
+        toast.success(r.message || 'Hata karnesi PDF hazır');
+      } else if (r.reportUrl) {
+        window.open(r.reportUrl, '_blank', 'noopener,noreferrer');
+        toast.success(r.message || 'Hata karnesi PDF hazır');
+      } else {
+        toast.warning(r.hint || r.message || 'Hata karnesi PDF bulunamadı');
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Hata karnesi açılamadı');
+    } finally {
+      setHataBusyId(null);
     }
   };
 
@@ -518,19 +548,34 @@ export default function StudentDashboard() {
                               </span>
                             )}
                             {result.edesisExamId ? (
-                              <button
-                                type="button"
-                                disabled={karneBusyId === result.id}
-                                onClick={() => void openEdesisKarne(result)}
-                                className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-bold text-white disabled:opacity-50"
-                              >
-                                {karneBusyId === result.id ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <FileText className="h-3.5 w-3.5" />
-                                )}
-                                Karne PDF
-                              </button>
+                              <div className="flex flex-wrap justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  disabled={karneBusyId === result.id}
+                                  onClick={() => void openEdesisKarne(result)}
+                                  className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-bold text-white disabled:opacity-50"
+                                >
+                                  {karneBusyId === result.id ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <FileText className="h-3.5 w-3.5" />
+                                  )}
+                                  Karne PDF
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={hataBusyId === result.id}
+                                  onClick={() => void openEdesisHataKarnesi(result)}
+                                  className="inline-flex items-center gap-1 rounded-lg bg-amber-600 px-2.5 py-1 text-xs font-bold text-white disabled:opacity-50"
+                                >
+                                  {hataBusyId === result.id ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <AlertTriangle className="h-3.5 w-3.5" />
+                                  )}
+                                  Hata karnesi
+                                </button>
+                              </div>
                             ) : null}
                           </div>
                         </div>

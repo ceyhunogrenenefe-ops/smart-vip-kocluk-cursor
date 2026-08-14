@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   ArrowLeft,
   BarChart3,
   ClipboardList,
@@ -21,6 +22,7 @@ import {
   fetchEdesisExamBookletPdf,
   fetchEdesisExamStructure,
   fetchEdesisIngestStatus,
+  fetchEdesisHataKarnesiPdf,
   fetchEdesisKarnePdf,
   fetchEdesisStudentResultsHub,
   submitEdesisStudentExam,
@@ -78,6 +80,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
   const [edesisStudentId, setEdesisStudentId] = useState('');
   const [hint, setHint] = useState<string | null>(null);
   const [karneBusyKey, setKarneBusyKey] = useState<string | null>(null);
+  const [hataBusyKey, setHataBusyKey] = useState<string | null>(null);
   const [lastKarneUrl, setLastKarneUrl] = useState<string | null>(null);
 
   const [activeExam, setActiveExam] = useState<EdesisAvailableExam | null>(null);
@@ -335,6 +338,37 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
     }
   };
 
+  const openHataKarnesi = async (exam: EdesisStudentResultsExam) => {
+    if (!exam.edesisExamId) {
+      toast.error('Hata karnesi için Edesis sınav eşlemesi gerekli');
+      return;
+    }
+    const key = `hata-${exam.edesisExamId}-${edesisStudentId}`;
+    setHataBusyKey(key);
+    try {
+      const r = await fetchEdesisHataKarnesiPdf({
+        examId: exam.edesisExamId,
+        edesisStudentId: edesisStudentId || undefined,
+        studentId: studentId || undefined
+      });
+      if (r.blob && r.blob.size > 8) {
+        window.open(URL.createObjectURL(r.blob), '_blank', 'noopener,noreferrer');
+        toast.success(r.message || 'Hata karnesi PDF hazır');
+        return;
+      }
+      if (r.reportUrl) {
+        window.open(r.reportUrl, '_blank', 'noopener,noreferrer');
+        toast.success(r.message || 'Hata karnesi PDF hazır');
+        return;
+      }
+      toast.warning(r.hint || r.message || 'Hata karnesi PDF bulunamadı');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Hata karnesi açılamadı');
+    } finally {
+      setHataBusyKey(null);
+    }
+  };
+
   const activeLessons =
     booklets.find((b) => b.kitapcikTuru === kitapcik)?.lessons || booklets[0]?.lessons || [];
   const takeable = useMemo(
@@ -353,8 +387,8 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             Edesis denemesi ve sonuçlarım
           </h2>
           <p className="mt-1 text-sm text-slate-600">
-            Yalnızca size tanımlanan Edesis denemeleri görünür. Optik formu ders ders doldurun; net, hata karnesi ve
-            deneme analizi aynı yerde açılır.
+            Yalnızca size tanımlanan Edesis denemeleri görünür. Optik formu ders ders doldurun; net, hata karnesi PDF
+            (boş ve yanlış sorular) ve deneme analizi aynı yerde açılır.
           </p>
         </div>
         <button
@@ -511,7 +545,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
           </div>
         )
       ) : view === 'analysis' ? (
-        <StudentEdesisAnalysisPanel exams={exams} studentId={studentId} />
+        <StudentEdesisAnalysisPanel exams={exams} studentId={studentId} edesisStudentId={edesisStudentId} />
       ) : hint && exams.length === 0 ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{hint}</div>
       ) : (
@@ -519,6 +553,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
           {exams.map((exam, i) => {
             const key = `${exam.edesisExamId || i}-${edesisStudentId}`;
             const busy = karneBusyKey === key;
+            const hataBusy = hataBusyKey === `hata-${exam.edesisExamId}-${edesisStudentId}`;
             return (
               <div key={key} className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 sm:p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -543,6 +578,15 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
                     >
                       {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
                       Karne PDF
+                    </button>
+                    <button
+                      type="button"
+                      disabled={hataBusy || !exam.edesisExamId}
+                      onClick={() => void openHataKarnesi(exam)}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-amber-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                    >
+                      {hataBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+                      Hata karnesi
                     </button>
                   </div>
                 </div>
