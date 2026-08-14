@@ -127,7 +127,7 @@ export const STUDENT_PANEL_SUBMENU_ITEMS: FlatNavItem[] = [
   { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
   { path: '/topic-tracking', icon: CheckSquare, label: 'Konu takibi' },
   { path: '/student-dashboard/denemeler', icon: ClipboardList, label: 'Deneme sınavları' },
-  { path: '/student-edesis', icon: CloudDownload, label: 'Edesis karnelerim' },
+  { path: '/student-edesis', icon: CloudDownload, label: 'Edesis sınavlarım' },
   { path: '/student-dashboard/yazili', icon: FileCheck, label: 'Yazılılarım' },
   { path: '/student-dashboard/kitaplar', icon: BookMarked, label: 'Kitaplarım' },
 ];

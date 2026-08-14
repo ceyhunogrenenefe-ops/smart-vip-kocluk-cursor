@@ -136,7 +136,7 @@ export default function StudentDashboard() {
       return;
     }
     if (!resolvedStudentId && !result.edesisStudentId) {
-      toast.error('Edesis öğrenci eşlemesi yok — Edesis karnelerim sayfasını deneyin');
+      toast.error('Edesis öğrenci eşlemesi yok — Edesis sınavlarım sayfasını deneyin');
       return;
     }
     setKarneBusyId(result.id);
@@ -435,7 +435,7 @@ export default function StudentDashboard() {
                   className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-100"
                 >
                   <CloudDownload className="h-3.5 w-3.5" />
-                  Edesis karnelerim
+                  Edesis sınavlarım
                 </Link>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
