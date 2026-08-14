@@ -14,9 +14,12 @@ import {
   generateEdesisExamReport,
   fetchEdesisDefaultTermId,
   fetchEdesisStudentsList,
+  fetchEdesisStudentByOgrenciId,
   fetchEdesisTermsList,
   fetchEdesisExamsCatalog,
   fetchEdesisStudentResults,
+  inferEdesisExamProgramKeys,
+  buildStudentAvailableEdesisExamItems,
   fetchEdesisGradesList,
   fetchEdesisDepartmentsList,
   fetchEdesisClassroomsList,
@@ -61,25 +64,82 @@ function actorIsStudent(actor, tags) {
   return role === 'student' || (Array.isArray(tags) && tags.includes('student'));
 }
 
+const STUDENT_SELF_COLS =
+  'id, name, email, edesis_ogrenci_id, institution_id, user_id, platform_user_id, class_level';
+const STUDENT_SELF_COLS_FALLBACK =
+  'id, name, email, edesis_ogrenci_id, institution_id, user_id, platform_user_id';
+
+async function selectStudentSelf(buildQuery) {
+  let { data, error } = await buildQuery(STUDENT_SELF_COLS);
+  if (error && String(error.message || '').includes('class_level')) {
+    ({ data, error } = await buildQuery(STUDENT_SELF_COLS_FALLBACK));
+  }
+  if (error) throw error;
+  return data;
+}
+
 async function resolveOwnPlatformStudent(actor) {
   const uid = String(actor?.sub || '').trim();
   const sidHint = String(actor?.student_id || '').trim();
   if (sidHint) {
-    const { data } = await supabaseAdmin
-      .from('students')
-      .select('id, name, email, edesis_ogrenci_id, institution_id, user_id, platform_user_id')
-      .eq('id', sidHint)
-      .maybeSingle();
+    const data = await selectStudentSelf((cols) =>
+      supabaseAdmin.from('students').select(cols).eq('id', sidHint).maybeSingle()
+    );
     if (data) return data;
   }
   if (!uid || uid === 'anonymous') return null;
-  const { data: byUser } = await supabaseAdmin
+  return selectStudentSelf((cols) =>
+    supabaseAdmin
+      .from('students')
+      .select(cols)
+      .or(`platform_user_id.eq.${uid},user_id.eq.${uid}`)
+      .limit(1)
+      .maybeSingle()
+  );
+}
+
+async function loadStudentClassLevel(platformStudentId, knownStudent) {
+  const fromKnown = String(knownStudent?.class_level || '').trim();
+  if (fromKnown) return fromKnown;
+  if (!platformStudentId) return '';
+  const { data, error } = await supabaseAdmin
     .from('students')
-    .select('id, name, email, edesis_ogrenci_id, institution_id, user_id, platform_user_id')
-    .or(`platform_user_id.eq.${uid},user_id.eq.${uid}`)
-    .limit(1)
+    .select('class_level')
+    .eq('id', platformStudentId)
     .maybeSingle();
-  return byUser || null;
+  if (error && String(error.message || '').includes('class_level')) return '';
+  if (error) throw error;
+  return data?.class_level != null ? String(data.class_level).trim() : '';
+}
+
+/** Öğrenci sayfası: yalnızca Edesis’te bu öğrenciye tanımlı / kendi programındaki açık denemeler */
+async function loadAvailableEdesisExamsForStudent({
+  edesisStudentId,
+  platformStudentId,
+  actor,
+  studentHint,
+  cfg
+}) {
+  const [catalog, studentResults, edesisStudent] = await Promise.all([
+    fetchEdesisExamsCatalog(cfg).catch(() => ({ rows: [] })),
+    fetchEdesisStudentResults(edesisStudentId, cfg, { enrichSubjects: false }).catch(() => ({
+      rows: []
+    })),
+    fetchEdesisStudentByOgrenciId(edesisStudentId, cfg).catch(() => null)
+  ]);
+  const classLevel = await loadStudentClassLevel(platformStudentId, studentHint);
+  const programKeys = inferEdesisExamProgramKeys({
+    gradeName: edesisStudent?.gradeName,
+    className: edesisStudent?.className,
+    classLevel
+  });
+  return buildStudentAvailableEdesisExamItems({
+    catalogRows: catalog.rows || [],
+    resultRows: studentResults.rows || [],
+    programKeys,
+    studentId: platformStudentId || `edesis-${edesisStudentId}`,
+    institutionId: actor?.institution_id || null
+  });
 }
 
 function examResultToUpsertRow(exam, institutionId) {
@@ -1062,9 +1122,11 @@ export default async function handler(req, res) {
         req.query?.edesisStudentId || req.body?.edesisStudentId || ''
       ).trim();
       const platformStudentId = String(req.query?.studentId || req.body?.studentId || '').trim();
+      let studentHint = studentSelf || null;
       if (!edesisStudentId && platformStudentId) {
         const resolved = await resolveEdesisIdForPlatformStudent(platformStudentId, actor, tags);
         edesisStudentId = resolved.edesisStudentId || '';
+        studentHint = resolved.student || studentHint;
       }
       if (!edesisStudentId) {
         return res.status(400).json({
@@ -1073,44 +1135,23 @@ export default async function handler(req, res) {
         });
       }
 
-      const catalog = await fetchEdesisExamsCatalog(cfg);
-      let resultByExam = new Map();
-      try {
-        const studentResults = await fetchEdesisStudentResults(edesisStudentId, cfg);
-        for (const row of studentResults.rows || []) {
-          const draft = mapEdesisRowToExamDraft(row, {
-            studentId: platformStudentId || `edesis-${edesisStudentId}`,
-            institutionId: actor?.institution_id || null
-          });
-          if (draft.edesisExamId) resultByExam.set(String(draft.edesisExamId), draft);
-        }
-      } catch {
-        resultByExam = new Map();
-      }
-
-      const items = (catalog.rows || []).map((ex) => {
-        const examId = String(ex.id ?? ex.examId ?? '');
-        const result = resultByExam.get(examId);
-        const resultStatus = String(ex.resultStatus || (result ? 'Ready' : 'None'));
-        return {
-          examId,
-          name: ex.name || ex.examName || 'Deneme',
-          examDate: ex.examDate || ex.date || null,
-          examType: ex.examType || null,
-          totalQuestions: ex.totalQuestions ?? null,
-          studentCount: ex.studentCount ?? null,
-          resultStatus,
-          hasStudentResult: Boolean(result),
-          studentNet: result?.totalNet ?? null,
-          canTake: Boolean(examId)
-        };
+      const items = await loadAvailableEdesisExamsForStudent({
+        edesisStudentId,
+        platformStudentId,
+        actor,
+        studentHint,
+        cfg
       });
 
       return res.status(200).json({
         ok: true,
         edesisStudentId,
         count: items.length,
-        items
+        items,
+        scope: 'assigned',
+        hint: items.length
+          ? null
+          : 'Edesis’te size tanımlanmış deneme yok. Koçunuz sınavı tanımladıktan sonra burada görünür.'
       });
     }
 
@@ -1135,6 +1176,20 @@ export default async function handler(req, res) {
         return res.status(400).json({
           error: 'edesis_student_id_missing',
           hint: 'Sınava girmek için Edesis öğrenci eşlemesi gerekli'
+        });
+      }
+
+      const assigned = await loadAvailableEdesisExamsForStudent({
+        edesisStudentId,
+        platformStudentId,
+        actor,
+        studentHint: studentSelf,
+        cfg
+      });
+      if (!assigned.some((ex) => String(ex.examId) === examId)) {
+        return res.status(403).json({
+          error: 'exam_not_assigned',
+          hint: 'Bu deneme size tanımlanmamış'
         });
       }
 

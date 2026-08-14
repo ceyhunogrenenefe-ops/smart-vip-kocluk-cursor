@@ -114,6 +114,9 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
       if (catalog.status === 'fulfilled') {
         setAvailable(catalog.value.items || []);
         if (catalog.value.edesisStudentId) setEdesisStudentId(catalog.value.edesisStudentId);
+        if (!(catalog.value.items || []).length && catalog.value.hint) {
+          setHint((prev) => prev || catalog.value.hint || null);
+        }
       } else {
         const msg = catalog.reason instanceof Error ? catalog.reason.message : 'Sınav listesi alınamadı';
         if (results.status !== 'fulfilled') {
@@ -240,7 +243,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             Edesis denemesi ve sonuçlarım
           </h2>
           <p className="mt-1 text-sm text-slate-600">
-            Optik formu buradan doldurun. Değerlendirme bitince net ve karne PDF aynı yerde görünür.
+            Yalnızca size tanımlanan Edesis denemeleri görünür. Optik formu doldurun; net ve karne PDF aynı yerde açılır.
           </p>
         </div>
         <button
@@ -384,7 +387,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             ))}
             {!available.length && !hint ? (
               <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                Açık Edesis denemesi görünmüyor. Koçunuzun Edesis eşlemesini kontrol etmesini isteyin.
+                Edesis’te size tanımlanmış deneme yok. Koçunuz sınavı tanımladıktan sonra burada görünür.
               </p>
             ) : null}
           </div>

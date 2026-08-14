@@ -351,6 +351,162 @@ function pickStr(obj, keys) {
   return '';
 }
 
+function foldTrAscii(s) {
+  return String(s || '')
+    .toLocaleLowerCase('tr-TR')
+    .replace(/ı/g, 'i')
+    .replace(/ş/g, 's')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c');
+}
+
+/** Katalog satırı — Edesis `id` sınav kimliğidir */
+export function pickEdesisCatalogExamId(row) {
+  const r = flattenEdesisRow(row);
+  return pickStr(r, ['id', 'examId', 'sinavId', 'sinav_id']);
+}
+
+/** Sonuç satırı — `id` sonuç kaydı olabilir, sınav için examId kullanılır */
+export function pickEdesisResultExamId(row) {
+  const r = flattenEdesisRow(row);
+  if (r.exam && typeof r.exam === 'object') {
+    const nested = pickStr(r.exam, ['id', 'examId', 'sinavId']);
+    if (nested) return nested;
+  }
+  return pickStr(r, ['examId', 'sinavId', 'sinav_id', 'exam_id']);
+}
+
+/**
+ * Öğrenci kademesi / sınav türü → program anahtarı (lgs, yks, yos, 34, 56).
+ * Kurum kataloğundaki TYT/YÖS/ilkokul denemelerini LGS öğrencisinden ayırmak için.
+ */
+export function inferEdesisExamProgramKeys(parts = {}) {
+  const blob = foldTrAscii(
+    [parts.gradeName, parts.className, parts.classLevel, parts.examType, parts.examName]
+      .filter((v) => v != null && String(v).trim())
+      .join(' ')
+  );
+  const keys = new Set();
+  if (/\blgs\b/.test(blob)) keys.add('lgs');
+  if (/\b(tyt|ayt|yks)\b/.test(blob)) keys.add('yks');
+  if (/\byos\b/.test(blob)) keys.add('yos');
+  if (/3\s*-\s*4/.test(blob)) keys.add('34');
+  if (/5\s*-\s*6/.test(blob)) keys.add('56');
+  if (/(?:^|[\s.])(7|8)(?:\.|\s|$)/.test(blob) || /\b(7|8)\s*\.?\s*sinif\b/.test(blob)) keys.add('lgs');
+  if (/(?:^|[\s.])(9|10|11|12)(?:\.|\s|$)/.test(blob) || /\bmezun\b/.test(blob)) keys.add('yks');
+  if (/(?:^|[\s.])(3|4)(?:\.|\s|$)/.test(blob) && !keys.has('lgs') && !keys.has('yks')) keys.add('34');
+  if (/(?:^|[\s.])(5|6)(?:\.|\s|$)/.test(blob) && !keys.has('lgs') && !keys.has('yks')) keys.add('56');
+  return keys;
+}
+
+export function edesisCatalogExamMatchesProgram(exam, programKeys) {
+  if (!programKeys || !programKeys.size) return false;
+  const examKeys = inferEdesisExamProgramKeys({
+    examType: exam?.examType || exam?.sinavTuru,
+    examName: exam?.name || exam?.examName || exam?.title
+  });
+  for (const k of examKeys) {
+    if (programKeys.has(k)) return true;
+  }
+  return false;
+}
+
+function isOpenEdesisCatalogExam(exam) {
+  const status = String(exam?.resultStatus || 'None').trim();
+  return /^(none|processing)$/i.test(status);
+}
+
+export function formatEdesisAvailableExamItem(examId, catalog, resultRow, meta = {}) {
+  const draft = resultRow
+    ? mapEdesisRowToExamDraft(resultRow, {
+        studentId: meta.studentId || 'edesis-student',
+        institutionId: meta.institutionId || null
+      })
+    : null;
+  const name =
+    (catalog && (catalog.name || catalog.examName || catalog.title)) ||
+    draft?.examTitle ||
+    (resultRow && (resultRow.examName || resultRow.sinavAdi || resultRow.name)) ||
+    'Deneme';
+  return {
+    examId: String(examId),
+    name,
+    examDate: (catalog && (catalog.examDate || catalog.date)) || draft?.examDate || null,
+    examType: (catalog && (catalog.examType || catalog.sinavTuru)) || draft?.examType || null,
+    totalQuestions: catalog?.totalQuestions ?? null,
+    studentCount: catalog?.studentCount ?? null,
+    resultStatus: String((catalog && catalog.resultStatus) || (draft ? 'Ready' : 'None')),
+    hasStudentResult: Boolean(draft),
+    studentNet: draft?.totalNet ?? null,
+    canTake: Boolean(examId)
+  };
+}
+
+/**
+ * Öğrenciye gösterilecek denemeler:
+ * 1) GET /exams/results?StudentId= satırlarındaki sınavlar (Edesis’te tanımlı / girilmiş)
+ * 2) Aynı programdaki henüz işlenmemiş katalog denemeleri (None/Processing) — ilk giriş
+ * Kurumun tüm Ready kataloğu (TYT+YÖS+ilkokul+eski LGS) eklenmez.
+ */
+export function buildStudentAvailableEdesisExamItems({
+  catalogRows = [],
+  resultRows = [],
+  programKeys = new Set(),
+  studentId,
+  institutionId
+} = {}) {
+  const catalogById = new Map();
+  for (const ex of catalogRows || []) {
+    const id = pickEdesisCatalogExamId(ex);
+    if (id) catalogById.set(id, ex);
+  }
+
+  const resultByExam = new Map();
+  for (const row of resultRows || []) {
+    const examId = pickEdesisResultExamId(row);
+    if (examId && !resultByExam.has(examId)) resultByExam.set(examId, row);
+  }
+
+  const keys = new Set(programKeys || []);
+  for (const [examId] of resultByExam) {
+    const cat = catalogById.get(examId) || {};
+    const row = resultByExam.get(examId);
+    for (const k of inferEdesisExamProgramKeys({
+      examType: cat.examType || row?.examType,
+      examName: cat.name || cat.examName || row?.examName
+    })) {
+      keys.add(k);
+    }
+  }
+
+  const items = [];
+  const seen = new Set();
+  const push = (examId, catalog, resultRow) => {
+    if (!examId || seen.has(examId)) return;
+    seen.add(examId);
+    items.push(
+      formatEdesisAvailableExamItem(examId, catalog, resultRow, { studentId, institutionId })
+    );
+  };
+
+  for (const [examId, resultRow] of resultByExam) {
+    push(examId, catalogById.get(examId) || null, resultRow);
+  }
+
+  for (const ex of catalogRows || []) {
+    const examId = pickEdesisCatalogExamId(ex);
+    if (!examId || seen.has(examId)) continue;
+    if (isOpenEdesisCatalogExam(ex) && edesisCatalogExamMatchesProgram(ex, keys)) {
+      push(examId, ex, null);
+    }
+  }
+
+  items.sort((a, b) => String(b.examDate || '').localeCompare(String(a.examDate || '')));
+  return items;
+}
+
 function looksLikeSubjectRow(s) {
   if (!s || typeof s !== 'object') return false;
   const name = pickStr(s, [
@@ -1298,6 +1454,26 @@ export async function fetchEdesisStudentsList(cfgOverride = {}, filters = {}) {
   };
 }
 
+/** GET /students Filter ile tek öğrenci (tam liste taramaz) */
+export async function fetchEdesisStudentByOgrenciId(edesisStudentId, cfgOverride = {}) {
+  const sid = String(edesisStudentId || '').trim();
+  if (!sid) return null;
+  const listed = await fetchEdesisStudentsList(cfgOverride, { Filter: sid });
+  const hit = (listed.rows || []).find((row) => {
+    const r = flattenEdesisRow(row);
+    const id = pickStr(r, ['id', 'studentId', 'ogrenciId']);
+    return id === sid;
+  });
+  if (!hit) return null;
+  const r = flattenEdesisRow(hit);
+  return {
+    id: pickStr(r, ['id', 'studentId', 'ogrenciId']),
+    gradeName: pickStr(r, ['gradeName', 'sinifAdi', 'grade']),
+    className: pickStr(r, ['className', 'classroomName', 'subeAdi', 'sube']),
+    classroomId: pickStr(r, ['classroomId', 'sinifId'])
+  };
+}
+
 /** GET /terms — akademik dönemler */
 export async function fetchEdesisTermsList(cfgOverride = {}) {
   const cfg = { ...getEdesisConfig(), ...cfgOverride };
@@ -1330,20 +1506,21 @@ export async function fetchEdesisExamsCatalog(cfgOverride = {}, query = {}) {
 }
 
 /** GET /exams/results?StudentId= — tek öğrenci sonuçları */
-export async function fetchEdesisStudentResults(edesisStudentId, cfgOverride = {}) {
+export async function fetchEdesisStudentResults(edesisStudentId, cfgOverride = {}, options = {}) {
   const sid = String(edesisStudentId || '').trim();
   if (!sid) throw new Error('edesis_student_id_required');
   const cfg = { ...getEdesisConfig(), ...cfgOverride };
   if (!cfg.apiKey) throw new Error('EDESIS_API_KEY_missing');
   const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+  const enrichSubjects = options.enrichSubjects !== false;
   const dateRange = defaultDateRangeQuery();
   const bulk = await fetchAllPaged(localCfg, V1_PATHS.examResults, {
     StudentId: sid,
     ...dateRange,
-    ...EXAM_DETAIL_QUERY
+    ...(enrichSubjects ? EXAM_DETAIL_QUERY : {})
   });
   let rows = bulk.rows || [];
-  if (rows.length) {
+  if (rows.length && enrichSubjects) {
     const enriched = await enrichEdesisRowsWithSubjectDetails(rows, localCfg, { maxStudents: 25 });
     rows = enriched.rows;
   }

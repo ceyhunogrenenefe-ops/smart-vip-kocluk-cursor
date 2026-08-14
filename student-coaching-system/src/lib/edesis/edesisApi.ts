@@ -414,6 +414,8 @@ export async function fetchEdesisAvailableExams(params: {
   edesisStudentId: string;
   count: number;
   items: EdesisAvailableExam[];
+  scope?: string;
+  hint?: string | null;
 }> {
   const qs = new URLSearchParams({ op: 'available-exams' });
   if (params.studentId) qs.set('studentId', params.studentId);
