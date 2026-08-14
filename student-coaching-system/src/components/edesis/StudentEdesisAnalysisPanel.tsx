@@ -55,18 +55,6 @@ export function edesisHubExamToResult(exam: EdesisStudentResultsExam, studentId:
   };
 }
 
-function inferFamilyFromExams(exams: EdesisStudentResultsExam[]): string {
-  const blob = exams
-    .slice(0, 8)
-    .map((e) => `${e.examType || ''} ${e.examTitle || ''}`)
-    .join(' ')
-    .toLocaleLowerCase('tr-TR');
-  if (/\blgs\b/.test(blob) || /\b7[\s.]|\b8[\s.]/.test(blob)) return 'lgs';
-  if (/\bayt\b/.test(blob)) return 'ayt';
-  if (/\btyt\b|\byks\b/.test(blob)) return 'tyt';
-  return 'lgs';
-}
-
 type AnalysisSub = 'hata' | 'deneme';
 
 type Props = {
@@ -85,7 +73,7 @@ export default function StudentEdesisAnalysisPanel({ exams, studentId, edesisStu
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
-  const [family, setFamily] = useState(() => inferFamilyFromExams(exams));
+  const [family, setFamily] = useState('all');
   const [windowKey, setWindowKey] = useState('last10');
   const [analysisBusy, setAnalysisBusy] = useState(false);
   const [analysis, setAnalysis] = useState<Record<string, unknown> | null>(null);
@@ -150,7 +138,11 @@ export default function StudentEdesisAnalysisPanel({ exams, studentId, edesisStu
     if (!studentId) return;
     setAnalysisBusy(true);
     try {
-      const j = await fetchEdesisStudentAnalysis({ studentId, family, window: windowKey });
+      const j = await fetchEdesisStudentAnalysis({
+        studentId,
+        family: family === 'all' ? 'all' : family,
+        window: windowKey
+      });
       setAnalysis((j.analysis || null) as Record<string, unknown> | null);
       const ev = await fetchEdesisEvaluations(studentId).catch(() => ({ items: [] }));
       setEvals(ev.items || []);
@@ -166,10 +158,6 @@ export default function StudentEdesisAnalysisPanel({ exams, studentId, edesisStu
     if (sub !== 'deneme') return;
     void loadAnalysis();
   }, [sub, loadAnalysis]);
-
-  useEffect(() => {
-    setFamily(inferFamilyFromExams(exams));
-  }, [exams]);
 
   const openPdfTab = () => {
     if (!pdfUrl) {
@@ -310,6 +298,7 @@ export default function StudentEdesisAnalysisPanel({ exams, studentId, edesisStu
                 onChange={(e) => setFamily(e.target.value)}
                 className="mt-1 block rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal"
               >
+                <option value="all">Tümü</option>
                 <option value="lgs">LGS</option>
                 <option value="tyt">TYT</option>
                 <option value="ayt">AYT</option>
