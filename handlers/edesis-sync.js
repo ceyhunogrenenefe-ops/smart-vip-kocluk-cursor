@@ -257,7 +257,9 @@ async function loadAvailableEdesisExamsForStudent({
     programKeys: scope.programKeys,
     classroomId: scope.classroomId,
     studentId: platformStudentId || `edesis-${edesisStudentId}`,
-    institutionId: actor?.institution_id || null
+    institutionId: actor?.institution_id || null,
+    // External API ogrenciIds vermezse son 21 gün + program yedeği (atanmış tespit yoksa)
+    allowRecencyFallback: assignedMap.size === 0
   });
 }
 

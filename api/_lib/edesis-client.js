@@ -422,6 +422,8 @@ export function edesisCatalogExamMatchesProgram(exam, programKeys) {
     examType: exam?.examType || exam?.sinavTuru,
     examName: exam?.name || exam?.examName || exam?.title || exam?.examTitle
   });
+  // Tür/ad çıkarılamıyorsa program engeli koyma (atanmış yeni denemeler sık böyle)
+  if (!examKeys.size) return true;
   for (const k of examKeys) {
     if (programKeys.has(k)) return true;
   }
@@ -606,17 +608,41 @@ export function catalogLooksStudentFiltered(fullRows, studentRows) {
   return false;
 }
 
-/** Henüz sonucu olmayan, bu öğrenciye tanımlanmış katalog denemesi */
+function examWindowStillOpen(exam, now = new Date()) {
+  const flat = flattenEdesisRow(exam);
+  const end = Date.parse(flat.endDate || flat.bitisTarihi || flat.EndDate || '');
+  if (Number.isFinite(end) && end < now.getTime() - 86400000) return false;
+  const start = Date.parse(flat.startDate || flat.baslamaTarihi || flat.StartDate || '');
+  if (Number.isFinite(start) && start > now.getTime() + 86400000) return false;
+  return true;
+}
+
+/** Henüz sonucu olmayan, bu öğrenciye tanımlanmış / girmesi gereken katalog denemesi */
 export function shouldOfferUntakenCatalogExam(exam, scope = {}, now = new Date()) {
   if (!exam || !isOpenEdesisCatalogExam(exam)) return false;
+  if (!examWindowStillOpen(exam, now)) return false;
   const keys = scope.programKeys instanceof Set ? scope.programKeys : new Set(scope.programKeys || []);
   const assigned = catalogExamAssignedToStudent(exam, scope);
   if (assigned === false) return false;
-  if (keys.size && !edesisCatalogExamMatchesProgram(exam, keys)) return false;
+  // Açık atama program süzgecinden önce — External API tür alanı boş gelebiliyor
   if (assigned === true) return true;
-  // Atama alanı yok: yalnızca Edesis StudentId listesi gerçekten kısaldıysa güven.
+  if (keys.size && !edesisCatalogExamMatchesProgram(exam, keys)) return false;
+  // GET /exams?StudentId= gerçekten kısaldıysa satırları güven
   if (scope.assignedCatalogOnly) return true;
-  return false;
+
+  // External v1 çoğu zaman ogrenciIds döndürmez — atama tespit edilemezse (handler flag)
+  // güncel / online denemeleri programa göre göster.
+  if (!scope.allowRecencyFallback) return false;
+
+  const flat = flattenEdesisRow(exam);
+  if (flat.isOnlineSinavForStudent === false || flat.isOnlineForStudent === false) return false;
+
+  const online =
+    flat.isOnlineSinavForStudent === true ||
+    flat.isOnlineSinavForStudent === 'true' ||
+    flat.isOnlineForStudent === true;
+  if (online && isRecentOpenCatalogExam(exam, now, 45)) return true;
+  return isRecentOpenCatalogExam(exam, now, OPEN_CATALOG_WINDOW_DAYS);
 }
 
 const BOOKLET_URL_KEYS = [
@@ -897,7 +923,8 @@ export function buildStudentAvailableEdesisExamItems({
   classroomId = '',
   studentId,
   institutionId,
-  now = new Date()
+  now = new Date(),
+  allowRecencyFallback = false
 } = {}) {
   const catalogById = new Map();
   for (const ex of catalogRows || []) {
@@ -940,7 +967,8 @@ export function buildStudentAvailableEdesisExamItems({
     edesisStudentId,
     classroomId,
     programKeys: keys,
-    assignedCatalogOnly: assignedOnly
+    assignedCatalogOnly: assignedOnly,
+    allowRecencyFallback: Boolean(allowRecencyFallback) && !assignedOnly
   };
   for (const ex of offerRows) {
     const examId = pickEdesisCatalogExamId(ex);
@@ -950,7 +978,10 @@ export function buildStudentAvailableEdesisExamItems({
   }
 
   items.sort((a, b) => String(b.examDate || '').localeCompare(String(a.examDate || '')));
-  return filterEdesisExamsForStudentProgram(items, keys);
+  const filtered = filterEdesisExamsForStudentProgram(items, keys);
+  // Program süzgeci tüm girilebilir denemeleri silmesin (tür alanı boş atanmışlar)
+  if (!filtered.length && items.some((x) => x.canTake)) return items;
+  return filtered;
 }
 
 function looksLikeSubjectRow(s) {
