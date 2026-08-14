@@ -405,12 +405,43 @@ export function edesisCatalogExamMatchesProgram(exam, programKeys) {
   if (!programKeys || !programKeys.size) return false;
   const examKeys = inferEdesisExamProgramKeys({
     examType: exam?.examType || exam?.sinavTuru,
-    examName: exam?.name || exam?.examName || exam?.title
+    examName: exam?.name || exam?.examName || exam?.title || exam?.examTitle
   });
   for (const k of examKeys) {
     if (programKeys.has(k)) return true;
   }
   return false;
+}
+
+/** Sonuç listesinden baskın program (sınıf yoksa LGS vs 5. sınıf karışmasını ayırır) */
+export function majorityEdesisProgramKeys(items) {
+  const counts = new Map();
+  for (const item of items || []) {
+    const ks = inferEdesisExamProgramKeys({
+      examType: item.examType,
+      examName: item.name || item.examName || item.examTitle
+    });
+    for (const k of ks) counts.set(k, (counts.get(k) || 0) + 1);
+  }
+  if (!counts.size) return new Set();
+  let best = 0;
+  for (const n of counts.values()) if (n > best) best = n;
+  const leaders = [...counts.entries()].filter(([, n]) => n === best).map(([k]) => k);
+  if (leaders.length !== 1) return new Set();
+  return new Set(leaders);
+}
+
+export function filterEdesisExamsForStudentProgram(items, programKeys) {
+  const list = Array.isArray(items) ? items : [];
+  let keys = programKeys instanceof Set ? new Set(programKeys) : new Set(programKeys || []);
+  if (!keys.size) keys = majorityEdesisProgramKeys(list);
+  if (!keys.size) return list;
+  return list.filter((item) =>
+    edesisCatalogExamMatchesProgram(
+      { examType: item.examType, name: item.name || item.examName || item.examTitle },
+      keys
+    )
+  );
 }
 
 /** Sonuç satırı bu Edesis öğrencisine mi ait (API StudentId’yi yok sayarsa yedek süzgeç) */
@@ -456,6 +487,7 @@ export function buildStudentAvailableEdesisExamItems({
   catalogRows = [],
   resultRows = [],
   edesisStudentId,
+  programKeys = new Set(),
   studentId,
   institutionId
 } = {}) {
@@ -483,7 +515,7 @@ export function buildStudentAvailableEdesisExamItems({
   }
 
   items.sort((a, b) => String(b.examDate || '').localeCompare(String(a.examDate || '')));
-  return items;
+  return filterEdesisExamsForStudentProgram(items, programKeys);
 }
 
 function looksLikeSubjectRow(s) {

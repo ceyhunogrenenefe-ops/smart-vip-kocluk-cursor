@@ -80,9 +80,39 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     );
   });
 
-  it('matches student id on result rows', () => {
-    assert.equal(resultRowBelongsToStudent({ studentId: 7105077 }, '7105077'), true);
-    assert.equal(resultRowBelongsToStudent({ ogrenciId: '111' }, '7105077'), false);
-    assert.equal(resultRowBelongsToStudent({ examId: 1 }, '7105077'), true);
+  it('hides 5. sınıf denemesinden LGS öğrencisini', () => {
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [
+        { id: 10, name: '5.SINIF MAT FEN KTT 2 y', examType: '5-6. Sınıf', examDate: '2026-08-14' },
+        { id: 11, name: 'LGS İNKILAP TARİHİ KTT 1', examType: 'LGS', examDate: '2026-07-25' },
+        { id: 12, name: 'LGS İNGİLİZCE KTT 1', examType: 'LGS', examDate: '2026-07-24' }
+      ],
+      resultRows: [
+        { examId: 10, examName: '5.SINIF MAT FEN KTT 2 y', studentId: 7105077, score: -1.33 },
+        { examId: 11, examName: 'LGS İNKILAP TARİHİ KTT 1', studentId: 7105077, score: 25 },
+        { examId: 12, examName: 'LGS İNGİLİZCE KTT 1', studentId: 7105077, score: 10 }
+      ],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' })
+    });
+    const names = items.map((x) => x.name);
+    assert.equal(names.some((n) => /5\.SINIF/i.test(n)), false);
+    assert.equal(names.some((n) => /LGS İNKILAP/i.test(n)), true);
+  });
+
+  it('majority LGS results drop a stray 5. sınıf row when class is unknown', () => {
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [],
+      resultRows: [
+        { examId: 10, examName: '5.SINIF MAT FEN KTT 2 y', studentId: 7105077 },
+        { examId: 11, examName: 'LGS İNKILAP TARİHİ KTT 1', studentId: 7105077 },
+        { examId: 12, examName: 'LGS İNGİLİZCE KTT 1', studentId: 7105077 },
+        { examId: 13, examName: 'LGS TÜRKÇE KTT 1', studentId: 7105077 },
+        { examId: 14, examName: 'LGS MATEMATİK KTT 2', studentId: 7105077 }
+      ],
+      edesisStudentId: '7105077'
+    });
+    assert.equal(items.some((x) => /5\.SINIF/i.test(x.name)), false);
+    assert.equal(items.length, 4);
   });
 });

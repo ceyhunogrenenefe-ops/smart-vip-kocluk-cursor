@@ -314,7 +314,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
               <div className="font-bold text-slate-900">{activeExam.name}</div>
               <p className="mt-1 text-xs text-slate-600">
-                Kitapçığınızı seçin, her ders için optik işaretleyin. Boş bıraktığınız sorular boş gider.
+                Kitapçık türünü seçin. Cevapları soldaki optikten işaretleyin; Kaydet ile saklanır, Bitir ile Edesis’e gider.
               </p>
               {activeExam.hasStudentResult ? (
                 <p className="mt-2 text-xs text-amber-800">
@@ -322,17 +322,18 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
                 </p>
               ) : null}
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-slate-500">Kitapçık türü</span>
               {booklets.map((b) => (
                 <button
                   key={b.kitapcikTuru}
                   type="button"
                   onClick={() => setKitapcik(b.kitapcikTuru)}
-                  className={`rounded-lg px-3 py-2 text-sm font-bold ${
-                    kitapcik === b.kitapcikTuru ? tabOn : tabOff
+                  className={`min-w-[2.25rem] rounded-md px-3 py-1.5 text-sm font-bold ${
+                    kitapcik === b.kitapcikTuru ? 'bg-slate-800 text-white' : tabOff
                   }`}
                 >
-                  Kitapçık {b.kitapcikTuru}
+                  {b.kitapcikTuru}
                 </button>
               ))}
             </div>
@@ -343,9 +344,12 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             ) : null}
             <EdesisOpticalSheet
               lessons={activeLessons}
+              examTitle={activeExam.name}
+              examType={activeExam.examType}
+              storageKey={`edesis-optic:${studentId}:${activeExam.examId}:${kitapcik}`}
               busy={submitBusy}
               submitLabel={
-                replaceConfirm || activeExam.hasStudentResult ? 'Üzerine yazarak gönder' : 'Cevapları gönder'
+                replaceConfirm || activeExam.hasStudentResult ? 'Üzerine yazarak bitir' : 'Bitir'
               }
               onSubmit={(dersCevaplari) =>
                 void submitAnswers(dersCevaplari, replaceConfirm || activeExam.hasStudentResult)
