@@ -67,6 +67,7 @@ Sayfalama: `MaxResultCount` (liste max 1000, kırılım max 100), `SkipCount`
 
 1. Koç **Edesis** sayfasından öğrenciyi `edesis_ogrenci_id` ile bağlar.
 2. Öğrenci: **Akademik Merkez → Deneme / Optik** (`/academic-center?tab=exam`) → **Sınava gir** / **Sonuçlarım**.
+   Liste **kurumun tüm denemelerini göstermez**. Kaynak: `GET /exams/results?StudentId=` (öğrenciye tanımlı/girilmiş) + aynı programdaki henüz işlenmemiş (`None`/`Processing`) denemeler. TYT/YÖS/ilkokul kataloğu LGS öğrencisine düşmez.
 3. Kitapçık seçilir, her ders için optik işaretlenir (`cevaplar` uzunluğu = `questionCount`).
 4. Sistem `ogrenciId` + `kitapcikTuru` + tüm `dersCevaplari` ile POST eder (`replace` gövdede).
 5. `jobId` ile durum izlenir (`Pending` / `Running` / `Completed` / `Failed` / `NotFound`).
