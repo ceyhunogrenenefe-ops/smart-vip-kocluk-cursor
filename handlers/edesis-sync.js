@@ -1457,9 +1457,10 @@ export default async function handler(req, res) {
         count: items.length,
         items,
         scope: 'assigned',
+        takeableCount: items.filter((x) => x.canTake && !x.hasStudentResult).length,
         hint: items.length
           ? null
-          : 'Edesis’te size tanımlanmış deneme yok. Koçunuz sınavı tanımladıktan sonra burada görünür.'
+          : 'Edesis’te size tanımlanmış deneme yok. Koçunuz sınavı tanımladıktan sonra burada görünür. Öğrenci Edesis ID eşlemesini kontrol edin.'
       });
     }
 
