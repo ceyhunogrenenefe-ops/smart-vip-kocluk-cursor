@@ -5,7 +5,8 @@ import {
   edesisCatalogExamMatchesProgram,
   buildStudentAvailableEdesisExamItems,
   pickEdesisCatalogExamId,
-  pickEdesisResultExamId
+  pickEdesisResultExamId,
+  resultRowBelongsToStudent
 } from './edesis-client.js';
 
 describe('inferEdesisExamProgramKeys', () => {
@@ -30,36 +31,37 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     { id: 5, name: '3-4. Sınıf Deneme', examType: '3-4. Sınıf', resultStatus: 'None', examDate: '2026-08-11' }
   ];
 
-  it('does not dump the full catalog', () => {
+  it('does not dump the catalog when the student has no results', () => {
     const items = buildStudentAvailableEdesisExamItems({
       catalogRows: catalog,
       resultRows: [],
-      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' })
-    });
-    const ids = items.map((x) => x.examId);
-    assert.deepEqual(ids, ['4']);
-  });
-
-  it('includes the student result exam even if Ready and other types exist', () => {
-    const items = buildStudentAvailableEdesisExamItems({
-      catalogRows: catalog,
-      resultRows: [{ examId: 1, examName: 'LGS Deneme 1', score: 12.5 }],
-      programKeys: inferEdesisExamProgramKeys({ classLevel: '8. Sınıf' })
-    });
-    const ids = items.map((x) => x.examId).sort();
-    assert.deepEqual(ids, ['1', '4']);
-    const taken = items.find((x) => x.examId === '1');
-    assert.equal(taken.hasStudentResult, true);
-    assert.equal(taken.studentNet, 12.5);
-  });
-
-  it('hides other programs when student has no grade and no results', () => {
-    const items = buildStudentAvailableEdesisExamItems({
-      catalogRows: catalog,
-      resultRows: [],
-      programKeys: new Set()
+      edesisStudentId: '7105077'
     });
     assert.equal(items.length, 0);
+  });
+
+  it('includes only the student result exam, not other LGS catalog rows', () => {
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: catalog,
+      resultRows: [{ examId: 1, examName: 'LGS Deneme 1', score: 12.5, studentId: 7105077 }],
+      edesisStudentId: '7105077'
+    });
+    assert.deepEqual(items.map((x) => x.examId), ['1']);
+    assert.equal(items[0].hasStudentResult, true);
+    assert.equal(items[0].studentNet, 12.5);
+    assert.equal(items[0].name, 'LGS Deneme 1');
+  });
+
+  it('drops result rows that belong to another student', () => {
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: catalog,
+      resultRows: [
+        { examId: 1, examName: 'LGS Deneme 1', studentId: 111 },
+        { examId: 2, examName: 'TYT Deneme', studentId: 7105077 }
+      ],
+      edesisStudentId: '7105077'
+    });
+    assert.deepEqual(items.map((x) => x.examId), ['2']);
   });
 
   it('picks catalog vs result exam ids', () => {
@@ -76,5 +78,11 @@ describe('buildStudentAvailableEdesisExamItems', () => {
       edesisCatalogExamMatchesProgram({ examType: 'LGS', name: 'LGS Yeni' }, new Set(['lgs'])),
       true
     );
+  });
+
+  it('matches student id on result rows', () => {
+    assert.equal(resultRowBelongsToStudent({ studentId: 7105077 }, '7105077'), true);
+    assert.equal(resultRowBelongsToStudent({ ogrenciId: '111' }, '7105077'), false);
+    assert.equal(resultRowBelongsToStudent({ examId: 1 }, '7105077'), true);
   });
 });
