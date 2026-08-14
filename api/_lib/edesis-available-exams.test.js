@@ -59,6 +59,41 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     assert.equal(items.length, 0);
   });
 
+  it('with allowRecencyFallback offers recent program exams when assignment unknown', () => {
+    const now = new Date('2026-08-14T12:00:00Z');
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: catalog,
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      now,
+      allowRecencyFallback: true
+    });
+    assert.ok(items.some((x) => x.examId === '4'));
+    assert.equal(items.some((x) => x.examId === '3'), false);
+  });
+
+  it('offers assigned exam even when examType/name has no program keyword', () => {
+    const now = new Date('2026-08-14T12:00:00Z');
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [
+        {
+          id: 92,
+          name: 'Deneme Tanım',
+          examType: '',
+          resultStatus: 'None',
+          examDate: '2026-03-01',
+          studentIds: [7105077]
+        }
+      ],
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      now
+    });
+    assert.deepEqual(items.map((x) => x.examId), ['92']);
+  });
+
   it('does not offer last year\'s open LGS catalog exams', () => {
     const now = new Date('2026-08-14T12:00:00Z');
     const items = buildStudentAvailableEdesisExamItems({
