@@ -12,7 +12,8 @@ import {
   detectEdesisExamFamily,
   edesisOpticalUi,
   pickEdesisBookletLessons,
-  looksLikePdfBuffer
+  looksLikePdfBuffer,
+  catalogLooksStudentFiltered
 } from './edesis-client.js';
 
 describe('inferEdesisExamProgramKeys', () => {
@@ -46,7 +47,7 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     assert.equal(items.length, 0);
   });
 
-  it('offers a recently defined open exam with no result row yet', () => {
+  it('does not dump recent open catalog exams without assignment', () => {
     const now = new Date('2026-08-14T12:00:00Z');
     const items = buildStudentAvailableEdesisExamItems({
       catalogRows: catalog,
@@ -55,10 +56,7 @@ describe('buildStudentAvailableEdesisExamItems', () => {
       programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
       now
     });
-    assert.deepEqual(items.map((x) => x.examId).sort(), ['4']);
-    assert.equal(items[0].canTake, true);
-    assert.equal(items[0].hasStudentResult, false);
-    assert.equal(items[0].name, 'LGS Yeni');
+    assert.equal(items.length, 0);
   });
 
   it('does not offer last year\'s open LGS catalog exams', () => {
@@ -94,6 +92,40 @@ describe('buildStudentAvailableEdesisExamItems', () => {
       now
     });
     assert.deepEqual(items.map((x) => x.examId), ['41']);
+  });
+
+  it('offers a StudentId-filtered catalog exam without studentIds on the row', () => {
+    const now = new Date('2026-08-14T12:00:00Z');
+    const assigned = [
+      { id: 4, name: 'LGS Yeni', examType: 'LGS', resultStatus: 'None', examDate: '2026-08-10' }
+    ];
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: catalog,
+      assignedCatalogRows: assigned,
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      now
+    });
+    assert.deepEqual(items.map((x) => x.examId), ['4']);
+    assert.equal(items[0].canTake, true);
+  });
+
+  it('does not treat a near-full StudentId response as assigned', () => {
+    assert.equal(
+      catalogLooksStudentFiltered(
+        Array.from({ length: 40 }, (_, i) => ({ id: i + 1 })),
+        Array.from({ length: 38 }, (_, i) => ({ id: i + 1 }))
+      ),
+      false
+    );
+    assert.equal(
+      catalogLooksStudentFiltered(
+        Array.from({ length: 40 }, (_, i) => ({ id: i + 1 })),
+        [{ id: 4 }, { id: 7 }]
+      ),
+      true
+    );
   });
 
   it('hides a recent exam assigned to other students', () => {
