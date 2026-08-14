@@ -68,7 +68,7 @@ function foldLessonName(s: string): string {
     .trim();
 }
 
-/** LGS sanal optik — Edesis 2 sütun düzeni (satır satır): Türkçe|İnkılap, Din|İngilizce, Matematik|Fen */
+/** LGS sanal optik — Edesis 2 sütun: Türkçe|İnkılap, Din|İngilizce, Matematik|Fen */
 const LGS_LESSON_ORDER: { rank: number; test: (n: string) => boolean }[] = [
   { rank: 0, test: (n) => /\bturkce\b/.test(n) },
   { rank: 1, test: (n) => /\binkilap\b|\btarih\b/.test(n) && !/\bdin\b/.test(n) },
@@ -78,18 +78,41 @@ const LGS_LESSON_ORDER: { rank: number; test: (n: string) => boolean }[] = [
   { rank: 5, test: (n) => /\bfen\b/.test(n) }
 ];
 
-function lgsLessonRank(lessonName: string): number {
+/** TYT — Edesis 2×2: Türkçe | Sosyal Bilimler / Matematik | Fen Bilimleri */
+const TYT_LESSON_ORDER: { rank: number; test: (n: string) => boolean }[] = [
+  { rank: 0, test: (n) => /\bturkce\b/.test(n) },
+  { rank: 1, test: (n) => /\bsosyal\b/.test(n) },
+  { rank: 2, test: (n) => /\bmatematik\b|\bmath\b/.test(n) },
+  { rank: 3, test: (n) => /\bfen\b/.test(n) },
+  // Parçalı sosyal kırılım (Sosyal Bilimler tek ders değilse)
+  { rank: 1.1, test: (n) => /\btarih\b/.test(n) },
+  { rank: 1.2, test: (n) => /\bcografya\b/.test(n) },
+  { rank: 1.3, test: (n) => /\bfelsefe\b/.test(n) },
+  { rank: 1.4, test: (n) => /\bdin\b/.test(n) }
+];
+
+function lessonRankForFamily(family: string, lessonName: string): number {
   const n = foldLessonName(lessonName);
-  for (const row of LGS_LESSON_ORDER) {
+  const table =
+    family === 'lgs' ? LGS_LESSON_ORDER : family === 'yks' || family === 'tyt' ? TYT_LESSON_ORDER : null;
+  if (!table) return 50;
+  for (const row of table) {
     if (row.test(n)) return row.rank;
   }
   return 50;
 }
 
 export function sortLgsOpticalLessons<T extends { lessonName?: string | null }>(lessons: T[]): T[] {
+  return sortOpticalLessonsByFamily(lessons, 'lgs');
+}
+
+export function sortOpticalLessonsByFamily<T extends { lessonName?: string | null }>(
+  lessons: T[],
+  family: string
+): T[] {
   return [...(lessons || [])].sort((a, b) => {
-    const ra = lgsLessonRank(String(a.lessonName || ''));
-    const rb = lgsLessonRank(String(b.lessonName || ''));
+    const ra = lessonRankForFamily(family, String(a.lessonName || ''));
+    const rb = lessonRankForFamily(family, String(b.lessonName || ''));
     if (ra !== rb) return ra - rb;
     return String(a.lessonName || '').localeCompare(String(b.lessonName || ''), 'tr');
   });
@@ -183,7 +206,8 @@ type Props = {
 };
 
 /**
- * Edesis Sınav Uygulaması: YKS tek kitapçık (A–E), LGS Sözel/Sayısal (A–D).
+ * Edesis Sınav Uygulaması görünümü: tüm denemelerde LGS tarzı grid + kitapçık türü.
+ * LGS: Sözel/Sayısal A–D. TYT/AYT/YÖS: Kitapçık Türü A–D (optik şıklar A–E kalır).
  */
 export default function EdesisOpticalSheet({
   lessons,
@@ -210,8 +234,8 @@ export default function EdesisOpticalSheet({
   const dual = bookletMode === 'dual-sozel-sayisal' || family === 'lgs';
   const choices = useMemo(() => opticalChoices(family, choiceCount), [family, choiceCount]);
   const orderedLessons = useMemo(
-    () => (dual ? sortLgsOpticalLessons(lessons) : lessons),
-    [dual, lessons]
+    () => sortOpticalLessonsByFamily(lessons, family === 'tyt' ? 'yks' : family),
+    [family, lessons]
   );
   const [answers, setAnswers] = useState<Record<string, string>>(() => readSaved(storageKey));
   const [savedFlash, setSavedFlash] = useState(false);
@@ -286,11 +310,13 @@ export default function EdesisOpticalSheet({
     const ordered = unique.sort(
       (a, b) => KITAPCIK_ORDER.indexOf(a) - KITAPCIK_ORDER.indexOf(b) || a.localeCompare(b, 'tr')
     );
-    return ordered.length ? ordered : KITAPCIK_ORDER;
+    return ordered.length ? ordered : [...KITAPCIK_ORDER];
   }, [booklets]);
 
+  const kitapcikValue = kitapcik || bookletTypes[0] || 'A';
   const heading = activeFilled?.lesson.lessonName || examTitle || 'Optik';
-  const pdfPaneClass = dual ? 'bg-neutral-900' : 'bg-slate-200';
+  const tabPrefix =
+    family === 'lgs' ? 'LGS' : family === 'ayt' ? 'AYT' : family === 'yos' ? 'YÖS' : family === 'yks' || family === 'tyt' ? 'TYT' : examType;
 
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -301,12 +327,12 @@ export default function EdesisOpticalSheet({
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-xs font-semibold text-slate-600">Sözel:</span>
-              <KitapcikCircles value={kitapcik} onChange={onKitapcikChange} codes={KITAPCIK_ORDER} />
+              <KitapcikCircles value={kitapcikValue} onChange={onKitapcikChange} codes={KITAPCIK_ORDER} />
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-xs font-semibold text-slate-600">Sayısal:</span>
               <KitapcikCircles
-                value={kitapcikSayisal || kitapcik}
+                value={kitapcikSayisal || kitapcikValue}
                 onChange={onKitapcikSayisalChange}
                 codes={KITAPCIK_ORDER}
               />
@@ -314,8 +340,8 @@ export default function EdesisOpticalSheet({
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-xs font-semibold text-slate-500">Kitapçık Türü:</span>
-            <KitapcikCircles value={kitapcik} onChange={onKitapcikChange} codes={bookletTypes} />
+            <span className="text-xs font-semibold text-slate-600">Kitapçık Türü:</span>
+            <KitapcikCircles value={kitapcikValue} onChange={onKitapcikChange} codes={bookletTypes} />
           </div>
         )}
         <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -341,13 +367,7 @@ export default function EdesisOpticalSheet({
 
       <div className="flex min-h-[70vh] flex-col md:flex-row">
         <aside className="flex w-full shrink-0 flex-col border-b border-slate-200 bg-white md:w-[22rem] md:border-b-0 md:border-r">
-          <div
-            className={
-              dual
-                ? 'grid grid-cols-2 gap-1 border-b border-slate-200 px-2 py-2'
-                : 'flex gap-1 overflow-x-auto border-b border-slate-200 px-2 pt-2'
-            }
-          >
+          <div className="grid grid-cols-2 gap-1 border-b border-slate-200 px-2 py-2">
             {filled.map(({ lesson, marked }) => {
               const key = lessonKey(lesson);
               const on = key === activeLessonKey;
@@ -356,21 +376,13 @@ export default function EdesisOpticalSheet({
                   key={key}
                   type="button"
                   onClick={() => setActiveLessonKey(key)}
-                  className={
-                    dual
-                      ? `rounded-md border px-1.5 py-1.5 text-left text-[10px] font-extrabold leading-tight tracking-wide ${
-                          on
-                            ? 'border-orange-500 bg-orange-50 text-orange-600'
-                            : 'border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-800'
-                        }`
-                      : `shrink-0 border-b-2 px-2 pb-2 text-[11px] font-extrabold tracking-wide ${
-                          on
-                            ? 'border-orange-500 text-orange-600'
-                            : 'border-transparent text-slate-500 hover:text-slate-800'
-                        }`
-                  }
+                  className={`rounded-md border px-1.5 py-1.5 text-left text-[10px] font-extrabold leading-tight tracking-wide ${
+                    on
+                      ? 'border-orange-500 bg-orange-50 text-orange-600'
+                      : 'border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+                  }`}
                 >
-                  {lessonTabLabel(lesson, examType)}
+                  {lessonTabLabel(lesson, tabPrefix)}
                   <span className="ml-1 font-semibold text-slate-400">
                     {marked}/{lesson.questionCount}
                   </span>
@@ -383,7 +395,7 @@ export default function EdesisOpticalSheet({
             <div className="min-h-0 flex-1 overflow-y-auto">
               <div className="sticky top-0 border-b border-orange-100 bg-orange-50 px-3 py-2">
                 <div className="text-sm font-extrabold uppercase tracking-wide text-orange-600">
-                  {lessonTabLabel(activeFilled.lesson, examType)}
+                  {lessonTabLabel(activeFilled.lesson, tabPrefix)}
                 </div>
                 <div className="text-xs font-semibold text-orange-800/80">{heading}</div>
               </div>
@@ -403,9 +415,7 @@ export default function EdesisOpticalSheet({
                             className={`h-7 w-7 rounded-full border text-[11px] font-bold ${
                               selected === ch
                                 ? 'border-emerald-600 bg-emerald-600 text-white'
-                                : dual
-                                  ? 'border-orange-400 bg-white text-orange-500 hover:border-orange-600'
-                                  : 'border-orange-400 bg-white text-orange-500 hover:border-emerald-400'
+                                : 'border-orange-400 bg-white text-orange-500 hover:border-orange-600'
                             }`}
                             aria-label={`Soru ${i + 1} ${ch}`}
                           >
@@ -431,7 +441,7 @@ export default function EdesisOpticalSheet({
           )}
         </aside>
 
-        <section className={`flex min-h-[50vh] flex-1 flex-col ${pdfPaneClass}`}>
+        <section className="flex min-h-[50vh] flex-1 flex-col bg-neutral-900">
           <div className="flex items-center gap-2 border-b border-slate-700 bg-slate-800 px-3 py-1.5 text-[11px] text-slate-200">
             <span className="truncate font-medium">{examTitle || 'Kitapçık PDF'}</span>
             {pdfBusy ? <Loader2 className="ml-auto h-3.5 w-3.5 animate-spin" /> : null}
