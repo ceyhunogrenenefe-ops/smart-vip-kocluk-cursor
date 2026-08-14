@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
+  BarChart3,
   ClipboardList,
   CloudDownload,
   ExternalLink,
@@ -14,8 +15,10 @@ import { useApp } from '../../context/AppContext';
 import { userRoleTags } from '../../config/rolePermissions';
 import { resolveStudentRecordId } from '../../lib/coachResolve';
 import EdesisOpticalSheet from './EdesisOpticalSheet';
+import StudentEdesisAnalysisPanel from './StudentEdesisAnalysisPanel';
 import {
   fetchEdesisAvailableExams,
+  fetchEdesisExamBookletPdf,
   fetchEdesisExamStructure,
   fetchEdesisIngestStatus,
   fetchEdesisKarnePdf,
@@ -26,7 +29,7 @@ import {
   type EdesisStudentResultsExam
 } from '../../lib/edesis/edesisApi';
 
-type View = 'take' | 'results';
+type View = 'take' | 'results' | 'analysis';
 
 async function waitForIngestJob(examId: string, jobId: string) {
   for (let i = 0; i < 12; i += 1) {
@@ -44,7 +47,7 @@ type Props = {
 };
 
 /**
- * Öğrenci — Edesis denemesine girer; net ve karne PDF görür.
+ * Öğrenci — Edesis denemesine girer; net, karne PDF, hata karnesi ve deneme analizi görür.
  * Akademik Merkez → Deneme / Optik içinde kullanılır.
  */
 export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
@@ -81,12 +84,20 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
   const [kitapcik, setKitapcik] = useState('');
   const [structureBusy, setStructureBusy] = useState(false);
   const [submitBusy, setSubmitBusy] = useState(false);
-  const [replaceConfirm, setReplaceConfirm] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   useEffect(() => {
     onActiveExamChange?.(Boolean(activeExam));
     return () => onActiveExamChange?.(false);
   }, [activeExam, onActiveExamChange]);
+
+  useEffect(() => {
+    return () => {
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+    };
+  }, [pdfUrl]);
 
   const load = useCallback(async () => {
     if (!studentId) {
@@ -135,9 +146,53 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (!activeExam || !kitapcik) return;
+    let cancelled = false;
+    setPdfBusy(true);
+    setPdfError(null);
+    setPdfUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    void (async () => {
+      try {
+        const r = await fetchEdesisExamBookletPdf({
+          examId: activeExam.examId,
+          kitapcikTuru: kitapcik
+        });
+        if (cancelled) return;
+        if (r.blob && r.blob.size > 0 && (r.blob.type.includes('pdf') || r.blob.size > 8)) {
+          const next = URL.createObjectURL(r.blob);
+          if (cancelled) {
+            URL.revokeObjectURL(next);
+            return;
+          }
+          setPdfUrl(next);
+        } else if (r.url) {
+          setPdfUrl(r.url);
+        } else {
+          setPdfError('Bu sınav için kitapçık PDF’si bulunamadı');
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setPdfError(e instanceof Error ? e.message : 'Kitapçık PDF alınamadı');
+        }
+      } finally {
+        if (!cancelled) setPdfBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeExam, kitapcik]);
+
   const openExam = async (exam: EdesisAvailableExam) => {
+    if (exam.hasStudentResult || exam.canTake === false) {
+      toast.message('Bu sınava daha önce girdiniz. Sonuçlarım veya Analizlerim sekmesine bakın.');
+      return;
+    }
     setStructureBusy(true);
-    setReplaceConfirm(false);
     try {
       const r = await fetchEdesisExamStructure(exam.examId);
       const books = r.booklets || [];
@@ -156,8 +211,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
   };
 
   const submitAnswers = async (
-    dersCevaplari: { lessonId: number | null; dersGrupId: number | null; cevaplar: string }[],
-    replace = false
+    dersCevaplari: { lessonId: number | null; dersGrupId: number | null; cevaplar: string }[]
   ) => {
     if (!activeExam || !kitapcik) return;
     setSubmitBusy(true);
@@ -166,12 +220,13 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
         examId: activeExam.examId,
         kitapcikTuru: kitapcik,
         dersCevaplari,
-        replace,
         studentId
       });
       if (r.conflict) {
-        setReplaceConfirm(true);
-        toast.warning('Bu sınavda sonucunuz var. Üzerine yazmak için tekrar gönderin.');
+        toast.warning(r.hint || r.message || 'Bu sınava daha önce girdiniz');
+        setActiveExam(null);
+        setView('results');
+        await load();
         return;
       }
       let state = String(r.job?.state || '');
@@ -243,7 +298,8 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             Edesis denemesi ve sonuçlarım
           </h2>
           <p className="mt-1 text-sm text-slate-600">
-            Yalnızca size tanımlanan Edesis denemeleri görünür. Optik formu doldurun; net ve karne PDF aynı yerde açılır.
+            Yalnızca size tanımlanan Edesis denemeleri görünür. Optik formu ders ders doldurun; net, hata karnesi ve
+            deneme analizi aynı yerde açılır.
           </p>
         </div>
         <button
@@ -257,7 +313,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
         </button>
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button
           type="button"
           onClick={() => {
@@ -283,6 +339,19 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
         >
           <FileText className="h-4 w-4" />
           Sonuçlarım
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setView('analysis');
+            setActiveExam(null);
+          }}
+          className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold ${
+            view === 'analysis' ? tabOn : tabOff
+          }`}
+        >
+          <BarChart3 className="h-4 w-4" />
+          Analizlerim
         </button>
       </div>
 
@@ -314,46 +383,24 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
               <div className="font-bold text-slate-900">{activeExam.name}</div>
               <p className="mt-1 text-xs text-slate-600">
-                Kitapçık türünü seçin. Cevapları soldaki optikten işaretleyin; Kaydet ile saklanır, Bitir ile Edesis’e gider.
+                Kitapçık türünü seçin. Soldan ders sekmesine tıklayıp optiği doldurun; Kaydet ile saklanır, Bitir ile
+                Edesis’e gider.
               </p>
-              {activeExam.hasStudentResult ? (
-                <p className="mt-2 text-xs text-amber-800">
-                  Bu sınavda sonucunuz var. Gönderirseniz Edesis mevcut neti silip yeniden değerlendirir.
-                </p>
-              ) : null}
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-semibold text-slate-500">Kitapçık türü</span>
-              {booklets.map((b) => (
-                <button
-                  key={b.kitapcikTuru}
-                  type="button"
-                  onClick={() => setKitapcik(b.kitapcikTuru)}
-                  className={`min-w-[2.25rem] rounded-md px-3 py-1.5 text-sm font-bold ${
-                    kitapcik === b.kitapcikTuru ? 'bg-slate-800 text-white' : tabOff
-                  }`}
-                >
-                  {b.kitapcikTuru}
-                </button>
-              ))}
-            </div>
-            {replaceConfirm ? (
-              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                Mevcut sonuç var. Aşağıdan tekrar gönderirseniz üzerine yazılır.
-              </p>
-            ) : null}
             <EdesisOpticalSheet
               lessons={activeLessons}
+              booklets={booklets}
+              kitapcik={kitapcik}
+              onKitapcikChange={setKitapcik}
               examTitle={activeExam.name}
               examType={activeExam.examType}
               storageKey={`edesis-optic:${studentId}:${activeExam.examId}:${kitapcik}`}
               busy={submitBusy}
-              submitLabel={
-                replaceConfirm || activeExam.hasStudentResult ? 'Üzerine yazarak bitir' : 'Bitir'
-              }
-              onSubmit={(dersCevaplari) =>
-                void submitAnswers(dersCevaplari, replaceConfirm || activeExam.hasStudentResult)
-              }
+              submitLabel="Bitir"
+              pdfUrl={pdfUrl}
+              pdfBusy={pdfBusy}
+              pdfError={pdfError}
+              onSubmit={(dersCevaplari) => void submitAnswers(dersCevaplari)}
             />
           </div>
         ) : (
@@ -361,34 +408,49 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             {hint && !available.length ? (
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{hint}</div>
             ) : null}
-            {available.map((exam) => (
-              <div key={exam.examId} className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 sm:p-5">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div className="font-bold text-slate-900">{exam.name}</div>
-                    <div className="mt-1 text-xs text-slate-500">
-                      {exam.examDate ? new Date(exam.examDate).toLocaleDateString('tr-TR') : '—'}
-                      {exam.totalQuestions ? ` · ${exam.totalQuestions} soru` : ''}
-                      {exam.resultStatus ? ` · ${exam.resultStatus}` : ''}
+            {available.map((exam) => {
+              const taken = exam.hasStudentResult || exam.canTake === false;
+              return (
+                <div key={exam.examId} className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 sm:p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="font-bold text-slate-900">{exam.name}</div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {exam.examDate ? new Date(exam.examDate).toLocaleDateString('tr-TR') : '—'}
+                        {exam.totalQuestions ? ` · ${exam.totalQuestions} soru` : ''}
+                        {exam.resultStatus ? ` · ${exam.resultStatus}` : ''}
+                      </div>
+                      {taken ? (
+                        <div className="mt-1 text-xs font-semibold text-emerald-700">
+                          Girildi{exam.studentNet != null ? ` · netiniz: ${exam.studentNet}` : ''}
+                        </div>
+                      ) : (
+                        <div className="mt-1 text-xs text-slate-500">Henüz sonucunuz yok — optik formu doldurabilirsiniz</div>
+                      )}
                     </div>
-                    {exam.hasStudentResult ? (
-                      <div className="mt-1 text-xs font-semibold text-emerald-700">Netiniz: {exam.studentNet}</div>
+                    {taken ? (
+                      <span className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-500">
+                        Girildi
+                      </span>
                     ) : (
-                      <div className="mt-1 text-xs text-slate-500">Henüz sonucunuz yok — optik formu doldurabilirsiniz</div>
+                      <button
+                        type="button"
+                        disabled={structureBusy}
+                        onClick={() => void openExam(exam)}
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                      >
+                        {structureBusy ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <ClipboardList className="h-3.5 w-3.5" />
+                        )}
+                        Sınava gir
+                      </button>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    disabled={structureBusy}
-                    onClick={() => void openExam(exam)}
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
-                  >
-                    {structureBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ClipboardList className="h-3.5 w-3.5" />}
-                    {exam.hasStudentResult ? 'Tekrar gir' : 'Sınava gir'}
-                  </button>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             {!available.length && !hint ? (
               <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
                 Edesis’te size tanımlanmış deneme yok. Koçunuz sınavı tanımladıktan sonra burada görünür.
@@ -396,6 +458,8 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             ) : null}
           </div>
         )
+      ) : view === 'analysis' ? (
+        <StudentEdesisAnalysisPanel exams={exams} studentId={studentId} />
       ) : hint && exams.length === 0 ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{hint}</div>
       ) : (

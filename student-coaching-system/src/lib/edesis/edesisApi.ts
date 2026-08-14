@@ -204,6 +204,7 @@ export type EdesisPlatformStudent = {
 export type EdesisStudentResultsExam = {
   edesisExamId: string | null;
   examTitle: string;
+  examType?: string | null;
   examDate: string;
   totalNet: number;
   correct: number;
@@ -373,6 +374,12 @@ export type EdesisExamBooklet = {
   lessons: EdesisExamStructureLesson[];
 };
 
+export type EdesisBookletPdf = {
+  url: string;
+  kitapcikTuru?: string;
+  name?: string;
+};
+
 export type EdesisAvailableExam = {
   examId: string;
   name: string;
@@ -384,6 +391,7 @@ export type EdesisAvailableExam = {
   hasStudentResult: boolean;
   studentNet: number | null;
   canTake: boolean;
+  bookletPdfs?: EdesisBookletPdf[];
 };
 
 export type EdesisIngestJob = {
@@ -398,12 +406,36 @@ export async function fetchEdesisExamStructure(examId: string): Promise<{
   count: number;
   items: EdesisExamStructureLesson[];
   booklets: EdesisExamBooklet[];
+  bookletPdfs?: EdesisBookletPdf[];
 }> {
   const qs = new URLSearchParams({ op: 'exam-structure', examId });
   const res = await apiFetch(`/api/edesis-sync?${qs.toString()}`);
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j.error || j.message || j.hint || res.statusText);
   return j;
+}
+
+export async function fetchEdesisExamBookletPdf(params: {
+  examId: string;
+  kitapcikTuru?: string;
+}): Promise<{ blob: Blob; url?: string | null }> {
+  const qs = new URLSearchParams({
+    op: 'exam-booklet-pdf',
+    examId: params.examId,
+    download: '1'
+  });
+  if (params.kitapcikTuru) qs.set('kitapcikTuru', params.kitapcikTuru);
+  const res = await apiFetch(`/api/edesis-sync?${qs.toString()}`);
+  const ct = String(res.headers.get('content-type') || '');
+  if (ct.includes('application/pdf') || ct.includes('octet-stream')) {
+    const blob = await res.blob();
+    if (!blob.size) throw new Error('Kitapçık PDF boş döndü');
+    return { blob };
+  }
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.hint || j.message || j.error || 'Kitapçık PDF alınamadı');
+  if (j.url) return { blob: new Blob(), url: String(j.url) };
+  throw new Error(j.hint || 'Bu sınav için kitapçık PDF’si bulunamadı');
 }
 
 export async function fetchEdesisAvailableExams(params: {

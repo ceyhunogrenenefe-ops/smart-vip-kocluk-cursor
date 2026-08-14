@@ -28,6 +28,7 @@ import {
   createEdesisStudent,
   createEdesisParent,
   fetchEdesisExamStructure,
+  loadEdesisExamBookletPdf,
   fetchEdesisExamSubjects,
   fetchEdesisExamResultsLessons,
   fetchEdesisExamResultsSubjects,
@@ -55,6 +56,7 @@ const STUDENT_ALLOWED_OPS = new Set([
   'exam-karne-pdf',
   'exam-detail',
   'exam-structure',
+  'exam-booklet-pdf',
   'available-exams',
   'submit-exam',
   'ingest-status'
@@ -1117,7 +1119,77 @@ export default async function handler(req, res) {
         examId,
         count: structure.rows.length,
         items: structure.rows,
-        booklets: structure.booklets
+        booklets: structure.booklets,
+        bookletPdfs: structure.bookletPdfs || []
+      });
+    }
+
+    if (op === 'exam-booklet-pdf') {
+      const examId = String(req.query?.examId || req.body?.examId || '').trim();
+      const kitapcikTuru = String(req.query?.kitapcikTuru || req.body?.kitapcikTuru || '').trim();
+      const download = String(req.query?.download || req.body?.download || '') === '1';
+      if (!examId) return res.status(400).json({ error: 'examId_required' });
+      const cfg = getEdesisConfig();
+      if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
+
+      if (isStudent && !isStaff) {
+        const edesisStudentId = String(
+          req.query?.edesisStudentId || req.body?.edesisStudentId || studentSelf?.edesis_ogrenci_id || ''
+        ).trim();
+        if (!edesisStudentId) {
+          return res.status(400).json({
+            error: 'edesis_student_id_missing',
+            hint: 'Kitapçık PDF için Edesis öğrenci eşlemesi gerekli'
+          });
+        }
+        const assigned = await loadAvailableEdesisExamsForStudent({
+          edesisStudentId,
+          platformStudentId: String(studentSelf?.id || ''),
+          actor,
+          studentHint: studentSelf,
+          cfg
+        });
+        if (!assigned.some((ex) => String(ex.examId) === examId)) {
+          return res.status(403).json({ error: 'exam_not_assigned', hint: 'Bu deneme size tanımlanmamış' });
+        }
+      }
+
+      const pdf = await loadEdesisExamBookletPdf(examId, kitapcikTuru, cfg);
+      const files = (pdf.files || []).map((f) => ({
+        url: f.url,
+        kitapcikTuru: f.kitapcikTuru || '',
+        name: f.name || 'Kitapçık PDF'
+      }));
+      if (download) {
+        if (!pdf.ok || !pdf.buf || !pdf.looksPdf) {
+          return res.status(404).json({
+            error: 'booklet_pdf_missing',
+            hint: 'Bu sınav için kitapçık PDF’si Edesis’te bulunamadı',
+            files
+          });
+        }
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader(
+          'Content-Disposition',
+          `inline; filename="kitapcik-${(kitapcikTuru || 'A').replace(/[^A-Za-z0-9]/g, '')}.pdf"`
+        );
+        res.setHeader('Cache-Control', 'private, max-age=120');
+        return res.status(200).send(pdf.buf);
+      }
+      if (!pdf.ok && !files.length) {
+        return res.status(404).json({
+          ok: false,
+          error: 'booklet_pdf_missing',
+          hint: 'Bu sınav için kitapçık PDF’si Edesis’te bulunamadı',
+          files
+        });
+      }
+      return res.status(200).json({
+        ok: true,
+        examId,
+        kitapcikTuru: kitapcikTuru || null,
+        url: pdf.url || files[0]?.url || null,
+        files
       });
     }
 
@@ -1220,12 +1292,23 @@ export default async function handler(req, res) {
         studentHint: studentSelf,
         cfg
       });
-      if (!assigned.some((ex) => String(ex.examId) === examId)) {
+      const assignedExam = assigned.find((ex) => String(ex.examId) === examId);
+      if (!assignedExam) {
         return res.status(403).json({
           error: 'exam_not_assigned',
           hint: 'Bu deneme size tanımlanmamış'
         });
       }
+      if (isStudent && !isStaff && assignedExam.hasStudentResult) {
+        return res.status(409).json({
+          ok: false,
+          conflict: true,
+          error: 'already_submitted',
+          message: 'Bu sınava daha önce girdiniz',
+          hint: 'Girilmiş denemeye tekrar girilemez. Sonuçlarım ve Analizlerim sekmelerine bakın.'
+        });
+      }
+      const replaceForIngest = isStudent && !isStaff ? false : replace;
 
       const structure = await fetchEdesisExamStructure(examId, cfg);
       const bookletLessons = (structure.rows || []).filter(
@@ -1268,7 +1351,7 @@ export default async function handler(req, res) {
       const ingest = await submitEdesisExamResults(
         examId,
         {
-          replace,
+          replace: replaceForIngest,
           results: [
             {
               ogrenciId: Number(edesisStudentId),
@@ -1286,7 +1369,10 @@ export default async function handler(req, res) {
           conflict: true,
           error: 'existing_result',
           message: ingest.message,
-          hint: 'Aynı sınava tekrar girmek için replace: true gönderin'
+          hint:
+            isStudent && !isStaff
+              ? 'Bu sınava daha önce girdiniz; tekrar gönderilemez'
+              : 'Aynı sınava tekrar girmek için replace: true gönderin'
         });
       }
       if (!ingest.ok) {
@@ -1405,6 +1491,7 @@ export default async function handler(req, res) {
         'exam-detail',
         'exam-karne-pdf',
         'exam-structure',
+        'exam-booklet-pdf',
         'exam-subjects',
         'exam-results-lessons',
         'exam-results-subjects',

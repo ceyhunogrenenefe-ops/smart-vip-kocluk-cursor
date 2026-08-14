@@ -6,7 +6,9 @@ import {
   buildStudentAvailableEdesisExamItems,
   pickEdesisCatalogExamId,
   pickEdesisResultExamId,
-  resultRowBelongsToStudent
+  resultRowBelongsToStudent,
+  collectEdesisBookletFiles,
+  pickEdesisBookletFile
 } from './edesis-client.js';
 
 describe('inferEdesisExamProgramKeys', () => {
@@ -48,6 +50,7 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     });
     assert.deepEqual(items.map((x) => x.examId), ['1']);
     assert.equal(items[0].hasStudentResult, true);
+    assert.equal(items[0].canTake, false);
     assert.equal(items[0].studentNet, 12.5);
     assert.equal(items[0].name, 'LGS Deneme 1');
   });
@@ -114,5 +117,41 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     });
     assert.equal(items.some((x) => /5\.SINIF/i.test(x.name)), false);
     assert.equal(items.length, 4);
+  });
+
+  it('allows take when the result row has no scores yet', () => {
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: catalog,
+      resultRows: [{ examId: 4, examName: 'LGS Yeni', studentId: 7105077 }],
+      edesisStudentId: '7105077'
+    });
+    assert.equal(items.length, 1);
+    assert.equal(items[0].canTake, true);
+    assert.equal(items[0].hasStudentResult, false);
+  });
+});
+
+describe('collectEdesisBookletFiles', () => {
+  it('extracts bookletUrl even without .pdf extension', () => {
+    const files = collectEdesisBookletFiles({
+      bookletUrl: 'https://cdn.edesis.com/files/1e373580-3cda-4595-a424-26fdb363cc670',
+      kitapcikTuru: 'A',
+      bookletName: 'TYT A'
+    });
+    assert.equal(files.length, 1);
+    assert.equal(files[0].kitapcikTuru, 'A');
+    assert.match(files[0].url, /1e373580/);
+  });
+
+  it('picks matching kitapçık from nested booklets', () => {
+    const files = collectEdesisBookletFiles({
+      booklets: [
+        { kitapcikTuru: 'B', url: 'https://files.edesis.com/b-kitapcik' },
+        { kitapcikTuru: 'A', bookletUrl: 'https://files.edesis.com/a.pdf' }
+      ]
+    });
+    const picked = pickEdesisBookletFile(files, 'A');
+    assert.equal(picked?.kitapcikTuru, 'A');
+    assert.match(picked.url, /a\.pdf/);
   });
 });
