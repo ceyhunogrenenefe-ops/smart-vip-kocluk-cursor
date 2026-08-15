@@ -35,9 +35,22 @@ const TYT_LESSON_ORDER = [
   { rank: 1.4, test: (n) => /\bdin\b/.test(n) }
 ];
 
+const YOS_LESSON_ORDER = [
+  { rank: 0, test: (n) => /\biq\b|\bzeka\b/.test(n) },
+  { rank: 1, test: (n) => /\bmatematik\b|\bmath\b/.test(n) },
+  { rank: 2, test: (n) => /\bgeometri\b|\bgeometry\b/.test(n) }
+];
+
 function lessonRankForFamily(family, lessonName) {
   const n = foldLessonName(lessonName);
-  const table = family === 'lgs' ? LGS_LESSON_ORDER : family === 'yks' || family === 'tyt' ? TYT_LESSON_ORDER : null;
+  const table =
+    family === 'lgs'
+      ? LGS_LESSON_ORDER
+      : family === 'yks' || family === 'tyt'
+        ? TYT_LESSON_ORDER
+        : family === 'yos'
+          ? YOS_LESSON_ORDER
+          : null;
   if (!table) return 50;
   for (const row of table) {
     if (row.test(n)) return row.rank;
@@ -87,6 +100,18 @@ describe('sortOpticalLessonsByFamily', () => {
     assert.deepEqual(
       sortOpticalLessonsByFamily(shuffled, 'yks').map((x) => x.lessonName),
       ['TYT-TÜRKÇE', 'TYT-SOSYAL BİLİMLER', 'TYT-MATEMATİK', 'TYT-FEN BİLİMLERİ']
+    );
+  });
+
+  it('orders YÖS tabs as IQ → Matematik → Geometri', () => {
+    const shuffled = [
+      { lessonName: 'YÖS-GEOMETRİ' },
+      { lessonName: 'YÖS-IQ' },
+      { lessonName: 'YÖS-MATEMATİK' }
+    ];
+    assert.deepEqual(
+      sortOpticalLessonsByFamily(shuffled, 'yos').map((x) => x.lessonName),
+      ['YÖS-IQ', 'YÖS-MATEMATİK', 'YÖS-GEOMETRİ']
     );
   });
 });
