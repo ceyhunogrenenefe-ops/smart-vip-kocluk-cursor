@@ -779,6 +779,41 @@ export default async function handler(req, res) {
       return res.status(200).json({ apiVersion: 'v1.5', baseUrl: cfg.baseUrl, attempts: out });
     }
 
+    if (op === 'exam-booklet-debug') {
+      if (!isStaff) return res.status(403).json({ error: 'forbidden' });
+      const examId = String(req.query?.examId || req.body?.examId || '').trim();
+      const kitapcikTuru = String(req.query?.kitapcikTuru || req.body?.kitapcikTuru || 'A').trim();
+      if (!examId) return res.status(400).json({ error: 'examId_required' });
+      const cfg = getEdesisConfig();
+      if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
+      const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+      const byId = await fetchEdesisJson(localCfg, `/api/external/v1/exams/${encodeURIComponent(examId)}`);
+      const pdf = await loadEdesisExamBookletPdf(examId, kitapcikTuru, cfg);
+      return res.status(200).json({
+        ok: Boolean(pdf.ok && pdf.looksPdf),
+        examId,
+        kitapcikTuru,
+        denemeId: pdf.denemeId || null,
+        files: (pdf.files || []).map((f) => ({
+          url: f.url,
+          name: f.name,
+          kitapcikTuru: f.kitapcikTuru || '',
+          hasBuf: Boolean(f.buf)
+        })),
+        attempts: pdf.attempts || [],
+        examById: {
+          status: byId.status,
+          ok: byId.ok,
+          keys:
+            byId.json && typeof byId.json === 'object' && !Array.isArray(byId.json)
+              ? Object.keys(byId.json).slice(0, 80)
+              : [],
+          preview: String(byId.rawPreview || byId.text || '').slice(0, 500)
+        },
+        pdfBytes: pdf.ok && pdf.buf ? pdf.buf.length : 0
+      });
+    }
+
     if (op === 'probe') {
       const result = await probeEdesisApi();
       return res.status(200).json({
@@ -1704,6 +1739,8 @@ export default async function handler(req, res) {
         'exam-hata-karnesi-pdf',
         'exam-structure',
         'exam-booklet-pdf',
+        'exam-booklet-debug',
+        'debug-fetch',
         'exam-subjects',
         'exam-results-lessons',
         'exam-results-subjects',

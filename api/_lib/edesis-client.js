@@ -2466,6 +2466,50 @@ function pickDenemeIdFromJson(json) {
   return pickStrCi(flat, ['denemeId', 'denemeRefId', 'refDenemeId']);
 }
 
+/** examId dışı UUID/URL string’lerini kitapçık adayı say */
+export function harvestLooseBookletRefs(json, examId = '', out = [], seen = new Set(), depth = 0) {
+  if (json == null || depth > 10) return dedupeBookletFiles(out);
+  if (typeof json === 'string') {
+    const s = json.trim();
+    if (!s || s === String(examId)) return dedupeBookletFiles(out);
+    const coerced = coerceFileUrl(s);
+    if (coerced && !seen.has(coerced)) {
+      seen.add(coerced);
+      out.push({ url: coerced, kitapcikTuru: '', name: 'harvest' });
+    }
+    return dedupeBookletFiles(out);
+  }
+  if (typeof json !== 'object') return dedupeBookletFiles(out);
+  if (seen.has(json)) return dedupeBookletFiles(out);
+  if (!Array.isArray(json)) seen.add(json);
+  if (Array.isArray(json)) {
+    for (const it of json) harvestLooseBookletRefs(it, examId, out, seen, depth + 1);
+    return dedupeBookletFiles(out);
+  }
+  for (const [k, v] of Object.entries(json)) {
+    if (/^(id|examId|sinavId|studentId|ogrenciId|classroomId|termId|donemId)$/i.test(k)) continue;
+    // Sınav guidId dosya değil
+    if (/^guidId$/i.test(k) && String(v) && !/deneme|file|pdf|url|kitap/i.test(k)) continue;
+    if (typeof v === 'string') {
+      const s = v.trim();
+      if (!s || s === String(examId)) continue;
+      const interesting =
+        /deneme|sinav|booklet|kitapcik|pdf|file|url|cdn|blob|storage|guid|token/i.test(k) ||
+        /^https?:\/\//i.test(s) ||
+        extractEdesisFileGuid(s);
+      if (!interesting) continue;
+      const coerced = coerceFileUrl(s) || (extractEdesisFileGuid(s) ? `/files/${extractEdesisFileGuid(s)}` : '');
+      if (coerced && !seen.has(coerced)) {
+        seen.add(coerced);
+        out.push({ url: coerced, kitapcikTuru: '', name: k });
+      }
+    } else if (v && typeof v === 'object') {
+      harvestLooseBookletRefs(v, examId, out, seen, depth + 1);
+    }
+  }
+  return dedupeBookletFiles(out);
+}
+
 function shouldAttachEdesisApiKey(url) {
   const u = String(url || '').toLowerCase();
   if (!u) return true;
@@ -2568,6 +2612,10 @@ async function probeEdesisExamBookletSources(examId, localCfg) {
     }
     if (!isReachableEdesisResponse(r)) continue;
     collected.push(...collectEdesisBookletFiles(r.json));
+    // Bilinmeyen alan adlarında gömülü UUID / URL (YÖS denemeUrl bazen farklı key)
+    if (path === V1_PATHS.examById(id) || path.includes('GetSinavForView')) {
+      collected.push(...harvestLooseBookletRefs(r.json, id));
+    }
   }
 
   // PDF uçlarını Accept: pdf ile paralel dene
@@ -2704,36 +2752,14 @@ export async function fetchEdesisUrlBuffer(fileUrl, cfgOverride = {}) {
   let last = null;
   let lastJson = null;
   for (const url of candidates) {
-    const keyModes = shouldAttachEdesisApiKey(url) ? [true] : [false];
-    for (const withKey of keyModes) {
-      try {
-        const headers = withKey
-          ? buildHeaders(cfg, { forGet: true })
-          : { Accept: 'application/pdf,application/octet-stream,*/*' };
-        headers.Accept = 'application/pdf,application/octet-stream,*/*';
-        const res = await fetch(url, {
-          method: 'GET',
-          headers,
-          signal: AbortSignal.timeout(45000),
-          redirect: 'follow'
-        });
-        const buf = Buffer.from(await res.arrayBuffer());
-        const contentType = res.headers.get('content-type') || '';
-        const looksPdf = looksLikePdfBuffer(buf);
-        const row = {
-          ok: res.ok,
-          status: res.status,
-          contentType,
-          buf,
-          url,
-          looksPdf
-        };
-        last = row;
-        if (res.ok && looksPdf) return row;
-        if (res.ok && /json/i.test(contentType) && !lastJson) lastJson = row;
-      } catch {
-        /* sonraki */
-      }
+    const withKey = shouldAttachEdesisApiKey(url);
+    try {
+      const row = await fetchEdesisBufferFollowingRedirects(url, cfg, { withApiKey: withKey });
+      last = row;
+      if (row.ok && row.looksPdf) return row;
+      if (row.ok && /json/i.test(String(row.contentType || '')) && !lastJson) lastJson = row;
+    } catch {
+      /* sonraki */
     }
   }
   return lastJson || last || {
@@ -2744,6 +2770,73 @@ export async function fetchEdesisUrlBuffer(fileUrl, cfgOverride = {}) {
     url: candidates[0],
     looksPdf: false
   };
+}
+
+/** 302→CDN sırasında X-API-Key taşınmasın (CDN PDF’yi reddedebilir) */
+async function fetchEdesisBufferFollowingRedirects(startUrl, cfg, { withApiKey = true, maxHops = 6 } = {}) {
+  let url = String(startUrl || '').trim();
+  let useKey = withApiKey;
+  let last = null;
+  for (let hop = 0; hop < maxHops; hop += 1) {
+    if (!url) break;
+    const headers = useKey
+      ? buildHeaders(cfg, { forGet: true })
+      : { Accept: 'application/pdf,application/octet-stream,*/*' };
+    headers.Accept = 'application/pdf,application/octet-stream,*/*';
+    const res = await fetch(url, {
+      method: 'GET',
+      headers,
+      signal: AbortSignal.timeout(45000),
+      redirect: 'manual'
+    });
+    const status = res.status;
+    if ([301, 302, 303, 307, 308].includes(status)) {
+      const loc = res.headers.get('location');
+      // body’yi tüket
+      try {
+        await res.arrayBuffer();
+      } catch {
+        /* ignore */
+      }
+      if (!loc) {
+        last = {
+          ok: false,
+          status,
+          contentType: res.headers.get('content-type') || '',
+          buf: Buffer.alloc(0),
+          url,
+          looksPdf: false
+        };
+        break;
+      }
+      url = new URL(loc, url).toString();
+      // Cross-host / CDN: API key gönderme
+      useKey = shouldAttachEdesisApiKey(url) && useKey && /api\.edesis\.com/i.test(url);
+      continue;
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    const contentType = res.headers.get('content-type') || '';
+    const looksPdf = looksLikePdfBuffer(buf);
+    last = {
+      ok: res.ok,
+      status,
+      contentType,
+      buf,
+      url,
+      looksPdf
+    };
+    return last;
+  }
+  return (
+    last || {
+      ok: false,
+      status: 404,
+      contentType: '',
+      buf: Buffer.alloc(0),
+      url: startUrl,
+      looksPdf: false
+    }
+  );
 }
 
 async function tryConsumeBookletDownload(got, files, file, localCfg, seen) {
