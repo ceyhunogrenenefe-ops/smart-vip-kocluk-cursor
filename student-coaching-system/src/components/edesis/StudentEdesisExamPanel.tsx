@@ -113,10 +113,12 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
     if (!studentId) {
       setLoading(false);
       setHint('Öğrenci kartınız bulunamadı. Çıkış yapıp tekrar giriş yapın.');
-      return;
+      return { exams: [] as EdesisStudentResultsExam[], available: [] as EdesisAvailableExam[] };
     }
     setLoading(true);
     setHint(null);
+    let nextExams: EdesisStudentResultsExam[] = [];
+    let nextAvailable: EdesisAvailableExam[] = [];
     try {
       const [results, catalog] = await Promise.allSettled([
         fetchEdesisStudentResultsHub({ studentId }),
@@ -124,7 +126,8 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
       ]);
 
       if (results.status === 'fulfilled') {
-        setExams(results.value.exams || []);
+        nextExams = results.value.exams || [];
+        setExams(nextExams);
         setEdesisStudentId(results.value.edesisStudentId || '');
       } else {
         setExams([]);
@@ -133,7 +136,8 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
       }
 
       if (catalog.status === 'fulfilled') {
-        setAvailable(catalog.value.items || []);
+        nextAvailable = catalog.value.items || [];
+        setAvailable(nextAvailable);
         if (catalog.value.edesisStudentId) setEdesisStudentId(catalog.value.edesisStudentId);
         if (!(catalog.value.items || []).length && catalog.value.hint) {
           setHint((prev) => prev || catalog.value.hint || null);
@@ -150,6 +154,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
     } finally {
       setLoading(false);
     }
+    return { exams: nextExams, available: nextAvailable };
   }, [studentId]);
 
   useEffect(() => {
@@ -343,9 +348,20 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
         return;
       }
       toast.success(state === 'Completed' ? 'Sınav değerlendirildi' : r.message || 'Cevaplar gönderildi');
+      const submittedExamId = String(activeExam.examId);
       setActiveExam(null);
       setView('results');
-      await load();
+      let refreshed = await load();
+      const hasResult = (bundle: { exams: EdesisStudentResultsExam[]; available: EdesisAvailableExam[] }) =>
+        (bundle.exams || []).some((ex) => String(ex.edesisExamId || '') === submittedExamId) ||
+        (bundle.available || []).some((ex) => String(ex.examId) === submittedExamId && ex.hasStudentResult);
+      if (!hasResult(refreshed)) {
+        for (const delayMs of [2500, 5000, 8000]) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          refreshed = await load();
+          if (hasResult(refreshed)) break;
+        }
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Cevaplar gönderilemedi');
     } finally {

@@ -19,7 +19,6 @@ import {
   fetchEdesisExamsCatalog,
   fetchEdesisStudentResults,
   inferEdesisExamProgramKeys,
-  filterEdesisExamsForStudentProgram,
   buildStudentAvailableEdesisExamItems,
   fetchEdesisGradesList,
   fetchEdesisDepartmentsList,
@@ -1097,16 +1096,10 @@ export default async function handler(req, res) {
           draft
         };
       });
-      const programKeys = await resolveStudentProgramKeys({
-        edesisStudentId,
-        platformStudentId: platformId,
-        studentHint: matched || studentSelf,
-        cfg: getEdesisConfig()
-      });
-      const exams = filterEdesisExamsForStudentProgram(
-        mappedExams.map((ex) => ({ ...ex, name: ex.examTitle })),
-        programKeys
-      );
+      // Öğrencinin kendi Edesis sonuçlarını programla süzme.
+      // Atanmış çapraz program denemeleri (ör. sınıf 12/YKS iken YÖS SARMAL)
+      // ingest sonrası Sonuçlarım’da kayboluyordu.
+      const exams = mappedExams;
 
       return res.status(200).json({
         ok: true,
