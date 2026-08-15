@@ -402,6 +402,19 @@ describe('collectEdesisBookletFiles', () => {
     });
     assert.ok(files.some((f) => f.url.includes('b2c3d4e5-f6a7-8901-bcde-f12345678901')));
   });
+
+  it('harvestLooseBookletRefs picks nested uuid file fields', async () => {
+    const { harvestLooseBookletRefs } = await import('./edesis-client.js');
+    const files = harvestLooseBookletRefs(
+      {
+        id: 1102253,
+        name: 'YÖS SARMAL DENEME-12',
+        extra: { paketGuid: 'c3d4e5f6-a7b8-9012-cdef-123456789012' }
+      },
+      '1102253'
+    );
+    assert.ok(files.some((f) => f.url.includes('c3d4e5f6-a7b8-9012-cdef-123456789012')));
+  });
 });
 
 describe('resolveEdesisFileUrl / expandEdesisFileUrlCandidates', () => {

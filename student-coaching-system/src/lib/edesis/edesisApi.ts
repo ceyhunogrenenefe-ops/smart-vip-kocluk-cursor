@@ -470,7 +470,13 @@ export async function fetchEdesisExamBookletPdf(params: {
   examId: string;
   kitapcikTuru?: string;
   fileUrl?: string;
-}): Promise<{ blob: Blob; url?: string | null; files?: EdesisBookletPdf[] }> {
+}): Promise<{
+  blob: Blob;
+  url?: string | null;
+  files?: EdesisBookletPdf[];
+  denemeId?: string | null;
+  attempts?: unknown[];
+}> {
   const qs = new URLSearchParams({
     op: 'exam-booklet-pdf',
     examId: params.examId,
@@ -494,11 +500,27 @@ export async function fetchEdesisExamBookletPdf(params: {
   }
   const url = typeof j.url === 'string' ? j.url : '';
   const files = Array.isArray(j.files) ? (j.files as EdesisBookletPdf[]) : [];
+  const denemeId = typeof j.denemeId === 'string' || typeof j.denemeId === 'number' ? String(j.denemeId) : null;
+  const attempts = Array.isArray(j.attempts) ? j.attempts : [];
   if (url || files[0]?.url) {
-    return { blob: new Blob(), url: url || files[0]?.url || null, files };
+    return { blob: new Blob(), url: url || files[0]?.url || null, files, denemeId, attempts };
   }
-  if (!res.ok) throw new Error(String(j.hint || j.message || j.error || 'Kitapçık PDF alınamadı'));
-  throw new Error(String(j.hint || 'Bu sınav için kitapçık PDF’si bulunamadı'));
+  const base = String(j.hint || j.message || j.error || 'Kitapçık PDF alınamadı');
+  const extra = [
+    denemeId ? `denemeId=${denemeId}` : '',
+    attempts.length ? `deneme=${attempts.length} deneme` : ''
+  ]
+    .filter(Boolean)
+    .join(', ');
+  const err = new Error(extra ? `${base} (${extra})` : base) as Error & {
+    denemeId?: string | null;
+    attempts?: unknown[];
+    files?: EdesisBookletPdf[];
+  };
+  err.denemeId = denemeId;
+  err.attempts = attempts;
+  err.files = files;
+  throw err;
 }
 
 export async function fetchEdesisAvailableExams(params: {
