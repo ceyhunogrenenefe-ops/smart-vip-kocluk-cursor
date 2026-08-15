@@ -17,6 +17,7 @@ import {
   buildLastVsPrevComparison,
   filterBreakdownByBranch,
   resolveEdesisExamId,
+  mergeExamListsPreferRicher,
   payloadToExam
 } from './edesis-exam-analysis.js';
 
@@ -160,6 +161,53 @@ describe('buildSubjectBreakdown + draft', () => {
     assert.match(draft.genel, /Ayşe/);
     assert.equal(draft.koc, '');
     assert.doesNotMatch(draft.kritikKonular, /uydur|örnek net/i);
+  });
+});
+
+describe('mergeExamListsPreferRicher', () => {
+  it('keeps live YÖS result that is missing from local exam_results', () => {
+    const local = [
+      exam({ id: 'edesis-1-s1', edesisExamId: '1', examType: 'TYT', examDate: '2026-08-01', totalNet: 40 })
+    ];
+    const live = [
+      exam({
+        id: 'edesis-1102253-s1',
+        edesisExamId: '1102253',
+        examType: 'YÖS',
+        examTitle: 'YÖS SARMAL DENEME-12',
+        examDate: '2026-08-10',
+        totalNet: 42.5
+      })
+    ];
+    const merged = mergeExamListsPreferRicher(local, live);
+    assert.equal(merged.length, 2);
+    assert.ok(merged.some((e) => String(e.edesisExamId) === '1102253'));
+    const full = buildFullStudentAnalysis(merged, { family: 'all', window: 'last10' });
+    assert.ok(full.table.some((r) => String(r.edesisExamId) === '1102253'));
+    assert.ok(full.charts.netLine.some((p) => p.net === 42.5));
+  });
+
+  it('pins recently submitted old-dated exam into last10 window', () => {
+    const olderMany = Array.from({ length: 10 }, (_, i) =>
+      exam({
+        id: `old-${i}`,
+        edesisExamId: String(100 + i),
+        examType: 'TYT',
+        examDate: `2026-08-${String(14 - i).padStart(2, '0')}`,
+        totalNet: 30 + i
+      })
+    );
+    const justTaken = exam({
+      id: 'edesis-999-s1',
+      edesisExamId: '999',
+      examType: 'YÖS',
+      examTitle: 'YÖS Eski Katalog',
+      examDate: '2026-01-05',
+      totalNet: 55,
+      createdAt: new Date().toISOString()
+    });
+    const sel = selectComparisonExams([...olderMany, justTaken], { family: 'all', window: 'last10' });
+    assert.ok(sel.compared.some((e) => String(e.edesisExamId) === '999'));
   });
 });
 

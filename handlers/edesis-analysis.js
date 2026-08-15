@@ -14,13 +14,18 @@ import {
   generateEdesisExamReport,
   pollEdesisReportJob,
   getEdesisConfig,
-  fetchEdesisDefaultTermId
+  fetchEdesisDefaultTermId,
+  fetchEdesisStudentResults,
+  mapEdesisRowToExamDraft,
+  pickEdesisResultExamId
 } from '../api/_lib/edesis-client.js';
 import {
   payloadToExam,
   buildFullStudentAnalysis,
   inferExamFamilyFromClassLevel,
   resolveEdesisExamId,
+  mergeExamListsPreferRicher,
+  examHasResult,
   EDESIS_REPORT_CODES,
   EDESIS_REPORT_LABELS,
   ANALYSIS_STATUS_LABELS,
@@ -142,20 +147,113 @@ async function assertCanAccessStudent(actor, tags, student) {
 async function loadStudentExams(studentId) {
   const { data, error } = await supabaseAdmin
     .from('exam_results')
-    .select('id, student_id, exam_name, date, net_score, correct, wrong, blank, app_payload, institution_id')
+    .select('id, student_id, exam_name, date, net_score, correct, wrong, blank, app_payload, institution_id, created_at, updated_at')
     .eq('student_id', studentId)
     .order('date', { ascending: false })
     .limit(200);
   if (error) throw error;
-  return (data || [])
+  const local = (data || [])
     .map((row) => {
       try {
-        return payloadToExam(row);
+        const exam = payloadToExam(row);
+        if (row.created_at && !exam.createdAt) exam.createdAt = row.created_at;
+        if (row.updated_at) exam.updatedAt = row.updated_at;
+        return exam;
       } catch {
         return null;
       }
     })
     .filter(Boolean);
+
+  let edesisStudentId = '';
+  let institutionId = null;
+  try {
+    const { data: st } = await supabaseAdmin
+      .from('students')
+      .select('edesis_ogrenci_id, institution_id')
+      .eq('id', studentId)
+      .maybeSingle();
+    edesisStudentId = String(st?.edesis_ogrenci_id || '').trim();
+    institutionId = st?.institution_id || null;
+  } catch {
+    /* sınıf / eşleşme yoksa yerel liste yeter */
+  }
+
+  const cfg = getEdesisConfig();
+  if (!edesisStudentId || !cfg.apiKey) return local;
+
+  try {
+    const liveFetch = await fetchEdesisStudentResults(edesisStudentId, cfg, { enrichSubjects: true });
+    const live = (liveFetch.rows || [])
+      .map((row) => {
+        try {
+          const draft = mapEdesisRowToExamDraft(row, { studentId, institutionId });
+          const eid = pickEdesisResultExamId(row) || draft.edesisExamId;
+          if (eid) {
+            draft.edesisExamId = String(eid);
+            draft.id = `edesis-${eid}-${studentId}`;
+          }
+          // Canlı listede createdAt=şimdi olmasın; sıralama examDate ile kalsın
+          if (draft.examDate) {
+            draft.createdAt = `${String(draft.examDate).slice(0, 10)}T12:00:00.000Z`;
+          }
+          return draft;
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+
+    const merged = mergeExamListsPreferRicher(local, live);
+
+    // Analizde görünen yeni Edesis sonuçlarını yerel tabloya yaz (ExamTracking vb.)
+    const localKeys = new Set(
+      local.map((e) => resolveEdesisExamId(e)).filter(Boolean).map(String)
+    );
+    const missing = live.filter((e) => {
+      const id = resolveEdesisExamId(e);
+      return id && !localKeys.has(String(id)) && examHasResult(e);
+    });
+    for (const exam of missing.slice(0, 30)) {
+      try {
+        const now = new Date().toISOString();
+        const totals = (exam.subjects || []).reduce(
+          (a, s) => ({
+            correct: a.correct + (s.correct ?? 0),
+            wrong: a.wrong + (s.wrong ?? 0),
+            blank: a.blank + (s.blank ?? 0)
+          }),
+          { correct: 0, wrong: 0, blank: 0 }
+        );
+        const tq = totals.correct + totals.wrong + totals.blank;
+        await supabaseAdmin.from('exam_results').upsert(
+          {
+            id: exam.id,
+            student_id: studentId,
+            exam_name: String(exam.examTitle || exam.examType || 'Deneme'),
+            date: String(exam.examDate || now).slice(0, 10),
+            raw_score: null,
+            net_score: exam.totalNet,
+            correct: totals.correct,
+            wrong: totals.wrong,
+            blank: totals.blank,
+            total_questions: tq > 0 ? tq : null,
+            institution_id: institutionId,
+            app_payload: exam,
+            updated_at: now,
+            created_at: exam.createdAt || now
+          },
+          { onConflict: 'id' }
+        );
+      } catch {
+        /* tek satır yazılamasa analiz yine döner */
+      }
+    }
+
+    return merged;
+  } catch {
+    return local;
+  }
 }
 
 async function loadThresholds(institutionId) {
