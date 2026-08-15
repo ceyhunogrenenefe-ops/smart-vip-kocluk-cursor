@@ -2420,10 +2420,14 @@ export async function fetchEdesisExamStructure(examId, cfgOverride = {}) {
   }
   const examFamily = detectEdesisExamFamily(examMeta.title, examMeta.examType);
   const ui = edesisOpticalUi(examFamily);
+  const resolvedPdfs = bookletPdfs.map((f) => ({
+    ...f,
+    url: resolveEdesisFileUrl(f.url, localCfg) || f.url
+  }));
   return {
     rows,
     booklets: groupEdesisStructureByBooklet(rows),
-    bookletPdfs,
+    bookletPdfs: resolvedPdfs,
     examFamily,
     bookletMode: ui.bookletMode,
     choiceCount: ui.choiceCount,
