@@ -469,6 +469,7 @@ export async function fetchEdesisExamStructure(examId: string): Promise<{
 export async function fetchEdesisExamBookletPdf(params: {
   examId: string;
   kitapcikTuru?: string;
+  fileUrl?: string;
 }): Promise<{ blob: Blob; url?: string | null; files?: EdesisBookletPdf[] }> {
   const qs = new URLSearchParams({
     op: 'exam-booklet-pdf',
@@ -476,6 +477,7 @@ export async function fetchEdesisExamBookletPdf(params: {
     download: '1'
   });
   if (params.kitapcikTuru) qs.set('kitapcikTuru', params.kitapcikTuru);
+  if (params.fileUrl) qs.set('fileUrl', params.fileUrl);
   const res = await apiFetch(`/api/edesis-sync?${qs.toString()}`, {
     headers: { Accept: 'application/pdf,application/json' }
   });

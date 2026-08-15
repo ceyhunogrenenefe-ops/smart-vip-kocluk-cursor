@@ -1337,6 +1337,7 @@ export default async function handler(req, res) {
     if (op === 'exam-booklet-pdf') {
       const examId = String(req.query?.examId || req.body?.examId || '').trim();
       const kitapcikTuru = String(req.query?.kitapcikTuru || req.body?.kitapcikTuru || '').trim();
+      const preferredFileUrl = String(req.query?.fileUrl || req.body?.fileUrl || '').trim();
       const download = String(req.query?.download || req.body?.download || '') === '1';
       if (!examId) return res.status(400).json({ error: 'examId_required' });
       const cfg = getEdesisConfig();
@@ -1356,7 +1357,9 @@ export default async function handler(req, res) {
         // Öğrenci kimliği + sınav UUID yeter (structure zaten aynı id ile açılır).
       }
 
-      const pdf = await loadEdesisExamBookletPdf(examId, kitapcikTuru, cfg);
+      const pdf = await loadEdesisExamBookletPdf(examId, kitapcikTuru, cfg, {
+        preferredFileUrl: preferredFileUrl || undefined
+      });
       const files = (pdf.files || []).map((f) => ({
         url: f.url,
         kitapcikTuru: f.kitapcikTuru || '',

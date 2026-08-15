@@ -13,7 +13,9 @@ import {
   edesisOpticalUi,
   pickEdesisBookletLessons,
   looksLikePdfBuffer,
-  catalogLooksStudentFiltered
+  catalogLooksStudentFiltered,
+  resolveEdesisFileUrl,
+  expandEdesisFileUrlCandidates
 } from './edesis-client.js';
 
 describe('inferEdesisExamProgramKeys', () => {
@@ -391,6 +393,31 @@ describe('collectEdesisBookletFiles', () => {
     });
     assert.equal(files.length, 1);
     assert.match(files[0].url, /yos-a/);
+  });
+
+  it('reads PascalCase DenemeUrl', () => {
+    const files = collectEdesisBookletFiles({
+      DenemeUrl: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
+      KitapcikTuru: 'B'
+    });
+    assert.ok(files.some((f) => f.url.includes('b2c3d4e5-f6a7-8901-bcde-f12345678901')));
+  });
+});
+
+describe('resolveEdesisFileUrl / expandEdesisFileUrlCandidates', () => {
+  it('prefers tenant web host over api.edesis.com for bare UUID', () => {
+    const cfg = { baseUrl: 'https://onlinevipdershane.api.edesis.com' };
+    const url = resolveEdesisFileUrl('a1b2c3d4-e5f6-7890-abcd-ef1234567890', cfg);
+    assert.match(url, /^https:\/\/onlinevipdershane\.edesis\.com\/files\//);
+    assert.equal(url.includes('.api.edesis.com'), false);
+  });
+
+  it('expands UUID across CDN hosts', () => {
+    const cfg = { baseUrl: 'https://onlinevipdershane.api.edesis.com' };
+    const cands = expandEdesisFileUrlCandidates('/files/a1b2c3d4-e5f6-7890-abcd-ef1234567890', cfg);
+    assert.ok(cands.some((u) => u.includes('cdn.edesis.com')));
+    assert.ok(cands.some((u) => u.includes('onlinevipdershane.edesis.com')));
+    assert.ok(cands[0].includes('onlinevipdershane.edesis.com') || cands[0].includes('cdn.edesis.com'));
   });
 });
 
