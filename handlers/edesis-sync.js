@@ -1370,7 +1370,9 @@ export default async function handler(req, res) {
           return res.status(404).json({
             error: 'booklet_pdf_missing',
             hint: 'Bu sınav için kitapçık PDF’si Edesis’te bulunamadı',
-            files
+            files,
+            denemeId: pdf.denemeId || null,
+            attempts: Array.isArray(pdf.attempts) ? pdf.attempts.slice(0, 25) : []
           });
         }
         res.setHeader('Content-Type', 'application/pdf');
@@ -1386,7 +1388,9 @@ export default async function handler(req, res) {
           ok: false,
           error: 'booklet_pdf_missing',
           hint: 'Bu sınav için kitapçık PDF’si Edesis’te bulunamadı',
-          files
+          files,
+          denemeId: pdf.denemeId || null,
+          attempts: Array.isArray(pdf.attempts) ? pdf.attempts.slice(0, 25) : []
         });
       }
       return res.status(200).json({
@@ -1394,7 +1398,8 @@ export default async function handler(req, res) {
         examId,
         kitapcikTuru: kitapcikTuru || null,
         url: pdf.url || files[0]?.url || null,
-        files
+        files,
+        denemeId: pdf.denemeId || null
       });
     }
 
