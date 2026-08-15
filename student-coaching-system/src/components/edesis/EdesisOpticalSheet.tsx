@@ -19,9 +19,11 @@ function detectFamily(examTitle?: string | null, examType?: string | null, examF
 }
 
 function opticalChoices(family: string, choiceCount?: number): readonly string[] {
+  // Bilinen ailelerde şık sayısı aileye göre — yanlış choiceCount=4 YÖS/TYT’te E’yi kesmesin
+  if (family === 'lgs') return CHOICES_4;
+  if (family === 'yks' || family === 'tyt' || family === 'ayt' || family === 'yos') return CHOICES_5;
   if (choiceCount === 5) return CHOICES_5;
   if (choiceCount === 4) return CHOICES_4;
-  if (family === 'yks' || family === 'tyt' || family === 'ayt' || family === 'yos') return CHOICES_5;
   return CHOICES_4;
 }
 
