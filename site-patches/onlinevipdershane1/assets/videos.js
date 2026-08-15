@@ -52,6 +52,20 @@
         category: 'veli-memnuniyet',
         portrait: true,
       },
+      {
+        id: '0y4T73zGF5c',
+        title: 'Veli Memnuniyeti',
+        desc: 'Velilerimizin Online VIP Dershane deneyiminden kısa bir memnuniyet paylaşımı.',
+        category: 'veli-memnuniyet',
+        portrait: true,
+      },
+      {
+        id: 'i-pxklBwaw0',
+        title: 'Veli Memnuniyeti',
+        desc: 'Velilerimizin Online VIP Dershane deneyiminden kısa bir memnuniyet paylaşımı.',
+        category: 'veli-memnuniyet',
+        portrait: true,
+      },
     ],
     /** Veliler / öğrencilerden gelen paylaşımlar */
     fromYou: [
