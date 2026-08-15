@@ -302,6 +302,7 @@ export default function StudentEdesisAnalysisPanel({ exams, studentId, edesisStu
                 <option value="lgs">LGS</option>
                 <option value="tyt">TYT</option>
                 <option value="ayt">AYT</option>
+                <option value="yos">YÖS</option>
                 <option value="okul">Okul</option>
               </select>
             </label>

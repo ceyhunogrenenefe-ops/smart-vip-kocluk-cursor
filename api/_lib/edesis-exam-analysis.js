@@ -159,8 +159,40 @@ export function sortExamsByExamDateDesc(exams) {
     .sort((a, b) => {
       const ta = Date.parse(a.examDate || a.date || 0) || 0;
       const tb = Date.parse(b.examDate || b.date || 0) || 0;
-      return tb - ta;
+      if (tb !== ta) return tb - ta;
+      const ca = Date.parse(a.createdAt || a.updatedAt || 0) || 0;
+      const cb = Date.parse(b.createdAt || b.updatedAt || 0) || 0;
+      return cb - ca;
     });
+}
+
+/** Yerel + Edesis canlı sonuçlarını examId üzerinden birleştirir (zengin olan kazanır). */
+export function mergeExamListsPreferRicher(localExams = [], liveExams = []) {
+  const byKey = new Map();
+  const keyOf = (e) => {
+    const eid = resolveEdesisExamId(e);
+    if (eid) return `e:${eid}`;
+    const id = String(e?.id || '').trim();
+    return id ? `i:${id}` : '';
+  };
+  const richness = (e) => {
+    const subjects = Array.isArray(e?.subjects) ? e.subjects.length : 0;
+    const topics = (e?.subjects || []).reduce(
+      (n, s) => n + (Array.isArray(s?.topics) ? s.topics.length : 0),
+      0
+    );
+    const has = examHasResult(e) ? 1000 : 0;
+    const netBits = e?.totalNet != null || e?.net != null ? 5 : 0;
+    return has + subjects * 10 + topics + netBits;
+  };
+  for (const e of [...(localExams || []), ...(liveExams || [])]) {
+    if (!e || typeof e !== 'object') continue;
+    const k = keyOf(e);
+    if (!k) continue;
+    const prev = byKey.get(k);
+    if (!prev || richness(e) >= richness(prev)) byKey.set(k, e);
+  }
+  return sortExamsByExamDateDesc([...byKey.values()]);
 }
 
 export function filterExamsByFamily(exams, family) {
@@ -190,6 +222,32 @@ export function selectComparisonExams(exams, { family, window = 'all', examIds, 
   let compared = withResult;
   if (win === 'last5' || win === '5') compared = withResult.slice(0, 5);
   if (win === 'last10' || win === '10') compared = withResult.slice(0, 10);
+
+  // Katalog tarihi eski olsa bile yakın zamanda girilen deneme (createdAt) pencerede kalsın
+  const lim =
+    win === 'last5' || win === '5' ? 5 : win === 'last10' || win === '10' ? 10 : null;
+  if (lim != null && withResult.length) {
+    const recentCutoff = Date.now() - 21 * 86400000;
+    const recentlyTaken = [...withResult]
+      .filter((e) => {
+        const takenAt = Date.parse(e.createdAt || 0) || 0;
+        const examAt = Date.parse(e.examDate || e.date || 0) || 0;
+        // Submit sonrası upsert: createdAt ≫ examDate → gerçekten yeni girilmiş
+        return takenAt >= recentCutoff && takenAt > examAt + 12 * 3600000;
+      })
+      .sort((a, b) => (Date.parse(b.createdAt || 0) || 0) - (Date.parse(a.createdAt || 0) || 0));
+    for (const recent of recentlyTaken) {
+      const same = (e) =>
+        (resolveEdesisExamId(e) &&
+          resolveEdesisExamId(e) === resolveEdesisExamId(recent)) ||
+        (e.id && recent.id && String(e.id) === String(recent.id));
+      if (!compared.some(same)) {
+        compared = [recent, ...compared.filter((e) => !same(e))].slice(0, lim);
+        break;
+      }
+    }
+  }
+
   return { all: list, withResult, absent, compared, last5: withResult.slice(0, 5), last10: withResult.slice(0, 10) };
 }
 

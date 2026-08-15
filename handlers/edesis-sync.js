@@ -46,7 +46,8 @@ import {
   sortCatalogExamsByRecencyDesc,
   mapEdesisRowToExamDraft,
   flattenEdesisRows,
-  studentMatchKeysFromEdesisRow
+  studentMatchKeysFromEdesisRow,
+  pickEdesisResultExamId
 } from '../api/_lib/edesis-client.js';
 import {
   processEdesisRows,
@@ -276,7 +277,7 @@ function examResultToUpsertRow(exam, institutionId) {
   return {
     id: exam.id,
     student_id: exam.studentId,
-    exam_name: String(exam.examType),
+    exam_name: String(exam.examTitle || exam.examType || 'Deneme'),
     date: exam.examDate.slice(0, 10),
     raw_score: null,
     net_score: exam.totalNet,
@@ -502,6 +503,60 @@ async function upsertExams(exams) {
     }
   }
   return { imported, skipped, errors };
+}
+
+/** Optik submit / tek sınav detayı → platform exam_results (Analizlerim grafikleri) */
+async function importEdesisExamResultToLocal({
+  examId,
+  edesisStudentId,
+  platformStudentId,
+  institutionId,
+  cfg
+}) {
+  if (!examId || !edesisStudentId || !platformStudentId) {
+    return { imported: 0, reason: 'missing_ids' };
+  }
+  let row = null;
+  let fetchMode = null;
+  try {
+    const detail = await fetchEdesisExamDetailForStudent(examId, edesisStudentId, cfg);
+    if (detail?.row) {
+      row = detail.row;
+      fetchMode = detail.fetchMode;
+    }
+  } catch {
+    /* aşağıda student-results yedek */
+  }
+  if (!row) {
+    try {
+      const fr = await fetchEdesisStudentResults(edesisStudentId, cfg, { enrichSubjects: true });
+      row =
+        (fr.rows || []).find((r) => String(pickEdesisResultExamId(r) || '') === String(examId)) ||
+        null;
+      fetchMode = fr.fetchMode;
+    } catch {
+      return { imported: 0, reason: 'fetch_failed' };
+    }
+  }
+  if (!row) return { imported: 0, reason: 'not_found', fetchMode };
+
+  try {
+    const enriched = await enrichEdesisRowsWithSubjectDetails([row], cfg, { maxStudents: 5 });
+    if (enriched.rows[0]) row = enriched.rows[0];
+  } catch {
+    /* net/ders yoksa ham satır yeterli */
+  }
+
+  const draft = mapEdesisRowToExamDraft(row, {
+    studentId: platformStudentId,
+    institutionId: institutionId || null
+  });
+  draft.studentId = platformStudentId;
+  draft.id = `edesis-${examId}-${platformStudentId}`;
+  draft.edesisExamId = String(examId);
+  draft.createdAt = new Date().toISOString();
+  const { imported, errors } = await upsertExams([draft]);
+  return { imported, exam: draft, fetchMode, errors };
 }
 
 async function runSync(actor) {
@@ -1638,6 +1693,36 @@ export default async function handler(req, res) {
         job = await pollEdesisIngestJob(examId, ingest.jobId, { maxAttempts: 10, delayMs: 4000 }, cfg);
       }
 
+      let localImport = null;
+      const jobState = String(job?.state || '');
+      const shouldImportLocal =
+        Boolean(platformStudentId) &&
+        (!ingest.jobId || ['Completed', 'Success', 'Succeeded'].includes(jobState) || !jobState);
+      if (shouldImportLocal) {
+        try {
+          localImport = await importEdesisExamResultToLocal({
+            examId,
+            edesisStudentId,
+            platformStudentId,
+            institutionId: actor?.institution_id || studentSelf?.institution_id || null,
+            cfg
+          });
+          // İnvest henüz skor üretmediyse kısa retry
+          if (!localImport?.imported) {
+            await new Promise((r) => setTimeout(r, 2500));
+            localImport = await importEdesisExamResultToLocal({
+              examId,
+              edesisStudentId,
+              platformStudentId,
+              institutionId: actor?.institution_id || studentSelf?.institution_id || null,
+              cfg
+            });
+          }
+        } catch (e) {
+          localImport = { imported: 0, error: errorMessage(e) };
+        }
+      }
+
       return res.status(202).json({
         ok: true,
         accepted: ingest.accepted,
@@ -1645,6 +1730,7 @@ export default async function handler(req, res) {
         jobId: ingest.jobId,
         statusUrl: ingest.statusUrl,
         job,
+        localImport,
         message: ingest.message
       });
     }
