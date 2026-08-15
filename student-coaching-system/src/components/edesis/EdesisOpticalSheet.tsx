@@ -222,7 +222,8 @@ type Props = {
 
 /**
  * Edesis Sınav Uygulaması görünümü: tüm denemelerde LGS tarzı grid + kitapçık türü.
- * LGS: Sözel/Sayısal A–D. TYT/AYT/YÖS: Kitapçık Türü A–D (optik şıklar A–E kalır).
+ * LGS: Sözel/Sayısal A–D. TYT/AYT/YÖS/diğer: Kitapçık Türü her zaman A–D
+ * (optik şıklar YKS/YÖS’te A–E, LGS’de A–D).
  */
 export default function EdesisOpticalSheet({
   lessons,
@@ -319,16 +320,14 @@ export default function EdesisOpticalSheet({
     );
   };
 
-  const bookletTypes = useMemo(() => {
-    const fromBooks = booklets.map((b) => String(b.kitapcikTuru || '').trim()).filter(Boolean);
-    const unique = [...new Set(fromBooks.length ? fromBooks : KITAPCIK_ORDER)];
-    const ordered = unique.sort(
-      (a, b) => KITAPCIK_ORDER.indexOf(a) - KITAPCIK_ORDER.indexOf(b) || a.localeCompare(b, 'tr')
-    );
-    return ordered.length ? ordered : [...KITAPCIK_ORDER];
-  }, [booklets]);
-
-  const kitapcikValue = kitapcik || bookletTypes[0] || 'A';
+  const kitapcikValue = (() => {
+    const raw = String(kitapcik || '').trim().toUpperCase();
+    return KITAPCIK_ORDER.includes(raw) ? raw : 'A';
+  })();
+  const sayisalValue = (() => {
+    const raw = String(kitapcikSayisal || '').trim().toUpperCase();
+    return KITAPCIK_ORDER.includes(raw) ? raw : kitapcikValue;
+  })();
   const heading = activeFilled?.lesson.lessonName || examTitle || 'Optik';
   const tabPrefix =
     family === 'lgs' ? 'LGS' : family === 'ayt' ? 'AYT' : family === 'yos' ? 'YÖS' : family === 'yks' || family === 'tyt' ? 'TYT' : examType;
@@ -347,7 +346,7 @@ export default function EdesisOpticalSheet({
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-xs font-semibold text-slate-600">Sayısal:</span>
               <KitapcikCircles
-                value={kitapcikSayisal || kitapcikValue}
+                value={sayisalValue}
                 onChange={onKitapcikSayisalChange}
                 codes={KITAPCIK_ORDER}
               />
@@ -356,7 +355,7 @@ export default function EdesisOpticalSheet({
         ) : (
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-xs font-semibold text-slate-600">Kitapçık Türü:</span>
-            <KitapcikCircles value={kitapcikValue} onChange={onKitapcikChange} codes={bookletTypes} />
+            <KitapcikCircles value={kitapcikValue} onChange={onKitapcikChange} codes={KITAPCIK_ORDER} />
           </div>
         )}
         <div className="ml-auto flex flex-wrap items-center gap-2">
