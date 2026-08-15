@@ -446,6 +446,13 @@ describe('detectEdesisExamFamily', () => {
     assert.equal(edesisOpticalUi('yks').bookletMode, 'single');
     assert.equal(edesisOpticalUi('yks').choiceCount, 5);
   });
+
+  it('maps YÖS SARMAL to yos with 5 choices', () => {
+    assert.equal(detectEdesisExamFamily('YÖS SARMAL DENEME-12', ''), 'yos');
+    assert.equal(detectEdesisExamFamily('YOS Sarmal 12', 'YÖS'), 'yos');
+    assert.equal(edesisOpticalUi('yos').choiceCount, 5);
+    assert.equal(edesisOpticalUi('yos').bookletMode, 'single');
+  });
 });
 
 describe('pickEdesisBookletLessons', () => {

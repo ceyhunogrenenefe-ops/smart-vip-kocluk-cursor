@@ -265,14 +265,17 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
         toast.error('Bu sınavın cevap anahtarı yapısı Edesis’te henüz yok');
         return;
       }
+      const nameType = `${exam.name || ''} ${exam.examType || ''} ${r.examTitle || ''} ${r.examType || ''}`;
       const family =
         r.examFamily && r.examFamily !== 'generic'
           ? r.examFamily
-          : /\blgs\b/i.test(`${exam.name || ''} ${exam.examType || ''}`)
+          : /\blgs\b/i.test(nameType)
             ? 'lgs'
-            : /\b(tyt|ayt|yks)\b/i.test(`${exam.name || ''} ${exam.examType || ''}`)
-              ? 'yks'
-              : r.examFamily || 'generic';
+            : /yös|\byos\b/i.test(nameType)
+              ? 'yos'
+              : /\b(tyt|ayt|yks)\b/i.test(nameType)
+                ? 'yks'
+                : r.examFamily || 'generic';
       const mode =
         family === 'lgs' || r.bookletMode === 'dual-sozel-sayisal' ? 'dual-sozel-sayisal' : r.bookletMode || 'single';
       const firstLetter = String(books[0]?.kitapcikTuru || 'A').trim().toUpperCase() || 'A';
@@ -281,7 +284,13 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
       setBookletPdfs(r.bookletPdfs || exam.bookletPdfs || []);
       setExamFamily(family);
       setBookletMode(mode);
-      setChoiceCount(family === 'yks' || family === 'yos' || family === 'ayt' ? 5 : r.choiceCount || 4);
+      setChoiceCount(
+        family === 'yks' || family === 'yos' || family === 'ayt' || family === 'tyt'
+          ? 5
+          : family === 'lgs'
+            ? 4
+            : r.choiceCount || 4
+      );
       setRemainingSeconds(r.remainingSeconds || 0);
       setKitapcik(firstLetter);
       setKitapcikSayisal(firstLetter);
