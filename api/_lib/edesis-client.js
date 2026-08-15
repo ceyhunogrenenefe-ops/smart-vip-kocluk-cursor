@@ -448,17 +448,19 @@ export function majorityEdesisProgramKeys(items) {
   return new Set(leaders);
 }
 
-export function filterEdesisExamsForStudentProgram(items, programKeys) {
+export function filterEdesisExamsForStudentProgram(items, programKeys, opts = {}) {
   const list = Array.isArray(items) ? items : [];
   let keys = programKeys instanceof Set ? new Set(programKeys) : new Set(programKeys || []);
   if (!keys.size) keys = majorityEdesisProgramKeys(list);
   if (!keys.size) return list;
-  return list.filter((item) =>
-    edesisCatalogExamMatchesProgram(
+  const keepSubmitted = Boolean(opts.keepSubmitted);
+  return list.filter((item) => {
+    if (keepSubmitted && item?.hasStudentResult) return true;
+    return edesisCatalogExamMatchesProgram(
       { examType: item.examType, name: item.name || item.examName || item.examTitle },
       keys
-    )
-  );
+    );
+  });
 }
 
 const OPEN_CATALOG_WINDOW_DAYS = 21;
@@ -973,8 +975,12 @@ export function edesisResultLooksSubmitted(row) {
     'bos'
   ];
   if (scoreKeys.some((k) => src[k] != null && String(src[k]).trim() !== '')) return true;
+  const subjects = src.subjects || src.dersler || src.lessonResults || src.dersSonuclari;
+  if (Array.isArray(subjects) && subjects.length > 0) return true;
   const status = String(src.resultStatus || src.status || src.evaluationStatus || '').toLowerCase();
-  return ['ready', 'completed', 'evaluated', 'published', 'success'].includes(status);
+  return ['ready', 'completed', 'evaluated', 'published', 'success', 'done', 'finished', 'processed'].includes(
+    status
+  );
 }
 
 export function formatEdesisAvailableExamItem(examId, catalog, resultRow, meta = {}) {
@@ -1076,7 +1082,8 @@ export function buildStudentAvailableEdesisExamItems({
   }
 
   items.sort((a, b) => String(b.examDate || '').localeCompare(String(a.examDate || '')));
-  const filtered = filterEdesisExamsForStudentProgram(items, keys);
+  // Girilmiş sonuçlar program süzgecinden geçmesin (YKS öğrencisi + YÖS denemesi vb.)
+  const filtered = filterEdesisExamsForStudentProgram(items, keys, { keepSubmitted: true });
   // Program süzgeci tüm girilebilir denemeleri silmesin (tür alanı boş atanmışlar)
   if (!filtered.length && items.some((x) => x.canTake)) return items;
   return filtered;

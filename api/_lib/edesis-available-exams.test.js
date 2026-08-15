@@ -256,7 +256,7 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     );
   });
 
-  it('hides 5. sınıf denemesinden LGS öğrencisini', () => {
+  it('keeps submitted cross-program results so retake stays blocked', () => {
     const items = buildStudentAvailableEdesisExamItems({
       catalogRows: [
         { id: 10, name: '5.SINIF MAT FEN KTT 2 y', examType: '5-6. Sınıf', examDate: '2026-08-14' },
@@ -271,9 +271,11 @@ describe('buildStudentAvailableEdesisExamItems', () => {
       edesisStudentId: '7105077',
       programKeys: inferEdesisExamProgramKeys({ classLevel: '8' })
     });
-    const names = items.map((x) => x.name);
-    assert.equal(names.some((n) => /5\.SINIF/i.test(n)), false);
-    assert.equal(names.some((n) => /LGS İNKILAP/i.test(n)), true);
+    const five = items.find((x) => /5\.SINIF/i.test(x.name || ''));
+    assert.ok(five, 'submitted 5. sınıf row must remain (retake block)');
+    assert.equal(five.hasStudentResult, true);
+    assert.equal(five.canTake, false);
+    assert.equal(items.some((x) => /LGS İNKILAP/i.test(x.name || '')), true);
   });
 
   it('majority LGS results drop a stray 5. sınıf row when class is unknown', () => {
@@ -341,6 +343,46 @@ describe('buildStudentAvailableEdesisExamItems', () => {
       programKeys: inferEdesisExamProgramKeys({ classLevel: '7' })
     });
     assert.deepEqual(items.map((x) => x.examId), ['88']);
+  });
+
+  it('keeps submitted YÖS result for YKS (class 12) student', () => {
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [
+        {
+          id: 1102253,
+          name: 'YÖS SARMAL DENEME-12',
+          examType: 'YÖS',
+          resultStatus: 'Ready',
+          examDate: '2026-08-10'
+        }
+      ],
+      resultRows: [
+        {
+          examId: 1102253,
+          studentId: 7105077,
+          examName: 'YÖS SARMAL DENEME-12',
+          examType: 'YÖS',
+          toplamNet: 42.5,
+          resultStatus: 'Ready'
+        }
+      ],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '12' })
+    });
+    assert.ok(items.some((x) => x.examId === '1102253' && x.hasStudentResult));
+  });
+
+  it('still hides untaken YÖS catalog for YKS student without assignment', () => {
+    const now = new Date('2026-08-14T12:00:00Z');
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: catalog,
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '12' }),
+      now,
+      allowRecencyFallback: true
+    });
+    assert.equal(items.some((x) => x.examId === '3'), false);
   });
 });
 
