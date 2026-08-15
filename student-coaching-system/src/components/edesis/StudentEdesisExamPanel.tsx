@@ -109,16 +109,6 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
     };
   }, [pdfUrl]);
 
-  const pickFallbackPdfUrl = (files: EdesisBookletPdf[] | undefined, letter: string) => {
-    const list = files || [];
-    const want = String(letter || '').trim().toUpperCase();
-    const hit =
-      list.find((f) => String(f.kitapcikTuru || '').trim().toUpperCase() === want) ||
-      list.find((f) => f.url) ||
-      null;
-    return hit?.url || '';
-  };
-
   const load = useCallback(async () => {
     if (!studentId) {
       setLoading(false);
@@ -176,41 +166,83 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
       return null;
     });
     void (async () => {
+      const applyBlob = (blob: Blob) => {
+        if (cancelled || blob.size <= 8) return false;
+        const next = URL.createObjectURL(blob);
+        if (cancelled) {
+          URL.revokeObjectURL(next);
+          return false;
+        }
+        setPdfUrl(next);
+        return true;
+      };
+
+      const candidateUrls = (files: EdesisBookletPdf[] | undefined) => {
+        const list = files || [];
+        const want = String(kitapcik || '').trim().toUpperCase();
+        const ordered = [
+          ...list.filter((f) => String(f.kitapcikTuru || '').trim().toUpperCase() === want),
+          ...list
+        ];
+        const seen = new Set<string>();
+        const out: string[] = [];
+        for (const f of ordered) {
+          const u = String(f?.url || '').trim();
+          if (!u || seen.has(u)) continue;
+          seen.add(u);
+          out.push(u);
+        }
+        return out;
+      };
+
       try {
         const r = await fetchEdesisExamBookletPdf({
           examId: activeExam.examId,
           kitapcikTuru: kitapcik
         });
         if (cancelled) return;
-        if (r.blob && r.blob.size > 8) {
-          const next = URL.createObjectURL(r.blob);
-          if (cancelled) {
-            URL.revokeObjectURL(next);
-            return;
+        if (applyBlob(r.blob)) return;
+
+        // Ham Edesis URL iframe’de auth’suz açılmaz; her adayı proxy ile tekrar dene
+        const retries = candidateUrls([
+          ...(r.files || []),
+          ...bookletPdfs,
+          ...(activeExam.bookletPdfs || [])
+        ]);
+        for (const fileUrl of retries) {
+          if (cancelled) return;
+          try {
+            const again = await fetchEdesisExamBookletPdf({
+              examId: activeExam.examId,
+              kitapcikTuru: kitapcik,
+              fileUrl
+            });
+            if (applyBlob(again.blob)) return;
+          } catch {
+            /* sonraki dosya */
           }
-          setPdfUrl(next);
-          return;
         }
-        const fallback =
-          r.url ||
-          pickFallbackPdfUrl(r.files, kitapcik) ||
-          pickFallbackPdfUrl(bookletPdfs, kitapcik) ||
-          pickFallbackPdfUrl(activeExam.bookletPdfs, kitapcik);
-        if (fallback) {
-          setPdfUrl(fallback);
-        } else {
-          setPdfError('Bu sınav için kitapçık PDF’si bulunamadı');
-        }
+        setPdfError('Bu sınav için kitapçık PDF’si bulunamadı');
       } catch (e) {
         if (cancelled) return;
-        const fallback =
-          pickFallbackPdfUrl(bookletPdfs, kitapcik) || pickFallbackPdfUrl(activeExam.bookletPdfs, kitapcik);
-        if (fallback) {
-          setPdfUrl(fallback);
-          setPdfError(null);
-        } else {
-          setPdfError(e instanceof Error ? e.message : 'Kitapçık PDF alınamadı');
+        const retries = candidateUrls([...bookletPdfs, ...(activeExam.bookletPdfs || [])]);
+        for (const fileUrl of retries) {
+          if (cancelled) return;
+          try {
+            const again = await fetchEdesisExamBookletPdf({
+              examId: activeExam.examId,
+              kitapcikTuru: kitapcik,
+              fileUrl
+            });
+            if (applyBlob(again.blob)) {
+              setPdfError(null);
+              return;
+            }
+          } catch {
+            /* sonraki */
+          }
         }
+        setPdfError(e instanceof Error ? e.message : 'Kitapçık PDF alınamadı');
       } finally {
         if (!cancelled) setPdfBusy(false);
       }
