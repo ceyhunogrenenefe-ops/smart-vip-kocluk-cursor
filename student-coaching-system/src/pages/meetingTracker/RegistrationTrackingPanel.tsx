@@ -23,8 +23,11 @@ import {
   rtImportPreview,
   rtImportCommit,
   rtBulk,
+  rtListCoaches,
+  rtLookupPhone,
   type RegLead,
-  type RegDashboard
+  type RegDashboard,
+  type RegCoach
 } from '../../lib/registrationTrackingApi';
 import {
   GRADE_PROGRAMS,
@@ -66,6 +69,10 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
   const [search, setSearch] = useState(params.get('rt_search') || '');
   const debouncedSearch = useDebouncedValue(search);
   const includeLost = params.get('rt_lost') === '1';
+  const coachId = params.get('rt_coach') || '';
+  const dateFrom = params.get('rt_from') || '';
+  const dateTo = params.get('rt_to') || '';
+  const [coaches, setCoaches] = useState<RegCoach[]>([]);
 
   const setViewMode = (v: ViewMode) => {
     setParams((p) => {
@@ -102,8 +109,11 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
     if (quickFilter === 'payment') q.payment_pending = '1';
     if (quickFilter === 'confirmed') q.primary_status = 'confirmed';
     if (quickFilter === 'tracking') q.primary_status = 'tracking';
+    if (coachId) q.coach_id = coachId;
+    if (dateFrom) q.date_from = dateFrom;
+    if (dateTo) q.date_to = dateTo;
     return q;
-  }, [debouncedSearch, includeLost, quickFilter]);
+  }, [debouncedSearch, includeLost, quickFilter, coachId, dateFrom, dateTo]);
 
   const reload = useCallback(async () => {
     if (!institutionId && !isManager) return;
@@ -128,6 +138,12 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
   useEffect(() => {
     reload();
   }, [reload]);
+
+  useEffect(() => {
+    rtListCoaches()
+      .then((r) => setCoaches(r.data || []))
+      .catch(() => setCoaches([]));
+  }, [institutionId]);
 
   useEffect(() => {
     setParams((p) => {
@@ -312,6 +328,56 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
           </button>
         </div>
 
+        <select
+          className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
+          value={coachId}
+          onChange={(e) =>
+            setParams((p) => {
+              const n = new URLSearchParams(p);
+              if (e.target.value) n.set('rt_coach', e.target.value);
+              else n.delete('rt_coach');
+              return n;
+            })
+          }
+        >
+          <option value="">Koç: Tümü</option>
+          {coaches.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        <label className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300">
+          Tarih
+          <input
+            type="date"
+            className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
+            value={dateFrom}
+            onChange={(e) =>
+              setParams((p) => {
+                const n = new URLSearchParams(p);
+                if (e.target.value) n.set('rt_from', e.target.value);
+                else n.delete('rt_from');
+                return n;
+              })
+            }
+          />
+          <span>—</span>
+          <input
+            type="date"
+            className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
+            value={dateTo}
+            onChange={(e) =>
+              setParams((p) => {
+                const n = new URLSearchParams(p);
+                if (e.target.value) n.set('rt_to', e.target.value);
+                else n.delete('rt_to');
+                return n;
+              })
+            }
+          />
+        </label>
+
         <button type="button" onClick={reload} className="rounded-lg border p-2 hover:bg-slate-50 dark:border-slate-600">
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
         </button>
@@ -391,6 +457,7 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
 
       {showCreate && (
         <CreateLeadModal
+          coaches={coaches}
           onClose={() => setShowCreate(false)}
           onCreated={() => {
             setShowCreate(false);
@@ -612,7 +679,15 @@ function ListView({
   );
 }
 
-function CreateLeadModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function CreateLeadModal({
+  coaches,
+  onClose,
+  onCreated
+}: {
+  coaches: RegCoach[];
+  onClose: () => void;
+  onCreated: () => void;
+}) {
   const [form, setForm] = useState({
     full_name: '',
     parent_full_name: '',
@@ -620,10 +695,13 @@ function CreateLeadModal({ onClose, onCreated }: { onClose: () => void; onCreate
     grade_program: 'lgs',
     temperature: 'warm',
     source: '',
-    notes: ''
+    notes: '',
+    primary_status: '' as '' | 'tracking' | 'confirmed',
+    assigned_user_id: ''
   });
   const [dupes, setDupes] = useState<RegLead[]>([]);
   const [busy, setBusy] = useState(false);
+  const [coachHint, setCoachHint] = useState('');
 
   const checkDup = async () => {
     try {
@@ -635,9 +713,38 @@ function CreateLeadModal({ onClose, onCreated }: { onClose: () => void; onCreate
     }
   };
 
+  const lookupPhone = async () => {
+    const phone = form.phone.trim();
+    if (!phone) {
+      setCoachHint('');
+      return;
+    }
+    try {
+      const { data } = await rtLookupPhone(phone);
+      if (data?.coach?.id) {
+        setForm((f) => ({
+          ...f,
+          assigned_user_id: data.coach!.id,
+          parent_full_name: f.parent_full_name || data.parent_full_name || ''
+        }));
+        setCoachHint(`Sistemde kayıtlı koç: ${data.coach.name}`);
+        toast.success(`Koç bulundu: ${data.coach.name}`);
+      } else {
+        setCoachHint('Bu telefonla eşleşen koç bulunamadı');
+      }
+    } catch {
+      setCoachHint('');
+    }
+    await checkDup();
+  };
+
   const submit = async (force = false) => {
     if (!form.full_name.trim()) {
       toast.error('Öğrenci adı zorunlu');
+      return;
+    }
+    if (!form.primary_status) {
+      toast.error('Kesin kayıt mı takip mi seçin');
       return;
     }
     if (dupes.length && !force) {
@@ -646,8 +753,12 @@ function CreateLeadModal({ onClose, onCreated }: { onClose: () => void; onCreate
     }
     setBusy(true);
     try {
-      await rtCreateLead({ ...form, full_name: form.full_name });
-      toast.success('Kayıt adayı oluşturuldu');
+      await rtCreateLead({
+        ...form,
+        full_name: form.full_name,
+        assigned_user_id: form.assigned_user_id || null
+      });
+      toast.success(form.primary_status === 'confirmed' ? 'Kesin kayıt eklendi' : 'Takip adayı oluşturuldu');
       onCreated();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Oluşturulamadı');
@@ -661,6 +772,33 @@ function CreateLeadModal({ onClose, onCreated }: { onClose: () => void; onCreate
       <div className="w-full max-w-md rounded-xl bg-white p-5 dark:bg-slate-900">
         <h3 className="text-lg font-semibold">Yeni Kayıt Adayı</h3>
         <div className="mt-3 space-y-2 text-sm">
+          <div>
+            <p className="mb-1 text-xs font-medium text-slate-600">Kayıt türü *</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, primary_status: 'confirmed' })}
+                className={`rounded-lg border px-3 py-2 text-sm font-semibold ${
+                  form.primary_status === 'confirmed'
+                    ? 'border-emerald-600 bg-emerald-50 text-emerald-800'
+                    : 'border-slate-200 dark:border-slate-600'
+                }`}
+              >
+                Kesin kayıt
+              </button>
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, primary_status: 'tracking' })}
+                className={`rounded-lg border px-3 py-2 text-sm font-semibold ${
+                  form.primary_status === 'tracking'
+                    ? 'border-violet-600 bg-violet-50 text-violet-800'
+                    : 'border-slate-200 dark:border-slate-600'
+                }`}
+              >
+                Takip
+              </button>
+            </div>
+          </div>
           <input
             placeholder="Öğrenci adı soyadı *"
             className="w-full rounded border px-2 py-1.5 dark:border-slate-600 dark:bg-slate-800"
@@ -675,12 +813,25 @@ function CreateLeadModal({ onClose, onCreated }: { onClose: () => void; onCreate
             onChange={(e) => setForm({ ...form, parent_full_name: e.target.value })}
           />
           <input
-            placeholder="Telefon"
+            placeholder="Veli telefonu"
             className="w-full rounded border px-2 py-1.5 dark:border-slate-600 dark:bg-slate-800"
             value={form.phone}
             onChange={(e) => setForm({ ...form, phone: e.target.value })}
-            onBlur={checkDup}
+            onBlur={lookupPhone}
           />
+          {coachHint && <p className="text-xs text-indigo-700 dark:text-indigo-300">{coachHint}</p>}
+          <select
+            className="w-full rounded border px-2 py-1.5 dark:border-slate-600 dark:bg-slate-800"
+            value={form.assigned_user_id}
+            onChange={(e) => setForm({ ...form, assigned_user_id: e.target.value })}
+          >
+            <option value="">Koç seçin (opsiyonel)</option>
+            {coaches.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
           <select
             className="w-full rounded border px-2 py-1.5 dark:border-slate-600 dark:bg-slate-800"
             value={form.grade_program}

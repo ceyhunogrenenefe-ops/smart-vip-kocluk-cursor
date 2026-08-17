@@ -6,7 +6,9 @@ import {
   computeConversionRate,
   isOverdue,
   splitFullName,
-  buildDuplicateKey
+  buildDuplicateKey,
+  phoneLookupVariants,
+  istanbulDayBounds
 } from './registration-tracking-utils.js';
 
 test('normalizeTrPhone formats Turkish numbers', () => {
@@ -64,3 +66,17 @@ test('buildDuplicateKey combines institution fields', () => {
   assert.ok(key.includes('inst1'));
   assert.ok(key.includes('05321234567'));
 });
+
+test('phoneLookupVariants covers TR formats', () => {
+  const v = phoneLookupVariants('+90 532 123 45 67');
+  assert.ok(v.includes('05321234567'));
+  assert.ok(v.includes('5321234567'));
+});
+
+test('istanbulDayBounds uses Europe/Istanbul day', () => {
+  const b = istanbulDayBounds('2026-08-17');
+  assert.ok(b);
+  assert.equal(new Date(b.start).toISOString(), '2026-08-16T21:00:00.000Z');
+  assert.equal(new Date(b.end).toISOString(), '2026-08-17T20:59:59.999Z');
+});
+
