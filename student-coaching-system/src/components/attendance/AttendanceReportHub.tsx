@@ -764,7 +764,7 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
               onChange={(e) => setChannels(e.target.value as typeof channels)}
               className="mt-1 block rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
             >
-              <option value="parent">Veli (+ koç/öğretmen)</option>
+              <option value="parent">Veli</option>
               <option value="student">Öğrenci</option>
               <option value="both">Öğrenci + veli</option>
             </select>
