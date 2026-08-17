@@ -87,6 +87,9 @@ export function examRoomsForClassLevel(classLevel: unknown): ExamEntryKey[] | nu
 
 export { BBB_AUTO_MEETING_LINK, isBbbAutoMeetingLink };
 
+export const LISE_DENEME_ZOOM_ENTRY =
+  'https://us06web.zoom.us/j/3565095951?pwd=Rk56NGhXeEYrZkZOWEVVbG5pa0RjUT09';
+
 export const defaultAcademicCenterLinks: AcademicCenterLinks = {
   studyClasses: {
     class56: 'https://kurumsal.ornek.edu/tr/etut-56',
@@ -95,7 +98,7 @@ export const defaultAcademicCenterLinks: AcademicCenterLinks = {
     yks: 'https://kurumsal.ornek.edu/tr/etut-yks'
   },
   exams: {
-    lise: 'https://kurumsal.ornek.edu/tr/deneme-lise',
+    lise: LISE_DENEME_ZOOM_ENTRY,
     yos: 'https://kurumsal.ornek.edu/tr/deneme-yos',
     class34: 'https://kurumsal.ornek.edu/tr/deneme-34',
     class56: 'https://kurumsal.ornek.edu/tr/deneme-56',

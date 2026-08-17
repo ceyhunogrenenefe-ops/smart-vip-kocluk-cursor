@@ -5,8 +5,13 @@ const DEFAULT_STUDY = {
   yks: 'https://kurumsal.ornek.edu/tr/etut-yks'
 };
 
+const LISE_DENEME_ZOOM_ENTRY =
+  'https://us06web.zoom.us/j/3565095951?pwd=Rk56NGhXeEYrZkZOWEVVbG5pa0RjUT09';
+
+export { LISE_DENEME_ZOOM_ENTRY };
+
 const DEFAULT_EXAMS = {
-  lise: 'https://kurumsal.ornek.edu/tr/deneme-lise',
+  lise: LISE_DENEME_ZOOM_ENTRY,
   yos: 'https://kurumsal.ornek.edu/tr/deneme-yos',
   class34: 'https://kurumsal.ornek.edu/tr/deneme-34',
   class56: 'https://kurumsal.ornek.edu/tr/deneme-56',
@@ -81,10 +86,15 @@ export function linksForInstitution(store, institutionId) {
   const normalized = normalizeAcademicLinksStore(store);
   const base = coerceAcademicLinks(normalized.default);
   const iid = String(institutionId || '').trim();
-  if (!iid) return base;
-  const patch = normalized.byInstitution[iid];
-  if (!patch) return base;
-  return coerceAcademicLinks(deepMerge(base, coerceAcademicLinks(patch)));
+  let merged = base;
+  if (iid) {
+    const patch = normalized.byInstitution[iid];
+    if (patch) merged = coerceAcademicLinks(deepMerge(base, coerceAcademicLinks(patch)));
+  }
+  // Lise Deneme Sınavı giriş — kurum geneli Zoom oturumu
+  merged.exams.lise = LISE_DENEME_ZOOM_ENTRY;
+  if (merged.exams.exam) merged.exams.exam = LISE_DENEME_ZOOM_ENTRY;
+  return merged;
 }
 
 export function upsertInstitutionLinks(store, institutionId, patchLinks) {
