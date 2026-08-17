@@ -43,6 +43,9 @@ import {
   catalogExamAssignedToStudent,
   trustEdesisStudentCatalogList,
   looksLikePersonalExamList,
+  examAssignedViaOnlineFlag,
+  fetchEdesisExamAssignedToStudent,
+  isRecentOpenCatalogExam,
   isOpenEdesisCatalogExam,
   edesisCatalogExamMatchesProgram,
   sortCatalogExamsByRecencyDesc,
@@ -218,6 +221,22 @@ async function loadAvailableEdesisExamsForStudent({
   };
 
   mergeTrustedStudentCatalog();
+
+  const fullById = new Map();
+  for (const ex of fullRows) {
+    const id = pickEdesisCatalogExamId(ex);
+    if (id) fullById.set(id, ex);
+  }
+  for (const ex of studentRows) {
+    const id = pickEdesisCatalogExamId(ex) || String(ex?.id ?? ex?.examId ?? '').trim();
+    if (!id || assignedMap.has(id)) continue;
+    if (!isOpenEdesisCatalogExam(ex)) continue;
+    if (catalogExamAssignedToStudent(ex, assignScope) === false) continue;
+    if (examAssignedViaOnlineFlag(ex, fullById.get(id) || null)) {
+      assignedMap.set(id, ex);
+    }
+  }
+
   const DETAIL_LIMIT = 60;
   const pool = sortCatalogExamsByRecencyDesc(
     fullRows.length ? [...fullRows, ...studentRows, ...classroomRows] : [...studentRows, ...classroomRows]
@@ -226,11 +245,10 @@ async function loadAvailableEdesisExamsForStudent({
   const needDetail = [];
   for (const ex of pool) {
     if (!isOpenEdesisCatalogExam(ex)) continue;
-    if (scope.programKeys?.size && !edesisCatalogExamMatchesProgram(ex, scope.programKeys)) continue;
     const id = pickEdesisCatalogExamId(ex) || String(ex?.id ?? ex?.examId ?? '').trim();
     if (!id || assignedMap.has(id) || seenPool.has(id)) continue;
     seenPool.add(id);
-    if (catalogExamAssignedToStudent(ex, assignScope) !== null) continue;
+    if (catalogExamAssignedToStudent(ex, assignScope) === false) continue;
     needDetail.push(ex);
   }
   needDetail.sort((a, b) => {
@@ -263,6 +281,35 @@ async function loadAvailableEdesisExamsForStudent({
             }
           } catch {
             /* rate / 404 */
+          }
+        })
+      );
+    }
+  }
+
+  // Liste DTO’sunda OgrenciIds yoksa: son 14 gün açık denemelerde StudentId sonuç satırı
+  const now = new Date();
+  const probeQueue = sortCatalogExamsByRecencyDesc(needDetail)
+    .filter((ex) => {
+      const id = pickEdesisCatalogExamId(ex);
+      if (!id || assignedMap.has(id)) return false;
+      return isRecentOpenCatalogExam(ex, now, 14);
+    })
+    .slice(0, 24);
+  if (probeQueue.length && cfg?.apiKey) {
+    const localCfg = { ...getEdesisConfig(), ...cfg, baseUrl: cfg.baseUrl || getEdesisConfig().baseUrl };
+    const CONCURRENCY = 6;
+    for (let i = 0; i < probeQueue.length; i += CONCURRENCY) {
+      const batch = probeQueue.slice(i, i + CONCURRENCY);
+      await Promise.all(
+        batch.map(async (ex) => {
+          const id = pickEdesisCatalogExamId(ex);
+          if (!id || assignedMap.has(id)) return;
+          try {
+            const hit = await fetchEdesisExamAssignedToStudent(id, edesisStudentId, localCfg);
+            if (hit) assignedMap.set(id, ex);
+          } catch {
+            /* 404 / rate */
           }
         })
       );
