@@ -380,7 +380,7 @@ function foldTrAscii(s) {
 /** Katalog satırı — Edesis `id` sınav kimliğidir */
 export function pickEdesisCatalogExamId(row) {
   const r = flattenEdesisRow(row);
-  return pickStr(r, ['id', 'examId', 'sinavId', 'sinav_id']);
+  return pickStrCi(r, ['id', 'examId', 'sinavId', 'sinav_id']) || pickStr(r, ['id', 'examId', 'sinavId', 'sinav_id']);
 }
 
 /** Sonuç satırı — `id` sonuç kaydı olabilir, sınav için examId kullanılır */
@@ -454,8 +454,10 @@ export function filterEdesisExamsForStudentProgram(items, programKeys, opts = {}
   if (!keys.size) keys = majorityEdesisProgramKeys(list);
   if (!keys.size) return list;
   const keepSubmitted = Boolean(opts.keepSubmitted);
+  const keepTakeable = Boolean(opts.keepTakeable);
   return list.filter((item) => {
     if (keepSubmitted && item?.hasStudentResult) return true;
+    if (keepTakeable && item?.canTake) return true;
     return edesisCatalogExamMatchesProgram(
       { examType: item.examType, name: item.name || item.examName || item.examTitle },
       keys
@@ -472,15 +474,27 @@ export function isOpenEdesisCatalogExam(exam) {
   return true;
 }
 
+function getPropCi(obj, names) {
+  if (!obj || typeof obj !== 'object') return undefined;
+  const map = new Map(Object.entries(obj).map(([k, v]) => [String(k).toLowerCase(), v]));
+  for (const n of names) {
+    const hit = map.get(String(n).toLowerCase());
+    if (hit !== undefined) return hit;
+  }
+  return undefined;
+}
+
 function collectEdesisIdList(obj, keys) {
   const out = [];
   for (const k of keys) {
-    const v = obj?.[k];
+    const v = getPropCi(obj, [k]);
     if (v == null || v === '') continue;
     if (Array.isArray(v)) {
       for (const it of v) {
         if (it != null && typeof it === 'object') {
-          const id = pickStr(it, ['id', 'studentId', 'ogrenciId', 'classroomId', 'sinifId']);
+          const id =
+            pickStrCi(it, ['id', 'studentId', 'ogrenciId', 'classroomId', 'sinifId']) ||
+            pickStr(it, ['id', 'studentId', 'ogrenciId', 'classroomId', 'sinifId']);
           if (id) out.push(id);
         } else if (String(it).trim()) {
           out.push(String(it).trim());
@@ -540,7 +554,8 @@ export function catalogExamAssignedToStudent(exam, scope = {}) {
   const classroomIds = [];
 
   for (const src of sources) {
-    if (src.isAllClasses === true || src.allClasses === true || src.tumSiniflar === true) {
+    const allFlag = getPropCi(src, ['isAllClasses', 'allClasses', 'tumSiniflar']);
+    if (allFlag === true || allFlag === 'true' || allFlag === 1) {
       allClasses = true;
     }
     explicitIds.push(...collectEdesisIdList(src, EXPLICIT_ASSIGNED_STUDENT_KEYS));
@@ -582,10 +597,54 @@ function catalogExamRecencyMs(exam) {
     'examDate',
     'date'
   ]) {
-    const t = Date.parse(flat[k]);
+    const t = Date.parse(getPropCi(flat, [k]));
     if (Number.isFinite(t) && t > best) best = t;
   }
   return best;
+}
+
+export function examOnlineFlag(exam) {
+  const flat = flattenEdesisRow(exam) || {};
+  const v = getPropCi(flat, [
+    'isOnlineSinavForStudent',
+    'isOnlineForStudent',
+    'onlineSinavForStudent',
+    'isOnlineExamForStudent'
+  ]);
+  if (v === true || v === 'true' || v === 1 || v === '1') return true;
+  if (v === false || v === 'false' || v === 0 || v === '0') return false;
+  return null;
+}
+
+/** StudentId kataloğunda online bayrağı kurum listesinden farklıysa bu öğrenciye tanımlı */
+export function examAssignedViaOnlineFlag(exam, fullExam = null) {
+  if (examOnlineFlag(exam) !== true) return false;
+  if (!fullExam) return true;
+  return examOnlineFlag(fullExam) !== true;
+}
+
+/** GET /exams/{id}/results?StudentId= satırları bu öğrenciye mi ait (sıkı eşleşme) */
+export function examResultRowsAssignStudent(rows, edesisStudentId) {
+  const sid = normEdesisId(edesisStudentId);
+  if (!sid || !Array.isArray(rows) || !rows.length) return false;
+  const matched = rows.filter((row) => {
+    const flat = flattenEdesisRow(row);
+    const rowSid = pickStrCi(flat, ['studentId', 'ogrenciId', 'ogrenci_id']) || pickStr(flat, ['studentId', 'ogrenciId', 'ogrenci_id']);
+    return rowSid && normEdesisId(rowSid) === sid;
+  });
+  return matched.length > 0;
+}
+
+export async function fetchEdesisExamAssignedToStudent(examId, edesisStudentId, cfgOverride = {}) {
+  const id = String(examId || '').trim();
+  const sid = normEdesisId(edesisStudentId);
+  if (!id || !sid) return false;
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+  const qs = buildQuery({ StudentId: sid, MaxResultCount: 50 });
+  const r = await fetchEdesisJson(localCfg, `${V1_PATHS.examResultsByExam(id)}${qs}`);
+  if (!isReachableEdesisResponse(r)) return false;
+  return examResultRowsAssignStudent(unwrapList(r.json), sid);
 }
 
 export function isRecentOpenCatalogExam(exam, now = new Date(), windowDays = OPEN_CATALOG_WINDOW_DAYS) {
@@ -596,7 +655,7 @@ export function isRecentOpenCatalogExam(exam, now = new Date(), windowDays = OPE
 }
 
 function catalogRowExamId(row) {
-  return String(row?.id ?? row?.examId ?? row?.sinavId ?? '').trim();
+  return pickEdesisCatalogExamId(row) || String(row?.id ?? row?.examId ?? row?.sinavId ?? '').trim();
 }
 
 /**
@@ -1127,7 +1186,10 @@ export function buildStudentAvailableEdesisExamItems({
 
   items.sort((a, b) => String(b.examDate || '').localeCompare(String(a.examDate || '')));
   // Girilmiş sonuçlar program süzgecinden geçmesin (YKS öğrencisi + YÖS denemesi vb.)
-  const filtered = filterEdesisExamsForStudentProgram(items, keys, { keepSubmitted: true });
+  const filtered = filterEdesisExamsForStudentProgram(items, keys, {
+    keepSubmitted: true,
+    keepTakeable: true
+  });
   // Program süzgeci tüm girilebilir denemeleri silmesin (tür alanı boş atanmışlar)
   if (!filtered.length && items.some((x) => x.canTake)) return items;
   return filtered;

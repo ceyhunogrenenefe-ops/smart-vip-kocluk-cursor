@@ -15,6 +15,8 @@ import {
   looksLikePdfBuffer,
   catalogLooksStudentFiltered,
   catalogExamAssignedToStudent,
+  examAssignedViaOnlineFlag,
+  examResultRowsAssignStudent,
   trustEdesisStudentCatalogList,
   looksLikePersonalExamList,
   resolveEdesisFileUrl,
@@ -312,7 +314,7 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     assert.equal(items.some((x) => /LGS İNKILAP/i.test(x.name || '')), true);
   });
 
-  it('majority LGS results drop a stray 5. sınıf row when class is unknown', () => {
+  it('keeps this student\'s result-row exams even when class is unknown', () => {
     const items = buildStudentAvailableEdesisExamItems({
       catalogRows: [],
       resultRows: [
@@ -324,8 +326,8 @@ describe('buildStudentAvailableEdesisExamItems', () => {
       ],
       edesisStudentId: '7105077'
     });
-    assert.equal(items.some((x) => /5\.SINIF/i.test(x.name)), false);
-    assert.equal(items.length, 4);
+    assert.equal(items.length, 5);
+    assert.ok(items.some((x) => /5\.SINIF/i.test(x.name)));
   });
 
   it('allows take when the result row has no scores yet', () => {
@@ -422,6 +424,88 @@ describe('buildStudentAvailableEdesisExamItems', () => {
       ),
       false
     );
+  });
+
+  it('reads PascalCase OgrenciIds as assignment', () => {
+    assert.equal(
+      catalogExamAssignedToStudent(
+        { Id: 1102253, OgrenciIds: [7105077], ExamType: 'YÖS' },
+        { edesisStudentId: '7105077' }
+      ),
+      true
+    );
+    assert.equal(
+      catalogExamAssignedToStudent(
+        { Id: 1102253, OgrenciIds: [111], ExamType: 'YÖS' },
+        { edesisStudentId: '7105077' }
+      ),
+      false
+    );
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [
+        {
+          Id: 1102253,
+          name: 'YÖS SARMAL DENEME-12',
+          examType: 'YÖS',
+          resultStatus: 'None',
+          examDate: '2026-08-16',
+          OgrenciIds: [7105077]
+        }
+      ],
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '12' })
+    });
+    assert.ok(items.some((x) => x.examId === '1102253' && x.canTake));
+  });
+
+  it('keeps assigned YÖS takeable for YKS class student (program filter)', () => {
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [
+        {
+          id: 88,
+          name: 'YÖS SARMAL',
+          examType: 'YÖS',
+          resultStatus: 'None',
+          examDate: '2026-08-16',
+          studentIds: [7105077]
+        }
+      ],
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '12' })
+    });
+    assert.deepEqual(items.map((x) => x.examId), ['88']);
+    assert.equal(items[0].canTake, true);
+  });
+
+  it('online flag on StudentId row is assignment when full catalog lacks it', () => {
+    assert.equal(
+      examAssignedViaOnlineFlag(
+        { id: 7, isOnlineSinavForStudent: true },
+        { id: 7, isOnlineSinavForStudent: false }
+      ),
+      true
+    );
+    assert.equal(
+      examAssignedViaOnlineFlag(
+        { id: 7, isOnlineSinavForStudent: true },
+        { id: 7, isOnlineSinavForStudent: true }
+      ),
+      false
+    );
+  });
+
+  it('examResultRowsAssignStudent requires matching studentId', () => {
+    assert.equal(
+      examResultRowsAssignStudent([{ examId: 1, studentId: 7105077 }], '7105077'),
+      true
+    );
+    assert.equal(
+      examResultRowsAssignStudent([{ examId: 1, studentId: 111 }], '7105077'),
+      false
+    );
+    assert.equal(examResultRowsAssignStudent([{ examId: 1 }], '7105077'), false);
   });
 
   it('offers isAllClasses exam to the student', () => {
