@@ -193,19 +193,33 @@ async function loadAvailableEdesisExamsForStudent({
     classroomId: scope.classroomId,
     programKeys: scope.programKeys
   };
-  const pushIfAssigned = (rows) => {
+  const assignScopeWithClassroom = { ...assignScope, allowClassroomOnly: true };
+
+  const pushIfAssigned = (rows, scopeOverride) => {
+    const sc = scopeOverride || assignScope;
     for (const ex of rows || []) {
       const id = pickEdesisCatalogExamId(ex) || String(ex?.id ?? ex?.examId ?? '').trim();
       if (!id || assignedMap.has(id)) continue;
-      if (catalogExamAssignedToStudent(ex, assignScope) === true) {
+      if (catalogExamAssignedToStudent(ex, sc) === true) {
         assignedMap.set(id, ex);
       }
     }
   };
-  // Öğrenci listesi / tüm sınıflar kanıtı olan satırlar — şube kataloğu dökülmez
+  // OgrenciIds / isAllClasses kanıtı olan satırlar
   pushIfAssigned(fullRows);
   pushIfAssigned(studentRows);
-  pushIfAssigned(classroomRows);
+  // ClassroomId kataloğu: bu şubeye tanımlanmış — sınıfa atama da geçerli atamadır
+  if (scope.classroomId && classroomRows.length) {
+    for (const ex of classroomRows) {
+      const id = pickEdesisCatalogExamId(ex) || String(ex?.id ?? ex?.examId ?? '').trim();
+      if (!id || assignedMap.has(id)) continue;
+      if (!isOpenEdesisCatalogExam(ex)) continue;
+      // Başka öğrenciye özelleştirilmiş değilse şube ataması olarak kabul et
+      if (catalogExamAssignedToStudent(ex, assignScopeWithClassroom) !== false) {
+        assignedMap.set(id, ex);
+      }
+    }
+  }
 
   const studentFiltered = trustEdesisStudentCatalogList(fullRows, studentRows);
 
@@ -287,15 +301,15 @@ async function loadAvailableEdesisExamsForStudent({
     }
   }
 
-  // Liste DTO’sunda OgrenciIds yoksa: son 14 gün açık denemelerde StudentId sonuç satırı
+  // Liste DTO'sunda OgrenciIds yoksa: son 45 gün açık denemelerde StudentId sonuç satırı
   const now = new Date();
   const probeQueue = sortCatalogExamsByRecencyDesc(needDetail)
     .filter((ex) => {
       const id = pickEdesisCatalogExamId(ex);
       if (!id || assignedMap.has(id)) return false;
-      return isRecentOpenCatalogExam(ex, now, 14);
+      return isRecentOpenCatalogExam(ex, now, 45);
     })
-    .slice(0, 24);
+    .slice(0, 40);
   if (probeQueue.length && cfg?.apiKey) {
     const localCfg = { ...getEdesisConfig(), ...cfg, baseUrl: cfg.baseUrl || getEdesisConfig().baseUrl };
     const CONCURRENCY = 6;
