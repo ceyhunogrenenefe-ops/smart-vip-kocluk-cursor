@@ -18,6 +18,7 @@ import {
   TASK_TYPES,
   GRADE_PROGRAMS
 } from '../api/_lib/registration-tracking-utils.js';
+import { ensureExcelBoardLeads } from '../api/_lib/registration-tracking-excel-seed.js';
 
 const PLATFORM_PRIMARY_INSTITUTION_ID = '73323d75-eea1-4552-8bba-d50555423589';
 
@@ -214,6 +215,16 @@ async function findDuplicates(institutionId, payload) {
     const rowName = String(row.full_name || '').toLocaleLowerCase('tr-TR').trim();
     return !fullName || rowName.includes(fullName) || fullName.includes(rowName);
   });
+}
+
+async function maybeSeedExcelBoard(institutionId) {
+  try {
+    return await ensureExcelBoardLeads(supabaseAdmin, institutionId);
+  } catch (e) {
+    if (isMissingTableError(e, 'registration_leads')) throw e;
+    console.warn('[registration-tracking] excel seed', errorMessage(e));
+    return null;
+  }
 }
 
 async function handleDashboard(institutionId, filters) {
@@ -1194,11 +1205,13 @@ export default async function handler(req, res) {
     }
 
     if (op === 'dashboard') {
+      await maybeSeedExcelBoard(institutionId);
       const data = await handleDashboard(institutionId, filters);
       return res.status(200).json({ data });
     }
 
     if (op === 'list') {
+      await maybeSeedExcelBoard(institutionId);
       const data = await handleList(institutionId, filters, tags, actor);
       return res.status(200).json(data);
     }
@@ -1232,6 +1245,11 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
+      if (op === 'seed-excel') {
+        if (!isManager(tags)) return res.status(403).json({ error: 'forbidden' });
+        const data = await ensureExcelBoardLeads(supabaseAdmin, institutionId);
+        return res.status(200).json({ data });
+      }
       if (op === 'create') {
         const data = await handleCreateLead(body, institutionId, actor);
         return res.status(201).json({ data });
