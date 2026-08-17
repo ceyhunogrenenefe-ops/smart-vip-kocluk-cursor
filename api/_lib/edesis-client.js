@@ -633,6 +633,26 @@ export function catalogLooksStudentFiltered(fullRows, studentRows) {
   return false;
 }
 
+/** GET /exams?StudentId= — kısa alt küme (≤20); program dökümü değil, kişisel liste gibi */
+export function looksLikePersonalExamList(fullRows, studentRows, maxSize = 20) {
+  const student = Array.isArray(studentRows) ? studentRows : [];
+  if (!student.length || student.length > maxSize) return false;
+  const fullIds = new Set((fullRows || []).map(catalogRowExamId).filter(Boolean));
+  const studentIds = [...new Set(student.map(catalogRowExamId).filter(Boolean))];
+  if (!studentIds.length) return false;
+  if (!fullIds.size) return true;
+  if (studentIds.length >= fullIds.size) return false;
+  return studentIds.every((id) => fullIds.has(id));
+}
+
+/** Edesis öğrenci kataloğu kişisel atama listesi sayılabilir mi */
+export function trustEdesisStudentCatalogList(fullRows, studentRows) {
+  return (
+    catalogLooksStudentFiltered(fullRows, studentRows) ||
+    looksLikePersonalExamList(fullRows, studentRows)
+  );
+}
+
 function examWindowStillOpen(exam, now = new Date()) {
   const flat = flattenEdesisRow(exam);
   const end = Date.parse(flat.endDate || flat.bitisTarihi || flat.EndDate || '');
@@ -1088,7 +1108,8 @@ export function buildStudentAvailableEdesisExamItems({
   }
 
   const keys = programKeys instanceof Set ? programKeys : new Set(programKeys || []);
-  const assignedOnly = Array.isArray(assignedCatalogRows);
+  const assignedOnly =
+    Array.isArray(assignedCatalogRows) && assignedCatalogRows.length > 0;
   const offerRows = assignedOnly ? assignedCatalogRows : catalogRows || [];
   const scope = {
     edesisStudentId,

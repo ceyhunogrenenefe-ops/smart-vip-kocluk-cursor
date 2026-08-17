@@ -41,6 +41,8 @@ import {
   isReachableEdesisResponse,
   catalogLooksStudentFiltered,
   catalogExamAssignedToStudent,
+  trustEdesisStudentCatalogList,
+  looksLikePersonalExamList,
   isOpenEdesisCatalogExam,
   edesisCatalogExamMatchesProgram,
   sortCatalogExamsByRecencyDesc,
@@ -202,15 +204,20 @@ async function loadAvailableEdesisExamsForStudent({
   pushIfAssigned(studentRows);
   pushIfAssigned(classroomRows);
 
-  // GET /exams?StudentId= gerçekten kısa kişisel listedeyse (program dökümü değil) güven
-  if (catalogLooksStudentFiltered(fullRows, studentRows)) {
+  const studentFiltered = trustEdesisStudentCatalogList(fullRows, studentRows);
+
+  const mergeTrustedStudentCatalog = () => {
+    if (!studentFiltered || !studentRows.length) return;
     for (const ex of studentRows) {
       const id = pickEdesisCatalogExamId(ex) || String(ex?.id ?? ex?.examId ?? '').trim();
-      if (id && !assignedMap.has(id)) assignedMap.set(id, ex);
+      if (!id || assignedMap.has(id)) continue;
+      if (!isOpenEdesisCatalogExam(ex)) continue;
+      if (catalogExamAssignedToStudent(ex, assignScope) === false) continue;
+      assignedMap.set(id, ex);
     }
-  }
+  };
 
-  const studentFiltered = catalogLooksStudentFiltered(fullRows, studentRows);
+  mergeTrustedStudentCatalog();
   const DETAIL_LIMIT = 60;
   const pool = sortCatalogExamsByRecencyDesc(
     fullRows.length ? [...fullRows, ...studentRows, ...classroomRows] : [...studentRows, ...classroomRows]
@@ -262,7 +269,10 @@ async function loadAvailableEdesisExamsForStudent({
     }
   }
 
-  const assignedCatalogRows = assignedMap.size ? [...assignedMap.values()] : [];
+  // Detayda ogrenciIds geldiyse yukarıda eklendi; yoksa güvenilir StudentId listesine güven
+  mergeTrustedStudentCatalog();
+
+  const assignedCatalogRows = assignedMap.size ? [...assignedMap.values()] : null;
   return buildStudentAvailableEdesisExamItems({
     catalogRows: fullRows,
     assignedCatalogRows,
@@ -272,7 +282,7 @@ async function loadAvailableEdesisExamsForStudent({
     classroomId: scope.classroomId,
     studentId: platformStudentId || `edesis-${edesisStudentId}`,
     institutionId: actor?.institution_id || null,
-    // Başkasının tanımlı denemesi program yedeğiyle tüm öğrencilere düşmesin
+    // Kurum kataloğu recency yedeği kapalı — yalnızca atanmış / StudentId kişisel liste
     allowRecencyFallback: false
   });
 }

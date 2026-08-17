@@ -15,6 +15,8 @@ import {
   looksLikePdfBuffer,
   catalogLooksStudentFiltered,
   catalogExamAssignedToStudent,
+  trustEdesisStudentCatalogList,
+  looksLikePersonalExamList,
   resolveEdesisFileUrl,
   expandEdesisFileUrlCandidates
 } from './edesis-client.js';
@@ -147,6 +149,37 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     });
     assert.deepEqual(items.map((x) => x.examId), ['4']);
     assert.equal(items[0].canTake, true);
+  });
+
+  it('empty assignedCatalogRows array does not block catalog (assignedOnly=false)', () => {
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: catalog,
+      assignedCatalogRows: [],
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' })
+    });
+    assert.equal(items.length, 0);
+  });
+
+  it('looksLikePersonalExamList trusts a single-exam StudentId response', () => {
+    const full = catalog;
+    const personal = [{ id: 99, name: 'Tek öğrenci denemesi', examType: 'LGS', resultStatus: 'None' }];
+    assert.equal(trustEdesisStudentCatalogList(full, personal), true);
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: full,
+      assignedCatalogRows: personal,
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' })
+    });
+    assert.deepEqual(items.map((x) => x.examId), ['99']);
+  });
+
+  it('does not trust near-full catalog as personal StudentId list', () => {
+    const full = Array.from({ length: 40 }, (_, i) => ({ id: i + 1 }));
+    const dump = Array.from({ length: 30 }, (_, i) => ({ id: i + 1 }));
+    assert.equal(trustEdesisStudentCatalogList(full, dump), false);
   });
 
   it('does not treat a near-full StudentId response as assigned', () => {
