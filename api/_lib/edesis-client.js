@@ -721,31 +721,38 @@ function examWindowStillOpen(exam, now = new Date()) {
   return true;
 }
 
-/** Henüz sonucu olmayan, bu öğrenciye tanımlanmış / girmesi gereken katalog denemesi */
+function catalogResultStatus(exam) {
+  const flat = flattenEdesisRow(exam);
+  return String(getPropCi(flat, ['resultStatus', 'status']) || 'None').trim();
+}
+
+/**
+ * Henüz sonucu olmayan katalog denemesi — v1.5 rehber:
+ * GET /exams DTO’sunda OgrenciIds / ClassroomId yok; StudentId filtresi de yok.
+ * Sınava gir = programı uyan, kapanmamış, henüz girilmemiş kurum denemeleri.
+ */
 export function shouldOfferUntakenCatalogExam(exam, scope = {}, now = new Date()) {
   if (!exam || !isOpenEdesisCatalogExam(exam)) return false;
   if (!examWindowStillOpen(exam, now)) return false;
   const keys = scope.programKeys instanceof Set ? scope.programKeys : new Set(scope.programKeys || []);
   const assigned = catalogExamAssignedToStudent(exam, scope);
   if (assigned === false) return false;
-  // Açık atama program süzgecinden önce — External API tür alanı boş gelebiliyor
   if (assigned === true) return true;
   if (keys.size && !edesisCatalogExamMatchesProgram(exam, keys)) return false;
-  // GET /exams?StudentId= gerçekten kısaldıysa satırları güven
   if (scope.assignedCatalogOnly) return true;
 
-  // External v1 çoğu zaman ogrenciIds döndürmez — atama tespit edilemezse (handler flag)
-  // güncel / online denemeleri programa göre göster.
+  const status = catalogResultStatus(exam);
+  const noneOrProcessing = /^(none|processing|pending|open)?$/i.test(status);
+  if (noneOrProcessing) {
+    if (!keys.size) return false;
+    if (!catalogExamRecencyMs(exam)) return true;
+    return isRecentOpenCatalogExam(exam, now, 400);
+  }
+  if (/^ready$/i.test(status)) {
+    if (!keys.size) return false;
+    return isRecentOpenCatalogExam(exam, now, 90);
+  }
   if (!scope.allowRecencyFallback) return false;
-
-  const flat = flattenEdesisRow(exam);
-  if (flat.isOnlineSinavForStudent === false || flat.isOnlineForStudent === false) return false;
-
-  const online =
-    flat.isOnlineSinavForStudent === true ||
-    flat.isOnlineSinavForStudent === 'true' ||
-    flat.isOnlineForStudent === true;
-  if (online && isRecentOpenCatalogExam(exam, now, 45)) return true;
   return isRecentOpenCatalogExam(exam, now, OPEN_CATALOG_WINDOW_DAYS);
 }
 
@@ -1114,11 +1121,10 @@ export function formatEdesisAvailableExamItem(examId, catalog, resultRow, meta =
 }
 
 /**
- * Öğrenciye gösterilecek denemeler:
- * 1) GET /exams/results?StudentId= satırları (girilmiş / Edesis sonuç kaydı)
- * 2) Henüz sonuç yoksa: açık (None/Processing) katalog denemeleri —
- *    yalnızca öğrenci/şube ataması veya GET /exams?StudentId= süzülmüş liste.
- * Tarih recency ile kurum kataloğu dökülmez.
+ * Öğrenciye gösterilecek denemeler (v1.5 rehber):
+ * 1) GET /exams/results?studentId= satırları (girilmiş)
+ * 2) GET /exams kataloğu — programı uyan, kapanmamış, henüz girilmemiş
+ *    (API’de öğrenci/şube atama filtresi yoktur)
  */
 export function buildStudentAvailableEdesisExamItems({
   catalogRows = [],
@@ -2429,24 +2435,48 @@ export async function fetchEdesisStudentsList(cfgOverride = {}, filters = {}) {
   };
 }
 
-/** GET /students Filter ile tek öğrenci (tam liste taramaz) */
+/** GET /students/{id} — v1.5 §7.1; yoksa Filter yedeği */
 export async function fetchEdesisStudentByOgrenciId(edesisStudentId, cfgOverride = {}) {
   const sid = String(edesisStudentId || '').trim();
   if (!sid) return null;
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  if (!cfg.apiKey) throw new Error('EDESIS_API_KEY_missing');
+  const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+
+  const mapStudent = (row) => {
+    if (!row || typeof row !== 'object') return null;
+    const r = flattenEdesisRow(row);
+    const id = pickStrCi(r, ['id', 'studentId', 'ogrenciId']) || pickStr(r, ['id', 'studentId', 'ogrenciId']);
+    return {
+      id: id || sid,
+      gradeName: pickStrCi(r, ['gradeName', 'sinifAdi', 'grade']) || '',
+      className: pickStrCi(r, ['className', 'classroomName', 'subeAdi', 'sube']) || '',
+      classroomId: pickStrCi(r, ['classroomId', 'sinifId']) || ''
+    };
+  };
+
+  try {
+    const r = await fetchEdesisJson(localCfg, `${V1_PATHS.students}/${encodeURIComponent(sid)}`);
+    if (r.status !== 204 && isReachableEdesisResponse(r) && r.json) {
+      const body = r.json.result && typeof r.json.result === 'object' && !Array.isArray(r.json.result)
+        ? r.json.result
+        : r.json;
+      const mapped = mapStudent(body);
+      if (mapped && (mapped.gradeName || mapped.className || mapped.classroomId || mapped.id)) {
+        return mapped;
+      }
+    }
+  } catch {
+    /* liste yedeği */
+  }
+
   const listed = await fetchEdesisStudentsList(cfgOverride, { Filter: sid });
   const hit = (listed.rows || []).find((row) => {
     const r = flattenEdesisRow(row);
-    const id = pickStr(r, ['id', 'studentId', 'ogrenciId']);
+    const id = pickStrCi(r, ['id', 'studentId', 'ogrenciId']) || pickStr(r, ['id', 'studentId', 'ogrenciId']);
     return id === sid;
   });
-  if (!hit) return null;
-  const r = flattenEdesisRow(hit);
-  return {
-    id: pickStr(r, ['id', 'studentId', 'ogrenciId']),
-    gradeName: pickStr(r, ['gradeName', 'sinifAdi', 'grade']),
-    className: pickStr(r, ['className', 'classroomName', 'subeAdi', 'sube']),
-    classroomId: pickStr(r, ['classroomId', 'sinifId'])
-  };
+  return hit ? mapStudent(hit) : null;
 }
 
 /** GET /terms — akademik dönemler */
@@ -2463,7 +2493,7 @@ export async function fetchEdesisTermsList(cfgOverride = {}) {
   };
 }
 
-/** GET /exams — sınav kataloğu (resultsUpdatedAfter artımlı senkron) */
+/** GET /exams — v1.5 §7.4: yalnızca Filter + resultsUpdatedAfter (StudentId/ClassroomId yok) */
 export async function fetchEdesisExamsCatalog(cfgOverride = {}, query = {}) {
   const cfg = { ...getEdesisConfig(), ...cfgOverride };
   if (!cfg.apiKey) throw new Error('EDESIS_API_KEY_missing');
@@ -2471,9 +2501,6 @@ export async function fetchEdesisExamsCatalog(cfgOverride = {}, query = {}) {
   const q = {};
   if (query.Filter) q.Filter = query.Filter;
   if (query.resultsUpdatedAfter) q.resultsUpdatedAfter = query.resultsUpdatedAfter;
-  if (query.StudentId) q.StudentId = query.StudentId;
-  if (query.studentId) q.studentId = query.studentId;
-  if (query.ClassroomId) q.ClassroomId = query.ClassroomId;
   const bulk = await fetchAllPaged(localCfg, V1_PATHS.exams, q);
   return {
     rows: bulk.rows || [],
@@ -2483,7 +2510,7 @@ export async function fetchEdesisExamsCatalog(cfgOverride = {}, query = {}) {
   };
 }
 
-/** GET /exams/results?StudentId= — tek öğrenci sonuçları */
+/** GET /exams/results?studentId= — v1.5 §7.5 (StudentId parametresi /exams/{id}/results’ta YOK) */
 export async function fetchEdesisStudentResults(edesisStudentId, cfgOverride = {}, options = {}) {
   const sid = String(edesisStudentId || '').trim();
   if (!sid) throw new Error('edesis_student_id_required');
@@ -2492,11 +2519,21 @@ export async function fetchEdesisStudentResults(edesisStudentId, cfgOverride = {
   const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
   const enrichSubjects = options.enrichSubjects !== false;
   const dateRange = defaultDateRangeQuery();
-  const bulk = await fetchAllPaged(localCfg, V1_PATHS.examResults, {
-    StudentId: sid,
+  const extra = enrichSubjects ? EXAM_DETAIL_QUERY : {};
+  let bulk = await fetchAllPaged(localCfg, V1_PATHS.examResults, {
+    studentId: sid,
+    startDate: dateRange.StartDate,
+    endDate: dateRange.EndDate,
     ...dateRange,
-    ...(enrichSubjects ? EXAM_DETAIL_QUERY : {})
+    ...extra
   });
+  if (!(bulk.rows || []).length) {
+    bulk = await fetchAllPaged(localCfg, V1_PATHS.examResults, {
+      StudentId: sid,
+      ...dateRange,
+      ...extra
+    });
+  }
   let rows = (bulk.rows || []).filter((row) => resultRowBelongsToStudent(row, sid));
   if (rows.length && enrichSubjects) {
     const enriched = await enrichEdesisRowsWithSubjectDetails(rows, localCfg, { maxStudents: 25 });
@@ -2506,7 +2543,7 @@ export async function fetchEdesisStudentResults(edesisStudentId, cfgOverride = {
     rows,
     totalCount: rows.length,
     httpStatus: bulk.response?.status ?? null,
-    fetchMode: 'v1:exams/results?StudentId',
+    fetchMode: 'v1:exams/results?studentId',
     error: bulk.error || null
   };
 }

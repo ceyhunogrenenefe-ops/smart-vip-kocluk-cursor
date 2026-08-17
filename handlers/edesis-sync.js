@@ -39,16 +39,6 @@ import {
   V1_PATHS,
   isAuthConnectedResponse,
   isReachableEdesisResponse,
-  catalogLooksStudentFiltered,
-  catalogExamAssignedToStudent,
-  trustEdesisStudentCatalogList,
-  looksLikePersonalExamList,
-  examAssignedViaOnlineFlag,
-  fetchEdesisExamAssignedToStudent,
-  isRecentOpenCatalogExam,
-  isOpenEdesisCatalogExam,
-  edesisCatalogExamMatchesProgram,
-  sortCatalogExamsByRecencyDesc,
   mapEdesisRowToExamDraft,
   flattenEdesisRows,
   studentMatchKeysFromEdesisRow,
@@ -156,7 +146,12 @@ async function resolveStudentEdesisScope({ edesisStudentId, platformStudentId, s
   };
 }
 
-/** Öğrenci sayfası: yalnızca bu öğrenciye tanımlanmış + henüz girilmemiş denemeler */
+/**
+ * Öğrenci Sınava gir — v1.5 rehber:
+ * GET /exams (kurum kataloğu; StudentId/ClassroomId filtresi YOK)
+ * GET /exams/results?studentId= (girilmiş sonuçlar)
+ * Girilebilir = programı uyan, kapanmamış, henüz girilmemiş denemeler.
+ */
 async function loadAvailableEdesisExamsForStudent({
   edesisStudentId,
   platformStudentId,
@@ -170,181 +165,21 @@ async function loadAvailableEdesisExamsForStudent({
     studentHint,
     cfg
   });
-  const catalogFetches = [
+  const [catalog, studentResults] = await Promise.all([
     fetchEdesisExamsCatalog(cfg).catch(() => ({ rows: [] })),
-    fetchEdesisExamsCatalog(cfg, { StudentId: edesisStudentId }).catch(() => ({ rows: [] })),
     fetchEdesisStudentResults(edesisStudentId, cfg, { enrichSubjects: false }).catch(() => ({
       rows: []
     }))
-  ];
-  if (scope.classroomId) {
-    catalogFetches.push(
-      fetchEdesisExamsCatalog(cfg, { ClassroomId: scope.classroomId }).catch(() => ({ rows: [] }))
-    );
-  }
-  const [catalog, studentCatalog, studentResults, classroomCatalog] = await Promise.all(catalogFetches);
-  const fullRows = catalog.rows || [];
-  const studentRows = studentCatalog.rows || [];
-  const classroomRows = classroomCatalog?.rows || [];
-
-  const assignedMap = new Map();
-  const assignScope = {
-    edesisStudentId,
-    classroomId: scope.classroomId,
-    programKeys: scope.programKeys
-  };
-  const assignScopeWithClassroom = { ...assignScope, allowClassroomOnly: true };
-
-  const pushIfAssigned = (rows, scopeOverride) => {
-    const sc = scopeOverride || assignScope;
-    for (const ex of rows || []) {
-      const id = pickEdesisCatalogExamId(ex) || String(ex?.id ?? ex?.examId ?? '').trim();
-      if (!id || assignedMap.has(id)) continue;
-      if (catalogExamAssignedToStudent(ex, sc) === true) {
-        assignedMap.set(id, ex);
-      }
-    }
-  };
-  // OgrenciIds / isAllClasses kanıtı olan satırlar
-  pushIfAssigned(fullRows);
-  pushIfAssigned(studentRows);
-  // ClassroomId kataloğu: bu şubeye tanımlanmış — sınıfa atama da geçerli atamadır
-  if (scope.classroomId && classroomRows.length) {
-    for (const ex of classroomRows) {
-      const id = pickEdesisCatalogExamId(ex) || String(ex?.id ?? ex?.examId ?? '').trim();
-      if (!id || assignedMap.has(id)) continue;
-      if (!isOpenEdesisCatalogExam(ex)) continue;
-      // Başka öğrenciye özelleştirilmiş değilse şube ataması olarak kabul et
-      if (catalogExamAssignedToStudent(ex, assignScopeWithClassroom) !== false) {
-        assignedMap.set(id, ex);
-      }
-    }
-  }
-
-  const studentFiltered = trustEdesisStudentCatalogList(fullRows, studentRows);
-
-  const mergeTrustedStudentCatalog = () => {
-    if (!studentFiltered || !studentRows.length) return;
-    for (const ex of studentRows) {
-      const id = pickEdesisCatalogExamId(ex) || String(ex?.id ?? ex?.examId ?? '').trim();
-      if (!id || assignedMap.has(id)) continue;
-      if (!isOpenEdesisCatalogExam(ex)) continue;
-      if (catalogExamAssignedToStudent(ex, assignScope) === false) continue;
-      assignedMap.set(id, ex);
-    }
-  };
-
-  mergeTrustedStudentCatalog();
-
-  const fullById = new Map();
-  for (const ex of fullRows) {
-    const id = pickEdesisCatalogExamId(ex);
-    if (id) fullById.set(id, ex);
-  }
-  for (const ex of studentRows) {
-    const id = pickEdesisCatalogExamId(ex) || String(ex?.id ?? ex?.examId ?? '').trim();
-    if (!id || assignedMap.has(id)) continue;
-    if (!isOpenEdesisCatalogExam(ex)) continue;
-    if (catalogExamAssignedToStudent(ex, assignScope) === false) continue;
-    if (examAssignedViaOnlineFlag(ex, fullById.get(id) || null)) {
-      assignedMap.set(id, ex);
-    }
-  }
-
-  const DETAIL_LIMIT = 60;
-  const pool = sortCatalogExamsByRecencyDesc(
-    fullRows.length ? [...fullRows, ...studentRows, ...classroomRows] : [...studentRows, ...classroomRows]
-  );
-  const seenPool = new Set();
-  const needDetail = [];
-  for (const ex of pool) {
-    if (!isOpenEdesisCatalogExam(ex)) continue;
-    const id = pickEdesisCatalogExamId(ex) || String(ex?.id ?? ex?.examId ?? '').trim();
-    if (!id || assignedMap.has(id) || seenPool.has(id)) continue;
-    seenPool.add(id);
-    if (catalogExamAssignedToStudent(ex, assignScope) === false) continue;
-    needDetail.push(ex);
-  }
-  needDetail.sort((a, b) => {
-    const aid = pickEdesisCatalogExamId(a) || '';
-    const bid = pickEdesisCatalogExamId(b) || '';
-    const aPri = studentFiltered && studentRows.some((r) => (pickEdesisCatalogExamId(r) || '') === aid) ? 1 : 0;
-    const bPri = studentFiltered && studentRows.some((r) => (pickEdesisCatalogExamId(r) || '') === bid) ? 1 : 0;
-    return bPri - aPri;
-  });
-  const detailQueue = needDetail.slice(0, DETAIL_LIMIT);
-
-  if (detailQueue.length && cfg?.apiKey) {
-    const localCfg = { ...getEdesisConfig(), ...cfg, baseUrl: cfg.baseUrl || getEdesisConfig().baseUrl };
-    const CONCURRENCY = 6;
-    for (let i = 0; i < detailQueue.length; i += CONCURRENCY) {
-      const batch = detailQueue.slice(i, i + CONCURRENCY);
-      await Promise.all(
-        batch.map(async (ex) => {
-          const id = pickEdesisCatalogExamId(ex) || String(ex?.id ?? ex?.examId ?? '').trim();
-          if (!id || assignedMap.has(id)) return;
-          try {
-            const r = await fetchEdesisJson(localCfg, V1_PATHS.examById(id));
-            if (!isReachableEdesisResponse(r)) return;
-            const detailBody =
-              r.json?.result && typeof r.json.result === 'object' && !Array.isArray(r.json.result)
-                ? { ...ex, ...r.json, ...r.json.result }
-                : { ...ex, ...(r.json && typeof r.json === 'object' ? r.json : {}) };
-            if (catalogExamAssignedToStudent(detailBody, assignScope) === true) {
-              assignedMap.set(id, detailBody);
-            }
-          } catch {
-            /* rate / 404 */
-          }
-        })
-      );
-    }
-  }
-
-  // Liste DTO'sunda OgrenciIds yoksa: son 45 gün açık denemelerde StudentId sonuç satırı
-  const now = new Date();
-  const probeQueue = sortCatalogExamsByRecencyDesc(needDetail)
-    .filter((ex) => {
-      const id = pickEdesisCatalogExamId(ex);
-      if (!id || assignedMap.has(id)) return false;
-      return isRecentOpenCatalogExam(ex, now, 45);
-    })
-    .slice(0, 40);
-  if (probeQueue.length && cfg?.apiKey) {
-    const localCfg = { ...getEdesisConfig(), ...cfg, baseUrl: cfg.baseUrl || getEdesisConfig().baseUrl };
-    const CONCURRENCY = 6;
-    for (let i = 0; i < probeQueue.length; i += CONCURRENCY) {
-      const batch = probeQueue.slice(i, i + CONCURRENCY);
-      await Promise.all(
-        batch.map(async (ex) => {
-          const id = pickEdesisCatalogExamId(ex);
-          if (!id || assignedMap.has(id)) return;
-          try {
-            const hit = await fetchEdesisExamAssignedToStudent(id, edesisStudentId, localCfg);
-            if (hit) assignedMap.set(id, ex);
-          } catch {
-            /* 404 / rate */
-          }
-        })
-      );
-    }
-  }
-
-  // Detayda ogrenciIds geldiyse yukarıda eklendi; yoksa güvenilir StudentId listesine güven
-  mergeTrustedStudentCatalog();
-
-  const assignedCatalogRows = assignedMap.size ? [...assignedMap.values()] : null;
+  ]);
   return buildStudentAvailableEdesisExamItems({
-    catalogRows: fullRows,
-    assignedCatalogRows,
+    catalogRows: catalog.rows || [],
     resultRows: studentResults.rows || [],
     edesisStudentId,
     programKeys: scope.programKeys,
     classroomId: scope.classroomId,
     studentId: platformStudentId || `edesis-${edesisStudentId}`,
     institutionId: actor?.institution_id || null,
-    // Kurum kataloğu recency yedeği kapalı — yalnızca atanmış / StudentId kişisel liste
-    allowRecencyFallback: false
+    allowRecencyFallback: true
   });
 }
 
@@ -1636,7 +1471,7 @@ export default async function handler(req, res) {
         takeableCount: items.filter((x) => x.canTake && !x.hasStudentResult).length,
         hint: items.length
           ? null
-          : 'Edesis’te size tanımlanmış deneme yok. Koçunuz sınavı tanımladıktan sonra burada görünür. Öğrenci Edesis ID eşlemesini kontrol edin.'
+          : 'Programınıza uyan açık deneme yok. Edesis öğrenci ID eşlemesini ve sınıf düzeyini kontrol edin.'
       });
     }
 

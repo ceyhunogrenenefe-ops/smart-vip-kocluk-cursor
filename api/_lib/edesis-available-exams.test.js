@@ -54,7 +54,7 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     assert.equal(items.length, 0);
   });
 
-  it('does not dump recent open catalog exams without assignment', () => {
+  it('offers recent open program exams from GET /exams catalog (v1.5 has no assignment filter)', () => {
     const now = new Date('2026-08-14T12:00:00Z');
     const items = buildStudentAvailableEdesisExamItems({
       catalogRows: catalog,
@@ -63,7 +63,10 @@ describe('buildStudentAvailableEdesisExamItems', () => {
       programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
       now
     });
-    assert.equal(items.length, 0);
+    assert.ok(items.some((x) => x.examId === '4' && x.canTake), 'LGS Yeni (None) must be takeable');
+    assert.equal(items.some((x) => x.examId === '3'), false, 'YÖS must not leak to LGS');
+    assert.equal(items.some((x) => x.examId === '5'), false, '3-4. sınıf must not leak to LGS');
+    assert.equal(items.some((x) => x.examId === '1'), false, 'old Ready LGS must not dump');
   });
 
   it('with allowRecencyFallback offers recent program exams when assignment unknown', () => {
@@ -105,7 +108,7 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     const now = new Date('2026-08-14T12:00:00Z');
     const items = buildStudentAvailableEdesisExamItems({
       catalogRows: [
-        { id: 40, name: 'LGS Eski', examType: 'LGS', resultStatus: 'None', examDate: '2026-03-01' }
+        { id: 40, name: 'LGS Eski', examType: 'LGS', resultStatus: 'None', examDate: '2025-03-01' }
       ],
       resultRows: [],
       edesisStudentId: '7105077',
@@ -154,14 +157,16 @@ describe('buildStudentAvailableEdesisExamItems', () => {
   });
 
   it('empty assignedCatalogRows array does not block catalog (assignedOnly=false)', () => {
+    const now = new Date('2026-08-14T12:00:00Z');
     const items = buildStudentAvailableEdesisExamItems({
       catalogRows: catalog,
       assignedCatalogRows: [],
       resultRows: [],
       edesisStudentId: '7105077',
-      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' })
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      now
     });
-    assert.equal(items.length, 0);
+    assert.ok(items.some((x) => x.examId === '4' && x.canTake));
   });
 
   it('looksLikePersonalExamList trusts a single-exam StudentId response', () => {
@@ -361,7 +366,7 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     assert.equal(items[0].canTake, true);
   });
 
-  it('does not treat classroomId alone as assigned to every classmate', () => {
+  it('offers program-matched None exam even without studentIds (v1.5 catalog DTO)', () => {
     const items = buildStudentAvailableEdesisExamItems({
       catalogRows: [
         {
@@ -378,7 +383,8 @@ describe('buildStudentAvailableEdesisExamItems', () => {
       classroomId: '501',
       programKeys: inferEdesisExamProgramKeys({ classLevel: '7' })
     });
-    assert.deepEqual(items.map((x) => x.examId), []);
+    assert.deepEqual(items.map((x) => x.examId), ['88']);
+    assert.equal(items[0].canTake, true);
   });
 
   it('hides exam assigned to another student even when classroom matches', () => {
