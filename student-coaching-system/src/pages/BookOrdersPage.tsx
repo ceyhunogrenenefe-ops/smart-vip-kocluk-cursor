@@ -586,9 +586,12 @@ export default function BookOrdersPage() {
   const startEditSet = (row: BookOrderSetRow) => {
     setBookSetsSectionOpen(true);
     setEditingSetId(row.id);
-    setSetName(row.name);
-    setSetIcerik(row.kitap_icerigi);
-    setSetSiniflar(Array.isArray(row.siniflar) ? row.siniflar.join(', ') : '');
+    setSetName(String(row.name || ''));
+    setSetIcerik(String(row.kitap_icerigi || ''));
+    const sinifText = Array.isArray(row.siniflar)
+      ? row.siniflar.map((x) => String(x || '').trim()).filter(Boolean).join(', ')
+      : String(row.siniflar || '').trim();
+    setSetSiniflar(sinifText);
     setSetSort(String(row.sort_order ?? 0));
     setShowSetForm(true);
   };
@@ -598,11 +601,14 @@ export default function BookOrdersPage() {
       toast.error('Kurum seçin');
       return;
     }
-    if (!setName.trim() || !setIcerik.trim() || !setSiniflar.trim()) {
+    const name = String(setName || '').trim();
+    const icerik = String(setIcerik || '').trim();
+    const sinifRaw = String(setSiniflar || '').trim();
+    if (!name || !icerik || !sinifRaw) {
       toast.error('Set adı, içerik ve sınıflar gerekli');
       return;
     }
-    const siniflar = setSiniflar
+    const siniflar = sinifRaw
       .split(/[,;]+/)
       .map((x) => x.trim())
       .filter(Boolean);
@@ -610,8 +616,8 @@ export default function BookOrdersPage() {
     try {
       if (editingSetId) {
         await patchBookOrderSet(editingSetId, {
-          name: setName.trim(),
-          kitap_icerigi: setSetIcerik.trim(),
+          name,
+          kitap_icerigi: icerik,
           siniflar,
           sort_order: Number(setSort) || 0
         });
@@ -619,8 +625,8 @@ export default function BookOrdersPage() {
       } else {
         await createBookOrderSet({
           institution_id: effectiveInstitutionId,
-          name: setName.trim(),
-          kitap_icerigi: setSetIcerik.trim(),
+          name,
+          kitap_icerigi: icerik,
           siniflar,
           sort_order: Number(setSort) || 0
         });
