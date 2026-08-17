@@ -14,6 +14,7 @@ import {
   pickEdesisBookletLessons,
   looksLikePdfBuffer,
   catalogLooksStudentFiltered,
+  catalogExamAssignedToStudent,
   resolveEdesisFileUrl,
   expandEdesisFileUrlCandidates
 } from './edesis-client.js';
@@ -165,13 +166,13 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     );
   });
 
-  it('trusts a proper id subset even when ratio is high (small catalog)', () => {
+  it('does not treat a near-full program dump as assigned', () => {
     assert.equal(
       catalogLooksStudentFiltered(
-        Array.from({ length: 5 }, (_, i) => ({ id: i + 1 })),
-        [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }]
+        Array.from({ length: 40 }, (_, i) => ({ id: i + 1 })),
+        Array.from({ length: 30 }, (_, i) => ({ id: i + 1 }))
       ),
-      true
+      false
     );
   });
 
@@ -325,15 +326,15 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     assert.equal(items[0].canTake, true);
   });
 
-  it('offers classroom-assigned open exams', () => {
+  it('does not treat classroomId alone as assigned to every classmate', () => {
     const items = buildStudentAvailableEdesisExamItems({
       catalogRows: [
         {
           id: 88,
-          name: '7 SINIF PAYLAŞIM MİS-3',
+          name: 'Tek öğrenciye tanımlı',
           examType: 'LGS',
           resultStatus: 'None',
-          examDate: '2026-04-18',
+          examDate: '2026-08-16',
           classroomId: 501
         }
       ],
@@ -342,7 +343,71 @@ describe('buildStudentAvailableEdesisExamItems', () => {
       classroomId: '501',
       programKeys: inferEdesisExamProgramKeys({ classLevel: '7' })
     });
-    assert.deepEqual(items.map((x) => x.examId), ['88']);
+    assert.deepEqual(items.map((x) => x.examId), []);
+  });
+
+  it('hides exam assigned to another student even when classroom matches', () => {
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [
+        {
+          id: 89,
+          name: 'Başka öğrenci',
+          examType: 'LGS',
+          resultStatus: 'None',
+          examDate: '2026-08-16',
+          classroomId: 501,
+          ogrenciIds: [111]
+        }
+      ],
+      resultRows: [],
+      edesisStudentId: '7105077',
+      classroomId: '501',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '7' })
+    });
+    assert.equal(items.length, 0);
+    assert.equal(
+      catalogExamAssignedToStudent(
+        { id: 89, classroomId: 501, ogrenciIds: [111] },
+        { edesisStudentId: '7105077', classroomId: '501' }
+      ),
+      false
+    );
+  });
+
+  it('prefers nested ogrenciIds over top-level classroomId', () => {
+    assert.equal(
+      catalogExamAssignedToStudent(
+        { id: 90, classroomId: 501, result: { ogrenciIds: [7105077] } },
+        { edesisStudentId: '7105077', classroomId: '501' }
+      ),
+      true
+    );
+    assert.equal(
+      catalogExamAssignedToStudent(
+        { id: 90, classroomId: 501, result: { ogrenciIds: [999] } },
+        { edesisStudentId: '7105077', classroomId: '501' }
+      ),
+      false
+    );
+  });
+
+  it('offers isAllClasses exam to the student', () => {
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [
+        {
+          id: 91,
+          name: 'Tüm sınıflar',
+          examType: 'LGS',
+          resultStatus: 'None',
+          examDate: '2026-08-16',
+          isAllClasses: true
+        }
+      ],
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '7' })
+    });
+    assert.deepEqual(items.map((x) => x.examId), ['91']);
   });
 
   it('keeps submitted YÖS result for YKS (class 12) student', () => {
