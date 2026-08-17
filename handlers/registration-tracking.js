@@ -13,6 +13,8 @@ import {
   computeConversionRate,
   isOverdue,
   splitFullName,
+  phoneLookupVariants,
+  istanbulDayBounds,
   STAGES,
   LOST_REASONS,
   TASK_TYPES,
@@ -187,6 +189,17 @@ function applyLeadFilters(q, filters, institutionId) {
   if (filters.created_from) query = query.gte('created_at', filters.created_from);
   if (filters.created_to) query = query.lte('created_at', filters.created_to);
 
+  if (filters.date_from) {
+    const b = istanbulDayBounds(filters.date_from);
+    if (b) query = query.gte('created_at', b.start);
+  }
+  if (filters.date_to) {
+    const b = istanbulDayBounds(filters.date_to);
+    if (b) query = query.lte('created_at', b.end);
+  }
+
+  if (filters.coach_id) query = query.eq('assigned_user_id', filters.coach_id);
+
   return query;
 }
 
@@ -353,6 +366,81 @@ async function handleGetLead(leadId, institutionId, tags) {
   };
 }
 
+async function resolveCoachRow(coachId) {
+  if (!coachId) return null;
+  const { data: c } = await supabaseAdmin.from('coaches').select('id, name, email').eq('id', coachId).maybeSingle();
+  if (c?.id) return { id: String(c.id), name: c.name || 'Koç', email: c.email || null };
+  const { data: u } = await supabaseAdmin.from('users').select('id, name, email').eq('id', coachId).maybeSingle();
+  if (u?.id) return { id: String(u.id), name: u.name || 'Koç', email: u.email || null };
+  return { id: String(coachId), name: 'Koç', email: null };
+}
+
+async function lookupCoachByParentPhone(institutionId, phoneRaw) {
+  const phone = normalizeTrPhone(phoneRaw);
+  if (!phone) {
+    return { phone: null, coach: null, parent_full_name: null, linked_student_id: null };
+  }
+  const variants = phoneLookupVariants(phone);
+  let coachId = null;
+  let parentName = null;
+  let studentId = null;
+
+  try {
+    let q = supabaseAdmin
+      .from('students')
+      .select('id, name, parent_name, parent_phone, coach_id')
+      .eq('institution_id', institutionId)
+      .limit(20);
+    if (variants.length === 1) q = q.eq('parent_phone', variants[0]);
+    else q = q.in('parent_phone', variants);
+    const { data: students } = await q;
+    const hit = (students || []).find((s) => s.coach_id) || (students || [])[0];
+    if (hit) {
+      coachId = hit.coach_id || null;
+      parentName = hit.parent_name || null;
+      studentId = hit.id || null;
+    }
+  } catch {
+    /* students tablosu yoksa leads'e düş */
+  }
+
+  if (!coachId) {
+    const { data: leads } = await supabaseAdmin
+      .from('registration_leads')
+      .select('assigned_user_id, parent_full_name, linked_student_id')
+      .eq('institution_id', institutionId)
+      .eq('normalized_phone', phone)
+      .is('deleted_at', null)
+      .not('assigned_user_id', 'is', null)
+      .limit(5);
+    const lead = (leads || [])[0];
+    if (lead) {
+      coachId = lead.assigned_user_id;
+      parentName = parentName || lead.parent_full_name;
+      studentId = studentId || lead.linked_student_id;
+    }
+  }
+
+  const coach = await resolveCoachRow(coachId);
+  return {
+    phone,
+    coach,
+    parent_full_name: parentName,
+    linked_student_id: studentId
+  };
+}
+
+async function handleListCoaches(institutionId) {
+  const { data, error } = await supabaseAdmin
+    .from('coaches')
+    .select('id, name, email')
+    .eq('institution_id', institutionId)
+    .order('name')
+    .limit(400);
+  if (error) throw error;
+  return (data || []).map((c) => ({ id: String(c.id), name: c.name || 'Koç', email: c.email || null }));
+}
+
 async function handleCreateLead(body, institutionId, actor) {
   const names = body.first_name
     ? { first_name: body.first_name, last_name: body.last_name || '' }
@@ -366,13 +454,27 @@ async function handleCreateLead(body, institutionId, actor) {
     throw new Error('Öğrenci adı ve sınıf/program zorunludur');
   }
 
+  const isConfirmed = body.primary_status === 'confirmed';
+  let assignedUserId = body.assigned_user_id || null;
+  let parentName = body.parent_full_name || null;
+  let linkedStudentId = body.linked_student_id || null;
+
+  if (phone && !assignedUserId) {
+    const looked = await lookupCoachByParentPhone(institutionId, phone);
+    if (looked.coach?.id) assignedUserId = looked.coach.id;
+    if (!parentName && looked.parent_full_name) parentName = looked.parent_full_name;
+    if (!linkedStudentId && looked.linked_student_id) linkedStudentId = looked.linked_student_id;
+  }
+
+  const nowIso = new Date().toISOString();
   const row = {
     institution_id: institutionId,
     academic_period_id: body.academic_period_id || null,
     academic_period_key: body.academic_period_key || null,
+    linked_student_id: linkedStudentId,
     first_name: names.first_name,
     last_name: names.last_name || '',
-    parent_full_name: body.parent_full_name || null,
+    parent_full_name: parentName,
     phone: body.phone || null,
     normalized_phone: phone,
     alternate_phone: body.alternate_phone || null,
@@ -380,12 +482,12 @@ async function handleCreateLead(body, institutionId, actor) {
     email: body.email || null,
     grade_program: grade,
     interested_package: body.interested_package || null,
-    primary_status: body.primary_status === 'confirmed' ? 'confirmed' : 'tracking',
-    stage: body.stage && STAGES.includes(body.stage) ? body.stage : 'new_lead',
-    temperature: body.temperature || 'warm',
+    primary_status: isConfirmed ? 'confirmed' : 'tracking',
+    stage: isConfirmed ? 'confirmed' : body.stage && STAGES.includes(body.stage) ? body.stage : 'new_lead',
+    temperature: body.temperature || (isConfirmed ? 'hot' : 'warm'),
     probability: body.probability != null ? Number(body.probability) : null,
     source: body.source || null,
-    assigned_user_id: body.assigned_user_id || null,
+    assigned_user_id: assignedUserId,
     next_action_at: body.next_action_at || null,
     next_action_type: body.next_action_type || null,
     parent_expectations: body.parent_expectations || null,
@@ -394,6 +496,8 @@ async function handleCreateLead(body, institutionId, actor) {
     discount_amount: body.discount_amount != null ? Number(body.discount_amount) : null,
     final_offer_amount: body.final_offer_amount != null ? Number(body.final_offer_amount) : null,
     notes: body.notes || null,
+    confirmed_at: isConfirmed ? nowIso : null,
+    confirmed_by: isConfirmed ? actor.sub : null,
     created_by: actor.sub,
     updated_by: actor.sub
   };
@@ -1226,6 +1330,16 @@ export default async function handler(req, res) {
     if (op === 'check-duplicates') {
       const dupes = await findDuplicates(institutionId, body);
       return res.status(200).json({ duplicates: dupes });
+    }
+
+    if (op === 'lookup-phone') {
+      const data = await lookupCoachByParentPhone(institutionId, req.query.phone || body.phone);
+      return res.status(200).json({ data });
+    }
+
+    if (op === 'coaches') {
+      const data = await handleListCoaches(institutionId);
+      return res.status(200).json({ data });
     }
 
     if (op === 'suggestions') {

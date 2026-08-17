@@ -192,3 +192,20 @@ export function rtStaffPerformance() {
 export function rtSuggestions() {
   return rtFetch<{ data: Record<string, RegLead[]> }>('suggestions', { method: 'GET' });
 }
+
+export type RegCoach = { id: string; name: string; email?: string | null };
+
+export function rtListCoaches() {
+  return rtFetch<{ data: RegCoach[] }>('coaches', { method: 'GET' });
+}
+
+export function rtLookupPhone(phone: string) {
+  return rtFetch<{
+    data: {
+      phone: string | null;
+      coach: RegCoach | null;
+      parent_full_name: string | null;
+      linked_student_id: string | null;
+    };
+  }>('lookup-phone', { method: 'GET', query: { phone } });
+}

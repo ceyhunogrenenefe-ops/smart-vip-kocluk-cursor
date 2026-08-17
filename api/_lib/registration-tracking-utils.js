@@ -77,6 +77,29 @@ export function normalizeTrPhone(raw) {
   return digits.length >= 10 ? digits : null;
 }
 
+/** students.parent_phone farklı formatlarda tutulabildiği için arama varyantları */
+export function phoneLookupVariants(raw) {
+  const n = normalizeTrPhone(raw);
+  if (!n) return [];
+  const set = new Set([n]);
+  if (n.startsWith('0') && n.length === 11) {
+    set.add(n.slice(1));
+    set.add(`+90${n.slice(1)}`);
+    set.add(`90${n.slice(1)}`);
+  }
+  return [...set];
+}
+
+/** Europe/Istanbul günü → UTC ISO aralığı */
+export function istanbulDayBounds(ymd) {
+  const d = String(ymd || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
+  return {
+    start: new Date(`${d}T00:00:00+03:00`).toISOString(),
+    end: new Date(`${d}T23:59:59.999+03:00`).toISOString()
+  };
+}
+
 export const PRIMARY_STATUSES = ['tracking', 'confirmed', 'lost'];
 export const PRIMARY_STATUS_LABELS = {
   tracking: 'Takip',
