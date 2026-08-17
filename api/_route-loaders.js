@@ -114,6 +114,7 @@ export const routeLoaders = {
   'public-teachers': () => import('../handlers/public-teachers.js'),
   'teacher-applications': () => import('../handlers/teacher-applications.js'),
   'meeting-tracker': () => import('../handlers/meeting-tracker.js'),
+  'registration-tracking': () => import('../handlers/registration-tracking.js'),
   'student-payment-tracker': () => import('../handlers/student-payment-tracker.js'),
   'muhasebe-ledger': () => import('../handlers/muhasebe-ledger.js'),
   'garanti-pos': () => import('../handlers/garanti-pos.js')

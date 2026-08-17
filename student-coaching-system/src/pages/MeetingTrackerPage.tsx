@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
   Calendar,
   ChevronDown,
   ChevronUp,
   ClipboardList,
+  Filter,
   LayoutGrid,
   List,
   Loader2,
@@ -20,6 +21,7 @@ import { userHasAnyRole } from '../config/rolePermissions';
 import { parseAgendaPasteText, mergeAgendaDrafts, type ParsedAgendaDraft } from '../lib/meetingAgendaParse';
 import MeetingDetailPanel from './meetingTracker/MeetingDetailPanel';
 import CoachEnrollmentTrackerPanel from './meetingTracker/CoachEnrollmentTrackerPanel';
+import RegistrationTrackingPanel from './meetingTracker/RegistrationTrackingPanel';
 import {
   mtAddAgenda,
   mtAddDecision,
@@ -111,31 +113,37 @@ function staffManagers(users: MtUser[]) {
   return users.filter((u) => ['super_admin', 'admin'].includes(String(u.role || '').toLowerCase()));
 }
 
-type PageTab = 'toplanti' | 'koc-takip';
+type PageTab = 'toplanti' | 'koc-takip' | 'kayit-takibi';
 
 function parsePageTab(raw: string | null): PageTab {
   if (raw === 'koc-takip') return 'koc-takip';
+  if (raw === 'kayit-takibi') return 'kayit-takibi';
   return 'toplanti';
 }
 
 export default function MeetingTrackerPage() {
   const { effectiveUser } = useAuth();
   const isManager = userHasAnyRole(effectiveUser, ['super_admin', 'admin']);
+  const location = useLocation();
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const meetingId = params.get('id') || '';
-  const pageTab = parsePageTab(params.get('tab'));
+  const isKayitRoute =
+    location.pathname === '/kayit-takibi' ||
+    location.pathname === '/super-admin/meetings/registration-tracking';
+  const pageTab = isKayitRoute ? 'kayit-takibi' : parsePageTab(params.get('tab'));
 
   const setPageTab = useCallback(
     (next: PageTab) => {
-      setParams((p) => {
-        const n = new URLSearchParams(p);
-        n.delete('id');
-        if (next === 'toplanti') n.delete('tab');
-        else n.set('tab', next);
-        return n;
-      });
+      if (next === 'kayit-takibi') {
+        navigate('/kayit-takibi');
+        return;
+      }
+      const n = new URLSearchParams();
+      if (next !== 'toplanti') n.set('tab', next);
+      navigate(n.toString() ? `/toplanti-takip?${n.toString()}` : '/toplanti-takip');
     },
-    [setParams]
+    [navigate]
   );
 
   const [loading, setLoading] = useState(true);
@@ -376,6 +384,18 @@ export default function MeetingTrackerPage() {
         </button>
         <button
           type="button"
+          onClick={() => setPageTab('kayit-takibi')}
+          className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors ${
+            pageTab === 'kayit-takibi'
+              ? 'bg-white text-indigo-700 shadow-sm dark:bg-slate-900 dark:text-indigo-300'
+              : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
+          }`}
+        >
+          <Filter className="h-4 w-4" />
+          Kayıt Takibi
+        </button>
+        <button
+          type="button"
           onClick={() => setPageTab('koc-takip')}
           className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors ${
             pageTab === 'koc-takip'
@@ -387,6 +407,13 @@ export default function MeetingTrackerPage() {
           Koç kayıt takibi
         </button>
       </div>
+
+      {pageTab === 'kayit-takibi' ? (
+        <RegistrationTrackingPanel
+          isManager={isManager}
+          institutionId={effectiveUser?.institutionId || null}
+        />
+      ) : null}
 
       {pageTab === 'koc-takip' ? (
         <CoachEnrollmentTrackerPanel

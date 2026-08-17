@@ -401,6 +401,22 @@ function App() {
               </ProtectedRoute>
             } />
 
+            <Route path="/kayit-takibi" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/kayit-takibi')}>
+                <Layout>
+                  <MeetingTrackerPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/super-admin/meetings/registration-tracking" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/kayit-takibi')}>
+                <Layout>
+                  <MeetingTrackerPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
             <Route path="/toplantilarim" element={
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/toplantilarim')}>
                 <Layout>
