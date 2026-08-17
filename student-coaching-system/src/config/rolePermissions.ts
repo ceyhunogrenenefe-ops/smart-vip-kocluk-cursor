@@ -79,6 +79,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/notifications': ['super_admin', 'admin', 'coach'],
   '/events': ['super_admin', 'admin', 'coach'],
   '/toplanti-takip': ['super_admin', 'admin'],
+  '/kayit-takibi': ['super_admin', 'admin'],
   '/toplantilarim': ['coach', 'teacher'],
   '/kitap-siparisleri': ['super_admin', 'admin'],
   '/ozel-ders-talepleri': ['super_admin', 'admin'],

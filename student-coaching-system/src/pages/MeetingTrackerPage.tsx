@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
   Calendar,
@@ -124,21 +124,26 @@ function parsePageTab(raw: string | null): PageTab {
 export default function MeetingTrackerPage() {
   const { effectiveUser } = useAuth();
   const isManager = userHasAnyRole(effectiveUser, ['super_admin', 'admin']);
+  const location = useLocation();
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const meetingId = params.get('id') || '';
-  const pageTab = parsePageTab(params.get('tab'));
+  const isKayitRoute =
+    location.pathname === '/kayit-takibi' ||
+    location.pathname === '/super-admin/meetings/registration-tracking';
+  const pageTab = isKayitRoute ? 'kayit-takibi' : parsePageTab(params.get('tab'));
 
   const setPageTab = useCallback(
     (next: PageTab) => {
-      setParams((p) => {
-        const n = new URLSearchParams(p);
-        n.delete('id');
-        if (next === 'toplanti') n.delete('tab');
-        else n.set('tab', next);
-        return n;
-      });
+      if (next === 'kayit-takibi') {
+        navigate('/kayit-takibi');
+        return;
+      }
+      const n = new URLSearchParams();
+      if (next !== 'toplanti') n.set('tab', next);
+      navigate(n.toString() ? `/toplanti-takip?${n.toString()}` : '/toplanti-takip');
     },
-    [setParams]
+    [navigate]
   );
 
   const [loading, setLoading] = useState(true);
