@@ -47,7 +47,8 @@ import {
   mapEdesisRowToExamDraft,
   flattenEdesisRows,
   studentMatchKeysFromEdesisRow,
-  pickEdesisResultExamId
+  pickEdesisResultExamId,
+  pickEdesisCatalogExamId
 } from '../api/_lib/edesis-client.js';
 import {
   processEdesisRows,
@@ -182,43 +183,66 @@ async function loadAvailableEdesisExamsForStudent({
   const classroomRows = classroomCatalog?.rows || [];
 
   const assignedMap = new Map();
-  const pushAssigned = (rows) => {
-    for (const ex of rows || []) {
-      const id = String(ex?.id ?? ex?.examId ?? '').trim();
-      if (!id) continue;
-      assignedMap.set(id, ex);
-    }
-  };
-  if (catalogLooksStudentFiltered(fullRows, studentRows)) pushAssigned(studentRows);
-  if (scope.classroomId && catalogLooksStudentFiltered(fullRows, classroomRows)) {
-    pushAssigned(classroomRows);
-  }
-
-  // Liste DTO’sunda ogrenciIds yoksa: açık + program uyan adaylarda detay çek (yeni tanımlananlar önce)
   const assignScope = {
     edesisStudentId,
     classroomId: scope.classroomId,
     programKeys: scope.programKeys
   };
-  const DETAIL_LIMIT = 60;
-  const needDetail = sortCatalogExamsByRecencyDesc(fullRows.length ? fullRows : studentRows)
-    .filter((ex) => {
-      if (!isOpenEdesisCatalogExam(ex)) return false;
-      if (scope.programKeys?.size && !edesisCatalogExamMatchesProgram(ex, scope.programKeys)) return false;
-      const id = String(ex?.id ?? ex?.examId ?? '').trim();
-      if (id && assignedMap.has(id)) return false;
-      return catalogExamAssignedToStudent(ex, assignScope) === null;
-    })
-    .slice(0, DETAIL_LIMIT);
+  const pushIfAssigned = (rows) => {
+    for (const ex of rows || []) {
+      const id = pickEdesisCatalogExamId(ex) || String(ex?.id ?? ex?.examId ?? '').trim();
+      if (!id || assignedMap.has(id)) continue;
+      if (catalogExamAssignedToStudent(ex, assignScope) === true) {
+        assignedMap.set(id, ex);
+      }
+    }
+  };
+  // Öğrenci listesi / tüm sınıflar kanıtı olan satırlar — şube kataloğu dökülmez
+  pushIfAssigned(fullRows);
+  pushIfAssigned(studentRows);
+  pushIfAssigned(classroomRows);
 
-  if (needDetail.length && cfg?.apiKey) {
-    const localCfg = { ...getEdesisConfig(), ...cfg, baseUrl: (cfg.baseUrl || getEdesisConfig().baseUrl) };
+  // GET /exams?StudentId= gerçekten kısa kişisel listedeyse (program dökümü değil) güven
+  if (catalogLooksStudentFiltered(fullRows, studentRows)) {
+    for (const ex of studentRows) {
+      const id = pickEdesisCatalogExamId(ex) || String(ex?.id ?? ex?.examId ?? '').trim();
+      if (id && !assignedMap.has(id)) assignedMap.set(id, ex);
+    }
+  }
+
+  const studentFiltered = catalogLooksStudentFiltered(fullRows, studentRows);
+  const DETAIL_LIMIT = 60;
+  const pool = sortCatalogExamsByRecencyDesc(
+    fullRows.length ? [...fullRows, ...studentRows, ...classroomRows] : [...studentRows, ...classroomRows]
+  );
+  const seenPool = new Set();
+  const needDetail = [];
+  for (const ex of pool) {
+    if (!isOpenEdesisCatalogExam(ex)) continue;
+    if (scope.programKeys?.size && !edesisCatalogExamMatchesProgram(ex, scope.programKeys)) continue;
+    const id = pickEdesisCatalogExamId(ex) || String(ex?.id ?? ex?.examId ?? '').trim();
+    if (!id || assignedMap.has(id) || seenPool.has(id)) continue;
+    seenPool.add(id);
+    if (catalogExamAssignedToStudent(ex, assignScope) !== null) continue;
+    needDetail.push(ex);
+  }
+  needDetail.sort((a, b) => {
+    const aid = pickEdesisCatalogExamId(a) || '';
+    const bid = pickEdesisCatalogExamId(b) || '';
+    const aPri = studentFiltered && studentRows.some((r) => (pickEdesisCatalogExamId(r) || '') === aid) ? 1 : 0;
+    const bPri = studentFiltered && studentRows.some((r) => (pickEdesisCatalogExamId(r) || '') === bid) ? 1 : 0;
+    return bPri - aPri;
+  });
+  const detailQueue = needDetail.slice(0, DETAIL_LIMIT);
+
+  if (detailQueue.length && cfg?.apiKey) {
+    const localCfg = { ...getEdesisConfig(), ...cfg, baseUrl: cfg.baseUrl || getEdesisConfig().baseUrl };
     const CONCURRENCY = 6;
-    for (let i = 0; i < needDetail.length; i += CONCURRENCY) {
-      const batch = needDetail.slice(i, i + CONCURRENCY);
+    for (let i = 0; i < detailQueue.length; i += CONCURRENCY) {
+      const batch = detailQueue.slice(i, i + CONCURRENCY);
       await Promise.all(
         batch.map(async (ex) => {
-          const id = String(ex?.id ?? ex?.examId ?? '').trim();
+          const id = pickEdesisCatalogExamId(ex) || String(ex?.id ?? ex?.examId ?? '').trim();
           if (!id || assignedMap.has(id)) return;
           try {
             const r = await fetchEdesisJson(localCfg, V1_PATHS.examById(id));
@@ -238,17 +262,7 @@ async function loadAvailableEdesisExamsForStudent({
     }
   }
 
-  // Katalog satırında doğrudan atama alanı olanlar (StudentId süzgeci çalışmasa bile)
-  for (const ex of fullRows.length ? fullRows : studentRows) {
-    const id = String(ex?.id ?? ex?.examId ?? '').trim();
-    if (!id || assignedMap.has(id)) continue;
-    if (!isOpenEdesisCatalogExam(ex)) continue;
-    if (catalogExamAssignedToStudent(ex, assignScope) === true) {
-      assignedMap.set(id, ex);
-    }
-  }
-
-  const assignedCatalogRows = assignedMap.size ? [...assignedMap.values()] : null;
+  const assignedCatalogRows = assignedMap.size ? [...assignedMap.values()] : [];
   return buildStudentAvailableEdesisExamItems({
     catalogRows: fullRows,
     assignedCatalogRows,
@@ -258,8 +272,8 @@ async function loadAvailableEdesisExamsForStudent({
     classroomId: scope.classroomId,
     studentId: platformStudentId || `edesis-${edesisStudentId}`,
     institutionId: actor?.institution_id || null,
-    // External API ogrenciIds vermezse son 21 gün + program yedeği (atanmış tespit yoksa)
-    allowRecencyFallback: assignedMap.size === 0
+    // Başkasının tanımlı denemesi program yedeğiyle tüm öğrencilere düşmesin
+    allowRecencyFallback: false
   });
 }
 

@@ -495,9 +495,37 @@ function collectEdesisIdList(obj, keys) {
   return out;
 }
 
+const EXPLICIT_ASSIGNED_STUDENT_KEYS = [
+  'studentIds',
+  'ogrenciIds',
+  'assignedStudentIds',
+  'ogrenciIdList',
+  'studentIdList',
+  'sinavOgrenciler',
+  'examStudents',
+  'ogrenciListesi',
+  'assignedStudents'
+];
+
+const GENERIC_STUDENT_ROSTER_KEYS = ['students', 'ogrenciler'];
+
+const CLASSROOM_ASSIGN_KEYS = [
+  'classroomIds',
+  'sinifIds',
+  'classroomId',
+  'sinifId',
+  'classId',
+  'classIds',
+  'subeIds',
+  'sinifIdList'
+];
+
 /**
  * Katalog satırı bu öğrenciye atanmış mı?
  * true / false / null (alan yok, bilinmiyor)
+ *
+ * Öğrenci listesi varsa yalnızca o liste geçerlidir — classroomId tek başına
+ * tüm şubeye yayılmaz (Edesis liste DTO’sunda şube alanı her denemede olabilir).
  */
 export function catalogExamAssignedToStudent(exam, scope = {}) {
   const flat = flattenEdesisRow(exam);
@@ -506,41 +534,31 @@ export function catalogExamAssignedToStudent(exam, scope = {}) {
     .map((x) => flattenEdesisRow(x));
   const sources = [flat, ...nestedCandidates];
 
+  let allClasses = false;
+  const explicitIds = [];
+  const genericIds = [];
+  const classroomIds = [];
+
   for (const src of sources) {
     if (src.isAllClasses === true || src.allClasses === true || src.tumSiniflar === true) {
-      return true;
+      allClasses = true;
     }
-    const studentIds = collectEdesisIdList(src, [
-      'studentIds',
-      'ogrenciIds',
-      'assignedStudentIds',
-      'ogrenciIdList',
-      'studentIdList',
-      'students',
-      'ogrenciler',
-      'sinavOgrenciler',
-      'examStudents',
-      'ogrenciListesi',
-      'assignedStudents'
-    ]);
-    const wantStudent = normEdesisId(scope.edesisStudentId);
-    if (studentIds.length && wantStudent) {
-      return studentIds.some((id) => normEdesisId(id) === wantStudent);
-    }
-    const classroomIds = collectEdesisIdList(src, [
-      'classroomIds',
-      'sinifIds',
-      'classroomId',
-      'sinifId',
-      'classId',
-      'classIds',
-      'subeIds',
-      'sinifIdList'
-    ]);
-    const wantClass = normEdesisId(scope.classroomId);
-    if (classroomIds.length && wantClass) {
-      return classroomIds.some((id) => normEdesisId(id) === wantClass);
-    }
+    explicitIds.push(...collectEdesisIdList(src, EXPLICIT_ASSIGNED_STUDENT_KEYS));
+    genericIds.push(...collectEdesisIdList(src, GENERIC_STUDENT_ROSTER_KEYS));
+    classroomIds.push(...collectEdesisIdList(src, CLASSROOM_ASSIGN_KEYS));
+  }
+
+  const wantStudent = normEdesisId(scope.edesisStudentId);
+  const studentIds = explicitIds.length ? explicitIds : genericIds;
+  if (studentIds.length && wantStudent) {
+    return studentIds.some((id) => normEdesisId(id) === wantStudent);
+  }
+
+  if (allClasses) return true;
+
+  const wantClass = normEdesisId(scope.classroomId);
+  if (scope.allowClassroomOnly && classroomIds.length && wantClass) {
+    return classroomIds.some((id) => normEdesisId(id) === wantClass);
   }
   return null;
 }
@@ -603,10 +621,15 @@ export function catalogLooksStudentFiltered(fullRows, studentRows) {
   }
 
   const subsetOfFull = studentIds.every((id) => fullIds.has(id));
-  if (subsetOfFull && studentIds.length < fullIds.size) return true;
+  if (subsetOfFull && studentIds.length < fullIds.size) {
+    // Program dökümü (ör. 40/50 LGS) kişisel atama değildir
+    const cap = Math.max(5, Math.floor(fullIds.size * 0.35));
+    return studentIds.length <= cap;
+  }
 
-  // Farklı şekil ama belirgin şekilde daha kısa liste
-  if (studentIds.length < full.length && studentIds.length <= 80) return true;
+  // Farklı şekil ama kısa kişisel liste (program dökümü değil)
+  const cap = Math.max(5, Math.floor((fullIds.size || full.length) * 0.35));
+  if (studentIds.length < full.length && studentIds.length <= cap) return true;
   return false;
 }
 
