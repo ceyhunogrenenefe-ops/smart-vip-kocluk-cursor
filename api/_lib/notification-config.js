@@ -122,7 +122,7 @@ export const NOTIFICATION_DEFINITIONS = [
     id: 'class_absent_notice_1',
     templateType: 'class_absent_notice_1',
     nameTr: 'Yoklama / devamsızlık',
-    descriptionTr: 'Resmi bildirim; Meta API; kampanya değil.',
+    descriptionTr: 'Resmi bildirim; yalnızca veliye; Meta API; kampanya değil.',
     sendChannel: SEND_CHANNELS.META_API,
     mode: 'instant',
     cronJobKey: 'absent_student_notification',

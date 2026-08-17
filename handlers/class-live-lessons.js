@@ -21,8 +21,6 @@ import { sendMetaTextMessage } from '../api/_lib/meta-whatsapp.js';
 import {
   normalizeAttendanceStatus,
   normalizeCameraStatus,
-  attendanceNoticeKind,
-  renderAttendanceNotice,
   buildAttendanceNotifyText
 } from '../api/_lib/attendance-notice-templates.js';
 import { isUuid } from '../api/_lib/uuid.js';
@@ -77,7 +75,7 @@ import { buildBbbAttendeeJoinUrl, buildStaffBbbJoinUrl, parseBbbJoinCredentials,
 import { pollBbbPresenceForSession, applyAutoAttendanceForClassSession } from '../api/_lib/bbb-attendance.js';
 import { isBbbAutoAttendanceEnabled } from '../api/_lib/bbb-auto-attendance-enabled.js';
 import { applyEarlyBbbAbsentCheck } from '../api/_lib/bbb-early-absent.js';
-import { sendAbsentNoticeForStudent, sendAttendanceNoticeToStaff } from '../api/_lib/class-attendance-notify.js';
+import { sendAbsentNoticeForStudent } from '../api/_lib/class-attendance-notify.js';
 import {
   completedSessionMinutes,
   sessionLessonUnits40,
@@ -1891,68 +1889,14 @@ export default async function handler(req, res) {
           channels === 'parent_staff' ||
           (channels !== 'student' && channels !== 'parent' && channels !== 'both' && channels !== 'staff');
         const notifyStudent = channels === 'student' || channels === 'both';
-        const notifyStaff =
-          channels === 'staff' ||
-          channels === 'parent_staff' ||
-          notifyParent; /* veliye giden yoklama → koç/öğretmene de */
 
         if (notifyStudent) {
           const r = await sendOne(stu.phone);
           rowResult.parts.push({ to: 'student', ...r });
         }
-        let parentPhoneSent = null;
         if (notifyParent) {
           const r = await sendOne(stu.parent_phone);
           rowResult.parts.push({ to: 'parent', ...r });
-          parentPhoneSent = normalizePhoneToE164(stu.parent_phone);
-        }
-        if (notifyStaff) {
-          const sessionStub = {
-            id: String(ctx.session_id || t.session_id || '') || null,
-            class_id: String(ctx.class_id || t.class_id || '') || null,
-            teacher_id: String(ctx.teacher_id || t.teacher_id || '') || null,
-            lesson_date: vars.lesson_date,
-            start_time: vars.lesson_time,
-            subject: vars.subject
-          };
-          // session_id varsa sınıf/öğretmen bilgisi için oturumu tamamla
-          if (sessionStub.id) {
-            const { data: sess } = await supabaseAdmin
-              .from('class_sessions')
-              .select('id,class_id,teacher_id,lesson_date,start_time,subject')
-              .eq('id', sessionStub.id)
-              .maybeSingle();
-            if (sess) {
-              sessionStub.class_id = sess.class_id || sessionStub.class_id;
-              sessionStub.teacher_id = sess.teacher_id || sessionStub.teacher_id;
-              sessionStub.lesson_date = sess.lesson_date || sessionStub.lesson_date;
-              sessionStub.start_time = sess.start_time || sessionStub.start_time;
-              sessionStub.subject = sess.subject || sessionStub.subject;
-            }
-          }
-          const staffKind =
-            rowPreset === 'camera_off' || rowPreset === 'class_camera_off_notice'
-              ? 'class_camera_off_notice_staff'
-              : 'class_absent_notice_staff';
-          try {
-            const staffRes = await sendAttendanceNoticeToStaff({
-              studentId: sid,
-              session: sessionStub,
-              message: text,
-              excludePhones: parentPhoneSent ? [parentPhoneSent] : [],
-              kind: staffKind
-            });
-            rowResult.staff = staffRes.staff || [];
-            for (const s of rowResult.staff) {
-              rowResult.parts.push({ to: s.role, ok: s.ok, error: s.note || undefined });
-            }
-          } catch (e) {
-            rowResult.parts.push({
-              to: 'staff',
-              ok: false,
-              error: e instanceof Error ? e.message : 'staff_send_failed'
-            });
-          }
         }
         rowResult.ok = rowResult.parts.some((p) => p.ok);
         rowResult.message = text;
@@ -2365,69 +2309,37 @@ export default async function handler(req, res) {
 
       const instKey = session.institution_id != null ? String(session.institution_id).trim() : '';
       const className = details.class?.name || 'Sınıf';
-      const subject = String(session.subject || '').trim() || 'ders';
-      const studentIds = prepared.map((r) => r.student_id);
-      const nameById = new Map();
-      if (studentIds.length) {
-        const { data: studs } = await supabaseAdmin.from('students').select('id,name').in('id', studentIds);
-        for (const s of studs || []) nameById.set(String(s.id), s.name || s.id);
-      }
-      for (const r of rows) {
-        const id = String(r.student_id || '').trim();
-        const nm = String(r.student_name || '').trim();
-        if (id && nm && !nameById.get(id)) nameById.set(id, nm);
-      }
-
-      const pending_notices = prepared
-        .map((row) => {
-          const kind = attendanceNoticeKind(row.status, row.camera_status);
-          if (!kind) return null;
-          const student_name = nameById.get(row.student_id) || 'Öğrencimiz';
-          return {
-            student_id: row.student_id,
-            student_name,
-            kind,
-            message_preset: kind === 'camera_off' ? 'camera_off' : 'absent_veli',
-            message: renderAttendanceNotice(kind, { student_name, subject }),
-            channels: 'parent'
-          };
-        })
-        .filter(Boolean);
 
       /** @type {{ student_id: string, ok: boolean, note?: string|null, error_code?: string|null, skipped?: string }[]} */
       const absent_whatsapp = [];
-      const autoSend = body.auto_send === true;
-      if (autoSend) {
-        for (const row of prepared) {
-          if (row.status !== 'absent') continue;
-          if (priorStatusByStudent.get(row.student_id) === 'absent') continue;
-          try {
-            const r = await sendAbsentNoticeForStudent({
-              session,
-              className,
-              studentId: row.student_id,
-              institutionId: instKey
-            });
-            absent_whatsapp.push({
-              student_id: row.student_id,
-              ok: Boolean(r.ok),
-              note: r.ok ? null : r.note || null,
-              error_code: r.ok ? null : r.error_code || null,
-              skipped: r.skipped
-            });
-          } catch (e) {
-            absent_whatsapp.push({
-              student_id: row.student_id,
-              ok: false,
-              note: e instanceof Error ? e.message : 'exception'
-            });
-          }
+      for (const row of prepared) {
+        if (row.status !== 'absent') continue;
+        if (priorStatusByStudent.get(row.student_id) === 'absent') continue;
+        try {
+          const r = await sendAbsentNoticeForStudent({
+            session,
+            className,
+            studentId: row.student_id,
+            institutionId: instKey
+          });
+          absent_whatsapp.push({
+            student_id: row.student_id,
+            ok: Boolean(r.ok),
+            note: r.ok ? null : r.note || null,
+            error_code: r.ok ? null : r.error_code || null,
+            skipped: r.skipped
+          });
+        } catch (e) {
+          absent_whatsapp.push({
+            student_id: row.student_id,
+            ok: false,
+            note: e instanceof Error ? e.message : 'exception'
+          });
         }
       }
       return res.status(200).json({
         ok: true,
-        suggest_notify: pending_notices.length > 0,
-        pending_notices,
+        suggest_notify: prepared.some((r) => r.status === 'absent'),
         absent_whatsapp
       });
     }
