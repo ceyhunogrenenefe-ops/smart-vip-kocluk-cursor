@@ -431,14 +431,23 @@ async function lookupCoachByParentPhone(institutionId, phoneRaw) {
 }
 
 async function handleListCoaches(institutionId) {
-  const { data, error } = await supabaseAdmin
-    .from('coaches')
-    .select('id, name, email')
+  let q = supabaseAdmin.from('coaches').select('id, name, email').order('name').limit(400);
+  if (institutionId) q = q.eq('institution_id', institutionId);
+  const { data, error } = await q;
+  if (!error) {
+    return (data || []).map((c) => ({ id: String(c.id), name: c.name || 'Koç', email: c.email || null }));
+  }
+  const { data: users } = await supabaseAdmin
+    .from('users')
+    .select('id, name, email, role, roles')
     .eq('institution_id', institutionId)
-    .order('name')
     .limit(400);
-  if (error) throw error;
-  return (data || []).map((c) => ({ id: String(c.id), name: c.name || 'Koç', email: c.email || null }));
+  return (users || [])
+    .filter((u) => {
+      const tags = [String(u.role || '').toLowerCase(), ...(Array.isArray(u.roles) ? u.roles.map((x) => String(x).toLowerCase()) : [])];
+      return tags.includes('coach');
+    })
+    .map((u) => ({ id: String(u.id), name: u.name || 'Koç', email: u.email || null }));
 }
 
 async function handleCreateLead(body, institutionId, actor) {
