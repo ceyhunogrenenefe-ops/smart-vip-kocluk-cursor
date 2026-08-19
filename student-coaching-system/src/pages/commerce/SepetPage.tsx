@@ -96,6 +96,47 @@ export default function SepetPage() {
     finally { setUpdatingId(null); }
   };
 
+  /** Sepet özetini geçici olarak yazar, ardından ödeme sitesine yönlendirir */
+  const handleCheckout = () => {
+    const CHECKOUT_URL = 'https://onlinevipdershane.com/odeme/kitap';
+
+    // Sepet özetini session storage'a kaydet (geri dönüş için kullanılabilir)
+    const payload = {
+      items: items.map((i) => ({
+        id: i.id,
+        title: i.title_snapshot,
+        quantity: i.quantity,
+        unit_price_kurus: i.commerce_vendor_offers?.price_kurus ?? i.price_kurus_snapshot,
+        vendor_offer_id: i.vendor_offer_id,
+        package_id: i.package_id,
+      })),
+      subtotal_kurus: subtotal,
+      shipping_kurus: shippingCost,
+      discount_kurus: discountAmount,
+      total_kurus: total,
+      coupon_code: coupon?.code ?? null,
+      source: 'coaching-panel',
+      user_id: effectiveUser?.id ?? null,
+      student_id: (effectiveUser as { student_id?: string })?.student_id ?? null,
+      created_at: new Date().toISOString(),
+    };
+    try {
+      sessionStorage.setItem('ovd_checkout_cart', JSON.stringify(payload));
+    } catch {
+      // storage doluysa sessizce geç
+    }
+
+    // URL parametreleri ile ödeme sayfasına gönder (toplam + referans)
+    const params = new URLSearchParams({
+      tutar: String(total),           // kuruş cinsinden
+      ref: payload.created_at,        // idempotency için zaman damgası
+      source: 'coaching',
+      ...(coupon?.code ? { kupon: coupon.code } : {}),
+    });
+
+    window.location.href = `${CHECKOUT_URL}?${params.toString()}`;
+  };
+
   const handleClearCart = async () => {
     if (!confirm('Sepeti tamamen boşaltmak istediğinize emin misiniz?')) return;
     try {
@@ -306,9 +347,9 @@ export default function SepetPage() {
               </div>
             )}
 
-            {/* Ödemeye geç */}
+            {/* Ödemeye geç — onlinevipdershane.com'a yönlendir */}
             <button
-              onClick={() => navigate('/odeme/sepet')}
+              onClick={handleCheckout}
               disabled={items.some((i) => i.out_of_stock) || items.length === 0}
               className="w-full mt-4 bg-indigo-600 text-white py-3 rounded-xl font-semibold text-sm hover:bg-indigo-700 disabled:opacity-50 transition-colors"
             >
@@ -316,7 +357,7 @@ export default function SepetPage() {
             </button>
 
             <p className="text-xs text-gray-400 text-center mt-3">
-              SSL güvenli ödeme · Garanti BBVA
+              onlinevipdershane.com güvenli ödeme
             </p>
           </div>
         </div>
