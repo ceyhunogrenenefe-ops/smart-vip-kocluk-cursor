@@ -93,6 +93,9 @@ import TeacherProfileApprovalsPage from './pages/TeacherProfileApprovalsPage';
 import KitapciPortalPage from './pages/KitapciPortalPage';
 import KitapPazaryeriPage from './pages/commerce/KitapPazaryeriPage';
 import VendorPanelPage from './pages/commerce/VendorPanelPage';
+import KitapMagazasiPage from './pages/commerce/KitapMagazasiPage';
+import KitapDetayPage from './pages/commerce/KitapDetayPage';
+import SepetPage from './pages/commerce/SepetPage';
 import GarantiOdemePage, { GarantiOdemeSonucPage } from './pages/GarantiOdemePage';
 import TeacherEduPanelPage from './pages/eduPanel/TeacherEduPanelPage';
 import StudentEduPanelPage from './pages/eduPanel/StudentEduPanelPage';
@@ -802,6 +805,29 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/exams/result/:id')}>
                 <Layout>
                   <ExamResultPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            {/* Öğrenci/Veli Kitap Mağazası */}
+            <Route path="/kitap-magazasi" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/kitap-magazasi')}>
+                <Layout>
+                  <KitapMagazasiPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            <Route path="/kitap-magazasi/:slug" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/kitap-magazasi/:slug')}>
+                <Layout>
+                  <KitapDetayPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            <Route path="/sepet" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/sepet')}>
+                <Layout>
+                  <SepetPage />
                 </Layout>
               </ProtectedRoute>
             } />

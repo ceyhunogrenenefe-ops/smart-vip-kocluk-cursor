@@ -352,9 +352,12 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     !tags.some((t) => ['super_admin', 'admin', 'coach', 'teacher'].includes(t));
   if (isStudentOnlyNav) {
     /** Akademik Merkez, Ders&Görüşme, panel ve Soru Sor Sidebar.tsx’te ayrı */
-    return [{ path: '/student-analytics', icon: BarChart3, label: 'Analizlerim' },
+    return [
+      { path: '/student-analytics', icon: BarChart3, label: 'Analizlerim' },
       { path: '/exam-tracking', icon: ClipboardList, label: 'Deneme analizi' },
-      { path: '/edesis-analiz', icon: BarChart3, label: 'Edesis sınav analizi' }];
+      { path: '/edesis-analiz', icon: BarChart3, label: 'Edesis sınav analizi' },
+      { path: '/kitap-magazasi', icon: ShoppingBag, label: 'Kitap Mağazası' },
+    ];
   }
 
   const MENU_ADMIN: FlatNavItem[] = [

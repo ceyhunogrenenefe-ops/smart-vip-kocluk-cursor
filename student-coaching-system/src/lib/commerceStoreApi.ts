@@ -1,0 +1,86 @@
+/**
+ * Öğrenci/Veli Kitap Mağazası — API istemcisi
+ */
+import { apiFetch } from './session';
+import type { CommerceBook, CommerceBookPackage, CommerceSettings, CommerceStudentBookAssignment, CommerceVendorOffer } from '../types/commerce.types';
+
+async function post<T = unknown>(op: string, params: Record<string, unknown> = {}): Promise<T> {
+  const res = await apiFetch('/api/commerce-store', { method: 'POST', body: JSON.stringify({ op, ...params }) });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error ?? op);
+  return data as T;
+}
+
+// Ayarlar
+export const csGetSettings = () => post<{ settings: CommerceSettings }>('catalog.settings');
+
+// Katalog
+export type CatalogListParams = {
+  search?: string;
+  subject?: string;
+  publisher?: string;
+  class_level?: string;
+  price_min?: number;
+  price_max?: number;
+  teacher_recommended?: boolean;
+  is_featured?: boolean;
+  is_bestseller?: boolean;
+  is_new_arrival?: boolean;
+  sort?: 'newest' | 'price_asc' | 'price_desc';
+  limit?: number;
+  offset?: number;
+};
+
+export type OfferWithBook = CommerceVendorOffer & {
+  commerce_books: Pick<CommerceBook, 'id' | 'slug' | 'title' | 'author' | 'publisher' | 'subject' | 'class_levels' | 'exam_types' | 'cover_image_url' | 'page_count'>;
+  commerce_vendors: { id: string; name: string };
+};
+
+export const csListCatalog = (params?: CatalogListParams) =>
+  post<{ offers: OfferWithBook[]; total: number | null }>('catalog.list', params ?? {});
+
+export const csGetBook = (idOrSlug: string, isSlug = true) =>
+  post<{ book: CommerceBook & { commerce_vendor_offers: (CommerceVendorOffer & { commerce_vendors: { id: string; name: string } })[] } }>(
+    'catalog.get',
+    isSlug ? { slug: idOrSlug } : { id: idOrSlug }
+  );
+
+export const csListPackages = (class_level?: string) =>
+  post<{ packages: CommerceBookPackage[] }>('catalog.packages', class_level ? { class_level } : {});
+
+export const csGetAssigned = (student_id?: string) =>
+  post<{ assignments: (CommerceStudentBookAssignment & { commerce_books: Pick<CommerceBook, 'id' | 'slug' | 'title' | 'author' | 'cover_image_url' | 'publisher'> | null })[] }>(
+    'catalog.assigned',
+    student_id ? { student_id } : {}
+  );
+
+// Sepet
+export type CartItem = {
+  id: string;
+  quantity: number;
+  price_kurus_snapshot: number;
+  title_snapshot: string | null;
+  vendor_offer_id: string | null;
+  package_id: string | null;
+  price_changed?: boolean;
+  out_of_stock?: boolean;
+  commerce_vendor_offers?: (CommerceVendorOffer & { commerce_books?: { id: string; slug: string; title: string; cover_image_url: string | null; author: string | null }; commerce_vendors?: { id: string; name: string } }) | null;
+  commerce_book_packages?: Pick<CommerceBookPackage, 'id' | 'name' | 'slug' | 'price_kurus' | 'cover_image_url'> | null;
+};
+
+export type CartResponse = { ok: true; cart_id: string; items: CartItem[]; subtotal_kurus: number };
+
+export const csGetCart = () => post<CartResponse>('cart.get');
+export const csAddToCart = (vendor_offer_id?: string, package_id?: string, quantity = 1) =>
+  post<{ ok: true; items: CartItem[] }>('cart.add', { vendor_offer_id, package_id, quantity });
+export const csUpdateCartItem = (item_id: string, quantity: number) =>
+  post<{ ok: true; items: CartItem[] }>('cart.update', { item_id, quantity });
+export const csRemoveFromCart = (item_id: string) =>
+  post<{ ok: true; items: CartItem[] }>('cart.remove', { item_id });
+export const csClearCart = () => post<{ ok: true; items: CartItem[] }>('cart.clear');
+export const csApplyCoupon = (code: string) =>
+  post<{ ok: boolean; coupon?: { id: string; code: string; discount_type: string; discount_value: number; max_discount_kurus: number | null; min_order_kurus: number }; error?: string }>('cart.apply_coupon', { code });
+
+// "Bu kitap bende var"
+export const csMarkOwned = (book_id: string, vendor_offer_id?: string, student_id?: string) =>
+  post<{ ok: true; assignment_id: string; already_existed: boolean }>('assignment.own', { book_id, vendor_offer_id, student_id });
