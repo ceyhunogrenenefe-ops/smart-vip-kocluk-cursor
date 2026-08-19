@@ -55,6 +55,10 @@ export const cvMarkPreparing = (id: string, vendor_id?: string) =>
 export const cvShipOrder = (id: string, shipFields: { carrier?: string; tracking_number?: string; tracking_url?: string; invoice_number?: string; vendor_id?: string }) =>
   post('orders.ship', { id, ...shipFields });
 
+// Stok güncelleme (onaylı teklif için)
+export const cvUpdateStock = (id: string, stock_quantity: number, vendor_id?: string) =>
+  post<{ offer: CommerceVendorOffer }>('offers.update', { id, stock_quantity, ...(vendor_id ? { vendor_id } : {}) });
+
 // Hakedişler
 export const cvListPayouts = (vendor_id?: string) =>
   post<{ payouts: CommerceVendorPayout[] }>('payouts.list', vendor_id ? { vendor_id } : {});
