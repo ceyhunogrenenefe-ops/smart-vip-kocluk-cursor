@@ -19,6 +19,7 @@
  *  reports.sales | reports.vendors | reports.low_stock
  */
 
+import { randomUUID } from 'crypto';
 import { requireAuth } from '../api/_lib/auth.js';
 import { actorRoleSet, roleSetHasSuperAdmin, roleSetHasAdmin } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
@@ -187,7 +188,7 @@ async function handleVendorUsers(op, body, actor) {
     if (existing) throw new Error('Bu e-posta adresi zaten kullanımda');
 
     const now = new Date().toISOString();
-    const userId = crypto.randomUUID ? crypto.randomUUID() : require('crypto').randomUUID();
+    const userId = randomUUID();
 
     // Kullanıcı oluştur
     const { data: newUser, error: userErr } = await supabaseAdmin
@@ -198,7 +199,7 @@ async function handleVendorUsers(op, body, actor) {
         email: normalizedEmail,
         phone: phone ? String(phone).trim() : null,
         role: 'vendor_admin',
-        roles: JSON.stringify(['vendor_admin']),
+        roles: ['vendor_admin'],
         password_hash: String(password),
         is_active: true,
         institution_id: null,
@@ -812,8 +813,8 @@ export default async function handler(req, res) {
 
     let result;
     const prefix = op.split('.')[0];
-    if (prefix === 'vendors' || op === 'vendor_users.list' || op === 'vendor_users.add' || op === 'vendor_users.remove') {
-      if (op.startsWith('vendor_users')) {
+    if (prefix === 'vendors' || prefix === 'vendor_users') {
+      if (prefix === 'vendor_users') {
         result = await handleVendorUsers(op, body, actor);
       } else {
         result = await handleVendors(op, body, actor);
