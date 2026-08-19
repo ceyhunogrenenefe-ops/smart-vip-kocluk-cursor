@@ -7,8 +7,10 @@ import {
   AlertCircle,
   CheckCircle2,
   ChevronDown,
-  ExternalLink,
+  Copy,
   Eye,
+  EyeOff,
+  KeyRound,
   Loader2,
   Package,
   Pencil,
@@ -19,13 +21,18 @@ import {
   ShoppingBag,
   Store,
   Trash2,
+  UserCog,
+  UserPlus,
+  Users,
   Wallet,
+  X,
   XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   caApproveOffer,
   caCreateVendor,
+  caCreateVendorAccount,
   caDeleteVendor,
   caGetSettings,
   caListBooks,
@@ -33,13 +40,18 @@ import {
   caListOffers,
   caListOrders,
   caListPayouts,
+  caListVendorUsers,
   caListVendors,
   caRejectOffer,
   caReportLowStock,
   caReportSales,
+  caRemoveVendorUser,
   caRequestCorrection,
+  caResetVendorPassword,
+  caToggleVendorActive,
   caUpdateSettings,
   caUpdateVendor,
+  type VendorUserRow,
 } from '../../lib/commerceAdminApi';
 import type {
   CommerceBook,
@@ -262,12 +274,287 @@ function VendorModal({
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// Satıcı Panel Kullanıcıları — Hesap Oluşturma / Şifre
+// ──────────────────────────────────────────────────────────────────────
+function VendorUsersPanel({ vendor, onClose }: { vendor: CommerceVendor; onClose: () => void }) {
+  const [users, setUsers] = useState<VendorUserRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState({ name: '', email: '', password: '', phone: '' });
+  const [saving, setSaving] = useState(false);
+  const [showPass, setShowPass] = useState(false);
+  const [resetTarget, setResetTarget] = useState<string | null>(null);
+  const [newPass, setNewPass] = useState('');
+  const [resetting, setResetting] = useState(false);
+  const [lastCreated, setLastCreated] = useState<{ name: string; email: string; password: string } | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await caListVendorUsers(vendor.id);
+      setUsers(r.users);
+    } catch (e: unknown) { toast.error((e as Error).message); }
+    finally { setLoading(false); }
+  }, [vendor.id]);
+  useEffect(() => { load(); }, [load]);
+
+  const handleCreate = async () => {
+    if (!form.name.trim() || !form.email.trim() || !form.password) {
+      toast.error('Ad, e-posta ve şifre zorunlu'); return;
+    }
+    setSaving(true);
+    try {
+      const r = await caCreateVendorAccount(vendor.id, { name: form.name.trim(), email: form.email.trim(), password: form.password, phone: form.phone.trim() || undefined });
+      setLastCreated({ name: r.user.name, email: r.user.email, password: r.password_set });
+      setForm({ name: '', email: '', password: '', phone: '' });
+      setShowCreate(false);
+      load();
+    } catch (e: unknown) { toast.error((e as Error).message); }
+    finally { setSaving(false); }
+  };
+
+  const handleReset = async () => {
+    if (!resetTarget || !newPass) return;
+    setResetting(true);
+    try {
+      await caResetVendorPassword(resetTarget, newPass);
+      toast.success('Şifre güncellendi');
+      setResetTarget(null); setNewPass('');
+    } catch (e: unknown) { toast.error((e as Error).message); }
+    finally { setResetting(false); }
+  };
+
+  const handleToggle = async (userId: string, current: boolean) => {
+    try {
+      await caToggleVendorActive(userId, !current);
+      load();
+    } catch (e: unknown) { toast.error((e as Error).message); }
+  };
+
+  const handleRemove = async (id: string) => {
+    if (!confirm('Bu kullanıcıyı satıcı panelinden çıkarmak istediğinize emin misiniz?')) return;
+    try {
+      await caRemoveVendorUser(id);
+      load();
+    } catch (e: unknown) { toast.error((e as Error).message); }
+  };
+
+  const copy = (text: string) => { navigator.clipboard.writeText(text); toast.success('Kopyalandı'); };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl w-full max-w-xl shadow-2xl my-4">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div>
+            <h3 className="text-lg font-semibold flex items-center gap-2">
+              <UserCog className="w-5 h-5 text-indigo-600" />
+              {vendor.name} — Panel Erişimi
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">Bu satıcının panel kullanıcıları ve giriş bilgileri</p>
+          </div>
+          <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+
+        <div className="px-6 py-5 space-y-4">
+          {/* Giriş URL */}
+          <div className="flex items-center gap-2 bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3">
+            <div className="flex-1">
+              <div className="text-xs text-indigo-600 font-medium mb-0.5">Panel Giriş Adresi</div>
+              <div className="text-sm font-mono font-semibold text-indigo-800">
+                {window.location.origin}/login
+              </div>
+              <div className="text-xs text-indigo-500 mt-0.5">→ Giriş sonrası /vendor-panel'e yönlendirilir</div>
+            </div>
+            <button onClick={() => copy(`${window.location.origin}/login`)} className="text-indigo-400 hover:text-indigo-600">
+              <Copy className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Başarıyla oluşturuldu bildirimi */}
+          {lastCreated && (
+            <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <CheckCircle2 className="w-5 h-5 text-green-500" />
+                <span className="font-semibold text-green-800 text-sm">Hesap oluşturuldu!</span>
+                <button onClick={() => setLastCreated(null)} className="ml-auto text-green-400 hover:text-green-600"><X className="w-4 h-4" /></button>
+              </div>
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Ad:</span>
+                  <span className="font-medium">{lastCreated.name}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">E-posta:</span>
+                  <div className="flex items-center gap-1">
+                    <span className="font-mono text-xs">{lastCreated.email}</span>
+                    <button onClick={() => copy(lastCreated.email)}><Copy className="w-3 h-3 text-gray-400" /></button>
+                  </div>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Şifre:</span>
+                  <div className="flex items-center gap-1">
+                    <span className="font-mono text-sm font-bold text-indigo-700">{lastCreated.password}</span>
+                    <button onClick={() => copy(lastCreated.password)}><Copy className="w-3 h-3 text-gray-400" /></button>
+                  </div>
+                </div>
+              </div>
+              <p className="text-xs text-green-600 mt-2">📋 Bu bilgileri satıcıya iletin. Şifre güvenlik için sonradan gösterilmez.</p>
+            </div>
+          )}
+
+          {/* Mevcut kullanıcılar */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-semibold text-gray-700 flex items-center gap-1"><Users className="w-4 h-4" /> Panel Kullanıcıları</h4>
+              <button onClick={() => setShowCreate(!showCreate)} className="flex items-center gap-1 text-xs bg-indigo-600 text-white px-2.5 py-1.5 rounded-lg hover:bg-indigo-700">
+                <UserPlus className="w-3.5 h-3.5" /> Yeni Hesap
+              </button>
+            </div>
+
+            {loading ? (
+              <div className="flex justify-center py-4"><Loader2 className="animate-spin w-5 h-5 text-gray-400" /></div>
+            ) : users.length === 0 ? (
+              <div className="text-center py-6 text-gray-400 text-sm border border-dashed border-gray-200 rounded-xl">
+                Henüz panel kullanıcısı yok.<br />
+                <button onClick={() => setShowCreate(true)} className="text-indigo-600 mt-1">İlk hesabı oluştur →</button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {users.map((vu) => {
+                  const u = vu.users;
+                  return (
+                    <div key={vu.id} className="flex items-center gap-3 border border-gray-200 rounded-xl px-3 py-2.5">
+                      <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                        <span className="text-indigo-700 text-sm font-bold">{u?.name?.[0]?.toUpperCase() ?? '?'}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium truncate">{u?.name ?? '—'}</div>
+                        <div className="text-xs text-gray-400 truncate">{u?.email ?? '—'}</div>
+                        {u?.last_login_at && (
+                          <div className="text-xs text-gray-300">Son giriş: {new Date(u.last_login_at).toLocaleDateString('tr-TR')}</div>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full ${u?.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                          {u?.is_active ? 'Aktif' : 'Pasif'}
+                        </span>
+                        {u?.id && (
+                          <>
+                            <button
+                              onClick={() => { setResetTarget(u.id); setNewPass(''); }}
+                              title="Şifre Sıfırla"
+                              className="text-gray-400 hover:text-amber-500"
+                            >
+                              <KeyRound className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleToggle(u.id, u.is_active)}
+                              title={u.is_active ? 'Devre Dışı Bırak' : 'Aktif Et'}
+                              className={`text-xs px-1.5 py-0.5 rounded border ${u.is_active ? 'border-red-300 text-red-500 hover:bg-red-50' : 'border-green-300 text-green-600 hover:bg-green-50'}`}
+                            >
+                              {u.is_active ? 'Durdur' : 'Aktif Et'}
+                            </button>
+                          </>
+                        )}
+                        <button onClick={() => handleRemove(vu.id)} title="Panelden çıkar" className="text-gray-300 hover:text-red-400">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Yeni hesap formu */}
+          {showCreate && (
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
+              <h4 className="text-sm font-semibold">Yeni Panel Hesabı</h4>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-gray-500">Ad Soyad *</label>
+                  <input className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    placeholder="Yankı Hanım" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">Telefon</label>
+                  <input className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"
+                    placeholder="05xx..." value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">E-posta * <span className="text-gray-400">(giriş yapacak adres)</span></label>
+                <input type="email" className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  placeholder="yanki@kitapevi.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">Şifre * <span className="text-gray-400">(en az 6 karakter)</span></label>
+                <div className="relative mt-0.5">
+                  <input
+                    type={showPass ? 'text' : 'password'}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    placeholder="Güçlü bir şifre belirleyin"
+                    value={form.password}
+                    onChange={(e) => setForm({ ...form, password: e.target.value })}
+                  />
+                  <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400">
+                    {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+              <div className="flex gap-2 justify-end pt-1">
+                <button onClick={() => setShowCreate(false)} className="text-sm text-gray-500 px-3 py-1.5">İptal</button>
+                <button onClick={handleCreate} disabled={saving} className="flex items-center gap-1.5 text-sm bg-indigo-600 text-white px-4 py-1.5 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                  {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  Hesap Oluştur
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Şifre sıfırlama */}
+          {resetTarget && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-2">
+              <h4 className="text-sm font-semibold text-amber-800 flex items-center gap-1.5"><KeyRound className="w-4 h-4" /> Şifre Sıfırla</h4>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type={showPass ? 'text' : 'password'}
+                    className="w-full border border-amber-300 rounded-lg px-3 py-2 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    placeholder="Yeni şifre (en az 6 karakter)"
+                    value={newPass}
+                    onChange={(e) => setNewPass(e.target.value)}
+                  />
+                  <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400">
+                    {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <button onClick={handleReset} disabled={resetting || !newPass} className="flex items-center gap-1 text-sm bg-amber-600 text-white px-3 py-1.5 rounded-lg hover:bg-amber-700 disabled:opacity-50">
+                  {resetting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Güncelle'}
+                </button>
+                <button onClick={() => setResetTarget(null)} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-3 border-t border-gray-100 text-xs text-gray-400">
+          Satıcı bu hesapla {window.location.origin}/login adresine giriş yapar, otomatik olarak Satıcı Paneli'ne yönlendirilir.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // Satıcılar sekmesi
 // ──────────────────────────────────────────────────────────────────────
 function VendorTab() {
   const [vendors, setVendors] = useState<CommerceVendor[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVendor, setModalVendor] = useState<CommerceVendor | null | 'new'>(null);
+  const [usersPanel, setUsersPanel] = useState<CommerceVendor | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -332,7 +619,14 @@ function VendorTab() {
                   </span>
                 </td>
                 <td className="px-4 py-3">
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 items-center">
+                    <button
+                      onClick={() => setUsersPanel(v)}
+                      className="flex items-center gap-1 text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded-lg hover:bg-indigo-100 font-medium"
+                      title="Panel Erişimi & Şifre"
+                    >
+                      <UserCog className="w-3.5 h-3.5" /> Panel
+                    </button>
                     <button
                       onClick={() => setModalVendor(v)}
                       className="text-gray-400 hover:text-indigo-600"
@@ -363,12 +657,20 @@ function VendorTab() {
         </table>
       </div>
 
-      {/* Modal */}
+      {/* Düzenle / Yeni Satıcı modal */}
       {modalVendor !== null && (
         <VendorModal
           vendor={modalVendor === 'new' ? null : modalVendor}
           onClose={() => setModalVendor(null)}
           onSave={load}
+        />
+      )}
+
+      {/* Panel erişimi & şifre paneli */}
+      {usersPanel && (
+        <VendorUsersPanel
+          vendor={usersPanel}
+          onClose={() => setUsersPanel(null)}
         />
       )}
     </div>
