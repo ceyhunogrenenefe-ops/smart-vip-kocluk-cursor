@@ -1,12 +1,18 @@
-/** Capacitor / mobil WebView kökenleri — cross-origin /api istekleri için CORS */
+/** Capacitor / mobil WebView kökenleri + her iki domain — cross-origin /api istekleri için CORS */
 const DEFAULT_ALLOWED = [
   'https://localhost',
   'http://localhost',
   'capacitor://localhost',
+  // Koçluk paneli
   'https://www.dersonlinevipkocluk.com',
   'https://dersonlinevipkocluk.com',
+  // Ana site / mağaza vitrin
+  'https://www.onlinevipdershane.com',
+  'https://onlinevipdershane.com',
+  // Geliştirme
   'http://localhost:5173',
   'http://127.0.0.1:5173',
+  // Vercel preview'ları
   'https://smart-kocluk-ceyhu.vercel.app',
   'https://kitap-siparis-formu.vercel.app',
   'https://kocluk-kayit-formu.vercel.app'

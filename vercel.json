@@ -118,6 +118,12 @@
       "has": [{ "type": "host", "value": "dersonlinevipkocluk.com" }],
       "destination": "https://www.dersonlinevipkocluk.com/:path*",
       "permanent": true
+    },
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "onlinevipdershane.com" }],
+      "destination": "https://www.onlinevipdershane.com/:path*",
+      "permanent": true
     }
   ],
   "rewrites": [
