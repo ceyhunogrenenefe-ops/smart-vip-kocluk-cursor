@@ -25,6 +25,7 @@ import {
 import { toast } from 'sonner';
 import {
   caApproveOffer,
+  caCreateVendor,
   caDeleteVendor,
   caGetSettings,
   caListBooks,
@@ -38,6 +39,7 @@ import {
   caReportSales,
   caRequestCorrection,
   caUpdateSettings,
+  caUpdateVendor,
 } from '../../lib/commerceAdminApi';
 import type {
   CommerceBook,
@@ -103,11 +105,170 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// Satıcı oluşturma / düzenleme modalı
+// ──────────────────────────────────────────────────────────────────────
+type VendorFormData = {
+  name: string;
+  contact_email: string;
+  contact_phone: string;
+  city: string;
+  address_line1: string;
+  commission_rate: string;
+  payout_iban: string;
+  description: string;
+  is_active: boolean;
+};
+
+const EMPTY_VENDOR_FORM: VendorFormData = {
+  name: '', contact_email: '', contact_phone: '',
+  city: '', address_line1: '', commission_rate: '15',
+  payout_iban: '', description: '', is_active: true,
+};
+
+function VendorModal({
+  vendor,
+  onClose,
+  onSave,
+}: {
+  vendor: CommerceVendor | null;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  const isEdit = Boolean(vendor);
+  const [form, setForm] = useState<VendorFormData>(
+    vendor
+      ? {
+          name: vendor.name,
+          contact_email: vendor.contact_email ?? '',
+          contact_phone: vendor.contact_phone ?? '',
+          city: vendor.city ?? '',
+          address_line1: vendor.address_line1 ?? '',
+          commission_rate: String(vendor.commission_rate),
+          payout_iban: vendor.payout_iban ?? '',
+          description: vendor.description ?? '',
+          is_active: vendor.is_active,
+        }
+      : EMPTY_VENDOR_FORM
+  );
+  const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState<Partial<Record<keyof VendorFormData, string>>>({});
+
+  const validate = () => {
+    const e: typeof errors = {};
+    if (!form.name.trim()) e.name = 'Satıcı adı zorunlu';
+    const comm = parseFloat(form.commission_rate);
+    if (isNaN(comm) || comm < 0 || comm > 100) e.commission_rate = '0–100 arası olmalı';
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  };
+
+  const handleSave = async () => {
+    if (!validate()) return;
+    setSaving(true);
+    try {
+      const payload = {
+        name: form.name.trim(),
+        contact_email: form.contact_email.trim() || undefined,
+        contact_phone: form.contact_phone.trim() || undefined,
+        city: form.city.trim() || undefined,
+        address_line1: form.address_line1.trim() || undefined,
+        commission_rate: parseFloat(form.commission_rate),
+        payout_iban: form.payout_iban.trim() || undefined,
+        description: form.description.trim() || undefined,
+        is_active: form.is_active,
+      };
+      if (isEdit && vendor) {
+        await caUpdateVendor(vendor.id, payload);
+        toast.success('Satıcı güncellendi');
+      } else {
+        await caCreateVendor(payload);
+        toast.success('Satıcı oluşturuldu');
+      }
+      onSave();
+      onClose();
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const field = (
+    key: keyof VendorFormData,
+    label: string,
+    opts?: { type?: string; placeholder?: string; required?: boolean }
+  ) => (
+    <div>
+      <label className="block text-xs font-medium text-gray-600 mb-1">
+        {label} {opts?.required && <span className="text-red-500">*</span>}
+      </label>
+      <input
+        type={opts?.type ?? 'text'}
+        placeholder={opts?.placeholder}
+        className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 ${errors[key] ? 'border-red-400' : 'border-gray-300'}`}
+        value={form[key] as string}
+        onChange={(e) => { setForm({ ...form, [key]: e.target.value }); setErrors({ ...errors, [key]: undefined }); }}
+      />
+      {errors[key] && <p className="text-xs text-red-500 mt-0.5">{errors[key]}</p>}
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl my-4">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h3 className="text-lg font-semibold">{isEdit ? 'Satıcıyı Düzenle' : 'Yeni Satıcı Ekle'}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <XCircle className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          {field('name', 'Satıcı / Kitapçı Adı', { required: true, placeholder: 'Örnek: ABC Kitapevi' })}
+          <div className="grid grid-cols-2 gap-3">
+            {field('contact_email', 'E-posta', { type: 'email', placeholder: 'info@kitapevi.com' })}
+            {field('contact_phone', 'Telefon', { placeholder: '05xx xxx xx xx' })}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {field('city', 'Şehir', { placeholder: 'İstanbul' })}
+            {field('commission_rate', 'Komisyon (%)', { type: 'number', required: true, placeholder: '15' })}
+          </div>
+          {field('address_line1', 'Adres', { placeholder: 'Mahalle, cadde, kapı no' })}
+          {field('payout_iban', 'Ödeme IBAN', { placeholder: 'TR00 0000 0000 0000 0000 0000 00' })}
+          {field('description', 'Notlar', { placeholder: 'İsteğe bağlı not' })}
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              className="rounded"
+              checked={form.is_active}
+              onChange={(e) => setForm({ ...form, is_active: e.target.checked })}
+            />
+            Satıcı aktif (sipariş kabul edebilir)
+          </label>
+        </div>
+        <div className="flex gap-2 justify-end px-6 py-4 border-t border-gray-100">
+          <button onClick={onClose} className="text-sm text-gray-500 hover:text-gray-700 px-4 py-2">İptal</button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-2 text-sm bg-indigo-600 text-white px-5 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+            {isEdit ? 'Güncelle' : 'Oluştur'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // Satıcılar sekmesi
 // ──────────────────────────────────────────────────────────────────────
 function VendorTab() {
   const [vendors, setVendors] = useState<CommerceVendor[]>([]);
   const [loading, setLoading] = useState(true);
+  const [modalVendor, setModalVendor] = useState<CommerceVendor | null | 'new'>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -122,7 +283,7 @@ function VendorTab() {
   useEffect(() => { load(); }, [load]);
 
   const handleDelete = async (v: CommerceVendor) => {
-    if (!confirm(`${v.name} satıcısını silmek istediğinize emin misiniz?`)) return;
+    if (!confirm(`"${v.name}" satıcısını silmek istediğinize emin misiniz?`)) return;
     try {
       await caDeleteVendor(v.id);
       toast.success('Satıcı silindi');
@@ -136,7 +297,10 @@ function VendorTab() {
     <div>
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-lg font-semibold">Satıcılar ({vendors.length})</h2>
-        <button className="flex items-center gap-1 text-sm bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700">
+        <button
+          onClick={() => setModalVendor('new')}
+          className="flex items-center gap-1 text-sm bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700"
+        >
           <Plus className="w-4 h-4" /> Yeni Satıcı
         </button>
       </div>
@@ -145,6 +309,7 @@ function VendorTab() {
           <thead className="bg-gray-50 text-gray-600 text-left">
             <tr>
               <th className="px-4 py-3 font-medium">Satıcı</th>
+              <th className="px-4 py-3 font-medium">Telefon</th>
               <th className="px-4 py-3 font-medium">Şehir</th>
               <th className="px-4 py-3 font-medium">Komisyon</th>
               <th className="px-4 py-3 font-medium">Durum</th>
@@ -156,8 +321,9 @@ function VendorTab() {
               <tr key={v.id} className="border-t border-gray-100 hover:bg-gray-50">
                 <td className="px-4 py-3">
                   <div className="font-medium">{v.name}</div>
-                  <div className="text-xs text-gray-500">{v.contact_email}</div>
+                  <div className="text-xs text-gray-500">{v.contact_email ?? '—'}</div>
                 </td>
+                <td className="px-4 py-3 text-gray-600 text-xs">{v.contact_phone ?? '—'}</td>
                 <td className="px-4 py-3 text-gray-600">{v.city ?? '—'}</td>
                 <td className="px-4 py-3">%{v.commission_rate}</td>
                 <td className="px-4 py-3">
@@ -167,18 +333,44 @@ function VendorTab() {
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex gap-2">
-                    <button className="text-gray-400 hover:text-indigo-600"><Pencil className="w-4 h-4" /></button>
-                    <button className="text-gray-400 hover:text-red-500" onClick={() => handleDelete(v)}><Trash2 className="w-4 h-4" /></button>
+                    <button
+                      onClick={() => setModalVendor(v)}
+                      className="text-gray-400 hover:text-indigo-600"
+                      title="Düzenle"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(v)}
+                      className="text-gray-400 hover:text-red-500"
+                      title="Sil"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
                 </td>
               </tr>
             ))}
             {vendors.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">Henüz satıcı yok</td></tr>
+              <tr>
+                <td colSpan={6} className="px-4 py-10 text-center text-gray-400">
+                  <Store className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  Henüz satıcı yok. "Yeni Satıcı" ile başlayın.
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
       </div>
+
+      {/* Modal */}
+      {modalVendor !== null && (
+        <VendorModal
+          vendor={modalVendor === 'new' ? null : modalVendor}
+          onClose={() => setModalVendor(null)}
+          onSave={load}
+        />
+      )}
     </div>
   );
 }
