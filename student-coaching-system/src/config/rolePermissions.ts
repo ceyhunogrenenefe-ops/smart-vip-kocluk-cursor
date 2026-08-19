@@ -96,7 +96,26 @@ export const ROUTE_ALLOWED_ROLES = {
   '/exams/result/:id': ['super_admin', 'admin', 'teacher', 'coach', 'student'],
   '/mobile/dersler': ['super_admin', 'admin', 'coach', 'teacher', 'student'],
   '/mobile/akademik': ['super_admin', 'admin', 'coach', 'teacher', 'student'],
-  '/mobile/yonetim': ['super_admin', 'admin']
+  '/mobile/yonetim': ['super_admin', 'admin'],
+  // Kitap Pazaryeri — Süper Admin yönetim paneli
+  '/kitap-pazaryeri': ['super_admin', 'admin'],
+  '/kitap-pazaryeri/saticilar': ['super_admin', 'admin'],
+  '/kitap-pazaryeri/onaylar': ['super_admin', 'admin'],
+  '/kitap-pazaryeri/kitaplar': ['super_admin', 'admin'],
+  '/kitap-pazaryeri/teklifler': ['super_admin', 'admin'],
+  '/kitap-pazaryeri/siparisler': ['super_admin', 'admin'],
+  '/kitap-pazaryeri/kargo': ['super_admin', 'admin'],
+  '/kitap-pazaryeri/hakedisler': ['super_admin', 'admin'],
+  '/kitap-pazaryeri/kuponlar': ['super_admin', 'admin'],
+  '/kitap-pazaryeri/raporlar': ['super_admin', 'admin'],
+  '/kitap-pazaryeri/ayarlar': ['super_admin', 'admin'],
+  // Satıcı paneli
+  '/vendor-panel': ['vendor_admin', 'super_admin'],
+  '/vendor-panel/genel': ['vendor_admin', 'super_admin'],
+  '/vendor-panel/kitaplarim': ['vendor_admin', 'super_admin'],
+  '/vendor-panel/tekliflerim': ['vendor_admin', 'super_admin'],
+  '/vendor-panel/siparislerim': ['vendor_admin', 'super_admin'],
+  '/vendor-panel/hakedislerim': ['vendor_admin', 'super_admin']
 } as const satisfies Record<string, readonly UserRole[]>;
 
 export type ProtectedAppPath = keyof typeof ROUTE_ALLOWED_ROLES;

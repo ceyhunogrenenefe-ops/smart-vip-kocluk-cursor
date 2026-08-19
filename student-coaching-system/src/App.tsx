@@ -91,6 +91,8 @@ import TeacherVitrineProfilePage from './pages/TeacherVitrineProfilePage';
 import TeacherAvailabilityPage from './pages/TeacherAvailabilityPage';
 import TeacherProfileApprovalsPage from './pages/TeacherProfileApprovalsPage';
 import KitapciPortalPage from './pages/KitapciPortalPage';
+import KitapPazaryeriPage from './pages/commerce/KitapPazaryeriPage';
+import VendorPanelPage from './pages/commerce/VendorPanelPage';
 import GarantiOdemePage, { GarantiOdemeSonucPage } from './pages/GarantiOdemePage';
 import TeacherEduPanelPage from './pages/eduPanel/TeacherEduPanelPage';
 import StudentEduPanelPage from './pages/eduPanel/StudentEduPanelPage';
@@ -120,6 +122,7 @@ function HomeRedirect() {
   /** Koç (aynı anda öğretmen olsa da) varsayılan giriş: koç paneli */
   if (tags.includes('coach')) return <Navigate to="/coach-dashboard" replace />;
   if (tags.includes('student')) return <Navigate to="/weekly-planner" replace />;
+  if (tags.includes('vendor_admin')) return <Navigate to="/vendor-panel" replace />;
 
   return <Navigate to="/login" replace />;
 }
@@ -799,6 +802,31 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/exams/result/:id')}>
                 <Layout>
                   <ExamResultPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            {/* Kitap Pazaryeri — Süper Admin yönetim paneli */}
+            <Route path="/kitap-pazaryeri" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/kitap-pazaryeri')}>
+                <Layout>
+                  <KitapPazaryeriPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            {/* Satıcı Paneli — vendor_admin */}
+            <Route path="/vendor-panel" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/vendor-panel')}>
+                <Layout>
+                  <VendorPanelPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            <Route path="/vendor-panel/:tab" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/vendor-panel')}>
+                <Layout>
+                  <VendorPanelPage />
                 </Layout>
               </ProtectedRoute>
             } />
