@@ -119,5 +119,6 @@ export const routeLoaders = {
   'muhasebe-ledger': () => import('../handlers/muhasebe-ledger.js'),
   'garanti-pos': () => import('../handlers/garanti-pos.js'),
   'commerce-admin': () => import('../handlers/commerce-admin.js'),
-  'commerce-vendor': () => import('../handlers/commerce-vendor.js')
+  'commerce-vendor': () => import('../handlers/commerce-vendor.js'),
+  'commerce-store': () => import('../handlers/commerce-store.js')
 };

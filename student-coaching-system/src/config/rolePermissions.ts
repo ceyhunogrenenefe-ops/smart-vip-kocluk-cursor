@@ -109,6 +109,10 @@ export const ROUTE_ALLOWED_ROLES = {
   '/kitap-pazaryeri/kuponlar': ['super_admin', 'admin'],
   '/kitap-pazaryeri/raporlar': ['super_admin', 'admin'],
   '/kitap-pazaryeri/ayarlar': ['super_admin', 'admin'],
+  // Öğrenci/Veli Kitap Mağazası
+  '/kitap-magazasi': ['student', 'super_admin', 'admin', 'coach', 'teacher'],
+  '/kitap-magazasi/:slug': ['student', 'super_admin', 'admin', 'coach', 'teacher'],
+  '/sepet': ['student', 'super_admin', 'admin'],
   // Satıcı paneli
   '/vendor-panel': ['vendor_admin', 'super_admin'],
   '/vendor-panel/genel': ['vendor_admin', 'super_admin'],
