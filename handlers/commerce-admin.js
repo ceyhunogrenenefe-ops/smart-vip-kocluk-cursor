@@ -157,12 +157,117 @@ async function handleVendorUsers(op, body, actor) {
     if (!vendor_id) throw new Error('vendor_id gerekli');
     const { data, error } = await supabaseAdmin
       .from('commerce_vendor_users')
-      .select('*, users(id, name, email, role)')
+      .select('*, users(id, name, email, role, roles, is_active, last_login_at)')
       .eq('vendor_id', vendor_id)
       .is('deleted_at', null)
       .order('created_at', { ascending: true });
     if (error) throw error;
     return { ok: true, users: data };
+  }
+
+  /**
+   * vendor_users.create_account
+   * Satıcı için yeni users kaydı oluşturur + commerce_vendor_users bağlar.
+   * body: { vendor_id, name, email, password, phone? }
+   */
+  if (op === 'vendor_users.create_account') {
+    const { vendor_id, name, email, password, phone } = body;
+    if (!vendor_id || !name || !email || !password) {
+      throw new Error('vendor_id, name, email, password zorunlu');
+    }
+    const normalizedEmail = String(email).toLowerCase().trim();
+    if (String(password).length < 6) throw new Error('Şifre en az 6 karakter olmalı');
+
+    // E-posta çakışma kontrolü
+    const { data: existing } = await supabaseAdmin
+      .from('users')
+      .select('id')
+      .eq('email', normalizedEmail)
+      .maybeSingle();
+    if (existing) throw new Error('Bu e-posta adresi zaten kullanımda');
+
+    const now = new Date().toISOString();
+    const userId = crypto.randomUUID ? crypto.randomUUID() : require('crypto').randomUUID();
+
+    // Kullanıcı oluştur
+    const { data: newUser, error: userErr } = await supabaseAdmin
+      .from('users')
+      .insert({
+        id: userId,
+        name: String(name).trim(),
+        email: normalizedEmail,
+        phone: phone ? String(phone).trim() : null,
+        role: 'vendor_admin',
+        roles: JSON.stringify(['vendor_admin']),
+        password_hash: String(password),
+        is_active: true,
+        institution_id: null,
+        package: 'starter',
+        start_date: now,
+        end_date: new Date(Date.now() + 3 * 365 * 24 * 60 * 60 * 1000).toISOString(),
+        created_by: actor.sub,
+        created_at: now,
+        updated_at: now,
+      })
+      .select('id, name, email, role')
+      .single();
+    if (userErr) throw new Error(`Kullanıcı oluşturulamadı: ${userErr.message}`);
+
+    // commerce_vendor_users bağla
+    const { error: vuErr } = await supabaseAdmin
+      .from('commerce_vendor_users')
+      .upsert({
+        vendor_id,
+        user_id: userId,
+        role: 'admin',
+        is_active: true,
+        created_by: actor.sub,
+        deleted_at: null,
+      }, { onConflict: 'vendor_id,user_id' });
+    if (vuErr) throw new Error(`Satıcı bağlantısı kurulamadı: ${vuErr.message}`);
+
+    await logAudit({
+      entity_type: 'commerce_vendor_user',
+      entity_id: userId,
+      action: 'create_account',
+      actor_user_id: actor.sub,
+      vendor_id,
+      new_value: { email: normalizedEmail, name },
+    });
+
+    return { ok: true, user: newUser, password_set: String(password) };
+  }
+
+  /**
+   * vendor_users.reset_password
+   * body: { user_id, new_password }
+   */
+  if (op === 'vendor_users.reset_password') {
+    const { user_id, new_password } = body;
+    if (!user_id || !new_password) throw new Error('user_id ve new_password zorunlu');
+    if (String(new_password).length < 6) throw new Error('Şifre en az 6 karakter olmalı');
+    const { error } = await supabaseAdmin
+      .from('users')
+      .update({ password_hash: String(new_password), updated_at: new Date().toISOString() })
+      .eq('id', user_id);
+    if (error) throw error;
+    await logAudit({ entity_type: 'user', entity_id: user_id, action: 'password_reset', actor_user_id: actor.sub });
+    return { ok: true };
+  }
+
+  /**
+   * vendor_users.toggle_active
+   * body: { user_id, is_active }
+   */
+  if (op === 'vendor_users.toggle_active') {
+    const { user_id, is_active } = body;
+    if (!user_id) throw new Error('user_id gerekli');
+    const { error } = await supabaseAdmin
+      .from('users')
+      .update({ is_active: Boolean(is_active), updated_at: new Date().toISOString() })
+      .eq('id', user_id);
+    if (error) throw error;
+    return { ok: true };
   }
 
   if (op === 'vendor_users.add') {

@@ -30,7 +30,21 @@ export const caCreateVendor = (fields: Partial<CommerceVendor>) => post<{ vendor
 export const caUpdateVendor = (id: string, fields: Partial<CommerceVendor>) => post<{ vendor: CommerceVendor }>('vendors.update', { id, ...fields });
 export const caDeleteVendor = (id: string) => post('vendors.delete', { id });
 
-export const caListVendorUsers = (vendor_id: string) => post<{ users: (CommerceVendorUser & { users: { id: string; name: string; email: string } })[] }>('vendor_users.list', { vendor_id });
+export type VendorUserRow = CommerceVendorUser & {
+  users: { id: string; name: string; email: string; role: string; is_active: boolean; last_login_at: string | null } | null;
+};
+
+export const caListVendorUsers = (vendor_id: string) => post<{ users: VendorUserRow[] }>('vendor_users.list', { vendor_id });
+
+export const caCreateVendorAccount = (vendor_id: string, fields: { name: string; email: string; password: string; phone?: string }) =>
+  post<{ user: { id: string; name: string; email: string; role: string }; password_set: string }>('vendor_users.create_account', { vendor_id, ...fields });
+
+export const caResetVendorPassword = (user_id: string, new_password: string) =>
+  post('vendor_users.reset_password', { user_id, new_password });
+
+export const caToggleVendorActive = (user_id: string, is_active: boolean) =>
+  post('vendor_users.toggle_active', { user_id, is_active });
+
 export const caAddVendorUser = (vendor_id: string, user_id: string, role = 'admin') => post('vendor_users.add', { vendor_id, user_id, role });
 export const caRemoveVendorUser = (id: string) => post('vendor_users.remove', { id });
 
