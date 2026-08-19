@@ -156,14 +156,31 @@ async function handleVendorUsers(op, body, actor) {
   if (op === 'vendor_users.list') {
     const { vendor_id } = body;
     if (!vendor_id) throw new Error('vendor_id gerekli');
-    const { data, error } = await supabaseAdmin
+
+    // İki adımlı sorgu: FK çakışmasını önlemek için join yerine ayrı çek
+    const { data: vuRows, error: vuErr } = await supabaseAdmin
       .from('commerce_vendor_users')
-      .select('*, users(id, name, email, role, roles, is_active, last_login_at)')
+      .select('id, vendor_id, user_id, role, is_active, created_at')
       .eq('vendor_id', vendor_id)
       .is('deleted_at', null)
       .order('created_at', { ascending: true });
-    if (error) throw error;
-    return { ok: true, users: data };
+    if (vuErr) throw vuErr;
+
+    const userIds = (vuRows ?? []).map((r) => r.user_id).filter(Boolean);
+    let usersMap = {};
+    if (userIds.length) {
+      const { data: userRows } = await supabaseAdmin
+        .from('users')
+        .select('id, name, email, role, is_active, last_login_at')
+        .in('id', userIds);
+      for (const u of userRows ?? []) usersMap[u.id] = u;
+    }
+
+    const normalized = (vuRows ?? []).map((row) => ({
+      ...row,
+      users: usersMap[row.user_id] ?? null,
+    }));
+    return { ok: true, users: normalized };
   }
 
   /**
