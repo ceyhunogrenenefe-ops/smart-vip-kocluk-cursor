@@ -333,6 +333,8 @@ export interface Database {
           status: string | null;
           notes: string | null;
           institution_id: string | null;
+          commerce_book_id: string | null;
+          commerce_order_item_id: string | null;
           created_at: string;
           updated_at: string;
         };

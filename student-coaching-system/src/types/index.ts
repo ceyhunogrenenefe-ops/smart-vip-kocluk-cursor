@@ -1,7 +1,7 @@
 // Türkçe: Uygulama genelinde kullanılan tipler
 
 // Kullanıcı Rolleri - Eğitim Koçu sistemi
-export type UserRole = 'super_admin' | 'admin' | 'coach' | 'teacher' | 'student';
+export type UserRole = 'super_admin' | 'admin' | 'coach' | 'teacher' | 'student' | 'vendor_admin';
 
 // Sınıf seviyeleri: ilkokul, ortaokul, lise ve YKS puan türleri
 export type ClassLevel =
