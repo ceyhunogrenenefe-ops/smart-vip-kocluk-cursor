@@ -1,5 +1,5 @@
-/**
- * Dış öğretmen başvurusu (site)
+﻿/**
+ * D─▒┼ş ├Â─şretmen ba┼şvurusu (site)
  * POST /api/teacher-applications
  * POST /api/teacher-applications  body.op=upload-photo  (bilgisayardan foto)
  * GET  /api/teacher-applications  (admin, liste)
@@ -84,21 +84,47 @@ function parseBase64Image(raw) {
   }
 }
 
+function parseBase64Document(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  const m = s.match(/^data:((?:image\/(?:jpeg|jpg|png|webp)|application\/pdf));base64,(.+)$/i);
+  if (m) {
+    return {
+      contentType: m[1].toLowerCase().replace('image/jpg', 'image/jpeg'),
+      buffer: Buffer.from(m[2], 'base64')
+    };
+  }
+  try {
+    return { contentType: null, buffer: Buffer.from(s, 'base64') };
+  } catch {
+    return null;
+  }
+}
+
+const DOC_MAX_BYTES = 5 * 1024 * 1024;
+const DOC_MIME = {
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'application/pdf': 'pdf'
+};
+
 async function handlePhotoUpload(req, res, ip) {
   if (isRateLimited(ip, photoBuckets, PHOTO_WINDOW_MS, MAX_PHOTO_PER_WINDOW)) {
-    return res.status(429).json({ error: 'too_many_requests', hint: 'Lütfen bir süre sonra tekrar deneyin.' });
+    return res.status(429).json({ error: 'too_many_requests', hint: 'L├╝tfen bir s├╝re sonra tekrar deneyin.' });
   }
 
   const body = req.body || {};
   const contentTypeHint = String(body.contentType || body.content_type || '').toLowerCase().trim();
   const parsed = parseBase64Image(body.fileBase64 || body.file_base64 || body.dataUrl || body.data_url);
   if (!parsed?.buffer?.length) {
-    return res.status(400).json({ error: 'file_required', message: 'Fotoğraf dosyası gerekli.' });
+    return res.status(400).json({ error: 'file_required', message: 'Foto─şraf dosyas─▒ gerekli.' });
   }
   if (parsed.buffer.length > PHOTO_MAX_BYTES) {
     return res.status(400).json({
       error: 'file_too_large',
-      message: 'Fotoğraf en fazla 2.5 MB olabilir.',
+      message: 'Foto─şraf en fazla 2.5 MB olabilir.',
       max_bytes: PHOTO_MAX_BYTES
     });
   }
@@ -108,7 +134,7 @@ async function handlePhotoUpload(req, res, ip) {
   if (!ext) {
     return res.status(400).json({
       error: 'invalid_mime',
-      message: 'Sadece JPG, PNG veya WEBP yükleyin.',
+      message: 'Sadece JPG, PNG veya WEBP y├╝kleyin.',
       allowed: Object.keys(PHOTO_MIME)
     });
   }
@@ -122,7 +148,7 @@ async function handlePhotoUpload(req, res, ip) {
     console.error('[teacher-applications] photo upload', upErr.message || upErr);
     return res.status(503).json({
       error: 'storage_unavailable',
-      hint: `Supabase Storage'da "${PHOTO_BUCKET}" bucket oluşturun (public).`,
+      hint: `Supabase Storage'da "${PHOTO_BUCKET}" bucket olu┼şturun (public).`,
       detail: upErr.message
     });
   }
@@ -135,12 +161,94 @@ async function handlePhotoUpload(req, res, ip) {
     publicUrl = null;
   }
   if (!publicUrl) {
-    return res.status(503).json({ error: 'public_url_failed', message: 'Fotoğraf yüklendi ama URL alınamadı.' });
+    return res.status(503).json({ error: 'public_url_failed', message: 'Foto─şraf y├╝klendi ama URL al─▒namad─▒.' });
   }
 
   return res.status(200).json({
     ok: true,
     photo_url: publicUrl,
+    path,
+    bucket: PHOTO_BUCKET,
+    contentType
+  });
+}
+
+async function handleDocumentUpload(req, res, ip) {
+  if (isRateLimited(ip, photoBuckets, PHOTO_WINDOW_MS, MAX_PHOTO_PER_WINDOW)) {
+    return res.status(429).json({ error: 'too_many_requests', hint: 'L├╝tfen bir s├╝re sonra tekrar deneyin.' });
+  }
+
+  const body = req.body || {};
+  const contentTypeHint = String(body.contentType || body.content_type || '').toLowerCase().trim();
+  const parsed = parseBase64Document(body.fileBase64 || body.file_base64 || body.dataUrl || body.data_url);
+  if (!parsed?.buffer?.length) {
+    return res.status(400).json({ error: 'file_required', message: 'Belge dosyas─▒ gerekli.' });
+  }
+  if (parsed.buffer.length > DOC_MAX_BYTES) {
+    return res.status(400).json({
+      error: 'file_too_large',
+      message: 'Belge en fazla 5 MB olabilir.',
+      max_bytes: DOC_MAX_BYTES
+    });
+  }
+
+  let contentType = (parsed.contentType || contentTypeHint || 'application/pdf')
+    .toLowerCase()
+    .replace('image/jpg', 'image/jpeg');
+  let ext = DOC_MIME[contentType];
+  if (!ext) {
+    const name = String(body.fileName || body.file_name || '').toLowerCase();
+    if (name.endsWith('.pdf')) {
+      contentType = 'application/pdf';
+      ext = 'pdf';
+    } else if (/\.(jpe?g)$/.test(name)) {
+      contentType = 'image/jpeg';
+      ext = 'jpg';
+    } else if (name.endsWith('.png')) {
+      contentType = 'image/png';
+      ext = 'png';
+    } else if (name.endsWith('.webp')) {
+      contentType = 'image/webp';
+      ext = 'webp';
+    }
+  }
+  if (!ext) {
+    return res.status(400).json({
+      error: 'invalid_mime',
+      message: 'Sadece PDF, JPG, PNG veya WEBP y├╝kleyin.',
+      allowed: Object.keys(DOC_MIME)
+    });
+  }
+
+  const path = `applications/${randomUUID()}/credential.${ext}`;
+  const { error: upErr } = await supabaseAdmin.storage.from(PHOTO_BUCKET).upload(path, parsed.buffer, {
+    contentType,
+    upsert: true
+  });
+  if (upErr) {
+    console.error('[teacher-applications] document upload', upErr.message || upErr);
+    return res.status(503).json({
+      error: 'storage_unavailable',
+      hint: `Supabase Storage'da "${PHOTO_BUCKET}" bucket olu┼şturun (public).`,
+      detail: upErr.message
+    });
+  }
+
+  let publicUrl = null;
+  try {
+    const { data: pub } = supabaseAdmin.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+    publicUrl = pub?.publicUrl || null;
+  } catch {
+    publicUrl = null;
+  }
+  if (!publicUrl) {
+    return res.status(503).json({ error: 'public_url_failed', message: 'Belge y├╝klendi ama URL al─▒namad─▒.' });
+  }
+
+  return res.status(200).json({
+    ok: true,
+    document_url: publicUrl,
+    credential_document_url: publicUrl,
     path,
     bucket: PHOTO_BUCKET,
     contentType
@@ -181,7 +289,7 @@ export default async function handler(req, res) {
       if (/teacher_applications/i.test(em) || /42P01|PGRST/i.test(em)) {
         return res.status(503).json({
           error: 'table_missing',
-          hint: 'sql/2026-07-29-teacher-applications.sql dosyasını Supabase’de çalıştırın.'
+          hint: 'sql/2026-07-29-teacher-applications.sql dosyas─▒n─▒ SupabaseÔÇÖde ├ğal─▒┼şt─▒r─▒n.'
         });
       }
       throw error;
@@ -192,7 +300,26 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' });
 
   const ip = currentIp(req);
-  const bodyOp = String(req.body?.op || req.query?.op || '').trim().toLowerCase();
+  // Vercel bazen body'yi string b─▒rak─▒r; op kaybolursa tam ba┼şvuru validasyonuna d├╝┼ş├╝p
+  // "Ad ve soyad zorunludur" hatas─▒ ├╝retir ÔÇö belge y├╝klemesini bozar.
+  if (typeof req.body === 'string') {
+    try {
+      req.body = JSON.parse(req.body || '{}');
+    } catch {
+      req.body = {};
+    }
+  }
+  let bodyOp = String(req.body?.op || req.query?.op || '').trim().toLowerCase();
+  const hasFile = Boolean(
+    req.body?.fileBase64 || req.body?.file_base64 || req.body?.dataUrl || req.body?.data_url
+  );
+  if (!bodyOp && hasFile) {
+    const ct = String(req.body?.contentType || req.body?.content_type || '').toLowerCase();
+    const name = String(req.body?.fileName || req.body?.file_name || '').toLowerCase();
+    if (ct.includes('pdf') || name.endsWith('.pdf')) bodyOp = 'upload-document';
+    else if (ct.startsWith('image/') || /\.(jpe?g|png|webp)$/.test(name)) bodyOp = 'upload-photo';
+    else bodyOp = 'upload-document';
+  }
   if (bodyOp === 'upload-photo') {
     try {
       return await handlePhotoUpload(req, res, ip);
@@ -201,9 +328,17 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'server_error', message: errorMessage(e) });
     }
   }
+  if (bodyOp === 'upload-document' || bodyOp === 'upload-credential') {
+    try {
+      return await handleDocumentUpload(req, res, ip);
+    } catch (e) {
+      console.error('[teacher-applications] upload-document', errorMessage(e));
+      return res.status(500).json({ error: 'server_error', message: errorMessage(e) });
+    }
+  }
 
   if (isRateLimited(ip)) {
-    return res.status(429).json({ error: 'too_many_requests', hint: 'Lütfen bir süre sonra tekrar deneyin.' });
+    return res.status(429).json({ error: 'too_many_requests', hint: 'L├╝tfen bir s├╝re sonra tekrar deneyin.' });
   }
 
   const normalized = normalizeTeacherApplicationBody(req.body || {});
@@ -228,7 +363,7 @@ export default async function handler(req, res) {
   if (recentDup?.id) {
     return res.status(409).json({
       error: 'basvuru_zaten_var',
-      message: 'Bu e-posta ile son günlerde başvuru alınmış.'
+      message: 'Bu e-posta ile son g├╝nlerde ba┼şvuru al─▒nm─▒┼ş.'
     });
   }
 
@@ -246,6 +381,7 @@ export default async function handler(req, res) {
     short_bio: normalized.short_bio,
     full_bio: normalized.full_bio,
     photo_url: normalized.photo_url,
+    credential_document_url: normalized.credential_document_url,
     intro_video_url: normalized.intro_video_url,
     lesson_video_url: normalized.lesson_video_url,
     instagram_url: normalized.instagram_url || null,
@@ -261,21 +397,33 @@ export default async function handler(req, res) {
     updated_at: now
   };
 
-  const { data: application, error: insErr } = await supabaseAdmin
-    .from('teacher_applications')
-    .insert(insertRow)
-    .select('*')
-    .single();
-
-  if (insErr) {
-    const em = String(insErr.message || '');
-    if (/teacher_applications/i.test(em) || /42P01|PGRST/i.test(em)) {
-      return res.status(503).json({
-        error: 'table_missing',
-        hint: 'sql/2026-07-29-teacher-applications.sql dosyasını Supabase’de çalıştırın.'
-      });
+  let application = null;
+  {
+    const firstTry = await supabaseAdmin.from('teacher_applications').insert(insertRow).select('*').single();
+    if (!firstTry.error && firstTry.data) {
+      application = firstTry.data;
+    } else {
+      const em = String(firstTry.error?.message || '');
+      if (/credential_document_url/i.test(em)) {
+        const { credential_document_url: _drop, ...withoutCred } = insertRow;
+        const retry = await supabaseAdmin.from('teacher_applications').insert(withoutCred).select('*').single();
+        if (!retry.error && retry.data) {
+          application = retry.data;
+        } else if (retry.error) {
+          throw retry.error;
+        }
+      } else if (/teacher_applications/i.test(em) || /42P01|PGRST/i.test(em)) {
+        return res.status(503).json({
+          error: 'table_missing',
+          hint: 'sql/2026-07-29-teacher-applications.sql dosyas─▒n─▒ SupabaseÔÇÖde ├ğal─▒┼şt─▒r─▒n.'
+        });
+      } else {
+        throw firstTry.error;
+      }
     }
-    throw insErr;
+  }
+  if (!application) {
+    return res.status(500).json({ error: 'insert_failed' });
   }
 
   try {
@@ -298,7 +446,7 @@ export default async function handler(req, res) {
       ok: true,
       application_id: application.id,
       profile_id: profile.id,
-      message: 'Başvurunuz alındı. İnceleme sonrası size dönüş yapılacaktır.'
+      message: 'Ba┼şvurunuz al─▒nd─▒. ─░nceleme sonras─▒ size d├Ân├╝┼ş yap─▒lacakt─▒r.'
     });
   } catch (e) {
     const status = e.status || 500;
