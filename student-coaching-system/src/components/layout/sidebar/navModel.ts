@@ -35,7 +35,9 @@ import {
   CloudDownload,
   ScrollText,
   ClipboardCheck,
-  UserCheck
+  UserCheck,
+  ShoppingBag,
+  Store
 } from 'lucide-react';
 import type { UserRole } from '../../../types';
 
@@ -328,8 +330,20 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/system-management', icon: Server, label: 'Sistem Yönetimi' },
       { path: '/veli-onay', icon: FileText, label: 'Veli onayı & e-imza' },
       { path: '/muhasebe', icon: Wallet, label: 'Muhasebe' },
+      { path: '/kitap-pazaryeri', icon: ShoppingBag, label: 'Kitap Pazaryeri' },
       { path: '/ai-coach', icon: Brain, label: 'AI KOÇ' },
       { path: '/settings', icon: Settings, label: 'Ayarlar' }
+    ];
+  }
+
+  // Satıcı paneli (vendor_admin)
+  if (tags.includes('vendor_admin') && !tags.some((t) => ['super_admin', 'admin', 'coach', 'teacher'].includes(t as string))) {
+    return [
+      { path: '/vendor-panel/genel', icon: LayoutDashboard, label: 'Genel Bakış' },
+      { path: '/vendor-panel/kitaplarim', icon: BookOpen, label: 'Kitaplarım' },
+      { path: '/vendor-panel/tekliflerim', icon: Store, label: 'Tekliflerim' },
+      { path: '/vendor-panel/siparislerim', icon: ShoppingBag, label: 'Siparişlerim' },
+      { path: '/vendor-panel/hakedislerim', icon: Wallet, label: 'Hakedişlerim' },
     ];
   }
 
@@ -381,6 +395,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/toplanti-takip', icon: ClipboardCheck, label: 'Toplantı ve Gündem Takibi' },
     { path: '/kayit-takibi', icon: ClipboardList, label: 'Kayıt Takibi' },
     NAV_KITAP_SIPARISLERI,
+    { path: '/kitap-pazaryeri', icon: ShoppingBag, label: 'Kitap Pazaryeri' },
     NAV_OZEL_DERS_TALEPLERI,
     NAV_TEACHER_PROFILE_APPROVALS,
     { path: '/system-management', icon: Server, label: 'Sistem Yönetimi' },

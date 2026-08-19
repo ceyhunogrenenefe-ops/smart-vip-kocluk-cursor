@@ -1,0 +1,430 @@
+/**
+ * /api/commerce-vendor — Satıcı (vendor_admin) paneli
+ *
+ * Satıcı yalnızca kendi commerce_vendor_users kaydı üzerinden erişebilir.
+ * Super admin de bu endpointi satıcı adına kullanabilir.
+ *
+ * Operasyonlar:
+ *  my_vendor.get
+ *  books.list | books.create | books.update
+ *  offers.list | offers.get | offers.create | offers.update | offers.submit
+ *  orders.list | orders.get | orders.accept | orders.preparing | orders.ship
+ *  shipments.create | shipments.update
+ *  payouts.list
+ *  stats.overview
+ */
+
+import { requireAuth } from '../api/_lib/auth.js';
+import { actorRoleSet, roleSetHasSuperAdmin } from '../api/_lib/actor-roles.js';
+import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
+
+function err(res, status, message) {
+  return res.status(status).json({ error: message });
+}
+
+function sanitizeText(v) {
+  return typeof v === 'string' ? v.trim() : null;
+}
+
+function sanitizeInt(v) {
+  const n = parseInt(String(v ?? ''), 10);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+/** Satıcının bu isteği yapma yetkisi var mı? vendor_id'yi döner veya hata fırlatır */
+async function resolveVendorAccess(actor, roleSet, requestedVendorId) {
+  if (roleSetHasSuperAdmin(roleSet)) {
+    if (!requestedVendorId) throw new Error('vendor_id gerekli (super_admin)');
+    return requestedVendorId;
+  }
+  // vendor_admin: DB'de commerce_vendor_users kontrolü
+  const { data } = await supabaseAdmin
+    .from('commerce_vendor_users')
+    .select('vendor_id')
+    .eq('user_id', actor.sub)
+    .eq('is_active', true)
+    .is('deleted_at', null)
+    .maybeSingle();
+  if (!data) throw new Error('Bu kullanıcıya bağlı satıcı bulunamadı');
+  if (requestedVendorId && data.vendor_id !== requestedVendorId) {
+    throw new Error('Başka satıcının verisine erişim yok');
+  }
+  return data.vendor_id;
+}
+
+// ─────────────────────────────────────────────
+// Ana handler
+// ─────────────────────────────────────────────
+export default async function handler(req, res) {
+  if (req.method !== 'POST') return err(res, 405, 'Method Not Allowed');
+  try {
+    const actor = requireAuth(req);
+    const roleSet = await actorRoleSet(actor);
+    const isSuperAdmin = roleSetHasSuperAdmin(roleSet);
+    const isVendorAdmin = roleSet.has('vendor_admin');
+
+    if (!isSuperAdmin && !isVendorAdmin) {
+      return err(res, 403, 'Yetki yok — vendor_admin veya super_admin gerekli');
+    }
+
+    const body = req.body ?? {};
+    const op = String(body.op ?? '').trim();
+    if (!op) return err(res, 400, 'op gerekli');
+
+    // vendor_id sadece my_vendor.get için opsiyonel; diğerlerinde zorunlu
+    let vendorId;
+    try {
+      vendorId = await resolveVendorAccess(actor, roleSet, body.vendor_id ?? null);
+    } catch (e) {
+      return err(res, 403, e.message);
+    }
+
+    // ── My vendor ────────────────────────────
+    if (op === 'my_vendor.get') {
+      const { data, error } = await supabaseAdmin
+        .from('commerce_vendors')
+        .select('*')
+        .eq('id', vendorId)
+        .single();
+      if (error) throw error;
+      return res.status(200).json({ ok: true, vendor: data });
+    }
+
+    // ── Kitaplar ─────────────────────────────
+    if (op === 'books.list') {
+      // Satıcının teklif verdiği veya verebileceği kitaplar
+      let q = supabaseAdmin
+        .from('commerce_books')
+        .select(`
+          *,
+          commerce_vendor_offers!left(
+            id, price_kurus, stock_quantity, status, vendor_id
+          )
+        `)
+        .is('deleted_at', null)
+        .eq('is_catalog_active', true)
+        .order('title', { ascending: true });
+      if (body.search) q = q.ilike('title', `%${body.search}%`);
+      if (body.limit) q = q.limit(parseInt(body.limit, 10));
+      const { data, error } = await q;
+      if (error) throw error;
+      // Yalnızca bu satıcının teklifini ekle
+      const books = (data ?? []).map((b) => ({
+        ...b,
+        my_offer: (b.commerce_vendor_offers ?? []).find((o) => o.vendor_id === vendorId) ?? null,
+        commerce_vendor_offers: undefined,
+      }));
+      return res.status(200).json({ ok: true, books });
+    }
+
+    if (op === 'books.create') {
+      if (!body.title) return err(res, 400, 'title gerekli');
+      const slug =
+        sanitizeText(body.slug) ||
+        sanitizeText(body.title)
+          ?.toLowerCase()
+          .replace(/\s+/g, '-')
+          .replace(/[^a-z0-9-]/g, '') + '-' + Date.now();
+      const { data, error } = await supabaseAdmin
+        .from('commerce_books')
+        .insert({
+          isbn: sanitizeText(body.isbn),
+          slug,
+          title: sanitizeText(body.title),
+          subtitle: sanitizeText(body.subtitle),
+          author: sanitizeText(body.author),
+          publisher: sanitizeText(body.publisher),
+          subject: sanitizeText(body.subject),
+          class_levels: body.class_levels ?? [],
+          exam_types: body.exam_types ?? [],
+          description: sanitizeText(body.description),
+          page_count: sanitizeInt(body.page_count),
+          cover_image_url: sanitizeText(body.cover_image_url),
+          is_catalog_active: false, // Süper Admin onaylayana kadar kapalı
+          created_by: actor.sub,
+          updated_by: actor.sub,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return res.status(200).json({ ok: true, book: data });
+    }
+
+    if (op === 'books.update') {
+      const { book_id, ...fields } = body;
+      if (!book_id) return err(res, 400, 'book_id gerekli');
+      // Satıcı yalnızca kendisinin oluşturduğu veya teklif verdiği kitabı güncelleyebilir
+      const { data: checkOffer } = await supabaseAdmin
+        .from('commerce_vendor_offers')
+        .select('id')
+        .eq('vendor_id', vendorId)
+        .eq('book_id', book_id)
+        .maybeSingle();
+      const { data: checkBook } = await supabaseAdmin
+        .from('commerce_books')
+        .select('created_by')
+        .eq('id', book_id)
+        .maybeSingle();
+      if (!checkOffer && checkBook?.created_by !== actor.sub) {
+        return err(res, 403, 'Bu kitabı düzenleme yetkiniz yok');
+      }
+      const patch = {};
+      ['subtitle', 'description', 'cover_image_url'].forEach((f) => {
+        if (fields[f] !== undefined) patch[f] = sanitizeText(fields[f]);
+      });
+      patch.updated_by = actor.sub;
+      patch.updated_at = new Date().toISOString();
+      const { data, error } = await supabaseAdmin.from('commerce_books').update(patch).eq('id', book_id).select().single();
+      if (error) throw error;
+      return res.status(200).json({ ok: true, book: data });
+    }
+
+    // ── Teklifler ─────────────────────────────
+    if (op === 'offers.list') {
+      const { data, error } = await supabaseAdmin
+        .from('commerce_vendor_offers')
+        .select('*, commerce_books(id, title, isbn, cover_image_url)')
+        .eq('vendor_id', vendorId)
+        .is('deleted_at', null)
+        .order('updated_at', { ascending: false });
+      if (error) throw error;
+      return res.status(200).json({ ok: true, offers: data });
+    }
+
+    if (op === 'offers.get') {
+      const { id } = body;
+      if (!id) return err(res, 400, 'id gerekli');
+      const { data, error } = await supabaseAdmin
+        .from('commerce_vendor_offers')
+        .select('*, commerce_books(*)')
+        .eq('id', id)
+        .eq('vendor_id', vendorId)
+        .single();
+      if (error) throw error;
+      return res.status(200).json({ ok: true, offer: data });
+    }
+
+    if (op === 'offers.create') {
+      const { book_id } = body;
+      if (!book_id || body.price_kurus === undefined) return err(res, 400, 'book_id ve price_kurus gerekli');
+      const { data, error } = await supabaseAdmin
+        .from('commerce_vendor_offers')
+        .insert({
+          vendor_id: vendorId,
+          book_id,
+          price_kurus: parseInt(body.price_kurus, 10),
+          compare_at_price_kurus: sanitizeInt(body.compare_at_price_kurus),
+          stock_quantity: sanitizeInt(body.stock_quantity) ?? 0,
+          low_stock_threshold: sanitizeInt(body.low_stock_threshold) ?? 5,
+          shipping_days: sanitizeInt(body.shipping_days) ?? 3,
+          status: 'draft',
+          created_by: actor.sub,
+          updated_by: actor.sub,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return res.status(200).json({ ok: true, offer: data });
+    }
+
+    if (op === 'offers.update') {
+      const { id, ...fields } = body;
+      if (!id) return err(res, 400, 'id gerekli');
+      // Yalnızca draft/correction_requested/rejected durumunda güncellenebilir
+      const { data: current } = await supabaseAdmin
+        .from('commerce_vendor_offers')
+        .select('status, vendor_id')
+        .eq('id', id)
+        .single();
+      if (!current || current.vendor_id !== vendorId) return err(res, 403, 'Bu teklif size ait değil');
+      const EDITABLE = ['draft', 'correction_requested', 'rejected'];
+      if (!EDITABLE.includes(current.status)) {
+        return err(res, 400, `Onaylanmış/incelemeye alınmış teklif düzenlenemez (${current.status})`);
+      }
+      const patch = {};
+      if (fields.price_kurus !== undefined) patch.price_kurus = parseInt(fields.price_kurus, 10);
+      if (fields.compare_at_price_kurus !== undefined) patch.compare_at_price_kurus = sanitizeInt(fields.compare_at_price_kurus);
+      if (fields.stock_quantity !== undefined) patch.stock_quantity = sanitizeInt(fields.stock_quantity);
+      if (fields.low_stock_threshold !== undefined) patch.low_stock_threshold = sanitizeInt(fields.low_stock_threshold);
+      if (fields.shipping_days !== undefined) patch.shipping_days = sanitizeInt(fields.shipping_days);
+      // Onaylanmış teklifte fiyat değişikliği → snapshot kaydet
+      if (current.status === 'approved' && fields.price_kurus !== undefined) {
+        patch.pending_snapshot = { price_kurus: patch.price_kurus, updated_at: new Date().toISOString() };
+        patch.status = 'pending_approval';
+      }
+      patch.updated_by = actor.sub;
+      patch.updated_at = new Date().toISOString();
+      const { data, error } = await supabaseAdmin.from('commerce_vendor_offers').update(patch).eq('id', id).select().single();
+      if (error) throw error;
+      return res.status(200).json({ ok: true, offer: data });
+    }
+
+    if (op === 'offers.submit') {
+      // Taslağı onaya gönder
+      const { id } = body;
+      if (!id) return err(res, 400, 'id gerekli');
+      const { data: current } = await supabaseAdmin
+        .from('commerce_vendor_offers')
+        .select('status, vendor_id, price_kurus, stock_quantity')
+        .eq('id', id)
+        .single();
+      if (!current || current.vendor_id !== vendorId) return err(res, 403, 'Bu teklif size ait değil');
+      if (!['draft', 'correction_requested', 'rejected'].includes(current.status)) {
+        return err(res, 400, 'Yalnızca taslak/reddedilmiş teklifler gönderilebilir');
+      }
+      if (current.price_kurus <= 0) return err(res, 400, 'Fiyat 0 olamaz');
+      const { data, error } = await supabaseAdmin
+        .from('commerce_vendor_offers')
+        .update({ status: 'pending_approval', submitted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .select()
+        .single();
+      if (error) throw error;
+      return res.status(200).json({ ok: true, offer: data });
+    }
+
+    // ── Siparişler (satıcının kendi siparişleri) ──
+    if (op === 'orders.list') {
+      let q = supabaseAdmin
+        .from('commerce_vendor_orders')
+        .select(`
+          *,
+          commerce_orders(id, order_number, customer_name, customer_phone, created_at, status),
+          commerce_order_items(id, title_snapshot, quantity, unit_price_kurus),
+          commerce_shipments(*)
+        `)
+        .eq('vendor_id', vendorId)
+        .order('created_at', { ascending: false });
+      if (body.status) q = q.eq('status', body.status);
+      const limit = Math.min(parseInt(body.limit ?? 50, 10), 200);
+      q = q.limit(limit);
+      const { data, error } = await q;
+      if (error) throw error;
+      return res.status(200).json({ ok: true, vendor_orders: data });
+    }
+
+    if (op === 'orders.get') {
+      const { id } = body;
+      if (!id) return err(res, 400, 'id gerekli');
+      const { data, error } = await supabaseAdmin
+        .from('commerce_vendor_orders')
+        .select(`
+          *,
+          commerce_orders(*, commerce_order_addresses(*)),
+          commerce_order_items(*),
+          commerce_shipments(*)
+        `)
+        .eq('id', id)
+        .eq('vendor_id', vendorId)
+        .single();
+      if (error) throw error;
+      return res.status(200).json({ ok: true, vendor_order: data });
+    }
+
+    if (op === 'orders.accept') {
+      const { id } = body;
+      if (!id) return err(res, 400, 'id gerekli');
+      const { data, error } = await supabaseAdmin
+        .from('commerce_vendor_orders')
+        .update({ status: 'confirmed', accepted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .eq('vendor_id', vendorId)
+        .select()
+        .single();
+      if (error) throw error;
+      return res.status(200).json({ ok: true, vendor_order: data });
+    }
+
+    if (op === 'orders.preparing') {
+      const { id } = body;
+      if (!id) return err(res, 400, 'id gerekli');
+      const { data, error } = await supabaseAdmin
+        .from('commerce_vendor_orders')
+        .update({ status: 'preparing', prepared_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .eq('vendor_id', vendorId)
+        .select()
+        .single();
+      if (error) throw error;
+      return res.status(200).json({ ok: true, vendor_order: data });
+    }
+
+    if (op === 'orders.ship') {
+      const { id, carrier, tracking_number, tracking_url, invoice_number } = body;
+      if (!id) return err(res, 400, 'id gerekli');
+      const { data: vo } = await supabaseAdmin
+        .from('commerce_vendor_orders')
+        .select('id, vendor_id')
+        .eq('id', id)
+        .eq('vendor_id', vendorId)
+        .single();
+      if (!vo) return err(res, 403, 'Sipariş bulunamadı');
+      const now = new Date().toISOString();
+      const [shipResult] = await Promise.all([
+        supabaseAdmin.from('commerce_shipments').insert({
+          vendor_order_id: id,
+          carrier: sanitizeText(carrier),
+          tracking_number: sanitizeText(tracking_number),
+          tracking_url: sanitizeText(tracking_url),
+          invoice_number: sanitizeText(invoice_number),
+          status: 'shipped',
+          shipped_at: now,
+        }).select().single(),
+        supabaseAdmin.from('commerce_vendor_orders').update({ status: 'shipped', shipped_at: now, updated_at: now }).eq('id', id),
+      ]);
+      if (shipResult.error) throw shipResult.error;
+      return res.status(200).json({ ok: true, shipment: shipResult.data });
+    }
+
+    // ── Hakedişler (salt okuma) ───────────────
+    if (op === 'payouts.list') {
+      const { data, error } = await supabaseAdmin
+        .from('commerce_vendor_payouts')
+        .select('*')
+        .eq('vendor_id', vendorId)
+        .order('period_end', { ascending: false });
+      if (error) throw error;
+      return res.status(200).json({ ok: true, payouts: data });
+    }
+
+    // ── Genel bakış istatistikleri ────────────
+    if (op === 'stats.overview') {
+      const [ordersRes, offersRes, pendingPayoutRes] = await Promise.all([
+        supabaseAdmin
+          .from('commerce_vendor_orders')
+          .select('status, vendor_net_kurus')
+          .eq('vendor_id', vendorId),
+        supabaseAdmin
+          .from('commerce_vendor_offers')
+          .select('status, stock_quantity, low_stock_threshold')
+          .eq('vendor_id', vendorId)
+          .is('deleted_at', null),
+        supabaseAdmin
+          .from('commerce_vendor_payouts')
+          .select('net_payout_kurus, status')
+          .eq('vendor_id', vendorId)
+          .eq('status', 'pending'),
+      ]);
+      const orders = ordersRes.data ?? [];
+      const offers = offersRes.data ?? [];
+      const pendingPayouts = pendingPayoutRes.data ?? [];
+      return res.status(200).json({
+        ok: true,
+        stats: {
+          total_orders: orders.length,
+          pending_orders: orders.filter((o) => o.status === 'pending').length,
+          active_offers: offers.filter((o) => o.status === 'approved').length,
+          pending_approval: offers.filter((o) => o.status === 'pending_approval').length,
+          low_stock: offers.filter((o) => o.stock_quantity <= o.low_stock_threshold).length,
+          total_net_kurus: orders.filter((o) => o.status === 'delivered').reduce((s, o) => s + o.vendor_net_kurus, 0),
+          pending_payout_kurus: pendingPayouts.reduce((s, p) => s + p.net_payout_kurus, 0),
+        },
+      });
+    }
+
+    return err(res, 400, `Bilinmeyen operasyon: ${op}`);
+  } catch (e) {
+    console.error('[commerce-vendor]', e?.message || e);
+    return err(res, 500, e?.message || 'sunucu_hatası');
+  }
+}

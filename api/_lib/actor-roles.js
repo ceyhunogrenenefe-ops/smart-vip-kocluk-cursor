@@ -38,6 +38,10 @@ export function roleSetHasAdmin(set) {
   return Boolean(set && typeof set.has === 'function' && set.has('admin'));
 }
 
+export function roleSetHasVendorAdmin(set) {
+  return Boolean(set && typeof set.has === 'function' && set.has('vendor_admin'));
+}
+
 /** Super admin veya kurumu tanimli kurum yoneticisi */
 export function actorIsInstitutionAdmin(actor, roleSet) {
   if (roleSetHasSuperAdmin(roleSet)) return true;

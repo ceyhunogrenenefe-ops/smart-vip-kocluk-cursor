@@ -1,0 +1,741 @@
+/**
+ * /api/commerce-admin — Süper Admin kitap pazaryeri yönetimi
+ *
+ * İzin verilen roller: super_admin, admin
+ *
+ * Operasyonlar:
+ *  vendors.list | vendors.get | vendors.create | vendors.update | vendors.delete
+ *  vendor_users.list | vendor_users.add | vendor_users.remove
+ *  books.list | books.get | books.create | books.update | books.delete
+ *  offers.list | offers.get | offers.approve | offers.reject | offers.request_correction | offers.inactive | offers.update
+ *  packages.list | packages.get | packages.create | packages.update | packages.delete | packages.items.set
+ *  orders.list | orders.get | orders.update_status
+ *  vendor_orders.list | vendor_orders.update_status
+ *  shipments.list | shipments.get | shipments.create | shipments.update
+ *  payouts.list | payouts.get | payouts.create | payouts.approve | payouts.mark_paid
+ *  refunds.list | refunds.get | refunds.decide
+ *  coupons.list | coupons.get | coupons.create | coupons.update | coupons.delete
+ *  settings.get | settings.update
+ *  reports.sales | reports.vendors | reports.low_stock
+ */
+
+import { requireAuth } from '../api/_lib/auth.js';
+import { actorRoleSet, roleSetHasSuperAdmin, roleSetHasAdmin } from '../api/_lib/actor-roles.js';
+import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
+
+function err(res, status, message) {
+  return res.status(status).json({ error: message });
+}
+
+function sanitizeText(v) {
+  return typeof v === 'string' ? v.trim() : null;
+}
+
+function sanitizeInt(v) {
+  const n = parseInt(String(v ?? ''), 10);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+async function logAudit(params) {
+  try {
+    await supabaseAdmin.from('commerce_audit_logs').insert({
+      entity_type: params.entity_type,
+      entity_id: String(params.entity_id ?? ''),
+      action: params.action,
+      actor_user_id: params.actor_user_id ?? null,
+      vendor_id: params.vendor_id ?? null,
+      institution_id: params.institution_id ?? null,
+      old_value: params.old_value ?? null,
+      new_value: params.new_value ?? null,
+      ip_address: params.ip_address ?? null,
+    });
+  } catch (e) {
+    console.warn('[commerce-admin] audit log failed', e?.message);
+  }
+}
+
+// ─────────────────────────────────────────────
+// Satıcılar
+// ─────────────────────────────────────────────
+async function handleVendors(op, body, actor) {
+  if (op === 'vendors.list') {
+    const { data, error } = await supabaseAdmin
+      .from('commerce_vendors')
+      .select('*, commerce_vendor_users(count)')
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return { ok: true, vendors: data };
+  }
+
+  if (op === 'vendors.get') {
+    const { id } = body;
+    if (!id) throw new Error('id gerekli');
+    const { data, error } = await supabaseAdmin
+      .from('commerce_vendors')
+      .select('*')
+      .eq('id', id)
+      .is('deleted_at', null)
+      .single();
+    if (error) throw error;
+    return { ok: true, vendor: data };
+  }
+
+  if (op === 'vendors.create') {
+    const slug =
+      sanitizeText(body.slug) ||
+      sanitizeText(body.name)
+        ?.toLowerCase()
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9-]/g, '');
+    if (!body.name || !slug) throw new Error('name ve slug gerekli');
+    const { data, error } = await supabaseAdmin
+      .from('commerce_vendors')
+      .insert({
+        name: sanitizeText(body.name),
+        slug,
+        description: sanitizeText(body.description),
+        contact_email: sanitizeText(body.contact_email),
+        contact_phone: sanitizeText(body.contact_phone),
+        address_line1: sanitizeText(body.address_line1),
+        city: sanitizeText(body.city),
+        commission_rate: parseFloat(body.commission_rate ?? 15),
+        payout_iban: sanitizeText(body.payout_iban),
+        linked_kitapci_id: body.linked_kitapci_id ?? null,
+        institution_id: body.institution_id ?? null,
+        created_by: actor.sub,
+        updated_by: actor.sub,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    await logAudit({ entity_type: 'commerce_vendor', entity_id: data.id, action: 'create', actor_user_id: actor.sub, new_value: data });
+    return { ok: true, vendor: data };
+  }
+
+  if (op === 'vendors.update') {
+    const { id, ...fields } = body;
+    if (!id) throw new Error('id gerekli');
+    const { data: old } = await supabaseAdmin.from('commerce_vendors').select('*').eq('id', id).single();
+    const patch = {};
+    if (fields.name !== undefined) patch.name = sanitizeText(fields.name);
+    if (fields.slug !== undefined) patch.slug = sanitizeText(fields.slug);
+    if (fields.description !== undefined) patch.description = sanitizeText(fields.description);
+    if (fields.contact_email !== undefined) patch.contact_email = sanitizeText(fields.contact_email);
+    if (fields.contact_phone !== undefined) patch.contact_phone = sanitizeText(fields.contact_phone);
+    if (fields.commission_rate !== undefined) patch.commission_rate = parseFloat(fields.commission_rate);
+    if (fields.is_active !== undefined) patch.is_active = Boolean(fields.is_active);
+    if (fields.payout_iban !== undefined) patch.payout_iban = sanitizeText(fields.payout_iban);
+    if (fields.address_line1 !== undefined) patch.address_line1 = sanitizeText(fields.address_line1);
+    if (fields.city !== undefined) patch.city = sanitizeText(fields.city);
+    patch.updated_by = actor.sub;
+    patch.updated_at = new Date().toISOString();
+    const { data, error } = await supabaseAdmin.from('commerce_vendors').update(patch).eq('id', id).select().single();
+    if (error) throw error;
+    await logAudit({ entity_type: 'commerce_vendor', entity_id: id, action: 'update', actor_user_id: actor.sub, old_value: old, new_value: data });
+    return { ok: true, vendor: data };
+  }
+
+  if (op === 'vendors.delete') {
+    const { id } = body;
+    if (!id) throw new Error('id gerekli');
+    const { error } = await supabaseAdmin.from('commerce_vendors').update({ deleted_at: new Date().toISOString() }).eq('id', id);
+    if (error) throw error;
+    await logAudit({ entity_type: 'commerce_vendor', entity_id: id, action: 'soft_delete', actor_user_id: actor.sub });
+    return { ok: true };
+  }
+
+  throw new Error(`Bilinmeyen operasyon: ${op}`);
+}
+
+// ─────────────────────────────────────────────
+// Satıcı kullanıcıları
+// ─────────────────────────────────────────────
+async function handleVendorUsers(op, body, actor) {
+  if (op === 'vendor_users.list') {
+    const { vendor_id } = body;
+    if (!vendor_id) throw new Error('vendor_id gerekli');
+    const { data, error } = await supabaseAdmin
+      .from('commerce_vendor_users')
+      .select('*, users(id, name, email, role)')
+      .eq('vendor_id', vendor_id)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    return { ok: true, users: data };
+  }
+
+  if (op === 'vendor_users.add') {
+    const { vendor_id, user_id, role } = body;
+    if (!vendor_id || !user_id) throw new Error('vendor_id ve user_id gerekli');
+    const { data, error } = await supabaseAdmin
+      .from('commerce_vendor_users')
+      .upsert({ vendor_id, user_id, role: role ?? 'admin', is_active: true, created_by: actor.sub, deleted_at: null }, { onConflict: 'vendor_id,user_id' })
+      .select()
+      .single();
+    if (error) throw error;
+    await logAudit({ entity_type: 'commerce_vendor_user', entity_id: data.id, action: 'add', actor_user_id: actor.sub, vendor_id, new_value: { user_id, role } });
+    return { ok: true, vendor_user: data };
+  }
+
+  if (op === 'vendor_users.remove') {
+    const { id } = body;
+    if (!id) throw new Error('id gerekli');
+    const { error } = await supabaseAdmin.from('commerce_vendor_users').update({ is_active: false, deleted_at: new Date().toISOString() }).eq('id', id);
+    if (error) throw error;
+    return { ok: true };
+  }
+
+  throw new Error(`Bilinmeyen operasyon: ${op}`);
+}
+
+// ─────────────────────────────────────────────
+// Kitap kataloğu
+// ─────────────────────────────────────────────
+async function handleBooks(op, body, actor) {
+  if (op === 'books.list') {
+    let q = supabaseAdmin
+      .from('commerce_books')
+      .select('*')
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false });
+    if (body.search) q = q.ilike('title', `%${body.search}%`);
+    if (body.publisher) q = q.eq('publisher', body.publisher);
+    if (body.limit) q = q.limit(parseInt(body.limit, 10));
+    if (body.offset) q = q.range(parseInt(body.offset, 10), parseInt(body.offset, 10) + (parseInt(body.limit ?? 50, 10) - 1));
+    const { data, error } = await q;
+    if (error) throw error;
+    return { ok: true, books: data };
+  }
+
+  if (op === 'books.get') {
+    const { id } = body;
+    if (!id) throw new Error('id gerekli');
+    const { data, error } = await supabaseAdmin
+      .from('commerce_books')
+      .select('*, commerce_vendor_offers(id, vendor_id, price_kurus, stock_quantity, status, commerce_vendors(name))')
+      .eq('id', id)
+      .is('deleted_at', null)
+      .single();
+    if (error) throw error;
+    return { ok: true, book: data };
+  }
+
+  if (op === 'books.create') {
+    if (!body.title) throw new Error('title gerekli');
+    const slug =
+      sanitizeText(body.slug) ||
+      sanitizeText(body.title)
+        ?.toLowerCase()
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9-]/g, '') + '-' + Date.now();
+    const { data, error } = await supabaseAdmin
+      .from('commerce_books')
+      .insert({
+        isbn: sanitizeText(body.isbn),
+        slug,
+        title: sanitizeText(body.title),
+        subtitle: sanitizeText(body.subtitle),
+        author: sanitizeText(body.author),
+        publisher: sanitizeText(body.publisher),
+        subject: sanitizeText(body.subject),
+        class_levels: body.class_levels ?? [],
+        exam_types: body.exam_types ?? [],
+        description: sanitizeText(body.description),
+        page_count: sanitizeInt(body.page_count),
+        cover_image_url: sanitizeText(body.cover_image_url),
+        is_catalog_active: body.is_catalog_active !== false,
+        created_by: actor.sub,
+        updated_by: actor.sub,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    await logAudit({ entity_type: 'commerce_book', entity_id: data.id, action: 'create', actor_user_id: actor.sub, new_value: data });
+    return { ok: true, book: data };
+  }
+
+  if (op === 'books.update') {
+    const { id, ...fields } = body;
+    if (!id) throw new Error('id gerekli');
+    const patch = {};
+    const textFields = ['slug', 'title', 'subtitle', 'author', 'publisher', 'subject', 'description', 'cover_image_url', 'isbn'];
+    textFields.forEach((f) => { if (fields[f] !== undefined) patch[f] = sanitizeText(fields[f]); });
+    if (fields.class_levels !== undefined) patch.class_levels = fields.class_levels;
+    if (fields.exam_types !== undefined) patch.exam_types = fields.exam_types;
+    if (fields.page_count !== undefined) patch.page_count = sanitizeInt(fields.page_count);
+    if (fields.is_catalog_active !== undefined) patch.is_catalog_active = Boolean(fields.is_catalog_active);
+    patch.updated_by = actor.sub;
+    patch.updated_at = new Date().toISOString();
+    const { data, error } = await supabaseAdmin.from('commerce_books').update(patch).eq('id', id).select().single();
+    if (error) throw error;
+    await logAudit({ entity_type: 'commerce_book', entity_id: id, action: 'update', actor_user_id: actor.sub, new_value: patch });
+    return { ok: true, book: data };
+  }
+
+  if (op === 'books.delete') {
+    const { id } = body;
+    if (!id) throw new Error('id gerekli');
+    const { error } = await supabaseAdmin.from('commerce_books').update({ deleted_at: new Date().toISOString() }).eq('id', id);
+    if (error) throw error;
+    return { ok: true };
+  }
+
+  throw new Error(`Bilinmeyen operasyon: ${op}`);
+}
+
+// ─────────────────────────────────────────────
+// Satıcı teklifleri (onay/ret)
+// ─────────────────────────────────────────────
+async function handleOffers(op, body, actor) {
+  if (op === 'offers.list') {
+    let q = supabaseAdmin
+      .from('commerce_vendor_offers')
+      .select('*, commerce_books(id, title, isbn, cover_image_url), commerce_vendors(id, name)')
+      .is('deleted_at', null)
+      .order('updated_at', { ascending: false });
+    if (body.status) q = q.eq('status', body.status);
+    if (body.vendor_id) q = q.eq('vendor_id', body.vendor_id);
+    if (body.book_id) q = q.eq('book_id', body.book_id);
+    if (body.limit) q = q.limit(parseInt(body.limit, 10));
+    const { data, error } = await q;
+    if (error) throw error;
+    return { ok: true, offers: data };
+  }
+
+  if (op === 'offers.get') {
+    const { id } = body;
+    if (!id) throw new Error('id gerekli');
+    const { data, error } = await supabaseAdmin
+      .from('commerce_vendor_offers')
+      .select('*, commerce_books(*), commerce_vendors(*)')
+      .eq('id', id)
+      .single();
+    if (error) throw error;
+    return { ok: true, offer: data };
+  }
+
+  const APPROVAL_OPS = ['offers.approve', 'offers.reject', 'offers.request_correction', 'offers.inactive'];
+  if (APPROVAL_OPS.includes(op)) {
+    const { id, reason, notes } = body;
+    if (!id) throw new Error('id gerekli');
+    const { data: offer } = await supabaseAdmin.from('commerce_vendor_offers').select('*').eq('id', id).single();
+    if (!offer) throw new Error('Teklif bulunamadı');
+    let statusPatch, action;
+    if (op === 'offers.approve') {
+      statusPatch = { status: 'approved', approved_at: new Date().toISOString(), approved_by: actor.sub, rejection_reason: null, correction_notes: null };
+      action = 'approve';
+    } else if (op === 'offers.reject') {
+      statusPatch = { status: 'rejected', rejection_reason: sanitizeText(reason), correction_notes: null };
+      action = 'reject';
+    } else if (op === 'offers.request_correction') {
+      statusPatch = { status: 'correction_requested', correction_notes: sanitizeText(notes ?? reason) };
+      action = 'request_correction';
+    } else {
+      statusPatch = { status: 'inactive' };
+      action = 'set_inactive';
+    }
+    statusPatch.updated_at = new Date().toISOString();
+    statusPatch.updated_by = actor.sub;
+    const { data, error } = await supabaseAdmin.from('commerce_vendor_offers').update(statusPatch).eq('id', id).select().single();
+    if (error) throw error;
+    await logAudit({ entity_type: 'commerce_vendor_offer', entity_id: id, action, actor_user_id: actor.sub, vendor_id: offer.vendor_id, old_value: { status: offer.status }, new_value: { status: data.status, reason } });
+    return { ok: true, offer: data };
+  }
+
+  if (op === 'offers.update') {
+    const { id, ...fields } = body;
+    if (!id) throw new Error('id gerekli');
+    const patch = {};
+    if (fields.is_featured !== undefined) patch.is_featured = Boolean(fields.is_featured);
+    if (fields.is_bestseller !== undefined) patch.is_bestseller = Boolean(fields.is_bestseller);
+    if (fields.is_new_arrival !== undefined) patch.is_new_arrival = Boolean(fields.is_new_arrival);
+    if (fields.teacher_recommended !== undefined) patch.teacher_recommended = Boolean(fields.teacher_recommended);
+    if (fields.required_for_classes !== undefined) patch.required_for_classes = fields.required_for_classes;
+    if (fields.visibility_scope !== undefined) patch.visibility_scope = fields.visibility_scope;
+    patch.updated_by = actor.sub;
+    patch.updated_at = new Date().toISOString();
+    const { data, error } = await supabaseAdmin.from('commerce_vendor_offers').update(patch).eq('id', id).select().single();
+    if (error) throw error;
+    return { ok: true, offer: data };
+  }
+
+  throw new Error(`Bilinmeyen operasyon: ${op}`);
+}
+
+// ─────────────────────────────────────────────
+// Siparişler (Süper Admin okuma + durum güncelleme)
+// ─────────────────────────────────────────────
+async function handleOrders(op, body) {
+  if (op === 'orders.list') {
+    let q = supabaseAdmin
+      .from('commerce_orders')
+      .select('*, commerce_order_items(id, title_snapshot, quantity, unit_price_kurus, vendor_id)')
+      .order('created_at', { ascending: false });
+    if (body.status) q = q.eq('status', body.status);
+    if (body.student_id) q = q.eq('student_id', body.student_id);
+    if (body.search) q = q.or(`customer_name.ilike.%${body.search}%,order_number.ilike.%${body.search}%`);
+    const limit = Math.min(parseInt(body.limit ?? 50, 10), 200);
+    const offset = parseInt(body.offset ?? 0, 10);
+    q = q.range(offset, offset + limit - 1);
+    const { data, error } = await q;
+    if (error) throw error;
+    return { ok: true, orders: data };
+  }
+
+  if (op === 'orders.get') {
+    const { id } = body;
+    if (!id) throw new Error('id gerekli');
+    const { data, error } = await supabaseAdmin
+      .from('commerce_orders')
+      .select(`
+        *,
+        commerce_order_items(*),
+        commerce_vendor_orders(*, commerce_shipments(*), commerce_vendors(id, name)),
+        commerce_order_addresses(*),
+        commerce_payments(*)
+      `)
+      .eq('id', id)
+      .single();
+    if (error) throw error;
+    return { ok: true, order: data };
+  }
+
+  if (op === 'orders.update_status') {
+    const { id, status, notes } = body;
+    const VALID = ['confirmed', 'cancelled', 'refund_requested', 'refunded'];
+    if (!VALID.includes(status)) throw new Error('Geçersiz durum');
+    const { data, error } = await supabaseAdmin
+      .from('commerce_orders')
+      .update({ status, notes: notes ?? undefined, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return { ok: true, order: data };
+  }
+
+  if (op === 'vendor_orders.update_status') {
+    const { id, status } = body;
+    const VALID = ['confirmed', 'preparing', 'shipped', 'delivered', 'cancelled'];
+    if (!VALID.includes(status)) throw new Error('Geçersiz durum');
+    const now = new Date().toISOString();
+    const patch = { status, updated_at: now };
+    if (status === 'confirmed') patch.accepted_at = now;
+    if (status === 'preparing') patch.prepared_at = now;
+    if (status === 'shipped') patch.shipped_at = now;
+    if (status === 'delivered') patch.delivered_at = now;
+    const { data, error } = await supabaseAdmin.from('commerce_vendor_orders').update(patch).eq('id', id).select().single();
+    if (error) throw error;
+    return { ok: true, vendor_order: data };
+  }
+
+  throw new Error(`Bilinmeyen operasyon: ${op}`);
+}
+
+// ─────────────────────────────────────────────
+// Kargo
+// ─────────────────────────────────────────────
+async function handleShipments(op, body) {
+  if (op === 'shipments.create') {
+    const { vendor_order_id } = body;
+    if (!vendor_order_id) throw new Error('vendor_order_id gerekli');
+    const { data, error } = await supabaseAdmin
+      .from('commerce_shipments')
+      .insert({
+        vendor_order_id,
+        carrier: sanitizeText(body.carrier),
+        tracking_number: sanitizeText(body.tracking_number),
+        tracking_url: sanitizeText(body.tracking_url),
+        invoice_number: sanitizeText(body.invoice_number),
+        invoice_url: sanitizeText(body.invoice_url),
+        status: 'shipped',
+        shipped_at: new Date().toISOString(),
+        notes: sanitizeText(body.notes),
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    // Satıcı siparişini güncelle
+    await supabaseAdmin.from('commerce_vendor_orders').update({ status: 'shipped', shipped_at: new Date().toISOString() }).eq('id', vendor_order_id);
+    return { ok: true, shipment: data };
+  }
+
+  if (op === 'shipments.update') {
+    const { id, ...fields } = body;
+    if (!id) throw new Error('id gerekli');
+    const patch = {};
+    ['carrier', 'tracking_number', 'tracking_url', 'invoice_number', 'invoice_url', 'notes'].forEach((f) => {
+      if (fields[f] !== undefined) patch[f] = sanitizeText(fields[f]);
+    });
+    if (fields.status) patch.status = fields.status;
+    if (fields.status === 'delivered') patch.delivered_at = new Date().toISOString();
+    patch.updated_at = new Date().toISOString();
+    const { data, error } = await supabaseAdmin.from('commerce_shipments').update(patch).eq('id', id).select().single();
+    if (error) throw error;
+    return { ok: true, shipment: data };
+  }
+
+  throw new Error(`Bilinmeyen operasyon: ${op}`);
+}
+
+// ─────────────────────────────────────────────
+// Hakedişler
+// ─────────────────────────────────────────────
+async function handlePayouts(op, body, actor) {
+  if (op === 'payouts.list') {
+    let q = supabaseAdmin
+      .from('commerce_vendor_payouts')
+      .select('*, commerce_vendors(id, name)')
+      .order('period_end', { ascending: false });
+    if (body.vendor_id) q = q.eq('vendor_id', body.vendor_id);
+    if (body.status) q = q.eq('status', body.status);
+    const { data, error } = await q;
+    if (error) throw error;
+    return { ok: true, payouts: data };
+  }
+
+  if (op === 'payouts.create') {
+    const { vendor_id, period_start, period_end } = body;
+    if (!vendor_id || !period_start || !period_end) throw new Error('vendor_id, period_start, period_end gerekli');
+    // Teslim edilen siparişlerden net hesaplama
+    const { data: items } = await supabaseAdmin
+      .from('commerce_vendor_orders')
+      .select('vendor_net_kurus, commission_kurus')
+      .eq('vendor_id', vendor_id)
+      .eq('status', 'delivered')
+      .gte('delivered_at', period_start)
+      .lte('delivered_at', period_end);
+    const gross = (items ?? []).reduce((s, r) => s + (r.vendor_net_kurus + r.commission_kurus), 0);
+    const commission = (items ?? []).reduce((s, r) => s + r.commission_kurus, 0);
+    const net = gross - commission;
+    const { data, error } = await supabaseAdmin
+      .from('commerce_vendor_payouts')
+      .insert({ vendor_id, period_start, period_end, gross_sales_kurus: gross, commission_kurus: commission, net_payout_kurus: net, status: 'pending', created_by: actor.sub })
+      .select()
+      .single();
+    if (error) throw error;
+    return { ok: true, payout: data };
+  }
+
+  if (op === 'payouts.approve') {
+    const { id } = body;
+    if (!id) throw new Error('id gerekli');
+    const { data, error } = await supabaseAdmin
+      .from('commerce_vendor_payouts')
+      .update({ status: 'approved', approved_by: actor.sub, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return { ok: true, payout: data };
+  }
+
+  if (op === 'payouts.mark_paid') {
+    const { id, payment_reference } = body;
+    if (!id) throw new Error('id gerekli');
+    const { data, error } = await supabaseAdmin
+      .from('commerce_vendor_payouts')
+      .update({ status: 'paid', paid_at: new Date().toISOString(), payment_reference: sanitizeText(payment_reference), updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return { ok: true, payout: data };
+  }
+
+  throw new Error(`Bilinmeyen operasyon: ${op}`);
+}
+
+// ─────────────────────────────────────────────
+// Kuponlar
+// ─────────────────────────────────────────────
+async function handleCoupons(op, body, actor) {
+  if (op === 'coupons.list') {
+    const { data, error } = await supabaseAdmin
+      .from('commerce_coupons')
+      .select('*')
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return { ok: true, coupons: data };
+  }
+
+  if (op === 'coupons.create') {
+    if (!body.code || !body.discount_type || !body.discount_value) throw new Error('code, discount_type, discount_value gerekli');
+    const { data, error } = await supabaseAdmin
+      .from('commerce_coupons')
+      .insert({
+        code: String(body.code).toUpperCase().trim(),
+        description: sanitizeText(body.description),
+        discount_type: body.discount_type,
+        discount_value: parseInt(body.discount_value, 10),
+        max_discount_kurus: sanitizeInt(body.max_discount_kurus),
+        min_order_kurus: sanitizeInt(body.min_order_kurus) ?? 0,
+        usage_limit: sanitizeInt(body.usage_limit),
+        per_user_limit: sanitizeInt(body.per_user_limit) ?? 1,
+        starts_at: body.starts_at ?? null,
+        ends_at: body.ends_at ?? null,
+        is_active: body.is_active !== false,
+        created_by: actor.sub,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return { ok: true, coupon: data };
+  }
+
+  if (op === 'coupons.update') {
+    const { id, ...fields } = body;
+    if (!id) throw new Error('id gerekli');
+    const patch = {};
+    if (fields.description !== undefined) patch.description = sanitizeText(fields.description);
+    if (fields.is_active !== undefined) patch.is_active = Boolean(fields.is_active);
+    if (fields.ends_at !== undefined) patch.ends_at = fields.ends_at;
+    if (fields.usage_limit !== undefined) patch.usage_limit = sanitizeInt(fields.usage_limit);
+    patch.updated_at = new Date().toISOString();
+    const { data, error } = await supabaseAdmin.from('commerce_coupons').update(patch).eq('id', id).select().single();
+    if (error) throw error;
+    return { ok: true, coupon: data };
+  }
+
+  if (op === 'coupons.delete') {
+    const { id } = body;
+    const { error } = await supabaseAdmin.from('commerce_coupons').update({ deleted_at: new Date().toISOString() }).eq('id', id);
+    if (error) throw error;
+    return { ok: true };
+  }
+
+  throw new Error(`Bilinmeyen operasyon: ${op}`);
+}
+
+// ─────────────────────────────────────────────
+// Ayarlar
+// ─────────────────────────────────────────────
+async function handleSettings(op, body, actor) {
+  if (op === 'settings.get') {
+    const { data, error } = await supabaseAdmin
+      .from('commerce_settings')
+      .select('*')
+      .is('institution_id', null)
+      .maybeSingle();
+    if (error) throw error;
+    return { ok: true, settings: data };
+  }
+
+  if (op === 'settings.update') {
+    const patch = {};
+    const FIELDS = ['commerce_mode', 'default_commission_rate', 'free_shipping_threshold_kurus', 'default_shipping_kurus', 'order_number_prefix', 'public_store_enabled', 'student_store_enabled', 'payment_sandbox', 'abandoned_cart_hours'];
+    FIELDS.forEach((f) => { if (body[f] !== undefined) patch[f] = body[f]; });
+    patch.updated_by = actor.sub;
+    patch.updated_at = new Date().toISOString();
+    const { data, error } = await supabaseAdmin
+      .from('commerce_settings')
+      .update(patch)
+      .is('institution_id', null)
+      .select()
+      .single();
+    if (error) throw error;
+    await logAudit({ entity_type: 'commerce_settings', entity_id: data.id, action: 'update', actor_user_id: actor.sub, new_value: patch });
+    return { ok: true, settings: data };
+  }
+
+  throw new Error(`Bilinmeyen operasyon: ${op}`);
+}
+
+// ─────────────────────────────────────────────
+// Raporlar
+// ─────────────────────────────────────────────
+async function handleReports(op, body) {
+  if (op === 'reports.sales') {
+    const { from_date, to_date } = body;
+    let q = supabaseAdmin
+      .from('commerce_orders')
+      .select('id, order_number, total_kurus, status, created_at, student_id')
+      .in('status', ['paid', 'confirmed', 'preparing', 'shipped', 'delivered']);
+    if (from_date) q = q.gte('created_at', from_date);
+    if (to_date) q = q.lte('created_at', to_date);
+    q = q.order('created_at', { ascending: false }).limit(500);
+    const { data, error } = await q;
+    if (error) throw error;
+    const total = (data ?? []).reduce((s, r) => s + r.total_kurus, 0);
+    return { ok: true, orders: data, total_kurus: total, count: (data ?? []).length };
+  }
+
+  if (op === 'reports.low_stock') {
+    const { data, error } = await supabaseAdmin
+      .from('commerce_vendor_offers')
+      .select('*, commerce_books(title, isbn), commerce_vendors(name)')
+      .eq('status', 'approved')
+      .filter('stock_quantity', 'lte', 'low_stock_threshold')
+      .is('deleted_at', null)
+      .order('stock_quantity', { ascending: true })
+      .limit(100);
+    if (error) throw error;
+    return { ok: true, offers: data };
+  }
+
+  if (op === 'reports.vendors') {
+    const { data, error } = await supabaseAdmin
+      .from('commerce_vendor_orders')
+      .select('vendor_id, vendor_net_kurus, commission_kurus, status, created_at, commerce_vendors(name)')
+      .in('status', ['delivered'])
+      .order('created_at', { ascending: false })
+      .limit(500);
+    if (error) throw error;
+    return { ok: true, vendor_orders: data };
+  }
+
+  throw new Error(`Bilinmeyen operasyon: ${op}`);
+}
+
+// ─────────────────────────────────────────────
+// Ana handler
+// ─────────────────────────────────────────────
+export default async function handler(req, res) {
+  if (req.method !== 'POST') return err(res, 405, 'Method Not Allowed');
+  try {
+    const actor = requireAuth(req);
+    const roleSet = await actorRoleSet(actor);
+    if (!roleSetHasSuperAdmin(roleSet) && !roleSetHasAdmin(roleSet)) {
+      return err(res, 403, 'Yetki yok');
+    }
+
+    const body = req.body ?? {};
+    const op = String(body.op ?? '').trim();
+    if (!op) return err(res, 400, 'op gerekli');
+
+    let result;
+    const prefix = op.split('.')[0];
+    if (prefix === 'vendors' || op === 'vendor_users.list' || op === 'vendor_users.add' || op === 'vendor_users.remove') {
+      if (op.startsWith('vendor_users')) {
+        result = await handleVendorUsers(op, body, actor);
+      } else {
+        result = await handleVendors(op, body, actor);
+      }
+    } else if (prefix === 'books') {
+      result = await handleBooks(op, body, actor);
+    } else if (prefix === 'offers') {
+      result = await handleOffers(op, body, actor);
+    } else if (prefix === 'orders' || op === 'vendor_orders.update_status') {
+      result = await handleOrders(op, body);
+    } else if (prefix === 'shipments') {
+      result = await handleShipments(op, body);
+    } else if (prefix === 'payouts') {
+      result = await handlePayouts(op, body, actor);
+    } else if (prefix === 'coupons') {
+      result = await handleCoupons(op, body, actor);
+    } else if (prefix === 'settings') {
+      result = await handleSettings(op, body, actor);
+    } else if (prefix === 'reports') {
+      result = await handleReports(op, body);
+    } else {
+      return err(res, 400, `Bilinmeyen operasyon: ${op}`);
+    }
+
+    return res.status(200).json(result);
+  } catch (e) {
+    console.error('[commerce-admin]', e?.message || e);
+    return err(res, 500, e?.message || 'sunucu_hatası');
+  }
+}
