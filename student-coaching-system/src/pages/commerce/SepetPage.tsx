@@ -98,7 +98,10 @@ export default function SepetPage() {
 
   /** Sepet özetini geçici olarak yazar, ardından ödeme sitesine yönlendirir */
   const handleCheckout = () => {
-    const CHECKOUT_URL = 'https://onlinevipdershane.com/odeme/kitap';
+    // Vercel env: VITE_CHECKOUT_URL — varsayılan onlinevipdershane.com
+    const CHECKOUT_URL =
+      (import.meta.env.VITE_CHECKOUT_URL as string | undefined)?.trim() ||
+      'https://onlinevipdershane.com/odeme/kitap';
 
     // Sepet özetini session storage'a kaydet (geri dönüş için kullanılabilir)
     const payload = {
