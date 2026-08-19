@@ -2,37 +2,48 @@
  * Satıcı (vendor_admin) paneli
  * Sekmeler: Genel Bakış | Kitaplarım | Tekliflerim | Siparişlerim | Hakedişlerim
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   BookOpen,
+  Camera,
   CheckCircle2,
   ChevronRight,
+  Image,
   Loader2,
   Package,
   Pencil,
   Plus,
   RefreshCw,
+  Search,
   Send,
   ShoppingBag,
   Store,
+  Tag,
   Truck,
   Wallet,
+  X,
   XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   cvAcceptOrder,
+  cvCreateBook,
+  cvCreateOffer,
   cvGetStats,
+  cvListBooks,
   cvListOffers,
   cvListOrders,
   cvListPayouts,
   cvMarkPreparing,
   cvShipOrder,
   cvSubmitOffer,
+  cvUpdateOffer,
   type VendorStats,
 } from '../../lib/commerceVendorApi';
+import { apiFetch } from '../../lib/session';
 import type {
+  CommerceBook,
   CommerceVendorOffer,
   CommerceVendorOrder,
   CommerceVendorPayout,
@@ -133,11 +144,545 @@ function GenelBakis() {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Kapak görseli yükleme yardımcısı
+// ─────────────────────────────────────────────────────────────────────
+async function uploadBookCover(file: File, bookId: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const res = await apiFetch('/api/commerce-upload', {
+          method: 'POST',
+          body: JSON.stringify({
+            op: 'book_cover',
+            file_base64: reader.result as string,
+            mime_type: file.type,
+            book_id: bookId,
+            save_to_db: true,
+          }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error ?? 'upload_failed');
+        resolve(data.url as string);
+      } catch (e) { reject(e); }
+    };
+    reader.onerror = () => reject(new Error('Dosya okunamadı'));
+    reader.readAsDataURL(file);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Teklif oluşturma / düzenleme modalı
+// ─────────────────────────────────────────────────────────────────────
+type OfferModalProps = {
+  offer: CommerceVendorOffer | null; // null = yeni teklif
+  onClose: () => void;
+  onSave: () => void;
+};
+
+type BookMode = 'search' | 'new';
+
+const SUBJECTS = ['Matematik', 'Türkçe', 'Fen Bilimleri', 'Sosyal Bilgiler', 'İngilizce',
+  'Fizik', 'Kimya', 'Biyoloji', 'Tarih', 'Coğrafya', 'Din Kültürü', 'Diğer'];
+const CLASS_LEVELS = ['3', '4', '5', '6', '7', '8', '9', '10', '11', '12', 'LGS', 'TYT', 'AYT', 'YOS'];
+
+function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
+  const isEdit = Boolean(offer);
+
+  // Fiyat alanları
+  const [priceLira, setPriceLira] = useState(offer ? String(offer.price_kurus / 100) : '');
+  const [discountLira, setDiscountLira] = useState(
+    offer?.compare_at_price_kurus ? String(offer.compare_at_price_kurus / 100) : ''
+  );
+  const [stock, setStock] = useState(String(offer?.stock_quantity ?? '0'));
+  const [lowStock, setLowStock] = useState(String(offer?.low_stock_threshold ?? '5'));
+  const [shippingDays, setShippingDays] = useState(String(offer?.shipping_days ?? '3'));
+
+  // Kitap seçimi
+  const [bookMode, setBookMode] = useState<BookMode>('search');
+  const [bookSearch, setBookSearch] = useState('');
+  const [bookResults, setBookResults] = useState<(CommerceBook & { my_offer: CommerceVendorOffer | null })[]>([]);
+  const [bookSearching, setBookSearching] = useState(false);
+  const [selectedBook, setSelectedBook] = useState<{ id: string; title: string; isbn: string | null; cover_image_url: string | null } | null>(
+    offer?.book ? (offer.book as { id: string; title: string; isbn: string | null; cover_image_url: string | null }) : null
+  );
+
+  // Yeni kitap formu
+  const [newBook, setNewBook] = useState({ isbn: '', title: '', subtitle: '', author: '', publisher: '', subject: '', class_levels: [] as string[], description: '' });
+  const [createdBookId, setCreatedBookId] = useState<string | null>(null);
+
+  // Kapak görseli
+  const [coverPreview, setCoverPreview] = useState<string | null>(selectedBook?.cover_image_url ?? null);
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Kitap arama (debounce)
+  useEffect(() => {
+    if (bookMode !== 'search' || bookSearch.length < 2) { setBookResults([]); return; }
+    const t = setTimeout(async () => {
+      setBookSearching(true);
+      try {
+        const r = await cvListBooks({ search: bookSearch, limit: 20 });
+        setBookResults(r.books);
+      } catch { /* ignore */ }
+      finally { setBookSearching(false); }
+    }, 350);
+    return () => clearTimeout(t);
+  }, [bookSearch, bookMode]);
+
+  const handleCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(f.type)) {
+      toast.error('Yalnızca JPEG, PNG veya WebP yükleyebilirsiniz');
+      return;
+    }
+    if (f.size > 10 * 1024 * 1024) { toast.error('Dosya 10 MB sınırını aşıyor'); return; }
+    setCoverFile(f);
+    const reader = new FileReader();
+    reader.onload = () => setCoverPreview(reader.result as string);
+    reader.readAsDataURL(f);
+  };
+
+  const validate = () => {
+    const e: Record<string, string> = {};
+    const price = parseFloat(priceLira);
+    if (isNaN(price) || price <= 0) e.price = 'Geçerli bir fiyat girin (₺)';
+    const disc = discountLira ? parseFloat(discountLira) : null;
+    if (disc !== null && disc <= price) e.discount = 'İndirimli fiyat, normal fiyattan yüksek olmalı';
+    if (parseInt(stock) < 0) e.stock = 'Stok 0 veya üzeri olmalı';
+    if (parseInt(shippingDays) < 1) e.shippingDays = 'Kargo süresi en az 1 gün olmalı';
+    if (!isEdit) {
+      if (bookMode === 'search' && !selectedBook) e.book = 'Bir kitap seçin';
+      if (bookMode === 'new' && !newBook.title.trim()) e.newTitle = 'Kitap başlığı zorunlu';
+    }
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  };
+
+  const handleSave = async () => {
+    if (!validate()) return;
+    setSaving(true);
+    try {
+      const priceKurus = Math.round(parseFloat(priceLira) * 100);
+      const discKurus = discountLira ? Math.round(parseFloat(discountLira) * 100) : null;
+
+      if (isEdit && offer) {
+        // Düzenleme
+        await cvUpdateOffer(offer.id, {
+          price_kurus: priceKurus,
+          compare_at_price_kurus: discKurus ?? undefined,
+          stock_quantity: parseInt(stock),
+          low_stock_threshold: parseInt(lowStock),
+          shipping_days: parseInt(shippingDays),
+        });
+        // Kapak yükle
+        if (coverFile && offer.book) {
+          setUploading(true);
+          try {
+            await uploadBookCover(coverFile, (offer.book as { id: string }).id);
+          } catch (e: unknown) { toast.error('Kapak yüklenemedi: ' + (e as Error).message); }
+          finally { setUploading(false); }
+        }
+        toast.success('Teklif güncellendi');
+      } else {
+        // Yeni teklif
+        let bookId = selectedBook?.id ?? createdBookId ?? null;
+
+        // Yeni kitap oluştur
+        if (bookMode === 'new' && !bookId) {
+          const bookRes = await cvCreateBook({
+            title: newBook.title.trim(),
+            subtitle: newBook.subtitle.trim() || undefined,
+            isbn: newBook.isbn.trim() || undefined,
+            author: newBook.author.trim() || undefined,
+            publisher: newBook.publisher.trim() || undefined,
+            subject: newBook.subject || undefined,
+            class_levels: newBook.class_levels,
+            description: newBook.description.trim() || undefined,
+          });
+          bookId = bookRes.book.id;
+          setCreatedBookId(bookId);
+
+          // Kapak yükle (yeni kitap için)
+          if (coverFile && bookId) {
+            setUploading(true);
+            try { await uploadBookCover(coverFile, bookId); }
+            catch (e: unknown) { toast.error('Kapak yüklenemedi: ' + (e as Error).message); }
+            finally { setUploading(false); }
+          }
+        }
+
+        if (!bookId) { toast.error('Kitap seçilmedi'); setSaving(false); return; }
+
+        const offerRes = await cvCreateOffer({
+          book_id: bookId,
+          price_kurus: priceKurus,
+          compare_at_price_kurus: discKurus ?? undefined,
+          stock_quantity: parseInt(stock),
+          shipping_days: parseInt(shippingDays),
+        });
+
+        // Kapak yükle (mevcut kitap seçilmişse)
+        if (coverFile && bookMode === 'search' && selectedBook) {
+          setUploading(true);
+          try { await uploadBookCover(coverFile, selectedBook.id); }
+          catch (e: unknown) { toast.error('Kapak yüklenemedi: ' + (e as Error).message); }
+          finally { setUploading(false); }
+        }
+
+        toast.success('Teklif oluşturuldu — "Onaya Gönder" ile gönderin');
+      }
+
+      onSave();
+      onClose();
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const discountPct = (() => {
+    const p = parseFloat(priceLira);
+    const d = parseFloat(discountLira);
+    if (!isNaN(p) && !isNaN(d) && d > p && p > 0) return Math.round((1 - p / d) * 100);
+    return null;
+  })();
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-start justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl my-4">
+        {/* Başlık */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h3 className="text-lg font-semibold">{isEdit ? 'Teklifi Düzenle' : 'Yeni Kitap Teklifi'}</h3>
+          <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+
+        <div className="px-6 py-5 space-y-6">
+
+          {/* ── KİTAP SEÇİMİ (sadece yeni teklif) ── */}
+          {!isEdit && (
+            <div>
+              <div className="flex gap-2 mb-3">
+                <button
+                  onClick={() => setBookMode('search')}
+                  className={`flex-1 text-sm py-2 rounded-lg border transition-colors ${bookMode === 'search' ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+                >
+                  Katalogdan Seç
+                </button>
+                <button
+                  onClick={() => setBookMode('new')}
+                  className={`flex-1 text-sm py-2 rounded-lg border transition-colors ${bookMode === 'new' ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+                >
+                  Yeni Kitap Ekle
+                </button>
+              </div>
+
+              {bookMode === 'search' && (
+                <div>
+                  {selectedBook ? (
+                    <div className="flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-xl p-3">
+                      {selectedBook.cover_image_url ? (
+                        <img src={selectedBook.cover_image_url} alt={selectedBook.title} className="w-10 h-14 object-cover rounded" />
+                      ) : <div className="w-10 h-14 bg-gray-200 rounded" />}
+                      <div className="flex-1">
+                        <div className="font-medium text-sm">{selectedBook.title}</div>
+                        <div className="text-xs text-gray-500">ISBN: {selectedBook.isbn ?? '—'}</div>
+                      </div>
+                      <button onClick={() => { setSelectedBook(null); setCoverPreview(null); }} className="text-gray-400 hover:text-red-500">
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <input
+                        className="pl-9 pr-3 py-2 border rounded-lg text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                        placeholder="Kitap adı veya ISBN ara..."
+                        value={bookSearch}
+                        onChange={(e) => setBookSearch(e.target.value)}
+                      />
+                      {bookSearching && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-gray-400" />}
+                    </div>
+                  )}
+                  {errors.book && <p className="text-xs text-red-500 mt-1">{errors.book}</p>}
+                  {bookResults.length > 0 && !selectedBook && (
+                    <div className="mt-1 border border-gray-200 rounded-lg overflow-hidden max-h-48 overflow-y-auto">
+                      {bookResults.map((b) => (
+                        <button
+                          key={b.id}
+                          onClick={() => { setSelectedBook(b); setCoverPreview(b.cover_image_url); setBookResults([]); setBookSearch(''); }}
+                          className="w-full flex items-center gap-3 px-3 py-2 hover:bg-indigo-50 text-left border-b border-gray-100 last:border-0"
+                        >
+                          {b.cover_image_url ? (
+                            <img src={b.cover_image_url} alt={b.title} className="w-8 h-10 object-cover rounded flex-shrink-0" />
+                          ) : <div className="w-8 h-10 bg-gray-100 rounded flex-shrink-0" />}
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium truncate">{b.title}</div>
+                            <div className="text-xs text-gray-400">{b.author ?? ''} · ISBN: {b.isbn ?? '—'}</div>
+                          </div>
+                          {b.my_offer && <span className="text-xs text-orange-500 flex-shrink-0">Teklif var</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {bookMode === 'new' && (
+                <div className="space-y-3 bg-gray-50 rounded-xl p-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-medium text-gray-600">Kitap Başlığı <span className="text-red-500">*</span></label>
+                      <input className={`mt-0.5 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 ${errors.newTitle ? 'border-red-400' : 'border-gray-300'}`}
+                        placeholder="Tam kitap adı"
+                        value={newBook.title}
+                        onChange={(e) => setNewBook({ ...newBook, title: e.target.value })} />
+                      {errors.newTitle && <p className="text-xs text-red-500 mt-0.5">{errors.newTitle}</p>}
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-600">ISBN</label>
+                      <input className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"
+                        placeholder="978-..."
+                        value={newBook.isbn}
+                        onChange={(e) => setNewBook({ ...newBook, isbn: e.target.value })} />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-medium text-gray-600">Yazar</label>
+                      <input className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"
+                        value={newBook.author}
+                        onChange={(e) => setNewBook({ ...newBook, author: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-600">Yayınevi</label>
+                      <input className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"
+                        value={newBook.publisher}
+                        onChange={(e) => setNewBook({ ...newBook, publisher: e.target.value })} />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-medium text-gray-600">Ders</label>
+                      <select className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"
+                        value={newBook.subject}
+                        onChange={(e) => setNewBook({ ...newBook, subject: e.target.value })}>
+                        <option value="">Seçin</option>
+                        {SUBJECTS.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-600">Sınıf / Seviye</label>
+                      <div className="mt-0.5 flex flex-wrap gap-1">
+                        {CLASS_LEVELS.map((cl) => (
+                          <button
+                            key={cl}
+                            type="button"
+                            onClick={() => {
+                              const next = newBook.class_levels.includes(cl)
+                                ? newBook.class_levels.filter((x) => x !== cl)
+                                : [...newBook.class_levels, cl];
+                              setNewBook({ ...newBook, class_levels: next });
+                            }}
+                            className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${newBook.class_levels.includes(cl) ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-300 text-gray-600 hover:bg-gray-100'}`}
+                          >{cl}</button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">Açıklama (opsiyonel)</label>
+                    <textarea
+                      className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none h-16"
+                      value={newBook.description}
+                      onChange={(e) => setNewBook({ ...newBook, description: e.target.value })} />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── KAPAK GÖRSELİ ── */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Kapak Görseli</label>
+            <div className="flex items-start gap-4">
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="w-24 h-32 border-2 border-dashed border-gray-300 rounded-xl overflow-hidden cursor-pointer hover:border-indigo-400 transition-colors flex items-center justify-center bg-gray-50 relative flex-shrink-0"
+              >
+                {coverPreview ? (
+                  <>
+                    <img src={coverPreview} alt="Kapak" className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+                      <Camera className="w-6 h-6 text-white" />
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-center text-gray-400">
+                    <Image className="w-8 h-8 mx-auto mb-1" />
+                    <span className="text-xs">Yükle</span>
+                  </div>
+                )}
+              </div>
+              <div className="text-xs text-gray-500 pt-2">
+                <p className="font-medium text-gray-700 mb-1">Kitap Kapak Görseli</p>
+                <p>· JPEG, PNG veya WebP</p>
+                <p>· Maksimum 10 MB</p>
+                <p>· Önerilen: 400×600 px (dikey)</p>
+                {coverFile && <p className="text-green-600 mt-1">✓ {coverFile.name}</p>}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="mt-2 text-indigo-600 hover:underline text-xs"
+                >
+                  {coverPreview ? 'Görseli Değiştir' : 'Dosya Seç'}
+                </button>
+              </div>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={handleCoverChange}
+            />
+          </div>
+
+          {/* ── FİYAT & İNDİRİM ── */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Fiyatlandırma</label>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-500">Satış Fiyatı (₺) <span className="text-red-500">*</span></label>
+                <div className="relative mt-0.5">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">₺</span>
+                  <input
+                    type="number" min="0" step="0.01"
+                    className={`pl-7 pr-3 py-2 border rounded-lg text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-400 ${errors.price ? 'border-red-400' : 'border-gray-300'}`}
+                    placeholder="0.00"
+                    value={priceLira}
+                    onChange={(e) => { setPriceLira(e.target.value); setErrors({ ...errors, price: '' }); }}
+                  />
+                </div>
+                {errors.price && <p className="text-xs text-red-500 mt-0.5">{errors.price}</p>}
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 flex items-center gap-1">
+                  <Tag className="w-3 h-3" /> Normal Fiyat (indirim öncesi, opsiyonel)
+                </label>
+                <div className="relative mt-0.5">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">₺</span>
+                  <input
+                    type="number" min="0" step="0.01"
+                    className={`pl-7 pr-3 py-2 border rounded-lg text-sm w-full focus:outline-none ${errors.discount ? 'border-red-400' : 'border-gray-300'}`}
+                    placeholder="Örn: 89.90"
+                    value={discountLira}
+                    onChange={(e) => { setDiscountLira(e.target.value); setErrors({ ...errors, discount: '' }); }}
+                  />
+                </div>
+                {errors.discount && <p className="text-xs text-red-500 mt-0.5">{errors.discount}</p>}
+              </div>
+            </div>
+            {discountPct && (
+              <div className="mt-2 flex items-center gap-2 text-sm">
+                <span className="bg-red-500 text-white text-xs px-2 py-0.5 rounded-full font-bold">%{discountPct} İndirim</span>
+                <span className="text-gray-500">
+                  <span className="line-through">{discountLira ? `₺${discountLira}` : ''}</span>
+                  {' → '}
+                  <span className="font-semibold text-green-700">₺{priceLira}</span>
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* ── STOK & KARGO ── */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Stok & Kargo</label>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs text-gray-500">Mevcut Stok <span className="text-red-500">*</span></label>
+                <input
+                  type="number" min="0"
+                  className={`mt-0.5 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 ${errors.stock ? 'border-red-400' : 'border-gray-300'}`}
+                  value={stock}
+                  onChange={(e) => { setStock(e.target.value); setErrors({ ...errors, stock: '' }); }}
+                />
+                {errors.stock && <p className="text-xs text-red-500 mt-0.5">{errors.stock}</p>}
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">Düşük Stok Uyarısı</label>
+                <input
+                  type="number" min="0"
+                  className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"
+                  value={lowStock}
+                  onChange={(e) => setLowStock(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">Kargo (iş günü) <span className="text-red-500">*</span></label>
+                <div className="relative mt-0.5">
+                  <Truck className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                  <input
+                    type="number" min="1"
+                    className={`pl-8 pr-3 py-2 border rounded-lg text-sm w-full focus:outline-none ${errors.shippingDays ? 'border-red-400' : 'border-gray-300'}`}
+                    value={shippingDays}
+                    onChange={(e) => { setShippingDays(e.target.value); setErrors({ ...errors, shippingDays: '' }); }}
+                  />
+                </div>
+                {errors.shippingDays && <p className="text-xs text-red-500 mt-0.5">{errors.shippingDays}</p>}
+              </div>
+            </div>
+          </div>
+
+          {/* Özet önizleme */}
+          {priceLira && parseFloat(priceLira) > 0 && (
+            <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3 flex items-center gap-4 text-sm">
+              {coverPreview && <img src={coverPreview} alt="kapak" className="w-10 h-14 object-cover rounded shadow-sm flex-shrink-0" />}
+              <div>
+                <div className="font-semibold">
+                  {isEdit ? (offer?.book as { title?: string } | null)?.title : (selectedBook?.title ?? newBook.title) || 'Kitap başlığı'}
+                </div>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-indigo-700 font-bold">₺{priceLira}</span>
+                  {discountPct && <span className="bg-red-500 text-white text-xs px-1.5 py-0.5 rounded-full">%{discountPct} indirim</span>}
+                  <span className="text-gray-500">· Stok: {stock}</span>
+                  <span className="text-gray-500">· {shippingDays}g kargo</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex gap-2 justify-end px-6 py-4 border-t border-gray-100">
+          <button onClick={onClose} className="text-sm text-gray-500 px-4 py-2">İptal</button>
+          <button
+            onClick={handleSave}
+            disabled={saving || uploading}
+            className="flex items-center gap-2 text-sm bg-indigo-600 text-white px-5 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {(saving || uploading) && <Loader2 className="w-4 h-4 animate-spin" />}
+            {uploading ? 'Görsel yükleniyor...' : isEdit ? 'Güncelle' : 'Teklif Oluştur'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Tekliflerim ────────────────────────────────────────────────────────
 function Tekliflerim() {
   const [offers, setOffers] = useState<CommerceVendorOffer[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState<string | null>(null);
+  const [modalOffer, setModalOffer] = useState<CommerceVendorOffer | null | 'new'>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -167,7 +712,10 @@ function Tekliflerim() {
         <h2 className="text-lg font-semibold">Tekliflerim ({offers.length})</h2>
         <div className="flex gap-2">
           <button onClick={load} className="text-gray-400 hover:text-gray-600"><RefreshCw className="w-4 h-4" /></button>
-          <button className="flex items-center gap-1 text-sm bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700">
+          <button
+            onClick={() => setModalOffer('new')}
+            className="flex items-center gap-1 text-sm bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700"
+          >
             <Plus className="w-4 h-4" /> Yeni Teklif
           </button>
         </div>
@@ -176,7 +724,7 @@ function Tekliflerim() {
         {offers.map((o) => {
           const book = o.book as { title?: string; isbn?: string | null; cover_image_url?: string | null } | null;
           const canSubmit = ['draft', 'correction_requested', 'rejected'].includes(o.status);
-          const canEdit = canSubmit;
+          const canEdit = canSubmit || o.status === 'approved';
           const isLowStock = o.stock_quantity <= o.low_stock_threshold;
           return (
             <div key={o.id} className={`border rounded-xl p-4 ${isLowStock && o.status === 'approved' ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-white'}`}>
@@ -184,7 +732,9 @@ function Tekliflerim() {
                 {book?.cover_image_url ? (
                   <img src={book.cover_image_url} alt={book?.title} className="w-12 h-16 object-cover rounded shadow-sm flex-shrink-0" />
                 ) : (
-                  <div className="w-12 h-16 bg-gray-100 rounded flex-shrink-0" />
+                  <div className="w-12 h-16 bg-gray-100 rounded flex-shrink-0 flex items-center justify-center">
+                    <BookOpen className="w-5 h-5 text-gray-300" />
+                  </div>
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between gap-2">
@@ -193,8 +743,14 @@ function Tekliflerim() {
                   </div>
                   <div className="text-xs text-gray-400 mt-0.5">ISBN: {book?.isbn ?? '—'}</div>
                   <div className="mt-2 flex gap-4 text-sm flex-wrap">
-                    <div><span className="text-gray-500">Fiyat:</span> <strong>{formatCommerceTry(o.price_kurus)}</strong></div>
-                    <div className={`${isLowStock ? 'text-red-700 font-semibold' : ''}`}>
+                    <div>
+                      <span className="text-gray-500">Fiyat:</span>{' '}
+                      <strong className="text-indigo-700">{formatCommerceTry(o.price_kurus)}</strong>
+                      {o.compare_at_price_kurus && o.compare_at_price_kurus > o.price_kurus && (
+                        <span className="ml-1 text-xs text-gray-400 line-through">{formatCommerceTry(o.compare_at_price_kurus)}</span>
+                      )}
+                    </div>
+                    <div className={isLowStock ? 'text-red-700 font-semibold' : ''}>
                       <span className="text-gray-500">Stok:</span> <strong>{o.stock_quantity}</strong>
                       {isLowStock && <span className="ml-1 text-xs text-red-500">⚠ düşük</span>}
                     </div>
@@ -210,9 +766,12 @@ function Tekliflerim() {
                       <strong>Red nedeni:</strong> {o.rejection_reason}
                     </div>
                   )}
-                  <div className="mt-3 flex gap-2">
+                  <div className="mt-3 flex gap-2 flex-wrap">
                     {canEdit && (
-                      <button className="flex items-center gap-1 text-xs border border-gray-300 text-gray-600 px-2.5 py-1 rounded-lg hover:bg-gray-50">
+                      <button
+                        onClick={() => setModalOffer(o)}
+                        className="flex items-center gap-1 text-xs border border-gray-300 text-gray-600 px-2.5 py-1 rounded-lg hover:bg-gray-50"
+                      >
                         <Pencil className="w-3.5 h-3.5" /> Düzenle
                       </button>
                     )}
@@ -235,10 +794,25 @@ function Tekliflerim() {
         {offers.length === 0 && (
           <div className="text-center py-12 text-gray-400">
             <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
-            <p className="text-sm">Henüz teklif oluşturmadınız</p>
+            <p className="text-sm mb-3">Henüz teklif oluşturmadınız</p>
+            <button
+              onClick={() => setModalOffer('new')}
+              className="text-sm bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
+            >
+              İlk Teklifini Oluştur
+            </button>
           </div>
         )}
       </div>
+
+      {/* Modal */}
+      {modalOffer !== null && (
+        <OfferModal
+          offer={modalOffer === 'new' ? null : modalOffer}
+          onClose={() => setModalOffer(null)}
+          onSave={load}
+        />
+      )}
     </div>
   );
 }
