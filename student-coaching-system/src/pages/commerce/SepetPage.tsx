@@ -102,9 +102,9 @@ export default function SepetPage() {
   const handleCheckout = async () => {
     if (items.some((i) => i.out_of_stock) || items.length === 0) return;
 
-    const CHECKOUT_URL =
+    const CHECKOUT_BASE =
       (import.meta.env.VITE_CHECKOUT_URL as string | undefined)?.trim() ||
-      'https://www.onlinevipdershane.com/odeme.html';
+      '/kitap-odeme';
 
     const cartSummary = {
       items: items.map((i) => ({
@@ -136,7 +136,7 @@ export default function SepetPage() {
         ref: cartSummary.ref ?? handoff.checkout.ref ?? handoff.token,
       });
       if (coupon?.code) params.set('kupon', coupon.code);
-      window.location.href = `${CHECKOUT_URL}?${params.toString()}`;
+      window.location.href = `${CHECKOUT_BASE}?${params.toString()}`;
     } catch (e: unknown) {
       toast.error((e as Error).message || 'Ödeme sayfasına yönlendirilemedi.');
       setCheckoutLoading(false);
@@ -369,7 +369,7 @@ export default function SepetPage() {
             </button>
 
             <p className="text-xs text-gray-400 text-center mt-3">
-              www.onlinevipdershane.com güvenli ödeme
+              Güvenli ödeme · Garanti BBVA 3D Secure
             </p>
           </div>
         </div>

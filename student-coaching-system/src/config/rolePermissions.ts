@@ -113,6 +113,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/kitap-magazasi': ['student', 'super_admin', 'admin', 'coach', 'teacher'],
   '/kitap-magazasi/:slug': ['student', 'super_admin', 'admin', 'coach', 'teacher'],
   '/sepet': ['student', 'super_admin', 'admin'],
+  '/kitap-odeme': ['student', 'super_admin', 'admin'],
   // Satıcı paneli
   '/vendor-panel': ['vendor_admin', 'super_admin'],
   '/vendor-panel/genel': ['vendor_admin', 'super_admin'],
