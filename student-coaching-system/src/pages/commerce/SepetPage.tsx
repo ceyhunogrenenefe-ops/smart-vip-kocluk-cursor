@@ -98,13 +98,13 @@ export default function SepetPage() {
     finally { setUpdatingId(null); }
   };
 
-  /** Sepet özetini token ile ödeme sitesine taşır (cross-origin; localStorage paylaşılmaz) */
+  /** Sepet özetini token ile onlinevipdershane.com ödeme sayfasına taşır */
   const handleCheckout = async () => {
     if (items.some((i) => i.out_of_stock) || items.length === 0) return;
 
-    const CHECKOUT_BASE =
+    const CHECKOUT_URL =
       (import.meta.env.VITE_CHECKOUT_URL as string | undefined)?.trim() ||
-      '/kitap-odeme';
+      'https://onlinevipdershane.com/odeme.html';
 
     const cartSummary = {
       items: items.map((i) => ({
@@ -136,7 +136,13 @@ export default function SepetPage() {
         ref: cartSummary.ref ?? handoff.checkout.ref ?? handoff.token,
       });
       if (coupon?.code) params.set('kupon', coupon.code);
-      window.location.href = `${CHECKOUT_BASE}?${params.toString()}`;
+      try {
+        const cartB64 = btoa(unescape(encodeURIComponent(JSON.stringify(cartSummary))));
+        if (cartB64.length < 1800) params.set('cart', cartB64);
+      } catch {
+        /* URL uzun olursa yalnızca token + tutar */
+      }
+      window.location.href = `${CHECKOUT_URL}?${params.toString()}`;
     } catch (e: unknown) {
       toast.error((e as Error).message || 'Ödeme sayfasına yönlendirilemedi.');
       setCheckoutLoading(false);
@@ -369,7 +375,7 @@ export default function SepetPage() {
             </button>
 
             <p className="text-xs text-gray-400 text-center mt-3">
-              Güvenli ödeme · Garanti BBVA 3D Secure
+              onlinevipdershane.com güvenli ödeme (PayTR)
             </p>
           </div>
         </div>

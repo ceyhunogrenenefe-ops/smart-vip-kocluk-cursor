@@ -1,62 +1,39 @@
-# onlinevipdershane1 — PayTR + Garanti ödeme seçeneği
+# onlinevipdershane1 — Koçluk kitap sepeti → ödeme sayfası
 
-PayTR checkout `onlinevipdershane1` reposunda. Bu klasördeki dosyaları o repoya kopyalayıp deploy edin.
+Koçluk paneli (`dersonlinevipkocluk.com`) sepetten **Ödemeye Geç** deyince
+`https://onlinevipdershane.com/odeme.html?source=coaching&token=...&tutar=...`
+sayfasına yönlendirir.
 
-## 1) Dosyaları kopyala
+Canlı sitede sepet/tutarın görünmesi için bu 2 dosya **zorunlu**:
 
-`onlinevipdershane1` köküne:
-
-| Kaynak (bu klasör) | Hedef (site repo) |
+| Dosya | Ne yapar |
 |---|---|
-| `api/_lib/products.js` | `api/_lib/products.js` (kitap mağazası dinamik tutar) |
-| `api/_lib/garanti.js` | `api/_lib/garanti.js` |
-| `api/garanti-token.js` | `api/garanti-token.js` |
-| `api/garanti-callback.js` | `api/garanti-callback.js` |
-| `api/payment-provider.js` | `api/payment-provider.js` (üzerine yaz) |
-| `odeme.html` | `odeme.html` (üzerine yaz) |
+| `odeme.html` | Koçluk token/tutar ile sipariş özeti gösterir |
+| `api/_lib/products.js` | `kitapMagaza` ürünü + dinamik `amountKurus` |
 
-## 2) Vercel env — **onlinevipdershane1** projesi
-
-⚠️ Panel (`smart-kocluk-ceyhu`) değil; site projesi:
-
-| Key | Value |
-|---|---|
-| `GARANTI_MERCHANT_ID` | `3267918` |
-| `GARANTI_TERMINAL_ID` | `10410839` |
-| `GARANTI_PROVISION_USER` | `PROVAUT` |
-| `GARANTI_PROVISION_PASSWORD` | (şifren) |
-| `GARANTI_STORE_KEY` | (store key) |
-| `GARANTI_MODE` | `prod` |
-| `SITE_URL` | `https://onlinevipdershane.com` |
-
-PayTR değişkenleri olduğu gibi kalsın.
-
-## 3) Deploy
+## Hızlı deploy (onlinevipdershane1 reposu)
 
 ```bash
-cd onlinevipdershane1
-git add api/_lib/products.js api/_lib/garanti.js api/garanti-token.js api/garanti-callback.js api/payment-provider.js odeme.html
-git commit -m "feat: kitap mağazası koçluk paneli ödeme yönlendirmesi (odeme.html + kitapMagaza)"
+# smart-vip-kocluk-cursor reposundan kopyala:
+cp site-patches/onlinevipdershane1/odeme.html ../onlinevipdershane1/odeme.html
+cp site-patches/onlinevipdershane1/api/_lib/products.js ../onlinevipdershane1/api/_lib/products.js
+
+cd ../onlinevipdershane1
+git add odeme.html api/_lib/products.js
+git commit -m "feat: koçluk paneli kitap sepeti ödeme (token + kitapMagaza)"
 git push origin main
 ```
 
-Vercel otomatik deploy eder. Env sonradan eklendiyse Redeploy.
+Vercel otomatik deploy eder.
 
-## Sonuç
+## Test
 
-`/odeme.html` üzerinde iki seçenek görünür:
+1. Koçluk: sepete kitap ekle → Ödemeye Geç
+2. URL: `onlinevipdershane.com/odeme.html?source=coaching&token=...&tutar=...`
+3. Sağda sipariş özeti + tutar görünmeli
+4. Veli bilgisi → PayTR
 
-1. **PayTR** (varsayılan)
-2. **Garanti BBVA**
+## Not
 
-Koçluk paneli kitap sepeti `?source=coaching&token=...&tutar=...` ile `/odeme.html` sayfasına gelir; sipariş özeti token ile koçluk API'sinden okunur.
-
-## Koçluk paneli (smart-kocluk-ceyhu)
-
-Supabase'de migration çalıştırın:
-
-```sql
--- student-coaching-system/sql/2026-08-20-commerce-checkout-handoff.sql
-```
-
-Vercel deploy sonrası `/api/commerce-checkout-handoff` aktif olur.
+- `kitapMagaza` olmadan PayTR `Geçersiz ürün: kitapMagaza` döner.
+- Eski site sepeti (`OVD_CART` localStorage) koçluk paneliyle paylaşılmaz; token şart.
