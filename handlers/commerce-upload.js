@@ -120,7 +120,7 @@ export default async function handler(req, res) {
     const rawBase64 = stripDataUrl(String(file_base64));
     const buffer = Buffer.from(rawBase64, 'base64');
     if (!buffer.length) return err(res, 400, 'Görsel okunamadı');
-    if (buffer.byteLength > MAX_BYTES) return err(res, 400, 'Dosya çok büyük. Lütfen 2 MB altı bir kapak kullanın.');
+    if (buffer.byteLength > MAX_BYTES) return err(res, 400, 'Dosya çok büyük. Lütfen kapak fotoğrafını yeniden seçin (otomatik küçültme sonrası ~2 MB altı olmalı).');
 
     const mime = sniffMime(buffer, mime_type);
     if (!mime) return err(res, 400, 'Desteklenmeyen dosya türü (jpeg/png/webp)');

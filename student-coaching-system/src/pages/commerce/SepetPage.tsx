@@ -228,7 +228,7 @@ export default function SepetPage() {
               <div key={item.id} className={`bg-white border rounded-xl p-3 flex gap-3 ${item.out_of_stock ? 'border-red-300 bg-red-50' : item.price_changed ? 'border-yellow-300 bg-yellow-50' : 'border-gray-200'}`}>
                 <div className="w-14 h-20 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
                   {coverUrl ? (
-                    <img src={coverUrl} alt={title} className="w-full h-full object-cover" />
+                    <img src={coverUrl} alt={title} className="w-full h-full object-contain" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center"><BookOpen className="w-6 h-6 text-gray-300" /></div>
                   )}

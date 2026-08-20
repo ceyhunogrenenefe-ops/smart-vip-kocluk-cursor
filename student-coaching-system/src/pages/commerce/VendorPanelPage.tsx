@@ -42,6 +42,7 @@ import {
   type VendorStats,
 } from '../../lib/commerceVendorApi';
 import { apiFetch } from '../../lib/session';
+import { compressCoverImage, formatBytes } from '../../lib/commerce/compressCoverImage';
 import type {
   CommerceBook,
   CommerceVendorOffer,
@@ -147,41 +148,13 @@ function GenelBakis() {
 // ─────────────────────────────────────────────────────────────────────
 // Kapak görseli yükleme yardımcısı
 // ─────────────────────────────────────────────────────────────────────
-async function compressCoverFile(file: File): Promise<{ base64: string; mime: string }> {
-  try {
-    const bitmap = await createImageBitmap(file);
-    const maxH = 900;
-    const scale = bitmap.height > maxH ? maxH / bitmap.height : 1;
-    const w = Math.max(1, Math.round(bitmap.width * scale));
-    const h = Math.max(1, Math.round(bitmap.height * scale));
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('canvas');
-    ctx.drawImage(bitmap, 0, 0, w, h);
-    const mime = 'image/jpeg';
-    const dataUrl = canvas.toDataURL(mime, 0.82);
-    bitmap.close?.();
-    return { base64: dataUrl, mime };
-  } catch {
-    return await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve({ base64: String(reader.result), mime: file.type || 'image/jpeg' });
-      reader.onerror = () => reject(new Error('Dosya okunamadı'));
-      reader.readAsDataURL(file);
-    });
-  }
-}
-
-async function uploadBookCover(file: File, bookId: string): Promise<string> {
-  const { base64, mime } = await compressCoverFile(file);
+async function uploadBookCoverDataUrl(dataUrl: string, bookId: string): Promise<string> {
   const res = await apiFetch('/api/commerce-upload', {
     method: 'POST',
     body: JSON.stringify({
       op: 'book_cover',
-      file_base64: base64,
-      mime_type: mime,
+      file_base64: dataUrl,
+      mime_type: 'image/jpeg',
       book_id: bookId,
       save_to_db: true,
     }),
@@ -234,9 +207,11 @@ function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
   const [newBook, setNewBook] = useState({ isbn: '', title: '', subtitle: '', author: '', publisher: '', subject: '', class_levels: [] as string[], description: '' });
   const [createdBookId, setCreatedBookId] = useState<string | null>(null);
 
-  // Kapak görseli
+  // Kapak görseli (sıkıştırılmış data URL ile yüklenir)
   const [coverPreview, setCoverPreview] = useState<string | null>(selectedBook?.cover_image_url ?? null);
-  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [coverDataUrl, setCoverDataUrl] = useState<string | null>(null);
+  const [coverMeta, setCoverMeta] = useState<string | null>(null);
+  const [coverPreparing, setCoverPreparing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -257,18 +232,31 @@ function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
     return () => clearTimeout(t);
   }, [bookSearch, bookMode]);
 
-  const handleCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCoverChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
+    e.target.value = '';
     if (!f) return;
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(f.type)) {
-      toast.error('Yalnızca JPEG, PNG veya WebP yükleyebilirsiniz');
+    if (f.size > 25 * 1024 * 1024) {
+      toast.error('Dosya çok büyük (max 25 MB). Daha küçük bir fotoğraf seçin.');
       return;
     }
-    if (f.size > 10 * 1024 * 1024) { toast.error('Dosya 10 MB sınırını aşıyor'); return; }
-    setCoverFile(f);
-    const reader = new FileReader();
-    reader.onload = () => setCoverPreview(reader.result as string);
-    reader.readAsDataURL(f);
+    setCoverPreparing(true);
+    try {
+      const compressed = await compressCoverImage(f);
+      setCoverDataUrl(compressed.dataUrl);
+      setCoverPreview(compressed.dataUrl);
+      setCoverMeta(
+        `${compressed.width}×${compressed.height} · ${formatBytes(compressed.bytesApprox)}` +
+          (f.size > compressed.bytesApprox ? ` (orijinal ${formatBytes(f.size)})` : '')
+      );
+      toast.success('Kapak küçültüldü, yüklenecek');
+    } catch (err) {
+      setCoverDataUrl(null);
+      setCoverMeta(null);
+      toast.error(err instanceof Error ? err.message : 'Görsel işlenemedi');
+    } finally {
+      setCoverPreparing(false);
+    }
   };
 
   const validate = () => {
@@ -304,12 +292,12 @@ function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
           shipping_days: parseInt(shippingDays),
         });
         // Kapak yükle
-        if (coverFile) {
+        if (coverDataUrl) {
           const bookId = selectedBook?.id || (offer.book_id as string) || offerBook(offer)?.id;
           if (!bookId) throw new Error('Kapak için kitap bulunamadı');
           setUploading(true);
           try {
-            await uploadBookCover(coverFile, bookId);
+            await uploadBookCoverDataUrl(coverDataUrl, bookId);
           } catch (e: unknown) {
             throw new Error('Kapak yüklenemedi: ' + (e as Error).message);
           } finally {
@@ -337,9 +325,9 @@ function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
           setCreatedBookId(bookId);
 
           // Kapak yükle (yeni kitap için)
-          if (coverFile && bookId) {
+          if (coverDataUrl && bookId) {
             setUploading(true);
-            try { await uploadBookCover(coverFile, bookId); }
+            try { await uploadBookCoverDataUrl(coverDataUrl, bookId); }
             catch (e: unknown) { throw new Error('Kapak yüklenemedi: ' + (e as Error).message); }
             finally { setUploading(false); }
           }
@@ -356,9 +344,9 @@ function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
         });
 
         // Kapak yükle (mevcut kitap seçilmişse)
-        if (coverFile && bookMode === 'search' && selectedBook) {
+        if (coverDataUrl && bookMode === 'search' && selectedBook) {
           setUploading(true);
-          try { await uploadBookCover(coverFile, selectedBook.id); }
+          try { await uploadBookCoverDataUrl(coverDataUrl, selectedBook.id); }
           catch (e: unknown) { throw new Error('Kapak yüklenemedi: ' + (e as Error).message); }
           finally { setUploading(false); }
         }
@@ -422,7 +410,7 @@ function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
                         <div className="font-medium text-sm">{selectedBook.title}</div>
                         <div className="text-xs text-gray-500">ISBN: {selectedBook.isbn ?? '—'}</div>
                       </div>
-                      <button onClick={() => { setSelectedBook(null); setCoverPreview(null); }} className="text-gray-400 hover:text-red-500">
+                      <button onClick={() => { setSelectedBook(null); setCoverPreview(null); setCoverDataUrl(null); setCoverMeta(null); }} className="text-gray-400 hover:text-red-500">
                         <X className="w-4 h-4" />
                       </button>
                     </div>
@@ -444,7 +432,7 @@ function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
                       {bookResults.map((b) => (
                         <button
                           key={b.id}
-                          onClick={() => { setSelectedBook(b); setCoverPreview(b.cover_image_url); setBookResults([]); setBookSearch(''); }}
+                          onClick={() => { setSelectedBook(b); setCoverPreview(b.cover_image_url); setCoverDataUrl(null); setCoverMeta(null); setBookResults([]); setBookSearch(''); }}
                           className="w-full flex items-center gap-3 px-3 py-2 hover:bg-indigo-50 text-left border-b border-gray-100 last:border-0"
                         >
                           {b.cover_image_url ? (
@@ -541,12 +529,14 @@ function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
             <label className="block text-sm font-semibold text-gray-700 mb-2">Kapak Görseli</label>
             <div className="flex items-start gap-4">
               <div
-                onClick={() => fileInputRef.current?.click()}
-                className="w-24 h-32 border-2 border-dashed border-gray-300 rounded-xl overflow-hidden cursor-pointer hover:border-indigo-400 transition-colors flex items-center justify-center bg-gray-50 relative flex-shrink-0"
+                onClick={() => !coverPreparing && fileInputRef.current?.click()}
+                className="w-24 h-32 border-2 border-dashed border-gray-300 rounded-xl overflow-hidden cursor-pointer hover:border-indigo-400 transition-colors flex items-center justify-center bg-slate-100 relative flex-shrink-0"
               >
-                {coverPreview ? (
+                {coverPreparing ? (
+                  <Loader2 className="w-6 h-6 text-indigo-500 animate-spin" />
+                ) : coverPreview ? (
                   <>
-                    <img src={coverPreview} alt="Kapak" className="w-full h-full object-cover" />
+                    <img src={coverPreview} alt="Kapak" className="w-full h-full object-contain" />
                     <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
                       <Camera className="w-6 h-6 text-white" />
                     </div>
@@ -560,25 +550,26 @@ function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
               </div>
               <div className="text-xs text-gray-500 pt-2">
                 <p className="font-medium text-gray-700 mb-1">Kitap Kapak Görseli</p>
-                <p>· JPEG, PNG veya WebP</p>
-                <p>· Maksimum 10 MB</p>
-                <p>· Önerilen: 400×600 px (dikey)</p>
-                {coverFile && <p className="text-green-600 mt-1">✓ {coverFile.name}</p>}
+                <p>· JPEG, PNG veya WebP (telefon fotoğrafı olur)</p>
+                <p>· Büyük fotoğraflar otomatik küçültülür</p>
+                <p>· Önerilen: dikey kapak, net görüntü</p>
+                {coverMeta && <p className="text-green-600 mt-1">✓ Hazır · {coverMeta}</p>}
                 <button
                   type="button"
+                  disabled={coverPreparing}
                   onClick={() => fileInputRef.current?.click()}
-                  className="mt-2 text-indigo-600 hover:underline text-xs"
+                  className="mt-2 text-indigo-600 hover:underline text-xs disabled:opacity-50"
                 >
-                  {coverPreview ? 'Görseli Değiştir' : 'Dosya Seç'}
+                  {coverPreparing ? 'Küçültülüyor…' : coverPreview ? 'Görseli Değiştir' : 'Dosya Seç'}
                 </button>
               </div>
             </div>
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/jpeg,image/png,image/webp"
+              accept="image/jpeg,image/png,image/webp,image/*"
               className="hidden"
-              onChange={handleCoverChange}
+              onChange={(e) => void handleCoverChange(e)}
             />
           </div>
 
@@ -671,7 +662,7 @@ function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
           {/* Özet önizleme */}
           {priceLira && parseFloat(priceLira) > 0 && (
             <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3 flex items-center gap-4 text-sm">
-              {coverPreview && <img src={coverPreview} alt="kapak" className="w-10 h-14 object-cover rounded shadow-sm flex-shrink-0" />}
+              {coverPreview && <img src={coverPreview} alt="kapak" className="w-10 h-14 object-contain rounded bg-slate-100 shadow-sm flex-shrink-0" />}
               <div>
                 <div className="font-semibold">
                   {isEdit ? (offer?.book as { title?: string } | null)?.title : (selectedBook?.title ?? newBook.title) || 'Kitap başlığı'}
@@ -757,7 +748,7 @@ function Tekliflerim() {
             <div key={o.id} className={`border rounded-xl p-4 ${isLowStock && o.status === 'approved' ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-white'}`}>
               <div className="flex gap-3">
                 {book?.cover_image_url ? (
-                  <img src={book.cover_image_url} alt={book?.title} className="w-12 h-16 object-cover rounded shadow-sm flex-shrink-0" />
+                  <img src={book.cover_image_url} alt={book?.title} className="w-12 h-16 object-contain rounded bg-slate-100 shadow-sm flex-shrink-0" />
                 ) : (
                   <div className="w-12 h-16 bg-gray-100 rounded flex-shrink-0 flex items-center justify-center">
                     <BookOpen className="w-5 h-5 text-gray-300" />

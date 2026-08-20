@@ -102,7 +102,7 @@ function BookCard({ offer, onCartChange }: { offer: OfferWithBook; onCartChange?
       <div className="relative">
         <div className="aspect-[3/4] bg-gray-100 flex items-center justify-center overflow-hidden">
           {book.cover_image_url ? (
-            <img src={book.cover_image_url} alt={book.title} className="w-full h-full object-cover" />
+            <img src={book.cover_image_url} alt={book.title} className="w-full h-full object-contain" />
           ) : (
             <BookOpen className="w-12 h-12 text-gray-300" />
           )}
@@ -270,7 +270,7 @@ function PaketlerTab() {
           <div key={pkg.id} className="bg-white border border-gray-200 rounded-2xl overflow-hidden hover:shadow-md transition-shadow">
             <div className="relative aspect-[2/1] bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center">
               {pkg.cover_image_url ? (
-                <img src={pkg.cover_image_url} alt={pkg.name} className="w-full h-full object-cover" />
+                <img src={pkg.cover_image_url} alt={pkg.name} className="w-full h-full object-contain" />
               ) : (
                 <BookOpen className="w-16 h-16 text-indigo-300" />
               )}
@@ -356,7 +356,7 @@ function AtanmisTab() {
               onClick={() => book?.slug && navigate(`/kitap-magazasi/${book.slug}`)}
             >
               {book?.cover_image_url ? (
-                <img src={book.cover_image_url} alt={book?.title} className="w-full h-full object-cover" />
+                <img src={book.cover_image_url} alt={book?.title} className="w-full h-full object-contain" />
               ) : (
                 <BookOpen className="w-full h-full p-2 text-gray-300" />
               )}
