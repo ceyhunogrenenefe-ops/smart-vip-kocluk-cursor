@@ -462,6 +462,13 @@ async function handleOffers(op, body, actor) {
     statusPatch.updated_by = actor.sub;
     const { data, error } = await supabaseAdmin.from('commerce_vendor_offers').update(statusPatch).eq('id', id).select().single();
     if (error) throw error;
+    // Teklif onaylandığında kitabı katalogda görünür yap
+    if (op === 'offers.approve' && offer.book_id) {
+      await supabaseAdmin
+        .from('commerce_books')
+        .update({ is_catalog_active: true, updated_at: new Date().toISOString(), updated_by: actor.sub })
+        .eq('id', offer.book_id);
+    }
     await logAudit({ entity_type: 'commerce_vendor_offer', entity_id: id, action, actor_user_id: actor.sub, vendor_id: offer.vendor_id, old_value: { status: offer.status }, new_value: { status: data.status, reason } });
     return { ok: true, offer: data };
   }
