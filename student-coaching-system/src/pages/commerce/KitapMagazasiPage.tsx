@@ -93,6 +93,7 @@ function CartButton({ offerId, stock, onAdded }: { offerId: string; stock: numbe
 function BookCard({ offer, onCartChange }: { offer: OfferWithBook; onCartChange?: () => void }) {
   const navigate = useNavigate();
   const book = offer.commerce_books;
+  if (!book) return null;
   return (
     <div
       className="bg-white rounded-2xl border border-gray-200 overflow-hidden hover:shadow-md transition-shadow cursor-pointer"

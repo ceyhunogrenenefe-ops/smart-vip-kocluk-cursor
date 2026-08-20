@@ -23,6 +23,7 @@ import { randomUUID } from 'crypto';
 import { requireAuth } from '../api/_lib/auth.js';
 import { actorRoleSet, roleSetHasSuperAdmin, roleSetHasAdmin } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
+import { attachOfferRelations, attachOfferRelationsList } from '../api/_lib/commerce-utils.js';
 
 function err(res, status, message) {
   return res.status(status).json({ error: message });
@@ -423,7 +424,7 @@ async function handleOffers(op, body, actor) {
     if (body.limit) q = q.limit(parseInt(body.limit, 10));
     const { data, error } = await q;
     if (error) throw error;
-    return { ok: true, offers: data };
+    return { ok: true, offers: attachOfferRelationsList(data) };
   }
 
   if (op === 'offers.get') {
@@ -435,7 +436,7 @@ async function handleOffers(op, body, actor) {
       .eq('id', id)
       .single();
     if (error) throw error;
-    return { ok: true, offer: data };
+    return { ok: true, offer: attachOfferRelations(data) };
   }
 
   const APPROVAL_OPS = ['offers.approve', 'offers.reject', 'offers.request_correction', 'offers.inactive'];
@@ -802,7 +803,7 @@ async function handleReports(op, body) {
       .order('stock_quantity', { ascending: true })
       .limit(100);
     if (error) throw error;
-    return { ok: true, offers: data };
+    return { ok: true, offers: attachOfferRelationsList(data) };
   }
 
   if (op === 'reports.vendors') {

@@ -62,7 +62,7 @@ import type {
   CommerceVendorOffer,
   CommerceVendorPayout,
 } from '../../types/commerce.types';
-import { formatCommerceTry, COMMERCE_OFFER_STATUS_LABELS, COMMERCE_ORDER_STATUS_LABELS } from '../../types/commerce.types';
+import { formatCommerceTry, COMMERCE_OFFER_STATUS_LABELS, COMMERCE_ORDER_STATUS_LABELS, offerBook, offerVendor } from '../../types/commerce.types';
 import { useAuth } from '../../context/AuthContext';
 
 type Tab =
@@ -732,8 +732,8 @@ function OnaylarTab() {
       ) : (
         <div className="space-y-3">
           {offers.map((o) => {
-            const book = o.book as { title: string; isbn: string | null; cover_image_url: string | null } | null;
-            const vendor = o.vendor as { name: string } | null;
+            const book = offerBook(o);
+            const vendor = offerVendor(o);
             return (
               <div key={o.id} className="border border-yellow-200 bg-yellow-50 rounded-xl p-4">
                 <div className="flex gap-4">
@@ -1177,8 +1177,8 @@ function RaporlarTab() {
           <h3 className="font-semibold mb-3 text-red-700">Düşük Stoklu Teklifler</h3>
           <div className="space-y-2">
             {lowStock.map((o) => {
-              const book = o.book as { title?: string } | null;
-              const vendor = o.vendor as { name?: string } | null;
+              const book = offerBook(o);
+              const vendor = offerVendor(o);
               return (
                 <div key={o.id} className="flex justify-between items-center bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm">
                   <div>
