@@ -27,8 +27,15 @@ async function startCheckoutPay(body: Record<string, unknown>) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.ok) {
+    if (data.error === 'garanti_not_configured') {
+      const missing = Array.isArray(data.missing) ? data.missing.join(', ') : '';
+      throw new Error(
+        missing
+          ? `Garanti POS yapılandırılmamış. Vercel (smart-kocluk-ceyhu) env eksik: ${missing}`
+          : 'Garanti POS yapılandırılmamış. Vercel → smart-kocluk-ceyhu projesine GARANTI_* ortam değişkenlerini ekleyin.'
+      );
+    }
     const map: Record<string, string> = {
-      garanti_not_configured: 'Ödeme sistemi henüz yapılandırılmamış. Lütfen destek ile iletişime geçin.',
       'Ödeme oturumu bulunamadı veya süresi doldu.': 'Ödeme oturumunuzun süresi doldu. Sepete dönüp tekrar deneyin.',
     };
     throw new Error(map[String(data.error)] || String(data.error || 'Ödeme başlatılamadı.'));
