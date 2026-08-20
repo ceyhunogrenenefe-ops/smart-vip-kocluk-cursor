@@ -1,5 +1,3 @@
-/** Site ödeme API — ürün kataloğu + koçluk kitap mağazası dinamik tutar desteği */
-
 const PRODUCTS = {
   lgs: { id: 'lgs', name: 'LGS Hazırlık', price: 112000 },
   yks: { id: 'yks', name: 'YKS TYT-AYT Hazırlık', price: 119000 },
@@ -18,35 +16,46 @@ const PRODUCTS = {
   start: { id: 'start', name: 'VIP Start Paketi', price: 28000 },
   'ders-1': { id: 'ders-1', name: 'Premium Özel Ders — 1 Ders', price: 1100 },
   'ders-3': { id: 'ders-3', name: 'Premium Özel Ders — 3 Ders', price: 3000 },
-  'ders-5': { id: 'ders-5', name: 'Premium Özel Ders — 5 Ders', price: 4900 },
-  'ders-10': { id: 'ders-10', name: 'Premium Özel Ders — 10 Ders', price: 9500 },
-  /** Koçluk paneli kitap mağazası — tutar amountKurus ile gelir */
+  'ders-5': { id: 'ders-5', name: 'Premium Özel Ders — 5 Ders', price: 4500 },
+  'ders-10': { id: 'ders-10', name: 'Premium Özel Ders — 10 Ders', price: 8500 },
+  /** Koçluk paneli kitap mağazası — tutar amountKurus (kuruş) ile gelir */
   kitapMagaza: {
     id: 'kitapMagaza',
     name: 'Kitap Mağazası Siparişi',
-    subtitle: 'Online VIP Dershane · Kitap Mağazası',
     price: 0,
   },
 };
 
 function resolveLineItems(items) {
-  const rows = [];
-  for (const item of items || []) {
-    const id = String(item?.id || '').trim();
-    const product = PRODUCTS[id];
-    if (!product) throw new Error(`Ürün bulunamadı: ${id}`);
-    const qty = Math.max(1, parseInt(String(item.qty ?? 1), 10) || 1);
-    let unitAmount = product.price;
-    if (item.amountKurus != null) {
+  if (!Array.isArray(items) || !items.length) {
+    throw new Error('Sepet boş.');
+  }
+
+  return items.map((item) => {
+    const product = PRODUCTS[item.id];
+    const qty = Math.max(1, Math.min(99, parseInt(item.qty, 10) || 1));
+    if (!product) throw new Error('Geçersiz ürün: ' + item.id);
+
+    let unitAmount;
+    if (item.amountKurus != null && item.amountKurus !== '') {
       unitAmount = parseInt(String(item.amountKurus), 10);
+    } else if (product.id === 'kitapMagaza') {
+      throw new Error('Kitap mağazası tutarı eksik.');
+    } else {
+      // Mevcut katalog: price TL cinsinden → kuruş
+      unitAmount = Math.round(product.price * 100);
     }
+
     if (!Number.isFinite(unitAmount) || unitAmount < 100) {
       throw new Error('Ödeme tutarı geçersiz.');
     }
-    rows.push({ product, qty, unitAmount });
-  }
-  if (!rows.length) throw new Error('Sepet boş.');
-  return rows;
+
+    return {
+      product,
+      qty,
+      unitAmount,
+    };
+  });
 }
 
 module.exports = { PRODUCTS, resolveLineItems };
