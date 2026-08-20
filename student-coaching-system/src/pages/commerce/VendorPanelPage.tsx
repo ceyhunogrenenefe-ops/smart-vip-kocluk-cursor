@@ -48,7 +48,7 @@ import type {
   CommerceVendorOrder,
   CommerceVendorPayout,
 } from '../../types/commerce.types';
-import { formatCommerceTry, COMMERCE_OFFER_STATUS_LABELS } from '../../types/commerce.types';
+import { formatCommerceTry, COMMERCE_OFFER_STATUS_LABELS, offerBook } from '../../types/commerce.types';
 import { useAuth } from '../../context/AuthContext';
 
 type Tab = 'genel' | 'kitaplarim' | 'tekliflerim' | 'siparislerim' | 'hakedislerim';
@@ -147,29 +147,48 @@ function GenelBakis() {
 // ─────────────────────────────────────────────────────────────────────
 // Kapak görseli yükleme yardımcısı
 // ─────────────────────────────────────────────────────────────────────
+async function compressCoverFile(file: File): Promise<{ base64: string; mime: string }> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const maxH = 900;
+    const scale = bitmap.height > maxH ? maxH / bitmap.height : 1;
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('canvas');
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    const mime = 'image/jpeg';
+    const dataUrl = canvas.toDataURL(mime, 0.82);
+    bitmap.close?.();
+    return { base64: dataUrl, mime };
+  } catch {
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve({ base64: String(reader.result), mime: file.type || 'image/jpeg' });
+      reader.onerror = () => reject(new Error('Dosya okunamadı'));
+      reader.readAsDataURL(file);
+    });
+  }
+}
+
 async function uploadBookCover(file: File, bookId: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        const res = await apiFetch('/api/commerce-upload', {
-          method: 'POST',
-          body: JSON.stringify({
-            op: 'book_cover',
-            file_base64: reader.result as string,
-            mime_type: file.type,
-            book_id: bookId,
-            save_to_db: true,
-          }),
-        });
-        const data = await res.json();
-        if (!data.ok) throw new Error(data.error ?? 'upload_failed');
-        resolve(data.url as string);
-      } catch (e) { reject(e); }
-    };
-    reader.onerror = () => reject(new Error('Dosya okunamadı'));
-    reader.readAsDataURL(file);
+  const { base64, mime } = await compressCoverFile(file);
+  const res = await apiFetch('/api/commerce-upload', {
+    method: 'POST',
+    body: JSON.stringify({
+      op: 'book_cover',
+      file_base64: base64,
+      mime_type: mime,
+      book_id: bookId,
+      save_to_db: true,
+    }),
   });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) throw new Error(data.error ?? 'Kapak yüklenemedi');
+  return data.url as string;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -205,7 +224,10 @@ function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
   const [bookResults, setBookResults] = useState<(CommerceBook & { my_offer: CommerceVendorOffer | null })[]>([]);
   const [bookSearching, setBookSearching] = useState(false);
   const [selectedBook, setSelectedBook] = useState<{ id: string; title: string; isbn: string | null; cover_image_url: string | null } | null>(
-    offer?.book ? (offer.book as { id: string; title: string; isbn: string | null; cover_image_url: string | null }) : null
+    offer ? (() => {
+      const b = offerBook(offer);
+      return b ? { id: b.id, title: b.title, isbn: b.isbn, cover_image_url: b.cover_image_url } : (offer.book_id ? { id: offer.book_id, title: '', isbn: null, cover_image_url: null } : null);
+    })() : null
   );
 
   // Yeni kitap formu
@@ -282,12 +304,17 @@ function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
           shipping_days: parseInt(shippingDays),
         });
         // Kapak yükle
-        if (coverFile && offer.book) {
+        if (coverFile) {
+          const bookId = selectedBook?.id || (offer.book_id as string) || offerBook(offer)?.id;
+          if (!bookId) throw new Error('Kapak için kitap bulunamadı');
           setUploading(true);
           try {
-            await uploadBookCover(coverFile, (offer.book as { id: string }).id);
-          } catch (e: unknown) { toast.error('Kapak yüklenemedi: ' + (e as Error).message); }
-          finally { setUploading(false); }
+            await uploadBookCover(coverFile, bookId);
+          } catch (e: unknown) {
+            throw new Error('Kapak yüklenemedi: ' + (e as Error).message);
+          } finally {
+            setUploading(false);
+          }
         }
         toast.success('Teklif güncellendi');
       } else {
@@ -313,7 +340,7 @@ function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
           if (coverFile && bookId) {
             setUploading(true);
             try { await uploadBookCover(coverFile, bookId); }
-            catch (e: unknown) { toast.error('Kapak yüklenemedi: ' + (e as Error).message); }
+            catch (e: unknown) { throw new Error('Kapak yüklenemedi: ' + (e as Error).message); }
             finally { setUploading(false); }
           }
         }
@@ -332,7 +359,7 @@ function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
         if (coverFile && bookMode === 'search' && selectedBook) {
           setUploading(true);
           try { await uploadBookCover(coverFile, selectedBook.id); }
-          catch (e: unknown) { toast.error('Kapak yüklenemedi: ' + (e as Error).message); }
+          catch (e: unknown) { throw new Error('Kapak yüklenemedi: ' + (e as Error).message); }
           finally { setUploading(false); }
         }
 
@@ -722,7 +749,7 @@ function Tekliflerim() {
       </div>
       <div className="space-y-3">
         {offers.map((o) => {
-          const book = o.book as { title?: string; isbn?: string | null; cover_image_url?: string | null } | null;
+          const book = offerBook(o);
           const canSubmit = ['draft', 'correction_requested', 'rejected'].includes(o.status);
           const canEdit = canSubmit || o.status === 'approved';
           const isLowStock = o.stock_quantity <= o.low_stock_threshold;

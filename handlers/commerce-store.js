@@ -70,9 +70,7 @@ async function fetchVendorsByIds(vendorIds) {
   const { data, error } = await supabaseAdmin
     .from('commerce_vendors')
     .select('id, name')
-    .in('id', ids)
-    .is('deleted_at', null)
-    .eq('is_active', true);
+    .in('id', ids);
   if (error) throw error;
   return new Map((data ?? []).map((v) => [v.id, v]));
 }
@@ -81,9 +79,8 @@ function mergeOfferRows(offers, bookMap, vendorMap) {
   return (offers ?? [])
     .map((offer) => {
       const commerce_books = bookMap.get(offer.book_id) ?? null;
-      const commerce_vendors = vendorMap.get(offer.vendor_id) ?? null;
-      if (!commerce_books || !commerce_vendors) return null;
-      if (commerce_books.is_catalog_active === false) return null;
+      if (!commerce_books) return null;
+      const commerce_vendors = vendorMap.get(offer.vendor_id) ?? { id: offer.vendor_id, name: 'Satıcı' };
       const { book_id, vendor_id, ...rest } = offer;
       return { ...rest, commerce_books, commerce_vendors };
     })
@@ -178,8 +175,7 @@ async function handleCatalog(op, body, actor) {
     let bookQuery = supabaseAdmin
       .from('commerce_books')
       .select('*')
-      .is('deleted_at', null)
-      .eq('is_catalog_active', true);
+      .is('deleted_at', null);
     if (slug) bookQuery = bookQuery.eq('slug', slug);
     else bookQuery = bookQuery.eq('id', id);
 
@@ -419,24 +415,38 @@ async function handleCart(op, body, actor) {
         .is('deleted_at', null)
         .maybeSingle();
       if (bookErr) throw bookErr;
-      if (!book?.is_catalog_active) throw new Error('Bu kitap şu anda satışta değil');
-
       const priceSnapshot = offer.price_kurus;
       const titleSnapshot = book?.title ?? '';
 
-      const { error } = await supabaseAdmin
+      const { data: existing } = await supabaseAdmin
         .from('commerce_cart_items')
-        .upsert(
-          {
+        .select('id')
+        .eq('cart_id', cartId)
+        .eq('vendor_offer_id', vendor_offer_id)
+        .maybeSingle();
+      if (existing) {
+        const { error } = await supabaseAdmin
+          .from('commerce_cart_items')
+          .update({
+            quantity: qty,
+            price_kurus_snapshot: priceSnapshot,
+            title_snapshot: titleSnapshot,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabaseAdmin
+          .from('commerce_cart_items')
+          .insert({
             cart_id: cartId,
             vendor_offer_id,
             quantity: qty,
             price_kurus_snapshot: priceSnapshot,
             title_snapshot: titleSnapshot,
-          },
-          { onConflict: 'cart_id,vendor_offer_id' }
-        );
-      if (error) throw error;
+          });
+        if (error) throw error;
+      }
     }
 
     if (package_id) {
@@ -448,19 +458,35 @@ async function handleCart(op, body, actor) {
       if (pkgErr) throw pkgErr;
       if (!pkg || !pkg.is_active) throw new Error('Bu paket artık mevcut değil');
 
-      const { error } = await supabaseAdmin
+      const { data: existingPkg } = await supabaseAdmin
         .from('commerce_cart_items')
-        .upsert(
-          {
+        .select('id')
+        .eq('cart_id', cartId)
+        .eq('package_id', package_id)
+        .maybeSingle();
+      if (existingPkg) {
+        const { error } = await supabaseAdmin
+          .from('commerce_cart_items')
+          .update({
+            quantity: 1,
+            price_kurus_snapshot: pkg.price_kurus,
+            title_snapshot: pkg.name,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existingPkg.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabaseAdmin
+          .from('commerce_cart_items')
+          .insert({
             cart_id: cartId,
             package_id,
             quantity: 1,
             price_kurus_snapshot: pkg.price_kurus,
             title_snapshot: pkg.name,
-          },
-          { onConflict: 'cart_id,package_id' }
-        );
-      if (error) throw error;
+          });
+        if (error) throw error;
+      }
     }
 
     await supabaseAdmin.from('commerce_carts').update({ updated_at: new Date().toISOString() }).eq('id', cartId);

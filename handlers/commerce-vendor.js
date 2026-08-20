@@ -17,6 +17,7 @@
 import { requireAuth } from '../api/_lib/auth.js';
 import { actorRoleSet, roleSetHasSuperAdmin } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
+import { attachOfferRelations, attachOfferRelationsList } from '../api/_lib/commerce-utils.js';
 
 function err(res, status, message) {
   return res.status(status).json({ error: message });
@@ -92,27 +93,32 @@ export default async function handler(req, res) {
 
     // ── Kitaplar ─────────────────────────────
     if (op === 'books.list') {
-      // Satıcının teklif verdiği veya verebileceği kitaplar
       let q = supabaseAdmin
         .from('commerce_books')
-        .select(`
-          *,
-          commerce_vendor_offers!left(
-            id, price_kurus, stock_quantity, status, vendor_id
-          )
-        `)
+        .select('id, isbn, slug, title, subtitle, author, publisher, subject, class_levels, exam_types, cover_image_url, is_catalog_active, created_by')
         .is('deleted_at', null)
-        .eq('is_catalog_active', true)
         .order('title', { ascending: true });
-      if (body.search) q = q.ilike('title', `%${body.search}%`);
+      if (body.search) q = q.or(`title.ilike.%${body.search}%,isbn.ilike.%${body.search}%`);
       if (body.limit) q = q.limit(parseInt(body.limit, 10));
       const { data, error } = await q;
       if (error) throw error;
-      // Yalnızca bu satıcının teklifini ekle
+
+      const bookIds = (data ?? []).map((b) => b.id);
+      let offerByBook = new Map();
+      if (bookIds.length) {
+        const { data: offers, error: offerErr } = await supabaseAdmin
+          .from('commerce_vendor_offers')
+          .select('id, price_kurus, stock_quantity, status, vendor_id, book_id')
+          .eq('vendor_id', vendorId)
+          .in('book_id', bookIds)
+          .is('deleted_at', null);
+        if (offerErr) throw offerErr;
+        offerByBook = new Map((offers ?? []).map((o) => [o.book_id, o]));
+      }
+
       const books = (data ?? []).map((b) => ({
         ...b,
-        my_offer: (b.commerce_vendor_offers ?? []).find((o) => o.vendor_id === vendorId) ?? null,
-        commerce_vendor_offers: undefined,
+        my_offer: offerByBook.get(b.id) ?? null,
       }));
       return res.status(200).json({ ok: true, books });
     }
@@ -188,7 +194,7 @@ export default async function handler(req, res) {
         .is('deleted_at', null)
         .order('updated_at', { ascending: false });
       if (error) throw error;
-      return res.status(200).json({ ok: true, offers: data });
+      return res.status(200).json({ ok: true, offers: attachOfferRelationsList(data) });
     }
 
     if (op === 'offers.get') {
@@ -201,7 +207,7 @@ export default async function handler(req, res) {
         .eq('vendor_id', vendorId)
         .single();
       if (error) throw error;
-      return res.status(200).json({ ok: true, offer: data });
+      return res.status(200).json({ ok: true, offer: attachOfferRelations(data) });
     }
 
     if (op === 'offers.create') {
@@ -230,33 +236,40 @@ export default async function handler(req, res) {
     if (op === 'offers.update') {
       const { id, ...fields } = body;
       if (!id) return err(res, 400, 'id gerekli');
-      // Yalnızca draft/correction_requested/rejected durumunda güncellenebilir
       const { data: current } = await supabaseAdmin
         .from('commerce_vendor_offers')
-        .select('status, vendor_id')
+        .select('status, vendor_id, price_kurus')
         .eq('id', id)
         .single();
       if (!current || current.vendor_id !== vendorId) return err(res, 403, 'Bu teklif size ait değil');
-      const EDITABLE = ['draft', 'correction_requested', 'rejected'];
-      if (!EDITABLE.includes(current.status)) {
-        return err(res, 400, `Onaylanmış/incelemeye alınmış teklif düzenlenemez (${current.status})`);
-      }
+
       const patch = {};
+      const priceChanging = fields.price_kurus !== undefined && parseInt(fields.price_kurus, 10) !== current.price_kurus;
+      const EDITABLE = ['draft', 'correction_requested', 'rejected'];
+
+      if (current.status === 'pending_approval' && priceChanging) {
+        return err(res, 400, 'Onay bekleyen teklifte fiyat değiştirilemez');
+      }
+      if (!EDITABLE.includes(current.status) && current.status !== 'approved') {
+        return err(res, 400, `Bu teklif düzenlenemez (${current.status})`);
+      }
+
       if (fields.price_kurus !== undefined) patch.price_kurus = parseInt(fields.price_kurus, 10);
       if (fields.compare_at_price_kurus !== undefined) patch.compare_at_price_kurus = sanitizeInt(fields.compare_at_price_kurus);
       if (fields.stock_quantity !== undefined) patch.stock_quantity = sanitizeInt(fields.stock_quantity);
       if (fields.low_stock_threshold !== undefined) patch.low_stock_threshold = sanitizeInt(fields.low_stock_threshold);
       if (fields.shipping_days !== undefined) patch.shipping_days = sanitizeInt(fields.shipping_days);
-      // Onaylanmış teklifte fiyat değişikliği → snapshot kaydet
-      if (current.status === 'approved' && fields.price_kurus !== undefined) {
+
+      if (current.status === 'approved' && priceChanging) {
         patch.pending_snapshot = { price_kurus: patch.price_kurus, updated_at: new Date().toISOString() };
         patch.status = 'pending_approval';
       }
+
       patch.updated_by = actor.sub;
       patch.updated_at = new Date().toISOString();
       const { data, error } = await supabaseAdmin.from('commerce_vendor_offers').update(patch).eq('id', id).select().single();
       if (error) throw error;
-      return res.status(200).json({ ok: true, offer: data });
+      return res.status(200).json({ ok: true, offer: attachOfferRelations(data) });
     }
 
     if (op === 'offers.submit') {

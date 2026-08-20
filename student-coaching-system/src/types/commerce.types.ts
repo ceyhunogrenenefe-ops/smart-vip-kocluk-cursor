@@ -506,3 +506,24 @@ export const COMMERCE_STORAGE_BUCKETS = {
   bookCovers: 'commerce-book-covers',
   vendorAssets: 'commerce-vendor-assets',
 } as const;
+
+/** PostgREST join (`commerce_books`) veya alias (`book`) — hangisi geldiyse kitabı döndür */
+export function offerBook(
+  offer:
+    | (Pick<CommerceVendorOffer, 'book'> & { commerce_books?: CommerceBook | null })
+    | null
+    | undefined
+): CommerceBook | null {
+  if (!offer) return null;
+  return offer.book ?? offer.commerce_books ?? null;
+}
+
+export function offerVendor(
+  offer:
+    | (Pick<CommerceVendorOffer, 'vendor'> & { commerce_vendors?: { id: string; name: string } | null })
+    | null
+    | undefined
+): { id: string; name: string } | null {
+  if (!offer) return null;
+  return offer.vendor ?? offer.commerce_vendors ?? null;
+}

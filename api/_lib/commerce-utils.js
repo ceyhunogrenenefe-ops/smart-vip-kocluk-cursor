@@ -27,3 +27,18 @@ export function isValidCommerceOrderNumber(value) {
   const s = String(value || '').trim().toUpperCase();
   return /^[A-Z0-9]+-[A-Z0-9]+-\d{4}-\d{6}$/.test(s);
 }
+
+/**
+ * PostgREST gömülü join alanlarını UI'nin beklediği `book` / `vendor` alias'larına kopyala.
+ * (commerce_books → book, commerce_vendors → vendor)
+ */
+export function attachOfferRelations(row) {
+  if (!row || typeof row !== 'object') return row;
+  const book = row.book ?? row.commerce_books ?? null;
+  const vendor = row.vendor ?? row.commerce_vendors ?? null;
+  return { ...row, book, vendor, commerce_books: book, commerce_vendors: vendor };
+}
+
+export function attachOfferRelationsList(rows) {
+  return (rows ?? []).map(attachOfferRelations);
+}
