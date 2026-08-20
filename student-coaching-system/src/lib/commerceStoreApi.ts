@@ -87,6 +87,35 @@ export const csClearCart = () => post<{ ok: true; items: CartItem[] }>('cart.cle
 export const csApplyCoupon = (code: string) =>
   post<{ ok: boolean; coupon?: { id: string; code: string; discount_type: string; discount_value: number; max_discount_kurus: number | null; min_order_kurus: number }; error?: string }>('cart.apply_coupon', { code });
 
+export type CheckoutHandoffPayload = {
+  items: { title: string; qty: number; unit_kurus: number }[];
+  subtotal_kurus: number;
+  shipping_kurus: number;
+  discount_kurus: number;
+  total_kurus: number;
+  coupon_code?: string | null;
+  cart_id?: string | null;
+  user_id?: string | null;
+  student_id?: string | null;
+  ref?: string;
+  created_at?: string;
+};
+
+export async function csCreateCheckoutHandoff(payload: CheckoutHandoffPayload) {
+  const res = await apiFetch('/api/commerce-checkout-handoff', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  let data: Record<string, unknown> = {};
+  try {
+    data = await res.json();
+  } catch {
+    /* ignore */
+  }
+  if (!res.ok || !data.ok) throw new Error(String(data.error ?? `HTTP ${res.status}`));
+  return data as { ok: true; token: string; expires_at: string; checkout: CheckoutHandoffPayload };
+}
+
 // "Bu kitap bende var"
 export const csMarkOwned = (book_id: string, vendor_offer_id?: string, student_id?: string) =>
   post<{ ok: true; assignment_id: string; already_existed: boolean }>('assignment.own', { book_id, vendor_offer_id, student_id });

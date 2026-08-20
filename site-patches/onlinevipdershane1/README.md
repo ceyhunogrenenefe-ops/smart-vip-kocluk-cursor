@@ -49,4 +49,14 @@ Vercel otomatik deploy eder. Env sonradan eklendiyse Redeploy.
 1. **PayTR** (varsayılan)
 2. **Garanti BBVA**
 
-Koçluk paneli kitap sepeti `?source=coaching&tutar=...&cart=...` ile `/odeme.html` sayfasına gelir; sipariş özeti ve ödeme tutarı URL'den okunur.
+Koçluk paneli kitap sepeti `?source=coaching&token=...&tutar=...` ile `/odeme.html` sayfasına gelir; sipariş özeti token ile koçluk API'sinden okunur.
+
+## Koçluk paneli (smart-kocluk-ceyhu)
+
+Supabase'de migration çalıştırın:
+
+```sql
+-- student-coaching-system/sql/2026-08-20-commerce-checkout-handoff.sql
+```
+
+Vercel deploy sonrası `/api/commerce-checkout-handoff` aktif olur.

@@ -21,6 +21,7 @@ import { toast } from 'sonner';
 import {
   csApplyCoupon,
   csClearCart,
+  csCreateCheckoutHandoff,
   csGetCart,
   csGetSettings,
   csRemoveFromCart,
@@ -42,6 +43,7 @@ export default function SepetPage() {
   const [coupon, setCoupon] = useState<{ id: string; code: string; discount_type: string; discount_value: number; max_discount_kurus: number | null; min_order_kurus: number } | null>(null);
   const [couponLoading, setCouponLoading] = useState(false);
   const [couponError, setCouponError] = useState('');
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
 
   useEffect(() => {
     if (!effectiveUser) return;
@@ -96,8 +98,10 @@ export default function SepetPage() {
     finally { setUpdatingId(null); }
   };
 
-  /** Sepet özetini URL ile ödeme sitesine taşır (cross-origin; localStorage paylaşılmaz) */
-  const handleCheckout = () => {
+  /** Sepet özetini token ile ödeme sitesine taşır (cross-origin; localStorage paylaşılmaz) */
+  const handleCheckout = async () => {
+    if (items.some((i) => i.out_of_stock) || items.length === 0) return;
+
     const CHECKOUT_URL =
       (import.meta.env.VITE_CHECKOUT_URL as string | undefined)?.trim() ||
       'https://www.onlinevipdershane.com/odeme.html';
@@ -116,26 +120,27 @@ export default function SepetPage() {
       shipping_kurus: shippingCost,
       discount_kurus: discountAmount,
       total_kurus: total,
+      coupon_code: coupon?.code ?? null,
       user_id: effectiveUser?.id ?? null,
       student_id: (effectiveUser as { student_id?: string })?.student_id ?? null,
-      created_at: new Date().toISOString(),
+      ref: new Date().toISOString(),
     };
 
-    const params = new URLSearchParams({
-      source: 'coaching',
-      tutar: String(total),
-      ref: cartSummary.created_at,
-    });
-    if (coupon?.code) params.set('kupon', coupon.code);
-
+    setCheckoutLoading(true);
     try {
-      const cartB64 = btoa(unescape(encodeURIComponent(JSON.stringify(cartSummary))));
-      if (cartB64.length < 1800) params.set('cart', cartB64);
-    } catch {
-      /* URL çok uzun olursa yalnızca tutar gönderilir */
+      const handoff = await csCreateCheckoutHandoff(cartSummary);
+      const params = new URLSearchParams({
+        source: 'coaching',
+        token: handoff.token,
+        tutar: String(total),
+        ref: cartSummary.ref ?? handoff.checkout.ref ?? handoff.token,
+      });
+      if (coupon?.code) params.set('kupon', coupon.code);
+      window.location.href = `${CHECKOUT_URL}?${params.toString()}`;
+    } catch (e: unknown) {
+      toast.error((e as Error).message || 'Ödeme sayfasına yönlendirilemedi.');
+      setCheckoutLoading(false);
     }
-
-    window.location.href = `${CHECKOUT_URL}?${params.toString()}`;
   };
 
   const handleClearCart = async () => {
@@ -351,10 +356,16 @@ export default function SepetPage() {
             {/* Ödemeye geç — onlinevipdershane.com'a yönlendir */}
             <button
               onClick={handleCheckout}
-              disabled={items.some((i) => i.out_of_stock) || items.length === 0}
+              disabled={checkoutLoading || items.some((i) => i.out_of_stock) || items.length === 0}
               className="w-full mt-4 bg-indigo-600 text-white py-3 rounded-xl font-semibold text-sm hover:bg-indigo-700 disabled:opacity-50 transition-colors"
             >
-              Ödemeye Geç
+              {checkoutLoading ? (
+                <span className="inline-flex items-center gap-2 justify-center">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Yönlendiriliyor…
+                </span>
+              ) : (
+                'Ödemeye Geç'
+              )}
             </button>
 
             <p className="text-xs text-gray-400 text-center mt-3">

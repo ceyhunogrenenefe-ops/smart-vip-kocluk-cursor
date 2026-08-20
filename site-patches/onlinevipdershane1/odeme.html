@@ -127,6 +127,18 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   var selectedTeacherSlug='';
   var coachingCheckout=null;
 
+  function applyCoachingCheckout(data){
+    if(!data||!Number.isFinite(data.totalKurus)||data.totalKurus<100) return false;
+    coachingCheckout=data;
+    document.querySelectorAll('.back-link').forEach(function(a){
+      a.href='https://www.dersonlinevipkocluk.com/sepet';
+      a.textContent='← Koçluk sepetine dön';
+    });
+    var lead=document.getElementById('pay-lead');
+    if(lead) lead.textContent='Kitap mağazası sepetiniz için veli bilgilerinizi girin; güvenli ödeme ekranına yönlendirileceksiniz.';
+    return true;
+  }
+
   function decodeCartParam(raw){
     if(!raw) return null;
     try{
@@ -142,7 +154,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     var tutar=parseInt(params.get('tutar')||'0',10);
     if(!Number.isFinite(tutar)||tutar<100) return false;
     var cart=decodeCartParam(params.get('cart')||'');
-    coachingCheckout={
+    return applyCoachingCheckout({
       totalKurus:tutar,
       items:(cart&&cart.items)||[],
       subtotalKurus:(cart&&cart.subtotal_kurus)||tutar,
@@ -152,14 +164,35 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       coupon:params.get('kupon')||'',
       userId:(cart&&cart.user_id)||null,
       studentId:(cart&&cart.student_id)||null
-    };
-    document.querySelectorAll('.back-link').forEach(function(a){
-      a.href='https://www.dersonlinevipkocluk.com/sepet';
-      a.textContent='← Koçluk sepetine dön';
     });
-    var lead=document.getElementById('pay-lead');
-    if(lead) lead.textContent='Kitap mağazası sepetiniz için veli bilgilerinizi girin; güvenli ödeme ekranına yönlendirileceksiniz.';
-    return true;
+  }
+
+  async function loadCoachingCheckoutFromToken(){
+    var params=new URLSearchParams(location.search);
+    var token=(params.get('token')||'').trim();
+    if(!token) return false;
+    var tutar=parseInt(params.get('tutar')||'0',10);
+    try{
+      var apiBase='https://www.dersonlinevipkocluk.com';
+      var res=await fetch(apiBase+'/api/commerce-checkout-handoff?token='+encodeURIComponent(token),{credentials:'omit'});
+      var data=await res.json();
+      if(!res.ok||!data.ok||!data.checkout) return false;
+      var cart=data.checkout;
+      var total=parseInt(String(cart.total_kurus||tutar||'0'),10);
+      return applyCoachingCheckout({
+        totalKurus:total,
+        items:cart.items||[],
+        subtotalKurus:cart.subtotal_kurus||total,
+        shippingKurus:cart.shipping_kurus||0,
+        discountKurus:cart.discount_kurus||0,
+        ref:cart.ref||params.get('ref')||'',
+        coupon:cart.coupon_code||params.get('kupon')||'',
+        userId:cart.user_id||null,
+        studentId:cart.student_id||null
+      });
+    }catch(e){
+      return false;
+    }
   }
 
   function formatKurus(kurus){
@@ -232,6 +265,9 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
         var line=(item.unit_kurus||0)*(item.qty||1);
         html+='<div class="order-line"><span>'+(item.title||'Kitap')+' × '+(item.qty||1)+'</span><strong>'+formatKurus(line)+'</strong></div>';
       });
+      if(!(coachingCheckout.items||[]).length){
+        html+='<div class="order-line"><span>Kitap Mağazası Siparişi</span><strong>'+formatKurus(coachingCheckout.totalKurus)+'</strong></div>';
+      }
       if(coachingCheckout.shippingKurus>0){
         html+='<div class="order-line"><span>Kargo</span><strong>'+formatKurus(coachingCheckout.shippingKurus)+'</strong></div>';
       }
@@ -393,7 +429,8 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   }
 
   document.addEventListener('DOMContentLoaded',async function(){
-    loadCoachingCheckoutFromQuery();
+    var loaded=await loadCoachingCheckoutFromToken();
+    if(!loaded) loadCoachingCheckoutFromQuery();
     ensurePackageFromQuery();
     renderSummary();
     try{
