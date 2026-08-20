@@ -22,6 +22,7 @@ import { toast } from 'sonner';
 import {
   csAddToCart,
   csGetAssigned,
+  csGetCart,
   csGetSettings,
   csListCatalog,
   csListPackages,
@@ -54,7 +55,7 @@ function DiscountBadge({ original, current }: { original: number | null; current
   );
 }
 
-function CartButton({ offerId, stock }: { offerId: string; stock: number }) {
+function CartButton({ offerId, stock, onAdded }: { offerId: string; stock: number; onAdded?: () => void }) {
   const [loading, setLoading] = useState(false);
   const [added, setAdded] = useState(false);
   const { effectiveUser } = useAuth();
@@ -65,6 +66,7 @@ function CartButton({ offerId, stock }: { offerId: string; stock: number }) {
     try {
       await csAddToCart(offerId, undefined, 1);
       setAdded(true);
+      onAdded?.();
       toast.success('Sepete eklendi');
       setTimeout(() => setAdded(false), 2000);
     } catch (e: unknown) { toast.error((e as Error).message); }
@@ -88,7 +90,7 @@ function CartButton({ offerId, stock }: { offerId: string; stock: number }) {
   );
 }
 
-function BookCard({ offer }: { offer: OfferWithBook }) {
+function BookCard({ offer, onCartChange }: { offer: OfferWithBook; onCartChange?: () => void }) {
   const navigate = useNavigate();
   const book = offer.commerce_books;
   return (
@@ -133,7 +135,7 @@ function BookCard({ offer }: { offer: OfferWithBook }) {
           </div>
         </div>
         <div className="mt-2" onClick={(e) => e.stopPropagation()}>
-          <CartButton offerId={offer.id} stock={offer.stock_quantity} />
+          <CartButton offerId={offer.id} stock={offer.stock_quantity} onAdded={onCartChange} />
         </div>
       </div>
     </div>
@@ -398,10 +400,24 @@ export default function KitapMagazasiPage() {
   const navigate = useNavigate();
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const { effectiveUser } = useAuth();
+
   // Ayarları bir kez çek
   useEffect(() => {
     csGetSettings().then((r) => setSettings(r.settings)).catch(() => null);
   }, []);
+
+  const refreshCartCount = useCallback(() => {
+    if (!effectiveUser) { setCartCount(0); return; }
+    csGetCart()
+      .then((r) => setCartCount(r.items.reduce((n, i) => n + i.quantity, 0)))
+      .catch(() => setCartCount(0));
+  }, [effectiveUser]);
+
+  // Sepet adedi
+  useEffect(() => {
+    refreshCartCount();
+  }, [refreshCartCount]);
 
   const loadCatalog = useCallback(async (params: CatalogListParams) => {
     setLoading(true);
@@ -538,7 +554,7 @@ export default function KitapMagazasiPage() {
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-          {offers.map((o) => <BookCard key={o.id} offer={o} />)}
+          {offers.map((o) => <BookCard key={o.id} offer={o} onCartChange={refreshCartCount} />)}
         </div>
       )}
 

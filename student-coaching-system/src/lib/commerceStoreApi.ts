@@ -6,8 +6,14 @@ import type { CommerceBook, CommerceBookPackage, CommerceSettings, CommerceStude
 
 async function post<T = unknown>(op: string, params: Record<string, unknown> = {}): Promise<T> {
   const res = await apiFetch('/api/commerce-store', { method: 'POST', body: JSON.stringify({ op, ...params }) });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error ?? op);
+  let data: Record<string, unknown> = {};
+  try {
+    data = await res.json();
+  } catch {
+    /* ignore */
+  }
+  if (!res.ok) throw new Error(String(data.error ?? `HTTP ${res.status}`));
+  if (!data.ok) throw new Error(String(data.error ?? op));
   return data as T;
 }
 
