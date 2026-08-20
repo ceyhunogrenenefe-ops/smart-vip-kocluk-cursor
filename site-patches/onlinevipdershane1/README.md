@@ -8,6 +8,7 @@ PayTR checkout `onlinevipdershane1` reposunda. Bu klasördeki dosyaları o repoy
 
 | Kaynak (bu klasör) | Hedef (site repo) |
 |---|---|
+| `api/_lib/products.js` | `api/_lib/products.js` (kitap mağazası dinamik tutar) |
 | `api/_lib/garanti.js` | `api/_lib/garanti.js` |
 | `api/garanti-token.js` | `api/garanti-token.js` |
 | `api/garanti-callback.js` | `api/garanti-callback.js` |
@@ -34,8 +35,8 @@ PayTR değişkenleri olduğu gibi kalsın.
 
 ```bash
 cd onlinevipdershane1
-git add api/_lib/garanti.js api/garanti-token.js api/garanti-callback.js api/payment-provider.js odeme.html
-git commit -m "feat: PayTR + Garanti ödeme seçeneği"
+git add api/_lib/products.js api/_lib/garanti.js api/garanti-token.js api/garanti-callback.js api/payment-provider.js odeme.html
+git commit -m "feat: kitap mağazası koçluk paneli ödeme yönlendirmesi (odeme.html + kitapMagaza)"
 git push origin main
 ```
 
@@ -47,3 +48,5 @@ Vercel otomatik deploy eder. Env sonradan eklendiyse Redeploy.
 
 1. **PayTR** (varsayılan)
 2. **Garanti BBVA**
+
+Koçluk paneli kitap sepeti `?source=coaching&tutar=...&cart=...` ile `/odeme.html` sayfasına gelir; sipariş özeti ve ödeme tutarı URL'den okunur.

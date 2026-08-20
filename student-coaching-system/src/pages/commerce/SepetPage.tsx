@@ -96,46 +96,44 @@ export default function SepetPage() {
     finally { setUpdatingId(null); }
   };
 
-  /** Sepet özetini geçici olarak yazar, ardından ödeme sitesine yönlendirir */
+  /** Sepet özetini URL ile ödeme sitesine taşır (cross-origin; localStorage paylaşılmaz) */
   const handleCheckout = () => {
-    // Vercel env: VITE_CHECKOUT_URL — varsayılan onlinevipdershane.com
     const CHECKOUT_URL =
       (import.meta.env.VITE_CHECKOUT_URL as string | undefined)?.trim() ||
-      'https://onlinevipdershane.com/odeme/kitap';
+      'https://www.onlinevipdershane.com/odeme.html';
 
-    // Sepet özetini session storage'a kaydet (geri dönüş için kullanılabilir)
-    const payload = {
+    const cartSummary = {
       items: items.map((i) => ({
-        id: i.id,
-        title: i.title_snapshot,
-        quantity: i.quantity,
-        unit_price_kurus: i.commerce_vendor_offers?.price_kurus ?? i.price_kurus_snapshot,
-        vendor_offer_id: i.vendor_offer_id,
-        package_id: i.package_id,
+        title:
+          i.title_snapshot ||
+          i.commerce_vendor_offers?.commerce_books?.title ||
+          i.commerce_book_packages?.name ||
+          'Kitap',
+        qty: i.quantity,
+        unit_kurus: i.commerce_vendor_offers?.price_kurus ?? i.price_kurus_snapshot,
       })),
       subtotal_kurus: subtotal,
       shipping_kurus: shippingCost,
       discount_kurus: discountAmount,
       total_kurus: total,
-      coupon_code: coupon?.code ?? null,
-      source: 'coaching-panel',
       user_id: effectiveUser?.id ?? null,
       student_id: (effectiveUser as { student_id?: string })?.student_id ?? null,
       created_at: new Date().toISOString(),
     };
-    try {
-      sessionStorage.setItem('ovd_checkout_cart', JSON.stringify(payload));
-    } catch {
-      // storage doluysa sessizce geç
-    }
 
-    // URL parametreleri ile ödeme sayfasına gönder (toplam + referans)
     const params = new URLSearchParams({
-      tutar: String(total),           // kuruş cinsinden
-      ref: payload.created_at,        // idempotency için zaman damgası
       source: 'coaching',
-      ...(coupon?.code ? { kupon: coupon.code } : {}),
+      tutar: String(total),
+      ref: cartSummary.created_at,
     });
+    if (coupon?.code) params.set('kupon', coupon.code);
+
+    try {
+      const cartB64 = btoa(unescape(encodeURIComponent(JSON.stringify(cartSummary))));
+      if (cartB64.length < 1800) params.set('cart', cartB64);
+    } catch {
+      /* URL çok uzun olursa yalnızca tutar gönderilir */
+    }
 
     window.location.href = `${CHECKOUT_URL}?${params.toString()}`;
   };
@@ -360,7 +358,7 @@ export default function SepetPage() {
             </button>
 
             <p className="text-xs text-gray-400 text-center mt-3">
-              onlinevipdershane.com güvenli ödeme
+              www.onlinevipdershane.com güvenli ödeme
             </p>
           </div>
         </div>

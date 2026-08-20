@@ -125,6 +125,73 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   var provider='none';
   var providers=[];
   var selectedTeacherSlug='';
+  var coachingCheckout=null;
+
+  function decodeCartParam(raw){
+    if(!raw) return null;
+    try{
+      return JSON.parse(decodeURIComponent(escape(atob(raw))));
+    }catch(e){
+      try{ return JSON.parse(atob(raw)); }catch(e2){ return null; }
+    }
+  }
+
+  function loadCoachingCheckoutFromQuery(){
+    var params=new URLSearchParams(location.search);
+    if(params.get('source')!=='coaching') return false;
+    var tutar=parseInt(params.get('tutar')||'0',10);
+    if(!Number.isFinite(tutar)||tutar<100) return false;
+    var cart=decodeCartParam(params.get('cart')||'');
+    coachingCheckout={
+      totalKurus:tutar,
+      items:(cart&&cart.items)||[],
+      subtotalKurus:(cart&&cart.subtotal_kurus)||tutar,
+      shippingKurus:(cart&&cart.shipping_kurus)||0,
+      discountKurus:(cart&&cart.discount_kurus)||0,
+      ref:params.get('ref')||'',
+      coupon:params.get('kupon')||'',
+      userId:(cart&&cart.user_id)||null,
+      studentId:(cart&&cart.student_id)||null
+    };
+    document.querySelectorAll('.back-link').forEach(function(a){
+      a.href='https://www.dersonlinevipkocluk.com/sepet';
+      a.textContent='← Koçluk sepetine dön';
+    });
+    var lead=document.getElementById('pay-lead');
+    if(lead) lead.textContent='Kitap mağazası sepetiniz için veli bilgilerinizi girin; güvenli ödeme ekranına yönlendirileceksiniz.';
+    return true;
+  }
+
+  function formatKurus(kurus){
+    var lira=(kurus||0)/100;
+    return lira.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})+'₺';
+  }
+
+  function paymentItems(){
+    if(coachingCheckout){
+      return [{ id:'kitapMagaza', qty:1, amountKurus:coachingCheckout.totalKurus }];
+    }
+    return OVD_CART.read();
+  }
+
+  function customerPayloadExtra(){
+    if(!coachingCheckout) return {};
+    var lines=(coachingCheckout.items||[]).map(function(it){
+      return (it.title||'Kitap')+' × '+(it.qty||1);
+    }).join('; ');
+    return {
+      studentInfo:[
+        lines?'Kitaplar: '+lines:'',
+        coachingCheckout.studentId?('Öğrenci ref: '+coachingCheckout.studentId):'',
+        coachingCheckout.ref?('Ref: '+coachingCheckout.ref):'',
+        coachingCheckout.coupon?('Kupon: '+coachingCheckout.coupon):''
+      ].filter(Boolean).join(' · '),
+      checkoutSource:'coaching',
+      checkoutRef:coachingCheckout.ref||'',
+      userId:coachingCheckout.userId||'',
+      studentId:coachingCheckout.studentId||''
+    };
+  }
 
   function ensurePackageFromQuery(){
     var paket=new URLSearchParams(location.search).get('paket')||'';
@@ -159,6 +226,22 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 
   function renderSummary(){
     var box=document.getElementById('order-summary');
+    if(coachingCheckout){
+      var html='';
+      (coachingCheckout.items||[]).forEach(function(item){
+        var line=(item.unit_kurus||0)*(item.qty||1);
+        html+='<div class="order-line"><span>'+(item.title||'Kitap')+' × '+(item.qty||1)+'</span><strong>'+formatKurus(line)+'</strong></div>';
+      });
+      if(coachingCheckout.shippingKurus>0){
+        html+='<div class="order-line"><span>Kargo</span><strong>'+formatKurus(coachingCheckout.shippingKurus)+'</strong></div>';
+      }
+      if(coachingCheckout.discountKurus>0){
+        html+='<div class="order-line"><span>İndirim</span><strong>-'+formatKurus(coachingCheckout.discountKurus)+'</strong></div>';
+      }
+      html+='<div class="order-total"><span>Toplam</span><strong>'+formatKurus(coachingCheckout.totalKurus)+'</strong></div>';
+      box.innerHTML=html;
+      return;
+    }
     var items=OVD_CART.read();
     if(!items.length){
       location.href='sepet.html';
@@ -181,13 +264,22 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   }
 
   function customerPayload(){
-    return {
+    var base={
       parentName:document.getElementById('parentName').value.trim(),
       phone:document.getElementById('phone').value.trim(),
       email:document.getElementById('email').value.trim(),
       studentInfo:document.getElementById('studentInfo').value.trim(),
       teacherSlug:selectedTeacherSlug||''
     };
+    var extra=customerPayloadExtra();
+    if(extra.studentInfo){
+      base.studentInfo=[base.studentInfo,extra.studentInfo].filter(Boolean).join(' · ');
+    }
+    if(extra.checkoutSource) base.checkoutSource=extra.checkoutSource;
+    if(extra.checkoutRef) base.checkoutRef=extra.checkoutRef;
+    if(extra.userId) base.userId=extra.userId;
+    if(extra.studentId) base.studentId=extra.studentId;
+    return base;
   }
 
   function selectedMethod(){
@@ -250,7 +342,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     var res=await fetch('/api/paytr-token',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({items:OVD_CART.read(),customer:customerPayload()})
+      body:JSON.stringify({items:paymentItems(),customer:customerPayload()})
     });
     var data=await res.json();
     if(!res.ok) throw new Error(data.error||'PayTR ödeme başlatılamadı');
@@ -279,7 +371,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     var res=await fetch('/api/garanti-token',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({items:OVD_CART.read(),customer:customerPayload()})
+      body:JSON.stringify({items:paymentItems(),customer:customerPayload()})
     });
     var data=await res.json();
     if(!res.ok) throw new Error(data.error||'Garanti ödeme başlatılamadı');
@@ -292,7 +384,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     var res=await fetch('/api/create-checkout-session',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({items:OVD_CART.read(),customer:customerPayload()})
+      body:JSON.stringify({items:paymentItems(),customer:customerPayload()})
     });
     var data=await res.json();
     if(!res.ok) throw new Error(data.error||'Ödeme başlatılamadı');
@@ -301,6 +393,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   }
 
   document.addEventListener('DOMContentLoaded',async function(){
+    loadCoachingCheckoutFromQuery();
     ensurePackageFromQuery();
     renderSummary();
     try{
