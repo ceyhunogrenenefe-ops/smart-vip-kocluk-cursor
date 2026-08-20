@@ -96,6 +96,7 @@ import VendorPanelPage from './pages/commerce/VendorPanelPage';
 import KitapMagazasiPage from './pages/commerce/KitapMagazasiPage';
 import KitapDetayPage from './pages/commerce/KitapDetayPage';
 import SepetPage from './pages/commerce/SepetPage';
+import KitapOdemePage from './pages/commerce/KitapOdemePage';
 import GarantiOdemePage, { GarantiOdemeSonucPage } from './pages/GarantiOdemePage';
 import TeacherEduPanelPage from './pages/eduPanel/TeacherEduPanelPage';
 import StudentEduPanelPage from './pages/eduPanel/StudentEduPanelPage';
@@ -829,6 +830,11 @@ function App() {
                 <Layout>
                   <SepetPage />
                 </Layout>
+              </ProtectedRoute>
+            } />
+            <Route path="/kitap-odeme" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/kitap-odeme')}>
+                <KitapOdemePage />
               </ProtectedRoute>
             } />
 

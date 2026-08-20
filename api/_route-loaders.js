@@ -122,5 +122,6 @@ export const routeLoaders = {
   'commerce-vendor': () => import('../handlers/commerce-vendor.js'),
   'commerce-store': () => import('../handlers/commerce-store.js'),
   'commerce-upload': () => import('../handlers/commerce-upload.js'),
-  'commerce-checkout-handoff': () => import('../handlers/commerce-checkout-handoff.js')
+  'commerce-checkout-handoff': () => import('../handlers/commerce-checkout-handoff.js'),
+  'commerce-checkout-pay': () => import('../handlers/commerce-checkout-pay.js')
 };

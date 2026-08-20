@@ -6,7 +6,7 @@
  */
 
 import crypto from 'crypto';
-import { requireAuthenticatedActor } from '../api/_lib/auth.js';
+import { requireAuth } from '../api/_lib/auth.js';
 import { applyCors, handleCorsPreflight } from '../api/_lib/cors-mobile.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 
@@ -78,8 +78,11 @@ function normalizePayload(body, actor) {
 async function createHandoff(req, res) {
   let actor;
   try {
-    actor = requireAuthenticatedActor(req);
+    actor = requireAuth(req);
   } catch {
+    return err(res, 401, 'Giriş gerekli.');
+  }
+  if (!actor?.sub || actor.sub === 'anonymous') {
     return err(res, 401, 'Giriş gerekli.');
   }
 
