@@ -21,6 +21,7 @@ import { toast } from 'sonner';
 import {
   csApplyCoupon,
   csClearCart,
+  csCheckoutPrepare,
   csGetCart,
   csGetSettings,
   csRemoveFromCart,
@@ -42,6 +43,7 @@ export default function SepetPage() {
   const [coupon, setCoupon] = useState<{ id: string; code: string; discount_type: string; discount_value: number; max_discount_kurus: number | null; min_order_kurus: number } | null>(null);
   const [couponLoading, setCouponLoading] = useState(false);
   const [couponError, setCouponError] = useState('');
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
 
   useEffect(() => {
     if (!effectiveUser) return;
@@ -96,48 +98,17 @@ export default function SepetPage() {
     finally { setUpdatingId(null); }
   };
 
-  /** Sepet özetini geçici olarak yazar, ardından ödeme sitesine yönlendirir */
-  const handleCheckout = () => {
-    // Vercel env: VITE_CHECKOUT_URL — varsayılan onlinevipdershane.com
-    const CHECKOUT_URL =
-      (import.meta.env.VITE_CHECKOUT_URL as string | undefined)?.trim() ||
-      'https://onlinevipdershane.com/odeme/kitap';
-
-    // Sepet özetini session storage'a kaydet (geri dönüş için kullanılabilir)
-    const payload = {
-      items: items.map((i) => ({
-        id: i.id,
-        title: i.title_snapshot,
-        quantity: i.quantity,
-        unit_price_kurus: i.commerce_vendor_offers?.price_kurus ?? i.price_kurus_snapshot,
-        vendor_offer_id: i.vendor_offer_id,
-        package_id: i.package_id,
-      })),
-      subtotal_kurus: subtotal,
-      shipping_kurus: shippingCost,
-      discount_kurus: discountAmount,
-      total_kurus: total,
-      coupon_code: coupon?.code ?? null,
-      source: 'coaching-panel',
-      user_id: effectiveUser?.id ?? null,
-      student_id: (effectiveUser as { student_id?: string })?.student_id ?? null,
-      created_at: new Date().toISOString(),
-    };
+  /** Pending sipariş + imzalı token → onlinevipdershane.com ödeme */
+  const handleCheckout = async () => {
+    setCheckoutLoading(true);
     try {
-      sessionStorage.setItem('ovd_checkout_cart', JSON.stringify(payload));
-    } catch {
-      // storage doluysa sessizce geç
+      const studentId = (effectiveUser as { student_id?: string })?.student_id ?? null;
+      const prepared = await csCheckoutPrepare(coupon?.code ?? null, studentId);
+      window.location.href = prepared.checkout_url;
+    } catch (e: unknown) {
+      toast.error((e as Error).message || 'Ödeme başlatılamadı');
+      setCheckoutLoading(false);
     }
-
-    // URL parametreleri ile ödeme sayfasına gönder (toplam + referans)
-    const params = new URLSearchParams({
-      tutar: String(total),           // kuruş cinsinden
-      ref: payload.created_at,        // idempotency için zaman damgası
-      source: 'coaching',
-      ...(coupon?.code ? { kupon: coupon.code } : {}),
-    });
-
-    window.location.href = `${CHECKOUT_URL}?${params.toString()}`;
   };
 
   const handleClearCart = async () => {
@@ -353,10 +324,11 @@ export default function SepetPage() {
             {/* Ödemeye geç — onlinevipdershane.com'a yönlendir */}
             <button
               onClick={handleCheckout}
-              disabled={items.some((i) => i.out_of_stock) || items.length === 0}
-              className="w-full mt-4 bg-indigo-600 text-white py-3 rounded-xl font-semibold text-sm hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+              disabled={checkoutLoading || items.some((i) => i.out_of_stock) || items.length === 0}
+              className="w-full mt-4 bg-indigo-600 text-white py-3 rounded-xl font-semibold text-sm hover:bg-indigo-700 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-2"
             >
-              Ödemeye Geç
+              {checkoutLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+              {checkoutLoading ? 'Sipariş hazırlanıyor…' : 'Ödemeye Geç'}
             </button>
 
             <p className="text-xs text-gray-400 text-center mt-3">

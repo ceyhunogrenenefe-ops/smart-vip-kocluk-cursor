@@ -16,11 +16,24 @@
  *  cart.remove           — sepetten çıkar
  *  cart.clear            — sepeti boşalt
  *  cart.apply_coupon     — kupon uygula
+ *  cart.checkout_prepare — pending sipariş + handoff token
+ *  checkout.resolve      — token ile sipariş özeti (site)
+ *  checkout.update_customer — veli/adres (site, token)
+ *  order.paid            — ödeme callback webhook (site)
  *  assignment.own        — "Bu kitap bende var" (purchase yapmadan atama)
  */
 
 import { requireAuth } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
+import {
+  assertWebhookSecret,
+  isCommercePaymentRef,
+  orderIdFromPaymentRef,
+  paymentRefFromOrderId,
+  signCheckoutToken,
+  verifyCheckoutToken,
+} from '../api/_lib/commerce-checkout-token.js';
+import { COMMERCE_DEFAULT_SETTINGS } from '../api/_lib/commerce-constants.js';
 
 function err(res, status, message) {
   return res.status(status).json({ error: message });
@@ -319,6 +332,452 @@ async function handleCart(op, body, actor) {
     return { ok: true, coupon: { id: coupon.id, code: coupon.code, discount_type: coupon.discount_type, discount_value: coupon.discount_value, max_discount_kurus: coupon.max_discount_kurus, min_order_kurus: coupon.min_order_kurus } };
   }
 
+  if (op === 'cart.checkout_prepare') {
+    return prepareCheckout(body, actor);
+  }
+
+  throw new Error(`Bilinmeyen operasyon: ${op}`);
+}
+
+async function loadCommerceSettings() {
+  const { data } = await supabaseAdmin
+    .from('commerce_settings')
+    .select('*')
+    .is('institution_id', null)
+    .maybeSingle();
+  return { ...COMMERCE_DEFAULT_SETTINGS, ...(data || {}) };
+}
+
+async function nextOrderNumber(prefix) {
+  const p = String(prefix || 'VIP-KTP').toUpperCase();
+  const { data, error } = await supabaseAdmin.rpc('commerce_next_order_number', { p_prefix: p });
+  if (!error && data) return String(data);
+  // Fallback: sayaç RPC yoksa
+  const year = new Date().getFullYear();
+  const { count } = await supabaseAdmin
+    .from('commerce_orders')
+    .select('id', { count: 'exact', head: true })
+    .like('order_number', `${p}-${year}-%`);
+  const seq = String((count || 0) + 1).padStart(6, '0');
+  return `${p}-${year}-${seq}`;
+}
+
+async function prepareCheckout(body, actor) {
+  if (!actor?.sub || actor.sub === 'anonymous') throw new Error('Ödeme için giriş gerekli');
+  const userId = actor.sub;
+  const cartId = await getOrCreateCart(userId);
+  const items = await enrichCart(cartId);
+  if (!items.length) throw new Error('Sepet boş');
+
+  const settings = await loadCommerceSettings();
+  if (settings.student_store_enabled === false) throw new Error('Kitap mağazası şu an kapalı');
+
+  const lines = [];
+  for (const item of items) {
+    if (item.vendor_offer_id) {
+      const { data: offer, error } = await supabaseAdmin
+        .from('commerce_vendor_offers')
+        .select(`
+          id, vendor_id, book_id, price_kurus, compare_at_price_kurus, stock_quantity, status,
+          commerce_books(id, title, isbn),
+          commerce_vendors(id, name, commission_rate)
+        `)
+        .eq('id', item.vendor_offer_id)
+        .single();
+      if (error || !offer || offer.status !== 'approved') {
+        throw new Error(`"${item.title_snapshot || 'Ürün'}" artık satışta değil`);
+      }
+      if (offer.stock_quantity < item.quantity) {
+        throw new Error(`"${offer.commerce_books?.title || item.title_snapshot}" için yeterli stok yok`);
+      }
+      lines.push({
+        vendor_offer_id: offer.id,
+        book_id: offer.book_id,
+        package_id: null,
+        vendor_id: offer.vendor_id,
+        title_snapshot: offer.commerce_books?.title || item.title_snapshot || 'Kitap',
+        isbn_snapshot: offer.commerce_books?.isbn || null,
+        quantity: item.quantity,
+        unit_price_kurus: offer.price_kurus,
+        compare_at_price_kurus: offer.compare_at_price_kurus,
+        line_total_kurus: offer.price_kurus * item.quantity,
+        commission_rate: Number(offer.commerce_vendors?.commission_rate ?? settings.default_commission_rate),
+      });
+      continue;
+    }
+
+    if (item.package_id) {
+      const { data: pkg, error } = await supabaseAdmin
+        .from('commerce_book_packages')
+        .select(`
+          id, name, price_kurus, is_active,
+          commerce_book_package_items(
+            quantity, commerce_books(id, title, isbn),
+            commerce_vendor_offers(id, vendor_id, price_kurus, stock_quantity, status, commerce_vendors(commission_rate))
+          )
+        `)
+        .eq('id', item.package_id)
+        .single();
+      if (error || !pkg || !pkg.is_active) throw new Error(`"${item.title_snapshot || 'Paket'}" artık mevcut değil`);
+      const pkgItems = pkg.commerce_book_package_items || [];
+      const first = pkgItems.find((pi) => pi.commerce_vendor_offers?.status === 'approved') || pkgItems[0];
+      if (!first?.commerce_books?.id) throw new Error('Paket içeriği eksik');
+      const offer = first.commerce_vendor_offers;
+      if (offer && (offer.status !== 'approved' || offer.stock_quantity < 1)) {
+        throw new Error(`"${pkg.name}" paketi için stok yetersiz`);
+      }
+      lines.push({
+        vendor_offer_id: offer?.id || null,
+        book_id: first.commerce_books.id,
+        package_id: pkg.id,
+        vendor_id: offer?.vendor_id,
+        title_snapshot: pkg.name,
+        isbn_snapshot: first.commerce_books.isbn || null,
+        quantity: 1,
+        unit_price_kurus: pkg.price_kurus,
+        compare_at_price_kurus: null,
+        line_total_kurus: pkg.price_kurus,
+        commission_rate: Number(offer?.commerce_vendors?.commission_rate ?? settings.default_commission_rate),
+      });
+      if (!lines[lines.length - 1].vendor_id) throw new Error('Paket satıcı bilgisi eksik');
+    }
+  }
+
+  if (!lines.length) throw new Error('Sepette ödenebilir ürün yok');
+
+  const subtotal = lines.reduce((s, l) => s + l.line_total_kurus, 0);
+  let couponId = null;
+  let couponCode = null;
+  let discount = 0;
+  const code = String(body.coupon_code || '').trim().toUpperCase();
+  if (code) {
+    const couponRes = await handleCart('cart.apply_coupon', { code }, actor);
+    if (!couponRes.ok || !couponRes.coupon) throw new Error(couponRes.error || 'Geçersiz kupon');
+    const c = couponRes.coupon;
+    if (subtotal < c.min_order_kurus) {
+      throw new Error(`Bu kupon için minimum sipariş tutarı yetersiz`);
+    }
+    discount =
+      c.discount_type === 'percent'
+        ? Math.round((subtotal * c.discount_value) / 100)
+        : c.discount_value;
+    if (c.max_discount_kurus) discount = Math.min(discount, c.max_discount_kurus);
+    couponId = c.id;
+    couponCode = c.code;
+  }
+
+  let shipping = settings.default_shipping_kurus || 0;
+  if (settings.free_shipping_threshold_kurus > 0 && subtotal >= settings.free_shipping_threshold_kurus) {
+    shipping = 0;
+  }
+  const total = Math.max(0, subtotal + shipping - discount);
+  if (total < 100) throw new Error('Ödeme tutarı geçersiz');
+
+  const orderNumber = await nextOrderNumber(settings.order_number_prefix);
+  const studentId = actor.student_id || body.student_id || null;
+  let institutionId = actor.institution_id || null;
+  if (!institutionId && studentId) {
+    const { data: st } = await supabaseAdmin.from('students').select('institution_id').eq('id', studentId).maybeSingle();
+    institutionId = st?.institution_id || null;
+  }
+
+  const { data: order, error: orderErr } = await supabaseAdmin
+    .from('commerce_orders')
+    .insert({
+      order_number: orderNumber,
+      institution_id: institutionId,
+      user_id: userId,
+      student_id: studentId,
+      status: 'pending_payment',
+      commerce_mode: settings.commerce_mode || 'reseller',
+      subtotal_kurus: subtotal,
+      discount_kurus: discount,
+      shipping_kurus: shipping,
+      total_kurus: total,
+      currency: 'TRY',
+      coupon_id: couponId,
+      coupon_code: couponCode,
+      payment_status: 'pending',
+    })
+    .select('id, order_number, total_kurus, subtotal_kurus, shipping_kurus, discount_kurus')
+    .single();
+  if (orderErr) throw orderErr;
+
+  const byVendor = new Map();
+  for (const line of lines) {
+    if (!byVendor.has(line.vendor_id)) byVendor.set(line.vendor_id, []);
+    byVendor.get(line.vendor_id).push(line);
+  }
+
+  const vendorOrderIds = new Map();
+  for (const [vendorId, vLines] of byVendor.entries()) {
+    const vSub = vLines.reduce((s, l) => s + l.line_total_kurus, 0);
+    const rate = vLines[0].commission_rate || settings.default_commission_rate || 15;
+    const commission = Math.round((vSub * rate) / 100);
+    const { data: vo, error: voErr } = await supabaseAdmin
+      .from('commerce_vendor_orders')
+      .insert({
+        order_id: order.id,
+        vendor_id: vendorId,
+        status: 'pending',
+        subtotal_kurus: vSub,
+        commission_kurus: commission,
+        vendor_net_kurus: Math.max(0, vSub - commission),
+        shipping_kurus: 0,
+      })
+      .select('id')
+      .single();
+    if (voErr) throw voErr;
+    vendorOrderIds.set(vendorId, vo.id);
+  }
+
+  const itemRows = lines.map((l) => ({
+    order_id: order.id,
+    vendor_order_id: vendorOrderIds.get(l.vendor_id) || null,
+    vendor_offer_id: l.vendor_offer_id,
+    book_id: l.book_id,
+    package_id: l.package_id,
+    vendor_id: l.vendor_id,
+    title_snapshot: l.title_snapshot,
+    isbn_snapshot: l.isbn_snapshot,
+    quantity: l.quantity,
+    unit_price_kurus: l.unit_price_kurus,
+    compare_at_price_kurus: l.compare_at_price_kurus,
+    line_total_kurus: l.line_total_kurus,
+  }));
+  const { error: itemsErr } = await supabaseAdmin.from('commerce_order_items').insert(itemRows);
+  if (itemsErr) throw itemsErr;
+
+  const paymentRef = paymentRefFromOrderId(order.id);
+  await supabaseAdmin.from('commerce_payments').insert({
+    order_id: order.id,
+    provider: 'paytr',
+    provider_order_id: paymentRef,
+    amount_kurus: total,
+    status: 'pending',
+    idempotency_key: `prep-${order.id}`,
+  });
+
+  const token = signCheckoutToken({
+    orderId: order.id,
+    orderNumber: order.order_number,
+    totalKurus: order.total_kurus,
+    userId,
+  });
+
+  const checkoutBase =
+    String(process.env.COMMERCE_CHECKOUT_URL || process.env.SITE_CHECKOUT_URL || '').trim() ||
+    'https://onlinevipdershane.com/odeme/kitap';
+
+  return {
+    ok: true,
+    token,
+    payment_ref: paymentRef,
+    order_id: order.id,
+    order_number: order.order_number,
+    total_kurus: order.total_kurus,
+    subtotal_kurus: order.subtotal_kurus,
+    shipping_kurus: order.shipping_kurus,
+    discount_kurus: order.discount_kurus,
+    checkout_url: `${checkoutBase.replace(/\/$/, '')}?token=${encodeURIComponent(token)}`,
+  };
+}
+
+async function loadOrderSummary(orderId) {
+  const { data: order, error } = await supabaseAdmin
+    .from('commerce_orders')
+    .select(
+      `
+      id, order_number, status, payment_status, total_kurus, subtotal_kurus, shipping_kurus, discount_kurus,
+      coupon_code, customer_name, customer_email, customer_phone,
+      commerce_order_items(id, title_snapshot, quantity, unit_price_kurus, line_total_kurus)
+    `
+    )
+    .eq('id', orderId)
+    .single();
+  if (error || !order) throw new Error('Sipariş bulunamadı');
+  return order;
+}
+
+async function handleCheckout(op, body, req) {
+  if (op === 'checkout.resolve') {
+    const payload = verifyCheckoutToken(body.token);
+    const order = await loadOrderSummary(payload.oid);
+    if (order.status !== 'pending_payment' && order.payment_status !== 'pending' && order.payment_status !== 'processing') {
+      if (order.payment_status === 'paid') throw new Error('Bu sipariş zaten ödendi');
+    }
+    if (order.status === 'cancelled' || order.status === 'payment_failed') {
+      throw new Error('Sipariş ödeme için uygun değil');
+    }
+    return {
+      ok: true,
+      order: {
+        id: order.id,
+        order_number: order.order_number,
+        payment_ref: paymentRefFromOrderId(order.id),
+        status: order.status,
+        payment_status: order.payment_status,
+        total_kurus: order.total_kurus,
+        subtotal_kurus: order.subtotal_kurus,
+        shipping_kurus: order.shipping_kurus,
+        discount_kurus: order.discount_kurus,
+        coupon_code: order.coupon_code,
+        customer_name: order.customer_name,
+        customer_email: order.customer_email,
+        customer_phone: order.customer_phone,
+        items: order.commerce_order_items || [],
+      },
+    };
+  }
+
+  if (op === 'checkout.update_customer') {
+    const payload = verifyCheckoutToken(body.token);
+    const name = String(body.customer_name || body.parentName || '').trim();
+    const email = String(body.customer_email || body.email || '').trim().toLowerCase();
+    const phone = String(body.customer_phone || body.phone || '').trim();
+    if (!name || name.length < 3) throw new Error('Ad soyad en az 3 karakter olmalı');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Geçerli e-posta girin');
+    if (phone.replace(/\D/g, '').length < 10) throw new Error('Geçerli telefon girin');
+
+    const { error } = await supabaseAdmin
+      .from('commerce_orders')
+      .update({
+        customer_name: name,
+        customer_email: email,
+        customer_phone: phone,
+        notes: String(body.notes || body.studentInfo || '').trim() || null,
+        payment_status: 'processing',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', payload.oid)
+      .eq('status', 'pending_payment');
+    if (error) throw error;
+
+    const addr = body.address || {};
+    const line1 = String(addr.address_line1 || addr.line1 || '').trim();
+    const city = String(addr.city || '').trim();
+    if (line1 && city) {
+      await supabaseAdmin.from('commerce_order_addresses').delete().eq('order_id', payload.oid).eq('address_type', 'shipping');
+      await supabaseAdmin.from('commerce_order_addresses').insert({
+        order_id: payload.oid,
+        address_type: 'shipping',
+        full_name: name,
+        phone,
+        address_line1: line1,
+        address_line2: String(addr.address_line2 || addr.line2 || '').trim() || null,
+        district: String(addr.district || '').trim() || null,
+        city,
+        postal_code: String(addr.postal_code || '').trim() || null,
+        country: 'TR',
+      });
+    }
+
+    const order = await loadOrderSummary(payload.oid);
+    return {
+      ok: true,
+      payment_ref: paymentRefFromOrderId(order.id),
+      order: {
+        id: order.id,
+        order_number: order.order_number,
+        total_kurus: order.total_kurus,
+        subtotal_kurus: order.subtotal_kurus,
+        shipping_kurus: order.shipping_kurus,
+        discount_kurus: order.discount_kurus,
+        items: order.commerce_order_items || [],
+        customer_name: name,
+        customer_email: email,
+        customer_phone: phone,
+      },
+    };
+  }
+
+  if (op === 'order.paid') {
+    assertWebhookSecret(req);
+    const ref = String(body.merchant_oid || body.payment_ref || '').trim();
+    let orderId = body.order_id || null;
+    if (!orderId && isCommercePaymentRef(ref)) orderId = orderIdFromPaymentRef(ref);
+    if (!orderId) throw new Error('Sipariş referansı bulunamadı');
+
+    const { data: order, error } = await supabaseAdmin
+      .from('commerce_orders')
+      .select('id, user_id, status, payment_status, total_kurus, order_number')
+      .eq('id', orderId)
+      .single();
+    if (error || !order) throw new Error('Sipariş bulunamadı');
+
+    if (order.payment_status === 'paid') {
+      return { ok: true, already_paid: true, order_id: order.id, order_number: order.order_number };
+    }
+
+    const amount = Number(body.amount_kurus);
+    if (Number.isFinite(amount) && amount > 0 && amount !== order.total_kurus) {
+      console.warn('[commerce-store] order.paid amount mismatch', amount, order.total_kurus);
+    }
+
+    const provider = String(body.provider || 'paytr').toLowerCase();
+    const now = new Date().toISOString();
+    const patch = {
+      status: 'paid',
+      payment_status: 'paid',
+      paid_at: now,
+      updated_at: now,
+    };
+    if (provider === 'garanti') patch.garanti_order_id = ref;
+
+    const { error: upErr } = await supabaseAdmin.from('commerce_orders').update(patch).eq('id', order.id);
+    if (upErr) throw upErr;
+
+    await supabaseAdmin
+      .from('commerce_payments')
+      .update({
+        status: 'paid',
+        provider,
+        provider_order_id: ref || null,
+        paid_at: now,
+        updated_at: now,
+        raw_response: body.raw || null,
+      })
+      .eq('order_id', order.id);
+
+    // Stok düş
+    const { data: orderItems } = await supabaseAdmin
+      .from('commerce_order_items')
+      .select('vendor_offer_id, quantity')
+      .eq('order_id', order.id);
+    for (const it of orderItems || []) {
+      if (!it.vendor_offer_id) continue;
+      const { data: offer } = await supabaseAdmin
+        .from('commerce_vendor_offers')
+        .select('stock_quantity')
+        .eq('id', it.vendor_offer_id)
+        .maybeSingle();
+      if (!offer) continue;
+      const next = Math.max(0, (offer.stock_quantity || 0) - it.quantity);
+      await supabaseAdmin
+        .from('commerce_vendor_offers')
+        .update({ stock_quantity: next, updated_at: now })
+        .eq('id', it.vendor_offer_id);
+    }
+
+    // Sepeti temizle
+    if (order.user_id) {
+      const { data: cart } = await supabaseAdmin
+        .from('commerce_carts')
+        .select('id')
+        .eq('user_id', order.user_id)
+        .maybeSingle();
+      if (cart?.id) await supabaseAdmin.from('commerce_cart_items').delete().eq('cart_id', cart.id);
+    }
+
+    await supabaseAdmin
+      .from('commerce_vendor_orders')
+      .update({ status: 'confirmed', updated_at: now })
+      .eq('order_id', order.id)
+      .eq('status', 'pending');
+
+    return { ok: true, order_id: order.id, order_number: order.order_number };
+  }
+
   throw new Error(`Bilinmeyen operasyon: ${op}`);
 }
 
@@ -396,6 +855,8 @@ export default async function handler(req, res) {
       result = await handleCatalog(op, body, actor);
     } else if (prefix === 'cart') {
       result = await handleCart(op, body, actor);
+    } else if (prefix === 'checkout' || prefix === 'order') {
+      result = await handleCheckout(op, body, req);
     } else if (prefix === 'assignment') {
       result = await handleAssignment(op, body, actor);
     } else {
@@ -405,6 +866,11 @@ export default async function handler(req, res) {
     return res.status(200).json(result);
   } catch (e) {
     console.error('[commerce-store]', e?.message || e);
-    return err(res, 500, e?.message || 'sunucu_hatası');
+    const msg = e?.message || 'sunucu_hatası';
+    if (/Yetkisiz|giriş gerekli|Geçersiz|süresi dolmuş|bulunamadı|yeterli stok|Sepet boş|yapılandırılmamış/i.test(msg)) {
+      const status = /Yetkisiz/i.test(msg) ? 401 : 400;
+      return err(res, status, msg);
+    }
+    return err(res, 500, msg);
   }
 }

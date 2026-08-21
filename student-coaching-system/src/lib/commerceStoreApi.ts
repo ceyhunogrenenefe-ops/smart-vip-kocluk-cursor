@@ -81,6 +81,25 @@ export const csClearCart = () => post<{ ok: true; items: CartItem[] }>('cart.cle
 export const csApplyCoupon = (code: string) =>
   post<{ ok: boolean; coupon?: { id: string; code: string; discount_type: string; discount_value: number; max_discount_kurus: number | null; min_order_kurus: number }; error?: string }>('cart.apply_coupon', { code });
 
+export type CheckoutPrepareResponse = {
+  ok: true;
+  token: string;
+  payment_ref: string;
+  order_id: string;
+  order_number: string;
+  total_kurus: number;
+  subtotal_kurus: number;
+  shipping_kurus: number;
+  discount_kurus: number;
+  checkout_url: string;
+};
+
+export const csCheckoutPrepare = (coupon_code?: string | null, student_id?: string | null) =>
+  post<CheckoutPrepareResponse>('cart.checkout_prepare', {
+    ...(coupon_code ? { coupon_code } : {}),
+    ...(student_id ? { student_id } : {}),
+  });
+
 // "Bu kitap bende var"
 export const csMarkOwned = (book_id: string, vendor_offer_id?: string, student_id?: string) =>
   post<{ ok: true; assignment_id: string; already_existed: boolean }>('assignment.own', { book_id, vendor_offer_id, student_id });
