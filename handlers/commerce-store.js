@@ -245,13 +245,36 @@ async function handleCart(op, body, actor) {
       priceSnapshot = offer.price_kurus;
       titleSnapshot = offer.commerce_books?.title ?? '';
 
-      const { error } = await supabaseAdmin
+      // Partial unique index → PostgREST upsert/ON CONFLICT çalışmaz; select+update/insert
+      const { data: existing } = await supabaseAdmin
         .from('commerce_cart_items')
-        .upsert(
-          { cart_id: cartId, vendor_offer_id, quantity: qty, price_kurus_snapshot: priceSnapshot, title_snapshot: titleSnapshot },
-          { onConflict: 'cart_id,vendor_offer_id' }
-        );
-      if (error) throw error;
+        .select('id, quantity')
+        .eq('cart_id', cartId)
+        .eq('vendor_offer_id', vendor_offer_id)
+        .maybeSingle();
+      const nextQty = existing ? existing.quantity + qty : qty;
+      if (offer.stock_quantity < nextQty) throw new Error('Yeterli stok yok');
+      if (existing) {
+        const { error } = await supabaseAdmin
+          .from('commerce_cart_items')
+          .update({
+            quantity: nextQty,
+            price_kurus_snapshot: priceSnapshot,
+            title_snapshot: titleSnapshot,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabaseAdmin.from('commerce_cart_items').insert({
+          cart_id: cartId,
+          vendor_offer_id,
+          quantity: nextQty,
+          price_kurus_snapshot: priceSnapshot,
+          title_snapshot: titleSnapshot,
+        });
+        if (error) throw error;
+      }
     }
 
     if (package_id) {
@@ -263,13 +286,33 @@ async function handleCart(op, body, actor) {
       if (!pkg || !pkg.is_active) throw new Error('Bu paket artık mevcut değil');
       priceSnapshot = pkg.price_kurus;
       titleSnapshot = pkg.name;
-      const { error } = await supabaseAdmin
+      const { data: existing } = await supabaseAdmin
         .from('commerce_cart_items')
-        .upsert(
-          { cart_id: cartId, package_id, quantity: 1, price_kurus_snapshot: priceSnapshot, title_snapshot: titleSnapshot },
-          { onConflict: 'cart_id,package_id' }
-        );
-      if (error) throw error;
+        .select('id, quantity')
+        .eq('cart_id', cartId)
+        .eq('package_id', package_id)
+        .maybeSingle();
+      if (existing) {
+        const { error } = await supabaseAdmin
+          .from('commerce_cart_items')
+          .update({
+            quantity: 1,
+            price_kurus_snapshot: priceSnapshot,
+            title_snapshot: titleSnapshot,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabaseAdmin.from('commerce_cart_items').insert({
+          cart_id: cartId,
+          package_id,
+          quantity: 1,
+          price_kurus_snapshot: priceSnapshot,
+          title_snapshot: titleSnapshot,
+        });
+        if (error) throw error;
+      }
     }
 
     // Sepet updated_at güncelle
