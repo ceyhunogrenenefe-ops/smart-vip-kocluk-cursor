@@ -1,39 +1,38 @@
-# onlinevipdershane1 — Koçluk kitap sepeti → ödeme sayfası
+# Koçluk sepeti → onlinevipdershane.com ödeme (PayTR / Garanti)
 
-Koçluk paneli (`dersonlinevipkocluk.com`) sepetten **Ödemeye Geç** deyince
-`https://onlinevipdershane.com/odeme.html?source=coaching&token=...&tutar=...`
-sayfasına yönlendirir.
+Koçluk paneli **ödeme anahtarı istemez**. Ödeme sitede kalır.
 
-Canlı sitede sepet/tutarın görünmesi için bu 2 dosya **zorunlu**:
+## Zorunlu 2 dosya (canlı siteye)
 
-| Dosya | Ne yapar |
+Canlı `odeme.html` şu an koçluk sepetini okumuyor; bu yüzden “sepette ürün yok” görünüyor.
+
+| Kaynak (bu klasör) | Canlı siteye kopyala |
 |---|---|
-| `odeme.html` | Koçluk token/tutar ile sipariş özeti gösterir |
-| `api/_lib/products.js` | `kitapMagaza` ürünü + dinamik `amountKurus` |
+| `odeme.html` | `odeme.html` (**üzerine yaz** — Garanti+PayTR seçenekli sürüm + koçluk) |
+| `api/_lib/products.js` | `api/_lib/products.js` (**tek kopya**, çift yapıştırma yok) |
 
-## Hızlı deploy (onlinevipdershane1 reposu)
+### GitHub / bilgisayar
 
-```bash
-# smart-vip-kocluk-cursor reposundan kopyala:
-cp site-patches/onlinevipdershane1/odeme.html ../onlinevipdershane1/odeme.html
-cp site-patches/onlinevipdershane1/api/_lib/products.js ../onlinevipdershane1/api/_lib/products.js
+1. **Canlı sitenin deploy edildiği projeyi** açın (Vercel’de `onlinevipdershane.com` hangi GitHub reposuna bağlıysa o).
+2. Bu 2 dosyayı kopyalayıp `main`’e push edin.
+3. Vercel Production deploy bitsin.
+4. Kontrol:
+   - Sayfada `source=coaching` ile sepet özeti görünmeli
+   - PayTR `kitapMagaza` kabul etmeli
 
-cd ../onlinevipdershane1
-git add odeme.html api/_lib/products.js
-git commit -m "feat: koçluk paneli kitap sepeti ödeme (token + kitapMagaza)"
-git push origin main
-```
+### Doğrulama (deploy sonrası)
 
-Vercel otomatik deploy eder.
+Tarayıcıda açın:
 
-## Test
+`https://onlinevipdershane.com/odeme.html?source=coaching&tutar=15000&ref=test`
 
-1. Koçluk: sepete kitap ekle → Ödemeye Geç
-2. URL: `onlinevipdershane.com/odeme.html?source=coaching&token=...&tutar=...`
-3. Sağda sipariş özeti + tutar görünmeli
-4. Veli bilgisi → PayTR
+- Sağda **15,00₺** / Kitap Mağazası görünmeli
+- `sepet.html`’e atmamalı
 
-## Not
+## Koçluk paneli
 
-- `kitapMagaza` olmadan PayTR `Geçersiz ürün: kitapMagaza` döner.
-- Eski site sepeti (`OVD_CART` localStorage) koçluk paneliyle paylaşılmaz; token şart.
+Sepet → Ödemeye Geç → otomatik:
+
+`https://onlinevipdershane.com/odeme.html?source=coaching&token=...&tutar=...`
+
+Supabase (koçluk): `commerce_checkout_handoffs` tablosu gerekli (token için).
