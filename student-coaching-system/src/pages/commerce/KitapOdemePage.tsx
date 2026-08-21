@@ -1,6 +1,6 @@
 /**
  * Kitap Mağazası Ödeme — /kitap-odeme
- * Koçluk panelinde sepet özeti + Garanti ödeme (onlinevipdershane yaması gerekmez)
+ * Sepet her zaman panelde gösterilir (onlinevipdershane odeme.html yamasına bağımlı değil).
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -20,27 +20,42 @@ async function fetchHandoff(token: string): Promise<CheckoutHandoffPayload> {
   return data.checkout as CheckoutHandoffPayload;
 }
 
-async function startCheckoutPay(body: Record<string, unknown>) {
-  const res = await apiFetch('/api/commerce-checkout-pay', {
+function postGarantiForm(gatewayUrl: string, fields: Record<string, string>) {
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = gatewayUrl;
+  form.acceptCharset = 'UTF-8';
+  form.style.display = 'none';
+  Object.keys(fields || {}).forEach((name) => {
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = name;
+    input.value = fields[name] == null ? '' : String(fields[name]);
+    form.appendChild(input);
+  });
+  document.body.appendChild(form);
+  form.submit();
+}
+
+async function startCheckout(body: Record<string, unknown>) {
+  const res = await apiFetch('/api/commerce-checkout-start', {
     method: 'POST',
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.ok) {
-    if (data.error === 'garanti_not_configured') {
-      const missing = Array.isArray(data.missing) ? data.missing.join(', ') : '';
-      throw new Error(
-        missing
-          ? `Garanti POS yapılandırılmamış. Vercel (smart-kocluk-ceyhu) env eksik: ${missing}`
-          : 'Garanti POS yapılandırılmamış. Vercel → smart-kocluk-ceyhu projesine GARANTI_* ortam değişkenlerini ekleyin.'
-      );
-    }
-    const map: Record<string, string> = {
-      'Ödeme oturumu bulunamadı veya süresi doldu.': 'Ödeme oturumunuzun süresi doldu. Sepete dönüp tekrar deneyin.',
-    };
-    throw new Error(map[String(data.error)] || String(data.error || 'Ödeme başlatılamadı.'));
+    const hint = data.hint ? ` ${data.hint}` : '';
+    throw new Error(String(data.error || 'Ödeme başlatılamadı.') + hint);
   }
-  return data as { ok: true; pay_url: string };
+  return data as {
+    ok: true;
+    method: 'paytr' | 'garanti_form' | 'garanti_link';
+    redirect_url?: string;
+    token?: string;
+    pay_url?: string;
+    gateway_url?: string;
+    fields?: Record<string, string>;
+  };
 }
 
 export default function KitapOdemePage() {
@@ -104,14 +119,27 @@ export default function KitapOdemePage() {
     setPaying(true);
     setError('');
     try {
-      const result = await startCheckoutPay({
+      const result = await startCheckout({
         handoff_token: token,
         parentName: parentName.trim(),
         phone: phone.trim(),
         email: email.trim(),
         studentInfo: studentInfo.trim(),
       });
-      window.location.assign(result.pay_url);
+
+      if (result.method === 'paytr' && result.redirect_url) {
+        window.location.assign(result.redirect_url);
+        return;
+      }
+      if (result.method === 'garanti_link' && result.pay_url) {
+        window.location.assign(result.pay_url);
+        return;
+      }
+      if (result.method === 'garanti_form' && result.gateway_url && result.fields) {
+        postGarantiForm(result.gateway_url, result.fields);
+        return;
+      }
+      throw new Error('Ödeme yönlendirmesi alınamadı.');
     } catch (ex) {
       const msg = ex instanceof Error ? ex.message : 'Ödeme başlatılamadı.';
       setError(msg);
@@ -209,7 +237,7 @@ export default function KitapOdemePage() {
               </button>
               <p className="mt-3 flex items-start gap-2 text-xs text-gray-500">
                 <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-indigo-500" />
-                Kart bilgileriniz Garanti BBVA güvenli ödeme sayfasında alınır (3D Secure).
+                Kart bilgileriniz PayTR veya Garanti BBVA güvenli ödeme sayfasında alınır.
               </p>
             </form>
 
