@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Ban,
   Check,
+  ExternalLink,
   Eye,
   KeyRound,
   Loader2,
@@ -135,6 +136,174 @@ function fmtVal(v: unknown): string {
     }
   }
   return String(v);
+}
+
+const SITE_ORIGIN = 'https://onlinevipdershane.com';
+
+function siteTeacherUrl(slug: string) {
+  const s = String(slug || '').trim().replace(/^\/+/, '');
+  if (!s) return `${SITE_ORIGIN}/ozel-ders.html`;
+  return `${SITE_ORIGIN}/ozel-ders/ogretmen/${encodeURIComponent(s)}`;
+}
+
+function extractPhotoUrl(data: Record<string, unknown> | null | undefined): string {
+  if (!data) return '';
+  return String(data.photo_url || data.photo || data.photo_path || '').trim();
+}
+
+function extractVideoEntries(data: Record<string, unknown> | null | undefined): { url: string; title: string }[] {
+  if (!data) return [];
+  const out: { url: string; title: string }[] = [];
+  const videos = data.videos;
+  if (Array.isArray(videos)) {
+    for (const item of videos) {
+      if (!item) continue;
+      if (typeof item === 'string') {
+        const url = item.trim();
+        if (url) out.push({ url, title: '' });
+        continue;
+      }
+      if (typeof item === 'object') {
+        const row = item as Record<string, unknown>;
+        const url = String(row.url || row.public_url || row.video_url || '').trim();
+        if (url) out.push({ url, title: String(row.title || '').trim() });
+      }
+    }
+  }
+  const legacy = String(data.video_url || data.video || data.intro_video_url || data.lesson_video_url || '').trim();
+  if (legacy && !out.some((v) => v.url === legacy)) {
+    out.unshift({ url: legacy, title: '' });
+  }
+  return out;
+}
+
+/** YouTube / Vimeo / doğrudan mp4 için gömülebilir adres */
+function videoEmbedSrc(raw: string): { kind: 'iframe' | 'video'; src: string } | null {
+  const url = String(raw || '').trim();
+  if (!url) return null;
+  if (/\.(mp4|webm|ogg)(\?|$)/i.test(url)) return { kind: 'video', src: url };
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, '');
+    if (host === 'youtu.be') {
+      const id = u.pathname.replace(/^\//, '').split('/')[0];
+      if (id) return { kind: 'iframe', src: `https://www.youtube.com/embed/${id}?rel=0` };
+    }
+    if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'youtube-nocookie.com') {
+      const id = u.searchParams.get('v') || u.pathname.split('/').filter(Boolean).pop();
+      if (id && id !== 'watch' && id !== 'embed') {
+        return { kind: 'iframe', src: `https://www.youtube.com/embed/${id}?rel=0` };
+      }
+      if (u.pathname.includes('/embed/')) return { kind: 'iframe', src: url };
+    }
+    if (host === 'vimeo.com') {
+      const id = u.pathname.split('/').filter(Boolean).pop();
+      if (id) return { kind: 'iframe', src: `https://player.vimeo.com/video/${id}` };
+    }
+  } catch {
+    /* ignore */
+  }
+  return { kind: 'video', src: url };
+}
+
+function ProfileSitePreview({
+  data,
+  slug,
+  statusLabel
+}: {
+  data: Record<string, unknown>;
+  slug: string;
+  statusLabel: string;
+}) {
+  const photo = extractPhotoUrl(data);
+  const videos = extractVideoEntries(data);
+  const name = String(data.display_name || '').trim() || '—';
+  const branch = String(data.branch || '').trim();
+  const title = String(data.title || '').trim();
+  const shortBio = String(data.short_bio || '').trim();
+  const fullBio = String(data.full_bio || '').trim();
+  const siteUrl = siteTeacherUrl(slug);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs font-bold uppercase tracking-wide text-slate-500">
+          Site önizlemesi · {statusLabel}
+        </div>
+        <a
+          href={siteUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 rounded-lg border border-[#1a3fad]/30 bg-[#1a3fad]/5 px-2.5 py-1 text-[11px] font-bold text-[#1a3fad] hover:bg-[#1a3fad]/10"
+          title="onlinevipdershane.com öğretmen sayfası (yayında değilse boş olabilir)"
+        >
+          <ExternalLink className="h-3.5 w-3.5" /> Sitede aç
+        </a>
+      </div>
+      <p className="text-[11px] text-slate-500">
+        Onaylanmamış profil sitede henüz görünmeyebilir. Aşağıdaki foto/video, onay sonrası sitede
+        görünecek içeriğin önizlemesidir.
+      </p>
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="grid gap-0 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+          <div className="relative aspect-[4/5] bg-slate-100 sm:aspect-auto sm:min-h-[280px]">
+            {photo ? (
+              <img src={photo} alt={name} className="absolute inset-0 h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full min-h-[220px] items-center justify-center text-sm text-slate-400">
+                Fotoğraf yok
+              </div>
+            )}
+          </div>
+          <div className="space-y-3 p-4">
+            <div>
+              <div className="text-lg font-bold text-slate-900">{name}</div>
+              <div className="mt-0.5 text-sm text-[#1a3fad]">
+                {[branch, title].filter(Boolean).join(' · ') || '—'}
+              </div>
+              <div className="mt-1 font-mono text-[11px] text-slate-400">/{slug}</div>
+            </div>
+            {shortBio ? <p className="text-sm leading-relaxed text-slate-700">{shortBio}</p> : null}
+            {fullBio ? (
+              <p className="line-clamp-6 text-xs leading-relaxed text-slate-600 whitespace-pre-wrap">{fullBio}</p>
+            ) : null}
+          </div>
+        </div>
+        {videos.length ? (
+          <div className="space-y-3 border-t border-slate-100 p-4">
+            <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Videolar</div>
+            {videos.map((v, idx) => {
+              const embed = videoEmbedSrc(v.url);
+              return (
+                <div key={`${v.url}-${idx}`} className="space-y-1.5">
+                  {v.title ? <div className="text-xs font-semibold text-slate-700">{v.title}</div> : null}
+                  {embed?.kind === 'iframe' ? (
+                    <div className="aspect-video overflow-hidden rounded-xl bg-black">
+                      <iframe
+                        title={v.title || `video-${idx + 1}`}
+                        src={embed.src}
+                        className="h-full w-full"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                      />
+                    </div>
+                  ) : embed?.kind === 'video' ? (
+                    <video src={embed.src} controls className="aspect-video w-full rounded-xl bg-black object-contain" />
+                  ) : (
+                    <a href={v.url} target="_blank" rel="noreferrer" className="text-xs text-[#1a3fad] underline break-all">
+                      {v.url}
+                    </a>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="border-t border-slate-100 px-4 py-3 text-xs text-amber-700">Tanıtım videosu yok</div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export default function TeacherProfileApprovalsPage() {
@@ -350,6 +519,20 @@ export default function TeacherProfileApprovalsPage() {
     return [...keys].filter((k) => !['id', 'user_id', 'slug'].includes(k)).sort();
   }, [compareLeft, compareRight, detail]);
 
+  const previewData = useMemo(() => {
+    const right = (detail?.pending_data || detail?.working || {}) as Record<string, unknown>;
+    const left = (detail?.approved_data || {}) as Record<string, unknown>;
+    const pub = (detail?.published_preview || {}) as Record<string, unknown>;
+    // Önce bekleyen/çalışma verisi (onaylanınca siteye gidecek), yoksa onaylı / yayın önizleme
+    const base = Object.keys(right).length ? right : Object.keys(left).length ? left : pub;
+    return base;
+  }, [detail]);
+
+  const previewSlug = useMemo(() => {
+    const p = detail?.profile as { slug?: string } | undefined;
+    return String(p?.slug || previewData.slug || '').trim();
+  }, [detail, previewData]);
+
   const isDeleted = (row: Row) => row.status === 'deleted' || !!row.deleted_at;
   const canApprove = (row: Row) =>
     row.status === 'pending_approval' ||
@@ -538,9 +721,21 @@ export default function TeacherProfileApprovalsPage() {
                         type="button"
                         onClick={() => void loadDetail(row.id)}
                         className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-[#1a3fad]"
+                        title="Foto, video ve metinlerin site önizlemesini panelde aç"
                       >
                         <Eye className="h-3.5 w-3.5" /> Görüntüle
                       </button>
+                      {row.slug ? (
+                        <a
+                          href={siteTeacherUrl(row.slug)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 rounded-lg border border-[#1a3fad]/30 bg-[#1a3fad]/5 px-3 py-1.5 text-xs font-bold text-[#1a3fad]"
+                          title="onlinevipdershane.com öğretmen sayfasını yeni sekmede aç"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" /> Sitede aç
+                        </a>
+                      ) : null}
                       {canApprove(row) && !isDeleted(row) ? (
                         <button
                           type="button"
@@ -781,6 +976,19 @@ export default function TeacherProfileApprovalsPage() {
                   </div>
                 </div>
 
+                {previewSlug ? (
+                  <ProfileSitePreview
+                    data={previewData}
+                    slug={previewSlug}
+                    statusLabel={
+                      STATUS_TR[String((detail.profile as { status?: string })?.status || '')] ||
+                      'önizleme'
+                    }
+                  />
+                ) : (
+                  <p className="text-xs text-slate-500">Slug yok — site önizlemesi açılamıyor</p>
+                )}
+
                 <div>
                   <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
                     Onaylı vs Bekleyen
@@ -830,19 +1038,6 @@ export default function TeacherProfileApprovalsPage() {
                     )}
                   </div>
                 </div>
-
-                {detail.published_preview ? (
-                  <div>
-                    <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
-                      Yayın önizleme
-                    </div>
-                    <pre className="max-h-64 overflow-auto rounded-xl bg-slate-900 p-3 text-[10px] text-slate-100">
-                      {JSON.stringify(detail.published_preview, null, 2)}
-                    </pre>
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-500">Henüz yayın önizlemesi yok</p>
-                )}
               </div>
             ) : null}
           </aside>
