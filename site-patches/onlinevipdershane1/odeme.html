@@ -8,15 +8,15 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@700;800&family=Nunito:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/cart.css">
+<link rel="stylesheet" href="assets/cart.css?v=4">
+<link rel="stylesheet" href="assets/nav-logo.css">
+<link rel="stylesheet" href="assets/nav-contact.css">
+<link rel="stylesheet" href="assets/checkout-chrome.css">
 <style>
 :root{--navy:#1a3fad;--accent:#e8232a;--accent2:#c8191f;--text:#1a1f36;--muted:#6e6e73;--border:#e5e5e7;--light:#f5f5f7;}
 *{margin:0;padding:0;box-sizing:border-box;}
 body{font-family:'Nunito',sans-serif;background:#fff;color:var(--text);line-height:1.6;}
 a{text-decoration:none;color:inherit;}
-.nav{position:sticky;top:0;z-index:200;background:rgba(255,255,255,.98);border-bottom:1px solid var(--border);}
-.nav-in{max-width:1100px;margin:0 auto;padding:0 5%;display:flex;align-items:center;justify-content:space-between;height:68px;}
-.nav-logo{display:inline-flex;align-items:center;flex-shrink:0;line-height:0;}
 .container{max-width:960px;margin:0 auto;padding:40px 5% 80px;}
 h1{font-family:'Bricolage Grotesque',sans-serif;font-size:clamp(28px,4vw,36px);margin-bottom:8px;}
 .lead{color:var(--muted);margin-bottom:28px;}
@@ -39,8 +39,15 @@ h1{font-family:'Bricolage Grotesque',sans-serif;font-size:clamp(28px,4vw,36px);m
 .secure{font-size:12px;color:var(--muted);margin-top:12px;text-align:center;}
 .error{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;padding:12px 14px;border-radius:10px;font-size:13px;margin-bottom:14px;display:none;}
 .back-link{display:inline-block;margin-bottom:20px;color:var(--navy);font-weight:700;font-size:14px;}
+.pay-methods{display:none;gap:10px;margin-bottom:16px;}
+.pay-methods.show{display:grid;grid-template-columns:1fr 1fr;}
+@media(max-width:520px){.pay-methods.show{grid-template-columns:1fr;}}
+.pay-method{display:flex;align-items:center;gap:10px;padding:12px 14px;border:2px solid var(--border);border-radius:12px;cursor:pointer;font-size:13px;font-weight:700;background:#fff;}
+.pay-method:has(input:checked){border-color:var(--navy);background:#f4f7ff;box-shadow:0 0 0 3px rgba(26,63,173,.1);}
+.pay-method input{accent-color:var(--navy);}
+.pay-badges{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:10px;}
+.pay-badges span{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;background:var(--light);border:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);}
 </style>
-  <link rel="stylesheet" href="assets/nav-logo.css">
   <link rel="stylesheet" href="assets/welcome-modal.css">
   <meta name="google-site-verification" content="3zMZ-JrvFsPWEUs_bzeFJOH-kmWIVfx9A-Ibq21w-Rs">
 <!-- Google tag (gtag.js) -->
@@ -56,9 +63,41 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 <nav class="nav">
   <div class="nav-in">
     <a href="index.html" class="nav-logo"><img src="assets/img/ovd-logo.png" alt="Online VIP Dershane" width="280" height="68" decoding="async"></a>
-    <a href="sepet.html" class="back-link">← Sepete Dön</a>
+    <div class="nav-links" id="navLinks">
+      <a href="index.html">Ana Sayfa</a>
+      <a href="programlar/index.html">Programlar</a>
+      <a href="ozel-ders.html" style="color:#e8232a;font-weight:700;">Özel Ders</a>
+      <a href="kadromuz.html">Kadromuz</a>
+      <div class="contact-dropdown">
+        <button type="button" class="contact-dropdown-btn" aria-haspopup="true">Videolar <span class="contact-arrow">▾</span></button>
+        <div class="contact-list">
+          <a href="videolar.html">Tüm Videolar</a>
+          <a href="videolar.html#veli-yorumlari">Veli Yorumları</a>
+        </div>
+      </div>
+      <div class="contact-dropdown">
+        <button type="button" class="contact-dropdown-btn" aria-haspopup="true">İletişim <span class="contact-arrow">▾</span></button>
+        <div class="contact-list">
+          <a href="iletisim.html">İletişim</a>
+          <a href="kariyer.html">Kariyer</a>
+        </div>
+      </div>
+    </div>
+    <div class="nav-right">
+      <a href="tel:08503034014" class="nav-phone">0850 303 40 14</a>
+      <a href="sepet.html" class="btn-link">Sepet</a>
+    </div>
+    <button class="nav-hamburger" onclick="document.getElementById('navLinks').classList.toggle('open')" aria-label="Menü">
+      <span></span><span></span><span></span>
+    </button>
   </div>
 </nav>
+<div class="trust-strip">
+  <span>🔒 256-bit SSL</span>
+  <span>3D Secure</span>
+  <span>Garanti Bonus · PayTR</span>
+  <span>KVKK uyumlu ödeme</span>
+</div>
 <main class="container">
   <a href="sepet.html" class="back-link">← Sepete Dön</a>
   <h1>💳 Ödeme</h1>
@@ -84,8 +123,24 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
         <label for="studentInfo">Öğrenci Bilgisi (isteğe bağlı)</label>
         <textarea id="studentInfo" name="studentInfo" rows="3" placeholder="Öğrenci adı, sınıf seviyesi vb."></textarea>
       </div>
+      <div class="pay-methods" id="pay-methods" role="radiogroup" aria-label="Ödeme yöntemi">
+        <label class="pay-method">
+          <input type="radio" name="payProvider" value="garanti" id="pay-garanti">
+          <span>Garanti Bonus POS</span>
+        </label>
+        <label class="pay-method">
+          <input type="radio" name="payProvider" value="paytr" id="pay-paytr">
+          <span>PayTR</span>
+        </label>
+      </div>
       <button type="submit" class="btn-pay" id="pay-btn">🔒 Kredi Kartı ile Öde</button>
-      <p class="secure" id="pay-secure">256-bit SSL · Güvenli ödeme · Visa, Mastercard, Troy</p>
+      <p class="secure" id="pay-secure">256-bit SSL · Güvenli ödeme · Visa, Mastercard, Troy · Garanti Bonus</p>
+      <div class="pay-badges" aria-hidden="true">
+        <span>Garanti Bonus POS</span>
+        <span>Visa</span>
+        <span>Mastercard</span>
+        <span>Troy</span>
+      </div>
     </form>
     <aside class="card">
       <h2>Sipariş Özeti</h2>
@@ -93,12 +148,18 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     </aside>
   </div>
 </main>
+<footer class="checkout-footer">
+  <p><strong>ONLİNE VIP DERSHANECİLİK EĞİTİM VE DANIŞMANLIK HİZMETLERİ LTD. ŞTİ.</strong></p>
+  <p><a href="tel:08503034014">0850 303 40 14</a> · <a href="mailto:info@onlinevipdershane.com">info@onlinevipdershane.com</a></p>
+  <p><a href="gizlilik.html">Gizlilik</a> · <a href="satis.html">Mesafeli Satış</a> · <a href="iade.html">İade &amp; İptal</a></p>
+</footer>
 <script src="assets/products.js?v=20260716b"></script>
 <script src="assets/cart.js?v=20260716b"></script>
 <script>
 (function(){
   var provider='none';
   var selectedTeacherSlug='';
+
   var coachingCheckout=null;
 
   function formatKurus(kurus){
@@ -108,11 +169,8 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 
   function decodeCartParam(raw){
     if(!raw) return null;
-    try{
-      return JSON.parse(decodeURIComponent(escape(atob(raw))));
-    }catch(e){
-      try{ return JSON.parse(atob(raw)); }catch(e2){ return null; }
-    }
+    try{ return JSON.parse(decodeURIComponent(escape(atob(raw)))); }
+    catch(e){ try{ return JSON.parse(atob(raw)); }catch(e2){ return null; } }
   }
 
   function applyCoachingCheckout(data){
@@ -155,11 +213,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       var res=await fetch('https://www.dersonlinevipkocluk.com/api/commerce-checkout-handoff?token='+encodeURIComponent(token),{credentials:'omit'});
       var data=await res.json();
       if(!res.ok||!data.ok||!data.checkout){
-        // Token başarısızsa URL'deki tutar ile devam et
-        if(params.get('source')==='coaching' && Number.isFinite(tutar) && tutar>=100){
-          return loadCoachingCheckoutFromQuery();
-        }
-        return false;
+        return (params.get('source')==='coaching') ? loadCoachingCheckoutFromQuery() : false;
       }
       var cart=data.checkout;
       var total=parseInt(String(cart.total_kurus||tutar||'0'),10);
@@ -185,6 +239,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     }
     return OVD_CART.read();
   }
+
 
   function ensurePackageFromQuery(){
     var paket=new URLSearchParams(location.search).get('paket')||'';
@@ -284,6 +339,28 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     return base;
   }
 
+  function selectedProvider(){
+    var checked=document.querySelector('input[name="payProvider"]:checked');
+    if(checked) return checked.value;
+    return provider;
+  }
+
+  function postGarantiForm(action, fields){
+    var form=document.createElement('form');
+    form.method='POST';
+    form.action=action;
+    form.acceptCharset='UTF-8';
+    Object.keys(fields||{}).forEach(function(key){
+      var input=document.createElement('input');
+      input.type='hidden';
+      input.name=key;
+      input.value=fields[key]==null?'':String(fields[key]);
+      form.appendChild(input);
+    });
+    document.body.appendChild(form);
+    form.submit();
+  }
+
   async function startPaytr(btn){
     var res=await fetch('/api/paytr-token',{
       method:'POST',
@@ -294,6 +371,19 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     if(!res.ok) throw new Error(data.error||'PayTR ödeme başlatılamadı');
     btn.textContent='PayTR sayfasına yönlendiriliyorsunuz…';
     window.location.assign('https://www.paytr.com/odeme/guvenli/'+encodeURIComponent(data.token));
+  }
+
+  async function startGaranti(btn){
+    var res=await fetch('/api/garanti-init',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({items:paymentItems(),customer:customerPayload()})
+    });
+    var data=await res.json();
+    if(!res.ok) throw new Error(data.error||'Garanti Bonus POS başlatılamadı');
+    if(!data.action||!data.fields) throw new Error('Garanti ödeme formu alınamadı');
+    btn.textContent='Garanti Bonus POS sayfasına yönlendiriliyorsunuz…';
+    postGarantiForm(data.action, data.fields);
   }
 
   async function startStripe(btn){
@@ -316,15 +406,32 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     try{
       var cfg=await fetch('/api/payment-provider').then(function(r){return r.json();});
       provider=cfg.provider||'none';
-      if(provider==='paytr'){
-        if(!coachingCheckout){
-          document.getElementById('pay-lead').textContent='Veli bilgilerinizi girin; PayTR güvenli ödeme sayfasına yönlendirileceksiniz.';
-        }
+      var list=cfg.providers||[];
+      var methods=document.getElementById('pay-methods');
+      if(list.indexOf('garanti')!==-1 && list.indexOf('paytr')!==-1){
+        methods.classList.add('show');
+        var prefer=provider==='garanti'?'garanti':'paytr';
+        var radio=document.getElementById(prefer==='garanti'?'pay-garanti':'pay-paytr');
+        if(radio) radio.checked=true;
+        document.getElementById('pay-lead').textContent='Veli bilgilerinizi girin; Garanti Bonus POS veya PayTR ile güvenli ödeyin.';
+        document.getElementById('pay-secure').textContent='Garanti Bonus POS · PayTR · Visa, Mastercard, Troy';
+      }else if(provider==='garanti'){
+        document.getElementById('pay-garanti').checked=true;
+        document.getElementById('pay-lead').textContent='Veli bilgilerinizi girin; Garanti Bonus POS güvenli ödeme sayfasına yönlendirileceksiniz.';
+        document.getElementById('pay-secure').textContent='Garanti Bonus POS · 3D Secure · Visa, Mastercard, Troy';
+      }else if(provider==='paytr'){
+        document.getElementById('pay-paytr').checked=true;
+        document.getElementById('pay-lead').textContent='Veli bilgilerinizi girin; PayTR güvenli ödeme sayfasına yönlendirileceksiniz.';
         document.getElementById('pay-secure').textContent='PayTR güvenli ödeme · Visa, Mastercard, Troy';
       }else if(provider==='stripe'){
         document.getElementById('pay-lead').textContent='Veli bilgilerinizi girin; Stripe güvenli ödeme sayfasına yönlendirileceksiniz.';
-      }else if(cfg.paytr && cfg.paytr.missingEnv && cfg.paytr.missingEnv.length){
-        showError('Ödeme sistemi henüz tam yapılandırılmamış. PayTR mağaza bilgileri Vercel ortam değişkenlerine girilmeli. (Eksik: '+cfg.paytr.missingEnv.join(', ')+')');
+      }else{
+        var missing=[];
+        if(cfg.garanti&&cfg.garanti.missingEnv) missing=missing.concat(cfg.garanti.missingEnv);
+        if(cfg.paytr&&cfg.paytr.missingEnv) missing=missing.concat(cfg.paytr.missingEnv);
+        if(missing.length){
+          showError('Ödeme sistemi henüz tam yapılandırılmamış. Vercel ortam değişkenlerini kontrol edin. (Eksik: '+missing.join(', ')+')');
+        }
       }
     }catch(e){}
 
@@ -336,8 +443,10 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       btn.disabled=true;
       btn.textContent='Yönlendiriliyor...';
       try{
-        if(provider==='paytr') await startPaytr(btn);
-        else if(provider==='stripe') await startStripe(btn);
+        var p=selectedProvider();
+        if(p==='garanti') await startGaranti(btn);
+        else if(p==='paytr') await startPaytr(btn);
+        else if(p==='stripe') await startStripe(btn);
         else throw new Error('Ödeme sistemi yapılandırılmamış. Lütfen bizimle iletişime geçin.');
       }catch(ex){
         showError(ex.message||'Bir hata oluştu. Lütfen tekrar deneyin.');
@@ -349,6 +458,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 })();
 </script>
   <script src="assets/welcome-modal.js"></script>
+<script src="assets/wa-float.js" defer></script>
 <script src="assets/perf-analytics.js" defer></script>
 </body>
 </html>
