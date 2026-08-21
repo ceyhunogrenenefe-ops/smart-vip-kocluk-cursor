@@ -98,13 +98,12 @@ export default function SepetPage() {
     finally { setUpdatingId(null); }
   };
 
-  /** Sepet özetini token ile onlinevipdershane.com ödeme sayfasına taşır */
+  /** Sepet özetini token ile koçluk paneli ödeme sayfasına taşır (harici odeme.html bağı yok) */
   const handleCheckout = async () => {
     if (items.some((i) => i.out_of_stock) || items.length === 0) return;
 
-    const CHECKOUT_URL =
-      (import.meta.env.VITE_CHECKOUT_URL as string | undefined)?.trim() ||
-      'https://onlinevipdershane.com/odeme.html';
+    // Harici onlinevipdershane odeme.html koçluk sepetini sık kaybediyor — panel içi ödeme sabit
+    const CHECKOUT_URL = '/kitap-odeme';
 
     const cartSummary = {
       items: items.map((i) => ({
@@ -136,12 +135,6 @@ export default function SepetPage() {
         ref: cartSummary.ref ?? handoff.checkout.ref ?? handoff.token,
       });
       if (coupon?.code) params.set('kupon', coupon.code);
-      try {
-        const cartB64 = btoa(unescape(encodeURIComponent(JSON.stringify(cartSummary))));
-        if (cartB64.length < 1800) params.set('cart', cartB64);
-      } catch {
-        /* URL uzun olursa yalnızca token + tutar */
-      }
       window.location.href = `${CHECKOUT_URL}?${params.toString()}`;
     } catch (e: unknown) {
       toast.error((e as Error).message || 'Ödeme sayfasına yönlendirilemedi.');
@@ -375,7 +368,7 @@ export default function SepetPage() {
             </button>
 
             <p className="text-xs text-gray-400 text-center mt-3">
-              onlinevipdershane.com güvenli ödeme (PayTR)
+              Güvenli ödeme · PayTR / Garanti BBVA
             </p>
           </div>
         </div>
