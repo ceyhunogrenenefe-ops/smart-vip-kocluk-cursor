@@ -201,6 +201,7 @@ function KitapcikCircles({
 type Props = {
   lessons: EdesisExamStructureLesson[];
   booklets?: EdesisExamBooklet[];
+  availableBookletCodes?: string[];
   kitapcik?: string;
   onKitapcikChange?: (kitapcik: string) => void;
   kitapcikSayisal?: string;
@@ -228,6 +229,7 @@ type Props = {
 export default function EdesisOpticalSheet({
   lessons,
   booklets = [],
+  availableBookletCodes = [],
   kitapcik = '',
   onKitapcikChange,
   kitapcikSayisal = '',
@@ -250,13 +252,17 @@ export default function EdesisOpticalSheet({
   const dual = bookletMode === 'dual-sozel-sayisal' || family === 'lgs';
   const choices = useMemo(() => opticalChoices(family, choiceCount), [family, choiceCount]);
   const bookletCodes = useMemo(() => {
+    const fromApi = (availableBookletCodes || [])
+      .map((c) => String(c || '').trim().toUpperCase())
+      .filter((c) => KITAPCIK_ORDER.includes(c));
+    if (fromApi.length) return [...new Set(fromApi)].sort();
     const fromBooklets = (booklets || [])
       .map((b) => String(b.kitapcikTuru || '').trim().toUpperCase())
       .filter((c) => KITAPCIK_ORDER.includes(c));
     const unique = [...new Set(fromBooklets)];
     if (unique.length) return unique.sort();
     return KITAPCIK_ORDER;
-  }, [booklets]);
+  }, [availableBookletCodes, booklets]);
   const orderedLessons = useMemo(
     () => sortOpticalLessonsByFamily(lessons, family === 'tyt' ? 'yks' : family),
     [family, lessons]
