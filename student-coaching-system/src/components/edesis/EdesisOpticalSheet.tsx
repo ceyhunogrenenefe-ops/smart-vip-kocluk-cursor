@@ -249,6 +249,14 @@ export default function EdesisOpticalSheet({
   const family = detectFamily(examTitle, examType, examFamily);
   const dual = bookletMode === 'dual-sozel-sayisal' || family === 'lgs';
   const choices = useMemo(() => opticalChoices(family, choiceCount), [family, choiceCount]);
+  const bookletCodes = useMemo(() => {
+    const fromBooklets = (booklets || [])
+      .map((b) => String(b.kitapcikTuru || '').trim().toUpperCase())
+      .filter((c) => KITAPCIK_ORDER.includes(c));
+    const unique = [...new Set(fromBooklets)];
+    if (unique.length) return unique.sort();
+    return KITAPCIK_ORDER;
+  }, [booklets]);
   const orderedLessons = useMemo(
     () => sortOpticalLessonsByFamily(lessons, family === 'tyt' ? 'yks' : family),
     [family, lessons]
@@ -341,21 +349,21 @@ export default function EdesisOpticalSheet({
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-xs font-semibold text-slate-600">Sözel:</span>
-              <KitapcikCircles value={kitapcikValue} onChange={onKitapcikChange} codes={KITAPCIK_ORDER} />
+              <KitapcikCircles value={kitapcikValue} onChange={onKitapcikChange} codes={bookletCodes} />
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-xs font-semibold text-slate-600">Sayısal:</span>
               <KitapcikCircles
                 value={sayisalValue}
                 onChange={onKitapcikSayisalChange}
-                codes={KITAPCIK_ORDER}
+                codes={bookletCodes}
               />
             </div>
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-xs font-semibold text-slate-600">Kitapçık Türü:</span>
-            <KitapcikCircles value={kitapcikValue} onChange={onKitapcikChange} codes={KITAPCIK_ORDER} />
+            <KitapcikCircles value={kitapcikValue} onChange={onKitapcikChange} codes={bookletCodes} />
           </div>
         )}
         <div className="ml-auto flex flex-wrap items-center gap-2">

@@ -965,16 +965,51 @@ export function edesisOpticalUi(family) {
   return { bookletMode: 'single', choiceCount: 4, tabPrefix: '' };
 }
 
+/** Kitapçık harfini tek forma getir (A–D; 1–4 sayısal kod yedeği) */
+export function normalizeKitapcikCode(v) {
+  const s = String(v || '')
+    .trim()
+    .toUpperCase();
+  if (!s) return '';
+  const aliases = { '1': 'A', '2': 'B', '3': 'C', '4': 'D' };
+  return aliases[s] || s;
+}
+
+function kitapcikCodesMatch(a, b) {
+  const left = normalizeKitapcikCode(a);
+  const right = normalizeKitapcikCode(b);
+  if (!left || !right) return false;
+  return left === right;
+}
+
 export function pickEdesisBookletLessons(structure, kitapcikTuru) {
   const rows = Array.isArray(structure?.rows) ? structure.rows : [];
   const booklets = Array.isArray(structure?.booklets) ? structure.booklets : [];
-  const want = String(kitapcikTuru || '').trim();
-  const matchedRows = rows.filter((r) => String(r.kitapcikTuru || '') === want);
-  if (matchedRows.length) return matchedRows;
-  const matchedBook = booklets.find((b) => String(b.kitapcikTuru || '') === want);
-  if (matchedBook?.lessons?.length) return matchedBook.lessons;
+  const want = normalizeKitapcikCode(kitapcikTuru);
+
+  if (want) {
+    const matchedRows = rows.filter((r) => kitapcikCodesMatch(r.kitapcikTuru, want));
+    if (matchedRows.length) return matchedRows;
+    const matchedBook = booklets.find((b) => kitapcikCodesMatch(b.kitapcikTuru, want));
+    if (matchedBook?.lessons?.length) return matchedBook.lessons;
+    return [];
+  }
+
   if (booklets[0]?.lessons?.length) return booklets[0].lessons;
   return rows;
+}
+
+export function listEdesisBookletCodes(structure) {
+  const codes = new Set();
+  for (const b of structure?.booklets || []) {
+    const c = normalizeKitapcikCode(b.kitapcikTuru);
+    if (c) codes.add(c);
+  }
+  for (const r of structure?.rows || []) {
+    const c = normalizeKitapcikCode(r.kitapcikTuru);
+    if (c) codes.add(c);
+  }
+  return [...codes].sort();
 }
 
 function pickExamMetaFromJson(json) {
@@ -2377,19 +2412,76 @@ function toEdesisInt(v) {
 
 export function normalizeEdesisStructureRow(row) {
   const r = row && typeof row === 'object' ? row : {};
+  const kitapcikRaw =
+    pickStrCi(r, ['kitapcikTuru', 'booklet', 'bookletType', 'bookletCode', 'kitapcik']) || 'A';
   return {
-    kitapcikTuru: String(r.kitapcikTuru || r.booklet || 'A').trim() || 'A',
-    lessonId: toEdesisInt(r.lessonId),
-    lessonName: String(r.lessonName || r.dersAdi || r.name || '').trim(),
-    dersGrupId: toEdesisInt(r.dersGrupId),
-    questionCount: Number(r.questionCount) || 0
+    kitapcikTuru: normalizeKitapcikCode(kitapcikRaw) || 'A',
+    lessonId: toEdesisInt(pickStrCi(r, ['lessonId']) || r.lessonId),
+    lessonName: String(pickStrCi(r, ['lessonName', 'dersAdi', 'name']) || r.lessonName || r.dersAdi || r.name || '').trim(),
+    dersGrupId: toEdesisInt(pickStrCi(r, ['dersGrupId']) || r.dersGrupId),
+    questionCount: Number(pickStrCi(r, ['questionCount']) || r.questionCount) || 0
   };
+}
+
+function rowLooksLikeStructureLesson(row) {
+  if (!row || typeof row !== 'object') return false;
+  return (
+    row.lessonId != null ||
+    row.questionCount != null ||
+    Boolean(pickStrCi(row, ['lessonName', 'dersAdi', 'name']))
+  );
+}
+
+/** GET /structure ve /booklets yanıtlarından ders satırları çıkar */
+export function extractEdesisStructureRows(json) {
+  const flat = unwrapList(json);
+  const lessonRows = flat.filter(rowLooksLikeStructureLesson);
+  if (lessonRows.length) return lessonRows.map(normalizeEdesisStructureRow);
+
+  const root =
+    json?.result && typeof json.result === 'object' && !Array.isArray(json.result) ? json.result : json;
+  const bookletsArr = root?.booklets || root?.Booklets || [];
+  if (Array.isArray(bookletsArr) && bookletsArr.length) {
+    const rows = [];
+    for (const booklet of bookletsArr) {
+      const kt =
+        normalizeKitapcikCode(
+          pickStrCi(booklet, ['kitapcikTuru', 'booklet', 'bookletType', 'bookletCode', 'kitapcik'])
+        ) || 'A';
+      const nestedLessons = Array.isArray(booklet.lessons)
+        ? booklet.lessons
+        : Array.isArray(booklet.dersler)
+          ? booklet.dersler
+          : unwrapList(booklet);
+      for (const lesson of nestedLessons) {
+        if (!rowLooksLikeStructureLesson(lesson)) continue;
+        const lessonKt =
+          normalizeKitapcikCode(
+            pickStrCi(lesson, ['kitapcikTuru', 'booklet', 'bookletType', 'bookletCode', 'kitapcik'])
+          ) || kt;
+        rows.push(normalizeEdesisStructureRow({ ...lesson, kitapcikTuru: lessonKt }));
+      }
+    }
+    if (rows.length) return rows;
+  }
+
+  return flat.map(normalizeEdesisStructureRow);
+}
+
+function mergeEdesisStructureRows(primary = [], secondary = []) {
+  const byKey = new Map();
+  for (const row of [...primary, ...secondary]) {
+    const kt = normalizeKitapcikCode(row.kitapcikTuru) || 'A';
+    const key = `${kt}:${row.lessonId}:${row.dersGrupId}:${row.lessonName}`;
+    if (!byKey.has(key)) byKey.set(key, { ...row, kitapcikTuru: kt });
+  }
+  return [...byKey.values()];
 }
 
 export function groupEdesisStructureByBooklet(rows) {
   const map = new Map();
   for (const row of rows || []) {
-    const key = String(row.kitapcikTuru || 'A');
+    const key = normalizeKitapcikCode(row.kitapcikTuru) || 'A';
     if (!map.has(key)) map.set(key, []);
     map.get(key).push(row);
   }
@@ -2564,7 +2656,16 @@ export async function fetchEdesisExamStructure(examId, cfgOverride = {}) {
       error: r.json?.error || r.json?.message || `structure_${r.status}`
     };
   }
-  const rows = unwrapList(r.json).map(normalizeEdesisStructureRow);
+  let rows = extractEdesisStructureRows(r.json);
+  try {
+    const bookletsRes = await fetchEdesisJson(localCfg, V1_PATHS.examBooklets(id));
+    if (isReachableEdesisResponse(bookletsRes)) {
+      const bookletRows = extractEdesisStructureRows(bookletsRes.json);
+      if (bookletRows.length) rows = mergeEdesisStructureRows(rows, bookletRows);
+    }
+  } catch {
+    /* /booklets yoksa structure yeter */
+  }
   let bookletPdfs = collectEdesisBookletFiles(r.json);
   let examMeta = pickExamMetaFromJson(r.json);
   try {
@@ -2583,6 +2684,7 @@ export async function fetchEdesisExamStructure(examId, cfgOverride = {}) {
   return {
     rows,
     booklets: groupEdesisStructureByBooklet(rows),
+    availableBookletCodes: listEdesisBookletCodes({ rows, booklets: groupEdesisStructureByBooklet(rows) }),
     bookletPdfs: resolvedPdfs,
     examFamily,
     bookletMode: ui.bookletMode,

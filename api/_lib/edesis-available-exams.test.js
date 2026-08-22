@@ -12,6 +12,9 @@ import {
   detectEdesisExamFamily,
   edesisOpticalUi,
   pickEdesisBookletLessons,
+  extractEdesisStructureRows,
+  normalizeKitapcikCode,
+  listEdesisBookletCodes,
   looksLikePdfBuffer,
   catalogLooksStudentFiltered,
   catalogExamAssignedToStudent,
@@ -686,7 +689,7 @@ describe('detectEdesisExamFamily', () => {
 });
 
 describe('pickEdesisBookletLessons', () => {
-  it('falls back to first booklet when selected letter is missing', () => {
+  it('returns empty when selected booklet is missing (no silent fallback)', () => {
     const structure = {
       rows: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 10, lessonName: 'Türkçe', questionCount: 20 }],
       booklets: [
@@ -697,8 +700,68 @@ describe('pickEdesisBookletLessons', () => {
       ]
     };
     const lessons = pickEdesisBookletLessons(structure, 'C');
+    assert.equal(lessons.length, 0);
+  });
+
+  it('matches booklet B case-insensitively', () => {
+    const structure = {
+      rows: [],
+      booklets: [
+        {
+          kitapcikTuru: 'B',
+          lessons: [{ kitapcikTuru: 'B', lessonId: 2, dersGrupId: 11, lessonName: 'Matematik', questionCount: 40 }]
+        }
+      ]
+    };
+    const lessons = pickEdesisBookletLessons(structure, 'b');
     assert.equal(lessons.length, 1);
-    assert.equal(lessons[0].lessonName, 'Türkçe');
+    assert.equal(lessons[0].lessonName, 'Matematik');
+  });
+
+  it('falls back only when no booklet letter requested', () => {
+    const structure = {
+      rows: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 10, lessonName: 'Türkçe', questionCount: 20 }],
+      booklets: [
+        {
+          kitapcikTuru: 'A',
+          lessons: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 10, lessonName: 'Türkçe', questionCount: 20 }]
+        }
+      ]
+    };
+    const lessons = pickEdesisBookletLessons(structure, '');
+    assert.equal(lessons.length, 1);
+  });
+});
+
+describe('extractEdesisStructureRows / normalizeKitapcikCode', () => {
+  it('reads PascalCase KitapcikTuru from structure rows', () => {
+    const rows = extractEdesisStructureRows([
+      { KitapcikTuru: 'B', lessonId: 3, dersGrupId: 12, lessonName: 'Fen', questionCount: 20 }
+    ]);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].kitapcikTuru, 'B');
+  });
+
+  it('expands nested booklets with lessons', () => {
+    const rows = extractEdesisStructureRows({
+      booklets: [
+        {
+          kitapcikTuru: 'A',
+          lessons: [{ lessonId: 1, dersGrupId: 1, lessonName: 'Türkçe', questionCount: 40 }]
+        },
+        {
+          kitapcikTuru: 'B',
+          lessons: [{ lessonId: 1, dersGrupId: 1, lessonName: 'Türkçe', questionCount: 40 }]
+        }
+      ]
+    });
+    assert.equal(rows.length, 2);
+    assert.deepEqual(listEdesisBookletCodes({ rows, booklets: [] }).sort(), ['A', 'B']);
+  });
+
+  it('maps numeric booklet codes to letters', () => {
+    assert.equal(normalizeKitapcikCode('2'), 'B');
+    assert.equal(normalizeKitapcikCode('b'), 'B');
   });
 });
 

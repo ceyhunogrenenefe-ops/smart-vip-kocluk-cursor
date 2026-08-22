@@ -30,6 +30,7 @@ import {
   loadEdesisExamBookletPdf,
   loadEdesisHataKarnesiPdf,
   pickEdesisBookletLessons,
+  listEdesisBookletCodes,
   fetchEdesisExamSubjects,
   fetchEdesisExamResultsLessons,
   fetchEdesisExamResultsSubjects,
@@ -1327,6 +1328,7 @@ export default async function handler(req, res) {
         count: structure.rows.length,
         items: structure.rows,
         booklets: structure.booklets,
+        availableBookletCodes: structure.availableBookletCodes || listEdesisBookletCodes(structure),
         bookletPdfs: structure.bookletPdfs || [],
         examFamily: structure.examFamily || 'generic',
         bookletMode: structure.bookletMode || 'single',
@@ -1528,9 +1530,14 @@ export default async function handler(req, res) {
       const structure = await fetchEdesisExamStructure(examId, cfg);
       const bookletLessons = pickEdesisBookletLessons(structure, kitapcikTuru);
       if (!bookletLessons.length) {
+        const available = listEdesisBookletCodes(structure);
         return res.status(400).json({
           error: 'invalid_kitapcik',
-          hint: `Bu sınavda kitapçık türü bulunamadı: ${kitapcikTuru}`,
+          message: `Kitapçık türü için cevap anahtarı bulunamadı. KitapcikTuru=${kitapcikTuru}`,
+          hint: available.length
+            ? `Bu sınavda tanımlı kitapçıklar: ${available.join(', ')}`
+            : `Bu sınavda kitapçık türü bulunamadı: ${kitapcikTuru}`,
+          availableBookletCodes: available,
           booklets: structure.booklets
         });
       }
