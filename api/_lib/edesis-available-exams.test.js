@@ -15,6 +15,7 @@ import {
   extractEdesisStructureRows,
   normalizeKitapcikCode,
   listEdesisBookletCodes,
+  canonicalEdesisStructureLessons,
   looksLikePdfBuffer,
   catalogLooksStudentFiltered,
   catalogExamAssignedToStudent,
@@ -689,7 +690,7 @@ describe('detectEdesisExamFamily', () => {
 });
 
 describe('pickEdesisBookletLessons', () => {
-  it('returns empty when selected booklet is missing (no silent fallback)', () => {
+  it('falls back to shared structure when selected letter has no separate rows', () => {
     const structure = {
       rows: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 10, lessonName: 'Türkçe', questionCount: 20 }],
       booklets: [
@@ -700,7 +701,8 @@ describe('pickEdesisBookletLessons', () => {
       ]
     };
     const lessons = pickEdesisBookletLessons(structure, 'C');
-    assert.equal(lessons.length, 0);
+    assert.equal(lessons.length, 1);
+    assert.equal(lessons[0].lessonName, 'Türkçe');
   });
 
   it('matches booklet B case-insensitively', () => {
@@ -718,7 +720,7 @@ describe('pickEdesisBookletLessons', () => {
     assert.equal(lessons[0].lessonName, 'Matematik');
   });
 
-  it('falls back only when no booklet letter requested', () => {
+  it('canonicalEdesisStructureLessons dedupes shared rows', () => {
     const structure = {
       rows: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 10, lessonName: 'Türkçe', questionCount: 20 }],
       booklets: [
@@ -728,8 +730,27 @@ describe('pickEdesisBookletLessons', () => {
         }
       ]
     };
-    const lessons = pickEdesisBookletLessons(structure, '');
+    const lessons = canonicalEdesisStructureLessons(structure);
     assert.equal(lessons.length, 1);
+  });
+});
+
+describe('listEdesisBookletCodes', () => {
+  it('prefers answer key booklet codes from deneme API', () => {
+    const codes = listEdesisBookletCodes({
+      rows: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 1, questionCount: 10 }],
+      booklets: [{ kitapcikTuru: 'A', lessons: [] }],
+      answerKeyBookletCodes: ['A', 'B']
+    });
+    assert.deepEqual(codes, ['A', 'B']);
+  });
+
+  it('defaults to A-D when structure exists but no booklet tags', () => {
+    const codes = listEdesisBookletCodes({
+      rows: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 1, questionCount: 10 }],
+      booklets: [{ kitapcikTuru: 'A', lessons: [] }]
+    });
+    assert.deepEqual(codes, ['A', 'B', 'C', 'D']);
   });
 });
 

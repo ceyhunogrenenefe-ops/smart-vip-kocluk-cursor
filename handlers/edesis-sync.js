@@ -31,6 +31,7 @@ import {
   loadEdesisHataKarnesiPdf,
   pickEdesisBookletLessons,
   listEdesisBookletCodes,
+  normalizeKitapcikCode,
   fetchEdesisExamSubjects,
   fetchEdesisExamResultsLessons,
   fetchEdesisExamResultsSubjects,
@@ -1329,6 +1330,8 @@ export default async function handler(req, res) {
         items: structure.rows,
         booklets: structure.booklets,
         availableBookletCodes: structure.availableBookletCodes || listEdesisBookletCodes(structure),
+        answerKeyBookletCodes: structure.answerKeyBookletCodes || [],
+        denemeId: structure.denemeId || null,
         bookletPdfs: structure.bookletPdfs || [],
         examFamily: structure.examFamily || 'generic',
         bookletMode: structure.bookletMode || 'single',
@@ -1528,16 +1531,27 @@ export default async function handler(req, res) {
       const replaceForIngest = isStudent && !isStaff ? false : replace;
 
       const structure = await fetchEdesisExamStructure(examId, cfg);
-      const bookletLessons = pickEdesisBookletLessons(structure, kitapcikTuru);
-      if (!bookletLessons.length) {
-        const available = listEdesisBookletCodes(structure);
+      const available =
+        structure.availableBookletCodes?.length
+          ? structure.availableBookletCodes
+          : listEdesisBookletCodes(structure);
+      const wantKt = normalizeKitapcikCode(kitapcikTuru);
+      if (wantKt && available.length && !available.includes(wantKt)) {
         return res.status(400).json({
           error: 'invalid_kitapcik',
           message: `Kitapçık türü için cevap anahtarı bulunamadı. KitapcikTuru=${kitapcikTuru}`,
-          hint: available.length
-            ? `Bu sınavda tanımlı kitapçıklar: ${available.join(', ')}`
-            : `Bu sınavda kitapçık türü bulunamadı: ${kitapcikTuru}`,
+          hint: `Bu sınavda tanımlı kitapçıklar: ${available.join(', ')}`,
           availableBookletCodes: available,
+          answerKeyBookletCodes: structure.answerKeyBookletCodes || [],
+          booklets: structure.booklets
+        });
+      }
+      const bookletLessons = pickEdesisBookletLessons(structure, kitapcikTuru);
+      if (!bookletLessons.length) {
+        return res.status(400).json({
+          error: 'exam_structure_empty',
+          message: 'Sınav ders yapısı alınamadı',
+          hint: 'Edesis structure endpoint boş döndü',
           booklets: structure.booklets
         });
       }
