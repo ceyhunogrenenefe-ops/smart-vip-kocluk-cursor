@@ -17,6 +17,8 @@ import {
   fetchEdesisStudentByOgrenciId,
   fetchEdesisTermsList,
   fetchEdesisExamsCatalog,
+  fetchEdesisExamsCatalogForStudent,
+  resolveAssignedCatalogRowsForStudent,
   fetchEdesisStudentResults,
   inferEdesisExamProgramKeys,
   buildStudentAvailableEdesisExamItems,
@@ -149,10 +151,8 @@ async function resolveStudentEdesisScope({ edesisStudentId, platformStudentId, s
 }
 
 /**
- * Öğrenci Sınava gir — v1.5 rehber:
- * GET /exams (kurum kataloğu; StudentId/ClassroomId filtresi YOK)
- * GET /exams/results?studentId= (girilmiş sonuçlar)
- * Girilebilir = programı uyan, kapanmamış, henüz girilmemiş denemeler.
+ * Öğrenci Sınava gir — yalnızca Edesis’te bu öğrenci ID’sine tanımlanan denemeler.
+ * Kaynak: ogrenciIds/studentIds katalog alanları + GET /exams?StudentId= kişisel alt küme.
  */
 async function loadAvailableEdesisExamsForStudent({
   edesisStudentId,
@@ -167,21 +167,32 @@ async function loadAvailableEdesisExamsForStudent({
     studentHint,
     cfg
   });
-  const [catalog, studentResults] = await Promise.all([
+  const [catalog, studentCatalog, studentResults] = await Promise.all([
     fetchEdesisExamsCatalog(cfg).catch(() => ({ rows: [] })),
+    fetchEdesisExamsCatalogForStudent(edesisStudentId, cfg, {
+      classroomId: scope.classroomId
+    }).catch(() => ({ rows: [] })),
     fetchEdesisStudentResults(edesisStudentId, cfg, { enrichSubjects: false }).catch(() => ({
       rows: []
     }))
   ]);
+  const assignedCatalogRows = resolveAssignedCatalogRowsForStudent({
+    catalogRows: catalog.rows || [],
+    studentCatalogRows: studentCatalog.rows || [],
+    edesisStudentId,
+    classroomId: scope.classroomId
+  });
   return buildStudentAvailableEdesisExamItems({
     catalogRows: catalog.rows || [],
+    assignedCatalogRows,
     resultRows: studentResults.rows || [],
     edesisStudentId,
     programKeys: scope.programKeys,
     classroomId: scope.classroomId,
     studentId: platformStudentId || `edesis-${edesisStudentId}`,
     institutionId: actor?.institution_id || null,
-    allowRecencyFallback: true
+    allowRecencyFallback: false,
+    requireExplicitAssignment: true
   });
 }
 
@@ -1476,7 +1487,7 @@ export default async function handler(req, res) {
         takeableCount: items.filter((x) => x.canTake && !x.hasStudentResult).length,
         hint: items.length
           ? null
-          : 'Programınıza uyan açık deneme yok. Edesis öğrenci ID eşlemesini ve sınıf düzeyini kontrol edin.'
+          : 'Size tanımlı açık Edesis denemesi yok. Koçunuzun Edesis’te bu öğrenci ID’sine sınav atadığından emin olun.'
       });
     }
 

@@ -726,10 +726,117 @@ function catalogResultStatus(exam) {
   return String(getPropCi(flat, ['resultStatus', 'status']) || 'None').trim();
 }
 
+export function mergeEdesisCatalogExamsById(...groups) {
+  const map = new Map();
+  for (const rows of groups) {
+    for (const ex of rows || []) {
+      const id = pickEdesisCatalogExamId(ex);
+      if (id && !map.has(id)) map.set(id, ex);
+    }
+  }
+  return [...map.values()];
+}
+
+/** Katalog satırlarında ogrenciIds / studentIds ile doğrudan atanmış denemeler */
+export function collectExplicitlyAssignedCatalogRows(catalogRows, scope = {}) {
+  const out = [];
+  for (const ex of catalogRows || []) {
+    if (catalogExamAssignedToStudent(ex, scope) === true) out.push(ex);
+  }
+  return out;
+}
+
+/** GET /exams?StudentId= satırını tam katalog kaydı + online bayrak ile birleştir */
+export function mapStudentCatalogRowsToAssigned(fullCatalog, studentCatalogRows, edesisStudentId) {
+  const fullById = new Map();
+  for (const ex of fullCatalog || []) {
+    const id = pickEdesisCatalogExamId(ex);
+    if (id) fullById.set(id, ex);
+  }
+  const out = [];
+  for (const row of studentCatalogRows || []) {
+    const id = pickEdesisCatalogExamId(row);
+    const full = id ? fullById.get(id) : null;
+    if (full && examAssignedViaOnlineFlag(row, full)) {
+      out.push(full);
+      continue;
+    }
+    if (catalogExamAssignedToStudent(row, { edesisStudentId }) === true) {
+      out.push(full || row);
+      continue;
+    }
+    if (id) out.push(full || row);
+  }
+  return out;
+}
+
 /**
- * Henüz sonucu olmayan katalog denemesi — v1.5 rehber:
- * GET /exams DTO’sunda OgrenciIds / ClassroomId yok; StudentId filtresi de yok.
- * Sınava gir = programı uyan, kapanmamış, henüz girilmemiş kurum denemeleri.
+ * Öğrenciye atanmış açık denemeler — GET /exams?StudentId= (ve yedek ClassroomId).
+ * v1.5 resmi parametre listesinde yok; kurum API’si destekliyorsa kişisel alt küme döner.
+ */
+export async function fetchEdesisExamsCatalogForStudent(
+  edesisStudentId,
+  cfgOverride = {},
+  { classroomId = '' } = {}
+) {
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  if (!cfg.apiKey) throw new Error('EDESIS_API_KEY_missing');
+  const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+  const sid = String(edesisStudentId || '').trim();
+  const cid = String(classroomId || '').trim();
+  const queries = [];
+  if (sid) {
+    queries.push({ StudentId: sid }, { studentId: sid });
+  }
+  if (cid) {
+    queries.push({ ClassroomId: cid }, { classroomId: cid }, { SinifId: cid }, { sinifId: cid });
+  }
+  let last = { rows: [], httpStatus: null, query: null, error: null };
+  for (const q of queries) {
+    try {
+      const bulk = await fetchAllPaged(localCfg, V1_PATHS.exams, q);
+      last = {
+        rows: bulk.rows || [],
+        httpStatus: bulk.response?.status ?? null,
+        query: q,
+        error: bulk.error || null
+      };
+      if (last.rows.length) return last;
+    } catch (e) {
+      last.error = e?.message || String(e);
+    }
+  }
+  return last;
+}
+
+/**
+ * Öğrenci Sınava gir listesi — yalnızca Edesis’te bu öğrenci ID’sine tanımlı denemeler.
+ */
+export function resolveAssignedCatalogRowsForStudent({
+  catalogRows = [],
+  studentCatalogRows = [],
+  edesisStudentId = '',
+  classroomId = ''
+} = {}) {
+  const scope = { edesisStudentId, classroomId };
+  let assigned = collectExplicitlyAssignedCatalogRows(catalogRows, scope);
+
+  const full = catalogRows || [];
+  const personal = studentCatalogRows || [];
+  if (personal.length) {
+    if (trustEdesisStudentCatalogList(full, personal) || looksLikePersonalExamList(full, personal)) {
+      assigned = mergeEdesisCatalogExamsById(
+        assigned,
+        mapStudentCatalogRowsToAssigned(full, personal, edesisStudentId)
+      );
+    }
+  }
+  return assigned;
+}
+
+/**
+ * Henüz sonucu olmayan katalog denemesi.
+ * requireExplicitAssignment=true iken yalnızca ogrenciIds / StudentId kataloğu ile atanmışlar.
  */
 export function shouldOfferUntakenCatalogExam(exam, scope = {}, now = new Date()) {
   if (!exam || !isOpenEdesisCatalogExam(exam)) return false;
@@ -737,6 +844,19 @@ export function shouldOfferUntakenCatalogExam(exam, scope = {}, now = new Date()
   const keys = scope.programKeys instanceof Set ? scope.programKeys : new Set(scope.programKeys || []);
   const assigned = catalogExamAssignedToStudent(exam, scope);
   if (assigned === false) return false;
+
+  if (scope.requireExplicitAssignment) {
+    if (assigned === true) {
+      if (keys.size && !edesisCatalogExamMatchesProgram(exam, keys)) return false;
+      return true;
+    }
+    if (scope.assignedCatalogOnly) {
+      if (keys.size && !edesisCatalogExamMatchesProgram(exam, keys)) return false;
+      return true;
+    }
+    return false;
+  }
+
   if (assigned === true) return true;
   if (keys.size && !edesisCatalogExamMatchesProgram(exam, keys)) return false;
   if (scope.assignedCatalogOnly) return true;
@@ -1251,7 +1371,8 @@ export function buildStudentAvailableEdesisExamItems({
   studentId,
   institutionId,
   now = new Date(),
-  allowRecencyFallback = false
+  allowRecencyFallback = false,
+  requireExplicitAssignment = false
 } = {}) {
   const catalogById = new Map();
   for (const ex of catalogRows || []) {
@@ -1288,15 +1409,21 @@ export function buildStudentAvailableEdesisExamItems({
   }
 
   const keys = programKeys instanceof Set ? programKeys : new Set(programKeys || []);
+  const strictAssignment = Boolean(requireExplicitAssignment);
   const assignedOnly =
-    Array.isArray(assignedCatalogRows) && assignedCatalogRows.length > 0;
-  const offerRows = assignedOnly ? assignedCatalogRows : catalogRows || [];
+    strictAssignment || (Array.isArray(assignedCatalogRows) && assignedCatalogRows.length > 0);
+  const offerRows = strictAssignment
+    ? assignedCatalogRows || []
+    : assignedOnly && Array.isArray(assignedCatalogRows)
+      ? assignedCatalogRows
+      : catalogRows || [];
   const scope = {
     edesisStudentId,
     classroomId,
     programKeys: keys,
     assignedCatalogOnly: assignedOnly,
-    allowRecencyFallback: Boolean(allowRecencyFallback) && !assignedOnly
+    allowRecencyFallback: Boolean(allowRecencyFallback) && !assignedOnly && !strictAssignment,
+    requireExplicitAssignment: strictAssignment
   };
   for (const ex of offerRows) {
     const examId = pickEdesisCatalogExamId(ex);
