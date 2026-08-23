@@ -18,7 +18,7 @@ import {
   fetchEdesisTermsList,
   fetchEdesisExamsCatalog,
   fetchEdesisExamsCatalogForStudent,
-  resolveAssignedCatalogRowsForStudent,
+  resolveAssignedCatalogRowsForStudentAsync,
   fetchEdesisStudentResults,
   inferEdesisExamProgramKeys,
   buildStudentAvailableEdesisExamItems,
@@ -33,7 +33,6 @@ import {
   loadEdesisHataKarnesiPdf,
   pickEdesisBookletLessons,
   listEdesisBookletCodes,
-  normalizeKitapcikCode,
   fetchEdesisExamSubjects,
   fetchEdesisExamResultsLessons,
   fetchEdesisExamResultsSubjects,
@@ -176,12 +175,15 @@ async function loadAvailableEdesisExamsForStudent({
       rows: []
     }))
   ]);
-  const assignedCatalogRows = resolveAssignedCatalogRowsForStudent({
-    catalogRows: catalog.rows || [],
-    studentCatalogRows: studentCatalog.rows || [],
-    edesisStudentId,
-    classroomId: scope.classroomId
-  });
+  const assignedCatalogRows = await resolveAssignedCatalogRowsForStudentAsync(
+    {
+      catalogRows: catalog.rows || [],
+      studentCatalogRows: studentCatalog.rows || [],
+      edesisStudentId,
+      classroomId: scope.classroomId
+    },
+    cfg
+  );
   return buildStudentAvailableEdesisExamItems({
     catalogRows: catalog.rows || [],
     assignedCatalogRows,
@@ -1542,21 +1544,6 @@ export default async function handler(req, res) {
       const replaceForIngest = isStudent && !isStaff ? false : replace;
 
       const structure = await fetchEdesisExamStructure(examId, cfg);
-      const available =
-        structure.availableBookletCodes?.length
-          ? structure.availableBookletCodes
-          : listEdesisBookletCodes(structure);
-      const wantKt = normalizeKitapcikCode(kitapcikTuru);
-      if (wantKt && available.length && !available.includes(wantKt)) {
-        return res.status(400).json({
-          error: 'invalid_kitapcik',
-          message: `Kitapçık türü için cevap anahtarı bulunamadı. KitapcikTuru=${kitapcikTuru}`,
-          hint: `Bu sınavda tanımlı kitapçıklar: ${available.join(', ')}`,
-          availableBookletCodes: available,
-          answerKeyBookletCodes: structure.answerKeyBookletCodes || [],
-          booklets: structure.booklets
-        });
-      }
       const bookletLessons = pickEdesisBookletLessons(structure, kitapcikTuru);
       if (!bookletLessons.length) {
         return res.status(400).json({

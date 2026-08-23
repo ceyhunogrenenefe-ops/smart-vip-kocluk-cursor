@@ -569,7 +569,7 @@ export function catalogExamAssignedToStudent(exam, scope = {}) {
     return studentIds.some((id) => normEdesisId(id) === wantStudent);
   }
 
-  if (allClasses) return true;
+  if (allClasses && !scope.requireStudentIdMatch) return true;
 
   const wantClass = normEdesisId(scope.classroomId);
   if (scope.allowClassroomOnly && classroomIds.length && wantClass) {
@@ -746,6 +746,35 @@ export function collectExplicitlyAssignedCatalogRows(catalogRows, scope = {}) {
   return out;
 }
 
+function collectOnlineFlagAssignedRows(fullCatalog, studentCatalogRows) {
+  const fullById = new Map();
+  for (const ex of fullCatalog || []) {
+    const id = pickEdesisCatalogExamId(ex);
+    if (id) fullById.set(id, ex);
+  }
+  const out = [];
+  for (const row of studentCatalogRows || []) {
+    const id = pickEdesisCatalogExamId(row);
+    const full = id ? fullById.get(id) : null;
+    if (full && examAssignedViaOnlineFlag(row, full)) out.push(full);
+  }
+  return out;
+}
+
+function studentCatalogLooksAssignedSubset(fullRows, personalRows) {
+  const full = Array.isArray(fullRows) ? fullRows : [];
+  const personal = Array.isArray(personalRows) ? personalRows : [];
+  if (!personal.length) return false;
+  if (trustEdesisStudentCatalogList(full, personal)) return true;
+  if (looksLikePersonalExamList(full, personal, 40)) return true;
+  const fullIds = new Set(full.map(catalogRowExamId).filter(Boolean));
+  const personalIds = [...new Set(personal.map(catalogRowExamId).filter(Boolean))];
+  if (!personalIds.length) return false;
+  if (fullIds.size && personalIds.length >= fullIds.size) return false;
+  if (fullIds.size && !personalIds.every((id) => fullIds.has(id))) return false;
+  return personalIds.length <= 80;
+}
+
 /** GET /exams?StudentId= satırını tam katalog kaydı + online bayrak ile birleştir */
 export function mapStudentCatalogRowsToAssigned(fullCatalog, studentCatalogRows, edesisStudentId) {
   const fullById = new Map();
@@ -816,20 +845,100 @@ export function resolveAssignedCatalogRowsForStudent({
   catalogRows = [],
   studentCatalogRows = [],
   edesisStudentId = '',
-  classroomId = ''
+  classroomId = '',
+  requireStudentIdMatch = true
 } = {}) {
-  const scope = { edesisStudentId, classroomId };
+  const scope = { edesisStudentId, classroomId, requireStudentIdMatch };
   let assigned = collectExplicitlyAssignedCatalogRows(catalogRows, scope);
 
   const full = catalogRows || [];
   const personal = studentCatalogRows || [];
-  if (personal.length) {
-    if (trustEdesisStudentCatalogList(full, personal) || looksLikePersonalExamList(full, personal)) {
-      assigned = mergeEdesisCatalogExamsById(
-        assigned,
-        mapStudentCatalogRowsToAssigned(full, personal, edesisStudentId)
-      );
+  if (personal.length && studentCatalogLooksAssignedSubset(full, personal)) {
+    assigned = mergeEdesisCatalogExamsById(
+      assigned,
+      mapStudentCatalogRowsToAssigned(full, personal, edesisStudentId)
+    );
+  }
+  assigned = mergeEdesisCatalogExamsById(assigned, collectOnlineFlagAssignedRows(full, personal));
+  return assigned;
+}
+
+/** Tek sınav detayı — ogrenciIds çoğu zaman yalnızca burada gelir */
+export async function fetchEdesisExamCatalogRowDetail(examId, cfgOverride = {}) {
+  const id = String(examId || '').trim();
+  if (!id) return null;
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+  for (const path of [
+    V1_PATHS.examById(id),
+    `/api/services/app/Sinavs/GetSinavForView?id=${encodeURIComponent(id)}`
+  ]) {
+    try {
+      const r = await fetchEdesisJson(localCfg, path);
+      if (!isReachableEdesisResponse(r) || !r.json) continue;
+      const body =
+        r.json?.result && typeof r.json.result === 'object' && !Array.isArray(r.json.result)
+          ? r.json.result
+          : r.json;
+      if (body && typeof body === 'object') return body;
+    } catch {
+      /* sonraki uç */
     }
+  }
+  return null;
+}
+
+/**
+ * Katalog listesinde ogrenciIds yoksa: detay + /exams/{id}/results?StudentId= ile atama doğrula.
+ */
+export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverride = {}) {
+  const {
+    catalogRows = [],
+    studentCatalogRows = [],
+    edesisStudentId = '',
+    classroomId = ''
+  } = params || {};
+  const scope = { edesisStudentId, classroomId, requireStudentIdMatch: true };
+  let assigned = resolveAssignedCatalogRowsForStudent({
+    catalogRows,
+    studentCatalogRows,
+    edesisStudentId,
+    classroomId,
+    requireStudentIdMatch: true
+  });
+
+  const known = new Set(assigned.map((ex) => pickEdesisCatalogExamId(ex)).filter(Boolean));
+  const candidates = sortCatalogExamsByRecencyDesc(catalogRows || [])
+    .filter((ex) => {
+      const id = pickEdesisCatalogExamId(ex);
+      if (!id || known.has(id)) return false;
+      if (!isOpenEdesisCatalogExam(ex) || !examWindowStillOpen(ex)) return false;
+      const quick = catalogExamAssignedToStudent(ex, scope);
+      return quick !== false;
+    })
+    .slice(0, 36);
+
+  if (!candidates.length) return assigned;
+
+  const probeOne = async (ex) => {
+    const id = pickEdesisCatalogExamId(ex);
+    if (!id) return null;
+    const detail = await fetchEdesisExamCatalogRowDetail(id, cfgOverride);
+    const merged = detail ? { ...ex, ...detail } : ex;
+    if (catalogExamAssignedToStudent(merged, scope) === true) return ex;
+    if (catalogExamAssignedToStudent(merged, scope) === false) return null;
+    try {
+      if (await fetchEdesisExamAssignedToStudent(id, edesisStudentId, cfgOverride)) return ex;
+    } catch {
+      /* yoksay */
+    }
+    return null;
+  };
+
+  for (let i = 0; i < candidates.length; i += 6) {
+    const batch = candidates.slice(i, i + 6);
+    const found = await Promise.all(batch.map(probeOne));
+    assigned = mergeEdesisCatalogExamsById(assigned, found.filter(Boolean));
   }
   return assigned;
 }
@@ -1140,16 +1249,11 @@ export function pickEdesisBookletLessons(structure, kitapcikTuru) {
 }
 
 export function listEdesisBookletCodes(structure) {
-  if (structure?.answerKeyBookletCodes?.length) {
-    return [
-      ...new Set(
-        structure.answerKeyBookletCodes
-          .map((c) => normalizeKitapcikCode(c))
-          .filter((c) => ['A', 'B', 'C', 'D'].includes(c))
-      )
-    ].sort();
-  }
   const codes = new Set();
+  for (const c of structure?.answerKeyBookletCodes || []) {
+    const n = normalizeKitapcikCode(c);
+    if (['A', 'B', 'C', 'D'].includes(n)) codes.add(n);
+  }
   for (const f of structure?.bookletPdfs || []) {
     const c = normalizeKitapcikCode(f.kitapcikTuru);
     if (c) codes.add(c);
@@ -1164,13 +1268,12 @@ export function listEdesisBookletCodes(structure) {
     const c = normalizeKitapcikCode(r.kitapcikTuru);
     if (c) codes.add(c);
   }
-  const sorted = [...codes].sort();
+  const sorted = [...codes].filter((c) => ['A', 'B', 'C', 'D'].includes(c)).sort();
   if (sorted.length > 1) return sorted;
-  // Paylaşımlı structure çoğu zaman yalnızca A etiketi taşır — optikte A–D göster
   if (structure?.rows?.length || structure?.booklets?.length) {
     return ['A', 'B', 'C', 'D'];
   }
-  return sorted;
+  return sorted.length ? sorted : ['A', 'B', 'C', 'D'];
 }
 
 function extractBookletCodesFromBookletsEndpoint(json) {
@@ -1423,7 +1526,8 @@ export function buildStudentAvailableEdesisExamItems({
     programKeys: keys,
     assignedCatalogOnly: assignedOnly,
     allowRecencyFallback: Boolean(allowRecencyFallback) && !assignedOnly && !strictAssignment,
-    requireExplicitAssignment: strictAssignment
+    requireExplicitAssignment: strictAssignment,
+    requireStudentIdMatch: strictAssignment
   };
   for (const ex of offerRows) {
     const examId = pickEdesisCatalogExamId(ex);

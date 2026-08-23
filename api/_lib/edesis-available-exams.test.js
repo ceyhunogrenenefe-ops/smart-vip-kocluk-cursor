@@ -580,7 +580,30 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     assert.equal(examResultRowsAssignStudent([{ examId: 1 }], '7105077'), false);
   });
 
-  it('offers isAllClasses exam to the student', () => {
+  it('requireStudentIdMatch ignores isAllClasses without ogrenciIds', () => {
+    const now = new Date('2026-08-14T12:00:00Z');
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [
+        {
+          id: 91,
+          name: 'Tüm sınıflar',
+          examType: 'LGS',
+          resultStatus: 'None',
+          examDate: '2026-08-16',
+          isAllClasses: true
+        }
+      ],
+      assignedCatalogRows: [],
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '7' }),
+      now,
+      requireExplicitAssignment: true
+    });
+    assert.equal(items.length, 0);
+  });
+
+  it('offers isAllClasses exam when requireStudentIdMatch is off', () => {
     const items = buildStudentAvailableEdesisExamItems({
       catalogRows: [
         {
@@ -807,10 +830,11 @@ describe('listEdesisBookletCodes', () => {
     assert.deepEqual(codes, ['A', 'B']);
   });
 
-  it('defaults to A-D when structure exists but no booklet tags', () => {
+  it('merges partial answer keys with A-D when structure exists', () => {
     const codes = listEdesisBookletCodes({
       rows: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 1, questionCount: 10 }],
-      booklets: [{ kitapcikTuru: 'A', lessons: [] }]
+      booklets: [{ kitapcikTuru: 'A', lessons: [] }],
+      answerKeyBookletCodes: ['A']
     });
     assert.deepEqual(codes, ['A', 'B', 'C', 'D']);
   });

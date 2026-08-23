@@ -285,10 +285,13 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
         toast.error('Bu sınavın cevap anahtarı yapısı Edesis’te henüz yok');
         return;
       }
-      const availableCodes = (r.availableBookletCodes || books.map((b) => b.kitapcikTuru))
-        .map((c) => String(c || '').trim().toUpperCase())
-        .filter((c) => ['A', 'B', 'C', 'D'].includes(c));
-      const uniqueCodes = [...new Set(availableCodes.length ? availableCodes : ['A', 'B', 'C', 'D'])].sort();
+      const uniqueCodes = (() => {
+        const fromApi = (r.availableBookletCodes || [])
+          .map((c) => String(c || '').trim().toUpperCase())
+          .filter((c) => ['A', 'B', 'C', 'D'].includes(c));
+        if (fromApi.length) return [...new Set(fromApi)].sort();
+        return ['A', 'B', 'C', 'D'];
+      })();
       const booksForUi = uniqueCodes.map((code) => ({
         kitapcikTuru: code,
         lessons: sharedLessons
