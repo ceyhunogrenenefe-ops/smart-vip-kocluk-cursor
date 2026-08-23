@@ -623,6 +623,50 @@ export function examAssignedViaOnlineFlag(exam, fullExam = null) {
   return examOnlineFlag(fullExam) !== true;
 }
 
+/** Edesis iç API — öğrenciye admin panelden tanımlı sınav ID listesi */
+export function parseEdesisOgrenciSinavIdsResponse(json) {
+  const body = json?.result && typeof json.result === 'object' ? json.result : json;
+  const raw = body?.sinavId ?? body?.sinavIds ?? body?.SinavId ?? body?.SinavIds ?? [];
+  const list = Array.isArray(raw) ? raw : raw != null && raw !== '' ? [raw] : [];
+  return [...new Set(list.map((x) => String(x).trim()).filter(Boolean))];
+}
+
+export async function fetchEdesisOgrenciAssignedSinavIds(edesisStudentId, cfgOverride = {}) {
+  const sid = normEdesisId(edesisStudentId);
+  if (!sid) return [];
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+  const path = `/api/services/app/OgrenciSinavs/GetOgrenciSinavIds?ogrenciId=${encodeURIComponent(sid)}`;
+  try {
+    const r = await fetchEdesisJson(localCfg, path);
+    if (!isReachableEdesisResponse(r)) return [];
+    return parseEdesisOgrenciSinavIdsResponse(r.json);
+  } catch {
+    return [];
+  }
+}
+
+/** GetOgrenciSinavIds çıktısını katalog satırlarına eşle (ogrenciIds alanı olmasa da) */
+export function collectCatalogRowsForSinavIds(catalogRows = [], sinavIds = [], detailById = {}) {
+  const want = new Set((sinavIds || []).map((id) => String(id).trim()).filter(Boolean));
+  if (!want.size) return [];
+  const byId = new Map();
+  for (const ex of catalogRows || []) {
+    const id = pickEdesisCatalogExamId(ex);
+    if (id) byId.set(String(id), ex);
+  }
+  const out = [];
+  for (const id of want) {
+    if (byId.has(id)) {
+      out.push(byId.get(id));
+      continue;
+    }
+    const detail = detailById[id];
+    if (detail && typeof detail === 'object') out.push({ id, ...detail });
+  }
+  return out;
+}
+
 /** GET /exams/{id}/results?StudentId= satırları bu öğrenciye mi ait (sıkı eşleşme) */
 export function examResultRowsAssignStudent(rows, edesisStudentId) {
   const sid = normEdesisId(edesisStudentId);
@@ -772,7 +816,8 @@ function studentCatalogLooksAssignedSubset(fullRows, personalRows) {
   if (!personalIds.length) return false;
   if (fullIds.size && personalIds.length >= fullIds.size) return false;
   if (fullIds.size && !personalIds.every((id) => fullIds.has(id))) return false;
-  return personalIds.length <= 80;
+  // Çok sayıda kişisel atama (Safiye gibi 50+ deneme) — alt küme ise güven
+  return personalIds.length <= 250;
 }
 
 /** GET /exams?StudentId= satırını tam katalog kaydı + online bayrak ile birleştir */
@@ -907,8 +952,37 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     requireStudentIdMatch: true
   });
 
+  const adminSinavIds = await fetchEdesisOgrenciAssignedSinavIds(edesisStudentId, cfgOverride);
+  if (adminSinavIds.length) {
+    assigned = mergeEdesisCatalogExamsById(
+      assigned,
+      collectCatalogRowsForSinavIds(catalogRows, adminSinavIds)
+    );
+    const knownAfterAdmin = new Set(assigned.map((ex) => pickEdesisCatalogExamId(ex)).filter(Boolean));
+    const missingAdminIds = adminSinavIds.filter((id) => !knownAfterAdmin.has(String(id)));
+    for (let i = 0; i < missingAdminIds.length; i += 6) {
+      const batch = missingAdminIds.slice(i, i + 6);
+      const details = await Promise.all(
+        batch.map((id) => fetchEdesisExamCatalogRowDetail(id, cfgOverride))
+      );
+      assigned = mergeEdesisCatalogExamsById(
+        assigned,
+        details
+          .map((detail, idx) => (detail ? { id: batch[idx], ...detail } : null))
+          .filter(Boolean)
+      );
+    }
+  }
+
   const known = new Set(assigned.map((ex) => pickEdesisCatalogExamId(ex)).filter(Boolean));
-  const candidates = sortCatalogExamsByRecencyDesc(catalogRows || [])
+  const adminProbeIds = new Set(
+    (adminSinavIds || []).map((id) => String(id).trim()).filter(Boolean)
+  );
+  const fromAdminNotKnown = (catalogRows || []).filter((ex) => {
+    const id = pickEdesisCatalogExamId(ex);
+    return id && adminProbeIds.has(String(id)) && !known.has(String(id));
+  });
+  const recencyCandidates = sortCatalogExamsByRecencyDesc(catalogRows || [])
     .filter((ex) => {
       const id = pickEdesisCatalogExamId(ex);
       if (!id || known.has(id)) return false;
@@ -917,6 +991,14 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
       return quick !== false;
     })
     .slice(0, 36);
+  const seenCandidateIds = new Set();
+  const candidates = [];
+  for (const ex of [...fromAdminNotKnown, ...recencyCandidates]) {
+    const id = pickEdesisCatalogExamId(ex);
+    if (!id || seenCandidateIds.has(String(id))) continue;
+    seenCandidateIds.add(String(id));
+    candidates.push(ex);
+  }
 
   if (!candidates.length) return assigned;
 

@@ -7,6 +7,8 @@ import {
   resolveAssignedCatalogRowsForStudent,
   collectExplicitlyAssignedCatalogRows,
   pickEdesisCatalogExamId,
+  parseEdesisOgrenciSinavIdsResponse,
+  collectCatalogRowsForSinavIds,
   pickEdesisResultExamId,
   resultRowBelongsToStudent,
   collectEdesisBookletFiles,
@@ -660,6 +662,43 @@ describe('buildStudentAvailableEdesisExamItems', () => {
       allowRecencyFallback: true
     });
     assert.equal(items.some((x) => x.examId === '3'), false);
+  });
+
+  it('offers many admin-assigned sinavIds without ogrenciIds on catalog rows', () => {
+    const now = new Date('2026-08-14T12:00:00Z');
+    const sinavIds = Array.from({ length: 55 }, (_, i) => String(5000 + i));
+    const catalogRows = sinavIds.map((id) => ({
+      id,
+      name: `Atanan deneme ${id}`,
+      examType: 'LGS',
+      resultStatus: 'None',
+      examDate: '2026-08-10'
+    }));
+    const assignedCatalogRows = collectCatalogRowsForSinavIds(catalogRows, sinavIds);
+    assert.equal(assignedCatalogRows.length, 55);
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows,
+      assignedCatalogRows,
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      now,
+      requireExplicitAssignment: true
+    });
+    assert.equal(items.filter((x) => x.canTake).length, 55);
+  });
+});
+
+describe('parseEdesisOgrenciSinavIdsResponse', () => {
+  it('reads sinavId array from ABP result wrapper', () => {
+    assert.deepEqual(
+      parseEdesisOgrenciSinavIdsResponse({ result: { sinavId: [101, 102, '103'] } }),
+      ['101', '102', '103']
+    );
+  });
+
+  it('deduplicates ids', () => {
+    assert.deepEqual(parseEdesisOgrenciSinavIdsResponse({ sinavId: [4, 4, 7] }), ['4', '7']);
   });
 });
 
