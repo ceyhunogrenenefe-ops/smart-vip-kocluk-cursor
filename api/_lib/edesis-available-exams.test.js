@@ -22,9 +22,12 @@ import {
   canonicalEdesisStructureLessons,
   looksLikePdfBuffer,
   catalogLooksStudentFiltered,
+  catalogQueryLooksFiltered,
   catalogExamAssignedToStudent,
+  collectClassroomAssignedCatalogRows,
   examAssignedViaOnlineFlag,
   examResultRowsAssignStudent,
+  examRosterIncludesStudent,
   trustEdesisStudentCatalogList,
   looksLikePersonalExamList,
   resolveEdesisFileUrl,
@@ -686,6 +689,38 @@ describe('buildStudentAvailableEdesisExamItems', () => {
       requireExplicitAssignment: true
     });
     assert.equal(items.filter((x) => x.canTake).length, 55);
+  });
+
+  it('rejects StudentId full-catalog dump as filtered query', () => {
+    const full = Array.from({ length: 40 }, (_, i) => ({ id: i + 1 }));
+    assert.equal(catalogQueryLooksFiltered(full, full), false);
+    assert.equal(catalogQueryLooksFiltered(full, [{ id: 4 }, { id: 7 }]), true);
+  });
+
+  it('collectClassroomAssignedCatalogRows keeps class exams not locked to others', () => {
+    const full = [
+      { id: 1, name: 'Şube LGS', examType: 'LGS', resultStatus: 'None', classroomId: 501 },
+      { id: 2, name: 'Başka öğrenci', examType: 'LGS', resultStatus: 'None', classroomId: 501, ogrenciIds: [111] }
+    ];
+    const classroom = [
+      { id: 1, name: 'Şube LGS', examType: 'LGS', resultStatus: 'None' },
+      { id: 2, name: 'Başka öğrenci', examType: 'LGS', resultStatus: 'None', ogrenciIds: [111] }
+    ];
+    const rows = collectClassroomAssignedCatalogRows({
+      fullCatalog: full,
+      classroomCatalogRows: classroom,
+      edesisStudentId: '7105077',
+      classroomId: '501'
+    });
+    assert.deepEqual(
+      rows.map((x) => String(pickEdesisCatalogExamId(x))),
+      ['1']
+    );
+  });
+
+  it('examRosterIncludesStudent matches ids', () => {
+    assert.equal(examRosterIncludesStudent([7105077, 99], '7105077'), true);
+    assert.equal(examRosterIncludesStudent([111], '7105077'), false);
   });
 });
 
