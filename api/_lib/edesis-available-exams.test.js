@@ -4,6 +4,8 @@ import {
   inferEdesisExamProgramKeys,
   edesisCatalogExamMatchesProgram,
   buildStudentAvailableEdesisExamItems,
+  resolveAssignedCatalogRowsForStudent,
+  collectExplicitlyAssignedCatalogRows,
   pickEdesisCatalogExamId,
   pickEdesisResultExamId,
   resultRowBelongsToStudent,
@@ -85,6 +87,66 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     });
     assert.ok(items.some((x) => x.examId === '4'));
     assert.equal(items.some((x) => x.examId === '3'), false);
+  });
+
+  it('requireExplicitAssignment hides unassigned program exams', () => {
+    const now = new Date('2026-08-14T12:00:00Z');
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: catalog,
+      assignedCatalogRows: [],
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      now,
+      requireExplicitAssignment: true
+    });
+    assert.equal(items.some((x) => x.canTake), false);
+  });
+
+  it('requireExplicitAssignment shows only studentIds-assigned exams', () => {
+    const now = new Date('2026-08-14T12:00:00Z');
+    const assigned = [
+      {
+        id: 4,
+        name: 'LGS Yeni',
+        examType: 'LGS',
+        resultStatus: 'None',
+        examDate: '2026-08-10',
+        studentIds: [7105077]
+      }
+    ];
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: catalog,
+      assignedCatalogRows: assigned,
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      now,
+      requireExplicitAssignment: true
+    });
+    assert.deepEqual(items.map((x) => x.examId), ['4']);
+  });
+
+  it('resolveAssignedCatalogRowsForStudent merges ogrenciIds and StudentId catalog', () => {
+    const full = catalog;
+    const personal = [{ id: 99, name: 'Tek öğrenci denemesi', examType: 'LGS', resultStatus: 'None' }];
+    const assigned = resolveAssignedCatalogRowsForStudent({
+      catalogRows: [
+        ...full,
+        {
+          id: 41,
+          name: 'Safiye LGS',
+          examType: 'LGS',
+          resultStatus: 'None',
+          examDate: '2026-03-01',
+          studentIds: [7105077]
+        }
+      ],
+      studentCatalogRows: personal,
+      edesisStudentId: '7105077'
+    });
+    assert.ok(assigned.some((x) => String(pickEdesisCatalogExamId(x)) === '41'));
+    assert.ok(assigned.some((x) => String(pickEdesisCatalogExamId(x)) === '99'));
   });
 
   it('offers assigned exam even when examType/name has no program keyword', () => {
