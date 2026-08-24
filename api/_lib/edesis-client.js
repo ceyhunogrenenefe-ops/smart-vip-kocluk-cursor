@@ -488,8 +488,11 @@ async function fetchAllPaged(cfg, path, query = {}, { pageSize = PAGE_SIZE } = {
     items.push(...batch);
     const total = Number(r.json?.totalCount);
     if (Number.isFinite(total)) lastTotal = total;
-    if (!batch.length || batch.length < pageSize) break;
+    // Edesis bazen MaxResultCount=1000 isterken ~995 döner; totalCount 1971 olsa bile
+    // batch.length < pageSize ile kırılıp ikinci sayfa kaçıyordu.
+    if (!batch.length) break;
     if (Number.isFinite(total) && items.length >= total) break;
+    if (!Number.isFinite(total) && batch.length < pageSize) break;
     skip += batch.length;
   }
   return {
