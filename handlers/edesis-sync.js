@@ -20,6 +20,7 @@ import {
   fetchEdesisExamsCatalogForStudent,
   fetchEdesisExamsCatalogForClassroom,
   resolveAssignedCatalogRowsForStudentAsync,
+  collectRecentUnpublishedProgramExams,
   catalogQueryLooksFiltered,
   fetchEdesisStudentResults,
   inferEdesisExamProgramKeys,
@@ -204,7 +205,8 @@ async function loadAvailableEdesisExamsForStudent({
       studentCatalogRows: studentRows,
       classroomCatalogRows: classroomRows,
       edesisStudentId,
-      classroomId: scope.classroomId
+      classroomId: scope.classroomId,
+      programKeys: scope.programKeys
     },
     cfg
   );
@@ -216,6 +218,22 @@ async function loadAvailableEdesisExamsForStudent({
     : assignedResolved?.adminAssignment || null;
 
   const hasAssignmentSignal = Array.isArray(assignedCatalogRows) && assignedCatalogRows.length > 0;
+  const unpublishedRecentRows = collectRecentUnpublishedProgramExams(fullRows, {
+    programKeys: scope.programKeys
+  });
+  const unpublishedRecentIds = new Set(
+    unpublishedRecentRows.map((ex) => pickEdesisCatalogExamId(ex)).filter(Boolean)
+  );
+  const assignedExamIds = (assignedCatalogRows || [])
+    .map((ex) => pickEdesisCatalogExamId(ex))
+    .filter(Boolean);
+  const unpublishedAssignedCount = assignedExamIds.filter((id) => unpublishedRecentIds.has(id)).length;
+  const explicitAssignedCount = assignedExamIds.length - unpublishedAssignedCount;
+  const assignmentMode = !hasAssignmentSignal
+    ? 'assigned-empty'
+    : explicitAssignedCount > 0
+      ? 'assigned'
+      : 'unpublished-recent-program';
   const items = buildStudentAvailableEdesisExamItems({
     catalogRows: fullRows,
     assignedCatalogRows: hasAssignmentSignal ? assignedCatalogRows : [],
@@ -234,12 +252,11 @@ async function loadAvailableEdesisExamsForStudent({
   return {
     items,
     meta: {
-      assignmentMode: hasAssignmentSignal ? 'assigned' : 'assigned-empty',
+      assignmentMode,
       assignedCount: hasAssignmentSignal ? assignedCatalogRows.length : 0,
-      assignedExamIds: (assignedCatalogRows || [])
-        .map((ex) => pickEdesisCatalogExamId(ex))
-        .filter(Boolean)
-        .slice(0, 80),
+      explicitAssignedCount,
+      unpublishedRecentCount: unpublishedAssignedCount,
+      assignedExamIds: assignedExamIds.slice(0, 80),
       takeableCount: takeableIds.length,
       takeableExamIds: takeableIds.slice(0, 40),
       classroomId: scope.classroomId || null,
@@ -1555,14 +1572,10 @@ export default async function handler(req, res) {
         hint: (() => {
           const takeable = items.filter((x) => x.canTake && !x.hasStudentResult).length;
           if (takeable > 0) return null;
-          const abp = meta.abpAuth || {};
-          if (!abp.configured) {
-            return 'Size tanımlı açık deneme listesi için Edesis panel oturumu gerekir (Vercel: EDESIS_ABP_USER + EDESIS_ABP_PASSWORD). Katalog dökülmez.';
-          }
           if (items.length) {
-            return 'Girilmiş sonuçlarınız var; size tanımlı yeni açık deneme yok.';
+            return 'Girilmiş sonuçlarınız var; henüz girilmemiş açık deneme bulunamadı.';
           }
-          return 'Size tanımlı açık Edesis denemesi yok. Koçunuzun Edesis’te bu öğrenci ID’sine sınav atadığından emin olun.';
+          return 'Size tanımlı açık Edesis denemesi yok.';
         })()
       });
     }
