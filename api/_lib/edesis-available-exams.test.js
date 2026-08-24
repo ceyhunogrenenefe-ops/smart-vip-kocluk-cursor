@@ -828,7 +828,7 @@ describe('requireExplicitAssignment never dumps catalog', () => {
     );
   });
 
-  it('offers recent unpublished program exams from v1 catalog without ABP studentIds', () => {
+  it('does not dump recent unpublished program exams as assigned without studentIds', () => {
     const catalog = [
       {
         id: 1559901,
@@ -838,32 +838,18 @@ describe('requireExplicitAssignment never dumps catalog', () => {
         examDate: '2026-08-14'
       },
       {
-        id: 1561043,
-        name: 'VİP MÜFREDAT İZLEME 2',
-        examType: 'LGS',
-        resultStatus: 'Ready',
-        examDate: '2026-08-15'
-      },
-      {
-        id: 9,
-        name: 'Eski açık LGS',
-        examType: 'LGS',
-        resultStatus: 'None',
-        examDate: '2026-01-01'
-      },
-      {
-        id: 10,
-        name: 'Açık TYT',
-        examType: 'TYT',
-        resultStatus: 'None',
-        examDate: '2026-08-20'
-      },
-      {
         id: 1567875,
         name: 'Maarif Model4',
         examType: 'MAARİF 80',
         resultStatus: 'None',
         examDate: '2026-08-19'
+      },
+      {
+        id: 1574085,
+        name: '9 SINIF ESEN DENEME-2',
+        examType: '9 SINIF 100',
+        resultStatus: 'None',
+        examDate: '2026-08-24'
       }
     ];
     const unpublished = collectRecentUnpublishedProgramExams(catalog, {
@@ -880,36 +866,21 @@ describe('requireExplicitAssignment never dumps catalog', () => {
       catalogRows: catalog,
       edesisStudentId: '2086573',
       classroomId: '294965',
-      programKeys: inferEdesisExamProgramKeys({ classLevel: 'LGS' }),
-      now: new Date('2026-08-24T12:00:00Z')
+      programKeys: inferEdesisExamProgramKeys({ classLevel: 'LGS' })
     });
-    assert.deepEqual(
-      assigned.map((r) => pickEdesisCatalogExamId(r)),
-      ['1559901']
-    );
+    assert.deepEqual(assigned.map((r) => pickEdesisCatalogExamId(r)), []);
 
     const items = buildStudentAvailableEdesisExamItems({
       catalogRows: catalog,
       assignedCatalogRows: assigned,
-      resultRows: [
-        {
-          examId: 1561043,
-          studentId: 2086573,
-          resultStatus: 'Ready'
-        }
-      ],
+      resultRows: [],
       edesisStudentId: '2086573',
       programKeys: inferEdesisExamProgramKeys({ classLevel: 'LGS' }),
       now: new Date('2026-08-24T12:00:00Z'),
       allowRecencyFallback: false,
       requireExplicitAssignment: true
     });
-    assert.deepEqual(
-      items.filter((x) => x.canTake && !x.hasStudentResult).map((x) => x.examId),
-      ['1559901']
-    );
-    assert.equal(items.find((x) => x.examId === '1561043')?.hasStudentResult, true);
-    assert.equal(items.some((x) => x.examId === '9' || x.examId === '10' || x.examId === '1567875'), false);
+    assert.equal(items.filter((x) => x.canTake).length, 0);
   });
 });
 

@@ -20,7 +20,6 @@ import {
   fetchEdesisExamsCatalogForStudent,
   fetchEdesisExamsCatalogForClassroom,
   resolveAssignedCatalogRowsForStudentAsync,
-  collectRecentUnpublishedProgramExams,
   catalogQueryLooksFiltered,
   fetchEdesisStudentResults,
   inferEdesisExamProgramKeys,
@@ -218,22 +217,10 @@ async function loadAvailableEdesisExamsForStudent({
     : assignedResolved?.adminAssignment || null;
 
   const hasAssignmentSignal = Array.isArray(assignedCatalogRows) && assignedCatalogRows.length > 0;
-  const unpublishedRecentRows = collectRecentUnpublishedProgramExams(fullRows, {
-    programKeys: scope.programKeys
-  });
-  const unpublishedRecentIds = new Set(
-    unpublishedRecentRows.map((ex) => pickEdesisCatalogExamId(ex)).filter(Boolean)
-  );
   const assignedExamIds = (assignedCatalogRows || [])
     .map((ex) => pickEdesisCatalogExamId(ex))
     .filter(Boolean);
-  const unpublishedAssignedCount = assignedExamIds.filter((id) => unpublishedRecentIds.has(id)).length;
-  const explicitAssignedCount = assignedExamIds.length - unpublishedAssignedCount;
-  const assignmentMode = !hasAssignmentSignal
-    ? 'assigned-empty'
-    : explicitAssignedCount > 0
-      ? 'assigned'
-      : 'unpublished-recent-program';
+  const assignmentMode = hasAssignmentSignal ? 'assigned' : 'assigned-empty';
   const items = buildStudentAvailableEdesisExamItems({
     catalogRows: fullRows,
     assignedCatalogRows: hasAssignmentSignal ? assignedCatalogRows : [],
@@ -254,8 +241,6 @@ async function loadAvailableEdesisExamsForStudent({
     meta: {
       assignmentMode,
       assignedCount: hasAssignmentSignal ? assignedCatalogRows.length : 0,
-      explicitAssignedCount,
-      unpublishedRecentCount: unpublishedAssignedCount,
       assignedExamIds: assignedExamIds.slice(0, 80),
       takeableCount: takeableIds.length,
       takeableExamIds: takeableIds.slice(0, 40),
@@ -272,6 +257,7 @@ async function loadAvailableEdesisExamsForStudent({
       abpAuth,
       probeSkipped: Boolean(assignedResolved?.probeSkipped),
       probeSkipReason: assignedResolved?.probeSkipReason || null,
+      probeCandidateCount: assignedResolved?.probeCandidateCount ?? null,
       totalMs: Date.now() - t0
     }
   };
