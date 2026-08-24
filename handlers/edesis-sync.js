@@ -1870,6 +1870,7 @@ export default async function handler(req, res) {
         'exam-results-lessons',
         'exam-results-subjects',
         'available-exams',
+        'debug-assignment',
         'submit-exam',
         'ingest-results',
         'ingest-status',
