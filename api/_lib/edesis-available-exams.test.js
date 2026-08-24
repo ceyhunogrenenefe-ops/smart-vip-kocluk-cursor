@@ -212,6 +212,55 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     assert.deepEqual(items.map((x) => x.examId), ['41']);
   });
 
+  it('requireExplicitAssignment hides ancient assigned exams outside 180d window', () => {
+    const now = new Date('2026-08-24T12:00:00Z');
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [
+        {
+          id: 315978,
+          name: 'Eski 5. sınıf',
+          examType: '5 SINIF 75 LGS',
+          resultStatus: 'Ready',
+          examDate: '2023-11-11',
+          studentIds: [2086573]
+        },
+        {
+          id: 1561043,
+          name: 'Yeni LGS',
+          examType: 'LGS',
+          resultStatus: 'None',
+          examDate: '2026-08-15',
+          studentIds: [2086573]
+        }
+      ],
+      assignedCatalogRows: [
+        {
+          id: 315978,
+          name: 'Eski 5. sınıf',
+          examType: '5 SINIF 75 LGS',
+          resultStatus: 'Ready',
+          examDate: '2023-11-11'
+        },
+        {
+          id: 1561043,
+          name: 'Yeni LGS',
+          examType: 'LGS',
+          resultStatus: 'None',
+          examDate: '2026-08-15'
+        }
+      ],
+      resultRows: [],
+      edesisStudentId: '2086573',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: 'LGS' }),
+      now,
+      requireExplicitAssignment: true
+    });
+    assert.deepEqual(
+      items.filter((x) => x.canTake).map((x) => x.examId),
+      ['1561043']
+    );
+  });
+
   it('offers a StudentId-filtered catalog exam without studentIds on the row', () => {
     const now = new Date('2026-08-14T12:00:00Z');
     const assigned = [
