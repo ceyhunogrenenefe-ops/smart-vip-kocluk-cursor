@@ -166,13 +166,14 @@ async function loadAvailableEdesisExamsForStudent({
   studentHint,
   cfg
 }) {
+  const t0 = Date.now();
   const scope = await resolveStudentEdesisScope({
     edesisStudentId,
     platformStudentId,
     studentHint,
     cfg
   });
-  const catalog = await fetchEdesisExamsCatalog(cfg).catch(() => ({ rows: [] }));
+  const catalog = await fetchEdesisExamsCatalog(cfg).catch(() => ({ rows: [], cached: false }));
   const fullRows = catalog.rows || [];
   const [studentCatalog, classroomCatalog, studentResults] = await Promise.all([
     fetchEdesisExamsCatalogForStudent(edesisStudentId, cfg, {
@@ -245,12 +246,16 @@ async function loadAvailableEdesisExamsForStudent({
       studentCatalogCount: studentRows.length,
       classroomCatalogCount: classroomRows.length,
       fullCatalogCount: fullRows.length,
+      catalogCached: Boolean(catalog.cached),
       programKeys: [...(scope.programKeys || [])],
       adminAssignmentSource: adminAssignment?.source || null,
       adminSinavIdCount: adminAssignment?.ids?.length || 0,
       adminSinavIdsSample: (adminAssignment?.ids || []).slice(0, 20),
       adminAssignmentAttempts: adminAssignment?.attempts || [],
-      abpAuth
+      abpAuth,
+      probeSkipped: Boolean(assignedResolved?.probeSkipped),
+      probeSkipReason: assignedResolved?.probeSkipReason || null,
+      totalMs: Date.now() - t0
     }
   };
 }

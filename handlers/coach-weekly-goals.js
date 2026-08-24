@@ -275,8 +275,18 @@ export default async function handler(req, res) {
         if (ymdCmp(rangeFrom, rangeTo) > 0) {
           return res.status(400).json({ error: 'invalid_date_range' });
         }
+        // Kanıt: AppContext öğrenci için batch=1 + kendi student_id gönderiyor → 403 olmamalı
         if (actorIsStudentRole(roleSet)) {
-          return res.status(403).json({ error: 'forbidden' });
+          const ownId = String(actor.student_id || '').trim();
+          const requested = String(req.query.student_ids || req.query.studentIds || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+          if (!ownId || !requested.length || requested.some((id) => id !== ownId)) {
+            return res.status(403).json({ error: 'forbidden' });
+          }
+          const data = await listGoalsForStudentsRange([ownId], rangeFrom, rangeTo);
+          return res.status(200).json({ data });
         }
         const studentIds = await resolveCoachBatchStudentIds(ctx, req.query);
         if (!studentIds.length) return res.status(200).json({ data: {} });

@@ -1397,6 +1397,25 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
   }
 
   let known = new Set(assigned.map((ex) => pickEdesisCatalogExamId(ex)).filter(Boolean));
+  // Hız: admin ID listesi geldiyse veya ABP auth yok/401 ise 80× roster/detail probe yapma
+  const abpUnauthorized = (adminDetail.attempts || []).some(
+    (a) => a?.status === 401 || a?.status === 403 || a?.error === 'unauthorized'
+  );
+  const skipHeavyProbe =
+    adminSinavIds.length > 0 || abpUnauthorized || adminDetail?.abpAuth?.configured === false;
+  if (skipHeavyProbe) {
+    return {
+      rows: assigned,
+      adminAssignment: adminDetail,
+      probeSkipped: skipHeavyProbe,
+      probeSkipReason: adminSinavIds.length
+        ? 'admin_ids'
+        : abpUnauthorized
+          ? 'abp_unauthorized'
+          : 'abp_not_configured'
+    };
+  }
+
   const adminProbeIds = new Set(
     (adminSinavIds || []).map((id) => String(id).trim()).filter(Boolean)
   );
@@ -1412,7 +1431,7 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
       const quick = catalogExamAssignedToStudent(ex, scope);
       return quick !== false;
     })
-    .slice(0, 80);
+    .slice(0, 12);
   const seenCandidateIds = new Set();
   const candidates = [];
   for (const ex of [...fromAdminNotKnown, ...recencyCandidates]) {
@@ -3416,6 +3435,9 @@ export async function fetchEdesisTermsList(cfgOverride = {}) {
 }
 
 /** GET /exams — v1.5 §7.4: yalnızca Filter + resultsUpdatedAfter (StudentId/ClassroomId yok) */
+const examsCatalogCache = new Map();
+const EXAMS_CATALOG_TTL_MS = 90_000;
+
 export async function fetchEdesisExamsCatalog(cfgOverride = {}, query = {}) {
   const cfg = { ...getEdesisConfig(), ...cfgOverride };
   if (!cfg.apiKey) throw new Error('EDESIS_API_KEY_missing');
@@ -3423,13 +3445,21 @@ export async function fetchEdesisExamsCatalog(cfgOverride = {}, query = {}) {
   const q = {};
   if (query.Filter) q.Filter = query.Filter;
   if (query.resultsUpdatedAfter) q.resultsUpdatedAfter = query.resultsUpdatedAfter;
+  const cacheKey = `${localCfg.baseUrl}|${JSON.stringify(q)}`;
+  const hit = examsCatalogCache.get(cacheKey);
+  if (hit && Date.now() - hit.at < EXAMS_CATALOG_TTL_MS) {
+    return { ...hit.value, cached: true };
+  }
   const bulk = await fetchAllPaged(localCfg, V1_PATHS.exams, q);
-  return {
+  const value = {
     rows: bulk.rows || [],
     totalCount: bulk.totalCount ?? bulk.rows?.length ?? 0,
     httpStatus: bulk.response?.status ?? null,
-    error: bulk.error || null
+    error: bulk.error || null,
+    cached: false
   };
+  examsCatalogCache.set(cacheKey, { at: Date.now(), value });
+  return value;
 }
 
 /** GET /exams/results?studentId= — v1.5 §7.5 (StudentId parametresi /exams/{id}/results’ta YOK) */
