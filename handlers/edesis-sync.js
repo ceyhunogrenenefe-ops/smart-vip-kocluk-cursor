@@ -26,6 +26,7 @@ import {
   buildStudentAvailableEdesisExamItems,
   pickEdesisCatalogExamId,
   fetchEdesisOgrenciAssignedSinavIdsDetailed,
+  getEdesisAbpAuthStatus,
   fetchEdesisGradesList,
   fetchEdesisDepartmentsList,
   fetchEdesisClassroomsList,
@@ -228,6 +229,7 @@ async function loadAvailableEdesisExamsForStudent({
     requireExplicitAssignment: true
   });
   const takeableIds = items.filter((x) => x.canTake && !x.hasStudentResult).map((x) => x.examId);
+  const abpAuth = adminAssignment?.abpAuth || getEdesisAbpAuthStatus();
   return {
     items,
     meta: {
@@ -247,7 +249,8 @@ async function loadAvailableEdesisExamsForStudent({
       adminAssignmentSource: adminAssignment?.source || null,
       adminSinavIdCount: adminAssignment?.ids?.length || 0,
       adminSinavIdsSample: (adminAssignment?.ids || []).slice(0, 20),
-      adminAssignmentAttempts: adminAssignment?.attempts || []
+      adminAssignmentAttempts: adminAssignment?.attempts || [],
+      abpAuth
     }
   };
 }
@@ -1544,12 +1547,18 @@ export default async function handler(req, res) {
         scope: meta.assignmentMode || 'assigned',
         assignmentMeta: meta,
         takeableCount: items.filter((x) => x.canTake && !x.hasStudentResult).length,
-        hint:
-          items.filter((x) => x.canTake && !x.hasStudentResult).length > 0
-            ? null
-            : items.length
-              ? 'Girilmiş sonuçlarınız var; size tanımlı yeni açık deneme yok.'
-              : 'Size tanımlı açık Edesis denemesi yok. Koçunuzun Edesis’te bu öğrenci ID’sine sınav atadığından emin olun.'
+        hint: (() => {
+          const takeable = items.filter((x) => x.canTake && !x.hasStudentResult).length;
+          if (takeable > 0) return null;
+          const abp = meta.abpAuth || {};
+          if (!abp.configured) {
+            return 'Size tanımlı açık deneme listesi için Edesis panel oturumu gerekir (Vercel: EDESIS_ABP_USER + EDESIS_ABP_PASSWORD). Katalog dökülmez.';
+          }
+          if (items.length) {
+            return 'Girilmiş sonuçlarınız var; size tanımlı yeni açık deneme yok.';
+          }
+          return 'Size tanımlı açık Edesis denemesi yok. Koçunuzun Edesis’te bu öğrenci ID’sine sınav atadığından emin olun.';
+        })()
       });
     }
 

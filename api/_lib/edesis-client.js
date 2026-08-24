@@ -139,6 +139,9 @@ export function getEdesisConfig() {
   const legacyResults = String(process.env.EDESIS_RESULTS_PATH || '').trim();
   const legacyExams = String(process.env.EDESIS_EXAMS_PATH || '').trim();
   const institutionCode = String(process.env.EDESIS_INSTITUTION_CODE || '').trim();
+  const abpUser = String(process.env.EDESIS_ABP_USER || process.env.EDESIS_ABP_USERNAME || '').trim();
+  const abpPassword = String(process.env.EDESIS_ABP_PASSWORD || '').trim();
+  const abpBearer = String(process.env.EDESIS_ABP_BEARER || process.env.EDESIS_ABP_TOKEN || '').trim();
 
   const bases = baseUrl ? [baseUrl] : DEFAULT_BASES;
 
@@ -150,7 +153,10 @@ export function getEdesisConfig() {
     authMode,
     apiVersion: 'v1.5',
     legacyResultsPath: legacyResults || null,
-    legacyExamsPath: legacyExams || null
+    legacyExamsPath: legacyExams || null,
+    abpUser,
+    abpPassword,
+    abpBearer
   };
 }
 
@@ -161,6 +167,137 @@ function buildHeaders(cfg, { forGet = false } = {}) {
   if (cfg.authMode === 'bearer') h.Authorization = `Bearer ${cfg.apiKey}`;
   else h['X-API-Key'] = cfg.apiKey;
   return h;
+}
+
+/** ABP App Service çağrıları — X-API-Key ile 403; Bearer (TokenAuth) gerekir */
+function buildAbpHeaders(cfg, abpAccessToken, { forGet = false } = {}) {
+  const h = { Accept: 'application/json' };
+  if (!forGet) h['Content-Type'] = 'application/json';
+  const token = String(abpAccessToken || cfg.abpBearer || '').trim();
+  if (token) h.Authorization = `Bearer ${token}`;
+  return h;
+}
+
+let abpTokenCache = { token: '', expiresAt: 0, status: 'unknown', error: null };
+
+export function getEdesisAbpAuthStatus() {
+  return {
+    configured: Boolean(
+      String(process.env.EDESIS_ABP_BEARER || process.env.EDESIS_ABP_TOKEN || '').trim() ||
+        (String(process.env.EDESIS_ABP_USER || process.env.EDESIS_ABP_USERNAME || '').trim() &&
+          String(process.env.EDESIS_ABP_PASSWORD || '').trim())
+    ),
+    cacheStatus: abpTokenCache.status,
+    cacheError: abpTokenCache.error,
+    hasCachedToken: Boolean(abpTokenCache.token && abpTokenCache.expiresAt > Date.now())
+  };
+}
+
+/**
+ * ID’siz AP (GetOgrenciSinavIds vb.) için ABP oturumu.
+ * Kanıt: GetSinavForView X-API-Key → 403; TokenAuth + Bearer gerekir.
+ */
+export async function resolveEdesisAbpAccessToken(cfgOverride = {}) {
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  if (cfg.abpBearer) {
+    abpTokenCache = { token: cfg.abpBearer, expiresAt: Date.now() + 55 * 60_000, status: 'env_bearer', error: null };
+    return { token: cfg.abpBearer, status: 'env_bearer', error: null };
+  }
+  if (abpTokenCache.token && abpTokenCache.expiresAt > Date.now() + 30_000) {
+    return { token: abpTokenCache.token, status: abpTokenCache.status, error: null };
+  }
+  if (!cfg.abpUser || !cfg.abpPassword) {
+    abpTokenCache = {
+      token: '',
+      expiresAt: 0,
+      status: 'missing_credentials',
+      error: 'EDESIS_ABP_USER + EDESIS_ABP_PASSWORD (veya EDESIS_ABP_BEARER) tanımlayın'
+    };
+    return { token: '', status: 'missing_credentials', error: abpTokenCache.error };
+  }
+
+  const base = cfg.baseUrl || cfg.bases[0];
+  try {
+    const res = await fetch(joinUrl(base, '/api/TokenAuth/Authenticate'), {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userNameOrEmailAddress: cfg.abpUser,
+        password: cfg.abpPassword,
+        rememberClient: true
+      }),
+      signal: AbortSignal.timeout(20000)
+    });
+    const json = await res.json().catch(() => ({}));
+    const body = json?.result && typeof json.result === 'object' ? json.result : json;
+    const token = String(body?.accessToken || '').trim();
+    if (!res.ok || !token) {
+      const err =
+        json?.error?.message ||
+        body?.error?.message ||
+        `TokenAuth HTTP ${res.status}`;
+      abpTokenCache = { token: '', expiresAt: 0, status: 'auth_failed', error: String(err).slice(0, 200) };
+      return { token: '', status: 'auth_failed', error: abpTokenCache.error };
+    }
+    const ttlSec = Number(body?.expireInSeconds) || 3600;
+    abpTokenCache = {
+      token,
+      expiresAt: Date.now() + Math.max(60, ttlSec - 60) * 1000,
+      status: 'authenticated',
+      error: null
+    };
+    return { token, status: 'authenticated', error: null };
+  } catch (e) {
+    abpTokenCache = {
+      token: '',
+      expiresAt: 0,
+      status: 'auth_error',
+      error: e instanceof Error ? e.message : String(e)
+    };
+    return { token: '', status: 'auth_error', error: abpTokenCache.error };
+  }
+}
+
+async function fetchEdesisAbpJson(cfg, path, { method = 'GET', body, timeoutMs = 30000 } = {}) {
+  const auth = await resolveEdesisAbpAccessToken(cfg);
+  if (!auth.token) {
+    return {
+      ok: false,
+      status: 401,
+      url: joinUrl(cfg.baseUrl || cfg.bases[0], path),
+      json: { error: auth.error || 'abp_auth_missing', abpStatus: auth.status },
+      parseOk: true,
+      contentType: 'application/json',
+      rawPreview: String(auth.error || auth.status).slice(0, 200),
+      text: '',
+      abpAuth: auth
+    };
+  }
+  const url = joinUrl(cfg.baseUrl || cfg.bases[0], path);
+  const init = {
+    method,
+    headers: buildAbpHeaders(cfg, auth.token, { forGet: method === 'GET' }),
+    signal: AbortSignal.timeout(timeoutMs)
+  };
+  if (body !== undefined && method !== 'GET') {
+    init.body = typeof body === 'string' ? body : JSON.stringify(body);
+  }
+  const res = await fetch(url, init);
+  const text = await res.text();
+  const contentType = res.headers.get('content-type') || '';
+  const parsed = parseEdesisResponseText(text);
+  const json = parsed.parseOk ? parsed.json : { _raw: parsed.rawPreview, _invalidBody: parsed.invalidBody };
+  return {
+    ok: res.ok,
+    status: res.status,
+    url,
+    json,
+    parseOk: parsed.parseOk,
+    contentType,
+    rawPreview: parsed.rawPreview,
+    text: stripResponseText(text)?.slice(0, 300),
+    abpAuth: auth
+  };
 }
 
 function joinUrl(base, path) {
@@ -725,9 +862,9 @@ export async function fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId
 
   const tryGet = async (label, path, parseFn) => {
     try {
-      const r = await fetchEdesisJson(localCfg, path);
+      const r = await fetchEdesisAbpJson(localCfg, path);
       if (r.status === 401 || r.status === 403) {
-        record(label, path, r.status, [], 'auth_rejected');
+        record(label, path, r.status, [], r.json?.abpStatus || r.abpAuth?.status || 'auth_rejected');
         return null;
       }
       if (!isReachableEdesisResponse(r)) {
@@ -745,9 +882,9 @@ export async function fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId
 
   const tryPost = async (label, path, body, parseFn) => {
     try {
-      const r = await fetchEdesisJson(localCfg, path, { method: 'POST', body });
+      const r = await fetchEdesisAbpJson(localCfg, path, { method: 'POST', body });
       if (r.status === 401 || r.status === 403) {
-        record(label, path, r.status, [], 'auth_rejected');
+        record(label, path, r.status, [], r.json?.abpStatus || r.abpAuth?.status || 'auth_rejected');
         return null;
       }
       if (!isReachableEdesisResponse(r)) {
@@ -786,9 +923,9 @@ export async function fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId
   if (!ids) {
     const path = `/api/services/app/SinavOgrencies/GetAll?Filter=${encodeURIComponent(sid)}&MaxResultCount=500`;
     try {
-      const r = await fetchEdesisJson(localCfg, path);
+      const r = await fetchEdesisAbpJson(localCfg, path);
       if (r.status === 401 || r.status === 403) {
-        record('SinavOgrencies.GetAll', path, r.status, [], 'auth_rejected');
+        record('SinavOgrencies.GetAll', path, r.status, [], r.json?.abpStatus || r.abpAuth?.status || 'auth_rejected');
       } else if (isReachableEdesisResponse(r)) {
         const fromSinavIds = parseEdesisOgrenciSinavIdsResponse(r.json);
         const fromRows = extractSinavIdsFromSinavOgrenciRows(unwrapList(r.json), sid);
@@ -803,7 +940,8 @@ export async function fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId
   }
 
   const source = attempts.find((a) => a.count > 0)?.label || null;
-  return { ids: ids || [], attempts, source };
+  const abpAuth = getEdesisAbpAuthStatus();
+  return { ids: ids || [], attempts, source, abpAuth };
 }
 
 export async function fetchEdesisOgrenciAssignedSinavIds(edesisStudentId, cfgOverride = {}) {
@@ -818,7 +956,7 @@ export async function fetchEdesisExamRosterStudentIds(examId, cfgOverride = {}) 
   const cfg = { ...getEdesisConfig(), ...cfgOverride };
   const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
   try {
-    const r = await fetchEdesisJson(
+    const r = await fetchEdesisAbpJson(
       localCfg,
       `/api/services/app/OgrenciSinavs/GetOgrenciBySinavId?sinavId=${encodeURIComponent(id)}`
     );
