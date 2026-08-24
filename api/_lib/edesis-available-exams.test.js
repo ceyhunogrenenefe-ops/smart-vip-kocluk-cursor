@@ -8,6 +8,7 @@ import {
   collectExplicitlyAssignedCatalogRows,
   pickEdesisCatalogExamId,
   parseEdesisOgrenciSinavIdsResponse,
+  parseEdesisOgrenciSinavListesiResponse,
   collectCatalogRowsForSinavIds,
   pickEdesisResultExamId,
   resultRowBelongsToStudent,
@@ -734,6 +735,96 @@ describe('parseEdesisOgrenciSinavIdsResponse', () => {
 
   it('deduplicates ids', () => {
     assert.deepEqual(parseEdesisOgrenciSinavIdsResponse({ sinavId: [4, 4, 7] }), ['4', '7']);
+  });
+});
+
+describe('parseEdesisOgrenciSinavListesiResponse', () => {
+  it('extracts sinavId from AnalizSinavDto sinavlar', () => {
+    const ids = parseEdesisOgrenciSinavListesiResponse([
+      {
+        sinavTuru: 'LGS',
+        sinavTuruId: 1,
+        sinavlar: [
+          { sinavAdi: 'Deneme 1', sinavId: 111, isChecked: true },
+          { sinavAdi: 'Deneme 2', sinavId: 222, isChecked: false }
+        ]
+      }
+    ]);
+    assert.deepEqual(ids, ['111', '222']);
+  });
+
+  it('extracts from ByDonemIds wrapper', () => {
+    const ids = parseEdesisOgrenciSinavListesiResponse({
+      result: [
+        {
+          donemAdi: '2025-2026',
+          donemId: 9,
+          donemSinavlar: [
+            {
+              sinavTuru: 'LGS',
+              sinavlar: [{ sinavId: 555 }]
+            }
+          ]
+        }
+      ]
+    });
+    assert.deepEqual(ids, ['555']);
+  });
+});
+
+describe('requireExplicitAssignment never dumps catalog', () => {
+  it('empty assignment + no fallback → no takeable exams', () => {
+    const catalog = [
+      { id: 1, name: 'LGS Yeni', examType: 'LGS', resultStatus: 'None', examDate: '2026-08-10' },
+      { id: 2, name: 'TYT', examType: 'TYT', resultStatus: 'None', examDate: '2026-08-11' }
+    ];
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: catalog,
+      assignedCatalogRows: [],
+      resultRows: [],
+      edesisStudentId: '2086573',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      now: new Date('2026-08-14T12:00:00Z'),
+      allowRecencyFallback: false,
+      requireExplicitAssignment: true
+    });
+    assert.equal(items.filter((x) => x.canTake).length, 0);
+  });
+
+  it('shows only admin-assigned open exams for Safiye id', () => {
+    const catalog = [
+      {
+        id: 1569664,
+        name: 'Safiye Atanan Açık',
+        examType: 'LGS',
+        resultStatus: 'None',
+        examDate: '2026-08-20',
+        studentIds: [2086573]
+      },
+      {
+        id: 1574084,
+        name: 'Başkasının TYT',
+        examType: 'TYT',
+        resultStatus: 'None',
+        examDate: '2026-08-24',
+        studentIds: [999]
+      },
+      { id: 4, name: 'Atamasız LGS', examType: 'LGS', resultStatus: 'None', examDate: '2026-08-10' }
+    ];
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: catalog,
+      assignedCatalogRows: [catalog[0]],
+      resultRows: [],
+      edesisStudentId: '2086573',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: 'LGS' }),
+      now: new Date('2026-08-24T12:00:00Z'),
+      allowRecencyFallback: false,
+      requireExplicitAssignment: true
+    });
+    assert.deepEqual(
+      items.filter((x) => x.canTake).map((x) => x.examId),
+      ['1569664']
+    );
   });
 });
 

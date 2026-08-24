@@ -631,49 +631,184 @@ export function parseEdesisOgrenciSinavIdsResponse(json) {
   return [...new Set(list.map((x) => String(x).trim()).filter(Boolean))];
 }
 
-export async function fetchEdesisOgrenciAssignedSinavIds(edesisStudentId, cfgOverride = {}) {
+/**
+ * ID’siz App Service yanıtlarından sinavId çıkar:
+ * - GetOgrenciSinavIds → { sinavId: number[] }
+ * - OgrenciSinavListesi → AnalizSinavDto[] → sinavlar[].sinavId
+ * - OgrenciSinavListesiByDonemIds → AnalizSinavDonemDto[] → donemSinavlar
+ */
+export function parseEdesisOgrenciSinavListesiResponse(json) {
+  const fromIds = parseEdesisOgrenciSinavIdsResponse(json);
+  if (fromIds.length) return fromIds;
+
+  const root =
+    json?.result != null && (Array.isArray(json.result) || typeof json.result === 'object')
+      ? json.result
+      : json;
+  const buckets = [];
+  if (Array.isArray(root)) buckets.push(...root);
+  else if (root && typeof root === 'object') {
+    for (const k of ['donemSinavlar', 'sinavlar', 'items', 'result', 'data']) {
+      const v = root[k];
+      if (Array.isArray(v)) buckets.push(...v);
+    }
+    buckets.push(root);
+  }
+
+  const out = [];
+  const walk = (node) => {
+    if (!node) return;
+    if (Array.isArray(node)) {
+      for (const it of node) walk(it);
+      return;
+    }
+    if (typeof node !== 'object') return;
+    const flat = flattenEdesisRow(node);
+    const direct =
+      pickStrCi(flat, ['sinavId', 'examId']) ||
+      (flat.sinavId != null ? String(flat.sinavId) : '') ||
+      (flat.SinavId != null ? String(flat.SinavId) : '');
+    if (direct && /^\d+$/.test(String(direct).trim())) out.push(String(direct).trim());
+    for (const k of ['sinavlar', 'donemSinavlar', 'items', 'exams']) {
+      if (Array.isArray(flat[k])) walk(flat[k]);
+    }
+  };
+  walk(buckets);
+  return [...new Set(out.filter(Boolean))];
+}
+
+function extractSinavIdsFromSinavOgrenciRows(rows, sid) {
+  const fromRows = [];
+  for (const row of rows || []) {
+    const flat = flattenEdesisRow(row);
+    const nested = flattenEdesisRow(flat.sinavOgrenci || flat.SinavOgrenci || {});
+    const rowSid =
+      pickStrCi(nested, ['ogrenciId', 'studentId']) ||
+      pickStrCi(flat, ['ogrenciId', 'studentId', 'ogrenciOkulNumarasi']);
+    if (rowSid && normEdesisId(rowSid) !== sid && String(rowSid).trim() !== sid) {
+      const hasOgrenci = Boolean(
+        pickStrCi(nested, ['ogrenciId', 'studentId']) || pickStrCi(flat, ['ogrenciId', 'studentId'])
+      );
+      if (hasOgrenci) continue;
+    }
+    if (rowSid && normEdesisId(rowSid) !== sid) continue;
+    const examId =
+      pickStrCi(nested, ['sinavId', 'examId']) || pickStrCi(flat, ['sinavId', 'examId', 'id']);
+    if (examId) fromRows.push(String(examId));
+  }
+  return [...new Set(fromRows)];
+}
+
+/**
+ * Öğrenciye tanımlı sınav ID’leri — sınav ID bilmeden (ID’siz AP).
+ * Kaynak sırası (swagger): GetOgrenciSinavIds → OgrenciSinavListesi → ByDonemIds → SinavOgrencies.
+ */
+export async function fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId, cfgOverride = {}) {
   const sid = normEdesisId(edesisStudentId);
-  if (!sid) return [];
+  const empty = { ids: [], attempts: [], source: null };
+  if (!sid) return empty;
   const cfg = { ...getEdesisConfig(), ...cfgOverride };
   const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
-  const paths = [
-    `/api/services/app/OgrenciSinavs/GetOgrenciSinavIds?ogrenciId=${encodeURIComponent(sid)}`,
-    `/api/services/app/SinavOgrencies/GetAll?Filter=${encodeURIComponent(sid)}&MaxResultCount=500`
-  ];
-  for (const path of paths) {
+  const attempts = [];
+  const numericSid = Number(sid);
+  const sidBody = Number.isFinite(numericSid) ? numericSid : sid;
+
+  const record = (label, path, status, ids, note = null) => {
+    attempts.push({
+      label,
+      path,
+      status: status ?? null,
+      count: Array.isArray(ids) ? ids.length : 0,
+      note
+    });
+  };
+
+  const tryGet = async (label, path, parseFn) => {
     try {
       const r = await fetchEdesisJson(localCfg, path);
-      if (r.status === 401 || r.status === 403) continue;
-      if (!isReachableEdesisResponse(r)) continue;
-      const fromSinavIds = parseEdesisOgrenciSinavIdsResponse(r.json);
-      if (fromSinavIds.length) return fromSinavIds;
-      const rows = unwrapList(r.json);
-      const fromRows = [];
-      for (const row of rows) {
-        const flat = flattenEdesisRow(row);
-        const nested = flattenEdesisRow(flat.sinavOgrenci || flat.SinavOgrenci || {});
-        const rowSid =
-          pickStrCi(nested, ['ogrenciId', 'studentId']) ||
-          pickStrCi(flat, ['ogrenciId', 'studentId', 'ogrenciOkulNumarasi']);
-        if (rowSid && normEdesisId(rowSid) !== sid && String(rowSid).trim() !== sid) {
-          // Filter geniş eşleşebilir — satırda öğrenci ID yoksa sinavId yine de al
-          const hasOgrenci = Boolean(
-            pickStrCi(nested, ['ogrenciId', 'studentId']) || pickStrCi(flat, ['ogrenciId', 'studentId'])
-          );
-          if (hasOgrenci) continue;
-        }
-        if (rowSid && normEdesisId(rowSid) !== sid) continue;
-        const examId =
-          pickStrCi(nested, ['sinavId', 'examId']) ||
-          pickStrCi(flat, ['sinavId', 'examId', 'id']);
-        if (examId) fromRows.push(String(examId));
+      if (r.status === 401 || r.status === 403) {
+        record(label, path, r.status, [], 'auth_rejected');
+        return null;
       }
-      if (fromRows.length) return [...new Set(fromRows)];
-    } catch {
-      /* sonraki uç */
+      if (!isReachableEdesisResponse(r)) {
+        record(label, path, r.status, [], 'unreachable');
+        return null;
+      }
+      const ids = parseFn(r.json);
+      record(label, path, r.status, ids);
+      return ids.length ? ids : null;
+    } catch (e) {
+      record(label, path, null, [], e instanceof Error ? e.message : 'error');
+      return null;
+    }
+  };
+
+  const tryPost = async (label, path, body, parseFn) => {
+    try {
+      const r = await fetchEdesisJson(localCfg, path, { method: 'POST', body });
+      if (r.status === 401 || r.status === 403) {
+        record(label, path, r.status, [], 'auth_rejected');
+        return null;
+      }
+      if (!isReachableEdesisResponse(r)) {
+        record(label, path, r.status, [], 'unreachable');
+        return null;
+      }
+      const ids = parseFn(r.json);
+      record(label, path, r.status, ids);
+      return ids.length ? ids : null;
+    } catch (e) {
+      record(label, path, null, [], e instanceof Error ? e.message : 'error');
+      return null;
+    }
+  };
+
+  let ids =
+    (await tryGet(
+      'GetOgrenciSinavIds',
+      `/api/services/app/OgrenciSinavs/GetOgrenciSinavIds?ogrenciId=${encodeURIComponent(sid)}`,
+      parseEdesisOgrenciSinavIdsResponse
+    )) ||
+    (await tryPost(
+      'OgrenciSinavListesi',
+      `/api/services/app/Sinavs/OgrenciSinavListesi`,
+      [sidBody],
+      parseEdesisOgrenciSinavListesiResponse
+    )) ||
+    (await tryPost(
+      'OgrenciSinavListesiByDonemIds',
+      `/api/services/app/Sinavs/OgrenciSinavListesiByDonemIds`,
+      // Swagger şeması: ogrengiIds (yazım hatası Edesis tarafında)
+      { ogrengiIds: [sidBody], ogrenciIds: [sidBody], donemIds: [] },
+      parseEdesisOgrenciSinavListesiResponse
+    ));
+
+  if (!ids) {
+    const path = `/api/services/app/SinavOgrencies/GetAll?Filter=${encodeURIComponent(sid)}&MaxResultCount=500`;
+    try {
+      const r = await fetchEdesisJson(localCfg, path);
+      if (r.status === 401 || r.status === 403) {
+        record('SinavOgrencies.GetAll', path, r.status, [], 'auth_rejected');
+      } else if (isReachableEdesisResponse(r)) {
+        const fromSinavIds = parseEdesisOgrenciSinavIdsResponse(r.json);
+        const fromRows = extractSinavIdsFromSinavOgrenciRows(unwrapList(r.json), sid);
+        ids = fromSinavIds.length ? fromSinavIds : fromRows.length ? fromRows : null;
+        record('SinavOgrencies.GetAll', path, r.status, ids || []);
+      } else {
+        record('SinavOgrencies.GetAll', path, r.status, [], 'unreachable');
+      }
+    } catch (e) {
+      record('SinavOgrencies.GetAll', path, null, [], e instanceof Error ? e.message : 'error');
     }
   }
-  return [];
+
+  const source = attempts.find((a) => a.count > 0)?.label || null;
+  return { ids: ids || [], attempts, source };
+}
+
+export async function fetchEdesisOgrenciAssignedSinavIds(edesisStudentId, cfgOverride = {}) {
+  const detailed = await fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId, cfgOverride);
+  return detailed.ids;
 }
 
 /** GET /OgrenciSinavs/GetOgrenciBySinavId — sınava tanımlı öğrenci listesi */
@@ -1080,7 +1215,7 @@ export async function fetchEdesisExamCatalogRowDetail(examId, cfgOverride = {}) 
 
 /**
  * Katalog listesinde ogrenciIds yoksa:
- * admin sinavId listesi + sınıf kataloğu + detay + GetOgrenciBySinavId roster + results.
+ * admin sinavId listesi (ID’siz AP) + sınıf kataloğu + detay + GetOgrenciBySinavId roster + results.
  */
 export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverride = {}) {
   const {
@@ -1100,7 +1235,8 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     requireStudentIdMatch: true
   });
 
-  const adminSinavIds = await fetchEdesisOgrenciAssignedSinavIds(edesisStudentId, cfgOverride);
+  const adminDetail = await fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId, cfgOverride);
+  const adminSinavIds = adminDetail.ids || [];
   if (adminSinavIds.length) {
     assigned = mergeEdesisCatalogExamsById(
       assigned,
@@ -1148,7 +1284,9 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     candidates.push(ex);
   }
 
-  if (!candidates.length) return assigned;
+  if (!candidates.length) {
+    return { rows: assigned, adminAssignment: adminDetail };
+  }
 
   let rosterApiAlive = true;
   const probeOne = async (ex) => {
@@ -1183,7 +1321,7 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     assigned = mergeEdesisCatalogExamsById(assigned, found.filter(Boolean));
     known = new Set(assigned.map((ex) => pickEdesisCatalogExamId(ex)).filter(Boolean));
   }
-  return assigned;
+  return { rows: assigned, adminAssignment: adminDetail };
 }
 
 /**
