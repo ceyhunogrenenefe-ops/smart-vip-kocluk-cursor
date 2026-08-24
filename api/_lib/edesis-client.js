@@ -1590,10 +1590,15 @@ export function shouldOfferUntakenCatalogExam(exam, scope = {}, now = new Date()
   if (scope.requireExplicitAssignment) {
     if (assigned === true) {
       if (keys.size && !edesisCatalogExamMatchesProgram(exam, keys)) return false;
+      // Atanmış ama yıllar önce kalmış denemeyi Sınava gir’e koyma (canlı: 2023–2024 5.sınıf)
+      const win = Number(scope.assignedTakeableWindowDays) || 180;
+      if (!isRecentOpenCatalogExam(exam, now, win)) return false;
       return true;
     }
     if (scope.assignedCatalogOnly) {
       if (keys.size && !edesisCatalogExamMatchesProgram(exam, keys)) return false;
+      const win = Number(scope.assignedTakeableWindowDays) || 180;
+      if (!isRecentOpenCatalogExam(exam, now, win)) return false;
       return true;
     }
     return false;
