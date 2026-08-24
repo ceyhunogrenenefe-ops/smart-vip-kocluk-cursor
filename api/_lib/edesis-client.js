@@ -139,6 +139,9 @@ export function getEdesisConfig() {
   const legacyResults = String(process.env.EDESIS_RESULTS_PATH || '').trim();
   const legacyExams = String(process.env.EDESIS_EXAMS_PATH || '').trim();
   const institutionCode = String(process.env.EDESIS_INSTITUTION_CODE || '').trim();
+  const abpUser = String(process.env.EDESIS_ABP_USER || process.env.EDESIS_ABP_USERNAME || '').trim();
+  const abpPassword = String(process.env.EDESIS_ABP_PASSWORD || '').trim();
+  const abpBearer = String(process.env.EDESIS_ABP_BEARER || process.env.EDESIS_ABP_TOKEN || '').trim();
 
   const bases = baseUrl ? [baseUrl] : DEFAULT_BASES;
 
@@ -150,7 +153,10 @@ export function getEdesisConfig() {
     authMode,
     apiVersion: 'v1.5',
     legacyResultsPath: legacyResults || null,
-    legacyExamsPath: legacyExams || null
+    legacyExamsPath: legacyExams || null,
+    abpUser,
+    abpPassword,
+    abpBearer
   };
 }
 
@@ -161,6 +167,137 @@ function buildHeaders(cfg, { forGet = false } = {}) {
   if (cfg.authMode === 'bearer') h.Authorization = `Bearer ${cfg.apiKey}`;
   else h['X-API-Key'] = cfg.apiKey;
   return h;
+}
+
+/** ABP App Service çağrıları — X-API-Key ile 403; Bearer (TokenAuth) gerekir */
+function buildAbpHeaders(cfg, abpAccessToken, { forGet = false } = {}) {
+  const h = { Accept: 'application/json' };
+  if (!forGet) h['Content-Type'] = 'application/json';
+  const token = String(abpAccessToken || cfg.abpBearer || '').trim();
+  if (token) h.Authorization = `Bearer ${token}`;
+  return h;
+}
+
+let abpTokenCache = { token: '', expiresAt: 0, status: 'unknown', error: null };
+
+export function getEdesisAbpAuthStatus() {
+  return {
+    configured: Boolean(
+      String(process.env.EDESIS_ABP_BEARER || process.env.EDESIS_ABP_TOKEN || '').trim() ||
+        (String(process.env.EDESIS_ABP_USER || process.env.EDESIS_ABP_USERNAME || '').trim() &&
+          String(process.env.EDESIS_ABP_PASSWORD || '').trim())
+    ),
+    cacheStatus: abpTokenCache.status,
+    cacheError: abpTokenCache.error,
+    hasCachedToken: Boolean(abpTokenCache.token && abpTokenCache.expiresAt > Date.now())
+  };
+}
+
+/**
+ * ID’siz AP (GetOgrenciSinavIds vb.) için ABP oturumu.
+ * Kanıt: GetSinavForView X-API-Key → 403; TokenAuth + Bearer gerekir.
+ */
+export async function resolveEdesisAbpAccessToken(cfgOverride = {}) {
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  if (cfg.abpBearer) {
+    abpTokenCache = { token: cfg.abpBearer, expiresAt: Date.now() + 55 * 60_000, status: 'env_bearer', error: null };
+    return { token: cfg.abpBearer, status: 'env_bearer', error: null };
+  }
+  if (abpTokenCache.token && abpTokenCache.expiresAt > Date.now() + 30_000) {
+    return { token: abpTokenCache.token, status: abpTokenCache.status, error: null };
+  }
+  if (!cfg.abpUser || !cfg.abpPassword) {
+    abpTokenCache = {
+      token: '',
+      expiresAt: 0,
+      status: 'missing_credentials',
+      error: 'EDESIS_ABP_USER + EDESIS_ABP_PASSWORD (veya EDESIS_ABP_BEARER) tanımlayın'
+    };
+    return { token: '', status: 'missing_credentials', error: abpTokenCache.error };
+  }
+
+  const base = cfg.baseUrl || cfg.bases[0];
+  try {
+    const res = await fetch(joinUrl(base, '/api/TokenAuth/Authenticate'), {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userNameOrEmailAddress: cfg.abpUser,
+        password: cfg.abpPassword,
+        rememberClient: true
+      }),
+      signal: AbortSignal.timeout(20000)
+    });
+    const json = await res.json().catch(() => ({}));
+    const body = json?.result && typeof json.result === 'object' ? json.result : json;
+    const token = String(body?.accessToken || '').trim();
+    if (!res.ok || !token) {
+      const err =
+        json?.error?.message ||
+        body?.error?.message ||
+        `TokenAuth HTTP ${res.status}`;
+      abpTokenCache = { token: '', expiresAt: 0, status: 'auth_failed', error: String(err).slice(0, 200) };
+      return { token: '', status: 'auth_failed', error: abpTokenCache.error };
+    }
+    const ttlSec = Number(body?.expireInSeconds) || 3600;
+    abpTokenCache = {
+      token,
+      expiresAt: Date.now() + Math.max(60, ttlSec - 60) * 1000,
+      status: 'authenticated',
+      error: null
+    };
+    return { token, status: 'authenticated', error: null };
+  } catch (e) {
+    abpTokenCache = {
+      token: '',
+      expiresAt: 0,
+      status: 'auth_error',
+      error: e instanceof Error ? e.message : String(e)
+    };
+    return { token: '', status: 'auth_error', error: abpTokenCache.error };
+  }
+}
+
+async function fetchEdesisAbpJson(cfg, path, { method = 'GET', body, timeoutMs = 30000 } = {}) {
+  const auth = await resolveEdesisAbpAccessToken(cfg);
+  if (!auth.token) {
+    return {
+      ok: false,
+      status: 401,
+      url: joinUrl(cfg.baseUrl || cfg.bases[0], path),
+      json: { error: auth.error || 'abp_auth_missing', abpStatus: auth.status },
+      parseOk: true,
+      contentType: 'application/json',
+      rawPreview: String(auth.error || auth.status).slice(0, 200),
+      text: '',
+      abpAuth: auth
+    };
+  }
+  const url = joinUrl(cfg.baseUrl || cfg.bases[0], path);
+  const init = {
+    method,
+    headers: buildAbpHeaders(cfg, auth.token, { forGet: method === 'GET' }),
+    signal: AbortSignal.timeout(timeoutMs)
+  };
+  if (body !== undefined && method !== 'GET') {
+    init.body = typeof body === 'string' ? body : JSON.stringify(body);
+  }
+  const res = await fetch(url, init);
+  const text = await res.text();
+  const contentType = res.headers.get('content-type') || '';
+  const parsed = parseEdesisResponseText(text);
+  const json = parsed.parseOk ? parsed.json : { _raw: parsed.rawPreview, _invalidBody: parsed.invalidBody };
+  return {
+    ok: res.ok,
+    status: res.status,
+    url,
+    json,
+    parseOk: parsed.parseOk,
+    contentType,
+    rawPreview: parsed.rawPreview,
+    text: stripResponseText(text)?.slice(0, 300),
+    abpAuth: auth
+  };
 }
 
 function joinUrl(base, path) {
@@ -631,49 +768,185 @@ export function parseEdesisOgrenciSinavIdsResponse(json) {
   return [...new Set(list.map((x) => String(x).trim()).filter(Boolean))];
 }
 
-export async function fetchEdesisOgrenciAssignedSinavIds(edesisStudentId, cfgOverride = {}) {
+/**
+ * ID’siz App Service yanıtlarından sinavId çıkar:
+ * - GetOgrenciSinavIds → { sinavId: number[] }
+ * - OgrenciSinavListesi → AnalizSinavDto[] → sinavlar[].sinavId
+ * - OgrenciSinavListesiByDonemIds → AnalizSinavDonemDto[] → donemSinavlar
+ */
+export function parseEdesisOgrenciSinavListesiResponse(json) {
+  const fromIds = parseEdesisOgrenciSinavIdsResponse(json);
+  if (fromIds.length) return fromIds;
+
+  const root =
+    json?.result != null && (Array.isArray(json.result) || typeof json.result === 'object')
+      ? json.result
+      : json;
+  const buckets = [];
+  if (Array.isArray(root)) buckets.push(...root);
+  else if (root && typeof root === 'object') {
+    for (const k of ['donemSinavlar', 'sinavlar', 'items', 'result', 'data']) {
+      const v = root[k];
+      if (Array.isArray(v)) buckets.push(...v);
+    }
+    buckets.push(root);
+  }
+
+  const out = [];
+  const walk = (node) => {
+    if (!node) return;
+    if (Array.isArray(node)) {
+      for (const it of node) walk(it);
+      return;
+    }
+    if (typeof node !== 'object') return;
+    const flat = flattenEdesisRow(node);
+    const direct =
+      pickStrCi(flat, ['sinavId', 'examId']) ||
+      (flat.sinavId != null ? String(flat.sinavId) : '') ||
+      (flat.SinavId != null ? String(flat.SinavId) : '');
+    if (direct && /^\d+$/.test(String(direct).trim())) out.push(String(direct).trim());
+    for (const k of ['sinavlar', 'donemSinavlar', 'items', 'exams']) {
+      if (Array.isArray(flat[k])) walk(flat[k]);
+    }
+  };
+  walk(buckets);
+  return [...new Set(out.filter(Boolean))];
+}
+
+function extractSinavIdsFromSinavOgrenciRows(rows, sid) {
+  const fromRows = [];
+  for (const row of rows || []) {
+    const flat = flattenEdesisRow(row);
+    const nested = flattenEdesisRow(flat.sinavOgrenci || flat.SinavOgrenci || {});
+    const rowSid =
+      pickStrCi(nested, ['ogrenciId', 'studentId']) ||
+      pickStrCi(flat, ['ogrenciId', 'studentId', 'ogrenciOkulNumarasi']);
+    if (rowSid && normEdesisId(rowSid) !== sid && String(rowSid).trim() !== sid) {
+      const hasOgrenci = Boolean(
+        pickStrCi(nested, ['ogrenciId', 'studentId']) || pickStrCi(flat, ['ogrenciId', 'studentId'])
+      );
+      if (hasOgrenci) continue;
+    }
+    if (rowSid && normEdesisId(rowSid) !== sid) continue;
+    const examId =
+      pickStrCi(nested, ['sinavId', 'examId']) || pickStrCi(flat, ['sinavId', 'examId', 'id']);
+    if (examId) fromRows.push(String(examId));
+  }
+  return [...new Set(fromRows)];
+}
+
+/**
+ * Öğrenciye tanımlı sınav ID’leri — sınav ID bilmeden (ID’siz AP).
+ * Kaynak sırası (swagger): GetOgrenciSinavIds → OgrenciSinavListesi → ByDonemIds → SinavOgrencies.
+ */
+export async function fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId, cfgOverride = {}) {
   const sid = normEdesisId(edesisStudentId);
-  if (!sid) return [];
+  const empty = { ids: [], attempts: [], source: null };
+  if (!sid) return empty;
   const cfg = { ...getEdesisConfig(), ...cfgOverride };
   const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
-  const paths = [
-    `/api/services/app/OgrenciSinavs/GetOgrenciSinavIds?ogrenciId=${encodeURIComponent(sid)}`,
-    `/api/services/app/SinavOgrencies/GetAll?Filter=${encodeURIComponent(sid)}&MaxResultCount=500`
-  ];
-  for (const path of paths) {
+  const attempts = [];
+  const numericSid = Number(sid);
+  const sidBody = Number.isFinite(numericSid) ? numericSid : sid;
+
+  const record = (label, path, status, ids, note = null) => {
+    attempts.push({
+      label,
+      path,
+      status: status ?? null,
+      count: Array.isArray(ids) ? ids.length : 0,
+      note
+    });
+  };
+
+  const tryGet = async (label, path, parseFn) => {
     try {
-      const r = await fetchEdesisJson(localCfg, path);
-      if (r.status === 401 || r.status === 403) continue;
-      if (!isReachableEdesisResponse(r)) continue;
-      const fromSinavIds = parseEdesisOgrenciSinavIdsResponse(r.json);
-      if (fromSinavIds.length) return fromSinavIds;
-      const rows = unwrapList(r.json);
-      const fromRows = [];
-      for (const row of rows) {
-        const flat = flattenEdesisRow(row);
-        const nested = flattenEdesisRow(flat.sinavOgrenci || flat.SinavOgrenci || {});
-        const rowSid =
-          pickStrCi(nested, ['ogrenciId', 'studentId']) ||
-          pickStrCi(flat, ['ogrenciId', 'studentId', 'ogrenciOkulNumarasi']);
-        if (rowSid && normEdesisId(rowSid) !== sid && String(rowSid).trim() !== sid) {
-          // Filter geniş eşleşebilir — satırda öğrenci ID yoksa sinavId yine de al
-          const hasOgrenci = Boolean(
-            pickStrCi(nested, ['ogrenciId', 'studentId']) || pickStrCi(flat, ['ogrenciId', 'studentId'])
-          );
-          if (hasOgrenci) continue;
-        }
-        if (rowSid && normEdesisId(rowSid) !== sid) continue;
-        const examId =
-          pickStrCi(nested, ['sinavId', 'examId']) ||
-          pickStrCi(flat, ['sinavId', 'examId', 'id']);
-        if (examId) fromRows.push(String(examId));
+      const r = await fetchEdesisAbpJson(localCfg, path);
+      if (r.status === 401 || r.status === 403) {
+        record(label, path, r.status, [], r.json?.abpStatus || r.abpAuth?.status || 'auth_rejected');
+        return null;
       }
-      if (fromRows.length) return [...new Set(fromRows)];
-    } catch {
-      /* sonraki uç */
+      if (!isReachableEdesisResponse(r)) {
+        record(label, path, r.status, [], 'unreachable');
+        return null;
+      }
+      const ids = parseFn(r.json);
+      record(label, path, r.status, ids);
+      return ids.length ? ids : null;
+    } catch (e) {
+      record(label, path, null, [], e instanceof Error ? e.message : 'error');
+      return null;
+    }
+  };
+
+  const tryPost = async (label, path, body, parseFn) => {
+    try {
+      const r = await fetchEdesisAbpJson(localCfg, path, { method: 'POST', body });
+      if (r.status === 401 || r.status === 403) {
+        record(label, path, r.status, [], r.json?.abpStatus || r.abpAuth?.status || 'auth_rejected');
+        return null;
+      }
+      if (!isReachableEdesisResponse(r)) {
+        record(label, path, r.status, [], 'unreachable');
+        return null;
+      }
+      const ids = parseFn(r.json);
+      record(label, path, r.status, ids);
+      return ids.length ? ids : null;
+    } catch (e) {
+      record(label, path, null, [], e instanceof Error ? e.message : 'error');
+      return null;
+    }
+  };
+
+  let ids =
+    (await tryGet(
+      'GetOgrenciSinavIds',
+      `/api/services/app/OgrenciSinavs/GetOgrenciSinavIds?ogrenciId=${encodeURIComponent(sid)}`,
+      parseEdesisOgrenciSinavIdsResponse
+    )) ||
+    (await tryPost(
+      'OgrenciSinavListesi',
+      `/api/services/app/Sinavs/OgrenciSinavListesi`,
+      [sidBody],
+      parseEdesisOgrenciSinavListesiResponse
+    )) ||
+    (await tryPost(
+      'OgrenciSinavListesiByDonemIds',
+      `/api/services/app/Sinavs/OgrenciSinavListesiByDonemIds`,
+      // Swagger şeması: ogrengiIds (yazım hatası Edesis tarafında)
+      { ogrengiIds: [sidBody], ogrenciIds: [sidBody], donemIds: [] },
+      parseEdesisOgrenciSinavListesiResponse
+    ));
+
+  if (!ids) {
+    const path = `/api/services/app/SinavOgrencies/GetAll?Filter=${encodeURIComponent(sid)}&MaxResultCount=500`;
+    try {
+      const r = await fetchEdesisAbpJson(localCfg, path);
+      if (r.status === 401 || r.status === 403) {
+        record('SinavOgrencies.GetAll', path, r.status, [], r.json?.abpStatus || r.abpAuth?.status || 'auth_rejected');
+      } else if (isReachableEdesisResponse(r)) {
+        const fromSinavIds = parseEdesisOgrenciSinavIdsResponse(r.json);
+        const fromRows = extractSinavIdsFromSinavOgrenciRows(unwrapList(r.json), sid);
+        ids = fromSinavIds.length ? fromSinavIds : fromRows.length ? fromRows : null;
+        record('SinavOgrencies.GetAll', path, r.status, ids || []);
+      } else {
+        record('SinavOgrencies.GetAll', path, r.status, [], 'unreachable');
+      }
+    } catch (e) {
+      record('SinavOgrencies.GetAll', path, null, [], e instanceof Error ? e.message : 'error');
     }
   }
-  return [];
+
+  const source = attempts.find((a) => a.count > 0)?.label || null;
+  const abpAuth = getEdesisAbpAuthStatus();
+  return { ids: ids || [], attempts, source, abpAuth };
+}
+
+export async function fetchEdesisOgrenciAssignedSinavIds(edesisStudentId, cfgOverride = {}) {
+  const detailed = await fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId, cfgOverride);
+  return detailed.ids;
 }
 
 /** GET /OgrenciSinavs/GetOgrenciBySinavId — sınava tanımlı öğrenci listesi */
@@ -683,7 +956,7 @@ export async function fetchEdesisExamRosterStudentIds(examId, cfgOverride = {}) 
   const cfg = { ...getEdesisConfig(), ...cfgOverride };
   const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
   try {
-    const r = await fetchEdesisJson(
+    const r = await fetchEdesisAbpJson(
       localCfg,
       `/api/services/app/OgrenciSinavs/GetOgrenciBySinavId?sinavId=${encodeURIComponent(id)}`
     );
@@ -1080,7 +1353,7 @@ export async function fetchEdesisExamCatalogRowDetail(examId, cfgOverride = {}) 
 
 /**
  * Katalog listesinde ogrenciIds yoksa:
- * admin sinavId listesi + sınıf kataloğu + detay + GetOgrenciBySinavId roster + results.
+ * admin sinavId listesi (ID’siz AP) + sınıf kataloğu + detay + GetOgrenciBySinavId roster + results.
  */
 export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverride = {}) {
   const {
@@ -1100,7 +1373,8 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     requireStudentIdMatch: true
   });
 
-  const adminSinavIds = await fetchEdesisOgrenciAssignedSinavIds(edesisStudentId, cfgOverride);
+  const adminDetail = await fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId, cfgOverride);
+  const adminSinavIds = adminDetail.ids || [];
   if (adminSinavIds.length) {
     assigned = mergeEdesisCatalogExamsById(
       assigned,
@@ -1148,7 +1422,9 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     candidates.push(ex);
   }
 
-  if (!candidates.length) return assigned;
+  if (!candidates.length) {
+    return { rows: assigned, adminAssignment: adminDetail };
+  }
 
   let rosterApiAlive = true;
   const probeOne = async (ex) => {
@@ -1183,7 +1459,7 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     assigned = mergeEdesisCatalogExamsById(assigned, found.filter(Boolean));
     known = new Set(assigned.map((ex) => pickEdesisCatalogExamId(ex)).filter(Boolean));
   }
-  return assigned;
+  return { rows: assigned, adminAssignment: adminDetail };
 }
 
 /**
