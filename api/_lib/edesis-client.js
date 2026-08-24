@@ -207,6 +207,16 @@ export async function resolveEdesisAbpAccessToken(cfgOverride = {}) {
     return { token: abpTokenCache.token, status: abpTokenCache.status, error: null };
   }
   if (!cfg.abpUser || !cfg.abpPassword) {
+    // Panel şifresi yoksa External API key’i Bearer dene (bazı kiracıda App Service açılır)
+    if (cfg.apiKey) {
+      abpTokenCache = {
+        token: cfg.apiKey,
+        expiresAt: Date.now() + 10 * 60_000,
+        status: 'api_key_bearer',
+        error: null
+      };
+      return { token: cfg.apiKey, status: 'api_key_bearer', error: null };
+    }
     abpTokenCache = {
       token: '',
       expiresAt: 0,
@@ -1334,9 +1344,7 @@ export function resolveAssignedCatalogRowsForStudent({
   edesisStudentId = '',
   classroomId = '',
   programKeys = new Set(),
-  requireStudentIdMatch = true,
-  now = new Date(),
-  unpublishedWindowDays = 45
+  requireStudentIdMatch = true
 } = {}) {
   const scope = { edesisStudentId, classroomId, requireStudentIdMatch, programKeys };
   let assigned = collectExplicitlyAssignedCatalogRows(catalogRows, scope);
@@ -1359,17 +1367,8 @@ export function resolveAssignedCatalogRowsForStudent({
       classroomId
     })
   );
-  // v1.5 liste DTO’sunda ogrenciIds yok (canlı: 995 satır, 0 ogrenciIds).
-  // resultStatus=None + program + son N gün = henüz girilmemiş tanımlı deneme
-  // (Safiye: 1559901 VİP MÜFREDAT İZLEME LGS-1, studentCount=0).
-  assigned = mergeEdesisCatalogExamsById(
-    assigned,
-    collectRecentUnpublishedProgramExams(full, {
-      programKeys,
-      now,
-      windowDays: unpublishedWindowDays
-    })
-  );
+  // Program/None yedeği YOK — canlıda YKS öğrencisine tüm açık TYT’yi döküyordu.
+  // Gerçek atama: ogrenciIds / StudentId alt kümesi / sınıf / ABP GetOgrenciSinavIds.
   return assigned;
 }
 
@@ -1379,21 +1378,36 @@ export async function fetchEdesisExamCatalogRowDetail(examId, cfgOverride = {}) 
   if (!id) return null;
   const cfg = { ...getEdesisConfig(), ...cfgOverride };
   const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
-  for (const path of [
-    V1_PATHS.examById(id),
-    `/api/services/app/Sinavs/GetSinavForView?id=${encodeURIComponent(id)}`
-  ]) {
-    try {
-      const r = await fetchEdesisJson(localCfg, path);
-      if (!isReachableEdesisResponse(r) || !r.json) continue;
-      const body =
-        r.json?.result && typeof r.json.result === 'object' && !Array.isArray(r.json.result)
-          ? r.json.result
-          : r.json;
-      if (body && typeof body === 'object') return body;
-    } catch {
-      /* sonraki uç */
+  const tryBody = (r) => {
+    if (!r || !r.json) return null;
+    if (r.json?._invalidBody) return null;
+    const body =
+      r.json?.result && typeof r.json.result === 'object' && !Array.isArray(r.json.result)
+        ? r.json.result
+        : r.json;
+    if (body && typeof body === 'object' && !Array.isArray(body)) return body;
+    return null;
+  };
+  try {
+    const r = await fetchEdesisJson(localCfg, V1_PATHS.examById(id));
+    if (isReachableEdesisResponse(r)) {
+      const body = tryBody(r);
+      if (body) return body;
     }
+  } catch {
+    /* ABP yedek */
+  }
+  try {
+    const r = await fetchEdesisAbpJson(
+      localCfg,
+      `/api/services/app/Sinavs/GetSinavForView?id=${encodeURIComponent(id)}`
+    );
+    if (r.status !== 401 && r.status !== 403 && isReachableEdesisResponse(r)) {
+      const body = tryBody(r);
+      if (body) return body;
+    }
+  } catch {
+    /* yok */
   }
   return null;
 }
@@ -1446,25 +1460,28 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
   }
 
   let known = new Set(assigned.map((ex) => pickEdesisCatalogExamId(ex)).filter(Boolean));
-  // Hız: admin ID listesi geldiyse veya ABP auth yok/401 ise 80× roster/detail probe yapma
-  const abpUnauthorized = (adminDetail.attempts || []).some(
-    (a) => a?.status === 401 || a?.status === 403 || a?.error === 'unauthorized'
-  );
-  const skipHeavyProbe =
-    adminSinavIds.length > 0 || abpUnauthorized || adminDetail?.abpAuth?.configured === false;
-  if (skipHeavyProbe) {
+  // Hız: admin ID listesi geldiyse ağır probe’a gerek yok.
+  // ABP 401/eksik iken probe’u kapatma — v1 detail/results + api_key_bearer ile atama aranır.
+  if (adminSinavIds.length > 0) {
     return {
       rows: assigned,
       adminAssignment: adminDetail,
-      probeSkipped: skipHeavyProbe,
-      probeSkipReason: adminSinavIds.length
-        ? 'admin_ids'
-        : abpUnauthorized
-          ? 'abp_unauthorized'
-          : 'abp_not_configured'
+      probeSkipped: true,
+      probeSkipReason: 'admin_ids'
     };
   }
 
+  const abpUnauthorized = (adminDetail.attempts || []).some(
+    (a) => a?.status === 401 || a?.status === 403 || a?.error === 'unauthorized'
+  );
+  const abpStatus = adminDetail?.abpAuth || getEdesisAbpAuthStatus();
+  const skipAbpRoster =
+    abpUnauthorized ||
+    abpStatus?.cacheStatus === 'missing_credentials' ||
+    abpStatus?.cacheStatus === 'auth_failed' ||
+    abpStatus?.cacheStatus === 'auth_error';
+
+  const keys = programKeys instanceof Set ? programKeys : new Set(programKeys || []);
   const adminProbeIds = new Set(
     (adminSinavIds || []).map((id) => String(id).trim()).filter(Boolean)
   );
@@ -1472,15 +1489,29 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     const id = pickEdesisCatalogExamId(ex);
     return id && adminProbeIds.has(String(id)) && !known.has(String(id));
   });
+  const programMatchStrict = (ex) => {
+    if (!keys.size) return true;
+    const examKeys = inferEdesisExamProgramKeys({
+      examType: ex?.examType || ex?.sinavTuru,
+      examName: ex?.name || ex?.examName || ex?.title || ex?.examTitle
+    });
+    if (!examKeys.size) return false;
+    for (const k of examKeys) if (keys.has(k)) return true;
+    return false;
+  };
   const recencyCandidates = sortCatalogExamsByRecencyDesc(catalogRows || [])
     .filter((ex) => {
       const id = pickEdesisCatalogExamId(ex);
       if (!id || known.has(id)) return false;
       if (!isOpenEdesisCatalogExam(ex) || !examWindowStillOpen(ex)) return false;
+      if (!programMatchStrict(ex)) return false;
+      // Önce None (girilmemiş); Ready de atanmış olabilir
+      const status = catalogResultStatus(ex);
+      if (!/^(none|ready|processing|pending)$/i.test(status)) return false;
       const quick = catalogExamAssignedToStudent(ex, scope);
       return quick !== false;
     })
-    .slice(0, 12);
+    .slice(0, 24);
   const seenCandidateIds = new Set();
   const candidates = [];
   for (const ex of [...fromAdminNotKnown, ...recencyCandidates]) {
@@ -1491,10 +1522,16 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
   }
 
   if (!candidates.length) {
-    return { rows: assigned, adminAssignment: adminDetail };
+    return {
+      rows: assigned,
+      adminAssignment: adminDetail,
+      probeSkipped: false,
+      probeSkipReason: null,
+      probeCandidateCount: 0
+    };
   }
 
-  let rosterApiAlive = true;
+  let rosterApiAlive = !skipAbpRoster;
   const probeOne = async (ex) => {
     const id = pickEdesisCatalogExamId(ex);
     if (!id) return null;
@@ -1502,7 +1539,7 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     const merged = detail ? { ...ex, ...detail } : ex;
     if (catalogExamAssignedToStudent(merged, scope) === true) return ex;
     if (catalogExamAssignedToStudent(merged, scope) === false) return null;
-    if (rosterApiAlive) {
+    if (rosterApiAlive && !skipAbpRoster) {
       const roster = await fetchEdesisExamRosterStudentIds(id, cfgOverride);
       if (roster === null) {
         rosterApiAlive = false;
@@ -1527,7 +1564,13 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     assigned = mergeEdesisCatalogExamsById(assigned, found.filter(Boolean));
     known = new Set(assigned.map((ex) => pickEdesisCatalogExamId(ex)).filter(Boolean));
   }
-  return { rows: assigned, adminAssignment: adminDetail };
+  return {
+    rows: assigned,
+    adminAssignment: adminDetail,
+    probeSkipped: false,
+    probeSkipReason: skipAbpRoster ? 'v1_only_no_abp_roster' : null,
+    probeCandidateCount: candidates.length
+  };
 }
 
 /**
