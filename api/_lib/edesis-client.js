@@ -1107,6 +1107,27 @@ function catalogResultStatus(exam) {
   return String(getPropCi(flat, ['resultStatus', 'status']) || 'None').trim();
 }
 
+/** Canlı katalog DTO (v1.5) alanları: id,name,examDate,examType,studentCount,resultStatus,createdAt — ogrenciIds YOK */
+export function collectRecentUnpublishedProgramExams(
+  catalogRows = [],
+  { programKeys = new Set(), now = new Date(), windowDays = 45, excludeExamIds = [] } = {}
+) {
+  const keys = programKeys instanceof Set ? programKeys : new Set(programKeys || []);
+  const excluded = new Set([...(excludeExamIds || [])].map((id) => String(id).trim()).filter(Boolean));
+  const out = [];
+  for (const ex of catalogRows || []) {
+    if (!isOpenEdesisCatalogExam(ex) || !examWindowStillOpen(ex, now)) continue;
+    const status = catalogResultStatus(ex);
+    if (!/^none$/i.test(status)) continue;
+    const id = pickEdesisCatalogExamId(ex);
+    if (!id || excluded.has(String(id))) continue;
+    if (keys.size && !edesisCatalogExamMatchesProgram(ex, keys)) continue;
+    if (!isRecentOpenCatalogExam(ex, now, windowDays)) continue;
+    out.push(ex);
+  }
+  return out;
+}
+
 export function mergeEdesisCatalogExamsById(...groups) {
   const map = new Map();
   for (const rows of groups) {
@@ -1300,9 +1321,12 @@ export function resolveAssignedCatalogRowsForStudent({
   classroomCatalogRows = [],
   edesisStudentId = '',
   classroomId = '',
-  requireStudentIdMatch = true
+  programKeys = new Set(),
+  requireStudentIdMatch = true,
+  now = new Date(),
+  unpublishedWindowDays = 45
 } = {}) {
-  const scope = { edesisStudentId, classroomId, requireStudentIdMatch };
+  const scope = { edesisStudentId, classroomId, requireStudentIdMatch, programKeys };
   let assigned = collectExplicitlyAssignedCatalogRows(catalogRows, scope);
 
   const full = catalogRows || [];
@@ -1321,6 +1345,17 @@ export function resolveAssignedCatalogRowsForStudent({
       classroomCatalogRows,
       edesisStudentId,
       classroomId
+    })
+  );
+  // v1.5 liste DTO’sunda ogrenciIds yok (canlı: 995 satır, 0 ogrenciIds).
+  // resultStatus=None + program + son N gün = henüz girilmemiş tanımlı deneme
+  // (Safiye: 1559901 VİP MÜFREDAT İZLEME LGS-1, studentCount=0).
+  assigned = mergeEdesisCatalogExamsById(
+    assigned,
+    collectRecentUnpublishedProgramExams(full, {
+      programKeys,
+      now,
+      windowDays: unpublishedWindowDays
     })
   );
   return assigned;
@@ -1361,7 +1396,8 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     studentCatalogRows = [],
     classroomCatalogRows = [],
     edesisStudentId = '',
-    classroomId = ''
+    classroomId = '',
+    programKeys = new Set()
   } = params || {};
   const scope = { edesisStudentId, classroomId, requireStudentIdMatch: true };
   let assigned = resolveAssignedCatalogRowsForStudent({
@@ -1370,6 +1406,7 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     classroomCatalogRows,
     edesisStudentId,
     classroomId,
+    programKeys,
     requireStudentIdMatch: true
   });
 
