@@ -857,6 +857,13 @@ describe('requireExplicitAssignment never dumps catalog', () => {
         examType: 'TYT',
         resultStatus: 'None',
         examDate: '2026-08-20'
+      },
+      {
+        id: 1567875,
+        name: 'Maarif Model4',
+        examType: 'MAARİF 80',
+        resultStatus: 'None',
+        examDate: '2026-08-19'
       }
     ];
     const unpublished = collectRecentUnpublishedProgramExams(catalog, {
@@ -902,7 +909,7 @@ describe('requireExplicitAssignment never dumps catalog', () => {
       ['1559901']
     );
     assert.equal(items.find((x) => x.examId === '1561043')?.hasStudentResult, true);
-    assert.equal(items.some((x) => x.examId === '9' || x.examId === '10'), false);
+    assert.equal(items.some((x) => x.examId === '9' || x.examId === '10' || x.examId === '1567875'), false);
   });
 });
 

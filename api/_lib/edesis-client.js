@@ -1121,7 +1121,19 @@ export function collectRecentUnpublishedProgramExams(
     if (!/^none$/i.test(status)) continue;
     const id = pickEdesisCatalogExamId(ex);
     if (!id || excluded.has(String(id))) continue;
-    if (keys.size && !edesisCatalogExamMatchesProgram(ex, keys)) continue;
+    // Atanmış denemede tür bilinmiyorsa geçirilir; katalog yedeğinde hayır —
+    // MAARİF 80 gibi tanımsız tür LGS öğrencisine sızmasın.
+    if (!keys.size) continue;
+    const examKeys = inferEdesisExamProgramKeys({
+      examType: ex?.examType || ex?.sinavTuru,
+      examName: ex?.name || ex?.examName || ex?.title || ex?.examTitle
+    });
+    if (!examKeys.size) continue;
+    let programHit = false;
+    for (const k of examKeys) {
+      if (keys.has(k)) programHit = true;
+    }
+    if (!programHit) continue;
     if (!isRecentOpenCatalogExam(ex, now, windowDays)) continue;
     out.push(ex);
   }
