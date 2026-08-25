@@ -884,10 +884,103 @@ export function examAssignedViaOnlineFlag(exam, fullExam = null) {
 
 /** Edesis iç API — öğrenciye admin panelden tanımlı sınav ID listesi */
 export function parseEdesisOgrenciSinavIdsResponse(json) {
+  return parseEdesisOgrenciSinavAssignmentResponse(json).sinavIds;
+}
+
+/**
+ * GetOgrenciSinavIds — sinavId (örnek atama) + sinavTuruId (online tür erişimi).
+ * Kanıt: yeni online deneme ogrenciIds boş olsa da sinavTuruId eşleşince Edesis Online’da görünür.
+ */
+export function parseEdesisOgrenciSinavAssignmentResponse(json) {
   const body = json?.result && typeof json.result === 'object' ? json.result : json;
-  const raw = body?.sinavId ?? body?.sinavIds ?? body?.SinavId ?? body?.SinavIds ?? [];
-  const list = Array.isArray(raw) ? raw : raw != null && raw !== '' ? [raw] : [];
-  return [...new Set(list.map((x) => String(x).trim()).filter(Boolean))];
+  const rawIds = body?.sinavId ?? body?.sinavIds ?? body?.SinavId ?? body?.SinavIds ?? [];
+  const rawTuru =
+    body?.sinavTuruId ?? body?.sinavTuruIds ?? body?.SinavTuruId ?? body?.SinavTuruIds ?? [];
+  const toList = (raw) => {
+    const list = Array.isArray(raw) ? raw : raw != null && raw !== '' ? [raw] : [];
+    return [...new Set(list.map((x) => String(x).trim()).filter(Boolean))];
+  };
+  return { sinavIds: toList(rawIds), sinavTuruIds: toList(rawTuru) };
+}
+
+/** Detay/deneme DTO’sundan sinavTuruId */
+export function pickEdesisExamSinavTuruId(examOrDetail) {
+  if (!examOrDetail || typeof examOrDetail !== 'object') return null;
+  const flat = flattenEdesisRow(examOrDetail);
+  const direct =
+    pickStrCi(flat, ['sinavTuruId', 'examTypeId', 'turuId']) ||
+    pickStr(flat, ['sinavTuruId', 'examTypeId', 'turuId']);
+  if (direct) return String(direct).trim();
+  const nested =
+    examOrDetail.sinav ||
+    examOrDetail.Sinav ||
+    examOrDetail.deneme ||
+    examOrDetail.Deneme ||
+    examOrDetail.result?.sinav ||
+    examOrDetail.result?.deneme ||
+    null;
+  if (nested && typeof nested === 'object') {
+    const nflat = flattenEdesisRow(nested);
+    const nid =
+      pickStrCi(nflat, ['sinavTuruId', 'examTypeId', 'turuId']) ||
+      pickStr(nflat, ['sinavTuruId', 'examTypeId', 'turuId']);
+    if (nid) return String(nid).trim();
+  }
+  return null;
+}
+
+/** Detay + isteğe bağlı Deneme view ile sinavTuruId çözümle */
+export async function resolveEdesisExamSinavTuruId(examOrDetail, cfgOverride = {}) {
+  const direct = pickEdesisExamSinavTuruId(examOrDetail);
+  if (direct) return direct;
+  const flat = flattenEdesisRow(examOrDetail || {});
+  const denemeId =
+    pickStrCi(flat, ['denemeId', 'denemeRefId']) ||
+    pickStr(flat, ['denemeId', 'denemeRefId']) ||
+    pickStrCi(flattenEdesisRow(examOrDetail?.sinav || {}), ['denemeId']) ||
+    '';
+  if (!denemeId) return null;
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+  try {
+    const r = await fetchEdesisAbpJson(
+      localCfg,
+      `/api/services/app/Denemes/GetDenemeForView?id=${encodeURIComponent(denemeId)}`
+    );
+    if (r.status === 401 || r.status === 403 || !isReachableEdesisResponse(r)) return null;
+    const body = r.json?.result && typeof r.json.result === 'object' ? r.json.result : r.json;
+    return pickEdesisExamSinavTuruId(body) || pickEdesisExamSinavTuruId(body?.deneme || body?.Deneme);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 8. sınıf LGS öğrencisine 5/6. sınıf denemesi dökülmesin.
+ * grade bilinmiyorsa engelleme yok.
+ */
+export function examCompatibleWithStudentGrade(exam, studentGradeName = '') {
+  const grade = String(studentGradeName || '').replace(/[^\d]/g, '');
+  if (!grade) return true;
+  const g = Number(grade);
+  if (!Number.isFinite(g) || g < 1 || g > 12) return true;
+  const blob = String(
+    exam?.name || exam?.examName || exam?.title || exam?.examTitle || exam?.sinavAdi || exam?.examType || ''
+  )
+    .toLocaleLowerCase('tr-TR')
+    .replace(/\s+/g, ' ');
+  const named = blob.match(/\b([5-9]|1[0-2])\s*\.?\s*(?:sinif|sınıf)\b/);
+  if (!named) return true;
+  const examGrade = Number(named[1]);
+  if (!Number.isFinite(examGrade)) return true;
+  // LGS (7–8): 5–6 net şekilde yazılmışsa ele; TYT sınıfı (9+) ele
+  if (g >= 7 && g <= 8) {
+    if (examGrade <= 6) return false;
+    if (examGrade >= 9) return false;
+    return true;
+  }
+  // Aynı sınıf ±1 tolerans
+  return Math.abs(examGrade - g) <= 1;
 }
 
 /**
@@ -993,7 +1086,7 @@ function extractSinavIdsFromSinavOgrenciRows(rows, sid) {
  */
 export async function fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId, cfgOverride = {}) {
   const sid = normEdesisId(edesisStudentId);
-  const empty = { ids: [], attempts: [], source: null, preferredSource: null, analysisIds: [] };
+  const empty = { ids: [], sinavTuruIds: [], attempts: [], source: null, preferredSource: null, analysisIds: [] };
   if (!sid) return empty;
   const cfg = { ...getEdesisConfig(), ...cfgOverride };
   const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
@@ -1002,6 +1095,7 @@ export async function fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId
   const sidBody = Number.isFinite(numericSid) ? numericSid : sid;
 
   let getOgrenciIds = [];
+  let getOgrenciTuruIds = [];
   let checkedIds = [];
   let defaultDonemIds = [];
   let sinavOgrenciIds = [];
@@ -1025,13 +1119,17 @@ export async function fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId
     if (r.status === 401 || r.status === 403) {
       record('GetOgrenciSinavIds', path, r.status, [], r.json?.abpStatus || r.abpAuth?.status || 'auth_rejected');
     } else if (isReachableEdesisResponse(r)) {
-      getOgrenciIds = parseEdesisOgrenciSinavIdsResponse(r.json);
+      const parsed = parseEdesisOgrenciSinavAssignmentResponse(r.json);
+      getOgrenciIds = parsed.sinavIds;
+      getOgrenciTuruIds = parsed.sinavTuruIds;
       record(
         'GetOgrenciSinavIds',
         path,
         r.status,
         getOgrenciIds,
-        localCfg.tenantId ? `tenantId=${localCfg.tenantId}` : 'tenantId_missing'
+        localCfg.tenantId
+          ? `tenantId=${localCfg.tenantId};turu=${getOgrenciTuruIds.length}`
+          : `tenantId_missing;turu=${getOgrenciTuruIds.length}`
       );
     } else {
       record('GetOgrenciSinavIds', path, r.status, [], 'unreachable');
@@ -1141,6 +1239,7 @@ export async function fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId
   const abpAuth = getEdesisAbpAuthStatus();
   return {
     ids,
+    sinavTuruIds: getOgrenciTuruIds,
     attempts,
     source: preferredSource || attempts.find((a) => a.count > 0)?.label || null,
     preferredSource,
@@ -1644,7 +1743,8 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     classroomCatalogRows = [],
     edesisStudentId = '',
     classroomId = '',
-    programKeys = new Set()
+    programKeys = new Set(),
+    gradeName = ''
   } = params || {};
   const scope = { edesisStudentId, classroomId, requireStudentIdMatch: true };
   let assigned = resolveAssignedCatalogRowsForStudent({
@@ -1659,6 +1759,9 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
 
   const adminDetail = await fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId, cfgOverride);
   const adminSinavIds = adminDetail.ids || [];
+  const adminTuruIds = new Set(
+    (adminDetail.sinavTuruIds || []).map((id) => String(id).trim()).filter(Boolean)
+  );
   if (adminSinavIds.length) {
     assigned = mergeEdesisCatalogExamsById(
       assigned,
@@ -1720,9 +1823,26 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     excludeExamIds: [...known]
   });
 
+  // sinavTuruId erişimi: son 21 gün Ready/None online adayları (program + sınıf filtresi probe’da)
+  const turuOnlineCandidates =
+    adminTuruIds.size > 0
+      ? sortCatalogExamsByRecencyDesc(catalogRows || [])
+          .filter((ex) => {
+            const id = pickEdesisCatalogExamId(ex);
+            if (!id || known.has(String(id)) || adminProbeIds.has(String(id))) return false;
+            if (!isOpenEdesisCatalogExam(ex) || !examWindowStillOpen(ex)) return false;
+            if (!programMatchStrict(ex)) return false;
+            if (!examCompatibleWithStudentGrade(ex, gradeName)) return false;
+            if (!isRecentOpenCatalogExam(ex, new Date(), 21)) return false;
+            const status = catalogResultStatus(ex);
+            return /^(none|ready|processing|pending)?$/i.test(status);
+          })
+          .slice(0, 36)
+      : [];
+
   const recencyCandidates =
-    adminSinavIds.length > 0
-      ? [] // Admin listesi varken Ready dump’ına girme; yalnızca unpublished + eksik admin
+    adminSinavIds.length > 0 || adminTuruIds.size > 0
+      ? [] // Admin listesi / tür erişimi varken Ready dump’ına girme
       : sortCatalogExamsByRecencyDesc(catalogRows || [])
           .filter((ex) => {
             const id = pickEdesisCatalogExamId(ex);
@@ -1738,7 +1858,12 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
 
   const seenCandidateIds = new Set();
   const candidates = [];
-  for (const ex of [...fromAdminNotKnown, ...unpublishedCandidates, ...recencyCandidates]) {
+  for (const ex of [
+    ...fromAdminNotKnown,
+    ...unpublishedCandidates,
+    ...turuOnlineCandidates,
+    ...recencyCandidates
+  ]) {
     const id = pickEdesisCatalogExamId(ex);
     if (!id || seenCandidateIds.has(String(id)) || known.has(String(id))) continue;
     seenCandidateIds.add(String(id));
@@ -1750,7 +1875,11 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
       rows: assigned,
       adminAssignment: adminDetail,
       probeSkipped: true,
-      probeSkipReason: adminSinavIds.length ? 'admin_ids_no_unpublished' : 'no_candidates',
+      probeSkipReason: adminSinavIds.length
+        ? adminTuruIds.size
+          ? 'admin_ids_no_turu_candidates'
+          : 'admin_ids_no_unpublished'
+        : 'no_candidates',
       probeCandidateCount: 0
     };
   }
@@ -1760,8 +1889,10 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
   const probeOne = async (ex) => {
     const id = pickEdesisCatalogExamId(ex);
     if (!id) return null;
+    if (!examCompatibleWithStudentGrade(ex, gradeName)) return null;
     const detail = await fetchEdesisExamCatalogRowDetail(id, cfgOverride);
     const merged = detail ? { ...ex, ...detail } : ex;
+    if (!examCompatibleWithStudentGrade(merged, gradeName)) return null;
     if (catalogExamAssignedToStudent(merged, detailScope) === true) return ex;
     // Kurum geneli online tanım (isAllClasses) + program eşleşmesi — yalnızca probe adayında
     const allFlag = getPropCi(flattenEdesisRow(merged), ['isAllClasses', 'allClasses', 'tumSiniflar']);
@@ -1773,6 +1904,9 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
       return ex;
     }
     if (catalogExamAssignedToStudent(merged, detailScope) === false) return null;
+
+    // Roster doluysa tür eşleşmesiyle başkasının denemesini alma
+    let rosterEmptyOrUnknown = true;
     if (rosterApiAlive && !skipAbpRoster) {
       const roster = await fetchEdesisExamRosterStudentIds(id, cfgOverride);
       if (roster === null) {
@@ -1780,10 +1914,22 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
       } else if (examRosterIncludesStudent(roster, edesisStudentId)) {
         return ex;
       } else if (roster.length > 0) {
-        // Roster dolu ve öğrenci yok → bu deneme atanmamış
         return null;
+      } else {
+        rosterEmptyOrUnknown = true;
       }
     }
+
+    // Online + sinavTuruId erişimi — ogrenciIds/roster boş online denemeler (yeni atama)
+    if (rosterEmptyOrUnknown && adminTuruIds.size && programMatchStrict(merged)) {
+      const online = examOnlineFlag(merged);
+      let turu = pickEdesisExamSinavTuruId(merged) || pickEdesisExamSinavTuruId(detail);
+      if (!turu) turu = await resolveEdesisExamSinavTuruId(merged, cfgOverride);
+      if (online === true && turu && adminTuruIds.has(String(turu))) {
+        if (examWindowStillOpen(merged) || examWindowStillOpen(ex)) return ex;
+      }
+    }
+
     try {
       if (await fetchEdesisExamAssignedToStudent(id, edesisStudentId, cfgOverride)) return ex;
     } catch {
