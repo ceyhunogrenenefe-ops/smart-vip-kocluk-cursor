@@ -958,7 +958,8 @@ describe('parseEdesisOgrenciSinavAssignmentResponse / grade compatibility', () =
     assert.equal(examCompatibleWithStudentGrade({ name: '5.SINIF MAT FEN KTT 2' }, '8'), false);
     assert.equal(examCompatibleWithStudentGrade({ name: '6 SINIF FEN KTT' }, '8'), false);
     assert.equal(examCompatibleWithStudentGrade({ name: 'LİMİT LGS HAZIRBULUNUŞLUK' }, '8'), true);
-    assert.equal(examCompatibleWithStudentGrade({ name: '7.sınıf Mat Fen KTT 2' }, '8'), true);
+    assert.equal(examCompatibleWithStudentGrade({ name: '7.sınıf Mat Fen KTT 2' }, '8'), false);
+    assert.equal(examCompatibleWithStudentGrade({ name: '7.sınıf Mat Fen KTT 2' }, '7'), true);
   });
 
   it('reads grade from examType when title has no sınıf', () => {
