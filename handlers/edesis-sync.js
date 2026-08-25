@@ -772,7 +772,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         configured: keyOk,
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-takeable-detail-2026-08-25',
+        deployMarker: 'edesis-takeable-strict-2026-08-25',
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
@@ -836,7 +836,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-takeable-detail-2026-08-25',
+        deployMarker: 'edesis-takeable-strict-2026-08-25',
         baseUrl: cfg.baseUrl,
         attempts: out
       });
