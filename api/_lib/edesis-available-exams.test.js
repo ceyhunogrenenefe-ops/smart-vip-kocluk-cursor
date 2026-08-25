@@ -16,6 +16,7 @@ import {
   examCompatibleWithStudentGrade,
   examCompatibleWithStudentProgramSoft,
   isThinOnlineRosterExam,
+  catalogExamTakeableWithoutRosterProbe,
   collectOpenOnlineProgramExams,
   pickEdesisExamSinavTuruId,
   collectCatalogRowsForSinavIds,
@@ -102,6 +103,28 @@ describe('thin online roster + open catalog', () => {
     assert.equal(isThinOnlineRosterExam({ studentCount: 0 }), false);
     assert.equal(isThinOnlineRosterExam({ studentCount: 24 }), false);
     assert.equal(isThinOnlineRosterExam({ studentCount: 24 }, 2), true);
+  });
+
+  it('catalog fast path keeps empty/thin LGS, drops 24-person roster', () => {
+    const keys = new Set(['lgs']);
+    const empty = {
+      id: '1579080',
+      name: 'LİMİT LGS HAZIRBULUNUŞLUK',
+      examType: 'LGS',
+      resultStatus: 'None',
+      studentCount: 0,
+      examDate: '2026-08-20',
+      isOnlineSinavForStudent: true
+    };
+    const fat = { ...empty, id: '1', name: 'PARAF MOR 1', studentCount: 24 };
+    assert.equal(
+      catalogExamTakeableWithoutRosterProbe(empty, { programKeys: keys, gradeName: '8-F' }),
+      true
+    );
+    assert.equal(
+      catalogExamTakeableWithoutRosterProbe(fat, { programKeys: keys, gradeName: '8-F' }),
+      false
+    );
   });
 
   it('lists LGS open exams in 45d excluding taken', () => {

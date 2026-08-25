@@ -948,6 +948,20 @@ export function isThinOnlineRosterExam(exam, rosterLength = null) {
   return c > 0 && c <= THIN_ONLINE_ROSTER_MAX;
 }
 
+/**
+ * HTTP probe (GetSinavForView × N) olmadan turu-online adayı.
+ * Kanıt: sinavTuruId tenant geneli; 24 kişilik roster katalog studentCount ile elenir.
+ */
+export function catalogExamTakeableWithoutRosterProbe(exam, { programKeys, gradeName } = {}) {
+  if (!exam) return false;
+  if (!examCompatibleWithStudentGrade(exam, gradeName || '')) return false;
+  if (!examCompatibleWithStudentProgramSoft(exam, programKeys || new Set())) return false;
+  if (!isOpenEdesisCatalogExam(exam) || !examWindowStillOpen(exam)) return false;
+  const sc = catalogExamStudentCount(exam);
+  if (sc > THIN_ONLINE_ROSTER_MAX) return false;
+  return true;
+}
+
 export function examOnlineFlag(exam) {
   const flat = flattenEdesisRow(exam) || {};
   const v = getPropCi(flat, [
@@ -1791,6 +1805,27 @@ export async function fetchEdesisExamCatalogRowDetail(examId, cfgOverride = {}) 
     if (body && typeof body === 'object' && !Array.isArray(body)) return body;
     return null;
   };
+  const mergeView = (body) => {
+    if (!body) return null;
+    const nested = body.sinav || body.Sinav || body.exam || null;
+    if (nested && typeof nested === 'object') {
+      return { ...nested, ...body, id: body.id || nested.id || id };
+    }
+    return body;
+  };
+  // v1 /exams/{id} HTML 404 döner; ABP GetSinavForView denemeUrl verir
+  try {
+    const r = await fetchEdesisAbpJson(
+      localCfg,
+      `/api/services/app/Sinavs/GetSinavForView?id=${encodeURIComponent(id)}`
+    );
+    if (r.status !== 401 && r.status !== 403 && isReachableEdesisResponse(r)) {
+      const body = mergeView(tryBody(r));
+      if (body) return body;
+    }
+  } catch {
+    /* v1 / edit yedek */
+  }
   try {
     const r = await fetchEdesisJson(localCfg, V1_PATHS.examById(id));
     if (isReachableEdesisResponse(r)) {
@@ -1798,42 +1833,16 @@ export async function fetchEdesisExamCatalogRowDetail(examId, cfgOverride = {}) 
       if (body) return body;
     }
   } catch {
-    /* ABP yedek */
+    /* ABP edit yedek */
   }
-  try {
-    const r = await fetchEdesisAbpJson(
-      localCfg,
-      `/api/services/app/Sinavs/GetSinavForView?id=${encodeURIComponent(id)}`
-    );
-    if (r.status !== 401 && r.status !== 403 && isReachableEdesisResponse(r)) {
-      const body = tryBody(r);
-      if (body) {
-        // GetSinavForViewDto: classRoomIds üstte, ogrenciIds çoğunlukla sinav altında
-        const nested = body.sinav || body.Sinav || body.exam || null;
-        if (nested && typeof nested === 'object') {
-          return { ...nested, ...body, id: body.id || nested.id };
-        }
-        return body;
-      }
-    }
-  } catch {
-    /* yok */
-  }
-  // Edit DTO’da ogrenciIds / isAllClasses net gelir (View’da bazen yok)
   try {
     const r = await fetchEdesisAbpJson(
       localCfg,
       `/api/services/app/Sinavs/GetSinavForEdit?id=${encodeURIComponent(id)}`
     );
     if (r.status !== 401 && r.status !== 403 && isReachableEdesisResponse(r)) {
-      const body = tryBody(r);
-      if (body) {
-        const nested = body.sinav || body.Sinav || body.exam || null;
-        if (nested && typeof nested === 'object') {
-          return { ...nested, ...body, id: nested.id || body.id || id };
-        }
-        return body;
-      }
+      const body = mergeView(tryBody(r));
+      if (body) return body;
     }
   } catch {
     /* yok */
@@ -1878,7 +1887,7 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     );
     const knownAfterAdmin = new Set(assigned.map((ex) => pickEdesisCatalogExamId(ex)).filter(Boolean));
     const missingAdminIds = adminSinavIds.filter((id) => !knownAfterAdmin.has(String(id)));
-    for (let i = 0; i < missingAdminIds.length; i += 6) {
+    for (let i = 0; i < Math.min(missingAdminIds.length, 8); i += 6) {
       const batch = missingAdminIds.slice(i, i + 6);
       const details = await Promise.all(
         batch.map((id) => fetchEdesisExamCatalogRowDetail(id, cfgOverride))
@@ -1994,87 +2003,17 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     };
   }
 
-  let rosterApiAlive = !skipAbpRoster;
-  const detailScope = { ...scope, allowClassroomOnly: true };
-  const probeOne = async (ex) => {
-    const id = pickEdesisCatalogExamId(ex);
-    if (!id) return null;
-    if (!examCompatibleWithStudentGrade(ex, gradeName)) return null;
-    const detail = await fetchEdesisExamCatalogRowDetail(id, cfgOverride);
-    const merged = detail ? { ...ex, ...detail } : ex;
-    if (!examCompatibleWithStudentGrade(merged, gradeName)) return null;
-    if (catalogExamAssignedToStudent(merged, detailScope) === true) return ex;
-    // Kurum geneli online tanım (isAllClasses) + program eşleşmesi — yalnızca probe adayında
-    const allFlag = getPropCi(flattenEdesisRow(merged), ['isAllClasses', 'allClasses', 'tumSiniflar']);
-    if (
-      (allFlag === true || allFlag === 'true' || allFlag === 1) &&
-      programMatchStrict(merged) &&
-      /^none$/i.test(catalogResultStatus(merged))
-    ) {
-      return ex;
-    }
-    if (catalogExamAssignedToStudent(merged, detailScope) === false) return null;
-
-    // Roster doluysa tür eşleşmesiyle başkasının denemesini alma —
-    // ince roster (1–3) Edesis Online’da hâlâ açık kalabiliyor (kanıt: YANIT 1 / KTT yeniden).
-    let rosterEmptyOrUnknown = true;
-    let thinRosterOpen = false;
-    if (rosterApiAlive && !skipAbpRoster) {
-      const roster = await fetchEdesisExamRosterStudentIds(id, cfgOverride);
-      if (roster === null) {
-        rosterApiAlive = false;
-      } else if (examRosterIncludesStudent(roster, edesisStudentId)) {
-        return ex;
-      } else if (roster.length > 0) {
-        if (isThinOnlineRosterExam(merged, roster.length) || isThinOnlineRosterExam(ex, roster.length)) {
-          rosterEmptyOrUnknown = false;
-          thinRosterOpen = true;
-        } else {
-          return null;
-        }
-      } else {
-        rosterEmptyOrUnknown = true;
-      }
-    } else if (isThinOnlineRosterExam(merged) || isThinOnlineRosterExam(ex)) {
-      thinRosterOpen = true;
-    }
-
-    // Online + sinavTuruId — boş roster veya ince roster.
-    // sinavTuruId tenant geneli olduğu için LGS↔TYT yumuşak program filtresi uygulanır (MAARİF→lgs).
-    if ((rosterEmptyOrUnknown || thinRosterOpen) && adminTuruIds.size) {
-      const online = examOnlineFlag(merged);
-      let turu = pickEdesisExamSinavTuruId(merged) || pickEdesisExamSinavTuruId(detail);
-      if (!turu) turu = await resolveEdesisExamSinavTuruId(merged, cfgOverride);
-      if (
-        online === true &&
-        turu &&
-        adminTuruIds.has(String(turu)) &&
-        examCompatibleWithStudentProgramSoft(merged, keys)
-      ) {
-        if (examWindowStillOpen(merged) || examWindowStillOpen(ex)) return ex;
-      }
-    }
-
-    try {
-      if (await fetchEdesisExamAssignedToStudent(id, edesisStudentId, cfgOverride)) return ex;
-    } catch {
-      /* yoksay */
-    }
-    return null;
-  };
-
-  for (let i = 0; i < candidates.length; i += 6) {
-    const batch = candidates.slice(i, i + 6);
-    const found = await Promise.all(batch.map(probeOne));
-    assigned = mergeEdesisCatalogExamsById(assigned, found.filter(Boolean));
-    known = new Set(assigned.map((ex) => pickEdesisCatalogExamId(ex)).filter(Boolean));
-  }
+  // GetSinavForView × 12 aday ~8–12s. sinavTuruId tenant geneli; studentCount katalogda var.
+  const fastHits = candidates.filter((ex) =>
+    catalogExamTakeableWithoutRosterProbe(ex, { programKeys: keys, gradeName })
+  );
+  assigned = mergeEdesisCatalogExamsById(assigned, fastHits);
 
   return {
     rows: assigned,
     adminAssignment: adminDetail,
-    probeSkipped: false,
-    probeSkipReason: null,
+    probeSkipped: true,
+    probeSkipReason: 'catalog_studentCount_fast_path',
     probeCandidateCount: candidates.length
   };
 }
@@ -4154,14 +4093,7 @@ export async function fetchEdesisExamStructure(examId, cfgOverride = {}) {
   }
   let examMeta = pickExamMetaFromJson(r.json);
   let denemeId = pickDenemeIdFromJson(r.json);
-  try {
-    const probed = await probeEdesisExamBookletSources(id, localCfg);
-    examMeta = { ...examMeta, ...probed.examMeta };
-    bookletPdfs = dedupeBookletFiles([...bookletPdfs, ...probed.files]);
-    if (probed.denemeId) denemeId = probed.denemeId;
-  } catch {
-    /* kitapçık PDF yoksa yapı yine döner */
-  }
+  // Kitapçık PDF ayrı uç (exam-booklet-pdf); structure’ı şişirme
   let answerKeyBookletCodes = [];
   if (denemeId) {
     answerKeyBookletCodes = await fetchEdesisDenemeAnswerKeyBooklets(denemeId, localCfg);
@@ -4374,14 +4306,7 @@ async function probeEdesisExamBookletSources(examId, localCfg) {
     examMeta = { ...examMeta, ...absorbed.examMeta };
   };
 
-  // v1 kitapçık uçları + ABP GetSinavForView (denemeUrl burada). v1 /pdf HTML 404’ü atla.
-  const [bookletsRes, filesRes, detail] = await Promise.all([
-    fetchEdesisJson(localCfg, V1_PATHS.examBooklets(id)).catch(() => null),
-    fetchEdesisJson(localCfg, V1_PATHS.examFiles(id)).catch(() => null),
-    fetchEdesisExamCatalogRowDetail(id, localCfg).catch(() => null)
-  ]);
-  if (bookletsRes && isReachableEdesisResponse(bookletsRes)) ingest(bookletsRes.json);
-  if (filesRes && isReachableEdesisResponse(filesRes)) ingest(filesRes.json);
+  const detail = await fetchEdesisExamCatalogRowDetail(id, localCfg).catch(() => null);
   if (detail) ingest(detail);
 
   if (denemeId) {
@@ -4393,32 +4318,6 @@ async function probeEdesisExamBookletSources(examId, localCfg) {
       if (isReachableEdesisResponse(denemeView)) ingest(denemeView.json);
     } catch {
       /* ignore */
-    }
-  }
-
-  // GUID → Files/GetFileForByGuidView (en fazla 3) — URL çöz; PDF indirmeyi load’a bırak
-  const guids = [];
-  for (const f of collected) {
-    const guid = extractEdesisFileGuid(f.url);
-    if (guid && !guids.includes(guid)) guids.push(guid);
-  }
-  for (const guid of guids.slice(0, 3)) {
-    const resolved = await tryResolveGuidViaFileView(guid, localCfg);
-    if (!resolved) continue;
-    if (resolved.buf) {
-      collected.push({
-        url: resolved.url,
-        kitapcikTuru: '',
-        name: resolved.name || 'Kitapçık PDF',
-        buf: resolved.buf,
-        contentType: resolved.contentType
-      });
-    } else if (resolved.url) {
-      collected.push({
-        url: resolved.url,
-        kitapcikTuru: '',
-        name: resolved.name || 'Kitapçık PDF'
-      });
     }
   }
 
