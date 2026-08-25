@@ -212,7 +212,7 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     assert.deepEqual(items.map((x) => x.examId), ['41']);
   });
 
-  it('requireExplicitAssignment shows ancient assigned exams without personal result', () => {
+  it('requireExplicitAssignment hides ancient Ready assigned exams (analysis residue)', () => {
     const now = new Date('2026-08-24T12:00:00Z');
     const items = buildStudentAvailableEdesisExamItems({
       catalogRows: [
@@ -256,9 +256,44 @@ describe('buildStudentAvailableEdesisExamItems', () => {
       requireExplicitAssignment: true
     });
     assert.deepEqual(
-      items.filter((x) => x.canTake).map((x) => x.examId).sort(),
-      ['1561043', '315978']
+      items.filter((x) => x.canTake).map((x) => x.examId),
+      ['1561043']
     );
+  });
+
+  it('requireExplicitAssignment does not mix submitted results into Sınava gir list', () => {
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [
+        {
+          id: 100,
+          name: 'Açık atanmış',
+          examType: 'LGS',
+          resultStatus: 'None',
+          examDate: '2026-08-20'
+        }
+      ],
+      assignedCatalogRows: [
+        {
+          id: 100,
+          name: 'Açık atanmış',
+          examType: 'LGS',
+          resultStatus: 'None',
+          examDate: '2026-08-20'
+        }
+      ],
+      resultRows: [
+        { examId: 99, studentId: 2086573, examName: 'Eski girilmiş', net: 80, examDate: '2026-08-01' }
+      ],
+      edesisStudentId: '2086573',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: 'LGS' }),
+      now: new Date('2026-08-24T12:00:00Z'),
+      requireExplicitAssignment: true
+    });
+    assert.deepEqual(
+      items.map((x) => x.examId),
+      ['100']
+    );
+    assert.equal(items[0].canTake, true);
   });
 
   it('offers a StudentId-filtered catalog exam without studentIds on the row', () => {
