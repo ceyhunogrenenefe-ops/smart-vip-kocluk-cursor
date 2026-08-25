@@ -1,12 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  BookOpen,
-  Brain,
-  ChevronDown,
+  CheckCircle2,
   ChevronRight,
   ClipboardList,
   CloudDownload,
-  ExternalLink,
   FileText,
   GraduationCap,
   Link2,
@@ -16,9 +13,10 @@ import {
   Plug,
   RefreshCw,
   Search,
+  Sparkles,
   Users
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
 import { sortByFirstName } from '../lib/personNameSort';
@@ -27,85 +25,86 @@ import {
   createEdesisClassroomHub,
   createEdesisParentHub,
   createEdesisStudentHub,
-  fetchEdesisHubExams,
+  fetchEdesisExamStructure,
   fetchEdesisHubClassrooms,
   fetchEdesisHubDepartments,
   fetchEdesisHubGrades,
   fetchEdesisHubStudents,
-  fetchEdesisHubTerms,
   fetchEdesisKarnePdf,
   fetchEdesisStatus,
-  fetchEdesisStudentResultsHub,
-  fetchEdesisExamStructure,
+  fetchEdesisStudentDossier,
   ingestEdesisExamResults,
   linkEdesisStudent,
   syncEdesis,
   type EdesisHubStudent,
   type EdesisPlatformStudent,
   type EdesisStatus,
+  type EdesisStudentDossier,
   type EdesisStudentResultsExam
 } from '../lib/edesis/edesisApi';
 import { shareEdesisKarneWithParent } from '../lib/edesis/shareEdesisKarneWhatsApp';
 
-type TabId = 'baglanti' | 'ogrenciler' | 'donem' | 'sonuclar' | 'yazma' | 'sinav';
+type DossierTab = 'girecek' | 'girdi' | 'kurum' | 'araclar';
 
-const WRITE_STEPS = [
-  { n: 1, title: 'Sınıf seviyeleri', desc: 'GET /grades — gradeId şube oluşturmak için gerekli.' },
-  { n: 2, title: 'Bölümler', desc: 'GET /departments — lise öğrencisi için bolumId zorunlu.' },
-  { n: 3, title: 'Şube oluştur', desc: 'POST /classrooms — dönen id öğrenci atamasında kullanılır.' },
-  { n: 4, title: 'Öğrenci ekle', desc: 'POST /students — classroomId + bolumId ile profil ve kullanıcı.' },
-  { n: 5, title: 'Veli ekle', desc: 'POST /parents — studentId ile veli bağlantısı.' },
-  { n: 6, title: 'Ham cevap gönder', desc: 'GET /structure sonra POST /exams/{id}/results — replace gövdede.' }
-];
+const AUTO_SYNC_KEY = 'edesis-auto-sync-at';
+const AUTO_SYNC_MS = 30 * 60 * 1000;
 
-const SYNC_TIP =
-  'Senkronizasyon: öğrenci listesini günde bir kez çekin; sınav sonuçlarını sınav bittikten sonra alın. Sık istek rate limit tetikler.';
+function fmtDate(raw?: string | null) {
+  if (!raw) return '—';
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return String(raw).slice(0, 10);
+  return d.toLocaleDateString('tr-TR');
+}
 
-const STEPS = [
-  { n: 1, title: 'API Key', desc: 'Kurum yöneticinizden API anahtarı alın (Vercel ortam değişkeni).' },
-  { n: 2, title: 'Öğrenci listesi', desc: 'GET /students — Edesis id’lerini sisteme kaydedin.' },
-  { n: 3, title: 'Dönem & sınav', desc: 'GET /terms ve GET /exams ile katalog bilgisini görün.' },
-  { n: 4, title: 'Sınav sonuçları', desc: 'GET /exams/results?StudentId=… ile öğrenci sonuçlarını sorgulayın.' },
-  { n: 5, title: 'Karne PDF', desc: 'POST /reports/exam-report — reportUrl ile PDF indirin.' },
-  { n: 6, title: 'Sınava gir', desc: 'Öğrenci GET /structure + POST ham cevap; değerlendirme Edesis’te.' }
-];
-
-function pickField(row: Record<string, unknown>, keys: string[]): string {
-  for (const k of keys) {
-    const v = row[k];
-    if (v != null && String(v).trim()) return String(v);
-  }
-  return '—';
+function ExamRow({
+  title,
+  type,
+  date,
+  status,
+  extra,
+  children
+}: {
+  title: string;
+  type?: string | null;
+  date?: string | null;
+  status?: string | null;
+  extra?: string | null;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-white px-4 py-3 shadow-sm">
+      <div className="min-w-0">
+        <p className="font-semibold text-slate-900">{title}</p>
+        <p className="mt-0.5 text-xs text-slate-500">
+          {type || 'Tür yok'} · {fmtDate(date)}
+          {status ? ` · ${status}` : ''}
+          {extra ? ` · ${extra}` : ''}
+        </p>
+      </div>
+      {children ? <div className="flex flex-wrap gap-2">{children}</div> : null}
+    </div>
+  );
 }
 
 export default function EdesisPage() {
   const { user } = useAuth();
-  const [tab, setTab] = useState<TabId>('baglanti');
+  const [searchParams, setSearchParams] = useSearchParams();
   const [status, setStatus] = useState<EdesisStatus | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
-
   const [studentsLoading, setStudentsLoading] = useState(false);
   const [hubStudents, setHubStudents] = useState<EdesisHubStudent[]>([]);
   const [platformStudents, setPlatformStudents] = useState<EdesisPlatformStudent[]>([]);
   const [studentSearch, setStudentSearch] = useState('');
   const [linkBusyId, setLinkBusyId] = useState<string | null>(null);
 
-  const [termsLoading, setTermsLoading] = useState(false);
-  const [terms, setTerms] = useState<Record<string, unknown>[]>([]);
-  const [examsLoading, setExamsLoading] = useState(false);
-  const [exams, setExams] = useState<Record<string, unknown>[]>([]);
-
-  const [resultsLoading, setResultsLoading] = useState(false);
+  const [selectedPlatformId, setSelectedPlatformId] = useState(searchParams.get('studentId') || '');
   const [selectedEdesisId, setSelectedEdesisId] = useState('');
-  const [selectedPlatformId, setSelectedPlatformId] = useState('');
-  const [resultExams, setResultExams] = useState<EdesisStudentResultsExam[]>([]);
-  const [expandedExam, setExpandedExam] = useState<string | null>(null);
+  const [dossierTab, setDossierTab] = useState<DossierTab>('girecek');
+  const [dossierLoading, setDossierLoading] = useState(false);
+  const [dossier, setDossier] = useState<EdesisStudentDossier | null>(null);
+
   const [karneBusyKey, setKarneBusyKey] = useState<string | null>(null);
   const [karneWaBusyKey, setKarneWaBusyKey] = useState<string | null>(null);
-  const [lastKarneUrl, setLastKarneUrl] = useState<string | null>(null);
-  const [resultsStudentName, setResultsStudentName] = useState<string | null>(null);
-  const [resultsParentPhone, setResultsParentPhone] = useState<string | null>(null);
-  const [selectedTermId, setSelectedTermId] = useState('');
 
   const [writeLoading, setWriteLoading] = useState(false);
   const [grades, setGrades] = useState<Record<string, unknown>[]>([]);
@@ -120,17 +119,13 @@ export default function EdesisPage() {
     classroomId: '',
     bolumId: ''
   });
-  const [parentForm, setParentForm] = useState({
-    firstName: '',
-    lastName: '',
-    phone: '',
-    studentId: ''
-  });
+  const [parentForm, setParentForm] = useState({ firstName: '', lastName: '', phone: '', studentId: '' });
   const [ingestExamId, setIngestExamId] = useState('');
   const [ingestReplace, setIngestReplace] = useState(false);
   const [ingestJson, setIngestJson] = useState('');
   const [ingestBusy, setIngestBusy] = useState(false);
-  const [structurePreview, setStructurePreview] = useState<string>('');
+  const [structurePreview, setStructurePreview] = useState('');
+  const autoSyncOnce = useRef(false);
 
   const reloadStatus = useCallback(async () => {
     try {
@@ -139,10 +134,6 @@ export default function EdesisPage() {
       setStatus(null);
     }
   }, []);
-
-  useEffect(() => {
-    void reloadStatus();
-  }, [reloadStatus]);
 
   const loadStudents = useCallback(async () => {
     setStudentsLoading(true);
@@ -157,116 +148,121 @@ export default function EdesisPage() {
     }
   }, []);
 
-  const loadTermsAndExams = useCallback(async () => {
-    setTermsLoading(true);
-    setExamsLoading(true);
-    try {
-      const [t, e] = await Promise.all([fetchEdesisHubTerms(), fetchEdesisHubExams()]);
-      setTerms(t.items || []);
-      setExams(e.items || []);
-      const def = (t.items || []).find((row) => row.isDefault === true) || (t.items || [])[0];
-      const defId = def ? pickField(def, ['id', 'termId']) : '';
-      if (defId && defId !== '—') setSelectedTermId(defId);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Dönem/sınav listesi alınamadı');
-    } finally {
-      setTermsLoading(false);
-      setExamsLoading(false);
-    }
-  }, []);
-
-  const loadWriteCatalog = useCallback(async () => {
-    setWriteLoading(true);
-    try {
-      const [g, d, c] = await Promise.all([
-        fetchEdesisHubGrades(),
-        fetchEdesisHubDepartments(),
-        fetchEdesisHubClassrooms()
-      ]);
-      setGrades(g.items || []);
-      setDepartments(d.items || []);
-      setClassrooms(c.items || []);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Yazma kataloğu alınamadı — admin API paketi gerekli');
-    } finally {
-      setWriteLoading(false);
-    }
-  }, []);
+  useEffect(() => {
+    void reloadStatus();
+    void loadStudents();
+  }, [reloadStatus, loadStudents]);
 
   useEffect(() => {
-    if (tab === 'ogrenciler' && !hubStudents.length && status?.configured) void loadStudents();
-    if (tab === 'sonuclar' && !terms.length && status?.configured) void loadTermsAndExams();
-    if (tab === 'donem' && !terms.length && !exams.length && status?.configured) void loadTermsAndExams();
-    if ((tab === 'sonuclar' || tab === 'ogrenciler') && !platformStudents.length && status?.configured) {
-      void loadStudents();
-    }
-    if (tab === 'yazma' && !grades.length && status?.configured) void loadWriteCatalog();
-    if (tab === 'sinav' && !exams.length && status?.configured) void loadTermsAndExams();
-  }, [tab, hubStudents.length, terms.length, exams.length, platformStudents.length, grades.length, status?.configured, loadStudents, loadTermsAndExams, loadWriteCatalog]);
+    if (autoSyncOnce.current) return;
+    autoSyncOnce.current = true;
+    const last = Number(sessionStorage.getItem(AUTO_SYNC_KEY) || 0);
+    if (Date.now() - last < AUTO_SYNC_MS) return;
+    setSyncBusy(true);
+    void syncEdesis()
+      .then((r) => {
+        sessionStorage.setItem(AUTO_SYNC_KEY, String(Date.now()));
+        if (r.ok) toast.success(`Edesis senkron: ${r.imported ?? 0} kayıt`);
+      })
+      .catch(() => {
+        /* otomatik senkron sessiz; manuel buton var */
+      })
+      .finally(() => setSyncBusy(false));
+  }, []);
 
-  const filteredStudents = useMemo(() => {
+  const filteredHub = useMemo(() => {
     const q = studentSearch.trim().toLocaleLowerCase('tr-TR');
-    if (!q) return hubStudents;
-    return hubStudents.filter(
+    const list = hubStudents.length
+      ? hubStudents
+      : platformStudents.map(
+          (p): EdesisHubStudent => ({
+            edesisId: p.edesis_ogrenci_id,
+            name: p.name,
+            email: p.email,
+            schoolNo: null,
+            platformStudentId: p.id,
+            platformStudentName: p.name,
+            matchMethod: p.edesis_ogrenci_id ? 'edesis_ogrenci_id' : null,
+            linked: Boolean(p.edesis_ogrenci_id)
+          })
+        );
+    if (!q) return list;
+    return list.filter(
       (s) =>
         (s.name || '').toLocaleLowerCase('tr-TR').includes(q) ||
         (s.email || '').toLocaleLowerCase('tr-TR').includes(q) ||
         String(s.edesisId || '').includes(q) ||
         (s.platformStudentName || '').toLocaleLowerCase('tr-TR').includes(q)
     );
-  }, [hubStudents, studentSearch]);
+  }, [hubStudents, platformStudents, studentSearch]);
 
-  const edesisIdByPlatformId = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const s of hubStudents) {
-      if (s.platformStudentId && s.edesisId) map.set(s.platformStudentId, s.edesisId);
-    }
-    for (const p of platformStudents) {
-      if (p.edesis_ogrenci_id) map.set(p.id, String(p.edesis_ogrenci_id));
-    }
-    return map;
-  }, [hubStudents, platformStudents]);
-
-  const selectedPlatformStudent = useMemo(
-    () => platformStudents.find((p) => p.id === selectedPlatformId) || null,
-    [platformStudents, selectedPlatformId]
+  const loadDossier = useCallback(
+    async (platformId: string, edesisId?: string) => {
+      if (!platformId && !edesisId) return;
+      setDossierLoading(true);
+      setDossier(null);
+      try {
+        const d = await fetchEdesisStudentDossier({
+          studentId: platformId || undefined,
+          edesisStudentId: edesisId || undefined
+        });
+        setDossier(d);
+        if (d.edesisStudentId) setSelectedEdesisId(d.edesisStudentId);
+        if (d.platformStudentId) setSelectedPlatformId(d.platformStudentId);
+        setDossierTab('girecek');
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Öğrenci dosyası alınamadı');
+      } finally {
+        setDossierLoading(false);
+      }
+    },
+    []
   );
 
-  const resolvedParentPhone =
-    resultsParentPhone ||
-    selectedPlatformStudent?.parent_phone ||
-    null;
-  const resolvedStudentName =
-    resultsStudentName ||
-    selectedPlatformStudent?.name ||
-    hubStudents.find((s) => s.platformStudentId === selectedPlatformId)?.platformStudentName ||
-    'Öğrenci';
-
-  const applyPlatformStudentSelection = (platformId: string) => {
+  const selectStudent = (item: EdesisHubStudent) => {
+    const platformId = item.platformStudentId || '';
+    const edesisId = item.edesisId || '';
     setSelectedPlatformId(platformId);
-    if (!platformId) return;
-    const fromHub = edesisIdByPlatformId.get(platformId);
-    if (fromHub) {
-      setSelectedEdesisId(fromHub);
-      return;
-    }
-    const p = platformStudents.find((x) => x.id === platformId);
-    if (p?.edesis_ogrenci_id) setSelectedEdesisId(String(p.edesis_ogrenci_id));
-    setResultsParentPhone(p?.parent_phone || null);
-    setResultsStudentName(p?.name || null);
+    setSelectedEdesisId(edesisId);
+    const next = new URLSearchParams(searchParams);
+    if (platformId) next.set('studentId', platformId);
+    else next.delete('studentId');
+    setSearchParams(next, { replace: true });
+    if (platformId || edesisId) void loadDossier(platformId, edesisId || undefined);
   };
+
+  useEffect(() => {
+    const sid = searchParams.get('studentId');
+    if (!sid || dossier || dossierLoading || !platformStudents.length) return;
+    const hit =
+      hubStudents.find((s) => s.platformStudentId === sid) ||
+      platformStudents.find((p) => p.id === sid);
+    if (!hit) return;
+    if ('platformStudentId' in (hit as EdesisHubStudent) && (hit as EdesisHubStudent).platformStudentId) {
+      selectStudent(hit as EdesisHubStudent);
+    } else {
+      const p = hit as EdesisPlatformStudent;
+      selectStudent({
+        edesisId: p.edesis_ogrenci_id,
+        name: p.name,
+        email: p.email,
+        schoolNo: null,
+        platformStudentId: p.id,
+        platformStudentName: p.name,
+        matchMethod: p.edesis_ogrenci_id ? 'edesis_ogrenci_id' : null,
+        linked: Boolean(p.edesis_ogrenci_id)
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [platformStudents.length, hubStudents.length]);
 
   const onSync = async () => {
     setSyncBusy(true);
     try {
       const r = await syncEdesis();
-      if (r.ok && (r.imported ?? 0) > 0) {
-        toast.success(`${r.imported} deneme sisteme aktarıldı`);
-      } else if (r.ok) {
-        toast.warning(r.diagnosis || 'Senkron tamamlandı — yeni kayıt yok');
-      } else {
-        toast.error(r.error || r.diagnosis || 'Senkron başarısız');
-      }
+      sessionStorage.setItem(AUTO_SYNC_KEY, String(Date.now()));
+      if (r.ok) toast.success(`${r.imported ?? 0} deneme aktarıldı`);
+      else toast.error(r.error || r.diagnosis || 'Senkron başarısız');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Senkron hatası');
     } finally {
@@ -281,6 +277,7 @@ export default function EdesisPage() {
       await linkEdesisStudent({ platformStudentId, edesisStudentId: item.edesisId });
       toast.success('Edesis ID bağlandı');
       await loadStudents();
+      void loadDossier(platformStudentId, item.edesisId);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Bağlantı başarısız');
     } finally {
@@ -288,61 +285,24 @@ export default function EdesisPage() {
     }
   };
 
-  const loadResults = async () => {
-    if (!selectedEdesisId && !selectedPlatformId) {
-      toast.error('Öğrenci seçin');
-      return;
-    }
-    setResultsLoading(true);
-    setResultExams([]);
-    try {
-      const r = await fetchEdesisStudentResultsHub({
-        edesisStudentId: selectedEdesisId || undefined,
-        studentId: selectedPlatformId || undefined
-      });
-      setResultExams(r.exams || []);
-      if (r.platformStudentId) setSelectedPlatformId(r.platformStudentId);
-      if (r.edesisStudentId) setSelectedEdesisId(r.edesisStudentId);
-      setResultsStudentName(r.platformStudentName || null);
-      setResultsParentPhone(r.parent_phone || null);
-      if (r.autoLinked) {
-        toast.success(`Edesis ID otomatik bağlandı (${r.edesisStudentId})`);
-        void loadStudents();
-      }
-      if ((r.exams || []).length) {
-        toast.success(`${r.count} sınav sonucu yüklendi`);
-      } else {
-        toast.info('Bu öğrenci için sonuç bulunamadı');
-      }
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Sonuçlar alınamadı');
-    } finally {
-      setResultsLoading(false);
-    }
-  };
-
   const onKarne = async (exam: EdesisStudentResultsExam) => {
-    if (!exam.edesisExamId || !selectedEdesisId) {
-      toast.error('Karne için Edesis öğrenci ID ve sınav ID gerekli');
+    const edesisId = dossier?.edesisStudentId || selectedEdesisId;
+    if (!exam.edesisExamId || !edesisId) {
+      toast.error('Karne için Edesis öğrenci ve sınav ID gerekli');
       return;
     }
-    const key = `${exam.edesisExamId}-${selectedEdesisId}`;
+    const key = `${exam.edesisExamId}-${edesisId}`;
     setKarneBusyKey(key);
-    setLastKarneUrl(null);
     try {
       const r = await fetchEdesisKarnePdf({
         examId: exam.edesisExamId,
-        edesisStudentId: selectedEdesisId,
-        studentId: selectedPlatformId || undefined,
-        termId: selectedTermId || undefined
+        edesisStudentId: edesisId,
+        studentId: selectedPlatformId || undefined
       });
       if (r.reportUrl) {
-        setLastKarneUrl(r.reportUrl);
         window.open(r.reportUrl, '_blank', 'noopener,noreferrer');
         toast.success(r.message || 'Karne PDF hazır');
-      } else {
-        toast.warning(r.message || r.hint || 'reportUrl dönmedi — admin/student_dashboard paketi gerekli');
-      }
+      } else toast.warning(r.message || 'Karne URL dönmedi');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Karne oluşturulamadı');
     } finally {
@@ -351,33 +311,22 @@ export default function EdesisPage() {
   };
 
   const onKarneWhatsApp = async (exam: EdesisStudentResultsExam) => {
-    if (!exam.edesisExamId || !selectedEdesisId) {
-      toast.error('Karne için Edesis öğrenci ID ve sınav ID gerekli');
-      return;
-    }
-    if (!resolvedParentPhone) {
-      toast.error(
-        'Veli telefonu koçluk sisteminde yok — Öğrenci yönetiminde öğrenci kartına veli numarası ekleyin (Edesis veli kaydı gerekmez).'
-      );
-      return;
-    }
-    if (!user?.id) {
-      toast.error('Oturum bulunamadı');
-      return;
-    }
-    const rowKey = String(exam.edesisExamId || exam.examTitle + exam.examDate);
+    const edesisId = dossier?.edesisStudentId || selectedEdesisId;
+    const phone = dossier?.profile.parentPhone;
+    if (!exam.edesisExamId || !edesisId) return toast.error('Karne için Edesis ID gerekli');
+    if (!phone) return toast.error('Veli telefonu öğrenci kartında yok');
+    if (!user?.id) return toast.error('Oturum yok');
+    const rowKey = String(exam.edesisExamId);
     setKarneWaBusyKey(rowKey);
     try {
       const r = await shareEdesisKarneWithParent({
         exam,
-        edesisStudentId: selectedEdesisId,
+        edesisStudentId: edesisId,
         platformStudentId: selectedPlatformId || undefined,
-        studentName: resolvedStudentName,
-        parentPhone: resolvedParentPhone,
-        coachUserId: user.id,
-        termId: selectedTermId || undefined
+        studentName: dossier?.profile.name || 'Öğrenci',
+        parentPhone: phone,
+        coachUserId: user.id
       });
-      setLastKarneUrl(r.reportUrl);
       toast.success(r.notice);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Veliye gönderilemedi');
@@ -386,22 +335,35 @@ export default function EdesisPage() {
     }
   };
 
-  const onCreateClassroom = async () => {
-    if (!classroomName.trim() || !classroomGradeId.trim()) {
-      toast.error('Şube adı ve gradeId gerekli');
-      return;
-    }
+  const loadWriteCatalog = async () => {
     setWriteLoading(true);
     try {
-      const r = await createEdesisClassroomHub({
+      const [g, d, c] = await Promise.all([
+        fetchEdesisHubGrades(),
+        fetchEdesisHubDepartments(),
+        fetchEdesisHubClassrooms()
+      ]);
+      setGrades(g.items || []);
+      setDepartments(d.items || []);
+      setClassrooms(c.items || []);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Yazma kataloğu alınamadı');
+    } finally {
+      setWriteLoading(false);
+    }
+  };
+
+  const onCreateClassroom = async () => {
+    if (!classroomName.trim() || !classroomGradeId.trim()) return toast.error('Şube adı ve gradeId gerekli');
+    setWriteLoading(true);
+    try {
+      await createEdesisClassroomHub({
         name: classroomName.trim(),
         gradeId: Number(classroomGradeId) || classroomGradeId
       });
       toast.success('Şube oluşturuldu');
       setClassroomName('');
       await loadWriteCatalog();
-      const id = pickField((r.item as Record<string, unknown>) || {}, ['id', 'classroomId']);
-      if (id !== '—') setStudentForm((s) => ({ ...s, classroomId: id }));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Şube oluşturulamadı');
     } finally {
@@ -410,9 +372,8 @@ export default function EdesisPage() {
   };
 
   const onCreateStudent = async () => {
-    if (!studentForm.firstName.trim() || !studentForm.lastName.trim() || !studentForm.classroomId.trim()) {
-      toast.error('Ad, soyad ve classroomId gerekli');
-      return;
+    if (!studentForm.firstName.trim() || !studentForm.classroomId.trim()) {
+      return toast.error('Ad ve classroomId gerekli');
     }
     setWriteLoading(true);
     try {
@@ -425,10 +386,8 @@ export default function EdesisPage() {
       if (studentForm.bolumId.trim()) body.bolumId = Number(studentForm.bolumId) || studentForm.bolumId;
       const r = await createEdesisStudentHub(body);
       toast.success('Edesis öğrencisi oluşturuldu');
-      const item = (r.item as Record<string, unknown>) || {};
-      const sid = pickField(item, ['id', 'studentId']);
-      if (sid !== '—') setParentForm((p) => ({ ...p, studentId: sid }));
-      setStudentForm({ firstName: '', lastName: '', email: '', classroomId: studentForm.classroomId, bolumId: studentForm.bolumId });
+      const sid = String((r.item as { id?: string })?.id || '');
+      if (sid) setParentForm((p) => ({ ...p, studentId: sid }));
       await loadStudents();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Öğrenci eklenemedi');
@@ -439,8 +398,7 @@ export default function EdesisPage() {
 
   const onCreateParent = async () => {
     if (!parentForm.studentId.trim() || !parentForm.firstName.trim()) {
-      toast.error('Veli adı ve Edesis studentId gerekli');
-      return;
+      return toast.error('Veli adı ve Edesis studentId gerekli');
     }
     setWriteLoading(true);
     try {
@@ -451,7 +409,6 @@ export default function EdesisPage() {
         studentId: Number(parentForm.studentId) || parentForm.studentId
       });
       toast.success('Veli eklendi');
-      setParentForm({ firstName: '', lastName: '', phone: '', studentId: parentForm.studentId });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Veli eklenemedi');
     } finally {
@@ -460,22 +417,17 @@ export default function EdesisPage() {
   };
 
   const onLoadStructure = async () => {
-    const examId = ingestExamId.trim();
-    if (!examId) {
-      toast.error('Sınav seçin veya examId girin');
-      return;
-    }
+    if (!ingestExamId.trim()) return toast.error('Sınav ID girin');
     setIngestBusy(true);
     try {
-      const r = await fetchEdesisExamStructure(examId);
-      const lines = (r.items || []).map(
-        (row) =>
-          `${row.kitapcikTuru} · ${row.lessonName} (lessonId=${row.lessonId}, dersGrupId=${row.dersGrupId}, ${row.questionCount} soru)`
+      const r = await fetchEdesisExamStructure(ingestExamId.trim());
+      setStructurePreview(
+        (r.items || [])
+          .map((row) => `${row.kitapcikTuru} · ${row.lessonName} (${row.questionCount} soru)`)
+          .join('\n') || 'Yapı boş'
       );
-      setStructurePreview(lines.join('\n') || 'Yapı boş');
-      toast.success(`${r.count} kitapçık×ders satırı`);
+      toast.success(`${r.count} kitapçık×ders`);
     } catch (e) {
-      setStructurePreview('');
       toast.error(e instanceof Error ? e.message : 'Yapı alınamadı');
     } finally {
       setIngestBusy(false);
@@ -483,32 +435,24 @@ export default function EdesisPage() {
   };
 
   const onIngestResults = async () => {
-    const examId = ingestExamId.trim();
-    if (!examId) {
-      toast.error('Sınav seçin');
-      return;
-    }
+    if (!ingestExamId.trim()) return toast.error('Sınav seçin');
     let results: Record<string, unknown>[] = [];
     try {
       const parsed = JSON.parse(ingestJson || '[]');
       results = Array.isArray(parsed) ? parsed : Array.isArray(parsed.results) ? parsed.results : [];
     } catch {
-      toast.error('results JSON geçersiz');
-      return;
+      return toast.error('results JSON geçersiz');
     }
-    if (!results.length) {
-      toast.error('results dizisi boş');
-      return;
-    }
+    if (!results.length) return toast.error('results dizisi boş');
     setIngestBusy(true);
     try {
-      const r = await ingestEdesisExamResults({ examId, replace: ingestReplace, results });
-      if (r.conflict) {
-        toast.warning(r.hint || r.message || 'Mevcut sonuç var — replace kutusunu işaretleyin (gövde alanı)');
-        return;
-      }
-      const rejected = r.rejected?.length ? ` · reddedilen ${r.rejected.length}` : '';
-      toast.success(`${r.accepted || 0} satır kabul${rejected} · ${r.job?.state || r.message || 'iş kuyruğa alındı'}`);
+      const r = await ingestEdesisExamResults({
+        examId: ingestExamId.trim(),
+        replace: ingestReplace,
+        results
+      });
+      if (r.conflict) return toast.warning(r.hint || 'Mevcut sonuç var — replace işaretleyin');
+      toast.success(`${r.accepted || 0} satır kabul · ${r.job?.state || 'kuyruk'}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Gönderim başarısız');
     } finally {
@@ -516,729 +460,509 @@ export default function EdesisPage() {
     }
   };
 
-  const tabBtn = (id: TabId, label: string, icon: React.ReactNode) => (
-    <button
-      type="button"
-      onClick={() => setTab(id)}
-      className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${
-        tab === id
-          ? 'bg-indigo-600 text-white shadow'
-          : 'bg-white text-indigo-900 hover:bg-indigo-50 border border-indigo-100'
-      }`}
-    >
-      {icon}
-      {label}
-    </button>
-  );
+  useEffect(() => {
+    if (dossierTab === 'araclar' && !grades.length && status?.configured) void loadWriteCatalog();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dossierTab]);
+
+  const profile = dossier?.profile;
+  const takeable = dossier?.takeable || [];
+  const taken = dossier?.taken || [];
+  const openOnline = dossier?.openOnline || [];
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Edesis</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            Edesis External API v1.5 — eşleme, sonuçlar, karne ve ham cevap gönderimi
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled={!status?.configured || syncBusy}
-            onClick={() => void onSync()}
-            className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
-          >
-            {syncBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
-            Tüm sonuçları senkronize et
-          </button>
-          <Link
-            to="/exam-tracking"
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            <BookOpen className="h-4 w-4" />
-            Deneme takibi
-          </Link>
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-4">
-        <p className="mb-3 text-sm font-semibold text-indigo-950">Veri okuma akışı</p>
-        <ol className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-          {STEPS.map((s) => (
-            <li key={s.n} className="rounded-lg border border-indigo-100 bg-white/90 p-3 text-xs">
-              <span className="font-bold text-indigo-700">{s.n}.</span> {s.title}
-              <p className="mt-1 text-slate-600">{s.desc}</p>
-            </li>
-          ))}
-        </ol>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        {tabBtn('baglanti', 'Bağlantı & Senkron', <Plug className="h-4 w-4" />)}
-        {tabBtn('ogrenciler', 'Edesis Öğrencileri', <Users className="h-4 w-4" />)}
-        {tabBtn('donem', 'Dönem & Sınavlar', <GraduationCap className="h-4 w-4" />)}
-        {tabBtn('sonuclar', 'Sonuçlar & Karne', <FileText className="h-4 w-4" />)}
-        {tabBtn('yazma', 'Veri Yazma', <PenLine className="h-4 w-4" />)}
-        {tabBtn('sinav', 'Sınav gönderimi', <ClipboardList className="h-4 w-4" />)}
-      </div>
-
-      {tab === 'baglanti' && <EdesisSyncPanel />}
-
-      {tab === 'ogrenciler' && (
-        <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-slate-600">
-              Edesis <code className="rounded bg-slate-100 px-1">GET /students</code> — platform öğrencisiyle eşleştirin
+    <div className="mx-auto max-w-[1400px] space-y-6 p-4 sm:p-6">
+      <section className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 p-6 text-white shadow-xl">
+        <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-amber-400/10 blur-3xl" />
+        <div className="relative flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-300/90">
+              Online VIP · Edesis Command
             </p>
-            <button
-              type="button"
-              disabled={!status?.configured || studentsLoading}
-              onClick={() => void loadStudents()}
-              className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 px-3 py-2 text-sm text-indigo-900 hover:bg-indigo-50 disabled:opacity-50"
-            >
-              {studentsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              Listeyi çek
-            </button>
-          </div>
-          <div className="relative max-w-md">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-            <input
-              value={studentSearch}
-              onChange={(e) => setStudentSearch(e.target.value)}
-              placeholder="Ad, e-posta veya Edesis ID ara…"
-              className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm"
-            />
-          </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-slate-500">
-                  <th className="px-2 py-2">Edesis ID</th>
-                  <th className="px-2 py-2">Ad</th>
-                  <th className="px-2 py-2">Durum</th>
-                  <th className="px-2 py-2">E-posta</th>
-                  <th className="px-2 py-2">Platform eşleşme</th>
-                  <th className="px-2 py-2">Bağla</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredStudents.map((item) => (
-                  <tr key={String(item.edesisId || item.name)} className="border-b border-slate-100">
-                    <td className="px-2 py-2 font-mono text-xs">{item.edesisId || '—'}</td>
-                    <td className="px-2 py-2">{item.name || '—'}</td>
-                    <td className="px-2 py-2 text-xs text-slate-600">
-                      {item.studentState || '—'}
-                      {item.termName ? ` · ${item.termName}` : ''}
-                    </td>
-                    <td className="px-2 py-2">{item.email || '—'}</td>
-                    <td className="px-2 py-2">
-                      {item.linked ? (
-                        <span className="text-green-700">{item.platformStudentName} ✓</span>
-                      ) : item.platformStudentName ? (
-                        <span className="text-amber-700">
-                          {item.platformStudentName} ({item.matchMethod})
-                        </span>
-                      ) : (
-                        <span className="text-red-600">Eşleşmedi</span>
-                      )}
-                    </td>
-                    <td className="px-2 py-2">
-                      {item.linked ? (
-                        <span className="text-xs text-green-600">Bağlı</span>
-                      ) : item.edesisId && item.platformStudentId ? (
-                        <button
-                          type="button"
-                          disabled={linkBusyId === item.edesisId}
-                          onClick={() => void onLink(item, item.platformStudentId!)}
-                          className="rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-800 hover:bg-indigo-100 disabled:opacity-50"
-                        >
-                          {linkBusyId === item.edesisId ? 'Bağlanıyor…' : 'Eşleşmeyi kaydet'}
-                        </button>
-                      ) : item.edesisId ? (
-                        <select
-                          defaultValue={item.platformStudentId || ''}
-                          disabled={linkBusyId === item.edesisId}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            if (v) void onLink(item, v);
-                          }}
-                          className="max-w-[180px] rounded border border-slate-200 px-2 py-1 text-xs"
-                        >
-                          <option value="">Öğrenci seç…</option>
-                          {platformStudents.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.name}
-                            </option>
-                          ))}
-                        </select>
-                      ) : null}
-                    </td>
-                  </tr>
-                ))}
-                {!studentsLoading && !filteredStudents.length && (
-                  <tr>
-                    <td colSpan={5} className="px-2 py-6 text-center text-slate-500">
-                      {status?.configured ? 'Liste boş — “Listeyi çek” ile Edesis’ten alın' : 'API key tanımlı değil'}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {tab === 'donem' && (
-        <div className="grid gap-6 lg:grid-cols-2">
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="font-semibold text-slate-900">Dönemler (GET /terms)</h2>
-              <button
-                type="button"
-                disabled={termsLoading}
-                onClick={() => void loadTermsAndExams()}
-                className="text-sm text-indigo-600 hover:underline disabled:opacity-50"
-              >
-                Yenile
-              </button>
-            </div>
-            {termsLoading ? (
-              <Loader2 className="mx-auto h-6 w-6 animate-spin text-slate-400" />
-            ) : (
-              <ul className="space-y-2 text-sm">
-                {terms.map((t, i) => (
-                  <li key={i} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                    <span className="font-medium">{pickField(t, ['name', 'termName', 'donemAdi'])}</span>
-                    <span className="ml-2 text-slate-500">ID: {pickField(t, ['id', 'termId'])}</span>
-                    {t.isDefault === true && (
-                      <span className="ml-2 rounded bg-indigo-100 px-1.5 py-0.5 text-xs text-indigo-800">Varsayılan</span>
-                    )}
-                  </li>
-                ))}
-                {!terms.length && <li className="text-slate-500">Kayıt yok</li>}
-              </ul>
-            )}
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="font-semibold text-slate-900">Sınavlar (GET /exams)</h2>
-              <button
-                type="button"
-                disabled={examsLoading}
-                onClick={() => void loadTermsAndExams()}
-                className="text-sm text-indigo-600 hover:underline disabled:opacity-50"
-              >
-                Yenile
-              </button>
-            </div>
-            {examsLoading ? (
-              <Loader2 className="mx-auto h-6 w-6 animate-spin text-slate-400" />
-            ) : (
-              <ul className="max-h-96 space-y-2 overflow-y-auto text-sm">
-                {exams.map((ex, i) => (
-                  <li key={i} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                    <p className="font-medium">{pickField(ex, ['name', 'examName', 'sinavAdi', 'title'])}</p>
-                    <p className="text-xs text-slate-500">
-                      ID: {pickField(ex, ['id', 'examId', 'sinavId'])} ·{' '}
-                      {pickField(ex, ['examDate', 'sinavTarihi', 'date', 'tarih'])}
-                      {ex.resultStatus ? ` · ${String(ex.resultStatus)}` : ''}
-                      {ex.totalQuestions != null ? ` · ${String(ex.totalQuestions)} soru` : ''}
-                    </p>
-                  </li>
-                ))}
-                {!exams.length && <li className="text-slate-500">Kayıt yok</li>}
-              </ul>
-            )}
-          </div>
-        </div>
-      )}
-
-      {tab === 'sonuclar' && (
-        <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-sm text-slate-600">
-            <code className="rounded bg-slate-100 px-1">GET /exams/results?StudentId=…</code> ve{' '}
-            <code className="rounded bg-slate-100 px-1">POST /reports/exam-report</code>
-          </p>
-          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-            <strong>Veliye WhatsApp:</strong> Numara Edesis&apos;ten alınmaz. Eşleşmiş Smart Koçluk öğrenci kartındaki{' '}
-            <strong>veli telefonu</strong> kullanılır. Karne PDF, bağlı <strong>koç WhatsApp gateway</strong> oturumundan
-            dosya olarak gider; büyükse otomatik sıkıştırılır.
-          </p>
-          {resolvedParentPhone ? (
-            <p className="text-sm text-green-800">
-              Veli (koçluk sistemi): <span className="font-mono">{resolvedParentPhone}</span>
-              {resolvedStudentName ? ` · ${resolvedStudentName}` : ''}
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight">Öğrenci sınav köprüsü</h1>
+            <p className="mt-2 max-w-2xl text-sm text-slate-300">
+              Öğrenciyi seçin — gireceği denemeler, girdiği sonuçlar, karne ve kurumdaki açık online sınavlar tek
+              dosyada. Liste ve senkron otomatik gelir.
             </p>
-          ) : selectedPlatformId || selectedEdesisId ? (
-            <p className="text-sm text-amber-800">
-              Veli telefonu bulunamadı — öğrenciyi koçluk sisteminde bulup kartına veli numarası ekleyin, sonra
-              &quot;Sonuçları getir&quot; ile yenileyin.
-            </p>
-          ) : null}
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="text-sm">
-              <span className="mb-1 block text-slate-600">Edesis öğrenci ID</span>
-              <input
-                value={selectedEdesisId}
-                onChange={(e) => setSelectedEdesisId(e.target.value)}
-                placeholder="Edesis student id"
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-              />
-            </label>
-            <label className="text-sm">
-              <span className="mb-1 block text-slate-600">veya platform öğrenci</span>
-              <select
-                value={selectedPlatformId}
-                onChange={(e) => applyPlatformStudentSelection(e.target.value)}
-                className="min-w-[240px] rounded-lg border border-slate-200 px-3 py-2 text-sm"
-              >
-                <option value="">Seçin…</option>
-                {platformStudents.map((p) => {
-                  const hubEdesis = edesisIdByPlatformId.get(p.id);
-                  return (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                      {hubEdesis || p.edesis_ogrenci_id
-                        ? ` (Edesis: ${hubEdesis || p.edesis_ogrenci_id})`
-                        : ' — ID bağlı değil'}
-                    </option>
-                  );
-                })}
-              </select>
-            </label>
-            <label className="text-sm">
-              <span className="mb-1 block text-slate-600">Dönem (termId)</span>
-              <select
-                value={selectedTermId}
-                onChange={(e) => setSelectedTermId(e.target.value)}
-                className="min-w-[160px] rounded-lg border border-slate-200 px-3 py-2 text-sm"
-              >
-                <option value="">Otomatik</option>
-                {terms.map((t, i) => {
-                  const id = pickField(t, ['id', 'termId']);
-                  return (
-                    <option key={i} value={id === '—' ? '' : id}>
-                      {pickField(t, ['name', 'termName', 'donemAdi'])} ({id})
-                    </option>
-                  );
-                })}
-              </select>
-            </label>
-            <button
-              type="button"
-              disabled={resultsLoading}
-              onClick={() => void loadResults()}
-              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-            >
-              {resultsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-              Sonuçları getir
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setTab('ogrenciler');
-                if (!hubStudents.length) void loadStudents();
-              }}
-              className="inline-flex items-center gap-1 text-sm text-indigo-600 hover:underline"
-            >
-              <Link2 className="h-4 w-4" />
-              Öğrenci bağla
-            </button>
-          </div>
-
-          {lastKarneUrl ? (
-            <p className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-900">
-              Son karne:{' '}
-              <a href={lastKarneUrl} target="_blank" rel="noopener noreferrer" className="font-medium underline">
-                PDF&apos;yi aç / indir
-              </a>
-            </p>
-          ) : null}
-
-          <div className="space-y-2">
-            {resultExams.map((exam) => {
-              const key = String(exam.edesisExamId || exam.examTitle + exam.examDate);
-              const open = expandedExam === key;
-              return (
-                <div key={key} className="rounded-lg border border-slate-200">
-                  <div className="flex w-full items-center justify-between gap-2 px-3 py-3">
-                    <button
-                      type="button"
-                      onClick={() => setExpandedExam(open ? null : key)}
-                      className="flex min-w-0 flex-1 items-center gap-2 text-left hover:opacity-80"
-                    >
-                      {open ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
-                      <div className="min-w-0">
-                        <p className="font-medium text-slate-900">{exam.examTitle}</p>
-                        <p className="text-xs text-slate-500">
-                          {exam.examDate} · Net: {exam.totalNet?.toFixed?.(2) ?? exam.totalNet} · D/Y/B:{' '}
-                          {exam.correct}/{exam.wrong}/{exam.blank}
-                          {exam.subjectCount ? ` · ${exam.subjectCount} ders` : ''}
-                        </p>
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!selectedEdesisId || karneBusyKey === key}
-                      onClick={() => void onKarne(exam)}
-                      className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-800 hover:bg-indigo-100 disabled:opacity-50"
-                    >
-                      {karneBusyKey === key ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <ExternalLink className="h-3 w-3" />
-                      )}
-                      Karne PDF
-                    </button>
-                    <button
-                      type="button"
-                      disabled={
-                        !selectedEdesisId ||
-                        !resolvedParentPhone ||
-                        karneWaBusyKey === key
-                      }
-                      title={
-                        !resolvedParentPhone
-                          ? 'Koçluk öğrenci kartında veli telefonu gerekli (Edesis veli kaydı şart değil)'
-                          : 'Karne PDF — veliye WhatsApp (koçluk sistemindeki veli numarası)'
-                      }
-                      onClick={() => void onKarneWhatsApp(exam)}
-                      className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-green-200 bg-green-50 px-2 py-1 text-xs font-medium text-green-900 hover:bg-green-100 disabled:opacity-50"
-                    >
-                      {karneWaBusyKey === key ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <MessageCircle className="h-3 w-3" />
-                      )}
-                      Veliye WhatsApp
-                    </button>
-                    {selectedPlatformId && exam.edesisExamId ? (
-                      <Link
-                        to={`/ai-coach?student=${encodeURIComponent(selectedPlatformId)}&from=edesis&edesisExamId=${encodeURIComponent(exam.edesisExamId)}&edesisStudentId=${encodeURIComponent(selectedEdesisId)}`}
-                        className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-purple-200 bg-purple-50 px-2 py-1 text-xs font-medium text-purple-800 hover:bg-purple-100"
-                      >
-                        <Brain className="h-3 w-3" />
-                        AI Koç
-                      </Link>
-                    ) : (
-                      <span
-                        className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-400"
-                        title="AI analiz için önce platform öğrencisi bağlayın"
-                      >
-                        <Brain className="h-3 w-3" />
-                        AI Koç
-                      </span>
-                    )}
-                  </div>
-                  {open && (
-                    <div className="border-t px-3 py-3">
-                      <table className="min-w-full text-xs">
-                        <thead>
-                          <tr className="text-left text-slate-500">
-                            <th className="py-1">Ders</th>
-                            <th className="py-1">D</th>
-                            <th className="py-1">Y</th>
-                            <th className="py-1">B</th>
-                            <th className="py-1">Net</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(exam.subjects || []).map((s, i) => (
-                            <tr key={i} className="border-t border-slate-100">
-                              <td className="py-1 font-medium">{s.name}</td>
-                              <td className="py-1">{s.correct}</td>
-                              <td className="py-1">{s.wrong}</td>
-                              <td className="py-1">{s.blank}</td>
-                              <td className="py-1">{s.net?.toFixed?.(2) ?? s.net}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      {(exam.subjects || []).some((s) => (s.topics?.length ?? 0) > 0) && (
-                        <p className="mt-2 text-xs text-slate-500">
-                          Konu kırılımı mevcut — detay için Deneme Takibi sayfasında “Edesis detayını çek” kullanın.
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            {!resultsLoading && !resultExams.length && (
-              <p className="py-8 text-center text-sm text-slate-500">Öğrenci seçip sonuçları getirin</p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {tab === 'yazma' && (
-        <div className="space-y-4">
-          <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4">
-            <p className="text-sm font-semibold text-amber-950">Veri yazma akışı (admin paketi gerekli)</p>
-            <ol className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-              {WRITE_STEPS.map((s) => (
-                <li key={s.n} className="rounded-lg border border-amber-100 bg-white/90 p-3 text-xs">
-                  <span className="font-bold text-amber-800">{s.n}.</span> {s.title}
-                  <p className="mt-1 text-slate-600">{s.desc}</p>
-                </li>
-              ))}
-            </ol>
-            <p className="mt-3 text-xs text-amber-900">{SYNC_TIP}</p>
-          </div>
-
-          <div className="flex justify-end">
-            <button
-              type="button"
-              disabled={writeLoading}
-              onClick={() => void loadWriteCatalog()}
-              className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 px-3 py-2 text-sm text-indigo-900 hover:bg-indigo-50 disabled:opacity-50"
-            >
-              {writeLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              Katalogları yenile
-            </button>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <h3 className="font-semibold text-slate-900">Sınıf seviyeleri (GET /grades)</h3>
-              <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-sm">
-                {grades.map((g, i) => (
-                  <li key={i} className="rounded bg-slate-50 px-2 py-1">
-                    {pickField(g, ['name', 'gradeName', 'sinifAdi'])} — ID: {pickField(g, ['id', 'gradeId'])}
-                  </li>
-                ))}
-                {!grades.length && <li className="text-slate-500">Liste boş veya admin paketi yok</li>}
-              </ul>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <h3 className="font-semibold text-slate-900">Bölümler (GET /departments)</h3>
-              <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-sm">
-                {departments.map((d, i) => (
-                  <li key={i} className="rounded bg-slate-50 px-2 py-1">
-                    {pickField(d, ['name', 'bolumAdi', 'departmentName'])} — ID: {pickField(d, ['id', 'bolumId'])}
-                  </li>
-                ))}
-                {!departments.length && <li className="text-slate-500">Liste boş</li>}
-              </ul>
-            </div>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-3">
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <h3 className="mb-3 font-semibold text-slate-900">POST /classrooms</h3>
-              <div className="space-y-2 text-sm">
-                <input
-                  value={classroomName}
-                  onChange={(e) => setClassroomName(e.target.value)}
-                  placeholder="Şube adı (9-A)"
-                  className="w-full rounded border border-slate-200 px-2 py-1.5"
-                />
-                <select
-                  value={classroomGradeId}
-                  onChange={(e) => setClassroomGradeId(e.target.value)}
-                  className="w-full rounded border border-slate-200 px-2 py-1.5"
-                >
-                  <option value="">gradeId seç…</option>
-                  {grades.map((g, i) => {
-                    const id = pickField(g, ['id', 'gradeId']);
-                    return (
-                      <option key={i} value={id === '—' ? '' : id}>
-                        {pickField(g, ['name', 'gradeName'])} ({id})
-                      </option>
-                    );
-                  })}
-                </select>
-                <button
-                  type="button"
-                  disabled={writeLoading}
-                  onClick={() => void onCreateClassroom()}
-                  className="w-full rounded-lg bg-indigo-600 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  Şube oluştur
-                </button>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <h3 className="mb-3 font-semibold text-slate-900">POST /students</h3>
-              <div className="space-y-2 text-sm">
-                <input
-                  value={studentForm.firstName}
-                  onChange={(e) => setStudentForm((s) => ({ ...s, firstName: e.target.value }))}
-                  placeholder="Ad"
-                  className="w-full rounded border border-slate-200 px-2 py-1.5"
-                />
-                <input
-                  value={studentForm.lastName}
-                  onChange={(e) => setStudentForm((s) => ({ ...s, lastName: e.target.value }))}
-                  placeholder="Soyad"
-                  className="w-full rounded border border-slate-200 px-2 py-1.5"
-                />
-                <input
-                  value={studentForm.email}
-                  onChange={(e) => setStudentForm((s) => ({ ...s, email: e.target.value }))}
-                  placeholder="E-posta (opsiyonel)"
-                  className="w-full rounded border border-slate-200 px-2 py-1.5"
-                />
-                <select
-                  value={studentForm.classroomId}
-                  onChange={(e) => setStudentForm((s) => ({ ...s, classroomId: e.target.value }))}
-                  className="w-full rounded border border-slate-200 px-2 py-1.5"
-                >
-                  <option value="">classroomId…</option>
-                  {classrooms.map((c, i) => {
-                    const id = pickField(c, ['id', 'classroomId']);
-                    return (
-                      <option key={i} value={id === '—' ? '' : id}>
-                        {pickField(c, ['name', 'className'])} ({id})
-                      </option>
-                    );
-                  })}
-                </select>
-                <select
-                  value={studentForm.bolumId}
-                  onChange={(e) => setStudentForm((s) => ({ ...s, bolumId: e.target.value }))}
-                  className="w-full rounded border border-slate-200 px-2 py-1.5"
-                >
-                  <option value="">bolumId (lise)…</option>
-                  {departments.map((d, i) => {
-                    const id = pickField(d, ['id', 'bolumId']);
-                    return (
-                      <option key={i} value={id === '—' ? '' : id}>
-                        {pickField(d, ['name', 'bolumAdi'])} ({id})
-                      </option>
-                    );
-                  })}
-                </select>
-                <button
-                  type="button"
-                  disabled={writeLoading}
-                  onClick={() => void onCreateStudent()}
-                  className="w-full rounded-lg bg-green-600 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
-                >
-                  Öğrenci ekle
-                </button>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <h3 className="mb-3 font-semibold text-slate-900">POST /parents</h3>
-              <div className="space-y-2 text-sm">
-                <input
-                  value={parentForm.studentId}
-                  onChange={(e) => setParentForm((p) => ({ ...p, studentId: e.target.value }))}
-                  placeholder="Edesis studentId"
-                  className="w-full rounded border border-slate-200 px-2 py-1.5"
-                />
-                <input
-                  value={parentForm.firstName}
-                  onChange={(e) => setParentForm((p) => ({ ...p, firstName: e.target.value }))}
-                  placeholder="Veli adı"
-                  className="w-full rounded border border-slate-200 px-2 py-1.5"
-                />
-                <input
-                  value={parentForm.lastName}
-                  onChange={(e) => setParentForm((p) => ({ ...p, lastName: e.target.value }))}
-                  placeholder="Veli soyadı"
-                  className="w-full rounded border border-slate-200 px-2 py-1.5"
-                />
-                <input
-                  value={parentForm.phone}
-                  onChange={(e) => setParentForm((p) => ({ ...p, phone: e.target.value }))}
-                  placeholder="Telefon"
-                  className="w-full rounded border border-slate-200 px-2 py-1.5"
-                />
-                <button
-                  type="button"
-                  disabled={writeLoading}
-                  onClick={() => void onCreateParent()}
-                  className="w-full rounded-lg bg-violet-600 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
-                >
-                  Veli ekle
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {tab === 'sinav' && (
-        <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-sm text-slate-600">
-            v1.5 ingest: <code className="rounded bg-slate-100 px-1">GET /exams/{'{id}'}/structure</code> sonra{' '}
-            <code className="rounded bg-slate-100 px-1">POST /exams/{'{id}'}/results</code>.{' '}
-            <strong>replace gövde alanıdır</strong> — <code>?replace=true</code> yok sayılır. Scope:{' '}
-            <code>exam_results:write</code> (admin/custom). Öğrenciler kendi optiklerini{' '}
-            <Link to="/academic-center?tab=exam" className="font-semibold text-indigo-700 hover:underline">
-              Akademik Merkez → Deneme / Optik
-            </Link>{' '}
-            sayfasından gönderir.
-          </p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="text-sm">
-              <span className="mb-1 block text-slate-600">Sınav</span>
-              <select
-                value={ingestExamId}
-                onChange={(e) => setIngestExamId(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-              >
-                <option value="">Seçin…</option>
-                {exams.map((ex, i) => {
-                  const id = pickField(ex, ['id', 'examId']);
-                  if (id === '—') return null;
-                  return (
-                    <option key={`${id}-${i}`} value={id}>
-                      {pickField(ex, ['name', 'examName', 'title'])} ({id})
-                    </option>
-                  );
-                })}
-              </select>
-            </label>
-            <label className="flex items-end gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={ingestReplace}
-                onChange={(e) => setIngestReplace(e.target.checked)}
-              />
-              <span>replace: true (mevcut sonucun üzerine yaz)</span>
-            </label>
           </div>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              disabled={ingestBusy}
-              onClick={() => void onLoadStructure()}
-              className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 px-3 py-2 text-sm text-indigo-900 hover:bg-indigo-50 disabled:opacity-50"
+              disabled={!status?.configured || syncBusy}
+              onClick={() => void onSync()}
+              className="inline-flex items-center gap-2 rounded-full bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 disabled:opacity-50"
             >
-              {ingestBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              Yapıyı çek
+              {syncBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
+              {syncBusy ? 'Senkron…' : 'Şimdi senkron'}
             </button>
+            <Link
+              to="/edesis-analiz"
+              className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/15"
+            >
+              <Sparkles className="h-4 w-4" />
+              Analiz
+            </Link>
+          </div>
+        </div>
+        <div className="relative mt-5 grid gap-3 sm:grid-cols-4">
+          {[
+            ['API', status?.configured ? 'Bağlı' : 'Eksik'],
+            ['Edesis ID', String(status?.studentsWithEdesisId ?? '—')],
+            ['Platform', String(status?.studentsInDb ?? '—')],
+            ['Senkron', syncBusy ? 'Çalışıyor' : 'Otomatik']
+          ].map(([k, v]) => (
+            <div key={k} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+              <p className="text-[11px] uppercase tracking-wider text-slate-400">{k}</p>
+              <p className="mt-1 text-lg font-semibold">{v}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
+        <aside className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <Users className="h-4 w-4 text-indigo-600" />
+              Öğrenciler
+            </h2>
             <button
               type="button"
-              disabled={ingestBusy}
-              onClick={() => void onIngestResults()}
-              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              disabled={studentsLoading}
+              onClick={() => void loadStudents()}
+              className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100"
             >
-              {ingestBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardList className="h-4 w-4" />}
-              Ham cevapları gönder
+              {studentsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             </button>
           </div>
-          {structurePreview ? (
-            <pre className="max-h-40 overflow-auto rounded-lg bg-slate-50 p-3 text-xs text-slate-700">{structurePreview}</pre>
-          ) : null}
-          <label className="block text-sm">
-            <span className="mb-1 block text-slate-600">
-              results JSON — ogrenciId (sayı), kitapcikTuru, dersCevaplari[].cevaplar uzunluğu structure.questionCount
-            </span>
-            <textarea
-              value={ingestJson}
-              onChange={(e) => setIngestJson(e.target.value)}
-              rows={10}
-              placeholder={`[\n  {\n    "ogrenciId": 7203743,\n    "kitapcikTuru": "A",\n    "dersCevaplari": [\n      { "lessonId": 1, "dersGrupId": 1, "cevaplar": "ABCDE..." }\n    ]\n  }\n]`}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-xs"
+          <div className="relative mb-3">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+            <input
+              value={studentSearch}
+              onChange={(e) => setStudentSearch(e.target.value)}
+              placeholder="Ad, e-posta, Edesis ID"
+              className="w-full rounded-xl border border-slate-200 py-2 pl-9 pr-3 text-sm"
             />
-          </label>
-        </div>
-      )}
+          </div>
+          <div className="max-h-[70vh] space-y-1 overflow-y-auto pr-1">
+            {filteredHub.map((item) => {
+              const active =
+                (item.platformStudentId && item.platformStudentId === selectedPlatformId) ||
+                (item.edesisId && item.edesisId === selectedEdesisId);
+              return (
+                <button
+                  key={String(item.edesisId || item.platformStudentId || item.name)}
+                  type="button"
+                  onClick={() => selectStudent(item)}
+                  className={`flex w-full items-center justify-between rounded-2xl px-3 py-2.5 text-left text-sm transition ${
+                    active ? 'bg-indigo-600 text-white shadow' : 'hover:bg-slate-50'
+                  }`}
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium">{item.name || item.platformStudentName}</span>
+                    <span className={`block truncate text-xs ${active ? 'text-indigo-100' : 'text-slate-500'}`}>
+                      {item.edesisId ? `Edesis ${item.edesisId}` : 'ID bağlı değil'}
+                      {item.linked ? ' · bağlı' : ''}
+                    </span>
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 opacity-70" />
+                </button>
+              );
+            })}
+            {!studentsLoading && !filteredHub.length && (
+              <p className="px-2 py-8 text-center text-sm text-slate-500">Öğrenci bulunamadı</p>
+            )}
+          </div>
+        </aside>
+
+        <section className="min-w-0 space-y-4">
+          {!selectedPlatformId && !selectedEdesisId ? (
+            <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500">
+              Soldan bir öğrenciye tıklayın. Gireceği ve girdiği tüm Edesis sınavları burada açılır.
+            </div>
+          ) : dossierLoading ? (
+            <div className="flex h-64 items-center justify-center rounded-3xl border border-slate-200 bg-white">
+              <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
+            </div>
+          ) : (
+            <>
+              <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-semibold text-slate-900">{profile?.name || 'Öğrenci'}</h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {profile?.classLevel || profile?.gradeName || 'Sınıf yok'}
+                      {profile?.className ? ` · ${profile.className}` : ''}
+                      {profile?.email ? ` · ${profile.email}` : ''}
+                    </p>
+                    <p className="mt-1 font-mono text-xs text-slate-400">
+                      Edesis {dossier?.edesisStudentId || selectedEdesisId || '—'}
+                      {profile?.parentPhone ? ` · veli ${profile.parentPhone}` : ''}
+                      {profile?.programKeys?.length ? ` · ${profile.programKeys.join(', ')}` : ''}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void loadDossier(selectedPlatformId, selectedEdesisId || undefined)}
+                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    Dosyayı yenile
+                  </button>
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  {[
+                    ['Girecek', dossier?.counts.takeable ?? takeable.length, 'amber'],
+                    ['Girdi', dossier?.counts.taken ?? taken.length, 'emerald'],
+                    ['Kurumda açık', dossier?.counts.openOnline ?? openOnline.length, 'indigo']
+                  ].map(([label, n, tone]) => (
+                    <div key={String(label)} className="rounded-2xl bg-slate-50 px-4 py-3">
+                      <p className="text-xs text-slate-500">{label}</p>
+                      <p
+                        className={`text-2xl font-semibold ${
+                          tone === 'amber' ? 'text-amber-700' : tone === 'emerald' ? 'text-emerald-700' : 'text-indigo-700'
+                        }`}
+                      >
+                        {n as number}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    ['girecek', 'Girecek sınavlar', <ClipboardList className="h-4 w-4" />],
+                    ['girdi', 'Girdiği sınavlar', <CheckCircle2 className="h-4 w-4" />],
+                    ['kurum', 'Kurumda açık', <GraduationCap className="h-4 w-4" />],
+                    ['araclar', 'Kurum araçları', <PenLine className="h-4 w-4" />]
+                  ] as const
+                ).map(([id, label, icon]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setDossierTab(id)}
+                    className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium ${
+                      dossierTab === id ? 'bg-indigo-600 text-white' : 'border border-slate-200 bg-white text-slate-700'
+                    }`}
+                  >
+                    {icon}
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {dossierTab === 'girecek' && (
+                <div className="space-y-2">
+                  {takeable.map((ex) => (
+                    <ExamRow
+                      key={ex.examId}
+                      title={ex.name}
+                      type={ex.examType}
+                      date={ex.examDate}
+                      status={ex.resultStatus}
+                      extra={ex.totalQuestions != null ? `${ex.totalQuestions} soru` : null}
+                    >
+                      <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
+                        Sınava girilebilir
+                      </span>
+                    </ExamRow>
+                  ))}
+                  {!takeable.length && (
+                    <p className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
+                      Bu öğrenci için henüz girilmemiş açık deneme yok.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {dossierTab === 'girdi' && (
+                <div className="space-y-2">
+                  {taken.map((ex) => {
+                    const key = `${ex.edesisExamId}`;
+                    return (
+                      <ExamRow
+                        key={key}
+                        title={ex.examTitle}
+                        type={ex.examType}
+                        date={ex.examDate}
+                        extra={`net ${ex.totalNet ?? '—'}`}
+                      >
+                        <button
+                          type="button"
+                          disabled={karneBusyKey === `${ex.edesisExamId}-${dossier?.edesisStudentId}`}
+                          onClick={() => void onKarne(ex)}
+                          className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-800"
+                        >
+                          {karneBusyKey ? 'Karne…' : 'Karne PDF'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={karneWaBusyKey === key}
+                          onClick={() => void onKarneWhatsApp(ex)}
+                          className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-800"
+                        >
+                          <MessageCircle className="h-3.5 w-3.5" />
+                          Veli
+                        </button>
+                        <Link
+                          to={`/edesis-analiz?studentId=${encodeURIComponent(selectedPlatformId)}`}
+                          className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-700"
+                        >
+                          Analiz
+                        </Link>
+                      </ExamRow>
+                    );
+                  })}
+                  {!taken.length && (
+                    <p className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
+                      Sonuç bulunamadı.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {dossierTab === 'kurum' && (
+                <div className="space-y-2">
+                  <p className="text-sm text-slate-500">
+                    Programına uygun, henüz girmediği kurum online denemeleri. Sınava gir listesi atama + ince
+                    roster süzmesi uygular; burası tam görünürlük içindir.
+                  </p>
+                  {openOnline.map((ex) => (
+                    <ExamRow
+                      key={ex.examId}
+                      title={ex.name}
+                      type={ex.examType}
+                      date={ex.examDate}
+                      status={ex.resultStatus}
+                      extra={ex.studentCount != null ? `${ex.studentCount} öğrenci` : null}
+                    />
+                  ))}
+                  {!openOnline.length && (
+                    <p className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
+                      Açık kurum denemesi yok.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {dossierTab === 'araclar' && (
+                <div className="space-y-6">
+                  <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                    <h3 className="mb-3 flex items-center gap-2 font-semibold">
+                      <Link2 className="h-4 w-4 text-indigo-600" />
+                      Edesis eşleme
+                    </h3>
+                    {hubStudents
+                      .filter((s) => s.platformStudentId === selectedPlatformId || s.edesisId === selectedEdesisId)
+                      .map((item) => (
+                        <div key={String(item.edesisId)} className="flex flex-wrap items-center gap-3 text-sm">
+                          <span>
+                            {item.name} · {item.edesisId}
+                          </span>
+                          {item.linked ? (
+                            <span className="text-emerald-700">Bağlı</span>
+                          ) : (
+                            <select
+                              defaultValue=""
+                              disabled={linkBusyId === item.edesisId}
+                              onChange={(e) => {
+                                if (e.target.value) void onLink(item, e.target.value);
+                              }}
+                              className="rounded-lg border px-2 py-1"
+                            >
+                              <option value="">Platform öğrencisi seç</option>
+                              {platformStudents.map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  {p.name}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                      ))}
+                  </div>
+
+                  <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                    <h3 className="mb-3 flex items-center gap-2 font-semibold">
+                      <Plug className="h-4 w-4 text-indigo-600" />
+                      Bağlantı
+                    </h3>
+                    <EdesisSyncPanel />
+                  </div>
+
+                  <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                    <h3 className="mb-3 font-semibold">Şube / öğrenci / veli yazma</h3>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <input
+                        value={classroomName}
+                        onChange={(e) => setClassroomName(e.target.value)}
+                        placeholder="Şube adı"
+                        className="rounded-lg border px-3 py-2 text-sm"
+                      />
+                      <select
+                        value={classroomGradeId}
+                        onChange={(e) => setClassroomGradeId(e.target.value)}
+                        className="rounded-lg border px-3 py-2 text-sm"
+                      >
+                        <option value="">gradeId</option>
+                        {grades.map((g, i) => (
+                          <option key={i} value={String((g as { id?: string }).id || '')}>
+                            {String((g as { name?: string }).name || (g as { id?: string }).id)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={writeLoading}
+                      onClick={() => void onCreateClassroom()}
+                      className="mt-3 rounded-lg bg-slate-900 px-3 py-2 text-sm text-white"
+                    >
+                      Şube oluştur
+                    </button>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <input
+                        value={studentForm.firstName}
+                        onChange={(e) => setStudentForm((s) => ({ ...s, firstName: e.target.value }))}
+                        placeholder="Ad"
+                        className="rounded-lg border px-3 py-2 text-sm"
+                      />
+                      <input
+                        value={studentForm.lastName}
+                        onChange={(e) => setStudentForm((s) => ({ ...s, lastName: e.target.value }))}
+                        placeholder="Soyad"
+                        className="rounded-lg border px-3 py-2 text-sm"
+                      />
+                      <input
+                        value={studentForm.email}
+                        onChange={(e) => setStudentForm((s) => ({ ...s, email: e.target.value }))}
+                        placeholder="E-posta"
+                        className="rounded-lg border px-3 py-2 text-sm"
+                      />
+                      <select
+                        value={studentForm.classroomId}
+                        onChange={(e) => setStudentForm((s) => ({ ...s, classroomId: e.target.value }))}
+                        className="rounded-lg border px-3 py-2 text-sm"
+                      >
+                        <option value="">Şube</option>
+                        {classrooms.map((c, i) => (
+                          <option key={i} value={String((c as { id?: string }).id || '')}>
+                            {String((c as { name?: string }).name || (c as { id?: string }).id)}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={studentForm.bolumId}
+                        onChange={(e) => setStudentForm((s) => ({ ...s, bolumId: e.target.value }))}
+                        className="rounded-lg border px-3 py-2 text-sm"
+                      >
+                        <option value="">Bölüm (lise)</option>
+                        {departments.map((d, i) => (
+                          <option key={i} value={String((d as { id?: string }).id || '')}>
+                            {String((d as { name?: string }).name || (d as { id?: string }).id)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={writeLoading}
+                      onClick={() => void onCreateStudent()}
+                      className="mt-3 rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white"
+                    >
+                      Öğrenci ekle
+                    </button>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <input
+                        value={parentForm.firstName}
+                        onChange={(e) => setParentForm((p) => ({ ...p, firstName: e.target.value }))}
+                        placeholder="Veli adı"
+                        className="rounded-lg border px-3 py-2 text-sm"
+                      />
+                      <input
+                        value={parentForm.lastName}
+                        onChange={(e) => setParentForm((p) => ({ ...p, lastName: e.target.value }))}
+                        placeholder="Veli soyadı"
+                        className="rounded-lg border px-3 py-2 text-sm"
+                      />
+                      <input
+                        value={parentForm.phone}
+                        onChange={(e) => setParentForm((p) => ({ ...p, phone: e.target.value }))}
+                        placeholder="Telefon"
+                        className="rounded-lg border px-3 py-2 text-sm"
+                      />
+                      <input
+                        value={parentForm.studentId}
+                        onChange={(e) => setParentForm((p) => ({ ...p, studentId: e.target.value }))}
+                        placeholder="Edesis studentId"
+                        className="rounded-lg border px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={writeLoading}
+                      onClick={() => void onCreateParent()}
+                      className="mt-3 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    >
+                      Veli ekle
+                    </button>
+                  </div>
+
+                  <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                    <h3 className="mb-3 flex items-center gap-2 font-semibold">
+                      <FileText className="h-4 w-4" />
+                      Ham sonuç gönderimi
+                    </h3>
+                    <input
+                      value={ingestExamId}
+                      onChange={(e) => setIngestExamId(e.target.value)}
+                      placeholder="examId"
+                      className="mb-2 w-full rounded-lg border px-3 py-2 text-sm"
+                    />
+                    <textarea
+                      value={ingestJson}
+                      onChange={(e) => setIngestJson(e.target.value)}
+                      placeholder='[{"ogrenciId":2086573,"kitapcikTuru":"A","dersCevaplari":[]}]'
+                      className="h-28 w-full rounded-lg border px-3 py-2 font-mono text-xs"
+                    />
+                    <label className="mt-2 flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={ingestReplace}
+                        onChange={(e) => setIngestReplace(e.target.checked)}
+                      />
+                      replace (mevcut sonucu üzerine yaz)
+                    </label>
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        type="button"
+                        disabled={ingestBusy}
+                        onClick={() => void onLoadStructure()}
+                        className="rounded-lg border px-3 py-2 text-sm"
+                      >
+                        Yapıyı getir
+                      </button>
+                      <button
+                        type="button"
+                        disabled={ingestBusy}
+                        onClick={() => void onIngestResults()}
+                        className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white"
+                      >
+                        Gönder
+                      </button>
+                    </div>
+                    {structurePreview ? (
+                      <pre className="mt-3 overflow-auto rounded-lg bg-slate-50 p-3 text-xs">{structurePreview}</pre>
+                    ) : null}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      </div>
     </div>
   );
 }
