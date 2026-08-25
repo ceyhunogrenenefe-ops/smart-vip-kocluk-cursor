@@ -44,6 +44,7 @@ import {
   fetchEdesisExamStructure,
   loadEdesisExamBookletPdf,
   loadEdesisHataKarnesiPdf,
+  absorbEdesisBookletSource,
   pickEdesisBookletLessons,
   listEdesisBookletCodes,
   fetchEdesisExamSubjects,
@@ -67,6 +68,8 @@ import {
 } from '../api/_lib/edesis-student-match.js';
 
 const STAFF = new Set(['super_admin', 'admin', 'coach']);
+/** Aynı Hobby instance’ta üst üste op=sync 504 üretmesin */
+let syncInFlight = null;
 /** Öğrencinin kendi Edesis sonuç / karne / sınava giriş ops */
 const STUDENT_ALLOWED_OPS = new Set([
   'student-results',
@@ -174,42 +177,25 @@ async function loadAvailableEdesisExamsForStudent({
   cfg
 }) {
   const t0 = Date.now();
-  const scope = await resolveStudentEdesisScope({
-    edesisStudentId,
-    platformStudentId,
-    studentHint,
-    cfg
-  });
-  const catalog = await fetchEdesisExamsCatalog(cfg).catch(() => ({ rows: [], cached: false }));
-  const fullRows = catalog.rows || [];
-  const [studentCatalog, classroomCatalog, studentResults] = await Promise.all([
-    fetchEdesisExamsCatalogForStudent(edesisStudentId, cfg, {
-      fullCatalogRows: fullRows
-    }).catch(() => ({ rows: [] })),
-    scope.classroomId
-      ? fetchEdesisExamsCatalogForClassroom(scope.classroomId, cfg, fullRows).catch(() => ({
-          rows: []
-        }))
-      : Promise.resolve({ rows: [] }),
+  const [scope, catalog, studentResults] = await Promise.all([
+    resolveStudentEdesisScope({
+      edesisStudentId,
+      platformStudentId,
+      studentHint,
+      cfg
+    }),
+    fetchEdesisExamsCatalog(cfg).catch(() => ({ rows: [], cached: false })),
     fetchEdesisStudentResults(edesisStudentId, cfg, { enrichSubjects: false }).catch(() => ({
       rows: []
     }))
   ]);
-
-  let studentRows = studentCatalog.rows || [];
-  if (studentRows.length && !catalogQueryLooksFiltered(fullRows, studentRows)) {
-    studentRows = [];
-  }
-  let classroomRows = classroomCatalog.rows || [];
-  if (classroomRows.length && !catalogQueryLooksFiltered(fullRows, classroomRows)) {
-    classroomRows = [];
-  }
-
+  const fullRows = catalog.rows || [];
+  // StudentId/ClassroomId katalog sorguları Edesis’te yok sayılıp 1972 satır dump eder (~4s ×2).
   const assignedResolved = await resolveAssignedCatalogRowsForStudentAsync(
     {
       catalogRows: fullRows,
-      studentCatalogRows: studentRows,
-      classroomCatalogRows: classroomRows,
+      studentCatalogRows: [],
+      classroomCatalogRows: [],
       edesisStudentId,
       classroomId: scope.classroomId,
       programKeys: scope.programKeys,
@@ -271,8 +257,8 @@ async function loadAvailableEdesisExamsForStudent({
       takeableCount: takeableIds.length,
       takeableExamIds: takeableIds.slice(0, 40),
       classroomId: scope.classroomId || null,
-      studentCatalogCount: studentRows.length,
-      classroomCatalogCount: classroomRows.length,
+      studentCatalogCount: 0,
+      classroomCatalogCount: 0,
       fullCatalogCount: fullRows.length,
       catalogCached: Boolean(catalog.cached),
       programKeys: [...(scope.programKeys || [])],
@@ -844,7 +830,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         configured: keyOk,
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-safiye-seven-2026-08-25',
+        deployMarker: 'edesis-booklet-fast-2026-08-25',
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
@@ -903,7 +889,7 @@ export default async function handler(req, res) {
         }
         return res.status(200).json({
           ok: true,
-          deployMarker: 'edesis-safiye-seven-2026-08-25',
+          deployMarker: 'edesis-booklet-fast-2026-08-25',
           configured: Boolean(cfg.apiKey),
           abpAuth: getEdesisAbpAuthStatus(),
           abpProbe: abpProbe
@@ -963,7 +949,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-safiye-seven-2026-08-25',
+        deployMarker: 'edesis-booklet-fast-2026-08-25',
         baseUrl: cfg.baseUrl,
         attempts: out
       });
@@ -978,12 +964,14 @@ export default async function handler(req, res) {
       if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
       const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
       const byId = await fetchEdesisJson(localCfg, `/api/external/v1/exams/${encodeURIComponent(examId)}`);
+      const detail = await fetchEdesisExamCatalogRowDetail(examId, cfg);
+      const absorbed = detail ? absorbEdesisBookletSource(detail, examId) : null;
       const pdf = await loadEdesisExamBookletPdf(examId, kitapcikTuru, cfg);
       return res.status(200).json({
         ok: Boolean(pdf.ok && pdf.looksPdf),
         examId,
         kitapcikTuru,
-        denemeId: pdf.denemeId || null,
+        denemeId: pdf.denemeId || absorbed?.denemeId || null,
         files: (pdf.files || []).map((f) => ({
           url: f.url,
           name: f.name,
@@ -991,6 +979,14 @@ export default async function handler(req, res) {
           hasBuf: Boolean(f.buf)
         })),
         attempts: pdf.attempts || [],
+        catalogDetail: detail
+          ? {
+              keys: Object.keys(detail).slice(0, 80),
+              denemeId: absorbed?.denemeId || null,
+              fileCount: absorbed?.files?.length || 0,
+              fileUrls: (absorbed?.files || []).slice(0, 8).map((f) => f.url)
+            }
+          : null,
         examById: {
           status: byId.status,
           ok: byId.ok,
@@ -1040,8 +1036,18 @@ export default async function handler(req, res) {
 
     if (op === 'sync' && (req.method === 'POST' || req.method === 'GET')) {
       try {
-        const result = await runSync(actor);
-        return res.status(200).json(result);
+        if (syncInFlight) {
+          const result = await syncInFlight;
+          return res.status(200).json({ ...result, coalesced: true });
+        }
+        const pending = runSync(actor);
+        syncInFlight = pending;
+        try {
+          const result = await pending;
+          return res.status(200).json(result);
+        } finally {
+          if (syncInFlight === pending) syncInFlight = null;
+        }
       } catch (e) {
         return res.status(200).json({
           ok: true,
@@ -1144,6 +1150,38 @@ export default async function handler(req, res) {
     if (op === 'list-students') {
       const cfg = getEdesisConfig();
       if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
+      const students = filterStudentsForActor(await loadStudentsForMatching(), actor, tags);
+      const wantFull = String(req.query?.full || req.body?.full || '') === '1';
+      if (!wantFull) {
+        const items = students
+          .filter((s) => s.edesis_ogrenci_id)
+          .map((s) => ({
+            edesisId: s.edesis_ogrenci_id,
+            name: s.name,
+            email: s.email,
+            schoolNo: null,
+            platformStudentId: s.id,
+            platformStudentName: s.name,
+            matchMethod: 'edesis_ogrenci_id',
+            linked: true,
+            parent_phone: s.parent_phone || null,
+            class_level: s.class_level || null
+          }));
+        return res.status(200).json({
+          ok: true,
+          light: true,
+          count: items.length,
+          items,
+          platformStudents: students.map((s) => ({
+            id: s.id,
+            name: s.name,
+            email: s.email,
+            edesis_ogrenci_id: s.edesis_ogrenci_id || null,
+            parent_phone: s.parent_phone || null,
+            class_level: s.class_level || null
+          }))
+        });
+      }
       const filters = {
         TermId: req.query?.TermId ?? req.query?.termId ?? req.body?.TermId,
         StudentState: req.query?.StudentState ?? req.query?.studentState ?? req.body?.StudentState,
@@ -1153,7 +1191,6 @@ export default async function handler(req, res) {
         Filter: req.query?.Filter ?? req.query?.filter ?? req.body?.Filter
       };
       const fetchResult = await fetchEdesisStudentsList(cfg, filters);
-      const students = filterStudentsForActor(await loadStudentsForMatching(), actor, tags);
       const items = (fetchResult.rows || []).map((row) => matchEdesisStudentToPlatform(row, students));
       return res.status(200).json({
         ok: true,
@@ -1221,21 +1258,12 @@ export default async function handler(req, res) {
         });
       }
 
-      const fetchResult = await fetchEdesisStudentResults(edesisStudentId);
+      const fetchResult = await fetchEdesisStudentResults(edesisStudentId, cfg, { enrichSubjects: false });
       const students = filterStudentsForActor(await loadStudentsForMatching(), actor, tags);
       const institutionId = actor?.institution_id || null;
-      let matched =
+      const matched =
         students.find((s) => String(s.edesis_ogrenci_id || '').trim() === edesisStudentId) ||
         (platformStudentId ? students.find((s) => s.id === platformStudentId) : null);
-      if (!matched) {
-        for (const row of (await fetchEdesisStudentsList()).rows || []) {
-          const m = matchEdesisStudentToPlatform(row, students);
-          if (String(m.edesisId || '') === edesisStudentId && m.platformStudentId) {
-            matched = students.find((s) => s.id === m.platformStudentId) || null;
-            break;
-          }
-        }
-      }
       const platformId = platformStudentId || matched?.id || null;
 
       let parentPhone = matched?.parent_phone || null;
@@ -1661,12 +1689,21 @@ export default async function handler(req, res) {
       });
       const items = loaded.items || [];
       const meta = loaded.meta || {};
+      const taken = mapHubResultExams(
+        loaded.resultRows || [],
+        platformStudentId || null,
+        edesisStudentId,
+        actor?.institution_id || null
+      );
 
       return res.status(200).json({
         ok: true,
+        deployMarker: 'edesis-booklet-fast-2026-08-25',
         edesisStudentId,
         count: items.length,
         items,
+        taken,
+        takenCount: taken.length,
         scope: meta.assignmentMode || 'assigned',
         assignmentMeta: meta,
         takeableCount: items.filter((x) => x.canTake && !x.hasStudentResult).length,
@@ -1725,12 +1762,6 @@ export default async function handler(req, res) {
         (platformStudentId ? students.find((s) => s.id === platformStudentId) : null) ||
         studentHint;
       const platformId = platformStudentId || matched?.id || null;
-      let edesisProfile = null;
-      try {
-        edesisProfile = await fetchEdesisStudentByOgrenciId(edesisStudentId, cfg);
-      } catch {
-        edesisProfile = null;
-      }
       const loaded = await loadAvailableEdesisExamsForStudent({
         edesisStudentId,
         platformStudentId: platformId,
@@ -1747,30 +1778,22 @@ export default async function handler(req, res) {
       const takeable = (loaded.items || []).filter((x) => x.canTake && !x.hasStudentResult);
       return res.status(200).json({
         ok: true,
-        deployMarker: 'edesis-safiye-seven-2026-08-25',
+        deployMarker: 'edesis-booklet-fast-2026-08-25',
         edesisStudentId,
         platformStudentId: platformId,
         autoLinked,
         matchMethod,
         profile: {
-          name: matched?.name || edesisProfile?.name || null,
-          email: matched?.email || edesisProfile?.email || null,
+          name: matched?.name || null,
+          email: matched?.email || null,
           classLevel: matched?.class_level || loaded.scope?.classLevel || null,
-          gradeName: loaded.scope?.gradeName || edesisProfile?.gradeName || null,
-          className: loaded.scope?.className || edesisProfile?.className || null,
-          classroomId: loaded.scope?.classroomId || edesisProfile?.classroomId || null,
+          gradeName: loaded.scope?.gradeName || null,
+          className: loaded.scope?.className || null,
+          classroomId: loaded.scope?.classroomId || null,
           parentPhone: matched?.parent_phone || null,
           programKeys: [...(loaded.scope?.programKeys || [])],
-          edesis: edesisProfile
-            ? {
-                id: edesisStudentId,
-                name: edesisProfile.name || null,
-                email: edesisProfile.email || null,
-                gradeName: edesisProfile.gradeName || null,
-                className: edesisProfile.className || null,
-                classroomId: edesisProfile.classroomId || null
-              }
-            : { id: edesisStudentId }
+          edesis: { id: edesisStudentId }
+        },
         },
         takeable,
         taken,

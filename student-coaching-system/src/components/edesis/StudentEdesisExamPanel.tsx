@@ -24,7 +24,6 @@ import {
   fetchEdesisIngestStatus,
   fetchEdesisHataKarnesiPdf,
   fetchEdesisKarnePdf,
-  fetchEdesisStudentResultsHub,
   submitEdesisStudentExam,
   type EdesisAvailableExam,
   type EdesisExamBooklet,
@@ -120,37 +119,23 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
     let nextExams: EdesisStudentResultsExam[] = [];
     let nextAvailable: EdesisAvailableExam[] = [];
     try {
-      const [results, catalog] = await Promise.allSettled([
-        fetchEdesisStudentResultsHub({ studentId }),
-        fetchEdesisAvailableExams({ studentId })
-      ]);
-
-      if (results.status === 'fulfilled') {
-        nextExams = results.value.exams || [];
+      const catalog = await fetchEdesisAvailableExams({ studentId });
+      nextAvailable = catalog.items || [];
+      setAvailable(nextAvailable);
+      if (catalog.edesisStudentId) setEdesisStudentId(catalog.edesisStudentId);
+      if (Array.isArray(catalog.taken)) {
+        nextExams = catalog.taken;
         setExams(nextExams);
-        setEdesisStudentId(results.value.edesisStudentId || '');
-      } else {
-        setExams([]);
-        const msg = results.reason instanceof Error ? results.reason.message : 'Edesis sonuçları alınamadı';
-        setHint(msg);
       }
-
-      if (catalog.status === 'fulfilled') {
-        nextAvailable = catalog.value.items || [];
-        setAvailable(nextAvailable);
-        if (catalog.value.edesisStudentId) setEdesisStudentId(catalog.value.edesisStudentId);
-        if (!(catalog.value.items || []).length && catalog.value.hint) {
-          setHint((prev) => prev || catalog.value.hint || null);
-        }
-      } else {
-        const msg = catalog.reason instanceof Error ? catalog.reason.message : 'Sınav listesi alınamadı';
-        if (results.status !== 'fulfilled') {
-          setHint(msg);
-          toast.error(msg);
-        } else {
-          toast.warning(msg);
-        }
+      if (!(catalog.items || []).length && catalog.hint) {
+        setHint(catalog.hint);
       }
+    } catch (e) {
+      setExams([]);
+      setAvailable([]);
+      const msg = e instanceof Error ? e.message : 'Sınav listesi alınamadı';
+      setHint(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
