@@ -399,8 +399,8 @@ export default function EdesisOpticalSheet({
 
   const opticalAside = (
     <aside
-      className={`flex min-h-0 w-full shrink-0 flex-col border-b border-slate-200 bg-white md:border-b-0 md:border-r ${
-        pdfWide ? 'hidden md:hidden' : 'md:w-[15.5rem] lg:w-[16.5rem] xl:w-[18rem]'
+      className={`edesis-optic-aside flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-b border-slate-200 bg-white md:border-b-0 md:border-r ${
+        pdfWide && !studio ? 'hidden' : studio ? '' : 'w-full md:w-[22rem] md:min-w-[22rem] md:shrink-0'
       }`}
     >
       <div className="grid grid-cols-2 gap-1 border-b border-slate-200 px-2 py-2">
@@ -538,15 +538,19 @@ export default function EdesisOpticalSheet({
       </div>
 
       <div
-        className={`flex min-h-0 flex-1 flex-col md:flex-row ${
-          studio ? 'h-full' : 'min-h-[70vh]'
-        }`}
+        className={
+          studio
+            ? `edesis-optic-split min-h-0 flex-1 ${pdfWide ? 'edesis-optic-pdf-wide flex flex-col' : 'flex flex-col md:flex-row'}`
+            : 'flex min-h-[70vh] flex-col md:flex-row'
+        }
       >
         {opticalAside}
 
         <section
           ref={pdfPaneRef}
-          className="relative flex min-h-[52vh] min-w-0 flex-1 flex-col bg-neutral-950 md:min-h-0"
+          className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-neutral-950 ${
+            studio ? 'min-w-0' : 'min-h-[52vh] md:min-h-0'
+          }`}
         >
           <div className="flex flex-wrap items-center gap-1.5 border-b border-white/10 bg-slate-900 px-2 py-1.5 text-[11px] text-slate-200">
             <span className="mr-1 max-w-[40%] truncate font-medium">{examTitle || 'Kitapçık PDF'}</span>
