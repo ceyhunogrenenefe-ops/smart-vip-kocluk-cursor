@@ -1471,6 +1471,25 @@ export async function fetchEdesisExamCatalogRowDetail(examId, cfgOverride = {}) 
   } catch {
     /* yok */
   }
+  // Edit DTO’da ogrenciIds / isAllClasses net gelir (View’da bazen yok)
+  try {
+    const r = await fetchEdesisAbpJson(
+      localCfg,
+      `/api/services/app/Sinavs/GetSinavForEdit?id=${encodeURIComponent(id)}`
+    );
+    if (r.status !== 401 && r.status !== 403 && isReachableEdesisResponse(r)) {
+      const body = tryBody(r);
+      if (body) {
+        const nested = body.sinav || body.Sinav || body.exam || null;
+        if (nested && typeof nested === 'object') {
+          return { ...nested, ...body, id: nested.id || body.id || id };
+        }
+        return body;
+      }
+    }
+  } catch {
+    /* yok */
+  }
   return null;
 }
 
@@ -1604,6 +1623,15 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     const detail = await fetchEdesisExamCatalogRowDetail(id, cfgOverride);
     const merged = detail ? { ...ex, ...detail } : ex;
     if (catalogExamAssignedToStudent(merged, detailScope) === true) return ex;
+    // Kurum geneli online tanım (isAllClasses) + program eşleşmesi — yalnızca probe adayında
+    const allFlag = getPropCi(flattenEdesisRow(merged), ['isAllClasses', 'allClasses', 'tumSiniflar']);
+    if (
+      (allFlag === true || allFlag === 'true' || allFlag === 1) &&
+      programMatchStrict(merged) &&
+      /^none$/i.test(catalogResultStatus(merged))
+    ) {
+      return ex;
+    }
     if (catalogExamAssignedToStudent(merged, detailScope) === false) return null;
     if (rosterApiAlive && !skipAbpRoster) {
       const roster = await fetchEdesisExamRosterStudentIds(id, cfgOverride);
@@ -1653,19 +1681,11 @@ export function shouldOfferUntakenCatalogExam(exam, scope = {}, now = new Date()
 
   if (scope.requireExplicitAssignment) {
     if (assigned === true) {
-      if (keys.size && !edesisCatalogExamMatchesProgram(exam, keys)) return false;
-      // Yeni tanımlı (henüz kurum sonucu yok) → tarih penceresi uygulama
-      if (/^none$/i.test(catalogResultStatus(exam))) return true;
-      // Atanmış ama yıllar önce kalmış denemeyi Sınava gir’e koyma (canlı: 2023–2024 5.sınıf)
-      const win = Number(scope.assignedTakeableWindowDays) || 180;
-      if (!isRecentOpenCatalogExam(exam, now, win)) return false;
+      // Atama varsa program süzgeci uygulama (Edesis ne tanımladıysa)
       return true;
     }
     if (scope.assignedCatalogOnly) {
-      if (keys.size && !edesisCatalogExamMatchesProgram(exam, keys)) return false;
-      if (/^none$/i.test(catalogResultStatus(exam))) return true;
-      const win = Number(scope.assignedTakeableWindowDays) || 180;
-      if (!isRecentOpenCatalogExam(exam, now, win)) return false;
+      // Admin/ID listesinden gelen satır — program uymasa da göster
       return true;
     }
     return false;
