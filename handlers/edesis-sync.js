@@ -793,7 +793,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         configured: keyOk,
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-turu-program-soft-2026-08-25',
+        deployMarker: 'edesis-turu-program-soft2-2026-08-25',
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
@@ -852,7 +852,7 @@ export default async function handler(req, res) {
         }
         return res.status(200).json({
           ok: true,
-          deployMarker: 'edesis-turu-program-soft-2026-08-25',
+          deployMarker: 'edesis-turu-program-soft2-2026-08-25',
           configured: Boolean(cfg.apiKey),
           abpAuth: getEdesisAbpAuthStatus(),
           abpProbe: abpProbe
@@ -912,7 +912,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-turu-program-soft-2026-08-25',
+        deployMarker: 'edesis-turu-program-soft2-2026-08-25',
         baseUrl: cfg.baseUrl,
         attempts: out
       });
