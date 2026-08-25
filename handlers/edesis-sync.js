@@ -844,7 +844,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         configured: keyOk,
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-student-console-2026-08-25',
+        deployMarker: 'edesis-safiye-seven-2026-08-25',
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
@@ -903,7 +903,7 @@ export default async function handler(req, res) {
         }
         return res.status(200).json({
           ok: true,
-          deployMarker: 'edesis-student-console-2026-08-25',
+          deployMarker: 'edesis-safiye-seven-2026-08-25',
           configured: Boolean(cfg.apiKey),
           abpAuth: getEdesisAbpAuthStatus(),
           abpProbe: abpProbe
@@ -963,7 +963,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-student-console-2026-08-25',
+        deployMarker: 'edesis-safiye-seven-2026-08-25',
         baseUrl: cfg.baseUrl,
         attempts: out
       });
@@ -1747,7 +1747,7 @@ export default async function handler(req, res) {
       const takeable = (loaded.items || []).filter((x) => x.canTake && !x.hasStudentResult);
       return res.status(200).json({
         ok: true,
-        deployMarker: 'edesis-student-console-2026-08-25',
+        deployMarker: 'edesis-safiye-seven-2026-08-25',
         edesisStudentId,
         platformStudentId: platformId,
         autoLinked,
