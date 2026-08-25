@@ -571,11 +571,12 @@ function buildQuery(params) {
 }
 
 /** v1 sayfalı liste — MaxResultCount max 1000; kırılım uçlarında max 100 */
-async function fetchAllPaged(cfg, path, query = {}, { pageSize = PAGE_SIZE } = {}) {
+async function fetchAllPaged(cfg, path, query = {}, { pageSize = PAGE_SIZE, maxPages = MAX_PAGES } = {}) {
   const items = [];
   let skip = 0;
   let lastTotal = null;
-  for (let page = 0; page < MAX_PAGES; page++) {
+  const pageLimit = Math.max(1, Number(maxPages) || MAX_PAGES);
+  for (let page = 0; page < pageLimit; page++) {
     const qs = buildQuery({
       ...query,
       MaxResultCount: pageSize,
@@ -1823,7 +1824,8 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     excludeExamIds: [...known]
   });
 
-  // sinavTuruId erişimi: son 21 gün Ready/None online adayları (program + sınıf filtresi probe’da)
+  // sinavTuruId erişimi: son 21 gün Ready/None online adayları
+  // Program filtresi YOK — tür ataması LGS dışı (MAARİF/TYT…) denemeleri de kapsar; sınıf adı filtresi var.
   const turuOnlineCandidates =
     adminTuruIds.size > 0
       ? sortCatalogExamsByRecencyDesc(catalogRows || [])
@@ -1831,13 +1833,12 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
             const id = pickEdesisCatalogExamId(ex);
             if (!id || known.has(String(id)) || adminProbeIds.has(String(id))) return false;
             if (!isOpenEdesisCatalogExam(ex) || !examWindowStillOpen(ex)) return false;
-            if (!programMatchStrict(ex)) return false;
             if (!examCompatibleWithStudentGrade(ex, gradeName)) return false;
             if (!isRecentOpenCatalogExam(ex, new Date(), 21)) return false;
             const status = catalogResultStatus(ex);
             return /^(none|ready|processing|pending)?$/i.test(status);
           })
-          .slice(0, 36)
+          .slice(0, 48)
       : [];
 
   const recencyCandidates =
@@ -1921,7 +1922,8 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     }
 
     // Online + sinavTuruId erişimi — ogrenciIds/roster boş online denemeler (yeni atama)
-    if (rosterEmptyOrUnknown && adminTuruIds.size && programMatchStrict(merged)) {
+    // ProgramKeys uygulanmaz: GetOgrenciSinavIds.sinavTuruId zaten öğrenciye tanımlı türdür.
+    if (rosterEmptyOrUnknown && adminTuruIds.size) {
       const online = examOnlineFlag(merged);
       let turu = pickEdesisExamSinavTuruId(merged) || pickEdesisExamSinavTuruId(detail);
       if (!turu) turu = await resolveEdesisExamSinavTuruId(merged, cfgOverride);
@@ -3565,9 +3567,24 @@ export async function fetchEdesisExamList(cfgOverride = {}) {
   const baseUrl = cfg.baseUrl || cfg.bases[0];
   const localCfg = { ...cfg, baseUrl };
   const dateRange = defaultDateRangeQuery();
+  // Manuel UI sync Vercel 60s limitine takılıyordu — konu zenginleştirmesini atla
+  const skipEnrich = Boolean(cfg.skipEnrich || cfgOverride.skipEnrich);
+  const lightDateRange = (() => {
+    if (!skipEnrich) return dateRange;
+    const end = new Date();
+    const start = new Date(end);
+    start.setDate(start.getDate() - 120);
+    const fmt = (d) => d.toISOString().slice(0, 10);
+    return { StartDate: fmt(start), EndDate: fmt(end) };
+  })();
 
   // 1) Toplu sınav sonuçları (rehber adım 4)
-  const bulk = await fetchAllPaged(localCfg, V1_PATHS.examResults, { ...dateRange, ...EXAM_DETAIL_QUERY });
+  const bulk = await fetchAllPaged(
+    localCfg,
+    V1_PATHS.examResults,
+    { ...lightDateRange, ...(skipEnrich ? {} : EXAM_DETAIL_QUERY) },
+    skipEnrich ? { pageSize: 500, maxPages: 2 } : {}
+  );
   if (bulk.error && bulk.response) {
     const r = bulk.response;
     if (isEdesisHtml404(r)) {
@@ -3595,13 +3612,13 @@ export async function fetchEdesisExamList(cfgOverride = {}) {
       fetchMode = 'v1:exams+results';
       path = V1_PATHS.exams;
       const merged = [];
-      const limit = Math.min(exams.length, 30); // rate limit
+      const limit = Math.min(exams.length, skipEnrich ? 15 : 30); // rate limit
       for (let i = 0; i < limit; i++) {
         const examId = exams[i]?.id;
         if (examId == null) continue;
         const r = await fetchEdesisJson(
           localCfg,
-          `${V1_PATHS.examResultsByExam(examId)}${buildQuery({ MaxResultCount: 1000, ...EXAM_DETAIL_QUERY })}`
+          `${V1_PATHS.examResultsByExam(examId)}${buildQuery({ MaxResultCount: skipEnrich ? 200 : 1000, ...(!skipEnrich ? EXAM_DETAIL_QUERY : {}) })}`
         );
         if (!isReachableEdesisResponse(r)) continue;
         merged.push(...unwrapList(r.json));
@@ -3612,15 +3629,17 @@ export async function fetchEdesisExamList(cfgOverride = {}) {
 
   const withStudent = countRowsWithStudents(rows);
 
-  // 3) Ders/konu detayı — öğrenci bazlı sonuç + analytics (PDF v1.2 adım 4 + 6.8)
+  // 3) Ders/konu detayı — ağır; manuel sync’te atlanır (504 önleme)
   let enrichStats = { enrichedCount: 0, studentQueries: 0, analyticsQueries: 0 };
-  if (rows.length && withStudent > 0) {
+  if (!skipEnrich && rows.length && withStudent > 0) {
     const enriched = await enrichEdesisRowsWithSubjectDetails(rows, localCfg);
     rows = enriched.rows;
     enrichStats = enriched;
     if (enriched.enrichedCount > 0) {
       fetchMode = `${fetchMode}+student-detail`;
     }
+  } else if (skipEnrich) {
+    fetchMode = `${fetchMode}+light`;
   }
 
   const subjectSample = rows[0] ? mapEdesisRowToExamDraft(rows[0], { studentId: 'sample', institutionId: null }) : null;
@@ -3639,6 +3658,7 @@ export async function fetchEdesisExamList(cfgOverride = {}) {
     enrichedCount: enrichStats.enrichedCount,
     enrichStudentQueries: enrichStats.studentQueries,
     enrichAnalyticsQueries: enrichStats.analyticsQueries,
+    skipEnrich,
     apiHint:
       rows.length === 0
         ? 'Edesis v1 bağlantısı OK ama sonuç yok — sınav yapıldı mı? Tarih aralığı 2 yıl; key scope: exams'
