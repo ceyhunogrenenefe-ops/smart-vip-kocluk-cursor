@@ -1261,6 +1261,24 @@ describe('collectEdesisBookletFiles', () => {
     assert.ok(files.some((f) => f.url.includes('c3d4e5f6-a7b8-9012-cdef-123456789012')));
   });
 
+  it('harvestLooseBookletRefs skips md5Key hashes', async () => {
+    const { harvestLooseBookletRefs } = await import('./edesis-client.js');
+    const files = harvestLooseBookletRefs(
+      {
+        id: 1579080,
+        md5Key: '80b56be2-3bbd-885e-acb2-d78e6279837f',
+        md10Key: '7d3fccb7-4e13-6442-9385-4f60cfeeee26',
+        denemeUrl: 'https://cdn.edesis.com/kitapcik/limit-a.pdf'
+      },
+      '1579080'
+    );
+    assert.equal(
+      files.some((f) => f.url.includes('80b56be2-3bbd-885e-acb2-d78e6279837f')),
+      false
+    );
+    assert.ok(files.some((f) => /limit-a\.pdf/.test(f.url)));
+  });
+
   it('absorbEdesisBookletSource reads ABP GetSinavForView denemeUrl + denemeId', () => {
     const absorbed = absorbEdesisBookletSource(
       {
