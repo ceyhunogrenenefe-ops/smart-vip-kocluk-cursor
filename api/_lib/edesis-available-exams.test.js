@@ -212,7 +212,7 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     assert.deepEqual(items.map((x) => x.examId), ['41']);
   });
 
-  it('requireExplicitAssignment hides ancient assigned exams outside 180d window', () => {
+  it('requireExplicitAssignment shows ancient assigned exams without personal result', () => {
     const now = new Date('2026-08-24T12:00:00Z');
     const items = buildStudentAvailableEdesisExamItems({
       catalogRows: [
@@ -256,8 +256,8 @@ describe('buildStudentAvailableEdesisExamItems', () => {
       requireExplicitAssignment: true
     });
     assert.deepEqual(
-      items.filter((x) => x.canTake).map((x) => x.examId),
-      ['1561043']
+      items.filter((x) => x.canTake).map((x) => x.examId).sort(),
+      ['1561043', '315978']
     );
   });
 
