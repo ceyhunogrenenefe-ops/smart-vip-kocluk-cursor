@@ -17,9 +17,16 @@ import {
   fetchEdesisStudentByOgrenciId,
   fetchEdesisTermsList,
   fetchEdesisExamsCatalog,
+  fetchEdesisExamsCatalogForStudent,
+  fetchEdesisExamsCatalogForClassroom,
+  resolveAssignedCatalogRowsForStudentAsync,
+  catalogQueryLooksFiltered,
   fetchEdesisStudentResults,
   inferEdesisExamProgramKeys,
   buildStudentAvailableEdesisExamItems,
+  pickEdesisCatalogExamId,
+  fetchEdesisOgrenciAssignedSinavIdsDetailed,
+  getEdesisAbpAuthStatus,
   fetchEdesisGradesList,
   fetchEdesisDepartmentsList,
   fetchEdesisClassroomsList,
@@ -30,6 +37,7 @@ import {
   loadEdesisExamBookletPdf,
   loadEdesisHataKarnesiPdf,
   pickEdesisBookletLessons,
+  listEdesisBookletCodes,
   fetchEdesisExamSubjects,
   fetchEdesisExamResultsLessons,
   fetchEdesisExamResultsSubjects,
@@ -43,14 +51,13 @@ import {
   flattenEdesisRows,
   studentMatchKeysFromEdesisRow,
   pickEdesisResultExamId,
-  pickEdesisCatalogExamId
+  EDESIS_EMPTY_LIST_HELP
 } from '../api/_lib/edesis-client.js';
 import {
   processEdesisRows,
   findStudentMatchPreview,
   EDESIS_MATCHING_GUIDE
 } from '../api/_lib/edesis-student-match.js';
-import { EDESIS_EMPTY_LIST_HELP } from '../api/_lib/edesis-client.js';
 
 const STAFF = new Set(['super_admin', 'admin', 'coach']);
 /** Öğrencinin kendi Edesis sonuç / karne / sınava giriş ops */
@@ -147,10 +154,10 @@ async function resolveStudentEdesisScope({ edesisStudentId, platformStudentId, s
 }
 
 /**
- * Öğrenci Sınava gir — v1.5 rehber:
- * GET /exams (kurum kataloğu; StudentId/ClassroomId filtresi YOK)
- * GET /exams/results?studentId= (girilmiş sonuçlar)
- * Girilebilir = programı uyan, kapanmamış, henüz girilmemiş denemeler.
+ * Öğrenci Sınava gir — yalnızca Edesis’te bu öğrenci ID’sine tanımlanan denemeler.
+ * Kaynak: ogrenciIds, GetOgrenciSinavIds / OgrenciSinavListesi (ID’siz AP),
+ * GetOgrenciBySinavId, güvenilir StudentId/ClassroomId alt kümesi.
+ * Program/recency yedeği YOK — atanmamış deneme gösterilmez (tüm katalog dökülmesin).
  */
 async function loadAvailableEdesisExamsForStudent({
   edesisStudentId,
@@ -159,28 +166,101 @@ async function loadAvailableEdesisExamsForStudent({
   studentHint,
   cfg
 }) {
+  const t0 = Date.now();
   const scope = await resolveStudentEdesisScope({
     edesisStudentId,
     platformStudentId,
     studentHint,
     cfg
   });
-  const [catalog, studentResults] = await Promise.all([
-    fetchEdesisExamsCatalog(cfg).catch(() => ({ rows: [] })),
+  const catalog = await fetchEdesisExamsCatalog(cfg).catch(() => ({ rows: [], cached: false }));
+  const fullRows = catalog.rows || [];
+  const [studentCatalog, classroomCatalog, studentResults] = await Promise.all([
+    fetchEdesisExamsCatalogForStudent(edesisStudentId, cfg, {
+      fullCatalogRows: fullRows
+    }).catch(() => ({ rows: [] })),
+    scope.classroomId
+      ? fetchEdesisExamsCatalogForClassroom(scope.classroomId, cfg, fullRows).catch(() => ({
+          rows: []
+        }))
+      : Promise.resolve({ rows: [] }),
     fetchEdesisStudentResults(edesisStudentId, cfg, { enrichSubjects: false }).catch(() => ({
       rows: []
     }))
   ]);
-  return buildStudentAvailableEdesisExamItems({
-    catalogRows: catalog.rows || [],
+
+  let studentRows = studentCatalog.rows || [];
+  if (studentRows.length && !catalogQueryLooksFiltered(fullRows, studentRows)) {
+    studentRows = [];
+  }
+  let classroomRows = classroomCatalog.rows || [];
+  if (classroomRows.length && !catalogQueryLooksFiltered(fullRows, classroomRows)) {
+    classroomRows = [];
+  }
+
+  const assignedResolved = await resolveAssignedCatalogRowsForStudentAsync(
+    {
+      catalogRows: fullRows,
+      studentCatalogRows: studentRows,
+      classroomCatalogRows: classroomRows,
+      edesisStudentId,
+      classroomId: scope.classroomId,
+      programKeys: scope.programKeys
+    },
+    cfg
+  );
+  const assignedCatalogRows = Array.isArray(assignedResolved)
+    ? assignedResolved
+    : assignedResolved?.rows || [];
+  const adminAssignment = Array.isArray(assignedResolved)
+    ? null
+    : assignedResolved?.adminAssignment || null;
+
+  const hasAssignmentSignal = Array.isArray(assignedCatalogRows) && assignedCatalogRows.length > 0;
+  const assignedExamIds = (assignedCatalogRows || [])
+    .map((ex) => pickEdesisCatalogExamId(ex))
+    .filter(Boolean);
+  const assignmentMode = hasAssignmentSignal ? 'assigned' : 'assigned-empty';
+  const items = buildStudentAvailableEdesisExamItems({
+    catalogRows: fullRows,
+    assignedCatalogRows: hasAssignmentSignal ? assignedCatalogRows : [],
     resultRows: studentResults.rows || [],
     edesisStudentId,
     programKeys: scope.programKeys,
     classroomId: scope.classroomId,
     studentId: platformStudentId || `edesis-${edesisStudentId}`,
     institutionId: actor?.institution_id || null,
-    allowRecencyFallback: true
+    // Atama yoksa boş liste — kurum kataloğu / program yedeği kapalı
+    allowRecencyFallback: false,
+    requireExplicitAssignment: true
   });
+  const takeableIds = items.filter((x) => x.canTake && !x.hasStudentResult).map((x) => x.examId);
+  const abpAuth = adminAssignment?.abpAuth || getEdesisAbpAuthStatus();
+  return {
+    items,
+    meta: {
+      assignmentMode,
+      assignedCount: hasAssignmentSignal ? assignedCatalogRows.length : 0,
+      assignedExamIds: assignedExamIds.slice(0, 80),
+      takeableCount: takeableIds.length,
+      takeableExamIds: takeableIds.slice(0, 40),
+      classroomId: scope.classroomId || null,
+      studentCatalogCount: studentRows.length,
+      classroomCatalogCount: classroomRows.length,
+      fullCatalogCount: fullRows.length,
+      catalogCached: Boolean(catalog.cached),
+      programKeys: [...(scope.programKeys || [])],
+      adminAssignmentSource: adminAssignment?.source || null,
+      adminSinavIdCount: adminAssignment?.ids?.length || 0,
+      adminSinavIdsSample: (adminAssignment?.ids || []).slice(0, 20),
+      adminAssignmentAttempts: adminAssignment?.attempts || [],
+      abpAuth,
+      probeSkipped: Boolean(assignedResolved?.probeSkipped),
+      probeSkipReason: assignedResolved?.probeSkipReason || null,
+      probeCandidateCount: assignedResolved?.probeCandidateCount ?? null,
+      totalMs: Date.now() - t0
+    }
+  };
 }
 
 function examResultToUpsertRow(exam, institutionId) {
@@ -689,6 +769,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         configured: keyOk,
         apiVersion: 'v1.5',
+        deployMarker: 'edesis-assigned-only-2026-08-25',
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
@@ -750,7 +831,12 @@ export default async function handler(req, res) {
           apiError: r.json?.error ?? null
         });
       }
-      return res.status(200).json({ apiVersion: 'v1.5', baseUrl: cfg.baseUrl, attempts: out });
+      return res.status(200).json({
+        apiVersion: 'v1.5',
+        deployMarker: 'edesis-assigned-only-2026-08-25',
+        baseUrl: cfg.baseUrl,
+        attempts: out
+      });
     }
 
     if (op === 'exam-booklet-debug') {
@@ -1327,6 +1413,9 @@ export default async function handler(req, res) {
         count: structure.rows.length,
         items: structure.rows,
         booklets: structure.booklets,
+        availableBookletCodes: structure.availableBookletCodes || listEdesisBookletCodes(structure),
+        answerKeyBookletCodes: structure.answerKeyBookletCodes || [],
+        denemeId: structure.denemeId || null,
         bookletPdfs: structure.bookletPdfs || [],
         examFamily: structure.examFamily || 'generic',
         bookletMode: structure.bookletMode || 'single',
@@ -1454,24 +1543,69 @@ export default async function handler(req, res) {
         });
       }
 
-      const items = await loadAvailableEdesisExamsForStudent({
+      const loaded = await loadAvailableEdesisExamsForStudent({
         edesisStudentId,
         platformStudentId,
         actor,
         studentHint,
         cfg
       });
+      const items = loaded.items || [];
+      const meta = loaded.meta || {};
 
       return res.status(200).json({
         ok: true,
         edesisStudentId,
         count: items.length,
         items,
-        scope: 'assigned',
+        scope: meta.assignmentMode || 'assigned',
+        assignmentMeta: meta,
         takeableCount: items.filter((x) => x.canTake && !x.hasStudentResult).length,
-        hint: items.length
-          ? null
-          : 'Programınıza uyan açık deneme yok. Edesis öğrenci ID eşlemesini ve sınıf düzeyini kontrol edin.'
+        hint: (() => {
+          const takeable = items.filter((x) => x.canTake && !x.hasStudentResult).length;
+          if (takeable > 0) return null;
+          if (items.length) {
+            return 'Girilmiş sonuçlarınız var; henüz girilmemiş açık deneme bulunamadı.';
+          }
+          return 'Size tanımlı açık Edesis denemesi yok.';
+        })()
+      });
+    }
+
+    if (op === 'debug-assignment') {
+      if (!isStaff) return res.status(403).json({ error: 'forbidden' });
+      const cfg = getEdesisConfig();
+      if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
+      let edesisStudentId = String(
+        req.query?.edesisStudentId || req.body?.edesisStudentId || ''
+      ).trim();
+      const platformStudentId = String(req.query?.studentId || req.body?.studentId || '').trim();
+      if (!edesisStudentId && platformStudentId) {
+        const resolved = await resolveEdesisIdForPlatformStudent(platformStudentId, actor, tags);
+        edesisStudentId = resolved.edesisStudentId || '';
+      }
+      if (!edesisStudentId) {
+        return res.status(400).json({ error: 'edesis_student_id_missing' });
+      }
+      const adminAssignment = await fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId, cfg);
+      const loaded = await loadAvailableEdesisExamsForStudent({
+        edesisStudentId,
+        platformStudentId,
+        actor,
+        studentHint: null,
+        cfg
+      });
+      return res.status(200).json({
+        ok: true,
+        edesisStudentId,
+        adminAssignment,
+        assignmentMeta: loaded.meta,
+        takeableCount: (loaded.items || []).filter((x) => x.canTake && !x.hasStudentResult).length,
+        takeableSample: (loaded.items || [])
+          .filter((x) => x.canTake && !x.hasStudentResult)
+          .slice(0, 20)
+          .map((x) => ({ examId: x.examId, examTitle: x.examTitle, examType: x.examType })),
+        resultCount: (loaded.items || []).filter((x) => x.hasStudentResult).length
       });
     }
 
@@ -1500,13 +1634,14 @@ export default async function handler(req, res) {
         });
       }
 
-      const assigned = await loadAvailableEdesisExamsForStudent({
+      const loaded = await loadAvailableEdesisExamsForStudent({
         edesisStudentId,
         platformStudentId,
         actor,
         studentHint: studentSelf,
         cfg
       });
+      const assigned = loaded.items || [];
       const assignedExam = assigned.find((ex) => String(ex.examId) === examId);
       if (!assignedExam) {
         return res.status(403).json({
@@ -1529,8 +1664,9 @@ export default async function handler(req, res) {
       const bookletLessons = pickEdesisBookletLessons(structure, kitapcikTuru);
       if (!bookletLessons.length) {
         return res.status(400).json({
-          error: 'invalid_kitapcik',
-          hint: `Bu sınavda kitapçık türü bulunamadı: ${kitapcikTuru}`,
+          error: 'exam_structure_empty',
+          message: 'Sınav ders yapısı alınamadı',
+          hint: 'Edesis structure endpoint boş döndü',
           booklets: structure.booklets
         });
       }
@@ -1744,6 +1880,7 @@ export default async function handler(req, res) {
         'exam-results-lessons',
         'exam-results-subjects',
         'available-exams',
+        'debug-assignment',
         'submit-exam',
         'ingest-results',
         'ingest-status',

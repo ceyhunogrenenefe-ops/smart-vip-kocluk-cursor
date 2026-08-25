@@ -4,7 +4,14 @@ import {
   inferEdesisExamProgramKeys,
   edesisCatalogExamMatchesProgram,
   buildStudentAvailableEdesisExamItems,
+  resolveAssignedCatalogRowsForStudent,
+  collectExplicitlyAssignedCatalogRows,
+  collectRecentUnpublishedProgramExams,
+  collectClassroomAssignedCatalogRows,
   pickEdesisCatalogExamId,
+  parseEdesisOgrenciSinavIdsResponse,
+  parseEdesisOgrenciSinavListesiResponse,
+  collectCatalogRowsForSinavIds,
   pickEdesisResultExamId,
   resultRowBelongsToStudent,
   collectEdesisBookletFiles,
@@ -12,11 +19,17 @@ import {
   detectEdesisExamFamily,
   edesisOpticalUi,
   pickEdesisBookletLessons,
+  extractEdesisStructureRows,
+  normalizeKitapcikCode,
+  listEdesisBookletCodes,
+  canonicalEdesisStructureLessons,
   looksLikePdfBuffer,
   catalogLooksStudentFiltered,
+  catalogQueryLooksFiltered,
   catalogExamAssignedToStudent,
   examAssignedViaOnlineFlag,
   examResultRowsAssignStudent,
+  examRosterIncludesStudent,
   trustEdesisStudentCatalogList,
   looksLikePersonalExamList,
   resolveEdesisFileUrl,
@@ -83,6 +96,66 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     assert.equal(items.some((x) => x.examId === '3'), false);
   });
 
+  it('requireExplicitAssignment hides unassigned program exams', () => {
+    const now = new Date('2026-08-14T12:00:00Z');
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: catalog,
+      assignedCatalogRows: [],
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      now,
+      requireExplicitAssignment: true
+    });
+    assert.equal(items.some((x) => x.canTake), false);
+  });
+
+  it('requireExplicitAssignment shows only studentIds-assigned exams', () => {
+    const now = new Date('2026-08-14T12:00:00Z');
+    const assigned = [
+      {
+        id: 4,
+        name: 'LGS Yeni',
+        examType: 'LGS',
+        resultStatus: 'None',
+        examDate: '2026-08-10',
+        studentIds: [7105077]
+      }
+    ];
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: catalog,
+      assignedCatalogRows: assigned,
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      now,
+      requireExplicitAssignment: true
+    });
+    assert.deepEqual(items.map((x) => x.examId), ['4']);
+  });
+
+  it('resolveAssignedCatalogRowsForStudent merges ogrenciIds and StudentId catalog', () => {
+    const full = catalog;
+    const personal = [{ id: 99, name: 'Tek öğrenci denemesi', examType: 'LGS', resultStatus: 'None' }];
+    const assigned = resolveAssignedCatalogRowsForStudent({
+      catalogRows: [
+        ...full,
+        {
+          id: 41,
+          name: 'Safiye LGS',
+          examType: 'LGS',
+          resultStatus: 'None',
+          examDate: '2026-03-01',
+          studentIds: [7105077]
+        }
+      ],
+      studentCatalogRows: personal,
+      edesisStudentId: '7105077'
+    });
+    assert.ok(assigned.some((x) => String(pickEdesisCatalogExamId(x)) === '41'));
+    assert.ok(assigned.some((x) => String(pickEdesisCatalogExamId(x)) === '99'));
+  });
+
   it('offers assigned exam even when examType/name has no program keyword', () => {
     const now = new Date('2026-08-14T12:00:00Z');
     const items = buildStudentAvailableEdesisExamItems({
@@ -137,6 +210,55 @@ describe('buildStudentAvailableEdesisExamItems', () => {
       now
     });
     assert.deepEqual(items.map((x) => x.examId), ['41']);
+  });
+
+  it('requireExplicitAssignment hides ancient assigned exams outside 180d window', () => {
+    const now = new Date('2026-08-24T12:00:00Z');
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [
+        {
+          id: 315978,
+          name: 'Eski 5. sınıf',
+          examType: '5 SINIF 75 LGS',
+          resultStatus: 'Ready',
+          examDate: '2023-11-11',
+          studentIds: [2086573]
+        },
+        {
+          id: 1561043,
+          name: 'Yeni LGS',
+          examType: 'LGS',
+          resultStatus: 'None',
+          examDate: '2026-08-15',
+          studentIds: [2086573]
+        }
+      ],
+      assignedCatalogRows: [
+        {
+          id: 315978,
+          name: 'Eski 5. sınıf',
+          examType: '5 SINIF 75 LGS',
+          resultStatus: 'Ready',
+          examDate: '2023-11-11'
+        },
+        {
+          id: 1561043,
+          name: 'Yeni LGS',
+          examType: 'LGS',
+          resultStatus: 'None',
+          examDate: '2026-08-15'
+        }
+      ],
+      resultRows: [],
+      edesisStudentId: '2086573',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: 'LGS' }),
+      now,
+      requireExplicitAssignment: true
+    });
+    assert.deepEqual(
+      items.filter((x) => x.canTake).map((x) => x.examId),
+      ['1561043']
+    );
   });
 
   it('offers a StudentId-filtered catalog exam without studentIds on the row', () => {
@@ -514,7 +636,30 @@ describe('buildStudentAvailableEdesisExamItems', () => {
     assert.equal(examResultRowsAssignStudent([{ examId: 1 }], '7105077'), false);
   });
 
-  it('offers isAllClasses exam to the student', () => {
+  it('requireStudentIdMatch ignores isAllClasses without ogrenciIds', () => {
+    const now = new Date('2026-08-14T12:00:00Z');
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [
+        {
+          id: 91,
+          name: 'Tüm sınıflar',
+          examType: 'LGS',
+          resultStatus: 'None',
+          examDate: '2026-08-16',
+          isAllClasses: true
+        }
+      ],
+      assignedCatalogRows: [],
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '7' }),
+      now,
+      requireExplicitAssignment: true
+    });
+    assert.equal(items.length, 0);
+  });
+
+  it('offers isAllClasses exam when requireStudentIdMatch is off', () => {
     const items = buildStudentAvailableEdesisExamItems({
       catalogRows: [
         {
@@ -571,6 +716,220 @@ describe('buildStudentAvailableEdesisExamItems', () => {
       allowRecencyFallback: true
     });
     assert.equal(items.some((x) => x.examId === '3'), false);
+  });
+
+  it('offers many admin-assigned sinavIds without ogrenciIds on catalog rows', () => {
+    const now = new Date('2026-08-14T12:00:00Z');
+    const sinavIds = Array.from({ length: 55 }, (_, i) => String(5000 + i));
+    const catalogRows = sinavIds.map((id) => ({
+      id,
+      name: `Atanan deneme ${id}`,
+      examType: 'LGS',
+      resultStatus: 'None',
+      examDate: '2026-08-10'
+    }));
+    const assignedCatalogRows = collectCatalogRowsForSinavIds(catalogRows, sinavIds);
+    assert.equal(assignedCatalogRows.length, 55);
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows,
+      assignedCatalogRows,
+      resultRows: [],
+      edesisStudentId: '7105077',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      now,
+      requireExplicitAssignment: true
+    });
+    assert.equal(items.filter((x) => x.canTake).length, 55);
+  });
+
+  it('rejects StudentId full-catalog dump as filtered query', () => {
+    const full = Array.from({ length: 40 }, (_, i) => ({ id: i + 1 }));
+    assert.equal(catalogQueryLooksFiltered(full, full), false);
+    assert.equal(catalogQueryLooksFiltered(full, [{ id: 4 }, { id: 7 }]), true);
+  });
+
+  it('collectClassroomAssignedCatalogRows keeps class exams not locked to others', () => {
+    const full = [
+      { id: 1, name: 'Şube LGS', examType: 'LGS', resultStatus: 'None', classroomId: 501 },
+      { id: 2, name: 'Başka öğrenci', examType: 'LGS', resultStatus: 'None', classroomId: 501, ogrenciIds: [111] }
+    ];
+    const classroom = [
+      { id: 1, name: 'Şube LGS', examType: 'LGS', resultStatus: 'None' },
+      { id: 2, name: 'Başka öğrenci', examType: 'LGS', resultStatus: 'None', ogrenciIds: [111] }
+    ];
+    const rows = collectClassroomAssignedCatalogRows({
+      fullCatalog: full,
+      classroomCatalogRows: classroom,
+      edesisStudentId: '7105077',
+      classroomId: '501'
+    });
+    assert.deepEqual(
+      rows.map((x) => String(pickEdesisCatalogExamId(x))),
+      ['1']
+    );
+  });
+
+  it('examRosterIncludesStudent matches ids', () => {
+    assert.equal(examRosterIncludesStudent([7105077, 99], '7105077'), true);
+    assert.equal(examRosterIncludesStudent([111], '7105077'), false);
+  });
+});
+
+describe('parseEdesisOgrenciSinavIdsResponse', () => {
+  it('reads sinavId array from ABP result wrapper', () => {
+    assert.deepEqual(
+      parseEdesisOgrenciSinavIdsResponse({ result: { sinavId: [101, 102, '103'] } }),
+      ['101', '102', '103']
+    );
+  });
+
+  it('deduplicates ids', () => {
+    assert.deepEqual(parseEdesisOgrenciSinavIdsResponse({ sinavId: [4, 4, 7] }), ['4', '7']);
+  });
+});
+
+describe('parseEdesisOgrenciSinavListesiResponse', () => {
+  it('extracts sinavId from AnalizSinavDto sinavlar', () => {
+    const ids = parseEdesisOgrenciSinavListesiResponse([
+      {
+        sinavTuru: 'LGS',
+        sinavTuruId: 1,
+        sinavlar: [
+          { sinavAdi: 'Deneme 1', sinavId: 111, isChecked: true },
+          { sinavAdi: 'Deneme 2', sinavId: 222, isChecked: false }
+        ]
+      }
+    ]);
+    assert.deepEqual(ids, ['111', '222']);
+  });
+
+  it('extracts from ByDonemIds wrapper', () => {
+    const ids = parseEdesisOgrenciSinavListesiResponse({
+      result: [
+        {
+          donemAdi: '2025-2026',
+          donemId: 9,
+          donemSinavlar: [
+            {
+              sinavTuru: 'LGS',
+              sinavlar: [{ sinavId: 555 }]
+            }
+          ]
+        }
+      ]
+    });
+    assert.deepEqual(ids, ['555']);
+  });
+});
+
+describe('requireExplicitAssignment never dumps catalog', () => {
+  it('empty assignment + no fallback → no takeable exams', () => {
+    const catalog = [
+      { id: 1, name: 'LGS Yeni', examType: 'LGS', resultStatus: 'None', examDate: '2026-08-10' },
+      { id: 2, name: 'TYT', examType: 'TYT', resultStatus: 'None', examDate: '2026-08-11' }
+    ];
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: catalog,
+      assignedCatalogRows: [],
+      resultRows: [],
+      edesisStudentId: '2086573',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      now: new Date('2026-08-14T12:00:00Z'),
+      allowRecencyFallback: false,
+      requireExplicitAssignment: true
+    });
+    assert.equal(items.filter((x) => x.canTake).length, 0);
+  });
+
+  it('shows only admin-assigned open exams for Safiye id', () => {
+    const catalog = [
+      {
+        id: 1569664,
+        name: 'Safiye Atanan Açık',
+        examType: 'LGS',
+        resultStatus: 'None',
+        examDate: '2026-08-20',
+        studentIds: [2086573]
+      },
+      {
+        id: 1574084,
+        name: 'Başkasının TYT',
+        examType: 'TYT',
+        resultStatus: 'None',
+        examDate: '2026-08-24',
+        studentIds: [999]
+      },
+      { id: 4, name: 'Atamasız LGS', examType: 'LGS', resultStatus: 'None', examDate: '2026-08-10' }
+    ];
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: catalog,
+      assignedCatalogRows: [catalog[0]],
+      resultRows: [],
+      edesisStudentId: '2086573',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: 'LGS' }),
+      now: new Date('2026-08-24T12:00:00Z'),
+      allowRecencyFallback: false,
+      requireExplicitAssignment: true
+    });
+    assert.deepEqual(
+      items.filter((x) => x.canTake).map((x) => x.examId),
+      ['1569664']
+    );
+  });
+
+  it('does not dump recent unpublished program exams as assigned without studentIds', () => {
+    const catalog = [
+      {
+        id: 1559901,
+        name: 'VİP MÜFREDAT İZLEME LGS-1',
+        examType: 'LGS',
+        resultStatus: 'None',
+        examDate: '2026-08-14'
+      },
+      {
+        id: 1567875,
+        name: 'Maarif Model4',
+        examType: 'MAARİF 80',
+        resultStatus: 'None',
+        examDate: '2026-08-19'
+      },
+      {
+        id: 1574085,
+        name: '9 SINIF ESEN DENEME-2',
+        examType: '9 SINIF 100',
+        resultStatus: 'None',
+        examDate: '2026-08-24'
+      }
+    ];
+    const unpublished = collectRecentUnpublishedProgramExams(catalog, {
+      programKeys: inferEdesisExamProgramKeys({ classLevel: 'LGS' }),
+      now: new Date('2026-08-24T12:00:00Z'),
+      windowDays: 45
+    });
+    assert.deepEqual(
+      unpublished.map((r) => pickEdesisCatalogExamId(r)),
+      ['1559901']
+    );
+
+    const assigned = resolveAssignedCatalogRowsForStudent({
+      catalogRows: catalog,
+      edesisStudentId: '2086573',
+      classroomId: '294965',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: 'LGS' })
+    });
+    assert.deepEqual(assigned.map((r) => pickEdesisCatalogExamId(r)), []);
+
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: catalog,
+      assignedCatalogRows: assigned,
+      resultRows: [],
+      edesisStudentId: '2086573',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: 'LGS' }),
+      now: new Date('2026-08-24T12:00:00Z'),
+      allowRecencyFallback: false,
+      requireExplicitAssignment: true
+    });
+    assert.equal(items.filter((x) => x.canTake).length, 0);
   });
 });
 
@@ -686,7 +1045,7 @@ describe('detectEdesisExamFamily', () => {
 });
 
 describe('pickEdesisBookletLessons', () => {
-  it('falls back to first booklet when selected letter is missing', () => {
+  it('falls back to shared structure when selected letter has no separate rows', () => {
     const structure = {
       rows: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 10, lessonName: 'Türkçe', questionCount: 20 }],
       booklets: [
@@ -699,6 +1058,87 @@ describe('pickEdesisBookletLessons', () => {
     const lessons = pickEdesisBookletLessons(structure, 'C');
     assert.equal(lessons.length, 1);
     assert.equal(lessons[0].lessonName, 'Türkçe');
+  });
+
+  it('matches booklet B case-insensitively', () => {
+    const structure = {
+      rows: [],
+      booklets: [
+        {
+          kitapcikTuru: 'B',
+          lessons: [{ kitapcikTuru: 'B', lessonId: 2, dersGrupId: 11, lessonName: 'Matematik', questionCount: 40 }]
+        }
+      ]
+    };
+    const lessons = pickEdesisBookletLessons(structure, 'b');
+    assert.equal(lessons.length, 1);
+    assert.equal(lessons[0].lessonName, 'Matematik');
+  });
+
+  it('canonicalEdesisStructureLessons dedupes shared rows', () => {
+    const structure = {
+      rows: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 10, lessonName: 'Türkçe', questionCount: 20 }],
+      booklets: [
+        {
+          kitapcikTuru: 'A',
+          lessons: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 10, lessonName: 'Türkçe', questionCount: 20 }]
+        }
+      ]
+    };
+    const lessons = canonicalEdesisStructureLessons(structure);
+    assert.equal(lessons.length, 1);
+  });
+});
+
+describe('listEdesisBookletCodes', () => {
+  it('prefers answer key booklet codes from deneme API', () => {
+    const codes = listEdesisBookletCodes({
+      rows: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 1, questionCount: 10 }],
+      booklets: [{ kitapcikTuru: 'A', lessons: [] }],
+      answerKeyBookletCodes: ['A', 'B']
+    });
+    assert.deepEqual(codes, ['A', 'B']);
+  });
+
+  it('merges partial answer keys with A-D when structure exists', () => {
+    const codes = listEdesisBookletCodes({
+      rows: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 1, questionCount: 10 }],
+      booklets: [{ kitapcikTuru: 'A', lessons: [] }],
+      answerKeyBookletCodes: ['A']
+    });
+    assert.deepEqual(codes, ['A', 'B', 'C', 'D']);
+  });
+});
+
+describe('extractEdesisStructureRows / normalizeKitapcikCode', () => {
+  it('reads PascalCase KitapcikTuru from structure rows', () => {
+    const rows = extractEdesisStructureRows([
+      { KitapcikTuru: 'B', lessonId: 3, dersGrupId: 12, lessonName: 'Fen', questionCount: 20 }
+    ]);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].kitapcikTuru, 'B');
+  });
+
+  it('expands nested booklets with lessons', () => {
+    const rows = extractEdesisStructureRows({
+      booklets: [
+        {
+          kitapcikTuru: 'A',
+          lessons: [{ lessonId: 1, dersGrupId: 1, lessonName: 'Türkçe', questionCount: 40 }]
+        },
+        {
+          kitapcikTuru: 'B',
+          lessons: [{ lessonId: 1, dersGrupId: 1, lessonName: 'Türkçe', questionCount: 40 }]
+        }
+      ]
+    });
+    assert.equal(rows.length, 2);
+    assert.deepEqual(listEdesisBookletCodes({ rows, booklets: [] }).sort(), ['A', 'B']);
+  });
+
+  it('maps numeric booklet codes to letters', () => {
+    assert.equal(normalizeKitapcikCode('2'), 'B');
+    assert.equal(normalizeKitapcikCode('b'), 'B');
   });
 });
 
