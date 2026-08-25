@@ -1,6 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Eraser, Flag, Loader2, Save } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Columns2,
+  Eraser,
+  Expand,
+  ExternalLink,
+  Flag,
+  Loader2,
+  Maximize2,
+  Minimize2,
+  Save,
+  Shrink
+} from 'lucide-react';
 import type { EdesisExamBooklet, EdesisExamStructureLesson } from '../../lib/edesis/edesisApi';
+import { buildEdesisPdfViewerSrc, type EdesisPdfZoom } from '../../lib/edesis/pdfViewer';
 
 const CHOICES_4 = ['A', 'B', 'C', 'D'] as const;
 const CHOICES_5 = ['A', 'B', 'C', 'D', 'E'] as const;
@@ -218,8 +230,18 @@ type Props = {
   pdfUrl?: string | null;
   pdfBusy?: boolean;
   pdfError?: string | null;
+  /** Akademik Merkez sınav stüdyosu — viewport’u doldur, PDF’i geniş tut */
+  studio?: boolean;
   onSubmit: (dersCevaplari: { lessonId: number | null; dersGrupId: number | null; cevaplar: string }[]) => void;
 };
+
+const PDF_ZOOM_CHIPS: { id: EdesisPdfZoom; label: string }[] = [
+  { id: 'page-width', label: 'Genişlik' },
+  { id: 'page-fit', label: 'Sayfa' },
+  { id: '100', label: '100%' },
+  { id: '125', label: '125%' },
+  { id: '150', label: '150%' }
+];
 
 /**
  * Edesis Sınav Uygulaması görünümü: tüm denemelerde LGS tarzı grid + kitapçık türü.
@@ -246,6 +268,7 @@ export default function EdesisOpticalSheet({
   pdfUrl,
   pdfBusy,
   pdfError,
+  studio = false,
   onSubmit
 }: Props) {
   const family = detectFamily(examTitle, examType, examFamily);
@@ -270,6 +293,10 @@ export default function EdesisOpticalSheet({
   const [answers, setAnswers] = useState<Record<string, string>>(() => readSaved(storageKey));
   const [savedFlash, setSavedFlash] = useState(false);
   const [activeLessonKey, setActiveLessonKey] = useState('');
+  const [pdfZoom, setPdfZoom] = useState<EdesisPdfZoom>('page-width');
+  const [pdfWide, setPdfWide] = useState(false);
+  const [pdfFs, setPdfFs] = useState(false);
+  const pdfPaneRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     setAnswers(readSaved(storageKey));
@@ -334,6 +361,30 @@ export default function EdesisOpticalSheet({
     );
   };
 
+  const pdfSrc = useMemo(() => (pdfUrl ? buildEdesisPdfViewerSrc(pdfUrl, pdfZoom) : ''), [pdfUrl, pdfZoom]);
+
+  const togglePdfFullscreen = async () => {
+    const el = pdfPaneRef.current;
+    if (!el) return;
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+        setPdfFs(false);
+        return;
+      }
+      await el.requestFullscreen();
+      setPdfFs(true);
+    } catch {
+      setPdfWide(true);
+    }
+  };
+
+  useEffect(() => {
+    const onFs = () => setPdfFs(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onFs);
+    return () => document.removeEventListener('fullscreenchange', onFs);
+  }, []);
+
   const kitapcikValue = (() => {
     const raw = String(kitapcik || '').trim().toUpperCase();
     return KITAPCIK_ORDER.includes(raw) ? raw : 'A';
@@ -346,19 +397,110 @@ export default function EdesisOpticalSheet({
   const tabPrefix =
     family === 'lgs' ? 'LGS' : family === 'ayt' ? 'AYT' : family === 'yos' ? 'YÖS' : family === 'yks' || family === 'tyt' ? 'TYT' : examType;
 
+  const opticalAside = (
+    <aside
+      className={`flex min-h-0 w-full shrink-0 flex-col border-b border-slate-200 bg-white md:border-b-0 md:border-r ${
+        pdfWide ? 'hidden md:hidden' : 'md:w-[17.5rem] lg:w-[19rem] xl:w-[20.5rem]'
+      }`}
+    >
+      <div className="grid grid-cols-2 gap-1 border-b border-slate-200 px-2 py-2">
+        {filled.map(({ lesson, marked }) => {
+          const key = lessonKey(lesson);
+          const on = key === activeLessonKey;
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setActiveLessonKey(key)}
+              className={`rounded-md border px-1.5 py-1.5 text-left text-[10px] font-extrabold leading-tight tracking-wide ${
+                on
+                  ? 'border-orange-500 bg-orange-50 text-orange-600'
+                  : 'border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+              }`}
+            >
+              {lessonTabLabel(lesson, tabPrefix)}
+              <span className="ml-1 font-semibold text-slate-400">
+                {marked}/{lesson.questionCount}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {activeFilled ? (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="sticky top-0 border-b border-orange-100 bg-orange-50 px-3 py-2">
+            <div className="text-sm font-extrabold uppercase tracking-wide text-orange-600">
+              {lessonTabLabel(activeFilled.lesson, tabPrefix)}
+            </div>
+            <div className="text-xs font-semibold text-orange-800/80">{heading}</div>
+          </div>
+          <ol className="space-y-1 px-2 py-2">
+            {Array.from({ length: activeFilled.lesson.questionCount }, (_, i) => {
+              const selected =
+                activeFilled.cevaplar[i] && activeFilled.cevaplar[i] !== ' ' ? activeFilled.cevaplar[i] : '';
+              return (
+                <li key={i} className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-slate-50">
+                  <span className="w-5 shrink-0 text-right text-xs font-bold text-slate-600">{i + 1}</span>
+                  <div className="flex flex-wrap gap-0.5">
+                    {choices.map((ch) => (
+                      <button
+                        key={ch}
+                        type="button"
+                        onClick={() => setChoice(activeFilled.lesson, i, ch)}
+                        className={`h-7 w-7 rounded-full border text-[11px] font-bold ${
+                          selected === ch
+                            ? 'border-emerald-600 bg-emerald-600 text-white'
+                            : 'border-orange-400 bg-white text-orange-500 hover:border-orange-600'
+                        }`}
+                        aria-label={`Soru ${i + 1} ${ch}`}
+                      >
+                        {ch}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => clearChoice(activeFilled.lesson, i)}
+                    className="ml-auto rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                    aria-label={`Soru ${i + 1} sil`}
+                  >
+                    <Eraser className="h-3.5 w-3.5" />
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      ) : (
+        <p className="p-4 text-sm text-slate-500">Bu kitapçıkta ders yok.</p>
+      )}
+    </aside>
+  );
+
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2">
+    <div
+      className={
+        studio
+          ? 'flex h-full min-h-0 flex-col overflow-hidden bg-slate-950'
+          : 'overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm'
+      }
+    >
+      <div
+        className={`flex flex-wrap items-center gap-3 border-b px-3 py-2 ${
+          studio ? 'border-white/10 bg-slate-900/90 text-slate-100' : 'border-slate-200 bg-slate-50'
+        }`}
+      >
         <ExamTimer remainingSeconds={remainingSeconds} />
-        <div className="text-sm font-bold text-slate-800">Sınav Uygulaması</div>
+        <div className={`text-sm font-bold ${studio ? 'text-white' : 'text-slate-800'}`}>Sınav Uygulaması</div>
         {dual ? (
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-xs font-semibold text-slate-600">Sözel:</span>
+              <span className={`text-xs font-semibold ${studio ? 'text-slate-300' : 'text-slate-600'}`}>Sözel:</span>
               <KitapcikCircles value={kitapcikValue} onChange={onKitapcikChange} codes={bookletCodes} />
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-xs font-semibold text-slate-600">Sayısal:</span>
+              <span className={`text-xs font-semibold ${studio ? 'text-slate-300' : 'text-slate-600'}`}>Sayısal:</span>
               <KitapcikCircles
                 value={sayisalValue}
                 onChange={onKitapcikSayisalChange}
@@ -368,7 +510,9 @@ export default function EdesisOpticalSheet({
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-xs font-semibold text-slate-600">Kitapçık Türü:</span>
+            <span className={`text-xs font-semibold ${studio ? 'text-slate-300' : 'text-slate-600'}`}>
+              Kitapçık Türü:
+            </span>
             <KitapcikCircles value={kitapcikValue} onChange={onKitapcikChange} codes={bookletCodes} />
           </div>
         )}
@@ -393,92 +537,67 @@ export default function EdesisOpticalSheet({
         </div>
       </div>
 
-      <div className="flex min-h-[70vh] flex-col md:flex-row">
-        <aside className="flex w-full shrink-0 flex-col border-b border-slate-200 bg-white md:w-[22rem] md:border-b-0 md:border-r">
-          <div className="grid grid-cols-2 gap-1 border-b border-slate-200 px-2 py-2">
-            {filled.map(({ lesson, marked }) => {
-              const key = lessonKey(lesson);
-              const on = key === activeLessonKey;
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setActiveLessonKey(key)}
-                  className={`rounded-md border px-1.5 py-1.5 text-left text-[10px] font-extrabold leading-tight tracking-wide ${
-                    on
-                      ? 'border-orange-500 bg-orange-50 text-orange-600'
-                      : 'border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-800'
-                  }`}
-                >
-                  {lessonTabLabel(lesson, tabPrefix)}
-                  <span className="ml-1 font-semibold text-slate-400">
-                    {marked}/{lesson.questionCount}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+      <div
+        className={`flex min-h-0 flex-1 flex-col md:flex-row ${
+          studio ? 'h-full' : 'min-h-[70vh]'
+        }`}
+      >
+        {opticalAside}
 
-          {activeFilled ? (
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <div className="sticky top-0 border-b border-orange-100 bg-orange-50 px-3 py-2">
-                <div className="text-sm font-extrabold uppercase tracking-wide text-orange-600">
-                  {lessonTabLabel(activeFilled.lesson, tabPrefix)}
-                </div>
-                <div className="text-xs font-semibold text-orange-800/80">{heading}</div>
-              </div>
-              <ol className="space-y-1 px-2 py-2">
-                {Array.from({ length: activeFilled.lesson.questionCount }, (_, i) => {
-                  const selected =
-                    activeFilled.cevaplar[i] && activeFilled.cevaplar[i] !== ' ' ? activeFilled.cevaplar[i] : '';
-                  return (
-                    <li key={i} className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-slate-50">
-                      <span className="w-5 shrink-0 text-right text-xs font-bold text-slate-600">{i + 1}</span>
-                      <div className="flex flex-wrap gap-0.5">
-                        {choices.map((ch) => (
-                          <button
-                            key={ch}
-                            type="button"
-                            onClick={() => setChoice(activeFilled.lesson, i, ch)}
-                            className={`h-7 w-7 rounded-full border text-[11px] font-bold ${
-                              selected === ch
-                                ? 'border-emerald-600 bg-emerald-600 text-white'
-                                : 'border-orange-400 bg-white text-orange-500 hover:border-orange-600'
-                            }`}
-                            aria-label={`Soru ${i + 1} ${ch}`}
-                          >
-                            {ch}
-                          </button>
-                        ))}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => clearChoice(activeFilled.lesson, i)}
-                        className="ml-auto rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                        aria-label={`Soru ${i + 1} sil`}
-                      >
-                        <Eraser className="h-3.5 w-3.5" />
-                      </button>
-                    </li>
-                  );
-                })}
-              </ol>
-            </div>
-          ) : (
-            <p className="p-4 text-sm text-slate-500">Bu kitapçıkta ders yok.</p>
-          )}
-        </aside>
-
-        <section className="flex min-h-[50vh] flex-1 flex-col bg-neutral-900">
-          <div className="flex items-center gap-2 border-b border-slate-700 bg-slate-800 px-3 py-1.5 text-[11px] text-slate-200">
-            <span className="truncate font-medium">{examTitle || 'Kitapçık PDF'}</span>
-            {pdfBusy ? <Loader2 className="ml-auto h-3.5 w-3.5 animate-spin" /> : null}
+        <section
+          ref={pdfPaneRef}
+          className="relative flex min-h-[52vh] min-w-0 flex-1 flex-col bg-neutral-950 md:min-h-0"
+        >
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-white/10 bg-slate-900 px-2 py-1.5 text-[11px] text-slate-200">
+            <span className="mr-1 max-w-[40%] truncate font-medium">{examTitle || 'Kitapçık PDF'}</span>
+            {PDF_ZOOM_CHIPS.map((z) => (
+              <button
+                key={z.id}
+                type="button"
+                onClick={() => setPdfZoom(z.id)}
+                className={`rounded-md px-2 py-1 font-semibold ${
+                  pdfZoom === z.id ? 'bg-white text-slate-900' : 'bg-white/10 text-slate-200 hover:bg-white/20'
+                }`}
+              >
+                {z.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setPdfWide((v) => !v)}
+              className="ml-auto inline-flex items-center gap-1 rounded-md bg-white/10 px-2 py-1 font-semibold hover:bg-white/20"
+              title={pdfWide ? 'Optik formu göster' : 'PDF’i tam genişlik yap'}
+            >
+              {pdfWide ? <Columns2 className="h-3.5 w-3.5" /> : <Expand className="h-3.5 w-3.5" />}
+              {pdfWide ? 'Optik' : 'PDF geniş'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void togglePdfFullscreen()}
+              className="inline-flex items-center gap-1 rounded-md bg-white/10 px-2 py-1 font-semibold hover:bg-white/20"
+            >
+              {pdfFs ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+              Tam ekran
+            </button>
+            {pdfUrl ? (
+              <a
+                href={pdfUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded-md bg-white/10 px-2 py-1 font-semibold hover:bg-white/20"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                Yeni sekme
+              </a>
+            ) : null}
+            {pdfBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
           </div>
-          <div className="relative min-h-[50vh] flex-1">
+          <div className="relative min-h-0 flex-1 overflow-hidden bg-neutral-900">
             {pdfUrl ? (
               <iframe
+                key={pdfSrc}
                 title="Sınav kitapçığı PDF"
-                src={pdfUrl}
+                src={pdfSrc}
                 className="absolute inset-0 h-full w-full border-0 bg-white"
               />
             ) : (
@@ -495,6 +614,16 @@ export default function EdesisOpticalSheet({
               </div>
             )}
           </div>
+          {pdfWide ? (
+            <button
+              type="button"
+              onClick={() => setPdfWide(false)}
+              className="absolute bottom-4 left-4 z-10 inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-2 text-xs font-bold text-slate-900 shadow-lg"
+            >
+              <Shrink className="h-3.5 w-3.5" />
+              Optik formu aç
+            </button>
+          ) : null}
         </section>
       </div>
     </div>

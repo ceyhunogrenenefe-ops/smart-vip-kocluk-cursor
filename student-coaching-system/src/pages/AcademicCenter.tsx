@@ -77,7 +77,7 @@ function PortalActionCard(props: {
 
   return (
     <div
-      className={`group relative flex h-full overflow-hidden rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition hover:shadow-md sm:p-5 ${
+      className={`group relative flex h-full overflow-hidden rounded-3xl border border-slate-200/80 bg-white p-5 shadow-[0_20px_50px_-32px_rgba(15,23,42,0.35)] transition hover:-translate-y-0.5 hover:shadow-[0_24px_60px_-28px_rgba(15,23,42,0.4)] sm:p-6 ${
         clickableCard && canAct ? 'cursor-pointer' : ''
       }`}
       role={clickableCard && canAct ? 'button' : undefined}
@@ -109,7 +109,7 @@ function PortalActionCard(props: {
               e.stopPropagation();
               trigger();
             }}
-            className={`mt-4 inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold shadow-md transition disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${buttonClassName}`}
+            className={`mt-4 inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold shadow-md transition disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${buttonClassName}`}
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             {buttonLabel}
@@ -260,6 +260,16 @@ export default function AcademicCenter() {
   const [edesisTaking, setEdesisTaking] = useState(false);
 
   useEffect(() => {
+    if (!edesisTaking) return;
+    const html = document.documentElement;
+    const prev = html.style.overflow;
+    html.style.overflow = 'hidden';
+    return () => {
+      html.style.overflow = prev;
+    };
+  }, [edesisTaking]);
+
+  useEffect(() => {
     const t = searchParams.get('tab');
     if (t === 'study' || t === 'exam' || t === 'pool') setActiveTab(t);
   }, [searchParams]);
@@ -361,54 +371,59 @@ export default function AcademicCenter() {
       label: 'Etüt Sınıfları',
       short: 'Etüt',
       icon: School,
-      activeClass:
-        'bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-lg shadow-indigo-300/50 ring-2 ring-white/30 scale-[1.02]',
-      inactiveClass:
-        'bg-white/90 text-indigo-900 border-2 border-indigo-100 hover:border-indigo-300 hover:bg-indigo-50/90'
+      activeClass: 'bg-slate-900 text-white shadow-lg shadow-slate-900/20',
+      inactiveClass: 'text-slate-600 hover:bg-white hover:text-slate-900'
     },
     {
       id: 'exam',
       label: 'Deneme / Optik',
       short: 'Deneme',
       icon: ClipboardList,
-      activeClass:
-        'bg-gradient-to-br from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-300/50 ring-2 ring-white/30 scale-[1.02]',
-      inactiveClass:
-        'bg-white/90 text-emerald-900 border-2 border-emerald-100 hover:border-emerald-300 hover:bg-emerald-50/90'
+      activeClass: 'bg-slate-900 text-white shadow-lg shadow-slate-900/20',
+      inactiveClass: 'text-slate-600 hover:bg-white hover:text-slate-900'
     },
     {
       id: 'pool',
       label: 'Soru Havuzları',
       short: 'Havuz',
       icon: BookOpen,
-      activeClass:
-        'bg-gradient-to-br from-sky-600 to-cyan-600 text-white shadow-lg shadow-sky-300/50 ring-2 ring-white/30 scale-[1.02]',
-      inactiveClass:
-        'bg-white/90 text-sky-900 border-2 border-sky-100 hover:border-sky-300 hover:bg-sky-50/90'
+      activeClass: 'bg-slate-900 text-white shadow-lg shadow-slate-900/20',
+      inactiveClass: 'text-slate-600 hover:bg-white hover:text-slate-900'
     }
   ];
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto px-1 sm:px-0">
-      <div className="relative overflow-hidden rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-600 p-4 text-white shadow-xl shadow-indigo-400/25 sm:p-6">
-        <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-white/10 blur-2xl" />
-        <div className="absolute -bottom-10 left-1/4 h-24 w-40 rounded-full bg-fuchsia-400/20 blur-2xl" />
-        <div className="relative flex flex-wrap items-start gap-4">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/20 backdrop-blur">
-            <Sparkles className="h-7 w-7 text-amber-200" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Akademik Merkez</h1>
-            <p className="mt-1 max-w-xl text-sm text-indigo-100">
-              Etüt sınıfları, deneme/optik ve soru havuzlarına tek ekrandan ulaşın. Aşağıdan bölüm seçin.
+    <div
+      className={
+        edesisTaking
+          ? '-mx-3 -my-4 flex h-[calc(100dvh-3.75rem)] min-h-0 flex-col overflow-hidden sm:-mx-5 sm:-my-6 sm:h-[calc(100dvh-4.25rem)] lg:-mx-6 lg:h-[calc(100dvh-5.5rem)]'
+          : 'mx-auto w-full max-w-[1680px] space-y-8'
+      }
+    >
+      {edesisTaking ? null : (
+        <>
+      <div className="relative overflow-hidden rounded-[28px] border border-white/10 bg-slate-950 p-6 text-white shadow-[0_30px_80px_-40px_rgba(15,23,42,0.8)] sm:p-8">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(251,191,36,0.18),transparent_42%)]" />
+        <div className="pointer-events-none absolute -bottom-16 left-1/3 h-40 w-72 rounded-full bg-teal-400/10 blur-3xl" />
+        <div className="relative flex flex-wrap items-end justify-between gap-6">
+          <div className="max-w-2xl">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-amber-200/90">
+              Online VIP · Öğrenci
             </p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Akademik Merkez</h1>
+            <p className="mt-3 max-w-xl text-sm leading-relaxed text-slate-300">
+              Etüt, deneme ve soru havuzu tek stüdyoda. Sınava girince kitapçık tam genişlikte açılır.
+            </p>
+          </div>
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 ring-1 ring-white/15">
+            <Sparkles className="h-7 w-7 text-amber-200" />
           </div>
         </div>
       </div>
 
-      <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-2 shadow-inner sm:p-3">
+      <div className="rounded-full border border-slate-200/80 bg-slate-100/80 p-1.5 shadow-inner">
         <div
-          className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-stretch"
+          className="grid grid-cols-3 gap-1"
           role="tablist"
           aria-label="Akademik merkez bölümleri"
         >
@@ -422,21 +437,29 @@ export default function AcademicCenter() {
                 role="tab"
                 aria-selected={active}
                 onClick={() => selectTab(t.id)}
-                className={`flex min-h-[52px] flex-1 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition-all sm:min-w-[160px] ${
+                className={`flex min-h-[48px] items-center justify-center gap-2 rounded-full px-3 py-2.5 text-sm font-semibold transition ${
                   active ? t.activeClass : t.inactiveClass
                 }`}
               >
-                <Icon className={`h-5 w-5 shrink-0 ${active ? 'text-white' : ''}`} />
-                <span className="hidden text-left sm:inline">{t.label}</span>
+                <Icon className="h-4 w-4 shrink-0" />
+                <span className="hidden sm:inline">{t.label}</span>
                 <span className="sm:hidden">{t.short}</span>
               </button>
             );
           })}
         </div>
       </div>
+        </>
+      )}
 
-      <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
-        <div className="p-1">
+      <div
+        className={
+          edesisTaking
+            ? 'flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-950'
+            : 'rounded-[28px] border border-slate-200/70 bg-white/90 p-4 shadow-[0_24px_70px_-48px_rgba(15,23,42,0.5)] sm:p-6'
+        }
+      >
+        <div className={edesisTaking ? 'flex min-h-0 flex-1 flex-col' : 'p-1'}>
           {activeTab === 'study' && (
             <div className="space-y-4">
               <div className="rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-4 shadow-sm">
@@ -520,8 +543,8 @@ export default function AcademicCenter() {
           )}
 
           {activeTab === 'exam' && (
-            <div className="space-y-6">
-              <div className="rounded-2xl border-2 border-emerald-200 bg-gradient-to-br from-emerald-50/90 to-white p-4 shadow-sm sm:p-5">
+            <div className={edesisTaking ? 'flex min-h-0 flex-1 flex-col' : 'space-y-6'}>
+              <div className={edesisTaking ? 'flex min-h-0 flex-1 flex-col' : ''}>
                 <StudentEdesisExamPanel onActiveExamChange={setEdesisTaking} />
               </div>
 
