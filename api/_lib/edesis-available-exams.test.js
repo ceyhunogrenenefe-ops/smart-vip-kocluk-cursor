@@ -862,6 +862,17 @@ describe('parseEdesisOgrenciSinavAssignmentResponse / grade compatibility', () =
     assert.equal(examCompatibleWithStudentGrade({ name: 'LİMİT LGS HAZIRBULUNUŞLUK' }, '8'), true);
     assert.equal(examCompatibleWithStudentGrade({ name: '7.sınıf Mat Fen KTT 2' }, '8'), true);
   });
+
+  it('reads grade from examType when title has no sınıf', () => {
+    assert.equal(
+      examCompatibleWithStudentGrade({ name: 'Origami', examType: '9 SINIF ORİGAMİ 125' }, '8'),
+      false
+    );
+    assert.equal(
+      examCompatibleWithStudentGrade({ name: 'Maarif Model4', examType: 'MAARİF 80' }, '8'),
+      true
+    );
+  });
 });
 
 describe('parseEdesisOgrenciSinavListesiResponse', () => {
