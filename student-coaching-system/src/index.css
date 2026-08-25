@@ -86,6 +86,19 @@
     overflow-x: clip;
   }
 
+  /* Öğrenci sınav stüdyosu: kitapçık PDF viewport’u doldurur, layout padding kesmez */
+  html.edesis-exam-studio,
+  html.edesis-exam-studio body {
+    overflow: hidden !important;
+  }
+  html.edesis-exam-studio main {
+    overflow: hidden !important;
+    padding: 0 !important;
+  }
+  html.edesis-exam-studio .mobile-scroll-port {
+    overflow: hidden !important;
+  }
+
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),
   a[href],
