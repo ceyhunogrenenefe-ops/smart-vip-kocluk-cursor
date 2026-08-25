@@ -15,6 +15,8 @@ import {
   buildEdesisGetOgrenciSinavIdsPath,
   examCompatibleWithStudentGrade,
   examCompatibleWithStudentProgramSoft,
+  isThinOnlineRosterExam,
+  collectOpenOnlineProgramExams,
   pickEdesisExamSinavTuruId,
   collectCatalogRowsForSinavIds,
   pickEdesisResultExamId,
@@ -90,6 +92,62 @@ describe('examCompatibleWithStudentProgramSoft', () => {
       examCompatibleWithStudentProgramSoft({ name: 'TOPRAK', examType: 'TYT' }, yks),
       true
     );
+  });
+});
+
+describe('thin online roster + open catalog', () => {
+  it('treats 1–3 students as thin, 24 as not', () => {
+    assert.equal(isThinOnlineRosterExam({ studentCount: 2 }), true);
+    assert.equal(isThinOnlineRosterExam({ studentCount: 0 }), false);
+    assert.equal(isThinOnlineRosterExam({ studentCount: 24 }), false);
+    assert.equal(isThinOnlineRosterExam({ studentCount: 24 }, 2), true);
+  });
+
+  it('lists LGS open exams in 45d excluding taken', () => {
+    const now = new Date('2026-08-25T12:00:00Z');
+    const rows = [
+      {
+        id: '1579080',
+        name: 'LİMİT LGS HAZIRBULUNUŞLUK',
+        examType: 'LGS',
+        resultStatus: 'None',
+        examDate: '2026-08-25'
+      },
+      {
+        id: '1544720',
+        name: 'YANIT 1 PROVA YENİ',
+        examType: 'LGS',
+        resultStatus: 'Ready',
+        examDate: '2026-08-01',
+        studentCount: 2
+      },
+      {
+        id: '1561040',
+        name: 'PARAF MOR 1',
+        examType: 'LGS',
+        resultStatus: 'Ready',
+        examDate: '2026-08-15',
+        studentCount: 24
+      },
+      {
+        id: '1539420',
+        name: 'TOPRAK',
+        examType: 'TYT',
+        resultStatus: 'None',
+        examDate: '2026-08-20'
+      }
+    ];
+    const open = collectOpenOnlineProgramExams(rows, {
+      programKeys: new Set(['lgs']),
+      gradeName: '8',
+      excludeExamIds: [],
+      now
+    });
+    const ids = open.map((r) => pickEdesisCatalogExamId(r));
+    assert.equal(ids.includes('1579080'), true);
+    assert.equal(ids.includes('1544720'), true);
+    assert.equal(ids.includes('1561040'), true);
+    assert.equal(ids.includes('1539420'), false);
   });
 });
 

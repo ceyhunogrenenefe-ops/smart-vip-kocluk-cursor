@@ -697,6 +697,28 @@ export function examCompatibleWithStudentProgramSoft(exam, programKeys) {
   return false;
 }
 
+/** Admin öğrenci dosyası: program+sınıf uyumlu, henüz girilmemiş açık online denemeler (roster yok). */
+export function collectOpenOnlineProgramExams(
+  catalogRows = [],
+  { programKeys = new Set(), gradeName = '', excludeExamIds = [], now = new Date(), windowDays = TURU_ONLINE_WINDOW_DAYS } = {}
+) {
+  const keys = programKeys instanceof Set ? programKeys : new Set(programKeys || []);
+  const excluded = new Set([...(excludeExamIds || [])].map((id) => String(id).trim()).filter(Boolean));
+  const out = [];
+  for (const ex of catalogRows || []) {
+    if (!isOpenEdesisCatalogExam(ex) || !examWindowStillOpen(ex, now)) continue;
+    if (!examCompatibleWithStudentGrade(ex, gradeName)) continue;
+    if (!examCompatibleWithStudentProgramSoft(ex, keys)) continue;
+    const id = pickEdesisCatalogExamId(ex);
+    if (!id || excluded.has(String(id))) continue;
+    if (!isRecentOpenCatalogExam(ex, now, windowDays)) continue;
+    const status = catalogResultStatus(ex);
+    if (!/^(none|ready|processing|pending)?$/i.test(status)) continue;
+    out.push(ex);
+  }
+  return sortCatalogExamsByRecencyDesc(out);
+}
+
 export function edesisCatalogExamMatchesProgram(exam, programKeys) {
   if (!programKeys || !programKeys.size) return false;
   const examKeys = inferEdesisExamProgramKeys({
@@ -747,6 +769,10 @@ export function filterEdesisExamsForStudentProgram(items, programKeys, opts = {}
 }
 
 const OPEN_CATALOG_WINDOW_DAYS = 21;
+/** Turu-online probe: Safiye’de 21g PARAF/YANIT (d=24–31) kesiliyordu; 45g = tanımlı açık LGS seti. */
+export const TURU_ONLINE_WINDOW_DAYS = 45;
+/** Roster 1–3: Edesis Online’da hâlâ girilebilir (test/ince atama). 24 kişilik PARAF MOR 1 Safiye’de yok. */
+export const THIN_ONLINE_ROSTER_MAX = 3;
 
 export function isOpenEdesisCatalogExam(exam) {
   const status = String(exam?.resultStatus || exam?.status || 'None').trim();
@@ -884,6 +910,27 @@ function catalogExamRecencyMs(exam) {
     if (Number.isFinite(t) && t > best) best = t;
   }
   return best;
+}
+
+export function catalogExamStudentCount(exam) {
+  const n = Number(
+    exam?.studentCount ??
+      exam?.toplamOgrenci ??
+      exam?.sinavKatilanOgrenci ??
+      exam?.katilanOgrenci ??
+      0
+  );
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** İnce roster: başkasının 24 kişilik denemesini değil, 1–3 kişilik açık online’ı geçir. */
+export function isThinOnlineRosterExam(exam, rosterLength = null) {
+  if (rosterLength != null && Number.isFinite(Number(rosterLength))) {
+    const n = Number(rosterLength);
+    return n > 0 && n <= THIN_ONLINE_ROSTER_MAX;
+  }
+  const c = catalogExamStudentCount(exam);
+  return c > 0 && c <= THIN_ONLINE_ROSTER_MAX;
 }
 
 export function examOnlineFlag(exam) {
@@ -1866,7 +1913,7 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
             if (!isOpenEdesisCatalogExam(ex) || !examWindowStillOpen(ex)) return false;
             if (!examCompatibleWithStudentGrade(ex, gradeName)) return false;
             if (!examCompatibleWithStudentProgramSoft(ex, keys)) return false;
-            if (!isRecentOpenCatalogExam(ex, new Date(), 21)) return false;
+            if (!isRecentOpenCatalogExam(ex, new Date(), TURU_ONLINE_WINDOW_DAYS)) return false;
             const status = catalogResultStatus(ex);
             return /^(none|ready|processing|pending)?$/i.test(status);
           })
@@ -1938,8 +1985,10 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     }
     if (catalogExamAssignedToStudent(merged, detailScope) === false) return null;
 
-    // Roster doluysa tür eşleşmesiyle başkasının denemesini alma
+    // Roster doluysa tür eşleşmesiyle başkasının denemesini alma —
+    // ince roster (1–3) Edesis Online’da hâlâ açık kalabiliyor (kanıt: YANIT 1 / KTT yeniden).
     let rosterEmptyOrUnknown = true;
+    let thinRosterOpen = false;
     if (rosterApiAlive && !skipAbpRoster) {
       const roster = await fetchEdesisExamRosterStudentIds(id, cfgOverride);
       if (roster === null) {
@@ -1947,15 +1996,22 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
       } else if (examRosterIncludesStudent(roster, edesisStudentId)) {
         return ex;
       } else if (roster.length > 0) {
-        return null;
+        if (isThinOnlineRosterExam(merged, roster.length) || isThinOnlineRosterExam(ex, roster.length)) {
+          rosterEmptyOrUnknown = false;
+          thinRosterOpen = true;
+        } else {
+          return null;
+        }
       } else {
         rosterEmptyOrUnknown = true;
       }
+    } else if (isThinOnlineRosterExam(merged) || isThinOnlineRosterExam(ex)) {
+      thinRosterOpen = true;
     }
 
-    // Online + sinavTuruId — roster boş yeni deneme.
+    // Online + sinavTuruId — boş roster veya ince roster.
     // sinavTuruId tenant geneli olduğu için LGS↔TYT yumuşak program filtresi uygulanır (MAARİF→lgs).
-    if (rosterEmptyOrUnknown && adminTuruIds.size) {
+    if ((rosterEmptyOrUnknown || thinRosterOpen) && adminTuruIds.size) {
       const online = examOnlineFlag(merged);
       let turu = pickEdesisExamSinavTuruId(merged) || pickEdesisExamSinavTuruId(detail);
       if (!turu) turu = await resolveEdesisExamSinavTuruId(merged, cfgOverride);
