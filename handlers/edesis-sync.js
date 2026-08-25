@@ -606,7 +606,9 @@ async function runSyncInner(actor) {
   const institutionId = actor?.institution_id || null;
   const students = await loadStudentsForMatching();
 
-  const fetchResult = await fetchEdesisExamList();
+  // Manuel UI: light sync (enrich yok) — Vercel 504 önleme. Cron: tam zenginleştirme.
+  const skipEnrich = String(actor?.role || '') !== 'cron';
+  const fetchResult = await fetchEdesisExamList({ skipEnrich });
   const {
     rows,
     baseUrl,
@@ -718,7 +720,7 @@ export default async function handler(req, res) {
     const auth = authorizeVercelOrCronSecret(req);
     if (!auth.ok) return res.status(401).json({ error: 'Unauthorized cron' });
     try {
-      const result = await runSync({ institution_id: null, role: 'admin' });
+      const result = await runSync({ institution_id: null, role: 'cron' });
       return res.status(200).json(result);
     } catch (e) {
       return res.status(500).json({ ok: false, error: errorMessage(e) });
@@ -781,7 +783,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         configured: keyOk,
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-turu-online-2026-08-25',
+        deployMarker: 'edesis-turu-alltypes-sync-2026-08-25',
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
@@ -840,7 +842,7 @@ export default async function handler(req, res) {
         }
         return res.status(200).json({
           ok: true,
-          deployMarker: 'edesis-turu-online-2026-08-25',
+          deployMarker: 'edesis-turu-alltypes-sync-2026-08-25',
           configured: Boolean(cfg.apiKey),
           abpAuth: getEdesisAbpAuthStatus(),
           abpProbe: abpProbe
@@ -900,7 +902,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-turu-online-2026-08-25',
+        deployMarker: 'edesis-turu-alltypes-sync-2026-08-25',
         baseUrl: cfg.baseUrl,
         attempts: out
       });
