@@ -711,7 +711,7 @@ export function collectOpenOnlineProgramExams(
     if (!examCompatibleWithStudentProgramSoft(ex, keys)) continue;
     const id = pickEdesisCatalogExamId(ex);
     if (!id || excluded.has(String(id))) continue;
-    if (!isRecentOpenCatalogExam(ex, now, windowDays)) continue;
+    if (!isRecentByExamDate(ex, now, windowDays)) continue;
     const status = catalogResultStatus(ex);
     if (!/^(none|ready|processing|pending)?$/i.test(status)) continue;
     out.push(ex);
@@ -1052,10 +1052,12 @@ export function examCompatibleWithStudentGrade(exam, studentGradeName = '') {
   if (!named) return true;
   const examGrade = Number(named[1]);
   if (!Number.isFinite(examGrade)) return true;
-  // LGS (7–8): 5–6 net şekilde yazılmışsa ele; TYT sınıfı (9+) ele
+  // LGS: 5–6 ve 9+ ele. 8. sınıf 7.sınıf denemesine girmesin (kanıt: Safiye 8-F).
   if (g >= 7 && g <= 8) {
     if (examGrade <= 6) return false;
     if (examGrade >= 9) return false;
+    if (g === 8 && examGrade === 7) return false;
+    if (g === 7 && examGrade === 8) return false;
     return true;
   }
   // Aynı sınıf ±1 tolerans
@@ -1416,6 +1418,19 @@ export function isRecentOpenCatalogExam(exam, now = new Date(), windowDays = OPE
   if (!ms) return false;
   const diffDays = (now.getTime() - ms) / 86400000;
   return diffDays <= windowDays;
+}
+
+/** Turu-online: yalnızca sınav tarihi (düzenleme tarihi eski LGS’yi 45g içine sokmasın). */
+export function isRecentByExamDate(exam, now = new Date(), windowDays = TURU_ONLINE_WINDOW_DAYS) {
+  const flat = flattenEdesisRow(exam);
+  let t = 0;
+  for (const k of ['examDate', 'sinavTarihi', 'date']) {
+    const p = Date.parse(getPropCi(flat, [k]));
+    if (Number.isFinite(p) && p > t) t = p;
+  }
+  if (!t) return false;
+  const diffDays = (now.getTime() - t) / 86400000;
+  return diffDays <= windowDays && diffDays >= -2;
 }
 
 function catalogRowExamId(row) {
@@ -1913,7 +1928,7 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
             if (!isOpenEdesisCatalogExam(ex) || !examWindowStillOpen(ex)) return false;
             if (!examCompatibleWithStudentGrade(ex, gradeName)) return false;
             if (!examCompatibleWithStudentProgramSoft(ex, keys)) return false;
-            if (!isRecentOpenCatalogExam(ex, new Date(), TURU_ONLINE_WINDOW_DAYS)) return false;
+            if (!isRecentByExamDate(ex, new Date(), TURU_ONLINE_WINDOW_DAYS)) return false;
             const status = catalogResultStatus(ex);
             return /^(none|ready|processing|pending)?$/i.test(status);
           })
