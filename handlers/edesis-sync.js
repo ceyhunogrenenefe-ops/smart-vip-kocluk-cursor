@@ -831,8 +831,12 @@ export default async function handler(req, res) {
           apiError: r.json?.error ?? null
         });
       }
-      return res.status(200).json({ apiVersion: 'v1.5',
-        deployMarker: 'edesis-assigned-only-2026-08-25', baseUrl: cfg.baseUrl, attempts: out });
+      return res.status(200).json({
+        apiVersion: 'v1.5',
+        deployMarker: 'edesis-assigned-only-2026-08-25',
+        baseUrl: cfg.baseUrl,
+        attempts: out
+      });
     }
 
     if (op === 'exam-booklet-debug') {
