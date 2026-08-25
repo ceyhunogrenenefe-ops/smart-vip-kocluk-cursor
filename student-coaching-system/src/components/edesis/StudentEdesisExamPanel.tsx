@@ -479,8 +479,8 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             Edesis denemesi ve sonuçlarım
           </h2>
           <p className="mt-1 text-sm text-slate-600">
-            Yalnızca sizin programınıza (LGS / YKS / YÖS) uyan Edesis denemeleri görünür. Optik formu ders ders doldurun; net, hata karnesi PDF
-            (boş ve yanlış sorular) ve deneme analizi aynı yerde açılır.
+            Yalnızca Edesis’te size tanımlanan denemeler görünür (TYT/LGS kataloğunun tamamı değil). Optik formu ders ders doldurun; net, hata
+            karnesi PDF (boş ve yanlış sorular) ve deneme analizi aynı yerde açılır.
           </p>
         </div>
         <button
@@ -632,7 +632,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             ) : null}
             {!available.length && !hint ? (
               <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                Edesis’te programınıza uyan açık deneme yok. Koçunuz Edesis’te denemeyi oluşturduktan sonra burada görünür.
+                Edesis’te size atanmış açık deneme yok. Koçunuz Edesis’te denemeyi size tanımladıktan sonra burada görünür.
               </p>
             ) : null}
           </div>
