@@ -417,6 +417,58 @@ async function fetchEdesisAbpJson(cfg, path, { method = 'GET', body, timeoutMs =
   };
 }
 
+/** ABP GET — PDF bayt veya FileDto JSON (GetDenemeSorulariPdf ikisini de dönebilir) */
+async function fetchEdesisAbpBuffer(cfg, path, { timeoutMs = 45000 } = {}) {
+  const auth = await resolveEdesisAbpAccessToken(cfg);
+  if (!auth.token) {
+    return {
+      ok: false,
+      status: 401,
+      url: joinUrl(cfg.baseUrl || cfg.bases[0], path),
+      buf: Buffer.alloc(0),
+      json: { error: auth.error || 'abp_auth_missing', abpStatus: auth.status },
+      looksPdf: false,
+      dto: null,
+      contentType: '',
+      rawPreview: String(auth.error || auth.status).slice(0, 200),
+      abpAuth: auth.status
+    };
+  }
+  const url = joinUrl(cfg.baseUrl || cfg.bases[0], path);
+  const headers = buildAbpHeaders(cfg, auth.token, { forGet: true });
+  headers.Accept = 'application/pdf,application/octet-stream,application/json,*/*';
+  const res = await fetch(url, {
+    method: 'GET',
+    headers,
+    signal: AbortSignal.timeout(timeoutMs)
+  });
+  const buf = Buffer.from(await res.arrayBuffer());
+  const contentType = res.headers.get('content-type') || '';
+  const looksPdf = looksLikePdfBuffer(buf);
+  let json = null;
+  let dto = null;
+  let rawPreview = '%PDF-';
+  if (!looksPdf) {
+    const text = buf.toString('utf8');
+    const parsed = parseEdesisResponseText(text);
+    json = parsed.parseOk ? parsed.json : { _raw: parsed.rawPreview, _invalidBody: parsed.invalidBody };
+    dto = fileDtoFromJson(json);
+    rawPreview = String(parsed.rawPreview || text).slice(0, 220);
+  }
+  return {
+    ok: res.ok,
+    status: res.status,
+    url,
+    buf,
+    json,
+    looksPdf,
+    dto,
+    contentType,
+    rawPreview,
+    abpAuth: auth.status
+  };
+}
+
 /** App Service: TokenAuth; harici v1: X-API-Key. GetSinavForView API key ile 403. */
 async function fetchEdesisJsonPreferAbp(cfg, path, options = {}) {
   const isAbpPath = /\/api\/services\/app\//i.test(String(path || ''));
@@ -2131,8 +2183,18 @@ export function collectEdesisBookletFiles(json, out = [], seen = new Set()) {
       url = coerceFileUrl(guid);
     }
   }
+  const fileToken = pickStrCi(json, ['fileToken', 'FileToken']);
   if (url) {
-    out.push({ url, kitapcikTuru, name });
+    out.push({ url, kitapcikTuru, name, ...(fileToken ? { fileToken, fileName: name, fileType: mime || 'application/pdf' } : {}) });
+  } else if (fileToken) {
+    out.push({
+      url: `file-token:${fileToken}`,
+      kitapcikTuru,
+      name,
+      fileToken,
+      fileName: name,
+      fileType: mime || 'application/pdf'
+    });
   }
 
   for (const [k, v] of Object.entries(json)) {
@@ -3116,30 +3178,72 @@ function unwrapAbpPayload(json) {
   return json;
 }
 
-function fileDtoFromJson(json) {
+export function fileDtoFromJson(json) {
   const payload = unwrapAbpPayload(json);
-  if (!payload || typeof payload !== 'object') return null;
-  const fileName = pickStr(payload, ['fileName', 'FileName']);
-  const fileToken = pickStr(payload, ['fileToken', 'FileToken', 'token']);
-  const fileType = pickStr(payload, ['fileType', 'FileType']) || 'application/pdf';
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const nested =
+    payload.fileDto && typeof payload.fileDto === 'object'
+      ? payload.fileDto
+      : payload.FileDto && typeof payload.FileDto === 'object'
+        ? payload.FileDto
+        : payload.file && typeof payload.file === 'object'
+          ? payload.file
+          : payload;
+  const fileName = pickStr(nested, ['fileName', 'FileName']) || pickStr(payload, ['fileName', 'FileName']);
+  const fileToken =
+    pickStr(nested, ['fileToken', 'FileToken', 'token']) || pickStr(payload, ['fileToken', 'FileToken', 'token']);
+  const fileType =
+    pickStr(nested, ['fileType', 'FileType']) || pickStr(payload, ['fileType', 'FileType']) || 'application/pdf';
   if (!fileToken) return null;
-  return { fileName: fileName || 'hata-karnesi.pdf', fileToken, fileType };
+  return { fileName: fileName || 'kitapcik.pdf', fileToken, fileType };
 }
 
-async function tryDownloadEdesisFileDto(cfg, dto) {
-  if (!dto?.fileToken) return null;
-  const fileName = encodeURIComponent(dto.fileName || 'hata-karnesi.pdf');
+/** FileController MVC host: API + tenant web (cdn/files değil) */
+export function listEdesisMvcFileBases(cfg = {}) {
+  const merged = { ...getEdesisConfig(), ...cfg };
+  const api = String(merged.baseUrl || merged.bases?.[0] || '').replace(/\/+$/, '');
+  const tenantWeb = api.replace(/\.api\.edesis\.com$/i, '.edesis.com');
+  const out = [];
+  for (const b of [api, tenantWeb]) {
+    if (!b || out.includes(b)) continue;
+    if (/cdn\.edesis\.com|files\.edesis\.com/i.test(b)) continue;
+    out.push(b);
+  }
+  return out;
+}
+
+export function edesisTempFileDownloadUrls(dto, cfg = {}) {
+  if (!dto?.fileToken) return [];
+  const fileName = encodeURIComponent(dto.fileName || 'kitapcik.pdf');
   const token = encodeURIComponent(dto.fileToken);
   const fileType = encodeURIComponent(dto.fileType || 'application/pdf');
   const paths = [
     `/File/DownloadTempFile?fileToken=${token}&fileName=${fileName}&fileType=${fileType}`,
+    `/File/DownloadTempFile?fileType=${fileType}&fileToken=${token}&fileName=${fileName}`,
     `/api/File/DownloadTempFile?fileToken=${token}&fileName=${fileName}&fileType=${fileType}`,
     `/File/DownloadBinaryFile?fileToken=${token}`
   ];
-  for (const path of paths) {
+  const urls = [];
+  for (const base of listEdesisMvcFileBases(cfg)) {
+    for (const path of paths) urls.push(`${base}${path}`);
+  }
+  return urls;
+}
+
+async function tryDownloadEdesisFileDto(cfg, dto) {
+  if (!dto?.fileToken) return null;
+  const urls = edesisTempFileDownloadUrls(dto, cfg);
+  const attempts = [];
+  for (const url of urls) {
     try {
-      const url = joinUrl(cfg.baseUrl, path);
-      const got = await fetchEdesisUrlBuffer(url, cfg);
+      const got = await fetchEdesisBufferFollowingRedirects(url, cfg, { withApiKey: false, preferAbp: true });
+      attempts.push({
+        url: got.url || url,
+        status: got.status,
+        ok: got.ok,
+        looksPdf: got.looksPdf,
+        contentType: String(got.contentType || '').slice(0, 80)
+      });
       if (got.ok && got.looksPdf) {
         return {
           ok: true,
@@ -3147,14 +3251,15 @@ async function tryDownloadEdesisFileDto(cfg, dto) {
           buf: got.buf,
           looksPdf: true,
           fileName: dto.fileName,
-          source: 'file-dto'
+          source: 'file-dto',
+          attempts
         };
       }
-    } catch {
-      /* sonraki aday */
+    } catch (e) {
+      attempts.push({ url, ok: false, error: e?.message || String(e) });
     }
   }
-  return null;
+  return { ok: false, looksPdf: false, buf: null, reportUrl: null, fileName: dto.fileName, source: 'file-dto', attempts };
 }
 
 async function tryGenerateEdesisHataKarnesiPdf(cfg, { edesisStudentId, analysisIds }) {
@@ -3179,7 +3284,7 @@ async function tryGenerateEdesisHataKarnesiPdf(cfg, { edesisStudentId, analysisI
         }
         const dto = fileDtoFromJson(row) || (row.token ? { fileName: row.fileName || 'hata-karnesi.pdf', fileToken: row.token, fileType: 'application/pdf' } : null);
         const downloaded = dto ? await tryDownloadEdesisFileDto(cfg, dto) : null;
-        if (downloaded) return { ...downloaded, source: 'ogrenci-analiz-rapor' };
+        if (downloaded?.looksPdf && downloaded.buf) return { ...downloaded, source: 'ogrenci-analiz-rapor' };
         const hid = pickStr(row, ['analysisId', 'analizId', 'AnalizId']);
         if (hid) {
           const at = ids.indexOf(hid);
@@ -3216,7 +3321,7 @@ async function tryGenerateEdesisHataKarnesiPdf(cfg, { edesisStudentId, analysisI
       const dto = fileDtoFromJson(r.json);
       if (!dto) continue;
       const downloaded = await tryDownloadEdesisFileDto(cfg, dto);
-      if (downloaded) {
+      if (downloaded?.looksPdf && downloaded.buf) {
         return { ...downloaded, source: 'analiz-olustur', analysisId: analizId };
       }
     } catch {
@@ -3879,6 +3984,16 @@ export function extractEdesisStructureRows(json) {
   return flat.map(normalizeEdesisStructureRow);
 }
 
+export function collectDersGrupIdsFromStructureRows(rows = []) {
+  const ids = [];
+  for (const row of rows || []) {
+    const id = toEdesisInt(row?.dersGrupId);
+    if (id == null || ids.includes(id)) continue;
+    ids.push(id);
+  }
+  return ids;
+}
+
 function mergeEdesisStructureRows(primary = [], secondary = []) {
   const byKey = new Map();
   for (const row of [...primary, ...secondary]) {
@@ -4253,34 +4368,88 @@ async function tryResolveGuidViaFileView(guid, localCfg) {
   return null;
 }
 
-async function tryDenemeSorulariPdf(denemeId, localCfg) {
+async function tryDenemeSorulariPdf(denemeId, localCfg, { dersGrupIds = [] } = {}) {
   const id = String(denemeId || '').trim();
-  if (!id || !/^\d+$/.test(id)) return null;
-  const path = `/api/services/app/Denemes/GetDenemeSorulariPdf?id=${encodeURIComponent(id)}`;
-  try {
-    const r = await fetchEdesisAbpJson(localCfg, path, { timeoutMs: 55000 });
-    const dto = fileDtoFromJson(r.json);
-    if (dto) {
-      const downloaded = await tryDownloadEdesisFileDto(localCfg, dto);
-      if (downloaded?.looksPdf && downloaded.buf) {
+  if (!id || !/^\d+$/.test(id)) return { file: null, probe: [] };
+  const grupIds = ['', ...dersGrupIds.map((n) => String(n)).filter(Boolean)].filter(
+    (v, i, arr) => arr.indexOf(v) === i
+  );
+  const probe = [];
+  for (const dersGrupId of grupIds.slice(0, 6)) {
+    const qs = new URLSearchParams({ id });
+    if (dersGrupId) qs.set('dersGrupId', dersGrupId);
+    const path = `/api/services/app/Denemes/GetDenemeSorulariPdf?${qs.toString()}`;
+    try {
+      const r = await fetchEdesisAbpBuffer(localCfg, path, { timeoutMs: dersGrupId ? 20000 : 45000 });
+      const abpError =
+        r.json?.error?.message || r.json?.error || r.json?._raw || (!r.ok ? `HTTP ${r.status}` : '');
+      probe.push({
+        kind: 'deneme-sorulari-pdf',
+        dersGrupId: dersGrupId || null,
+        status: r.status,
+        ok: Boolean(r.ok),
+        looksPdf: Boolean(r.looksPdf),
+        hasFileToken: Boolean(r.dto?.fileToken),
+        fileName: r.dto?.fileName || '',
+        abpAuth: r.abpAuth || null,
+        url: r.url || path,
+        preview: String(r.rawPreview || '').slice(0, 160),
+        error: abpError ? String(abpError).slice(0, 160) : undefined
+      });
+      if (r.looksPdf && r.buf) {
         return {
-          url: downloaded.reportUrl || path,
-          kitapcikTuru: '',
-          name: dto.fileName || 'Deneme Soruları PDF',
-          buf: downloaded.buf,
-          contentType: 'application/pdf',
-          source: 'deneme-sorulari-pdf'
+          file: {
+            url: r.url || path,
+            kitapcikTuru: '',
+            name: 'Deneme Soruları PDF',
+            buf: r.buf,
+            contentType: 'application/pdf',
+            source: 'deneme-sorulari-pdf-bytes'
+          },
+          probe
         };
       }
+      if (r.dto?.fileToken) {
+        const downloaded = await tryDownloadEdesisFileDto(localCfg, r.dto);
+        const dlAttempts = Array.isArray(downloaded?.attempts) ? downloaded.attempts.slice(0, 8) : [];
+        probe.push({
+          kind: 'download-temp-file',
+          dersGrupId: dersGrupId || null,
+          ok: Boolean(downloaded?.looksPdf),
+          fileName: r.dto.fileName,
+          attempts: dlAttempts
+        });
+        if (downloaded?.looksPdf && downloaded.buf) {
+          return {
+            file: {
+              url: downloaded.reportUrl || path,
+              kitapcikTuru: '',
+              name: r.dto.fileName || 'Deneme Soruları PDF',
+              buf: downloaded.buf,
+              contentType: 'application/pdf',
+              source: 'deneme-sorulari-pdf'
+            },
+            probe
+          };
+        }
+      }
+      if (r.json && isReachableEdesisResponse(r)) {
+        const files = collectEdesisBookletFiles(r.json);
+        if (files[0]?.url) {
+          return { file: { ...files[0], source: 'deneme-sorulari-pdf-url' }, probe };
+        }
+      }
+    } catch (e) {
+      probe.push({
+        kind: 'deneme-sorulari-pdf',
+        dersGrupId: dersGrupId || null,
+        ok: false,
+        url: path,
+        error: e?.message || String(e)
+      });
     }
-    if (isReachableEdesisResponse(r)) {
-      const files = collectEdesisBookletFiles(r.json);
-      if (files[0]?.url) return { ...files[0], source: 'deneme-sorulari-pdf-url' };
-    }
-  } catch {
-    /* ignore */
   }
-  return null;
+  return { file: null, probe };
 }
 
 async function probeEdesisExamBookletSources(examId, localCfg) {
@@ -4379,13 +4548,28 @@ export async function fetchEdesisUrlBuffer(fileUrl, cfgOverride = {}) {
 }
 
 /** 302→CDN sırasında X-API-Key taşınmasın (CDN PDF’yi reddedebilir) */
-async function fetchEdesisBufferFollowingRedirects(startUrl, cfg, { withApiKey = true, maxHops = 6 } = {}) {
+function urlWantsEdesisAbpAuth(url) {
+  const u = String(url || '');
+  if (/cdn\.edesis\.com|files\.edesis\.com|blob\.core\.windows\.net|amazonaws\.com|cloudfront\.net/i.test(u)) {
+    return false;
+  }
+  if (/\/api\/services\/app\//i.test(u)) return true;
+  if (/\/(?:api\/)?File\/Download/i.test(u)) return true;
+  return false;
+}
+
+async function fetchEdesisBufferFollowingRedirects(
+  startUrl,
+  cfg,
+  { withApiKey = true, preferAbp = false, maxHops = 6 } = {}
+) {
   let url = String(startUrl || '').trim();
   let useKey = withApiKey;
+  let useAbp = preferAbp;
   let last = null;
   for (let hop = 0; hop < maxHops; hop += 1) {
     if (!url) break;
-    const wantsAbp = /\/api\/services\/app\//i.test(url);
+    const wantsAbp = useAbp || urlWantsEdesisAbpAuth(url);
     let headers;
     if (wantsAbp) {
       const auth = await resolveEdesisAbpAccessToken(cfg);
@@ -4425,8 +4609,12 @@ async function fetchEdesisBufferFollowingRedirects(startUrl, cfg, { withApiKey =
         break;
       }
       url = new URL(loc, url).toString();
-      // Cross-host / CDN: API key gönderme
+      // Cross-host / CDN: API key / ABP bearer gönderme
       useKey = shouldAttachEdesisApiKey(url) && useKey && /api\.edesis\.com/i.test(url);
+      if (/cdn\.edesis\.com|files\.edesis\.com|blob\.core\.windows\.net|amazonaws\.com|cloudfront\.net/i.test(url)) {
+        useAbp = false;
+        useKey = false;
+      }
       continue;
     }
     const buf = Buffer.from(await res.arrayBuffer());
@@ -4611,28 +4799,36 @@ export async function loadEdesisExamBookletPdf(examId, kitapcikTuru, cfgOverride
   }
 
   if (probed.denemeId) {
-    const soruPdf = await tryDenemeSorulariPdf(probed.denemeId, localCfg);
-    attempts.push({
-      kind: 'deneme-sorulari-pdf',
-      ok: Boolean(soruPdf?.buf && looksLikePdfBuffer(soruPdf.buf)),
-      url: soruPdf?.url || probed.denemeId
-    });
-    if (soruPdf?.buf && looksLikePdfBuffer(soruPdf.buf)) {
+    let dersGrupIds = [];
+    try {
+      const structRes = await fetchEdesisJson(localCfg, V1_PATHS.examStructure(id));
+      if (isReachableEdesisResponse(structRes)) {
+        dersGrupIds = collectDersGrupIdsFromStructureRows(extractEdesisStructureRows(structRes.json));
+      }
+    } catch {
+      /* yapı yoksa id-only dene */
+    }
+    const soruPdf = await tryDenemeSorulariPdf(probed.denemeId, localCfg, { dersGrupIds });
+    if (Array.isArray(soruPdf?.probe) && soruPdf.probe.length) {
+      attempts.push(...soruPdf.probe);
+    }
+    const fileHit = soruPdf?.file || null;
+    if (fileHit?.buf && looksLikePdfBuffer(fileHit.buf)) {
       return {
         ok: true,
         files,
-        file: soruPdf,
-        buf: soruPdf.buf,
-        contentType: soruPdf.contentType || 'application/pdf',
-        url: soruPdf.url,
+        file: fileHit,
+        buf: fileHit.buf,
+        contentType: fileHit.contentType || 'application/pdf',
+        url: fileHit.url,
         looksPdf: true,
         status: 200,
         denemeId: probed.denemeId,
         attempts
       };
     }
-    if (soruPdf?.url) {
-      const hit = await tryOne(soruPdf.url);
+    if (fileHit?.url) {
+      const hit = await tryOne(fileHit.url);
       if (hit) return { ...hit, denemeId: probed.denemeId, attempts };
     }
   }
