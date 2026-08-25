@@ -244,6 +244,7 @@ export type EdesisPlatformStudent = {
   email: string | null;
   edesis_ogrenci_id: string | null;
   parent_phone?: string | null;
+  class_level?: string | null;
 };
 
 export type EdesisStudentResultsExam = {
@@ -542,6 +543,40 @@ export async function fetchEdesisAvailableExams(params: {
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j.error || j.message || j.hint || res.statusText);
   return j;
+}
+
+export type EdesisStudentDossier = {
+  ok: boolean;
+  edesisStudentId: string;
+  platformStudentId: string | null;
+  profile: {
+    name: string | null;
+    email: string | null;
+    classLevel: string | null;
+    gradeName: string | null;
+    className: string | null;
+    classroomId: string | null;
+    parentPhone: string | null;
+    programKeys: string[];
+  };
+  takeable: EdesisAvailableExam[];
+  taken: EdesisStudentResultsExam[];
+  openOnline: EdesisAvailableExam[];
+  counts: { takeable: number; taken: number; openOnline: number };
+  assignmentMeta?: Record<string, unknown>;
+};
+
+export async function fetchEdesisStudentDossier(params: {
+  studentId?: string;
+  edesisStudentId?: string;
+}): Promise<EdesisStudentDossier> {
+  const qs = new URLSearchParams({ op: 'student-dossier' });
+  if (params.studentId) qs.set('studentId', params.studentId);
+  if (params.edesisStudentId) qs.set('edesisStudentId', params.edesisStudentId);
+  const res = await apiFetch(`/api/edesis-sync?${qs.toString()}`);
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || j.hint || j.message || res.statusText);
+  return j as EdesisStudentDossier;
 }
 
 export async function submitEdesisStudentExam(params: {
