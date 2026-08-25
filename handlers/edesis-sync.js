@@ -1794,7 +1794,6 @@ export default async function handler(req, res) {
           programKeys: [...(loaded.scope?.programKeys || [])],
           edesis: { id: edesisStudentId }
         },
-        },
         takeable,
         taken,
         openOnline: loaded.openOnline || [],
