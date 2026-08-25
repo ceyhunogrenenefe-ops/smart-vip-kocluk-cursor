@@ -665,6 +665,8 @@ export function inferEdesisExamProgramKeys(parts = {}) {
   if (/\blgs\b/.test(blob)) keys.add('lgs');
   if (/\b(tyt|ayt|yks)\b/.test(blob)) keys.add('yks');
   if (/\byos\b/.test(blob)) keys.add('yos');
+  // MAARİF / müfredat izleme — ortaokul LGS hattı (tür adı LGS yazmasa da)
+  if (/\bmaarif\b/.test(blob) || /\bmufredat\b/.test(blob)) keys.add('lgs');
   if (/3\s*-\s*4/.test(blob)) keys.add('34');
   if (/5\s*-\s*6/.test(blob)) keys.add('56');
   if (/(?:^|[\s.])(7|8)(?:\.|\s|$)/.test(blob) || /\b(7|8)\s*\.?\s*sinif\b/.test(blob)) keys.add('lgs');
@@ -672,6 +674,26 @@ export function inferEdesisExamProgramKeys(parts = {}) {
   if (/(?:^|[\s.])(3|4)(?:\.|\s|$)/.test(blob) && !keys.has('lgs') && !keys.has('yks')) keys.add('34');
   if (/(?:^|[\s.])(5|6)(?:\.|\s|$)/.test(blob) && !keys.has('lgs') && !keys.has('yks')) keys.add('56');
   return keys;
+}
+
+/**
+ * Tür-online probe için yumuşak program filtresi.
+ * Kanıt: GetOgrenciSinavIds.sinavTuruId Safiye/Furkan’da aynı 162 id (tenant geneli) —
+ * programKeys uygulanmazsa TYT öğrencisine LGS online denemesi sızar.
+ * examKeys boşsa (belirsiz ad) engelleme yok; net LGS↔TYT çelişkisinde reddet.
+ */
+export function examCompatibleWithStudentProgramSoft(exam, programKeys) {
+  const keys = programKeys instanceof Set ? programKeys : new Set(programKeys || []);
+  if (!keys.size) return true;
+  const examKeys = inferEdesisExamProgramKeys({
+    examType: exam?.examType || exam?.sinavTuru,
+    examName: exam?.name || exam?.examName || exam?.title || exam?.examTitle
+  });
+  if (!examKeys.size) return true;
+  for (const k of examKeys) {
+    if (keys.has(k)) return true;
+  }
+  return false;
 }
 
 export function edesisCatalogExamMatchesProgram(exam, programKeys) {
@@ -1832,8 +1854,8 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     excludeExamIds: [...known]
   });
 
-  // sinavTuruId erişimi: son 21 gün Ready/None online adayları
-  // Program filtresi YOK — tür ataması LGS dışı (MAARİF/TYT…) denemeleri de kapsar; sınıf adı filtresi var.
+  // sinavTuruId erişimi: son 21 gün Ready/None online adayları.
+  // Yumuşak program filtresi zorunlu: sinavTuruId listesi tenant geneli (Safiye=Furkan=162).
   const turuOnlineCandidates =
     adminTuruIds.size > 0
       ? sortCatalogExamsByRecencyDesc(catalogRows || [])
@@ -1842,6 +1864,7 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
             if (!id || known.has(String(id)) || adminProbeIds.has(String(id))) return false;
             if (!isOpenEdesisCatalogExam(ex) || !examWindowStillOpen(ex)) return false;
             if (!examCompatibleWithStudentGrade(ex, gradeName)) return false;
+            if (!examCompatibleWithStudentProgramSoft(ex, keys)) return false;
             if (!isRecentOpenCatalogExam(ex, new Date(), 21)) return false;
             const status = catalogResultStatus(ex);
             return /^(none|ready|processing|pending)?$/i.test(status);
@@ -1929,13 +1952,18 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
       }
     }
 
-    // Online + sinavTuruId erişimi — ogrenciIds/roster boş online denemeler (yeni atama)
-    // ProgramKeys uygulanmaz: GetOgrenciSinavIds.sinavTuruId zaten öğrenciye tanımlı türdür.
+    // Online + sinavTuruId — roster boş yeni deneme.
+    // sinavTuruId tenant geneli olduğu için LGS↔TYT yumuşak program filtresi uygulanır (MAARİF→lgs).
     if (rosterEmptyOrUnknown && adminTuruIds.size) {
       const online = examOnlineFlag(merged);
       let turu = pickEdesisExamSinavTuruId(merged) || pickEdesisExamSinavTuruId(detail);
       if (!turu) turu = await resolveEdesisExamSinavTuruId(merged, cfgOverride);
-      if (online === true && turu && adminTuruIds.has(String(turu))) {
+      if (
+        online === true &&
+        turu &&
+        adminTuruIds.has(String(turu)) &&
+        examCompatibleWithStudentProgramSoft(merged, keys)
+      ) {
         if (examWindowStillOpen(merged) || examWindowStillOpen(ex)) return ex;
       }
     }
