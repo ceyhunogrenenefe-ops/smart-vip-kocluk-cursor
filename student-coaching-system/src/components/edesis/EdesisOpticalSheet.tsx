@@ -392,8 +392,8 @@ export default function EdesisOpticalSheet({
 
   const opticalAside = (
     <aside
-      className={`flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-b border-slate-200 bg-white md:border-b-0 md:border-r ${
-        pdfWide ? 'hidden' : studio ? '' : 'w-full md:w-[22rem] md:min-w-[22rem] md:shrink-0'
+      className={`edesis-optic-aside flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-b border-slate-200 bg-white md:border-b-0 md:border-r ${
+        pdfWide && !studio ? 'hidden' : studio ? '' : 'w-full md:w-[22rem] md:min-w-[22rem] md:shrink-0'
       }`}
     >
       <div className="grid grid-cols-2 gap-1 border-b border-slate-200 px-2 py-2">
@@ -533,11 +533,7 @@ export default function EdesisOpticalSheet({
       <div
         className={
           studio
-            ? `grid min-h-0 flex-1 ${
-                pdfWide
-                  ? 'grid-cols-1 grid-rows-1'
-                  : 'grid-cols-1 grid-rows-[minmax(240px,42vh)_minmax(0,1fr)] md:grid-cols-[minmax(22rem,26rem)_minmax(0,1fr)] md:grid-rows-1'
-              }`
+            ? `edesis-optic-split min-h-0 flex-1 ${pdfWide ? 'edesis-optic-pdf-wide flex flex-col' : 'flex flex-col md:flex-row'}`
             : 'flex min-h-[70vh] flex-col md:flex-row'
         }
       >
@@ -546,7 +542,7 @@ export default function EdesisOpticalSheet({
         <section
           ref={pdfPaneRef}
           className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-neutral-950 ${
-            studio ? '' : 'min-h-[52vh] md:min-h-0'
+            studio ? 'min-w-0' : 'min-h-[52vh] md:min-h-0'
           }`}
         >
           <div className="flex flex-wrap items-center gap-1.5 border-b border-white/10 bg-slate-900 px-2 py-1.5 text-[11px] text-slate-200">

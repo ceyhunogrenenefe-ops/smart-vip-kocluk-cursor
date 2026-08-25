@@ -99,6 +99,39 @@
     overflow: hidden !important;
   }
 
+  /* Optik sütun PDF’e yedirilmesin — Tailwind grid-cols arbitrary purge’e takılmasın */
+  html.edesis-exam-studio .edesis-optic-split {
+    display: flex;
+    min-height: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+  }
+  html.edesis-exam-studio .edesis-optic-aside {
+    display: flex;
+    width: 100%;
+    height: 46vh;
+    max-height: 46vh;
+    flex: 0 0 auto;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  html.edesis-exam-studio .edesis-optic-split.edesis-optic-pdf-wide .edesis-optic-aside {
+    display: none !important;
+  }
+  @media (min-width: 768px) {
+    html.edesis-exam-studio .edesis-optic-split:not(.edesis-optic-pdf-wide) {
+      flex-direction: row;
+    }
+    html.edesis-exam-studio .edesis-optic-aside {
+      width: 28rem;
+      min-width: 28rem;
+      max-width: 28rem;
+      height: 100%;
+      max-height: none;
+      flex: 0 0 28rem;
+    }
+  }
+
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),
   a[href],
