@@ -12,6 +12,10 @@
     "api/[[...segments]].js": {
       "maxDuration": 120,
       "memory": 1024
+    },
+    "api/cron/edesis-sync.js": {
+      "maxDuration": 120,
+      "memory": 1024
     }
   },
   "installCommand": "npm install && cd student-coaching-system && npm install",
