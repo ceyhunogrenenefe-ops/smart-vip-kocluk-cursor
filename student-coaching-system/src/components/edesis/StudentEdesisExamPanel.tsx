@@ -418,20 +418,61 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
     () => available.filter((exam) => !exam.hasStudentResult && exam.canTake !== false),
     [available]
   );
-  const tabOn = 'bg-emerald-600 text-white';
-  const tabOff = 'border border-slate-200 bg-white text-slate-700';
+  const tabOn = 'bg-slate-900 text-white shadow-sm';
+  const tabOff = 'border border-slate-200/80 bg-white text-slate-700 hover:bg-slate-50';
+
+  if (view === 'take' && activeExam) {
+    return (
+      <section className="flex h-full min-h-0 flex-col bg-slate-950">
+        <div className="flex shrink-0 items-center gap-3 border-b border-white/10 px-3 py-2 text-white">
+          <button
+            type="button"
+            onClick={() => setActiveExam(null)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-white/10 px-2.5 py-1.5 text-sm font-semibold hover:bg-white/20"
+          >
+            <ArrowLeft className="h-4 w-4" /> Liste
+          </button>
+          <div className="min-w-0 flex-1 truncate text-sm font-semibold tracking-tight">{activeExam.name}</div>
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col">
+          <EdesisOpticalSheet
+            studio
+            lessons={activeLessons}
+            booklets={booklets}
+            availableBookletCodes={availableBookletCodes}
+            kitapcik={kitapcik}
+            onKitapcikChange={setKitapcik}
+            kitapcikSayisal={kitapcikSayisal}
+            onKitapcikSayisalChange={setKitapcikSayisal}
+            examTitle={activeExam.name}
+            examType={activeExam.examType}
+            examFamily={examFamily}
+            bookletMode={bookletMode}
+            choiceCount={choiceCount}
+            remainingSeconds={remainingSeconds}
+            storageKey={`edesis-optic:${studentId}:${activeExam.examId}`}
+            busy={submitBusy}
+            submitLabel="Bitir"
+            pdfUrl={pdfUrl}
+            pdfBusy={pdfBusy}
+            pdfError={pdfError}
+            onSubmit={(dersCevaplari) => void submitAnswers(dersCevaplari)}
+          />
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="flex items-center gap-2 text-lg font-bold text-slate-900">
-            <CloudDownload className="h-5 w-5 text-emerald-600" />
-            Edesis denemesi ve sonuçlarım
+          <h2 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-slate-900">
+            <CloudDownload className="h-5 w-5 text-slate-900" />
+            Denemelerim
           </h2>
-          <p className="mt-1 text-sm text-slate-600">
-            Yalnızca Edesis’te size tanımlanan denemeler görünür (TYT/LGS kataloğunun tamamı değil). Optik formu ders ders doldurun; net, hata
-            karnesi PDF (boş ve yanlış sorular) ve deneme analizi aynı yerde açılır.
+          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-600">
+            Yalnızca size tanımlanan denemeler. Kitapçık tam genişlikte açılır; optiği soldan doldurup Bitir ile gönderin.
           </p>
         </div>
         <button
@@ -503,6 +544,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
           <Loader2 className="h-6 w-6 animate-spin" />
         </div>
       ) : view === 'take' ? (
+<<<<<<< HEAD
         activeExam ? (
           <div className="space-y-4">
             <button
@@ -544,26 +586,32 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
           </div>
         ) : (
           <div className="space-y-3">
+=======
+        <div className="space-y-3">
+>>>>>>> eaa8721 (feat(academic): öğrenci Akademik Merkez stüdyo + geniş kitapçık PDF)
             {hint && !takeable.length && !available.length ? (
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{hint}</div>
             ) : null}
             {takeable.map((exam) => (
-              <div key={exam.examId} className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 sm:p-5">
+              <div
+                key={exam.examId}
+                className="rounded-3xl border border-slate-200/80 bg-white p-4 shadow-[0_12px_40px_-24px_rgba(15,23,42,0.45)] sm:p-5"
+              >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <div className="font-bold text-slate-900">{exam.name}</div>
+                    <div className="text-base font-semibold tracking-tight text-slate-900">{exam.name}</div>
                     <div className="mt-1 text-xs text-slate-500">
                       {exam.examDate ? new Date(exam.examDate).toLocaleDateString('tr-TR') : '—'}
                       {exam.totalQuestions ? ` · ${exam.totalQuestions} soru` : ''}
                       {exam.resultStatus ? ` · ${exam.resultStatus}` : ''}
                     </div>
-                    <div className="mt-1 text-xs text-slate-500">Henüz sonucunuz yok — optik formu doldurabilirsiniz</div>
+                    <div className="mt-1 text-xs text-emerald-700">Henüz sonucunuz yok — optik formu doldurabilirsiniz</div>
                   </div>
                   <button
                     type="button"
                     disabled={structureBusy}
                     onClick={() => void openExam(exam)}
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
                   >
                     {structureBusy ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -586,7 +634,6 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
               </p>
             ) : null}
           </div>
-        )
       ) : view === 'analysis' ? (
         <StudentEdesisAnalysisPanel exams={exams} studentId={studentId} edesisStudentId={edesisStudentId} />
       ) : hint && exams.length === 0 ? (
