@@ -2070,6 +2070,7 @@ const BOOKLET_URL_KEYS = [
   'sinavUrl',
   'denemeUrl',
   'denemePdfUrl',
+  'txtDosyayasi',
   'pdfFileUrl',
   'fileUrl',
   'pdfUrl',
@@ -4182,9 +4183,9 @@ export function harvestLooseBookletRefs(json, examId = '', out = [], seen = new 
       if (!s || s === String(examId)) continue;
       const interesting =
         /deneme|sinav|booklet|kitapcik|pdf|file|url|cdn|blob|storage|guid|token/i.test(k) ||
-        /^https?:\/\//i.test(s) ||
-        extractEdesisFileGuid(s);
+        /^https?:\/\//i.test(s);
       if (!interesting) continue;
+      if (/^md\d*key$/i.test(k)) continue;
       const coerced = coerceFileUrl(s) || (extractEdesisFileGuid(s) ? `/files/${extractEdesisFileGuid(s)}` : '');
       if (coerced && !seen.has(coerced)) {
         seen.add(coerced);
@@ -4257,34 +4258,23 @@ async function tryDenemeSorulariPdf(denemeId, localCfg) {
   if (!id || !/^\d+$/.test(id)) return null;
   const path = `/api/services/app/Denemes/GetDenemeSorulariPdf?id=${encodeURIComponent(id)}`;
   try {
-    const got = await fetchEdesisUrlBuffer(joinUrl(localCfg.baseUrl, path), localCfg);
-    if (got?.ok && got.looksPdf) {
-      return {
-        url: got.url || path,
-        kitapcikTuru: '',
-        name: 'Deneme Soruları PDF',
-        buf: got.buf,
-        contentType: 'application/pdf',
-        source: 'deneme-sorulari-pdf'
-      };
-    }
-    if (got?.ok && /json/i.test(String(got.contentType || '')) && got.buf) {
-      const json = JSON.parse(got.buf.toString('utf8'));
-      const dto = fileDtoFromJson(json);
-      if (dto) {
-        const downloaded = await tryDownloadEdesisFileDto(localCfg, dto);
-        if (downloaded?.looksPdf && downloaded.buf) {
-          return {
-            url: downloaded.reportUrl || path,
-            kitapcikTuru: '',
-            name: dto.fileName || 'Deneme Soruları PDF',
-            buf: downloaded.buf,
-            contentType: 'application/pdf',
-            source: 'deneme-sorulari-pdf'
-          };
-        }
+    const r = await fetchEdesisAbpJson(localCfg, path, { timeoutMs: 55000 });
+    const dto = fileDtoFromJson(r.json);
+    if (dto) {
+      const downloaded = await tryDownloadEdesisFileDto(localCfg, dto);
+      if (downloaded?.looksPdf && downloaded.buf) {
+        return {
+          url: downloaded.reportUrl || path,
+          kitapcikTuru: '',
+          name: dto.fileName || 'Deneme Soruları PDF',
+          buf: downloaded.buf,
+          contentType: 'application/pdf',
+          source: 'deneme-sorulari-pdf'
+        };
       }
-      const files = collectEdesisBookletFiles(json);
+    }
+    if (isReachableEdesisResponse(r)) {
+      const files = collectEdesisBookletFiles(r.json);
       if (files[0]?.url) return { ...files[0], source: 'deneme-sorulari-pdf-url' };
     }
   } catch {
