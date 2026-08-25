@@ -11,6 +11,7 @@ import {
   pickEdesisCatalogExamId,
   parseEdesisOgrenciSinavIdsResponse,
   parseEdesisOgrenciSinavListesiResponse,
+  buildEdesisGetOgrenciSinavIdsPath,
   collectCatalogRowsForSinavIds,
   pickEdesisResultExamId,
   resultRowBelongsToStudent,
@@ -820,6 +821,22 @@ describe('parseEdesisOgrenciSinavIdsResponse', () => {
 
   it('deduplicates ids', () => {
     assert.deepEqual(parseEdesisOgrenciSinavIdsResponse({ sinavId: [4, 4, 7] }), ['4', '7']);
+  });
+});
+
+describe('buildEdesisGetOgrenciSinavIdsPath', () => {
+  it('appends tenantId — empty sinavId without it (Edesis live bug)', () => {
+    assert.equal(
+      buildEdesisGetOgrenciSinavIdsPath('2086573', '3226'),
+      '/api/services/app/OgrenciSinavs/GetOgrenciSinavIds?ogrenciId=2086573&tenantId=3226'
+    );
+  });
+
+  it('omits tenantId when blank', () => {
+    assert.equal(
+      buildEdesisGetOgrenciSinavIdsPath(2086573, ''),
+      '/api/services/app/OgrenciSinavs/GetOgrenciSinavIds?ogrenciId=2086573'
+    );
   });
 });
 
