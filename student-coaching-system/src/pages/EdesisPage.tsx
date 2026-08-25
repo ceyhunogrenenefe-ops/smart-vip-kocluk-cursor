@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2,
   ChevronRight,
@@ -45,9 +45,6 @@ import {
 import { shareEdesisKarneWithParent } from '../lib/edesis/shareEdesisKarneWhatsApp';
 
 type DossierTab = 'girecek' | 'girdi' | 'kurum' | 'araclar';
-
-const AUTO_SYNC_KEY = 'edesis-auto-sync-at';
-const AUTO_SYNC_MS = 30 * 60 * 1000;
 
 function fmtDate(raw?: string | null) {
   if (!raw) return '—';
@@ -125,7 +122,6 @@ export default function EdesisPage() {
   const [ingestJson, setIngestJson] = useState('');
   const [ingestBusy, setIngestBusy] = useState(false);
   const [structurePreview, setStructurePreview] = useState('');
-  const autoSyncOnce = useRef(false);
 
   const reloadStatus = useCallback(async () => {
     try {
@@ -152,23 +148,6 @@ export default function EdesisPage() {
     void reloadStatus();
     void loadStudents();
   }, [reloadStatus, loadStudents]);
-
-  useEffect(() => {
-    if (autoSyncOnce.current) return;
-    autoSyncOnce.current = true;
-    const last = Number(sessionStorage.getItem(AUTO_SYNC_KEY) || 0);
-    if (Date.now() - last < AUTO_SYNC_MS) return;
-    setSyncBusy(true);
-    void syncEdesis()
-      .then((r) => {
-        sessionStorage.setItem(AUTO_SYNC_KEY, String(Date.now()));
-        if (r.ok) toast.success(`Edesis senkron: ${r.imported ?? 0} kayıt`);
-      })
-      .catch(() => {
-        /* otomatik senkron sessiz; manuel buton var */
-      })
-      .finally(() => setSyncBusy(false));
-  }, []);
 
   const filteredHub = useMemo(() => {
     const q = studentSearch.trim().toLocaleLowerCase('tr-TR');
@@ -260,7 +239,6 @@ export default function EdesisPage() {
     setSyncBusy(true);
     try {
       const r = await syncEdesis();
-      sessionStorage.setItem(AUTO_SYNC_KEY, String(Date.now()));
       if (r.ok) toast.success(`${r.imported ?? 0} deneme aktarıldı`);
       else toast.error(r.error || r.diagnosis || 'Senkron başarısız');
     } catch (e) {
@@ -482,7 +460,7 @@ export default function EdesisPage() {
             <h1 className="mt-2 text-3xl font-semibold tracking-tight">Öğrenci sınav köprüsü</h1>
             <p className="mt-2 max-w-2xl text-sm text-slate-300">
               Öğrenciyi seçin — gireceği denemeler, girdiği sonuçlar, karne ve kurumdaki açık online sınavlar tek
-              dosyada. Liste ve senkron otomatik gelir.
+              dosyada. Öğrenci listesi otomatik gelir; tam senkron yalnızca “Şimdi senkron” ile (Hobby 60s sınırı).
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

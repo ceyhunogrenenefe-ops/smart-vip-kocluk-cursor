@@ -417,6 +417,21 @@ async function fetchEdesisAbpJson(cfg, path, { method = 'GET', body, timeoutMs =
   };
 }
 
+/** App Service: TokenAuth; harici v1: X-API-Key. GetSinavForView API key ile 403. */
+async function fetchEdesisJsonPreferAbp(cfg, path, options = {}) {
+  const isAbpPath = /\/api\/services\/app\//i.test(String(path || ''));
+  if (isAbpPath) {
+    try {
+      const abp = await fetchEdesisAbpJson(cfg, path, options);
+      if (isReachableEdesisResponse(abp) || responseLooksLikePdf(abp)) return abp;
+      if (abp.status && abp.status !== 401 && abp.status !== 403) return abp;
+    } catch {
+      /* API key yedek */
+    }
+  }
+  return fetchEdesisJson(cfg, path, options);
+}
+
 function joinUrl(base, path) {
   const b = String(base || '').replace(/\/+$/, '');
   const p = path.startsWith('/') ? path : `/${path}`;
@@ -4250,6 +4265,22 @@ export function harvestLooseBookletRefs(json, examId = '', out = [], seen = new 
   return dedupeBookletFiles(out);
 }
 
+/** GetSinavForView / deneme DTO → kitapçık URL + denemeId */
+export function absorbEdesisBookletSource(json, examId = '') {
+  if (!json || typeof json !== 'object') {
+    return { files: [], denemeId: '', examMeta: {} };
+  }
+  const files = dedupeBookletFiles([
+    ...collectEdesisBookletFiles(json),
+    ...harvestLooseBookletRefs(json, examId)
+  ]);
+  return {
+    files,
+    denemeId: pickDenemeIdFromJson(json),
+    examMeta: pickExamMetaFromJson(json)
+  };
+}
+
 function shouldAttachEdesisApiKey(url) {
   const u = String(url || '').toLowerCase();
   if (!u) return true;
@@ -4266,7 +4297,7 @@ async function tryResolveGuidViaFileView(guid, localCfg) {
   if (!id) return null;
   const path = `/api/services/app/Files/GetFileForByGuidView?id=${encodeURIComponent(id)}`;
   try {
-    const r = await fetchEdesisJson(localCfg, path);
+    const r = await fetchEdesisJsonPreferAbp(localCfg, path);
     if (!isReachableEdesisResponse(r)) return null;
     const files = collectEdesisBookletFiles(r.json);
     if (files[0]?.url) return files[0];
@@ -4294,23 +4325,36 @@ async function tryDenemeSorulariPdf(denemeId, localCfg) {
   if (!id || !/^\d+$/.test(id)) return null;
   const path = `/api/services/app/Denemes/GetDenemeSorulariPdf?id=${encodeURIComponent(id)}`;
   try {
-    const r = await fetchEdesisJson(localCfg, path, { timeoutMs: 55000 });
-    const dto = fileDtoFromJson(r.json);
-    if (dto) {
-      const downloaded = await tryDownloadEdesisFileDto(localCfg, dto);
-      if (downloaded?.looksPdf && downloaded.buf) {
-        return {
-          url: downloaded.reportUrl || path,
-          kitapcikTuru: '',
-          name: dto.fileName || 'Deneme Soruları PDF',
-          buf: downloaded.buf,
-          contentType: 'application/pdf',
-          source: 'deneme-sorulari-pdf'
-        };
-      }
+    const got = await fetchEdesisUrlBuffer(joinUrl(localCfg.baseUrl, path), localCfg);
+    if (got?.ok && got.looksPdf) {
+      return {
+        url: got.url || path,
+        kitapcikTuru: '',
+        name: 'Deneme Soruları PDF',
+        buf: got.buf,
+        contentType: 'application/pdf',
+        source: 'deneme-sorulari-pdf'
+      };
     }
-    const files = collectEdesisBookletFiles(r.json);
-    if (files[0]?.url) return { ...files[0], source: 'deneme-sorulari-pdf-url' };
+    if (got?.ok && /json/i.test(String(got.contentType || '')) && got.buf) {
+      const json = JSON.parse(got.buf.toString('utf8'));
+      const dto = fileDtoFromJson(json);
+      if (dto) {
+        const downloaded = await tryDownloadEdesisFileDto(localCfg, dto);
+        if (downloaded?.looksPdf && downloaded.buf) {
+          return {
+            url: downloaded.reportUrl || path,
+            kitapcikTuru: '',
+            name: dto.fileName || 'Deneme Soruları PDF',
+            buf: downloaded.buf,
+            contentType: 'application/pdf',
+            source: 'deneme-sorulari-pdf'
+          };
+        }
+      }
+      const files = collectEdesisBookletFiles(json);
+      if (files[0]?.url) return { ...files[0], source: 'deneme-sorulari-pdf-url' };
+    }
   } catch {
     /* ignore */
   }
@@ -4319,107 +4363,40 @@ async function tryDenemeSorulariPdf(denemeId, localCfg) {
 
 async function probeEdesisExamBookletSources(examId, localCfg) {
   const id = String(examId || '').trim();
-  const jsonPaths = [
-    V1_PATHS.examById(id),
-    V1_PATHS.examBooklets(id),
-    V1_PATHS.examFiles(id),
-    `/api/services/app/Sinavs/GetSinavForView?id=${encodeURIComponent(id)}`
-  ];
-  const pdfPaths = [
-    V1_PATHS.examPdf(id),
-    `${V1_PATHS.examPdf(id)}?kitapcikTuru=A`,
-    `${V1_PATHS.examPdf(id)}?kitapcikTuru=B`
-  ];
   const collected = [];
   let examMeta = {};
   let denemeId = '';
 
-  const jsonResults = await Promise.all(jsonPaths.map((path) => fetchEdesisJson(localCfg, path)));
-  for (let i = 0; i < jsonPaths.length; i += 1) {
-    const path = jsonPaths[i];
-    const r = jsonResults[i];
-    if (
-      (path === V1_PATHS.examById(id) || path.includes('GetSinavForView')) &&
-      isReachableEdesisResponse(r)
-    ) {
-      examMeta = { ...examMeta, ...pickExamMetaFromJson(r.json) };
-      const did = pickDenemeIdFromJson(r.json);
-      if (did) denemeId = did;
-    }
-    if (responseLooksLikePdf(r) && r.url) {
-      collected.push({ url: r.url, kitapcikTuru: '', name: 'Sınav PDF' });
-      continue;
-    }
-    if (!isReachableEdesisResponse(r)) continue;
-    collected.push(...collectEdesisBookletFiles(r.json));
-    // Bilinmeyen alan adlarında gömülü UUID / URL (YÖS denemeUrl bazen farklı key)
-    if (path === V1_PATHS.examById(id) || path.includes('GetSinavForView')) {
-      collected.push(...harvestLooseBookletRefs(r.json, id));
-    }
-  }
+  const ingest = (json) => {
+    const absorbed = absorbEdesisBookletSource(json, id);
+    collected.push(...absorbed.files);
+    if (absorbed.denemeId) denemeId = absorbed.denemeId;
+    examMeta = { ...examMeta, ...absorbed.examMeta };
+  };
 
-  // PDF uçlarını Accept: pdf ile paralel dene
-  const pdfGot = await Promise.all(
-    pdfPaths.map(async (path) => {
-      try {
-        return await fetchEdesisUrlBuffer(joinUrl(localCfg.baseUrl, path), localCfg);
-      } catch {
-        return null;
-      }
-    })
-  );
-  for (const got of pdfGot) {
-    if (!got) continue;
-    if (got.ok && got.looksPdf) {
-      collected.push({ url: got.url, kitapcikTuru: '', name: 'Sınav PDF' });
-    } else if (got.ok && /json/i.test(String(got.contentType || ''))) {
-      try {
-        const json = JSON.parse(got.buf.toString('utf8'));
-        collected.push(...collectEdesisBookletFiles(json));
-        const dto = fileDtoFromJson(json);
-        if (dto?.fileToken) {
-          collected.push({
-            url: `file-token:${dto.fileToken}`,
-            kitapcikTuru: '',
-            name: dto.fileName || 'Kitapçık PDF',
-            fileToken: dto.fileToken,
-            fileName: dto.fileName,
-            fileType: dto.fileType
-          });
-        }
-      } catch {
-        /* ignore */
-      }
-    }
-  }
+  // v1 kitapçık uçları + ABP GetSinavForView (denemeUrl burada). v1 /pdf HTML 404’ü atla.
+  const [bookletsRes, filesRes, detail] = await Promise.all([
+    fetchEdesisJson(localCfg, V1_PATHS.examBooklets(id)).catch(() => null),
+    fetchEdesisJson(localCfg, V1_PATHS.examFiles(id)).catch(() => null),
+    fetchEdesisExamCatalogRowDetail(id, localCfg).catch(() => null)
+  ]);
+  if (bookletsRes && isReachableEdesisResponse(bookletsRes)) ingest(bookletsRes.json);
+  if (filesRes && isReachableEdesisResponse(filesRes)) ingest(filesRes.json);
+  if (detail) ingest(detail);
 
   if (denemeId) {
     try {
-      const denemeView = await fetchEdesisJson(
+      const denemeView = await fetchEdesisJsonPreferAbp(
         localCfg,
         `/api/services/app/Denemes/GetDenemeForView?id=${encodeURIComponent(denemeId)}`
       );
-      if (isReachableEdesisResponse(denemeView)) {
-        collected.push(...collectEdesisBookletFiles(denemeView.json));
-      }
+      if (isReachableEdesisResponse(denemeView)) ingest(denemeView.json);
     } catch {
       /* ignore */
     }
-    const soruPdf = await tryDenemeSorulariPdf(denemeId, localCfg);
-    if (soruPdf?.buf) {
-      collected.push({
-        url: soruPdf.url,
-        kitapcikTuru: '',
-        name: soruPdf.name,
-        buf: soruPdf.buf,
-        contentType: soruPdf.contentType
-      });
-    } else if (soruPdf?.url) {
-      collected.push({ url: soruPdf.url, kitapcikTuru: '', name: soruPdf.name || 'Deneme PDF' });
-    }
   }
 
-  // GUID → Files/GetFileForByGuidView (en fazla 3)
+  // GUID → Files/GetFileForByGuidView (en fazla 3) — URL çöz; PDF indirmeyi load’a bırak
   const guids = [];
   for (const f of collected) {
     const guid = extractEdesisFileGuid(f.url);
@@ -4519,10 +4496,19 @@ async function fetchEdesisBufferFollowingRedirects(startUrl, cfg, { withApiKey =
   let last = null;
   for (let hop = 0; hop < maxHops; hop += 1) {
     if (!url) break;
-    const headers = useKey
-      ? buildHeaders(cfg, { forGet: true })
-      : { Accept: 'application/pdf,application/octet-stream,*/*' };
-    headers.Accept = 'application/pdf,application/octet-stream,*/*';
+    const wantsAbp = /\/api\/services\/app\//i.test(url);
+    let headers;
+    if (wantsAbp) {
+      const auth = await resolveEdesisAbpAccessToken(cfg);
+      headers = auth.token
+        ? buildAbpHeaders(cfg, auth.token, { forGet: true })
+        : buildHeaders(cfg, { forGet: true });
+    } else if (useKey) {
+      headers = buildHeaders(cfg, { forGet: true });
+    } else {
+      headers = { Accept: 'application/pdf,application/octet-stream,*/*' };
+    }
+    headers.Accept = 'application/pdf,application/octet-stream,application/json,*/*';
     const res = await fetch(url, {
       method: 'GET',
       headers,
@@ -4557,9 +4543,10 @@ async function fetchEdesisBufferFollowingRedirects(startUrl, cfg, { withApiKey =
     const buf = Buffer.from(await res.arrayBuffer());
     const contentType = res.headers.get('content-type') || '';
     const looksPdf = looksLikePdfBuffer(buf);
+    const html = looksLikeHtml(buf.subarray(0, 240).toString('utf8'));
     last = {
-      ok: res.ok,
-      status,
+      ok: res.ok && !html,
+      status: html && res.ok ? 404 : status,
       contentType,
       buf,
       url,
@@ -4695,34 +4682,23 @@ export async function loadEdesisExamBookletPdf(examId, kitapcikTuru, cfgOverride
 
   const file = pickEdesisBookletFile(files, kitapcikTuru);
   const kt = String(kitapcikTuru || '').trim();
-  const tryUrls = [];
-  if (preferredFileUrl) tryUrls.push(preferredFileUrl);
-  if (file?.url) tryUrls.push(file.url);
+  const fileUrls = [];
+  if (preferredFileUrl) fileUrls.push(preferredFileUrl);
+  if (file?.url) fileUrls.push(file.url);
   for (const f of files || []) {
-    if (f?.url) tryUrls.push(f.url);
+    if (f?.url) fileUrls.push(f.url);
   }
-  if (kt) tryUrls.push(joinUrl(localCfg.baseUrl, `${V1_PATHS.examPdf(id)}?kitapcikTuru=${encodeURIComponent(kt)}`));
-  tryUrls.push(joinUrl(localCfg.baseUrl, V1_PATHS.examPdf(id)));
-  tryUrls.push(joinUrl(localCfg.baseUrl, V1_PATHS.examFiles(id)));
-  tryUrls.push(joinUrl(localCfg.baseUrl, V1_PATHS.examBooklets(id)));
-  tryUrls.push(joinUrl(localCfg.baseUrl, V1_PATHS.examById(id)));
-  if (probed.denemeId) {
-    tryUrls.push(
-      joinUrl(
-        localCfg.baseUrl,
-        `/api/services/app/Denemes/GetDenemeSorulariPdf?id=${encodeURIComponent(probed.denemeId)}`
-      )
-    );
-  }
-  tryUrls.push(
-    joinUrl(localCfg.baseUrl, `/api/services/app/Sinavs/GetSinavForView?id=${encodeURIComponent(id)}`)
-  );
+  const fallbackUrls = [];
+  if (kt) fallbackUrls.push(joinUrl(localCfg.baseUrl, `${V1_PATHS.examPdf(id)}?kitapcikTuru=${encodeURIComponent(kt)}`));
+  fallbackUrls.push(joinUrl(localCfg.baseUrl, V1_PATHS.examPdf(id)));
+  fallbackUrls.push(joinUrl(localCfg.baseUrl, V1_PATHS.examFiles(id)));
+  fallbackUrls.push(joinUrl(localCfg.baseUrl, V1_PATHS.examBooklets(id)));
 
   const seen = new Set();
   const seenRaw = new Set();
-  for (const raw of tryUrls) {
+  const tryOne = async (raw) => {
     const key = String(raw || '').trim();
-    if (!key || seenRaw.has(key)) continue;
+    if (!key || seenRaw.has(key)) return null;
     seenRaw.add(key);
     try {
       const got = await fetchEdesisUrlBuffer(key, localCfg);
@@ -4733,12 +4709,50 @@ export async function loadEdesisExamBookletPdf(examId, kitapcikTuru, cfgOverride
         looksPdf: got.looksPdf,
         contentType: String(got.contentType || '').slice(0, 80)
       });
-      const hit = await tryConsumeBookletDownload(got, files, file, localCfg, seen);
-      if (hit) return { ...hit, denemeId: probed.denemeId, attempts };
+      return tryConsumeBookletDownload(got, files, file, localCfg, seen);
     } catch (e) {
       attempts.push({ url: key, ok: false, error: e?.message || String(e) });
+      return null;
+    }
+  };
+
+  for (const raw of fileUrls) {
+    const hit = await tryOne(raw);
+    if (hit) return { ...hit, denemeId: probed.denemeId, attempts };
+  }
+
+  if (probed.denemeId) {
+    const soruPdf = await tryDenemeSorulariPdf(probed.denemeId, localCfg);
+    attempts.push({
+      kind: 'deneme-sorulari-pdf',
+      ok: Boolean(soruPdf?.buf && looksLikePdfBuffer(soruPdf.buf)),
+      url: soruPdf?.url || probed.denemeId
+    });
+    if (soruPdf?.buf && looksLikePdfBuffer(soruPdf.buf)) {
+      return {
+        ok: true,
+        files,
+        file: soruPdf,
+        buf: soruPdf.buf,
+        contentType: soruPdf.contentType || 'application/pdf',
+        url: soruPdf.url,
+        looksPdf: true,
+        status: 200,
+        denemeId: probed.denemeId,
+        attempts
+      };
+    }
+    if (soruPdf?.url) {
+      const hit = await tryOne(soruPdf.url);
+      if (hit) return { ...hit, denemeId: probed.denemeId, attempts };
     }
   }
+
+  for (const raw of fallbackUrls) {
+    const hit = await tryOne(raw);
+    if (hit) return { ...hit, denemeId: probed.denemeId, attempts };
+  }
+
   return {
     ok: false,
     status: 404,
