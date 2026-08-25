@@ -16,6 +16,7 @@ import {
 import { toast } from 'sonner';
 import { apiFetch } from '../lib/session';
 import { Link } from 'react-router-dom';
+import { listInstitutionsForPicker, type InstitutionPickRow } from '../lib/parentSignApi';
 
 type Row = {
   id: string;
@@ -30,7 +31,13 @@ type Row = {
   editing_enabled?: boolean;
   deleted_at?: string | null;
   source_system?: string | null;
-  user?: { name?: string; email?: string; phone?: string; is_active?: boolean } | null;
+  user?: {
+    name?: string;
+    email?: string;
+    phone?: string;
+    is_active?: boolean;
+    institution_id?: string | null;
+  } | null;
   missing_required?: string[];
 };
 
@@ -154,6 +161,11 @@ export default function TeacherProfileApprovalsPage() {
   const [showCatalog, setShowCatalog] = useState(false);
   const [importEmails, setImportEmails] = useState<Record<string, string>>({});
   const [importBusy, setImportBusy] = useState('');
+  const [openPanelId, setOpenPanelId] = useState('');
+  const [openPanelPwd, setOpenPanelPwd] = useState('');
+  const [openPanelInstId, setOpenPanelInstId] = useState('');
+  const [institutions, setInstitutions] = useState<InstitutionPickRow[]>([]);
+  const [institutionsLoading, setInstitutionsLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -254,13 +266,40 @@ export default function TeacherProfileApprovalsPage() {
   };
 
   const openPanelAccount = async (row: Row) => {
-    const email = row.user?.email || '';
-    const pwd = window.prompt(
-      `Panele aç — giriş şifresi belirleyin (min. 6 karakter).\nE-posta: ${email || '—'}\n\nÖğretmen bu şifreyle sisteme giriş yapabilecek.`
-    );
-    if (pwd == null) return;
-    if (String(pwd).trim().length < 6) {
+    setOpenPanelId(row.id);
+    setOpenPanelPwd('');
+    setOpenPanelInstId(String(row.user?.institution_id || '').trim());
+    if (institutions.length) {
+      if (!row.user?.institution_id && institutions.length === 1) {
+        setOpenPanelInstId(institutions[0].id);
+      }
+      return;
+    }
+    setInstitutionsLoading(true);
+    try {
+      const list = await listInstitutionsForPicker();
+      setInstitutions(list);
+      if (!row.user?.institution_id && list.length === 1) {
+        setOpenPanelInstId(list[0].id);
+      } else if (row.user?.institution_id) {
+        setOpenPanelInstId(String(row.user.institution_id));
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Kurum listesi alınamadı');
+    } finally {
+      setInstitutionsLoading(false);
+    }
+  };
+
+  const submitOpenPanel = async (row: Row) => {
+    const pwd = openPanelPwd.trim();
+    if (pwd.length < 6) {
       toast.error('Şifre en az 6 karakter olmalı');
+      return;
+    }
+    const institutionId = openPanelInstId.trim() || String(row.user?.institution_id || '').trim();
+    if (!institutionId && institutions.length > 0) {
+      toast.error('Kurum seçin');
       return;
     }
     setBusyId(row.id);
@@ -270,12 +309,18 @@ export default function TeacherProfileApprovalsPage() {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password: String(pwd).trim() })
+          body: JSON.stringify({
+            password: pwd,
+            ...(institutionId ? { institution_id: institutionId } : {})
+          })
         }
       );
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.message || j.error || res.statusText);
       toast.success(j.message || 'Panel hesabı açıldı');
+      setOpenPanelId('');
+      setOpenPanelPwd('');
+      setOpenPanelInstId('');
       if (j.user_management_path) {
         toast.message(
           <span>
@@ -671,6 +716,64 @@ export default function TeacherProfileApprovalsPage() {
                       ) : null}
                     </div>
                   </div>
+
+                  {openPanelId === row.id ? (
+                    <div className="mt-3 space-y-2 rounded-xl border border-violet-200 bg-violet-50/60 p-3">
+                      <p className="text-xs text-violet-900">
+                        Panel hesabı aç — e-posta: <strong>{row.user?.email || '—'}</strong>
+                      </p>
+                      <label className="block text-xs font-semibold text-slate-700">
+                        Kurum
+                        <select
+                          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                          value={openPanelInstId}
+                          disabled={institutionsLoading}
+                          onChange={(e) => setOpenPanelInstId(e.target.value)}
+                        >
+                          <option value="">
+                            {institutionsLoading ? 'Kurumlar yükleniyor…' : 'Kurum seçin'}
+                          </option>
+                          {institutions.map((inst) => (
+                            <option key={inst.id} value={inst.id}>
+                              {inst.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block text-xs font-semibold text-slate-700">
+                        Şifre (min. 6)
+                        <input
+                          type="text"
+                          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                          value={openPanelPwd}
+                          onChange={(e) => setOpenPanelPwd(e.target.value)}
+                          placeholder="Giriş şifresi"
+                          autoComplete="new-password"
+                        />
+                      </label>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          disabled={busyId === row.id || institutionsLoading}
+                          className="rounded-lg bg-violet-700 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+                          onClick={() => void submitOpenPanel(row)}
+                        >
+                          Panele Aç
+                        </button>
+                        <button
+                          type="button"
+                          className="text-xs font-semibold text-slate-600"
+                          onClick={() => {
+                            setOpenPanelId('');
+                            setOpenPanelPwd('');
+                            setOpenPanelInstId('');
+                          }}
+                        >
+                          Vazgeç
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
 
                   {rejectId === row.id ? (
                     <div className="mt-3 space-y-2 rounded-xl bg-red-50 p-3">

@@ -551,10 +551,20 @@ export default async function handler(req, res) {
           institutionId = String(actor.institution_id).trim();
         }
         if (!institutionId) {
+          // Super-admin / web başvurusu: env yoksa ilk kurumu kullan
+          const { data: instRow } = await supabaseAdmin
+            .from('institutions')
+            .select('id')
+            .order('created_at', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+          institutionId = instRow?.id ? String(instRow.id).trim() : null;
+        }
+        if (!institutionId) {
           return res.status(400).json({
             error: 'institution_required',
             message:
-              'Panele açmak için kurum gerekli. TEACHER_APPLICATION_INSTITUTION_ID tanımlayın veya body.institution_id gönderin.'
+              'Panele açmak için kurum gerekli. Listeden kurum seçin veya TEACHER_APPLICATION_INSTITUTION_ID tanımlayın.'
           });
         }
 
