@@ -931,6 +931,52 @@ describe('requireExplicitAssignment never dumps catalog', () => {
     });
     assert.equal(items.filter((x) => x.canTake).length, 0);
   });
+
+  it('offers unpublished assigned exam even when older than 180d', () => {
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [
+        {
+          id: 1559901,
+          name: 'VİP MÜFREDAT İZLEME LGS-1',
+          examType: 'LGS',
+          resultStatus: 'None',
+          examDate: '2025-01-01'
+        }
+      ],
+      assignedCatalogRows: [
+        {
+          id: 1559901,
+          name: 'VİP MÜFREDAT İZLEME LGS-1',
+          examType: 'LGS',
+          resultStatus: 'None',
+          examDate: '2025-01-01'
+        }
+      ],
+      resultRows: [],
+      edesisStudentId: '2086573',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: 'LGS' }),
+      now: new Date('2026-08-24T12:00:00Z'),
+      requireExplicitAssignment: true
+    });
+    assert.deepEqual(
+      items.filter((x) => x.canTake).map((x) => x.examId),
+      ['1559901']
+    );
+  });
+
+  it('treats classRoomIds detail as classroom assignment', () => {
+    const hit = catalogExamAssignedToStudent(
+      {
+        id: 1559901,
+        name: 'VİP MÜFREDAT İZLEME LGS-1',
+        examType: 'LGS',
+        resultStatus: 'None',
+        classRoomIds: [294965, 111]
+      },
+      { edesisStudentId: '2086573', classroomId: '294965', allowClassroomOnly: true }
+    );
+    assert.equal(hit, true);
+  });
 });
 
 describe('collectEdesisBookletFiles', () => {
