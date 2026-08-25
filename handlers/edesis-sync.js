@@ -28,6 +28,9 @@ import {
   inferEdesisExamProgramKeys,
   buildStudentAvailableEdesisExamItems,
   pickEdesisCatalogExamId,
+  pickEdesisResultExamId,
+  collectOpenOnlineProgramExams,
+  formatEdesisAvailableExamItem,
   fetchEdesisOgrenciAssignedSinavIdsDetailed,
   fetchEdesisExamCatalogRowDetail,
   fetchEdesisExamRosterStudentIds,
@@ -55,7 +58,6 @@ import {
   mapEdesisRowToExamDraft,
   flattenEdesisRows,
   studentMatchKeysFromEdesisRow,
-  pickEdesisResultExamId,
   EDESIS_EMPTY_LIST_HELP
 } from '../api/_lib/edesis-client.js';
 import {
@@ -242,9 +244,26 @@ async function loadAvailableEdesisExamsForStudent({
     requireExplicitAssignment: true
   });
   const takeableIds = items.filter((x) => x.canTake && !x.hasStudentResult).map((x) => x.examId);
+  const resultExamIds = (studentResults.rows || [])
+    .map((row) => pickEdesisResultExamId(row))
+    .filter(Boolean);
+  const openOnlineRows = collectOpenOnlineProgramExams(fullRows, {
+    programKeys: scope.programKeys,
+    gradeName: scope.gradeName || '',
+    excludeExamIds: [...resultExamIds, ...takeableIds]
+  });
+  const openOnline = openOnlineRows.slice(0, 48).map((ex) =>
+    formatEdesisAvailableExamItem(pickEdesisCatalogExamId(ex), ex, null, {
+      studentId: platformStudentId || `edesis-${edesisStudentId}`,
+      institutionId: actor?.institution_id || null
+    })
+  );
   const abpAuth = adminAssignment?.abpAuth || getEdesisAbpAuthStatus();
   return {
     items,
+    resultRows: studentResults.rows || [],
+    openOnline,
+    scope,
     meta: {
       assignmentMode,
       assignedCount: hasAssignmentSignal ? assignedCatalogRows.length : 0,
@@ -267,6 +286,7 @@ async function loadAvailableEdesisExamsForStudent({
       probeSkipped: Boolean(assignedResolved?.probeSkipped),
       probeSkipReason: assignedResolved?.probeSkipReason || null,
       probeCandidateCount: assignedResolved?.probeCandidateCount ?? null,
+      openOnlineCount: openOnline.length,
       totalMs: Date.now() - t0
     }
   };
@@ -481,6 +501,37 @@ async function loadStudentsForMatching() {
     }));
   }
   return students;
+}
+
+function mapHubResultExams(rows, platformId, edesisStudentId, institutionId) {
+  return (rows || []).map((row) => {
+    const draft = mapEdesisRowToExamDraft(row, {
+      studentId: platformId || `edesis-${edesisStudentId}`,
+      institutionId
+    });
+    const totals = (draft.subjects || []).reduce(
+      (a, s) => ({
+        correct: a.correct + (s.correct ?? 0),
+        wrong: a.wrong + (s.wrong ?? 0),
+        blank: a.blank + (s.blank ?? 0)
+      }),
+      { correct: 0, wrong: 0, blank: 0 }
+    );
+    return {
+      edesisExamId: draft.edesisExamId || null,
+      examTitle: draft.examTitle || draft.examType,
+      examType: draft.examType,
+      examDate: draft.examDate,
+      totalNet: draft.totalNet,
+      correct: totals.correct,
+      wrong: totals.wrong,
+      blank: totals.blank,
+      subjectCount: draft.subjects?.length ?? 0,
+      topicCount: (draft.subjects || []).reduce((n, s) => n + (s.topics?.length ?? 0), 0),
+      subjects: draft.subjects || [],
+      draft
+    };
+  });
 }
 
 function buildExamDrafts(processed, students, institutionId) {
@@ -793,7 +844,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         configured: keyOk,
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-turu-program-soft2-2026-08-25',
+        deployMarker: 'edesis-student-console-2026-08-25',
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
@@ -852,7 +903,7 @@ export default async function handler(req, res) {
         }
         return res.status(200).json({
           ok: true,
-          deployMarker: 'edesis-turu-program-soft2-2026-08-25',
+          deployMarker: 'edesis-student-console-2026-08-25',
           configured: Boolean(cfg.apiKey),
           abpAuth: getEdesisAbpAuthStatus(),
           abpProbe: abpProbe
@@ -912,7 +963,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-turu-program-soft2-2026-08-25',
+        deployMarker: 'edesis-student-console-2026-08-25',
         baseUrl: cfg.baseUrl,
         attempts: out
       });
@@ -1113,7 +1164,8 @@ export default async function handler(req, res) {
           name: s.name,
           email: s.email,
           edesis_ogrenci_id: s.edesis_ogrenci_id || null,
-          parent_phone: s.parent_phone || null
+          parent_phone: s.parent_phone || null,
+          class_level: s.class_level || null
         }))
       });
     }
@@ -1208,34 +1260,12 @@ export default async function handler(req, res) {
         }
       }
 
-      const mappedExams = (fetchResult.rows || []).map((row) => {
-        const draft = mapEdesisRowToExamDraft(row, {
-          studentId: platformId || `edesis-${edesisStudentId}`,
-          institutionId: institutionId || matched?.institution_id || null
-        });
-        const totals = (draft.subjects || []).reduce(
-          (a, s) => ({
-            correct: a.correct + (s.correct ?? 0),
-            wrong: a.wrong + (s.wrong ?? 0),
-            blank: a.blank + (s.blank ?? 0)
-          }),
-          { correct: 0, wrong: 0, blank: 0 }
-        );
-        return {
-          edesisExamId: draft.edesisExamId || null,
-          examTitle: draft.examTitle || draft.examType,
-          examType: draft.examType,
-          examDate: draft.examDate,
-          totalNet: draft.totalNet,
-          correct: totals.correct,
-          wrong: totals.wrong,
-          blank: totals.blank,
-          subjectCount: draft.subjects?.length ?? 0,
-          topicCount: (draft.subjects || []).reduce((n, s) => n + (s.topics?.length ?? 0), 0),
-          subjects: draft.subjects || [],
-          draft
-        };
-      });
+      const mappedExams = mapHubResultExams(
+        fetchResult.rows || [],
+        platformId,
+        edesisStudentId,
+        institutionId || matched?.institution_id || null
+      );
       // Öğrencinin kendi Edesis sonuçlarını programla süzme.
       // Atanmış çapraz program denemeleri (ör. sınıf 12/YKS iken YÖS SARMAL)
       // ingest sonrası Sonuçlarım’da kayboluyordu.
@@ -1662,6 +1692,95 @@ export default async function handler(req, res) {
           }
           return 'Size tanımlı açık Edesis denemesi yok. Edesis’te öğrenciye online deneme tanımlayıp Yenile’ye basın.';
         })()
+      });
+    }
+
+    if (op === 'student-dossier') {
+      if (!isStaff) return res.status(403).json({ error: 'forbidden' });
+      const cfg = getEdesisConfig();
+      if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
+      let edesisStudentId = String(
+        req.query?.edesisStudentId || req.body?.edesisStudentId || ''
+      ).trim();
+      const platformStudentId = String(req.query?.studentId || req.body?.studentId || '').trim();
+      let studentHint = null;
+      let autoLinked = false;
+      let matchMethod = null;
+      if (!edesisStudentId && platformStudentId) {
+        const resolved = await resolveEdesisIdForPlatformStudent(platformStudentId, actor, tags);
+        edesisStudentId = resolved.edesisStudentId || '';
+        studentHint = resolved.student || null;
+        autoLinked = Boolean(resolved.autoLinked);
+        matchMethod = resolved.matchMethod || null;
+      }
+      if (!edesisStudentId) {
+        return res.status(400).json({
+          error: 'edesis_student_id_missing',
+          hint: 'Öğrenciyi Edesis ID ile bağlayın — listeden seçip kaydedin'
+        });
+      }
+      const students = filterStudentsForActor(await loadStudentsForMatching(), actor, tags);
+      const matched =
+        students.find((s) => String(s.edesis_ogrenci_id || '').trim() === edesisStudentId) ||
+        (platformStudentId ? students.find((s) => s.id === platformStudentId) : null) ||
+        studentHint;
+      const platformId = platformStudentId || matched?.id || null;
+      let edesisProfile = null;
+      try {
+        edesisProfile = await fetchEdesisStudentByOgrenciId(edesisStudentId, cfg);
+      } catch {
+        edesisProfile = null;
+      }
+      const loaded = await loadAvailableEdesisExamsForStudent({
+        edesisStudentId,
+        platformStudentId: platformId,
+        actor,
+        studentHint: matched || studentHint,
+        cfg
+      });
+      const taken = mapHubResultExams(
+        loaded.resultRows || [],
+        platformId,
+        edesisStudentId,
+        actor?.institution_id || matched?.institution_id || null
+      );
+      const takeable = (loaded.items || []).filter((x) => x.canTake && !x.hasStudentResult);
+      return res.status(200).json({
+        ok: true,
+        deployMarker: 'edesis-student-console-2026-08-25',
+        edesisStudentId,
+        platformStudentId: platformId,
+        autoLinked,
+        matchMethod,
+        profile: {
+          name: matched?.name || edesisProfile?.name || null,
+          email: matched?.email || edesisProfile?.email || null,
+          classLevel: matched?.class_level || loaded.scope?.classLevel || null,
+          gradeName: loaded.scope?.gradeName || edesisProfile?.gradeName || null,
+          className: loaded.scope?.className || edesisProfile?.className || null,
+          classroomId: loaded.scope?.classroomId || edesisProfile?.classroomId || null,
+          parentPhone: matched?.parent_phone || null,
+          programKeys: [...(loaded.scope?.programKeys || [])],
+          edesis: edesisProfile
+            ? {
+                id: edesisStudentId,
+                name: edesisProfile.name || null,
+                email: edesisProfile.email || null,
+                gradeName: edesisProfile.gradeName || null,
+                className: edesisProfile.className || null,
+                classroomId: edesisProfile.classroomId || null
+              }
+            : { id: edesisStudentId }
+        },
+        takeable,
+        taken,
+        openOnline: loaded.openOnline || [],
+        counts: {
+          takeable: takeable.length,
+          taken: taken.length,
+          openOnline: (loaded.openOnline || []).length
+        },
+        assignmentMeta: loaded.meta || {}
       });
     }
 
