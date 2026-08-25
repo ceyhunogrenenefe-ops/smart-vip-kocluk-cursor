@@ -21,7 +21,7 @@ import { toast } from 'sonner';
 import {
   csApplyCoupon,
   csClearCart,
-  csCreateCheckoutHandoff,
+  csCheckoutPrepare,
   csGetCart,
   csGetSettings,
   csRemoveFromCart,
@@ -98,53 +98,16 @@ export default function SepetPage() {
     finally { setUpdatingId(null); }
   };
 
-  /** Sepet özetini token ile onlinevipdershane.com ödeme sayfasına taşır */
+  /** Pending sipariş + imzalı token → onlinevipdershane.com/odeme/kitap */
   const handleCheckout = async () => {
     if (items.some((i) => i.out_of_stock) || items.length === 0) return;
-
-    const CHECKOUT_URL =
-      (import.meta.env.VITE_CHECKOUT_URL as string | undefined)?.trim() ||
-      'https://onlinevipdershane.com/odeme.html';
-
-    const cartSummary = {
-      items: items.map((i) => ({
-        title:
-          i.title_snapshot ||
-          i.commerce_vendor_offers?.commerce_books?.title ||
-          i.commerce_book_packages?.name ||
-          'Kitap',
-        qty: i.quantity,
-        unit_kurus: i.commerce_vendor_offers?.price_kurus ?? i.price_kurus_snapshot,
-      })),
-      subtotal_kurus: subtotal,
-      shipping_kurus: shippingCost,
-      discount_kurus: discountAmount,
-      total_kurus: total,
-      coupon_code: coupon?.code ?? null,
-      user_id: effectiveUser?.id ?? null,
-      student_id: (effectiveUser as { student_id?: string })?.student_id ?? null,
-      ref: new Date().toISOString(),
-    };
-
     setCheckoutLoading(true);
     try {
-      const handoff = await csCreateCheckoutHandoff(cartSummary);
-      const params = new URLSearchParams({
-        source: 'coaching',
-        token: handoff.token,
-        tutar: String(total),
-        ref: cartSummary.ref ?? handoff.checkout.ref ?? handoff.token,
-      });
-      if (coupon?.code) params.set('kupon', coupon.code);
-      try {
-        const cartB64 = btoa(unescape(encodeURIComponent(JSON.stringify(cartSummary))));
-        if (cartB64.length < 1800) params.set('cart', cartB64);
-      } catch {
-        /* URL uzun olursa yalnızca token + tutar */
-      }
-      window.location.href = `${CHECKOUT_URL}?${params.toString()}`;
+      const studentId = (effectiveUser as { student_id?: string })?.student_id ?? null;
+      const prepared = await csCheckoutPrepare(coupon?.code ?? null, studentId);
+      window.location.href = prepared.checkout_url;
     } catch (e: unknown) {
-      toast.error((e as Error).message || 'Ödeme sayfasına yönlendirilemedi.');
+      toast.error((e as Error).message || 'Ödeme başlatılamadı');
       setCheckoutLoading(false);
     }
   };
@@ -367,7 +330,7 @@ export default function SepetPage() {
             >
               {checkoutLoading ? (
                 <span className="inline-flex items-center gap-2 justify-center">
-                  <Loader2 className="w-4 h-4 animate-spin" /> Yönlendiriliyor…
+                  <Loader2 className="w-4 h-4 animate-spin" /> Sipariş hazırlanıyor…
                 </span>
               ) : (
                 'Ödemeye Geç'
