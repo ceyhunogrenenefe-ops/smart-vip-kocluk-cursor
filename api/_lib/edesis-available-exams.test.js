@@ -58,6 +58,12 @@ describe('inferEdesisExamProgramKeys', () => {
     assert.equal(keys.has('lgs'), true);
     assert.equal(keys.has('yks'), false);
   });
+
+  it('does not map TYT-Maarif student class to lgs', () => {
+    const keys = inferEdesisExamProgramKeys({ classLevel: 'TYT-Maarif' });
+    assert.equal(keys.has('yks'), true);
+    assert.equal(keys.has('lgs'), false);
+  });
 });
 
 describe('examCompatibleWithStudentProgramSoft', () => {
