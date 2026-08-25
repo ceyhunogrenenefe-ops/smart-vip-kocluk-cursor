@@ -236,6 +236,7 @@ async function loadAvailableEdesisExamsForStudent({
     classroomId: scope.classroomId,
     studentId: platformStudentId || `edesis-${edesisStudentId}`,
     institutionId: actor?.institution_id || null,
+    gradeName: scope.gradeName || '',
     // Atama yoksa boş liste — kurum kataloğu / program yedeği kapalı
     allowRecencyFallback: false,
     requireExplicitAssignment: true
@@ -606,9 +607,11 @@ async function runSyncInner(actor) {
   const institutionId = actor?.institution_id || null;
   const students = await loadStudentsForMatching();
 
-  // Manuel UI: light sync (enrich yok) — Vercel 504 önleme. Cron: tam zenginleştirme.
+  // Manuel UI: light sync (enrich yok) — Vercel Hobby ~60s 504 önleme. Cron: tam.
   const skipEnrich = String(actor?.role || '') !== 'cron';
+  const tFetch = Date.now();
   const fetchResult = await fetchEdesisExamList({ skipEnrich });
+  const fetchMs = Date.now() - tFetch;
   const {
     rows,
     baseUrl,
@@ -625,13 +628,18 @@ async function runSyncInner(actor) {
   } = fetchResult;
   const processed = processEdesisRows(rows, students);
   const exams = buildExamDrafts(processed, students, institutionId);
-  const { imported, skipped, errors } = await upsertExams(exams);
+  // Manuel sync: çok satırda upsert 504 yapmasın
+  const examCap = skipEnrich ? 150 : exams.length;
+  const cappedExams = exams.slice(0, examCap);
+  const { imported, skipped, errors } = await upsertExams(cappedExams);
 
   return {
     ok: true,
     baseUrl,
     path,
     fetchMode: fetchMode || 'exams',
+    skipEnrich,
+    fetchMs,
     httpStatus: httpStatus ?? null,
     jsonShape: jsonShape ?? null,
     apiHint: apiHint ?? null,
@@ -651,6 +659,8 @@ async function runSyncInner(actor) {
     matched: exams.length,
     imported,
     skipped,
+    capped: exams.length > cappedExams.length,
+    capLimit: examCap,
     unmatchedCount: processed.unmatched.length,
     unmatchedSample: processed.unmatched.slice(0, 15),
     matchedByMethod: processed.matchedByMethod,
@@ -783,7 +793,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         configured: keyOk,
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-turu-alltypes-sync-2026-08-25',
+        deployMarker: 'edesis-alltypes-synclight-2026-08-25',
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
@@ -842,7 +852,7 @@ export default async function handler(req, res) {
         }
         return res.status(200).json({
           ok: true,
-          deployMarker: 'edesis-turu-alltypes-sync-2026-08-25',
+          deployMarker: 'edesis-alltypes-synclight-2026-08-25',
           configured: Boolean(cfg.apiKey),
           abpAuth: getEdesisAbpAuthStatus(),
           abpProbe: abpProbe
@@ -902,7 +912,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-turu-alltypes-sync-2026-08-25',
+        deployMarker: 'edesis-alltypes-synclight-2026-08-25',
         baseUrl: cfg.baseUrl,
         attempts: out
       });

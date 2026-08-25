@@ -965,9 +965,17 @@ export function examCompatibleWithStudentGrade(exam, studentGradeName = '') {
   if (!grade) return true;
   const g = Number(grade);
   if (!Number.isFinite(g) || g < 1 || g > 12) return true;
-  const blob = String(
-    exam?.name || exam?.examName || exam?.title || exam?.examTitle || exam?.sinavAdi || exam?.examType || ''
-  )
+  const blob = [
+    exam?.name,
+    exam?.examName,
+    exam?.title,
+    exam?.examTitle,
+    exam?.sinavAdi,
+    exam?.examType,
+    exam?.sinavTuru
+  ]
+    .filter(Boolean)
+    .join(' ')
     .toLocaleLowerCase('tr-TR')
     .replace(/\s+/g, ' ');
   const named = blob.match(/\b([5-9]|1[0-2])\s*\.?\s*(?:sinif|sınıf)\b/);
@@ -2484,6 +2492,7 @@ export function buildStudentAvailableEdesisExamItems({
   classroomId = '',
   studentId,
   institutionId,
+  gradeName = '',
   now = new Date(),
   allowRecencyFallback = false,
   requireExplicitAssignment = false
@@ -2550,6 +2559,7 @@ export function buildStudentAvailableEdesisExamItems({
   for (const ex of offerRows) {
     const examId = pickEdesisCatalogExamId(ex);
     if (!examId || seen.has(examId)) continue;
+    if (!examCompatibleWithStudentGrade(ex, gradeName)) continue;
     if (!shouldOfferUntakenCatalogExam(ex, scope, now)) continue;
     push(examId, catalogById.get(examId) || ex, null);
   }
@@ -3573,7 +3583,7 @@ export async function fetchEdesisExamList(cfgOverride = {}) {
     if (!skipEnrich) return dateRange;
     const end = new Date();
     const start = new Date(end);
-    start.setDate(start.getDate() - 120);
+    start.setDate(start.getDate() - 45);
     const fmt = (d) => d.toISOString().slice(0, 10);
     return { StartDate: fmt(start), EndDate: fmt(end) };
   })();
@@ -3583,7 +3593,7 @@ export async function fetchEdesisExamList(cfgOverride = {}) {
     localCfg,
     V1_PATHS.examResults,
     { ...lightDateRange, ...(skipEnrich ? {} : EXAM_DETAIL_QUERY) },
-    skipEnrich ? { pageSize: 500, maxPages: 2 } : {}
+    skipEnrich ? { pageSize: 200, maxPages: 1 } : {}
   );
   if (bulk.error && bulk.response) {
     const r = bulk.response;
