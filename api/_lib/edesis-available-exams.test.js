@@ -16,6 +16,7 @@ import {
   examCompatibleWithStudentGrade,
   examCompatibleWithStudentProgramSoft,
   isThinOnlineRosterExam,
+  catalogExamTakeableWithoutRosterProbe,
   collectOpenOnlineProgramExams,
   pickEdesisExamSinavTuruId,
   collectCatalogRowsForSinavIds,
@@ -31,6 +32,7 @@ import {
   listEdesisBookletCodes,
   canonicalEdesisStructureLessons,
   looksLikePdfBuffer,
+  absorbEdesisBookletSource,
   catalogLooksStudentFiltered,
   catalogQueryLooksFiltered,
   catalogExamAssignedToStudent,
@@ -101,6 +103,28 @@ describe('thin online roster + open catalog', () => {
     assert.equal(isThinOnlineRosterExam({ studentCount: 0 }), false);
     assert.equal(isThinOnlineRosterExam({ studentCount: 24 }), false);
     assert.equal(isThinOnlineRosterExam({ studentCount: 24 }, 2), true);
+  });
+
+  it('catalog fast path keeps empty/thin LGS, drops 24-person roster', () => {
+    const keys = new Set(['lgs']);
+    const empty = {
+      id: '1579080',
+      name: 'LİMİT LGS HAZIRBULUNUŞLUK',
+      examType: 'LGS',
+      resultStatus: 'None',
+      studentCount: 0,
+      examDate: '2026-08-20',
+      isOnlineSinavForStudent: true
+    };
+    const fat = { ...empty, id: '1', name: 'PARAF MOR 1', studentCount: 24 };
+    assert.equal(
+      catalogExamTakeableWithoutRosterProbe(empty, { programKeys: keys, gradeName: '8-F' }),
+      true
+    );
+    assert.equal(
+      catalogExamTakeableWithoutRosterProbe(fat, { programKeys: keys, gradeName: '8-F' }),
+      false
+    );
   });
 
   it('lists LGS open exams in 45d excluding taken', () => {
@@ -1235,6 +1259,38 @@ describe('collectEdesisBookletFiles', () => {
       '1102253'
     );
     assert.ok(files.some((f) => f.url.includes('c3d4e5f6-a7b8-9012-cdef-123456789012')));
+  });
+
+  it('absorbEdesisBookletSource reads ABP GetSinavForView denemeUrl + denemeId', () => {
+    const absorbed = absorbEdesisBookletSource(
+      {
+        id: 1579080,
+        name: 'LİMİT LGS HAZIRBULUNUŞLUK',
+        sinavTuruAdi: 'LGS',
+        deneme: {
+          id: 441122,
+          denemeUrl: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+        }
+      },
+      '1579080'
+    );
+    assert.equal(absorbed.denemeId, '441122');
+    assert.ok(absorbed.files.some((f) => f.url.includes('a1b2c3d4-e5f6-7890-abcd-ef1234567890')));
+    assert.match(absorbed.examMeta.title || '', /LİMİT LGS/i);
+  });
+
+  it('absorbEdesisBookletSource reads merged catalog-row denemeUrl', () => {
+    const absorbed = absorbEdesisBookletSource(
+      {
+        id: 1579080,
+        name: 'LİMİT LGS HAZIRBULUNUŞLUK',
+        denemeUrl: 'https://cdn.edesis.com/files/11111111-2222-3333-4444-555555555555',
+        denemeId: 778899
+      },
+      '1579080'
+    );
+    assert.equal(absorbed.denemeId, '778899');
+    assert.ok(absorbed.files.some((f) => /555555555555/.test(f.url)));
   });
 });
 
