@@ -1568,10 +1568,18 @@ export default async function handler(req, res) {
         hint: (() => {
           const takeable = items.filter((x) => x.canTake && !x.hasStudentResult).length;
           if (takeable > 0) return null;
+          const attempts = meta.adminAssignmentAttempts || [];
+          const getIds401 = attempts.some(
+            (a) => a?.label === 'GetOgrenciSinavIds' && (a.status === 401 || a.status === 403)
+          );
+          const analysisN = Number(meta.analysisIdCount || 0);
+          if (getIds401 && analysisN > 0) {
+            return 'Edesis online atama listesi (GetOgrenciSinavIds) şu an API key ile açılamıyor. Analiz geçmişi Sınava gir’e dökülmez; ABP oturumu (EDESIS_ABP_USER/PASSWORD) gerekir. Girilmiş denemeler Sonuçlarım’da.';
+          }
           if (items.length) {
             return 'Girilmiş sonuçlarınız var; henüz girilmemiş açık deneme bulunamadı.';
           }
-          return 'Size tanımlı açık Edesis denemesi yok.';
+          return 'Size tanımlı açık Edesis denemesi yok. Edesis’te öğrenciye online deneme tanımlayıp Yenile’ye basın.';
         })()
       });
     }
