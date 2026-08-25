@@ -413,7 +413,11 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
   };
 
   const activeLessons =
-    booklets.find((b) => b.kitapcikTuru === kitapcik)?.lessons || booklets[0]?.lessons || [];
+    booklets.find(
+      (b) => String(b.kitapcikTuru || '').trim().toUpperCase() === String(kitapcik || '').trim().toUpperCase()
+    )?.lessons ||
+    booklets[0]?.lessons ||
+    [];
   const takeable = useMemo(
     () => available.filter((exam) => !exam.hasStudentResult && exam.canTake !== false),
     [available]
@@ -439,7 +443,6 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             studio
             lessons={activeLessons}
             booklets={booklets}
-            availableBookletCodes={availableBookletCodes}
             kitapcik={kitapcik}
             onKitapcikChange={setKitapcik}
             kitapcikSayisal={kitapcikSayisal}
@@ -472,7 +475,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             Denemelerim
           </h2>
           <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-600">
-            Yalnızca size tanımlanan denemeler. Kitapçık tam genişlikte açılır; optiği soldan doldurup Bitir ile gönderin.
+            Yalnızca size tanımlanan denemeler. Sınava girince kitapçık tam ekran açılır; optiği soldan doldurup Bitir ile gönderin.
           </p>
         </div>
         <button
@@ -544,58 +547,14 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
           <Loader2 className="h-6 w-6 animate-spin" />
         </div>
       ) : view === 'take' ? (
-<<<<<<< HEAD
-        activeExam ? (
-          <div className="space-y-4">
-            <button
-              type="button"
-              onClick={() => setActiveExam(null)}
-              className="inline-flex items-center gap-1 text-sm font-semibold text-slate-600 hover:text-slate-900"
-            >
-              <ArrowLeft className="h-4 w-4" /> Sınav listesine dön
-            </button>
-            <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
-              <div className="font-bold text-slate-900">{activeExam.name}</div>
-              <p className="mt-1 text-xs text-slate-600">
-                {bookletMode === 'dual-sozel-sayisal' || examFamily === 'lgs'
-                  ? 'LGS’de Sözel ve Sayısal kitapçık harflerini ayrı seçin. Ders sekmeleri değişmez; Kaydet taslak, Bitir Edesis’e gider.'
-                  : 'Kitapçık türünü seçin. Soldan ders sekmesine tıklayıp optiği doldurun; Kaydet ile saklanır, Bitir ile Edesis’e gider.'}
-              </p>
-            </div>
-            <EdesisOpticalSheet
-              lessons={activeLessons}
-              booklets={booklets}
-              kitapcik={kitapcik}
-              onKitapcikChange={setKitapcik}
-              kitapcikSayisal={kitapcikSayisal}
-              onKitapcikSayisalChange={setKitapcikSayisal}
-              examTitle={activeExam.name}
-              examType={activeExam.examType}
-              examFamily={examFamily}
-              bookletMode={bookletMode}
-              choiceCount={choiceCount}
-              remainingSeconds={remainingSeconds}
-              storageKey={`edesis-optic:${studentId}:${activeExam.examId}`}
-              busy={submitBusy}
-              submitLabel="Bitir"
-              pdfUrl={pdfUrl}
-              pdfBusy={pdfBusy}
-              pdfError={pdfError}
-              onSubmit={(dersCevaplari) => void submitAnswers(dersCevaplari)}
-            />
-          </div>
-        ) : (
-          <div className="space-y-3">
-=======
-        <div className="space-y-3">
->>>>>>> eaa8721 (feat(academic): öğrenci Akademik Merkez stüdyo + geniş kitapçık PDF)
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             {hint && !takeable.length && !available.length ? (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{hint}</div>
+              <div className="rounded-3xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900 xl:col-span-2">{hint}</div>
             ) : null}
             {takeable.map((exam) => (
               <div
                 key={exam.examId}
-                className="rounded-3xl border border-slate-200/80 bg-white p-4 shadow-[0_12px_40px_-24px_rgba(15,23,42,0.45)] sm:p-5"
+                className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50 p-5 shadow-[0_18px_50px_-32px_rgba(15,23,42,0.55)] sm:p-6"
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -624,12 +583,12 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
               </div>
             ))}
             {!takeable.length && available.length ? (
-              <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+              <p className="rounded-3xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-600 xl:col-span-2">
                 Girilecek deneme kalmadı. Girdiğiniz sınavlar Sonuçlarım ve Analizlerim sekmelerinde.
               </p>
             ) : null}
             {!available.length && !hint ? (
-              <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+              <p className="rounded-3xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-600 xl:col-span-2">
                 Edesis’te size atanmış açık deneme yok. Koçunuz Edesis’te denemeyi size tanımladıktan sonra burada görünür.
               </p>
             ) : null}

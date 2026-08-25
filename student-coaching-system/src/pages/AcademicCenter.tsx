@@ -262,10 +262,16 @@ export default function AcademicCenter() {
   useEffect(() => {
     if (!edesisTaking) return;
     const html = document.documentElement;
-    const prev = html.style.overflow;
+    const body = document.body;
+    html.classList.add('edesis-exam-studio');
+    const prevHtml = html.style.overflow;
+    const prevBody = body.style.overflow;
     html.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
     return () => {
-      html.style.overflow = prev;
+      html.classList.remove('edesis-exam-studio');
+      html.style.overflow = prevHtml;
+      body.style.overflow = prevBody;
     };
   }, [edesisTaking]);
 
@@ -396,7 +402,7 @@ export default function AcademicCenter() {
     <div
       className={
         edesisTaking
-          ? '-mx-3 -my-4 flex h-[calc(100dvh-3.75rem)] min-h-0 flex-col overflow-hidden sm:-mx-5 sm:-my-6 sm:h-[calc(100dvh-4.25rem)] lg:-mx-6 lg:h-[calc(100dvh-5.5rem)]'
+          ? 'fixed inset-0 z-[160] flex min-h-0 flex-col overflow-hidden bg-slate-950'
           : 'mx-auto w-full max-w-[1680px] space-y-8'
       }
     >
@@ -412,7 +418,7 @@ export default function AcademicCenter() {
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Akademik Merkez</h1>
             <p className="mt-3 max-w-xl text-sm leading-relaxed text-slate-300">
-              Etüt, deneme ve soru havuzu tek stüdyoda. Sınava girince kitapçık tam genişlikte açılır.
+              Etüt, deneme ve soru havuzu tek stüdyoda. Sınava girince kitapçık ve optik tam ekran açılır.
             </p>
           </div>
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 ring-1 ring-white/15">

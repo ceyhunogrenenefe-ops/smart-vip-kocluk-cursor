@@ -272,6 +272,13 @@ export default function EdesisOpticalSheet({
   const family = detectFamily(examTitle, examType, examFamily);
   const dual = bookletMode === 'dual-sozel-sayisal' || family === 'lgs';
   const choices = useMemo(() => opticalChoices(family, choiceCount), [family, choiceCount]);
+  const bookletCodes = useMemo(() => {
+    const fromBooklets = (booklets || [])
+      .map((b) => String(b.kitapcikTuru || '').trim().toUpperCase())
+      .filter((c) => KITAPCIK_ORDER.includes(c));
+    const unique = [...new Set(fromBooklets)];
+    return unique.length ? KITAPCIK_ORDER.filter((c) => unique.includes(c)) : KITAPCIK_ORDER;
+  }, [booklets]);
   const orderedLessons = useMemo(
     () => sortOpticalLessonsByFamily(lessons, family === 'tyt' ? 'yks' : family),
     [family, lessons]
@@ -373,11 +380,11 @@ export default function EdesisOpticalSheet({
 
   const kitapcikValue = (() => {
     const raw = String(kitapcik || '').trim().toUpperCase();
-    return KITAPCIK_ORDER.includes(raw) ? raw : 'A';
+    return bookletCodes.includes(raw) ? raw : bookletCodes[0] || 'A';
   })();
   const sayisalValue = (() => {
     const raw = String(kitapcikSayisal || '').trim().toUpperCase();
-    return KITAPCIK_ORDER.includes(raw) ? raw : kitapcikValue;
+    return bookletCodes.includes(raw) ? raw : kitapcikValue;
   })();
   const heading = activeFilled?.lesson.lessonName || examTitle || 'Optik';
   const tabPrefix =
@@ -386,7 +393,7 @@ export default function EdesisOpticalSheet({
   const opticalAside = (
     <aside
       className={`flex min-h-0 w-full shrink-0 flex-col border-b border-slate-200 bg-white md:border-b-0 md:border-r ${
-        pdfWide ? 'hidden md:hidden' : 'md:w-[17.5rem] lg:w-[19rem] xl:w-[20.5rem]'
+        pdfWide ? 'hidden md:hidden' : 'md:w-[15.5rem] lg:w-[16.5rem] xl:w-[18rem]'
       }`}
     >
       <div className="grid grid-cols-2 gap-1 border-b border-slate-200 px-2 py-2">
@@ -482,34 +489,24 @@ export default function EdesisOpticalSheet({
         {dual ? (
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex flex-wrap items-center gap-1.5">
-<<<<<<< HEAD
-              <span className="text-xs font-semibold text-slate-600">Sözel:</span>
-              <KitapcikCircles value={kitapcikValue} onChange={onKitapcikChange} codes={KITAPCIK_ORDER} />
-=======
               <span className={`text-xs font-semibold ${studio ? 'text-slate-300' : 'text-slate-600'}`}>Sözel:</span>
               <KitapcikCircles value={kitapcikValue} onChange={onKitapcikChange} codes={bookletCodes} />
->>>>>>> eaa8721 (feat(academic): öğrenci Akademik Merkez stüdyo + geniş kitapçık PDF)
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
               <span className={`text-xs font-semibold ${studio ? 'text-slate-300' : 'text-slate-600'}`}>Sayısal:</span>
               <KitapcikCircles
                 value={sayisalValue}
                 onChange={onKitapcikSayisalChange}
-                codes={KITAPCIK_ORDER}
+                codes={bookletCodes}
               />
             </div>
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-1.5">
-<<<<<<< HEAD
-            <span className="text-xs font-semibold text-slate-600">Kitapçık Türü:</span>
-            <KitapcikCircles value={kitapcikValue} onChange={onKitapcikChange} codes={KITAPCIK_ORDER} />
-=======
             <span className={`text-xs font-semibold ${studio ? 'text-slate-300' : 'text-slate-600'}`}>
               Kitapçık Türü:
             </span>
             <KitapcikCircles value={kitapcikValue} onChange={onKitapcikChange} codes={bookletCodes} />
->>>>>>> eaa8721 (feat(academic): öğrenci Akademik Merkez stüdyo + geniş kitapçık PDF)
           </div>
         )}
         <div className="ml-auto flex flex-wrap items-center gap-2">
