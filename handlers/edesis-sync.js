@@ -5,6 +5,9 @@ import { errorMessage } from '../api/_lib/error-msg.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import {
   getEdesisConfig,
+  loadEdesisRuntimeSecretsFromDb,
+  saveEdesisRuntimeSecretsToDb,
+  getEdesisAbpAuthStatus,
   probeEdesisApi,
   scanEdesisEndpoints,
   fetchEdesisExamList,
@@ -26,7 +29,6 @@ import {
   buildStudentAvailableEdesisExamItems,
   pickEdesisCatalogExamId,
   fetchEdesisOgrenciAssignedSinavIdsDetailed,
-  getEdesisAbpAuthStatus,
   fetchEdesisExamCatalogRowDetail,
   fetchEdesisExamRosterStudentIds,
   catalogExamAssignedToStudent,
@@ -738,6 +740,9 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: 'forbidden' });
     }
 
+    // Vercel env yoksa commerce_settings.meta.edesis (configure-edesis)
+    await loadEdesisRuntimeSecretsFromDb(supabaseAdmin);
+
     /** Öğrenci yalnızca kendi kartına erişir; yabancı ID'leri yok sayar */
     let studentSelf = null;
     if (isStudent && !isStaff && studentAllowedOp) {
@@ -770,13 +775,16 @@ export default async function handler(req, res) {
       const withEdesisId = students.filter((s) => s.edesis_ogrenci_id).length;
       const withEmail = students.filter((s) => s.email).length;
       const keyOk = Boolean(cfg.apiKey);
+      const abpAuth = getEdesisAbpAuthStatus();
       return res.status(200).json({
         configured: keyOk,
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-takeable-strict-2026-08-25',
+        deployMarker: 'edesis-abp-tenant-2026-08-25',
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
+        tenantId: cfg.tenantId || null,
+        abpAuth,
         endpoints: {
           students: '/api/external/v1/students',
           exams: '/api/external/v1/exams',
@@ -790,9 +798,62 @@ export default async function handler(req, res) {
         studentsWithEmail: withEmail,
         matchingGuide: EDESIS_MATCHING_GUIDE.tr,
         hint: keyOk
-          ? 'probe veya sync — v1.5 API; ham cevap gönderimi için exam_results:write (admin/custom)'
+          ? abpAuth.configured
+            ? 'probe veya sync — v1.5 + ABP TokenAuth (GetOgrenciSinavIds)'
+            : 'API key var; Sınava gir için ABP: op=configure-edesis (abpUser/abpPassword) veya Vercel EDESIS_ABP_USER/PASSWORD'
           : 'Vercel: EDESIS_API_KEY + EDESIS_API_BASE_URL=https://onlinevipdershane.api.edesis.com + EDESIS_AUTH_MODE=x-api-key'
       });
+    }
+
+    if (op === 'configure-edesis' && (req.method === 'POST' || req.method === 'PUT')) {
+      if (!actorIsSuper(actor, tags)) {
+        return res.status(403).json({ error: 'super_admin_required' });
+      }
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const patch = {};
+      if (body.apiKey != null) patch.apiKey = body.apiKey;
+      if (body.baseUrl != null) patch.baseUrl = body.baseUrl;
+      if (body.abpUser != null || body.abpUsername != null) {
+        patch.abpUser = body.abpUser || body.abpUsername;
+      }
+      if (body.abpPassword != null) patch.abpPassword = body.abpPassword;
+      if (body.abpBearer != null || body.abpToken != null) {
+        patch.abpBearer = body.abpBearer || body.abpToken;
+      }
+      if (body.tenantId != null) patch.tenantId = body.tenantId;
+      if (!Object.keys(patch).length) {
+        return res.status(400).json({
+          error: 'empty_patch',
+          hint: 'apiKey, abpUser, abpPassword, tenantId, baseUrl alanlarından en az birini gönderin'
+        });
+      }
+      try {
+        const saved = await saveEdesisRuntimeSecretsToDb(supabaseAdmin, patch);
+        const cfg = getEdesisConfig();
+        // ABP doğrula (şifre yazıldıysa)
+        let abpProbe = null;
+        if (cfg.abpUser && cfg.abpPassword) {
+          const { resolveEdesisAbpAccessToken } = await import('../api/_lib/edesis-client.js');
+          abpProbe = await resolveEdesisAbpAccessToken(cfg);
+        }
+        return res.status(200).json({
+          ok: true,
+          deployMarker: 'edesis-abp-tenant-2026-08-25',
+          configured: Boolean(cfg.apiKey),
+          abpAuth: getEdesisAbpAuthStatus(),
+          abpProbe: abpProbe
+            ? { status: abpProbe.status, error: abpProbe.error, hasToken: Boolean(abpProbe.token) }
+            : null,
+          tenantId: cfg.tenantId || null,
+          savedKeys: Object.keys(patch),
+          // asla şifre/token döndürme
+          hasApiKey: Boolean(saved.apiKey || cfg.apiKey),
+          hasAbpUser: Boolean(saved.abpUser || cfg.abpUser),
+          hasAbpPassword: Boolean(saved.abpPassword || cfg.abpPassword)
+        });
+      } catch (e) {
+        return res.status(500).json({ ok: false, error: errorMessage(e) });
+      }
     }
 
     if (op === 'students-preview') {
@@ -837,7 +898,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-takeable-strict-2026-08-25',
+        deployMarker: 'edesis-abp-tenant-2026-08-25',
         baseUrl: cfg.baseUrl,
         attempts: out
       });
@@ -1574,7 +1635,13 @@ export default async function handler(req, res) {
           );
           const analysisN = Number(meta.analysisIdCount || 0);
           if (getIds401 && analysisN > 0) {
-            return 'Edesis online atama listesi (GetOgrenciSinavIds) şu an API key ile açılamıyor. Analiz geçmişi Sınava gir’e dökülmez; ABP oturumu (EDESIS_ABP_USER/PASSWORD) gerekir. Girilmiş denemeler Sonuçlarım’da.';
+            return 'Edesis online atama listesi (GetOgrenciSinavIds) şu an API key ile açılamıyor. Analiz geçmişi Sınava gir’e dökülmez; ABP oturumu (configure-edesis / EDESIS_ABP_USER) gerekir. Girilmiş denemeler Sonuçlarım’da.';
+          }
+          const getIdsEmpty = attempts.some(
+            (a) => a?.label === 'GetOgrenciSinavIds' && a.status === 200 && Number(a.count || 0) === 0
+          );
+          if (getIdsEmpty && !meta?.abpAuth?.configured) {
+            return 'GetOgrenciSinavIds boş/401 — ABP panel kullanıcısı + tenantId (3226) gerekli. op=configure-edesis ile kaydedin.';
           }
           if (items.length) {
             return 'Girilmiş sonuçlarınız var; henüz girilmemiş açık deneme bulunamadı.';

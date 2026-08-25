@@ -124,9 +124,90 @@ function findEnrichmentKeyForDetailRow(byKey, detailRow) {
 export const EDESIS_HTML404_HELP =
   'Edesis v1 endpoint bulunamadı — EDESIS_API_BASE_URL=https://{kurum}.api.edesis.com olmalı; key paketi exams veya student_dashboard olmalı (bilgi@sinavza.com).';
 
+/**
+ * Vercel env yoksa commerce_settings.meta.edesis üzerinden (super-admin configure-edesis).
+ * Env her zaman DB değerinin önüne geçer.
+ */
+let edesisRuntimeSecrets = null;
+let edesisRuntimeSecretsAt = 0;
+
+export function getEdesisRuntimeSecrets() {
+  return edesisRuntimeSecrets && typeof edesisRuntimeSecrets === 'object' ? edesisRuntimeSecrets : null;
+}
+
+export function setEdesisRuntimeSecrets(secrets) {
+  const s = secrets && typeof secrets === 'object' ? secrets : {};
+  edesisRuntimeSecrets = {
+    apiKey: String(s.apiKey || '').trim(),
+    baseUrl: String(s.baseUrl || '').trim().replace(/\/+$/, ''),
+    abpUser: String(s.abpUser || s.abpUsername || '').trim(),
+    abpPassword: String(s.abpPassword || '').trim(),
+    abpBearer: String(s.abpBearer || s.abpToken || '').trim(),
+    tenantId: String(s.tenantId || '').trim()
+  };
+  edesisRuntimeSecretsAt = Date.now();
+  abpTokenCache = { token: '', expiresAt: 0, status: 'unknown', error: null };
+  return edesisRuntimeSecrets;
+}
+
+/** commerce_settings.meta.edesis — migration yok; mevcut jsonb */
+export async function loadEdesisRuntimeSecretsFromDb(supabase) {
+  if (!supabase) return getEdesisRuntimeSecrets();
+  if (edesisRuntimeSecrets && Date.now() - edesisRuntimeSecretsAt < 60_000) {
+    return edesisRuntimeSecrets;
+  }
+  try {
+    const { data, error } = await supabase
+      .from('commerce_settings')
+      .select('id, meta')
+      .is('institution_id', null)
+      .maybeSingle();
+    if (error) {
+      console.warn('[edesis] runtime secrets load:', error.message);
+      return getEdesisRuntimeSecrets();
+    }
+    const edesis = data?.meta?.edesis && typeof data.meta.edesis === 'object' ? data.meta.edesis : {};
+    return setEdesisRuntimeSecrets(edesis);
+  } catch (e) {
+    console.warn('[edesis] runtime secrets load failed:', e instanceof Error ? e.message : e);
+    return getEdesisRuntimeSecrets();
+  }
+}
+
+export async function saveEdesisRuntimeSecretsToDb(supabase, patch = {}) {
+  if (!supabase) throw new Error('supabase_required');
+  const { data: row, error: readErr } = await supabase
+    .from('commerce_settings')
+    .select('id, meta')
+    .is('institution_id', null)
+    .maybeSingle();
+  if (readErr) throw new Error(readErr.message);
+  if (!row?.id) throw new Error('commerce_settings_global_missing');
+
+  const prevMeta = row.meta && typeof row.meta === 'object' ? row.meta : {};
+  const prev = prevMeta.edesis && typeof prevMeta.edesis === 'object' ? prevMeta.edesis : {};
+  const next = { ...prev };
+  for (const [k, v] of Object.entries(patch || {})) {
+    if (v === undefined || v === null) continue;
+    const str = String(v).trim();
+    if (!str && k !== 'tenantId') continue;
+    next[k] = str;
+  }
+  const meta = { ...prevMeta, edesis: next };
+  const { error: writeErr } = await supabase
+    .from('commerce_settings')
+    .update({ meta, updated_at: new Date().toISOString() })
+    .eq('id', row.id);
+  if (writeErr) throw new Error(writeErr.message);
+  return setEdesisRuntimeSecrets(next);
+}
+
 export function getEdesisConfig() {
-  const apiKey = String(process.env.EDESIS_API_KEY || '').trim();
-  let baseUrl = String(process.env.EDESIS_API_BASE_URL || '').trim().replace(/\/+$/, '');
+  const rt = getEdesisRuntimeSecrets() || {};
+  const apiKey = String(process.env.EDESIS_API_KEY || rt.apiKey || '').trim();
+  let baseUrl = String(process.env.EDESIS_API_BASE_URL || rt.baseUrl || '')
+    .trim()
+    .replace(/\/+$/, '');
 
   // Eski yapılandırma: base URL path içeriyorsa domain'e indir
   if (baseUrl && /\/api\/external/i.test(baseUrl)) {
@@ -139,9 +220,20 @@ export function getEdesisConfig() {
   const legacyResults = String(process.env.EDESIS_RESULTS_PATH || '').trim();
   const legacyExams = String(process.env.EDESIS_EXAMS_PATH || '').trim();
   const institutionCode = String(process.env.EDESIS_INSTITUTION_CODE || '').trim();
-  const abpUser = String(process.env.EDESIS_ABP_USER || process.env.EDESIS_ABP_USERNAME || '').trim();
-  const abpPassword = String(process.env.EDESIS_ABP_PASSWORD || '').trim();
-  const abpBearer = String(process.env.EDESIS_ABP_BEARER || process.env.EDESIS_ABP_TOKEN || '').trim();
+  const abpUser = String(
+    process.env.EDESIS_ABP_USER || process.env.EDESIS_ABP_USERNAME || rt.abpUser || ''
+  ).trim();
+  const abpPassword = String(process.env.EDESIS_ABP_PASSWORD || rt.abpPassword || '').trim();
+  const abpBearer = String(
+    process.env.EDESIS_ABP_BEARER || process.env.EDESIS_ABP_TOKEN || rt.abpBearer || ''
+  ).trim();
+  // Kanıt: GetOgrenciSinavIds tenantId olmadan sinavId=[]; tenantId=3226 → 50 id
+  const tenantId = String(
+    process.env.EDESIS_TENANT_ID ||
+      process.env.EDESIS_ABP_TENANT_ID ||
+      rt.tenantId ||
+      (institutionCode === 'onlinevipdershane' || /onlinevipdershane/i.test(baseUrl) ? '3226' : '')
+  ).trim();
 
   const bases = baseUrl ? [baseUrl] : DEFAULT_BASES;
 
@@ -156,8 +248,18 @@ export function getEdesisConfig() {
     legacyExamsPath: legacyExams || null,
     abpUser,
     abpPassword,
-    abpBearer
+    abpBearer,
+    tenantId
   };
+}
+
+/** GetOgrenciSinavIds — tenantId query şart (boş liste hatası) */
+export function buildEdesisGetOgrenciSinavIdsPath(ogrenciId, tenantId) {
+  const sid = encodeURIComponent(String(ogrenciId || '').trim());
+  const tid = String(tenantId || '').trim();
+  let path = `/api/services/app/OgrenciSinavs/GetOgrenciSinavIds?ogrenciId=${sid}`;
+  if (tid) path += `&tenantId=${encodeURIComponent(tid)}`;
+  return path;
 }
 
 function buildHeaders(cfg, { forGet = false } = {}) {
@@ -169,27 +271,27 @@ function buildHeaders(cfg, { forGet = false } = {}) {
   return h;
 }
 
-/** ABP App Service çağrıları — X-API-Key ile 403; Bearer (TokenAuth) gerekir */
+/** ABP App Service çağrıları — X-API-Key ile 403; Bearer (TokenAuth) + Abp.TenantId gerekir */
 function buildAbpHeaders(cfg, abpAccessToken, { forGet = false } = {}) {
   const h = { Accept: 'application/json' };
   if (!forGet) h['Content-Type'] = 'application/json';
   const token = String(abpAccessToken || cfg.abpBearer || '').trim();
   if (token) h.Authorization = `Bearer ${token}`;
+  const tenantId = String(cfg.tenantId || '').trim();
+  if (tenantId) h['Abp.TenantId'] = tenantId;
   return h;
 }
 
 let abpTokenCache = { token: '', expiresAt: 0, status: 'unknown', error: null };
 
 export function getEdesisAbpAuthStatus() {
+  const cfg = getEdesisConfig();
   return {
-    configured: Boolean(
-      String(process.env.EDESIS_ABP_BEARER || process.env.EDESIS_ABP_TOKEN || '').trim() ||
-        (String(process.env.EDESIS_ABP_USER || process.env.EDESIS_ABP_USERNAME || '').trim() &&
-          String(process.env.EDESIS_ABP_PASSWORD || '').trim())
-    ),
+    configured: Boolean(cfg.abpBearer || (cfg.abpUser && cfg.abpPassword)),
     cacheStatus: abpTokenCache.status,
     cacheError: abpTokenCache.error,
-    hasCachedToken: Boolean(abpTokenCache.token && abpTokenCache.expiresAt > Date.now())
+    hasCachedToken: Boolean(abpTokenCache.token && abpTokenCache.expiresAt > Date.now()),
+    tenantId: cfg.tenantId || null
   };
 }
 
@@ -228,9 +330,14 @@ export async function resolveEdesisAbpAccessToken(cfgOverride = {}) {
 
   const base = cfg.baseUrl || cfg.bases[0];
   try {
+    const authHeaders = {
+      Accept: 'application/json',
+      'Content-Type': 'application/json'
+    };
+    if (cfg.tenantId) authHeaders['Abp.TenantId'] = String(cfg.tenantId);
     const res = await fetch(joinUrl(base, '/api/TokenAuth/Authenticate'), {
       method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({
         userNameOrEmailAddress: cfg.abpUser,
         password: cfg.abpPassword,
@@ -911,15 +1018,21 @@ export async function fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId
     });
   };
 
-  // 1) Asıl atama API
+  // 1) Asıl atama API — tenantId query zorunlu (yoksa sinavId=[])
   try {
-    const path = `/api/services/app/OgrenciSinavs/GetOgrenciSinavIds?ogrenciId=${encodeURIComponent(sid)}`;
+    const path = buildEdesisGetOgrenciSinavIdsPath(sid, localCfg.tenantId);
     const r = await fetchEdesisAbpJson(localCfg, path);
     if (r.status === 401 || r.status === 403) {
       record('GetOgrenciSinavIds', path, r.status, [], r.json?.abpStatus || r.abpAuth?.status || 'auth_rejected');
     } else if (isReachableEdesisResponse(r)) {
       getOgrenciIds = parseEdesisOgrenciSinavIdsResponse(r.json);
-      record('GetOgrenciSinavIds', path, r.status, getOgrenciIds);
+      record(
+        'GetOgrenciSinavIds',
+        path,
+        r.status,
+        getOgrenciIds,
+        localCfg.tenantId ? `tenantId=${localCfg.tenantId}` : 'tenantId_missing'
+      );
     } else {
       record('GetOgrenciSinavIds', path, r.status, [], 'unreachable');
     }
