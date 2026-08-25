@@ -665,8 +665,9 @@ export function inferEdesisExamProgramKeys(parts = {}) {
   if (/\blgs\b/.test(blob)) keys.add('lgs');
   if (/\b(tyt|ayt|yks)\b/.test(blob)) keys.add('yks');
   if (/\byos\b/.test(blob)) keys.add('yos');
-  // MAARİF / müfredat izleme — ortaokul LGS hattı (tür adı LGS yazmasa da)
-  if (/\bmaarif\b/.test(blob) || /\bmufredat\b/.test(blob)) keys.add('lgs');
+  // MAARİF / müfredat izleme — ortaokul LGS hattı.
+  // Kanıt: Furkan class_level="TYT-Maarif" → TYT varken maarif≠lgs (aksi halde soft filter LGS sızdırır).
+  if ((/\bmaarif\b/.test(blob) || /\bmufredat\b/.test(blob)) && !keys.has('yks')) keys.add('lgs');
   if (/3\s*-\s*4/.test(blob)) keys.add('34');
   if (/5\s*-\s*6/.test(blob)) keys.add('56');
   if (/(?:^|[\s.])(7|8)(?:\.|\s|$)/.test(blob) || /\b(7|8)\s*\.?\s*sinif\b/.test(blob)) keys.add('lgs');
