@@ -11,7 +11,10 @@ import {
   pickEdesisCatalogExamId,
   parseEdesisOgrenciSinavIdsResponse,
   parseEdesisOgrenciSinavListesiResponse,
+  parseEdesisOgrenciSinavAssignmentResponse,
   buildEdesisGetOgrenciSinavIdsPath,
+  examCompatibleWithStudentGrade,
+  pickEdesisExamSinavTuruId,
   collectCatalogRowsForSinavIds,
   pickEdesisResultExamId,
   resultRowBelongsToStudent,
@@ -837,6 +840,27 @@ describe('buildEdesisGetOgrenciSinavIdsPath', () => {
       buildEdesisGetOgrenciSinavIdsPath(2086573, ''),
       '/api/services/app/OgrenciSinavs/GetOgrenciSinavIds?ogrenciId=2086573'
     );
+  });
+});
+
+describe('parseEdesisOgrenciSinavAssignmentResponse / grade compatibility', () => {
+  it('reads sinavId + sinavTuruId together', () => {
+    const parsed = parseEdesisOgrenciSinavAssignmentResponse({
+      result: { sinavId: [1579080], sinavTuruId: [60, 3, 60] }
+    });
+    assert.deepEqual(parsed.sinavIds, ['1579080']);
+    assert.deepEqual(parsed.sinavTuruIds, ['60', '3']);
+  });
+
+  it('picks sinavTuruId from nested deneme', () => {
+    assert.equal(pickEdesisExamSinavTuruId({ deneme: { sinavTuruId: 60 } }), '60');
+  });
+
+  it('blocks 5/6. sınıf denemeleri for grade 8', () => {
+    assert.equal(examCompatibleWithStudentGrade({ name: '5.SINIF MAT FEN KTT 2' }, '8'), false);
+    assert.equal(examCompatibleWithStudentGrade({ name: '6 SINIF FEN KTT' }, '8'), false);
+    assert.equal(examCompatibleWithStudentGrade({ name: 'LİMİT LGS HAZIRBULUNUŞLUK' }, '8'), true);
+    assert.equal(examCompatibleWithStudentGrade({ name: '7.sınıf Mat Fen KTT 2' }, '8'), true);
   });
 });
 

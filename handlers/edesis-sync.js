@@ -210,7 +210,8 @@ async function loadAvailableEdesisExamsForStudent({
       classroomCatalogRows: classroomRows,
       edesisStudentId,
       classroomId: scope.classroomId,
-      programKeys: scope.programKeys
+      programKeys: scope.programKeys,
+      gradeName: scope.gradeName || ''
     },
     cfg
   );
@@ -260,6 +261,7 @@ async function loadAvailableEdesisExamsForStudent({
       adminSinavIdsSample: (adminAssignment?.ids || []).slice(0, 20),
       adminAssignmentAttempts: adminAssignment?.attempts || [],
       analysisIdCount: adminAssignment?.analysisIds?.length || 0,
+      adminSinavTuruIdCount: adminAssignment?.sinavTuruIds?.length || 0,
       abpAuth,
       probeSkipped: Boolean(assignedResolved?.probeSkipped),
       probeSkipReason: assignedResolved?.probeSkipReason || null,
@@ -779,7 +781,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         configured: keyOk,
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-abp-tenant-2026-08-25',
+        deployMarker: 'edesis-turu-online-2026-08-25',
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
@@ -838,7 +840,7 @@ export default async function handler(req, res) {
         }
         return res.status(200).json({
           ok: true,
-          deployMarker: 'edesis-abp-tenant-2026-08-25',
+          deployMarker: 'edesis-turu-online-2026-08-25',
           configured: Boolean(cfg.apiKey),
           abpAuth: getEdesisAbpAuthStatus(),
           abpProbe: abpProbe
@@ -898,7 +900,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-abp-tenant-2026-08-25',
+        deployMarker: 'edesis-turu-online-2026-08-25',
         baseUrl: cfg.baseUrl,
         attempts: out
       });
