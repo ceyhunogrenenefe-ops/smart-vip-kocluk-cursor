@@ -19,6 +19,7 @@
  *  cart.checkout_prepare — pending sipariş + handoff token
  *  checkout.resolve      — token ile sipariş özeti (site)
  *  checkout.update_customer — veli/adres (site, token)
+ *  checkout.pay          — PayTR/Garanti başlat (odeme/kitap)
  *  order.paid            — ödeme callback webhook (site)
  *  assignment.own        — "Bu kitap bende var" (purchase yapmadan atama)
  */
@@ -33,6 +34,12 @@ import {
   signCheckoutToken,
   verifyCheckoutToken,
 } from '../api/_lib/commerce-checkout-token.js';
+import {
+  customerFieldsFromCheckoutBody,
+  normalizeCommerceCheckoutOp,
+  wantsCheckoutPayment,
+} from '../api/_lib/commerce-checkout-op.js';
+import { startCommerceProviderPayment } from '../api/_lib/commerce-checkout-pay.js';
 import { COMMERCE_DEFAULT_SETTINGS } from '../api/_lib/commerce-constants.js';
 
 function err(res, status, message) {
@@ -642,6 +649,72 @@ async function loadOrderSummary(orderId) {
   return order;
 }
 
+function orderPublic(order, extra = {}) {
+  return {
+    id: order.id,
+    order_number: order.order_number,
+    payment_ref: paymentRefFromOrderId(order.id),
+    status: order.status,
+    payment_status: order.payment_status,
+    total_kurus: order.total_kurus,
+    subtotal_kurus: order.subtotal_kurus,
+    shipping_kurus: order.shipping_kurus,
+    discount_kurus: order.discount_kurus,
+    coupon_code: order.coupon_code,
+    customer_name: order.customer_name,
+    customer_email: order.customer_email,
+    customer_phone: order.customer_phone,
+    items: order.commerce_order_items || [],
+    ...extra,
+  };
+}
+
+async function applyCheckoutCustomer(body, orderId) {
+  const fields = customerFieldsFromCheckoutBody(body);
+  const c = body.customer && typeof body.customer === 'object' ? body.customer : {};
+  const name = fields.name || String(c.parentName || '').trim();
+  const email = fields.email;
+  const phone = fields.phone;
+  if (!name || name.length < 3) throw new Error('Veli adı soyadı en az 3 karakter olmalıdır.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Geçerli e-posta girin');
+  if (phone.replace(/\D/g, '').length < 10) throw new Error('Geçerli telefon girin');
+
+  const { error } = await supabaseAdmin
+    .from('commerce_orders')
+    .update({
+      customer_name: name,
+      customer_email: email,
+      customer_phone: phone,
+      notes: fields.notes || null,
+      payment_status: 'processing',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', orderId)
+    .eq('status', 'pending_payment');
+  if (error) throw error;
+
+  const addr = body.address || {};
+  const line1 = String(addr.address_line1 || addr.line1 || '').trim();
+  const city = String(addr.city || '').trim();
+  if (line1 && city) {
+    await supabaseAdmin.from('commerce_order_addresses').delete().eq('order_id', orderId).eq('address_type', 'shipping');
+    await supabaseAdmin.from('commerce_order_addresses').insert({
+      order_id: orderId,
+      address_type: 'shipping',
+      full_name: name,
+      phone,
+      address_line1: line1,
+      address_line2: String(addr.address_line2 || addr.line2 || '').trim() || null,
+      district: String(addr.district || '').trim() || null,
+      city,
+      postal_code: String(addr.postal_code || '').trim() || null,
+      country: 'TR',
+    });
+  }
+
+  return { name, email, phone, notes: fields.notes };
+}
+
 async function handleCheckout(op, body, req) {
   if (op === 'checkout.resolve') {
     const payload = verifyCheckoutToken(body.token);
@@ -654,84 +727,31 @@ async function handleCheckout(op, body, req) {
     }
     return {
       ok: true,
-      order: {
-        id: order.id,
-        order_number: order.order_number,
-        payment_ref: paymentRefFromOrderId(order.id),
-        status: order.status,
-        payment_status: order.payment_status,
-        total_kurus: order.total_kurus,
-        subtotal_kurus: order.subtotal_kurus,
-        shipping_kurus: order.shipping_kurus,
-        discount_kurus: order.discount_kurus,
-        coupon_code: order.coupon_code,
-        customer_name: order.customer_name,
-        customer_email: order.customer_email,
-        customer_phone: order.customer_phone,
-        items: order.commerce_order_items || [],
-      },
+      order: orderPublic(order),
     };
   }
 
-  if (op === 'checkout.update_customer') {
+  if (op === 'checkout.update_customer' || op === 'checkout.pay') {
     const payload = verifyCheckoutToken(body.token);
-    const name = String(body.customer_name || body.parentName || '').trim();
-    const email = String(body.customer_email || body.email || '').trim().toLowerCase();
-    const phone = String(body.customer_phone || body.phone || '').trim();
-    if (!name || name.length < 3) throw new Error('Ad soyad en az 3 karakter olmalı');
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Geçerli e-posta girin');
-    if (phone.replace(/\D/g, '').length < 10) throw new Error('Geçerli telefon girin');
-
-    const { error } = await supabaseAdmin
-      .from('commerce_orders')
-      .update({
-        customer_name: name,
-        customer_email: email,
-        customer_phone: phone,
-        notes: String(body.notes || body.studentInfo || '').trim() || null,
-        payment_status: 'processing',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', payload.oid)
-      .eq('status', 'pending_payment');
-    if (error) throw error;
-
-    const addr = body.address || {};
-    const line1 = String(addr.address_line1 || addr.line1 || '').trim();
-    const city = String(addr.city || '').trim();
-    if (line1 && city) {
-      await supabaseAdmin.from('commerce_order_addresses').delete().eq('order_id', payload.oid).eq('address_type', 'shipping');
-      await supabaseAdmin.from('commerce_order_addresses').insert({
-        order_id: payload.oid,
-        address_type: 'shipping',
-        full_name: name,
-        phone,
-        address_line1: line1,
-        address_line2: String(addr.address_line2 || addr.line2 || '').trim() || null,
-        district: String(addr.district || '').trim() || null,
-        city,
-        postal_code: String(addr.postal_code || '').trim() || null,
-        country: 'TR',
-      });
-    }
-
+    const saved = await applyCheckoutCustomer(body, payload.oid);
     const order = await loadOrderSummary(payload.oid);
-    return {
+    const base = {
       ok: true,
       payment_ref: paymentRefFromOrderId(order.id),
-      order: {
-        id: order.id,
-        order_number: order.order_number,
-        total_kurus: order.total_kurus,
-        subtotal_kurus: order.subtotal_kurus,
-        shipping_kurus: order.shipping_kurus,
-        discount_kurus: order.discount_kurus,
-        items: order.commerce_order_items || [],
-        customer_name: name,
-        customer_email: email,
-        customer_phone: phone,
-      },
+      order: orderPublic(order, {
+        customer_name: saved.name,
+        customer_email: saved.email,
+        customer_phone: saved.phone,
+      }),
     };
+    if (!wantsCheckoutPayment(op, body) && op !== 'checkout.pay') return base;
+    const pay = await startCommerceProviderPayment(
+      req,
+      order,
+      { name: saved.name, email: saved.email, phone: saved.phone, notes: saved.notes },
+      body.provider
+    );
+    return { ...base, ...pay };
   }
 
   if (op === 'order.paid') {
@@ -885,8 +905,12 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return err(res, 405, 'Method Not Allowed');
   try {
     const body = req.body ?? {};
-    const op = String(body.op ?? '').trim();
+    let op = String(body.op ?? '').trim();
     if (!op) return err(res, 400, 'op gerekli');
+    // Site /odeme/kitap: resolve | pay | update_customer
+    if (op === 'resolve' || op === 'pay' || op === 'update_customer') {
+      op = normalizeCommerceCheckoutOp(op);
+    }
 
     // Catalog GET operasyonları public (actor olmayabilir)
     let actor = null;
@@ -910,7 +934,7 @@ export default async function handler(req, res) {
   } catch (e) {
     console.error('[commerce-store]', e?.message || e);
     const msg = e?.message || 'sunucu_hatası';
-    if (/Yetkisiz|giriş gerekli|Geçersiz|süresi dolmuş|bulunamadı|yeterli stok|Sepet boş|yapılandırılmamış/i.test(msg)) {
+    if (/Yetkisiz|giriş gerekli|Geçersiz|süresi dolmuş|bulunamadı|yeterli stok|Sepet boş|yapılandırılmamış|Veli|e-posta|telefon|karakter|PayTR|Garanti|token|ödeme|Sipariş/i.test(msg)) {
       const status = /Yetkisiz/i.test(msg) ? 401 : 400;
       return err(res, status, msg);
     }
