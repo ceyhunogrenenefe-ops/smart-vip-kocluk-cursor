@@ -27,6 +27,9 @@ import {
   pickEdesisCatalogExamId,
   fetchEdesisOgrenciAssignedSinavIdsDetailed,
   getEdesisAbpAuthStatus,
+  fetchEdesisExamCatalogRowDetail,
+  fetchEdesisExamRosterStudentIds,
+  catalogExamAssignedToStudent,
   fetchEdesisGradesList,
   fetchEdesisDepartmentsList,
   fetchEdesisClassroomsList,
@@ -769,7 +772,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         configured: keyOk,
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-safiye-takeable-2026-08-25',
+        deployMarker: 'edesis-takeable-detail-2026-08-25',
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
@@ -833,7 +836,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-safiye-takeable-2026-08-25',
+        deployMarker: 'edesis-takeable-detail-2026-08-25',
         baseUrl: cfg.baseUrl,
         attempts: out
       });
@@ -1604,8 +1607,59 @@ export default async function handler(req, res) {
         takeableSample: (loaded.items || [])
           .filter((x) => x.canTake && !x.hasStudentResult)
           .slice(0, 20)
-          .map((x) => ({ examId: x.examId, examTitle: x.examTitle, examType: x.examType })),
+          .map((x) => ({ examId: x.examId, examTitle: x.examTitle || x.name, examType: x.examType })),
         resultCount: (loaded.items || []).filter((x) => x.hasStudentResult).length
+      });
+    }
+
+    if (op === 'debug-exam-assign') {
+      if (!isStaff) return res.status(403).json({ error: 'forbidden' });
+      const cfg = getEdesisConfig();
+      if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
+      const examId = String(req.query?.examId || req.body?.examId || '').trim();
+      let edesisStudentId = String(
+        req.query?.edesisStudentId || req.body?.edesisStudentId || ''
+      ).trim();
+      const platformStudentId = String(req.query?.studentId || req.body?.studentId || '').trim();
+      if (!examId) return res.status(400).json({ error: 'examId_required' });
+      if (!edesisStudentId && platformStudentId) {
+        const resolved = await resolveEdesisIdForPlatformStudent(platformStudentId, actor, tags);
+        edesisStudentId = resolved.edesisStudentId || '';
+      }
+      if (!edesisStudentId) return res.status(400).json({ error: 'edesis_student_id_missing' });
+      const detail = await fetchEdesisExamCatalogRowDetail(examId, cfg);
+      const roster = await fetchEdesisExamRosterStudentIds(examId, cfg);
+      const classroomId = String(req.query?.classroomId || '294965');
+      const assign = catalogExamAssignedToStudent(detail || {}, {
+        edesisStudentId,
+        classroomId,
+        allowClassroomOnly: true,
+        requireStudentIdMatch: true
+      });
+      return res.status(200).json({
+        ok: true,
+        examId,
+        edesisStudentId,
+        classroomId,
+        assign,
+        detailKeys: detail ? Object.keys(detail).slice(0, 40) : [],
+        ogrenciIds: detail?.ogrenciIds || detail?.studentIds || null,
+        classRoomIds: detail?.classRoomIds || detail?.classroomIds || null,
+        isAllClasses: detail?.isAllClasses ?? null,
+        isOnlineSinavForStudent: detail?.isOnlineSinavForStudent ?? null,
+        rosterCount: Array.isArray(roster) ? roster.length : null,
+        rosterHasStudent: Array.isArray(roster)
+          ? roster.some((id) => String(id) === String(edesisStudentId))
+          : null,
+        detailSample: detail
+          ? {
+              id: detail.id,
+              sinavAdi: detail.sinavAdi || detail.name,
+              isAllClasses: detail.isAllClasses,
+              ogrenciIds: detail.ogrenciIds,
+              classRoomIds: detail.classRoomIds
+            }
+          : null
       });
     }
 
@@ -1881,6 +1935,7 @@ export default async function handler(req, res) {
         'exam-results-subjects',
         'available-exams',
         'debug-assignment',
+        'debug-exam-assign',
         'submit-exam',
         'ingest-results',
         'ingest-status',
