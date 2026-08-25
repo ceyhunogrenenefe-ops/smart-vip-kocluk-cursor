@@ -784,14 +784,14 @@ export function parseEdesisOgrenciSinavIdsResponse(json) {
 }
 
 /**
- * ID’siz App Service yanıtlarından sinavId çıkar:
- * - GetOgrenciSinavIds → { sinavId: number[] }
- * - OgrenciSinavListesi → AnalizSinavDto[] → sinavlar[].sinavId
- * - OgrenciSinavListesiByDonemIds → AnalizSinavDonemDto[] → donemSinavlar
+ * OgrenciSinavListesi / ByDonemIds — sinavId + isChecked ayrımı.
+ * Analiz listesi geçmişi döner; isChecked=true online/seçili atama adayıdır.
  */
-export function parseEdesisOgrenciSinavListesiResponse(json) {
+export function parseEdesisOgrenciSinavListesiDetailed(json) {
   const fromIds = parseEdesisOgrenciSinavIdsResponse(json);
-  if (fromIds.length) return fromIds;
+  if (fromIds.length) {
+    return { allIds: fromIds, checkedIds: fromIds, sawCheckedFlag: false };
+  }
 
   const root =
     json?.result != null && (Array.isArray(json.result) || typeof json.result === 'object')
@@ -807,7 +807,9 @@ export function parseEdesisOgrenciSinavListesiResponse(json) {
     buckets.push(root);
   }
 
-  const out = [];
+  const all = [];
+  const checked = [];
+  let sawCheckedFlag = false;
   const walk = (node) => {
     if (!node) return;
     if (Array.isArray(node)) {
@@ -820,13 +822,34 @@ export function parseEdesisOgrenciSinavListesiResponse(json) {
       pickStrCi(flat, ['sinavId', 'examId']) ||
       (flat.sinavId != null ? String(flat.sinavId) : '') ||
       (flat.SinavId != null ? String(flat.SinavId) : '');
-    if (direct && /^\d+$/.test(String(direct).trim())) out.push(String(direct).trim());
+    if (direct && /^\d+$/.test(String(direct).trim())) {
+      const id = String(direct).trim();
+      all.push(id);
+      const flag = getPropCi(flat, ['isChecked', 'checked', 'secili']);
+      if (flag === true || flag === 'true' || flag === 1 || flag === '1') {
+        sawCheckedFlag = true;
+        checked.push(id);
+      } else if (flag === false || flag === 'false' || flag === 0 || flag === '0') {
+        sawCheckedFlag = true;
+      }
+    }
     for (const k of ['sinavlar', 'donemSinavlar', 'items', 'exams']) {
       if (Array.isArray(flat[k])) walk(flat[k]);
     }
   };
   walk(buckets);
-  return [...new Set(out.filter(Boolean))];
+  return {
+    allIds: [...new Set(all.filter(Boolean))],
+    checkedIds: [...new Set(checked.filter(Boolean))],
+    sawCheckedFlag
+  };
+}
+
+/**
+ * ID’siz App Service yanıtlarından sinavId çıkar (geriye dönük: tüm ID’ler).
+ */
+export function parseEdesisOgrenciSinavListesiResponse(json) {
+  return parseEdesisOgrenciSinavListesiDetailed(json).allIds;
 }
 
 function extractSinavIdsFromSinavOgrenciRows(rows, sid) {
@@ -852,20 +875,30 @@ function extractSinavIdsFromSinavOgrenciRows(rows, sid) {
 }
 
 /**
- * Öğrenciye tanımlı sınav ID’leri — sınav ID bilmeden (ID’siz AP).
- * Tüm kaynaklar birleştirilir (Listesi analiz geçmişi olabilir; SinavOgrencies / GetOgrenciSinavIds
- * yeni online atamayı taşır). Short-circuit YOK.
+ * Öğrenciye tanımlı sınav ID’leri — Sınava gir için.
+ *
+ * ÖNEMLİ: OgrenciSinavListesi = analiz geçmişi (46+ eski sınav). Sınava gir’e dökülmez.
+ * Tercih sırası:
+ * 1) GetOgrenciSinavIds (asıl atama)
+ * 2) Listesi isChecked=true
+ * 3) Yalnızca aktif/default dönem Listesi
+ * 4) SinavOgrencies
  */
 export async function fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId, cfgOverride = {}) {
   const sid = normEdesisId(edesisStudentId);
-  const empty = { ids: [], attempts: [], source: null };
+  const empty = { ids: [], attempts: [], source: null, preferredSource: null, analysisIds: [] };
   if (!sid) return empty;
   const cfg = { ...getEdesisConfig(), ...cfgOverride };
   const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
   const attempts = [];
   const numericSid = Number(sid);
   const sidBody = Number.isFinite(numericSid) ? numericSid : sid;
-  const merged = new Set();
+
+  let getOgrenciIds = [];
+  let checkedIds = [];
+  let defaultDonemIds = [];
+  let sinavOgrenciIds = [];
+  let analysisIds = [];
 
   const record = (label, path, status, ids, note = null) => {
     attempts.push({
@@ -873,140 +906,134 @@ export async function fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId
       path,
       status: status ?? null,
       count: Array.isArray(ids) ? ids.length : 0,
+      idsSample: (ids || []).slice(0, 12),
       note
     });
   };
 
-  const absorb = (ids) => {
-    for (const id of ids || []) {
-      const s = String(id || '').trim();
-      if (s) merged.add(s);
+  // 1) Asıl atama API
+  try {
+    const path = `/api/services/app/OgrenciSinavs/GetOgrenciSinavIds?ogrenciId=${encodeURIComponent(sid)}`;
+    const r = await fetchEdesisAbpJson(localCfg, path);
+    if (r.status === 401 || r.status === 403) {
+      record('GetOgrenciSinavIds', path, r.status, [], r.json?.abpStatus || r.abpAuth?.status || 'auth_rejected');
+    } else if (isReachableEdesisResponse(r)) {
+      getOgrenciIds = parseEdesisOgrenciSinavIdsResponse(r.json);
+      record('GetOgrenciSinavIds', path, r.status, getOgrenciIds);
+    } else {
+      record('GetOgrenciSinavIds', path, r.status, [], 'unreachable');
     }
-  };
+  } catch (e) {
+    record('GetOgrenciSinavIds', '', null, [], e instanceof Error ? e.message : 'error');
+  }
 
-  const tryGet = async (label, path, parseFn) => {
-    try {
-      const r = await fetchEdesisAbpJson(localCfg, path);
-      if (r.status === 401 || r.status === 403) {
-        record(label, path, r.status, [], r.json?.abpStatus || r.abpAuth?.status || 'auth_rejected');
-        return;
+  // 2) Analiz listesi — yalnızca isChecked / debug; tümünü Sınava gir’e alma
+  try {
+    const path = `/api/services/app/Sinavs/OgrenciSinavListesi`;
+    const r = await fetchEdesisAbpJson(localCfg, path, { method: 'POST', body: [sidBody] });
+    if (r.status === 401 || r.status === 403) {
+      record('OgrenciSinavListesi', path, r.status, [], r.json?.abpStatus || r.abpAuth?.status || 'auth_rejected');
+    } else if (isReachableEdesisResponse(r)) {
+      const parsed = parseEdesisOgrenciSinavListesiDetailed(r.json);
+      analysisIds = parsed.allIds;
+      checkedIds = parsed.checkedIds;
+      record(
+        'OgrenciSinavListesi',
+        path,
+        r.status,
+        parsed.allIds,
+        parsed.sawCheckedFlag
+          ? `checked=${parsed.checkedIds.length}/${parsed.allIds.length}`
+          : `analysis_all=${parsed.allIds.length}`
+      );
+      if (parsed.sawCheckedFlag && parsed.checkedIds.length) {
+        record('OgrenciSinavListesi.checked', path, r.status, parsed.checkedIds, 'isChecked=true');
       }
-      if (!isReachableEdesisResponse(r)) {
-        record(label, path, r.status, [], 'unreachable');
-        return;
-      }
-      const ids = parseFn(r.json);
-      record(label, path, r.status, ids);
-      absorb(ids);
-    } catch (e) {
-      record(label, path, null, [], e instanceof Error ? e.message : 'error');
+    } else {
+      record('OgrenciSinavListesi', path, r.status, [], 'unreachable');
     }
-  };
+  } catch (e) {
+    record('OgrenciSinavListesi', '', null, [], e instanceof Error ? e.message : 'error');
+  }
 
-  const tryPost = async (label, path, body, parseFn) => {
-    try {
-      const r = await fetchEdesisAbpJson(localCfg, path, { method: 'POST', body });
-      if (r.status === 401 || r.status === 403) {
-        record(label, path, r.status, [], r.json?.abpStatus || r.abpAuth?.status || 'auth_rejected');
-        return;
-      }
-      if (!isReachableEdesisResponse(r)) {
-        record(label, path, r.status, [], 'unreachable');
-        return;
-      }
-      const ids = parseFn(r.json);
-      record(label, path, r.status, ids);
-      absorb(ids);
-    } catch (e) {
-      record(label, path, null, [], e instanceof Error ? e.message : 'error');
-    }
-  };
-
-  await tryGet(
-    'GetOgrenciSinavIds',
-    `/api/services/app/OgrenciSinavs/GetOgrenciSinavIds?ogrenciId=${encodeURIComponent(sid)}`,
-    parseEdesisOgrenciSinavIdsResponse
-  );
-  await tryPost(
-    'OgrenciSinavListesi',
-    `/api/services/app/Sinavs/OgrenciSinavListesi`,
-    [sidBody],
-    parseEdesisOgrenciSinavListesiResponse
-  );
-
-  let donemIds = [];
+  // 3) Aktif dönem — dar liste (geçmiş dönemleri birleştirme)
+  let defaultDonemId = null;
   try {
     const terms = await fetchEdesisTermsList(localCfg);
     const items = terms?.rows || terms?.items || [];
-    donemIds = items
-      .filter((t) => t && (t.isDefault || /2026|2025|YAZ/i.test(String(t.name || ''))))
-      .map((t) => Number(t.id))
-      .filter((n) => Number.isFinite(n))
-      .slice(0, 5);
+    const def = items.find((t) => t && t.isDefault) || items.find((t) => /2026-2027(?!-)/.test(String(t?.name || '')));
+    defaultDonemId = def ? Number(def.id) : null;
+    if (!Number.isFinite(defaultDonemId)) defaultDonemId = 113;
   } catch {
-    donemIds = [];
+    defaultDonemId = 113;
   }
-  if (!donemIds.length) donemIds = [113, 142, 40];
 
-  for (const donemId of donemIds) {
-    await tryPost(
-      `OgrenciSinavListesi?donemId=${donemId}`,
-      `/api/services/app/Sinavs/OgrenciSinavListesi?donemId=${donemId}`,
-      [sidBody],
-      parseEdesisOgrenciSinavListesiResponse
-    );
+  try {
+    const path = `/api/services/app/Sinavs/OgrenciSinavListesi?donemId=${defaultDonemId}`;
+    const r = await fetchEdesisAbpJson(localCfg, path, { method: 'POST', body: [sidBody] });
+    if (r.status === 401 || r.status === 403) {
+      record(`OgrenciSinavListesi?donemId=${defaultDonemId}`, path, r.status, [], 'auth_rejected');
+    } else if (isReachableEdesisResponse(r)) {
+      const parsed = parseEdesisOgrenciSinavListesiDetailed(r.json);
+      defaultDonemIds = parsed.sawCheckedFlag && parsed.checkedIds.length ? parsed.checkedIds : parsed.allIds;
+      record(
+        `OgrenciSinavListesi?donemId=${defaultDonemId}`,
+        path,
+        r.status,
+        defaultDonemIds,
+        parsed.sawCheckedFlag ? `checked=${parsed.checkedIds.length}` : 'donem_all'
+      );
+    } else {
+      record(`OgrenciSinavListesi?donemId=${defaultDonemId}`, path, r.status, [], 'unreachable');
+    }
+  } catch (e) {
+    record(`OgrenciSinavListesi?donemId=${defaultDonemId}`, '', null, [], e instanceof Error ? e.message : 'error');
   }
-  await tryPost(
-    'OgrenciSinavListesiByDonemIds',
-    `/api/services/app/Sinavs/OgrenciSinavListesiByDonemIds`,
-    // Swagger şeması: ogrengiIds (yazım hatası Edesis tarafında)
-    { ogrengiIds: [sidBody], ogrenciIds: [sidBody], donemIds },
-    parseEdesisOgrenciSinavListesiResponse
-  );
 
-  {
+  // 4) SinavOgrencies — gerçek öğrenci-sınav bağları
+  try {
     const path = `/api/services/app/SinavOgrencies/GetAll?Filter=${encodeURIComponent(sid)}&MaxResultCount=500`;
-    try {
-      const r = await fetchEdesisAbpJson(localCfg, path);
-      if (r.status === 401 || r.status === 403) {
-        record('SinavOgrencies.GetAll', path, r.status, [], r.json?.abpStatus || r.abpAuth?.status || 'auth_rejected');
-      } else if (isReachableEdesisResponse(r)) {
-        const fromSinavIds = parseEdesisOgrenciSinavIdsResponse(r.json);
-        const fromRows = extractSinavIdsFromSinavOgrenciRows(unwrapList(r.json), sid);
-        const ids = fromSinavIds.length ? fromSinavIds : fromRows;
-        record('SinavOgrencies.GetAll', path, r.status, ids || []);
-        absorb(ids);
-      } else {
-        record('SinavOgrencies.GetAll', path, r.status, [], 'unreachable');
-      }
-    } catch (e) {
-      record('SinavOgrencies.GetAll', path, null, [], e instanceof Error ? e.message : 'error');
+    const r = await fetchEdesisAbpJson(localCfg, path);
+    if (r.status === 401 || r.status === 403) {
+      record('SinavOgrencies.GetAll', path, r.status, [], r.json?.abpStatus || r.abpAuth?.status || 'auth_rejected');
+    } else if (isReachableEdesisResponse(r)) {
+      const fromSinavIds = parseEdesisOgrenciSinavIdsResponse(r.json);
+      const fromRows = extractSinavIdsFromSinavOgrenciRows(unwrapList(r.json), sid);
+      sinavOgrenciIds = fromSinavIds.length ? fromSinavIds : fromRows;
+      record('SinavOgrencies.GetAll', path, r.status, sinavOgrenciIds);
+    } else {
+      record('SinavOgrencies.GetAll', path, r.status, [], 'unreachable');
     }
+  } catch (e) {
+    record('SinavOgrencies.GetAll', '', null, [], e instanceof Error ? e.message : 'error');
   }
 
-  // OgrenciId filtresi (Filter serbest metin bazen başka kayda kayar)
-  {
-    const path = `/api/services/app/SinavOgrencies/GetAll?OgrenciId=${encodeURIComponent(sid)}&MaxResultCount=500`;
-    try {
-      const r = await fetchEdesisAbpJson(localCfg, path);
-      if (r.status === 401 || r.status === 403) {
-        record('SinavOgrencies.GetAll.OgrenciId', path, r.status, [], r.json?.abpStatus || r.abpAuth?.status || 'auth_rejected');
-      } else if (isReachableEdesisResponse(r)) {
-        const fromRows = extractSinavIdsFromSinavOgrenciRows(unwrapList(r.json), sid);
-        record('SinavOgrencies.GetAll.OgrenciId', path, r.status, fromRows);
-        absorb(fromRows);
-      } else {
-        record('SinavOgrencies.GetAll.OgrenciId', path, r.status, [], 'unreachable');
-      }
-    } catch (e) {
-      record('SinavOgrencies.GetAll.OgrenciId', path, null, [], e instanceof Error ? e.message : 'error');
-    }
+  let ids = [];
+  let preferredSource = null;
+  if (getOgrenciIds.length) {
+    ids = getOgrenciIds;
+    preferredSource = 'GetOgrenciSinavIds';
+  } else if (sinavOgrenciIds.length) {
+    ids = sinavOgrenciIds;
+    preferredSource = 'SinavOgrencies';
+  } else if (checkedIds.length) {
+    ids = checkedIds;
+    preferredSource = 'OgrenciSinavListesi.checked';
+  } else if (defaultDonemIds.length) {
+    // Aktif dönem analiz listesi — hâlâ geniş olabilir; takeable tarafı tarih/None ile daraltır
+    ids = defaultDonemIds;
+    preferredSource = `OgrenciSinavListesi?donemId=${defaultDonemId}`;
   }
 
-  const ids = [...merged];
-  const source = attempts.find((a) => a.count > 0)?.label || null;
   const abpAuth = getEdesisAbpAuthStatus();
-  return { ids, attempts, source, abpAuth };
+  return {
+    ids,
+    attempts,
+    source: preferredSource || attempts.find((a) => a.count > 0)?.label || null,
+    preferredSource,
+    analysisIds,
+    abpAuth
+  };
 }
 
 export async function fetchEdesisOgrenciAssignedSinavIds(edesisStudentId, cfgOverride = {}) {
@@ -1680,12 +1707,11 @@ export function shouldOfferUntakenCatalogExam(exam, scope = {}, now = new Date()
   if (assigned === false) return false;
 
   if (scope.requireExplicitAssignment) {
-    if (assigned === true) {
-      // Atama varsa program süzgeci uygulama (Edesis ne tanımladıysa)
-      return true;
-    }
-    if (scope.assignedCatalogOnly) {
-      // Admin/ID listesinden gelen satır — program uymasa da göster
+    if (assigned === true || scope.assignedCatalogOnly) {
+      // Sınava gir: atanmış + açık. Ready ama yıllarca eski analiz kalıntısını gösterme.
+      if (/^none$/i.test(catalogResultStatus(exam))) return true;
+      const win = Number(scope.assignedTakeableWindowDays) || 120;
+      if (!isRecentOpenCatalogExam(exam, now, win)) return false;
       return true;
     }
     return false;
@@ -2184,10 +2210,9 @@ export function formatEdesisAvailableExamItem(examId, catalog, resultRow, meta =
 }
 
 /**
- * Öğrenciye gösterilecek denemeler (v1.5 rehber):
- * 1) GET /exams/results?studentId= satırları (girilmiş)
- * 2) GET /exams kataloğu — programı uyan, kapanmamış, henüz girilmemiş
- *    (API’de öğrenci/şube atama filtresi yoktur)
+ * Öğrenciye gösterilecek denemeler:
+ * requireExplicitAssignment → yalnızca atanmış + henüz girilmemiş (Sınava gir).
+ * Sonuçlar student-results hub’dan gelir; buraya girilmişleri karıştırma.
  */
 export function buildStudentAvailableEdesisExamItems({
   catalogRows = [],
@@ -2232,12 +2257,19 @@ export function buildStudentAvailableEdesisExamItems({
     );
   };
 
-  for (const [examId, resultRow] of resultByExam) {
-    push(examId, catalogById.get(examId) || null, resultRow);
-  }
-
   const keys = programKeys instanceof Set ? programKeys : new Set(programKeys || []);
   const strictAssignment = Boolean(requireExplicitAssignment);
+
+  // Sınava gir: girilmiş sonuçları listeye koyma (Sonuçlarım ayrı API)
+  if (!strictAssignment) {
+    for (const [examId, resultRow] of resultByExam) {
+      push(examId, catalogById.get(examId) || null, resultRow);
+    }
+  } else {
+    // Atanmış ama daha önce girilmişse Sınava gir’de gösterme
+    for (const examId of resultByExam.keys()) seen.add(examId);
+  }
+
   const assignedOnly =
     strictAssignment || (Array.isArray(assignedCatalogRows) && assignedCatalogRows.length > 0);
   const offerRows = strictAssignment
@@ -2262,12 +2294,11 @@ export function buildStudentAvailableEdesisExamItems({
   }
 
   items.sort((a, b) => String(b.examDate || '').localeCompare(String(a.examDate || '')));
-  // Girilmiş sonuçlar program süzgecinden geçmesin (YKS öğrencisi + YÖS denemesi vb.)
+  if (strictAssignment) return items;
   const filtered = filterEdesisExamsForStudentProgram(items, keys, {
     keepSubmitted: true,
     keepTakeable: true
   });
-  // Program süzgeci tüm girilebilir denemeleri silmesin (tür alanı boş atanmışlar)
   if (!filtered.length && items.some((x) => x.canTake)) return items;
   return filtered;
 }

@@ -253,10 +253,11 @@ async function loadAvailableEdesisExamsForStudent({
       fullCatalogCount: fullRows.length,
       catalogCached: Boolean(catalog.cached),
       programKeys: [...(scope.programKeys || [])],
-      adminAssignmentSource: adminAssignment?.source || null,
+      adminAssignmentSource: adminAssignment?.preferredSource || adminAssignment?.source || null,
       adminSinavIdCount: adminAssignment?.ids?.length || 0,
       adminSinavIdsSample: (adminAssignment?.ids || []).slice(0, 20),
       adminAssignmentAttempts: adminAssignment?.attempts || [],
+      analysisIdCount: adminAssignment?.analysisIds?.length || 0,
       abpAuth,
       probeSkipped: Boolean(assignedResolved?.probeSkipped),
       probeSkipReason: assignedResolved?.probeSkipReason || null,
@@ -772,7 +773,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         configured: keyOk,
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-takeable-detail-2026-08-25',
+        deployMarker: 'edesis-takeable-strict-2026-08-25',
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
@@ -836,7 +837,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-takeable-detail-2026-08-25',
+        deployMarker: 'edesis-takeable-strict-2026-08-25',
         baseUrl: cfg.baseUrl,
         attempts: out
       });
