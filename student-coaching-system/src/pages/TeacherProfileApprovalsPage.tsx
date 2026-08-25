@@ -322,12 +322,13 @@ export default function TeacherProfileApprovalsPage() {
       setOpenPanelPwd('');
       setOpenPanelInstId('');
       if (j.user_management_path) {
+        const path = String(j.user_management_path);
         toast.message(
           <span>
             Kullanıcı Yönetimi:{' '}
-            <Link className="underline font-bold" to={j.user_management_path}>
+            <a className="underline font-bold" href={path}>
               kaydı aç
-            </Link>
+            </a>
           </span>,
           { duration: 8000 }
         );
