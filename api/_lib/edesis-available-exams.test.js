@@ -14,6 +14,7 @@ import {
   parseEdesisOgrenciSinavAssignmentResponse,
   buildEdesisGetOgrenciSinavIdsPath,
   examCompatibleWithStudentGrade,
+  examCompatibleWithStudentProgramSoft,
   pickEdesisExamSinavTuruId,
   collectCatalogRowsForSinavIds,
   pickEdesisResultExamId,
@@ -50,6 +51,39 @@ describe('inferEdesisExamProgramKeys', () => {
   it('maps TYT exam type to yks', () => {
     const keys = inferEdesisExamProgramKeys({ examType: 'TYT' });
     assert.equal(keys.has('yks'), true);
+  });
+
+  it('maps MAARİF / müfredat to lgs', () => {
+    const keys = inferEdesisExamProgramKeys({ examType: 'MAARİF 80', examName: 'Maarif Model4' });
+    assert.equal(keys.has('lgs'), true);
+    assert.equal(keys.has('yks'), false);
+  });
+});
+
+describe('examCompatibleWithStudentProgramSoft', () => {
+  it('keeps LGS+Maarif for lgs student, blocks for yks', () => {
+    const lgs = new Set(['lgs']);
+    const yks = new Set(['yks']);
+    assert.equal(
+      examCompatibleWithStudentProgramSoft({ name: 'LİMİT LGS', examType: '5-6-7 LGS 90' }, lgs),
+      true
+    );
+    assert.equal(
+      examCompatibleWithStudentProgramSoft({ name: 'Maarif Model4', examType: 'MAARİF 80' }, lgs),
+      true
+    );
+    assert.equal(
+      examCompatibleWithStudentProgramSoft({ name: 'LİMİT LGS', examType: '5-6-7 LGS 90' }, yks),
+      false
+    );
+    assert.equal(
+      examCompatibleWithStudentProgramSoft({ name: 'Maarif Model4', examType: 'MAARİF 80' }, yks),
+      false
+    );
+    assert.equal(
+      examCompatibleWithStudentProgramSoft({ name: 'TOPRAK', examType: 'TYT' }, yks),
+      true
+    );
   });
 });
 
@@ -994,8 +1028,8 @@ describe('requireExplicitAssignment never dumps catalog', () => {
       windowDays: 45
     });
     assert.deepEqual(
-      unpublished.map((r) => pickEdesisCatalogExamId(r)),
-      ['1559901']
+      unpublished.map((r) => pickEdesisCatalogExamId(r)).sort(),
+      ['1559901', '1567875']
     );
 
     const assigned = resolveAssignedCatalogRowsForStudent({
