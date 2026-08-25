@@ -387,11 +387,11 @@ export default function EdesisOpticalSheet({
 
   const kitapcikValue = (() => {
     const raw = String(kitapcik || '').trim().toUpperCase();
-    return KITAPCIK_ORDER.includes(raw) ? raw : 'A';
+    return bookletCodes.includes(raw) ? raw : bookletCodes[0] || 'A';
   })();
   const sayisalValue = (() => {
     const raw = String(kitapcikSayisal || '').trim().toUpperCase();
-    return KITAPCIK_ORDER.includes(raw) ? raw : kitapcikValue;
+    return bookletCodes.includes(raw) ? raw : kitapcikValue;
   })();
   const heading = activeFilled?.lesson.lessonName || examTitle || 'Optik';
   const tabPrefix =
@@ -400,7 +400,7 @@ export default function EdesisOpticalSheet({
   const opticalAside = (
     <aside
       className={`flex min-h-0 w-full shrink-0 flex-col border-b border-slate-200 bg-white md:border-b-0 md:border-r ${
-        pdfWide ? 'hidden md:hidden' : 'md:w-[17.5rem] lg:w-[19rem] xl:w-[20.5rem]'
+        pdfWide ? 'hidden md:hidden' : 'md:w-[15.5rem] lg:w-[16.5rem] xl:w-[18rem]'
       }`}
     >
       <div className="grid grid-cols-2 gap-1 border-b border-slate-200 px-2 py-2">
