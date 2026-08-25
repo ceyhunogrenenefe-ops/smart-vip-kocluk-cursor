@@ -31,6 +31,7 @@ import {
   listEdesisBookletCodes,
   canonicalEdesisStructureLessons,
   looksLikePdfBuffer,
+  absorbEdesisBookletSource,
   catalogLooksStudentFiltered,
   catalogQueryLooksFiltered,
   catalogExamAssignedToStudent,
@@ -1235,6 +1236,38 @@ describe('collectEdesisBookletFiles', () => {
       '1102253'
     );
     assert.ok(files.some((f) => f.url.includes('c3d4e5f6-a7b8-9012-cdef-123456789012')));
+  });
+
+  it('absorbEdesisBookletSource reads ABP GetSinavForView denemeUrl + denemeId', () => {
+    const absorbed = absorbEdesisBookletSource(
+      {
+        id: 1579080,
+        name: 'LİMİT LGS HAZIRBULUNUŞLUK',
+        sinavTuruAdi: 'LGS',
+        deneme: {
+          id: 441122,
+          denemeUrl: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+        }
+      },
+      '1579080'
+    );
+    assert.equal(absorbed.denemeId, '441122');
+    assert.ok(absorbed.files.some((f) => f.url.includes('a1b2c3d4-e5f6-7890-abcd-ef1234567890')));
+    assert.match(absorbed.examMeta.title || '', /LİMİT LGS/i);
+  });
+
+  it('absorbEdesisBookletSource reads merged catalog-row denemeUrl', () => {
+    const absorbed = absorbEdesisBookletSource(
+      {
+        id: 1579080,
+        name: 'LİMİT LGS HAZIRBULUNUŞLUK',
+        denemeUrl: 'https://cdn.edesis.com/files/11111111-2222-3333-4444-555555555555',
+        denemeId: 778899
+      },
+      '1579080'
+    );
+    assert.equal(absorbed.denemeId, '778899');
+    assert.ok(absorbed.files.some((f) => /555555555555/.test(f.url)));
   });
 });
 

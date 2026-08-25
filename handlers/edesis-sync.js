@@ -44,6 +44,7 @@ import {
   fetchEdesisExamStructure,
   loadEdesisExamBookletPdf,
   loadEdesisHataKarnesiPdf,
+  absorbEdesisBookletSource,
   pickEdesisBookletLessons,
   listEdesisBookletCodes,
   fetchEdesisExamSubjects,
@@ -67,6 +68,8 @@ import {
 } from '../api/_lib/edesis-student-match.js';
 
 const STAFF = new Set(['super_admin', 'admin', 'coach']);
+/** Aynı Hobby instance’ta üst üste op=sync 504 üretmesin */
+let syncInFlight = null;
 /** Öğrencinin kendi Edesis sonuç / karne / sınava giriş ops */
 const STUDENT_ALLOWED_OPS = new Set([
   'student-results',
@@ -844,7 +847,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         configured: keyOk,
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-safiye-seven-2026-08-25',
+        deployMarker: 'edesis-booklet-pdf-abp-2026-08-25',
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
@@ -903,7 +906,7 @@ export default async function handler(req, res) {
         }
         return res.status(200).json({
           ok: true,
-          deployMarker: 'edesis-safiye-seven-2026-08-25',
+          deployMarker: 'edesis-booklet-pdf-abp-2026-08-25',
           configured: Boolean(cfg.apiKey),
           abpAuth: getEdesisAbpAuthStatus(),
           abpProbe: abpProbe
@@ -963,7 +966,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-safiye-seven-2026-08-25',
+        deployMarker: 'edesis-booklet-pdf-abp-2026-08-25',
         baseUrl: cfg.baseUrl,
         attempts: out
       });
@@ -978,12 +981,14 @@ export default async function handler(req, res) {
       if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
       const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
       const byId = await fetchEdesisJson(localCfg, `/api/external/v1/exams/${encodeURIComponent(examId)}`);
+      const detail = await fetchEdesisExamCatalogRowDetail(examId, cfg);
+      const absorbed = detail ? absorbEdesisBookletSource(detail, examId) : null;
       const pdf = await loadEdesisExamBookletPdf(examId, kitapcikTuru, cfg);
       return res.status(200).json({
         ok: Boolean(pdf.ok && pdf.looksPdf),
         examId,
         kitapcikTuru,
-        denemeId: pdf.denemeId || null,
+        denemeId: pdf.denemeId || absorbed?.denemeId || null,
         files: (pdf.files || []).map((f) => ({
           url: f.url,
           name: f.name,
@@ -991,6 +996,14 @@ export default async function handler(req, res) {
           hasBuf: Boolean(f.buf)
         })),
         attempts: pdf.attempts || [],
+        catalogDetail: detail
+          ? {
+              keys: Object.keys(detail).slice(0, 80),
+              denemeId: absorbed?.denemeId || null,
+              fileCount: absorbed?.files?.length || 0,
+              fileUrls: (absorbed?.files || []).slice(0, 8).map((f) => f.url)
+            }
+          : null,
         examById: {
           status: byId.status,
           ok: byId.ok,
@@ -1040,8 +1053,18 @@ export default async function handler(req, res) {
 
     if (op === 'sync' && (req.method === 'POST' || req.method === 'GET')) {
       try {
-        const result = await runSync(actor);
-        return res.status(200).json(result);
+        if (syncInFlight) {
+          const result = await syncInFlight;
+          return res.status(200).json({ ...result, coalesced: true });
+        }
+        const pending = runSync(actor);
+        syncInFlight = pending;
+        try {
+          const result = await pending;
+          return res.status(200).json(result);
+        } finally {
+          if (syncInFlight === pending) syncInFlight = null;
+        }
       } catch (e) {
         return res.status(200).json({
           ok: true,
@@ -1747,7 +1770,7 @@ export default async function handler(req, res) {
       const takeable = (loaded.items || []).filter((x) => x.canTake && !x.hasStudentResult);
       return res.status(200).json({
         ok: true,
-        deployMarker: 'edesis-safiye-seven-2026-08-25',
+        deployMarker: 'edesis-booklet-pdf-abp-2026-08-25',
         edesisStudentId,
         platformStudentId: platformId,
         autoLinked,

@@ -71,10 +71,18 @@ export async function probeEdesis(): Promise<EdesisProbeResult> {
   return j as EdesisProbeResult;
 }
 
+let syncInFlight: Promise<EdesisSyncResult> | null = null;
+
 export async function syncEdesis(): Promise<EdesisSyncResult> {
-  const res = await apiFetch('/api/edesis-sync?op=sync', { method: 'POST' });
-  const j = await res.json().catch(() => ({}));
-  return j as EdesisSyncResult;
+  if (syncInFlight) return syncInFlight;
+  syncInFlight = (async () => {
+    const res = await apiFetch('/api/edesis-sync?op=sync', { method: 'POST' });
+    const j = await res.json().catch(() => ({}));
+    return j as EdesisSyncResult;
+  })().finally(() => {
+    syncInFlight = null;
+  });
+  return syncInFlight;
 }
 
 export async function importEdesisJson(rows: unknown[]): Promise<EdesisSyncResult> {
