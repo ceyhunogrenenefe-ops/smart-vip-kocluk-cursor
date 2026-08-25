@@ -830,7 +830,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         configured: keyOk,
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-booklet-fast-2026-08-25',
+        deployMarker: 'edesis-booklet-filedto-2026-08-25',
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
@@ -889,7 +889,7 @@ export default async function handler(req, res) {
         }
         return res.status(200).json({
           ok: true,
-          deployMarker: 'edesis-booklet-fast-2026-08-25',
+          deployMarker: 'edesis-booklet-filedto-2026-08-25',
           configured: Boolean(cfg.apiKey),
           abpAuth: getEdesisAbpAuthStatus(),
           abpProbe: abpProbe
@@ -949,7 +949,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-booklet-fast-2026-08-25',
+        deployMarker: 'edesis-booklet-filedto-2026-08-25',
         baseUrl: cfg.baseUrl,
         attempts: out
       });
@@ -983,6 +983,8 @@ export default async function handler(req, res) {
           ? {
               keys: Object.keys(detail).slice(0, 80),
               denemeId: absorbed?.denemeId || null,
+              denemeUrl: String(detail.denemeUrl || detail.DenemeUrl || '').slice(0, 300),
+              txtDosyayasi: String(detail.txtDosyayasi || '').slice(0, 300),
               fileCount: absorbed?.files?.length || 0,
               fileUrls: (absorbed?.files || []).slice(0, 8).map((f) => f.url)
             }
@@ -1698,7 +1700,7 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         ok: true,
-        deployMarker: 'edesis-booklet-fast-2026-08-25',
+        deployMarker: 'edesis-booklet-filedto-2026-08-25',
         edesisStudentId,
         count: items.length,
         items,
@@ -1778,7 +1780,7 @@ export default async function handler(req, res) {
       const takeable = (loaded.items || []).filter((x) => x.canTake && !x.hasStudentResult);
       return res.status(200).json({
         ok: true,
-        deployMarker: 'edesis-booklet-fast-2026-08-25',
+        deployMarker: 'edesis-booklet-filedto-2026-08-25',
         edesisStudentId,
         platformStudentId: platformId,
         autoLinked,
