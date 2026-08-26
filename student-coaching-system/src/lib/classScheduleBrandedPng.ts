@@ -2,7 +2,7 @@
  * Ders Program Planlayıcısı PNG stili — logo + sınıf adı + haftalık tablo.
  * Kaynak: public/ders-program-planner/index.html → exportPNG()
  */
-import html2canvas from 'html2canvas';
+import { rasterizeHtmlElementForPdf } from './pdfLiveWeekGrid';
 
 const BRAND_NAVY = '#1F478F';
 const BRAND_RED = '#FC3232';
@@ -157,7 +157,7 @@ export async function downloadBrandedClassSchedulePng(opts: {
   const className = String(opts.className || 'Sınıf').trim() || 'Sınıf';
   const slots = opts.slots || [];
   if (!slots.length) {
-    throw new Error('İndirilecek haftalık program şablonu yok.');
+    throw new Error('Bu sınıfta indirilecek ders yok. Tarihli oturum veya haftalık şablon ekleyin.');
   }
 
   const { periods, dayCount } = buildBrandedPeriodsFromSlots(slots);
@@ -192,8 +192,9 @@ export async function downloadBrandedClassSchedulePng(opts: {
   const logoSrc = resolveLogoUrl(opts.logoUrl);
   const stage = document.createElement('div');
   stage.setAttribute('data-branded-schedule-png', '1');
+  // html2canvas left:-100000px ile düğümü sayfada bulamıyor (boş PNG / «Node not in page»).
   stage.style.cssText =
-    'position:fixed;left:-100000px;top:0;background:#fff;padding:34px;width:1180px;z-index:-1;';
+    'position:fixed;left:0;top:0;transform:translate(-12000px,0);background:#fff;padding:34px;width:1180px;z-index:0;pointer-events:none;';
   stage.innerHTML = `
     <style>
       .png-sheet{font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#1A1D26;background:#fff;width:1112px;box-sizing:border-box}
@@ -247,18 +248,7 @@ export async function downloadBrandedClassSchedulePng(opts: {
     const sheet = stage.querySelector('.png-sheet') as HTMLElement | null;
     if (!sheet) throw new Error('PNG şablonu oluşturulamadı');
 
-    const canvas = await html2canvas(sheet, {
-      scale: 2,
-      backgroundColor: '#ffffff',
-      useCORS: true,
-      allowTaint: true,
-      foreignObjectRendering: false,
-      logging: false,
-      width: sheet.scrollWidth,
-      height: sheet.scrollHeight,
-      windowWidth: sheet.scrollWidth,
-      windowHeight: sheet.scrollHeight
-    });
+    const canvas = await rasterizeHtmlElementForPdf(sheet, 2);
 
     if (!canvas.width || !canvas.height) {
       throw new Error('PNG görüntüsü boş üretildi');
