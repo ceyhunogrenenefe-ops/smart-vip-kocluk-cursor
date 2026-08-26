@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   LGS8_COLLECTIONS,
+  PARAF_LGS8_IQ_SET,
+  PARAF_LGS8_IQ_SET_CONTENTS,
+  PARAF_LGS8_SET_ISBN,
+  PARAF_LGS8_SERIES,
   VIP_LGS8_BOOKS,
   VIP_LGS8_PACKAGE,
   YANKI_VENDOR_SLUG,
@@ -68,5 +72,16 @@ describe('commerce-lgs8-catalog', () => {
       'lgs-8-denemeler',
     ]);
     expect(vipLgs8BulkRows()).toHaveLength(6);
+  });
+
+  it('lists the Paraf IQ product as one 6-book set, not six SKUs', () => {
+    expect(PARAF_LGS8_IQ_SET.isbn).toBe(PARAF_LGS8_SET_ISBN);
+    expect(PARAF_LGS8_IQ_SET.metadata.is_set).toBe(true);
+    expect(PARAF_LGS8_IQ_SET.metadata.book_count).toBe(6);
+    expect(PARAF_LGS8_IQ_SET.metadata.series).toBe(PARAF_LGS8_SERIES);
+    expect(PARAF_LGS8_IQ_SET_CONTENTS).toHaveLength(6);
+    expect(PARAF_LGS8_IQ_SET.publisher).toBe('Paraf Yayınları');
+    expect(PARAF_LGS8_IQ_SET.class_levels).toEqual(['8', 'LGS']);
+    expect(LGS8_COLLECTIONS.find((c) => c.key === PARAF_LGS8_SERIES)?.coming_soon).toBe(false);
   });
 });
