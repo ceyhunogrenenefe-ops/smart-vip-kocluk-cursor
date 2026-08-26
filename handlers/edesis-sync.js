@@ -46,6 +46,7 @@ import {
   loadEdesisHataKarnesiPdf,
   absorbEdesisBookletSource,
   pickGoogleDriveFetchUrl,
+  googleDrivePreviewUrl,
   pickEdesisBookletLessons,
   listEdesisBookletCodes,
   fetchEdesisExamSubjects,
@@ -831,7 +832,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         configured: keyOk,
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-gdrive-pdf-302-2026-08-26',
+        deployMarker: 'edesis-gdrive-preview-2026-08-26',
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
@@ -890,7 +891,7 @@ export default async function handler(req, res) {
         }
         return res.status(200).json({
           ok: true,
-          deployMarker: 'edesis-gdrive-pdf-302-2026-08-26',
+          deployMarker: 'edesis-gdrive-preview-2026-08-26',
           configured: Boolean(cfg.apiKey),
           abpAuth: getEdesisAbpAuthStatus(),
           abpProbe: abpProbe
@@ -950,7 +951,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-gdrive-pdf-302-2026-08-26',
+        deployMarker: 'edesis-gdrive-preview-2026-08-26',
         baseUrl: cfg.baseUrl,
         attempts: out
       });
@@ -1609,14 +1610,21 @@ export default async function handler(req, res) {
           );
           return res.status(200).send(pdf.buf);
         }
-        // 7MB Drive PDF Vercel 4.5MB limitini aşar; 302 ile tarayıcı indirir (404 konsolu yok).
-        if (driveUrl) {
-          res.setHeader('Location', driveUrl);
-          return res.status(302).end();
-        }
-        if (pdf.publicFetch && pdf.url) {
-          res.setHeader('Location', pdf.url);
-          return res.status(302).end();
+        // Drive 7MB: Vercel gövde limiti + tarayıcı CORS/CORP. 302 Chrome’da Failed to fetch.
+        // 200 JSON + /preview iframe — konsolda 404 yok, PDF görünür.
+        const preview =
+          pdf.previewUrl ||
+          googleDrivePreviewUrl(driveUrl || pdf.url || preferredFileUrl);
+        if (preview) {
+          return res.status(200).json({
+            ok: true,
+            publicFetch: true,
+            viewer: 'google-drive-preview',
+            url: preview,
+            downloadUrl: driveUrl || pdf.downloadUrl || pdf.url || null,
+            files,
+            denemeId: pdf.denemeId || null
+          });
         }
         return res.status(404).json({
           error: 'booklet_pdf_missing',
@@ -1712,7 +1720,7 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         ok: true,
-        deployMarker: 'edesis-gdrive-pdf-302-2026-08-26',
+        deployMarker: 'edesis-gdrive-preview-2026-08-26',
         edesisStudentId,
         count: items.length,
         items,
@@ -1792,7 +1800,7 @@ export default async function handler(req, res) {
       const takeable = (loaded.items || []).filter((x) => x.canTake && !x.hasStudentResult);
       return res.status(200).json({
         ok: true,
-        deployMarker: 'edesis-gdrive-pdf-302-2026-08-26',
+        deployMarker: 'edesis-gdrive-preview-2026-08-26',
         edesisStudentId,
         platformStudentId: platformId,
         autoLinked,
