@@ -837,7 +837,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         configured: keyOk,
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-ingest-a-only-2026-08-26',
+        deployMarker: 'edesis-booklets-all-keys-2026-08-26',
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
@@ -896,7 +896,7 @@ export default async function handler(req, res) {
         }
         return res.status(200).json({
           ok: true,
-          deployMarker: 'edesis-ingest-a-only-2026-08-26',
+          deployMarker: 'edesis-booklets-all-keys-2026-08-26',
           configured: Boolean(cfg.apiKey),
           abpAuth: getEdesisAbpAuthStatus(),
           abpProbe: abpProbe
@@ -956,7 +956,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-ingest-a-only-2026-08-26',
+        deployMarker: 'edesis-booklets-all-keys-2026-08-26',
         baseUrl: cfg.baseUrl,
         attempts: out
       });
@@ -1735,7 +1735,7 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         ok: true,
-        deployMarker: 'edesis-ingest-a-only-2026-08-26',
+        deployMarker: 'edesis-booklets-all-keys-2026-08-26',
         edesisStudentId,
         count: items.length,
         items,
@@ -1815,7 +1815,7 @@ export default async function handler(req, res) {
       const takeable = (loaded.items || []).filter((x) => x.canTake && !x.hasStudentResult);
       return res.status(200).json({
         ok: true,
-        deployMarker: 'edesis-ingest-a-only-2026-08-26',
+        deployMarker: 'edesis-booklets-all-keys-2026-08-26',
         edesisStudentId,
         platformStudentId: platformId,
         autoLinked,
@@ -1986,19 +1986,14 @@ export default async function handler(req, res) {
       const kitapcikNorm = normalizeKitapcikCode(kitapcikTuru) || kitapcikTuru;
       const allowed = kitapcikAllowedForExam(structure, kitapcikNorm);
       if (!allowed.ok) {
-        const denemeOnly = denemeOnlyBookletCodes(structure);
-        const denemeHint = denemeOnly.includes(kitapcikNorm)
-          ? ` Edesis denemede ${kitapcikNorm} anahtarı var ama bu sınav oturumu onu değerlendirmiyor. Edesis panelinde bu sınavın optik/kitapçık ayarına ${kitapcikNorm} ekleyin.`
-          : '';
         return res.status(400).json({
           error: 'invalid_kitapcik',
-          message: `Bu sınav oturumu ${kitapcikNorm} kitapçığını değerlendirmiyor.`,
-          hint: (allowed.available.length
-            ? `Değerlendirilen kitapçık: ${allowed.available.join(', ')}.`
-            : 'Edesis’te bu deneme için cevap anahtarı yok.') + denemeHint,
+          message: `Kitapçık türü için cevap anahtarı bulunamadı. KitapcikTuru=${kitapcikNorm}`,
+          hint: allowed.available.length
+            ? `Bu sınavda kayıtlı kitapçıklar: ${allowed.available.join(', ')}`
+            : 'Edesis’te bu deneme için cevap anahtarı yok',
           availableBookletCodes: allowed.available,
-          answerKeyBookletCodes: structure.answerKeyBookletCodes || [],
-          denemeOnlyBookletCodes: denemeOnly
+          answerKeyBookletCodes: structure.answerKeyBookletCodes || []
         });
       }
       if (kitapcikTuruSay) {
@@ -2082,13 +2077,6 @@ export default async function handler(req, res) {
       if (!ingest.ok) {
         const status = ingest.httpStatus && ingest.httpStatus >= 400 ? ingest.httpStatus : 422;
         const reason = String(ingest.rejected?.[0]?.reason || ingest.message || '');
-        const denemeOnly = denemeOnlyBookletCodes(structure);
-        const missingKt = (reason.match(/KitapcikTuru=([A-Za-z0-9])/i) || [])[1];
-        const missingLetter = normalizeKitapcikCode(missingKt);
-        const denemeHint =
-          missingLetter && denemeOnly.includes(missingLetter)
-            ? ` Edesis denemede ${missingLetter} anahtarı tanımlı; bu sınav kaydı onu değerlendirmiyor. Edesis’te sınavın optik/kitapçık ayarına ${missingLetter} bağlayın.`
-            : '';
         return res.status(status).json({
           ok: false,
           error: 'ingest_rejected',
@@ -2098,9 +2086,8 @@ export default async function handler(req, res) {
           hint:
             ingest.httpStatus === 403
               ? 'API key exam_results:write kapsamına sahip olmalı (admin veya custom paket)'
-              : `${reason}${denemeHint}`.trim() || ingest.message,
-          availableBookletCodes: listEdesisBookletCodes(structure),
-          denemeOnlyBookletCodes: denemeOnly
+              : reason || ingest.message,
+          availableBookletCodes: listEdesisBookletCodes(structure)
         });
       }
 

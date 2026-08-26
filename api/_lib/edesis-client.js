@@ -2537,19 +2537,23 @@ export function structureBookletLetters(structure) {
   return [...codes].filter((c) => KITAPCIK_LETTERS.includes(c)).sort();
 }
 
-/** Optikte gösterilecek harfler. Deneme Lst B olsa da v1 ingest sınav satırında yoksa 422. edesis-ingest-a-only-2026-08-26 */
+/**
+ * Optikte gösterilecek harfler = Edesis’te tanımlı kitapçıkların birleşimi.
+ * Structure satırları çoğu sınavda yalnız A basılır; B/C/D cevap anahtarında varsa gizlenmez.
+ */
 export function listEdesisBookletCodes(structure) {
-  const fromKeys = new Set();
+  const codes = new Set();
   for (const c of structure?.answerKeyBookletCodes || []) {
-    pushKitapcikLetter(c, fromKeys);
+    pushKitapcikLetter(c, codes);
   }
-  const fromStructure = structureBookletLetters(structure);
-  if (fromKeys.size && fromStructure.length) {
-    const inter = fromStructure.filter((c) => fromKeys.has(c));
-    if (inter.length) return inter;
+  for (const c of structure?.bookletEndpointCodes || []) {
+    pushKitapcikLetter(c, codes);
   }
-  if (fromKeys.size) return [...fromKeys].sort();
-  return fromStructure.length ? fromStructure : ['A'];
+  for (const c of structureBookletLetters(structure)) {
+    codes.add(c);
+  }
+  if (codes.size) return [...codes].sort();
+  return ['A', 'B', 'C', 'D'];
 }
 
 /** Denemede var, bu sınav oturumunun structure/ingest’inde yok */
@@ -4414,7 +4418,8 @@ export async function fetchEdesisExamStructure(examId, cfgOverride = {}) {
     rows,
     booklets: bookletsGrouped,
     bookletPdfs: resolvedPdfs,
-    answerKeyBookletCodes
+    answerKeyBookletCodes,
+    bookletEndpointCodes
   };
   return {
     rows,
