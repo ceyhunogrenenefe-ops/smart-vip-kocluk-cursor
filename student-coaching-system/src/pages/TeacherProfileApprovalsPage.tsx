@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Ban,
   Check,
   ExternalLink,
   Eye,
+  EyeOff,
   KeyRound,
   Loader2,
   LockOpen,
@@ -17,6 +18,7 @@ import {
 import { toast } from 'sonner';
 import { apiFetch } from '../lib/session';
 import { Link } from 'react-router-dom';
+import { listInstitutionsForPicker, type InstitutionPickRow } from '../lib/parentSignApi';
 
 type Row = {
   id: string;
@@ -31,7 +33,13 @@ type Row = {
   editing_enabled?: boolean;
   deleted_at?: string | null;
   source_system?: string | null;
-  user?: { name?: string; email?: string; phone?: string; is_active?: boolean } | null;
+  user?: {
+    name?: string;
+    email?: string;
+    phone?: string;
+    is_active?: boolean;
+    institution_id?: string | null;
+  } | null;
   missing_required?: string[];
 };
 
@@ -323,6 +331,14 @@ export default function TeacherProfileApprovalsPage() {
   const [showCatalog, setShowCatalog] = useState(false);
   const [importEmails, setImportEmails] = useState<Record<string, string>>({});
   const [importBusy, setImportBusy] = useState('');
+  const [openPanelRow, setOpenPanelRow] = useState<Row | null>(null);
+  const [openPanelPwd, setOpenPanelPwd] = useState('');
+  const [openPanelInstId, setOpenPanelInstId] = useState('');
+  const [showOpenPanelPwd, setShowOpenPanelPwd] = useState(false);
+  const [openPanelError, setOpenPanelError] = useState('');
+  const [institutions, setInstitutions] = useState<InstitutionPickRow[]>([]);
+  const [institutionsLoading, setInstitutionsLoading] = useState(false);
+  const openPanelPwdRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -422,16 +438,55 @@ export default function TeacherProfileApprovalsPage() {
     await act(row.id, 'approve');
   };
 
+  const closeOpenPanel = () => {
+    setOpenPanelRow(null);
+    setOpenPanelPwd('');
+    setOpenPanelInstId('');
+    setShowOpenPanelPwd(false);
+    setOpenPanelError('');
+  };
+
   const openPanelAccount = async (row: Row) => {
-    const email = row.user?.email || '';
-    const pwd = window.prompt(
-      `Panele aç — giriş şifresi belirleyin (min. 6 karakter).\nE-posta: ${email || '—'}\n\nÖğretmen bu şifreyle sisteme giriş yapabilecek.`
-    );
-    if (pwd == null) return;
-    if (String(pwd).trim().length < 6) {
-      toast.error('Şifre en az 6 karakter olmalı');
+    setOpenPanelRow(row);
+    setOpenPanelPwd('');
+    setShowOpenPanelPwd(false);
+    setOpenPanelError('');
+    setOpenPanelInstId(String(row.user?.institution_id || '').trim());
+    if (institutions.length) {
+      if (!row.user?.institution_id && institutions.length === 1) {
+        setOpenPanelInstId(institutions[0].id);
+      }
       return;
     }
+    setInstitutionsLoading(true);
+    try {
+      const list = await listInstitutionsForPicker();
+      setInstitutions(list);
+      if (!row.user?.institution_id && list.length === 1) {
+        setOpenPanelInstId(list[0].id);
+      } else if (row.user?.institution_id) {
+        setOpenPanelInstId(String(row.user.institution_id));
+      }
+    } catch (e) {
+      setOpenPanelError(e instanceof Error ? e.message : 'Kurum listesi alınamadı');
+    } finally {
+      setInstitutionsLoading(false);
+    }
+  };
+
+  const submitOpenPanel = async (row: Row) => {
+    const pwd = openPanelPwd.trim();
+    if (pwd.length < 6) {
+      setOpenPanelError('Panel girişi için en az 6 karakterlik şifre girin.');
+      openPanelPwdRef.current?.focus();
+      return;
+    }
+    const institutionId = openPanelInstId.trim() || String(row.user?.institution_id || '').trim();
+    if (!institutionId && institutions.length > 0) {
+      setOpenPanelError('Kurum seçin');
+      return;
+    }
+    setOpenPanelError('');
     setBusyId(row.id);
     try {
       const res = await apiFetch(
@@ -439,30 +494,41 @@ export default function TeacherProfileApprovalsPage() {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password: String(pwd).trim() })
+          body: JSON.stringify({
+            password: pwd,
+            ...(institutionId ? { institution_id: institutionId } : {})
+          })
         }
       );
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.message || j.error || res.statusText);
-      toast.success(j.message || 'Panel hesabı açıldı');
-      if (j.user_management_path) {
-        toast.message(
-          <span>
-            Kullanıcı Yönetimi:{' '}
-            <Link className="underline font-bold" to={j.user_management_path}>
-              kaydı aç
-            </Link>
-          </span>,
-          { duration: 8000 }
-        );
-      }
+      const email = String(row.user?.email || j.user?.email || '').trim();
+      toast.success(
+        email
+          ? `${j.message || 'Öğretmen paneli açıldı'} Kullanıcı Yönetimi’nde ${email} olarak arayın.`
+          : j.message || 'Öğretmen paneli açıldı'
+      );
+      closeOpenPanel();
       await load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Panele açılamadı');
+      setOpenPanelError(e instanceof Error ? e.message : 'Panele açılamadı');
     } finally {
       setBusyId('');
     }
   };
+
+  useEffect(() => {
+    if (!openPanelRow) return;
+    const t = window.setTimeout(() => openPanelPwdRef.current?.focus(), 50);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && busyId !== openPanelRow.id) closeOpenPanel();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [openPanelRow, busyId]);
 
   const confirmAct = async (id: string, op: string, message: string, body?: Record<string, string>) => {
     if (!window.confirm(message)) return;
@@ -1043,6 +1109,149 @@ export default function TeacherProfileApprovalsPage() {
           </aside>
         ) : null}
       </div>
+
+      {openPanelRow ? (
+        <div
+          data-marker="teacher-open-panel-modal-2026-08-26"
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-[2px]"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="open-panel-title"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && busyId !== openPanelRow.id) closeOpenPanel();
+          }}
+        >
+          <form
+            className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitOpenPanel(openPanelRow);
+            }}
+          >
+            <div className="flex items-start justify-between gap-3 bg-[#1a3fad] px-5 py-4 text-white">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-xl bg-white/15">
+                  <KeyRound className="h-5 w-5" />
+                </span>
+                <div>
+                  <h2 id="open-panel-title" className="text-base font-bold">
+                    Panel hesabı aç
+                  </h2>
+                  <p className="mt-0.5 text-xs text-white/80">
+                    {openPanelRow.display_name || openPanelRow.user?.name || 'Öğretmen'} için giriş
+                    şifresi belirleyin.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="rounded-lg p-1 text-white/80 hover:bg-white/10 hover:text-white"
+                aria-label="Kapat"
+                disabled={busyId === openPanelRow.id}
+                onClick={closeOpenPanel}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 px-5 py-4">
+              <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-sm">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Giriş e-postası
+                </div>
+                <div className="mt-0.5 font-semibold text-slate-900">
+                  {openPanelRow.user?.email || '—'}
+                </div>
+              </div>
+
+              <label className="block text-sm font-semibold text-slate-700">
+                Kurum
+                <select
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-800 outline-none ring-[#1a3fad]/30 focus:border-[#1a3fad] focus:ring-2"
+                  value={openPanelInstId}
+                  disabled={institutionsLoading || busyId === openPanelRow.id}
+                  onChange={(e) => {
+                    setOpenPanelInstId(e.target.value);
+                    setOpenPanelError('');
+                  }}
+                >
+                  <option value="">
+                    {institutionsLoading ? 'Kurumlar yükleniyor…' : 'Kurum seçin'}
+                  </option>
+                  {institutions.map((inst) => (
+                    <option key={inst.id} value={inst.id}>
+                      {inst.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block text-sm font-semibold text-slate-700">
+                Şifre
+                <span className="ml-1 text-xs font-normal text-slate-500">(en az 6 karakter)</span>
+                <div className="relative mt-1">
+                  <input
+                    ref={openPanelPwdRef}
+                    type={showOpenPanelPwd ? 'text' : 'password'}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 pr-11 text-sm font-medium text-slate-800 outline-none ring-[#1a3fad]/30 focus:border-[#1a3fad] focus:ring-2"
+                    value={openPanelPwd}
+                    onChange={(e) => {
+                      setOpenPanelPwd(e.target.value);
+                      setOpenPanelError('');
+                    }}
+                    placeholder="Öğretmenin panel girişi"
+                    autoComplete="new-password"
+                    minLength={6}
+                    disabled={busyId === openPanelRow.id}
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 hover:text-[#1a3fad]"
+                    aria-label={showOpenPanelPwd ? 'Şifreyi gizle' : 'Şifreyi göster'}
+                    onClick={() => setShowOpenPanelPwd((v) => !v)}
+                  >
+                    {showOpenPanelPwd ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
+                </div>
+              </label>
+
+              {openPanelError ? (
+                <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
+                  {openPanelError}
+                </p>
+              ) : (
+                <p className="text-xs text-slate-500">
+                  Bu şifre ile öğretmen panele giriş yapar. Kullanıcı Yönetimi’nde aktif öğretmen
+                  olarak görünür.
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
+              <button
+                type="button"
+                className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-white"
+                disabled={busyId === openPanelRow.id}
+                onClick={closeOpenPanel}
+              >
+                Vazgeç
+              </button>
+              <button
+                type="submit"
+                disabled={busyId === openPanelRow.id || institutionsLoading}
+                className="inline-flex items-center gap-2 rounded-xl bg-[#1a3fad] px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+              >
+                {busyId === openPanelRow.id ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <KeyRound className="h-4 w-4" />
+                )}
+                Panele Aç
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
     </div>
   );
 }

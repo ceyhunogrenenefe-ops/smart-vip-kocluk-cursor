@@ -863,12 +863,12 @@ function App() {
             {/* Bulunamadı sayfası */}
             <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
+            <Toaster position="top-center" richColors closeButton duration={3500} />
           </Router>
         </AppProvider>
       </OrganizationProvider>
       </NotificationAuthBridge>
     </AuthProvider>
-    <Toaster position="top-center" richColors closeButton duration={3500} />
     </>
   );
 }
