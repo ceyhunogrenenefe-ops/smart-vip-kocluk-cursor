@@ -30,6 +30,8 @@ import {
   extractEdesisStructureRows,
   normalizeKitapcikCode,
   listEdesisBookletCodes,
+  extractEdesisAnswerKeyBookletCodes,
+  kitapcikAllowedForExam,
   canonicalEdesisStructureLessons,
   looksLikePdfBuffer,
   absorbEdesisBookletSource,
@@ -1483,13 +1485,44 @@ describe('listEdesisBookletCodes', () => {
     assert.deepEqual(codes, ['A', 'B']);
   });
 
-  it('merges partial answer keys with A-D when structure exists', () => {
+  it('does not invent B-C-D when only A has an answer key', () => {
     const codes = listEdesisBookletCodes({
       rows: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 1, questionCount: 10 }],
       booklets: [{ kitapcikTuru: 'A', lessons: [] }],
       answerKeyBookletCodes: ['A']
     });
-    assert.deepEqual(codes, ['A', 'B', 'C', 'D']);
+    assert.deepEqual(codes, ['A']);
+  });
+
+  it('uses structure letters when answer keys are empty (no A-D dump)', () => {
+    const codes = listEdesisBookletCodes({
+      rows: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 1, questionCount: 10 }],
+      booklets: [{ kitapcikTuru: 'A', lessons: [] }],
+      answerKeyBookletCodes: []
+    });
+    assert.deepEqual(codes, ['A']);
+  });
+});
+
+describe('extractEdesisAnswerKeyBookletCodes', () => {
+  it('reads ABP DenemeCevapOutputDto kitapciklar', () => {
+    const codes = extractEdesisAnswerKeyBookletCodes({
+      result: {
+        kitapciklar: [{ kitapcikTuru: 'A' }, { KitapcikTuru: '2' }]
+      }
+    });
+    assert.deepEqual(codes, ['A', 'B']);
+  });
+});
+
+describe('kitapcikAllowedForExam', () => {
+  it('rejects B when only A is registered', () => {
+    const structure = {
+      rows: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 1, questionCount: 10 }],
+      answerKeyBookletCodes: ['A']
+    };
+    assert.equal(kitapcikAllowedForExam(structure, 'B').ok, false);
+    assert.deepEqual(kitapcikAllowedForExam(structure, 'A').available, ['A']);
   });
 });
 
