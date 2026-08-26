@@ -122,6 +122,7 @@ export default function Sidebar({
 
   return (
     <aside
+      data-app-sidebar
       className={cn(
         'flex min-h-0 h-screen max-h-[100dvh] flex-col overflow-hidden',
         'max-lg:fixed max-lg:left-0 max-lg:top-0',
