@@ -236,11 +236,11 @@ type Props = {
 };
 
 const PDF_ZOOM_CHIPS: { id: EdesisPdfZoom; label: string }[] = [
-  { id: 'page-width', label: 'Genişlik' },
-  { id: 'page-fit', label: 'Sayfa' },
   { id: '100', label: '100%' },
   { id: '125', label: '125%' },
-  { id: '150', label: '150%' }
+  { id: '150', label: '150%' },
+  { id: 'page-width', label: 'Genişlik' },
+  { id: 'page-fit', label: 'Sayfa' }
 ];
 
 /**
@@ -293,7 +293,7 @@ export default function EdesisOpticalSheet({
   const [answers, setAnswers] = useState<Record<string, string>>(() => readSaved(storageKey));
   const [savedFlash, setSavedFlash] = useState(false);
   const [activeLessonKey, setActiveLessonKey] = useState('');
-  const [pdfZoom, setPdfZoom] = useState<EdesisPdfZoom>('page-width');
+  const [pdfZoom, setPdfZoom] = useState<EdesisPdfZoom>('100');
   const [pdfWide, setPdfWide] = useState(false);
   const [pdfFs, setPdfFs] = useState(false);
   const pdfPaneRef = useRef<HTMLElement | null>(null);

@@ -2250,6 +2250,46 @@ export function extractEdesisFileGuid(value) {
   return m ? m[0] : '';
 }
 
+/** Edesis “test et” Google Drive paylaşım linki — /view HTML, PDF değil */
+export function extractGoogleDriveFileId(value) {
+  const s = String(value || '').trim();
+  if (!s || !/(?:drive|docs)\.google\.com|drive\.usercontent\.google\.com/i.test(s)) return '';
+  const filePath = s.match(/\/file\/d\/([a-zA-Z0-9_-]+)/i);
+  if (filePath) return filePath[1];
+  const openPath = s.match(/\/open\/d\/([a-zA-Z0-9_-]+)/i);
+  if (openPath) return openPath[1];
+  const q = s.match(/[?&]id=([a-zA-Z0-9_-]+)/i);
+  return q ? q[1] : '';
+}
+
+/** CORS’lu doğrudan indirme (iframe Drive /view açmaz; blob + %100 zoom) */
+export function expandGoogleDrivePdfCandidates(fileUrl) {
+  const id = extractGoogleDriveFileId(fileUrl);
+  if (!id) return [];
+  return [
+    `https://drive.usercontent.google.com/download?id=${encodeURIComponent(id)}&export=download&confirm=t`,
+    `https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}&confirm=t`,
+    `https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}`,
+    `https://docs.google.com/uc?export=download&id=${encodeURIComponent(id)}`
+  ];
+}
+
+export function pickGoogleDriveFetchUrl(filesOrUrls = []) {
+  const urls = [];
+  if (typeof filesOrUrls === 'string') urls.push(filesOrUrls);
+  else {
+    for (const it of filesOrUrls || []) {
+      if (typeof it === 'string') urls.push(it);
+      else if (it?.url) urls.push(it.url);
+    }
+  }
+  for (const u of urls) {
+    const cands = expandGoogleDrivePdfCandidates(u);
+    if (cands.length) return cands[0];
+  }
+  return '';
+}
+
 /** API host dosya vermez; tenant web + CDN dener */
 export function listEdesisFileBases(cfg = {}) {
   const merged = { ...getEdesisConfig(), ...cfg };
@@ -2296,6 +2336,12 @@ export function expandEdesisFileUrlCandidates(fileUrl, cfg = {}) {
   }
 
   if (absolute) push(absolute);
+
+  const driveCands = expandGoogleDrivePdfCandidates(absolute || raw);
+  if (driveCands.length) {
+    for (const u of driveCands) push(u);
+    return out;
+  }
 
   const bases = listEdesisFileBases(cfg);
   if (coerced.startsWith('/')) {
@@ -2492,6 +2538,8 @@ function looksLikePdfUrl(u) {
       s.includes('kitapcik') ||
       s.includes('blob.core.windows.net') ||
       s.includes('cdn.') ||
+      s.includes('drive.google.com') ||
+      s.includes('drive.usercontent.google.com') ||
       /\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(s))
   );
 }
@@ -4347,6 +4395,9 @@ export function absorbEdesisBookletSource(json, examId = '') {
 function shouldAttachEdesisApiKey(url) {
   const u = String(url || '').toLowerCase();
   if (!u) return true;
+  if (u.includes('drive.google.com') || u.includes('googleusercontent.com') || u.includes('docs.google.com')) {
+    return false;
+  }
   if (u.includes('blob.core.windows.net')) return false;
   if (u.includes('amazonaws.com') || u.includes('cloudfront.net')) return false;
   // CDN /files çoğu zaman imzasız veya cookie ister; API key göndermek bozabilir
@@ -4727,6 +4778,26 @@ export async function loadEdesisExamBookletPdf(examId, kitapcikTuru, cfgOverride
   const probed = await probeEdesisExamBookletSources(id, localCfg);
   const files = probed.files || [];
   const attempts = [];
+  const driveFetch = pickGoogleDriveFetchUrl([preferredFileUrl, ...files.map((f) => f.url)]);
+  if (driveFetch) {
+    const driveFiles = dedupeBookletFiles([
+      { url: driveFetch, kitapcikTuru: '', name: 'Google Drive PDF' },
+      ...files
+    ]);
+    attempts.push({ kind: 'google-drive', url: driveFetch, ok: true, publicFetch: true });
+    return {
+      ok: true,
+      publicFetch: true,
+      files: driveFiles,
+      file: driveFiles[0],
+      buf: null,
+      looksPdf: false,
+      url: driveFetch,
+      status: 200,
+      denemeId: probed.denemeId,
+      attempts
+    };
+  }
 
   // Probe sırasında buffer’ı hazır gelen aday (GetDenemeSorulariPdf / GuidView)
   for (const f of files) {

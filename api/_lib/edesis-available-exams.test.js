@@ -42,7 +42,10 @@ import {
   trustEdesisStudentCatalogList,
   looksLikePersonalExamList,
   resolveEdesisFileUrl,
-  expandEdesisFileUrlCandidates
+  expandEdesisFileUrlCandidates,
+  extractGoogleDriveFileId,
+  expandGoogleDrivePdfCandidates,
+  pickGoogleDriveFetchUrl
 } from './edesis-client.js';
 
 describe('inferEdesisExamProgramKeys', () => {
@@ -1372,6 +1375,23 @@ describe('resolveEdesisFileUrl / expandEdesisFileUrlCandidates', () => {
     assert.ok(cands.some((u) => u.includes('cdn.edesis.com')));
     assert.ok(cands.some((u) => u.includes('onlinevipdershane.edesis.com')));
     assert.ok(cands[0].includes('onlinevipdershane.edesis.com') || cands[0].includes('cdn.edesis.com'));
+  });
+
+  it('expands Google Drive /view share links to download URLs', () => {
+    const view = 'https://drive.google.com/file/d/1MYKrkAlkJ0jG-nkO1Lf72TUfDa1sSPPR/view?usp=sharing';
+    assert.equal(extractGoogleDriveFileId(view), '1MYKrkAlkJ0jG-nkO1Lf72TUfDa1sSPPR');
+    const cands = expandGoogleDrivePdfCandidates(view);
+    assert.ok(cands.some((u) => u.includes('drive.usercontent.google.com/download')));
+    assert.ok(cands.some((u) => u.includes('export=download')));
+    assert.equal(cands.some((u) => /\/view/.test(u)), false);
+    assert.equal(
+      pickGoogleDriveFetchUrl([{ url: view }]),
+      cands[0]
+    );
+    const expanded = expandEdesisFileUrlCandidates(view, {
+      baseUrl: 'https://onlinevipdershane.api.edesis.com'
+    });
+    assert.ok(expanded.some((u) => u.includes('export=download') || u.includes('usercontent.google.com')));
   });
 });
 
