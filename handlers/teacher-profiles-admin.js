@@ -9,6 +9,7 @@
  * POST   /api/teacher-profiles-admin?op=republish&id=
  * POST   /api/teacher-profiles-admin?op=retry-sync&id=
  * POST   /api/teacher-profiles-admin?op=enable-editing&id=
+ * POST   /api/teacher-profiles-admin?op=open-panel&id=  (body: password, institution_id?)
  * POST   /api/teacher-profiles-admin?op=soft-delete&id=
  * POST   /api/teacher-profiles-admin?op=restore&id=
  * POST   /api/teacher-profiles-admin?op=hard-delete&id=
@@ -178,6 +179,13 @@ export default async function handler(req, res) {
     if (statusFilter === 'changes_pending') statusFilter = 'update_pending';
 
     const actorIsSuper = await isSuperAdminActor(actor);
+
+    if (req.method === 'GET' && MUTATION_OPS.has(op)) {
+      return res.status(405).json({
+        error: 'method_not_allowed',
+        message: 'Bu işlem POST ile yapılır. Şifreyi formdaki alana yazıp Panele Aç’a basın.'
+      });
+    }
 
     // Sitedeki statik kadro listesi + panel eşleşme durumu
     if (req.method === 'GET' && op === 'site-catalog') {
