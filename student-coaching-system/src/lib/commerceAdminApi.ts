@@ -50,11 +50,46 @@ export const caRemoveVendorUser = (id: string) => post('vendor_users.remove', { 
 
 // ── Kitaplar ──────────────────────────────────────
 export const caListBooks = (params?: { search?: string; publisher?: string; limit?: number; offset?: number }) =>
-  post<{ books: CommerceBook[] }>('books.list', params ?? {});
+  post<{ books: (CommerceBook & { commerce_vendor_offers?: CommerceVendorOffer[] })[] }>('books.list', params ?? {});
 export const caGetBook = (id: string) => post<{ book: CommerceBook & { commerce_vendor_offers: CommerceVendorOffer[] } }>('books.get', { id });
 export const caCreateBook = (fields: Partial<CommerceBook>) => post<{ book: CommerceBook }>('books.create', fields);
 export const caUpdateBook = (id: string, fields: Partial<CommerceBook>) => post<{ book: CommerceBook }>('books.update', { id, ...fields });
 export const caDeleteBook = (id: string) => post('books.delete', { id });
+
+export type SaveBookInput = Partial<CommerceBook> & {
+  id?: string;
+  price_lira?: number | string;
+  price_kurus?: number;
+  stock?: number;
+  stock_quantity?: number;
+  shipping_days?: number;
+  fascicle_count?: number;
+  series?: string;
+  series_label?: string;
+  approve_if_priced?: boolean;
+};
+
+export const caSaveBook = (fields: SaveBookInput) =>
+  post<{ book: CommerceBook & { commerce_vendor_offers?: CommerceVendorOffer[] }; offer: CommerceVendorOffer | null }>('books.save', fields);
+
+export const caRequestBookCorrection = (id: string, notes: string) =>
+  post<{ offer: CommerceVendorOffer }>('books.request_correction', { id, notes });
+
+export async function caUploadBookCover(bookId: string, dataUrl: string): Promise<string> {
+  const res = await apiFetch('/api/commerce-upload', {
+    method: 'POST',
+    body: JSON.stringify({
+      op: 'book_cover',
+      file_base64: dataUrl,
+      mime_type: 'image/jpeg',
+      book_id: bookId,
+      save_to_db: true,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) throw new Error((data as { error?: string }).error ?? 'Kapak yüklenemedi');
+  return (data as { url: string }).url;
+}
 
 export type BulkBookInput = Partial<CommerceBook> & {
   price_lira?: number | string;

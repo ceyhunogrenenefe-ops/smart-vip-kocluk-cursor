@@ -18,6 +18,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Send,
   Settings,
   ShoppingBag,
   Store,
@@ -35,6 +36,7 @@ import {
   caApproveOffer,
   caCreateVendor,
   caCreateVendorAccount,
+  caDeleteBook,
   caDeleteVendor,
   caGetSettings,
   caListBooks,
@@ -48,14 +50,17 @@ import {
   caReportLowStock,
   caReportSales,
   caRemoveVendorUser,
+  caRequestBookCorrection,
   caRequestCorrection,
   caResetVendorPassword,
+  caSaveBook,
   caSeedLgs8Vip,
   caBulkUpsertBooks,
   caEnsureYankiVendor,
   caToggleVendorActive,
   caUpdateSettings,
   caUpdateVendor,
+  caUploadBookCover,
   type VendorUserRow,
 } from '../../lib/commerceAdminApi';
 import type {
@@ -70,6 +75,7 @@ import type {
 import { formatCommerceTry, COMMERCE_OFFER_STATUS_LABELS, COMMERCE_ORDER_STATUS_LABELS } from '../../types/commerce.types';
 import { useAuth } from '../../context/AuthContext';
 import BookOrdersPage from '../BookOrdersPage';
+import { compressCoverImage, formatBytes } from '../../lib/commerce/compressCoverImage';
 
 type Tab =
   | 'kurum-siparis'
@@ -822,11 +828,226 @@ function OnaylarTab() {
   );
 }
 
+type CatalogBook = CommerceBook & { commerce_vendor_offers?: CommerceVendorOffer[] };
+
+function primaryOffer(book: CatalogBook | null | undefined): CommerceVendorOffer | null {
+  const offers = book?.commerce_vendor_offers ?? [];
+  return offers.find((o) => o.status === 'approved') ?? offers[0] ?? null;
+}
+
+const BOOK_SUBJECTS = ['Matematik', 'Türkçe', 'Fen Bilimleri', 'Sosyal Bilgiler', 'İngilizce', 'Din Kültürü', 'İnkılap Tarihi', 'Diğer'];
+const BOOK_CLASS_LEVELS = ['5', '6', '7', '8', '9', '10', '11', '12', 'LGS', 'TYT', 'AYT'];
+const BOOK_SERIES = [
+  { value: 'vip-lgs-8-egitim', label: 'VIP Eğitim Seti' },
+  { value: 'paraf-lgs-8-egitim', label: 'Paraf Eğitim Seti' },
+  { value: 'lgs-8-denemeler', label: 'Denemeler' },
+];
+
+function BookEditorModal({
+  book,
+  onClose,
+  onSaved,
+}: {
+  book: CatalogBook | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const isEdit = Boolean(book);
+  const offer = primaryOffer(book);
+  const [title, setTitle] = useState(book?.title ?? '');
+  const [isbn, setIsbn] = useState(book?.isbn ?? '');
+  const [publisher, setPublisher] = useState(book?.publisher ?? '');
+  const [author, setAuthor] = useState(book?.author ?? '');
+  const [subject, setSubject] = useState(book?.subject ?? '');
+  const [classLevels, setClassLevels] = useState<string[]>(book?.class_levels?.length ? book.class_levels : ['8', 'LGS']);
+  const [series, setSeries] = useState(String(book?.metadata?.series ?? 'vip-lgs-8-egitim'));
+  const [fascicle, setFascicle] = useState(
+    book?.metadata?.fascicle_count != null ? String(book.metadata.fascicle_count) : '',
+  );
+  const [description, setDescription] = useState(book?.description ?? '');
+  const [priceLira, setPriceLira] = useState(offer && offer.price_kurus > 0 ? String(offer.price_kurus / 100) : '');
+  const [stock, setStock] = useState(offer ? String(offer.stock_quantity) : '100');
+  const [catalogActive, setCatalogActive] = useState(book?.is_catalog_active !== false);
+  const [coverPreview, setCoverPreview] = useState<string | null>(book?.cover_image_url ?? null);
+  const [coverDataUrl, setCoverDataUrl] = useState<string | null>(null);
+  const [coverMeta, setCoverMeta] = useState<string | null>(null);
+  const [coverPreparing, setCoverPreparing] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const toggleLevel = (level: string) => {
+    setClassLevels((prev) => (prev.includes(level) ? prev.filter((x) => x !== level) : [...prev, level]));
+  };
+
+  const handleCoverChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    if (f.size > 25 * 1024 * 1024) {
+      toast.error('Dosya çok büyük (max 25 MB).');
+      return;
+    }
+    setCoverPreparing(true);
+    try {
+      const compressed = await compressCoverImage(f);
+      setCoverDataUrl(compressed.dataUrl);
+      setCoverPreview(compressed.dataUrl);
+      setCoverMeta(`${compressed.width}×${compressed.height} · ${formatBytes(compressed.bytesApprox)}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Görsel işlenemedi');
+    } finally {
+      setCoverPreparing(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!title.trim()) {
+      toast.error('Kitap adı gerekli');
+      return;
+    }
+    setSaving(true);
+    try {
+      const saved = await caSaveBook({
+        id: book?.id,
+        title: title.trim(),
+        isbn: isbn.trim() || null,
+        publisher: publisher.trim() || null,
+        author: author.trim() || null,
+        subject: subject.trim() || null,
+        class_levels: classLevels,
+        exam_types: classLevels.includes('LGS') ? ['LGS'] : book?.exam_types ?? [],
+        description: description.trim() || null,
+        cover_image_url: coverDataUrl ? undefined : (book?.cover_image_url ?? null),
+        is_catalog_active: catalogActive,
+        series,
+        fascicle_count: fascicle ? Number(fascicle) : undefined,
+        price_lira: priceLira === '' ? 0 : priceLira,
+        stock_quantity: stock === '' ? 100 : Number(stock),
+      });
+      if (coverDataUrl && saved.book?.id) {
+        await caUploadBookCover(saved.book.id, coverDataUrl);
+      }
+      toast.success(isEdit ? 'Kitap güncellendi' : 'Kitap eklendi');
+      onSaved();
+      onClose();
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl w-full max-w-2xl p-6 shadow-xl max-h-[92vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold">{isEdit ? 'Kitabı düzenle' : 'Yeni kitap'}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600" type="button">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="sm:col-span-2">
+            <label className="text-xs text-gray-500">Kitap adı *</label>
+            <input className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={title} onChange={(e) => setTitle(e.target.value)} />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500">ISBN / barkod</label>
+            <input className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm font-mono" value={isbn} onChange={(e) => setIsbn(e.target.value)} />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500">Yayınevi</label>
+            <input className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={publisher} onChange={(e) => setPublisher(e.target.value)} />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500">Yazar</label>
+            <input className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={author} onChange={(e) => setAuthor(e.target.value)} />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500">Ders</label>
+            <select className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={subject} onChange={(e) => setSubject(e.target.value)}>
+              <option value="">Seçin</option>
+              {BOOK_SUBJECTS.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500">Koleksiyon</label>
+            <select className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={series} onChange={(e) => setSeries(e.target.value)}>
+              {BOOK_SERIES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500">Fasikül sayısı</label>
+            <input type="number" min={0} className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={fascicle} onChange={(e) => setFascicle(e.target.value)} />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="text-xs text-gray-500">Sınıf / sınav</label>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {BOOK_CLASS_LEVELS.map((lv) => (
+                <button
+                  key={lv}
+                  type="button"
+                  onClick={() => toggleLevel(lv)}
+                  className={`text-xs px-2 py-1 rounded-full border ${classLevels.includes(lv) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200'}`}
+                >
+                  {lv}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="sm:col-span-2">
+            <label className="text-xs text-gray-500">Açıklama</label>
+            <textarea className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm min-h-[80px] resize-y" value={description} onChange={(e) => setDescription(e.target.value)} />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500">Fiyat ₺ (boş = taslak)</label>
+            <input type="number" min={0} step="0.01" className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" placeholder="ör. 450" value={priceLira} onChange={(e) => setPriceLira(e.target.value)} />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500">Stok</label>
+            <input type="number" min={0} className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={stock} onChange={(e) => setStock(e.target.value)} />
+          </div>
+          <div className="sm:col-span-2 flex items-start gap-3">
+            <div className="w-16 h-22 flex-shrink-0">
+              {coverPreview ? (
+                <img src={coverPreview} alt="" className="w-16 h-[88px] object-cover rounded shadow-sm" />
+              ) : (
+                <div className="w-16 h-[88px] bg-gray-100 rounded" />
+              )}
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-gray-500">Kapak görseli</label>
+              <input type="file" accept="image/*" className="mt-1 block w-full text-xs" onChange={handleCoverChange} disabled={coverPreparing} />
+              {coverPreparing && <p className="text-xs text-gray-400 mt-1">Küçültülüyor…</p>}
+              {coverMeta && <p className="text-xs text-gray-400 mt-1">{coverMeta}</p>}
+            </div>
+          </div>
+          <label className="sm:col-span-2 flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" checked={catalogActive} onChange={(e) => setCatalogActive(e.target.checked)} />
+            Katalogda aktif (mağazada listelenebilir)
+          </label>
+        </div>
+        <div className="flex justify-end gap-2 mt-5">
+          <button type="button" onClick={onClose} className="text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5">İptal</button>
+          <button
+            type="button"
+            disabled={saving || coverPreparing}
+            onClick={handleSave}
+            className="flex items-center gap-1.5 text-sm bg-indigo-600 text-white px-4 py-1.5 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+            Kaydet
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // Kitaplar sekmesi
 // ──────────────────────────────────────────────────────────────────────
 function KitaplarTab() {
-  const [books, setBooks] = useState<CommerceBook[]>([]);
+  const [books, setBooks] = useState<CatalogBook[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showBulk, setShowBulk] = useState(true);
@@ -836,6 +1057,12 @@ function KitaplarTab() {
   const [priceDraft, setPriceDraft] = useState<Record<string, string>>({});
   const [savingPrices, setSavingPrices] = useState(false);
   const [bulkJson, setBulkJson] = useState('');
+  const [editor, setEditor] = useState<CatalogBook | 'new' | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CatalogBook | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [corrTarget, setCorrTarget] = useState<CatalogBook | null>(null);
+  const [corrNotes, setCorrNotes] = useState('');
+  const [corrSaving, setCorrSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -895,6 +1122,31 @@ function KitaplarTab() {
     finally { setSeeding(false); }
   };
 
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await caDeleteBook(deleteTarget.id);
+      toast.success('Kitap silindi — mağazadan kalktı');
+      setDeleteTarget(null);
+      await load();
+    } catch (e: unknown) { toast.error((e as Error).message); }
+    finally { setDeleting(false); }
+  };
+
+  const handleCorrection = async () => {
+    if (!corrTarget || !corrNotes.trim()) return;
+    setCorrSaving(true);
+    try {
+      await caRequestBookCorrection(corrTarget.id, corrNotes.trim());
+      toast.success('Yankı Kitapevi paneline düzeltme isteği gönderildi');
+      setCorrTarget(null);
+      setCorrNotes('');
+      await load();
+    } catch (e: unknown) { toast.error((e as Error).message); }
+    finally { setCorrSaving(false); }
+  };
+
   return (
     <div>
       <div className="flex justify-between items-center mb-4 gap-3">
@@ -913,7 +1165,10 @@ function KitaplarTab() {
         >
           <Upload className="w-4 h-4" /> Toplu yükleme
         </button>
-        <button className="flex items-center gap-1 text-sm bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700">
+        <button
+          onClick={() => setEditor('new')}
+          className="flex items-center gap-1 text-sm bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700"
+        >
           <Plus className="w-4 h-4" /> Yeni Kitap
         </button>
       </div>
@@ -1014,11 +1269,16 @@ function KitaplarTab() {
                 <th className="px-4 py-3 font-medium">ISBN</th>
                 <th className="px-4 py-3 font-medium">Yayınevi</th>
                 <th className="px-4 py-3 font-medium">Sınıf</th>
-                <th className="px-4 py-3 font-medium">Durum</th>
+                <th className="px-4 py-3 font-medium">Fiyat</th>
+                <th className="px-4 py-3 font-medium">Teklif</th>
+                <th className="px-4 py-3 font-medium">Katalog</th>
+                <th className="px-4 py-3 font-medium text-right">İşlem</th>
               </tr>
             </thead>
             <tbody>
-              {books.map((b) => (
+              {books.map((b) => {
+                const offer = primaryOffer(b);
+                return (
                 <tr key={b.id} className="border-t border-gray-100 hover:bg-gray-50">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
@@ -1036,18 +1296,111 @@ function KitaplarTab() {
                   <td className="px-4 py-3 text-gray-500 text-xs">{b.isbn ?? '—'}</td>
                   <td className="px-4 py-3 text-gray-600">{b.publisher ?? '—'}</td>
                   <td className="px-4 py-3 text-gray-600 text-xs">{(b.class_levels ?? []).join(', ') || '—'}</td>
+                  <td className="px-4 py-3 text-sm font-medium">
+                    {offer && offer.price_kurus > 0 ? formatCommerceTry(offer.price_kurus) : <span className="text-gray-400 font-normal">Fiyat yakında</span>}
+                  </td>
+                  <td className="px-4 py-3">
+                    {offer ? <StatusBadge status={offer.status} /> : <span className="text-xs text-gray-400">Teklif yok</span>}
+                  </td>
                   <td className="px-4 py-3">
                     <span className={`text-xs px-2 py-0.5 rounded-full ${b.is_catalog_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                       {b.is_catalog_active ? 'Aktif' : 'Pasif'}
                     </span>
                   </td>
+                  <td className="px-4 py-3">
+                    <div className="flex justify-end gap-1 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => setEditor(b)}
+                        className="flex items-center gap-1 text-xs border border-gray-200 text-gray-700 px-2 py-1 rounded-lg hover:bg-gray-50"
+                      >
+                        <Pencil className="w-3.5 h-3.5" /> Düzenle
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setCorrTarget(b); setCorrNotes(offer?.correction_notes ?? ''); }}
+                        className="flex items-center gap-1 text-xs border border-orange-200 text-orange-700 px-2 py-1 rounded-lg hover:bg-orange-50"
+                      >
+                        <Send className="w-3.5 h-3.5" /> Düzeltmeye gönder
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteTarget(b)}
+                        className="flex items-center gap-1 text-xs border border-red-200 text-red-700 px-2 py-1 rounded-lg hover:bg-red-50"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> Sil
+                      </button>
+                    </div>
+                  </td>
                 </tr>
-              ))}
+                );
+              })}
               {books.length === 0 && (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">Kitap bulunamadı</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">Kitap bulunamadı</td></tr>
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {editor && (
+        <BookEditorModal
+          book={editor === 'new' ? null : editor}
+          onClose={() => setEditor(null)}
+          onSaved={load}
+        />
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-xl">
+            <h3 className="text-lg font-semibold mb-2">Kitabı sil</h3>
+            <p className="text-sm text-gray-600">
+              <strong>{deleteTarget.title}</strong> kataloğundan ve mağazadan kalkacak. Yankı teklifi de pasife alınır.
+            </p>
+            <div className="flex justify-end gap-2 mt-5">
+              <button type="button" onClick={() => setDeleteTarget(null)} className="text-sm text-gray-500 px-3 py-1.5">İptal</button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={handleDelete}
+                className="flex items-center gap-1.5 text-sm bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                Sil
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {corrTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-xl">
+            <h3 className="text-lg font-semibold mb-2">Düzeltmeye gönder</h3>
+            <p className="text-sm text-gray-500 mb-3">
+              {corrTarget.title} — Yankı Kitapevi panelinde «Düzeltme İstendi» görünür; satıcı düzeltip yeniden gönderebilir.
+            </p>
+            <label className="block text-sm text-gray-600 mb-1">Satıcıya not</label>
+            <textarea
+              className="w-full border rounded-lg p-2 text-sm resize-none h-28 focus:outline-none focus:ring-2 focus:ring-orange-400"
+              placeholder="Örn. Kapak görseli eksik, ISBN yanlış, fiyat güncelleyin…"
+              value={corrNotes}
+              onChange={(e) => setCorrNotes(e.target.value)}
+            />
+            <div className="flex gap-2 justify-end mt-4">
+              <button type="button" onClick={() => setCorrTarget(null)} className="text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5">İptal</button>
+              <button
+                type="button"
+                disabled={!corrNotes.trim() || corrSaving}
+                onClick={handleCorrection}
+                className="flex items-center gap-1.5 text-sm bg-orange-500 text-white px-4 py-1.5 rounded-lg hover:bg-orange-600 disabled:opacity-50"
+              >
+                {corrSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                Düzeltmeye gönder
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
