@@ -56,6 +56,33 @@ export const caCreateBook = (fields: Partial<CommerceBook>) => post<{ book: Comm
 export const caUpdateBook = (id: string, fields: Partial<CommerceBook>) => post<{ book: CommerceBook }>('books.update', { id, ...fields });
 export const caDeleteBook = (id: string) => post('books.delete', { id });
 
+export type BulkBookInput = Partial<CommerceBook> & {
+  price_lira?: number | string;
+  price_kurus?: number;
+  stock?: number;
+  fascicle_count?: number;
+  series?: string;
+  features?: string[];
+};
+
+export const caBulkUpsertBooks = (books: BulkBookInput[], vendor_id?: string) =>
+  post<{
+    vendor: { id: string; name: string; slug: string };
+    count: number;
+    books: { id: string; title: string; isbn: string | null; offer_id: string; price_kurus: number; status: string; created: boolean }[];
+  }>('books.bulk_upsert', { books, vendor_id, approve_if_priced: true });
+
+export const caSeedLgs8Vip = (fields?: { contact_phone?: string; package_price_kurus?: number; prices?: Record<string, { price_kurus?: number; stock_quantity?: number }> }) =>
+  post<{
+    vendor: CommerceVendor;
+    vendor_created: boolean;
+    books: { id: string; title: string; isbn: string | null; offer_id: string; price_kurus: number; status: string }[];
+    package: CommerceBookPackage | null;
+  }>('books.seed_lgs8_vip', fields ?? {});
+
+export const caEnsureYankiVendor = (fields?: { contact_phone?: string; institution_id?: string }) =>
+  post<{ vendor: CommerceVendor; created: boolean }>('vendors.ensure_yanki', fields ?? {});
+
 // ── Teklifler & Onay ─────────────────────────────
 export type OfferListParams = { status?: string; vendor_id?: string; book_id?: string; limit?: number };
 export const caListOffers = (params?: OfferListParams) => post<{ offers: CommerceVendorOffer[] }>('offers.list', params ?? {});
@@ -64,7 +91,7 @@ export const caApproveOffer = (id: string) => post<{ offer: CommerceVendorOffer 
 export const caRejectOffer = (id: string, reason: string) => post<{ offer: CommerceVendorOffer }>('offers.reject', { id, reason });
 export const caRequestCorrection = (id: string, notes: string) => post<{ offer: CommerceVendorOffer }>('offers.request_correction', { id, notes });
 export const caSetOfferInactive = (id: string) => post<{ offer: CommerceVendorOffer }>('offers.inactive', { id });
-export const caUpdateOfferFlags = (id: string, flags: { is_featured?: boolean; is_bestseller?: boolean; is_new_arrival?: boolean; teacher_recommended?: boolean; required_for_classes?: string[] }) =>
+export const caUpdateOfferFlags = (id: string, flags: { is_featured?: boolean; is_bestseller?: boolean; is_new_arrival?: boolean; teacher_recommended?: boolean; required_for_classes?: string[]; price_kurus?: number; stock_quantity?: number; shipping_days?: number; status?: string }) =>
   post<{ offer: CommerceVendorOffer }>('offers.update', { id, ...flags });
 
 // ── Siparişler ────────────────────────────────────
