@@ -463,6 +463,10 @@ export async function fetchEdesisExamStructure(examId: string): Promise<{
   booklets: EdesisExamBooklet[];
   availableBookletCodes?: string[];
   answerKeyBookletCodes?: string[];
+<<<<<<< HEAD
+=======
+  denemeOnlyBookletCodes?: string[];
+>>>>>>> 0117ec7 (fix(edesis): B’yi deneme anahtarından gösterme, v1 ingest A-only)
   bookletPdfs?: EdesisBookletPdf[];
   examFamily?: string;
   bookletMode?: string;
