@@ -30,6 +30,7 @@ import {
   type EdesisBookletPdf,
   type EdesisStudentResultsExam
 } from '../../lib/edesis/edesisApi';
+import { fetchGoogleDrivePdfBlob } from '../../lib/edesis/googleDrivePdf';
 
 type View = 'take' | 'results' | 'analysis';
 
@@ -193,6 +194,15 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
         if (cancelled) return;
         if (applyBlob(r.blob)) return;
 
+        const publicUrls = [r.url, ...candidateUrls([...(r.files || []), ...bookletPdfs, ...(activeExam.bookletPdfs || [])])].filter(
+          (u): u is string => Boolean(u)
+        );
+        for (const fileUrl of publicUrls) {
+          if (cancelled) return;
+          const driveBlob = await fetchGoogleDrivePdfBlob(fileUrl);
+          if (driveBlob && applyBlob(driveBlob)) return;
+        }
+
         // Ham Edesis URL iframe’de auth’suz açılmaz; her adayı proxy ile tekrar dene
         const retries = candidateUrls([
           ...(r.files || []),
@@ -207,7 +217,12 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
               kitapcikTuru: kitapcik,
               fileUrl
             });
+            if (cancelled) return;
             if (applyBlob(again.blob)) return;
+            if (again.url) {
+              const driveBlob = await fetchGoogleDrivePdfBlob(again.url);
+              if (driveBlob && applyBlob(driveBlob)) return;
+            }
           } catch {
             /* sonraki dosya */
           }
@@ -218,6 +233,11 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
         const retries = candidateUrls([...bookletPdfs, ...(activeExam.bookletPdfs || [])]);
         for (const fileUrl of retries) {
           if (cancelled) return;
+          const driveBlob = await fetchGoogleDrivePdfBlob(fileUrl);
+          if (driveBlob && applyBlob(driveBlob)) {
+            setPdfError(null);
+            return;
+          }
           try {
             const again = await fetchEdesisExamBookletPdf({
               examId: activeExam.examId,
@@ -227,6 +247,13 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             if (applyBlob(again.blob)) {
               setPdfError(null);
               return;
+            }
+            if (again.url) {
+              const againDrive = await fetchGoogleDrivePdfBlob(again.url);
+              if (againDrive && applyBlob(againDrive)) {
+                setPdfError(null);
+                return;
+              }
             }
           } catch {
             /* sonraki */
