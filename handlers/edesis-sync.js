@@ -830,7 +830,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         configured: keyOk,
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-booklet-abp-dl-2026-08-25',
+        deployMarker: 'edesis-lgs-neighbor-ktt-2026-08-26',
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
@@ -889,7 +889,7 @@ export default async function handler(req, res) {
         }
         return res.status(200).json({
           ok: true,
-          deployMarker: 'edesis-booklet-abp-dl-2026-08-25',
+          deployMarker: 'edesis-lgs-neighbor-ktt-2026-08-26',
           configured: Boolean(cfg.apiKey),
           abpAuth: getEdesisAbpAuthStatus(),
           abpProbe: abpProbe
@@ -949,7 +949,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-booklet-abp-dl-2026-08-25',
+        deployMarker: 'edesis-lgs-neighbor-ktt-2026-08-26',
         baseUrl: cfg.baseUrl,
         attempts: out
       });
@@ -1701,7 +1701,7 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         ok: true,
-        deployMarker: 'edesis-booklet-abp-dl-2026-08-25',
+        deployMarker: 'edesis-lgs-neighbor-ktt-2026-08-26',
         edesisStudentId,
         count: items.length,
         items,
@@ -1781,7 +1781,7 @@ export default async function handler(req, res) {
       const takeable = (loaded.items || []).filter((x) => x.canTake && !x.hasStudentResult);
       return res.status(200).json({
         ok: true,
-        deployMarker: 'edesis-booklet-abp-dl-2026-08-25',
+        deployMarker: 'edesis-lgs-neighbor-ktt-2026-08-26',
         edesisStudentId,
         platformStudentId: platformId,
         autoLinked,
