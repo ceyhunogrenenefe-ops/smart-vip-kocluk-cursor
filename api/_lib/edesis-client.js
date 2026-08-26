@@ -2297,6 +2297,14 @@ export function googleDrivePreviewUrl(fileUrl) {
   return `https://drive.google.com/file/d/${id}/preview`;
 }
 
+export function rewriteBookletFilesForBrowser(files = []) {
+  return (files || []).map((f) => {
+    const preview = googleDrivePreviewUrl(f?.url);
+    if (!preview || preview === f.url) return f;
+    return { ...f, url: preview, name: f.name || 'Google Drive önizleme' };
+  });
+}
+
 /** API host dosya vermez; tenant web + CDN dener */
 export function listEdesisFileBases(cfg = {}) {
   const merged = { ...getEdesisConfig(), ...cfg };
