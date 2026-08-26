@@ -30,6 +30,7 @@ import {
   extractEdesisStructureRows,
   normalizeKitapcikCode,
   listEdesisBookletCodes,
+  denemeOnlyBookletCodes,
   extractEdesisAnswerKeyBookletCodes,
   kitapcikAllowedForExam,
   canonicalEdesisStructureLessons,
@@ -1476,10 +1477,23 @@ describe('pickEdesisBookletLessons', () => {
 });
 
 describe('listEdesisBookletCodes', () => {
-  it('prefers answer key booklet codes from deneme API', () => {
-    const codes = listEdesisBookletCodes({
+  it('intersects deneme keys with structure so B is not offered when ingest only has A', () => {
+    const structure = {
       rows: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 1, questionCount: 10 }],
       booklets: [{ kitapcikTuru: 'A', lessons: [] }],
+      answerKeyBookletCodes: ['A', 'B']
+    };
+    assert.deepEqual(listEdesisBookletCodes(structure), ['A']);
+    assert.deepEqual(denemeOnlyBookletCodes(structure), ['B']);
+  });
+
+  it('keeps A and B when structure rows include both', () => {
+    const codes = listEdesisBookletCodes({
+      rows: [
+        { kitapcikTuru: 'A', lessonId: 1, dersGrupId: 1, questionCount: 10 },
+        { kitapcikTuru: 'B', lessonId: 1, dersGrupId: 1, questionCount: 10 }
+      ],
+      booklets: [],
       answerKeyBookletCodes: ['A', 'B']
     });
     assert.deepEqual(codes, ['A', 'B']);
