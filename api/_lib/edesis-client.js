@@ -2490,19 +2490,35 @@ export function extractEdesisAnswerKeyBookletCodes(json) {
         pushKitapcikLetter(item, codes);
         continue;
       }
-      pushKitapcikLetter(
-        pickStrCi(item, ['kitapcikTuru', 'kitapcik', 'booklet', 'bookletType', 'bookletCode', 'tur']),
-        codes
-      );
       const nested = item.cevaplar || item.Cevaplar;
+      const letter = pickStrCi(item, ['kitapcikTuru', 'kitapcik', 'booklet', 'bookletType', 'bookletCode', 'tur']);
+      // Boş yuva (cevaplar:[]) B diye gösterilmesin — ingest 422 “KitapcikTuru=B”
       if (Array.isArray(nested)) {
-        for (const row of nested) {
-          pushKitapcikLetter(pickStrCi(row, ['kitapcikTuru', 'kitapcik']), codes);
-        }
+        if (nested.length > 0) pushKitapcikLetter(letter, codes);
+      } else {
+        pushKitapcikLetter(letter, codes);
       }
     }
   }
   return [...codes].sort();
+}
+
+export function summarizeEdesisAnswerKeyBooklets(json) {
+  if (!json || typeof json !== 'object') return [];
+  const root =
+    json.result && typeof json.result === 'object' && !Array.isArray(json.result)
+      ? json.result
+      : json;
+  const kitapciklar = root?.kitapciklar || root?.Kitapciklar || [];
+  if (!Array.isArray(kitapciklar)) return [];
+  return kitapciklar.map((k) => {
+    const cevaplar = k?.cevaplar || k?.Cevaplar;
+    return {
+      kitapcikTuru: normalizeKitapcikCode(pickStrCi(k, ['kitapcikTuru', 'kitapcik'])),
+      cevapCount: Array.isArray(cevaplar) ? cevaplar.length : null,
+      keys: k && typeof k === 'object' ? Object.keys(k).slice(0, 12) : []
+    };
+  });
 }
 
 /** Optikte gösterilecek harfler — cevap anahtarı varsa yalnız onu; A–D uydurma yok. edesis-booklet-keys-2026-08-26 */
@@ -2548,20 +2564,29 @@ function extractBookletCodesFromBookletsEndpoint(json) {
   return [...codes].sort();
 }
 
-export async function fetchEdesisDenemeAnswerKeyBooklets(denemeId, localCfg) {
+export async function fetchEdesisDenemeAnswerKeyInfo(denemeId, localCfg) {
+  const empty = { codes: [], detail: [], error: null, success: null };
   const id = String(denemeId || '').trim();
-  if (!id || !/^\d+$/.test(id)) return [];
+  if (!id || !/^\d+$/.test(id)) return empty;
   try {
     const r = await fetchEdesisJsonPreferAbp(
       localCfg,
       `/api/services/app/Denemes/GetDenemeCevapAnahtariLst?id=${encodeURIComponent(id)}`
     );
-    const codes = extractEdesisAnswerKeyBookletCodes(r.json);
-    if (codes.length) return codes;
-  } catch {
-    /* ABP 401/403 veya boş liste */
+    return {
+      codes: extractEdesisAnswerKeyBookletCodes(r.json),
+      detail: summarizeEdesisAnswerKeyBooklets(r.json),
+      error: r.json?.error?.message || (typeof r.json?.error === 'string' ? r.json.error : null),
+      success: r.json?.success ?? null
+    };
+  } catch (e) {
+    return { ...empty, error: e instanceof Error ? e.message : String(e) };
   }
-  return [];
+}
+
+export async function fetchEdesisDenemeAnswerKeyBooklets(denemeId, localCfg) {
+  const info = await fetchEdesisDenemeAnswerKeyInfo(denemeId, localCfg);
+  return info.codes;
 }
 
 function pickExamMetaFromJson(json) {
@@ -4351,8 +4376,11 @@ export async function fetchEdesisExamStructure(examId, cfgOverride = {}) {
     /* exam-booklet-pdf / cevap anahtarı yedek */
   }
   let answerKeyBookletCodes = [];
+  let answerKeyDetail = [];
   if (denemeId) {
-    answerKeyBookletCodes = await fetchEdesisDenemeAnswerKeyBooklets(denemeId, localCfg);
+    const keyInfo = await fetchEdesisDenemeAnswerKeyInfo(denemeId, localCfg);
+    answerKeyBookletCodes = keyInfo.codes || [];
+    answerKeyDetail = keyInfo.detail || [];
   }
   if (!answerKeyBookletCodes.length && bookletEndpointCodes.length) {
     answerKeyBookletCodes = bookletEndpointCodes;
@@ -4375,6 +4403,7 @@ export async function fetchEdesisExamStructure(examId, cfgOverride = {}) {
     booklets: bookletsGrouped,
     availableBookletCodes: listEdesisBookletCodes(structureCtx),
     answerKeyBookletCodes,
+    answerKeyDetail,
     denemeId: denemeId || null,
     bookletPdfs: resolvedPdfs,
     examFamily,

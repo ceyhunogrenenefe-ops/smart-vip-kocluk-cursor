@@ -1508,10 +1508,25 @@ describe('extractEdesisAnswerKeyBookletCodes', () => {
   it('reads ABP DenemeCevapOutputDto kitapciklar', () => {
     const codes = extractEdesisAnswerKeyBookletCodes({
       result: {
-        kitapciklar: [{ kitapcikTuru: 'A' }, { KitapcikTuru: '2' }]
+        kitapciklar: [
+          { kitapcikTuru: 'A', cevaplar: [{ adet: 1 }] },
+          { KitapcikTuru: '2', cevaplar: [{ adet: 1 }] }
+        ]
       }
     });
     assert.deepEqual(codes, ['A', 'B']);
+  });
+
+  it('skips booklet slot with empty cevaplar', () => {
+    const codes = extractEdesisAnswerKeyBookletCodes({
+      result: {
+        kitapciklar: [
+          { kitapcikTuru: 'A', cevaplar: [{ adet: 1 }] },
+          { kitapcikTuru: 'B', cevaplar: [] }
+        ]
+      }
+    });
+    assert.deepEqual(codes, ['A']);
   });
 });
 
