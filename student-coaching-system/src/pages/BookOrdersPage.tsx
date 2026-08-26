@@ -204,7 +204,7 @@ function formatTrDate(iso: string) {
   return d.toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
-export default function BookOrdersPage() {
+export default function BookOrdersPage({ embedded = false }: { embedded?: boolean }) {
   const { effectiveUser, user } = useAuth();
   const { activeInstitutionId } = useApp();
   const isSuper = userHasAnyRole(effectiveUser, ['super_admin']);
@@ -1011,9 +1011,21 @@ export default function BookOrdersPage() {
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
+    <div className={embedded ? 'space-y-6' : 'mx-auto max-w-6xl space-y-6 p-4 sm:p-6'}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
+          {embedded ? (
+            <>
+              <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
+                <BookOpen className="h-5 w-5 text-indigo-600" />
+                Kurum kitap sipariş formu
+              </h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Veli formu doldurur → sipariş tabloya düşer → onay → kitapçıya WhatsApp.
+              </p>
+            </>
+          ) : (
+            <>
           <h1 className="flex items-center gap-2 text-xl font-bold text-slate-900">
             <BookOpen className="h-6 w-6 text-indigo-600" />
             Kitap siparişleri
@@ -1024,6 +1036,8 @@ export default function BookOrdersPage() {
             <span className="font-mono text-xs">Meta şablonu</span> (kitap_siparisi1)
             <span className="text-slate-500"> · Kitapçı paneli: onay + kargo takibi</span>
           </p>
+            </>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <button
