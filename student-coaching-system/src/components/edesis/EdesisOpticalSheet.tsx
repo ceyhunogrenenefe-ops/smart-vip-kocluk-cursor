@@ -399,7 +399,7 @@ export default function EdesisOpticalSheet({
 
   const opticalAside = (
     <aside
-      className={`edesis-optic-aside flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-b border-slate-200 bg-white md:border-b-0 md:border-r ${
+      className={`edesis-optic-aside flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-b border-slate-200 bg-white md:border-b-0 md:border-l ${
         pdfWide && !studio ? 'hidden' : studio ? '' : 'w-full md:w-[22rem] md:min-w-[22rem] md:shrink-0'
       }`}
     >
@@ -544,7 +544,7 @@ export default function EdesisOpticalSheet({
             : 'flex min-h-[70vh] flex-col md:flex-row'
         }
       >
-        {opticalAside}
+        {studio ? null : opticalAside}
 
         <section
           ref={pdfPaneRef}
@@ -612,7 +612,7 @@ export default function EdesisOpticalSheet({
                     {pdfBusy
                       ? 'Kitapçık PDF yükleniyor…'
                       : pdfError ||
-                        'Bu sınav için sistemde PDF bulunamadı. Soruları basılı kitapçıktan takip edip soldaki optiği doldurun.'}
+                        'Bu sınav için sistemde PDF bulunamadı. Soruları basılı kitapçıktan takip edip sağdaki optiği doldurun.'}
                   </p>
                 </div>
               </div>
@@ -622,13 +622,14 @@ export default function EdesisOpticalSheet({
             <button
               type="button"
               onClick={() => setPdfWide(false)}
-              className="absolute bottom-4 left-4 z-10 inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-2 text-xs font-bold text-slate-900 shadow-lg"
+              className="absolute bottom-4 right-4 z-10 inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-2 text-xs font-bold text-slate-900 shadow-lg"
             >
               <Shrink className="h-3.5 w-3.5" />
               Optik formu aç
             </button>
           ) : null}
         </section>
+        {studio ? opticalAside : null}
       </div>
     </div>
   );

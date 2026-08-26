@@ -99,6 +99,18 @@
     overflow: hidden !important;
   }
 
+  /* Sol menü optiğin üstüne binmesin — sınavdayken rail gizlenir, içerik tam genişlik */
+  html.edesis-exam-studio aside:not(.edesis-optic-aside) {
+    display: none !important;
+  }
+  html.edesis-exam-studio [data-app-content-col] {
+    padding-left: 0 !important;
+    z-index: 280 !important;
+  }
+  html.edesis-exam-studio [data-mobile-tab-bar] {
+    display: none !important;
+  }
+
   /* Optik sütun PDF’e yedirilmesin — Tailwind grid-cols arbitrary purge’e takılmasın */
   html.edesis-exam-studio .edesis-optic-split {
     display: flex;
@@ -114,6 +126,12 @@
     flex: 0 0 auto;
     flex-direction: column;
     overflow: hidden;
+    order: 1;
+  }
+  html.edesis-exam-studio .edesis-optic-split > section {
+    order: 2;
+    min-width: 0;
+    flex: 1 1 auto;
   }
   html.edesis-exam-studio .edesis-optic-split.edesis-optic-pdf-wide .edesis-optic-aside {
     display: none !important;
@@ -129,6 +147,13 @@
       height: 100%;
       max-height: none;
       flex: 0 0 28rem;
+      margin-left: auto;
+      order: 2;
+    }
+    html.edesis-exam-studio .edesis-optic-split > section {
+      order: 1;
+      min-width: 0;
+      flex: 1 1 auto;
     }
   }
 
