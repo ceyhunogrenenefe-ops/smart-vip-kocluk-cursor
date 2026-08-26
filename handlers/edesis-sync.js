@@ -47,6 +47,7 @@ import {
   absorbEdesisBookletSource,
   pickGoogleDriveFetchUrl,
   googleDrivePreviewUrl,
+  rewriteBookletFilesForBrowser,
   pickEdesisBookletLessons,
   listEdesisBookletCodes,
   fetchEdesisExamSubjects,
@@ -832,7 +833,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         configured: keyOk,
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-gdrive-preview-2026-08-26',
+        deployMarker: 'edesis-gdrive-no-cors-2026-08-26',
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
@@ -891,7 +892,7 @@ export default async function handler(req, res) {
         }
         return res.status(200).json({
           ok: true,
-          deployMarker: 'edesis-gdrive-preview-2026-08-26',
+          deployMarker: 'edesis-gdrive-no-cors-2026-08-26',
           configured: Boolean(cfg.apiKey),
           abpAuth: getEdesisAbpAuthStatus(),
           abpProbe: abpProbe
@@ -951,7 +952,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-gdrive-preview-2026-08-26',
+        deployMarker: 'edesis-gdrive-no-cors-2026-08-26',
         baseUrl: cfg.baseUrl,
         attempts: out
       });
@@ -1558,7 +1559,7 @@ export default async function handler(req, res) {
         availableBookletCodes: structure.availableBookletCodes || listEdesisBookletCodes(structure),
         answerKeyBookletCodes: structure.answerKeyBookletCodes || [],
         denemeId: structure.denemeId || null,
-        bookletPdfs: structure.bookletPdfs || [],
+        bookletPdfs: rewriteBookletFilesForBrowser(structure.bookletPdfs || []),
         examFamily: structure.examFamily || 'generic',
         bookletMode: structure.bookletMode || 'single',
         choiceCount: structure.choiceCount || 4,
@@ -1594,11 +1595,13 @@ export default async function handler(req, res) {
       const pdf = await loadEdesisExamBookletPdf(examId, kitapcikTuru, cfg, {
         preferredFileUrl: preferredFileUrl || undefined
       });
-      const files = (pdf.files || []).map((f) => ({
-        url: f.url,
-        kitapcikTuru: f.kitapcikTuru || '',
-        name: f.name || 'Kitapçık PDF'
-      }));
+      const files = rewriteBookletFilesForBrowser(
+        (pdf.files || []).map((f) => ({
+          url: f.url,
+          kitapcikTuru: f.kitapcikTuru || '',
+          name: f.name || 'Kitapçık PDF'
+        }))
+      );
       if (download) {
         res.setHeader('Cache-Control', 'private, no-store');
         const driveUrl = pickGoogleDriveFetchUrl([pdf.url, ...(pdf.files || []).map((f) => f.url)]);
@@ -1720,7 +1723,7 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         ok: true,
-        deployMarker: 'edesis-gdrive-preview-2026-08-26',
+        deployMarker: 'edesis-gdrive-no-cors-2026-08-26',
         edesisStudentId,
         count: items.length,
         items,
@@ -1800,7 +1803,7 @@ export default async function handler(req, res) {
       const takeable = (loaded.items || []).filter((x) => x.canTake && !x.hasStudentResult);
       return res.status(200).json({
         ok: true,
-        deployMarker: 'edesis-gdrive-preview-2026-08-26',
+        deployMarker: 'edesis-gdrive-no-cors-2026-08-26',
         edesisStudentId,
         platformStudentId: platformId,
         autoLinked,

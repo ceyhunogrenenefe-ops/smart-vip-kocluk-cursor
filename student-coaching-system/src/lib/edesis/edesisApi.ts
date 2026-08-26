@@ -1,5 +1,5 @@
 import { apiFetch } from '../session';
-import { fetchGoogleDrivePdfBlob } from './googleDrivePdf';
+import { firstGoogleDrivePreviewUrl } from './googleDrivePdf';
 
 export type EdesisProbeResult = {
   ok: boolean;
@@ -513,15 +513,14 @@ export async function fetchEdesisExamBookletPdf(params: {
   const denemeId = typeof j.denemeId === 'string' || typeof j.denemeId === 'number' ? String(j.denemeId) : null;
   const attempts = Array.isArray(j.attempts) ? j.attempts : [];
   const viewer = typeof j.viewer === 'string' ? j.viewer : '';
-  if (viewer === 'google-drive-preview' && url) {
-    return { blob: new Blob(), url, files, denemeId, attempts };
-  }
-  const publicUrls = [params.fileUrl, url, ...files.map((f) => String(f?.url || ''))].filter(Boolean);
-  for (const fileUrl of publicUrls) {
-    const driveBlob = await fetchGoogleDrivePdfBlob(fileUrl);
-    if (driveBlob && driveBlob.size > 8) {
-      return { blob: driveBlob, url: fileUrl, files, denemeId, attempts };
-    }
+  const preview = firstGoogleDrivePreviewUrl([
+    viewer === 'google-drive-preview' ? url : '',
+    params.fileUrl,
+    url,
+    ...files.map((f) => String(f?.url || ''))
+  ]);
+  if (preview) {
+    return { blob: new Blob(), url: preview, files, denemeId, attempts };
   }
   if (url || files[0]?.url) {
     return { blob: new Blob(), url: url || files[0]?.url || null, files, denemeId, attempts };

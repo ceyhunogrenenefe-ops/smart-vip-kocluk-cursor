@@ -46,7 +46,8 @@ import {
   extractGoogleDriveFileId,
   expandGoogleDrivePdfCandidates,
   pickGoogleDriveFetchUrl,
-  googleDrivePreviewUrl
+  googleDrivePreviewUrl,
+  rewriteBookletFilesForBrowser
 } from './edesis-client.js';
 
 describe('inferEdesisExamProgramKeys', () => {
@@ -1394,6 +1395,10 @@ describe('resolveEdesisFileUrl / expandEdesisFileUrlCandidates', () => {
       'https://drive.google.com/file/d/1MYKrkAlkJ0jG-nkO1Lf72TUfDa1sSPPR/preview'
     );
     assert.equal(googleDrivePreviewUrl(cands[0]), googleDrivePreviewUrl(view));
+    const rewritten = rewriteBookletFilesForBrowser([{ url: view, name: 'Kitapçık PDF' }]);
+    assert.equal(rewritten[0].url, googleDrivePreviewUrl(view));
+    assert.equal(rewritten[0].url.includes('/preview'), true);
+    assert.equal(rewritten[0].url.includes('usercontent'), false);
     const expanded = expandEdesisFileUrlCandidates(view, {
       baseUrl: 'https://onlinevipdershane.api.edesis.com'
     });
