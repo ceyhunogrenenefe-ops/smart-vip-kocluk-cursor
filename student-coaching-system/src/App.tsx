@@ -85,7 +85,6 @@ import CoachSoruAnalitikPage from './pages/questionHelp/CoachSoruAnalitikPage';
 import NotificationsPage from './pages/NotificationsPage';
 import EventsPage from './pages/EventsPage';
 import MeetingTrackerPage from './pages/MeetingTrackerPage';
-import BookOrdersPage from './pages/BookOrdersPage';
 import OzelDersTalepleriPage from './pages/OzelDersTalepleriPage';
 import TeacherVitrineProfilePage from './pages/TeacherVitrineProfilePage';
 import TeacherAvailabilityPage from './pages/TeacherAvailabilityPage';
@@ -434,9 +433,7 @@ function App() {
 
             <Route path="/kitap-siparisleri" element={
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/kitap-siparisleri')}>
-                <Layout>
-                  <BookOrdersPage />
-                </Layout>
+                <Navigate to="/kitap-pazaryeri#kurum-siparis" replace />
               </ProtectedRoute>
             } />
 
