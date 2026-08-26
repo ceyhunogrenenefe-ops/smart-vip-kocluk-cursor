@@ -86,7 +86,7 @@ const ADMIN_HUB_MATCH = [
 
   '/kayit-takibi',
 
-  '/kitap-siparisleri',
+  '/kitap-pazaryeri',
 
   '/ozel-ders-talepleri',
 

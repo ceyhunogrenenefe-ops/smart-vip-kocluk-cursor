@@ -15,7 +15,7 @@ import {
 import BrandLogo from '../brand/BrandLogo';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
-import { userRoleTags, userHasAnyRole } from '../../config/rolePermissions';
+import { userRoleTags } from '../../config/rolePermissions';
 import { cn } from '../../lib/utils';
 import {
   getFlatMenuForRoles,
@@ -25,7 +25,7 @@ import {
   STUDENT_NAV_ACADEMIC_CENTER,
   STUDENT_NAV_SORU_SOR,
   STUDENT_NAV_YARDIM,
-  NAV_KITAP_SIPARISLERI,
+  NAV_OZEL_DERS_TALEPLERI,
   type FlatNavItem
 } from './sidebar/navModel';
 import { SidebarNavLink } from './sidebar/SidebarNavLink';
@@ -54,11 +54,7 @@ export default function Sidebar({
   const tags = userRoleTags(effectiveUser);
   const flat = useMemo(() => getFlatMenuForRoles(tags), [tags]);
   const nav = useMemo(() => structureNavFromFlat(flat), [flat]);
-  const showBookOrdersNav = userHasAnyRole(effectiveUser, ['super_admin', 'admin']);
-  const restNav = useMemo(
-    () => (showBookOrdersNav ? nav.rest.filter((it) => it.path !== NAV_KITAP_SIPARISLERI.path) : nav.rest),
-    [nav.rest, showBookOrdersNav]
-  );
+  const restNav = nav.rest;
   const isStudentOnlyNav =
     tags.includes('student') &&
     !tags.some((t) => ['super_admin', 'admin', 'coach', 'teacher'].includes(t));
@@ -239,19 +235,6 @@ export default function Sidebar({
             />
           );
         })}
-
-        {showBookOrdersNav ? (
-          <SidebarNavLink
-            label={NAV_KITAP_SIPARISLERI.label}
-            icon={NAV_KITAP_SIPARISLERI.icon}
-            active={
-              location.pathname === NAV_KITAP_SIPARISLERI.path ||
-              location.pathname.startsWith(`${NAV_KITAP_SIPARISLERI.path}/`)
-            }
-            collapsed={railCollapsed}
-            onNavigate={() => go(NAV_KITAP_SIPARISLERI.path)}
-          />
-        ) : null}
 
         {hasGroupedSection ? (
           <>

@@ -7,6 +7,7 @@ import {
   AlertCircle,
   CheckCircle2,
   ChevronDown,
+  ClipboardList,
   Copy,
   Eye,
   EyeOff,
@@ -64,8 +65,10 @@ import type {
 } from '../../types/commerce.types';
 import { formatCommerceTry, COMMERCE_OFFER_STATUS_LABELS, COMMERCE_ORDER_STATUS_LABELS } from '../../types/commerce.types';
 import { useAuth } from '../../context/AuthContext';
+import BookOrdersPage from '../BookOrdersPage';
 
 type Tab =
+  | 'kurum-siparis'
   | 'saticilar'
   | 'onaylar'
   | 'kitaplar'
@@ -77,11 +80,12 @@ type Tab =
   | 'ayarlar';
 
 const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
+  { key: 'kurum-siparis', label: 'Sipariş formu', icon: <ClipboardList className="w-4 h-4" /> },
   { key: 'saticilar', label: 'Satıcılar', icon: <Store className="w-4 h-4" /> },
   { key: 'onaylar', label: 'Onay Bekleyenler', icon: <AlertCircle className="w-4 h-4" /> },
   { key: 'kitaplar', label: 'Kitaplar', icon: <Package className="w-4 h-4" /> },
   { key: 'teklifler', label: 'Tüm Teklifler', icon: <Eye className="w-4 h-4" /> },
-  { key: 'siparisler', label: 'Siparişler', icon: <ShoppingBag className="w-4 h-4" /> },
+  { key: 'siparisler', label: 'Mağaza siparişleri', icon: <ShoppingBag className="w-4 h-4" /> },
   { key: 'hakedisler', label: 'Hakedişler', icon: <Wallet className="w-4 h-4" /> },
   { key: 'kuponlar', label: 'Kuponlar', icon: <CheckCircle2 className="w-4 h-4" /> },
   { key: 'raporlar', label: 'Raporlar', icon: <ChevronDown className="w-4 h-4" /> },
@@ -1213,21 +1217,28 @@ function PlaceholderTab({ label }: { label: string }) {
 // ──────────────────────────────────────────────────────────────────────
 export default function KitapPazaryeriPage() {
   const { effectiveUser } = useAuth();
-  const [tab, setTab] = useState<Tab>('saticilar');
+  const [tab, setTab] = useState<Tab>('kurum-siparis');
 
   // URL hash ile sekme senkronizasyonu
   useEffect(() => {
-    const hash = window.location.hash.replace('#', '') as Tab;
-    if (TABS.some((t) => t.key === hash)) setTab(hash);
+    const sync = () => {
+      const hash = window.location.hash.replace('#', '') as Tab;
+      if (TABS.some((t) => t.key === hash)) setTab(hash);
+    };
+    sync();
+    window.addEventListener('hashchange', sync);
+    return () => window.removeEventListener('hashchange', sync);
   }, []);
 
   const isSuperAdmin = effectiveUser?.role === 'super_admin' || (effectiveUser as { roles?: string[] })?.roles?.includes('super_admin');
-  if (!isSuperAdmin) {
+  const isAdmin = effectiveUser?.role === 'admin' || (effectiveUser as { roles?: string[] })?.roles?.includes('admin');
+  if (!isSuperAdmin && !isAdmin) {
     return <div className="p-6 text-gray-500">Bu sayfaya erişim yetkiniz yok.</div>;
   }
 
   const renderTab = () => {
     switch (tab) {
+      case 'kurum-siparis': return <BookOrdersPage embedded />;
       case 'saticilar': return <VendorTab />;
       case 'onaylar': return <OnaylarTab />;
       case 'kitaplar': return <KitaplarTab />;
@@ -1246,7 +1257,7 @@ export default function KitapPazaryeriPage() {
         <ShoppingBag className="w-7 h-7 text-indigo-600" />
         <div>
           <h1 className="text-xl font-bold text-gray-900">Kitap Pazaryeri</h1>
-          <p className="text-sm text-gray-500">Satıcılar · Onay · Siparişler · Hakedişler</p>
+          <p className="text-sm text-gray-500">Sipariş formu · Satıcılar · Onay · Mağaza siparişleri · Hakedişler</p>
         </div>
       </div>
 
