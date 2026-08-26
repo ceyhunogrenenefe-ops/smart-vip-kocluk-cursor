@@ -115,6 +115,14 @@ export const caSeedLgs8Vip = (fields?: { contact_phone?: string; package_price_k
     package: CommerceBookPackage | null;
   }>('books.seed_lgs8_vip', fields ?? {});
 
+export const caSeedLgs8ParafIq = (fields?: { contact_phone?: string; price_kurus?: number; stock_quantity?: number }) =>
+  post<{
+    vendor: CommerceVendor;
+    vendor_created: boolean;
+    book: { id: string; title: string; isbn: string | null; slug: string; offer_id: string; price_kurus: number; status: string };
+    offer: CommerceVendorOffer | null;
+  }>('books.seed_lgs8_paraf_iq', fields ?? {});
+
 export const caEnsureYankiVendor = (fields?: { contact_phone?: string; institution_id?: string }) =>
   post<{ vendor: CommerceVendor; created: boolean }>('vendors.ensure_yanki', fields ?? {});
 
