@@ -30,7 +30,7 @@ import {
   type EdesisBookletPdf,
   type EdesisStudentResultsExam
 } from '../../lib/edesis/edesisApi';
-import { fetchGoogleDrivePdfBlob } from '../../lib/edesis/googleDrivePdf';
+import { firstGoogleDrivePreviewUrl } from '../../lib/edesis/googleDrivePdf';
 
 type View = 'take' | 'results' | 'analysis';
 
@@ -171,6 +171,13 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
       return null;
     });
     void (async () => {
+      const applyPreview = (fileUrl: string | null | undefined) => {
+        const preview = firstGoogleDrivePreviewUrl([fileUrl]);
+        if (!preview || cancelled) return false;
+        setPdfUrl(preview);
+        return true;
+      };
+
       const applyBlob = (blob: Blob) => {
         if (cancelled || blob.size <= 8) return false;
         const next = URL.createObjectURL(blob);
@@ -202,11 +209,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
 
       try {
         const known = candidateUrls([...bookletPdfs, ...(activeExam.bookletPdfs || [])]);
-        for (const fileUrl of known) {
-          if (cancelled) return;
-          const driveBlob = await fetchGoogleDrivePdfBlob(fileUrl);
-          if (driveBlob && applyBlob(driveBlob)) return;
-        }
+        if (applyPreview(firstGoogleDrivePreviewUrl(known))) return;
 
         const r = await fetchEdesisExamBookletPdf({
           examId: activeExam.examId,
@@ -214,15 +217,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
         });
         if (cancelled) return;
         if (applyBlob(r.blob)) return;
-
-        const publicUrls = [r.url, ...candidateUrls([...(r.files || []), ...bookletPdfs, ...(activeExam.bookletPdfs || [])])].filter(
-          (u): u is string => Boolean(u)
-        );
-        for (const fileUrl of publicUrls) {
-          if (cancelled) return;
-          const driveBlob = await fetchGoogleDrivePdfBlob(fileUrl);
-          if (driveBlob && applyBlob(driveBlob)) return;
-        }
+        if (applyPreview(r.url) || applyPreview(firstGoogleDrivePreviewUrl(candidateUrls(r.files)))) return;
 
         // Ham Edesis URL iframe’de auth’suz açılmaz; her adayı proxy ile tekrar dene
         const retries = candidateUrls([
@@ -232,6 +227,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
         ]);
         for (const fileUrl of retries) {
           if (cancelled) return;
+          if (applyPreview(fileUrl)) return;
           try {
             const again = await fetchEdesisExamBookletPdf({
               examId: activeExam.examId,
@@ -240,10 +236,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             });
             if (cancelled) return;
             if (applyBlob(again.blob)) return;
-            if (again.url) {
-              const driveBlob = await fetchGoogleDrivePdfBlob(again.url);
-              if (driveBlob && applyBlob(driveBlob)) return;
-            }
+            if (applyPreview(again.url) || applyPreview(fileUrl)) return;
           } catch {
             /* sonraki dosya */
           }
@@ -252,13 +245,12 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
       } catch (e) {
         if (cancelled) return;
         const retries = candidateUrls([...bookletPdfs, ...(activeExam.bookletPdfs || [])]);
+        if (applyPreview(firstGoogleDrivePreviewUrl(retries))) {
+          setPdfError(null);
+          return;
+        }
         for (const fileUrl of retries) {
           if (cancelled) return;
-          const driveBlob = await fetchGoogleDrivePdfBlob(fileUrl);
-          if (driveBlob && applyBlob(driveBlob)) {
-            setPdfError(null);
-            return;
-          }
           try {
             const again = await fetchEdesisExamBookletPdf({
               examId: activeExam.examId,
@@ -269,12 +261,9 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
               setPdfError(null);
               return;
             }
-            if (again.url) {
-              const againDrive = await fetchGoogleDrivePdfBlob(again.url);
-              if (againDrive && applyBlob(againDrive)) {
-                setPdfError(null);
-                return;
-              }
+            if (applyPreview(again.url) || applyPreview(fileUrl)) {
+              setPdfError(null);
+              return;
             }
           } catch {
             /* sonraki */

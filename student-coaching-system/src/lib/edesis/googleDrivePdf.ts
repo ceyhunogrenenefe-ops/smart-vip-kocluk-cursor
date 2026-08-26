@@ -23,6 +23,21 @@ export function expandGoogleDrivePdfCandidates(fileUrl: string): string[] {
   ];
 }
 
+/** Chrome Drive download’u CORS/CORP ile keser; /preview iframe aynı origin değil ama yüklenir */
+export function googleDrivePreviewUrl(fileUrl: string): string {
+  const id = extractGoogleDriveFileId(fileUrl);
+  if (!id) return '';
+  return `https://drive.google.com/file/d/${id}/preview`;
+}
+
+export function firstGoogleDrivePreviewUrl(urls: Array<string | null | undefined>): string {
+  for (const u of urls) {
+    const preview = googleDrivePreviewUrl(String(u || ''));
+    if (preview) return preview;
+  }
+  return '';
+}
+
 function looksLikePdfBuffer(buf: ArrayBuffer): boolean {
   if (!buf || buf.byteLength < 5) return false;
   const head = new TextDecoder('latin1').decode(new Uint8Array(buf).subarray(0, 8));

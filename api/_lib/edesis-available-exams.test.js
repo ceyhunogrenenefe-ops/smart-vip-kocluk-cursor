@@ -45,7 +45,8 @@ import {
   expandEdesisFileUrlCandidates,
   extractGoogleDriveFileId,
   expandGoogleDrivePdfCandidates,
-  pickGoogleDriveFetchUrl
+  pickGoogleDriveFetchUrl,
+  googleDrivePreviewUrl
 } from './edesis-client.js';
 
 describe('inferEdesisExamProgramKeys', () => {
@@ -1388,6 +1389,11 @@ describe('resolveEdesisFileUrl / expandEdesisFileUrlCandidates', () => {
       pickGoogleDriveFetchUrl([{ url: view }]),
       cands[0]
     );
+    assert.equal(
+      googleDrivePreviewUrl(view),
+      'https://drive.google.com/file/d/1MYKrkAlkJ0jG-nkO1Lf72TUfDa1sSPPR/preview'
+    );
+    assert.equal(googleDrivePreviewUrl(cands[0]), googleDrivePreviewUrl(view));
     const expanded = expandEdesisFileUrlCandidates(view, {
       baseUrl: 'https://onlinevipdershane.api.edesis.com'
     });
