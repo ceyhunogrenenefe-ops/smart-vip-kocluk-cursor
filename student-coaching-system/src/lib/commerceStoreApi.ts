@@ -26,6 +26,7 @@ export type CatalogListParams = {
   subject?: string;
   publisher?: string;
   class_level?: string;
+  series?: string;
   price_min?: number;
   price_max?: number;
   teacher_recommended?: boolean;
@@ -38,7 +39,7 @@ export type CatalogListParams = {
 };
 
 export type OfferWithBook = CommerceVendorOffer & {
-  commerce_books: Pick<CommerceBook, 'id' | 'slug' | 'title' | 'author' | 'publisher' | 'subject' | 'class_levels' | 'exam_types' | 'cover_image_url' | 'page_count'>;
+  commerce_books: Pick<CommerceBook, 'id' | 'slug' | 'title' | 'author' | 'publisher' | 'subject' | 'class_levels' | 'exam_types' | 'cover_image_url' | 'page_count' | 'metadata'>;
   commerce_vendors: { id: string; name: string };
 };
 
@@ -53,6 +54,28 @@ export const csGetBook = (idOrSlug: string, isSlug = true) =>
 
 export const csListPackages = (class_level?: string) =>
   post<{ packages: CommerceBookPackage[] }>('catalog.packages', class_level ? { class_level } : {});
+
+export type StoreCollectionBook = CommerceBook & {
+  buyable?: boolean;
+  commerce_vendor_offers?: (CommerceVendorOffer & { commerce_vendors?: { id: string; name: string; slug?: string } })[];
+};
+
+export type StoreCollection = {
+  key: string;
+  label: string;
+  publisher: string | null;
+  class_level: string;
+  exam: string;
+  coming_soon: boolean;
+  cover_image_url: string | null;
+  description: string;
+  book_count: number;
+  priced_count: number;
+  books: StoreCollectionBook[];
+};
+
+export const csListCollections = () =>
+  post<{ collections: StoreCollection[] }>('catalog.collections');
 
 export const csGetAssigned = (student_id?: string) =>
   post<{ assignments: (CommerceStudentBookAssignment & { commerce_books: Pick<CommerceBook, 'id' | 'slug' | 'title' | 'author' | 'cover_image_url' | 'publisher'> | null })[] }>(

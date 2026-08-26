@@ -22,6 +22,7 @@ import {
   ShoppingBag,
   Store,
   Trash2,
+  Upload,
   UserCog,
   UserPlus,
   Users,
@@ -49,6 +50,9 @@ import {
   caRemoveVendorUser,
   caRequestCorrection,
   caResetVendorPassword,
+  caSeedLgs8Vip,
+  caBulkUpsertBooks,
+  caEnsureYankiVendor,
   caToggleVendorActive,
   caUpdateSettings,
   caUpdateVendor,
@@ -825,6 +829,13 @@ function KitaplarTab() {
   const [books, setBooks] = useState<CommerceBook[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [showBulk, setShowBulk] = useState(true);
+  const [seeding, setSeeding] = useState(false);
+  const [yankiPhone, setYankiPhone] = useState('');
+  const [seedResult, setSeedResult] = useState<{ title: string; isbn: string | null; price_kurus: number; status: string }[] | null>(null);
+  const [priceDraft, setPriceDraft] = useState<Record<string, string>>({});
+  const [savingPrices, setSavingPrices] = useState(false);
+  const [bulkJson, setBulkJson] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -835,6 +846,54 @@ function KitaplarTab() {
     finally { setLoading(false); }
   }, [search]);
   useEffect(() => { const t = setTimeout(load, 350); return () => clearTimeout(t); }, [load]);
+
+  const handleSeedVip = async () => {
+    setSeeding(true);
+    try {
+      if (yankiPhone.trim()) await caEnsureYankiVendor({ contact_phone: yankiPhone.trim() });
+      const r = await caSeedLgs8Vip({ contact_phone: yankiPhone.trim() || undefined });
+      setSeedResult(r.books);
+      const draft: Record<string, string> = {};
+      r.books.forEach((b) => { if (b.isbn) draft[b.isbn] = b.price_kurus ? String(b.price_kurus / 100) : ''; });
+      setPriceDraft(draft);
+      toast.success(`${r.books.length} VIP LGS kitabı Yankı Kitapevi kataloğuna işlendi`);
+      await load();
+    } catch (e: unknown) { toast.error((e as Error).message); }
+    finally { setSeeding(false); }
+  };
+
+  const handlePublishPrices = async () => {
+    const rows = (seedResult ?? []).filter((b) => b.isbn);
+    if (!rows.length) { toast.error('Önce VIP setini yükleyin'); return; }
+    setSavingPrices(true);
+    try {
+      await caBulkUpsertBooks(rows.map((b) => ({
+        isbn: b.isbn,
+        title: b.title,
+        price_lira: priceDraft[b.isbn!] || 0,
+        stock: 100,
+      })));
+      toast.success('Fiyatlar kaydedildi — ₺0 olanlar taslak kalır, fiyat girilenler mağazada görünür');
+      await load();
+    } catch (e: unknown) { toast.error((e as Error).message); }
+    finally { setSavingPrices(false); }
+  };
+
+  const handleBulkJson = async () => {
+    let parsed: unknown;
+    try { parsed = JSON.parse(bulkJson); }
+    catch { toast.error('Geçerli JSON yapıştırın'); return; }
+    const list = Array.isArray(parsed) ? parsed : (parsed as { books?: unknown[] }).books;
+    if (!Array.isArray(list) || !list.length) { toast.error('books dizisi boş'); return; }
+    setSeeding(true);
+    try {
+      const r = await caBulkUpsertBooks(list as Parameters<typeof caBulkUpsertBooks>[0]);
+      toast.success(`${r.count} kitap yüklendi`);
+      setBulkJson('');
+      await load();
+    } catch (e: unknown) { toast.error((e as Error).message); }
+    finally { setSeeding(false); }
+  };
 
   return (
     <div>
@@ -848,10 +907,102 @@ function KitaplarTab() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+        <button
+          onClick={() => setShowBulk((v) => !v)}
+          className="flex items-center gap-1 text-sm border border-indigo-200 text-indigo-700 px-3 py-1.5 rounded-lg hover:bg-indigo-50"
+        >
+          <Upload className="w-4 h-4" /> Toplu yükleme
+        </button>
         <button className="flex items-center gap-1 text-sm bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700">
           <Plus className="w-4 h-4" /> Yeni Kitap
         </button>
       </div>
+
+      {showBulk && (
+        <div className="mb-6 border border-indigo-100 bg-indigo-50/40 rounded-2xl p-4 space-y-4">
+          <div>
+            <h3 className="font-semibold text-gray-900">8. sınıf LGS — Yankı Kitapevi</h3>
+            <p className="text-xs text-gray-500 mt-1">
+              Öğrenci kredi kartıyla ödeyince sipariş Yankı Kitapevi paneline düşer ve WhatsApp gider. Fiyat girilmeden set taslak kalır.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 items-end">
+            <div className="flex-1 min-w-[200px]">
+              <label className="text-xs text-gray-500">Yankı WhatsApp (05xx…)</label>
+              <input
+                className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm"
+                placeholder="05xx xxx xx xx"
+                value={yankiPhone}
+                onChange={(e) => setYankiPhone(e.target.value)}
+              />
+            </div>
+            <button
+              onClick={handleSeedVip}
+              disabled={seeding}
+              className="flex items-center gap-1.5 bg-indigo-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {seeding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Package className="w-4 h-4" />}
+              VIP 8. Sınıf 6 kitabı yükle
+            </button>
+          </div>
+
+          {seedResult && (
+            <div className="bg-white rounded-xl border overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-left text-gray-600">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">Kitap</th>
+                    <th className="px-3 py-2 font-medium">ISBN</th>
+                    <th className="px-3 py-2 font-medium">Fiyat ₺</th>
+                    <th className="px-3 py-2 font-medium">Durum</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {seedResult.map((b) => (
+                    <tr key={b.isbn || b.title} className="border-t">
+                      <td className="px-3 py-2">{b.title.replace('VIP Yayınları 8. Sınıf LGS ', '')}</td>
+                      <td className="px-3 py-2 text-xs font-mono text-gray-500">{b.isbn}</td>
+                      <td className="px-3 py-2">
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          className="w-28 border rounded-lg px-2 py-1 text-sm"
+                          placeholder="ör. 450"
+                          value={b.isbn ? (priceDraft[b.isbn] ?? '') : ''}
+                          onChange={(e) => b.isbn && setPriceDraft((p) => ({ ...p, [b.isbn!]: e.target.value }))}
+                        />
+                      </td>
+                      <td className="px-3 py-2 text-xs">{b.status === 'approved' ? 'Mağazada' : 'Taslak (fiyat bekleniyor)'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="px-3 py-2 border-t flex justify-end">
+                <button
+                  onClick={handlePublishPrices}
+                  disabled={savingPrices}
+                  className="text-sm bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50"
+                >
+                  {savingPrices ? 'Kaydediliyor…' : 'Fiyatları yayınla'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <details className="text-sm">
+            <summary className="cursor-pointer text-gray-600">Paraf / deneme için JSON toplu yükleme</summary>
+            <textarea
+              className="mt-2 w-full border rounded-lg p-2 font-mono text-xs min-h-[120px]"
+              placeholder='[{"title":"Paraf 8. Sınıf Fen","isbn":"...","publisher":"Paraf Yayınları","subject":"Fen Bilimleri","series":"paraf-lgs-8-egitim","fascicle_count":30,"price_lira":400}]'
+              value={bulkJson}
+              onChange={(e) => setBulkJson(e.target.value)}
+            />
+            <button onClick={handleBulkJson} disabled={seeding} className="mt-2 text-xs bg-gray-800 text-white px-3 py-1.5 rounded-lg">JSON yükle</button>
+          </details>
+        </div>
+      )}
+
       {loading ? (
         <div className="flex justify-center p-10"><Loader2 className="animate-spin w-6 h-6 text-gray-400" /></div>
       ) : (

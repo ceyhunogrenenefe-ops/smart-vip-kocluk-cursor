@@ -121,14 +121,19 @@ export default function KitapDetayPage() {
           {/* Sınıf & Ders */}
           <div className="flex flex-wrap gap-2 mt-3">
             {(book.class_levels ?? []).map((cl) => (
-              <span key={cl} className="bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded-full">{cl}. Sınıf</span>
+              <span key={cl} className="bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded-full">
+                {cl === 'LGS' ? 'LGS' : /^\d+$/.test(cl) ? `${cl}. Sınıf` : cl}
+              </span>
             ))}
             {book.subject && <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full">{book.subject}</span>}
+            {typeof book.metadata?.fascicle_count === 'number' && (
+              <span className="bg-violet-100 text-violet-700 text-xs px-2 py-0.5 rounded-full">{book.metadata.fascicle_count} fasikül</span>
+            )}
           </div>
 
           {/* Açıklama */}
           {book.description && (
-            <p className="mt-4 text-sm text-gray-600 leading-relaxed">{book.description}</p>
+            <p className="mt-4 text-sm text-gray-600 leading-relaxed whitespace-pre-line">{book.description}</p>
           )}
 
           {/* Teklifler */}
@@ -196,8 +201,8 @@ export default function KitapDetayPage() {
               </div>
             </div>
           ) : (
-            <div className="mt-6 bg-gray-50 border border-gray-200 rounded-xl p-4 text-sm text-gray-500 text-center">
-              Bu kitap için şu anda aktif satıcı bulunmuyor.
+            <div className="mt-6 bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800 text-center">
+              Bu kitap Yankı Kitapevi kataloğunda. Fiyat yayına alınınca sepete eklenebilir.
             </div>
           )}
         </div>

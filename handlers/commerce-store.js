@@ -8,6 +8,7 @@
  *  catalog.list          — onaylı teklifleri sayfa bazlı listele
  *  catalog.get           — kitap slug/id ile detay + teklifler
  *  catalog.packages      — aktif paketleri listele
+ *  catalog.collections   — 8. sınıf VIP / Paraf / Deneme grupları
  *  catalog.assigned      — öğrenciye atanmış kitaplar
  *  catalog.settings      — genel mağaza ayarları (kargo eşiği vs)
  *  cart.get              — mevcut sepeti getir
@@ -41,6 +42,8 @@ import {
 } from '../api/_lib/commerce-checkout-op.js';
 import { startCommerceProviderPayment } from '../api/_lib/commerce-checkout-pay.js';
 import { COMMERCE_DEFAULT_SETTINGS } from '../api/_lib/commerce-constants.js';
+import { listLgs8Collections } from '../api/_lib/commerce-lgs8-seed.js';
+import { notifyVendorWhatsAppForPaidOrder } from '../api/_lib/commerce-vendor-order-notify.js';
 
 function err(res, status, message) {
   return res.status(status).json({ error: message });
@@ -77,7 +80,7 @@ async function fetchBooksByIds(bookIds) {
   if (!ids.length) return new Map();
   const { data, error } = await supabaseAdmin
     .from('commerce_books')
-    .select('id, slug, title, author, publisher, subject, class_levels, exam_types, cover_image_url, page_count, is_catalog_active')
+    .select('id, slug, title, author, publisher, subject, class_levels, exam_types, cover_image_url, page_count, is_catalog_active, metadata')
     .in('id', ids)
     .is('deleted_at', null);
   if (error) throw error;
@@ -149,8 +152,8 @@ async function handleCatalog(op, body, actor) {
     else q = q.order('created_at', { ascending: false });
 
     // Filtreler kitap tablosunda — önce geniş çek, sonra uygulama katmanında süz
-    const fetchLimit = search || body.subject || body.publisher || body.class_level ? 500 : limit;
-    const fetchOffset = search || body.subject || body.publisher || body.class_level ? 0 : offset;
+    const fetchLimit = search || body.subject || body.publisher || body.class_level || body.series ? 500 : limit;
+    const fetchOffset = search || body.subject || body.publisher || body.class_level || body.series ? 0 : offset;
     q = q.range(fetchOffset, fetchOffset + fetchLimit - 1);
 
     const { data: rawOffers, error, count } = await q;
@@ -167,6 +170,9 @@ async function handleCatalog(op, body, actor) {
     if (body.publisher) {
       offers = offers.filter((o) => o.commerce_books.publisher === body.publisher);
     }
+    if (body.series) {
+      offers = offers.filter((o) => o.commerce_books.metadata?.series === String(body.series));
+    }
     if (body.class_level) {
       offers = offers.filter((o) => {
         const levels = o.commerce_books.class_levels ?? [];
@@ -177,11 +183,11 @@ async function handleCatalog(op, body, actor) {
       offers = offers.filter((o) => bookMatchesSearch(o.commerce_books, search));
     }
 
-    const total = search || body.subject || body.publisher || body.class_level
+    const total = search || body.subject || body.publisher || body.class_level || body.series
       ? offers.length
       : (count ?? offers.length);
 
-    if (search || body.subject || body.publisher || body.class_level) {
+    if (search || body.subject || body.publisher || body.class_level || body.series) {
       offers = offers.slice(offset, offset + limit);
     }
 
@@ -283,6 +289,11 @@ async function handleCatalog(op, body, actor) {
     }
 
     return { ok: true, packages: result };
+  }
+
+  if (op === 'catalog.collections') {
+    const collections = await listLgs8Collections();
+    return { ok: true, collections };
   }
 
   if (op === 'catalog.assigned') {
@@ -1033,7 +1044,15 @@ async function handleCheckout(op, body, req) {
       .eq('order_id', order.id)
       .eq('status', 'pending');
 
-    return { ok: true, order_id: order.id, order_number: order.order_number };
+    let vendor_whatsapp = null;
+    try {
+      vendor_whatsapp = await notifyVendorWhatsAppForPaidOrder(order.id);
+    } catch (e) {
+      console.warn('[commerce-store] vendor whatsapp failed', e?.message || e);
+      vendor_whatsapp = { ok: false, error: e?.message || 'whatsapp_failed' };
+    }
+
+    return { ok: true, order_id: order.id, order_number: order.order_number, vendor_whatsapp };
   }
 
   throw new Error(`Bilinmeyen operasyon: ${op}`);
