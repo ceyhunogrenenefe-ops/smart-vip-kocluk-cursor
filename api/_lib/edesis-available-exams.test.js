@@ -127,6 +127,44 @@ describe('thin online roster + open catalog', () => {
     );
   });
 
+  it('unpublished 7.SINIF KTT (None, empty roster) is takeable for 8-F', () => {
+    const keys = new Set(['lgs']);
+    const ktt = {
+      id: '1579103',
+      name: '\t7.SINIF MAT FEN KTT 2',
+      examType: 'ONLİNE VİP 5-6-7 (MAT FEN 15 Lİ)',
+      resultStatus: 'None',
+      studentCount: 0,
+      examDate: '2026-08-26',
+      isOnlineSinavForStudent: true
+    };
+    assert.equal(
+      catalogExamTakeableWithoutRosterProbe(ktt, { programKeys: keys, gradeName: '8-F' }),
+      true
+    );
+    assert.equal(
+      catalogExamTakeableWithoutRosterProbe(
+        { ...ktt, id: '1533029', resultStatus: 'Ready', studentCount: 1 },
+        { programKeys: keys, gradeName: '8-F' }
+      ),
+      false
+    );
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [ktt],
+      assignedCatalogRows: [ktt],
+      resultRows: [],
+      edesisStudentId: '2086573',
+      programKeys: keys,
+      gradeName: '8-F',
+      now: new Date('2026-08-26T12:00:00Z'),
+      requireExplicitAssignment: true
+    });
+    assert.deepEqual(
+      items.filter((x) => x.canTake).map((x) => x.examId),
+      ['1579103']
+    );
+  });
+
   it('lists LGS open exams in 45d excluding taken', () => {
     const now = new Date('2026-08-25T12:00:00Z');
     const rows = [
@@ -984,6 +1022,14 @@ describe('parseEdesisOgrenciSinavAssignmentResponse / grade compatibility', () =
     assert.equal(examCompatibleWithStudentGrade({ name: 'LİMİT LGS HAZIRBULUNUŞLUK' }, '8'), true);
     assert.equal(examCompatibleWithStudentGrade({ name: '7.sınıf Mat Fen KTT 2' }, '8'), false);
     assert.equal(examCompatibleWithStudentGrade({ name: '7.sınıf Mat Fen KTT 2' }, '7'), true);
+    assert.equal(
+      examCompatibleWithStudentGrade({ name: '7.sınıf Mat Fen KTT 2' }, '8', { allowLgsNeighbor: true }),
+      true
+    );
+    assert.equal(
+      examCompatibleWithStudentGrade({ name: '5.SINIF MAT FEN KTT 2' }, '8', { allowLgsNeighbor: true }),
+      false
+    );
   });
 
   it('reads grade from examType when title has no sınıf', () => {

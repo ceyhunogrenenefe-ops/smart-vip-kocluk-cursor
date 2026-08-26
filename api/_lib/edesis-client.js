@@ -1006,7 +1006,11 @@ export function isThinOnlineRosterExam(exam, rosterLength = null) {
  */
 export function catalogExamTakeableWithoutRosterProbe(exam, { programKeys, gradeName } = {}) {
   if (!exam) return false;
-  if (!examCompatibleWithStudentGrade(exam, gradeName || '')) return false;
+  const unpublished = /^none$/i.test(catalogResultStatus(exam));
+  // Yeni online tanım (None, boş roster): 7.SINIF KTT 8-F’ye gelsin. Ready 7.sınıf sınıf denemesi elenir.
+  if (!examCompatibleWithStudentGrade(exam, gradeName || '', { allowLgsNeighbor: unpublished })) {
+    return false;
+  }
   if (!examCompatibleWithStudentProgramSoft(exam, programKeys || new Set())) return false;
   if (!isOpenEdesisCatalogExam(exam) || !examWindowStillOpen(exam)) return false;
   const sc = catalogExamStudentCount(exam);
@@ -1110,8 +1114,10 @@ export async function resolveEdesisExamSinavTuruId(examOrDetail, cfgOverride = {
 /**
  * 8. sınıf LGS öğrencisine 5/6. sınıf denemesi dökülmesin.
  * grade bilinmiyorsa engelleme yok.
+ * allowLgsNeighbor: 7↔8 (yeni yayımlanmamış online KTT / atanmış LGS denemesi).
  */
-export function examCompatibleWithStudentGrade(exam, studentGradeName = '') {
+export function examCompatibleWithStudentGrade(exam, studentGradeName = '', opts = {}) {
+  const allowLgsNeighbor = Boolean(opts?.allowLgsNeighbor);
   const grade = String(studentGradeName || '').replace(/[^\d]/g, '');
   if (!grade) return true;
   const g = Number(grade);
@@ -1133,12 +1139,14 @@ export function examCompatibleWithStudentGrade(exam, studentGradeName = '') {
   if (!named) return true;
   const examGrade = Number(named[1]);
   if (!Number.isFinite(examGrade)) return true;
-  // LGS: 5–6 ve 9+ ele. 8. sınıf 7.sınıf denemesine girmesin (kanıt: Safiye 8-F).
+  // LGS: 5–6 ve 9+ ele. 7↔8 yalnızca allowLgsNeighbor (None online / atanmış).
   if (g >= 7 && g <= 8) {
     if (examGrade <= 6) return false;
     if (examGrade >= 9) return false;
-    if (g === 8 && examGrade === 7) return false;
-    if (g === 7 && examGrade === 8) return false;
+    if (!allowLgsNeighbor) {
+      if (g === 8 && examGrade === 7) return false;
+      if (g === 7 && examGrade === 8) return false;
+    }
     return true;
   }
   // Aynı sınıf ±1 tolerans
@@ -2002,7 +2010,13 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
             const id = pickEdesisCatalogExamId(ex);
             if (!id || known.has(String(id)) || adminProbeIds.has(String(id))) return false;
             if (!isOpenEdesisCatalogExam(ex) || !examWindowStillOpen(ex)) return false;
-            if (!examCompatibleWithStudentGrade(ex, gradeName)) return false;
+            if (
+              !examCompatibleWithStudentGrade(ex, gradeName, {
+                allowLgsNeighbor: /^none$/i.test(catalogResultStatus(ex))
+              })
+            ) {
+              return false;
+            }
             if (!examCompatibleWithStudentProgramSoft(ex, keys)) return false;
             if (!isRecentByExamDate(ex, new Date(), TURU_ONLINE_WINDOW_DAYS)) return false;
             const status = catalogResultStatus(ex);
@@ -2676,7 +2690,8 @@ export function buildStudentAvailableEdesisExamItems({
   for (const ex of offerRows) {
     const examId = pickEdesisCatalogExamId(ex);
     if (!examId || seen.has(examId)) continue;
-    if (!examCompatibleWithStudentGrade(ex, gradeName)) continue;
+    // Atanmış listede 7.SINIF KTT 8-F’ye açılsın; 5/6. sınıf hâlâ kapalı.
+    if (!examCompatibleWithStudentGrade(ex, gradeName, { allowLgsNeighbor: strictAssignment })) continue;
     if (!shouldOfferUntakenCatalogExam(ex, scope, now)) continue;
     push(examId, catalogById.get(examId) || ex, null);
   }
