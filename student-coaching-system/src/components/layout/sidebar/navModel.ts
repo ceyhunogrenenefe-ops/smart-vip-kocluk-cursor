@@ -43,11 +43,11 @@ import type { UserRole } from '../../../types';
 
 export type FlatNavItem = { path: string; label: string; icon: LucideIcon };
 
-/** Admin / süper admin — kitap siparişleri (sidebar’da üst düzey link) */
+/** Eski üst menü — artık Kitap Pazaryeri → Sipariş formu */
 export const NAV_KITAP_SIPARISLERI: FlatNavItem = {
-  path: '/kitap-siparisleri',
+  path: '/kitap-pazaryeri',
   icon: BookOpen,
-  label: 'Kitap siparişleri'
+  label: 'Kitap Pazaryeri'
 };
 
 /** Admin / süper admin — web sitesinden gelen özel ders talepleri */
@@ -319,7 +319,6 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/events', icon: CalendarDays, label: 'Etkinlikler' },
       { path: '/toplanti-takip', icon: ClipboardCheck, label: 'Toplantı ve Gündem Takibi' },
       { path: '/kayit-takibi', icon: ClipboardList, label: 'Kayıt Takibi' },
-      NAV_KITAP_SIPARISLERI,
       NAV_OZEL_DERS_TALEPLERI,
       NAV_TEACHER_PROFILE_APPROVALS,
       { path: '/edesis', icon: CloudDownload, label: 'Edesis' },
@@ -397,7 +396,6 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/events', icon: CalendarDays, label: 'Etkinlikler' },
     { path: '/toplanti-takip', icon: ClipboardCheck, label: 'Toplantı ve Gündem Takibi' },
     { path: '/kayit-takibi', icon: ClipboardList, label: 'Kayıt Takibi' },
-    NAV_KITAP_SIPARISLERI,
     { path: '/kitap-pazaryeri', icon: ShoppingBag, label: 'Kitap Pazaryeri' },
     NAV_OZEL_DERS_TALEPLERI,
     NAV_TEACHER_PROFILE_APPROVALS,
