@@ -52,7 +52,7 @@ import {
   listEdesisBookletCodes,
   kitapcikAllowedForExam,
   normalizeKitapcikCode,
-  fetchEdesisDenemeAnswerKeyBooklets,
+  fetchEdesisDenemeAnswerKeyInfo,
   fetchEdesisExamSubjects,
   fetchEdesisExamResultsLessons,
   fetchEdesisExamResultsSubjects,
@@ -974,15 +974,15 @@ export default async function handler(req, res) {
       const absorbed = detail ? absorbEdesisBookletSource(detail, examId) : null;
       const pdf = await loadEdesisExamBookletPdf(examId, kitapcikTuru, cfg);
       const denemeId = pdf.denemeId || absorbed?.denemeId || null;
-      const answerKeyBookletCodes = denemeId
-        ? await fetchEdesisDenemeAnswerKeyBooklets(denemeId, localCfg)
-        : [];
+      const keyInfo = denemeId ? await fetchEdesisDenemeAnswerKeyInfo(denemeId, localCfg) : { codes: [], detail: [] };
       return res.status(200).json({
         ok: Boolean(pdf.ok && pdf.looksPdf),
         examId,
         kitapcikTuru,
         denemeId,
-        answerKeyBookletCodes,
+        answerKeyBookletCodes: keyInfo.codes || [],
+        answerKeyDetail: keyInfo.detail || [],
+        answerKeyError: keyInfo.error || null,
         files: (pdf.files || []).map((f) => ({
           url: f.url,
           name: f.name,
@@ -1566,6 +1566,7 @@ export default async function handler(req, res) {
         booklets: structure.booklets,
         availableBookletCodes: structure.availableBookletCodes || listEdesisBookletCodes(structure),
         answerKeyBookletCodes: structure.answerKeyBookletCodes || [],
+        answerKeyDetail: structure.answerKeyDetail || [],
         denemeId: structure.denemeId || null,
         bookletPdfs: rewriteBookletFilesForBrowser(structure.bookletPdfs || []),
         examFamily: structure.examFamily || 'generic',
