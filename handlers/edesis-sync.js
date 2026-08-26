@@ -50,6 +50,9 @@ import {
   rewriteBookletFilesForBrowser,
   pickEdesisBookletLessons,
   listEdesisBookletCodes,
+  kitapcikAllowedForExam,
+  normalizeKitapcikCode,
+  fetchEdesisDenemeAnswerKeyBooklets,
   fetchEdesisExamSubjects,
   fetchEdesisExamResultsLessons,
   fetchEdesisExamResultsSubjects,
@@ -833,7 +836,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         configured: keyOk,
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-gdrive-no-cors-2026-08-26',
+        deployMarker: 'edesis-booklet-keys-2026-08-26',
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
@@ -892,7 +895,7 @@ export default async function handler(req, res) {
         }
         return res.status(200).json({
           ok: true,
-          deployMarker: 'edesis-gdrive-no-cors-2026-08-26',
+          deployMarker: 'edesis-booklet-keys-2026-08-26',
           configured: Boolean(cfg.apiKey),
           abpAuth: getEdesisAbpAuthStatus(),
           abpProbe: abpProbe
@@ -952,7 +955,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-gdrive-no-cors-2026-08-26',
+        deployMarker: 'edesis-booklet-keys-2026-08-26',
         baseUrl: cfg.baseUrl,
         attempts: out
       });
@@ -970,11 +973,16 @@ export default async function handler(req, res) {
       const detail = await fetchEdesisExamCatalogRowDetail(examId, cfg);
       const absorbed = detail ? absorbEdesisBookletSource(detail, examId) : null;
       const pdf = await loadEdesisExamBookletPdf(examId, kitapcikTuru, cfg);
+      const denemeId = pdf.denemeId || absorbed?.denemeId || null;
+      const answerKeyBookletCodes = denemeId
+        ? await fetchEdesisDenemeAnswerKeyBooklets(denemeId, localCfg)
+        : [];
       return res.status(200).json({
         ok: Boolean(pdf.ok && pdf.looksPdf),
         examId,
         kitapcikTuru,
-        denemeId: pdf.denemeId || absorbed?.denemeId || null,
+        denemeId,
+        answerKeyBookletCodes,
         files: (pdf.files || []).map((f) => ({
           url: f.url,
           name: f.name,
@@ -1629,7 +1637,8 @@ export default async function handler(req, res) {
             denemeId: pdf.denemeId || null
           });
         }
-        return res.status(404).json({
+        return res.status(200).json({
+          ok: false,
           error: 'booklet_pdf_missing',
           hint: 'Bu sınav için kitapçık PDF’si Edesis’te bulunamadı',
           files,
@@ -1723,7 +1732,7 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         ok: true,
-        deployMarker: 'edesis-gdrive-no-cors-2026-08-26',
+        deployMarker: 'edesis-booklet-keys-2026-08-26',
         edesisStudentId,
         count: items.length,
         items,
@@ -1803,7 +1812,7 @@ export default async function handler(req, res) {
       const takeable = (loaded.items || []).filter((x) => x.canTake && !x.hasStudentResult);
       return res.status(200).json({
         ok: true,
-        deployMarker: 'edesis-gdrive-no-cors-2026-08-26',
+        deployMarker: 'edesis-booklet-keys-2026-08-26',
         edesisStudentId,
         platformStudentId: platformId,
         autoLinked,
@@ -1971,6 +1980,33 @@ export default async function handler(req, res) {
       const replaceForIngest = isStudent && !isStaff ? false : replace;
 
       const structure = await fetchEdesisExamStructure(examId, cfg);
+      const kitapcikNorm = normalizeKitapcikCode(kitapcikTuru) || kitapcikTuru;
+      const allowed = kitapcikAllowedForExam(structure, kitapcikNorm);
+      if (!allowed.ok) {
+        return res.status(400).json({
+          error: 'invalid_kitapcik',
+          message: `Kitapçık türü için cevap anahtarı bulunamadı. KitapcikTuru=${kitapcikNorm}`,
+          hint: allowed.available.length
+            ? `Bu sınavda kayıtlı kitapçıklar: ${allowed.available.join(', ')}. Optikte doğru daireyi seçin.`
+            : 'Edesis’te bu deneme için cevap anahtarı yok',
+          availableBookletCodes: allowed.available,
+          answerKeyBookletCodes: structure.answerKeyBookletCodes || []
+        });
+      }
+      if (kitapcikTuruSay) {
+        const allowedSay = kitapcikAllowedForExam(structure, kitapcikTuruSay);
+        if (!allowedSay.ok) {
+          return res.status(400).json({
+            error: 'invalid_kitapcik',
+            message: `Kitapçık türü için cevap anahtarı bulunamadı. KitapcikTuruSay=${normalizeKitapcikCode(kitapcikTuruSay)}`,
+            hint: allowedSay.available.length
+              ? `Bu sınavda kayıtlı kitapçıklar: ${allowedSay.available.join(', ')}`
+              : 'Edesis’te bu deneme için sayısal kitapçık cevap anahtarı yok',
+            availableBookletCodes: allowedSay.available,
+            answerKeyBookletCodes: structure.answerKeyBookletCodes || []
+          });
+        }
+      }
       const bookletLessons = pickEdesisBookletLessons(structure, kitapcikTuru);
       if (!bookletLessons.length) {
         return res.status(400).json({

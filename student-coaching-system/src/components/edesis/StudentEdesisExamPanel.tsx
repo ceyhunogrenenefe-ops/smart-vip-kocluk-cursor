@@ -294,11 +294,17 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
         return;
       }
       const uniqueCodes = (() => {
-        const fromApi = (r.availableBookletCodes || [])
-          .map((c) => String(c || '').trim().toUpperCase())
-          .filter((c) => ['A', 'B', 'C', 'D'].includes(c));
-        if (fromApi.length) return [...new Set(fromApi)].sort();
-        return ['A', 'B', 'C', 'D'];
+        const letters = (arr: unknown) =>
+          [...new Set(
+            (Array.isArray(arr) ? arr : [])
+              .map((c) => String(c || '').trim().toUpperCase())
+              .filter((c) => ['A', 'B', 'C', 'D'].includes(c))
+          )].sort();
+        const fromKeys = letters(r.answerKeyBookletCodes);
+        if (fromKeys.length) return fromKeys;
+        const fromApi = letters(r.availableBookletCodes);
+        if (fromApi.length) return fromApi;
+        return ['A'];
       })();
       const booksForUi = uniqueCodes.map((code) => ({
         kitapcikTuru: code,
@@ -496,6 +502,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             studio
             lessons={activeLessons}
             booklets={booklets}
+            availableBookletCodes={availableBookletCodes}
             kitapcik={kitapcik}
             onKitapcikChange={setKitapcik}
             kitapcikSayisal={kitapcikSayisal}

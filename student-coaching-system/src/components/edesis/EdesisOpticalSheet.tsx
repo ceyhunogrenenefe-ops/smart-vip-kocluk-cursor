@@ -284,7 +284,7 @@ export default function EdesisOpticalSheet({
       .filter((c) => KITAPCIK_ORDER.includes(c));
     const unique = [...new Set(fromBooklets)];
     if (unique.length) return unique.sort();
-    return KITAPCIK_ORDER;
+    return ['A'];
   }, [availableBookletCodes, booklets]);
   const orderedLessons = useMemo(
     () => sortOpticalLessonsByFamily(lessons, family === 'tyt' ? 'yks' : family),
