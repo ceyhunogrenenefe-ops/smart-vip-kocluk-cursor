@@ -8,6 +8,7 @@
  *  catalog.list          — onaylı teklifleri sayfa bazlı listele
  *  catalog.get           — kitap slug/id ile detay + teklifler
  *  catalog.packages      — aktif paketleri listele
+ *  catalog.collections   — 8. sınıf VIP / Paraf / Deneme grupları
  *  catalog.assigned      — öğrenciye atanmış kitaplar
  *  catalog.settings      — genel mağaza ayarları (kargo eşiği vs)
  *  cart.get              — mevcut sepeti getir
@@ -41,6 +42,8 @@ import {
 } from '../api/_lib/commerce-checkout-op.js';
 import { startCommerceProviderPayment } from '../api/_lib/commerce-checkout-pay.js';
 import { COMMERCE_DEFAULT_SETTINGS } from '../api/_lib/commerce-constants.js';
+import { listLgs8Collections } from '../api/_lib/commerce-lgs8-seed.js';
+import { notifyVendorWhatsAppForPaidOrder } from '../api/_lib/commerce-vendor-order-notify.js';
 
 function err(res, status, message) {
   return res.status(status).json({ error: message });
@@ -73,7 +76,7 @@ async function handleCatalog(op, body, actor) {
       .select(`
         id, price_kurus, compare_at_price_kurus, stock_quantity, shipping_days,
         is_featured, is_bestseller, is_new_arrival, teacher_recommended, required_for_classes,
-        commerce_books!inner(id, slug, title, author, publisher, subject, class_levels, exam_types, cover_image_url, page_count),
+        commerce_books!inner(id, slug, title, author, publisher, subject, class_levels, exam_types, cover_image_url, page_count, metadata),
         commerce_vendors!inner(id, name)
       `)
       .eq('status', 'approved')
@@ -83,6 +86,7 @@ async function handleCatalog(op, body, actor) {
     // Filtreler
     if (body.subject) q = q.eq('commerce_books.subject', body.subject);
     if (body.publisher) q = q.eq('commerce_books.publisher', body.publisher);
+    if (body.series) q = q.contains('commerce_books.metadata', { series: String(body.series) });
     if (body.teacher_recommended) q = q.eq('teacher_recommended', true);
     if (body.is_featured) q = q.eq('is_featured', true);
     if (body.is_bestseller) q = q.eq('is_bestseller', true);
@@ -154,6 +158,11 @@ async function handleCatalog(op, body, actor) {
       return { ok: true, packages: filtered };
     }
     return { ok: true, packages: data };
+  }
+
+  if (op === 'catalog.collections') {
+    const collections = await listLgs8Collections();
+    return { ok: true, collections };
   }
 
   if (op === 'catalog.assigned') {
@@ -838,7 +847,15 @@ async function handleCheckout(op, body, req) {
       .eq('order_id', order.id)
       .eq('status', 'pending');
 
-    return { ok: true, order_id: order.id, order_number: order.order_number };
+    let vendor_whatsapp = null;
+    try {
+      vendor_whatsapp = await notifyVendorWhatsAppForPaidOrder(order.id);
+    } catch (e) {
+      console.warn('[commerce-store] vendor whatsapp failed', e?.message || e);
+      vendor_whatsapp = { ok: false, error: e?.message || 'whatsapp_failed' };
+    }
+
+    return { ok: true, order_id: order.id, order_number: order.order_number, vendor_whatsapp };
   }
 
   throw new Error(`Bilinmeyen operasyon: ${op}`);
