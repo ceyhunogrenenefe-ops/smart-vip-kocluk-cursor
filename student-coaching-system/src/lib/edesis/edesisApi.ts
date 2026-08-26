@@ -461,6 +461,8 @@ export async function fetchEdesisExamStructure(examId: string): Promise<{
   count: number;
   items: EdesisExamStructureLesson[];
   booklets: EdesisExamBooklet[];
+  availableBookletCodes?: string[];
+  answerKeyBookletCodes?: string[];
   bookletPdfs?: EdesisBookletPdf[];
   examFamily?: string;
   bookletMode?: string;

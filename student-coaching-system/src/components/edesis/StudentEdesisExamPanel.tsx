@@ -85,6 +85,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
 
   const [activeExam, setActiveExam] = useState<EdesisAvailableExam | null>(null);
   const [booklets, setBooklets] = useState<EdesisExamBooklet[]>([]);
+  const [availableBookletCodes, setAvailableBookletCodes] = useState<string[]>([]);
   const [bookletPdfs, setBookletPdfs] = useState<EdesisBookletPdf[]>([]);
   const [kitapcik, setKitapcik] = useState('');
   const [kitapcikSayisal, setKitapcikSayisal] = useState('');
@@ -274,10 +275,28 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
     try {
       const r = await fetchEdesisExamStructure(exam.examId);
       const books = r.booklets || [];
-      if (!books.length) {
+      const sharedLessons = books[0]?.lessons || r.items || [];
+      if (!sharedLessons.length) {
         toast.error('Bu sınavın cevap anahtarı yapısı Edesis’te henüz yok');
         return;
       }
+      const uniqueCodes = (() => {
+        const letters = (arr: unknown) =>
+          [...new Set(
+            (Array.isArray(arr) ? arr : [])
+              .map((c) => String(c || '').trim().toUpperCase())
+              .filter((c) => ['A', 'B', 'C', 'D'].includes(c))
+          )].sort();
+        const fromKeys = letters(r.answerKeyBookletCodes);
+        if (fromKeys.length) return fromKeys;
+        const fromApi = letters(r.availableBookletCodes);
+        if (fromApi.length) return fromApi;
+        return ['A'];
+      })();
+      const booksForUi = uniqueCodes.map((code) => ({
+        kitapcikTuru: code,
+        lessons: sharedLessons
+      }));
       const nameType = `${exam.name || ''} ${exam.examType || ''} ${r.examTitle || ''} ${r.examType || ''}`;
       const family =
         r.examFamily && r.examFamily !== 'generic'
@@ -291,10 +310,10 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
                 : r.examFamily || 'generic';
       const mode =
         family === 'lgs' || r.bookletMode === 'dual-sozel-sayisal' ? 'dual-sozel-sayisal' : r.bookletMode || 'single';
-      const firstLetterRaw = String(books[0]?.kitapcikTuru || 'A').trim().toUpperCase() || 'A';
-      const firstLetter = ['A', 'B', 'C', 'D'].includes(firstLetterRaw) ? firstLetterRaw : 'A';
+      const firstLetter = uniqueCodes[0] || 'A';
       setActiveExam(exam);
-      setBooklets(books);
+      setBooklets(booksForUi);
+      setAvailableBookletCodes(uniqueCodes);
       setBookletPdfs(r.bookletPdfs || exam.bookletPdfs || []);
       setExamFamily(family);
       setBookletMode(mode);
@@ -466,6 +485,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             studio
             lessons={activeLessons}
             booklets={booklets}
+            availableBookletCodes={availableBookletCodes}
             kitapcik={kitapcik}
             onKitapcikChange={setKitapcik}
             kitapcikSayisal={kitapcikSayisal}
