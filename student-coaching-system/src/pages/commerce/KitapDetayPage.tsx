@@ -131,7 +131,11 @@ export default function KitapDetayPage() {
             )}
             {book.metadata?.is_set === true && (
               <span className="bg-violet-100 text-violet-700 text-xs px-2 py-0.5 rounded-full">
-                {typeof book.metadata.book_count === 'number' ? `${book.metadata.book_count} kitaplık set` : 'Kitap seti'}
+                {typeof book.metadata.set_size_label === 'string'
+                  ? book.metadata.set_size_label
+                  : typeof book.metadata.book_count === 'number'
+                    ? `${book.metadata.book_count} kitaplık set`
+                    : 'Kitap seti'}
               </span>
             )}
           </div>

@@ -21,6 +21,10 @@ export const PARAF_LGS8_SET_SLUG = 'paraf-8-sinif-iq-lgs-soru-kutuphanesi-seti';
 export const PARAF_LGS8_SET_ISBN = '978-625-78901-0-4';
 export const PARAF_LGS8_COVER_PATH = '/commerce/paraf-lgs-8-iq-soru-kutuphanesi-seti.jpg';
 
+export const LGS8_DENEME_SET_SLUG = 'lgs-hazirlik-deneme-klubu-40-plus';
+export const LGS8_DENEME_SET_ISBN = '978-625-99881-4-2';
+export const LGS8_DENEME_COVER_PATH = '/commerce/lgs-hazirlik-deneme-klubu.jpg';
+
 export const LGS8_CLASS_LEVELS = ['8', 'LGS'];
 
 const TR_MAP = {
@@ -272,6 +276,83 @@ export const PARAF_LGS8_IQ_SET = {
   },
 };
 
+export const LGS8_DENEME_KULUBU_CONTENTS = [
+  'Özdebir Yayınları',
+  'TÖDER',
+  'VIP Yayınları',
+  'Paraf Yayınları',
+  'ÜçDörtBeş',
+  'Hız Yayınları',
+  'KR Akademi',
+  'Yanıt Yayınları',
+  'Okyanus Yayınları',
+  'Arı Yayıncılık',
+  'Günay Yayınları',
+  'Aday Yayınları',
+  'Soru Kalesi',
+  'MUBA Yayınları',
+  'Startfen',
+  'Strateji & Eğitim Yayın Grubu',
+  'Paylaşım Yayınları',
+  'Mentor Yayınları',
+  'Altın Karma Sınavları',
+  'Adrenalin Yayınları',
+  'Optik Yayınları',
+  'Oksijen Yayınları',
+  'NFT Yayınları',
+  'Elit',
+];
+
+const DENEME_KULUBU_FEATURES = [
+  '40+ farklı deneme: 20’den fazla yayınevinin soru vizyonu.',
+  'Gerçek sınav formatı: MEB, PISA/TIMSS ve güncel LGS dağılımı.',
+  'Tamamı video çözümlü sorular.',
+  'Zaman yönetimi ve stres kontrolü: optik kodlama, süre, sınav kaygısı.',
+  'Sınırlı kontenjan: bireysel takip ve güncel basım.',
+  '1. hamur, çok renkli özgün baskı + optik formlar.',
+];
+
+/** Tek ürün: 40+ deneme kulübü paketi. Fasiküller ayrı satılmaz. */
+export const LGS8_DENEME_KULUBU_SET = {
+  isbn: LGS8_DENEME_SET_ISBN,
+  slug: LGS8_DENEME_SET_SLUG,
+  title: 'Online VIP Dershane – LGS Hazırlık 40+ Türkiye Geneli Deneme Kulübü Paketi',
+  subtitle: '40+ deneme · 20+ yayınevi · 8. Sınıf LGS (5–7 takviye)',
+  author: 'Online VIP Dershane',
+  publisher: 'Online VIP Dershane',
+  subject: 'LGS Deneme',
+  class_levels: ['5', '6', '7', '8', 'LGS'],
+  exam_types: ['LGS'],
+  description: [
+    'Hayalindeki liseye bir adım daha yaklaş! Türkiye’nin önde gelen seçkin yayınevlerinin en güncel LGS deneme sınavları tek bir pakette. Online VIP Dershane Deneme Kulübü, öğrencilere sadece soru çözdürmekle kalmaz; farklı soru tipleri, farklı zorluk dereceleri ve gerçek sınav provasıyla eksiksiz bir LGS maratonu yaşatır.',
+    '',
+    'Satış Yankı Kitapevi üzerinden yapılır; denemeler tek tek değil, 40+’lık kulüp paketi olarak gönderilir.',
+    '',
+    'Paket içeriğinde yer alan seçkin yayınlar:',
+    ...LGS8_DENEME_KULUBU_CONTENTS.map((t, i) => `${i + 1}. ${t}`),
+    featureBlock(DENEME_KULUBU_FEATURES),
+  ].join('\n').trim(),
+  cover_image_url: LGS8_DENEME_COVER_PATH,
+  is_catalog_active: true,
+  metadata: {
+    series: LGS8_DENEME_SERIES,
+    series_label: 'Denemeler',
+    collection: 'denemeler',
+    is_set: true,
+    book_count: 40,
+    set_size_label: '40+ deneme',
+    set_contents: LGS8_DENEME_KULUBU_CONTENTS,
+    grade: '8',
+    exam: 'LGS',
+    publisher_group: 'Online VIP Dershane',
+    paper: '1. Hamur, Çok Renkli Özgün Baskı',
+    language: 'Türkçe',
+    limited_quota: true,
+    features: DENEME_KULUBU_FEATURES,
+    sort_order: 1,
+  },
+};
+
 export const LGS8_COLLECTIONS = [
   {
     key: VIP_LGS8_SERIES,
@@ -296,12 +377,12 @@ export const LGS8_COLLECTIONS = [
   {
     key: LGS8_DENEME_SERIES,
     label: 'Denemeler',
-    publisher: null,
+    publisher: 'Online VIP Dershane',
     class_level: '8',
     exam: 'LGS',
-    coming_soon: true,
-    cover_image_url: null,
-    description: 'LGS deneme setleri yakında eklenecek.',
+    coming_soon: false,
+    cover_image_url: LGS8_DENEME_COVER_PATH,
+    description: '40+ Türkiye geneli deneme kulübü · Yankı Kitapevi',
   },
 ];
 
