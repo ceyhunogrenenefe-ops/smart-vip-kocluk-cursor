@@ -47,6 +47,7 @@ import {
   type WeekGridColumn
 } from '../lib/pdfLiveWeekGrid';
 import { downloadBrandedClassSchedulePng } from '../lib/classScheduleBrandedPng';
+import { mergeWeeklyAndSessionSlots } from '../lib/classSchedulePngSlots.js';
 import { useCoachLessonsMeetingsLock } from '../lib/coachLessonsLock';
 import { CoachLessonsLockBanner } from '../components/coach/CoachLessonsLockBanner';
 import ClassLessonTopicCheckpointModal, {
@@ -547,6 +548,33 @@ export default function ClassLiveLessons() {
   }, [teacherCandidates, selectedClass?.teacher_ids, editingSession?.teacher_id, editingSlotRow?.teacher_id]);
 
   const classSlots = useMemo(() => slots.filter((s) => s.class_id === selectedClassId), [slots, selectedClassId]);
+
+  const pngExportSlots = useMemo(() => {
+    const weekly = classSlots.map((s) => {
+      const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
+      return {
+        day_of_week: s.day_of_week,
+        start_time: String(s.start_time || ''),
+        end_time: String(s.end_time || ''),
+        subject: String(s.subject || ''),
+        teacher_name: teacher?.name || s.teacher_name || null
+      };
+    });
+    const dated = weekSessions
+      .filter((s) => s.class_id === selectedClassId && s.status !== 'cancelled')
+      .map((s) => {
+        const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
+        return {
+          lesson_date: String(s.lesson_date || '').slice(0, 10),
+          start_time: String(s.start_time || ''),
+          end_time: String(s.end_time || ''),
+          subject: String(s.subject || ''),
+          teacher_name: teacher?.name || s.teacher_name || null,
+          status: s.status
+        };
+      });
+    return mergeWeeklyAndSessionSlots(weekly, dated);
+  }, [classSlots, weekSessions, selectedClassId, teacherCandidates]);
 
   const calendarHours = useMemo(() => {
     const hours = new Set<number>();
@@ -1899,7 +1927,7 @@ export default function ClassLiveLessons() {
         hint={
           showMobileCalendar
             ? undefined
-            : 'Yeşil kartlar gerçek oturumdur. Kesik çizgili kartlar şablondur. «PNG görsel» planlayıcı stili (logo + haftalık tablo) indirir; PDF de metin listesi üretir.'
+            : 'Yeşil kartlar gerçek oturumdur. Kesik çizgili kartlar şablondur. «PNG görsel» logo + haftalık tablo indirir (tarihli oturum ve şablon). PDF metin listesi de üretir.'
         }
       >
         {!showMobileCalendar ? (
@@ -1907,25 +1935,15 @@ export default function ClassLiveLessons() {
         <div className="flex flex-wrap items-center justify-end gap-2 border-b border-slate-100 bg-slate-50/80 px-2 py-2 sm:px-3">
           <button
             type="button"
-            disabled={!selectedClassId || classPngBusy || !classSlots.length}
+            disabled={!selectedClassId || classPngBusy || !pngExportSlots.length}
             onClick={() => {
               void (async () => {
                 if (!selectedClassId || !selectedClass) return;
                 setClassPngBusy(true);
                 try {
-                  const slots = classSlots.map((s) => {
-                    const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
-                    return {
-                      day_of_week: s.day_of_week,
-                      start_time: String(s.start_time || ''),
-                      end_time: String(s.end_time || ''),
-                      subject: String(s.subject || ''),
-                      teacher_name: teacher?.name || s.teacher_name || null
-                    };
-                  });
                   await downloadBrandedClassSchedulePng({
                     className: selectedClass.name || 'Sınıf',
-                    slots,
+                    slots: pngExportSlots,
                     logoUrl: institution?.logo?.trim() || null,
                     filename: `${String(selectedClass.name || 'ders-programi')
                       .replace(/[\\/:*?"<>|]+/g, ' ')
