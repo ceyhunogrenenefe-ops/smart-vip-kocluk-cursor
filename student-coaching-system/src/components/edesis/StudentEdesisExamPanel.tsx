@@ -201,6 +201,13 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
       };
 
       try {
+        const known = candidateUrls([...bookletPdfs, ...(activeExam.bookletPdfs || [])]);
+        for (const fileUrl of known) {
+          if (cancelled) return;
+          const driveBlob = await fetchGoogleDrivePdfBlob(fileUrl);
+          if (driveBlob && applyBlob(driveBlob)) return;
+        }
+
         const r = await fetchEdesisExamBookletPdf({
           examId: activeExam.examId,
           kitapcikTuru: kitapcik

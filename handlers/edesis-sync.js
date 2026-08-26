@@ -45,6 +45,7 @@ import {
   loadEdesisExamBookletPdf,
   loadEdesisHataKarnesiPdf,
   absorbEdesisBookletSource,
+  pickGoogleDriveFetchUrl,
   pickEdesisBookletLessons,
   listEdesisBookletCodes,
   fetchEdesisExamSubjects,
@@ -830,7 +831,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         configured: keyOk,
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-gdrive-pdf-zoom-2026-08-26',
+        deployMarker: 'edesis-gdrive-pdf-302-2026-08-26',
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
@@ -889,7 +890,7 @@ export default async function handler(req, res) {
         }
         return res.status(200).json({
           ok: true,
-          deployMarker: 'edesis-gdrive-pdf-zoom-2026-08-26',
+          deployMarker: 'edesis-gdrive-pdf-302-2026-08-26',
           configured: Boolean(cfg.apiKey),
           abpAuth: getEdesisAbpAuthStatus(),
           abpProbe: abpProbe
@@ -949,7 +950,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-gdrive-pdf-zoom-2026-08-26',
+        deployMarker: 'edesis-gdrive-pdf-302-2026-08-26',
         baseUrl: cfg.baseUrl,
         attempts: out
       });
@@ -1598,24 +1599,24 @@ export default async function handler(req, res) {
         name: f.name || 'Kitapçık PDF'
       }));
       if (download) {
-        if (pdf.ok && pdf.buf && pdf.looksPdf) {
+        res.setHeader('Cache-Control', 'private, no-store');
+        const driveUrl = pickGoogleDriveFetchUrl([pdf.url, ...(pdf.files || []).map((f) => f.url)]);
+        if (pdf.ok && pdf.buf && pdf.looksPdf && pdf.buf.length <= 4_000_000) {
           res.setHeader('Content-Type', 'application/pdf');
           res.setHeader(
             'Content-Disposition',
             `inline; filename="kitapcik-${(kitapcikTuru || 'A').replace(/[^A-Za-z0-9]/g, '')}.pdf"`
           );
-          res.setHeader('Cache-Control', 'private, max-age=120');
           return res.status(200).send(pdf.buf);
         }
+        // 7MB Drive PDF Vercel 4.5MB limitini aşar; 302 ile tarayıcı indirir (404 konsolu yok).
+        if (driveUrl) {
+          res.setHeader('Location', driveUrl);
+          return res.status(302).end();
+        }
         if (pdf.publicFetch && pdf.url) {
-          return res.status(200).json({
-            ok: true,
-            publicFetch: true,
-            url: pdf.url,
-            files,
-            denemeId: pdf.denemeId || null,
-            attempts: Array.isArray(pdf.attempts) ? pdf.attempts.slice(0, 25) : []
-          });
+          res.setHeader('Location', pdf.url);
+          return res.status(302).end();
         }
         return res.status(404).json({
           error: 'booklet_pdf_missing',
@@ -1711,7 +1712,7 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         ok: true,
-        deployMarker: 'edesis-gdrive-pdf-zoom-2026-08-26',
+        deployMarker: 'edesis-gdrive-pdf-302-2026-08-26',
         edesisStudentId,
         count: items.length,
         items,
@@ -1791,7 +1792,7 @@ export default async function handler(req, res) {
       const takeable = (loaded.items || []).filter((x) => x.canTake && !x.hasStudentResult);
       return res.status(200).json({
         ok: true,
-        deployMarker: 'edesis-gdrive-pdf-zoom-2026-08-26',
+        deployMarker: 'edesis-gdrive-pdf-302-2026-08-26',
         edesisStudentId,
         platformStudentId: platformId,
         autoLinked,
