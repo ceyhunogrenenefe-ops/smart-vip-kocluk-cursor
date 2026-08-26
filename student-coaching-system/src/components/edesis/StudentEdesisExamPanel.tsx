@@ -475,7 +475,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             Denemelerim
           </h2>
           <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-600">
-            Yalnızca size tanımlanan denemeler. Sınava girince kitapçık tam ekran açılır; optiği soldan doldurup Bitir ile gönderin.
+            Yalnızca size tanımlanan denemeler. Sınava girince kitapçık tam ekran açılır; optiği sağdan doldurup Bitir ile gönderin.
           </p>
         </div>
         <button

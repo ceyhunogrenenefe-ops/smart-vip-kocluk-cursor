@@ -408,7 +408,7 @@ export default function AcademicCenter() {
     <div
       className={
         edesisTaking
-          ? 'fixed inset-0 z-[160] flex min-h-0 flex-col overflow-hidden bg-slate-950'
+          ? 'fixed inset-0 z-[280] flex min-h-0 flex-col overflow-hidden bg-slate-950'
           : 'mx-auto w-full max-w-[1680px] space-y-8'
       }
     >
