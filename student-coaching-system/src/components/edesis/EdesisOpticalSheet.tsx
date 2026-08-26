@@ -12,7 +12,7 @@ import {
   Shrink
 } from 'lucide-react';
 import type { EdesisExamBooklet, EdesisExamStructureLesson } from '../../lib/edesis/edesisApi';
-import { buildEdesisPdfViewerSrc, type EdesisPdfZoom } from '../../lib/edesis/pdfViewer';
+import { buildEdesisPdfViewerSrc, isGoogleDrivePreviewSrc, type EdesisPdfZoom } from '../../lib/edesis/pdfViewer';
 
 const CHOICES_4 = ['A', 'B', 'C', 'D'] as const;
 const CHOICES_5 = ['A', 'B', 'C', 'D', 'E'] as const;
@@ -362,6 +362,7 @@ export default function EdesisOpticalSheet({
   };
 
   const pdfSrc = useMemo(() => (pdfUrl ? buildEdesisPdfViewerSrc(pdfUrl, pdfZoom) : ''), [pdfUrl, pdfZoom]);
+  const drivePreview = isGoogleDrivePreviewSrc(pdfUrl || '');
 
   const togglePdfFullscreen = async () => {
     const el = pdfPaneRef.current;
@@ -554,18 +555,24 @@ export default function EdesisOpticalSheet({
         >
           <div className="flex flex-wrap items-center gap-1.5 border-b border-white/10 bg-slate-900 px-2 py-1.5 text-[11px] text-slate-200">
             <span className="mr-1 max-w-[40%] truncate font-medium">{examTitle || 'Kitapçık PDF'}</span>
-            {PDF_ZOOM_CHIPS.map((z) => (
-              <button
-                key={z.id}
-                type="button"
-                onClick={() => setPdfZoom(z.id)}
-                className={`rounded-md px-2 py-1 font-semibold ${
-                  pdfZoom === z.id ? 'bg-white text-slate-900' : 'bg-white/10 text-slate-200 hover:bg-white/20'
-                }`}
-              >
-                {z.label}
-              </button>
-            ))}
+            {drivePreview ? (
+              <span className="rounded-md bg-white/10 px-2 py-1 font-semibold text-slate-200">
+                Google Drive önizleme
+              </span>
+            ) : (
+              PDF_ZOOM_CHIPS.map((z) => (
+                <button
+                  key={z.id}
+                  type="button"
+                  onClick={() => setPdfZoom(z.id)}
+                  className={`rounded-md px-2 py-1 font-semibold ${
+                    pdfZoom === z.id ? 'bg-white text-slate-900' : 'bg-white/10 text-slate-200 hover:bg-white/20'
+                  }`}
+                >
+                  {z.label}
+                </button>
+              ))
+            )}
             <button
               type="button"
               onClick={() => setPdfWide((v) => !v)}
@@ -602,6 +609,7 @@ export default function EdesisOpticalSheet({
                 key={pdfSrc}
                 title="Sınav kitapçığı PDF"
                 src={pdfSrc}
+                allow="fullscreen"
                 className="absolute inset-0 h-full w-full border-0 bg-white"
               />
             ) : (

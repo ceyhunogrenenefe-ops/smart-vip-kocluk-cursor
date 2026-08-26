@@ -2290,6 +2290,13 @@ export function pickGoogleDriveFetchUrl(filesOrUrls = []) {
   return '';
 }
 
+/** Drive /view ve usercontent CORS/CORP yüzünden tarayıcı fetch’i düşürür; /preview iframe açılır */
+export function googleDrivePreviewUrl(fileUrl) {
+  const id = extractGoogleDriveFileId(fileUrl);
+  if (!id) return '';
+  return `https://drive.google.com/file/d/${id}/preview`;
+}
+
 /** API host dosya vermez; tenant web + CDN dener */
 export function listEdesisFileBases(cfg = {}) {
   const merged = { ...getEdesisConfig(), ...cfg };
@@ -4801,6 +4808,7 @@ export async function loadEdesisExamBookletPdf(examId, kitapcikTuru, cfgOverride
       ...files
     ]);
     attempts.push({ kind: 'google-drive', url: driveFetch, ok: true, publicFetch: true });
+    const previewUrl = googleDrivePreviewUrl(preferredFileUrl || driveFetch);
     return {
       ok: true,
       publicFetch: true,
@@ -4808,7 +4816,9 @@ export async function loadEdesisExamBookletPdf(examId, kitapcikTuru, cfgOverride
       file: driveFiles[0],
       buf: null,
       looksPdf: false,
-      url: driveFetch,
+      url: previewUrl || driveFetch,
+      downloadUrl: driveFetch,
+      previewUrl: previewUrl || '',
       status: 200,
       denemeId: probed.denemeId,
       attempts

@@ -1,9 +1,15 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
+function isGoogleDrivePreviewSrc(fileUrl) {
+  const u = String(fileUrl || '');
+  return /drive\.google\.com\/file\/d\//i.test(u) && /\/preview(?:[?#]|$)/i.test(u);
+}
+
 function buildEdesisPdfViewerSrc(fileUrl, zoom = '100') {
   const base = String(fileUrl || '').trim().replace(/#.*$/, '');
   if (!base) return '';
+  if (isGoogleDrivePreviewSrc(base)) return base;
   const z = String(zoom || '100');
   if (z === 'page-width') {
     return `${base}#toolbar=1&navpanes=0&scrollbar=1&view=FitH`;
@@ -31,5 +37,12 @@ describe('buildEdesisPdfViewerSrc', () => {
 
   it('returns empty for blank url', () => {
     assert.equal(buildEdesisPdfViewerSrc(''), '');
+  });
+
+  it('leaves Google Drive preview URLs without Chrome PDF hash', () => {
+    const src =
+      'https://drive.google.com/file/d/1MYKrkAlkJ0jG-nkO1Lf72TUfDa1sSPPR/preview';
+    assert.equal(buildEdesisPdfViewerSrc(src, '100'), src);
+    assert.equal(buildEdesisPdfViewerSrc(src, 'page-width').includes('view=FitH'), false);
   });
 });

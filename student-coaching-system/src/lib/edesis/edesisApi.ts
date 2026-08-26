@@ -513,6 +513,10 @@ export async function fetchEdesisExamBookletPdf(params: {
   const files = Array.isArray(j.files) ? (j.files as EdesisBookletPdf[]) : [];
   const denemeId = typeof j.denemeId === 'string' || typeof j.denemeId === 'number' ? String(j.denemeId) : null;
   const attempts = Array.isArray(j.attempts) ? j.attempts : [];
+  const viewer = typeof j.viewer === 'string' ? j.viewer : '';
+  if (viewer === 'google-drive-preview' && url) {
+    return { blob: new Blob(), url, files, denemeId, attempts };
+  }
   const publicUrls = [params.fileUrl, url, ...files.map((f) => String(f?.url || ''))].filter(Boolean);
   for (const fileUrl of publicUrls) {
     const driveBlob = await fetchGoogleDrivePdfBlob(fileUrl);
