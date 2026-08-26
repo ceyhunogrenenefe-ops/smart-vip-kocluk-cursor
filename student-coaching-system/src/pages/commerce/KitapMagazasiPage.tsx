@@ -180,7 +180,9 @@ function CollectionBookCard({ book }: { book: StoreCollectionBook }) {
         <div className="text-xs text-gray-400">{book.publisher}</div>
         {typeof fascicle === 'number' && <div className="text-xs text-indigo-600 mt-0.5">{fascicle} fasikül</div>}
         {book.metadata?.is_set && typeof book.metadata?.book_count === 'number' && (
-          <div className="text-xs text-indigo-600 mt-0.5">{book.metadata.book_count} kitaplık set</div>
+          <div className="text-xs text-indigo-600 mt-0.5">
+            {typeof book.metadata.set_size_label === 'string' ? book.metadata.set_size_label : `${book.metadata.book_count} kitaplık set`}
+          </div>
         )}
         <div className="mt-2">
           {book.buyable && offer ? (
