@@ -83,6 +83,7 @@ import {
   GROUP_LESSON_UNIT_MINUTES
 } from '../api/_lib/class-lesson-payment-units.js';
 import { isSolutionLessonSubject } from '../api/_lib/solution-appointments-core.js';
+import { findBlockingTeacherRow } from '../api/_lib/teacher-time-conflict.js';
 import { listScheduledSessionBatchPeers } from '../api/_lib/class-session-batch-peers.js';
 import { ensureClassTeacherLink, getTeacherPanelClassIds } from '../api/_lib/teacher-class-scope.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
@@ -267,30 +268,39 @@ async function teacherTimeConflictOnDate({
   const ownClassId = sameClassId ? String(sameClassId).trim() : '';
   const { data: sess, error: sErr } = await supabaseAdmin
     .from('class_sessions')
-    .select('id,start_time,end_time,status')
+    .select('id,class_id,subject,start_time,end_time,status')
     .eq('teacher_id', teacherId)
     .eq('lesson_date', lessonDate)
     .neq('status', 'cancelled');
   if (sErr) throw sErr;
-  for (const r of sess || []) {
-    if (ex.has(r.id)) continue;
-    if (timeOverlap(start, end, r.start_time, r.end_time)) {
-      return { ok: false, reason: `Bu öğretmenin ${lessonDate} tarihinde çakışan bir oturumu var.` };
-    }
+  const sessionHit = findBlockingTeacherRow({
+    start,
+    end,
+    subject,
+    ownClassId,
+    rows: sess || [],
+    excludeIds: [...ex]
+  });
+  if (sessionHit) {
+    return { ok: false, reason: `Bu öğretmenin ${lessonDate} tarihinde çakışan bir oturumu var.` };
   }
   const dow = dowFromIsoDate(lessonDate);
   if (dow == null) return { ok: true };
   const { data: slots, error: slErr } = await supabaseAdmin
     .from('class_weekly_slots')
-    .select('class_id,start_time,end_time')
+    .select('id,class_id,subject,start_time,end_time')
     .eq('teacher_id', teacherId)
     .eq('day_of_week', dow);
   if (slErr) throw slErr;
-  for (const x of slots || []) {
-    if (ownClassId && String(x.class_id || '') === ownClassId) continue;
-    if (timeOverlap(start, end, x.start_time, x.end_time)) {
-      return { ok: false, reason: `Bu öğretmenin aynı gün/saatte haftalık şablon dersi var (${lessonDate}).` };
-    }
+  const slotHit = findBlockingTeacherRow({
+    start,
+    end,
+    subject,
+    ownClassId,
+    rows: slots || []
+  });
+  if (slotHit) {
+    return { ok: false, reason: `Bu öğretmenin aynı gün/saatte haftalık şablon dersi var (${lessonDate}).` };
   }
   return { ok: true };
 }
@@ -2425,16 +2435,23 @@ export default async function handler(req, res) {
 
       const { data: sameTeacherSlots, error: cErr } = await supabaseAdmin
         .from('class_weekly_slots')
-        .select('id,start_time,end_time')
+        .select('id,class_id,subject,start_time,end_time')
         .eq('teacher_id', teacherId)
         .eq('day_of_week', dayOfWeek);
       if (cErr) return res.status(500).json({ error: cErr.message });
+      const slotHit = findBlockingTeacherRow({
+        start,
+        end,
+        subject,
+        ownClassId: classId,
+        rows: sameTeacherSlots || []
+      });
       if (
         !isSolutionLessonSubject(subject) &&
         !isSharedMultiClassSubject(subject) &&
-        (sameTeacherSlots || []).some((x) => timeOverlap(start, end, x.start_time, x.end_time))
+        slotHit
       ) {
-        return res.status(409).json({ error: 'Aynı öğretmen aynı saatte ders alamaz.', code: 'teacher_time_conflict' });
+        return res.status(409).json({ error: 'Aynı öğretmen aynı saatte farklı bir dersi var.', code: 'teacher_time_conflict' });
       }
 
       const { data, error } = await insertOneOptionalModerator('class_weekly_slots', {
@@ -2916,17 +2933,25 @@ export default async function handler(req, res) {
       const subjectForCheck = String((patch.subject ?? session.subject) || '');
       const { data: sameTeacherSlots, error: cErr } = await supabaseAdmin
         .from('class_weekly_slots')
-        .select('id,start_time,end_time')
+        .select('id,class_id,subject,start_time,end_time')
         .eq('teacher_id', teacherId)
         .eq('day_of_week', dayOfWeek)
         .neq('id', rowId);
       if (cErr) return res.status(500).json({ error: cErr.message });
+      const slotHit = findBlockingTeacherRow({
+        start,
+        end,
+        subject: subjectForCheck,
+        ownClassId: session.class_id,
+        rows: sameTeacherSlots || [],
+        excludeIds: [rowId]
+      });
       if (
         !isSolutionLessonSubject(subjectForCheck) &&
         !isSharedMultiClassSubject(subjectForCheck) &&
-        (sameTeacherSlots || []).some((x) => timeOverlap(start, end, x.start_time, x.end_time))
+        slotHit
       ) {
-        return res.status(409).json({ error: 'Aynı öğretmen aynı saatte ders alamaz.', code: 'teacher_time_conflict' });
+        return res.status(409).json({ error: 'Aynı öğretmen aynı saatte farklı bir dersi var.', code: 'teacher_time_conflict' });
       }
     }
 

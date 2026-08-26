@@ -1451,11 +1451,11 @@ export default async function handler(req, res) {
           return res.status(200).send(pdf.buf);
         }
         if (!pdf.ok && !pdf.reportUrl) {
-          return res.status(404).json({
+          return res.status(200).json({
             ok: false,
             error: 'hata_karnesi_pdf_missing',
             message: pdf.message,
-            hint: pdf.hint
+            hint: pdf.hint || 'Bu sınav için hata karnesi PDF’si Edesis’te bulunamadı'
           });
         }
         return res.status(200).json({
