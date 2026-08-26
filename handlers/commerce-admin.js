@@ -6,9 +6,10 @@
  * Operasyonlar:
  *  vendors.list | vendors.get | vendors.create | vendors.update | vendors.delete
  *  vendor_users.list | vendor_users.add | vendor_users.remove
- *  books.list | books.get | books.create | books.update | books.delete
+ *  books.list | books.get | books.create | books.update | books.delete | books.bulk_upsert | books.seed_lgs8_vip
  *  offers.list | offers.get | offers.approve | offers.reject | offers.request_correction | offers.inactive | offers.update
  *  packages.list | packages.get | packages.create | packages.update | packages.delete | packages.items.set
+ *  vendors.ensure_yanki
  *  orders.list | orders.get | orders.update_status
  *  vendor_orders.list | vendor_orders.update_status
  *  shipments.list | shipments.get | shipments.create | shipments.update
@@ -22,6 +23,7 @@
 import { requireAuth } from '../api/_lib/auth.js';
 import { actorRoleSet, roleSetHasSuperAdmin, roleSetHasAdmin } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
+import { bulkUpsertBooks, ensureYankiVendor, seedLgs8VipCatalog } from '../api/_lib/commerce-lgs8-seed.js';
 
 function err(res, status, message) {
   return res.status(status).json({ error: message });
@@ -128,6 +130,8 @@ async function handleVendors(op, body, actor) {
     if (fields.payout_iban !== undefined) patch.payout_iban = sanitizeText(fields.payout_iban);
     if (fields.address_line1 !== undefined) patch.address_line1 = sanitizeText(fields.address_line1);
     if (fields.city !== undefined) patch.city = sanitizeText(fields.city);
+    if (fields.meta !== undefined && typeof fields.meta === 'object') patch.meta = fields.meta;
+    if (fields.linked_kitapci_id !== undefined) patch.linked_kitapci_id = fields.linked_kitapci_id || null;
     patch.updated_by = actor.sub;
     patch.updated_at = new Date().toISOString();
     const { data, error } = await supabaseAdmin.from('commerce_vendors').update(patch).eq('id', id).select().single();
@@ -143,6 +147,22 @@ async function handleVendors(op, body, actor) {
     if (error) throw error;
     await logAudit({ entity_type: 'commerce_vendor', entity_id: id, action: 'soft_delete', actor_user_id: actor.sub });
     return { ok: true };
+  }
+
+  if (op === 'vendors.ensure_yanki') {
+    const out = await ensureYankiVendor({
+      actorSub: actor.sub,
+      contact_phone: sanitizeText(body.contact_phone),
+      institution_id: sanitizeText(body.institution_id),
+    });
+    await logAudit({
+      entity_type: 'commerce_vendor',
+      entity_id: out.vendor.id,
+      action: out.created ? 'create' : 'ensure_yanki',
+      actor_user_id: actor.sub,
+      new_value: { slug: out.vendor.slug, phone: out.vendor.contact_phone },
+    });
+    return { ok: true, ...out };
   }
 
   throw new Error(`Bilinmeyen operasyon: ${op}`);
@@ -350,6 +370,7 @@ async function handleBooks(op, body, actor) {
         page_count: sanitizeInt(body.page_count),
         cover_image_url: sanitizeText(body.cover_image_url),
         is_catalog_active: body.is_catalog_active !== false,
+        metadata: body.metadata && typeof body.metadata === 'object' ? body.metadata : {},
         created_by: actor.sub,
         updated_by: actor.sub,
       })
@@ -370,6 +391,7 @@ async function handleBooks(op, body, actor) {
     if (fields.exam_types !== undefined) patch.exam_types = fields.exam_types;
     if (fields.page_count !== undefined) patch.page_count = sanitizeInt(fields.page_count);
     if (fields.is_catalog_active !== undefined) patch.is_catalog_active = Boolean(fields.is_catalog_active);
+    if (fields.metadata !== undefined) patch.metadata = fields.metadata;
     patch.updated_by = actor.sub;
     patch.updated_at = new Date().toISOString();
     const { data, error } = await supabaseAdmin.from('commerce_books').update(patch).eq('id', id).select().single();
@@ -384,6 +406,55 @@ async function handleBooks(op, body, actor) {
     const { error } = await supabaseAdmin.from('commerce_books').update({ deleted_at: new Date().toISOString() }).eq('id', id);
     if (error) throw error;
     return { ok: true };
+  }
+
+  if (op === 'books.bulk_upsert') {
+    const out = await bulkUpsertBooks({
+      books: body.books,
+      actorSub: actor.sub,
+      vendorId: body.vendor_id || null,
+      approveIfPriced: body.approve_if_priced !== false,
+    });
+    await logAudit({
+      entity_type: 'commerce_book',
+      entity_id: out.vendor.id,
+      action: 'bulk_upsert',
+      actor_user_id: actor.sub,
+      vendor_id: out.vendor.id,
+      new_value: { count: out.count },
+    });
+    return {
+      ok: true,
+      vendor: { id: out.vendor.id, name: out.vendor.name, slug: out.vendor.slug },
+      count: out.count,
+      books: out.results.map((r) => ({
+        id: r.book.id,
+        title: r.book.title,
+        isbn: r.book.isbn,
+        offer_id: r.offer?.id,
+        price_kurus: r.offer?.price_kurus,
+        status: r.offer?.status,
+        created: r.created,
+      })),
+    };
+  }
+
+  if (op === 'books.seed_lgs8_vip') {
+    const out = await seedLgs8VipCatalog({
+      actorSub: actor.sub,
+      prices: body.prices && typeof body.prices === 'object' ? body.prices : {},
+      package_price_kurus: sanitizeInt(body.package_price_kurus) || 0,
+      contact_phone: sanitizeText(body.contact_phone),
+    });
+    await logAudit({
+      entity_type: 'commerce_book',
+      entity_id: out.vendor.id,
+      action: 'seed_lgs8_vip',
+      actor_user_id: actor.sub,
+      vendor_id: out.vendor.id,
+      new_value: { book_count: out.books.length },
+    });
+    return { ok: true, ...out };
   }
 
   throw new Error(`Bilinmeyen operasyon: ${op}`);
@@ -458,6 +529,11 @@ async function handleOffers(op, body, actor) {
     if (fields.teacher_recommended !== undefined) patch.teacher_recommended = Boolean(fields.teacher_recommended);
     if (fields.required_for_classes !== undefined) patch.required_for_classes = fields.required_for_classes;
     if (fields.visibility_scope !== undefined) patch.visibility_scope = fields.visibility_scope;
+    if (fields.price_kurus !== undefined) patch.price_kurus = sanitizeInt(fields.price_kurus) ?? 0;
+    if (fields.compare_at_price_kurus !== undefined) patch.compare_at_price_kurus = sanitizeInt(fields.compare_at_price_kurus);
+    if (fields.stock_quantity !== undefined) patch.stock_quantity = sanitizeInt(fields.stock_quantity) ?? 0;
+    if (fields.shipping_days !== undefined) patch.shipping_days = sanitizeInt(fields.shipping_days) ?? 3;
+    if (fields.status !== undefined) patch.status = sanitizeText(fields.status);
     patch.updated_by = actor.sub;
     patch.updated_at = new Date().toISOString();
     const { data, error } = await supabaseAdmin.from('commerce_vendor_offers').update(patch).eq('id', id).select().single();
@@ -795,6 +871,110 @@ async function handleReports(op, body) {
 }
 
 // ─────────────────────────────────────────────
+// Paketler
+// ─────────────────────────────────────────────
+async function handlePackages(op, body, actor) {
+  if (op === 'packages.list') {
+    const { data, error } = await supabaseAdmin
+      .from('commerce_book_packages')
+      .select('*, commerce_book_package_items(id, book_id, quantity, is_required, sort_order)')
+      .is('deleted_at', null)
+      .order('sort_order', { ascending: true });
+    if (error) throw error;
+    return { ok: true, packages: data };
+  }
+
+  if (op === 'packages.get') {
+    if (!body.id) throw new Error('id gerekli');
+    const { data, error } = await supabaseAdmin
+      .from('commerce_book_packages')
+      .select('*, commerce_book_package_items(*, commerce_books(id, title, isbn, cover_image_url))')
+      .eq('id', body.id)
+      .single();
+    if (error) throw error;
+    return { ok: true, package: data };
+  }
+
+  if (op === 'packages.create') {
+    if (!body.name) throw new Error('name gerekli');
+    const slug =
+      sanitizeText(body.slug) ||
+      sanitizeText(body.name)
+        ?.toLowerCase()
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9-]/g, '');
+    const { data, error } = await supabaseAdmin
+      .from('commerce_book_packages')
+      .insert({
+        name: sanitizeText(body.name),
+        slug,
+        description: sanitizeText(body.description),
+        class_level: sanitizeText(body.class_level),
+        program: sanitizeText(body.program),
+        price_kurus: sanitizeInt(body.price_kurus) ?? 0,
+        compare_at_price_kurus: sanitizeInt(body.compare_at_price_kurus),
+        cover_image_url: sanitizeText(body.cover_image_url),
+        is_active: body.is_active === true && (sanitizeInt(body.price_kurus) || 0) > 0,
+        sort_order: sanitizeInt(body.sort_order) ?? 0,
+        institution_id: body.institution_id ?? null,
+        created_by: actor.sub,
+        updated_by: actor.sub,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return { ok: true, package: data };
+  }
+
+  if (op === 'packages.update') {
+    const { id, ...fields } = body;
+    if (!id) throw new Error('id gerekli');
+    const patch = { updated_by: actor.sub, updated_at: new Date().toISOString() };
+    ['name', 'slug', 'description', 'class_level', 'program', 'cover_image_url'].forEach((f) => {
+      if (fields[f] !== undefined) patch[f] = sanitizeText(fields[f]);
+    });
+    if (fields.price_kurus !== undefined) patch.price_kurus = sanitizeInt(fields.price_kurus) ?? 0;
+    if (fields.compare_at_price_kurus !== undefined) patch.compare_at_price_kurus = sanitizeInt(fields.compare_at_price_kurus);
+    if (fields.is_active !== undefined) patch.is_active = Boolean(fields.is_active);
+    if (fields.sort_order !== undefined) patch.sort_order = sanitizeInt(fields.sort_order) ?? 0;
+    const { data, error } = await supabaseAdmin.from('commerce_book_packages').update(patch).eq('id', id).select().single();
+    if (error) throw error;
+    return { ok: true, package: data };
+  }
+
+  if (op === 'packages.delete') {
+    if (!body.id) throw new Error('id gerekli');
+    const { error } = await supabaseAdmin
+      .from('commerce_book_packages')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', body.id);
+    if (error) throw error;
+    return { ok: true };
+  }
+
+  if (op === 'packages.items.set') {
+    if (!body.package_id || !Array.isArray(body.items)) throw new Error('package_id ve items gerekli');
+    await supabaseAdmin.from('commerce_book_package_items').delete().eq('package_id', body.package_id);
+    if (body.items.length) {
+      const { error } = await supabaseAdmin.from('commerce_book_package_items').insert(
+        body.items.map((it, idx) => ({
+          package_id: body.package_id,
+          book_id: it.book_id,
+          vendor_offer_id: it.vendor_offer_id ?? null,
+          quantity: sanitizeInt(it.quantity) || 1,
+          is_required: it.is_required !== false,
+          sort_order: sanitizeInt(it.sort_order) ?? idx,
+        }))
+      );
+      if (error) throw error;
+    }
+    return { ok: true };
+  }
+
+  throw new Error(`Bilinmeyen operasyon: ${op}`);
+}
+
+// ─────────────────────────────────────────────
 // Ana handler
 // ─────────────────────────────────────────────
 export default async function handler(req, res) {
@@ -832,6 +1012,8 @@ export default async function handler(req, res) {
       result = await handleCoupons(op, body, actor);
     } else if (prefix === 'settings') {
       result = await handleSettings(op, body, actor);
+    } else if (prefix === 'packages') {
+      result = await handlePackages(op, body, actor);
     } else if (prefix === 'reports') {
       result = await handleReports(op, body);
     } else {
