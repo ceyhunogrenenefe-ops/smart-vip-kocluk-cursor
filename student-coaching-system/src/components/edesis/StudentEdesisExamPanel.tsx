@@ -288,23 +288,15 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
               .filter((c) => ['A', 'B', 'C', 'D'].includes(c))
           )].sort();
         const fromApi = letters(r.availableBookletCodes);
-        if (fromApi.length) return fromApi;
         const fromKeys = letters(r.answerKeyBookletCodes);
-        if (fromKeys.length) return fromKeys;
-        return ['A'];
+        const merged = [...new Set([...fromApi, ...fromKeys])].sort();
+        if (merged.length) return merged;
+        return ['A', 'B', 'C', 'D'];
       })();
       const booksForUi = uniqueCodes.map((code) => ({
         kitapcikTuru: code,
         lessons: sharedLessons
       }));
-      const denemeOnly = (r.denemeOnlyBookletCodes || []).filter((c) =>
-        ['A', 'B', 'C', 'D'].includes(String(c || '').trim().toUpperCase())
-      );
-      if (denemeOnly.length) {
-        toast.message(
-          `Edesis denemede ${denemeOnly.join(', ')} kitapçığı da var; bu sınav oturumu yalnızca ${uniqueCodes.join(', ')} değerlendiriyor.`
-        );
-      }
       const nameType = `${exam.name || ''} ${exam.examType || ''} ${r.examTitle || ''} ${r.examType || ''}`;
       const family =
         r.examFamily && r.examFamily !== 'generic'
