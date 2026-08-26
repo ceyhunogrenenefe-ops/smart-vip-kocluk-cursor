@@ -202,6 +202,16 @@ export async function upsertYankiOfferForExistingBook(
       delete offerPatch.approved_at;
       delete offerPatch.approved_by;
     }
+    if (existingOffer.status === 'correction_requested' && status !== 'approved') {
+      delete offerPatch.status;
+      delete offerPatch.approved_at;
+      delete offerPatch.approved_by;
+    }
+    if (existingOffer.status === 'pending_approval' && status !== 'approved') {
+      delete offerPatch.status;
+      delete offerPatch.approved_at;
+      delete offerPatch.approved_by;
+    }
     const { data, error } = await supabaseAdmin
       .from('commerce_vendor_offers')
       .update(offerPatch)
