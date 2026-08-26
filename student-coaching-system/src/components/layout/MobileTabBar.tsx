@@ -27,6 +27,7 @@ export default function MobileTabBar() {
 
   return (
     <nav
+      data-mobile-tab-bar
       className="pointer-events-none fixed inset-x-0 bottom-0 z-[150] border-t border-slate-200/90 bg-white/95 pb-safe backdrop-blur-md supports-[backdrop-filter]:bg-white/90"
       aria-label="Ana menü"
     >

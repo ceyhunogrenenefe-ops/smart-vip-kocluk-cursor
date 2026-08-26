@@ -141,6 +141,7 @@ export default function Layout({ children }: LayoutProps) {
       ) : null}
 
       <div
+        data-app-content-col
         className={cn(
           'relative z-10 flex h-full min-h-0 w-full min-w-0 flex-col bg-slate-50 transition-[padding] duration-300',
           !mobileAppShell && (desktopWide ? 'lg:pl-64' : 'lg:pl-[4.5rem]')
