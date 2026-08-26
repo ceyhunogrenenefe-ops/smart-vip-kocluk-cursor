@@ -1477,14 +1477,23 @@ describe('pickEdesisBookletLessons', () => {
 });
 
 describe('listEdesisBookletCodes', () => {
-  it('intersects deneme keys with structure so B is not offered when ingest only has A', () => {
+  it('shows deneme B even when structure rows are only A', () => {
     const structure = {
       rows: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 1, questionCount: 10 }],
       booklets: [{ kitapcikTuru: 'A', lessons: [] }],
       answerKeyBookletCodes: ['A', 'B']
     };
-    assert.deepEqual(listEdesisBookletCodes(structure), ['A']);
-    assert.deepEqual(denemeOnlyBookletCodes(structure), ['B']);
+    assert.deepEqual(listEdesisBookletCodes(structure), ['A', 'B']);
+    assert.deepEqual(denemeOnlyBookletCodes(structure), []);
+  });
+
+  it('includes C and D from answer keys or booklet endpoint', () => {
+    const codes = listEdesisBookletCodes({
+      rows: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 1, questionCount: 10 }],
+      booklets: [],
+      answerKeyBookletCodes: ['A', 'B', 'C', 'D']
+    });
+    assert.deepEqual(codes, ['A', 'B', 'C', 'D']);
   });
 
   it('keeps A and B when structure rows include both', () => {
@@ -1508,13 +1517,22 @@ describe('listEdesisBookletCodes', () => {
     assert.deepEqual(codes, ['A']);
   });
 
-  it('uses structure letters when answer keys are empty (no A-D dump)', () => {
+  it('uses structure letters when answer keys are empty', () => {
     const codes = listEdesisBookletCodes({
       rows: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 1, questionCount: 10 }],
       booklets: [{ kitapcikTuru: 'A', lessons: [] }],
       answerKeyBookletCodes: []
     });
     assert.deepEqual(codes, ['A']);
+  });
+
+  it('falls back to A-D when nothing is known', () => {
+    assert.deepEqual(listEdesisBookletCodes({ rows: [], booklets: [], answerKeyBookletCodes: [] }), [
+      'A',
+      'B',
+      'C',
+      'D'
+    ]);
   });
 });
 
@@ -1552,6 +1570,15 @@ describe('kitapcikAllowedForExam', () => {
     };
     assert.equal(kitapcikAllowedForExam(structure, 'B').ok, false);
     assert.deepEqual(kitapcikAllowedForExam(structure, 'A').available, ['A']);
+  });
+
+  it('allows B when deneme answer key has B even if structure is A', () => {
+    const structure = {
+      rows: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 1, questionCount: 10 }],
+      answerKeyBookletCodes: ['A', 'B']
+    };
+    assert.equal(kitapcikAllowedForExam(structure, 'B').ok, true);
+    assert.deepEqual(kitapcikAllowedForExam(structure, 'B').available, ['A', 'B']);
   });
 });
 
