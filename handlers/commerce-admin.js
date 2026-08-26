@@ -6,7 +6,8 @@
  * Operasyonlar:
  *  vendors.list | vendors.get | vendors.create | vendors.update | vendors.delete
  *  vendor_users.list | vendor_users.add | vendor_users.remove
- *  books.list | books.get | books.create | books.update | books.delete | books.bulk_upsert | books.seed_lgs8_vip
+ *  books.list | books.get | books.create | books.update | books.delete | books.save | books.request_correction
+ *  books.bulk_upsert | books.seed_lgs8_vip
  *  offers.list | offers.get | offers.approve | offers.reject | offers.request_correction | offers.inactive | offers.update
  *  packages.list | packages.get | packages.create | packages.update | packages.delete | packages.items.set
  *  vendors.ensure_yanki
@@ -24,7 +25,7 @@ import { randomUUID } from 'crypto';
 import { requireAuth } from '../api/_lib/auth.js';
 import { actorRoleSet, roleSetHasSuperAdmin, roleSetHasAdmin } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
-import { bulkUpsertBooks, ensureYankiVendor, seedLgs8VipCatalog } from '../api/_lib/commerce-lgs8-seed.js';
+import { bulkUpsertBooks, ensureYankiVendor, seedLgs8VipCatalog, upsertYankiOfferForExistingBook } from '../api/_lib/commerce-lgs8-seed.js';
 import { attachOfferRelations, attachOfferRelationsList } from '../api/_lib/commerce-utils.js';
 
 function err(res, status, message) {
@@ -38,6 +39,15 @@ function sanitizeText(v) {
 function sanitizeInt(v) {
   const n = parseInt(String(v ?? ''), 10);
   return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function sanitizeIsbn(v) {
+  const t = sanitizeText(v);
+  return t || null;
+}
+
+function activeOffers(list) {
+  return (list ?? []).filter((o) => !o.deleted_at);
 }
 
 async function logAudit(params) {
@@ -340,7 +350,7 @@ async function handleBooks(op, body, actor) {
   if (op === 'books.list') {
     let q = supabaseAdmin
       .from('commerce_books')
-      .select('*')
+      .select('*, commerce_vendor_offers(id, vendor_id, price_kurus, stock_quantity, status, shipping_days, correction_notes, deleted_at)')
       .is('deleted_at', null)
       .order('created_at', { ascending: false });
     if (body.search) q = q.ilike('title', `%${body.search}%`);
@@ -349,7 +359,11 @@ async function handleBooks(op, body, actor) {
     if (body.offset) q = q.range(parseInt(body.offset, 10), parseInt(body.offset, 10) + (parseInt(body.limit ?? 50, 10) - 1));
     const { data, error } = await q;
     if (error) throw error;
-    return { ok: true, books: data };
+    const books = (data ?? []).map((b) => ({
+      ...b,
+      commerce_vendor_offers: activeOffers(b.commerce_vendor_offers),
+    }));
+    return { ok: true, books };
   }
 
   if (op === 'books.get') {
@@ -357,12 +371,12 @@ async function handleBooks(op, body, actor) {
     if (!id) throw new Error('id gerekli');
     const { data, error } = await supabaseAdmin
       .from('commerce_books')
-      .select('*, commerce_vendor_offers(id, vendor_id, price_kurus, stock_quantity, status, commerce_vendors(name))')
+      .select('*, commerce_vendor_offers(id, vendor_id, price_kurus, stock_quantity, status, shipping_days, correction_notes, deleted_at, commerce_vendors(name))')
       .eq('id', id)
       .is('deleted_at', null)
       .single();
     if (error) throw error;
-    return { ok: true, book: data };
+    return { ok: true, book: { ...data, commerce_vendor_offers: activeOffers(data.commerce_vendor_offers) } };
   }
 
   if (op === 'books.create') {
@@ -376,7 +390,7 @@ async function handleBooks(op, body, actor) {
     const { data, error } = await supabaseAdmin
       .from('commerce_books')
       .insert({
-        isbn: sanitizeText(body.isbn),
+        isbn: sanitizeIsbn(body.isbn),
         slug,
         title: sanitizeText(body.title),
         subtitle: sanitizeText(body.subtitle),
@@ -404,8 +418,9 @@ async function handleBooks(op, body, actor) {
     const { id, ...fields } = body;
     if (!id) throw new Error('id gerekli');
     const patch = {};
-    const textFields = ['slug', 'title', 'subtitle', 'author', 'publisher', 'subject', 'description', 'cover_image_url', 'isbn'];
+    const textFields = ['slug', 'title', 'subtitle', 'author', 'publisher', 'subject', 'description', 'cover_image_url'];
     textFields.forEach((f) => { if (fields[f] !== undefined) patch[f] = sanitizeText(fields[f]); });
+    if (fields.isbn !== undefined) patch.isbn = sanitizeIsbn(fields.isbn);
     if (fields.class_levels !== undefined) patch.class_levels = fields.class_levels;
     if (fields.exam_types !== undefined) patch.exam_types = fields.exam_types;
     if (fields.page_count !== undefined) patch.page_count = sanitizeInt(fields.page_count);
@@ -422,9 +437,93 @@ async function handleBooks(op, body, actor) {
   if (op === 'books.delete') {
     const { id } = body;
     if (!id) throw new Error('id gerekli');
-    const { error } = await supabaseAdmin.from('commerce_books').update({ deleted_at: new Date().toISOString() }).eq('id', id);
+    const now = new Date().toISOString();
+    const { error: offerErr } = await supabaseAdmin
+      .from('commerce_vendor_offers')
+      .update({ status: 'inactive', deleted_at: now, updated_at: now, updated_by: actor.sub })
+      .eq('book_id', id)
+      .is('deleted_at', null);
+    if (offerErr) throw offerErr;
+    await supabaseAdmin.from('commerce_book_package_items').delete().eq('book_id', id);
+    const { error } = await supabaseAdmin
+      .from('commerce_books')
+      .update({ deleted_at: now, is_catalog_active: false, updated_at: now, updated_by: actor.sub })
+      .eq('id', id);
     if (error) throw error;
+    await logAudit({ entity_type: 'commerce_book', entity_id: id, action: 'soft_delete', actor_user_id: actor.sub });
     return { ok: true };
+  }
+
+  if (op === 'books.save') {
+    const title = sanitizeText(body.title);
+    if (!title) throw new Error('Ürün adı gerekli');
+    const fascicle = sanitizeInt(body.fascicle_count);
+    const metadata = {
+      ...(body.metadata && typeof body.metadata === 'object' ? body.metadata : {}),
+    };
+    if (body.series !== undefined) metadata.series = sanitizeText(body.series);
+    if (body.series_label !== undefined) metadata.series_label = sanitizeText(body.series_label);
+    if (fascicle) metadata.fascicle_count = fascicle;
+    const bookBody = {
+      ...body,
+      title,
+      isbn: sanitizeIsbn(body.isbn),
+      metadata,
+    };
+    let book;
+    if (body.id) {
+      const upd = await handleBooks('books.update', { ...bookBody, id: body.id }, actor);
+      book = upd.book;
+    } else {
+      const created = await handleBooks('books.create', bookBody, actor);
+      book = created.book;
+    }
+    const { vendor } = await ensureYankiVendor({ actorSub: actor.sub });
+    const { data: existingOffer } = await supabaseAdmin
+      .from('commerce_vendor_offers')
+      .select('id, price_kurus, stock_quantity, shipping_days')
+      .eq('vendor_id', vendor.id)
+      .eq('book_id', book.id)
+      .maybeSingle();
+    let priceKurus = sanitizeInt(body.price_kurus);
+    if (priceKurus == null && body.price_lira !== undefined && body.price_lira !== '') {
+      const lira = Number(String(body.price_lira).replace(',', '.'));
+      priceKurus = Number.isFinite(lira) && lira >= 0 ? Math.round(lira * 100) : 0;
+    }
+    if (priceKurus == null) priceKurus = existingOffer?.price_kurus ?? 0;
+    const stockRaw = body.stock_quantity ?? body.stock;
+    const offer = await upsertYankiOfferForExistingBook(book.id, vendor, actor.sub, {
+      price_kurus: priceKurus,
+      stock_quantity: stockRaw !== undefined && stockRaw !== '' ? stockRaw : existingOffer?.stock_quantity,
+      shipping_days: body.shipping_days ?? existingOffer?.shipping_days,
+      approveIfPriced: body.approve_if_priced !== false,
+    });
+    const got = await handleBooks('books.get', { id: book.id }, actor);
+    return { ok: true, book: got.book, offer };
+  }
+
+  if (op === 'books.request_correction') {
+    const { id, notes, reason } = body;
+    if (!id) throw new Error('id gerekli');
+    const note = sanitizeText(notes ?? reason);
+    if (!note) throw new Error('Düzeltme notu gerekli');
+    const { data: offers, error: offerErr } = await supabaseAdmin
+      .from('commerce_vendor_offers')
+      .select('id')
+      .eq('book_id', id)
+      .is('deleted_at', null)
+      .order('updated_at', { ascending: false });
+    if (offerErr) throw offerErr;
+    let offerId = offers?.[0]?.id;
+    if (!offerId) {
+      const { vendor } = await ensureYankiVendor({ actorSub: actor.sub });
+      const createdOffer = await upsertYankiOfferForExistingBook(id, vendor, actor.sub, {
+        price_kurus: 0,
+        approveIfPriced: false,
+      });
+      offerId = createdOffer.id;
+    }
+    return handleOffers('offers.request_correction', { id: offerId, notes: note }, actor);
   }
 
   if (op === 'books.bulk_upsert') {

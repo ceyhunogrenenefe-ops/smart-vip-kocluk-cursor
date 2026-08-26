@@ -153,15 +153,32 @@ export async function upsertBookAndYankiOffer(normalized, vendor, actorSub, { ap
     book = data;
   }
 
-  const price = Number(normalized.price_kurus) || 0;
-  const stock = Number(normalized.stock_quantity);
+  const offer = await upsertYankiOfferForExistingBook(book.id, vendor, actorSub, {
+    price_kurus: normalized.price_kurus,
+    stock_quantity: normalized.stock_quantity,
+    shipping_days: normalized.shipping_days,
+    approveIfPriced,
+  });
+
+  return { book, offer, created: !existing };
+}
+
+/** Mevcut kitap için Yankı teklifini oluşturur veya soft-delete edilmişse geri açar. */
+export async function upsertYankiOfferForExistingBook(
+  bookId,
+  vendor,
+  actorSub,
+  { price_kurus = 0, stock_quantity, shipping_days, approveIfPriced = true } = {},
+) {
+  const price = Number(price_kurus) || 0;
+  const stock = Number(stock_quantity);
   const status = offerStatusForPrice(price, { approveIfPriced });
   const offerPatch = {
     vendor_id: vendor.id,
-    book_id: book.id,
+    book_id: bookId,
     price_kurus: price,
     stock_quantity: Number.isFinite(stock) && stock >= 0 ? stock : 100,
-    shipping_days: Number(normalized.shipping_days) || 3,
+    shipping_days: Number(shipping_days) || 3,
     status,
     updated_by: actorSub || null,
     updated_at: new Date().toISOString(),
@@ -176,10 +193,9 @@ export async function upsertBookAndYankiOffer(normalized, vendor, actorSub, { ap
     .from('commerce_vendor_offers')
     .select('id, status, price_kurus')
     .eq('vendor_id', vendor.id)
-    .eq('book_id', book.id)
+    .eq('book_id', bookId)
     .maybeSingle();
 
-  let offer;
   if (existingOffer) {
     if (existingOffer.status === 'approved' && price <= 0) {
       delete offerPatch.status;
@@ -193,18 +209,16 @@ export async function upsertBookAndYankiOffer(normalized, vendor, actorSub, { ap
       .select()
       .single();
     if (error) throw error;
-    offer = data;
-  } else {
-    const { data, error } = await supabaseAdmin
-      .from('commerce_vendor_offers')
-      .insert({ ...offerPatch, created_by: actorSub || null })
-      .select()
-      .single();
-    if (error) throw error;
-    offer = data;
+    return data;
   }
 
-  return { book, offer, created: !existing };
+  const { data, error } = await supabaseAdmin
+    .from('commerce_vendor_offers')
+    .insert({ ...offerPatch, created_by: actorSub || null })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
 }
 
 export async function bulkUpsertBooks({ books, actorSub, vendorId, approveIfPriced = true } = {}) {
