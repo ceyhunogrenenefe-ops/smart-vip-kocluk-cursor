@@ -129,7 +129,26 @@ export default function KitapDetayPage() {
             {typeof book.metadata?.fascicle_count === 'number' && (
               <span className="bg-violet-100 text-violet-700 text-xs px-2 py-0.5 rounded-full">{book.metadata.fascicle_count} fasikül</span>
             )}
+            {book.metadata?.is_set === true && (
+              <span className="bg-violet-100 text-violet-700 text-xs px-2 py-0.5 rounded-full">
+                {typeof book.metadata.book_count === 'number' ? `${book.metadata.book_count} kitaplık set` : 'Kitap seti'}
+              </span>
+            )}
           </div>
+
+          {Array.isArray(book.metadata?.set_contents) && book.metadata.set_contents.length > 0 && (
+            <div className="mt-4 bg-slate-50 border border-slate-200 rounded-xl p-4">
+              <h3 className="text-sm font-semibold text-gray-800 mb-2">Set içeriği</h3>
+              <ul className="space-y-1.5">
+                {(book.metadata.set_contents as unknown[]).map((item, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
+                    <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
+                    <span>{String(item)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* Açıklama */}
           {book.description && (

@@ -4,6 +4,7 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import {
   LGS8_COLLECTIONS,
+  PARAF_LGS8_IQ_SET,
   VIP_LGS8_BOOKS,
   VIP_LGS8_PACKAGE,
   YANKI_VENDOR_SLUG,
@@ -351,6 +352,35 @@ export async function seedLgs8VipCatalog({ actorSub, prices = {}, package_price_
     })),
     package: pkg.package,
     collections: LGS8_COLLECTIONS,
+  };
+}
+
+export async function seedLgs8ParafIqSet({ actorSub, price_kurus = 0, stock_quantity = 100, contact_phone } = {}) {
+  const { vendor, created } = await ensureYankiVendor({ actorSub, contact_phone });
+  const out = await upsertBookAndYankiOffer(
+    {
+      ...PARAF_LGS8_IQ_SET,
+      price_kurus: Number(price_kurus) || 0,
+      stock_quantity: Number(stock_quantity) || 100,
+      shipping_days: 3,
+    },
+    vendor,
+    actorSub,
+    { approveIfPriced: true },
+  );
+  return {
+    vendor,
+    vendor_created: created,
+    book: {
+      id: out.book.id,
+      title: out.book.title,
+      isbn: out.book.isbn,
+      slug: out.book.slug,
+      offer_id: out.offer?.id,
+      price_kurus: out.offer?.price_kurus,
+      status: out.offer?.status,
+    },
+    offer: out.offer,
   };
 }
 

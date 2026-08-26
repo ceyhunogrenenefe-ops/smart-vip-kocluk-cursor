@@ -7,7 +7,7 @@
  *  vendors.list | vendors.get | vendors.create | vendors.update | vendors.delete
  *  vendor_users.list | vendor_users.add | vendor_users.remove
  *  books.list | books.get | books.create | books.update | books.delete | books.save | books.request_correction
- *  books.bulk_upsert | books.seed_lgs8_vip
+ *  books.bulk_upsert | books.seed_lgs8_vip | books.seed_lgs8_paraf_iq
  *  offers.list | offers.get | offers.approve | offers.reject | offers.request_correction | offers.inactive | offers.update
  *  packages.list | packages.get | packages.create | packages.update | packages.delete | packages.items.set
  *  vendors.ensure_yanki
@@ -24,7 +24,7 @@
 import { requireAuth } from '../api/_lib/auth.js';
 import { actorRoleSet, roleSetHasSuperAdmin, roleSetHasAdmin } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
-import { bulkUpsertBooks, ensureYankiVendor, seedLgs8VipCatalog, upsertYankiOfferForExistingBook } from '../api/_lib/commerce-lgs8-seed.js';
+import { bulkUpsertBooks, ensureYankiVendor, seedLgs8ParafIqSet, seedLgs8VipCatalog, upsertYankiOfferForExistingBook } from '../api/_lib/commerce-lgs8-seed.js';
 
 function err(res, status, message) {
   return res.status(status).json({ error: message });
@@ -552,6 +552,24 @@ async function handleBooks(op, body, actor) {
       actor_user_id: actor.sub,
       vendor_id: out.vendor.id,
       new_value: { book_count: out.books.length },
+    });
+    return { ok: true, ...out };
+  }
+
+  if (op === 'books.seed_lgs8_paraf_iq') {
+    const out = await seedLgs8ParafIqSet({
+      actorSub: actor.sub,
+      price_kurus: sanitizeInt(body.price_kurus) || 0,
+      stock_quantity: sanitizeInt(body.stock_quantity) || 100,
+      contact_phone: sanitizeText(body.contact_phone),
+    });
+    await logAudit({
+      entity_type: 'commerce_book',
+      entity_id: out.book.id,
+      action: 'seed_lgs8_paraf_iq',
+      actor_user_id: actor.sub,
+      vendor_id: out.vendor.id,
+      new_value: { isbn: out.book.isbn, status: out.book.status },
     });
     return { ok: true, ...out };
   }

@@ -17,6 +17,10 @@ export const VIP_LGS8_SET_SLUG = 'vip-lgs-8-kitap-seti';
 export const VIP_LGS8_SET_ISBN = '978-625-12345-0-0';
 export const VIP_LGS8_COVER_PATH = '/commerce/vip-lgs-8-kitap-seti.jpg';
 
+export const PARAF_LGS8_SET_SLUG = 'paraf-8-sinif-iq-lgs-soru-kutuphanesi-seti';
+export const PARAF_LGS8_SET_ISBN = '978-625-78901-0-4';
+export const PARAF_LGS8_COVER_PATH = '/commerce/paraf-lgs-8-iq-soru-kutuphanesi-seti.jpg';
+
 export const LGS8_CLASS_LEVELS = ['8', 'LGS'];
 
 const TR_MAP = {
@@ -211,6 +215,63 @@ export const VIP_LGS8_PACKAGE = {
   book_isbns: VIP_LGS8_BOOKS.map((b) => b.isbn),
 };
 
+export const PARAF_LGS8_IQ_SET_CONTENTS = [
+  'Paraf 8. Sınıf IQ Türkçe Soru Kütüphanesi',
+  'Paraf 8. Sınıf IQ Matematik Soru Kütüphanesi',
+  'Paraf 8. Sınıf IQ Fen Bilimleri Soru Kütüphanesi',
+  'Paraf 8. Sınıf IQ T.C. İnkılap Tarihi ve Atatürkçülük Soru Kütüphanesi',
+  'Paraf 8. Sınıf IQ İngilizce Soru Kütüphanesi',
+  'Paraf 8. Sınıf LGS Sözel Mantık ve Paragraf Soru Kütüphanesi',
+];
+
+const PARAF_IQ_FEATURES = [
+  'IQ ve mantık odaklı yeni nesil sorular (PISA / TIMSS formatı).',
+  'Tamamı video çözümlü soru bankası.',
+  'Sözel mantık ve paragraf gücü: metin analizi, şifreleme, görsel yorumlama.',
+  'Akıllı tahta ve mobil kütüphane desteği.',
+  'Kademeli / sarmal test yapısı: kavramadan deneme tadına.',
+  '1. hamur, renkli baskı, karton kapak.',
+];
+
+/** Tek ürün: 6 kitaplık set. Branşlar ayrı satılmaz. */
+export const PARAF_LGS8_IQ_SET = {
+  isbn: PARAF_LGS8_SET_ISBN,
+  slug: PARAF_LGS8_SET_SLUG,
+  title: 'Paraf Yayınları 8. Sınıf IQ LGS Soru Kütüphanesi Hazırlık Seti (6 Kitap)',
+  subtitle: '6 kitaplık set · Soru bankası ve deneme · 8. Sınıf LGS',
+  author: 'Paraf Yayınları',
+  publisher: 'Paraf Yayınları',
+  subject: 'LGS Set',
+  class_levels: [...LGS8_CLASS_LEVELS],
+  exam_types: ['LGS'],
+  description: [
+    'Paraf Yayınları 8. Sınıf IQ LGS Soru Kütüphanesi Seti, Liselere Geçiş Sınavı’na (LGS) hazırlanan öğrencilerin muhakeme, analitik düşünme ve yeni nesil soru çözme becerilerini en üst seviyeye çıkarmak için özel olarak hazırlanmıştır. MEB güncel müfredatına ve LGS sınav standartlarına %100 uyumludur.',
+    '',
+    'Set, IQ serisi branş soru bankaları ile LGS’nin belirleyicisi Sözel Mantık ve Paragraf kitabını tek pakette sunar. Satış Yankı Kitapevi üzerinden yapılır; kitaplar tek tek değil, 6’lı set olarak gönderilir.',
+    '',
+    'Set içeriği (6 kitap):',
+    ...PARAF_LGS8_IQ_SET_CONTENTS.map((t, i) => `${i + 1}. ${t}`),
+    featureBlock(PARAF_IQ_FEATURES),
+  ].join('\n').trim(),
+  cover_image_url: PARAF_LGS8_COVER_PATH,
+  is_catalog_active: true,
+  metadata: {
+    series: PARAF_LGS8_SERIES,
+    series_label: 'Paraf Eğitim Seti',
+    collection: 'egitim-seti',
+    is_set: true,
+    book_count: 6,
+    set_contents: PARAF_LGS8_IQ_SET_CONTENTS,
+    grade: '8',
+    exam: 'LGS',
+    publisher_group: 'Paraf Yayınları',
+    paper: '1. Hamur, Renkli Baskı, Karton Kapak',
+    language: 'Türkçe',
+    features: PARAF_IQ_FEATURES,
+    sort_order: 1,
+  },
+};
+
 export const LGS8_COLLECTIONS = [
   {
     key: VIP_LGS8_SERIES,
@@ -228,9 +289,9 @@ export const LGS8_COLLECTIONS = [
     publisher: 'Paraf Yayınları',
     class_level: '8',
     exam: 'LGS',
-    coming_soon: true,
-    cover_image_url: null,
-    description: 'Paraf 8. sınıf eğitim seti yakında eklenecek.',
+    coming_soon: false,
+    cover_image_url: PARAF_LGS8_COVER_PATH,
+    description: 'IQ Soru Kütüphanesi · 6 kitaplık set · Yankı Kitapevi',
   },
   {
     key: LGS8_DENEME_SERIES,
