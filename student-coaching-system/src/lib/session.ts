@@ -106,10 +106,13 @@ let authRedirectToLoginInProgress = false;
 export const apiFetch = async (url: string, options: RequestInit = {}) => {
   const token = getAuthToken();
   const headers = new Headers(options.headers || {});
-  headers.set('Content-Type', 'application/json');
+  const method = String(options.method || 'GET').toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD' && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
-  const res = await fetch(resolveApiUrl(url), { ...options, headers });
+  const res = await fetch(resolveApiUrl(url), { ...options, headers, redirect: 'follow' });
 
   // Token süresi dolduysa kullanıcıyı otomatik login'e yönlendir.
   // Böylece UI'da "giriş var" görünüp tüm API çağrılarının 401 ile düşmesi engellenir.

@@ -1,4 +1,5 @@
 import { apiFetch } from '../session';
+import { fetchGoogleDrivePdfBlob } from './googleDrivePdf';
 
 export type EdesisProbeResult = {
   ok: boolean;
@@ -512,6 +513,13 @@ export async function fetchEdesisExamBookletPdf(params: {
   const files = Array.isArray(j.files) ? (j.files as EdesisBookletPdf[]) : [];
   const denemeId = typeof j.denemeId === 'string' || typeof j.denemeId === 'number' ? String(j.denemeId) : null;
   const attempts = Array.isArray(j.attempts) ? j.attempts : [];
+  const publicUrls = [params.fileUrl, url, ...files.map((f) => String(f?.url || ''))].filter(Boolean);
+  for (const fileUrl of publicUrls) {
+    const driveBlob = await fetchGoogleDrivePdfBlob(fileUrl);
+    if (driveBlob && driveBlob.size > 8) {
+      return { blob: driveBlob, url: fileUrl, files, denemeId, attempts };
+    }
+  }
   if (url || files[0]?.url) {
     return { blob: new Blob(), url: url || files[0]?.url || null, files, denemeId, attempts };
   }

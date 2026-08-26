@@ -4280,6 +4280,22 @@ export async function fetchEdesisExamStructure(examId, cfgOverride = {}) {
   if (!answerKeyBookletCodes.length && bookletEndpointCodes.length) {
     answerKeyBookletCodes = bookletEndpointCodes;
   }
+  try {
+    const detail = await fetchEdesisExamCatalogRowDetail(id, localCfg);
+    if (detail) {
+      const absorbed = absorbEdesisBookletSource(detail, id);
+      bookletPdfs = dedupeBookletFiles([...bookletPdfs, ...(absorbed.files || [])]);
+      const drive = pickGoogleDriveFetchUrl(bookletPdfs);
+      if (drive) {
+        bookletPdfs = dedupeBookletFiles([
+          { url: drive, kitapcikTuru: '', name: 'Google Drive PDF' },
+          ...bookletPdfs
+        ]);
+      }
+    }
+  } catch {
+    /* exam-booklet-pdf yedek */
+  }
   const examFamily = detectEdesisExamFamily(examMeta.title, examMeta.examType);
   const ui = edesisOpticalUi(examFamily);
   const resolvedPdfs = bookletPdfs.map((f) => ({
