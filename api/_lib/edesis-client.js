@@ -2521,14 +2521,7 @@ export function summarizeEdesisAnswerKeyBooklets(json) {
   });
 }
 
-/** Optikte gösterilecek harfler — cevap anahtarı varsa yalnız onu; A–D uydurma yok. edesis-booklet-keys-2026-08-26 */
-export function listEdesisBookletCodes(structure) {
-  const fromKeys = new Set();
-  for (const c of structure?.answerKeyBookletCodes || []) {
-    pushKitapcikLetter(c, fromKeys);
-  }
-  if (fromKeys.size) return [...fromKeys].sort();
-
+export function structureBookletLetters(structure) {
   const codes = new Set();
   for (const f of structure?.bookletPdfs || []) {
     pushKitapcikLetter(f.kitapcikTuru, codes);
@@ -2541,8 +2534,33 @@ export function listEdesisBookletCodes(structure) {
   for (const r of structure?.rows || []) {
     pushKitapcikLetter(r.kitapcikTuru, codes);
   }
-  const sorted = [...codes].filter((c) => KITAPCIK_LETTERS.includes(c)).sort();
-  return sorted.length ? sorted : ['A'];
+  return [...codes].filter((c) => KITAPCIK_LETTERS.includes(c)).sort();
+}
+
+/** Optikte gösterilecek harfler. Deneme Lst B olsa da v1 ingest sınav satırında yoksa 422. edesis-ingest-a-only-2026-08-26 */
+export function listEdesisBookletCodes(structure) {
+  const fromKeys = new Set();
+  for (const c of structure?.answerKeyBookletCodes || []) {
+    pushKitapcikLetter(c, fromKeys);
+  }
+  const fromStructure = structureBookletLetters(structure);
+  if (fromKeys.size && fromStructure.length) {
+    const inter = fromStructure.filter((c) => fromKeys.has(c));
+    if (inter.length) return inter;
+  }
+  if (fromKeys.size) return [...fromKeys].sort();
+  return fromStructure.length ? fromStructure : ['A'];
+}
+
+/** Denemede var, bu sınav oturumunun structure/ingest’inde yok */
+export function denemeOnlyBookletCodes(structure) {
+  const offered = new Set(listEdesisBookletCodes(structure));
+  const extra = [];
+  for (const c of structure?.answerKeyBookletCodes || []) {
+    const n = normalizeKitapcikCode(c);
+    if (KITAPCIK_LETTERS.includes(n) && !offered.has(n) && !extra.includes(n)) extra.push(n);
+  }
+  return extra.sort();
 }
 
 export function kitapcikAllowedForExam(structure, kitapcikTuru) {
@@ -4404,6 +4422,7 @@ export async function fetchEdesisExamStructure(examId, cfgOverride = {}) {
     availableBookletCodes: listEdesisBookletCodes(structureCtx),
     answerKeyBookletCodes,
     answerKeyDetail,
+    denemeOnlyBookletCodes: denemeOnlyBookletCodes(structureCtx),
     denemeId: denemeId || null,
     bookletPdfs: resolvedPdfs,
     examFamily,
