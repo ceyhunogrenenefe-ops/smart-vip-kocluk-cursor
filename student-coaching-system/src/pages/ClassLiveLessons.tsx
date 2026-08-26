@@ -1190,7 +1190,7 @@ export default function ClassLiveLessons() {
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const errText = [j.error, j.code === 'bbb_create_failed' ? 'BBB sunucusu yanıt vermedi.' : '', j.code === 'subject_meeting_link_required' ? 'BBB API tanımlı değil veya link zorunlu.' : '', j.code === 'teacher_time_conflict' ? 'Aynı gün/saatte başka ders veya şablon var.' : ''].filter(Boolean).join(' ');
+        const errText = [j.error, j.code === 'bbb_create_failed' ? 'BBB sunucusu yanıt vermedi.' : '', j.code === 'subject_meeting_link_required' ? 'BBB API tanımlı değil veya link zorunlu.' : '', j.code === 'teacher_time_conflict' ? 'Aynı öğretmen o saatte başka bir dersi veriyor. Aynı dersi farklı sınıfa ekleyebilirsiniz.' : ''].filter(Boolean).join(' ');
         setError(errText || 'Ders şablonu eklenemedi');
         return;
       }
@@ -1230,7 +1230,7 @@ export default function ClassLiveLessons() {
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
         const dateHint = j.lesson_date ? ` Tarih: ${j.lesson_date}.` : '';
-        const errText = [j.error, j.reason, dateHint, j.code === 'bbb_create_failed' ? 'BBB sunucusu yanıt vermedi.' : '', j.code === 'subject_meeting_link_required' ? 'BBB API (Vercel) tanımlı değil; link girin veya BBB_API_ENDPOINT + BBB_API_SECRET ekleyin.' : '', j.code === 'teacher_time_conflict' ? 'Öğretmenin aynı saatte başka oturumu veya haftalık şablonu olabilir.' : ''].filter(Boolean).map(String).join(' — ');
+        const errText = [j.error, j.reason, dateHint, j.code === 'bbb_create_failed' ? 'BBB sunucusu yanıt vermedi.' : '', j.code === 'subject_meeting_link_required' ? 'BBB API (Vercel) tanımlı değil; link girin veya BBB_API_ENDPOINT + BBB_API_SECRET ekleyin.' : '', j.code === 'teacher_time_conflict' ? 'Aynı öğretmen o saatte başka bir dersi veriyor. Aynı dersi (ör. Fen) 8A ile 8C’ye aynı anda ekleyebilirsiniz.' : ''].filter(Boolean).map(String).join(' — ');
         setError(errText || 'Oturumlar oluşturulamadı');
         return;
       }
