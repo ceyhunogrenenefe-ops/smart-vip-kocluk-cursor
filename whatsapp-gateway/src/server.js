@@ -3,6 +3,8 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs/promises';
+import fsSync from 'fs';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import pino from 'pino';
@@ -1382,6 +1384,44 @@ app.get('/ready', (_req, res) => {
   const jwtReady = Boolean(appJwtSecret);
   const corsReady = allowedOrigins.length > 0;
   res.json({ ok: jwtReady && corsReady, jwtReady, corsReady });
+});
+
+function tailTextFile(filePath, maxLines) {
+  try {
+    if (!fsSync.existsSync(filePath)) return { path: filePath, missing: true, text: '' };
+    const raw = fsSync.readFileSync(filePath, 'utf8');
+    const lines = raw.split(/\r?\n/);
+    const slice = lines.slice(-Math.max(20, Math.min(800, maxLines)));
+    return { path: filePath, missing: false, lines: slice.length, text: slice.join('\n') };
+  } catch (e) {
+    return { path: filePath, missing: false, error: e instanceof Error ? e.message : String(e), text: '' };
+  }
+}
+
+/** PM2 / dosya kuyruğu — x-gateway-key. Cursor ajanı sorun olunca buradan okur. */
+app.get('/admin/logs', (req, res) => {
+  const key = String(req.headers['x-gateway-key'] || '').trim();
+  if (!gatewayApiKey || key !== gatewayApiKey) {
+    return res.status(401).json({ ok: false, error: 'unauthorized' });
+  }
+  const maxLines = Number(req.query.lines) || 180;
+  const home = os.homedir();
+  const outLog =
+    process.env.PM2_OUT_LOG || path.join(home, '.pm2/logs/whatsapp-gateway-out.log');
+  const errLog =
+    process.env.PM2_ERR_LOG || path.join(home, '.pm2/logs/whatsapp-gateway-error.log');
+  res.json({
+    ok: true,
+    marker: 'wa-gateway-admin-logs-2026-08-26',
+    host: os.hostname(),
+    ts: new Date().toISOString(),
+    pid: process.pid,
+    uptime_s: Math.round(process.uptime()),
+    memory_mb: Math.round(process.memoryUsage().rss / 1024 / 1024),
+    sessions: sessions.size,
+    stdout: tailTextFile(outLog, maxLines),
+    stderr: tailTextFile(errLog, maxLines)
+  });
 });
 
 app.post('/sessions/:coachId/start', requireGatewayAuth, requireCoachScope, async (req, res) => {
