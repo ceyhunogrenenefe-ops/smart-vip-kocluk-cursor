@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   LGS8_COLLECTIONS,
+  LGS8_DENEME_KULUBU_CONTENTS,
+  LGS8_DENEME_KULUBU_SET,
+  LGS8_DENEME_SERIES,
+  LGS8_DENEME_SET_ISBN,
   PARAF_LGS8_IQ_SET,
   PARAF_LGS8_IQ_SET_CONTENTS,
   PARAF_LGS8_SET_ISBN,
@@ -83,5 +87,16 @@ describe('commerce-lgs8-catalog', () => {
     expect(PARAF_LGS8_IQ_SET.publisher).toBe('Paraf Yayınları');
     expect(PARAF_LGS8_IQ_SET.class_levels).toEqual(['8', 'LGS']);
     expect(LGS8_COLLECTIONS.find((c) => c.key === PARAF_LGS8_SERIES)?.coming_soon).toBe(false);
+  });
+
+  it('lists the Deneme Kulübü as one 40+ package, not per-publisher SKUs', () => {
+    expect(LGS8_DENEME_KULUBU_SET.isbn).toBe(LGS8_DENEME_SET_ISBN);
+    expect(LGS8_DENEME_KULUBU_SET.metadata.is_set).toBe(true);
+    expect(LGS8_DENEME_KULUBU_SET.metadata.book_count).toBe(40);
+    expect(LGS8_DENEME_KULUBU_SET.metadata.series).toBe(LGS8_DENEME_SERIES);
+    expect(LGS8_DENEME_KULUBU_CONTENTS.length).toBeGreaterThanOrEqual(12);
+    expect(LGS8_DENEME_KULUBU_SET.publisher).toBe('Online VIP Dershane');
+    expect(LGS8_DENEME_KULUBU_SET.class_levels).toContain('8');
+    expect(LGS8_COLLECTIONS.find((c) => c.key === LGS8_DENEME_SERIES)?.coming_soon).toBe(false);
   });
 });
