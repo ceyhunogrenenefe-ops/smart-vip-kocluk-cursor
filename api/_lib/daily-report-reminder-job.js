@@ -18,6 +18,7 @@ import {
 } from './coach-notification-prefs.js';
 import { getCoachGatewayHealth } from './message-service.js';
 import { sendAutomationTemplateMessage } from './whatsapp-automation-channel.js';
+import { waitAutoSendGap } from './whatsapp-gateway-send.js';
 import { loadPeriodsForStudents, isActiveFromPeriods } from './student-activity.js';
 import { resolveEffectiveSendChannel, SEND_CHANNELS } from './notification-config.js';
 
@@ -323,6 +324,7 @@ export async function runDailyReportReminderJob(opts = {}) {
         });
         log.push({ student_id: student.id, coach_id: coachId, phone, role, error: errMsg });
       }
+      await waitAutoSendGap();
     }
   }
 

@@ -36,6 +36,25 @@ async function main() {
   const miss = await store.getMessage({ id: 'NOPE', remoteJid: '905551112233@s.whatsapp.net' });
   assert.equal(miss, undefined);
 
+  // aliasJids: LID + PN aynı içerik (otomatik gönderim retry)
+  assert.equal(
+    await store.put(
+      {
+        key: { id: 'ALIAS1', remoteJid: '999888777666555@lid', fromMe: true },
+        message: { conversation: 'alias test' },
+      },
+      {
+        coachId: 'coach1',
+        aliasJids: ['905551112233@s.whatsapp.net', '999888777666555@lid'],
+      }
+    ),
+    true
+  );
+  const byPn = await store.getMessage({ id: 'ALIAS1', remoteJid: '905551112233@s.whatsapp.net' });
+  assert.equal(byPn.conversation, 'alias test');
+  const byLid = await store.getMessage({ id: 'ALIAS1', remoteJid: '999888777666555@lid' });
+  assert.equal(byLid.conversation, 'alias test');
+
   const cache = createMsgRetryCounterCache(1000);
   cache.set('k1', 1);
   assert.equal(cache.get('k1'), 1);

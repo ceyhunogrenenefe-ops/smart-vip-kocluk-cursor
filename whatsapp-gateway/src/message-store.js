@@ -83,7 +83,7 @@ export function createMessageStore({
 
   /**
    * @param {object} waMessage - Baileys WAMessage ({ key, message })
-   * @param {{ coachId?: string, fallbackText?: string }} [opts]
+   * @param {{ coachId?: string, fallbackText?: string, aliasJids?: string[] }} [opts]
    */
   async function put(waMessage, opts = {}) {
     const key = waMessage?.key;
@@ -106,6 +106,11 @@ export function createMessageStore({
     };
     indexEntry(entry);
     puts += 1;
+    const extra = Array.isArray(opts.aliasJids) ? opts.aliasJids : [];
+    for (const aj of extra) {
+      const j = bareJid(aj);
+      if (j) mem.set(cacheKey(id, j), entry);
+    }
     pruneExpired();
 
     if (diskEnabled && dataRoot && opts.coachId) {
