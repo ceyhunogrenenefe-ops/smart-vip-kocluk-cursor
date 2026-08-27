@@ -36,6 +36,7 @@ import {
   ingestEdesisExamResults,
   linkEdesisStudent,
   syncEdesis,
+  enrollPlatformStudentsToEdesis,
   type EdesisHubStudent,
   type EdesisPlatformStudent,
   type EdesisStatus,
@@ -88,6 +89,7 @@ export default function EdesisPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [status, setStatus] = useState<EdesisStatus | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
+  const [enrollBusy, setEnrollBusy] = useState(false);
   const [studentsLoading, setStudentsLoading] = useState(false);
   const [hubStudents, setHubStudents] = useState<EdesisHubStudent[]>([]);
   const [platformStudents, setPlatformStudents] = useState<EdesisPlatformStudent[]>([]);
@@ -245,6 +247,34 @@ export default function EdesisPage() {
       toast.error(e instanceof Error ? e.message : 'Senkron hatası');
     } finally {
       setSyncBusy(false);
+    }
+  };
+
+  const onEnrollPlatform = async () => {
+    setEnrollBusy(true);
+    let created = 0;
+    let linked = 0;
+    let failed = 0;
+    try {
+      for (let i = 0; i < 40; i += 1) {
+        const r = await enrollPlatformStudentsToEdesis(6);
+        if (r.error && !r.ok) throw new Error(r.error);
+        for (const it of r.items || []) {
+          if (it.ok && it.created) created += 1;
+          else if (it.ok) linked += 1;
+          else if (it.error) failed += 1;
+        }
+        if (r.done) break;
+        if (!r.writes) break;
+      }
+      toast.success(
+        `Edesis dönem kaydı: ${created} yeni, ${linked} bağlandı${failed ? `, ${failed} hata` : ''}.`
+      );
+      await loadStudents();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Edesis kayıt senkronu başarısız');
+    } finally {
+      setEnrollBusy(false);
     }
   };
 
@@ -472,6 +502,15 @@ export default function EdesisPage() {
             >
               {syncBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
               {syncBusy ? 'Senkron…' : 'Şimdi senkron'}
+            </button>
+            <button
+              type="button"
+              disabled={!status?.configured || enrollBusy || syncBusy}
+              onClick={() => void onEnrollPlatform()}
+              className="inline-flex items-center gap-2 rounded-full border border-amber-300/70 bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/15 disabled:opacity-50"
+            >
+              {enrollBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <GraduationCap className="h-4 w-4" />}
+              {enrollBusy ? 'Edesis kaydı…' : 'Öğrencileri Edesis dönemine yaz'}
             </button>
             <Link
               to="/edesis-analiz"

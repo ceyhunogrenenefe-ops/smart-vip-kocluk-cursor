@@ -13,9 +13,16 @@ import {
 } from './edesis-client.js';
 
 export const EDESIS_AUTO_ENROLL_INSTITUTION_ID = '73323d75-eea1-4552-8bba-d50555423589';
+export const EDESIS_TERM_REGULAR_NAME = '2026-2027';
+export const EDESIS_TERM_SUMMER_NAME = '2026-2027-YAZ';
+export const EDESIS_TERM_REGULAR_ID_FALLBACK = 113;
+export const EDESIS_TERM_SUMMER_ID_FALLBACK = 142;
 
 const SKIP_CLASSROOM_NAME =
   /bursluluk|kayit silen|kayıt silen|sömestr|somestr|yaz kamp|kitap okuma|deneme klub|4zpz8|eu8bb|premium|özelders|^özel$/i;
+
+const SKIP_AUTO_ENROLL_EMAIL =
+  /@example\.com$|^admin@smartvip(?:\.com)?$|cursor-setup-test/i;
 
 export function shouldAutoEnrollEdesis(institutionId) {
   const id = String(institutionId || '').trim();
@@ -35,6 +42,69 @@ export function edesisGradeFromClassLevel(classLevel) {
   return '8';
 }
 
+/** Lise / TYT-AYT-YKS → yaz dönemi; 3–8 ve LGS → normal 2026-2027. */
+export function edesisTermKindFromClassLevel(classLevel) {
+  const raw = String(classLevel || '').trim();
+  const s = raw.toLocaleUpperCase('tr');
+  if (!s) return 'regular';
+  if (s.includes('YÖS') || s.includes('YOS')) return 'summer';
+  if (s.includes('TYT') || s.includes('AYT') || s.includes('YKS') || s.includes('MEZUN')) return 'summer';
+  const n = parseInt(s, 10);
+  if (Number.isFinite(n) && n >= 9 && n <= 12) return 'summer';
+  return 'regular';
+}
+
+export function pickEdesisTerm(terms, classLevel) {
+  const kind = edesisTermKindFromClassLevel(classLevel);
+  const list = Array.isArray(terms) ? terms : [];
+  const want = kind === 'summer' ? EDESIS_TERM_SUMMER_NAME : EDESIS_TERM_REGULAR_NAME;
+  const wantU = want.toLocaleUpperCase('tr');
+  const exact = list.find((t) => String(t?.name || '').trim().toLocaleUpperCase('tr') === wantU);
+  if (exact?.id) return { id: exact.id, name: String(exact.name || want), kind };
+  if (kind === 'summer') {
+    const fuzzy = list.find((t) => {
+      const n = String(t?.name || '').toLocaleUpperCase('tr');
+      return n.includes('2026') && n.includes('2027') && n.includes('YAZ');
+    });
+    if (fuzzy?.id) return { id: fuzzy.id, name: String(fuzzy.name || want), kind };
+    return { id: EDESIS_TERM_SUMMER_ID_FALLBACK, name: EDESIS_TERM_SUMMER_NAME, kind };
+  }
+  const fuzzy = list.find((t) => {
+    const n = String(t?.name || '').trim().toLocaleUpperCase('tr');
+    return n === '2026-2027' || n === '2026 / 2027' || n === '2026-2027 DÖNEMİ';
+  });
+  if (fuzzy?.id) return { id: fuzzy.id, name: String(fuzzy.name || want), kind };
+  return { id: EDESIS_TERM_REGULAR_ID_FALLBACK, name: EDESIS_TERM_REGULAR_NAME, kind };
+}
+
+export function skipEdesisAutoEnrollStudent(student) {
+  const email = String(student?.email || '').trim().toLowerCase();
+  const name = String(student?.name || '').trim();
+  if (SKIP_AUTO_ENROLL_EMAIL.test(email)) return true;
+  if (/^admin$/i.test(name)) return true;
+  return false;
+}
+
+export function studentToPending(student) {
+  const s = student && typeof student === 'object' ? student : {};
+  const { firstName, lastName } = splitName(s.name);
+  return {
+    first_name: firstName,
+    last_name: lastName,
+    name: s.name,
+    email: s.email,
+    phone: s.phone,
+    phone_e164: s.phone_e164 || s.phone,
+    class_level: s.class_level,
+    branch: s.branch || s.school,
+    parent_name: s.parent_name,
+    parent_phone: s.parent_phone,
+    parent_phone_e164: s.parent_phone_e164 || s.parent_phone,
+    tc_identity_no: s.tc_identity_no,
+    birth_date: s.birth_date
+  };
+}
+
 export function extractClassroomLetter(classLevel, branch) {
   const blob = `${branch || ''} ${classLevel || ''}`.toLocaleUpperCase('tr').trim();
   const m = blob.match(/(?:^|[\s.\-])([A-H])(?:\s|$|SINIF)/) || blob.match(/(\d)\s*([A-H])\b/);
@@ -52,10 +122,15 @@ function classroomLetter(name) {
   return m2 ? m2[1] : '';
 }
 
-function isUsableClassroom(row) {
+function isUsableClassroom(row, termKind) {
   const name = String(row?.name || '');
   const full = String(row?.fullName || '');
-  return !SKIP_CLASSROOM_NAME.test(name) && !SKIP_CLASSROOM_NAME.test(full);
+  const grade = String(row?.gradeName || '');
+  if (SKIP_CLASSROOM_NAME.test(name) || SKIP_CLASSROOM_NAME.test(full)) return false;
+  if (termKind === 'regular') {
+    if (/yaz/i.test(name) || /yaz/i.test(full) || /Y$/i.test(grade)) return false;
+  }
+  return true;
 }
 
 function newestClassroom(rows) {
@@ -64,16 +139,28 @@ function newestClassroom(rows) {
     .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0] || null;
 }
 
-export const EDESIS_AUTO_ENROLL_MARKER = 'edesis-auto-enroll-on-approve-2026-08-27';
+export const EDESIS_AUTO_ENROLL_MARKER = 'edesis-auto-enroll-terms-2026-08-27';
 
-export function pickEdesisClassroom(classrooms, { classLevel, branch } = {}) {
+export function pickEdesisClassroom(classrooms, { classLevel, branch, termKind } = {}) {
   const list = Array.isArray(classrooms) ? classrooms : [];
   const grade = edesisGradeFromClassLevel(classLevel);
-  const inGrade = list.filter((c) => String(c.gradeName || '') === grade);
-  const pool = (inGrade.length ? inGrade : list).filter(isUsableClassroom);
+  const kind = termKind || edesisTermKindFromClassLevel(classLevel);
+  const gradeNames =
+    kind === 'summer' && grade !== 'YÖS' ? [`${grade}Y`, grade] : [grade];
+  let inGrade = [];
+  for (const g of gradeNames) {
+    inGrade = list.filter((c) => String(c.gradeName || '') === g);
+    if (inGrade.length) break;
+  }
+  const pool = (inGrade.length ? inGrade : list).filter((c) => isUsableClassroom(c, kind));
   const usable = pool.length ? pool : inGrade.length ? inGrade : list;
   const letter = extractClassroomLetter(classLevel, branch);
-  const wantsLgsNamed = /LGS/i.test(String(classLevel || ''));
+  const wantsLgsNamed = kind === 'regular' && /LGS/i.test(String(classLevel || ''));
+
+  if (grade === 'YÖS') {
+    const eki = usable.filter((c) => /2026\s*ek[iı]m/i.test(String(c.name || '')));
+    if (eki.length) return newestClassroom(eki);
+  }
 
   if (letter) {
     const byLetter = usable.filter((c) => classroomLetter(c.name) === letter);
@@ -126,7 +213,7 @@ function edesisPhone(raw) {
   return d;
 }
 
-function buildStudentBody(pending, classroomId) {
+function buildStudentBody(pending, classroomId, termId) {
   const firstName = String(pending.first_name || '').trim();
   const lastName = String(pending.last_name || '').trim();
   const body = {
@@ -134,6 +221,7 @@ function buildStudentBody(pending, classroomId) {
     lastName: lastName || splitName(pending.name).lastName,
     classroomId: Number(classroomId) || classroomId
   };
+  if (termId != null && termId !== '') body.termId = Number(termId) || termId;
   const email = String(pending.email || '').trim().toLowerCase();
   if (email) body.email = email;
   const phone = edesisPhone(pending.phone_e164 || pending.phone);
@@ -163,25 +251,53 @@ async function persistLink(platformStudentId, edesisStudentId) {
   return true;
 }
 
-async function findExistingEdesisStudent(pending) {
+function rowEdesisId(row) {
+  const keys = studentMatchKeysFromEdesisRow(row);
+  return String(keys.edesisStudentId || '').trim();
+}
+
+function findInTermRows(rows, pending) {
+  const email = String(pending?.email || '').trim().toLowerCase();
+  const list = Array.isArray(rows) ? rows : [];
+  if (email) {
+    for (const row of list) {
+      const keys = studentMatchKeysFromEdesisRow(row);
+      const rowEmail = keys.email || String(row?.email || '').trim().toLowerCase();
+      if (rowEmail && rowEmail === email) {
+        const id = String(keys.edesisStudentId || row?.edesisId || row?.id || '').trim();
+        if (id) return { edesisStudentId: id, matchMethod: 'email' };
+      }
+    }
+  }
+  return null;
+}
+
+function idInTermRows(rows, edesisStudentId) {
+  const want = String(edesisStudentId || '').trim();
+  if (!want) return false;
+  return (rows || []).some((row) => {
+    const keys = studentMatchKeysFromEdesisRow(row);
+    const id = String(keys.edesisStudentId || row?.edesisId || row?.id || '').trim();
+    return id === want;
+  });
+}
+
+async function findExistingEdesisStudent(pending, termId) {
   const email = String(pending.email || '').trim().toLowerCase();
   if (!email) return null;
   try {
-    const listed = await fetchEdesisStudentsList({}, { Filter: email });
-    for (const row of listed.rows || []) {
-      const keys = studentMatchKeysFromEdesisRow(row);
-      if (keys.email && keys.email === email && keys.edesisStudentId) {
-        return { edesisStudentId: String(keys.edesisStudentId).trim(), matchMethod: 'email' };
-      }
-    }
+    const filters = { Filter: email };
+    if (termId != null && termId !== '') filters.TermId = termId;
+    const listed = await fetchEdesisStudentsList({}, filters);
+    return findInTermRows(listed.rows || [], pending);
   } catch {
     /* onay düşmesin; oluşturma denenecek */
   }
   return null;
 }
 
-async function createEdesisStudentWithFallback(pending, classroomId, cfg) {
-  const full = buildStudentBody(pending, classroomId);
+async function createEdesisStudentWithFallback(pending, classroomId, cfg, termId) {
+  const full = buildStudentBody(pending, classroomId, termId);
   try {
     return await createEdesisStudent(full, cfg);
   } catch (firstErr) {
@@ -191,12 +307,44 @@ async function createEdesisStudentWithFallback(pending, classroomId, cfg) {
       classroomId: full.classroomId
     };
     if (full.email) minimal.email = full.email;
+    if (full.termId != null) minimal.termId = full.termId;
     try {
       return await createEdesisStudent(minimal, cfg);
     } catch {
       throw firstErr;
     }
   }
+}
+
+let enrollCatalogCache = { at: 0, rooms: null, terms: null, regularRows: null, summerRows: null };
+
+async function loadEnrollCatalog({ includeTermStudents = false } = {}) {
+  const fresh = Date.now() - enrollCatalogCache.at < 90_000;
+  if (fresh && enrollCatalogCache.rooms && enrollCatalogCache.terms) {
+    if (!includeTermStudents || (enrollCatalogCache.regularRows && enrollCatalogCache.summerRows)) {
+      return enrollCatalogCache;
+    }
+  }
+  const [rooms, terms] = await Promise.all([fetchEdesisClassroomsList(), fetchEdesisTermsList()]);
+  const next = {
+    at: Date.now(),
+    rooms: rooms.rows || [],
+    terms: terms.rows || [],
+    regularRows: enrollCatalogCache.regularRows,
+    summerRows: enrollCatalogCache.summerRows
+  };
+  if (includeTermStudents) {
+    const regular = pickEdesisTerm(next.terms, 'LGS');
+    const summer = pickEdesisTerm(next.terms, '9');
+    const [reg, yaz] = await Promise.all([
+      fetchEdesisStudentsList({}, { TermId: regular.id }),
+      fetchEdesisStudentsList({}, { TermId: summer.id })
+    ]);
+    next.regularRows = reg.rows || [];
+    next.summerRows = yaz.rows || [];
+  }
+  enrollCatalogCache = next;
+  return next;
 }
 
 async function maybeCreateParent(pending, edesisStudentId) {
@@ -232,12 +380,23 @@ export function summarizeEdesisEnrollResult(edesis) {
 }
 
 /**
- * Platform öğrencisi onaylandıktan sonra Edesis kaydı + edesis_ogrenci_id bağlama.
- * Platform onayını düşürmez; hata döner.
+ * Platform öğrencisi → Edesis kaydı (dönem + şube) + edesis_ogrenci_id.
+ * Platform yazımını düşürmez.
  */
-export async function provisionEdesisStudentOnApproval({ pending, platformStudentId, institutionId }) {
+export async function provisionEdesisStudent({
+  pending,
+  platformStudentId,
+  institutionId,
+  allowRelinkToNewTerm = false,
+  classrooms,
+  terms,
+  termStudentRows
+} = {}) {
   if (!shouldAutoEnrollEdesis(institutionId)) {
     return { skipped: true, reason: 'institution_not_edesis', marker: EDESIS_AUTO_ENROLL_MARKER };
+  }
+  if (skipEdesisAutoEnrollStudent(pending)) {
+    return { skipped: true, reason: 'test_or_admin_account', marker: EDESIS_AUTO_ENROLL_MARKER };
   }
   const cfg = getEdesisConfig();
   if (!cfg.apiKey) {
@@ -250,50 +409,76 @@ export async function provisionEdesisStudentOnApproval({ pending, platformStuden
   const { supabaseAdmin } = await import('./supabase-admin.js');
   const { data: student } = await supabaseAdmin
     .from('students')
-    .select('id, edesis_ogrenci_id, email, name')
+    .select('id, edesis_ogrenci_id, email, name, class_level, school, parent_name, parent_phone, phone, birth_date, institution_id')
     .eq('id', platformStudentId)
     .maybeSingle();
+  const source = pending && (pending.email || pending.name || pending.class_level)
+    ? pending
+    : studentToPending(student || {});
   const existingId = String(student?.edesis_ogrenci_id || '').trim();
-  if (existingId) {
+
+  let catalog;
+  try {
+    catalog = classrooms && terms
+      ? { rooms: classrooms, terms }
+      : await loadEnrollCatalog({ includeTermStudents: false });
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : 'edesis_catalog_failed',
+      marker: EDESIS_AUTO_ENROLL_MARKER
+    };
+  }
+
+  const term = pickEdesisTerm(catalog.terms || [], source.class_level);
+  const kind = term.kind;
+  const inTermRows = termStudentRows || (kind === 'summer' ? enrollCatalogCache.summerRows : enrollCatalogCache.regularRows) || null;
+
+  if (existingId && inTermRows && idInTermRows(inTermRows, existingId)) {
+    return {
+      ok: true,
+      created: false,
+      edesisStudentId: existingId,
+      matchMethod: 'already_in_term',
+      term,
+      marker: EDESIS_AUTO_ENROLL_MARKER
+    };
+  }
+  if (existingId && !allowRelinkToNewTerm) {
     return {
       ok: true,
       created: false,
       edesisStudentId: existingId,
       matchMethod: 'already_linked',
+      term,
       marker: EDESIS_AUTO_ENROLL_MARKER
     };
   }
 
-  const existing = await findExistingEdesisStudent(pending);
+  const existing = inTermRows
+    ? findInTermRows(inTermRows, source)
+    : await findExistingEdesisStudent(source, term.id);
   if (existing?.edesisStudentId) {
     await persistLink(platformStudentId, existing.edesisStudentId);
-    const parent = await maybeCreateParent(pending, existing.edesisStudentId);
+    const parent = await maybeCreateParent(source, existing.edesisStudentId);
     return {
       ok: true,
       created: false,
       edesisStudentId: existing.edesisStudentId,
       matchMethod: existing.matchMethod,
+      term,
       parent,
       marker: EDESIS_AUTO_ENROLL_MARKER
     };
   }
 
-  let rooms;
-  try {
-    rooms = await fetchEdesisClassroomsList();
-  } catch (e) {
-    return {
-      ok: false,
-      error: e instanceof Error ? e.message : 'edesis_classrooms_failed',
-      marker: EDESIS_AUTO_ENROLL_MARKER
-    };
-  }
-  const classroom = pickEdesisClassroom(rooms.rows || [], {
-    classLevel: pending.class_level,
-    branch: pending.branch
+  const classroom = pickEdesisClassroom(catalog.rooms || [], {
+    classLevel: source.class_level,
+    branch: source.branch,
+    termKind: kind
   });
   if (!classroom?.id) {
-    return { ok: false, error: 'edesis_classroom_not_found', marker: EDESIS_AUTO_ENROLL_MARKER };
+    return { ok: false, error: 'edesis_classroom_not_found', term, marker: EDESIS_AUTO_ENROLL_MARKER };
   }
 
   const classroomInfo = {
@@ -304,18 +489,19 @@ export async function provisionEdesisStudentOnApproval({ pending, platformStuden
 
   let created;
   try {
-    created = await createEdesisStudentWithFallback(pending, classroom.id, cfg);
+    created = await createEdesisStudentWithFallback(source, classroom.id, cfg, term.id);
   } catch (e) {
-    const again = await findExistingEdesisStudent(pending);
+    const again = await findExistingEdesisStudent(source, term.id);
     if (again?.edesisStudentId) {
       await persistLink(platformStudentId, again.edesisStudentId);
-      const parent = await maybeCreateParent(pending, again.edesisStudentId);
+      const parent = await maybeCreateParent(source, again.edesisStudentId);
       return {
         ok: true,
         created: false,
         edesisStudentId: again.edesisStudentId,
         matchMethod: again.matchMethod,
         classroom: classroomInfo,
+        term,
         parent,
         marker: EDESIS_AUTO_ENROLL_MARKER
       };
@@ -324,13 +510,14 @@ export async function provisionEdesisStudentOnApproval({ pending, platformStuden
       ok: false,
       error: e instanceof Error ? e.message : 'edesis_create_student_failed',
       classroom: classroomInfo,
+      term,
       marker: EDESIS_AUTO_ENROLL_MARKER
     };
   }
 
   let edesisStudentId = pickCreatedEdesisId(created);
   if (!edesisStudentId) {
-    const again = await findExistingEdesisStudent(pending);
+    const again = await findExistingEdesisStudent(source, term.id);
     edesisStudentId = again?.edesisStudentId || '';
   }
   if (!edesisStudentId) {
@@ -338,18 +525,154 @@ export async function provisionEdesisStudentOnApproval({ pending, platformStuden
       ok: false,
       error: 'edesis_student_id_missing_after_create',
       classroom: classroomInfo,
+      term,
       marker: EDESIS_AUTO_ENROLL_MARKER
     };
   }
 
   await persistLink(platformStudentId, edesisStudentId);
-  const parent = await maybeCreateParent(pending, edesisStudentId);
+  const parent = await maybeCreateParent(source, edesisStudentId);
   return {
     ok: true,
     created: true,
     edesisStudentId,
     classroom: classroomInfo,
+    term,
     parent,
     marker: EDESIS_AUTO_ENROLL_MARKER
   };
 }
+
+export async function provisionEdesisStudentOnApproval(opts) {
+  return provisionEdesisStudent({ ...opts, allowRelinkToNewTerm: false });
+}
+
+export async function autoEnrollStudentRow(studentRow) {
+  if (!studentRow?.id) return { skipped: true, reason: 'no_student' };
+  try {
+    return await provisionEdesisStudent({
+      pending: studentToPending(studentRow),
+      platformStudentId: studentRow.id,
+      institutionId: studentRow.institution_id,
+      allowRelinkToNewTerm: false
+    });
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : 'edesis_auto_enroll_failed',
+      marker: EDESIS_AUTO_ENROLL_MARKER
+    };
+  }
+}
+
+/**
+ * Online VIP platform öğrencilerini hedef 2026-2027 / YAZ dönemine yazar.
+ * Hobby zaman aşımı için limit kadar yazma; tekrar çağrılınca kalanı işler.
+ */
+export async function enrollPlatformStudentsBatch({ limit = 6, institutionId } = {}) {
+  if (institutionId && !shouldAutoEnrollEdesis(institutionId)) {
+    return { skipped: true, reason: 'institution_not_edesis', marker: EDESIS_AUTO_ENROLL_MARKER };
+  }
+  const cfg = getEdesisConfig();
+  if (!cfg.apiKey) {
+    return { skipped: true, reason: 'EDESIS_API_KEY_missing', marker: EDESIS_AUTO_ENROLL_MARKER };
+  }
+
+  const { supabaseAdmin } = await import('./supabase-admin.js');
+  const vip = EDESIS_AUTO_ENROLL_INSTITUTION_ID;
+  const cols =
+    'id, name, email, phone, class_level, school, branch, parent_name, parent_phone, birth_date, tc_identity_no, institution_id, edesis_ogrenci_id';
+  let { data, error } = await supabaseAdmin
+    .from('students')
+    .select(cols)
+    .or(`institution_id.eq.${vip},institution_id.is.null`)
+    .order('id', { ascending: true })
+    .limit(5000);
+  if (error && String(error.message || '').includes('branch')) {
+    ({ data, error } = await supabaseAdmin
+      .from('students')
+      .select(
+        'id, name, email, phone, class_level, school, parent_name, parent_phone, birth_date, tc_identity_no, institution_id, edesis_ogrenci_id'
+      )
+      .or(`institution_id.eq.${vip},institution_id.is.null`)
+      .order('id', { ascending: true })
+      .limit(5000));
+  }
+  if (error) throw error;
+
+  const catalog = await loadEnrollCatalog({ includeTermStudents: true });
+  const maxWrites = Math.min(Math.max(Number(limit) || 6, 1), 10);
+  const items = [];
+  let remaining = 0;
+  let writes = 0;
+  let skipped = 0;
+  let already = 0;
+
+  for (const st of data || []) {
+    if (skipEdesisAutoEnrollStudent(st) || !String(st.name || '').trim()) {
+      skipped += 1;
+      continue;
+    }
+    const term = pickEdesisTerm(catalog.terms, st.class_level);
+    const termRows = term.kind === 'summer' ? catalog.summerRows : catalog.regularRows;
+    const linkedId = String(st.edesis_ogrenci_id || '').trim();
+    const inTermById = linkedId && idInTermRows(termRows, linkedId);
+    const inTermByEmail = findInTermRows(termRows, studentToPending(st));
+    if (inTermById || (inTermByEmail && linkedId && inTermByEmail.edesisStudentId === linkedId)) {
+      already += 1;
+      continue;
+    }
+    if (inTermByEmail && !linkedId) {
+      await persistLink(st.id, inTermByEmail.edesisStudentId);
+      items.push({
+        id: st.id,
+        name: st.name,
+        ok: true,
+        created: false,
+        matchMethod: 'email',
+        edesisStudentId: inTermByEmail.edesisStudentId,
+        term
+      });
+      already += 1;
+      continue;
+    }
+    if (writes >= maxWrites) {
+      remaining += 1;
+      continue;
+    }
+    const result = await provisionEdesisStudent({
+      pending: studentToPending(st),
+      platformStudentId: st.id,
+      institutionId: st.institution_id || vip,
+      allowRelinkToNewTerm: true,
+      classrooms: catalog.rooms,
+      terms: catalog.terms,
+      termStudentRows: termRows
+    });
+    items.push({ id: st.id, name: st.name, class_level: st.class_level, ...result });
+    writes += 1;
+    if (result.ok && result.edesisStudentId) {
+      const rowFake = {
+        id: result.edesisStudentId,
+        email: st.email,
+        edesisId: result.edesisStudentId
+      };
+      if (term.kind === 'summer') catalog.summerRows = [...(catalog.summerRows || []), rowFake];
+      else catalog.regularRows = [...(catalog.regularRows || []), rowFake];
+    }
+  }
+
+  enrollCatalogCache = { ...catalog, at: Date.now() };
+  return {
+    ok: true,
+    done: remaining === 0,
+    remaining,
+    writes,
+    skipped,
+    already,
+    count: (data || []).length,
+    items,
+    marker: EDESIS_AUTO_ENROLL_MARKER
+  };
+}
+

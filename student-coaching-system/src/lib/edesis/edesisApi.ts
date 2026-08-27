@@ -86,6 +86,40 @@ export async function syncEdesis(): Promise<EdesisSyncResult> {
   return syncInFlight;
 }
 
+export type EdesisEnrollBatchResult = {
+  ok?: boolean;
+  done?: boolean;
+  remaining?: number;
+  writes?: number;
+  skipped?: number;
+  already?: number;
+  count?: number;
+  error?: string;
+  marker?: string;
+  items?: Array<{
+    id?: string;
+    name?: string;
+    ok?: boolean;
+    created?: boolean;
+    skipped?: boolean;
+    error?: string;
+    edesisStudentId?: string;
+  }>;
+};
+
+export async function enrollPlatformStudentsToEdesis(
+  limit = 6
+): Promise<EdesisEnrollBatchResult> {
+  const res = await apiFetch('/api/edesis-sync?op=enroll-platform-students', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ limit })
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || j.message || res.statusText);
+  return j as EdesisEnrollBatchResult;
+}
+
 export async function importEdesisJson(rows: unknown[]): Promise<EdesisSyncResult> {
   const res = await apiFetch('/api/edesis-sync?op=import', {
     method: 'POST',
