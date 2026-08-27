@@ -4056,7 +4056,46 @@ export async function postEdesisResource(path, body, cfgOverride = {}) {
   const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
   const r = await fetchEdesisJson(localCfg, path, { method: 'POST', body });
   if (!r.ok) {
-    throw new Error(r.json?.error || r.json?.message || `edesis_post_${r.status}`);
+    throw new Error(edesisHttpErrorText(r, `edesis_post_${r.status}`));
+  }
+  return r.json;
+}
+
+function edesisHttpErrorText(r, fallback) {
+  const j = r?.json;
+  if (!j || typeof j !== 'object') return fallback;
+  const err = j.error;
+  if (typeof err === 'string' && err.trim()) return err.trim();
+  if (err && typeof err === 'object') {
+    const msg = err.message || err.details || err.error;
+    if (msg) return String(msg);
+  }
+  if (j.message) return String(j.message);
+  if (j.title) return String(j.title);
+  try {
+    const s = JSON.stringify(j);
+    if (s && s !== '{}') return s.slice(0, 240);
+  } catch {
+    /* ignore */
+  }
+  return fallback;
+}
+
+/** ABP: öğrenciyi hedef döneme + şubeye al (Kesinkayit=3). */
+export async function changeEdesisStudentTerm({ ogrenciId, donemId, subeId, studentState = 3 }, cfgOverride = {}) {
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  const body = {
+    ogrenciId: Number(ogrenciId) || ogrenciId,
+    donemId: Number(donemId) || donemId,
+    studentState
+  };
+  if (subeId != null && subeId !== '') body.subeId = Number(subeId) || subeId;
+  const r = await fetchEdesisJsonPreferAbp(cfg, '/api/services/app/Ogrencies/ChangeOgrenciDonem', {
+    method: 'POST',
+    body
+  });
+  if (!r.ok) {
+    throw new Error(edesisHttpErrorText(r, `edesis_change_term_${r.status}`));
   }
   return r.json;
 }

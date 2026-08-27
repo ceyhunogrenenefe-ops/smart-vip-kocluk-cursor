@@ -4,6 +4,7 @@
  */
 
 import {
+  changeEdesisStudentTerm,
   createEdesisParent,
   createEdesisStudent,
   fetchEdesisClassroomsList,
@@ -297,8 +298,8 @@ async function findExistingEdesisStudent(pending, termId) {
   return null;
 }
 
-async function createEdesisStudentWithFallback(pending, classroomId, cfg, termId) {
-  const full = buildStudentBody(pending, classroomId, termId);
+async function createEdesisStudentWithFallback(pending, classroomId, cfg) {
+  const full = buildStudentBody(pending, classroomId);
   try {
     return await createEdesisStudent(full, cfg);
   } catch (firstErr) {
@@ -308,12 +309,26 @@ async function createEdesisStudentWithFallback(pending, classroomId, cfg, termId
       classroomId: full.classroomId
     };
     if (full.email) minimal.email = full.email;
-    if (full.termId != null) minimal.termId = full.termId;
     try {
       return await createEdesisStudent(minimal, cfg);
     } catch {
       throw firstErr;
     }
+  }
+}
+
+async function moveStudentToTerm(edesisStudentId, term, classroom) {
+  if (!edesisStudentId || !term?.id) return { ok: false, error: 'term_or_student_missing' };
+  try {
+    await changeEdesisStudentTerm({
+      ogrenciId: edesisStudentId,
+      donemId: term.id,
+      subeId: classroom?.id,
+      studentState: 3
+    });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
 
@@ -488,13 +503,30 @@ export async function provisionEdesisStudent({
     gradeName: classroom.gradeName
   };
 
+  if (existingId && allowRelinkToNewTerm) {
+    const moved = await moveStudentToTerm(existingId, term, classroom);
+    return {
+      ok: moved.ok,
+      created: false,
+      edesisStudentId: existingId,
+      matchMethod: 'term_changed',
+      classroom: classroomInfo,
+      term,
+      termAssigned: moved.ok,
+      error: moved.ok ? undefined : moved.error,
+      marker: EDESIS_AUTO_ENROLL_MARKER
+    };
+  }
+
   let created;
   try {
-    created = await createEdesisStudentWithFallback(source, classroom.id, cfg, term.id);
+    created = await createEdesisStudentWithFallback(source, classroom.id, cfg);
   } catch (e) {
-    const again = await findExistingEdesisStudent(source, term.id);
+    const again =
+      (await findExistingEdesisStudent(source, term.id)) || (await findExistingEdesisStudent(source));
     if (again?.edesisStudentId) {
       await persistLink(platformStudentId, again.edesisStudentId);
+      const moved = await moveStudentToTerm(again.edesisStudentId, term, classroom);
       const parent = await maybeCreateParent(source, again.edesisStudentId);
       return {
         ok: true,
@@ -503,6 +535,7 @@ export async function provisionEdesisStudent({
         matchMethod: again.matchMethod,
         classroom: classroomInfo,
         term,
+        termAssigned: moved.ok,
         parent,
         marker: EDESIS_AUTO_ENROLL_MARKER
       };
@@ -518,7 +551,8 @@ export async function provisionEdesisStudent({
 
   let edesisStudentId = pickCreatedEdesisId(created);
   if (!edesisStudentId) {
-    const again = await findExistingEdesisStudent(source, term.id);
+    const again =
+      (await findExistingEdesisStudent(source, term.id)) || (await findExistingEdesisStudent(source));
     edesisStudentId = again?.edesisStudentId || '';
   }
   if (!edesisStudentId) {
@@ -532,6 +566,7 @@ export async function provisionEdesisStudent({
   }
 
   await persistLink(platformStudentId, edesisStudentId);
+  const moved = await moveStudentToTerm(edesisStudentId, term, classroom);
   const parent = await maybeCreateParent(source, edesisStudentId);
   return {
     ok: true,
@@ -539,6 +574,8 @@ export async function provisionEdesisStudent({
     edesisStudentId,
     classroom: classroomInfo,
     term,
+    termAssigned: moved.ok,
+    termError: moved.ok ? undefined : moved.error,
     parent,
     marker: EDESIS_AUTO_ENROLL_MARKER
   };
