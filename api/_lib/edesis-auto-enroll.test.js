@@ -29,7 +29,8 @@ const ROOMS = [
   { id: 185252, name: 'A', gradeName: '9', fullName: '9-A' },
   { id: 283261, name: 'A', gradeName: '10Y', fullName: '10Y-A' },
   { id: 282242, name: 'A', gradeName: '10', fullName: '10-A' },
-  { id: 120121, name: 'YAZ', gradeName: '8', fullName: '8-YAZ' }
+  { id: 120121, name: 'YAZ', gradeName: '8', fullName: '8-YAZ' },
+  { id: 265587, name: 'KİTAP UKUMA ATOLYESİ', gradeName: '5', fullName: '5-KİTAP UKUMA ATOLYESİ' }
 ];
 
 const TERMS = [
@@ -153,6 +154,14 @@ describe('edesis-auto-enroll classroom pick', () => {
     expect(skipEdesisAutoEnrollStudent({ email: 'admin@smartvip.com', name: 'Admin' })).toBe(true);
     expect(skipEdesisAutoEnrollStudent({ email: 'veli@gmail.com', name: 'Ada' })).toBe(false);
     expect(skipEdesisAutoEnrollStudent({ email: 'a@b.com', name: 'TEST TESY' })).toBe(true);
+  });
+
+  it('skips kitap atolyesi junk even if it is in the term', () => {
+    const room = pickEdesisClassroom(ROOMS, {
+      classLevel: '5',
+      preferredIds: [265587, 192156]
+    });
+    expect(room.id).toBe(192156);
   });
 
   it('prefers classrooms already used in the target term', () => {
