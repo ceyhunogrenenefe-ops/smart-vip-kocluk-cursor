@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   edesisGradeFromClassLevel,
+  edesisTermKindFromClassLevel,
   extractClassroomLetter,
   pickCreatedEdesisId,
   pickEdesisClassroom,
+  pickEdesisTerm,
   shouldAutoEnrollEdesis,
+  skipEdesisAutoEnrollStudent,
   summarizeEdesisEnrollResult
 } from './edesis-auto-enroll.js';
 
@@ -20,7 +23,18 @@ const ROOMS = [
   { id: 104365, name: 'A', gradeName: '5', fullName: '5-A' },
   { id: 192156, name: 'A', gradeName: '5', fullName: '5-A' },
   { id: 185258, name: 'A', gradeName: '12', fullName: '12-A' },
-  { id: 283258, name: 'A', gradeName: '12', fullName: '12-A' }
+  { id: 283258, name: 'A', gradeName: '12', fullName: '12-A' },
+  { id: 185255, name: 'A', gradeName: '9Y', fullName: '9Y-A' },
+  { id: 185252, name: 'A', gradeName: '9', fullName: '9-A' },
+  { id: 283261, name: 'A', gradeName: '10Y', fullName: '10Y-A' },
+  { id: 282242, name: 'A', gradeName: '10', fullName: '10-A' },
+  { id: 120121, name: 'YAZ', gradeName: '8', fullName: '8-YAZ' }
+];
+
+const TERMS = [
+  { id: 113, name: '2026-2027', isDefault: true },
+  { id: 142, name: '2026-2027-YAZ', isDefault: false },
+  { id: 40, name: '2025-2026', isDefault: false }
 ];
 
 describe('edesis-auto-enroll classroom pick', () => {
@@ -91,5 +105,39 @@ describe('edesis-auto-enroll classroom pick', () => {
       }).extra
     ).toContain('Edesis kaydı açıldı: 11 (8-C)');
     expect(summarizeEdesisEnrollResult({ ok: false, error: 'timeout' }).tone).toBe('warning');
+  });
+
+  it('maps 9-11 / TYT / YKS to summer and LGS / 5-7 to regular', () => {
+    expect(edesisTermKindFromClassLevel('9')).toBe('summer');
+    expect(edesisTermKindFromClassLevel('11')).toBe('summer');
+    expect(edesisTermKindFromClassLevel('TYT-Maarif')).toBe('summer');
+    expect(edesisTermKindFromClassLevel('YKS-Sayısal')).toBe('summer');
+    expect(edesisTermKindFromClassLevel('LGS')).toBe('regular');
+    expect(edesisTermKindFromClassLevel('5')).toBe('regular');
+    expect(edesisTermKindFromClassLevel('7')).toBe('regular');
+  });
+
+  it('picks 2026-2027 vs 2026-2027-YAZ from live-like terms', () => {
+    expect(pickEdesisTerm(TERMS, 'LGS')).toEqual({ id: 113, name: '2026-2027', kind: 'regular' });
+    expect(pickEdesisTerm(TERMS, '9')).toEqual({ id: 142, name: '2026-2027-YAZ', kind: 'summer' });
+    expect(pickEdesisTerm(TERMS, 'TYT-Maarif').id).toBe(142);
+  });
+
+  it('puts yaz 9 into 9Y-A and skips regular 9-A', () => {
+    const room = pickEdesisClassroom(ROOMS, { classLevel: '9', termKind: 'summer' });
+    expect(room.id).toBe(185255);
+    expect(room.gradeName).toBe('9Y');
+  });
+
+  it('does not put LGS into 8-YAZ', () => {
+    const room = pickEdesisClassroom(ROOMS, { classLevel: 'LGS' });
+    expect(room.name).not.toMatch(/YAZ/i);
+    expect(room.id).toBe(219076);
+  });
+
+  it('skips demo / test student rows', () => {
+    expect(skipEdesisAutoEnrollStudent({ email: 'cursor-setup-test@example.com', name: 'X' })).toBe(true);
+    expect(skipEdesisAutoEnrollStudent({ email: 'admin@smartvip.com', name: 'Admin' })).toBe(true);
+    expect(skipEdesisAutoEnrollStudent({ email: 'veli@gmail.com', name: 'Ada' })).toBe(false);
   });
 });
