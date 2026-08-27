@@ -161,7 +161,7 @@ function newestClassroom(rows) {
     .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0] || null;
 }
 
-export const EDESIS_AUTO_ENROLL_MARKER = 'edesis-auto-enroll-terms-2026-08-27i';
+export const EDESIS_AUTO_ENROLL_MARKER = 'edesis-auto-enroll-terms-2026-08-27j';
 
 export function classroomIdsFromStudentRows(rows) {
   const ids = [];
@@ -464,17 +464,20 @@ async function createEdesisStudentWithFallback(pending, classroomId, cfg, termId
     }
     const msg = firstErr instanceof Error ? firstErr.message : String(firstErr);
     if (/email adresi ile zaten|already.*email/i.test(msg) && full.email) {
-      const withoutEmail = {
+      const phone = String(pending.phone_e164 || pending.phone || pending.parent_phone_e164 || pending.parent_phone || '').replace(/\D/g, '');
+      const local = (phone.slice(-10) || foldNameKey(pendingDisplayName(pending)).replace(/\s+/g, '').slice(0, 24) || 'ogrenci') + Date.now().toString(36).slice(-4);
+      const alt = {
         firstName: full.firstName,
         lastName: full.lastName,
         classroomId: full.classroomId,
         password: full.password,
         passwordRepeat: full.passwordRepeat,
-        studentState: 3
+        studentState: 3,
+        email: `${local}@sinavza.com`
       };
-      if (full.donemId != null) withoutEmail.donemId = full.donemId;
+      if (full.donemId != null) alt.donemId = full.donemId;
       try {
-        return await createEdesisStudent(withoutEmail, cfg);
+        return await createEdesisStudent(alt, cfg);
       } catch {
         /* yok */
       }
