@@ -3,9 +3,13 @@
  */
 import { apiFetch } from './session';
 import type { CommerceBook, CommerceVendor, CommerceVendorOffer, CommerceVendorOrder, CommerceVendorPayout } from '../types/commerce.types';
+import { getActingVendorId } from './commerceActingVendor';
 
 async function post<T = unknown>(op: string, params: Record<string, unknown> = {}): Promise<T> {
-  const res = await apiFetch('/api/commerce-vendor', { method: 'POST', body: JSON.stringify({ op, ...params }) });
+  const actingId = getActingVendorId();
+  const payload =
+    actingId && !params.vendor_id ? { op, vendor_id: actingId, ...params } : { op, ...params };
+  const res = await apiFetch('/api/commerce-vendor', { method: 'POST', body: JSON.stringify(payload) });
   const data = await res.json();
   if (!data.ok) throw new Error(data.error ?? op);
   return data as T;

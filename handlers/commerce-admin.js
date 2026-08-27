@@ -11,7 +11,7 @@
  *  offers.list | offers.get | offers.approve | offers.reject | offers.request_correction | offers.inactive | offers.update
  *  packages.list | packages.get | packages.create | packages.update | packages.delete | packages.items.set
  *  vendors.ensure_yanki
- *  orders.list | orders.get | orders.update_status
+ *  orders.list | orders.get | orders.update | orders.update_status | orders.delete
  *  vendor_orders.list | vendor_orders.update_status
  *  shipments.list | shipments.get | shipments.create | shipments.update
  *  payouts.list | payouts.get | payouts.create | payouts.approve | payouts.mark_paid
@@ -717,6 +717,67 @@ async function handleOrders(op, body) {
     return { ok: true, order: data };
   }
 
+  if (op === 'orders.update') {
+    const { id } = body;
+    if (!id) throw new Error('id gerekli');
+    const patch = { updated_at: new Date().toISOString() };
+    if (body.customer_name !== undefined) patch.customer_name = sanitizeText(body.customer_name);
+    if (body.customer_email !== undefined) patch.customer_email = sanitizeText(body.customer_email);
+    if (body.customer_phone !== undefined) patch.customer_phone = sanitizeText(body.customer_phone);
+    if (body.notes !== undefined) patch.notes = sanitizeText(body.notes);
+    if (body.status) {
+      const VALID = [
+        'pending_payment',
+        'paid',
+        'confirmed',
+        'preparing',
+        'shipped',
+        'delivered',
+        'cancelled',
+        'refund_requested',
+        'refunded',
+        'payment_failed',
+      ];
+      if (!VALID.includes(body.status)) throw new Error('Geçersiz durum');
+      patch.status = body.status;
+    }
+    const { data, error } = await supabaseAdmin
+      .from('commerce_orders')
+      .update(patch)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return { ok: true, order: data };
+  }
+
+  if (op === 'orders.delete') {
+    const { id } = body;
+    if (!id) throw new Error('id gerekli');
+    const { data: existing, error: loadErr } = await supabaseAdmin
+      .from('commerce_orders')
+      .select('id, status, payment_status, order_number')
+      .eq('id', id)
+      .maybeSingle();
+    if (loadErr) throw loadErr;
+    if (!existing) throw new Error('Sipariş bulunamadı');
+    const paid = existing.payment_status === 'paid' || existing.status === 'paid';
+    if (paid && existing.status !== 'cancelled' && existing.status !== 'refunded') {
+      throw new Error('Ödenmiş sipariş silinemez — önce iptal veya iade edin');
+    }
+    await supabaseAdmin.from('commerce_order_items').delete().eq('order_id', id);
+    await supabaseAdmin.from('commerce_order_addresses').delete().eq('order_id', id);
+    await supabaseAdmin.from('commerce_payments').delete().eq('order_id', id);
+    const { data: vos } = await supabaseAdmin.from('commerce_vendor_orders').select('id').eq('order_id', id);
+    for (const vo of vos || []) {
+      await supabaseAdmin.from('commerce_shipments').delete().eq('vendor_order_id', vo.id);
+    }
+    await supabaseAdmin.from('commerce_vendor_orders').delete().eq('order_id', id);
+    const { error } = await supabaseAdmin.from('commerce_orders').delete().eq('id', id);
+    if (error) throw error;
+    return { ok: true, deleted: true, order_number: existing.order_number };
+  }
+
   if (op === 'orders.update_status') {
     const { id, status, notes } = body;
     const VALID = ['confirmed', 'cancelled', 'refund_requested', 'refunded'];
@@ -879,6 +940,7 @@ async function handleCoupons(op, body, actor) {
 
   if (op === 'coupons.create') {
     if (!body.code || !body.discount_type || !body.discount_value) throw new Error('code, discount_type, discount_value gerekli');
+    if (!['percent', 'fixed'].includes(body.discount_type)) throw new Error('discount_type percent veya fixed olmalı');
     const { data, error } = await supabaseAdmin
       .from('commerce_coupons')
       .insert({
@@ -908,7 +970,17 @@ async function handleCoupons(op, body, actor) {
     if (fields.description !== undefined) patch.description = sanitizeText(fields.description);
     if (fields.is_active !== undefined) patch.is_active = Boolean(fields.is_active);
     if (fields.ends_at !== undefined) patch.ends_at = fields.ends_at;
+    if (fields.starts_at !== undefined) patch.starts_at = fields.starts_at;
     if (fields.usage_limit !== undefined) patch.usage_limit = sanitizeInt(fields.usage_limit);
+    if (fields.per_user_limit !== undefined) patch.per_user_limit = sanitizeInt(fields.per_user_limit);
+    if (fields.discount_type !== undefined) {
+      if (!['percent', 'fixed'].includes(fields.discount_type)) throw new Error('discount_type percent veya fixed olmalı');
+      patch.discount_type = fields.discount_type;
+    }
+    if (fields.discount_value !== undefined) patch.discount_value = parseInt(fields.discount_value, 10);
+    if (fields.max_discount_kurus !== undefined) patch.max_discount_kurus = sanitizeInt(fields.max_discount_kurus);
+    if (fields.min_order_kurus !== undefined) patch.min_order_kurus = sanitizeInt(fields.min_order_kurus) ?? 0;
+    if (fields.code !== undefined) patch.code = String(fields.code).toUpperCase().trim();
     patch.updated_at = new Date().toISOString();
     const { data, error } = await supabaseAdmin.from('commerce_coupons').update(patch).eq('id', id).select().single();
     if (error) throw error;

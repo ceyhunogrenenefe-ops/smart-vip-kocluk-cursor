@@ -11,6 +11,7 @@ describe('commerce-checkout-op', () => {
     expect(normalizeCommerceCheckoutOp('pay')).toBe('checkout.pay');
     expect(normalizeCommerceCheckoutOp('update_customer')).toBe('checkout.update_customer');
     expect(normalizeCommerceCheckoutOp('checkout.resolve')).toBe('checkout.resolve');
+    expect(normalizeCommerceCheckoutOp('apply_coupon')).toBe('checkout.apply_coupon');
   });
 
   it('starts payment when provider is present on update_customer', () => {

@@ -151,6 +151,17 @@ export const caListOrders = (params?: OrderListParams) => post<{ orders: Commerc
 export const caGetOrder = (id: string) => post<{ order: CommerceOrder }>('orders.get', { id });
 export const caUpdateOrderStatus = (id: string, status: string, notes?: string) =>
   post<{ order: CommerceOrder }>('orders.update_status', { id, status, notes });
+export const caUpdateOrder = (
+  id: string,
+  fields: {
+    customer_name?: string | null;
+    customer_email?: string | null;
+    customer_phone?: string | null;
+    notes?: string | null;
+    status?: string;
+  }
+) => post<{ order: CommerceOrder }>('orders.update', { id, ...fields });
+export const caDeleteOrder = (id: string) => post<{ deleted: boolean; order_number?: string }>('orders.delete', { id });
 export const caUpdateVendorOrderStatus = (id: string, status: string) =>
   post<{ vendor_order: CommerceVendorOrder }>('vendor_orders.update_status', { id, status });
 
