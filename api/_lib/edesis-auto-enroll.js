@@ -158,7 +158,7 @@ function newestClassroom(rows) {
     .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0] || null;
 }
 
-export const EDESIS_AUTO_ENROLL_MARKER = 'edesis-auto-enroll-terms-2026-08-27c';
+export const EDESIS_AUTO_ENROLL_MARKER = 'edesis-auto-enroll-terms-2026-08-27d';
 
 export function pickEdesisClassroom(classrooms, { classLevel, branch, termKind } = {}) {
   const list = Array.isArray(classrooms) ? classrooms : [];
