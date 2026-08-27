@@ -2,6 +2,7 @@ import { supabaseAdmin, getSupabaseAdmin, hasSupabaseServiceRoleKey } from './su
 import { normalizeUuidOrGenerate } from './uuid.js';
 import { enforceStudentInsertQuotas } from './quota-enforce.js';
 import { errorMessage } from './error-msg.js';
+import { autoEnrollStudentRow } from './edesis-auto-enroll.js';
 
 function kayitJson(row) {
   const kj = row?.kayit_formu_json;
@@ -248,6 +249,25 @@ export async function provisionStudentFromParentSignContract(rowOrId, opts = {})
     })
     .eq('id', row.id);
   if (cErr) throw cErr;
+
+  try {
+    await autoEnrollStudentRow({
+      id: studentId,
+      name: studentPayload.name,
+      email: studentPayload.email,
+      phone: studentPayload.phone,
+      class_level: studentPayload.class_level,
+      school: studentPayload.school,
+      branch: studentPayload.branch,
+      parent_name: studentPayload.parent_name,
+      parent_phone: studentPayload.parent_phone,
+      birth_date: studentPayload.birth_date,
+      tc_identity_no: studentPayload.tc_identity_no,
+      institution_id: studentPayload.institution_id
+    });
+  } catch (e) {
+    console.warn('[provision-student-from-parent-sign] edesis auto-enroll', errorMessage(e));
+  }
 
   return {
     ok: true,

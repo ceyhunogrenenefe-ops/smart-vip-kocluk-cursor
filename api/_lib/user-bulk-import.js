@@ -189,22 +189,43 @@ async function upsertStudentProfile({
     .eq('email', em)
     .maybeSingle();
 
+  let studentId = existingByEmail?.id || null;
   if (existingByEmail?.id) {
     const { error } = await supabaseAdmin
       .from('students')
       .update(studentPayload)
       .eq('id', existingByEmail.id);
     if (error) throw error;
-    return;
+  } else {
+    studentId = normalizeUuidOrGenerate(null);
+    const { error } = await supabaseAdmin.from('students').insert({
+      id: studentId,
+      ...studentPayload,
+      coach_id: null,
+      created_at: now
+    });
+    if (error) throw error;
   }
 
-  const { error } = await supabaseAdmin.from('students').insert({
-    id: normalizeUuidOrGenerate(null),
-    ...studentPayload,
-    coach_id: null,
-    created_at: now
-  });
-  if (error) throw error;
+  try {
+    const { autoEnrollStudentRow } = await import('./edesis-auto-enroll.js');
+    await autoEnrollStudentRow({
+      id: studentId,
+      name: fullName,
+      email: em,
+      phone: phone || null,
+      class_level: classLevel,
+      school: branch || null,
+      branch: branch || null,
+      parent_name: parentName || null,
+      parent_phone: parentPhone || null,
+      birth_date: birthDate || null,
+      institution_id: institutionId
+    });
+  } catch (e) {
+    console.warn('[user-bulk-import] edesis auto-enroll', errorMessage(e));
+  }
+  return studentId;
 }
 
 /**

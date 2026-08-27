@@ -9,6 +9,7 @@ import { getTeacherPanelStudentScope } from '../api/_lib/teacher-class-scope.js'
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import { STUDENT_LIST_COLUMNS } from '../api/_lib/list-query-columns.js';
 import { resolveViewAsActorIfAllowed } from '../api/_lib/view-as-actor.js';
+import { autoEnrollStudentRow } from '../api/_lib/edesis-auto-enroll.js';
 
 const normActorRole = (r) => String(r || '').trim().toLowerCase();
 
@@ -548,7 +549,12 @@ export default async function handler(req, res) {
           coach_id: patch.coach_id
         };
         const data = await finalizeStudentRow(merged, payloadForLink);
-        return res.status(200).json({ data, merged_existing: true });
+        try {
+          const edesis = await autoEnrollStudentRow(data);
+          return res.status(200).json({ data: { ...data, edesis }, merged_existing: true });
+        } catch {
+          return res.status(200).json({ data, merged_existing: true });
+        }
       }
 
       const { data: existingById } = await supabaseAdmin
@@ -604,7 +610,12 @@ export default async function handler(req, res) {
       if (error) throw error;
 
       data = await finalizeStudentRow(data, payload);
-      return res.status(200).json({ data });
+      try {
+        const edesis = await autoEnrollStudentRow(data);
+        return res.status(200).json({ data: { ...data, edesis } });
+      } catch {
+        return res.status(200).json({ data });
+      }
     }
 
     if (req.method === 'PATCH') {
