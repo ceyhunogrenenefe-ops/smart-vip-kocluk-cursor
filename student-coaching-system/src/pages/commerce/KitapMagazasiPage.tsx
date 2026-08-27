@@ -556,6 +556,7 @@ export default function KitapMagazasiPage() {
   useEffect(() => {
     refreshCartCount();
   }, [refreshCartCount]);
+
   const loadCatalog = useCallback(async (params: CatalogListParams) => {
     setLoading(true);
     try {
