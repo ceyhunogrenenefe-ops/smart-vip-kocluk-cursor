@@ -333,6 +333,7 @@ async function moveStudentToTerm(edesisStudentId, term, classroom) {
 }
 
 let enrollCatalogCache = { at: 0, rooms: null, terms: null, regularRows: null, summerRows: null };
+const enrollSkipUntil = new Map();
 
 async function loadEnrollCatalog({ includeTermStudents = false } = {}) {
   const fresh = Date.now() - enrollCatalogCache.at < 90_000;
@@ -483,6 +484,32 @@ export async function provisionEdesisStudent({
       edesisStudentId: existing.edesisStudentId,
       matchMethod: existing.matchMethod,
       term,
+      parent,
+      marker: EDESIS_AUTO_ENROLL_MARKER
+    };
+  }
+
+  const anyTerm = await findExistingEdesisStudent(source);
+  if (anyTerm?.edesisStudentId) {
+    await persistLink(platformStudentId, anyTerm.edesisStudentId);
+    const classroomEarly = pickEdesisClassroom(catalog.rooms || [], {
+      classLevel: source.class_level,
+      branch: source.branch,
+      termKind: kind
+    });
+    const moved = await moveStudentToTerm(anyTerm.edesisStudentId, term, classroomEarly);
+    const parent = await maybeCreateParent(source, anyTerm.edesisStudentId);
+    return {
+      ok: true,
+      created: false,
+      edesisStudentId: anyTerm.edesisStudentId,
+      matchMethod: 'email_other_term',
+      classroom: classroomEarly
+        ? { id: classroomEarly.id, name: classroomEarly.fullName || classroomEarly.name, gradeName: classroomEarly.gradeName }
+        : undefined,
+      term,
+      termAssigned: moved.ok,
+      termError: moved.ok ? undefined : moved.error,
       parent,
       marker: EDESIS_AUTO_ENROLL_MARKER
     };
@@ -674,6 +701,10 @@ export async function enrollPlatformStudentsBatch({ limit = 6, institutionId } =
       already += 1;
       continue;
     }
+    if ((enrollSkipUntil.get(st.id) || 0) > Date.now()) {
+      remaining += 1;
+      continue;
+    }
     if (writes >= maxWrites) {
       remaining += 1;
       continue;
@@ -697,6 +728,8 @@ export async function enrollPlatformStudentsBatch({ limit = 6, institutionId } =
       };
       if (term.kind === 'summer') catalog.summerRows = [...(catalog.summerRows || []), rowFake];
       else catalog.regularRows = [...(catalog.regularRows || []), rowFake];
+    } else if (!result.ok) {
+      enrollSkipUntil.set(st.id, Date.now() + 8 * 60 * 1000);
     }
   }
 
