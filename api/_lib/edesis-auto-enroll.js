@@ -23,7 +23,7 @@ export const EDESIS_TERM_REGULAR_ID_FALLBACK = 113;
 export const EDESIS_TERM_SUMMER_ID_FALLBACK = 142;
 
 const SKIP_CLASSROOM_NAME =
-  /bursluluk|kayit silen|kayıt silen|sömestr|somestr|yaz kamp|kitap okuma|deneme klub|4zpz8|eu8bb|premium|özelders|^özel$/i;
+  /bursluluk|kayit silen|kayıt silen|sömestr|somestr|yaz kamp|kitap okuma|kitap ukuma|atolye|deneme klub|4zpz8|eu8bb|premium|özelders|^özel$/i;
 
 const SKIP_AUTO_ENROLL_EMAIL =
   /@example\.com$|^admin@smartvip(?:\.com)?$|cursor-setup-test/i;
@@ -161,7 +161,7 @@ function newestClassroom(rows) {
     .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0] || null;
 }
 
-export const EDESIS_AUTO_ENROLL_MARKER = 'edesis-auto-enroll-terms-2026-08-27h';
+export const EDESIS_AUTO_ENROLL_MARKER = 'edesis-auto-enroll-terms-2026-08-27i';
 
 export function classroomIdsFromStudentRows(rows) {
   const ids = [];
@@ -464,8 +464,15 @@ async function createEdesisStudentWithFallback(pending, classroomId, cfg, termId
     }
     const msg = firstErr instanceof Error ? firstErr.message : String(firstErr);
     if (/email adresi ile zaten|already.*email/i.test(msg) && full.email) {
-      const withoutEmail = { ...full };
-      delete withoutEmail.email;
+      const withoutEmail = {
+        firstName: full.firstName,
+        lastName: full.lastName,
+        classroomId: full.classroomId,
+        password: full.password,
+        passwordRepeat: full.passwordRepeat,
+        studentState: 3
+      };
+      if (full.donemId != null) withoutEmail.donemId = full.donemId;
       try {
         return await createEdesisStudent(withoutEmail, cfg);
       } catch {
