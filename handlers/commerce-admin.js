@@ -1251,6 +1251,10 @@ export default async function handler(req, res) {
     return res.status(200).json(result);
   } catch (e) {
     console.error('[commerce-admin]', e?.message || e);
-    return err(res, 500, e?.message || 'sunucu_hatası');
+    const raw = String(e?.message || 'sunucu_hatası');
+    const message = /duplicate key|unique constraint/i.test(raw)
+      ? 'Bu kitap zaten kayıtlı (ISBN veya slug). Silinmiş kaydı güncellemeyi deneyin veya farklı ad kullanın.'
+      : raw;
+    return err(res, 500, message);
   }
 }
