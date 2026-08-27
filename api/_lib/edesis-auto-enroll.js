@@ -11,6 +11,7 @@ import {
   fetchEdesisStudentsList,
   fetchEdesisTermsList,
   getEdesisConfig,
+  nameLookupKeys,
   studentMatchKeysFromEdesisRow
 } from './edesis-client.js';
 
@@ -158,7 +159,7 @@ function newestClassroom(rows) {
     .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0] || null;
 }
 
-export const EDESIS_AUTO_ENROLL_MARKER = 'edesis-auto-enroll-terms-2026-08-27d';
+export const EDESIS_AUTO_ENROLL_MARKER = 'edesis-auto-enroll-terms-2026-08-27e';
 
 export function pickEdesisClassroom(classrooms, { classLevel, branch, termKind } = {}) {
   const list = Array.isArray(classrooms) ? classrooms : [];
@@ -275,7 +276,39 @@ function rowEdesisId(row) {
   return String(keys.edesisStudentId || '').trim();
 }
 
-function findInTermRows(rows, pending) {
+function foldNameKey(s) {
+  return String(s || '')
+    .toLocaleLowerCase('tr-TR')
+    .replace(/ı/g, 'i')
+    .replace(/ş/g, 's')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c');
+}
+
+function pendingDisplayName(pending) {
+  return String(pending?.name || `${pending?.first_name || ''} ${pending?.last_name || ''}`).trim();
+}
+
+function personNameKeys(name) {
+  const keys = new Set(nameLookupKeys(name).map(foldNameKey).filter(Boolean));
+  const tokens = foldNameKey(name)
+    .replace(/[.\-_,']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter((t) => t.length > 1);
+  if (tokens.length >= 3) keys.add(tokens.slice(-2).join(' '));
+  return keys;
+}
+
+function rowEdesisStudentId(row) {
+  const keys = studentMatchKeysFromEdesisRow(row);
+  return String(keys.edesisStudentId || row?.edesisId || row?.id || '').trim();
+}
+
+export function findInTermRows(rows, pending) {
   const email = String(pending?.email || '').trim().toLowerCase();
   const list = Array.isArray(rows) ? rows : [];
   if (email) {
@@ -283,11 +316,30 @@ function findInTermRows(rows, pending) {
       const keys = studentMatchKeysFromEdesisRow(row);
       const rowEmail = keys.email || String(row?.email || '').trim().toLowerCase();
       if (rowEmail && rowEmail === email) {
-        const id = String(keys.edesisStudentId || row?.edesisId || row?.id || '').trim();
+        const id = rowEdesisStudentId(row);
         if (id) return { edesisStudentId: id, matchMethod: 'email' };
       }
     }
   }
+  const want = personNameKeys(pendingDisplayName(pending));
+  if (!want.size) return null;
+  const hits = [];
+  for (const row of list) {
+    const keys = studentMatchKeysFromEdesisRow(row);
+    const have = personNameKeys(keys.name || row?.name);
+    let hit = false;
+    for (const k of have) {
+      if (want.has(k)) {
+        hit = true;
+        break;
+      }
+    }
+    if (!hit) continue;
+    const id = rowEdesisStudentId(row);
+    if (id) hits.push(id);
+  }
+  const unique = [...new Set(hits)];
+  if (unique.length === 1) return { edesisStudentId: unique[0], matchMethod: 'name' };
   return null;
 }
 
@@ -346,17 +398,30 @@ async function createEdesisStudentWithFallback(pending, classroomId, cfg) {
   try {
     return await createEdesisStudent(full, cfg);
   } catch (firstErr) {
-    const minimal = {
-      firstName: full.firstName,
-      lastName: full.lastName,
-      classroomId: full.classroomId
-    };
-    if (full.email) minimal.email = full.email;
-    try {
-      return await createEdesisStudent(minimal, cfg);
-    } catch {
-      throw firstErr;
+    const attempts = [
+      {
+        firstName: full.firstName,
+        lastName: full.lastName,
+        classroomId: full.classroomId,
+        studentState: 3,
+        ...(full.email ? { email: full.email } : {})
+      },
+      {
+        adi: full.firstName,
+        soyadi: full.lastName,
+        classroomId: full.classroomId,
+        studentState: 3,
+        ...(full.email ? { email: full.email } : {})
+      }
+    ];
+    for (const body of attempts) {
+      try {
+        return await createEdesisStudent(body, cfg);
+      } catch {
+        /* sonraki deneme */
+      }
     }
+    throw firstErr;
   }
 }
 
@@ -737,6 +802,8 @@ export async function enrollPlatformStudentsBatch({ limit = 6, institutionId } =
   let skipped = 0;
   let already = 0;
 
+  const linkedWork = [];
+  const unlinkedWork = [];
   for (const st of data || []) {
     if (skipEdesisAutoEnrollStudent(st) || !String(st.name || '').trim()) {
       skipped += 1;
@@ -746,25 +813,32 @@ export async function enrollPlatformStudentsBatch({ limit = 6, institutionId } =
     const termRows = term.kind === 'summer' ? catalog.summerRows : catalog.regularRows;
     const linkedId = String(st.edesis_ogrenci_id || '').trim();
     const inTermById = linkedId && idInTermRows(termRows, linkedId);
-    const inTermByEmail = findInTermRows(termRows, studentToPending(st));
-    if (inTermById || (inTermByEmail && linkedId && inTermByEmail.edesisStudentId === linkedId)) {
+    const inTermHit = findInTermRows(termRows, studentToPending(st));
+    if (inTermById || (inTermHit && linkedId && inTermHit.edesisStudentId === linkedId)) {
       already += 1;
       continue;
     }
-    if (inTermByEmail && !linkedId) {
-      await persistLink(st.id, inTermByEmail.edesisStudentId);
+    if (inTermHit && !linkedId) {
+      await persistLink(st.id, inTermHit.edesisStudentId);
       items.push({
         id: st.id,
         name: st.name,
         ok: true,
         created: false,
-        matchMethod: 'email',
-        edesisStudentId: inTermByEmail.edesisStudentId,
+        matchMethod: inTermHit.matchMethod,
+        edesisStudentId: inTermHit.edesisStudentId,
         term
       });
       already += 1;
       continue;
     }
+    const job = { st, term, termRows, linkedId };
+    if (linkedId) linkedWork.push(job);
+    else unlinkedWork.push(job);
+  }
+
+  for (const job of [...linkedWork, ...unlinkedWork]) {
+    const { st, term, termRows } = job;
     if ((enrollSkipUntil.get(st.id) || 0) > Date.now()) {
       remaining += 1;
       continue;
@@ -789,6 +863,7 @@ export async function enrollPlatformStudentsBatch({ limit = 6, institutionId } =
       const rowFake = {
         id: result.edesisStudentId,
         email: st.email,
+        name: st.name,
         edesisId: result.edesisStudentId
       };
       if (term.kind === 'summer') catalog.summerRows = [...(catalog.summerRows || []), rowFake];
