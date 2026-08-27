@@ -66,6 +66,7 @@ import {
   mapEdesisRowToExamDraft,
   flattenEdesisRows,
   studentMatchKeysFromEdesisRow,
+  pickExamDurationSeconds,
   EDESIS_EMPTY_LIST_HELP
 } from '../api/_lib/edesis-client.js';
 import {
@@ -76,6 +77,7 @@ import {
 import { enrollPlatformStudentsBatch, EDESIS_AUTO_ENROLL_MARKER, EDESIS_AUTO_ENROLL_INSTITUTION_ID } from '../api/_lib/edesis-auto-enroll.js';
 
 const STAFF = new Set(['super_admin', 'admin', 'coach']);
+const EDESIS_PDF_DURATION_MARKER = 'edesis-pdf-duration-2026-08-27';
 /** Aynı Hobby instance’ta üst üste op=sync 504 üretmesin */
 let syncInFlight = null;
 /** Öğrencinin kendi Edesis sonuç / karne / sınava giriş ops */
@@ -838,7 +840,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         configured: keyOk,
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-booklets-all-keys-2026-08-26',
+        deployMarker: EDESIS_PDF_DURATION_MARKER,
         institutionCode: cfg.institutionCode || null,
         baseUrl: cfg.baseUrl,
         authMode: cfg.authMode,
@@ -897,7 +899,7 @@ export default async function handler(req, res) {
         }
         return res.status(200).json({
           ok: true,
-          deployMarker: 'edesis-booklets-all-keys-2026-08-26',
+          deployMarker: EDESIS_PDF_DURATION_MARKER,
           configured: Boolean(cfg.apiKey),
           abpAuth: getEdesisAbpAuthStatus(),
           abpProbe: abpProbe
@@ -957,7 +959,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({
         apiVersion: 'v1.5',
-        deployMarker: 'edesis-booklets-all-keys-2026-08-26',
+        deployMarker: EDESIS_PDF_DURATION_MARKER,
         baseUrl: cfg.baseUrl,
         attempts: out
       });
@@ -998,7 +1000,14 @@ export default async function handler(req, res) {
               keys: Object.keys(detail).slice(0, 80),
               denemeId: absorbed?.denemeId || null,
               denemeUrl: String(detail.denemeUrl || detail.DenemeUrl || '').slice(0, 300),
+              nestedDenemeUrl: String(detail.sinav?.denemeUrl || detail.sinav?.DenemeUrl || '').slice(0, 300),
               txtDosyayasi: String(detail.txtDosyayasi || '').slice(0, 300),
+              sinavSuresi: detail.sinavSuresi ?? detail.sinav?.sinavSuresi ?? null,
+              kalanSure: detail.kalanSure ?? detail.sinav?.kalanSure ?? null,
+              kalanSaniye: detail.kalanSaniye ?? detail.sinav?.kalanSaniye ?? null,
+              isSinavSuresiForStudent:
+                detail.isSinavSuresiForStudent ?? detail.sinav?.isSinavSuresiForStudent ?? null,
+              remainingSeconds: pickExamDurationSeconds(detail),
               fileCount: absorbed?.files?.length || 0,
               fileUrls: (absorbed?.files || []).slice(0, 8).map((f) => f.url)
             }
@@ -1577,7 +1586,8 @@ export default async function handler(req, res) {
         choiceCount: structure.choiceCount || 4,
         remainingSeconds: structure.remainingSeconds || 0,
         examTitle: structure.examTitle || '',
-        examType: structure.examType || ''
+        examType: structure.examType || '',
+        deployMarker: EDESIS_PDF_DURATION_MARKER
       });
     }
 
@@ -1736,7 +1746,7 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         ok: true,
-        deployMarker: 'edesis-booklets-all-keys-2026-08-26',
+        deployMarker: EDESIS_PDF_DURATION_MARKER,
         edesisStudentId,
         count: items.length,
         items,
@@ -1816,7 +1826,7 @@ export default async function handler(req, res) {
       const takeable = (loaded.items || []).filter((x) => x.canTake && !x.hasStudentResult);
       return res.status(200).json({
         ok: true,
-        deployMarker: 'edesis-booklets-all-keys-2026-08-26',
+        deployMarker: EDESIS_PDF_DURATION_MARKER,
         edesisStudentId,
         platformStudentId: platformId,
         autoLinked,

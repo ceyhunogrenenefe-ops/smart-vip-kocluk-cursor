@@ -620,7 +620,7 @@ export default function EdesisOpticalSheet({
                     {pdfBusy
                       ? 'Kitapçık PDF yükleniyor…'
                       : pdfError ||
-                        'Bu sınav için sistemde PDF bulunamadı. Soruları basılı kitapçıktan takip edip sağdaki optiği doldurun.'}
+                        'Edesis’te bu denemeye kitapçık PDF yüklenmemiş. Soruları basılı kitapçıktan takip edip sağdaki optiği doldurun.'}
                   </p>
                 </div>
               </div>
