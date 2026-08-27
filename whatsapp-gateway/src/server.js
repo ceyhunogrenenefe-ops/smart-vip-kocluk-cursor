@@ -1616,6 +1616,17 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
     }
 
     const correlationId = newCorrelationId();
+    logger.info(
+      {
+        coachId,
+        phone_suffix: digits.length > 4 ? digits.slice(-4) : digits,
+        message_id: mid,
+        chars: message.length,
+        shared_fallback: sendMeta.sharedFallback,
+        correlation_id: correlationId
+      },
+      'send message ok'
+    );
     res.json({
       ok: true,
       id: mid,
