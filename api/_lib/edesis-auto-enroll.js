@@ -8,6 +8,7 @@ import {
   createEdesisStudent,
   fetchEdesisClassroomsList,
   fetchEdesisStudentsList,
+  fetchEdesisTermsList,
   getEdesisConfig,
   studentMatchKeysFromEdesisRow
 } from './edesis-client.js';
