@@ -4,7 +4,7 @@
  * Kayıt yoksa LGS-8 VIP / Paraf / Deneme varsayılanı kullanılır.
  */
 
-import { LGS8_COLLECTIONS, slugifyTr } from './commerce-lgs8-catalog.js';
+import { LGS8_COLLECTIONS, LGS8_DENEME_SERIES, LGS8_DENEME_SET_ISBN, LGS8_DENEME_SET_SLUG, slugifyTr } from './commerce-lgs8-catalog.js';
 
 export const STORE_BROWSE_MAX_CLASSES = 40;
 export const STORE_BROWSE_MAX_CATEGORIES = 80;
@@ -89,11 +89,33 @@ export function categoryBelongsToClass(category, classKey) {
   return keys.some((k) => classKeysEqual(k, classKey));
 }
 
+function digitsIsbn(value) {
+  return String(value ?? '').replace(/[^0-9Xx]/g, '');
+}
+
+/** Deneme Kulübü kaydı yanlışlıkla VIP serisine yazılmış olsa bile Denemeler kutusuna düşer. */
+export function canonicalBookSeries(book) {
+  const stored = String(book?.metadata?.series ?? '').trim();
+  const isbn = digitsIsbn(book?.isbn);
+  const slug = String(book?.slug ?? '').toLowerCase();
+  const title = String(book?.title ?? '').toLocaleLowerCase('tr');
+  const denemeIsbn = digitsIsbn(LGS8_DENEME_SET_ISBN);
+  const looksDeneme =
+    (denemeIsbn && isbn === denemeIsbn) ||
+    slug === LGS8_DENEME_SET_SLUG ||
+    slug.includes('deneme-kulubu') ||
+    slug.includes('deneme-klubu') ||
+    title.includes('deneme kulübü') ||
+    title.includes('deneme kulubu');
+  if (looksDeneme) return LGS8_DENEME_SERIES;
+  return stored;
+}
+
 export function bookMatchesCategory(book, category) {
   if (!book || !category) return false;
   const series = String(category.series || category.key || '').trim();
   if (!series) return false;
-  const bookSeries = String(book.metadata?.series ?? '').trim();
+  const bookSeries = canonicalBookSeries(book);
   return Boolean(bookSeries) && bookSeries === series;
 }
 
