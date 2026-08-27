@@ -17,7 +17,7 @@
  *  payouts.list | payouts.get | payouts.create | payouts.approve | payouts.mark_paid
  *  refunds.list | refunds.get | refunds.decide
  *  coupons.list | coupons.get | coupons.create | coupons.update | coupons.delete
- *  settings.get | settings.update
+ *  settings.get | settings.update  (store_browse = sınıf + kategori menüsü)
  *  reports.sales | reports.vendors | reports.low_stock
  */
 
@@ -25,6 +25,7 @@ import { requireAuth } from '../api/_lib/auth.js';
 import { actorRoleSet, roleSetHasSuperAdmin, roleSetHasAdmin } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { bulkUpsertBooks, ensureYankiVendor, seedLgs8DenemeKulubu, seedLgs8ParafIqSet, seedLgs8VipCatalog, upsertYankiOfferForExistingBook } from '../api/_lib/commerce-lgs8-seed.js';
+import { defaultStoreBrowse, normalizeStoreBrowse } from '../api/_lib/commerce-store-browse.js';
 
 function err(res, status, message) {
   return res.status(status).json({ error: message });
@@ -1008,13 +1009,33 @@ async function handleSettings(op, body, actor) {
       .is('institution_id', null)
       .maybeSingle();
     if (error) throw error;
-    return { ok: true, settings: data };
+    const store_browse = normalizeStoreBrowse(data?.meta?.store_browse);
+    return { ok: true, settings: data, store_browse };
   }
 
   if (op === 'settings.update') {
+    const { data: current, error: currentErr } = await supabaseAdmin
+      .from('commerce_settings')
+      .select('*')
+      .is('institution_id', null)
+      .maybeSingle();
+    if (currentErr) throw currentErr;
+    if (!current) throw new Error('Mağaza ayarları bulunamadı');
+
     const patch = {};
     const FIELDS = ['commerce_mode', 'default_commission_rate', 'free_shipping_threshold_kurus', 'default_shipping_kurus', 'order_number_prefix', 'public_store_enabled', 'student_store_enabled', 'payment_sandbox', 'abandoned_cart_hours'];
     FIELDS.forEach((f) => { if (body[f] !== undefined) patch[f] = body[f]; });
+
+    if (body.store_browse !== undefined) {
+      const meta = (current.meta && typeof current.meta === 'object' && !Array.isArray(current.meta))
+        ? { ...current.meta }
+        : {};
+      meta.store_browse = body.store_browse === null
+        ? defaultStoreBrowse()
+        : normalizeStoreBrowse(body.store_browse);
+      patch.meta = meta;
+    }
+
     patch.updated_by = actor.sub;
     patch.updated_at = new Date().toISOString();
     const { data, error } = await supabaseAdmin
@@ -1025,7 +1046,7 @@ async function handleSettings(op, body, actor) {
       .single();
     if (error) throw error;
     await logAudit({ entity_type: 'commerce_settings', entity_id: data.id, action: 'update', actor_user_id: actor.sub, new_value: patch });
-    return { ok: true, settings: data };
+    return { ok: true, settings: data, store_browse: normalizeStoreBrowse(data?.meta?.store_browse) };
   }
 
   throw new Error(`Bilinmeyen operasyon: ${op}`);

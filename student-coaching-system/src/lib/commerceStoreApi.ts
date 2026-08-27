@@ -2,7 +2,15 @@
  * Öğrenci/Veli Kitap Mağazası — API istemcisi
  */
 import { apiFetch } from './session';
-import type { CommerceBook, CommerceBookPackage, CommerceSettings, CommerceStudentBookAssignment, CommerceVendorOffer } from '../types/commerce.types';
+import type {
+  CommerceBook,
+  CommerceBookPackage,
+  CommerceSettings,
+  CommerceStudentBookAssignment,
+  CommerceVendorOffer,
+  StoreBrowseCategory,
+  StoreBrowseNav,
+} from '../types/commerce.types';
 
 async function post<T = unknown>(op: string, params: Record<string, unknown> = {}): Promise<T> {
   const res = await apiFetch('/api/commerce-store', { method: 'POST', body: JSON.stringify({ op, ...params }) });
@@ -70,6 +78,13 @@ export type StoreCollection = {
 
 export const csListCollections = () =>
   post<{ collections: StoreCollection[] }>('catalog.collections');
+
+export type StoreBrowseCategoryWithBooks = StoreBrowseCategory & {
+  books: StoreCollectionBook[];
+};
+
+export const csListBrowse = () =>
+  post<StoreBrowseNav & { categories: StoreBrowseCategoryWithBooks[] }>('catalog.browse');
 
 export const csGetAssigned = (student_id?: string) =>
   post<{ assignments: (CommerceStudentBookAssignment & { commerce_books: Pick<CommerceBook, 'id' | 'slug' | 'title' | 'author' | 'cover_image_url' | 'publisher'> | null })[] }>(
