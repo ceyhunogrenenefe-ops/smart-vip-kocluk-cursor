@@ -14,6 +14,7 @@ import type {
   CommerceVendorPayout,
   CommerceCoupon,
   CommerceSettings,
+  StoreBrowseNav,
 } from '../types/commerce.types';
 
 async function post<T = unknown>(op: string, params: Record<string, unknown> = {}): Promise<T> {
@@ -187,8 +188,9 @@ export const caUpdateCoupon = (id: string, fields: Partial<CommerceCoupon>) => p
 export const caDeleteCoupon = (id: string) => post('coupons.delete', { id });
 
 // ── Ayarlar ──────────────────────────────────────
-export const caGetSettings = () => post<{ settings: CommerceSettings }>('settings.get');
-export const caUpdateSettings = (fields: Partial<CommerceSettings>) => post<{ settings: CommerceSettings }>('settings.update', fields);
+export const caGetSettings = () => post<{ settings: CommerceSettings; store_browse?: StoreBrowseNav }>('settings.get');
+export const caUpdateSettings = (fields: Partial<CommerceSettings> & { store_browse?: StoreBrowseNav | null }) =>
+  post<{ settings: CommerceSettings; store_browse?: StoreBrowseNav }>('settings.update', fields);
 
 // ── Raporlar ─────────────────────────────────────
 export const caReportSales = (from_date?: string, to_date?: string) =>
