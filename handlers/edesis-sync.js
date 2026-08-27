@@ -73,6 +73,7 @@ import {
   findStudentMatchPreview,
   EDESIS_MATCHING_GUIDE
 } from '../api/_lib/edesis-student-match.js';
+import { enrollPlatformStudentsBatch, EDESIS_AUTO_ENROLL_MARKER, EDESIS_AUTO_ENROLL_INSTITUTION_ID } from '../api/_lib/edesis-auto-enroll.js';
 
 const STAFF = new Set(['super_admin', 'admin', 'coach']);
 /** Aynı Hobby instance’ta üst üste op=sync 504 üretmesin */
@@ -2211,6 +2212,31 @@ export default async function handler(req, res) {
       });
     }
 
+    if (op === 'enroll-platform-students' && (req.method === 'POST' || req.method === 'GET')) {
+      if (!(actor.role === 'super_admin' || actor.role === 'admin')) {
+        return res.status(403).json({ error: 'admin_required' });
+      }
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const limit = Number(req.query?.limit || body.limit || 6);
+      const institutionId =
+        actor.role === 'admin' && actor.institution_id
+          ? String(actor.institution_id)
+          : EDESIS_AUTO_ENROLL_INSTITUTION_ID;
+      try {
+        const result = await enrollPlatformStudentsBatch({
+          limit,
+          institutionId
+        });
+        return res.status(200).json(result);
+      } catch (e) {
+        return res.status(200).json({
+          ok: false,
+          error: errorMessage(e),
+          marker: EDESIS_AUTO_ENROLL_MARKER
+        });
+      }
+    }
+
     return res.status(400).json({
       error: 'unknown_op',
       allowed: [
@@ -2246,7 +2272,8 @@ export default async function handler(req, res) {
         'list-classrooms',
         'create-classroom',
         'create-student',
-        'create-parent'
+        'create-parent',
+        'enroll-platform-students'
       ]
     });
   } catch (e) {
