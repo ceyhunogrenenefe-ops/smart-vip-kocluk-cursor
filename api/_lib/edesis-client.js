@@ -1849,6 +1849,41 @@ export function resolveAssignedCatalogRowsForStudent({
   return assigned;
 }
 
+/**
+ * GetSinavForViewDto üst seviye denemeUrl/sinavSuresi çoğu zaman boş;
+ * asıl değer nested `sinav` içinde. Boş overlay dolu alanı ezmesin.
+ */
+export function mergeEdesisFilledObject(base, overlay) {
+  const out = { ...(base && typeof base === 'object' && !Array.isArray(base) ? base : {}) };
+  if (!overlay || typeof overlay !== 'object' || Array.isArray(overlay)) return out;
+  for (const [k, v] of Object.entries(overlay)) {
+    if (v == null) continue;
+    if (typeof v === 'string' && !v.trim()) continue;
+    if (Array.isArray(v) && v.length === 0 && Array.isArray(out[k]) && out[k].length) continue;
+    if (
+      typeof v === 'number' &&
+      v === 0 &&
+      Number(out[k]) > 0 &&
+      /sure|saniye|duration|dakika/i.test(k)
+    ) {
+      continue;
+    }
+    out[k] = v;
+  }
+  return out;
+}
+
+export function mergeEdesisExamViewBody(body, examId = '') {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const nested = body.sinav || body.Sinav || body.exam || null;
+  const merged =
+    nested && typeof nested === 'object' && !Array.isArray(nested)
+      ? mergeEdesisFilledObject(nested, body)
+      : { ...body };
+  merged.id = body.id || nested?.id || examId || merged.id;
+  return merged;
+}
+
 /** Tek sınav detayı — ogrenciIds çoğu zaman yalnızca burada gelir */
 export async function fetchEdesisExamCatalogRowDetail(examId, cfgOverride = {}) {
   const id = String(examId || '').trim();
@@ -1865,33 +1900,28 @@ export async function fetchEdesisExamCatalogRowDetail(examId, cfgOverride = {}) 
     if (body && typeof body === 'object' && !Array.isArray(body)) return body;
     return null;
   };
-  const mergeView = (body) => {
-    if (!body) return null;
-    const nested = body.sinav || body.Sinav || body.exam || null;
-    if (nested && typeof nested === 'object') {
-      return { ...nested, ...body, id: body.id || nested.id || id };
-    }
-    return body;
+  let merged = null;
+  const absorbBody = (body) => {
+    const view = mergeEdesisExamViewBody(body, id);
+    if (!view) return;
+    merged = merged ? mergeEdesisFilledObject(merged, view) : view;
   };
-  // v1 /exams/{id} HTML 404 döner; ABP GetSinavForView denemeUrl verir
+  // v1 /exams/{id} HTML 404 döner; ABP GetSinavForView denemeUrl + sinavSuresi verir.
+  // View boş denemeUrl dönerse Edit’teki dolu alanı ezme — ikisini birleştir.
   try {
     const r = await fetchEdesisAbpJson(
       localCfg,
       `/api/services/app/Sinavs/GetSinavForView?id=${encodeURIComponent(id)}`
     );
     if (r.status !== 401 && r.status !== 403 && isReachableEdesisResponse(r)) {
-      const body = mergeView(tryBody(r));
-      if (body) return body;
+      absorbBody(tryBody(r));
     }
   } catch {
     /* v1 / edit yedek */
   }
   try {
     const r = await fetchEdesisJson(localCfg, V1_PATHS.examById(id));
-    if (isReachableEdesisResponse(r)) {
-      const body = tryBody(r);
-      if (body) return body;
-    }
+    if (isReachableEdesisResponse(r)) absorbBody(tryBody(r));
   } catch {
     /* ABP edit yedek */
   }
@@ -1901,13 +1931,12 @@ export async function fetchEdesisExamCatalogRowDetail(examId, cfgOverride = {}) 
       `/api/services/app/Sinavs/GetSinavForEdit?id=${encodeURIComponent(id)}`
     );
     if (r.status !== 401 && r.status !== 403 && isReachableEdesisResponse(r)) {
-      const body = mergeView(tryBody(r));
-      if (body) return body;
+      absorbBody(tryBody(r));
     }
   } catch {
     /* yok */
   }
-  return null;
+  return merged;
 }
 
 /**
@@ -2374,6 +2403,8 @@ export function expandEdesisFileUrlCandidates(fileUrl, cfg = {}) {
       push(`${b}/files/${guid}`);
       push(`${b}/files/${guid}.pdf`);
     }
+    push(`https://sinavzacdn.azureedge.net/soruhavuzu-deneme/${guid}`);
+    push(`https://sinavzacdn.azureedge.net/soruhavuzu-deneme/${guid}.pdf`);
   }
   return out;
 }
@@ -2613,21 +2644,57 @@ export async function fetchEdesisDenemeAnswerKeyBooklets(denemeId, localCfg) {
 
 function pickExamMetaFromJson(json) {
   if (!json || typeof json !== 'object') return {};
-  const src =
+  const raw =
     json.result && typeof json.result === 'object' && !Array.isArray(json.result)
       ? { ...json, ...json.result }
       : json;
+  const src = mergeEdesisExamViewBody(raw) || raw;
   const title =
     pickStrCi(src, ['name', 'examName', 'title', 'examTitle', 'sinavAdi', 'denemeAdi', 'denemeDenemeAdi']) ||
     pickStr(src, ['name', 'examName', 'title', 'examTitle', 'sinavAdi']);
   const examType =
     pickStrCi(src, ['examType', 'sinavTuru', 'type']) || pickStr(src, ['examType', 'sinavTuru', 'type']);
-  const remainingSeconds = Number(src.kalanSaniye || src.remainingSeconds || src.sinavSuresi || 0);
   return {
     title,
     examType,
-    remainingSeconds: Number.isFinite(remainingSeconds) && remainingSeconds > 0 ? remainingSeconds : 0
+    remainingSeconds: pickExamDurationSeconds(src)
   };
+}
+
+/** Edesis `sinavSuresi` / `kalanSure` dakika; `kalanSaniye` saniye. */
+export function pickExamDurationSeconds(json) {
+  if (!json || typeof json !== 'object') return 0;
+  const raw =
+    json.result && typeof json.result === 'object' && !Array.isArray(json.result)
+      ? { ...json, ...json.result }
+      : json;
+  const src = mergeEdesisExamViewBody(raw) || raw;
+  const num = (keys) => {
+    for (const want of keys) {
+      const n = Number(
+        src[want] ??
+          Object.entries(src).find(([k]) => String(k).toLowerCase() === want.toLowerCase())?.[1]
+      );
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+    return 0;
+  };
+  const seconds = num(['kalanSaniye', 'remainingSeconds', 'durationSeconds']);
+  if (seconds > 0) return Math.round(seconds);
+  const minutes = num([
+    'sinavSuresi',
+    'kalanSure',
+    'sureDakika',
+    'durationMinutes',
+    'sinavSuresiDakika',
+    'sure'
+  ]);
+  if (minutes > 0) {
+    // 10 saatten uzun değer zaten saniye (ör. 7200)
+    if (minutes > 600) return Math.round(minutes);
+    return Math.round(minutes * 60);
+  }
+  return 0;
 }
 
 function looksLikePdfUrl(u) {
@@ -2755,6 +2822,7 @@ export function formatEdesisAvailableExamItem(examId, catalog, resultRow, meta =
     hasStudentResult: submitted,
     studentNet: submitted ? draft?.totalNet ?? null : null,
     canTake: Boolean(examId) && !submitted,
+    remainingSeconds: pickExamDurationSeconds(catalog) || 0,
     bookletPdfs: catalog ? collectEdesisBookletFiles(catalog) : []
   };
 }
@@ -3363,6 +3431,12 @@ export function fileDtoFromJson(json) {
   return { fileName: fileName || 'kitapcik.pdf', fileToken, fileType };
 }
 
+/** Öğrenci kitapçığı değil — cevap anahtarı / hata karnesi PDF’si */
+export function looksLikeEdesisAnswerKeyPdf({ url, name, fileName } = {}) {
+  const s = `${url || ''} ${name || ''} ${fileName || ''}`.toLowerCase();
+  return /hatakarnesi|cevap\s*anahtar|cevapanahtar/.test(s);
+}
+
 /** FileController MVC host: API + tenant web (cdn/files değil) */
 export function listEdesisMvcFileBases(cfg = {}) {
   const merged = { ...getEdesisConfig(), ...cfg };
@@ -3397,8 +3471,36 @@ export function edesisTempFileDownloadUrls(dto, cfg = {}) {
 
 async function tryDownloadEdesisFileDto(cfg, dto) {
   if (!dto?.fileToken) return null;
-  const urls = edesisTempFileDownloadUrls(dto, cfg);
+  const token = String(dto.fileToken).trim();
   const attempts = [];
+  // Edesis FileDto.fileToken bazen GUID değil, hazır CDN URL (sinavzacdn)
+  if (/^https?:\/\//i.test(token)) {
+    try {
+      const got = await fetchEdesisUrlBuffer(token, cfg);
+      attempts.push({
+        url: got.url || token,
+        status: got.status,
+        ok: got.ok,
+        looksPdf: got.looksPdf,
+        contentType: String(got.contentType || '').slice(0, 80),
+        kind: 'file-token-url'
+      });
+      if (got.ok && got.looksPdf) {
+        return {
+          ok: true,
+          reportUrl: got.url || token,
+          buf: got.buf,
+          looksPdf: true,
+          fileName: dto.fileName,
+          source: 'file-token-url',
+          attempts
+        };
+      }
+    } catch (e) {
+      attempts.push({ url: token, ok: false, kind: 'file-token-url', error: e?.message || String(e) });
+    }
+  }
+  const urls = edesisTempFileDownloadUrls(dto, cfg);
   for (const url of urls) {
     try {
       const got = await fetchEdesisBufferFollowingRedirects(url, cfg, { withApiKey: false, preferAbp: true });
@@ -4442,6 +4544,9 @@ export async function fetchEdesisExamStructure(examId, cfgOverride = {}) {
       const catalogType = catalogMeta.examType || pickStrCi(detail, ['examType', 'sinavTuru', 'type']);
       if (!examMeta.title && catalogTitle) examMeta = { ...examMeta, title: catalogTitle };
       if (!examMeta.examType && catalogType) examMeta = { ...examMeta, examType: catalogType };
+      if ((catalogMeta.remainingSeconds || 0) > (examMeta.remainingSeconds || 0)) {
+        examMeta = { ...examMeta, remainingSeconds: catalogMeta.remainingSeconds };
+      }
     }
   } catch {
     /* exam-booklet-pdf / cevap anahtarı yedek */
@@ -4577,7 +4682,9 @@ function shouldAttachEdesisApiKey(url) {
   if (u.includes('drive.google.com') || u.includes('googleusercontent.com') || u.includes('docs.google.com')) {
     return false;
   }
-  if (u.includes('blob.core.windows.net')) return false;
+  if (u.includes('blob.core.windows.net') || u.includes('azureedge.net') || u.includes('sinavzacdn')) {
+    return false;
+  }
   if (u.includes('amazonaws.com') || u.includes('cloudfront.net')) return false;
   // CDN /files çoğu zaman imzasız veya cookie ister; API key göndermek bozabilir
   if (/cdn\.edesis\.com|files\.edesis\.com/.test(u) && u.includes('/files/')) return false;
@@ -4642,19 +4749,30 @@ async function tryDenemeSorulariPdf(denemeId, localCfg, { dersGrupIds = [] } = {
         error: abpError ? String(abpError).slice(0, 160) : undefined
       });
       if (r.looksPdf && r.buf) {
-        return {
-          file: {
-            url: r.url || path,
-            kitapcikTuru: '',
-            name: 'Deneme Soruları PDF',
-            buf: r.buf,
-            contentType: 'application/pdf',
-            source: 'deneme-sorulari-pdf-bytes'
-          },
-          probe
-        };
+        if (looksLikeEdesisAnswerKeyPdf({ url: r.url, name: r.dto?.fileName })) {
+          probe.push({ kind: 'deneme-sorulari-pdf-skipped-answer-key', fileName: r.dto?.fileName || '' });
+        } else {
+          return {
+            file: {
+              url: r.url || path,
+              kitapcikTuru: '',
+              name: 'Deneme Soruları PDF',
+              buf: r.buf,
+              contentType: 'application/pdf',
+              source: 'deneme-sorulari-pdf-bytes'
+            },
+            probe
+          };
+        }
       }
       if (r.dto?.fileToken) {
+        if (looksLikeEdesisAnswerKeyPdf({ url: r.dto.fileToken, name: r.dto.fileName })) {
+          probe.push({
+            kind: 'deneme-sorulari-pdf-skipped-answer-key',
+            fileName: r.dto.fileName || '',
+            url: String(r.dto.fileToken).slice(0, 180)
+          });
+        } else {
         const downloaded = await tryDownloadEdesisFileDto(localCfg, r.dto);
         const dlAttempts = Array.isArray(downloaded?.attempts) ? downloaded.attempts.slice(0, 8) : [];
         probe.push({
@@ -4677,9 +4795,10 @@ async function tryDenemeSorulariPdf(denemeId, localCfg, { dersGrupIds = [] } = {
             probe
           };
         }
+        }
       }
       if (r.json && isReachableEdesisResponse(r)) {
-        const files = collectEdesisBookletFiles(r.json);
+        const files = collectEdesisBookletFiles(r.json).filter((f) => !looksLikeEdesisAnswerKeyPdf(f));
         if (files[0]?.url) {
           return { file: { ...files[0], source: 'deneme-sorulari-pdf-url' }, probe };
         }

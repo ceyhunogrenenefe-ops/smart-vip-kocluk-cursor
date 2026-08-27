@@ -30,9 +30,17 @@ import {
   type EdesisBookletPdf,
   type EdesisStudentResultsExam
 } from '../../lib/edesis/edesisApi';
-import { firstGoogleDrivePreviewUrl } from '../../lib/edesis/googleDrivePdf';
+import { firstPublicBookletViewerUrl } from '../../lib/edesis/googleDrivePdf';
 
-type View = 'take' | 'results' | 'analysis';
+function formatExamDurationLabel(seconds?: number | null) {
+  const s = Number(seconds) || 0;
+  if (s <= 0) return '';
+  const m = Math.max(1, Math.round(s / 60));
+  if (m < 60) return `${m} dk`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return rm ? `${h} sa ${rm} dk` : `${h} sa`;
+}
 
 async function waitForIngestJob(examId: string, jobId: string) {
   for (let i = 0; i < 12; i += 1) {
@@ -43,6 +51,8 @@ async function waitForIngestJob(examId: string, jobId: string) {
   }
   return fetchEdesisIngestStatus({ examId, jobId });
 }
+
+type View = 'take' | 'results' | 'analysis';
 
 type Props = {
   /** Optik formu açıkken Akademik Merkez diğer kartları gizleyebilir */
@@ -159,7 +169,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
     });
     void (async () => {
       const applyPreview = (fileUrl: string | null | undefined) => {
-        const preview = firstGoogleDrivePreviewUrl([fileUrl]);
+        const preview = firstPublicBookletViewerUrl([fileUrl]);
         if (!preview || cancelled) return false;
         setPdfUrl(preview);
         return true;
@@ -196,7 +206,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
 
       try {
         const known = candidateUrls([...bookletPdfs, ...(activeExam.bookletPdfs || [])]);
-        if (applyPreview(firstGoogleDrivePreviewUrl(known))) return;
+        if (applyPreview(firstPublicBookletViewerUrl(known))) return;
 
         const r = await fetchEdesisExamBookletPdf({
           examId: activeExam.examId,
@@ -204,7 +214,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
         });
         if (cancelled) return;
         if (applyBlob(r.blob)) return;
-        if (applyPreview(r.url) || applyPreview(firstGoogleDrivePreviewUrl(candidateUrls(r.files)))) return;
+        if (applyPreview(r.url) || applyPreview(firstPublicBookletViewerUrl(candidateUrls(r.files)))) return;
 
         // Ham Edesis URL iframe’de auth’suz açılmaz; her adayı proxy ile tekrar dene
         const retries = candidateUrls([
@@ -232,7 +242,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
       } catch (e) {
         if (cancelled) return;
         const retries = candidateUrls([...bookletPdfs, ...(activeExam.bookletPdfs || [])]);
-        if (applyPreview(firstGoogleDrivePreviewUrl(retries))) {
+        if (applyPreview(firstPublicBookletViewerUrl(retries))) {
           setPdfError(null);
           return;
         }
@@ -605,6 +615,12 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
                     <div className="mt-1 text-xs text-slate-500">
                       {exam.examDate ? new Date(exam.examDate).toLocaleDateString('tr-TR') : '—'}
                       {exam.totalQuestions ? ` · ${exam.totalQuestions} soru` : ''}
+                      {formatExamDurationLabel(exam.remainingSeconds) ? (
+                        <span className="text-emerald-700">
+                          {' '}
+                          · {formatExamDurationLabel(exam.remainingSeconds)} süre
+                        </span>
+                      ) : null}
                       {exam.resultStatus ? ` · ${exam.resultStatus}` : ''}
                     </div>
                     <div className="mt-1 text-xs text-emerald-700">Henüz sonucunuz yok — optik formu doldurabilirsiniz</div>

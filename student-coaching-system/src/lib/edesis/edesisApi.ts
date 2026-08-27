@@ -480,6 +480,7 @@ export type EdesisAvailableExam = {
   hasStudentResult: boolean;
   studentNet: number | null;
   canTake: boolean;
+  remainingSeconds?: number;
   bookletPdfs?: EdesisBookletPdf[];
 };
 
