@@ -302,7 +302,7 @@ export default function UserManagement() {
   const [modalMode, setModalMode] = useState<'add' | 'edit'>('add');
   const [selectedUser, setSelectedUser] = useState<SystemUser | null>(null);
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [message, setMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
   const [quota, setQuota] = useState<QuotaSnapshot | null>(null);
   const [quotaRefreshKey, setQuotaRefreshKey] = useState(0);
   const [quotaPickerInstitutionId, setQuotaPickerInstitutionId] = useState('');
@@ -581,8 +581,23 @@ export default function UserManagement() {
     setPendingBusyId(row.id);
     setMessage(null);
     try {
-      await db.approvePendingRegistration(row.id);
-      setMessage({ type: 'success', text: 'Kayıt onaylandı ve hesap aktif edildi.' });
+      const approved = await db.approvePendingRegistration(row.id);
+      const edesis = approved?.edesis;
+      const room = edesis?.classroom?.name ? ` (${edesis.classroom.name})` : '';
+      if (edesis?.ok && edesis.edesisStudentId) {
+        const verb = edesis.created ? 'Edesis kaydı açıldı' : 'Mevcut Edesis kaydına bağlandı';
+        setMessage({
+          type: 'success',
+          text: `Kayıt onaylandı ve hesap aktif edildi. ${verb}: ${edesis.edesisStudentId}${room}.`
+        });
+      } else if (edesis && !edesis.skipped && edesis.ok === false) {
+        setMessage({
+          type: 'warning',
+          text: `Kayıt onaylandı ve hesap aktif edildi. Edesis kaydı oluşturulamadı${edesis.error ? `: ${edesis.error}` : '.'}`
+        });
+      } else {
+        setMessage({ type: 'success', text: 'Kayıt onaylandı ve hesap aktif edildi.' });
+      }
       await refreshUsers({ broadcast: true });
     } catch (e) {
       setMessage({
@@ -3196,9 +3211,13 @@ export default function UserManagement() {
       {/* Message */}
       {message && (
         <div className={`p-4 rounded-lg flex items-center gap-2 ${
-          message.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'
+          message.type === 'success'
+            ? 'bg-green-50 text-green-700 border border-green-200'
+            : message.type === 'warning'
+              ? 'bg-amber-50 text-amber-800 border border-amber-200'
+              : 'bg-red-50 text-red-700 border border-red-200'
         }`}>
-          {message.type === 'success' ? <CheckCircle className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
+          {message.type === 'error' ? <AlertCircle className="w-5 h-5" /> : <CheckCircle className="w-5 h-5" />}
           {message.text}
         </div>
       )}
