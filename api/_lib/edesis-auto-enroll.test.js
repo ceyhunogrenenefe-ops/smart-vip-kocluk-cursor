@@ -63,13 +63,13 @@ describe('edesis-auto-enroll classroom pick', () => {
       branch: 'Fatih Koleji',
       termKind: 'regular'
     });
-    expect(room.id).toBe(219076);
+    expect(room.id).toBe(294967);
   });
 
-  it('puts LGS without branch into newest LGS-named classroom', () => {
+  it('puts LGS without branch into newest 8-A used in 2026-2027', () => {
     const room = pickEdesisClassroom(ROOMS, { classLevel: 'LGS' });
-    expect(room.id).toBe(219076);
-    expect(room.name).toMatch(/LGS/i);
+    expect(room.id).toBe(294967);
+    expect(room.name).toBe('A');
   });
 
   it('puts 8C into newest 8-C', () => {
@@ -145,7 +145,7 @@ describe('edesis-auto-enroll classroom pick', () => {
   it('does not put LGS into 8-YAZ', () => {
     const room = pickEdesisClassroom(ROOMS, { classLevel: 'LGS' });
     expect(room.name).not.toMatch(/YAZ/i);
-    expect(room.id).toBe(219076);
+    expect(room.id).toBe(294967);
   });
 
   it('skips demo / test student rows', () => {
@@ -153,6 +153,15 @@ describe('edesis-auto-enroll classroom pick', () => {
     expect(skipEdesisAutoEnrollStudent({ email: 'admin@smartvip.com', name: 'Admin' })).toBe(true);
     expect(skipEdesisAutoEnrollStudent({ email: 'veli@gmail.com', name: 'Ada' })).toBe(false);
     expect(skipEdesisAutoEnrollStudent({ email: 'a@b.com', name: 'TEST TESY' })).toBe(true);
+  });
+
+  it('prefers classrooms already used in the target term', () => {
+    const room = pickEdesisClassroom(ROOMS, {
+      classLevel: 'LGS',
+      termKind: 'regular',
+      preferredIds: [294967, 329887]
+    });
+    expect(room.id).toBe(294967);
   });
 
   it('matches Edesis placeholder emails by unique name', () => {
