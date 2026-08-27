@@ -74,7 +74,7 @@ export default function SepetPage() {
       ? Math.round(subtotal * coupon.discount_value / 100)
       : coupon.discount_value;
     if (coupon.max_discount_kurus) disc = Math.min(disc, coupon.max_discount_kurus);
-    return disc;
+    return Math.max(0, Math.min(disc, subtotal));
   }, [coupon, subtotal]);
 
   const total = subtotal + shippingCost - discountAmount;

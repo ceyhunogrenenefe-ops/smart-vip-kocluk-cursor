@@ -171,7 +171,7 @@ export default async function handler(req, res) {
         .select('created_by')
         .eq('id', book_id)
         .maybeSingle();
-      if (!checkOffer && checkBook?.created_by !== actor.sub) {
+      if (!isSuperAdmin && !checkOffer && checkBook?.created_by !== actor.sub) {
         return err(res, 403, 'Bu kitabı düzenleme yetkiniz yok');
       }
       const patch = {};
@@ -189,7 +189,7 @@ export default async function handler(req, res) {
     if (op === 'offers.list') {
       const { data, error } = await supabaseAdmin
         .from('commerce_vendor_offers')
-        .select('*, commerce_books(id, title, isbn, cover_image_url)')
+        .select('*, commerce_books(id, title, isbn, cover_image_url, description)')
         .eq('vendor_id', vendorId)
         .is('deleted_at', null)
         .order('updated_at', { ascending: false });
@@ -242,15 +242,14 @@ export default async function handler(req, res) {
         .eq('id', id)
         .single();
       if (!current || current.vendor_id !== vendorId) return err(res, 403, 'Bu teklif size ait değil');
-
       const patch = {};
       const priceChanging = fields.price_kurus !== undefined && parseInt(fields.price_kurus, 10) !== current.price_kurus;
       const EDITABLE = ['draft', 'correction_requested', 'rejected'];
 
-      if (current.status === 'pending_approval' && priceChanging) {
+      if (current.status === 'pending_approval' && priceChanging && !isSuperAdmin) {
         return err(res, 400, 'Onay bekleyen teklifte fiyat değiştirilemez');
       }
-      if (!EDITABLE.includes(current.status) && current.status !== 'approved') {
+      if (!EDITABLE.includes(current.status) && current.status !== 'approved' && !isSuperAdmin) {
         return err(res, 400, `Bu teklif düzenlenemez (${current.status})`);
       }
 
@@ -260,7 +259,8 @@ export default async function handler(req, res) {
       if (fields.low_stock_threshold !== undefined) patch.low_stock_threshold = sanitizeInt(fields.low_stock_threshold);
       if (fields.shipping_days !== undefined) patch.shipping_days = sanitizeInt(fields.shipping_days);
 
-      if (current.status === 'approved' && priceChanging) {
+      // Satıcı onaylı teklifte fiyat değiştirirse yeniden onaya düşer; süper admin doğrudan yazar
+      if (current.status === 'approved' && priceChanging && !isSuperAdmin) {
         patch.pending_snapshot = { price_kurus: patch.price_kurus, updated_at: new Date().toISOString() };
         patch.status = 'pending_approval';
       }

@@ -90,6 +90,14 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     <aside class="card">
       <h2>Sipariş Özeti</h2>
       <div id="order-summary"></div>
+      <div id="coupon-box" style="display:none;margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
+        <label for="coupon-code" style="display:block;font-size:13px;font-weight:700;margin-bottom:6px;">Kupon kodu</label>
+        <div style="display:flex;gap:8px;">
+          <input id="coupon-code" type="text" placeholder="VIP10" style="flex:1;padding:10px 12px;border:1px solid var(--border);border-radius:10px;font:inherit;font-size:14px;text-transform:uppercase;">
+          <button type="button" id="coupon-apply" style="padding:10px 14px;border:none;border-radius:10px;background:var(--navy);color:#fff;font-weight:700;cursor:pointer;">Uygula</button>
+        </div>
+        <p id="coupon-msg" style="display:none;margin-top:8px;font-size:13px;"></p>
+      </div>
     </aside>
   </div>
 </main>
@@ -124,6 +132,10 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     });
     var lead=document.getElementById('pay-lead');
     if(lead) lead.textContent='Kitap mağazası sepetiniz için veli bilgilerinizi girin; güvenli ödeme ekranına yönlendirileceksiniz.';
+    var cbox=document.getElementById('coupon-box');
+    if(cbox) cbox.style.display='block';
+    var cin=document.getElementById('coupon-code');
+    if(cin && data.coupon) cin.value=data.coupon;
     return true;
   }
 
@@ -217,6 +229,59 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     }
   }
 
+  function checkoutToken(){
+    return (new URLSearchParams(location.search).get('token')||'').trim();
+  }
+
+  function showCouponMsg(text, ok){
+    var el=document.getElementById('coupon-msg');
+    if(!el) return;
+    el.style.display='block';
+    el.style.color=ok?'#15803d':'#b91c1c';
+    el.textContent=text;
+  }
+
+  async function applyPayPageCoupon(){
+    var code=(document.getElementById('coupon-code')||{}).value||'';
+    code=String(code).trim();
+    if(!code){ showCouponMsg('Kupon kodu girin', false); return; }
+    var token=checkoutToken();
+    if(!token){ showCouponMsg('Bu sayfada kupon için ödeme oturumu yok', false); return; }
+    var btn=document.getElementById('coupon-apply');
+    if(btn) btn.disabled=true;
+    try{
+      var res=await fetch('https://www.dersonlinevipkocluk.com/api/commerce-checkout',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({op:'apply_coupon', token:token, coupon_code:code})
+      });
+      var data=await res.json();
+      if(!res.ok||!data.ok||!data.order){
+        throw new Error(data.error||'Kupon uygulanamadı');
+      }
+      var o=data.order;
+      applyCoachingCheckout({
+        totalKurus:o.total_kurus,
+        items:(o.items||[]).map(function(it){
+          return { title:it.title_snapshot, qty:it.quantity, unit_kurus:it.unit_price_kurus };
+        }),
+        subtotalKurus:o.subtotal_kurus,
+        shippingKurus:o.shipping_kurus,
+        discountKurus:o.discount_kurus,
+        ref:coachingCheckout&&coachingCheckout.ref||'',
+        coupon:o.coupon_code||code,
+        userId:coachingCheckout&&coachingCheckout.userId||null,
+        studentId:coachingCheckout&&coachingCheckout.studentId||null
+      });
+      renderSummary();
+      showCouponMsg('Kupon uygulandı — yeni toplam '+formatKurus(o.total_kurus), true);
+    }catch(e){
+      showCouponMsg(e.message||'Kupon uygulanamadı', false);
+    }finally{
+      if(btn) btn.disabled=false;
+    }
+  }
+
   function renderSummary(){
     var box=document.getElementById('order-summary');
     if(coachingCheckout){
@@ -232,7 +297,10 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
         html+='<div class="order-line"><span>Kargo</span><strong>'+formatKurus(coachingCheckout.shippingKurus)+'</strong></div>';
       }
       if(coachingCheckout.discountKurus>0){
-        html+='<div class="order-line"><span>İndirim</span><strong>-'+formatKurus(coachingCheckout.discountKurus)+'</strong></div>';
+        var coup=coachingCheckout.coupon?(' ('+coachingCheckout.coupon+')'):'';
+        html+='<div class="order-line"><span>İndirim'+coup+'</span><strong style="color:#c8191f">-'+formatKurus(coachingCheckout.discountKurus)+'</strong></div>';
+      } else if(coachingCheckout.coupon){
+        html+='<div class="order-line"><span>Kupon</span><strong>'+coachingCheckout.coupon+'</strong></div>';
       }
       html+='<div class="order-total"><span>Toplam</span><strong>'+formatKurus(coachingCheckout.totalKurus)+'</strong></div>';
       box.innerHTML=html;
@@ -323,6 +391,10 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     if(!loaded) loadCoachingCheckoutFromQuery();
     ensurePackageFromQuery();
     renderSummary();
+    var couponBtn=document.getElementById('coupon-apply');
+    if(couponBtn) couponBtn.addEventListener('click', applyPayPageCoupon);
+    var couponIn=document.getElementById('coupon-code');
+    if(couponIn) couponIn.addEventListener('keydown', function(ev){ if(ev.key==='Enter'){ ev.preventDefault(); applyPayPageCoupon(); } });
     try{
       var cfg=await fetch('/api/payment-provider').then(function(r){return r.json();});
       provider=cfg.provider||'none';
