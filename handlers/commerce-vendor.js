@@ -165,7 +165,7 @@ export default async function handler(req, res) {
         .select('created_by')
         .eq('id', book_id)
         .maybeSingle();
-      if (!checkOffer && checkBook?.created_by !== actor.sub) {
+      if (!isSuperAdmin && !checkOffer && checkBook?.created_by !== actor.sub) {
         return err(res, 403, 'Bu kitabı düzenleme yetkiniz yok');
       }
       const patch = {};
@@ -183,7 +183,7 @@ export default async function handler(req, res) {
     if (op === 'offers.list') {
       const { data, error } = await supabaseAdmin
         .from('commerce_vendor_offers')
-        .select('*, commerce_books(id, title, isbn, cover_image_url)')
+        .select('*, commerce_books(id, title, isbn, cover_image_url, description)')
         .eq('vendor_id', vendorId)
         .is('deleted_at', null)
         .order('updated_at', { ascending: false });
@@ -238,7 +238,7 @@ export default async function handler(req, res) {
         .single();
       if (!current || current.vendor_id !== vendorId) return err(res, 403, 'Bu teklif size ait değil');
       const EDITABLE = ['draft', 'correction_requested', 'rejected'];
-      if (!EDITABLE.includes(current.status)) {
+      if (!EDITABLE.includes(current.status) && !isSuperAdmin) {
         return err(res, 400, `Onaylanmış/incelemeye alınmış teklif düzenlenemez (${current.status})`);
       }
       const patch = {};
@@ -247,8 +247,8 @@ export default async function handler(req, res) {
       if (fields.stock_quantity !== undefined) patch.stock_quantity = sanitizeInt(fields.stock_quantity);
       if (fields.low_stock_threshold !== undefined) patch.low_stock_threshold = sanitizeInt(fields.low_stock_threshold);
       if (fields.shipping_days !== undefined) patch.shipping_days = sanitizeInt(fields.shipping_days);
-      // Onaylanmış teklifte fiyat değişikliği → snapshot kaydet
-      if (current.status === 'approved' && fields.price_kurus !== undefined) {
+      // Satıcı onaylı teklifte fiyat değiştirirse yeniden onaya düşer; süper admin doğrudan yazar
+      if (current.status === 'approved' && fields.price_kurus !== undefined && !isSuperAdmin) {
         patch.pending_snapshot = { price_kurus: patch.price_kurus, updated_at: new Date().toISOString() };
         patch.status = 'pending_approval';
       }

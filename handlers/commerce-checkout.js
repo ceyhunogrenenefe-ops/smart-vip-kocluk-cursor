@@ -4,8 +4,11 @@
  */
 import storeHandler from './commerce-store.js';
 import { normalizeCommerceCheckoutOp } from '../api/_lib/commerce-checkout-op.js';
+import { handleCorsPreflight, applyCors } from '../api/_lib/cors-mobile.js';
 
 export default async function handler(req, res) {
+  applyCors(req, res);
+  if (handleCorsPreflight(req, res)) return;
   const body = req.body && typeof req.body === 'object' ? req.body : {};
   const op = normalizeCommerceCheckoutOp(body.op);
   req.body = { ...body, op };

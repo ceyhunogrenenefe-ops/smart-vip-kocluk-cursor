@@ -20,9 +20,12 @@
  *  cart.checkout_prepare — pending sipariş + handoff token
  *  checkout.resolve      — token ile sipariş özeti (site)
  *  checkout.update_customer — veli/adres (site, token)
+ *  checkout.apply_coupon — ödeme sayfasında kupon (token, giriş yok)
  *  checkout.pay          — PayTR/Garanti başlat (odeme/kitap)
  *  order.paid            — ödeme callback webhook (site)
  *  assignment.own        — "Bu kitap bende var" (purchase yapmadan atama)
+ *
+ *  deployMarker: commerce-admin-vendor-coupon-2026-08-27
  */
 
 import { requireAuth } from '../api/_lib/auth.js';
@@ -44,6 +47,8 @@ import { startCommerceProviderPayment } from '../api/_lib/commerce-checkout-pay.
 import { COMMERCE_DEFAULT_SETTINGS } from '../api/_lib/commerce-constants.js';
 import { listLgs8Collections } from '../api/_lib/commerce-lgs8-seed.js';
 import { notifyVendorWhatsAppForPaidOrder } from '../api/_lib/commerce-vendor-order-notify.js';
+import { computeCouponDiscount } from '../api/_lib/commerce-coupon-discount.js';
+import { applyCors, handleCorsPreflight } from '../api/_lib/cors-mobile.js';
 
 function err(res, status, message) {
   return res.status(status).json({ error: message });
@@ -64,7 +69,7 @@ async function handleCatalog(op, body, actor) {
       .select('free_shipping_threshold_kurus, default_shipping_kurus, commerce_mode, student_store_enabled')
       .is('institution_id', null)
       .maybeSingle();
-    return { ok: true, settings: data };
+    return { ok: true, settings: data, deployMarker: 'commerce-admin-vendor-coupon-2026-08-27' };
   }
 
   if (op === 'catalog.list') {
@@ -223,6 +228,32 @@ async function enrichCart(cartId) {
   return data ?? [];
 }
 
+async function lookupActiveCoupon(code) {
+  const now = new Date().toISOString();
+  const { data: coupon } = await supabaseAdmin
+    .from('commerce_coupons')
+    .select('*')
+    .eq('code', String(code || '').toUpperCase().trim())
+    .eq('is_active', true)
+    .is('deleted_at', null)
+    .maybeSingle();
+  if (!coupon) return { ok: false, error: 'Kupon bulunamadı veya geçersiz' };
+  if (coupon.ends_at && coupon.ends_at < now) return { ok: false, error: 'Kuponun süresi dolmuş' };
+  if (coupon.starts_at && coupon.starts_at > now) return { ok: false, error: 'Kupon henüz aktif değil' };
+  if (coupon.usage_limit && coupon.usage_count >= coupon.usage_limit) return { ok: false, error: 'Kupon kullanım limiti dolmuş' };
+  return {
+    ok: true,
+    coupon: {
+      id: coupon.id,
+      code: coupon.code,
+      discount_type: coupon.discount_type,
+      discount_value: coupon.discount_value,
+      max_discount_kurus: coupon.max_discount_kurus,
+      min_order_kurus: coupon.min_order_kurus,
+    },
+  };
+}
+
 async function handleCart(op, body, actor) {
   if (!actor?.sub || actor.sub === 'anonymous') throw new Error('Sepet için giriş gerekli');
   const userId = actor.sub;
@@ -376,19 +407,7 @@ async function handleCart(op, body, actor) {
   if (op === 'cart.apply_coupon') {
     const { code } = body;
     if (!code) throw new Error('Kupon kodu gerekli');
-    const now = new Date().toISOString();
-    const { data: coupon } = await supabaseAdmin
-      .from('commerce_coupons')
-      .select('*')
-      .eq('code', String(code).toUpperCase().trim())
-      .eq('is_active', true)
-      .is('deleted_at', null)
-      .maybeSingle();
-    if (!coupon) return { ok: false, error: 'Kupon bulunamadı veya geçersiz' };
-    if (coupon.ends_at && coupon.ends_at < now) return { ok: false, error: 'Kuponun süresi dolmuş' };
-    if (coupon.starts_at && coupon.starts_at > now) return { ok: false, error: 'Kupon henüz aktif değil' };
-    if (coupon.usage_limit && coupon.usage_count >= coupon.usage_limit) return { ok: false, error: 'Kupon kullanım limiti dolmuş' };
-    return { ok: true, coupon: { id: coupon.id, code: coupon.code, discount_type: coupon.discount_type, discount_value: coupon.discount_value, max_discount_kurus: coupon.max_discount_kurus, min_order_kurus: coupon.min_order_kurus } };
+    return lookupActiveCoupon(code);
   }
 
   if (op === 'cart.checkout_prepare') {
@@ -510,17 +529,13 @@ async function prepareCheckout(body, actor) {
   let discount = 0;
   const code = String(body.coupon_code || '').trim().toUpperCase();
   if (code) {
-    const couponRes = await handleCart('cart.apply_coupon', { code }, actor);
+    const couponRes = await lookupActiveCoupon(code);
     if (!couponRes.ok || !couponRes.coupon) throw new Error(couponRes.error || 'Geçersiz kupon');
     const c = couponRes.coupon;
     if (subtotal < c.min_order_kurus) {
       throw new Error(`Bu kupon için minimum sipariş tutarı yetersiz`);
     }
-    discount =
-      c.discount_type === 'percent'
-        ? Math.round((subtotal * c.discount_value) / 100)
-        : c.discount_value;
-    if (c.max_discount_kurus) discount = Math.min(discount, c.max_discount_kurus);
+    discount = computeCouponDiscount(c, subtotal);
     couponId = c.id;
     couponCode = c.code;
   }
@@ -740,6 +755,50 @@ async function handleCheckout(op, body, req) {
     };
   }
 
+  if (op === 'checkout.apply_coupon') {
+    const payload = verifyCheckoutToken(body.token);
+    const rawCode = String(body.coupon_code || body.code || '').trim();
+    const order = await loadOrderSummary(payload.oid);
+    if (order.status !== 'pending_payment') {
+      throw new Error('Kupon yalnızca ödenmemiş siparişe uygulanır');
+    }
+    let couponId = null;
+    let couponCode = null;
+    let discount = 0;
+    if (rawCode) {
+      const couponRes = await lookupActiveCoupon(rawCode);
+      if (!couponRes.ok || !couponRes.coupon) throw new Error(couponRes.error || 'Geçersiz kupon');
+      const c = couponRes.coupon;
+      discount = computeCouponDiscount(c, order.subtotal_kurus);
+      if (discount <= 0 && order.subtotal_kurus < Number(c.min_order_kurus || 0)) {
+        throw new Error(`Bu kupon için minimum sipariş tutarı yetersiz`);
+      }
+      couponId = c.id;
+      couponCode = c.code;
+    }
+    const total = Math.max(0, Number(order.subtotal_kurus || 0) + Number(order.shipping_kurus || 0) - discount);
+    if (total < 100) throw new Error('İndirim sonrası ödeme tutarı geçersiz');
+    const { error: updErr } = await supabaseAdmin
+      .from('commerce_orders')
+      .update({
+        coupon_id: couponId,
+        coupon_code: couponCode,
+        discount_kurus: discount,
+        total_kurus: total,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', order.id)
+      .eq('status', 'pending_payment');
+    if (updErr) throw updErr;
+    await supabaseAdmin
+      .from('commerce_payments')
+      .update({ amount_kurus: total, updated_at: new Date().toISOString() })
+      .eq('order_id', order.id)
+      .in('status', ['pending', 'processing']);
+    const refreshed = await loadOrderSummary(order.id);
+    return { ok: true, order: orderPublic(refreshed) };
+  }
+
   if (op === 'checkout.update_customer' || op === 'checkout.pay') {
     const payload = verifyCheckoutToken(body.token);
     const saved = await applyCheckoutCustomer(body, payload.oid);
@@ -919,13 +978,15 @@ async function handleAssignment(op, body, actor) {
 // Ana handler
 // ─────────────────────────────────────────────
 export default async function handler(req, res) {
+  applyCors(req, res);
+  if (handleCorsPreflight(req, res)) return;
   if (req.method !== 'POST') return err(res, 405, 'Method Not Allowed');
   try {
     const body = req.body ?? {};
     let op = String(body.op ?? '').trim();
     if (!op) return err(res, 400, 'op gerekli');
     // Site /odeme/kitap: resolve | pay | update_customer
-    if (op === 'resolve' || op === 'pay' || op === 'update_customer') {
+    if (op === 'resolve' || op === 'pay' || op === 'update_customer' || op === 'apply_coupon') {
       op = normalizeCommerceCheckoutOp(op);
     }
 
@@ -951,7 +1012,7 @@ export default async function handler(req, res) {
   } catch (e) {
     console.error('[commerce-store]', e?.message || e);
     const msg = e?.message || 'sunucu_hatası';
-    if (/Yetkisiz|giriş gerekli|Geçersiz|süresi dolmuş|bulunamadı|yeterli stok|Sepet boş|yapılandırılmamış|Veli|e-posta|telefon|karakter|PayTR|Garanti|token|ödeme|Sipariş/i.test(msg)) {
+    if (/Yetkisiz|giriş gerekli|Geçersiz|süresi dolmuş|bulunamadı|yeterli stok|Sepet boş|yapılandırılmamış|Veli|e-posta|telefon|karakter|PayTR|Garanti|token|ödeme|Sipariş|kupon|Kupon|indirim/i.test(msg)) {
       const status = /Yetkisiz/i.test(msg) ? 401 : 400;
       return err(res, status, msg);
     }

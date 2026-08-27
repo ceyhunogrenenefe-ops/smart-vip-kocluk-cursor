@@ -3,6 +3,7 @@
  * Sekmeler: Genel Bakış | Kitaplarım | Tekliflerim | Siparişlerim | Hakedişlerim
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle,
   BookOpen,
@@ -39,9 +40,12 @@ import {
   cvShipOrder,
   cvSubmitOffer,
   cvUpdateOffer,
+  cvUpdateBook,
   type VendorStats,
 } from '../../lib/commerceVendorApi';
 import { apiFetch } from '../../lib/session';
+import { clearActingVendor, getActingVendor, setActingVendor, type ActingVendor } from '../../lib/commerceActingVendor';
+import { caListVendors } from '../../lib/commerceAdminApi';
 import type {
   CommerceBook,
   CommerceVendorOffer,
@@ -204,8 +208,8 @@ function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
   const [bookSearch, setBookSearch] = useState('');
   const [bookResults, setBookResults] = useState<(CommerceBook & { my_offer: CommerceVendorOffer | null })[]>([]);
   const [bookSearching, setBookSearching] = useState(false);
-  const [selectedBook, setSelectedBook] = useState<{ id: string; title: string; isbn: string | null; cover_image_url: string | null } | null>(
-    offer?.book ? (offer.book as { id: string; title: string; isbn: string | null; cover_image_url: string | null }) : null
+  const [selectedBook, setSelectedBook] = useState<{ id: string; title: string; isbn: string | null; cover_image_url: string | null; description?: string | null } | null>(
+    offer?.book ? (offer.book as { id: string; title: string; isbn: string | null; cover_image_url: string | null; description?: string | null }) : null
   );
 
   // Yeni kitap formu
@@ -217,6 +221,9 @@ function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [editDescription, setEditDescription] = useState(
+    String((offer?.book as { description?: string | null } | undefined)?.description ?? '')
+  );
 
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -273,7 +280,20 @@ function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
       const discKurus = discountLira ? Math.round(parseFloat(discountLira) * 100) : null;
 
       if (isEdit && offer) {
-        // Düzenleme
+        const bookId = (offer.book as { id?: string } | undefined)?.id;
+        if (bookId) {
+          await cvUpdateBook(bookId, { description: editDescription.trim() || null });
+          if (coverFile) {
+            setUploading(true);
+            try {
+              await uploadBookCover(coverFile, bookId);
+            } catch (e: unknown) {
+              toast.error('Kapak yüklenemedi: ' + (e as Error).message);
+            } finally {
+              setUploading(false);
+            }
+          }
+        }
         await cvUpdateOffer(offer.id, {
           price_kurus: priceKurus,
           compare_at_price_kurus: discKurus ?? undefined,
@@ -281,14 +301,6 @@ function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
           low_stock_threshold: parseInt(lowStock),
           shipping_days: parseInt(shippingDays),
         });
-        // Kapak yükle
-        if (coverFile && offer.book) {
-          setUploading(true);
-          try {
-            await uploadBookCover(coverFile, (offer.book as { id: string }).id);
-          } catch (e: unknown) { toast.error('Kapak yüklenemedi: ' + (e as Error).message); }
-          finally { setUploading(false); }
-        }
         toast.success('Teklif güncellendi');
       } else {
         // Yeni teklif
@@ -506,6 +518,18 @@ function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {isEdit && (
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Kitap açıklaması</label>
+              <textarea
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none h-24"
+                placeholder="Kitap hakkında kısa açıklama"
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+              />
             </div>
           )}
 
@@ -1083,17 +1107,73 @@ function Kitaplarim() {
 // ── Ana sayfa ──────────────────────────────────────────────────────────
 export default function VendorPanelPage() {
   const { effectiveUser } = useAuth();
+  const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>('genel');
+  const [acting, setActing] = useState<ActingVendor | null>(() => getActingVendor());
+  const [vendorChoices, setVendorChoices] = useState<{ id: string; name: string }[]>([]);
+  const [vendorPick, setVendorPick] = useState('');
 
   useEffect(() => {
     const hash = window.location.hash.replace('#', '') as Tab;
     if (TABS.some((t) => t.key === hash)) setTab(hash);
   }, []);
 
+  useEffect(() => {
+    const sync = () => setActing(getActingVendor());
+    window.addEventListener('commerce-acting-vendor', sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener('commerce-acting-vendor', sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
+
   const roles = [(effectiveUser?.role ?? ''), ...((effectiveUser as { roles?: string[] })?.roles ?? [])];
-  const hasAccess = roles.includes('vendor_admin') || roles.includes('super_admin');
+  const isSuperAdmin = roles.includes('super_admin');
+  const hasAccess = roles.includes('vendor_admin') || isSuperAdmin;
+
+  useEffect(() => {
+    if (!isSuperAdmin || acting) return;
+    caListVendors()
+      .then((r) => setVendorChoices((r.vendors || []).map((v) => ({ id: v.id, name: v.name }))))
+      .catch(() => undefined);
+  }, [isSuperAdmin, acting]);
+
   if (!hasAccess) {
     return <div className="p-6 text-gray-500">Bu sayfaya erişim yetkiniz yok.</div>;
+  }
+
+  if (isSuperAdmin && !acting) {
+    return (
+      <div className="p-4 md:p-6 max-w-xl mx-auto">
+        <h1 className="text-xl font-bold text-gray-900 mb-2">Satıcı paneline geç</h1>
+        <p className="text-sm text-gray-500 mb-4">
+          Süper admin olarak bir satıcı seçin; o satıcının paneli açılır (görsel, açıklama, teklif, sipariş).
+        </p>
+        <select
+          className="w-full border rounded-lg px-3 py-2 text-sm mb-3"
+          value={vendorPick}
+          onChange={(e) => setVendorPick(e.target.value)}
+        >
+          <option value="">Satıcı seçin…</option>
+          {vendorChoices.map((v) => (
+            <option key={v.id} value={v.id}>{v.name}</option>
+          ))}
+        </select>
+        <button
+          disabled={!vendorPick}
+          onClick={() => {
+            const v = vendorChoices.find((x) => x.id === vendorPick);
+            if (!v) return;
+            setActingVendor(v);
+            setActing(v);
+          }}
+          className="bg-indigo-600 text-white text-sm px-4 py-2 rounded-lg disabled:opacity-50"
+        >
+          Panele geç
+        </button>
+      </div>
+    );
   }
 
   const renderTab = () => {
@@ -1109,6 +1189,22 @@ export default function VendorPanelPage() {
 
   return (
     <div className="p-4 md:p-6 max-w-5xl mx-auto">
+      {isSuperAdmin && acting && (
+        <div className="mb-4 flex items-center justify-between gap-3 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3">
+          <div className="text-sm text-indigo-900">
+            <span className="font-semibold">{acting.name}</span> satıcı paneli — süper admin olarak bakıyorsunuz
+          </div>
+          <button
+            className="text-xs font-medium text-indigo-700 hover:underline"
+            onClick={() => {
+              clearActingVendor();
+              navigate('/kitap-pazaryeri#saticilar');
+            }}
+          >
+            Pazaryerine dön
+          </button>
+        </div>
+      )}
       <div className="flex items-center gap-3 mb-6">
         <Store className="w-7 h-7 text-indigo-600" />
         <div>
