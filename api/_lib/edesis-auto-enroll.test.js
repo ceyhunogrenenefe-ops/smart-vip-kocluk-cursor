@@ -8,7 +8,8 @@ import {
   pickEdesisTerm,
   shouldAutoEnrollEdesis,
   skipEdesisAutoEnrollStudent,
-  summarizeEdesisEnrollResult
+  summarizeEdesisEnrollResult,
+  findInTermRows
 } from './edesis-auto-enroll.js';
 
 const ROOMS = [
@@ -151,5 +152,27 @@ describe('edesis-auto-enroll classroom pick', () => {
     expect(skipEdesisAutoEnrollStudent({ email: 'cursor-setup-test@example.com', name: 'X' })).toBe(true);
     expect(skipEdesisAutoEnrollStudent({ email: 'admin@smartvip.com', name: 'Admin' })).toBe(true);
     expect(skipEdesisAutoEnrollStudent({ email: 'veli@gmail.com', name: 'Ada' })).toBe(false);
+  });
+
+  it('matches Edesis placeholder emails by unique name', () => {
+    const rows = [
+      { id: 7197508, name: 'Emir Aras Uzun', email: '2345@edesis.com' },
+      { id: 7692721, name: 'BADE MERSİN', email: 'navfrn@edesis.com' },
+      { id: 6781847, name: 'Serap Mira Özyanık', email: 'h.m.ozynk@qmail.com' },
+      { id: 3474519, name: 'EMİRHAN ÇELİK', email: '2492@edesis.com' }
+    ];
+    expect(findInTermRows(rows, { name: 'Emir aras Uzun', email: 'efsunuzun90@gmail.com' })).toEqual({
+      edesisStudentId: '7197508',
+      matchMethod: 'name'
+    });
+    expect(findInTermRows(rows, { name: 'Zübeyde Bade Mersin', email: 'zubeydebademersin@gmail.com' })).toEqual({
+      edesisStudentId: '7692721',
+      matchMethod: 'name'
+    });
+    expect(findInTermRows(rows, { name: 'Serap mira Ozyanık', email: 'hasanozyanikk@gmail.com' })).toEqual({
+      edesisStudentId: '6781847',
+      matchMethod: 'name'
+    });
+    expect(findInTermRows(rows, { name: 'Emir Kökmen', email: 'x@y.com' })).toBeNull();
   });
 });
