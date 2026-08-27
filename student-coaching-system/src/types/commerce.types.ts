@@ -439,6 +439,34 @@ export interface CommerceSettings {
   updated_at: string;
 }
 
+/** Süper admin mağaza menüsü: sınıf kutuları */
+export interface StoreBrowseClass {
+  key: string;
+  label: string;
+  sort: number;
+  active?: boolean;
+  category_count?: number;
+  book_count?: number;
+}
+
+/** Süper admin mağaza menüsü: sınıf altındaki kitap kategorileri */
+export interface StoreBrowseCategory {
+  key: string;
+  label: string;
+  class_keys: string[];
+  series: string;
+  description: string;
+  sort: number;
+  active?: boolean;
+  book_count?: number;
+  priced_count?: number;
+}
+
+export interface StoreBrowseNav {
+  classes: StoreBrowseClass[];
+  categories: StoreBrowseCategory[];
+}
+
 export interface CommerceAuditLog {
   id: string;
   entity_type: string;
