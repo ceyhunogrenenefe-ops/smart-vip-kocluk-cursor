@@ -3,6 +3,7 @@
  * Sekmeler: Satıcılar | Onay Bekleyenler | Kitaplar | Teklifler | Siparişler | Hakedişler | Kuponlar | Raporlar | Ayarlar
  */
 import React, { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle,
   CheckCircle2,
@@ -11,6 +12,8 @@ import {
   Copy,
   Eye,
   EyeOff,
+  LogIn,
+  Tag,
   KeyRound,
   Loader2,
   Package,
@@ -34,9 +37,12 @@ import {
 import { toast } from 'sonner';
 import {
   caApproveOffer,
+  caCreateCoupon,
   caCreateVendor,
   caCreateVendorAccount,
   caDeleteBook,
+  caDeleteCoupon,
+  caDeleteOrder,
   caDeleteVendor,
   caGetSettings,
   caListBooks,
@@ -60,6 +66,8 @@ import {
   caBulkUpsertBooks,
   caEnsureYankiVendor,
   caToggleVendorActive,
+  caUpdateCoupon,
+  caUpdateOrder,
   caUpdateSettings,
   caUpdateVendor,
   caUploadBookCover,
@@ -77,6 +85,7 @@ import type {
 import { formatCommerceTry, COMMERCE_OFFER_STATUS_LABELS, COMMERCE_ORDER_STATUS_LABELS, offerBook, offerVendor } from '../../types/commerce.types';
 import { useAuth } from '../../context/AuthContext';
 import BookOrdersPage from '../BookOrdersPage';
+import { setActingVendor } from '../../lib/commerceActingVendor';
 import { compressCoverImage, formatBytes } from '../../lib/commerce/compressCoverImage';
 
 type Tab =
@@ -99,7 +108,7 @@ const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   { key: 'teklifler', label: 'Tüm Teklifler', icon: <Eye className="w-4 h-4" /> },
   { key: 'siparisler', label: 'Mağaza siparişleri', icon: <ShoppingBag className="w-4 h-4" /> },
   { key: 'hakedisler', label: 'Hakedişler', icon: <Wallet className="w-4 h-4" /> },
-  { key: 'kuponlar', label: 'Kuponlar', icon: <CheckCircle2 className="w-4 h-4" /> },
+  { key: 'kuponlar', label: 'Kuponlar', icon: <Tag className="w-4 h-4" /> },
   { key: 'raporlar', label: 'Raporlar', icon: <ChevronDown className="w-4 h-4" /> },
   { key: 'ayarlar', label: 'Ayarlar', icon: <Settings className="w-4 h-4" /> },
 ];
@@ -567,6 +576,7 @@ function VendorUsersPanel({ vendor, onClose }: { vendor: CommerceVendor; onClose
 // Satıcılar sekmesi
 // ──────────────────────────────────────────────────────────────────────
 function VendorTab() {
+  const navigate = useNavigate();
   const [vendors, setVendors] = useState<CommerceVendor[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVendor, setModalVendor] = useState<CommerceVendor | null | 'new'>(null);
@@ -636,6 +646,16 @@ function VendorTab() {
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex gap-2 items-center">
+                    <button
+                      onClick={() => {
+                        setActingVendor({ id: v.id, name: v.name });
+                        navigate('/vendor-panel');
+                      }}
+                      className="flex items-center gap-1 text-xs bg-emerald-50 text-emerald-800 px-2 py-1 rounded-lg hover:bg-emerald-100 font-medium"
+                      title="Satıcı paneline geç"
+                    >
+                      <LogIn className="w-3.5 h-3.5" /> Panele geç
+                    </button>
                     <button
                       onClick={() => setUsersPanel(v)}
                       className="flex items-center gap-1 text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded-lg hover:bg-indigo-100 font-medium"
@@ -1462,6 +1482,9 @@ function SiparislerTab() {
   const [orders, setOrders] = useState<CommerceOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState('');
+  const [editing, setEditing] = useState<CommerceOrder | null>(null);
+  const [form, setForm] = useState({ customer_name: '', customer_email: '', customer_phone: '', notes: '', status: '' });
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1473,10 +1496,49 @@ function SiparislerTab() {
   }, [filterStatus]);
   useEffect(() => { load(); }, [load]);
 
+  const openEdit = (o: CommerceOrder) => {
+    setEditing(o);
+    setForm({
+      customer_name: o.customer_name || '',
+      customer_email: o.customer_email || '',
+      customer_phone: o.customer_phone || '',
+      notes: o.notes || '',
+      status: o.status,
+    });
+  };
+
+  const handleSave = async () => {
+    if (!editing) return;
+    setSaving(true);
+    try {
+      await caUpdateOrder(editing.id, {
+        customer_name: form.customer_name.trim() || null,
+        customer_email: form.customer_email.trim() || null,
+        customer_phone: form.customer_phone.trim() || null,
+        notes: form.notes.trim() || null,
+        status: form.status as CommerceOrder['status'],
+      });
+      toast.success('Sipariş güncellendi');
+      setEditing(null);
+      load();
+    } catch (e: unknown) { toast.error((e as Error).message); }
+    finally { setSaving(false); }
+  };
+
+  const handleDelete = async (o: CommerceOrder) => {
+    if (!confirm(`${o.order_number} siparişini silmek istediğinize emin misiniz?`)) return;
+    try {
+      await caDeleteOrder(o.id);
+      toast.success('Sipariş silindi');
+      if (editing?.id === o.id) setEditing(null);
+      load();
+    } catch (e: unknown) { toast.error((e as Error).message); }
+  };
+
   return (
     <div>
       <div className="flex justify-between items-center mb-4 gap-3">
-        <h2 className="text-lg font-semibold">Siparişler</h2>
+        <h2 className="text-lg font-semibold">Mağaza siparişleri</h2>
         <select
           className="border rounded-lg text-sm px-2 py-1.5 focus:outline-none"
           value={filterStatus}
@@ -1500,6 +1562,7 @@ function SiparislerTab() {
                 <th className="px-4 py-3 font-medium">Toplam</th>
                 <th className="px-4 py-3 font-medium">Durum</th>
                 <th className="px-4 py-3 font-medium">Tarih</th>
+                <th className="px-4 py-3 font-medium">İşlem</th>
               </tr>
             </thead>
             <tbody>
@@ -1510,22 +1573,282 @@ function SiparislerTab() {
                   <td className="px-4 py-3 font-medium">{formatCommerceTry(o.total_kurus)}</td>
                   <td className="px-4 py-3"><StatusBadge status={o.status} /></td>
                   <td className="px-4 py-3 text-gray-500">{new Date(o.created_at).toLocaleDateString('tr-TR')}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex gap-2">
+                      <button onClick={() => openEdit(o)} className="text-gray-400 hover:text-indigo-600" title="Düzenle">
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => handleDelete(o)} className="text-gray-400 hover:text-red-500" title="Sil">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
               {orders.length === 0 && (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">Sipariş bulunamadı</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Sipariş bulunamadı</td></tr>
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {editing && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <h3 className="font-semibold">Sipariş düzenle · {editing.order_number}</h3>
+              <button onClick={() => setEditing(null)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+            <div className="px-6 py-4 space-y-3">
+              <div>
+                <label className="text-xs text-gray-500">Müşteri adı</label>
+                <input className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-500">E-posta</label>
+                  <input className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={form.customer_email} onChange={(e) => setForm({ ...form, customer_email: e.target.value })} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">Telefon</label>
+                  <input className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={form.customer_phone} onChange={(e) => setForm({ ...form, customer_phone: e.target.value })} />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">Durum</label>
+                <select className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                  {Object.entries(COMMERCE_ORDER_STATUS_LABELS).map(([v, l]) => (
+                    <option key={v} value={v}>{l}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">Not</label>
+                <textarea className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm h-20" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+              </div>
+            </div>
+            <div className="px-6 py-3 border-t flex justify-between">
+              <button onClick={() => handleDelete(editing)} className="text-sm text-red-600 hover:underline">Sil</button>
+              <div className="flex gap-2">
+                <button onClick={() => setEditing(null)} className="text-sm text-gray-500 px-3 py-1.5">Vazgeç</button>
+                <button onClick={handleSave} disabled={saving} className="text-sm bg-indigo-600 text-white px-4 py-1.5 rounded-lg disabled:opacity-50">
+                  {saving ? 'Kaydediliyor…' : 'Kaydet'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-// ──────────────────────────────────────────────────────────────────────
-// Hakedişler sekmesi
-// ──────────────────────────────────────────────────────────────────────
+function KuponlarTab() {
+  const [coupons, setCoupons] = useState<CommerceCoupon[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState<null | 'new' | CommerceCoupon>(null);
+  const [form, setForm] = useState({
+    code: '',
+    description: '',
+    discount_type: 'percent' as 'percent' | 'fixed',
+    discount_value: '',
+    min_order_lira: '',
+    max_discount_lira: '',
+    usage_limit: '',
+    is_active: true,
+  });
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await caListCoupons();
+      setCoupons(r.coupons || []);
+    } catch (e: unknown) { toast.error((e as Error).message); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const openNew = () => {
+    setForm({
+      code: '',
+      description: '',
+      discount_type: 'percent',
+      discount_value: '',
+      min_order_lira: '',
+      max_discount_lira: '',
+      usage_limit: '',
+      is_active: true,
+    });
+    setModal('new');
+  };
+
+  const openEdit = (c: CommerceCoupon) => {
+    setForm({
+      code: c.code,
+      description: c.description || '',
+      discount_type: c.discount_type,
+      discount_value: c.discount_type === 'percent' ? String(c.discount_value) : String((c.discount_value || 0) / 100),
+      min_order_lira: c.min_order_kurus ? String(c.min_order_kurus / 100) : '',
+      max_discount_lira: c.max_discount_kurus ? String(c.max_discount_kurus / 100) : '',
+      usage_limit: c.usage_limit != null ? String(c.usage_limit) : '',
+      is_active: c.is_active,
+    });
+    setModal(c);
+  };
+
+  const handleSave = async () => {
+    if (!form.code.trim()) { toast.error('Kupon kodu gerekli'); return; }
+    const value = parseFloat(form.discount_value);
+    if (!Number.isFinite(value) || value <= 0) { toast.error('İndirim değeri girin'); return; }
+    setSaving(true);
+    try {
+      const payload = {
+        code: form.code.trim().toUpperCase(),
+        description: form.description.trim() || null,
+        discount_type: form.discount_type,
+        discount_value: form.discount_type === 'percent' ? Math.round(value) : Math.round(value * 100),
+        min_order_kurus: form.min_order_lira ? Math.round(parseFloat(form.min_order_lira) * 100) : 0,
+        max_discount_kurus: form.max_discount_lira ? Math.round(parseFloat(form.max_discount_lira) * 100) : null,
+        usage_limit: form.usage_limit ? parseInt(form.usage_limit, 10) : null,
+        is_active: form.is_active,
+      };
+      if (modal === 'new') await caCreateCoupon(payload);
+      else if (modal && modal !== 'new') await caUpdateCoupon(modal.id, payload);
+      toast.success(modal === 'new' ? 'Kupon oluşturuldu' : 'Kupon güncellendi');
+      setModal(null);
+      load();
+    } catch (e: unknown) { toast.error((e as Error).message); }
+    finally { setSaving(false); }
+  };
+
+  const handleDelete = async (c: CommerceCoupon) => {
+    if (!confirm(`${c.code} kuponunu silmek istiyor musunuz?`)) return;
+    try {
+      await caDeleteCoupon(c.id);
+      toast.success('Kupon silindi');
+      load();
+    } catch (e: unknown) { toast.error((e as Error).message); }
+  };
+
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-lg font-semibold flex items-center gap-2"><Tag className="w-5 h-5 text-indigo-600" /> Kuponlar</h2>
+        <button onClick={openNew} className="flex items-center gap-1 text-sm bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700">
+          <Plus className="w-4 h-4" /> Yeni kupon
+        </button>
+      </div>
+      {loading ? (
+        <div className="flex justify-center p-10"><Loader2 className="animate-spin w-6 h-6 text-gray-400" /></div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-gray-200">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-gray-600 text-left">
+              <tr>
+                <th className="px-4 py-3 font-medium">Kod</th>
+                <th className="px-4 py-3 font-medium">İndirim</th>
+                <th className="px-4 py-3 font-medium">Min. sipariş</th>
+                <th className="px-4 py-3 font-medium">Kullanım</th>
+                <th className="px-4 py-3 font-medium">Durum</th>
+                <th className="px-4 py-3 font-medium">İşlem</th>
+              </tr>
+            </thead>
+            <tbody>
+              {coupons.map((c) => (
+                <tr key={c.id} className="border-t border-gray-100 hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <div className="font-mono font-semibold">{c.code}</div>
+                    {c.description && <div className="text-xs text-gray-400">{c.description}</div>}
+                  </td>
+                  <td className="px-4 py-3">
+                    {c.discount_type === 'percent' ? `%${c.discount_value}` : formatCommerceTry(c.discount_value)}
+                  </td>
+                  <td className="px-4 py-3">{c.min_order_kurus ? formatCommerceTry(c.min_order_kurus) : '—'}</td>
+                  <td className="px-4 py-3 text-xs">{c.usage_count}/{c.usage_limit ?? '∞'}</td>
+                  <td className="px-4 py-3">
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${c.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                      {c.is_active ? 'Aktif' : 'Pasif'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex gap-2">
+                      <button onClick={() => openEdit(c)} className="text-gray-400 hover:text-indigo-600"><Pencil className="w-4 h-4" /></button>
+                      <button onClick={() => handleDelete(c)} className="text-gray-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {coupons.length === 0 && (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Henüz kupon yok</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {modal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <h3 className="font-semibold">{modal === 'new' ? 'Yeni kupon' : 'Kuponu düzenle'}</h3>
+              <button onClick={() => setModal(null)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+            <div className="px-6 py-4 space-y-3">
+              <div>
+                <label className="text-xs text-gray-500">Kod *</label>
+                <input className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm font-mono uppercase" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="VIP10" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">Açıklama</label>
+                <input className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-500">Tür</label>
+                  <select className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={form.discount_type} onChange={(e) => setForm({ ...form, discount_type: e.target.value as 'percent' | 'fixed' })}>
+                    <option value="percent">Yüzde (%)</option>
+                    <option value="fixed">Sabit tutar (₺)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">{form.discount_type === 'percent' ? 'Yüzde' : 'Tutar (₺)'}</label>
+                  <input type="number" min="0" step="0.01" className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={form.discount_value} onChange={(e) => setForm({ ...form, discount_value: e.target.value })} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-500">Min. sipariş (₺)</label>
+                  <input type="number" min="0" step="0.01" className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={form.min_order_lira} onChange={(e) => setForm({ ...form, min_order_lira: e.target.value })} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">Maks. indirim (₺)</label>
+                  <input type="number" min="0" step="0.01" className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={form.max_discount_lira} onChange={(e) => setForm({ ...form, max_discount_lira: e.target.value })} />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">Kullanım limiti</label>
+                <input type="number" min="0" className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={form.usage_limit} onChange={(e) => setForm({ ...form, usage_limit: e.target.value })} placeholder="Boş = sınırsız" />
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} />
+                Aktif
+              </label>
+            </div>
+            <div className="px-6 py-3 border-t flex justify-end gap-2">
+              <button onClick={() => setModal(null)} className="text-sm text-gray-500 px-3 py-1.5">Vazgeç</button>
+              <button onClick={handleSave} disabled={saving} className="text-sm bg-indigo-600 text-white px-4 py-1.5 rounded-lg disabled:opacity-50">
+                {saving ? 'Kaydediliyor…' : 'Kaydet'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function HakedislerTab() {
   const [payouts, setPayouts] = useState<CommerceVendorPayout[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1795,6 +2118,7 @@ export default function KitapPazaryeriPage() {
       case 'onaylar': return <OnaylarTab />;
       case 'kitaplar': return <KitaplarTab />;
       case 'siparisler': return <SiparislerTab />;
+      case 'kuponlar': return <KuponlarTab />;
       case 'hakedisler': return <HakedislerTab />;
       case 'raporlar': return <RaporlarTab />;
       case 'ayarlar': return <AyarlarTab />;

@@ -7,9 +7,11 @@ const OP_ALIASES = {
   resolve: 'checkout.resolve',
   pay: 'checkout.pay',
   update_customer: 'checkout.update_customer',
+  apply_coupon: 'checkout.apply_coupon',
   'checkout.resolve': 'checkout.resolve',
   'checkout.pay': 'checkout.pay',
   'checkout.update_customer': 'checkout.update_customer',
+  'checkout.apply_coupon': 'checkout.apply_coupon',
   'order.paid': 'order.paid',
 };
 
