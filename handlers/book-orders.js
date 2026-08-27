@@ -9,7 +9,7 @@ import {
   activateBookOrderMetaTemplate,
   BOOK_ORDER_META_NAME
 } from '../api/_lib/book-order-notify.js';
-import { getMetaWhatsAppEnvStatus, getMetaWebhookEnvStatus } from '../api/_lib/meta-whatsapp.js';
+import { getMetaWhatsAppEnvStatus, getMetaWebhookEnvStatus, loadMetaWhatsAppSecretsFromDb } from '../api/_lib/meta-whatsapp.js';
 import { fetchMetaTemplatesFromPhoneWaba } from '../api/_lib/meta-templates-sync.js';
 import { getGatewaySendEnvStatus, getGatewaySessionStatus, bookOrderGatewaySessionId, resolveBookOrderGatewaySessionId, listConnectedGatewaySessionIds, probeGatewayHealth } from '../api/_lib/whatsapp-gateway-send.js';
 import { ensureBooksellerPortalToken } from '../api/_lib/kitapci-portal.js';
@@ -296,6 +296,7 @@ async function insertBookOrder(payload) {
 }
 
 export default async function handler(req, res) {
+  await loadMetaWhatsAppSecretsFromDb();
   const op = String(req.query?.op || '').trim();
   let scope = String(req.query?.scope || '').trim();
   if (!scope && typeof req.url === 'string') {
