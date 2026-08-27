@@ -161,7 +161,7 @@ function newestClassroom(rows) {
     .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0] || null;
 }
 
-export const EDESIS_AUTO_ENROLL_MARKER = 'edesis-auto-enroll-terms-2026-08-27f';
+export const EDESIS_AUTO_ENROLL_MARKER = 'edesis-auto-enroll-terms-2026-08-27g';
 
 export function pickEdesisClassroom(classrooms, { classLevel, branch, termKind } = {}) {
   const list = Array.isArray(classrooms) ? classrooms : [];
@@ -250,7 +250,10 @@ function buildStudentBody(pending, classroomId, termId) {
     password,
     passwordRepeat: password
   };
-  if (termId != null && termId !== '') body.termId = Number(termId) || termId;
+  if (termId != null && termId !== '') {
+    const id = Number(termId) || termId;
+    body.donemId = id;
+  }
   const email = String(pending.email || '').trim().toLowerCase();
   if (email) body.email = email;
   const phone = edesisPhone(pending.phone_e164 || pending.phone);
@@ -402,8 +405,8 @@ async function findExistingEdesisStudent(pending, termId) {
   return null;
 }
 
-async function createEdesisStudentWithFallback(pending, classroomId, cfg) {
-  const full = buildStudentBody(pending, classroomId);
+async function createEdesisStudentWithFallback(pending, classroomId, cfg, termId) {
+  const full = buildStudentBody(pending, classroomId, termId);
   try {
     return await createEdesisStudent(full, cfg);
   } catch (firstErr) {
@@ -415,6 +418,7 @@ async function createEdesisStudentWithFallback(pending, classroomId, cfg) {
         password: full.password,
         passwordRepeat: full.passwordRepeat,
         studentState: 3,
+        ...(full.donemId != null ? { donemId: full.donemId } : {}),
         ...(full.email ? { email: full.email } : {})
       },
       {
@@ -424,6 +428,7 @@ async function createEdesisStudentWithFallback(pending, classroomId, cfg) {
         password: full.password,
         passwordRepeat: full.passwordRepeat,
         studentState: 3,
+        ...(full.donemId != null ? { donemId: full.donemId } : {}),
         ...(full.email ? { email: full.email } : {})
       }
     ];
@@ -674,22 +679,37 @@ export async function provisionEdesisStudent({
 
   if (existingId && allowRelinkToNewTerm) {
     const moved = await moveStudentToTerm(existingId, term, classroom);
-    return {
-      ok: moved.ok,
-      created: false,
-      edesisStudentId: existingId,
-      matchMethod: 'term_changed',
-      classroom: classroomInfo,
-      term,
-      termAssigned: moved.ok,
-      error: moved.ok ? undefined : moved.error,
-      marker: EDESIS_AUTO_ENROLL_MARKER
-    };
+    const missing = /bulunamad[ıi]|not found|nesne bulunamad/i.test(String(moved.error || ''));
+    if (moved.ok) {
+      return {
+        ok: true,
+        created: false,
+        edesisStudentId: existingId,
+        matchMethod: 'term_changed',
+        classroom: classroomInfo,
+        term,
+        termAssigned: true,
+        marker: EDESIS_AUTO_ENROLL_MARKER
+      };
+    }
+    if (!missing) {
+      return {
+        ok: false,
+        created: false,
+        edesisStudentId: existingId,
+        matchMethod: 'term_changed',
+        classroom: classroomInfo,
+        term,
+        termAssigned: false,
+        error: moved.error,
+        marker: EDESIS_AUTO_ENROLL_MARKER
+      };
+    }
   }
 
   let created;
   try {
-    created = await createEdesisStudentWithFallback(source, classroom.id, cfg);
+    created = await createEdesisStudentWithFallback(source, classroom.id, cfg, term.id);
   } catch (e) {
     const again =
       (await findExistingEdesisStudent(source, term.id)) || (await findExistingEdesisStudent(source));
