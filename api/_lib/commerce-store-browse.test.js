@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   bookMatchesCategory,
+  canonicalBookSeries,
   categoryBelongsToClass,
   classKeyMatchesLevels,
   classKeysEqual,
@@ -83,5 +84,17 @@ describe('commerce-store-browse', () => {
     expect(pub.classes.map((c) => c.key)).toEqual(['8']);
     expect(pub.categories[0].cover_image_url).toBeUndefined();
     expect(pub.classes[0].label).toBe('8. Sınıf');
+  });
+
+  it('puts Deneme Kulübü into Denemeler even if metadata.series is VIP', () => {
+    const book = {
+      isbn: '978-625-99881-4-2',
+      slug: 'online-vip-dershane-lgs-hazirlik-40-turkiye-geneli-deneme-kulubu-paketi',
+      title: 'Online VIP Dershane – LGS Hazırlık 40+ Türkiye Geneli Deneme Kulübü Paketi',
+      metadata: { series: 'vip-lgs-8-egitim' },
+    };
+    expect(canonicalBookSeries(book)).toBe('lgs-8-denemeler');
+    expect(bookMatchesCategory(book, { series: 'lgs-8-denemeler' })).toBe(true);
+    expect(bookMatchesCategory(book, { series: 'vip-lgs-8-egitim' })).toBe(false);
   });
 });
