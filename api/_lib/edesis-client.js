@@ -4070,6 +4070,13 @@ function edesisHttpErrorText(r, fallback) {
     const msg = err.message || err.details || err.error;
     if (msg) return String(msg);
   }
+  if (j.errors) {
+    try {
+      return `${j.title || fallback}: ${JSON.stringify(j.errors).slice(0, 280)}`;
+    } catch {
+      return j.title || fallback;
+    }
+  }
   if (j.message) return String(j.message);
   if (j.title) return String(j.title);
   try {
