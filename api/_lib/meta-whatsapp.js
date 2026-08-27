@@ -1,9 +1,68 @@
+import { supabaseAdmin } from './supabase-admin.js';
 import { normalizePhoneDigitsForMeta } from './phone-whatsapp.js';
 import { uploadParentPdfForMeta } from './meta-document-storage.js';
 
 export { normalizePhoneToE164 } from './phone-whatsapp.js';
 
 const GRAPH = () => String(process.env.META_GRAPH_API_VERSION || 'v21.0').trim() || 'v21.0';
+
+let metaSecretsAppliedAt = 0;
+
+function applyMetaWhatsAppSecrets(wa = {}) {
+  const tokenVal = String(wa.token || wa.access_token || '').trim();
+  const phoneVal = String(wa.phone_number_id || wa.phoneNumberId || '').trim();
+  const wabaVal = String(wa.waba_id || wa.wabaId || '').trim();
+  if (tokenVal) process.env.META_WHATSAPP_TOKEN = tokenVal;
+  if (phoneVal) process.env.META_PHONE_NUMBER_ID = phoneVal;
+  if (wabaVal) process.env.META_WABA_ID = wabaVal;
+  metaSecretsAppliedAt = Date.now();
+  return { token: tokenVal, phone_number_id: phoneVal, waba_id: wabaVal };
+}
+
+/** commerce_settings.meta.whatsapp — Vercel WABA yanlışsa panel buradan düzeltir. */
+export async function loadMetaWhatsAppSecretsFromDb() {
+  if (Date.now() - metaSecretsAppliedAt < 60_000) return;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('commerce_settings')
+      .select('meta')
+      .is('institution_id', null)
+      .maybeSingle();
+    if (error) {
+      console.warn('[meta-whatsapp] secrets load:', error.message);
+      return;
+    }
+    const wa = data?.meta?.whatsapp && typeof data.meta.whatsapp === 'object' ? data.meta.whatsapp : {};
+    applyMetaWhatsAppSecrets(wa);
+  } catch (e) {
+    console.warn('[meta-whatsapp] secrets load failed:', e instanceof Error ? e.message : e);
+  }
+}
+
+export async function saveMetaWhatsAppSecretsToDb(patch = {}) {
+  const { data: row, error: readErr } = await supabaseAdmin
+    .from('commerce_settings')
+    .select('id, meta')
+    .is('institution_id', null)
+    .maybeSingle();
+  if (readErr) throw new Error(readErr.message);
+  if (!row?.id) throw new Error('commerce_settings_global_missing');
+  const prevMeta = row.meta && typeof row.meta === 'object' ? row.meta : {};
+  const prev = prevMeta.whatsapp && typeof prevMeta.whatsapp === 'object' ? prevMeta.whatsapp : {};
+  const next = { ...prev };
+  if (patch.token) next.token = String(patch.token).trim();
+  if (patch.phone_number_id) next.phone_number_id = String(patch.phone_number_id).trim();
+  if (patch.waba_id) next.waba_id = String(patch.waba_id).trim();
+  next.updated_at = new Date().toISOString();
+  const meta = { ...prevMeta, whatsapp: next };
+  const { error: writeErr } = await supabaseAdmin
+    .from('commerce_settings')
+    .update({ meta, updated_at: new Date().toISOString() })
+    .eq('id', row.id);
+  if (writeErr) throw new Error(writeErr.message);
+  applyMetaWhatsAppSecrets(next);
+  return next;
+}
 
 function token() {
   return process.env.META_WHATSAPP_TOKEN?.trim();

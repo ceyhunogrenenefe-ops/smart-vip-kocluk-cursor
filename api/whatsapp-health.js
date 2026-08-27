@@ -1,4 +1,4 @@
-import { getMetaWhatsAppEnvStatus, metaWhatsAppConfigured } from './_lib/meta-whatsapp.js';
+import { getMetaWhatsAppEnvStatus, loadMetaWhatsAppSecretsFromDb, metaWhatsAppConfigured } from './_lib/meta-whatsapp.js';
 import { getTwilioEnvStatus } from './_lib/whatsapp-twilio.js';
 import { resolvePrimaryWabaId } from './_lib/meta-templates-sync.js';
 import {
@@ -30,6 +30,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  await loadMetaWhatsAppSecretsFromDb();
   const meta = getMetaWhatsAppEnvStatus();
   const twilio = getTwilioEnvStatus();
   const metaReady = metaWhatsAppConfigured();
