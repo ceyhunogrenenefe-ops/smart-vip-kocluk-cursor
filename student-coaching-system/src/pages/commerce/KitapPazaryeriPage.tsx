@@ -869,6 +869,21 @@ const BOOK_SERIES = [
   { value: 'lgs-8-denemeler', label: 'Denemeler' },
 ];
 
+function inferBookSeries(book: CatalogBook | null | undefined): string {
+  if (!book) return 'vip-lgs-8-egitim';
+  const isbn = String(book.isbn || '').replace(/[^0-9]/g, '');
+  const slug = String(book.slug || '').toLowerCase();
+  const title = String(book.title || '').toLocaleLowerCase('tr');
+  const deneme =
+    isbn === '9786259988142' ||
+    slug.includes('deneme-kulub') ||
+    slug.includes('deneme-klub') ||
+    title.includes('deneme kulübü') ||
+    title.includes('deneme kulubu');
+  if (deneme) return 'lgs-8-denemeler';
+  return String(book.metadata?.series ?? 'vip-lgs-8-egitim');
+}
+
 function BookEditorModal({
   book,
   onClose,
@@ -886,7 +901,7 @@ function BookEditorModal({
   const [author, setAuthor] = useState(book?.author ?? '');
   const [subject, setSubject] = useState(book?.subject ?? '');
   const [classLevels, setClassLevels] = useState<string[]>(book?.class_levels?.length ? book.class_levels : ['8', 'LGS']);
-  const [series, setSeries] = useState(String(book?.metadata?.series ?? 'vip-lgs-8-egitim'));
+  const [series, setSeries] = useState(inferBookSeries(book));
   const [fascicle, setFascicle] = useState(
     book?.metadata?.fascicle_count != null ? String(book.metadata.fascicle_count) : '',
   );

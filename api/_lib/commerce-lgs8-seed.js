@@ -13,6 +13,7 @@ import {
   offerStatusForPrice,
   yankiVendorDefaults,
 } from './commerce-lgs8-catalog.js';
+import { canonicalBookSeries } from './commerce-store-browse.js';
 
 const DEFAULT_INSTITUTION_ID = '73323d75-eea1-4552-8bba-d50555423589';
 
@@ -404,7 +405,7 @@ export async function listLgs8Collections() {
 
   const bySeries = new Map();
   for (const b of books || []) {
-    const series = b.metadata?.series;
+    const series = canonicalBookSeries(b) || b.metadata?.series;
     if (!series) continue;
     if (!bySeries.has(series)) bySeries.set(series, []);
     const approved = (b.commerce_vendor_offers || []).filter((o) => o.status === 'approved' && o.stock_quantity > 0);
