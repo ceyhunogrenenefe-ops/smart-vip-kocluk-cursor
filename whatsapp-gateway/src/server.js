@@ -111,6 +111,17 @@ const SEND_MESSAGE_RETRIES = Math.min(
 );
 /** İstenen oturum bağlı değilse başka bağlı WhatsApp hattından gönder (otomasyon). Varsayılan kapalı — WA_SHARED_SEND_FALLBACK=1 ile açılır. */
 const SHARED_SEND_FALLBACK = String(process.env.WA_SHARED_SEND_FALLBACK ?? '0') !== '0';
+/** Aynı oturumdan peş peşe otomatik gönderimde Signal yarışı → alıcıda «Mesaj bekleniyor». Manuel tek gönderimde bekleme yok (önceki yok). */
+const SEND_PACE_MS = Math.min(8_000, Math.max(0, Number(process.env.WA_SEND_PACE_MS) || 1200));
+const ASSERT_SESSIONS_TIMEOUT_MS = Math.min(
+  15_000,
+  Math.max(3_000, Number(process.env.WA_ASSERT_SESSIONS_TIMEOUT_MS) || 8_000)
+);
+const RECIPIENT_JID_TTL_MS = Math.min(
+  24 * 3600_000,
+  Math.max(60_000, Number(process.env.WA_RECIPIENT_JID_TTL_MS) || 6 * 3600_000)
+);
+const GATEWAY_FIX_MARKER = 'wa-auto-pending-fix-2026-08-27';
 
 app.use(
   cors({
@@ -378,6 +389,10 @@ const sessions = new Map();
 const setupInFlight = new Map();
 /** Aynı coach için gönderimleri sırala (reconnect yarışını önler). */
 const sendInFlight = new Map();
+/** Son gönderim bitiş zamanı — SEND_PACE_MS aralığı. */
+const sendLastFinishedAt = new Map();
+/** digits → { jid, exp } — burst sırasında onWhatsApp timeout’unu keser. */
+const recipientJidCache = new Map();
 
 const b64urlToBuffer = (input) => {
   const normalized = String(input || '').replace(/-/g, '+').replace(/_/g, '/');
@@ -536,7 +551,21 @@ function messageKeysMatch(a, b) {
   return jidBare(a.remoteJid) === jidBare(b.remoteJid);
 }
 
-/** WhatsApp'ın döndürdüğü gerçek JID (PN veya LID); yoksa numara kayıtlı değil. */
+async function resolveLidForPn(sock, pnJid) {
+  try {
+    const lid = await sock.signalRepository?.lidMapping?.getLIDForPN?.(pnJid);
+    if (lid && String(lid).includes('@')) return String(lid);
+  } catch {
+    /* eşleme yok */
+  }
+  return null;
+}
+
+async function queryOnWhatsApp(sock, pnJid) {
+  return withTimeout(() => sock.onWhatsApp(pnJid), ON_WHATSAPP_TIMEOUT_MS, 'on_whatsapp_timeout');
+}
+
+/** WhatsApp'ın döndürdüğü gerçek JID (PN veya LID). Burst’te timeout → PN fallback «Mesaj bekleniyor» üretir. */
 async function resolveRecipientJid(sock, digits) {
   const fallbackPn = ensurePhoneJid(digits);
   if (!fallbackPn) {
@@ -545,40 +574,50 @@ async function resolveRecipientJid(sock, digits) {
     throw err;
   }
 
+  const cached = recipientJidCache.get(digits);
+  if (cached?.jid && Date.now() < Number(cached.exp || 0)) {
+    return cached.jid;
+  }
+
   let onWaResults;
   try {
-    onWaResults = await withTimeout(
-      () => sock.onWhatsApp(fallbackPn),
-      ON_WHATSAPP_TIMEOUT_MS,
-      'on_whatsapp_timeout'
-    );
+    onWaResults = await queryOnWhatsApp(sock, fallbackPn);
   } catch (checkErr) {
     const msg = checkErr instanceof Error ? checkErr.message : String(checkErr);
     if (msg === 'on_whatsapp_timeout' || /jid\.replace is not a function/i.test(msg)) {
-      logger.warn({ digits, err: msg }, 'onWhatsApp failed — PN jid ile denenecek');
-      return fallbackPn;
+      logger.warn({ digits, err: msg }, 'onWhatsApp timeout — retry');
+      await sleep(350);
+      try {
+        onWaResults = await queryOnWhatsApp(sock, fallbackPn);
+      } catch (retryErr) {
+        const rmsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+        logger.warn({ digits, err: rmsg }, 'onWhatsApp failed after retry — LID/PN fallback');
+        return (await resolveLidForPn(sock, fallbackPn)) || fallbackPn;
+      }
+    } else {
+      throw checkErr;
     }
-    throw checkErr;
   }
 
   const hit = Array.isArray(onWaResults) ? onWaResults.find((r) => r?.exists) : null;
   if (!hit) {
-    logger.warn({ digits }, 'onWhatsApp: numara bulunamadı — PN jid ile denenecek');
-    return fallbackPn;
-  }
-
-  let jid = String(hit.jid || hit.lid || '').trim();
-  if (!jid) jid = fallbackPn;
-
-  try {
-    const lid = await sock.signalRepository?.lidMapping?.getLIDForPN?.(jid);
-    if (lid && String(lid).includes('@')) {
-      jid = String(lid);
+    if (!SKIP_ON_WHATSAPP_CHECK) {
+      const err = new Error('number_not_on_whatsapp');
+      err.httpStatus = 400;
+      err.phone = digits;
+      throw err;
     }
-  } catch {
-    /* LID eşlemesi yoksa PN jid yeterli */
+    logger.warn({ digits }, 'onWhatsApp: numara bulunamadı — LID/PN ile denenecek');
+    return (await resolveLidForPn(sock, fallbackPn)) || fallbackPn;
   }
 
+  let jid = String(hit.jid || hit.lid || '').trim() || fallbackPn;
+  if (!String(jid).includes('@lid')) {
+    const lid = await resolveLidForPn(sock, fallbackPn);
+    if (lid) jid = lid;
+  }
+
+  recipientJidCache.set(digits, { jid, exp: Date.now() + RECIPIENT_JID_TTL_MS });
   return jid;
 }
 
@@ -611,21 +650,50 @@ function waitForMessageServerAck(sock, key, timeoutMs = 9000) {
   });
 }
 
-async function sendTextWithDeliveryCheck(sock, jid, message, retriesLeft = SEND_MESSAGE_RETRIES, coachId = '') {
-  // Signal oturumunu ısıt — ilk gönderimde "Mesaj bekleniyor" süresini kısaltır
-  try {
-    if (typeof sock.assertSessions === 'function') {
-      await withTimeout(() => sock.assertSessions([jid], true), 4_000, 'assert_sessions_timeout');
-    } else if (typeof sock.presenceSubscribe === 'function') {
+async function warmSignalSession(sock, jid, coachId) {
+  if (typeof sock.assertSessions === 'function') {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await withTimeout(
+          () => sock.assertSessions([jid], true),
+          ASSERT_SESSIONS_TIMEOUT_MS,
+          'assert_sessions_timeout'
+        );
+        return;
+      } catch (warmErr) {
+        logger.warn(
+          { coachId, attempt, err: warmErr?.message || warmErr },
+          'assertSessions failed'
+        );
+        if (attempt < 2) await sleep(700);
+      }
+    }
+    logger.warn(
+      { coachId, jid: String(jid || '').slice(0, 40) },
+      'assertSessions failed twice — settle then send'
+    );
+    await sleep(800);
+    return;
+  }
+  if (typeof sock.presenceSubscribe === 'function') {
+    try {
       await withTimeout(() => sock.presenceSubscribe(jid), 2_500, 'presence_timeout');
       await sleep(250);
+    } catch (warmErr) {
+      logger.debug({ coachId, err: warmErr?.message || warmErr }, 'presenceSubscribe skipped');
     }
-  } catch (warmErr) {
-    logger.debug(
-      { coachId, err: warmErr?.message || warmErr },
-      'session warm skipped — sending anyway'
-    );
   }
+}
+
+async function sendTextWithDeliveryCheck(
+  sock,
+  jid,
+  message,
+  retriesLeft = SEND_MESSAGE_RETRIES,
+  coachId = '',
+  aliasJids = []
+) {
+  await warmSignalSession(sock, jid, coachId);
 
   const result = await sendTextWithTimeout(sock, jid, message, retriesLeft);
   const mid = result?.key?.id ? String(result.key.id).trim() : '';
@@ -635,13 +703,11 @@ async function sendTextWithDeliveryCheck(sock, jid, message, retriesLeft = SEND_
     throw err;
   }
 
+  const putOpts = { coachId, fallbackText: message, aliasJids };
   // Retry için içeriği hemen sakla (fallbackText: result.message boş/eksik olsa bile)
-  await messageStore.put(result, { coachId, fallbackText: message });
+  await messageStore.put(result, putOpts);
   if (!result.message) {
-    await messageStore.put(
-      { key: result.key, message: { conversation: message } },
-      { coachId, fallbackText: message }
-    );
+    await messageStore.put({ key: result.key, message: { conversation: message } }, putOpts);
   }
 
   const immediateStatus = result?.status;
@@ -658,7 +724,7 @@ async function sendTextWithDeliveryCheck(sock, jid, message, retriesLeft = SEND_
     throw err;
   }
   // ACK sonrası store'u tazele (bazen message alanı sonradan dolar)
-  await messageStore.put(result, { coachId, fallbackText: message });
+  await messageStore.put(result, { coachId, fallbackText: message, aliasJids });
   return result;
 }
 
@@ -688,7 +754,14 @@ async function runInCoachSendQueue(coachId, task) {
   const prev = sendInFlight.get(id) || Promise.resolve();
   const run = (async () => {
     await prev.catch(() => undefined);
-    return task();
+    const last = Number(sendLastFinishedAt.get(id) || 0);
+    const wait = last && SEND_PACE_MS > 0 ? SEND_PACE_MS - (Date.now() - last) : 0;
+    if (wait > 0) await sleep(wait);
+    try {
+      return await task();
+    } finally {
+      sendLastFinishedAt.set(id, Date.now());
+    }
   })();
   sendInFlight.set(id, run);
   try {
@@ -1053,9 +1126,14 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
         try {
           const msg = await messageStore.getMessage(key);
           if (msg) return msg;
-          logger.debug(
-            { coachId, id: key?.id ? String(key.id).slice(0, 12) : null },
-            'getMessage miss — retry content unavailable'
+          logger.warn(
+            {
+              coachId,
+              id: key?.id ? String(key.id).slice(0, 16) : null,
+              remote_jid: key?.remoteJid ? String(key.remoteJid).slice(0, 48) : null,
+              store_size: messageStore.stats().size,
+            },
+            'getMessage miss — retry content unavailable (alıcıda Mesaj bekleniyor)'
           );
           return undefined;
         } catch (err) {
@@ -1343,6 +1421,8 @@ app.get('/health', (_req, res) => {
     message_store: storeStats,
     message_store_healthy: storeStats.puts === 0 || storeStats.hits + storeStats.misses === 0 || storeStats.hits > 0 || storeStats.size > 0,
     get_message_implemented: true,
+    marker: GATEWAY_FIX_MARKER,
+    send_pace_ms: SEND_PACE_MS,
     watchdogMs: SESSION_WATCHDOG_MS,
     keepaliveMs: SESSION_KEEPALIVE_MS,
     pm2_instances_expected: 1,
@@ -1375,8 +1455,10 @@ app.get('/admin/health', (req, res) => {
     sessions: list,
     message_store: storeStats,
     get_message_implemented: true,
+    marker: GATEWAY_FIX_MARKER,
+    send_pace_ms: SEND_PACE_MS,
     note:
-      'Alıcıda «Mesaj bekleniyor» için getMessage + message store zorunlu. Bu sürümde aktiftir.',
+      'wa-auto-pending-fix-2026-08-27 — otomatik burst: kuyruk aralığı + assertSessions retry + JID cache. Manuel tek gönderim aynı /send.',
   });
 });
 
@@ -1603,7 +1685,15 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
       }
 
       resolvedJid = await resolveRecipientJid(session.sock, digits);
-      return sendTextWithDeliveryCheck(session.sock, resolvedJid, message, SEND_MESSAGE_RETRIES, sendMeta.usedCoachId);
+      const pnJid = ensurePhoneJid(digits);
+      return sendTextWithDeliveryCheck(
+        session.sock,
+        resolvedJid,
+        message,
+        SEND_MESSAGE_RETRIES,
+        sendMeta.usedCoachId,
+        [resolvedJid, pnJid].filter(Boolean)
+      );
     });
 
     const mid = result?.key?.id ? String(result.key.id).trim() : '';

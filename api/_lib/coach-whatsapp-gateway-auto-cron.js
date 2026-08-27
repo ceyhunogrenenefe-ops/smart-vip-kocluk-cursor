@@ -15,7 +15,8 @@ import {
 import { resolveGatewayUpstream } from './gateway-upstream.js';
 import {
   sendGatewayTextMessage,
-  warmActiveCoachGatewaySessions
+  warmActiveCoachGatewaySessions,
+  waitAutoSendGap
 } from './whatsapp-gateway-send.js';
 import { loadPeriodsForStudents, isActiveFromPeriods } from './student-activity.js';
 
@@ -330,6 +331,7 @@ export async function runCoachWhatsappGatewayAutoCron(opts = {}) {
           sessionCandidates: [sessionId],
           allowSharedFallback: false
         });
+        await waitAutoSendGap();
 
         if (!sendResult.ok) {
           logDetail.push({

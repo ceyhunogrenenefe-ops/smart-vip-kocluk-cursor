@@ -5,6 +5,7 @@ import { getIstanbulDateString } from './istanbul-time.js';
 import { shouldSkipConsecutiveSameLesson, shouldSkipClassLessonReminder } from './class-lesson-reminder-logic.js';
 import { resolveGuestShareUrlForClassSession } from './guest-join-share-url.js';
 import { sendAutomationTemplateMessage } from './whatsapp-automation-channel.js';
+import { waitAutoSendGap } from './whatsapp-gateway-send.js';
 import { OUTBOUND_LOG_CODE } from './whatsapp-outbound.js';
 import { getClassLessonReminderPhone } from './meetings-resolve.js';
 
@@ -238,6 +239,7 @@ export async function sendClassLessonReminderForSession(p) {
       error: sent.ok ? undefined : sent.error,
       log_code: lc
     });
+    await waitAutoSendGap();
   }
 
   return { log, anySucceeded, hadSendFailure, evaluatedAny, source };

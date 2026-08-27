@@ -5,7 +5,8 @@ import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import {
   getGatewaySessionStatus,
   sendGatewayTextMessage,
-  warmGatewaySession
+  warmGatewaySession,
+  waitAutoSendGap
 } from '../api/_lib/whatsapp-gateway-send.js';
 import {
   loadScopedClasses,
@@ -14,7 +15,6 @@ import {
 } from '../api/_lib/whatsapp-gateway-bulk-scope.js';
 
 const GW_BULK_LABEL_PREFIX = 'GW_BULK:';
-const SEND_DELAY_MS = 700;
 
 function parseBody(req) {
   const b = req.body;
@@ -52,10 +52,6 @@ function canUseBulk(actor, roleSet) {
     roleSet.has('admin') ||
     roleSet.has('super_admin')
   );
-}
-
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 async function ensureGatewayConnected(sessionId) {
@@ -261,7 +257,7 @@ export default async function handler(req, res) {
           channel: rec.channel
         });
       }
-      await sleep(SEND_DELAY_MS);
+      await waitAutoSendGap();
     }
 
     return res.status(200).json({
