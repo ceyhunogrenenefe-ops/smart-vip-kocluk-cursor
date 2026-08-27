@@ -3,6 +3,10 @@ import { supabaseAdmin, getSupabaseAdmin, hasSupabaseServiceRoleKey } from '../a
 import { normalizeUuidOrGenerate } from '../api/_lib/uuid.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { upsertCoachProfile } from '../api/_lib/user-bulk-import.js';
+import {
+  EDESIS_AUTO_ENROLL_MARKER,
+  provisionEdesisStudentOnApproval
+} from '../api/_lib/edesis-auto-enroll.js';
 
 const STAFF_ROLES = new Set(['admin', 'coach', 'teacher']);
 
@@ -283,6 +287,7 @@ export default async function handler(req, res) {
         console.warn('[registration-approvals] auth provision', errorMessage(authErr));
       }
 
+      let platformStudentId = null;
       if (role === 'student') {
         const studentPayload = {
           name: fullName || email,
@@ -313,9 +318,11 @@ export default async function handler(req, res) {
             .update(studentPayload)
             .eq('id', existingStudentByEmail.id);
           if (stUpdErr) throw stUpdErr;
+          platformStudentId = existingStudentByEmail.id;
         } else {
+          platformStudentId = normalizeUuidOrGenerate(null);
           const { error: stInsErr } = await supabaseAdmin.from('students').insert({
-            id: normalizeUuidOrGenerate(null),
+            id: platformStudentId,
             ...studentPayload,
             coach_id: null,
             created_at: now
@@ -349,7 +356,27 @@ export default async function handler(req, res) {
         .single();
       if (pUpdErr) throw pUpdErr;
 
-      return res.status(200).json({ data: { pending: updatedPending, user: createdUser } });
+      let edesis = { skipped: true, reason: 'not_student', marker: EDESIS_AUTO_ENROLL_MARKER };
+      if (role === 'student' && platformStudentId) {
+        try {
+          edesis = await provisionEdesisStudentOnApproval({
+            pending,
+            platformStudentId,
+            institutionId
+          });
+        } catch (edesisErr) {
+          console.warn('[registration-approvals] edesis auto-enroll', errorMessage(edesisErr));
+          edesis = {
+            ok: false,
+            error: errorMessage(edesisErr) || 'edesis_auto_enroll_failed',
+            marker: EDESIS_AUTO_ENROLL_MARKER
+          };
+        }
+      }
+
+      return res.status(200).json({
+        data: { pending: updatedPending, user: createdUser, edesis, studentId: platformStudentId }
+      });
     }
 
     return res.status(405).json({ error: 'method_not_allowed' });

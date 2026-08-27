@@ -247,8 +247,24 @@ class DatabaseService {
     );
   }
 
-  async approvePendingRegistration(id: string): Promise<{ pending: PendingRegistrationRow; user: UserRow }> {
-    return this.apiJson<{ pending: PendingRegistrationRow; user: UserRow }>('/api/registration-approvals', {
+  async approvePendingRegistration(id: string): Promise<{
+    pending: PendingRegistrationRow;
+    user: UserRow;
+    studentId?: string | null;
+    edesis?: {
+      ok?: boolean;
+      skipped?: boolean;
+      created?: boolean;
+      edesisStudentId?: string;
+      error?: string;
+      reason?: string;
+      matchMethod?: string;
+      marker?: string;
+      classroom?: { id?: number | string; name?: string; gradeName?: string };
+      parent?: { created?: boolean; error?: string };
+    };
+  }> {
+    return this.apiJson('/api/registration-approvals', {
       method: 'POST',
       body: JSON.stringify({ op: 'approve', id })
     });
