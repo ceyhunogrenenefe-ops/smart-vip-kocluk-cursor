@@ -1,17 +1,32 @@
 /**
  * VPS WhatsApp gateway taban adresi — http:// ve :4010 eksikse tamamlar.
+ * Eski Windows/Korea IP otomatik Phoenix VPS’e alınır (2026-08-27).
  */
+const PHOENIX_GATEWAY = 'http://89.252.179.128:4010';
+const LEGACY_GATEWAY_HOSTS = new Set(['27.102.132.134', '27.102.134.199']);
+
+function remapLegacyGatewayHost(raw) {
+  try {
+    const u = new URL(raw);
+    if (LEGACY_GATEWAY_HOSTS.has(u.hostname)) return PHOENIX_GATEWAY;
+  } catch {
+    /* ignore */
+  }
+  return raw;
+}
+
 export function resolveGatewayUpstream() {
   let raw = String(process.env.WHATSAPP_GATEWAY_UPSTREAM || '').trim().replace(/\/$/, '');
   if (!raw) {
     const alt = String(process.env.WHATSAPP_GATEWAY_URL || '').trim().replace(/\/$/, '');
     if (alt && /^https?:\/\//i.test(alt) && !/vercel\.app/i.test(alt)) raw = alt;
   }
-  if (!raw) return '';
+  if (!raw) raw = PHOENIX_GATEWAY;
 
   if (!/^https?:\/\//i.test(raw)) {
     raw = `http://${raw}`;
   }
+  raw = remapLegacyGatewayHost(raw);
 
   try {
     const u = new URL(raw);
