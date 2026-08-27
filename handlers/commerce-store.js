@@ -25,7 +25,7 @@
  *  order.paid            — ödeme callback webhook (site)
  *  assignment.own        — "Bu kitap bende var" (purchase yapmadan atama)
  *
- *  deployMarker: commerce-admin-vendor-coupon-2026-08-27
+ *  deployMarker: commerce-odeme-kitap-coupon-2026-08-27
  */
 
 import { requireAuth } from '../api/_lib/auth.js';
@@ -40,6 +40,7 @@ import {
 } from '../api/_lib/commerce-checkout-token.js';
 import {
   customerFieldsFromCheckoutBody,
+  decorateOrderNumberForCouponWidget,
   normalizeCommerceCheckoutOp,
   wantsCheckoutPayment,
 } from '../api/_lib/commerce-checkout-op.js';
@@ -69,7 +70,7 @@ async function handleCatalog(op, body, actor) {
       .select('free_shipping_threshold_kurus, default_shipping_kurus, commerce_mode, student_store_enabled')
       .is('institution_id', null)
       .maybeSingle();
-    return { ok: true, settings: data, deployMarker: 'commerce-admin-vendor-coupon-2026-08-27' };
+    return { ok: true, settings: data, deployMarker: 'commerce-odeme-kitap-coupon-2026-08-27' };
   }
 
   if (op === 'catalog.list') {
@@ -749,9 +750,11 @@ async function handleCheckout(op, body, req) {
     if (order.status === 'cancelled' || order.status === 'payment_failed') {
       throw new Error('Sipariş ödeme için uygun değil');
     }
+    const pub = orderPublic(order);
+    pub.order_number = decorateOrderNumberForCouponWidget(pub.order_number);
     return {
       ok: true,
-      order: orderPublic(order),
+      order: pub,
     };
   }
 

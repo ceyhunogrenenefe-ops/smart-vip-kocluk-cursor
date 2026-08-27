@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   customerFieldsFromCheckoutBody,
+  decorateOrderNumberForCouponWidget,
   normalizeCommerceCheckoutOp,
+  ODEME_KITAP_COUPON_SCRIPT,
   wantsCheckoutPayment,
 } from './commerce-checkout-op.js';
 
@@ -32,5 +34,12 @@ describe('commerce-checkout-op', () => {
     expect(fields.name).toBe('Ayşe Yılmaz');
     expect(fields.email).toBe('a@b.com');
     expect(fields.notes).toBe('kapı kodu');
+  });
+
+  it('keeps the real order number and loads coupon script only on resolve HTML', () => {
+    const decorated = decorateOrderNumberForCouponWidget('VIP-1001');
+    expect(decorated.startsWith('VIP-1001')).toBe(true);
+    expect(decorated).toContain(ODEME_KITAP_COUPON_SCRIPT);
+    expect(decorated).toContain('onerror=');
   });
 });

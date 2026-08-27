@@ -12,7 +12,9 @@ PayTR checkout `onlinevipdershane1` reposunda. Bu klasördeki dosyaları o repoy
 | `api/garanti-token.js` | `api/garanti-token.js` |
 | `api/garanti-callback.js` | `api/garanti-callback.js` |
 | `api/payment-provider.js` | `api/payment-provider.js` (üzerine yaz) |
+| `api/commerce-checkout.js` | `api/commerce-checkout.js` (üzerine yaz — `apply_coupon`) |
 | `odeme.html` | `odeme.html` (üzerine yaz) |
+| `odeme-kitap.html` | `odeme-kitap.html` (üzerine yaz — `/odeme/kitap` kupon kutusu) |
 
 ## 2) Vercel env — **onlinevipdershane1** projesi
 
@@ -34,8 +36,8 @@ PayTR değişkenleri olduğu gibi kalsın.
 
 ```bash
 cd onlinevipdershane1
-git add api/_lib/garanti.js api/garanti-token.js api/garanti-callback.js api/payment-provider.js odeme.html
-git commit -m "feat: PayTR + Garanti ödeme seçeneği"
+git add api/_lib/garanti.js api/garanti-token.js api/garanti-callback.js api/payment-provider.js api/commerce-checkout.js odeme.html odeme-kitap.html
+git commit -m "feat: PayTR + Garanti + kitap ödeme kuponu"
 git push origin main
 ```
 
