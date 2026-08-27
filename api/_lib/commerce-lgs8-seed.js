@@ -1,5 +1,6 @@
 /**
  * Yankı Kitapevi + 8. sınıf VIP katalog seed / toplu upsert.
+ * deployMarker: vip8-kitap-seed-unique-2026-08-27
  */
 import { supabaseAdmin } from './supabase-admin.js';
 import {
@@ -14,6 +15,9 @@ import {
   yankiVendorDefaults,
 } from './commerce-lgs8-catalog.js';
 import { canonicalBookSeries } from './commerce-store-browse.js';
+import { isbnDigits, isUniqueViolation, retiredBookSlug, selectBookMatch } from './commerce-lgs8-seed-keys.js';
+
+export { isbnDigits, isUniqueViolation, retiredBookSlug, selectBookMatch } from './commerce-lgs8-seed-keys.js';
 
 const DEFAULT_INSTITUTION_ID = '73323d75-eea1-4552-8bba-d50555423589';
 
@@ -98,60 +102,147 @@ export async function ensureYankiVendor({ actorSub, contact_phone, institution_i
 }
 
 async function findBookByIsbnOrSlug(isbn, slug) {
-  if (isbn) {
-    const { data } = await supabaseAdmin
-      .from('commerce_books')
-      .select('*')
-      .eq('isbn', isbn)
-      .is('deleted_at', null)
-      .maybeSingle();
-    if (data) return data;
+  const wantIsbn = String(isbn || '').trim();
+  const wantSlug = String(slug || '').trim();
+  const rows = [];
+  const isbnVariants = [...new Set([wantIsbn, wantIsbn.replace(/-/g, ''), isbnDigits(wantIsbn)].filter(Boolean))];
+  for (const variant of isbnVariants) {
+    const { data, error } = await supabaseAdmin.from('commerce_books').select('*').eq('isbn', variant);
+    if (error) throw error;
+    rows.push(...(data || []));
   }
-  if (slug) {
-    const { data } = await supabaseAdmin
-      .from('commerce_books')
-      .select('*')
-      .eq('slug', slug)
-      .is('deleted_at', null)
-      .maybeSingle();
-    if (data) return data;
+  if (wantSlug) {
+    const { data, error } = await supabaseAdmin.from('commerce_books').select('*').eq('slug', wantSlug);
+    if (error) throw error;
+    rows.push(...(data || []));
   }
-  return null;
+  const seen = new Set();
+  const uniq = [];
+  for (const r of rows) {
+    if (!r?.id || seen.has(r.id)) continue;
+    seen.add(r.id);
+    uniq.push(r);
+  }
+  return selectBookMatch(uniq, wantIsbn, wantSlug);
+}
+
+/** Slug UNIQUE silinmiş satırları da kilitler; ISBN UNIQUE yalnızca aktif satırda. */
+async function retireConflictingBookKeys(keepId, isbn, slug) {
+  const wantSlug = String(slug || '').trim();
+  const wantIsbn = String(isbn || '').trim();
+  const now = new Date().toISOString();
+  if (wantSlug) {
+    const { data, error } = await supabaseAdmin.from('commerce_books').select('id, slug').eq('slug', wantSlug);
+    if (error) throw error;
+    for (const r of data || []) {
+      if (!r?.id || r.id === keepId) continue;
+      const { error: updErr } = await supabaseAdmin
+        .from('commerce_books')
+        .update({ slug: retiredBookSlug(r.slug, r.id), updated_at: now })
+        .eq('id', r.id);
+      if (updErr) throw updErr;
+    }
+  }
+  const digits = isbnDigits(wantIsbn);
+  if (!digits) return;
+  const variants = [...new Set([wantIsbn, wantIsbn.replace(/-/g, ''), digits].filter(Boolean))];
+  const seen = new Set();
+  for (const variant of variants) {
+    const { data, error } = await supabaseAdmin
+      .from('commerce_books')
+      .select('id, isbn, deleted_at')
+      .eq('isbn', variant);
+    if (error) throw error;
+    for (const r of data || []) {
+      if (!r?.id || r.id === keepId || seen.has(r.id) || r.deleted_at) continue;
+      seen.add(r.id);
+      const { error: updErr } = await supabaseAdmin
+        .from('commerce_books')
+        .update({ isbn: null, updated_at: now })
+        .eq('id', r.id);
+      if (updErr) throw updErr;
+    }
+  }
+}
+
+function bookUpdateRow(row, existing, actorSub) {
+  const updateRow = {
+    updated_by: actorSub || existing.updated_by,
+    updated_at: new Date().toISOString(),
+    deleted_at: null,
+  };
+  for (const [k, v] of Object.entries(row)) {
+    if (v === undefined || v === null || v === '') continue;
+    if (k === 'metadata') continue;
+    updateRow[k] = v;
+  }
+  const metaIncoming = row.metadata && typeof row.metadata === 'object' ? row.metadata : {};
+  const metaClean = {};
+  for (const [k, v] of Object.entries(metaIncoming)) {
+    if (v === undefined || v === null || v === '') continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    metaClean[k] = v;
+  }
+  updateRow.metadata = { ...(existing.metadata || {}), ...metaClean };
+  return updateRow;
 }
 
 export async function upsertBookAndYankiOffer(normalized, vendor, actorSub, { approveIfPriced = true } = {}) {
   const row = bookRowFromNormalized(normalized, actorSub);
-  const existing = await findBookByIsbnOrSlug(row.isbn, row.slug);
+  let existing = await findBookByIsbnOrSlug(row.isbn, row.slug);
   let book;
-  if (existing) {
-    const updateRow = { updated_by: actorSub || existing.updated_by, updated_at: new Date().toISOString(), deleted_at: null };
-    for (const [k, v] of Object.entries(row)) {
-      if (v === undefined || v === null || v === '') continue;
-      if (k === 'metadata') continue;
-      updateRow[k] = v;
-    }
-    const metaIncoming = row.metadata && typeof row.metadata === 'object' ? row.metadata : {};
-    const metaClean = {};
-    for (const [k, v] of Object.entries(metaIncoming)) {
-      if (v === undefined || v === null || v === '') continue;
-      if (Array.isArray(v) && v.length === 0) continue;
-      metaClean[k] = v;
-    }
-    updateRow.metadata = { ...(existing.metadata || {}), ...metaClean };
-    const { data, error } = await supabaseAdmin
-      .from('commerce_books')
-      .update(updateRow)
-      .eq('id', existing.id)
-      .select()
-      .single();
-    if (error) throw error;
-    book = data;
-  } else {
+  let created = false;
+
+  if (!existing) {
     const { data, error } = await supabaseAdmin
       .from('commerce_books')
       .insert({ ...row, created_by: actorSub || null })
       .select()
       .single();
+    if (error) {
+      if (!isUniqueViolation(error)) throw error;
+      existing = await findBookByIsbnOrSlug(row.isbn, row.slug);
+      if (!existing && row.slug) {
+        const { data: bySlug } = await supabaseAdmin.from('commerce_books').select('*').eq('slug', row.slug).limit(1);
+        existing = bySlug?.[0] || null;
+      }
+      if (!existing) {
+        await retireConflictingBookKeys(null, row.isbn, row.slug);
+        const retry = await supabaseAdmin
+          .from('commerce_books')
+          .insert({ ...row, created_by: actorSub || null })
+          .select()
+          .single();
+        if (retry.error) throw retry.error;
+        book = retry.data;
+        created = true;
+      }
+    } else {
+      book = data;
+      created = true;
+    }
+  }
+
+  if (existing && !book) {
+    await retireConflictingBookKeys(existing.id, row.isbn, row.slug);
+    const updateRow = bookUpdateRow(row, existing, actorSub);
+    let { data, error } = await supabaseAdmin
+      .from('commerce_books')
+      .update(updateRow)
+      .eq('id', existing.id)
+      .select()
+      .single();
+    if (error && isUniqueViolation(error)) {
+      await retireConflictingBookKeys(existing.id, row.isbn, row.slug);
+      const retry = await supabaseAdmin
+        .from('commerce_books')
+        .update(updateRow)
+        .eq('id', existing.id)
+        .select()
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
     if (error) throw error;
     book = data;
   }
@@ -163,7 +254,7 @@ export async function upsertBookAndYankiOffer(normalized, vendor, actorSub, { ap
     approveIfPriced,
   });
 
-  return { book, offer, created: !existing };
+  return { book, offer, created };
 }
 
 /** Mevcut kitap için Yankı teklifini oluşturur veya soft-delete edilmişse geri açar. */
@@ -192,12 +283,14 @@ export async function upsertYankiOfferForExistingBook(
     offerPatch.approved_by = actorSub || null;
   }
 
-  const { data: existingOffer } = await supabaseAdmin
+  const { data: offerRows } = await supabaseAdmin
     .from('commerce_vendor_offers')
-    .select('id, status, price_kurus')
+    .select('id, status, price_kurus, deleted_at')
     .eq('vendor_id', vendor.id)
     .eq('book_id', bookId)
-    .maybeSingle();
+    .limit(8);
+  const existingOffer =
+    (offerRows || []).find((r) => !r.deleted_at) || (offerRows || [])[0] || null;
 
   if (existingOffer) {
     if (existingOffer.status === 'approved' && price <= 0) {
@@ -230,6 +323,25 @@ export async function upsertYankiOfferForExistingBook(
     .insert({ ...offerPatch, created_by: actorSub || null })
     .select()
     .single();
+  if (error && isUniqueViolation(error)) {
+    const { data: occupier } = await supabaseAdmin
+      .from('commerce_vendor_offers')
+      .select('id, status, price_kurus, deleted_at')
+      .eq('vendor_id', vendor.id)
+      .eq('book_id', bookId)
+      .limit(1);
+    const hit = occupier?.[0];
+    if (hit) {
+      const { data: updated, error: updErr } = await supabaseAdmin
+        .from('commerce_vendor_offers')
+        .update(offerPatch)
+        .eq('id', hit.id)
+        .select()
+        .single();
+      if (updErr) throw updErr;
+      return updated;
+    }
+  }
   if (error) throw error;
   return data;
 }
@@ -281,16 +393,18 @@ export async function upsertVipLgs8Package({ actorSub, vendor, bookByIsbn, price
     is_active: Number(price_kurus) > 0,
     sort_order: 1,
     institution_id: vendor?.institution_id || DEFAULT_INSTITUTION_ID,
+    deleted_at: null,
     updated_by: actorSub || null,
     updated_at: new Date().toISOString(),
   };
 
-  const { data: existing } = await supabaseAdmin
+  const { data: pkgRows } = await supabaseAdmin
     .from('commerce_book_packages')
-    .select('id')
+    .select('id, deleted_at')
     .eq('slug', VIP_LGS8_PACKAGE.slug)
-    .is('deleted_at', null)
-    .maybeSingle();
+    .limit(5);
+  const existing =
+    (pkgRows || []).find((r) => !r.deleted_at) || (pkgRows || [])[0] || null;
 
   let pkg;
   if (existing) {
@@ -309,8 +423,31 @@ export async function upsertVipLgs8Package({ actorSub, vendor, bookByIsbn, price
       .insert({ ...pkgRow, created_by: actorSub || null })
       .select()
       .single();
-    if (error) throw error;
-    pkg = data;
+    if (error && isUniqueViolation(error)) {
+      const { data: occupiers } = await supabaseAdmin
+        .from('commerce_book_packages')
+        .select('id')
+        .eq('slug', VIP_LGS8_PACKAGE.slug)
+        .limit(1);
+      const hit = occupiers?.[0];
+      if (hit) {
+        const retry = await supabaseAdmin
+          .from('commerce_book_packages')
+          .update(pkgRow)
+          .eq('id', hit.id)
+          .select()
+          .single();
+        if (retry.error) throw retry.error;
+        pkg = retry.data;
+        await supabaseAdmin.from('commerce_book_package_items').delete().eq('package_id', pkg.id);
+      } else {
+        throw error;
+      }
+    } else if (error) {
+      throw error;
+    } else {
+      pkg = data;
+    }
   }
 
   const { error: itemErr } = await supabaseAdmin
@@ -354,6 +491,7 @@ export async function seedLgs8VipCatalog({ actorSub, prices = {}, package_price_
     })),
     package: pkg.package,
     collections: LGS8_COLLECTIONS,
+    deployMarker: 'vip8-kitap-seed-unique-2026-08-27',
   };
 }
 
