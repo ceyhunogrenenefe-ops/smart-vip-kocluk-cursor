@@ -4078,7 +4078,10 @@ function edesisHttpErrorText(r, fallback) {
     }
   }
   if (j.message) return String(j.message);
-  if (j.title) return String(j.title);
+  if (j.title) {
+    const extra = j.errors ? ` ${JSON.stringify(j.errors).slice(0, 220)}` : r?.text ? ` ${String(r.text).slice(0, 180)}` : '';
+    return `${j.title}${extra}`.trim();
+  }
   try {
     const s = JSON.stringify(j);
     if (s && s !== '{}') return s.slice(0, 240);
