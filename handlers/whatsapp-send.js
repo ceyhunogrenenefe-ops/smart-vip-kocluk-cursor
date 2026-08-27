@@ -3,6 +3,7 @@ import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { getTwilioEnvStatus, sendMeetingWhatsApp, normalizePhoneToE164 } from '../api/_lib/whatsapp-twilio.js';
 import {
   getMetaWhatsAppEnvStatus,
+  loadMetaWhatsAppSecretsFromDb,
   metaWhatsAppConfigured,
   sendMetaTextMessage,
   parseMetaSendError
@@ -25,6 +26,8 @@ export default async function handler(req, res) {
   if (role !== 'super_admin' && role !== 'admin') {
     return res.status(403).json({ error: 'forbidden', hint: 'Yalnızca admin / süper admin.' });
   }
+
+  await loadMetaWhatsAppSecretsFromDb();
 
   if (req.method === 'GET') {
     const meta = getMetaWhatsAppEnvStatus();

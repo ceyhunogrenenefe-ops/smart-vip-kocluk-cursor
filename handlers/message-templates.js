@@ -1,6 +1,7 @@
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { fetchAllMetaMessageTemplates, findMetaTemplateStatus, findMetaTemplatesByName, fetchMetaTemplatesForName, getMetaTemplateSyncDiagnostics } from '../api/_lib/meta-templates-sync.js';
+import { loadMetaWhatsAppSecretsFromDb } from '../api/_lib/meta-whatsapp.js';
 import { syncMessageTemplateRowFromPhoneWaba } from '../api/_lib/meta-template-import.js';
 import { buildTemplatePreview } from '../api/_lib/whatsapp-outbound.js';
 
@@ -44,6 +45,8 @@ export default async function handler(req, res) {
   if (role !== 'super_admin' && role !== 'admin') {
     return res.status(403).json({ error: 'forbidden', hint: 'Yalnızca süper admin ve kurum yöneticisi.' });
   }
+
+  await loadMetaWhatsAppSecretsFromDb();
 
   if (req.method === 'GET') {
     const { data, error } = await supabaseAdmin.from('message_templates').select('*').order('type', { ascending: true });
