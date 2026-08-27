@@ -2,7 +2,7 @@
 
 Koçluk paneli **ödeme anahtarı istemez**. Ödeme sitede kalır.
 
-## Zorunlu 2 dosya (canlı siteye)
+## Zorunlu dosyalar (canlı siteye)
 
 Canlı `odeme.html` şu an koçluk sepetini okumuyor; bu yüzden “sepette ürün yok” görünüyor.
 
@@ -10,15 +10,18 @@ Canlı `odeme.html` şu an koçluk sepetini okumuyor; bu yüzden “sepette ür�
 |---|---|
 | `odeme.html` | `odeme.html` (**üzerine yaz** — Garanti+PayTR seçenekli sürüm + koçluk) |
 | `api/_lib/products.js` | `api/_lib/products.js` (**tek kopya**, çift yapıştırma yok) |
+| `api/commerce-checkout.js` | `api/commerce-checkout.js` (`apply_coupon` — `/odeme/kitap`) |
+| `odeme-kitap.html` | `odeme-kitap.html` (`/odeme/kitap` kupon kutusu) |
 
 ### GitHub / bilgisayar
 
 1. **Canlı sitenin deploy edildiği projeyi** açın (Vercel’de `onlinevipdershane.com` hangi GitHub reposuna bağlıysa o).
-2. Bu 2 dosyayı kopyalayıp `main`’e push edin.
+2. Bu dosyaları kopyalayıp `main`’e push edin.
 3. Vercel Production deploy bitsin.
 4. Kontrol:
    - Sayfada `source=coaching` ile sepet özeti görünmeli
    - PayTR `kitapMagaza` kabul etmeli
+   - `/odeme/kitap?token=` kupon kutusu + toplam güncellenmeli
 
 ### Doğrulama (deploy sonrası)
 
