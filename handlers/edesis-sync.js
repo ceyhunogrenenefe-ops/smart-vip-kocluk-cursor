@@ -1276,7 +1276,7 @@ export default async function handler(req, res) {
       const fetchResult = await fetchEdesisStudentResults(edesisStudentId, cfg, { enrichSubjects: false });
       const students = filterStudentsForActor(await loadStudentsForMatching(), actor, tags);
       const institutionId = actor?.institution_id || null;
-      const matched =
+      let matched =
         students.find((s) => String(s.edesis_ogrenci_id || '').trim() === edesisStudentId) ||
         (platformStudentId ? students.find((s) => s.id === platformStudentId) : null);
       const platformId = platformStudentId || matched?.id || null;
