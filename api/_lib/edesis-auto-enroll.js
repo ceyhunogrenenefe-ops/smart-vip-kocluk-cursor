@@ -98,7 +98,7 @@ export function studentToPending(student) {
     phone: s.phone,
     phone_e164: s.phone_e164 || s.phone,
     class_level: s.class_level,
-    branch: s.branch || s.school,
+    branch: s.branch || s.class_letter || s.school,
     parent_name: s.parent_name,
     parent_phone: s.parent_phone,
     parent_phone_e164: s.parent_phone_e164 || s.parent_phone,
@@ -107,8 +107,25 @@ export function studentToPending(student) {
   };
 }
 
+function isShortClassroomLetterToken(raw) {
+  const compact = String(raw || '')
+    .trim()
+    .toLocaleUpperCase('tr');
+  if (!compact) return false;
+  return (
+    /^[A-H]$/.test(compact) ||
+    /^\d+\s*[-.]?\s*[A-H]$/.test(compact) ||
+    /^\d+[A-H]$/.test(compact.replace(/\s+/g, '')) ||
+    /^[A-H]\s*SINIFI?$/.test(compact)
+  );
+}
+
 export function extractClassroomLetter(classLevel, branch) {
-  const blob = `${branch || ''} ${classLevel || ''}`.toLocaleUpperCase('tr').trim();
+  const level = String(classLevel || '').trim();
+  const rawBranch = String(branch || '').trim();
+  const examTrack = /(LGS|TYT|AYT|YKS|YÖS|YOS)/i.test(level);
+  const branchForLetter = examTrack && !isShortClassroomLetterToken(rawBranch) ? '' : rawBranch;
+  const blob = `${branchForLetter} ${level}`.toLocaleUpperCase('tr').trim();
   const m = blob.match(/(?:^|[\s.\-])([A-H])(?:\s|$|SINIF)/) || blob.match(/(\d)\s*([A-H])\b/);
   if (m) return (m[2] || m[1]).toLocaleUpperCase('tr');
   const only = blob.match(/^([A-H])$/);
@@ -141,7 +158,7 @@ function newestClassroom(rows) {
     .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0] || null;
 }
 
-export const EDESIS_AUTO_ENROLL_MARKER = 'edesis-auto-enroll-terms-2026-08-27';
+export const EDESIS_AUTO_ENROLL_MARKER = 'edesis-auto-enroll-terms-2026-08-27c';
 
 export function pickEdesisClassroom(classrooms, { classLevel, branch, termKind } = {}) {
   const list = Array.isArray(classrooms) ? classrooms : [];
@@ -284,6 +301,19 @@ function idInTermRows(rows, edesisStudentId) {
   });
 }
 
+async function listTermIdsForLookup() {
+  const cached = enrollCatalogCache.terms;
+  if (Array.isArray(cached) && cached.length) {
+    return cached.map((t) => t.id).filter((id) => id != null && id !== '');
+  }
+  try {
+    const listed = await fetchEdesisTermsList();
+    return (listed.rows || []).map((t) => t.id).filter((id) => id != null && id !== '');
+  } catch {
+    return [EDESIS_TERM_REGULAR_ID_FALLBACK, EDESIS_TERM_SUMMER_ID_FALLBACK, 40];
+  }
+}
+
 async function findExistingEdesisStudent(pending, termId) {
   const email = String(pending.email || '').trim().toLowerCase();
   if (!email) return null;
@@ -291,9 +321,22 @@ async function findExistingEdesisStudent(pending, termId) {
     const filters = { Filter: email };
     if (termId != null && termId !== '') filters.TermId = termId;
     const listed = await fetchEdesisStudentsList({}, filters);
-    return findInTermRows(listed.rows || [], pending);
+    const hit = findInTermRows(listed.rows || [], pending);
+    if (hit) return hit;
   } catch {
-    /* onay düşmesin; oluşturma denenecek */
+    /* onay düşmesin; diğer dönemler denenecek */
+  }
+  const skipId = termId != null && termId !== '' ? String(termId) : '';
+  const termIds = await listTermIdsForLookup();
+  for (const id of termIds) {
+    if (skipId && String(id) === skipId) continue;
+    try {
+      const listed = await fetchEdesisStudentsList({}, { Filter: email, TermId: id });
+      const hit = findInTermRows(listed.rows || [], pending);
+      if (hit) return { ...hit, matchMethod: 'email_other_term' };
+    } catch {
+      /* sonraki dönem */
+    }
   }
   return null;
 }
@@ -332,12 +375,23 @@ async function moveStudentToTerm(edesisStudentId, term, classroom) {
   }
 }
 
-let enrollCatalogCache = { at: 0, rooms: null, terms: null, regularRows: null, summerRows: null };
+let enrollCatalogCache = {
+  at: 0,
+  rooms: null,
+  terms: null,
+  regularRows: null,
+  summerRows: null,
+  otherTermRows: null
+};
+const enrollSkipUntil = new Map();
 
 async function loadEnrollCatalog({ includeTermStudents = false } = {}) {
   const fresh = Date.now() - enrollCatalogCache.at < 90_000;
   if (fresh && enrollCatalogCache.rooms && enrollCatalogCache.terms) {
-    if (!includeTermStudents || (enrollCatalogCache.regularRows && enrollCatalogCache.summerRows)) {
+    if (
+      !includeTermStudents ||
+      (enrollCatalogCache.regularRows && enrollCatalogCache.summerRows && enrollCatalogCache.otherTermRows)
+    ) {
       return enrollCatalogCache;
     }
   }
@@ -347,17 +401,23 @@ async function loadEnrollCatalog({ includeTermStudents = false } = {}) {
     rooms: rooms.rows || [],
     terms: terms.rows || [],
     regularRows: enrollCatalogCache.regularRows,
-    summerRows: enrollCatalogCache.summerRows
+    summerRows: enrollCatalogCache.summerRows,
+    otherTermRows: enrollCatalogCache.otherTermRows
   };
   if (includeTermStudents) {
     const regular = pickEdesisTerm(next.terms, 'LGS');
     const summer = pickEdesisTerm(next.terms, '9');
-    const [reg, yaz] = await Promise.all([
+    const extraTerms = (next.terms || []).filter(
+      (t) => t?.id != null && String(t.id) !== String(regular.id) && String(t.id) !== String(summer.id)
+    );
+    const [reg, yaz, ...extra] = await Promise.all([
       fetchEdesisStudentsList({}, { TermId: regular.id }),
-      fetchEdesisStudentsList({}, { TermId: summer.id })
+      fetchEdesisStudentsList({}, { TermId: summer.id }),
+      ...extraTerms.slice(0, 4).map((t) => fetchEdesisStudentsList({}, { TermId: t.id }))
     ]);
     next.regularRows = reg.rows || [];
     next.summerRows = yaz.rows || [];
+    next.otherTermRows = extra.flatMap((listed) => listed.rows || []);
   }
   enrollCatalogCache = next;
   return next;
@@ -406,7 +466,8 @@ export async function provisionEdesisStudent({
   allowRelinkToNewTerm = false,
   classrooms,
   terms,
-  termStudentRows
+  termStudentRows,
+  otherTermRows
 } = {}) {
   if (!shouldAutoEnrollEdesis(institutionId)) {
     return { skipped: true, reason: 'institution_not_edesis', marker: EDESIS_AUTO_ENROLL_MARKER };
@@ -436,7 +497,7 @@ export async function provisionEdesisStudent({
   let catalog;
   try {
     catalog = classrooms && terms
-      ? { rooms: classrooms, terms }
+      ? { rooms: classrooms, terms, otherTermRows }
       : await loadEnrollCatalog({ includeTermStudents: false });
   } catch (e) {
     return {
@@ -483,6 +544,36 @@ export async function provisionEdesisStudent({
       edesisStudentId: existing.edesisStudentId,
       matchMethod: existing.matchMethod,
       term,
+      parent,
+      marker: EDESIS_AUTO_ENROLL_MARKER
+    };
+  }
+
+  const extraRows = otherTermRows || catalog.otherTermRows || enrollCatalogCache.otherTermRows || null;
+  const cachedOther = extraRows ? findInTermRows(extraRows, source) : null;
+  const anyTerm = cachedOther
+    ? { ...cachedOther, matchMethod: 'email_other_term' }
+    : await findExistingEdesisStudent(source);
+  if (anyTerm?.edesisStudentId) {
+    await persistLink(platformStudentId, anyTerm.edesisStudentId);
+    const classroomEarly = pickEdesisClassroom(catalog.rooms || [], {
+      classLevel: source.class_level,
+      branch: source.branch,
+      termKind: kind
+    });
+    const moved = await moveStudentToTerm(anyTerm.edesisStudentId, term, classroomEarly);
+    const parent = await maybeCreateParent(source, anyTerm.edesisStudentId);
+    return {
+      ok: true,
+      created: false,
+      edesisStudentId: anyTerm.edesisStudentId,
+      matchMethod: 'email_other_term',
+      classroom: classroomEarly
+        ? { id: classroomEarly.id, name: classroomEarly.fullName || classroomEarly.name, gradeName: classroomEarly.gradeName }
+        : undefined,
+      term,
+      termAssigned: moved.ok,
+      termError: moved.ok ? undefined : moved.error,
       parent,
       marker: EDESIS_AUTO_ENROLL_MARKER
     };
@@ -674,6 +765,10 @@ export async function enrollPlatformStudentsBatch({ limit = 6, institutionId } =
       already += 1;
       continue;
     }
+    if ((enrollSkipUntil.get(st.id) || 0) > Date.now()) {
+      remaining += 1;
+      continue;
+    }
     if (writes >= maxWrites) {
       remaining += 1;
       continue;
@@ -685,7 +780,8 @@ export async function enrollPlatformStudentsBatch({ limit = 6, institutionId } =
       allowRelinkToNewTerm: true,
       classrooms: catalog.rooms,
       terms: catalog.terms,
-      termStudentRows: termRows
+      termStudentRows: termRows,
+      otherTermRows: catalog.otherTermRows
     });
     items.push({ id: st.id, name: st.name, class_level: st.class_level, ...result });
     writes += 1;
@@ -697,6 +793,8 @@ export async function enrollPlatformStudentsBatch({ limit = 6, institutionId } =
       };
       if (term.kind === 'summer') catalog.summerRows = [...(catalog.summerRows || []), rowFake];
       else catalog.regularRows = [...(catalog.regularRows || []), rowFake];
+    } else if (!result.ok) {
+      enrollSkipUntil.set(st.id, Date.now() + 8 * 60 * 1000);
     }
   }
 
