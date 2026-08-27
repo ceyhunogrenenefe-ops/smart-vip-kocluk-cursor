@@ -152,6 +152,7 @@ describe('edesis-auto-enroll classroom pick', () => {
     expect(skipEdesisAutoEnrollStudent({ email: 'cursor-setup-test@example.com', name: 'X' })).toBe(true);
     expect(skipEdesisAutoEnrollStudent({ email: 'admin@smartvip.com', name: 'Admin' })).toBe(true);
     expect(skipEdesisAutoEnrollStudent({ email: 'veli@gmail.com', name: 'Ada' })).toBe(false);
+    expect(skipEdesisAutoEnrollStudent({ email: 'a@b.com', name: 'TEST TESY' })).toBe(true);
   });
 
   it('matches Edesis placeholder emails by unique name', () => {

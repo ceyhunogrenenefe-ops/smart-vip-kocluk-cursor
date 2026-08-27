@@ -3,6 +3,7 @@
  * Şube, sınıf seviyesine göre Edesis classrooms listesinden seçilir.
  */
 
+import { randomBytes } from 'node:crypto';
 import {
   changeEdesisStudentTerm,
   createEdesisParent,
@@ -85,6 +86,7 @@ export function skipEdesisAutoEnrollStudent(student) {
   const name = String(student?.name || '').trim();
   if (SKIP_AUTO_ENROLL_EMAIL.test(email)) return true;
   if (/^admin$/i.test(name)) return true;
+  if (/^test(\s|$)/i.test(name)) return true;
   return false;
 }
 
@@ -159,7 +161,7 @@ function newestClassroom(rows) {
     .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0] || null;
 }
 
-export const EDESIS_AUTO_ENROLL_MARKER = 'edesis-auto-enroll-terms-2026-08-27e';
+export const EDESIS_AUTO_ENROLL_MARKER = 'edesis-auto-enroll-terms-2026-08-27f';
 
 export function pickEdesisClassroom(classrooms, { classLevel, branch, termKind } = {}) {
   const list = Array.isArray(classrooms) ? classrooms : [];
@@ -233,13 +235,20 @@ function edesisPhone(raw) {
   return d;
 }
 
+function edesisCreatePassword() {
+  return `Vip${randomBytes(9).toString('base64url')}9aA!`;
+}
+
 function buildStudentBody(pending, classroomId, termId) {
   const firstName = String(pending.first_name || '').trim();
   const lastName = String(pending.last_name || '').trim();
+  const password = edesisCreatePassword();
   const body = {
     firstName: firstName || splitName(pending.name).firstName,
     lastName: lastName || splitName(pending.name).lastName,
-    classroomId: Number(classroomId) || classroomId
+    classroomId: Number(classroomId) || classroomId,
+    password,
+    passwordRepeat: password
   };
   if (termId != null && termId !== '') body.termId = Number(termId) || termId;
   const email = String(pending.email || '').trim().toLowerCase();
@@ -403,6 +412,8 @@ async function createEdesisStudentWithFallback(pending, classroomId, cfg) {
         firstName: full.firstName,
         lastName: full.lastName,
         classroomId: full.classroomId,
+        password: full.password,
+        passwordRepeat: full.passwordRepeat,
         studentState: 3,
         ...(full.email ? { email: full.email } : {})
       },
@@ -410,6 +421,8 @@ async function createEdesisStudentWithFallback(pending, classroomId, cfg) {
         adi: full.firstName,
         soyadi: full.lastName,
         classroomId: full.classroomId,
+        password: full.password,
+        passwordRepeat: full.passwordRepeat,
         studentState: 3,
         ...(full.email ? { email: full.email } : {})
       }
