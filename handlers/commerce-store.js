@@ -8,7 +8,8 @@
  *  catalog.list          — onaylı teklifleri sayfa bazlı listele
  *  catalog.get           — kitap slug/id ile detay + teklifler
  *  catalog.packages      — aktif paketleri listele
- *  catalog.collections   — 8. sınıf VIP / Paraf / Deneme grupları
+ *  catalog.collections   — 8. sınıf VIP / Paraf / Deneme grupları (geriye dönük)
+ *  catalog.browse        — sınıf → kategori → kitap (süper admin store_browse)
  *  catalog.assigned      — öğrenciye atanmış kitaplar
  *  catalog.settings      — genel mağaza ayarları (kargo eşiği vs)
  *  cart.get              — mevcut sepeti getir
@@ -25,7 +26,7 @@
  *  order.paid            — ödeme callback webhook (site)
  *  assignment.own        — "Bu kitap bende var" (purchase yapmadan atama)
  *
- *  deployMarker: commerce-odeme-kitap-coupon-2026-08-27
+ *  deployMarker: commerce-store-browse-boxes-2026-08-27
  */
 
 import { requireAuth } from '../api/_lib/auth.js';
@@ -47,6 +48,7 @@ import {
 import { startCommerceProviderPayment } from '../api/_lib/commerce-checkout-pay.js';
 import { COMMERCE_DEFAULT_SETTINGS } from '../api/_lib/commerce-constants.js';
 import { listLgs8Collections } from '../api/_lib/commerce-lgs8-seed.js';
+import { listStoreBrowse, publicStoreBrowseNav } from '../api/_lib/commerce-store-browse.js';
 import { notifyVendorWhatsAppForPaidOrder } from '../api/_lib/commerce-vendor-order-notify.js';
 import { computeCouponDiscount } from '../api/_lib/commerce-coupon-discount.js';
 import { applyCors, handleCorsPreflight } from '../api/_lib/cors-mobile.js';
@@ -123,11 +125,25 @@ async function handleCatalog(op, body, actor) {
   if (op === 'catalog.settings') {
     const { data, error } = await supabaseAdmin
       .from('commerce_settings')
-      .select('free_shipping_threshold_kurus, default_shipping_kurus, commerce_mode, student_store_enabled')
+      .select('free_shipping_threshold_kurus, default_shipping_kurus, commerce_mode, student_store_enabled, meta')
       .is('institution_id', null)
       .maybeSingle();
     if (error) throw error;
-    return { ok: true, settings: data, deployMarker: 'commerce-odeme-kitap-coupon-2026-08-27' };
+    const store_browse = publicStoreBrowseNav(data?.meta?.store_browse);
+    const settings = data
+      ? {
+          free_shipping_threshold_kurus: data.free_shipping_threshold_kurus,
+          default_shipping_kurus: data.default_shipping_kurus,
+          commerce_mode: data.commerce_mode,
+          student_store_enabled: data.student_store_enabled,
+        }
+      : data;
+    return {
+      ok: true,
+      settings,
+      store_browse,
+      deployMarker: 'commerce-store-browse-boxes-2026-08-27',
+    };
   }
 
   if (op === 'catalog.list') {
@@ -300,6 +316,11 @@ async function handleCatalog(op, body, actor) {
   if (op === 'catalog.collections') {
     const collections = await listLgs8Collections();
     return { ok: true, collections };
+  }
+
+  if (op === 'catalog.browse') {
+    const browse = await listStoreBrowse();
+    return { ok: true, ...browse, deployMarker: 'commerce-store-browse-boxes-2026-08-27' };
   }
 
   if (op === 'catalog.assigned') {

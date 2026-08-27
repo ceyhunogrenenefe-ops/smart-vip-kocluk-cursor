@@ -15,6 +15,7 @@ import {
   LogIn,
   Tag,
   KeyRound,
+  LayoutGrid,
   Loader2,
   Package,
   Pencil,
@@ -85,6 +86,7 @@ import type {
 import { formatCommerceTry, COMMERCE_OFFER_STATUS_LABELS, COMMERCE_ORDER_STATUS_LABELS, offerBook, offerVendor } from '../../types/commerce.types';
 import { useAuth } from '../../context/AuthContext';
 import BookOrdersPage from '../BookOrdersPage';
+import MagazaMenuTab from './MagazaMenuTab';
 import { setActingVendor } from '../../lib/commerceActingVendor';
 import { compressCoverImage, formatBytes } from '../../lib/commerce/compressCoverImage';
 
@@ -97,6 +99,7 @@ type Tab =
   | 'siparisler'
   | 'hakedisler'
   | 'kuponlar'
+  | 'magaza-menu'
   | 'raporlar'
   | 'ayarlar';
 
@@ -109,6 +112,7 @@ const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   { key: 'siparisler', label: 'Mağaza siparişleri', icon: <ShoppingBag className="w-4 h-4" /> },
   { key: 'hakedisler', label: 'Hakedişler', icon: <Wallet className="w-4 h-4" /> },
   { key: 'kuponlar', label: 'Kuponlar', icon: <Tag className="w-4 h-4" /> },
+  { key: 'magaza-menu', label: 'Mağaza menü', icon: <LayoutGrid className="w-4 h-4" /> },
   { key: 'raporlar', label: 'Raporlar', icon: <ChevronDown className="w-4 h-4" /> },
   { key: 'ayarlar', label: 'Ayarlar', icon: <Settings className="w-4 h-4" /> },
 ];
@@ -2119,6 +2123,7 @@ export default function KitapPazaryeriPage() {
       case 'kitaplar': return <KitaplarTab />;
       case 'siparisler': return <SiparislerTab />;
       case 'kuponlar': return <KuponlarTab />;
+      case 'magaza-menu': return <MagazaMenuTab />;
       case 'hakedisler': return <HakedislerTab />;
       case 'raporlar': return <RaporlarTab />;
       case 'ayarlar': return <AyarlarTab />;

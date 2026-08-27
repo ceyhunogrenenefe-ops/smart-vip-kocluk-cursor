@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   BookOpen,
   CheckCircle2,
+  ChevronRight,
   Loader2,
   Package,
   Search,
@@ -24,16 +25,16 @@ import {
   csGetAssigned,
   csGetCart,
   csGetSettings,
+  csListBrowse,
   csListCatalog,
-  csListCollections,
   csListPackages,
   type CartItem,
   type CatalogListParams,
   type OfferWithBook,
-  type StoreCollection,
+  type StoreBrowseCategoryWithBooks,
   type StoreCollectionBook,
 } from '../../lib/commerceStoreApi';
-import type { CommerceBookPackage, CommerceSettings, CommerceStudentBookAssignment, CommerceVendorOffer } from '../../types/commerce.types';
+import type { CommerceBookPackage, CommerceSettings, CommerceStudentBookAssignment, CommerceVendorOffer, StoreBrowseClass } from '../../types/commerce.types';
 import { formatCommerceTry } from '../../types/commerce.types';
 import { useAuth } from '../../context/AuthContext';
 
@@ -157,6 +158,29 @@ function isLgs8ClassLevel(value: unknown): boolean {
   const s = String(value).trim().toLocaleUpperCase('tr');
   if (s === 'LGS' || s === '8' || s.startsWith('8.') || s.startsWith('8 ')) return true;
   return parseInt(String(value), 10) === 8;
+}
+
+function classKeysEqual(a: string, b: string) {
+  const left = String(a ?? '').trim().toLocaleUpperCase('tr');
+  const right = String(b ?? '').trim().toLocaleUpperCase('tr');
+  if (!left || !right) return false;
+  if (left === right) return true;
+  const ln = parseInt(left, 10);
+  const rn = parseInt(right, 10);
+  if (/^\d+$/.test(left) && Number.isFinite(rn) && ln === rn) return true;
+  if (/^\d+$/.test(right) && Number.isFinite(ln) && ln === rn) return true;
+  return false;
+}
+
+function studentMatchesClass(studentLevel: unknown, classKey: string) {
+  if (studentLevel == null || studentLevel === '') return false;
+  if (classKeysEqual(String(studentLevel), classKey)) return true;
+  if (isLgs8ClassLevel(studentLevel) && (classKeysEqual(classKey, '8') || classKeysEqual(classKey, 'LGS'))) return true;
+  return false;
+}
+
+function categoryBelongsToClass(cat: { class_keys?: string[] }, classKey: string) {
+  return (cat.class_keys ?? []).some((k) => classKeysEqual(k, classKey));
 }
 
 function CollectionBookCard({ book }: { book: StoreCollectionBook }) {
@@ -443,33 +467,83 @@ function AtanmisTab() {
   );
 }
 
+function BrowseBox({
+  title,
+  subtitle,
+  badge,
+  selected,
+  highlight,
+  onClick,
+}: {
+  title: string;
+  subtitle?: string;
+  badge?: string;
+  selected?: boolean;
+  highlight?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`text-left rounded-2xl border bg-white px-4 py-4 min-h-[7.5rem] transition-all ${
+        selected
+          ? 'border-indigo-600 bg-indigo-600 text-white shadow-md'
+          : highlight
+            ? 'border-indigo-300 ring-2 ring-indigo-100 hover:border-indigo-400'
+            : 'border-gray-200 hover:border-indigo-300 hover:shadow-sm'
+      }`}
+    >
+      <div className={`text-base font-bold leading-tight ${selected ? 'text-white' : 'text-gray-900'}`}>{title}</div>
+      {subtitle && (
+        <div className={`text-xs mt-1.5 line-clamp-2 ${selected ? 'text-indigo-100' : 'text-gray-500'}`}>{subtitle}</div>
+      )}
+      {badge && (
+        <span className={`inline-block mt-2.5 text-[11px] px-2 py-0.5 rounded-full ${
+          selected ? 'bg-white/20 text-white' : 'bg-indigo-50 text-indigo-700'
+        }`}>
+          {badge}
+        </span>
+      )}
+    </button>
+  );
+}
+
 // ─── Ana Sayfa ───────────────────────────────────────────────────────
 export default function KitapMagazasiPage() {
   const [tab, setTab] = useState<Tab>('tum-kitaplar');
   const [offers, setOffers] = useState<OfferWithBook[]>([]);
   const [loading, setLoading] = useState(true);
+  const [browseLoading, setBrowseLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<CatalogListParams>({});
   const [showFilter, setShowFilter] = useState(false);
   const [settings, setSettings] = useState<CommerceSettings | null>(null);
   const [cartCount, setCartCount] = useState(0);
-  const [collections, setCollections] = useState<StoreCollection[]>([]);
-  const [activeSeries, setActiveSeries] = useState<string | null>(null);
+  const [classes, setClasses] = useState<StoreBrowseClass[]>([]);
+  const [categories, setCategories] = useState<StoreBrowseCategoryWithBooks[]>([]);
+  const [activeClassKey, setActiveClassKey] = useState<string | null>(null);
+  const [activeCategoryKey, setActiveCategoryKey] = useState<string | null>(null);
   const navigate = useNavigate();
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { effectiveUser, linkedStudent } = useAuth();
   const lgs8 = isLgs8ClassLevel(linkedStudent?.classLevel);
+  const searching = Boolean(search.trim()) || Boolean(filters.subject) || Boolean(filters.price_min) || Boolean(filters.price_max);
 
-  // Ayarları bir kez çek
   useEffect(() => {
     csGetSettings().then((r) => setSettings(r.settings)).catch(() => null);
   }, []);
 
   useEffect(() => {
-    csListCollections()
-      .then((r) => setCollections(r.collections ?? []))
-      .catch(() => setCollections([]));
+    setBrowseLoading(true);
+    csListBrowse()
+      .then((r) => {
+        setClasses(r.classes ?? []);
+        setCategories(r.categories ?? []);
+      })
+      .catch(() => { setClasses([]); setCategories([]); })
+      .finally(() => setBrowseLoading(false));
   }, []);
 
   const refreshCartCount = useCallback(() => {
@@ -479,11 +553,9 @@ export default function KitapMagazasiPage() {
       .catch(() => setCartCount(0));
   }, [effectiveUser]);
 
-  // Sepet adedi
   useEffect(() => {
     refreshCartCount();
   }, [refreshCartCount]);
-
   const loadCatalog = useCallback(async (params: CatalogListParams) => {
     setLoading(true);
     try {
@@ -500,18 +572,22 @@ export default function KitapMagazasiPage() {
   }, [tab, lgs8]);
 
   useEffect(() => {
-    if (tab === 'tum-kitaplar' || tab === 'onerilen') {
-      if (searchTimer.current) clearTimeout(searchTimer.current);
-      searchTimer.current = setTimeout(() => {
-        loadCatalog({ ...filters, search: search || undefined });
-      }, 350);
-    }
+    const needList = tab === 'onerilen' || (tab === 'tum-kitaplar' && searching);
+    if (!needList) return;
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      loadCatalog({ ...filters, search: search || undefined });
+    }, 350);
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
-  }, [tab, search, filters, loadCatalog]);
+  }, [tab, search, filters, loadCatalog, searching]);
 
   const activeFilterCount = Object.values(filters).filter(Boolean).length;
-  const activeCollection = collections.find((c) => c.key === activeSeries) ?? null;
-  const showCollectionShelf = tab === 'tum-kitaplar' && !search && !filters.subject && (lgs8 || collections.some((c) => c.book_count > 0));
+  const activeClass = classes.find((c) => c.key === activeClassKey) ?? null;
+  const classCategories = useMemo(
+    () => (activeClassKey ? categories.filter((c) => categoryBelongsToClass(c, activeClassKey)) : []),
+    [categories, activeClassKey]
+  );
+  const activeCategory = classCategories.find((c) => c.key === activeCategoryKey) ?? null;
 
   const freeShippingMsg = useMemo(() => {
     if (!settings) return null;
@@ -522,9 +598,135 @@ export default function KitapMagazasiPage() {
 
   const showCatalog = tab === 'tum-kitaplar' || tab === 'onerilen';
 
+  const resetBrowse = () => {
+    setActiveClassKey(null);
+    setActiveCategoryKey(null);
+  };
+
+  const renderBrowse = () => {
+    if (browseLoading) {
+      return <div className="flex justify-center py-16"><Loader2 className="animate-spin w-8 h-8 text-indigo-400" /></div>;
+    }
+
+    const crumb = (
+      <div className="flex flex-wrap items-center gap-1 text-sm mb-4">
+        <button
+          type="button"
+          onClick={resetBrowse}
+          className={`font-bold tracking-wide ${activeClass ? 'text-indigo-600 hover:underline' : 'text-gray-900'}`}
+        >
+          SINIFLAR
+        </button>
+        {activeClass && (
+          <>
+            <ChevronRight className="w-4 h-4 text-gray-300" />
+            <button
+              type="button"
+              onClick={() => setActiveCategoryKey(null)}
+              className={`font-semibold ${activeCategory ? 'text-indigo-600 hover:underline' : 'text-gray-900'}`}
+            >
+              {activeClass.label}
+            </button>
+          </>
+        )}
+        {activeCategory && (
+          <>
+            <ChevronRight className="w-4 h-4 text-gray-300" />
+            <span className="font-semibold text-gray-900">{activeCategory.label}</span>
+          </>
+        )}
+      </div>
+    );
+
+    if (!activeClass) {
+      return (
+        <div>
+          {crumb}
+          <p className="text-sm text-gray-500 mb-4">Sınıfını seç — ardından kitap kategorisi açılır.</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            {classes.map((cl) => (
+              <BrowseBox
+                key={cl.key}
+                title={cl.label}
+                subtitle={cl.category_count ? `${cl.category_count} kategori` : 'Kategori yakında'}
+                badge={cl.book_count ? `${cl.book_count} kitap` : 'Yakında'}
+                highlight={studentMatchesClass(linkedStudent?.classLevel, cl.key)}
+                onClick={() => { setActiveClassKey(cl.key); setActiveCategoryKey(null); }}
+              />
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    if (!activeCategory) {
+      return (
+        <div>
+          {crumb}
+          <p className="text-sm text-gray-500 mb-4">{activeClass.label} için bir kategori seç.</p>
+          {classCategories.length === 0 ? (
+            <div className="text-center py-12 text-gray-400">
+              <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
+              <p className="text-sm">Bu sınıf için henüz kategori yok.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+              {classCategories.map((cat) => (
+                <BrowseBox
+                  key={cat.key}
+                  title={cat.label}
+                  subtitle={cat.description || undefined}
+                  badge={cat.book_count ? `${cat.book_count} kitap` : 'Yakında'}
+                  onClick={() => setActiveCategoryKey(cat.key)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div>
+        {crumb}
+        {activeCategory.books.length ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+            {activeCategory.books.map((b) => <CollectionBookCard key={b.id} book={b} />)}
+          </div>
+        ) : (
+          <div className="text-center py-12 text-gray-400">
+            <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
+            <p className="text-sm">{activeCategory.label} henüz ürün yok.</p>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderSearchOrRecommended = () => {
+    if (loading) {
+      return <div className="flex justify-center py-16"><Loader2 className="animate-spin w-8 h-8 text-indigo-400" /></div>;
+    }
+    if (offers.length === 0) {
+      return (
+        <div className="text-center py-16 text-gray-400">
+          <BookOpen className="w-12 h-12 mx-auto mb-3 opacity-30" />
+          <p>Kitap bulunamadı</p>
+          {activeFilterCount > 0 && (
+            <button onClick={() => setFilters({})} className="mt-2 text-sm text-indigo-600">Filtreleri temizle</button>
+          )}
+        </div>
+      );
+    }
+    return (
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+        {offers.map((o) => <BookCard key={o.id} offer={o} onCartChange={refreshCartCount} />)}
+      </div>
+    );
+  };
+
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto">
-      {/* Başlık */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <ShoppingBag className="w-7 h-7 text-indigo-600" />
@@ -548,12 +750,11 @@ export default function KitapMagazasiPage() {
         </button>
       </div>
 
-      {/* Sekmeler */}
       <div className="flex gap-1 overflow-x-auto pb-1 mb-4 border-b border-gray-200">
         {TABS.map((t) => (
           <button
             key={t.key}
-            onClick={() => { setTab(t.key); setSearch(''); setFilters({}); }}
+            onClick={() => { setTab(t.key); setSearch(''); setFilters({}); if (t.key === 'tum-kitaplar') resetBrowse(); }}
             className={`px-4 py-2 text-sm whitespace-nowrap rounded-t-lg transition-colors ${
               tab === t.key ? 'bg-indigo-50 text-indigo-700 font-semibold border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-700'
             }`}
@@ -563,7 +764,6 @@ export default function KitapMagazasiPage() {
         ))}
       </div>
 
-      {/* Arama + Filtre (katalog sekmelerinde) */}
       {showCatalog && (
         <div className="flex gap-2 mb-5">
           <div className="relative flex-1">
@@ -586,7 +786,6 @@ export default function KitapMagazasiPage() {
         </div>
       )}
 
-      {/* Aktif filtre etiketleri */}
       {showCatalog && activeFilterCount > 0 && (
         <div className="flex gap-2 flex-wrap mb-4">
           {filters.subject && (
@@ -609,78 +808,16 @@ export default function KitapMagazasiPage() {
         </div>
       )}
 
-      {/* İçerik */}
       {tab === 'paketler' ? (
         <PaketlerTab classLevel={lgs8 ? '8' : undefined} />
       ) : tab === 'atanmis' ? (
         <AtanmisTab />
+      ) : tab === 'onerilen' || (tab === 'tum-kitaplar' && searching) ? (
+        renderSearchOrRecommended()
       ) : (
-        <>
-          {showCollectionShelf && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
-              {collections.map((col) => (
-                <button
-                  key={col.key}
-                  type="button"
-                  onClick={() => setActiveSeries(activeSeries === col.key ? null : col.key)}
-                  className={`text-left rounded-2xl border overflow-hidden transition-shadow ${
-                    activeSeries === col.key ? 'border-indigo-500 ring-2 ring-indigo-200' : 'border-gray-200 hover:shadow-md'
-                  }`}
-                >
-                  <div className="h-28 bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center overflow-hidden">
-                    {col.cover_image_url ? (
-                      <img src={col.cover_image_url} alt={col.label} className="w-full h-full object-cover" />
-                    ) : (
-                      <Package className="w-10 h-10 text-indigo-300" />
-                    )}
-                  </div>
-                  <div className="p-3">
-                    <div className="font-bold text-sm">{col.label}</div>
-                    <div className="text-xs text-gray-500 mt-0.5">{col.description}</div>
-                    {col.coming_soon && col.book_count === 0 && (
-                      <span className="inline-block mt-2 text-[11px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full">Yakında</span>
-                    )}
-                    {col.book_count > 0 && (
-                      <span className="inline-block mt-2 text-[11px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full">
-                        {col.book_count} kitap{col.priced_count ? ` · ${col.priced_count} fiyatlı` : ''}
-                      </span>
-                    )}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {activeCollection && showCollectionShelf ? (
-            activeCollection.books.length ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                {activeCollection.books.map((b) => <CollectionBookCard key={b.id} book={b} />)}
-              </div>
-            ) : (
-              <div className="text-center py-12 text-gray-400">
-                <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                <p className="text-sm">{activeCollection.label} henüz ürün yok.</p>
-              </div>
-            )
-          ) : loading ? (
-            <div className="flex justify-center py-16"><Loader2 className="animate-spin w-8 h-8 text-indigo-400" /></div>
-          ) : offers.length === 0 ? (
-            <div className="text-center py-16 text-gray-400">
-              <BookOpen className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p>Kitap bulunamadı</p>
-              {activeFilterCount > 0 && (
-                <button onClick={() => setFilters({})} className="mt-2 text-sm text-indigo-600">Filtreleri temizle</button>
-              )}
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-              {offers.map((o) => <BookCard key={o.id} offer={o} onCartChange={refreshCartCount} />)}
-            </div>
-          )}
-        </>
+        renderBrowse()
       )}
 
-      {/* Filtre modal */}
       {showFilter && (
         <FilterPanel filters={filters} onChange={setFilters} onClose={() => setShowFilter(false)} settings={settings} />
       )}
