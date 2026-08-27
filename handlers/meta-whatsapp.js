@@ -4,10 +4,12 @@ import { insertWhatsAppAutomationLog } from '../api/_lib/message-log.js';
 import { getIstanbulDateString } from '../api/_lib/istanbul-time.js';
 import {
   getMetaWhatsAppEnvStatus,
+  loadMetaWhatsAppSecretsFromDb,
   metaWhatsAppConfigured,
   normalizePhoneToE164,
-  sendMetaTextMessage,
-  parseMetaSendError
+  parseMetaSendError,
+  saveMetaWhatsAppSecretsToDb,
+  sendMetaTextMessage
 } from '../api/_lib/meta-whatsapp.js';
 import { sendParentPdfToWhatsapp } from '../api/_lib/parent-pdf-meta-send.js';
 
@@ -43,12 +45,50 @@ export default async function handler(req, res) {
     });
   }
 
+  await loadMetaWhatsAppSecretsFromDb();
+
   if (req.method === 'GET') {
     return res.status(200).json({ data: getMetaWhatsAppEnvStatus() });
   }
 
   if (req.method === 'POST') {
     const b = parseBody(req);
+    if (String(b.op || '').trim() === 'configure') {
+      if (role !== 'super_admin') {
+        return res.status(403).json({ error: 'forbidden', hint: 'Meta bağlantısını yalnızca süper admin kaydeder.' });
+      }
+      const token = String(b.token || b.access_token || '').trim();
+      const phoneNumberId = String(b.phone_number_id || b.phoneNumberId || '').trim();
+      const wabaId = String(b.waba_id || b.wabaId || '').trim();
+      if (!token || !phoneNumberId || !wabaId) {
+        return res.status(400).json({
+          error: 'token_phone_waba_required',
+          hint: 'token + phone_number_id + waba_id gerekli.'
+        });
+      }
+      const graphVer = String(process.env.META_GRAPH_API_VERSION || 'v21.0').trim() || 'v21.0';
+      const probe = await fetch(
+        `https://graph.facebook.com/${graphVer}/${encodeURIComponent(wabaId)}/phone_numbers?fields=id,display_phone_number,verified_name`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const probeJson = await probe.json().catch(() => ({}));
+      const phones = probeJson?.data || [];
+      const phoneOk = phones.some((p) => String(p?.id || '') === phoneNumberId);
+      if (!probe.ok || !phoneOk) {
+        return res.status(400).json({
+          error: 'meta_probe_failed',
+          hint: 'Token bu WhatsApp hesabına veya numaraya erişemiyor. WABA ve Phone number ID’yi kontrol edin.',
+          graph: probeJson?.error || null,
+          phones: phones.map((p) => ({ id_suffix: String(p?.id || '').slice(-6), display: p?.display_phone_number || null }))
+        });
+      }
+      await saveMetaWhatsAppSecretsToDb({ token, phone_number_id: phoneNumberId, waba_id: wabaId });
+      return res.status(200).json({
+        ok: true,
+        data: getMetaWhatsAppEnvStatus(),
+        display_phone_number: phones.find((p) => String(p?.id || '') === phoneNumberId)?.display_phone_number || null
+      });
+    }
     const to = typeof b.to === 'string' ? b.to.trim() : '';
     const message = typeof b.message === 'string' ? b.message : '';
     const documentBase64 =
