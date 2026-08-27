@@ -53,6 +53,18 @@ describe('edesis-auto-enroll classroom pick', () => {
     expect(extractClassroomLetter('', 'B')).toBe('B');
   });
 
+  it('does not treat LGS / TYT school names as classroom letters', () => {
+    expect(extractClassroomLetter('LGS', 'Fatih Koleji')).toBe('');
+    expect(extractClassroomLetter('LGS', 'Fen Lisesi')).toBe('');
+    expect(extractClassroomLetter('TYT-Maarif', 'Maarif Anadolu')).toBe('');
+    const room = pickEdesisClassroom(ROOMS, {
+      classLevel: 'LGS',
+      branch: 'Fatih Koleji',
+      termKind: 'regular'
+    });
+    expect(room.id).toBe(219076);
+  });
+
   it('puts LGS without branch into newest LGS-named classroom', () => {
     const room = pickEdesisClassroom(ROOMS, { classLevel: 'LGS' });
     expect(room.id).toBe(219076);
