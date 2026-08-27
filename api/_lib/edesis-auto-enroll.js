@@ -161,12 +161,23 @@ function newestClassroom(rows) {
     .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0] || null;
 }
 
-export const EDESIS_AUTO_ENROLL_MARKER = 'edesis-auto-enroll-terms-2026-08-27g';
+export const EDESIS_AUTO_ENROLL_MARKER = 'edesis-auto-enroll-terms-2026-08-27h';
 
-export function pickEdesisClassroom(classrooms, { classLevel, branch, termKind } = {}) {
+export function classroomIdsFromStudentRows(rows) {
+  const ids = [];
+  for (const row of rows || []) {
+    const id = row?.classroomId ?? row?.ClassroomId ?? row?.subeId ?? row?.subeID;
+    if (id == null || id === '') continue;
+    if (!ids.some((x) => String(x) === String(id))) ids.push(id);
+  }
+  return ids;
+}
+
+export function pickEdesisClassroom(classrooms, { classLevel, branch, termKind, preferredIds } = {}) {
   const list = Array.isArray(classrooms) ? classrooms : [];
   const grade = edesisGradeFromClassLevel(classLevel);
   const kind = termKind || edesisTermKindFromClassLevel(classLevel);
+  const pref = new Set((preferredIds || []).map((id) => String(id)));
   const gradeNames =
     kind === 'summer' && grade !== 'YÖS' ? [`${grade}Y`, grade] : [grade];
   let inGrade = [];
@@ -174,13 +185,25 @@ export function pickEdesisClassroom(classrooms, { classLevel, branch, termKind }
     inGrade = list.filter((c) => String(c.gradeName || '') === g);
     if (inGrade.length) break;
   }
-  const pool = (inGrade.length ? inGrade : list).filter((c) => isUsableClassroom(c, kind));
-  const usable = pool.length ? pool : inGrade.length ? inGrade : list;
+  const poolAll = (inGrade.length ? inGrade : list).filter((c) => isUsableClassroom(c, kind));
+  const inPref = pref.size ? poolAll.filter((c) => pref.has(String(c.id))) : [];
+  let usable = inPref.length ? inPref : poolAll;
+  if (pref.size && !inPref.length && kind === 'summer' && grade === '9') {
+    const nineish = list.filter(
+      (c) => pref.has(String(c.id)) && /9/.test(`${c.name || ''}${c.gradeName || ''}${c.fullName || ''}`)
+    );
+    if (nineish.length) usable = nineish;
+    else {
+      const tenY = list.filter((c) => pref.has(String(c.id)) && String(c.gradeName || '') === '10Y');
+      if (tenY.length) usable = tenY;
+    }
+  }
+  if (!usable.length) usable = poolAll.length ? poolAll : inGrade.length ? inGrade : list;
   const letter = extractClassroomLetter(classLevel, branch);
-  const wantsLgsNamed = kind === 'regular' && /LGS/i.test(String(classLevel || ''));
+  const wantsLgsNamed = false;
 
   if (grade === 'YÖS') {
-    const eki = usable.filter((c) => /2026\s*ek[iı]m/i.test(String(c.name || '')));
+    const eki = usable.filter((c) => /2026\s*ekim/.test(foldNameKey(`${c.name || ''} ${c.fullName || ''}`)));
     if (eki.length) return newestClassroom(eki);
   }
 
@@ -439,6 +462,16 @@ async function createEdesisStudentWithFallback(pending, classroomId, cfg, termId
         /* sonraki deneme */
       }
     }
+    const msg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+    if (/email adresi ile zaten|already.*email/i.test(msg) && full.email) {
+      const withoutEmail = { ...full };
+      delete withoutEmail.email;
+      try {
+        return await createEdesisStudent(withoutEmail, cfg);
+      } catch {
+        /* yok */
+      }
+    }
     throw firstErr;
   }
 }
@@ -642,7 +675,8 @@ export async function provisionEdesisStudent({
     const classroomEarly = pickEdesisClassroom(catalog.rooms || [], {
       classLevel: source.class_level,
       branch: source.branch,
-      termKind: kind
+      termKind: kind,
+      preferredIds: classroomIdsFromStudentRows(inTermRows)
     });
     const moved = await moveStudentToTerm(anyTerm.edesisStudentId, term, classroomEarly);
     const parent = await maybeCreateParent(source, anyTerm.edesisStudentId);
@@ -665,7 +699,8 @@ export async function provisionEdesisStudent({
   const classroom = pickEdesisClassroom(catalog.rooms || [], {
     classLevel: source.class_level,
     branch: source.branch,
-    termKind: kind
+    termKind: kind,
+    preferredIds: classroomIdsFromStudentRows(inTermRows)
   });
   if (!classroom?.id) {
     return { ok: false, error: 'edesis_classroom_not_found', term, marker: EDESIS_AUTO_ENROLL_MARKER };
