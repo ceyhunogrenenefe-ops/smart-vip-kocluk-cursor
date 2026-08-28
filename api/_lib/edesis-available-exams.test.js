@@ -21,6 +21,10 @@ import {
   pickEdesisExamSinavTuruId,
   collectCatalogRowsForSinavIds,
   mergeAssignedCatalogWithAdminSinavIds,
+  collectAssignedRowsFromStudentRaporViews,
+  overlayAssignedCatalogWithRaporViews,
+  edesisResultHiddenFromStudent,
+  pickExamDurationSeconds,
   pickEdesisResultExamId,
   resultRowBelongsToStudent,
   collectEdesisBookletFiles,
@@ -1679,5 +1683,128 @@ describe('looksLikePdfBuffer', () => {
   it('accepts %PDF magic even without content-type', () => {
     assert.equal(looksLikePdfBuffer(Buffer.from('%PDF-1.7\n...')), true);
     assert.equal(looksLikePdfBuffer(Buffer.from('{"error":"no"}')), false);
+  });
+});
+
+describe('GetAllSinavRaporForStudent classroom gate', () => {
+  const safiyeClass = 294965;
+  const kaganClass = 335565;
+  const limitLgs = {
+    id: 1579103,
+    name: 'LİMİT LGS-1',
+    examType: 'LGS',
+    resultStatus: 'None',
+    examDate: '2026-08-25',
+    isOnlineSinavForStudent: true,
+    isStudentAddResult: true,
+    classRoomIds: [safiyeClass],
+    sinav: { id: 1579103, isOnlineSinavForStudent: true, sinavSuresi: 165 }
+  };
+  const suparaTyt = {
+    id: 1579181,
+    name: 'SUPARA TYT-1',
+    examType: 'TYT',
+    resultStatus: 'None',
+    examDate: '2026-08-26',
+    isOnlineSinavForStudent: true,
+    classRoomIds: [kaganClass]
+  };
+  const tenantDump = {
+    id: 1537212,
+    name: 'LGS İNGİLİZCE KTT 1',
+    examType: 'LGS İNGİLİZCE 10',
+    resultStatus: 'None',
+    examDate: '2026-08-10',
+    isOnlineSinavForStudent: true
+  };
+
+  it('keeps only the student classroom + online flag', () => {
+    const rows = collectAssignedRowsFromStudentRaporViews([limitLgs, suparaTyt, tenantDump], {
+      edesisStudentId: '2086573',
+      classroomId: String(safiyeClass),
+      adminSinavIds: []
+    });
+    assert.deepEqual(
+      rows.map((r) => pickEdesisCatalogExamId(r)),
+      ['1579103']
+    );
+  });
+
+  it('does not leak Safiye classroom exams to Kağan', () => {
+    const rows = collectAssignedRowsFromStudentRaporViews([limitLgs, suparaTyt], {
+      edesisStudentId: '7909547',
+      classroomId: String(kaganClass),
+      adminSinavIds: []
+    });
+    assert.deepEqual(
+      rows.map((r) => pickEdesisCatalogExamId(r)),
+      ['1579181']
+    );
+  });
+
+  it('does not dump tenant rapor rows without classroom or admin sinavId', () => {
+    const dump = Array.from({ length: 17 }, (_, i) => ({
+      id: 1500000 + i,
+      name: `Kurum dump ${i}`,
+      isOnlineSinavForStudent: true,
+      resultStatus: 'None',
+      examDate: '2026-08-27'
+    }));
+    const rows = collectAssignedRowsFromStudentRaporViews(dump, {
+      edesisStudentId: '7909547',
+      classroomId: String(kaganClass),
+      adminSinavIds: []
+    });
+    assert.equal(rows.length, 0);
+  });
+
+  it('still keeps GetOgrenciSinavIds admin id without classroom match', () => {
+    const rows = collectAssignedRowsFromStudentRaporViews([tenantDump], {
+      edesisStudentId: '7909547',
+      classroomId: String(kaganClass),
+      adminSinavIds: ['1537212']
+    });
+    assert.equal(rows.length, 1);
+    assert.equal(pickEdesisCatalogExamId(rows[0]), '1537212');
+  });
+
+  it('overlays rapor duration onto thin catalog assignment', () => {
+    const out = overlayAssignedCatalogWithRaporViews(
+      [{ id: 1579103, name: 'LİMİT LGS-1', resultStatus: 'None' }],
+      [limitLgs]
+    );
+    assert.equal(out.length, 1);
+    assert.equal(pickExamDurationSeconds(out[0]), 9900);
+  });
+
+  it('Safiye classroom online exam is takeable; tenant dump is not', () => {
+    const assigned = collectAssignedRowsFromStudentRaporViews([limitLgs, tenantDump], {
+      edesisStudentId: '2086573',
+      classroomId: String(safiyeClass),
+      adminSinavIds: []
+    });
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [limitLgs, tenantDump],
+      assignedCatalogRows: assigned,
+      resultRows: [],
+      edesisStudentId: '2086573',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      classroomId: String(safiyeClass),
+      gradeName: '8. Sınıf',
+      now: new Date('2026-08-28T12:00:00Z'),
+      allowRecencyFallback: false,
+      requireExplicitAssignment: true
+    });
+    assert.deepEqual(
+      items.filter((x) => x.canTake).map((x) => x.examId),
+      ['1579103']
+    );
+  });
+});
+
+describe('edesisResultHiddenFromStudent', () => {
+  it('hides when isResultHideForStudent is true', () => {
+    assert.equal(edesisResultHiddenFromStudent({ isResultHideForStudent: true, examId: 1 }), true);
+    assert.equal(edesisResultHiddenFromStudent({ examId: 1, totalNet: 12 }), false);
   });
 });
