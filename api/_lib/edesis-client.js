@@ -1552,55 +1552,114 @@ export function collectAssignedRowsFromStudentRaporViews(
   return out;
 }
 
+export function buildEdesisStudentRaporQuery({
+  donemId,
+  sid,
+  skip = 0,
+  pageSize = 250,
+  stdIdsKey = 'stdIds'
+} = {}) {
+  const parts = [`${stdIdsKey}=${encodeURIComponent(sid)}`, `MaxResultCount=${pageSize}`, `SkipCount=${skip}`];
+  if (donemId != null && donemId !== '' && Number.isFinite(Number(donemId))) {
+    parts.unshift(`donemId=${Number(donemId)}`);
+  }
+  parts.push(`Sorting=${encodeURIComponent('id desc')}`);
+  return parts.join('&');
+}
+
+async function fetchEdesisStudentRaporPages(localCfg, sid, donemId, stdIdsKey) {
+  const pageSize = 250;
+  const maxPages = donemId == null ? 2 : 2;
+  const collected = [];
+  let last = { rows: [], httpStatus: null, path: null, error: null, count: 0, totalCount: 0 };
+  for (let page = 0; page < maxPages; page += 1) {
+    const path = `/api/services/app/Sinavs/GetAllSinavRaporForStudent?${buildEdesisStudentRaporQuery({
+      donemId,
+      sid,
+      skip: page * pageSize,
+      pageSize,
+      stdIdsKey
+    })}`;
+    try {
+      const r = await fetchEdesisAbpJson(localCfg, path);
+      last = {
+        rows: collected,
+        httpStatus: r.status,
+        path,
+        error: r.status === 401 || r.status === 403 ? 'unauthorized' : null,
+        count: collected.length,
+        totalCount: 0
+      };
+      if (r.status === 401 || r.status === 403 || !isReachableEdesisResponse(r)) break;
+      const rows = unwrapList(r.json);
+      const totalCount = Number(r.json?.result?.totalCount ?? r.json?.totalCount ?? rows.length) || rows.length;
+      collected.push(...rows);
+      last = { rows: collected, httpStatus: r.status, path, error: null, count: collected.length, totalCount };
+      if (!rows.length || collected.length >= totalCount) break;
+    } catch (e) {
+      last = {
+        rows: collected,
+        httpStatus: null,
+        path,
+        error: e instanceof Error ? e.message : String(e),
+        count: collected.length,
+        totalCount: 0
+      };
+      break;
+    }
+  }
+  return last;
+}
+
 export async function fetchEdesisStudentSinavRaporViews(edesisStudentId, cfgOverride = {}, { donemId } = {}) {
   const sid = normEdesisId(edesisStudentId);
   const empty = { rows: [], httpStatus: null, path: null, error: null, count: 0, totalCount: 0 };
   if (!sid) return empty;
   const cfg = { ...getEdesisConfig(), ...cfgOverride };
   const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
-  const donem = Number(donemId) || Number(localCfg.defaultDonemId) || 113;
-  const pageSize = 250;
-  const maxPages = 3;
-  const encodings = [
-    (skip) =>
-      `donemId=${donem}&stdIds=${encodeURIComponent(sid)}&MaxResultCount=${pageSize}&SkipCount=${skip}&Sorting=${encodeURIComponent('id desc')}`,
-    (skip) =>
-      `donemId=${donem}&StdIds=${encodeURIComponent(sid)}&MaxResultCount=${pageSize}&SkipCount=${skip}&Sorting=${encodeURIComponent('id desc')}`
-  ];
-  let last = empty;
-  for (const encode of encodings) {
-    const collected = [];
-    let totalCount = 0;
-    let pathUsed = null;
-    for (let page = 0; page < maxPages; page += 1) {
-      const path = `/api/services/app/Sinavs/GetAllSinavRaporForStudent?${encode(page * pageSize)}`;
-      try {
-        const r = await fetchEdesisAbpJson(localCfg, path);
-        last = {
-          rows: collected,
-          httpStatus: r.status,
-          path,
-          error: r.status === 401 || r.status === 403 ? 'unauthorized' : null,
-          count: collected.length,
-          totalCount
-        };
-        if (r.status === 401 || r.status === 403 || !isReachableEdesisResponse(r)) break;
-        const rows = unwrapList(r.json);
-        totalCount = Number(r.json?.result?.totalCount ?? r.json?.totalCount ?? rows.length) || rows.length;
-        pathUsed = path;
-        collected.push(...rows);
-        last = { rows: collected, httpStatus: r.status, path, error: null, count: collected.length, totalCount };
-        if (!rows.length || collected.length >= totalCount) break;
-      } catch (e) {
-        last = { ...empty, error: e instanceof Error ? e.message : String(e), path };
-        break;
+  const donems = [];
+  const seenDonem = new Set();
+  const pushDonem = (v) => {
+    const key = v == null ? 'none' : String(Number(v));
+    if (seenDonem.has(key)) return;
+    seenDonem.add(key);
+    donems.push(v == null ? null : Number(v));
+  };
+  if (donemId != null && Number.isFinite(Number(donemId))) pushDonem(Number(donemId));
+  pushDonem(Number(localCfg.defaultDonemId) || 113);
+  pushDonem(null);
+
+  const mergeHits = (hits) => {
+    const byId = new Map();
+    let last = empty;
+    for (const hit of hits) {
+      if (hit?.httpStatus) last = hit;
+      for (const row of hit?.rows || []) {
+        const id = pickEdesisCatalogExamId(row);
+        if (id && !byId.has(String(id))) byId.set(String(id), row);
       }
     }
-    if (collected.length) {
-      return { rows: collected, httpStatus: last.httpStatus, path: pathUsed, error: null, count: collected.length, totalCount };
-    }
-  }
-  return last;
+    const rows = [...byId.values()];
+    return {
+      rows,
+      httpStatus: last.httpStatus,
+      path: last.path,
+      error: rows.length ? null : last.error,
+      count: rows.length,
+      totalCount: rows.length
+    };
+  };
+
+  const stdHits = await Promise.all(
+    donems.map((d) => fetchEdesisStudentRaporPages(localCfg, sid, d, 'stdIds'))
+  );
+  const mergedStd = mergeHits(stdHits);
+  if (mergedStd.rows.length) return mergedStd;
+
+  const pascalHits = await Promise.all(
+    donems.map((d) => fetchEdesisStudentRaporPages(localCfg, sid, d, 'StdIds'))
+  );
+  return mergeHits(pascalHits);
 }
 
 /**

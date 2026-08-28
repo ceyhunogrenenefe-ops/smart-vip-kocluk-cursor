@@ -26,6 +26,7 @@ import {
   edesisResultHiddenFromStudent,
   pickExamDurationSeconds,
   pickEdesisResultExamId,
+  buildEdesisStudentRaporQuery,
   resultRowBelongsToStudent,
   collectEdesisBookletFiles,
   pickEdesisBookletFile,
@@ -1806,5 +1807,18 @@ describe('edesisResultHiddenFromStudent', () => {
   it('hides when isResultHideForStudent is true', () => {
     assert.equal(edesisResultHiddenFromStudent({ isResultHideForStudent: true, examId: 1 }), true);
     assert.equal(edesisResultHiddenFromStudent({ examId: 1, totalNet: 12 }), false);
+  });
+});
+
+describe('buildEdesisStudentRaporQuery', () => {
+  it('omits donemId so current-term exams are not locked to 113', () => {
+    const q = buildEdesisStudentRaporQuery({ sid: '7909547', stdIdsKey: 'stdIds' });
+    assert.equal(q.includes('donemId='), false);
+    assert.match(q, /stdIds=7909547/);
+  });
+
+  it('includes donemId when given', () => {
+    const q = buildEdesisStudentRaporQuery({ sid: '2086573', donemId: 113, stdIdsKey: 'stdIds' });
+    assert.match(q, /donemId=113/);
   });
 });
