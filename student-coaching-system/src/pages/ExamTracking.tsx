@@ -196,7 +196,7 @@ const createDraftResult = (label: string) => ({
 });
 
 export default function ExamTracking() {
-  const { students, examResults, addExamResult, updateExamResult, deleteExamResult, appDataLoading, scoresDataReady } = useApp();
+  const { students, examResults, addExamResult, updateExamResult, deleteExamResult, scoresDataReady } = useApp();
   const [selectedStudent, setSelectedStudent] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState('');
   const [examTypeFilter, setExamTypeFilter] = useState<string>('all');
@@ -973,7 +973,7 @@ export default function ExamTracking() {
 
   const totalStats = getTotalStats();
 
-  if (appDataLoading && !scoresDataReady) {
+  if (!scoresDataReady) {
     return (
       <div className="space-y-6">
         <div className="bg-gradient-to-r from-orange-500 to-red-500 rounded-xl shadow-lg p-6 text-white">
