@@ -82,7 +82,7 @@ import { enrollPlatformStudentsBatch, EDESIS_AUTO_ENROLL_MARKER, EDESIS_AUTO_ENR
 
 const STAFF = new Set(['super_admin', 'admin', 'coach']);
 const EDESIS_PDF_DURATION_MARKER = 'edesis-pdf-duration-2026-08-27';
-const EDESIS_ASSIGNED_ONLY_MARKER = 'edesis-student-edesis-apis-2026-08-28b';
+const EDESIS_ASSIGNED_ONLY_MARKER = 'edesis-sinava-gir-open-none-2026-08-28';
 /** Aynı Hobby instance’ta üst üste op=sync 504 üretmesin */
 let syncInFlight = null;
 /** Öğrencinin kendi Edesis sonuç / karne / sınava giriş ops */
@@ -288,6 +288,8 @@ async function loadAvailableEdesisExamsForStudent({
       probeSkipReason: assignedResolved?.probeSkipReason || null,
       probeCandidateCount: assignedResolved?.probeCandidateCount ?? null,
       studentRapor: assignedResolved?.studentRapor || null,
+      openCatalogCount: assignedResolved?.openCatalogCount ?? 0,
+      openCatalogExamIds: assignedResolved?.openCatalogExamIds || [],
       openOnlineCount: openOnline.length,
       totalMs: Date.now() - t0
     }
