@@ -78,6 +78,7 @@ import { enrollPlatformStudentsBatch, EDESIS_AUTO_ENROLL_MARKER, EDESIS_AUTO_ENR
 
 const STAFF = new Set(['super_admin', 'admin', 'coach']);
 const EDESIS_PDF_DURATION_MARKER = 'edesis-pdf-duration-2026-08-27';
+const EDESIS_ASSIGNED_ONLY_MARKER = 'edesis-assigned-only-2026-08-28';
 /** Aynı Hobby instance’ta üst üste op=sync 504 üretmesin */
 let syncInFlight = null;
 /** Öğrencinin kendi Edesis sonuç / karne / sınava giriş ops */
@@ -174,10 +175,9 @@ async function resolveStudentEdesisScope({ edesisStudentId, platformStudentId, s
 }
 
 /**
- * Öğrenci Sınava gir — yalnızca Edesis’te bu öğrenci ID’sine tanımlanan denemeler.
- * Kaynak: ogrenciIds, GetOgrenciSinavIds / OgrenciSinavListesi (ID’siz AP),
- * GetOgrenciBySinavId, güvenilir StudentId/ClassroomId alt kümesi.
- * Program/recency yedeği YOK — atanmamış deneme gösterilmez (tüm katalog dökülmesin).
+ * Öğrenci Sınava gir — yalnızca Edesis’te bu öğrenciye tanımlı denemeler.
+ * Kaynak: ogrenciIds + GetOgrenciSinavIds.sinavId (OgrenciSinavListesi analiz geçmişi dökülmez).
+ * sinavTuruId kurum geneli — Sınava gir’e eklenmez. Program/recency yedeği yok.
  */
 async function loadAvailableEdesisExamsForStudent({
   edesisStudentId,
@@ -1746,7 +1746,7 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         ok: true,
-        deployMarker: EDESIS_PDF_DURATION_MARKER,
+        deployMarker: EDESIS_ASSIGNED_ONLY_MARKER,
         edesisStudentId,
         count: items.length,
         items,
@@ -1826,7 +1826,7 @@ export default async function handler(req, res) {
       const takeable = (loaded.items || []).filter((x) => x.canTake && !x.hasStudentResult);
       return res.status(200).json({
         ok: true,
-        deployMarker: EDESIS_PDF_DURATION_MARKER,
+        deployMarker: EDESIS_ASSIGNED_ONLY_MARKER,
         edesisStudentId,
         platformStudentId: platformId,
         autoLinked,
@@ -1879,6 +1879,7 @@ export default async function handler(req, res) {
       });
       return res.status(200).json({
         ok: true,
+        deployMarker: EDESIS_ASSIGNED_ONLY_MARKER,
         edesisStudentId,
         adminAssignment,
         assignmentMeta: loaded.meta,
