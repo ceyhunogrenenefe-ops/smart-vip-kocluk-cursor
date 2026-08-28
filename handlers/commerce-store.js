@@ -26,7 +26,7 @@
  *  order.paid            — ödeme callback webhook (site)
  *  assignment.own        — "Bu kitap bende var" (purchase yapmadan atama)
  *
- *  deployMarker: kitap-store-visible-2026-08-28
+ *  deployMarker: kitap-store-visible-2026-08-28b
  */
 
 import { requireAuth } from '../api/_lib/auth.js';
@@ -142,7 +142,7 @@ async function handleCatalog(op, body, actor) {
       ok: true,
       settings,
       store_browse,
-      deployMarker: 'kitap-store-visible-2026-08-28',
+      deployMarker: 'kitap-store-visible-2026-08-28b',
     };
   }
 
@@ -320,7 +320,7 @@ async function handleCatalog(op, body, actor) {
 
   if (op === 'catalog.browse') {
     const browse = await listStoreBrowse();
-    return { ok: true, ...browse, deployMarker: 'kitap-store-visible-2026-08-28' };
+    return { ok: true, ...browse, deployMarker: 'kitap-store-visible-2026-08-28b' };
   }
 
   if (op === 'catalog.assigned') {
