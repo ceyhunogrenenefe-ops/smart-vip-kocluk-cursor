@@ -77,16 +77,28 @@ export function classKeysEqual(a, b) {
   return false;
 }
 
+/** 8. sınıf ve LGS mağazada aynı aile. */
+export function isLgsStoreClassKey(value) {
+  const s = String(value ?? '').trim().toLocaleUpperCase('tr');
+  if (!s) return false;
+  if (s === 'LGS' || s.startsWith('8.') || s.startsWith('8 ')) return true;
+  return /^\d+$/.test(s) && parseInt(s, 10) === 8;
+}
+
 export function classKeyMatchesLevels(classKey, classLevels) {
   const key = String(classKey ?? '').trim();
   if (!key) return false;
   const levels = Array.isArray(classLevels) ? classLevels : [];
-  return levels.some((lv) => classKeysEqual(key, lv));
+  if (levels.some((lv) => classKeysEqual(key, lv))) return true;
+  if (isLgsStoreClassKey(key) && levels.some((lv) => isLgsStoreClassKey(lv))) return true;
+  return false;
 }
 
 export function categoryBelongsToClass(category, classKey) {
   const keys = Array.isArray(category?.class_keys) ? category.class_keys : [];
-  return keys.some((k) => classKeysEqual(k, classKey));
+  if (keys.some((k) => classKeysEqual(k, classKey))) return true;
+  if (isLgsStoreClassKey(classKey) && keys.some((k) => isLgsStoreClassKey(k))) return true;
+  return false;
 }
 
 function digitsIsbn(value) {
@@ -108,7 +120,28 @@ export function canonicalBookSeries(book) {
     title.includes('deneme kulübü') ||
     title.includes('deneme kulubu');
   if (looksDeneme) return LGS8_DENEME_SERIES;
+  if (stored) return stored;
+  const levels = Array.isArray(book?.class_levels) ? book.class_levels : [];
+  const lgsPack =
+    levels.some((lv) => isLgsStoreClassKey(lv)) ||
+    title.includes('lgs') ||
+    slug.includes('lgs');
+  if (
+    lgsPack &&
+    (title.includes('deneme') || title.includes('soru bank') || title.includes('branş') || title.includes('brans'))
+  ) {
+    return LGS8_DENEME_SERIES;
+  }
   return stored;
+}
+
+/** Serisi boşsa başlıktan/sınıftan doldur; kayıtlı seriyi ezme. */
+export function withInferredSeriesMetadata(book) {
+  const metadata = { ...(book?.metadata && typeof book.metadata === 'object' ? book.metadata : {}) };
+  if (String(metadata.series ?? '').trim()) return metadata;
+  const inferred = canonicalBookSeries({ ...book, metadata });
+  if (inferred) metadata.series = inferred;
+  return metadata;
 }
 
 export function bookMatchesCategory(book, category) {
@@ -264,19 +297,39 @@ export async function listStoreBrowse() {
       };
     });
 
-  const classes = nav.classes
-    .filter((c) => c.active)
-    .map((cl) => {
-      const cats = categories.filter((cat) => categoryBelongsToClass(cat, cl.key));
-      const bookIds = new Set(cats.flatMap((cat) => cat.books.map((b) => b.id)));
-      return {
-        key: cl.key,
-        label: cl.label,
-        sort: cl.sort,
-        category_count: cats.length,
-        book_count: bookIds.size,
-      };
+  const matchedIds = new Set(categories.flatMap((cat) => cat.books.map((b) => b.id)));
+  const classes = nav.classes.filter((c) => c.active);
+  for (const cl of classes) {
+    const unmatched = decoratedBooks.filter(
+      (b) => !matchedIds.has(b.id) && classKeyMatchesLevels(cl.key, b.class_levels)
+    );
+    if (!unmatched.length) continue;
+    const key = `${sanitizeKey(cl.key) || cl.key}-diger`;
+    categories.push({
+      key,
+      label: 'Diğer',
+      class_keys: [cl.key],
+      series: '',
+      description: 'Serisi seçilmeden yüklenen kitaplar',
+      sort: 999,
+      book_count: unmatched.length,
+      priced_count: unmatched.filter((b) => b.buyable).length,
+      books: unmatched,
     });
+    unmatched.forEach((b) => matchedIds.add(b.id));
+  }
 
-  return { classes, categories };
+  const classRows = classes.map((cl) => {
+    const cats = categories.filter((cat) => categoryBelongsToClass(cat, cl.key));
+    const bookIds = new Set(cats.flatMap((cat) => cat.books.map((b) => b.id)));
+    return {
+      key: cl.key,
+      label: cl.label,
+      sort: cl.sort,
+      category_count: cats.length,
+      book_count: bookIds.size,
+    };
+  });
+
+  return { classes: classRows, categories };
 }

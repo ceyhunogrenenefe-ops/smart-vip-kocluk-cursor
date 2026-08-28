@@ -8,6 +8,7 @@ import {
   defaultStoreBrowse,
   normalizeStoreBrowse,
   publicStoreBrowseNav,
+  withInferredSeriesMetadata,
 } from './commerce-store-browse.js';
 
 describe('commerce-store-browse', () => {
@@ -54,6 +55,42 @@ describe('commerce-store-browse', () => {
     });
     expect(nav.classes.map((c) => c.key).sort()).toEqual(['8', 'LGS']);
     expect(nav.categories[0].class_keys.sort()).toEqual(['8', 'LGS']);
+  });
+
+  it('treats 8 and LGS as the same store family', () => {
+    expect(classKeyMatchesLevels('8', ['LGS'])).toBe(true);
+    expect(classKeyMatchesLevels('LGS', ['8'])).toBe(true);
+    expect(classKeyMatchesLevels('TYT', ['LGS'])).toBe(false);
+    expect(categoryBelongsToClass({ class_keys: ['LGS'] }, '8')).toBe(true);
+    expect(categoryBelongsToClass({ class_keys: ['8'] }, 'LGS')).toBe(true);
+    expect(categoryBelongsToClass({ class_keys: ['TYT'] }, 'LGS')).toBe(false);
+  });
+
+  it('infers LGS deneme / soru bankası packs into Denemeler series', () => {
+    expect(canonicalBookSeries({
+      title: 'LGS MOZAİK YAYINLARI 4LÜ HİT BRANŞ DENEMELERİ',
+      class_levels: ['LGS'],
+      metadata: {},
+    })).toBe('lgs-8-denemeler');
+    expect(canonicalBookSeries({
+      title: 'VIP Yayınları 8. Sınıf LGS Fen Bilimleri Eğitim Seti',
+      class_levels: ['8', 'LGS'],
+      metadata: { series: 'vip-lgs-8-egitim' },
+    })).toBe('vip-lgs-8-egitim');
+    expect(canonicalBookSeries({
+      title: 'ÜçDörtBeş Yayınları Sıfırdan Başla Start Matematik',
+      class_levels: ['TYT'],
+      metadata: {},
+    })).toBe('');
+    expect(withInferredSeriesMetadata({
+      title: 'LGS ULTİ 6 LI BRANŞ DENEMELERİ',
+      class_levels: ['LGS'],
+      metadata: {},
+    }).series).toBe('lgs-8-denemeler');
+    expect(withInferredSeriesMetadata({
+      title: 'VIP Fen',
+      metadata: { series: 'vip-lgs-8-egitim' },
+    }).series).toBe('vip-lgs-8-egitim');
   });
 
   it('matches class keys and book series', () => {
