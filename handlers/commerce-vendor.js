@@ -18,6 +18,7 @@ import { requireAuth } from '../api/_lib/auth.js';
 import { actorRoleSet, roleSetHasSuperAdmin } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { attachOfferRelations, attachOfferRelationsList } from '../api/_lib/commerce-utils.js';
+import { withInferredSeriesMetadata } from '../api/_lib/commerce-store-browse.js';
 
 function err(res, status, message) {
   return res.status(status).json({ error: message });
@@ -147,6 +148,13 @@ export default async function handler(req, res) {
           page_count: sanitizeInt(body.page_count),
           cover_image_url: sanitizeText(body.cover_image_url),
           is_catalog_active: false, // Süper Admin onaylayana kadar kapalı
+          metadata: withInferredSeriesMetadata({
+            title: sanitizeText(body.title),
+            isbn: sanitizeText(body.isbn),
+            slug,
+            class_levels: body.class_levels,
+            metadata: body.metadata,
+          }),
           created_by: actor.sub,
           updated_by: actor.sub,
         })
