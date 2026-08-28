@@ -24,6 +24,9 @@ import {
   collectAssignedRowsFromStudentRaporViews,
   overlayAssignedCatalogWithRaporViews,
   collectStudentTakeableOpenCatalogExams,
+  pickEdesisExamTakeWindow,
+  edesisExamTakeWindowOpen,
+  overlayCatalogExamsWithTakeWindows,
   edesisResultHiddenFromStudent,
   pickExamDurationSeconds,
   pickEdesisResultExamId,
@@ -1909,6 +1912,99 @@ describe('GetAllSinavRaporForStudent classroom gate', () => {
       items.filter((x) => x.canTake).map((x) => x.examId),
       ['1579103']
     );
+  });
+});
+
+describe('edesisExamTakeWindowOpen', () => {
+  const now = new Date('2026-08-28T12:00:00Z');
+
+  it('hides when GetSinavForView endDate has passed', () => {
+    assert.equal(
+      edesisExamTakeWindowOpen(
+        { id: 1559901, name: 'VİP MÜFREDAT İZLEME LGS-1', startDate: '2026-08-10', endDate: '2026-08-20' },
+        now
+      ),
+      false
+    );
+  });
+
+  it('keeps exam open through the Istanbul calendar day of a midnight endDate', () => {
+    assert.equal(
+      edesisExamTakeWindowOpen({ id: 1580129, endDate: '2026-08-28T00:00:00' }, now),
+      true
+    );
+  });
+
+  it('hides when startDate is still in the future', () => {
+    assert.equal(
+      edesisExamTakeWindowOpen({ id: 1, startDate: '2026-08-29', endDate: '2026-09-05' }, now),
+      false
+    );
+  });
+
+  it('does not hide when only examDate exists (that is not the take window)', () => {
+    assert.equal(
+      edesisExamTakeWindowOpen({ id: 1559901, examDate: '2026-08-14', sinavTarihi: '2026-08-14' }, now),
+      true
+    );
+  });
+
+  it('ignores placeholder 0001 dates', () => {
+    assert.equal(
+      edesisExamTakeWindowOpen(
+        { id: 1, startDate: '0001-01-01T00:00:00', endDate: '0001-01-01T00:00:00' },
+        now
+      ),
+      true
+    );
+    assert.equal(pickEdesisExamTakeWindow({ startDate: '0001-01-01' }).startRaw, '');
+  });
+
+  it('reads nested GetSinavForViewDto startDate/endDate', () => {
+    const view = {
+      sinav: { id: 1579080, sinavAdi: 'LİMİT LGS', sinavTarihi: '2026-08-25' },
+      startDate: '2026-08-25T00:00:00',
+      endDate: '2026-08-20T00:00:00'
+    };
+    assert.equal(edesisExamTakeWindowOpen(view, now), false);
+    assert.equal(pickEdesisExamTakeWindow(view).endRaw, '2026-08-20T00:00:00');
+  });
+
+  it('Sınava gir hides expired window even if catalog examDate is recent', () => {
+    const expired = {
+      id: 1559901,
+      name: 'VİP MÜFREDAT İZLEME LGS-1',
+      examType: 'LGS',
+      resultStatus: 'None',
+      examDate: '2026-08-14',
+      studentCount: 0,
+      startDate: '2026-08-10T00:00:00',
+      endDate: '2026-08-20T00:00:00'
+    };
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [expired],
+      assignedCatalogRows: [expired],
+      resultRows: [],
+      edesisStudentId: '2086573',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      gradeName: '8',
+      now,
+      allowRecencyFallback: false,
+      requireExplicitAssignment: true
+    });
+    assert.deepEqual(items.filter((x) => x.canTake).map((x) => x.examId), []);
+  });
+
+  it('overlays GetSinavForView dates onto an assigned row that had none', () => {
+    const assigned = [
+      { id: 1559901, name: 'VİP MÜFREDAT', resultStatus: 'None', examDate: '2026-08-14' }
+    ];
+    const detailed = [
+      { id: 1559901, startDate: '2026-08-10', endDate: '2026-08-20', resultStatus: 'None' }
+    ];
+    const merged = overlayCatalogExamsWithTakeWindows(assigned, detailed);
+    assert.equal(merged[0].endDate, '2026-08-20');
+    assert.equal(edesisExamTakeWindowOpen(merged[0], now), false);
   });
 });
 
