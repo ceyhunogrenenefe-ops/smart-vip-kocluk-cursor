@@ -35,6 +35,10 @@ import {
   fetchEdesisExamCatalogRowDetail,
   fetchEdesisExamRosterStudentIds,
   catalogExamAssignedToStudent,
+  enrichTakeableExamDurations,
+  resultRowBelongsToStudent,
+  edesisResultLooksSubmitted,
+  edesisResultHiddenFromStudent,
   fetchEdesisGradesList,
   fetchEdesisDepartmentsList,
   fetchEdesisClassroomsList,
@@ -78,7 +82,7 @@ import { enrollPlatformStudentsBatch, EDESIS_AUTO_ENROLL_MARKER, EDESIS_AUTO_ENR
 
 const STAFF = new Set(['super_admin', 'admin', 'coach']);
 const EDESIS_PDF_DURATION_MARKER = 'edesis-pdf-duration-2026-08-27';
-const EDESIS_ASSIGNED_ONLY_MARKER = 'edesis-assigned-only-2026-08-28';
+const EDESIS_ASSIGNED_ONLY_MARKER = 'edesis-student-edesis-apis-2026-08-28';
 /** Aynı Hobby instance’ta üst üste op=sync 504 üretmesin */
 let syncInFlight = null;
 /** Öğrencinin kendi Edesis sonuç / karne / sınava giriş ops */
@@ -176,8 +180,8 @@ async function resolveStudentEdesisScope({ edesisStudentId, platformStudentId, s
 
 /**
  * Öğrenci Sınava gir — yalnızca Edesis’te bu öğrenciye tanımlı denemeler.
- * Kaynak: ogrenciIds + GetOgrenciSinavIds.sinavId (OgrenciSinavListesi analiz geçmişi dökülmez).
- * sinavTuruId kurum geneli — Sınava gir’e eklenmez. Program/recency yedeği yok.
+ * Kaynak: ogrenciIds + GetOgrenciSinavIds.sinavId + GetAllSinavRaporForStudent
+ * (sınıf/ogrenciIds eşleşmesi). sinavTuruId kurum geneli — Sınava gir’e eklenmez.
  */
 async function loadAvailableEdesisExamsForStudent({
   edesisStudentId,
@@ -239,6 +243,7 @@ async function loadAvailableEdesisExamsForStudent({
     allowRecencyFallback: false,
     requireExplicitAssignment: true
   });
+  await enrichTakeableExamDurations(items, cfg, { limit: 6 });
   const takeableIds = items.filter((x) => x.canTake && !x.hasStudentResult).map((x) => x.examId);
   const resultExamIds = (studentResults.rows || [])
     .map((row) => pickEdesisResultExamId(row))
@@ -282,6 +287,7 @@ async function loadAvailableEdesisExamsForStudent({
       probeSkipped: Boolean(assignedResolved?.probeSkipped),
       probeSkipReason: assignedResolved?.probeSkipReason || null,
       probeCandidateCount: assignedResolved?.probeCandidateCount ?? null,
+      studentRapor: assignedResolved?.studentRapor || null,
       openOnlineCount: openOnline.length,
       totalMs: Date.now() - t0
     }
@@ -1314,7 +1320,7 @@ export default async function handler(req, res) {
       }
 
       const mappedExams = mapHubResultExams(
-        fetchResult.rows || [],
+        (fetchResult.rows || []).filter((row) => !(isStudent && !isStaff && edesisResultHiddenFromStudent(row))),
         platformId,
         edesisStudentId,
         institutionId || matched?.institution_id || null
@@ -1977,13 +1983,20 @@ export default async function handler(req, res) {
       });
       const assigned = loaded.items || [];
       const assignedExam = assigned.find((ex) => String(ex.examId) === examId);
-      if (!assignedExam) {
+      const assignedIdSet = new Set((loaded.meta?.assignedExamIds || []).map((id) => String(id)));
+      const inAssigned = assignedIdSet.has(examId) || Boolean(assignedExam);
+      if (!inAssigned) {
         return res.status(403).json({
           error: 'exam_not_assigned',
           hint: 'Bu deneme size tanımlanmamış'
         });
       }
-      if (isStudent && !isStaff && assignedExam.hasStudentResult) {
+      const submittedFromResults = (loaded.resultRows || []).some((row) => {
+        if (String(pickEdesisResultExamId(row) || '') !== examId) return false;
+        if (edesisStudentId && !resultRowBelongsToStudent(row, edesisStudentId)) return false;
+        return edesisResultLooksSubmitted(row);
+      });
+      if (isStudent && !isStaff && (assignedExam?.hasStudentResult || submittedFromResults)) {
         return res.status(409).json({
           ok: false,
           conflict: true,

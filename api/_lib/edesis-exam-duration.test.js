@@ -8,7 +8,8 @@ import {
   pickExamDurationSeconds,
   looksLikeEdesisAnswerKeyPdf,
   expandEdesisFileUrlCandidates,
-  formatEdesisAvailableExamItem
+  formatEdesisAvailableExamItem,
+  interpretEdesisDurationValue
 } from './edesis-client.js';
 
 describe('mergeEdesisExamViewBody', () => {
@@ -66,6 +67,15 @@ describe('expandEdesisFileUrlCandidates sinavzacdn', () => {
       baseUrl: 'https://onlinevipdershane.api.edesis.com'
     });
     assert.ok(urls.some((u) => /sinavzacdn\.azureedge\.net\/soruhavuzu-deneme\/f59b1c0b/.test(u)));
+  });
+});
+
+describe('interpretEdesisDurationValue', () => {
+  it('treats GetSinavSuresi minutes as seconds on the clock', () => {
+    assert.equal(interpretEdesisDurationValue(165), 9900);
+    assert.equal(interpretEdesisDurationValue(40), 2400);
+    assert.equal(interpretEdesisDurationValue(7200), 7200);
+    assert.equal(interpretEdesisDurationValue(0), 0);
   });
 });
 
