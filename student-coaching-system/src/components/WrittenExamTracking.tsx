@@ -54,7 +54,6 @@ export default function WrittenExamTracking() {
     updateWrittenExamScore,
     deleteWrittenExamScore,
     getWrittenExamStats,
-    appDataLoading,
     scoresDataReady
   } = useApp();
 
@@ -252,7 +251,7 @@ export default function WrittenExamTracking() {
     }
   };
 
-  if (appDataLoading && !scoresDataReady) {
+  if (!scoresDataReady) {
     return (
       <div className="space-y-6">
         <div className="bg-gradient-to-r from-purple-600 to-indigo-600 rounded-2xl p-6 text-white">

@@ -26,7 +26,7 @@ import { getAuthToken } from '../lib/session';
 import { bookRowPatchFromBook, bookStatusFromRow, mergeBookStatusPatch } from '../lib/bookReadingStatus';
 import { resolveCoachRecordId, resolveStudentRecordId } from '../lib/coachResolve';
 import { isSupabaseReady, supabase, supabaseBaseUrl, verifySupabaseReachable } from '../lib/supabase';
-import { studentRowToStudent, type ApiStudentRow } from '../lib/mapStudentRow';
+import { studentRowToStudent, coachRowToCoach, type ApiStudentRow } from '../lib/mapStudentRow';
 import {
   encodeTopicProgressNotes,
   isTopicMarkedCompleted,
@@ -68,6 +68,9 @@ export type StudentProfileUpdate = Partial<Student> & {
   endDate?: string;
   isActive?: boolean;
 };
+
+/** Kabuk bootstrap (kurum/öğrenci/koç) skor paketini bekletmez */
+export const APP_SHELL_FAST_MARKER = 'app-shell-fast-2026-08-28';
 
 // LocalStorage anahtarları
 const STORAGE_KEYS = {
@@ -163,9 +166,9 @@ interface AppState {
   userRole: UserRole;
   setUserRole: (role: UserRole) => void;
 
-  /** Supabase bootstrap devam ediyor */
+  /** Shell (kurum/öğrenci/koç) yüklendi; skor paketini bekletmez */
   appDataLoading: boolean;
-  /** Deneme + yazılı skorları yüklendi */
+  /** Deneme + yazılı + haftalık paket yüklendi */
   scoresDataReady: boolean;
 
   // Öğrenciler
@@ -429,7 +432,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Supabase'den veri yükle (başlangıçta)
+  // Supabase'den veri yükle — kabuk (kurum/öğrenci/koç) önce; skor paketi arka planda
   useEffect(() => {
     if (!isSupabaseReady) {
       console.error(
@@ -453,18 +456,61 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     const loadForUserId = effectiveUser.id;
+    let cancelled = false;
+    const stale = () => cancelled || effectiveUser?.id !== loadForUserId;
 
     const loadDataFromDatabase = async () => {
       setAppDataLoading(true);
       setScoresDataReady(false);
       try {
         await ensureSupabaseReady();
+        if (stale()) return;
+
+        const isStudentRole = effectiveUser?.role === 'student';
+        const useTenantInstitutionFilter =
+          effectiveUser?.role === 'admin' || effectiveUser?.role === 'super_admin';
+        const userInstId =
+          effectiveUser?.institutionId && isUuid(effectiveUser.institutionId)
+            ? effectiveUser.institutionId
+            : null;
+        const earlyScope = isStudentRole
+          ? undefined
+          : useTenantInstitutionFilter
+            ? activeInstitutionId || userInstId || undefined
+            : undefined;
+
+        const viewAsRoleTags = userRoleTags(effectiveUser);
+        const realRoleTags = userRoleTags(user);
+        const realCanViewAs =
+          realRoleTags.includes('super_admin') || realRoleTags.includes('admin');
+        const viewAsUserId =
+          isImpersonating &&
+          realCanViewAs &&
+          effectiveUser?.id &&
+          (viewAsRoleTags.includes('coach') ||
+            viewAsRoleTags.includes('teacher') ||
+            viewAsRoleTags.includes('student') ||
+            viewAsRoleTags.includes('admin'))
+            ? effectiveUser.id
+            : undefined;
+        const studentsOpts = viewAsUserId ? { viewAsUserId } : undefined;
+
+        if (import.meta.env.DEV) {
+          void db.initializeDatabase().catch(() => undefined);
+        }
+
+        const [instOutcome, studentsOutcome, coachesOutcome] = await Promise.allSettled([
+          db.getInstitutions(),
+          db.getStudents(earlyScope, studentsOpts),
+          isStudentRole ? Promise.resolve([]) : db.getCoaches(earlyScope)
+        ]);
+        if (stale()) return;
 
         let dbInstitutions: Awaited<ReturnType<typeof db.getInstitutions>> = [];
-        try {
-          dbInstitutions = await db.getInstitutions();
-        } catch (instErr) {
-          console.warn('[AppContext] Kurumlar yüklenemedi, önbellek kullanılıyor:', instErr);
+        if (instOutcome.status === 'fulfilled') {
+          dbInstitutions = instOutcome.value;
+        } else {
+          console.warn('[AppContext] Kurumlar yüklenemedi, önbellek kullanılıyor:', instOutcome.reason);
           const cached = loadFromStorage<Institution[]>(STORAGE_KEYS.institutions, []);
           dbInstitutions = cached.map((i) => ({
             id: i.id,
@@ -480,10 +526,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
             created_at: i.createdAt,
             updated_at: i.createdAt
           }));
-        }
-
-        if (import.meta.env.DEV) {
-          await db.initializeDatabase();
         }
 
         let loadedInstitutions: Institution[] = [];
@@ -529,10 +571,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const defaultInstitutionId = canSwitchTenant
           ? resolveSuperAdminDefaultInstitutionId(loadedInstitutions)
           : loadedInstitutions[0]?.id;
-        const userInstId =
-          effectiveUser?.institutionId && isUuid(effectiveUser.institutionId)
-            ? effectiveUser.institutionId
-            : null;
         const scopeInstitutionId = resolveTenantScopeInstitutionId({
           role: effectiveUser?.role,
           userInstitutionId: userInstId,
@@ -557,17 +595,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
               writeActiveInstitutionIdForRole(next, effectiveUser?.role);
             }
           } else if (userInstId) {
-            // Kiracı: kullanıcı institution_id biliniyor ama liste henüz eşleşmiyor — yine kendi id'sini tut
             if (activeInstitutionId !== userInstId) setActiveInstitutionId(userInstId);
           } else {
-            // institutionId yokken institutions[0] / önceki süper admin seçimine düşme
             if (activeInstitutionId) setActiveInstitutionId(null);
           }
         }
-
-        const isStudentRole = effectiveUser?.role === 'student';
-        const useTenantInstitutionFilter =
-          effectiveUser?.role === 'admin' || effectiveUser?.role === 'super_admin';
 
         const institutionScope = isStudentRole
           ? undefined
@@ -575,58 +607,59 @@ export function AppProvider({ children }: { children: ReactNode }) {
             ? resolvedActiveId || defaultInstitutionId || undefined
             : undefined;
 
-        const viewAsRoleTags = userRoleTags(effectiveUser);
-        const realRoleTags = userRoleTags(user);
-        const realCanViewAs =
-          realRoleTags.includes('super_admin') || realRoleTags.includes('admin');
-        // view_as yalnızca gerçek JWT admin/süper admin iken (koç→öğrenci taklidinde 403 olur)
-        const viewAsUserId =
-          isImpersonating &&
-          realCanViewAs &&
-          effectiveUser?.id &&
-          (viewAsRoleTags.includes('coach') ||
-            viewAsRoleTags.includes('teacher') ||
-            viewAsRoleTags.includes('student') ||
-            viewAsRoleTags.includes('admin'))
-            ? effectiveUser.id
-            : undefined;
-
-        const [dbStudents, myRow] = await Promise.all([
-          db.getStudents(institutionScope, viewAsUserId ? { viewAsUserId } : undefined),
-          isStudentRole && getAuthToken()
-            ? db.getMyStudent().catch((e) => {
-                console.warn('[AppContext] getMyStudent birleştirme atlandı:', e);
-                return null;
-              })
-            : Promise.resolve(null)
-        ]);
-
-        let loadedStudents: Student[] = dbStudents.map(studentRowToStudent);
-
-        if (myRow) {
-          const st = studentRowToStudent(myRow);
-          const ix = loadedStudents.findIndex((s) => s.id === st.id);
-          if (ix === -1) loadedStudents = [...loadedStudents, st];
-          else {
-            const copy = [...loadedStudents];
-            copy[ix] = { ...copy[ix], ...st };
-            loadedStudents = copy;
+        let dbStudents =
+          studentsOutcome.status === 'fulfilled' ? studentsOutcome.value : [];
+        if (studentsOutcome.status === 'rejected') {
+          console.warn('[AppContext] getStudents (boş devam):', studentsOutcome.reason);
+        }
+        const scopeMismatch =
+          Boolean(institutionScope) &&
+          String(earlyScope || '') !== String(institutionScope || '');
+        if (scopeMismatch) {
+          try {
+            dbStudents = await db.getStudents(institutionScope, studentsOpts);
+          } catch (e) {
+            console.warn('[AppContext] getStudents yeniden deneme:', e);
           }
         }
 
+        let loadedStudents: Student[] = dbStudents.map(studentRowToStudent);
         setStudents(loadedStudents);
 
+        let coachesRows =
+          coachesOutcome.status === 'fulfilled' ? coachesOutcome.value : [];
+        if (coachesOutcome.status === 'rejected') {
+          console.warn('[AppContext] getCoaches (boş devam):', coachesOutcome.reason);
+        }
+        if (scopeMismatch && !isStudentRole) {
+          try {
+            coachesRows = await db.getCoaches(institutionScope);
+          } catch (e) {
+            console.warn('[AppContext] getCoaches yeniden deneme:', e);
+          }
+        }
+        const loadedCoaches: Coach[] = (coachesRows || []).map((c) => coachRowToCoach(c));
+        const localCoaches = loadFromStorage<Coach[]>(STORAGE_KEYS.coaches, []).map((c) => ({
+          ...c,
+          subjects: Array.isArray(c.subjects) ? c.subjects : [],
+          studentIds: Array.isArray(c.studentIds) ? c.studentIds : [],
+          institutionId: c.institutionId || institutionScope || loadedInstitutions[0]?.id
+        }));
+        setCoaches(mergeCoachesByEmail(loadedCoaches, localCoaches));
+
+        if (stale()) return;
+        setAppDataLoading(false);
+        void APP_SHELL_FAST_MARKER;
+
+        try {
         const studentIdScope = new Set(loadedStudents.map((s) => s.id));
         const restrictRelatedDataByStudents = !isStudentRole && Boolean(institutionScope);
         const sidList = loadedStudents.map((s) => s.id);
         const hasAuth = Boolean(getAuthToken());
         const hasStudents = sidList.length > 0;
-        const legacyInstitutionId =
-          institutionScope || loadedInstitutions[0]?.id || createDefaultInstitution().id;
         const prefsInstId = resolvedActiveId || defaultInstitutionId || null;
 
         const [
-          coachesResult,
           entriesResult,
           booksResult,
           writtenResult,
@@ -636,7 +669,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           topicResult,
           prefsResult
         ] = await Promise.allSettled([
-          db.getCoaches(institutionScope),
           db.getWeeklyEntries(undefined, institutionScope),
           db.getBookReadings(),
           db.getWrittenExams(),
@@ -648,29 +680,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             ? db.getInstitutionWrittenExamPrefs(prefsInstId)
             : Promise.resolve(null)
         ]);
-
-        if (coachesResult.status === 'fulfilled') {
-          const loadedCoaches: Coach[] = coachesResult.value.map((c) => ({
-            id: c.id,
-            name: c.name,
-            email: c.email,
-            phone: c.phone || undefined,
-            subjects: c.specialties || [],
-            studentIds: c.student_ids || [],
-            institutionId: c.institution_id || undefined,
-            lessonsMeetingsLocked: c.lessons_meetings_locked === true,
-            createdAt: c.created_at
-          }));
-          const localCoaches = loadFromStorage<Coach[]>(STORAGE_KEYS.coaches, []).map((c) => ({
-            ...c,
-            subjects: Array.isArray(c.subjects) ? c.subjects : [],
-            studentIds: Array.isArray(c.studentIds) ? c.studentIds : [],
-            institutionId: c.institutionId || legacyInstitutionId
-          }));
-          setCoaches(mergeCoachesByEmail(loadedCoaches, localCoaches));
-        } else {
-          console.warn('[AppContext] getCoaches (boş devam):', coachesResult.reason);
-        }
+        if (stale()) return;
 
         if (entriesResult.status === 'fulfilled') {
           const loadedEntries: WeeklyEntry[] = entriesResult.value.map((e) => ({
@@ -825,7 +835,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           console.warn('[AppContext] institution_written_exam_prefs:', prefsResult.reason);
         }
 
-        /** Yerel → sunucu migrate: ilk yükleme hızını bloklamaz */
         if (hasAuth && hasStudents) {
           void (async () => {
             const fromLocal = loadFromStorage<TopicProgress[]>(STORAGE_KEYS.topicProgress, []);
@@ -887,11 +896,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
 
         if (import.meta.env.DEV) {
-          console.debug('[AppContext] Veritabanından veriler yüklendi');
+          console.debug('[AppContext] Veritabanından veriler yüklendi', APP_SHELL_FAST_MARKER);
         }
-        if (effectiveUser?.id !== loadForUserId) return;
+        } catch (heavyErr) {
+          if (stale()) return;
+          console.warn('[AppContext] ağır paket:', heavyErr);
+          setScoresDataReady(true);
+        }
       } catch (error) {
-        if (effectiveUser?.id !== loadForUserId) return;
+        if (stale()) return;
         console.error('Veritabanı yükleme hatası:', error);
         setStudents([]);
         setCoaches([]);
@@ -902,24 +915,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setExamResults([]);
         setAISuggestions([]);
         setScoresDataReady(false);
-      } finally {
-        if (effectiveUser?.id === loadForUserId) {
-          setAppDataLoading(false);
-        }
+        setAppDataLoading(false);
       }
     };
 
     loadDataFromDatabase();
+    return () => {
+      cancelled = true;
+    };
   }, [
     tenantScopeInstitutionId,
     effectiveUser?.role,
     effectiveUser?.id,
-    effectiveUser?.studentId,
     user?.id,
     user?.role,
     isImpersonating,
     syncOrganizationsFromInstitutions
-  ]); // Öğrenci JWT student_id sonradan dolabiliyor
+  ]);
+
+  useEffect(() => {
+    if (!linkedStudent?.id) return;
+    setStudents((prev) => {
+      const ix = prev.findIndex((s) => s.id === linkedStudent.id);
+      if (ix === -1) return [...prev, linkedStudent];
+      const cur = prev[ix];
+      if (
+        cur.name === linkedStudent.name &&
+        cur.email === linkedStudent.email &&
+        cur.coachId === linkedStudent.coachId &&
+        cur.classLevel === linkedStudent.classLevel
+      ) {
+        return prev;
+      }
+      const copy = [...prev];
+      copy[ix] = { ...cur, ...linkedStudent };
+      return copy;
+    });
+  }, [linkedStudent]);
 
   // Veriler değiştiğinde localStorage'a kaydet
   useEffect(() => {

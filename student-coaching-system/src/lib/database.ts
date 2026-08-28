@@ -111,6 +111,8 @@ function newInstitutionUuid(): string {
 class DatabaseService {
   /** Aynı anda yapılan tekrarlı GET isteklerini birleştirir (sayfa yenileme / çift context yükü). */
   private inflightGets = new Map<string, Promise<unknown>>();
+  /** Kısa TTL — navigasyon / ikinci bootstrap aynı listeyi tekrar indirmez. */
+  private sessionCache = new Map<string, { at: number; value: unknown }>();
 
   private dedupeGet<T>(key: string, run: () => Promise<T>): Promise<T> {
     const hit = this.inflightGets.get(key);
@@ -120,6 +122,26 @@ class DatabaseService {
     });
     this.inflightGets.set(key, p);
     return p;
+  }
+
+  invalidateSessionCache(prefix?: string) {
+    if (!prefix) {
+      this.sessionCache.clear();
+      return;
+    }
+    for (const k of [...this.sessionCache.keys()]) {
+      if (k === prefix || k.startsWith(prefix) || k.includes(`:${prefix}`)) this.sessionCache.delete(k);
+    }
+  }
+
+  private cachedGet<T>(key: string, ttlMs: number, run: () => Promise<T>): Promise<T> {
+    const hit = this.sessionCache.get(key);
+    if (hit && Date.now() - hit.at < ttlMs) return Promise.resolve(hit.value as T);
+    return this.dedupeGet(key, async () => {
+      const value = await run();
+      this.sessionCache.set(key, { at: Date.now(), value });
+      return value;
+    });
   }
 
   /** Sunucu { data } veya doğrudan dizi/obje döndürebilir; hatalı yanlış rewrite (SPA 405/200) güvenliği */
@@ -401,7 +423,7 @@ class DatabaseService {
     const authSub = peekJwtClaims(getAuthToken())?.sub || 'anon';
     const viewAs = opts?.viewAsUserId ? String(opts.viewAsUserId).trim() : '';
     const key = `students:${authSub}:${institutionId || '*'}:va:${viewAs || '-'}`;
-    return this.dedupeGet(key, async () => {
+    return this.cachedGet(key, 12_000, async () => {
       const path = viewAs
         ? `/api/students?view_as_user_id=${encodeURIComponent(viewAs)}`
         : '/api/students';
@@ -447,7 +469,7 @@ class DatabaseService {
       `student-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const now = new Date().toISOString();
 
-    return this.apiJson<StudentRow>('/api/students', {
+    const row = await this.apiJson<StudentRow>('/api/students', {
       method: 'POST',
       body: JSON.stringify({
         ...student,
@@ -458,10 +480,16 @@ class DatabaseService {
         auth_password: provision?.auth_password
       })
     });
+    this.invalidateSessionCache('students');
+    return row;
   }
 
   /** Oturum açmış öğrencinin tek canonical kartı (GET /api/my-student) */
   async getMyStudent(): Promise<StudentRow | null> {
+    return this.dedupeGet('my-student', () => this.fetchMyStudent());
+  }
+
+  private async fetchMyStudent(): Promise<StudentRow | null> {
     let res = await apiFetch('/api/my-student');
     let payload = await res.json().catch(() => ({}));
     if (res.status === 404) return null;
@@ -488,15 +516,18 @@ class DatabaseService {
 
   // Öğrenci güncelle
   async updateStudent(id: string, updates: Partial<StudentRow>): Promise<StudentRow> {
-    return this.apiJson<StudentRow>(`/api/students?id=${encodeURIComponent(id)}`, {
+    const row = await this.apiJson<StudentRow>(`/api/students?id=${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify({ ...updates, updated_at: new Date().toISOString() })
     });
+    this.invalidateSessionCache('students');
+    return row;
   }
 
   // Öğrenci sil
   async deleteStudent(id: string): Promise<void> {
     await this.apiJson<{ ok: boolean }>(`/api/students?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+    this.invalidateSessionCache('students');
   }
 
   // ========== KOÇLAR ==========
@@ -504,7 +535,7 @@ class DatabaseService {
   // Tüm koçları getir
   async getCoaches(institutionId?: string): Promise<CoachRow[]> {
     const key = `coaches:${institutionId || '*'}`;
-    return this.dedupeGet(key, async () => {
+    return this.cachedGet(key, 12_000, async () => {
       const rows = await this.apiListJson<CoachRow>('/api/coaches', '/api/coaches');
       if (!institutionId) return rows;
       return rows.filter((c) => c.institution_id === institutionId);
@@ -521,23 +552,28 @@ class DatabaseService {
       `coach-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const now = new Date().toISOString();
 
-    return this.apiJson<CoachRow>('/api/coaches', {
+    const row = await this.apiJson<CoachRow>('/api/coaches', {
       method: 'POST',
       body: JSON.stringify({ ...coach, id, created_at: now, updated_at: now })
     });
+    this.invalidateSessionCache('coaches');
+    return row;
   }
 
   // Koç güncelle
   async updateCoach(id: string, updates: Partial<CoachRow>): Promise<CoachRow> {
-    return this.apiJson<CoachRow>(`/api/coaches?id=${encodeURIComponent(id)}`, {
+    const row = await this.apiJson<CoachRow>(`/api/coaches?id=${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify({ ...updates, updated_at: new Date().toISOString() })
     });
+    this.invalidateSessionCache('coaches');
+    return row;
   }
 
   // Koç sil
   async deleteCoach(id: string): Promise<void> {
     await this.apiJson<{ ok: boolean }>(`/api/coaches?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+    this.invalidateSessionCache('coaches');
   }
 
   // ========== KURUMLAR ==========
@@ -549,7 +585,7 @@ class DatabaseService {
       if (!token) {
         return this.getPublicInstitutionOptions();
       }
-      return this.dedupeGet('institutions', async () => {
+      return this.cachedGet('institutions', 45_000, async () => {
         let lastErr: unknown;
         for (let attempt = 0; attempt < 2; attempt++) {
           try {
@@ -559,7 +595,7 @@ class DatabaseService {
             );
           } catch (e) {
             lastErr = e;
-            if (attempt === 0) await new Promise((r) => setTimeout(r, 600));
+            if (attempt === 0) await new Promise((r) => setTimeout(r, 200));
           }
         }
         throw lastErr;
@@ -605,6 +641,7 @@ class DatabaseService {
       console.error('Kurum oluşturma hatası:', error);
       throw error;
     }
+    this.invalidateSessionCache('institutions');
     return data;
   }
 
@@ -621,6 +658,7 @@ class DatabaseService {
       console.error('Kurum güncelleme hatası:', error);
       throw error;
     }
+    this.invalidateSessionCache('institutions');
     return data;
   }
 

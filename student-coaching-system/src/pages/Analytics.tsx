@@ -93,7 +93,6 @@ export default function Analytics() {
     markSuggestionRead,
     updateAISuggestion,
     deleteAISuggestion,
-    appDataLoading,
     scoresDataReady,
   } = useApp();
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
@@ -878,7 +877,7 @@ export default function Analytics() {
     return '#EF4444'; // red-500
   };
 
-  if (appDataLoading && !scoresDataReady) {
+  if (!scoresDataReady) {
     return (
       <div className="space-y-6">
         <div>
