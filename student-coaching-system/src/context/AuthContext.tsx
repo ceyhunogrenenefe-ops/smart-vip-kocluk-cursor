@@ -328,8 +328,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     : user;
   const isImpersonating = impersonationTarget !== null;
 
+  const userRef = React.useRef(user);
+  userRef.current = user;
+  const impersonationRef = React.useRef(impersonationTarget);
+  impersonationRef.current = impersonationTarget;
+
   const refreshLinkedStudent = useCallback(async () => {
-    const u = impersonationTarget ?? user;
+    const u = impersonationRef.current ?? userRef.current;
     const tokenAtStart = getAuthToken();
     if (!u || !tokenAtStart) {
       setLinkedStudent(null);
@@ -355,11 +360,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (row) {
         const st = studentRowToStudent(row);
         setLinkedStudent(st);
-        const next = { ...u, studentId: st.id };
-        if (impersonationTarget) setImpersonationTarget(next);
-        else {
-          setUser(next);
-          localStorage.setItem('coaching_user', JSON.stringify(next));
+        if (u.studentId !== st.id) {
+          const next = { ...u, studentId: st.id };
+          if (impersonationRef.current) setImpersonationTarget(next);
+          else {
+            setUser(next);
+            localStorage.setItem('coaching_user', JSON.stringify(next));
+          }
         }
       } else {
         setLinkedStudent(null);
@@ -373,11 +380,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setLinkedStudentLoading(false);
     }
-  }, [user, impersonationTarget]);
+  }, []);
 
   useEffect(() => {
     void refreshLinkedStudent();
-  }, [refreshLinkedStudent]);
+  }, [refreshLinkedStudent, user?.id, impersonationTarget?.id]);
 
   /** Profil henüz yoksa birkaç kez otomatik dene (sunucu kart oluştururken gecikme) */
   useEffect(() => {

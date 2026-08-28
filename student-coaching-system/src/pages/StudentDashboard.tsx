@@ -81,7 +81,6 @@ export default function StudentDashboard() {
     getWrittenExamStats,
     readingLogs,
     examResults,
-    appDataLoading,
     scoresDataReady
   } = useApp();
 
@@ -454,7 +453,7 @@ export default function StudentDashboard() {
         <div className="p-6">
           {/* Deneme Sınavları Tab */}
           {activeTab === 'exams' && (
-            !scoresDataReady && appDataLoading ? (
+            !scoresDataReady ? (
               <ScoresLoadingPlaceholder message="Deneme sınavları yükleniyor…" />
             ) : (
             <div className="space-y-6">
@@ -630,7 +629,7 @@ export default function StudentDashboard() {
 
           {/* Yazılı Takip Tab */}
           {activeTab === 'written' && (
-            !scoresDataReady && appDataLoading ? (
+            !scoresDataReady ? (
               <ScoresLoadingPlaceholder message="Yazılı notları yükleniyor…" />
             ) : (
             <div className="space-y-6">
@@ -937,7 +936,7 @@ export default function StudentDashboard() {
 
           {/* Kitaplarım Tab */}
           {activeTab === 'books' && (
-            appDataLoading ? (
+            !scoresDataReady ? (
               <ScoresLoadingPlaceholder message="Kitap verileri yükleniyor…" />
             ) : (
             <div className="space-y-6">
