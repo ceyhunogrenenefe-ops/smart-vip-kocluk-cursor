@@ -1567,9 +1567,25 @@ export function buildEdesisStudentRaporQuery({
   return parts.join('&');
 }
 
-async function fetchEdesisStudentRaporPages(localCfg, sid, donemId, stdIdsKey) {
+function pickRaporViewExamId(row) {
+  if (!row || typeof row !== 'object') return '';
+  return (
+    pickEdesisCatalogExamId(row) ||
+    pickEdesisCatalogExamId(row.sinav) ||
+    pickEdesisCatalogExamId(row.Sinav) ||
+    ''
+  );
+}
+
+function looksLikePersonalStudentRaporList(rows) {
+  const n = Array.isArray(rows) ? rows.length : 0;
+  if (!n || n > 80) return false;
+  const withId = rows.filter((row) => pickRaporViewExamId(row)).length;
+  return withId > 0 && withId >= Math.min(n, 1);
+}
+
+async function fetchEdesisStudentRaporPages(localCfg, sid, donemId, stdIdsKey, { maxPages = 2 } = {}) {
   const pageSize = 250;
-  const maxPages = donemId == null ? 2 : 2;
   const collected = [];
   let last = { rows: [], httpStatus: null, path: null, error: null, count: 0, totalCount: 0 };
   for (let page = 0; page < maxPages; page += 1) {
@@ -1596,6 +1612,8 @@ async function fetchEdesisStudentRaporPages(localCfg, sid, donemId, stdIdsKey) {
       collected.push(...rows);
       last = { rows: collected, httpStatus: r.status, path, error: null, count: collected.length, totalCount };
       if (!rows.length || collected.length >= totalCount) break;
+      // Dönemsiz tenant dump’ını 2. sayfaya taşıma
+      if (donemId == null && collected.length >= 80) break;
     } catch (e) {
       last = {
         rows: collected,
@@ -1611,55 +1629,60 @@ async function fetchEdesisStudentRaporPages(localCfg, sid, donemId, stdIdsKey) {
   return last;
 }
 
+function mergeRaporHits(hits, empty) {
+  const byId = new Map();
+  let last = empty;
+  for (const hit of hits) {
+    if (hit?.httpStatus) last = hit;
+    for (const row of hit?.rows || []) {
+      const id = pickRaporViewExamId(row);
+      if (id && !byId.has(String(id))) byId.set(String(id), row);
+    }
+  }
+  const rows = [...byId.values()];
+  return {
+    rows,
+    httpStatus: last.httpStatus,
+    path: last.path,
+    error: rows.length ? null : last.error,
+    count: rows.length,
+    totalCount: rows.length
+  };
+}
+
 export async function fetchEdesisStudentSinavRaporViews(edesisStudentId, cfgOverride = {}, { donemId } = {}) {
   const sid = normEdesisId(edesisStudentId);
   const empty = { rows: [], httpStatus: null, path: null, error: null, count: 0, totalCount: 0 };
   if (!sid) return empty;
   const cfg = { ...getEdesisConfig(), ...cfgOverride };
   const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
-  const donems = [];
-  const seenDonem = new Set();
-  const pushDonem = (v) => {
-    const key = v == null ? 'none' : String(Number(v));
-    if (seenDonem.has(key)) return;
-    seenDonem.add(key);
-    donems.push(v == null ? null : Number(v));
-  };
-  if (donemId != null && Number.isFinite(Number(donemId))) pushDonem(Number(donemId));
-  pushDonem(Number(localCfg.defaultDonemId) || 113);
-  pushDonem(null);
+  const primaryDonem = Number(donemId) || Number(localCfg.defaultDonemId) || 113;
 
-  const mergeHits = (hits) => {
-    const byId = new Map();
-    let last = empty;
-    for (const hit of hits) {
-      if (hit?.httpStatus) last = hit;
-      for (const row of hit?.rows || []) {
-        const id = pickEdesisCatalogExamId(row);
-        if (id && !byId.has(String(id))) byId.set(String(id), row);
-      }
+  // Sıralı: paralel ABP 401/boş ezmesin. 113 Safiye’de kanıtlı (14 satır).
+  let termHit = await fetchEdesisStudentRaporPages(localCfg, sid, primaryDonem, 'stdIds');
+  if (!looksLikePersonalStudentRaporList(termHit.rows)) {
+    const alt = await fetchEdesisStudentRaporPages(localCfg, sid, primaryDonem, 'StdIds');
+    if (looksLikePersonalStudentRaporList(alt.rows) || alt.rows.length > (termHit.rows || []).length) {
+      termHit = alt;
     }
-    const rows = [...byId.values()];
-    return {
-      rows,
-      httpStatus: last.httpStatus,
-      path: last.path,
-      error: rows.length ? null : last.error,
-      count: rows.length,
-      totalCount: rows.length
-    };
-  };
+  }
 
-  const stdHits = await Promise.all(
-    donems.map((d) => fetchEdesisStudentRaporPages(localCfg, sid, d, 'stdIds'))
-  );
-  const mergedStd = mergeHits(stdHits);
-  if (mergedStd.rows.length) return mergedStd;
+  let openHit = await fetchEdesisStudentRaporPages(localCfg, sid, null, 'stdIds', { maxPages: 1 });
+  if (!looksLikePersonalStudentRaporList(openHit.rows)) {
+    const alt = await fetchEdesisStudentRaporPages(localCfg, sid, null, 'StdIds', { maxPages: 1 });
+    if (looksLikePersonalStudentRaporList(alt.rows)) openHit = alt;
+    else openHit = { ...openHit, rows: [] };
+  }
 
-  const pascalHits = await Promise.all(
-    donems.map((d) => fetchEdesisStudentRaporPages(localCfg, sid, d, 'StdIds'))
-  );
-  return mergeHits(pascalHits);
+  const termOk = looksLikePersonalStudentRaporList(termHit.rows) ? termHit : { ...termHit, rows: [] };
+  const openOk = looksLikePersonalStudentRaporList(openHit.rows) ? openHit : { ...openHit, rows: [] };
+  const merged = mergeRaporHits([termOk, openOk], empty);
+  if (merged.rows.length) return merged;
+  // Hiç id yoksa dönemli ham yanıtı bırak (kapı collectAssigned’da)
+  if ((termHit.rows || []).length) {
+    return { ...termHit, count: termHit.rows.length };
+  }
+  return termHit.httpStatus ? termHit : openHit;
 }
 
 /**
