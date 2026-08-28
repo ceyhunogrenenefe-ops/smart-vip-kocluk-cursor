@@ -1495,6 +1495,191 @@ export function mergeAssignedCatalogWithAdminSinavIds({
   );
 }
 
+function truthyEdesisFlag(v) {
+  return v === true || v === 'true' || v === 1 || v === '1';
+}
+
+/** Edesis Online: öğrenci girebilsin (isOnlineSinavForStudent / isStudentAddResult). */
+export function edesisExamViewAllowsStudentTake(exam) {
+  if (!exam || typeof exam !== 'object') return false;
+  const src = mergeEdesisExamViewBody(exam) || flattenEdesisRow(exam) || exam;
+  const nested = src.sinav && typeof src.sinav === 'object' ? flattenEdesisRow(src.sinav) : {};
+  return (
+    truthyEdesisFlag(src.isOnlineSinavForStudent) ||
+    truthyEdesisFlag(src.isStudentAddResult) ||
+    truthyEdesisFlag(nested.isOnlineSinavForStudent) ||
+    truthyEdesisFlag(nested.isStudentAddResult)
+  );
+}
+
+export function interpretEdesisDurationValue(raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  if (n <= 600) return Math.round(n * 60);
+  return Math.round(n);
+}
+
+/**
+ * GetAllSinavRaporForStudent — stdIds ile öğrenciye özel görünüm.
+ * Katalog dump’ı değil; sınıf/ogrenciIds eşleşmesi veya GetOgrenciSinavIds şart.
+ */
+export function collectAssignedRowsFromStudentRaporViews(
+  viewRows,
+  { edesisStudentId = '', classroomId = '', adminSinavIds = [] } = {}
+) {
+  const admin = new Set((adminSinavIds || []).map((id) => String(id).trim()).filter(Boolean));
+  const scope = {
+    edesisStudentId,
+    classroomId,
+    requireStudentIdMatch: true,
+    allowClassroomOnly: true
+  };
+  const out = [];
+  for (const raw of viewRows || []) {
+    if (!raw) continue;
+    const nested = raw.sinav && typeof raw.sinav === 'object' ? raw.sinav : null;
+    const row = nested ? { ...nested, ...raw, id: nested.id || raw.id } : raw;
+    const id = pickEdesisCatalogExamId(row) || pickEdesisCatalogExamId(nested);
+    if (!id) continue;
+    const inAdmin = admin.has(String(id));
+    const assigned = catalogExamAssignedToStudent(row, scope);
+    if (!inAdmin && assigned !== true) continue;
+    if (!inAdmin && !edesisExamViewAllowsStudentTake(row) && !edesisExamViewAllowsStudentTake(nested)) {
+      continue;
+    }
+    out.push({ id, ...row });
+  }
+  return out;
+}
+
+export async function fetchEdesisStudentSinavRaporViews(edesisStudentId, cfgOverride = {}, { donemId } = {}) {
+  const sid = normEdesisId(edesisStudentId);
+  const empty = { rows: [], httpStatus: null, path: null, error: null, count: 0, totalCount: 0 };
+  if (!sid) return empty;
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+  const donem = Number(donemId) || Number(localCfg.defaultDonemId) || 113;
+  const pageSize = 250;
+  const maxPages = 3;
+  const encodings = [
+    (skip) =>
+      `donemId=${donem}&stdIds=${encodeURIComponent(sid)}&MaxResultCount=${pageSize}&SkipCount=${skip}&Sorting=${encodeURIComponent('id desc')}`,
+    (skip) =>
+      `donemId=${donem}&StdIds=${encodeURIComponent(sid)}&MaxResultCount=${pageSize}&SkipCount=${skip}&Sorting=${encodeURIComponent('id desc')}`
+  ];
+  let last = empty;
+  for (const encode of encodings) {
+    const collected = [];
+    let totalCount = 0;
+    let pathUsed = null;
+    for (let page = 0; page < maxPages; page += 1) {
+      const path = `/api/services/app/Sinavs/GetAllSinavRaporForStudent?${encode(page * pageSize)}`;
+      try {
+        const r = await fetchEdesisAbpJson(localCfg, path);
+        last = {
+          rows: collected,
+          httpStatus: r.status,
+          path,
+          error: r.status === 401 || r.status === 403 ? 'unauthorized' : null,
+          count: collected.length,
+          totalCount
+        };
+        if (r.status === 401 || r.status === 403 || !isReachableEdesisResponse(r)) break;
+        const rows = unwrapList(r.json);
+        totalCount = Number(r.json?.result?.totalCount ?? r.json?.totalCount ?? rows.length) || rows.length;
+        pathUsed = path;
+        collected.push(...rows);
+        last = { rows: collected, httpStatus: r.status, path, error: null, count: collected.length, totalCount };
+        if (!rows.length || collected.length >= totalCount) break;
+      } catch (e) {
+        last = { ...empty, error: e instanceof Error ? e.message : String(e), path };
+        break;
+      }
+    }
+    if (collected.length) {
+      return { rows: collected, httpStatus: last.httpStatus, path: pathUsed, error: null, count: collected.length, totalCount };
+    }
+  }
+  return last;
+}
+
+/**
+ * Rapor görünümü (classRoomIds / isOnline / süre) katalog satırının üstüne yazılır.
+ * merge-by-id ilk kaydı tuttuğu için rapor bayrakları kaybolmasın.
+ */
+export function overlayAssignedCatalogWithRaporViews(assigned, raporRows) {
+  const raporById = new Map();
+  for (const raw of raporRows || []) {
+    const id = pickEdesisCatalogExamId(raw);
+    if (id) raporById.set(String(id), raw);
+  }
+  const out = [];
+  const seen = new Set();
+  for (const ex of assigned || []) {
+    const id = pickEdesisCatalogExamId(ex);
+    if (!id) continue;
+    seen.add(String(id));
+    const rapor = raporById.get(String(id));
+    if (!rapor) {
+      out.push(ex);
+      continue;
+    }
+    const view = mergeEdesisExamViewBody(rapor, id) || rapor;
+    out.push(mergeEdesisFilledObject(ex, view));
+  }
+  for (const raw of raporRows || []) {
+    const id = pickEdesisCatalogExamId(raw);
+    if (!id || seen.has(String(id))) continue;
+    seen.add(String(id));
+    out.push(raw);
+  }
+  return out;
+}
+
+export async function enrichTakeableExamDurations(items, cfgOverride = {}, { limit = 6 } = {}) {
+  const need = (items || [])
+    .filter((x) => x?.canTake && !x.hasStudentResult && !(Number(x.remainingSeconds) > 0))
+    .slice(0, Math.max(0, Number(limit) || 0));
+  await Promise.all(
+    need.map(async (item) => {
+      const sec = await fetchEdesisExamDurationSeconds(item.examId, cfgOverride);
+      if (sec > 0) item.remainingSeconds = sec;
+    })
+  );
+  return items;
+}
+
+export function edesisResultHiddenFromStudent(row) {
+  if (!row || typeof row !== 'object') return false;
+  const src = flattenEdesisRow(row);
+  const nested = src.sinav && typeof src.sinav === 'object' ? flattenEdesisRow(src.sinav) : {};
+  return truthyEdesisFlag(src.isResultHideForStudent) || truthyEdesisFlag(nested.isResultHideForStudent);
+}
+
+export async function fetchEdesisExamDurationSeconds(examId, cfgOverride = {}, { denemeId } = {}) {
+  const id = String(examId || '').trim();
+  if (!id) return 0;
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+  const qs = new URLSearchParams({ id });
+  if (denemeId) qs.set('denemeId', String(denemeId));
+  for (const name of ['GetSinavSuresi', 'GetSinavSuresi1']) {
+    try {
+      const r = await fetchEdesisAbpJson(
+        localCfg,
+        `/api/services/app/Sinavs/${name}?${qs.toString()}`
+      );
+      if (r.status === 401 || r.status === 403 || !isReachableEdesisResponse(r)) continue;
+      const raw = r.json?.result ?? r.json;
+      const sec = interpretEdesisDurationValue(typeof raw === 'object' ? raw?.sinavSuresi ?? raw?.result : raw);
+      if (sec > 0) return sec;
+    } catch {
+      /* diğer uç */
+    }
+  }
+  return 0;
+}
+
 /** GET /exams/{id}/results?StudentId= satırları bu öğrenciye mi ait (sıkı eşleşme) */
 export function examResultRowsAssignStudent(rows, edesisStudentId) {
   const sid = normEdesisId(edesisStudentId);
@@ -1979,7 +2164,17 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     requireStudentIdMatch: true
   });
 
-  const adminDetail = await fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId, cfgOverride);
+  const [adminDetail, studentRapor] = await Promise.all([
+    fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId, cfgOverride),
+    fetchEdesisStudentSinavRaporViews(edesisStudentId, cfgOverride).catch((e) => ({
+      rows: [],
+      httpStatus: null,
+      path: null,
+      error: e instanceof Error ? e.message : String(e),
+      count: 0,
+      totalCount: 0
+    }))
+  ]);
   const adminSinavIds = adminDetail.ids || [];
   if (adminSinavIds.length) {
     assigned = mergeAssignedCatalogWithAdminSinavIds({
@@ -2003,11 +2198,42 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     }
   }
 
+  const raporAssigned = collectAssignedRowsFromStudentRaporViews(studentRapor?.rows || [], {
+    edesisStudentId,
+    classroomId,
+    adminSinavIds
+  });
+  if (raporAssigned.length) {
+    const catalogById = new Map();
+    for (const ex of catalogRows || []) {
+      const id = pickEdesisCatalogExamId(ex);
+      if (id) catalogById.set(String(id), ex);
+    }
+    const raporWithCatalog = raporAssigned.map((row) => {
+      const id = pickEdesisCatalogExamId(row);
+      const cat = id ? catalogById.get(String(id)) : null;
+      return cat ? mergeEdesisFilledObject(cat, row) : row;
+    });
+    assigned = overlayAssignedCatalogWithRaporViews(assigned, raporWithCatalog);
+  }
+
   return {
     rows: assigned,
     adminAssignment: adminDetail,
+    studentRapor: {
+      httpStatus: studentRapor?.httpStatus ?? null,
+      path: studentRapor?.path || null,
+      error: studentRapor?.error || null,
+      count: studentRapor?.count || 0,
+      totalCount: studentRapor?.totalCount || 0,
+      assignedCount: raporAssigned.length,
+      assignedExamIds: raporAssigned
+        .map((ex) => pickEdesisCatalogExamId(ex))
+        .filter(Boolean)
+        .slice(0, 40)
+    },
     probeSkipped: true,
-    probeSkipReason: 'assigned_ids_only',
+    probeSkipReason: raporAssigned.length ? 'assigned_ids_and_classroom_rapor' : 'assigned_ids_only',
     probeCandidateCount: 0
   };
 }
@@ -4449,6 +4675,10 @@ export async function fetchEdesisExamStructure(examId, cfgOverride = {}) {
     }
   } catch {
     /* exam-booklet-pdf / cevap anahtarı yedek */
+  }
+  if (!(examMeta.remainingSeconds > 0)) {
+    const durationSec = await fetchEdesisExamDurationSeconds(id, localCfg, { denemeId });
+    if (durationSec > 0) examMeta = { ...examMeta, remainingSeconds: durationSec };
   }
   let answerKeyBookletCodes = [];
   let answerKeyDetail = [];

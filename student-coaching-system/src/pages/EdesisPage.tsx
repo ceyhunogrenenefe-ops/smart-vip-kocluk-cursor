@@ -743,8 +743,9 @@ export default function EdesisPage() {
               {dossierTab === 'kurum' && (
                 <div className="space-y-2">
                   <p className="text-sm text-slate-500">
-                    Programına uygun, henüz girmediği kurum online denemeleri. Sınava gir listesi atama + ince
-                    roster süzmesi uygular; burası tam görünürlük içindir.
+                    Personel görünümü: programa uygun kurum online denemeleri. Öğrencinin Sınava gir
+                    listesi değildir — orada yalnızca Edesis ataması (öğrenci ID / GetOgrenciSinavIds /
+                    sınıf raporu) görünür.
                   </p>
                   {openOnline.map((ex) => (
                     <ExamRow
