@@ -23,6 +23,7 @@ import {
   mergeAssignedCatalogWithAdminSinavIds,
   collectAssignedRowsFromStudentRaporViews,
   overlayAssignedCatalogWithRaporViews,
+  collectStudentTakeableOpenCatalogExams,
   edesisResultHiddenFromStudent,
   pickExamDurationSeconds,
   pickEdesisResultExamId,
@@ -81,6 +82,15 @@ describe('inferEdesisExamProgramKeys', () => {
     const keys = inferEdesisExamProgramKeys({ classLevel: 'TYT-Maarif' });
     assert.equal(keys.has('yks'), true);
     assert.equal(keys.has('lgs'), false);
+  });
+
+  it('maps KTT / 25’li mini tarama to lgs without dumping TYT', () => {
+    const ktt = inferEdesisExamProgramKeys({ examName: 'MATEMATİK KTT 25 Lİ' });
+    assert.equal(ktt.has('lgs'), true);
+    assert.equal(ktt.has('yks'), false);
+    const tytKtt = inferEdesisExamProgramKeys({ examName: 'TYT KTT 1' });
+    assert.equal(tytKtt.has('yks'), true);
+    assert.equal(tytKtt.has('lgs'), false);
   });
 });
 
@@ -1169,6 +1179,105 @@ describe('requireExplicitAssignment never dumps catalog', () => {
       items.filter((x) => x.canTake).map((x) => x.examId),
       ['1579890']
     );
+  });
+
+  it('Safiye-like: unpublished empty-roster LGS is takeable; fat Ready and TYT are not', () => {
+    const catalog = [
+      {
+        id: 315978,
+        name: 'Eski analiz',
+        examType: 'LGS',
+        resultStatus: 'Ready',
+        examDate: '2024-01-01',
+        studentCount: 40
+      },
+      {
+        id: 1579080,
+        name: 'LİMİT LGS HAZIRBULUNUŞLUK',
+        examType: 'LGS',
+        resultStatus: 'None',
+        examDate: '2026-08-25',
+        studentCount: 0
+      },
+      {
+        id: 1580129,
+        name: 'MATEMATİK KTT 25 Lİ',
+        resultStatus: 'None',
+        examDate: '2026-08-28',
+        studentCount: 0
+      },
+      {
+        id: 1561040,
+        name: 'PARAF MOR 1',
+        examType: 'LGS',
+        resultStatus: 'Ready',
+        examDate: '2026-08-15',
+        studentCount: 25
+      },
+      {
+        id: 1579181,
+        name: 'SUPARA TYT-1',
+        examType: 'TYT',
+        resultStatus: 'Ready',
+        examDate: '2026-08-26',
+        studentCount: 1
+      }
+    ];
+    const open = collectStudentTakeableOpenCatalogExams(catalog, {
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      gradeName: '8',
+      now: new Date('2026-08-28T12:00:00Z')
+    });
+    assert.deepEqual(open.map((r) => pickEdesisCatalogExamId(r)).sort(), ['1579080', '1580129']);
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: catalog,
+      assignedCatalogRows: open,
+      resultRows: [],
+      edesisStudentId: '2086573',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      gradeName: '8',
+      now: new Date('2026-08-28T12:00:00Z'),
+      allowRecencyFallback: false,
+      requireExplicitAssignment: true
+    });
+    assert.deepEqual(
+      items.filter((x) => x.canTake).map((x) => x.examId).sort(),
+      ['1579080', '1580129']
+    );
+  });
+
+  it('Kağan-like: unpublished LGS catalog is not takeable for YKS class 11', () => {
+    const catalog = [
+      {
+        id: 1579080,
+        name: 'LİMİT LGS HAZIRBULUNUŞLUK',
+        examType: 'LGS',
+        resultStatus: 'None',
+        examDate: '2026-08-25',
+        studentCount: 0
+      },
+      {
+        id: 1580129,
+        name: 'MATEMATİK KTT 25 Lİ',
+        resultStatus: 'None',
+        examDate: '2026-08-28',
+        studentCount: 0
+      },
+      {
+        id: 1579181,
+        name: 'SUPARA TYT-1',
+        examType: 'TYT',
+        resultStatus: 'Ready',
+        examDate: '2026-08-26',
+        studentCount: 1
+      }
+    ];
+    const open = collectStudentTakeableOpenCatalogExams(catalog, {
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '11' }),
+      gradeName: '11',
+      now: new Date('2026-08-28T12:00:00Z')
+    });
+    assert.equal(open.length, 0);
   });
 
   it('shows only admin-assigned open exams for that student id', () => {
