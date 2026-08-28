@@ -735,6 +735,8 @@ export function inferEdesisExamProgramKeys(parts = {}) {
   // MAARİF / müfredat izleme — ortaokul LGS hattı.
   // Kanıt: Furkan class_level="TYT-Maarif" → TYT varken maarif≠lgs (aksi halde soft filter LGS sızdırır).
   if ((/\bmaarif\b/.test(blob) || /\bmufredat\b/.test(blob)) && !keys.has('yks')) keys.add('lgs');
+  // KTT / 25’li mini tarama — adında LGS yazmasa da ortaokul hattı (TYT KTT değil).
+  if ((/\bktt\b/.test(blob) || /\b\d+\s*li\b/.test(blob)) && !keys.has('yks')) keys.add('lgs');
   if (/3\s*-\s*4/.test(blob)) keys.add('34');
   if (/5\s*-\s*6/.test(blob)) keys.add('56');
   if (/(?:^|[\s.])(7|8)(?:\.|\s|$)/.test(blob) || /\b(7|8)\s*\.?\s*sinif\b/.test(blob)) keys.add('lgs');
@@ -781,6 +783,28 @@ export function collectOpenOnlineProgramExams(
     if (!isRecentByExamDate(ex, now, windowDays)) continue;
     const status = catalogResultStatus(ex);
     if (!/^(none|ready|processing|pending)?$/i.test(status)) continue;
+    out.push(ex);
+  }
+  return sortCatalogExamsByRecencyDesc(out);
+}
+
+/**
+ * Sınava gir: yayımlanmamış (None) + boş/ince roster + program + sınıf.
+ * GetOgrenciSinavIds.sinavId analiz geçmişidir — yeni LİMİT/KTT orada yok.
+ * Ready + 1 kişilik TYT kalıntısı dökülmez. 24 kişilik PARAF MOR dökülmez.
+ */
+export function collectStudentTakeableOpenCatalogExams(
+  catalogRows = [],
+  { programKeys = new Set(), gradeName = '', excludeExamIds = [], now = new Date(), windowDays = TURU_ONLINE_WINDOW_DAYS } = {}
+) {
+  const excluded = new Set([...(excludeExamIds || [])].map((id) => String(id).trim()).filter(Boolean));
+  const out = [];
+  for (const ex of catalogRows || []) {
+    if (!/^none$/i.test(catalogResultStatus(ex))) continue;
+    if (!catalogExamTakeableWithoutRosterProbe(ex, { programKeys, gradeName })) continue;
+    const id = pickEdesisCatalogExamId(ex);
+    if (!id || excluded.has(String(id))) continue;
+    if (!isRecentByExamDate(ex, now, windowDays)) continue;
     out.push(ex);
   }
   return sortCatalogExamsByRecencyDesc(out);
@@ -2234,7 +2258,8 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     classroomCatalogRows = [],
     edesisStudentId = '',
     classroomId = '',
-    programKeys = new Set()
+    programKeys = new Set(),
+    gradeName = ''
   } = params || {};
   let assigned = resolveAssignedCatalogRowsForStudent({
     catalogRows,
@@ -2299,6 +2324,15 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     assigned = overlayAssignedCatalogWithRaporViews(assigned, raporWithCatalog);
   }
 
+  const openCatalog = collectStudentTakeableOpenCatalogExams(catalogRows, {
+    programKeys,
+    gradeName,
+    now: new Date()
+  });
+  if (openCatalog.length) {
+    assigned = mergeEdesisCatalogExamsById(assigned, openCatalog);
+  }
+
   return {
     rows: assigned,
     adminAssignment: adminDetail,
@@ -2314,9 +2348,15 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
         .filter(Boolean)
         .slice(0, 40)
     },
+    openCatalogCount: openCatalog.length,
+    openCatalogExamIds: openCatalog.map((ex) => pickEdesisCatalogExamId(ex)).filter(Boolean).slice(0, 20),
     probeSkipped: true,
-    probeSkipReason: raporAssigned.length ? 'assigned_ids_and_classroom_rapor' : 'assigned_ids_only',
-    probeCandidateCount: 0
+    probeSkipReason: openCatalog.length
+      ? 'assigned_ids_and_open_none_catalog'
+      : raporAssigned.length
+        ? 'assigned_ids_and_classroom_rapor'
+        : 'assigned_ids_only',
+    probeCandidateCount: openCatalog.length
   };
 }
 
