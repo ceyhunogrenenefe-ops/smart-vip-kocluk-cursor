@@ -864,13 +864,21 @@ function primaryOffer(book: CatalogBook | null | undefined): CommerceVendorOffer
 const BOOK_SUBJECTS = ['Matematik', 'Türkçe', 'Fen Bilimleri', 'Sosyal Bilgiler', 'İngilizce', 'Din Kültürü', 'İnkılap Tarihi', 'Diğer'];
 const BOOK_CLASS_LEVELS = ['5', '6', '7', '8', '9', '10', '11', '12', 'LGS', 'TYT', 'AYT'];
 const BOOK_SERIES = [
+  { value: '', label: 'Otomatik / Diğer' },
   { value: 'vip-lgs-8-egitim', label: 'VIP Eğitim Seti' },
   { value: 'paraf-lgs-8-egitim', label: 'Paraf Eğitim Seti' },
   { value: 'lgs-8-denemeler', label: 'Denemeler' },
 ];
 
+function isLgs8ClassLevel(value: unknown): boolean {
+  if (value == null || value === '') return false;
+  const s = String(value).trim().toLocaleUpperCase('tr');
+  if (s === 'LGS' || s === '8' || s.startsWith('8.') || s.startsWith('8 ')) return true;
+  return parseInt(String(value), 10) === 8;
+}
+
 function inferBookSeries(book: CatalogBook | null | undefined): string {
-  if (!book) return 'vip-lgs-8-egitim';
+  if (!book) return '';
   const isbn = String(book.isbn || '').replace(/[^0-9]/g, '');
   const slug = String(book.slug || '').toLowerCase();
   const title = String(book.title || '').toLocaleLowerCase('tr');
@@ -881,7 +889,17 @@ function inferBookSeries(book: CatalogBook | null | undefined): string {
     title.includes('deneme kulübü') ||
     title.includes('deneme kulubu');
   if (deneme) return 'lgs-8-denemeler';
-  return String(book.metadata?.series ?? 'vip-lgs-8-egitim');
+  const stored = String(book.metadata?.series ?? '').trim();
+  if (stored) return stored;
+  const levels = book.class_levels ?? [];
+  const lgsPack =
+    levels.some((lv) => isLgs8ClassLevel(lv)) ||
+    title.includes('lgs') ||
+    slug.includes('lgs');
+  if (lgsPack && (title.includes('deneme') || title.includes('soru bank') || title.includes('branş') || title.includes('brans'))) {
+    return 'lgs-8-denemeler';
+  }
+  return '';
 }
 
 function BookEditorModal({

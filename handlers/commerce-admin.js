@@ -25,7 +25,7 @@ import { requireAuth } from '../api/_lib/auth.js';
 import { actorRoleSet, roleSetHasSuperAdmin, roleSetHasAdmin } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { bulkUpsertBooks, ensureYankiVendor, seedLgs8DenemeKulubu, seedLgs8ParafIqSet, seedLgs8VipCatalog, upsertYankiOfferForExistingBook } from '../api/_lib/commerce-lgs8-seed.js';
-import { defaultStoreBrowse, normalizeStoreBrowse } from '../api/_lib/commerce-store-browse.js';
+import { defaultStoreBrowse, normalizeStoreBrowse, canonicalBookSeries, withInferredSeriesMetadata } from '../api/_lib/commerce-store-browse.js';
 
 function err(res, status, message) {
   return res.status(status).json({ error: message });
@@ -385,7 +385,13 @@ async function handleBooks(op, body, actor) {
         page_count: sanitizeInt(body.page_count),
         cover_image_url: sanitizeText(body.cover_image_url),
         is_catalog_active: body.is_catalog_active !== false,
-        metadata: body.metadata && typeof body.metadata === 'object' ? body.metadata : {},
+        metadata: withInferredSeriesMetadata({
+          title: sanitizeText(body.title),
+          isbn: sanitizeIsbn(body.isbn),
+          slug,
+          class_levels: body.class_levels,
+          metadata: body.metadata,
+        }),
         created_by: actor.sub,
         updated_by: actor.sub,
       })
@@ -446,6 +452,16 @@ async function handleBooks(op, body, actor) {
     if (body.series !== undefined) metadata.series = sanitizeText(body.series);
     if (body.series_label !== undefined) metadata.series_label = sanitizeText(body.series_label);
     if (fascicle) metadata.fascicle_count = fascicle;
+    if (!metadata.series) {
+      const inferred = canonicalBookSeries({
+        title,
+        isbn: sanitizeIsbn(body.isbn),
+        slug: body.slug,
+        class_levels: body.class_levels,
+        metadata,
+      });
+      if (inferred) metadata.series = inferred;
+    }
     const bookBody = {
       ...body,
       title,
@@ -651,6 +667,21 @@ async function handleOffers(op, body, actor) {
     statusPatch.updated_by = actor.sub;
     const { data, error } = await supabaseAdmin.from('commerce_vendor_offers').update(statusPatch).eq('id', id).select().single();
     if (error) throw error;
+    // Teklif onaylandığında kitabı katalogda görünür yap + boş seriyi doldur
+    if (op === 'offers.approve' && offer.book_id) {
+      const { data: bookRow } = await supabaseAdmin
+        .from('commerce_books')
+        .select('id, title, isbn, slug, class_levels, metadata')
+        .eq('id', offer.book_id)
+        .maybeSingle();
+      const patch = {
+        is_catalog_active: true,
+        updated_at: new Date().toISOString(),
+        updated_by: actor.sub,
+      };
+      if (bookRow) patch.metadata = withInferredSeriesMetadata(bookRow);
+      await supabaseAdmin.from('commerce_books').update(patch).eq('id', offer.book_id);
+    }
     await logAudit({ entity_type: 'commerce_vendor_offer', entity_id: id, action, actor_user_id: actor.sub, vendor_id: offer.vendor_id, old_value: { status: offer.status }, new_value: { status: data.status, reason } });
     return { ok: true, offer: data };
   }

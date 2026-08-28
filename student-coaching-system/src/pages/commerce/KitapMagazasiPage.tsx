@@ -177,7 +177,10 @@ function studentMatchesClass(studentLevel: unknown, classKey: string) {
 }
 
 function categoryBelongsToClass(cat: { class_keys?: string[] }, classKey: string) {
-  return (cat.class_keys ?? []).some((k) => classKeysEqual(k, classKey));
+  const keys = cat.class_keys ?? [];
+  if (keys.some((k) => classKeysEqual(k, classKey))) return true;
+  if (isLgs8ClassLevel(classKey) && keys.some((k) => isLgs8ClassLevel(k))) return true;
+  return false;
 }
 
 function CollectionBookCard({ book }: { book: StoreCollectionBook }) {

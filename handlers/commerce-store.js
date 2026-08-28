@@ -26,7 +26,7 @@
  *  order.paid            — ödeme callback webhook (site)
  *  assignment.own        — "Bu kitap bende var" (purchase yapmadan atama)
  *
- *  deployMarker: commerce-store-browse-boxes-2026-08-27
+ *  deployMarker: kitap-store-visible-2026-08-28
  */
 
 import { requireAuth } from '../api/_lib/auth.js';
@@ -48,7 +48,7 @@ import {
 import { startCommerceProviderPayment } from '../api/_lib/commerce-checkout-pay.js';
 import { COMMERCE_DEFAULT_SETTINGS } from '../api/_lib/commerce-constants.js';
 import { listLgs8Collections } from '../api/_lib/commerce-lgs8-seed.js';
-import { listStoreBrowse, publicStoreBrowseNav } from '../api/_lib/commerce-store-browse.js';
+import { canonicalBookSeries, classKeyMatchesLevels, listStoreBrowse, publicStoreBrowseNav } from '../api/_lib/commerce-store-browse.js';
 import { notifyVendorWhatsAppForPaidOrder } from '../api/_lib/commerce-vendor-order-notify.js';
 import { computeCouponDiscount } from '../api/_lib/commerce-coupon-discount.js';
 import { applyCors, handleCorsPreflight } from '../api/_lib/cors-mobile.js';
@@ -85,7 +85,7 @@ async function handleCatalog(op, body, actor) {
       ok: true,
       settings,
       store_browse,
-      deployMarker: 'commerce-store-browse-boxes-2026-08-27',
+      deployMarker: 'kitap-store-visible-2026-08-28',
     };
   }
 
@@ -108,16 +108,12 @@ async function handleCatalog(op, body, actor) {
     // Filtreler
     if (body.subject) q = q.eq('commerce_books.subject', body.subject);
     if (body.publisher) q = q.eq('commerce_books.publisher', body.publisher);
-    if (body.series) q = q.contains('commerce_books.metadata', { series: String(body.series) });
     if (body.teacher_recommended) q = q.eq('teacher_recommended', true);
     if (body.is_featured) q = q.eq('is_featured', true);
     if (body.is_bestseller) q = q.eq('is_bestseller', true);
     if (body.is_new_arrival) q = q.eq('is_new_arrival', true);
     if (body.price_min) q = q.gte('price_kurus', sanitizeInt(body.price_min));
     if (body.price_max) q = q.lte('price_kurus', sanitizeInt(body.price_max));
-    if (body.class_level) {
-      q = q.contains('commerce_books.class_levels', JSON.stringify([body.class_level]));
-    }
     if (body.search) {
       q = q.or(`commerce_books.title.ilike.%${body.search}%,commerce_books.author.ilike.%${body.search}%`);
     }
@@ -128,10 +124,25 @@ async function handleCatalog(op, body, actor) {
     else if (sort === 'price_desc') q = q.order('price_kurus', { ascending: false });
     else q = q.order('created_at', { ascending: false });
 
-    q = q.range(offset, offset + limit - 1);
+    // class_level SQL contains('8') LGS-only kitapları düşürür; seri başlıktan da çıkar.
+    const needsJs = Boolean(body.class_level || body.series);
+    if (needsJs) q = q.range(0, 499);
+    else q = q.range(offset, offset + limit - 1);
+
     const { data, error, count } = await q;
     if (error) throw error;
-    return { ok: true, offers: data, total: count };
+    let offers = data ?? [];
+    if (body.series) {
+      offers = offers.filter((o) => canonicalBookSeries(o.commerce_books) === String(body.series));
+    }
+    if (body.class_level) {
+      offers = offers.filter((o) =>
+        classKeyMatchesLevels(body.class_level, o.commerce_books?.class_levels)
+      );
+    }
+    const total = needsJs ? offers.length : (count ?? offers.length);
+    if (needsJs) offers = offers.slice(offset, offset + limit);
+    return { ok: true, offers, total };
   }
 
   if (op === 'catalog.get') {
@@ -189,7 +200,7 @@ async function handleCatalog(op, body, actor) {
 
   if (op === 'catalog.browse') {
     const browse = await listStoreBrowse();
-    return { ok: true, ...browse, deployMarker: 'commerce-store-browse-boxes-2026-08-27' };
+    return { ok: true, ...browse, deployMarker: 'kitap-store-visible-2026-08-28' };
   }
 
   if (op === 'catalog.assigned') {
