@@ -1888,13 +1888,67 @@ export function trustEdesisStudentCatalogList(fullRows, studentRows) {
   );
 }
 
-function examWindowStillOpen(exam, now = new Date()) {
-  const flat = flattenEdesisRow(exam);
-  const end = Date.parse(flat.endDate || flat.bitisTarihi || flat.EndDate || '');
-  if (Number.isFinite(end) && end < now.getTime() - 86400000) return false;
-  const start = Date.parse(flat.startDate || flat.baslamaTarihi || flat.StartDate || '');
-  if (Number.isFinite(start) && start > now.getTime() + 86400000) return false;
+/** Edesis “şu tarihler arası girebilir” — GetSinavForView startDate/endDate. */
+export function pickEdesisExamTakeWindow(exam) {
+  if (!exam || typeof exam !== 'object') return { startRaw: '', endRaw: '' };
+  const view = mergeEdesisExamViewBody(exam) || flattenEdesisRow(exam) || exam;
+  const nested = view.sinav && typeof view.sinav === 'object' ? view.sinav : {};
+  const pick = (obj, keys) => {
+    for (const k of keys) {
+      const v = obj?.[k] ?? getPropCi(obj || {}, [k]);
+      if (v != null && String(v).trim() && !isPlaceholderEdesisDate(v)) return String(v).trim();
+    }
+    return '';
+  };
+  const keysStart = ['startDate', 'baslamaTarihi', 'StartDate', 'girisBaslangic', 'onlineStartDate'];
+  const keysEnd = ['endDate', 'bitisTarihi', 'EndDate', 'girisBitis', 'onlineEndDate'];
+  return {
+    startRaw: pick(view, keysStart) || pick(nested, keysStart),
+    endRaw: pick(view, keysEnd) || pick(nested, keysEnd)
+  };
+}
+
+function isPlaceholderEdesisDate(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return true;
+  if (/^0001-/.test(s) || /^1900-01-01/.test(s) || /^1970-01-01/.test(s)) return true;
+  return false;
+}
+
+function istanbulDayBoundsMs(ymd, kind) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return NaN;
+  if (kind === 'end') return Date.parse(`${ymd}T23:59:59.999+03:00`);
+  return Date.parse(`${ymd}T00:00:00+03:00`);
+}
+
+function expandEdesisWindowBoundMs(raw, kind) {
+  if (raw == null || raw === '') return NaN;
+  const s = String(raw).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return istanbulDayBoundsMs(s, kind);
+  const ymd = (s.match(/^(\d{4}-\d{2}-\d{2})/) || [])[1];
+  const midnight = /T00:00:00/.test(s) || /T00:00:00\.000/.test(s);
+  if (ymd && midnight) return istanbulDayBoundsMs(ymd, kind);
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? t : NaN;
+}
+
+/**
+ * Edesis’te giriş penceresi tanımlıysa ona uy.
+ * Bitiş geçmişse gizle; başlangıç henüz gelmemişse gizle.
+ * Tarih aralığı yoksa (yalnız examDate) bu fonksiyon engellemez.
+ */
+export function edesisExamTakeWindowOpen(exam, now = new Date()) {
+  const { startRaw, endRaw } = pickEdesisExamTakeWindow(exam);
+  const startMs = expandEdesisWindowBoundMs(startRaw, 'start');
+  const endMs = expandEdesisWindowBoundMs(endRaw, 'end');
+  const t = now.getTime();
+  if (Number.isFinite(endMs) && t > endMs) return false;
+  if (Number.isFinite(startMs) && t < startMs) return false;
   return true;
+}
+
+function examWindowStillOpen(exam, now = new Date()) {
+  return edesisExamTakeWindowOpen(exam, now);
 }
 
 function catalogResultStatus(exam) {
@@ -1944,6 +1998,31 @@ export function mergeEdesisCatalogExamsById(...groups) {
     }
   }
   return [...map.values()];
+}
+
+/** GetSinavForView startDate/endDate mevcut atama satırının üzerine yazılsın. */
+export function overlayCatalogExamsWithTakeWindows(assigned = [], windowedRows = []) {
+  const byId = new Map();
+  for (const ex of windowedRows || []) {
+    const id = pickEdesisCatalogExamId(ex);
+    if (id) byId.set(String(id), ex);
+  }
+  const seen = new Set();
+  const out = [];
+  for (const ex of assigned || []) {
+    const id = pickEdesisCatalogExamId(ex);
+    const overlay = id ? byId.get(String(id)) : null;
+    if (overlay) {
+      out.push(mergeEdesisFilledObject(ex, overlay));
+      seen.add(String(id));
+    } else {
+      out.push(ex);
+    }
+  }
+  for (const [id, ex] of byId) {
+    if (!seen.has(id)) out.push(ex);
+  }
+  return out;
 }
 
 /** Katalog satırlarında ogrenciIds / studentIds ile doğrudan atanmış denemeler */
@@ -2329,9 +2408,57 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     gradeName,
     now: new Date()
   });
-  if (openCatalog.length) {
-    assigned = mergeEdesisCatalogExamsById(assigned, openCatalog);
+  const openWithWindow = [];
+  for (let i = 0; i < openCatalog.length; i += 6) {
+    const batch = openCatalog.slice(i, i + 6);
+    const details = await Promise.all(
+      batch.map((ex) => fetchEdesisExamCatalogRowDetail(pickEdesisCatalogExamId(ex), cfgOverride))
+    );
+    for (let j = 0; j < batch.length; j += 1) {
+      const id = pickEdesisCatalogExamId(batch[j]);
+      const detail = details[j];
+      const merged = detail
+        ? mergeEdesisFilledObject(batch[j], mergeEdesisExamViewBody(detail, id) || detail)
+        : batch[j];
+      if (!edesisExamTakeWindowOpen(merged)) continue;
+      openWithWindow.push(merged);
+    }
   }
+  if (openWithWindow.length) {
+    // İlk kazanan merge tarihleri düşürürdü: rapor/atama satırında startDate yok,
+    // GetSinavForView’de bitiş geçmiş olsa bile deneme Sınava gir’de kalırdı.
+    assigned = overlayCatalogExamsWithTakeWindows(assigned, openWithWindow);
+  }
+
+  const missingWindowIds = [];
+  const missingById = new Map();
+  for (const ex of assigned) {
+    if (!/^none$/i.test(catalogResultStatus(ex))) continue;
+    const { startRaw, endRaw } = pickEdesisExamTakeWindow(ex);
+    if (startRaw || endRaw) continue;
+    const id = pickEdesisCatalogExamId(ex);
+    if (!id || missingById.has(id)) continue;
+    missingById.set(id, ex);
+    missingWindowIds.push(id);
+    if (missingWindowIds.length >= 24) break;
+  }
+  for (let i = 0; i < missingWindowIds.length; i += 6) {
+    const batch = missingWindowIds.slice(i, i + 6);
+    const details = await Promise.all(
+      batch.map((id) => fetchEdesisExamCatalogRowDetail(id, cfgOverride))
+    );
+    const overlayRows = [];
+    for (let j = 0; j < batch.length; j += 1) {
+      const detail = details[j];
+      const base = missingById.get(batch[j]);
+      if (!detail || !base) continue;
+      overlayRows.push(
+        mergeEdesisFilledObject(base, mergeEdesisExamViewBody(detail, batch[j]) || detail)
+      );
+    }
+    if (overlayRows.length) assigned = overlayCatalogExamsWithTakeWindows(assigned, overlayRows);
+  }
+  assigned = assigned.filter((ex) => edesisExamTakeWindowOpen(ex));
 
   return {
     rows: assigned,
@@ -2348,10 +2475,10 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
         .filter(Boolean)
         .slice(0, 40)
     },
-    openCatalogCount: openCatalog.length,
-    openCatalogExamIds: openCatalog.map((ex) => pickEdesisCatalogExamId(ex)).filter(Boolean).slice(0, 20),
+    openCatalogCount: openWithWindow.length,
+    openCatalogExamIds: openWithWindow.map((ex) => pickEdesisCatalogExamId(ex)).filter(Boolean).slice(0, 20),
     probeSkipped: true,
-    probeSkipReason: openCatalog.length
+    probeSkipReason: openWithWindow.length
       ? 'assigned_ids_and_open_none_catalog'
       : raporAssigned.length
         ? 'assigned_ids_and_classroom_rapor'
