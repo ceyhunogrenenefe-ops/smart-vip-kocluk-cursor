@@ -20,6 +20,7 @@ import {
   collectOpenOnlineProgramExams,
   pickEdesisExamSinavTuruId,
   collectCatalogRowsForSinavIds,
+  mergeAssignedCatalogWithAdminSinavIds,
   pickEdesisResultExamId,
   resultRowBelongsToStudent,
   collectEdesisBookletFiles,
@@ -1105,7 +1106,67 @@ describe('requireExplicitAssignment never dumps catalog', () => {
     assert.equal(items.filter((x) => x.canTake).length, 0);
   });
 
-  it('shows only admin-assigned open exams for Safiye id', () => {
+  it('Kağan-like: tenant-wide sinavTuruId does not expand 1 assigned exam into the catalog', () => {
+    const catalog = [
+      {
+        id: 1579890,
+        name: 'Kağan atanan',
+        examType: 'TYT',
+        resultStatus: 'None',
+        examDate: '2026-08-27',
+        studentCount: 0,
+        isOnlineSinavForStudent: true
+      },
+      {
+        id: 1579181,
+        name: 'SUPARA TYT-1',
+        examType: 'TYT',
+        resultStatus: 'None',
+        examDate: '2026-08-26',
+        studentCount: 0,
+        isOnlineSinavForStudent: true
+      },
+      {
+        id: 1574149,
+        name: 'TOPRAK TYT-5',
+        examType: 'TYT',
+        resultStatus: 'None',
+        examDate: '2026-08-24',
+        studentCount: 2,
+        isOnlineSinavForStudent: true
+      },
+      {
+        id: 1537212,
+        name: 'LGS İNGİLİZCE KTT 1',
+        examType: 'LGS İNGİLİZCE 10',
+        resultStatus: 'None',
+        examDate: '2026-08-10',
+        studentCount: 0
+      }
+    ];
+    const assigned = mergeAssignedCatalogWithAdminSinavIds({
+      assigned: [],
+      catalogRows: catalog,
+      adminSinavIds: ['1579890']
+    });
+    assert.deepEqual(assigned.map((r) => pickEdesisCatalogExamId(r)), ['1579890']);
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: catalog,
+      assignedCatalogRows: assigned,
+      resultRows: [],
+      edesisStudentId: '7909547',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '11' }),
+      now: new Date('2026-08-28T12:00:00Z'),
+      allowRecencyFallback: false,
+      requireExplicitAssignment: true
+    });
+    assert.deepEqual(
+      items.filter((x) => x.canTake).map((x) => x.examId),
+      ['1579890']
+    );
+  });
+
+  it('shows only admin-assigned open exams for that student id', () => {
     const catalog = [
       {
         id: 1569664,

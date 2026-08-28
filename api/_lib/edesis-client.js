@@ -1001,8 +1001,8 @@ export function isThinOnlineRosterExam(exam, rosterLength = null) {
 }
 
 /**
- * HTTP probe (GetSinavForView × N) olmadan turu-online adayı.
- * Kanıt: sinavTuruId tenant geneli; 24 kişilik roster katalog studentCount ile elenir.
+ * HTTP probe (GetSinavForView × N) olmadan turu-online adayı — yalnız admin «Kurumda açık».
+ * Sınava gir atamasında KULLANILMAZ: boş roster herkese dökülür.
  */
 export function catalogExamTakeableWithoutRosterProbe(exam, { programKeys, gradeName } = {}) {
   if (!exam) return false;
@@ -1478,6 +1478,23 @@ export function collectCatalogRowsForSinavIds(catalogRows = [], sinavIds = [], d
   return out;
 }
 
+/**
+ * Sınava gir atama kümesi: katalogda öğrenciye yazılı satırlar + GetOgrenciSinavIds.sinavId.
+ * sinavTuruId kurum geneli (Safiye=Kağan=162 tür) — buraya eklenmez.
+ */
+export function mergeAssignedCatalogWithAdminSinavIds({
+  assigned = [],
+  catalogRows = [],
+  adminSinavIds = [],
+  extraRows = []
+} = {}) {
+  return mergeEdesisCatalogExamsById(
+    assigned,
+    collectCatalogRowsForSinavIds(catalogRows, adminSinavIds),
+    extraRows
+  );
+}
+
 /** GET /exams/{id}/results?StudentId= satırları bu öğrenciye mi ait (sıkı eşleşme) */
 export function examResultRowsAssignStudent(rows, edesisStudentId) {
   const sid = normEdesisId(edesisStudentId);
@@ -1844,8 +1861,8 @@ export function resolveAssignedCatalogRowsForStudent({
       classroomId
     })
   );
-  // Program/None yedeği YOK — canlıda YKS öğrencisine tüm açık TYT’yi döküyordu.
-  // Gerçek atama: ogrenciIds / StudentId alt kümesi / sınıf / ABP GetOgrenciSinavIds.
+  // Program/None/turu yedeği YOK — sinavTuruId kurum geneli (herkese 162 tür).
+  // Gerçek atama: ogrenciIds / StudentId alt kümesi / sınıf / GetOgrenciSinavIds.sinavId.
   return assigned;
 }
 
@@ -1950,10 +1967,8 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     classroomCatalogRows = [],
     edesisStudentId = '',
     classroomId = '',
-    programKeys = new Set(),
-    gradeName = ''
+    programKeys = new Set()
   } = params || {};
-  const scope = { edesisStudentId, classroomId, requireStudentIdMatch: true };
   let assigned = resolveAssignedCatalogRowsForStudent({
     catalogRows,
     studentCatalogRows,
@@ -1966,17 +1981,15 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
 
   const adminDetail = await fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId, cfgOverride);
   const adminSinavIds = adminDetail.ids || [];
-  const adminTuruIds = new Set(
-    (adminDetail.sinavTuruIds || []).map((id) => String(id).trim()).filter(Boolean)
-  );
   if (adminSinavIds.length) {
-    assigned = mergeEdesisCatalogExamsById(
+    assigned = mergeAssignedCatalogWithAdminSinavIds({
       assigned,
-      collectCatalogRowsForSinavIds(catalogRows, adminSinavIds)
-    );
+      catalogRows,
+      adminSinavIds
+    });
     const knownAfterAdmin = new Set(assigned.map((ex) => pickEdesisCatalogExamId(ex)).filter(Boolean));
     const missingAdminIds = adminSinavIds.filter((id) => !knownAfterAdmin.has(String(id)));
-    for (let i = 0; i < Math.min(missingAdminIds.length, 8); i += 6) {
+    for (let i = 0; i < missingAdminIds.length; i += 6) {
       const batch = missingAdminIds.slice(i, i + 6);
       const details = await Promise.all(
         batch.map((id) => fetchEdesisExamCatalogRowDetail(id, cfgOverride))
@@ -1990,126 +2003,12 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     }
   }
 
-  let known = new Set(assigned.map((ex) => pickEdesisCatalogExamId(ex)).filter(Boolean));
-  // Admin ID gelse bile yayınlanmamış (None) yeni atamaları kaçırma —
-  // OgrenciSinavListesi çoğu zaman yalnızca sonuçlu analiz geçmişidir.
-  const abpUnauthorized = (adminDetail.attempts || []).some(
-    (a) => a?.status === 401 || a?.status === 403 || a?.error === 'unauthorized'
-  );
-  const abpStatus = adminDetail?.abpAuth || getEdesisAbpAuthStatus();
-  const skipAbpRoster =
-    abpUnauthorized ||
-    abpStatus?.cacheStatus === 'missing_credentials' ||
-    abpStatus?.cacheStatus === 'auth_failed' ||
-    abpStatus?.cacheStatus === 'auth_error';
-
-  const keys = programKeys instanceof Set ? programKeys : new Set(programKeys || []);
-  const adminProbeIds = new Set(
-    (adminSinavIds || []).map((id) => String(id).trim()).filter(Boolean)
-  );
-  const fromAdminNotKnown = (catalogRows || []).filter((ex) => {
-    const id = pickEdesisCatalogExamId(ex);
-    return id && adminProbeIds.has(String(id)) && !known.has(String(id));
-  });
-  const programMatchStrict = (ex) => {
-    if (!keys.size) return true;
-    const examKeys = inferEdesisExamProgramKeys({
-      examType: ex?.examType || ex?.sinavTuru,
-      examName: ex?.name || ex?.examName || ex?.title || ex?.examTitle
-    });
-    if (!examKeys.size) return false;
-    for (const k of examKeys) if (keys.has(k)) return true;
-    return false;
-  };
-
-  // Yeni online tanım: resultStatus=None — katalog dökümü değil, dar probe adayı
-  const unpublishedCandidates = collectRecentUnpublishedProgramExams(catalogRows || [], {
-    programKeys: keys,
-    now: new Date(),
-    windowDays: 45,
-    excludeExamIds: [...known]
-  });
-
-  // sinavTuruId erişimi: son 21 gün Ready/None online adayları.
-  // Yumuşak program filtresi zorunlu: sinavTuruId listesi tenant geneli (Safiye=Furkan=162).
-  const turuOnlineCandidates =
-    adminTuruIds.size > 0
-      ? sortCatalogExamsByRecencyDesc(catalogRows || [])
-          .filter((ex) => {
-            const id = pickEdesisCatalogExamId(ex);
-            if (!id || known.has(String(id)) || adminProbeIds.has(String(id))) return false;
-            if (!isOpenEdesisCatalogExam(ex) || !examWindowStillOpen(ex)) return false;
-            if (
-              !examCompatibleWithStudentGrade(ex, gradeName, {
-                allowLgsNeighbor: /^none$/i.test(catalogResultStatus(ex))
-              })
-            ) {
-              return false;
-            }
-            if (!examCompatibleWithStudentProgramSoft(ex, keys)) return false;
-            if (!isRecentByExamDate(ex, new Date(), TURU_ONLINE_WINDOW_DAYS)) return false;
-            const status = catalogResultStatus(ex);
-            return /^(none|ready|processing|pending)?$/i.test(status);
-          })
-          .slice(0, 48)
-      : [];
-
-  const recencyCandidates =
-    adminSinavIds.length > 0 || adminTuruIds.size > 0
-      ? [] // Admin listesi / tür erişimi varken Ready dump’ına girme
-      : sortCatalogExamsByRecencyDesc(catalogRows || [])
-          .filter((ex) => {
-            const id = pickEdesisCatalogExamId(ex);
-            if (!id || known.has(id)) return false;
-            if (!isOpenEdesisCatalogExam(ex) || !examWindowStillOpen(ex)) return false;
-            if (!programMatchStrict(ex)) return false;
-            const status = catalogResultStatus(ex);
-            if (!/^(none|ready|processing|pending)$/i.test(status)) return false;
-            const quick = catalogExamAssignedToStudent(ex, scope);
-            return quick !== false;
-          })
-          .slice(0, 24);
-
-  const seenCandidateIds = new Set();
-  const candidates = [];
-  for (const ex of [
-    ...fromAdminNotKnown,
-    ...unpublishedCandidates,
-    ...turuOnlineCandidates,
-    ...recencyCandidates
-  ]) {
-    const id = pickEdesisCatalogExamId(ex);
-    if (!id || seenCandidateIds.has(String(id)) || known.has(String(id))) continue;
-    seenCandidateIds.add(String(id));
-    candidates.push(ex);
-  }
-
-  if (!candidates.length) {
-    return {
-      rows: assigned,
-      adminAssignment: adminDetail,
-      probeSkipped: true,
-      probeSkipReason: adminSinavIds.length
-        ? adminTuruIds.size
-          ? 'admin_ids_no_turu_candidates'
-          : 'admin_ids_no_unpublished'
-        : 'no_candidates',
-      probeCandidateCount: 0
-    };
-  }
-
-  // GetSinavForView × 12 aday ~8–12s. sinavTuruId tenant geneli; studentCount katalogda var.
-  const fastHits = candidates.filter((ex) =>
-    catalogExamTakeableWithoutRosterProbe(ex, { programKeys: keys, gradeName })
-  );
-  assigned = mergeEdesisCatalogExamsById(assigned, fastHits);
-
   return {
     rows: assigned,
     adminAssignment: adminDetail,
     probeSkipped: true,
-    probeSkipReason: 'catalog_studentCount_fast_path',
-    probeCandidateCount: candidates.length
+    probeSkipReason: 'assigned_ids_only',
+    probeCandidateCount: 0
   };
 }
 
