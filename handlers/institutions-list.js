@@ -70,7 +70,9 @@ async function fetchFullInstitutions(actor, role) {
 
   let query = supabaseAdmin
     .from('institutions')
-    .select('*')
+    .select(
+      'id,name,email,phone,address,website,logo,plan,is_active,whatsapp_automation_enabled,created_at,updated_at'
+    )
     .order('created_at', { ascending: false })
     .limit(500);
 

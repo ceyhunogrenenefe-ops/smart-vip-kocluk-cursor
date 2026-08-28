@@ -64,7 +64,6 @@ export default function CoachDashboard() {
     writtenExamScores,
     getWrittenExamStats,
     coachQuestionStatsTick,
-    appDataLoading,
     scoresDataReady,
   } = useApp();
 
@@ -495,7 +494,7 @@ export default function CoachDashboard() {
       )}
 
       {/* 📝 Yazılı Sınav Analizi */}
-      {appDataLoading && !scoresDataReady ? (
+      {!scoresDataReady ? (
         <ScoresLoadingPlaceholder message="Yazılı skorları yükleniyor…" compact />
       ) : writtenExamStats.length > 0 && (
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-6 text-white">
