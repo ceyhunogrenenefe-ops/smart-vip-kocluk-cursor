@@ -152,6 +152,34 @@ export function bookMatchesCategory(book, category) {
   return Boolean(bookSeries) && bookSeries === series;
 }
 
+/** Serisiz kitapları her eşleşen sınıfta Diğer kutusuna koy (ilk sınıf yutmasın). */
+export function attachUnmatchedStoreCategories(classes, seriesCategories, decoratedBooks) {
+  const seriesMatchedIds = new Set(
+    (seriesCategories || []).flatMap((cat) => (cat.books || []).map((b) => b.id))
+  );
+  const out = [...(seriesCategories || [])];
+  for (const cl of classes || []) {
+    if (cl.active === false) continue;
+    const unmatched = (decoratedBooks || []).filter(
+      (b) => !seriesMatchedIds.has(b.id) && classKeyMatchesLevels(cl.key, b.class_levels)
+    );
+    if (!unmatched.length) continue;
+    const key = `${sanitizeKey(cl.key) || cl.key}-diger`;
+    out.push({
+      key,
+      label: 'Diğer',
+      class_keys: [cl.key],
+      series: '',
+      description: 'Serisi seçilmeden yüklenen kitaplar',
+      sort: 999,
+      book_count: unmatched.length,
+      priced_count: unmatched.filter((b) => b.buyable).length,
+      books: unmatched,
+    });
+  }
+  return out;
+}
+
 function normalizeClass(raw, index) {
   const fallbackKey = `sinif-${index + 1}`;
   const key = sanitizeKey(raw?.key || raw?.label, fallbackKey) || fallbackKey;
@@ -278,7 +306,7 @@ export async function listStoreBrowse() {
 
   const decoratedBooks = (books || []).map(decorateBook);
 
-  const categories = nav.categories
+  const seriesCategories = nav.categories
     .filter((c) => c.active)
     .map((cat) => {
       const matched = decoratedBooks
@@ -297,27 +325,8 @@ export async function listStoreBrowse() {
       };
     });
 
-  const matchedIds = new Set(categories.flatMap((cat) => cat.books.map((b) => b.id)));
   const classes = nav.classes.filter((c) => c.active);
-  for (const cl of classes) {
-    const unmatched = decoratedBooks.filter(
-      (b) => !matchedIds.has(b.id) && classKeyMatchesLevels(cl.key, b.class_levels)
-    );
-    if (!unmatched.length) continue;
-    const key = `${sanitizeKey(cl.key) || cl.key}-diger`;
-    categories.push({
-      key,
-      label: 'Diğer',
-      class_keys: [cl.key],
-      series: '',
-      description: 'Serisi seçilmeden yüklenen kitaplar',
-      sort: 999,
-      book_count: unmatched.length,
-      priced_count: unmatched.filter((b) => b.buyable).length,
-      books: unmatched,
-    });
-    unmatched.forEach((b) => matchedIds.add(b.id));
-  }
+  const categories = attachUnmatchedStoreCategories(classes, seriesCategories, decoratedBooks);
 
   const classRows = classes.map((cl) => {
     const cats = categories.filter((cat) => categoryBelongsToClass(cat, cl.key));

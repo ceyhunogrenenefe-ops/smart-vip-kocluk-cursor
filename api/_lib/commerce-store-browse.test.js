@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  attachUnmatchedStoreCategories,
   bookMatchesCategory,
   canonicalBookSeries,
   categoryBelongsToClass,
@@ -133,5 +134,27 @@ describe('commerce-store-browse', () => {
     expect(canonicalBookSeries(book)).toBe('lgs-8-denemeler');
     expect(bookMatchesCategory(book, { series: 'lgs-8-denemeler' })).toBe(true);
     expect(bookMatchesCategory(book, { series: 'vip-lgs-8-egitim' })).toBe(false);
+  });
+
+  it('puts unmatched books into Diğer for every matching class', () => {
+    const book = {
+      id: 'tyt-mat',
+      title: 'ÜçDörtBeş Yayınları Sıfırdan Başla Start Matematik',
+      class_levels: ['11', '12', 'TYT'],
+      buyable: true,
+      commerce_vendor_offers: [],
+    };
+    const cats = attachUnmatchedStoreCategories(
+      [
+        { key: '11', label: '11. Sınıf', sort: 1, active: true },
+        { key: '12', label: '12. Sınıf', sort: 2, active: true },
+        { key: 'TYT', label: 'TYT', sort: 3, active: true },
+        { key: 'LGS', label: 'LGS', sort: 4, active: true },
+      ],
+      [],
+      [book]
+    );
+    expect(cats.map((c) => c.key)).toEqual(['11-diger', '12-diger', 'TYT-diger']);
+    expect(cats.every((c) => c.books[0].id === 'tyt-mat')).toBe(true);
   });
 });
