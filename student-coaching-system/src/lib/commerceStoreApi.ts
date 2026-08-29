@@ -139,6 +139,29 @@ export const csCheckoutPrepare = (coupon_code?: string | null, student_id?: stri
     ...(student_id ? { student_id } : {}),
   });
 
+export type CheckoutIbanResponse = {
+  ok: true;
+  payment_method: 'iban';
+  order_id: string;
+  order_number: string;
+  total_kurus: number;
+  receipt_url: string;
+  iban_payment: { enabled: boolean; holder: string; iban: string; note: string };
+};
+
+export const csCheckoutIban = (params: {
+  file_base64: string;
+  mime_type: string;
+  coupon_code?: string | null;
+  student_id?: string | null;
+}) =>
+  post<CheckoutIbanResponse>('cart.checkout_iban', {
+    file_base64: params.file_base64,
+    mime_type: params.mime_type,
+    ...(params.coupon_code ? { coupon_code: params.coupon_code } : {}),
+    ...(params.student_id ? { student_id: params.student_id } : {}),
+  });
+
 // "Bu kitap bende var"
 export const csMarkOwned = (book_id: string, vendor_offer_id?: string, student_id?: string) =>
   post<{ ok: true; assignment_id: string; already_existed: boolean }>('assignment.own', { book_id, vendor_offer_id, student_id });
@@ -180,5 +203,5 @@ export const csStaffUpdatePackage = (params: {
 export const csStaffDeletePackage = (id: string) =>
   post<{ ok: true }>('staff.package_delete', { id });
 
-export const csStaffSetPackageItems = (params: { package_id: string; book_ids: string[] }) =>
-  post<{ item_count: number }>('staff.package_items_set', params);
+export const csStaffSetPackageItems = (params: { package_id: string; book_ids: string[]; auto_sum?: boolean }) =>
+  post<{ item_count: number; price_kurus?: number | null; auto_summed?: boolean }>('staff.package_items_set', params);
