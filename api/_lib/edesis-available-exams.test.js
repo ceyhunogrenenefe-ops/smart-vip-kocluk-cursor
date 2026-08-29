@@ -54,6 +54,7 @@ import {
   examAssignedViaOnlineFlag,
   examResultRowsAssignStudent,
   examRosterIncludesStudent,
+  shouldOfferOpenCatalogExamAfterRoster,
   trustEdesisStudentCatalogList,
   looksLikePersonalExamList,
   resolveEdesisFileUrl,
@@ -127,8 +128,9 @@ describe('examCompatibleWithStudentProgramSoft', () => {
 });
 
 describe('thin online roster + open catalog', () => {
-  it('treats 1–3 students as thin, 24 as not', () => {
+  it('treats 1–8 students as thin, 24 as not', () => {
     assert.equal(isThinOnlineRosterExam({ studentCount: 2 }), true);
+    assert.equal(isThinOnlineRosterExam({ studentCount: 4 }), true);
     assert.equal(isThinOnlineRosterExam({ studentCount: 0 }), false);
     assert.equal(isThinOnlineRosterExam({ studentCount: 24 }), false);
     assert.equal(isThinOnlineRosterExam({ studentCount: 24 }, 2), true);
@@ -1081,6 +1083,26 @@ describe('parseEdesisOgrenciSinavAssignmentResponse / grade compatibility', () =
     assert.equal(edesisExamGradeIdMatchesStudent({ gradeId: '8' }, '8'), true);
     assert.equal(edesisExamGradeIdMatchesStudent({ gradeId: '7' }, '8'), false);
     assert.equal(edesisExamGradeIdMatchesStudent({ name: 'LGS' }, '8'), null);
+  });
+
+  it('empty known roster stays takeable even if GetSinavForView studentCount is nonzero', () => {
+    const exam = { id: '1580678', name: 'PARAF MİS LGS-2', studentCount: 12 };
+    assert.equal(
+      shouldOfferOpenCatalogExamAfterRoster(exam, { roster: [], edesisStudentId: '2086573' }),
+      true
+    );
+    assert.equal(
+      shouldOfferOpenCatalogExamAfterRoster(exam, { roster: ['999'], edesisStudentId: '2086573' }),
+      false
+    );
+    assert.equal(
+      shouldOfferOpenCatalogExamAfterRoster(exam, { roster: ['2086573'], edesisStudentId: '2086573' }),
+      true
+    );
+    assert.equal(
+      shouldOfferOpenCatalogExamAfterRoster(exam, { roster: null, edesisStudentId: '2086573' }),
+      false
+    );
   });
 
   it('reads grade from examType when title has no sınıf', () => {
