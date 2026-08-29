@@ -864,42 +864,30 @@ function primaryOffer(book: CatalogBook | null | undefined): CommerceVendorOffer
 const BOOK_SUBJECTS = ['Matematik', 'Türkçe', 'Fen Bilimleri', 'Sosyal Bilgiler', 'İngilizce', 'Din Kültürü', 'İnkılap Tarihi', 'Diğer'];
 const BOOK_CLASS_LEVELS = ['5', '6', '7', '8', '9', '10', '11', '12', 'LGS', 'TYT', 'AYT'];
 const BOOK_SERIES = [
-  { value: '', label: 'Otomatik / Diğer' },
-  { value: 'vip-lgs-8-egitim', label: 'VIP Eğitim Seti' },
-  { value: 'paraf-lgs-8-egitim', label: 'Paraf Eğitim Seti' },
-  { value: 'lgs-8-denemeler', label: 'Denemeler' },
+  { value: '', label: 'Kategori seçin' },
+  { value: 'egitim-setleri', label: 'Eğitim Setleri' },
+  { value: 'soru-bankalari', label: 'Soru Bankaları' },
+  { value: 'denemeler', label: 'Denemeler' },
 ];
-
-function isLgs8ClassLevel(value: unknown): boolean {
-  if (value == null || value === '') return false;
-  const s = String(value).trim().toLocaleUpperCase('tr');
-  if (s === 'LGS' || s === '8' || s.startsWith('8.') || s.startsWith('8 ')) return true;
-  return parseInt(String(value), 10) === 8;
-}
 
 function inferBookSeries(book: CatalogBook | null | undefined): string {
   if (!book) return '';
-  const isbn = String(book.isbn || '').replace(/[^0-9]/g, '');
+  const storedKind = String(book.metadata?.store_kind || '').trim();
+  if (storedKind === 'egitim-setleri' || storedKind === 'soru-bankalari' || storedKind === 'denemeler') {
+    return storedKind;
+  }
+  const stored = String(book.metadata?.series ?? '').trim();
+  if (stored === 'egitim-setleri' || stored === 'soru-bankalari' || stored === 'denemeler') return stored;
+  if (stored === 'vip-lgs-8-egitim') return 'egitim-setleri';
+  if (stored === 'paraf-lgs-8-egitim') return 'soru-bankalari';
+  if (stored === 'lgs-8-denemeler') return 'denemeler';
   const slug = String(book.slug || '').toLowerCase();
   const title = String(book.title || '').toLocaleLowerCase('tr');
-  const deneme =
-    isbn === '9786259988142' ||
-    slug.includes('deneme-kulub') ||
-    slug.includes('deneme-klub') ||
-    title.includes('deneme kulübü') ||
-    title.includes('deneme kulubu');
-  if (deneme) return 'lgs-8-denemeler';
-  const stored = String(book.metadata?.series ?? '').trim();
-  if (stored) return stored;
-  const levels = book.class_levels ?? [];
-  const lgsPack =
-    levels.some((lv) => isLgs8ClassLevel(lv)) ||
-    title.includes('lgs') ||
-    slug.includes('lgs');
-  if (lgsPack && (title.includes('deneme') || title.includes('soru bank') || title.includes('branş') || title.includes('brans'))) {
-    return 'lgs-8-denemeler';
-  }
-  return '';
+  if (title.includes('deneme kulüb') || title.includes('deneme kulub') || slug.includes('deneme-kulub')) return 'denemeler';
+  if (title.includes('soru bank') || title.includes('soru kütüphan') || title.includes('soru kutuphan')) return 'soru-bankalari';
+  if (title.includes('deneme')) return 'denemeler';
+  if (title.includes('eğitim set') || title.includes('egitim set')) return 'egitim-setleri';
+  return stored === 'vip-lgs-8-egitim' ? 'egitim-setleri' : '';
 }
 
 function BookEditorModal({
@@ -1029,7 +1017,7 @@ function BookEditorModal({
             </select>
           </div>
           <div>
-            <label className="text-xs text-gray-500">Koleksiyon</label>
+            <label className="text-xs text-gray-500">Kategori (sınıf kutusunda)</label>
             <select className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={series} onChange={(e) => setSeries(e.target.value)}>
               {BOOK_SERIES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
             </select>

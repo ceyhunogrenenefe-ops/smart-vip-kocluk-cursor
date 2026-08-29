@@ -13,37 +13,44 @@ import {
 } from './commerce-store-browse.js';
 
 describe('commerce-store-browse', () => {
-  it('defaults include 8. sınıf + LGS with three LGS8 categories', () => {
+  it('defaults give every class Eğitim Setleri / Soru Bankaları / Denemeler', () => {
     const nav = defaultStoreBrowse();
     expect(nav.classes.some((c) => c.key === '8' && c.label === '8. Sınıf')).toBe(true);
     expect(nav.classes.some((c) => c.key === 'LGS')).toBe(true);
-    expect(nav.categories).toHaveLength(3);
-    expect(nav.categories.every((c) => c.class_keys.includes('8') && c.class_keys.includes('LGS'))).toBe(true);
-    expect(nav.categories.map((c) => c.series)).toEqual([
-      'vip-lgs-8-egitim',
-      'paraf-lgs-8-egitim',
-      'lgs-8-denemeler',
+    expect(nav.categories.map((c) => c.key)).toEqual([
+      'egitim-setleri',
+      'soru-bankalari',
+      'denemeler',
     ]);
+    expect(nav.categories.every((c) => c.class_keys.includes('8') && c.class_keys.includes('5'))).toBe(true);
   });
 
   it('empty input falls back to defaults', () => {
     const nav = normalizeStoreBrowse(null);
     expect(nav.classes.length).toBeGreaterThan(3);
-    expect(nav.categories).toHaveLength(3);
+    expect(nav.categories.map((c) => c.series)).toEqual([
+      'egitim-setleri',
+      'soru-bankalari',
+      'denemeler',
+    ]);
   });
 
-  it('custom classes drop unknown category class_keys', () => {
+  it('upgrades old publisher categories and inserts 8. Sınıf', () => {
     const nav = normalizeStoreBrowse({
-      classes: [{ key: '8', label: '8. Sınıf', sort: 1 }],
+      classes: [{ key: 'LGS', label: 'LGS', sort: 9 }],
       categories: [{
         key: 'vip-lgs-8-egitim',
         label: 'VIP',
         series: 'vip-lgs-8-egitim',
-        class_keys: ['8', 'ghost'],
+        class_keys: ['LGS'],
       }],
     });
-    expect(nav.classes).toHaveLength(1);
-    expect(nav.categories[0].class_keys).toEqual(['8']);
+    expect(nav.classes.map((c) => c.key).sort()).toEqual(['8', 'LGS']);
+    expect(nav.categories.map((c) => c.key)).toEqual([
+      'egitim-setleri',
+      'soru-bankalari',
+      'denemeler',
+    ]);
   });
 
   it('preserves LGS / numeric class keys', () => {
@@ -52,10 +59,9 @@ describe('commerce-store-browse', () => {
         { key: 'LGS', label: 'LGS', sort: 1 },
         { key: '8', label: '8. Sınıf', sort: 2 },
       ],
-      categories: [{ key: 'vip-lgs-8-egitim', label: 'VIP', class_keys: ['8', 'LGS'], series: 'vip-lgs-8-egitim' }],
+      categories: [],
     });
     expect(nav.classes.map((c) => c.key).sort()).toEqual(['8', 'LGS']);
-    expect(nav.categories[0].class_keys.sort()).toEqual(['8', 'LGS']);
   });
 
   it('treats 8 and LGS as the same store family', () => {
@@ -67,17 +73,17 @@ describe('commerce-store-browse', () => {
     expect(categoryBelongsToClass({ class_keys: ['TYT'] }, 'LGS')).toBe(false);
   });
 
-  it('infers LGS deneme / soru bankası packs into Denemeler series', () => {
+  it('maps books into the three kinds', () => {
     expect(canonicalBookSeries({
       title: 'LGS MOZAİK YAYINLARI 4LÜ HİT BRANŞ DENEMELERİ',
       class_levels: ['LGS'],
       metadata: {},
-    })).toBe('lgs-8-denemeler');
+    })).toBe('denemeler');
     expect(canonicalBookSeries({
-      title: 'VIP Yayınları 8. Sınıf LGS Fen Bilimleri Eğitim Seti',
-      class_levels: ['8', 'LGS'],
+      title: '5.SINIF VİP YAYINLARI EĞİTİM SETİ 5 LI',
+      class_levels: ['5'],
       metadata: { series: 'vip-lgs-8-egitim' },
-    })).toBe('vip-lgs-8-egitim');
+    })).toBe('egitim-setleri');
     expect(canonicalBookSeries({
       title: 'ÜçDörtBeş Yayınları Sıfırdan Başla Start Matematik',
       class_levels: ['TYT'],
@@ -87,41 +93,49 @@ describe('commerce-store-browse', () => {
       title: 'LGS ULTİ 6 LI BRANŞ DENEMELERİ',
       class_levels: ['LGS'],
       metadata: {},
-    }).series).toBe('lgs-8-denemeler');
-    expect(withInferredSeriesMetadata({
-      title: 'VIP Fen',
-      metadata: { series: 'vip-lgs-8-egitim' },
-    }).series).toBe('vip-lgs-8-egitim');
+    }).series).toBe('denemeler');
   });
 
-  it('matches class keys and book series', () => {
+  it('matches class keys and store kinds', () => {
     expect(classKeysEqual('8', '8. Sınıf')).toBe(true);
     expect(classKeysEqual('LGS', 'lgs')).toBe(true);
     expect(classKeyMatchesLevels('8', ['8', 'LGS'])).toBe(true);
-    expect(categoryBelongsToClass({ class_keys: ['8', 'LGS'] }, 'LGS')).toBe(true);
     expect(bookMatchesCategory(
-      { metadata: { series: 'vip-lgs-8-egitim' } },
-      { series: 'vip-lgs-8-egitim' }
+      { title: '5.SINIF VİP EĞİTİM SETİ 5 LI', class_levels: ['5'], metadata: { series: 'egitim-setleri' } },
+      { series: 'egitim-setleri', class_keys: ['5'] }
     )).toBe(true);
     expect(bookMatchesCategory(
-      { metadata: { series: 'other' } },
-      { series: 'vip-lgs-8-egitim' }
+      { title: '5.SINIF VİP EĞİTİM SETİ 5 LI', class_levels: ['5'], metadata: { series: 'egitim-setleri' } },
+      { series: 'denemeler', class_keys: ['5'] }
     )).toBe(false);
   });
 
-  it('public nav hides inactive items and cover images', () => {
+  it('does not put VIP 8 component books into Eğitim Setleri', () => {
+    expect(bookMatchesCategory(
+      {
+        slug: 'vip-yayinlari-8-sinif-lgs-fen-bilimleri-egitim-seti',
+        title: 'VIP Yayınları 8. Sınıf LGS Fen Bilimleri Eğitim Seti',
+        class_levels: ['8', 'LGS'],
+        metadata: { series: 'vip-lgs-8-egitim' },
+      },
+      { series: 'egitim-setleri', class_keys: ['8'] }
+    )).toBe(false);
+  });
+
+  it('public nav hides inactive items', () => {
     const pub = publicStoreBrowseNav({
       classes: [
         { key: '8', label: '8. Sınıf', active: true, sort: 1 },
         { key: '5', label: '5. Sınıf', active: false, sort: 2 },
       ],
-      categories: [
-        { key: 'vip', label: 'VIP', class_keys: ['8'], series: 'vip-lgs-8-egitim', active: true },
-      ],
+      categories: [],
     });
     expect(pub.classes.map((c) => c.key)).toEqual(['8']);
-    expect(pub.categories[0].cover_image_url).toBeUndefined();
-    expect(pub.classes[0].label).toBe('8. Sınıf');
+    expect(pub.categories.map((c) => c.key)).toEqual([
+      'egitim-setleri',
+      'soru-bankalari',
+      'denemeler',
+    ]);
   });
 
   it('puts Deneme Kulübü into Denemeler even if metadata.series is VIP', () => {
@@ -129,11 +143,12 @@ describe('commerce-store-browse', () => {
       isbn: '978-625-99881-4-2',
       slug: 'online-vip-dershane-lgs-hazirlik-40-turkiye-geneli-deneme-kulubu-paketi',
       title: 'Online VIP Dershane – LGS Hazırlık 40+ Türkiye Geneli Deneme Kulübü Paketi',
+      class_levels: ['8', 'LGS'],
       metadata: { series: 'vip-lgs-8-egitim' },
     };
-    expect(canonicalBookSeries(book)).toBe('lgs-8-denemeler');
-    expect(bookMatchesCategory(book, { series: 'lgs-8-denemeler' })).toBe(true);
-    expect(bookMatchesCategory(book, { series: 'vip-lgs-8-egitim' })).toBe(false);
+    expect(canonicalBookSeries(book)).toBe('denemeler');
+    expect(bookMatchesCategory(book, { series: 'denemeler', class_keys: ['8'] })).toBe(true);
+    expect(bookMatchesCategory(book, { series: 'egitim-setleri', class_keys: ['8'] })).toBe(false);
   });
 
   it('puts unmatched books into Diğer for every matching class', () => {

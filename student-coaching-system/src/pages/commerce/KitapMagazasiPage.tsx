@@ -197,6 +197,11 @@ function BookCard({
 
 // ─── Filtre panel ────────────────────────────────────────────────────
 const SUBJECTS = ['Matematik', 'Türkçe', 'Fen Bilimleri', 'İngilizce', 'Din Kültürü ve Ahlak Bilgisi', 'T.C. İnkılap Tarihi ve Atatürkçülük', 'Sosyal Bilgiler', 'Fizik', 'Kimya', 'Biyoloji'];
+const STORE_KINDS = [
+  { key: 'egitim-setleri', label: 'Eğitim Setleri' },
+  { key: 'soru-bankalari', label: 'Soru Bankaları' },
+  { key: 'denemeler', label: 'Denemeler' },
+];
 
 function isLgs8ClassLevel(value: unknown): boolean {
   if (value == null || value === '') return false;
@@ -794,7 +799,7 @@ export default function KitapMagazasiPage() {
   const role = String(effectiveUser?.role || '');
   const staffRole = ['super_admin', 'admin', 'coach', 'teacher'].includes(role);
   const canBuy = ['student', 'super_admin', 'admin'].includes(role);
-  const [viewMode, setViewMode] = useState<'list' | 'categories'>('list');
+  const [viewMode, setViewMode] = useState<'list' | 'categories'>('categories');
   const [selectedBookIds, setSelectedBookIds] = useState<string[]>([]);
   const [staffAction, setStaffAction] = useState<StaffAction | null>(null);
 
@@ -1091,12 +1096,39 @@ export default function KitapMagazasiPage() {
                   setFilters({ ...filters, class_level: cl.key });
                   setActiveClassKey(cl.key);
                   setActiveCategoryKey(null);
+                  setViewMode('categories');
                 }}
                 className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap ${
                   filters.class_level === cl.key ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}
               >
                 {cl.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-1.5 overflow-x-auto pb-1">
+            <button
+              type="button"
+              onClick={() => { setFilters({ ...filters, series: undefined }); setActiveCategoryKey(null); }}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap ${
+                !filters.series ? 'bg-violet-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              Tüm kategoriler
+            </button>
+            {STORE_KINDS.map((k) => (
+              <button
+                key={k.key}
+                type="button"
+                onClick={() => {
+                  setFilters({ ...filters, series: k.key });
+                  setViewMode('list');
+                }}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap ${
+                  filters.series === k.key ? 'bg-violet-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {k.label}
               </button>
             ))}
           </div>
