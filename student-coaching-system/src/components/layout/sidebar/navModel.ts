@@ -330,6 +330,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/veli-onay', icon: FileText, label: 'Veli onayı & e-imza' },
       { path: '/muhasebe', icon: Wallet, label: 'Muhasebe' },
       { path: '/kitap-pazaryeri', icon: ShoppingBag, label: 'Kitap Pazaryeri' },
+      { path: '/kitap-magazasi', icon: ShoppingBag, label: 'Kitap Mağazası' },
       { path: '/ai-coach', icon: Brain, label: 'AI KOÇ' },
       { path: '/settings', icon: Settings, label: 'Ayarlar' }
     ];
@@ -397,6 +398,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/toplanti-takip', icon: ClipboardCheck, label: 'Toplantı ve Gündem Takibi' },
     { path: '/kayit-takibi', icon: ClipboardList, label: 'Kayıt Takibi' },
     { path: '/kitap-pazaryeri', icon: ShoppingBag, label: 'Kitap Pazaryeri' },
+    { path: '/kitap-magazasi', icon: ShoppingBag, label: 'Kitap Mağazası' },
     NAV_OZEL_DERS_TALEPLERI,
     NAV_TEACHER_PROFILE_APPROVALS,
     { path: '/system-management', icon: Server, label: 'Sistem Yönetimi' },
@@ -422,6 +424,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
     { path: '/class-lesson-topic-progress', icon: MapPin, label: 'Grup dersi konu ilerlemesi' },
     { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
+    { path: '/kitap-magazasi', icon: ShoppingBag, label: 'Kitap Mağazası' },
     { path: '/settings', icon: Settings, label: 'Ayarlar' }
   ];
 
@@ -455,6 +458,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/written-exam', icon: FileCheck, label: 'Yazılı Takip' },
     { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
     { path: '/class-lesson-topic-progress', icon: MapPin, label: 'Grup dersi konu ilerlemesi' },
+    { path: '/kitap-magazasi', icon: ShoppingBag, label: 'Kitap Mağazası' },
     { path: '/veli-onay', icon: FileText, label: 'Veli onayı & e-imza' }
   ];
 
