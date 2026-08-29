@@ -4,7 +4,7 @@
  */
 
 import { classKeyMatchesLevels } from './commerce-store-browse.js';
-import { isVipEgitimComponentBook, storeKindOfBook } from './commerce-store-kinds.js';
+import { STORE_KIND_SORU, isVipEgitimComponentBook, storeKindOfBook } from './commerce-store-kinds.js';
 
 export function pickBestApprovedOffer(offers = []) {
   const list = Array.isArray(offers) ? offers : [];
@@ -94,7 +94,7 @@ export function filterCatalogListRows(rows = [], params = {}) {
     list = list.filter((o) => classKeyMatchesLevels(classLevel, o.commerce_books?.class_levels));
   }
   if (series) {
-    list = list.filter((o) => storeKindOfBook(o.commerce_books) === series);
+    list = list.filter((o) => (storeKindOfBook(o.commerce_books) || STORE_KIND_SORU) === series);
   }
   if (params.teacher_recommended) list = list.filter((o) => o.teacher_recommended);
   if (params.is_featured) list = list.filter((o) => o.is_featured);
