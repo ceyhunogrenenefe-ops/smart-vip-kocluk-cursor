@@ -2484,8 +2484,8 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
         : batch[j];
       if (!edesisExamTakeWindowOpen(merged)) continue;
       if (!examCompatibleWithStudentGrade(merged, gradeName, { allowLgsNeighbor: false })) continue;
-      const gradeMatch = edesisExamGradeIdMatchesStudent(merged, studentGradeId);
-      if (gradeMatch === false) continue;
+      // gradeId Edesis’te aynı kademenin farklı id’si olabiliyor (kitap denemesi vs şube);
+      // isim/tür filtresi yeterli. gradeId false-negative PARAF MİS’i gizliyordu.
       if (
         !shouldOfferOpenCatalogExamAfterRoster(merged, {
           roster: rosters[j],
@@ -3358,7 +3358,6 @@ export function buildStudentAvailableEdesisExamItems({
     if (!examId || seen.has(examId)) continue;
     // Atanmış listede 7.SINIF KTT yalnızca gerçek atamada; 5-6-7 dump 8-F’ye gitmez.
     if (!examCompatibleWithStudentGrade(ex, gradeName, { allowLgsNeighbor: false })) continue;
-    if (edesisExamGradeIdMatchesStudent(ex, studentGradeId) === false) continue;
     if (!shouldOfferUntakenCatalogExam(ex, scope, now)) continue;
     push(examId, catalogById.get(examId) || ex, null);
   }
