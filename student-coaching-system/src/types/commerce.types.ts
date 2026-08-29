@@ -277,6 +277,12 @@ export interface CommerceOrder extends CommerceTimestamps {
   items?: CommerceOrderItem[];
   vendor_orders?: CommerceVendorOrder[];
   addresses?: CommerceOrderAddress[];
+  payments?: CommercePayment[];
+  commerce_payments?: CommercePayment[];
+  receipt_url?: string | null;
+  payment_method?: string | null;
+  holder?: string | null;
+  iban?: string | null;
 }
 
 export interface CommerceVendorOrder extends CommerceTimestamps {
