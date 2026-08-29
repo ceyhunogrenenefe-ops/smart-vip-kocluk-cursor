@@ -135,6 +135,17 @@ export const caSeedLgs8DenemeKulubu = (fields?: { contact_phone?: string; price_
 export const caEnsureYankiVendor = (fields?: { contact_phone?: string; institution_id?: string }) =>
   post<{ vendor: CommerceVendor; created: boolean }>('vendors.ensure_yanki', fields ?? {});
 
+export const caSyncVendorOrderTemplate = () =>
+  post<{
+    template: {
+      name?: string;
+      language?: string;
+      is_active?: boolean;
+      channel?: string;
+      meta_configured?: boolean;
+    };
+  }>('orders.sync_whatsapp_template', {});
+
 // ── Teklifler & Onay ─────────────────────────────
 export type OfferListParams = { status?: string; vendor_id?: string; book_id?: string; limit?: number };
 export const caListOffers = (params?: OfferListParams) => post<{ offers: CommerceVendorOffer[] }>('offers.list', params ?? {});

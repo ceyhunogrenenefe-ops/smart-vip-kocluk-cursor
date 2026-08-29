@@ -66,6 +66,7 @@ import {
   caSeedLgs8Vip,
   caBulkUpsertBooks,
   caEnsureYankiVendor,
+  caSyncVendorOrderTemplate,
   caToggleVendorActive,
   caUpdateCoupon,
   caUpdateOrder,
@@ -1166,6 +1167,21 @@ function KitaplarTab() {
     finally { setSeeding(false); }
   };
 
+  const handleSyncVendorWaTemplate = async () => {
+    setSeeding(true);
+    try {
+      if (yankiPhone.trim()) await caEnsureYankiVendor({ contact_phone: yankiPhone.trim() });
+      const r = await caSyncVendorOrderTemplate();
+      const name = r.template?.name || 'kitap_siparisi1';
+      toast.success(
+        r.template?.meta_configured
+          ? `Meta şablon aktif: ${name} (${r.template.language || 'tr'})`
+          : `Şablon kaydedildi (${name}) — Meta env eksik`
+      );
+    } catch (e: unknown) { toast.error((e as Error).message); }
+    finally { setSeeding(false); }
+  };
+
   const handlePublishPrices = async () => {
     const rows = (seedResult ?? []).filter((b) => b.isbn);
     if (!rows.length) { toast.error('Önce VIP setini yükleyin'); return; }
@@ -1255,7 +1271,7 @@ function KitaplarTab() {
           <div>
             <h3 className="font-semibold text-gray-900">8. sınıf LGS — Yankı Kitapevi</h3>
             <p className="text-xs text-gray-500 mt-1">
-              Öğrenci kredi kartıyla ödeyince sipariş Yankı Kitapevi paneline düşer ve WhatsApp gider. Fiyat girilmeden set taslak kalır.
+              Kart veya IBAN ödemesi alınca sipariş satıcı paneline düşer ve Meta WhatsApp (kitap_siparisi1) gider. Ödenmemiş sepet satıcıda görünmez.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 items-end">
@@ -1291,6 +1307,14 @@ function KitaplarTab() {
             >
               {seeding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Package className="w-4 h-4" />}
               Deneme Kulübü 40+ yükle
+            </button>
+            <button
+              onClick={handleSyncVendorWaTemplate}
+              disabled={seeding}
+              className="flex items-center gap-1.5 bg-emerald-700 text-white text-sm px-4 py-2 rounded-lg hover:bg-emerald-800 disabled:opacity-50"
+            >
+              {seeding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              WhatsApp şablonunu aktif et
             </button>
           </div>
 
