@@ -82,7 +82,7 @@ import { enrollPlatformStudentsBatch, EDESIS_AUTO_ENROLL_MARKER, EDESIS_AUTO_ENR
 
 const STAFF = new Set(['super_admin', 'admin', 'coach']);
 const EDESIS_PDF_DURATION_MARKER = 'edesis-pdf-duration-2026-08-27';
-const EDESIS_ASSIGNED_ONLY_MARKER = 'edesis-exam-window-2026-08-28';
+const EDESIS_ASSIGNED_ONLY_MARKER = 'edesis-assigned-grade-2026-08-29';
 /** Aynı Hobby instance’ta üst üste op=sync 504 üretmesin */
 let syncInFlight = null;
 /** Öğrencinin kendi Edesis sonuç / karne / sınava giriş ops */
@@ -161,11 +161,13 @@ async function resolveStudentEdesisScope({ edesisStudentId, platformStudentId, s
   let gradeName = '';
   let className = '';
   let classroomId = '';
+  let studentGradeId = '';
   try {
     const es = await fetchEdesisStudentByOgrenciId(edesisStudentId, cfg);
     gradeName = es?.gradeName || '';
     className = es?.className || '';
     classroomId = es?.classroomId || '';
+    studentGradeId = es?.gradeId || '';
   } catch {
     /* sınıf Edesis’ten gelmezse class_level yeter */
   }
@@ -174,7 +176,8 @@ async function resolveStudentEdesisScope({ edesisStudentId, platformStudentId, s
     classroomId,
     gradeName,
     className,
-    classLevel
+    classLevel,
+    studentGradeId
   };
 }
 
@@ -213,7 +216,8 @@ async function loadAvailableEdesisExamsForStudent({
       edesisStudentId,
       classroomId: scope.classroomId,
       programKeys: scope.programKeys,
-      gradeName: scope.gradeName || ''
+      gradeName: scope.gradeName || '',
+      studentGradeId: scope.studentGradeId || ''
     },
     cfg
   );
@@ -239,6 +243,7 @@ async function loadAvailableEdesisExamsForStudent({
     studentId: platformStudentId || `edesis-${edesisStudentId}`,
     institutionId: actor?.institution_id || null,
     gradeName: scope.gradeName || '',
+    studentGradeId: scope.studentGradeId || '',
     // Atama yoksa boş liste — kurum kataloğu / program yedeği kapalı
     allowRecencyFallback: false,
     requireExplicitAssignment: true

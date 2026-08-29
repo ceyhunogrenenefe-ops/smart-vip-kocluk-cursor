@@ -17,6 +17,8 @@ import {
   examCompatibleWithStudentProgramSoft,
   isThinOnlineRosterExam,
   catalogExamTakeableWithoutRosterProbe,
+  catalogExamOpenTakeableCandidate,
+  edesisExamGradeIdMatchesStudent,
   collectOpenOnlineProgramExams,
   pickEdesisExamSinavTuruId,
   collectCatalogRowsForSinavIds,
@@ -103,7 +105,7 @@ describe('examCompatibleWithStudentProgramSoft', () => {
     const yks = new Set(['yks']);
     assert.equal(
       examCompatibleWithStudentProgramSoft({ name: 'LİMİT LGS', examType: '5-6-7 LGS 90' }, lgs),
-      true
+      false
     );
     assert.equal(
       examCompatibleWithStudentProgramSoft({ name: 'Maarif Model4', examType: 'MAARİF 80' }, lgs),
@@ -152,9 +154,24 @@ describe('thin online roster + open catalog', () => {
       catalogExamTakeableWithoutRosterProbe(fat, { programKeys: keys, gradeName: '8-F' }),
       false
     );
+    assert.equal(
+      catalogExamTakeableWithoutRosterProbe({ ...empty, studentCount: 1 }, { programKeys: keys, gradeName: '8-F' }),
+      false
+    );
+    assert.equal(
+      catalogExamOpenTakeableCandidate({ ...empty, studentCount: 1 }, { programKeys: keys, gradeName: '8-F' }),
+      true
+    );
+    assert.equal(
+      catalogExamOpenTakeableCandidate(
+        { ...empty, examType: '5-6-7 LGS 90', studentCount: 0 },
+        { programKeys: keys, gradeName: '8-F' }
+      ),
+      false
+    );
   });
 
-  it('unpublished 7.SINIF KTT (None, empty roster) is takeable for 8-F', () => {
+  it('unpublished 7.SINIF / 5-6-7 KTT is not dumped to 8-F', () => {
     const keys = new Set(['lgs']);
     const ktt = {
       id: '1579103',
@@ -167,7 +184,7 @@ describe('thin online roster + open catalog', () => {
     };
     assert.equal(
       catalogExamTakeableWithoutRosterProbe(ktt, { programKeys: keys, gradeName: '8-F' }),
-      true
+      false
     );
     assert.equal(
       catalogExamTakeableWithoutRosterProbe(
@@ -188,7 +205,7 @@ describe('thin online roster + open catalog', () => {
     });
     assert.deepEqual(
       items.filter((x) => x.canTake).map((x) => x.examId),
-      ['1579103']
+      []
     );
   });
 
@@ -1051,12 +1068,19 @@ describe('parseEdesisOgrenciSinavAssignmentResponse / grade compatibility', () =
     assert.equal(examCompatibleWithStudentGrade({ name: '7.sınıf Mat Fen KTT 2' }, '7'), true);
     assert.equal(
       examCompatibleWithStudentGrade({ name: '7.sınıf Mat Fen KTT 2' }, '8', { allowLgsNeighbor: true }),
-      true
+      false
+    );
+    assert.equal(
+      examCompatibleWithStudentGrade({ name: 'LİMİT LGS HAZIRBULUNUŞLUK', examType: '5-6-7 LGS 90' }, '8'),
+      false
     );
     assert.equal(
       examCompatibleWithStudentGrade({ name: '5.SINIF MAT FEN KTT 2' }, '8', { allowLgsNeighbor: true }),
       false
     );
+    assert.equal(edesisExamGradeIdMatchesStudent({ gradeId: '8' }, '8'), true);
+    assert.equal(edesisExamGradeIdMatchesStudent({ gradeId: '7' }, '8'), false);
+    assert.equal(edesisExamGradeIdMatchesStudent({ name: 'LGS' }, '8'), null);
   });
 
   it('reads grade from examType when title has no sınıf', () => {
@@ -1197,7 +1221,7 @@ describe('requireExplicitAssignment never dumps catalog', () => {
       {
         id: 1579080,
         name: 'LİMİT LGS HAZIRBULUNUŞLUK',
-        examType: 'LGS',
+        examType: '5-6-7 LGS 90',
         resultStatus: 'None',
         examDate: '2026-08-25',
         studentCount: 0
@@ -1207,6 +1231,14 @@ describe('requireExplicitAssignment never dumps catalog', () => {
         name: 'MATEMATİK KTT 25 Lİ',
         resultStatus: 'None',
         examDate: '2026-08-28',
+        studentCount: 0
+      },
+      {
+        id: 1580678,
+        name: 'PARAF MİS LGS-2 İNTERAKTİF',
+        examType: 'LGS',
+        resultStatus: 'Ready',
+        examDate: '2026-08-29',
         studentCount: 0
       },
       {
@@ -1231,7 +1263,29 @@ describe('requireExplicitAssignment never dumps catalog', () => {
       gradeName: '8',
       now: new Date('2026-08-28T12:00:00Z')
     });
-    assert.deepEqual(open.map((r) => pickEdesisCatalogExamId(r)).sort(), ['1579080', '1580129']);
+    assert.deepEqual(open.map((r) => pickEdesisCatalogExamId(r)).sort(), ['1580129', '1580678']);
+    const thinAssigned = collectStudentTakeableOpenCatalogExams(
+      [
+        ...catalog,
+        {
+          id: 1580999,
+          name: '8-F MATEMATİK KTT ATAMA',
+          examType: 'LGS',
+          resultStatus: 'None',
+          examDate: '2026-08-29',
+          studentCount: 1
+        }
+      ],
+      {
+        programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+        gradeName: '8',
+        now: new Date('2026-08-28T12:00:00Z')
+      }
+    );
+    assert.equal(
+      thinAssigned.some((r) => pickEdesisCatalogExamId(r) === '1580999'),
+      true
+    );
     const items = buildStudentAvailableEdesisExamItems({
       catalogRows: catalog,
       assignedCatalogRows: open,
@@ -1245,7 +1299,7 @@ describe('requireExplicitAssignment never dumps catalog', () => {
     });
     assert.deepEqual(
       items.filter((x) => x.canTake).map((x) => x.examId).sort(),
-      ['1579080', '1580129']
+      ['1580129', '1580678']
     );
   });
 
@@ -1280,7 +1334,10 @@ describe('requireExplicitAssignment never dumps catalog', () => {
       gradeName: '11',
       now: new Date('2026-08-28T12:00:00Z')
     });
-    assert.equal(open.length, 0);
+    const ids = open.map((r) => pickEdesisCatalogExamId(r));
+    assert.equal(ids.includes('1579080'), false);
+    assert.equal(ids.includes('1580129'), false);
+    assert.deepEqual(ids, ['1579181']);
   });
 
   it('shows only admin-assigned open exams for that student id', () => {
