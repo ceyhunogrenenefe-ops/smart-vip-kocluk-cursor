@@ -5,6 +5,7 @@
 import { slugifyTr } from './commerce-lgs8-catalog.js';
 import {
   STORE_CATEGORY_KINDS,
+  STORE_KIND_SORU,
   defaultKindCategories,
   isLegacyPublisherCategory,
   isVipEgitimComponentBook,
@@ -25,7 +26,7 @@ export const DEFAULT_STORE_CLASSES = [
   { key: '10', label: '10. Sınıf', sort: 10, active: true },
   { key: '11', label: '11. Sınıf', sort: 11, active: true },
   { key: '12', label: '12. Sınıf', sort: 12, active: true },
-  { key: 'YKS', label: 'YKS', sort: 13, active: true },
+  { key: 'YKS', label: 'YKS', sort: 16, active: true },
 ];
 
 export function defaultStoreCategories(classKeys) {
@@ -131,7 +132,7 @@ export function bookMatchesCategory(book, category) {
   if (isVipEgitimComponentBook(book)) return false;
   const series = String(category.series || category.key || '').trim();
   if (!series) return false;
-  const bookSeries = storeKindOfBook(book);
+  const bookSeries = storeKindOfBook(book) || STORE_KIND_SORU;
   if (!bookSeries || bookSeries !== series) return false;
   const keys = Array.isArray(category.class_keys) ? category.class_keys : [];
   if (!keys.length) return true;
@@ -226,7 +227,12 @@ export function normalizeStoreBrowse(input) {
     folded.push({ key: 'LGS', label: 'LGS', sort: 8, active: true });
   }
   if (!folded.some((c) => c.key === 'YKS')) {
-    folded.push({ key: 'YKS', label: 'YKS', sort: 13, active: true });
+    folded.push({ key: 'YKS', label: 'YKS', sort: 16, active: true });
+  }
+  const twelve = folded.find((c) => c.key === '12');
+  const yks = folded.find((c) => c.key === 'YKS');
+  if (yks && twelve && yks.sort <= twelve.sort) {
+    yks.sort = twelve.sort + 1;
   }
   classes.length = 0;
   classes.push(...folded);
@@ -322,7 +328,7 @@ export async function listStoreBrowse() {
   for (const cl of classes) {
     STORE_CATEGORY_KINDS.forEach((kind, idx) => {
       const matched = decoratedBooks
-        .filter((b) => storeKindOfBook(b) === kind.key && classKeyMatchesLevels(cl.key, b.class_levels))
+        .filter((b) => (storeKindOfBook(b) || STORE_KIND_SORU) === kind.key && classKeyMatchesLevels(cl.key, b.class_levels))
         .sort((a, b) => (a.metadata?.sort_order || 0) - (b.metadata?.sort_order || 0));
       categories.push({
         key: `${cl.key}-${kind.key}`,

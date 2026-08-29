@@ -67,6 +67,20 @@ describe('commerce-store-catalog', () => {
     expect(rows.map((r) => r.commerce_books.id)).toEqual(['b1']);
   });
 
+  it('puts uncategorized TYT books under YKS Soru Bankaları', () => {
+    const tyt = catalogOfferFromBook({
+      ...book,
+      id: 'b3',
+      title: 'ÜçDörtBeş Yayınları Sıfırdan Başla Start Matematik',
+      class_levels: ['11', '12', 'TYT'],
+      metadata: { series: '' }
+    });
+    expect(filterCatalogListRows([tyt], { class_level: 'YKS' })).toHaveLength(1);
+    expect(filterCatalogListRows([tyt], { class_level: 'YKS', series: 'soru-bankalari' })).toHaveLength(1);
+    expect(filterCatalogListRows([tyt], { class_level: '12' })).toHaveLength(1);
+    expect(filterCatalogListRows([tyt], { class_level: 'YKS', series: 'denemeler' })).toHaveLength(0);
+  });
+
   it('does not apply a default class filter — all books stay visible', () => {
     const tyt = catalogOfferFromBook({
       ...book,
