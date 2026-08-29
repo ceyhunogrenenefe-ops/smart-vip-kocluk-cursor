@@ -202,3 +202,18 @@ export const csStaffCreatePackage = (params: {
   price_kurus?: number;
 }) =>
   post<{ package: CommerceBookPackage; item_count: number }>('staff.package_create', params);
+
+export const csStaffUpdatePackage = (params: {
+  id: string;
+  name?: string;
+  description?: string | null;
+  class_level?: string | null;
+  price_kurus?: number;
+}) =>
+  post<{ package: CommerceBookPackage }>('staff.package_update', params);
+
+export const csStaffDeletePackage = (id: string) =>
+  post<{ ok: true }>('staff.package_delete', { id });
+
+export const csStaffSetPackageItems = (params: { package_id: string; book_ids: string[] }) =>
+  post<{ item_count: number }>('staff.package_items_set', params);

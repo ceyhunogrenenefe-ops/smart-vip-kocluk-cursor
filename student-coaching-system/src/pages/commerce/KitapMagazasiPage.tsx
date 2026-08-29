@@ -12,6 +12,7 @@ import {
   List,
   Loader2,
   Package,
+  Pencil,
   Search,
   ShoppingBag,
   ShoppingCart,
@@ -33,7 +34,10 @@ import {
   csListPackages,
   csStaffAssign,
   csStaffCreatePackage,
+  csStaffDeletePackage,
   csStaffRoster,
+  csStaffSetPackageItems,
+  csStaffUpdatePackage,
   type CatalogListParams,
   type StaffRosterClass,
   type StaffRosterStudent,
@@ -223,6 +227,13 @@ function classKeysEqual(a: string, b: string) {
   return false;
 }
 
+function classLevelLabel(value: string | null | undefined) {
+  const s = String(value ?? '').trim();
+  if (!s) return '';
+  if (/^\d+$/.test(s)) return `${s}. Sınıf`;
+  return s;
+}
+
 function studentMatchesClass(studentLevel: unknown, classKey: string) {
   if (studentLevel == null || studentLevel === '') return false;
   if (classKeysEqual(String(studentLevel), classKey)) return true;
@@ -367,15 +378,203 @@ function FilterPanel({
 }
 
 // ─── Paketler sekmesi ────────────────────────────────────────────────
-function PaketlerTab({ classLevel }: { classLevel?: string }) {
+type PackageItemRow = {
+  book_id?: string;
+  is_required?: boolean;
+  commerce_books?: { id?: string; title?: string; cover_image_url?: string | null } | null;
+};
+
+function packageItemsOf(pkg: CommerceBookPackage): PackageItemRow[] {
+  return ((pkg as unknown as { commerce_book_package_items?: PackageItemRow[] }).commerce_book_package_items ?? []);
+}
+
+function PackageEditModal({
+  pkg,
+  onClose,
+  onSaved,
+}: {
+  pkg: CommerceBookPackage;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const initialItems = packageItemsOf(pkg);
+  const [name, setName] = useState(pkg.name);
+  const [desc, setDesc] = useState(pkg.description || '');
+  const [classLevel, setClassLevel] = useState(pkg.class_level || '');
+  const [priceTl, setPriceTl] = useState(pkg.price_kurus > 0 ? String(pkg.price_kurus / 100) : '');
+  const [items, setItems] = useState<{ id: string; title: string }[]>(
+    initialItems
+      .map((it) => ({
+        id: String(it.book_id || it.commerce_books?.id || ''),
+        title: it.commerce_books?.title || 'Kitap',
+      }))
+      .filter((it) => it.id)
+  );
+  const [search, setSearch] = useState('');
+  const [hits, setHits] = useState<OfferWithBook[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    const q = search.trim();
+    if (q.length < 2) { setHits([]); return; }
+    const t = setTimeout(() => {
+      setSearching(true);
+      csListCatalog({ search: q, limit: 12 })
+        .then((r) => setHits(r.offers ?? []))
+        .catch((e: Error) => toast.error(e.message))
+        .finally(() => setSearching(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const addBook = (offer: OfferWithBook) => {
+    const id = offer.commerce_books?.id;
+    const title = offer.commerce_books?.title;
+    if (!id) return;
+    setItems((prev) => (prev.some((x) => x.id === id) ? prev : [...prev, { id, title: title || 'Kitap' }]));
+    setSearch('');
+    setHits([]);
+  };
+
+  const save = async () => {
+    if (!name.trim()) { toast.error('Paket adı gerekli'); return; }
+    if (!items.length) { toast.error('Pakette en az bir kitap olmalı'); return; }
+    const priceTlTrim = priceTl.trim();
+    const price_kurus = priceTlTrim ? Math.round(parseFloat(priceTlTrim.replace(',', '.')) * 100) : 0;
+    if (priceTlTrim && (!Number.isFinite(price_kurus) || price_kurus < 0)) {
+      toast.error('Geçerli bir fiyat yazın veya boş bırakın');
+      return;
+    }
+    setSaving(true);
+    try {
+      await csStaffUpdatePackage({
+        id: pkg.id,
+        name: name.trim(),
+        description: desc.trim() || null,
+        class_level: classLevel || null,
+        price_kurus,
+      });
+      await csStaffSetPackageItems({ package_id: pkg.id, book_ids: items.map((it) => it.id) });
+      toast.success('Paket güncellendi');
+      onSaved();
+      onClose();
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!window.confirm(`“${pkg.name}” paketini silmek istiyor musunuz?`)) return;
+    setDeleting(true);
+    try {
+      await csStaffDeletePackage(pkg.id);
+      toast.success('Paket silindi');
+      onSaved();
+      onClose();
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-end md:items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-5 shadow-xl">
+        <div className="flex justify-between items-center mb-3">
+          <h3 className="font-semibold text-gray-800">Sınıf paketini düzelt</h3>
+          <button type="button" onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-medium text-gray-500 mb-1 block">Paket adı</label>
+            <input className="border rounded-lg px-3 py-2 text-sm w-full" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500 mb-1 block">Açıklama</label>
+            <textarea className="border rounded-lg px-3 py-2 text-sm w-full" rows={2} value={desc} onChange={(e) => setDesc(e.target.value)} />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500 mb-1 block">Kademe</label>
+            <select className="border rounded-lg px-3 py-2 text-sm w-full" value={classLevel} onChange={(e) => setClassLevel(e.target.value)}>
+              <option value="">Kademe yok</option>
+              {['5', '6', '7', 'LGS', '9', '10', '11', '12', 'YKS'].map((k) => (
+                <option key={k} value={k}>{k}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500 mb-1 block">Paket fiyatı (₺) — boş = Fiyat yakında</label>
+            <input className="border rounded-lg px-3 py-2 text-sm w-full" inputMode="decimal" value={priceTl} onChange={(e) => setPriceTl(e.target.value)} placeholder="Yalnızca gerçek fiyat" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500 mb-1 block">Kitaplar ({items.length})</label>
+            <div className="border rounded-lg divide-y max-h-40 overflow-y-auto">
+              {items.map((it) => (
+                <div key={it.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
+                  <span className="flex-1 truncate">{it.title}</span>
+                  <button type="button" className="text-red-500 text-xs" onClick={() => setItems((prev) => prev.filter((x) => x.id !== it.id))}>Çıkar</button>
+                </div>
+              ))}
+              {items.length === 0 && <div className="px-3 py-2 text-xs text-gray-400">Kitap yok</div>}
+            </div>
+            <input
+              className="border rounded-lg px-3 py-2 text-sm w-full mt-2"
+              placeholder="Kitap ara ve ekle"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {searching && <div className="text-xs text-gray-400 mt-1">Aranıyor…</div>}
+            {hits.length > 0 && (
+              <div className="border rounded-lg divide-y mt-1 max-h-36 overflow-y-auto">
+                {hits.map((o) => (
+                  <button
+                    key={o.id}
+                    type="button"
+                    className="w-full text-left px-3 py-1.5 text-sm hover:bg-indigo-50"
+                    onClick={() => addBook(o)}
+                  >
+                    {o.commerce_books?.title}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2 mt-5">
+          <button type="button" onClick={remove} disabled={deleting || saving} className="text-sm text-red-600 px-3 py-2">
+            {deleting ? 'Siliniyor…' : 'Paketi sil'}
+          </button>
+          <button type="button" onClick={onClose} className="ml-auto border border-gray-300 text-gray-600 text-sm px-4 py-2 rounded-lg">Vazgeç</button>
+          <button type="button" onClick={save} disabled={saving} className="bg-indigo-600 text-white text-sm px-4 py-2 rounded-lg disabled:opacity-50">
+            {saving ? 'Kaydediliyor…' : 'Kaydet'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PaketlerTab({ classLevel, staffRole }: { classLevel?: string; staffRole?: boolean }) {
   const [packages, setPackages] = useState<CommerceBookPackage[]>([]);
   const [loading, setLoading] = useState(true);
   const [addingId, setAddingId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<CommerceBookPackage | null>(null);
   const { effectiveUser } = useAuth();
 
-  useEffect(() => {
-    csListPackages(classLevel).then((r) => setPackages(r.packages)).catch((e: Error) => toast.error(e.message)).finally(() => setLoading(false));
+  const reload = useCallback(() => {
+    setLoading(true);
+    csListPackages(classLevel)
+      .then((r) => setPackages(r.packages))
+      .catch((e: Error) => toast.error(e.message))
+      .finally(() => setLoading(false));
   }, [classLevel]);
+
+  useEffect(() => { reload(); }, [reload]);
 
   const handleAddPackage = async (pkgId: string) => {
     if (!effectiveUser) { toast.error('Sepete eklemek için giriş yapın'); return; }
@@ -392,72 +591,92 @@ function PaketlerTab({ classLevel }: { classLevel?: string }) {
     <div className="text-center py-12 text-gray-400">
       <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
       <p className="text-sm">Henüz aktif paket yok</p>
+      {staffRole && <p className="text-xs mt-1">Tüm Kitaplar’dan kitap seçip “Sınıf paketi oluştur” deyin</p>}
     </div>
   );
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      {packages.map((pkg) => {
-        const items = (pkg as unknown as { commerce_book_package_items?: { commerce_books?: { title: string; cover_image_url: string | null }; is_required: boolean }[] }).commerce_book_package_items ?? [];
-        return (
-          <div key={pkg.id} className="bg-white border border-gray-200 rounded-2xl overflow-hidden hover:shadow-md transition-shadow">
-            <div className="relative aspect-[2/1] bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center">
-              {pkg.cover_image_url ? (
-                <img src={pkg.cover_image_url} alt={pkg.name} className="w-full h-full object-contain" />
-              ) : (
-                <BookOpen className="w-16 h-16 text-indigo-300" />
-              )}
-              {pkg.compare_at_price_kurus && pkg.compare_at_price_kurus > pkg.price_kurus && (
-                <span className="absolute top-2 left-2 bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-                  %{Math.round((1 - pkg.price_kurus / pkg.compare_at_price_kurus) * 100)} İndirim
-                </span>
-              )}
-            </div>
-            <div className="p-4">
-              <div className="font-bold text-base">{pkg.name}</div>
-              {pkg.class_level && <div className="text-xs text-indigo-600 font-medium mt-0.5">{pkg.class_level}. Sınıf</div>}
-              {pkg.description && <div className="text-sm text-gray-500 mt-1 line-clamp-2">{pkg.description}</div>}
-              {items.length > 0 && (
-                <div className="mt-3 space-y-1">
-                  {items.slice(0, 4).map((item, i) => (
-                    <div key={i} className="flex items-center gap-1.5 text-xs text-gray-600">
-                      <CheckCircle2 className="w-3 h-3 text-green-500 flex-shrink-0" />
-                      <span className="truncate">{item.commerce_books?.title ?? '—'}</span>
-                      {!item.is_required && <span className="text-gray-400">(opsiyonel)</span>}
-                    </div>
-                  ))}
-                  {items.length > 4 && <div className="text-xs text-gray-400">+{items.length - 4} kitap daha</div>}
-                </div>
-              )}
-              <div className="mt-4 flex items-center justify-between">
-                <div>
-                  {pkg.price_kurus > 0 ? (
-                    <>
-                      <span className="text-xl font-bold text-indigo-700">{formatCommerceTry(pkg.price_kurus)}</span>
-                      {pkg.compare_at_price_kurus && pkg.compare_at_price_kurus > pkg.price_kurus && (
-                        <span className="ml-2 text-sm text-gray-400 line-through">{formatCommerceTry(pkg.compare_at_price_kurus)}</span>
-                      )}
-                    </>
-                  ) : (
-                    <span className="text-xs font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">Fiyat yakında</span>
-                  )}
-                </div>
-                {pkg.price_kurus > 0 && (
-                  <button
-                    onClick={() => handleAddPackage(pkg.id)}
-                    disabled={addingId === pkg.id}
-                    className="flex items-center gap-1.5 bg-indigo-600 text-white text-sm px-4 py-2 rounded-xl hover:bg-indigo-700 disabled:opacity-50"
-                  >
-                    {addingId === pkg.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShoppingCart className="w-4 h-4" />}
-                    Paketi Al
-                  </button>
+    <>
+      {staffRole && (
+        <p className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2 mb-3">
+          Yanlış paket: karttaki <b>Düzenle</b> ile adı, kademeyi, fiyatı veya kitapları düzeltin. Silmek de aynı yerden.
+        </p>
+      )}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {packages.map((pkg) => {
+          const items = packageItemsOf(pkg);
+          return (
+            <div key={pkg.id} className="bg-white border border-gray-200 rounded-2xl overflow-hidden hover:shadow-md transition-shadow">
+              <div className="relative aspect-[2/1] bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center">
+                {pkg.cover_image_url ? (
+                  <img src={pkg.cover_image_url} alt={pkg.name} className="w-full h-full object-contain" />
+                ) : (
+                  <BookOpen className="w-16 h-16 text-indigo-300" />
+                )}
+                {pkg.compare_at_price_kurus && pkg.compare_at_price_kurus > pkg.price_kurus && (
+                  <span className="absolute top-2 left-2 bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                    %{Math.round((1 - pkg.price_kurus / pkg.compare_at_price_kurus) * 100)} İndirim
+                  </span>
                 )}
               </div>
+              <div className="p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="font-bold text-base">{pkg.name}</div>
+                  {staffRole && (
+                    <button
+                      type="button"
+                      onClick={() => setEditing(pkg)}
+                      className="flex items-center gap-1 text-xs font-medium text-indigo-700 bg-indigo-50 px-2 py-1 rounded-lg flex-shrink-0"
+                    >
+                      <Pencil className="w-3 h-3" /> Düzenle
+                    </button>
+                  )}
+                </div>
+                {pkg.class_level && <div className="text-xs text-indigo-600 font-medium mt-0.5">{classLevelLabel(pkg.class_level)}</div>}
+                {pkg.description && <div className="text-sm text-gray-500 mt-1 line-clamp-2">{pkg.description}</div>}
+                {items.length > 0 && (
+                  <div className="mt-3 space-y-1">
+                    {items.slice(0, 4).map((item, i) => (
+                      <div key={i} className="flex items-center gap-1.5 text-xs text-gray-600">
+                        <CheckCircle2 className="w-3 h-3 text-green-500 flex-shrink-0" />
+                        <span className="truncate">{item.commerce_books?.title ?? '—'}</span>
+                        {!item.is_required && <span className="text-gray-400">(opsiyonel)</span>}
+                      </div>
+                    ))}
+                    {items.length > 4 && <div className="text-xs text-gray-400">+{items.length - 4} kitap daha</div>}
+                  </div>
+                )}
+                <div className="mt-4 flex items-center justify-between">
+                  <div>
+                    {pkg.price_kurus > 0 ? (
+                      <>
+                        <span className="text-xl font-bold text-indigo-700">{formatCommerceTry(pkg.price_kurus)}</span>
+                        {pkg.compare_at_price_kurus && pkg.compare_at_price_kurus > pkg.price_kurus && (
+                          <span className="ml-2 text-sm text-gray-400 line-through">{formatCommerceTry(pkg.compare_at_price_kurus)}</span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-xs font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">Fiyat yakında</span>
+                    )}
+                  </div>
+                  {pkg.price_kurus > 0 && (
+                    <button
+                      onClick={() => handleAddPackage(pkg.id)}
+                      disabled={addingId === pkg.id}
+                      className="flex items-center gap-1.5 bg-indigo-600 text-white text-sm px-4 py-2 rounded-xl hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      {addingId === pkg.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShoppingCart className="w-4 h-4" />}
+                      Paketi Al
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
-        );
-      })}
-    </div>
+          );
+        })}
+      </div>
+      {editing && <PackageEditModal pkg={editing} onClose={() => setEditing(null)} onSaved={reload} />}
+    </>
   );
 }
 
@@ -1236,7 +1455,7 @@ export default function KitapMagazasiPage() {
       )}
 
       {tab === 'paketler' ? (
-        <PaketlerTab classLevel={filters.class_level} />
+        <PaketlerTab classLevel={filters.class_level} staffRole={staffRole} />
       ) : tab === 'atanmis' ? (
         <AtanmisTab />
       ) : tab === 'onerilen' || (tab === 'tum-kitaplar' && viewMode === 'list') ? (

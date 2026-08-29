@@ -78,3 +78,42 @@ export function buildAssignmentInserts({
   }
   return rows;
 }
+
+export function sanitizePackageName(value) {
+  const name = String(value ?? '').trim();
+  if (!name) throw new Error('name gerekli');
+  return name.slice(0, 160);
+}
+
+export function sanitizePackagePriceKurus(value) {
+  if (value == null || value === '') return 0;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) throw new Error('Geçersiz paket fiyatı');
+  return Math.round(n);
+}
+
+/** Personel paket güncelleme — boş fiyat “Fiyat yakında”. */
+export function buildPackageUpdatePatch(body, actorSub) {
+  const patch = { updated_by: actorSub || null, updated_at: new Date().toISOString() };
+  if (body.name !== undefined) patch.name = sanitizePackageName(body.name);
+  if (body.description !== undefined) {
+    const d = String(body.description || '').trim();
+    patch.description = d ? d.slice(0, 2000) : null;
+  }
+  if (body.class_level !== undefined) {
+    const c = String(body.class_level || '').trim();
+    patch.class_level = c || null;
+  }
+  if (body.program !== undefined) {
+    const p = String(body.program || '').trim();
+    patch.program = p || null;
+  }
+  if (body.price_kurus !== undefined) patch.price_kurus = sanitizePackagePriceKurus(body.price_kurus);
+  if (body.compare_at_price_kurus !== undefined) {
+    patch.compare_at_price_kurus = body.compare_at_price_kurus == null || body.compare_at_price_kurus === ''
+      ? null
+      : sanitizePackagePriceKurus(body.compare_at_price_kurus);
+  }
+  if (body.is_active !== undefined) patch.is_active = Boolean(body.is_active);
+  return patch;
+}
