@@ -1970,13 +1970,22 @@ function istanbulDayBoundsMs(ymd, kind) {
   return Date.parse(`${ymd}T00:00:00+03:00`);
 }
 
+function hasExplicitTimezone(s) {
+  return /[zZ]$/.test(s) || /[+-]\d{2}:?\d{2}$/.test(s);
+}
+
 function expandEdesisWindowBoundMs(raw, kind) {
   if (raw == null || raw === '') return NaN;
   const s = String(raw).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return istanbulDayBoundsMs(s, kind);
   const ymd = (s.match(/^(\d{4}-\d{2}-\d{2})/) || [])[1];
   const midnight = /T00:00:00/.test(s) || /T00:00:00\.000/.test(s);
-  if (ymd && midnight) return istanbulDayBoundsMs(ymd, kind);
+  if (ymd && midnight && !hasExplicitTimezone(s)) return istanbulDayBoundsMs(ymd, kind);
+  // Edesis panel saatleri offset’siz İstanbul’dur; UTC varsayımı 10:30’u 3 saat kaydırır.
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s)) {
+    const t = Date.parse(`${s}+03:00`);
+    return Number.isFinite(t) ? t : NaN;
+  }
   const t = Date.parse(s);
   return Number.isFinite(t) ? t : NaN;
 }
