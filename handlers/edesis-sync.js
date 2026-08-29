@@ -82,7 +82,7 @@ import { enrollPlatformStudentsBatch, EDESIS_AUTO_ENROLL_MARKER, EDESIS_AUTO_ENR
 
 const STAFF = new Set(['super_admin', 'admin', 'coach']);
 const EDESIS_PDF_DURATION_MARKER = 'edesis-pdf-duration-2026-08-27';
-const EDESIS_ASSIGNED_ONLY_MARKER = 'edesis-istanbul-window-2026-08-29';
+const EDESIS_ASSIGNED_ONLY_MARKER = 'edesis-istanbul-window-2026-08-29b';
 /** Aynı Hobby instance’ta üst üste op=sync 504 üretmesin */
 let syncInFlight = null;
 /** Öğrencinin kendi Edesis sonuç / karne / sınava giriş ops */
@@ -1948,12 +1948,15 @@ export default async function handler(req, res) {
           ? {
               id: detail.id,
               sinavAdi: detail.sinavAdi || detail.name,
+              gradeId: detail.gradeId ?? detail.sinav?.gradeId ?? null,
               isAllClasses: detail.isAllClasses,
               ogrenciIds: detail.ogrenciIds,
               classRoomIds: detail.classRoomIds,
               startDate: detail.startDate || detail.sinav?.startDate || null,
               endDate: detail.endDate || detail.sinav?.endDate || null,
-              sinavTarihi: detail.sinavTarihi || detail.examDate || null
+              sinavTarihi: detail.sinavTarihi || detail.examDate || null,
+              toplamOgrenci: detail.toplamOgrenci ?? null,
+              sinavKatilanOgrenci: detail.sinavKatilanOgrenci ?? null
             }
           : null
       });
