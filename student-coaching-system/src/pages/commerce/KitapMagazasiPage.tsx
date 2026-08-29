@@ -388,6 +388,53 @@ function packageItemsOf(pkg: CommerceBookPackage): PackageItemRow[] {
   return ((pkg as unknown as { commerce_book_package_items?: PackageItemRow[] }).commerce_book_package_items ?? []);
 }
 
+function packageCoverUrls(items: PackageItemRow[]) {
+  return items
+    .map((it) => ({
+      url: String(it.commerce_books?.cover_image_url || '').trim(),
+      title: it.commerce_books?.title || 'Kitap',
+    }))
+    .filter((c) => c.url);
+}
+
+/** Seçilen kitap / set kapakları FULL PAKET görselinde yan yana. */
+function PackageCoverStrip({
+  items,
+  name,
+  compact = false,
+}: {
+  items: PackageItemRow[];
+  name: string;
+  compact?: boolean;
+}) {
+  const covers = packageCoverUrls(items);
+  if (!covers.length) {
+    return (
+      <div className={`relative ${compact ? 'h-28' : 'h-44 md:h-52'} bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center`}>
+        <BookOpen className={compact ? 'w-10 h-10 text-indigo-300' : 'w-16 h-16 text-indigo-300'} />
+      </div>
+    );
+  }
+  return (
+    <div className={`relative ${compact ? 'h-28' : 'h-44 md:h-52'} bg-gradient-to-br from-slate-800 via-indigo-900 to-violet-900 overflow-hidden`}>
+      <div className="absolute inset-0 flex">
+        {covers.map((c, i) => (
+          <div key={`${c.url}-${i}`} className="relative min-w-0 flex-1 h-full border-r border-white/10 last:border-r-0">
+            <img src={c.url} alt={c.title} className="w-full h-full object-cover" />
+          </div>
+        ))}
+      </div>
+      <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-black/55 to-transparent pointer-events-none" />
+      <div className="absolute bottom-2 left-2 right-2 flex items-end justify-between gap-2">
+        <span className="text-[10px] font-bold tracking-wide text-white/95 bg-black/35 backdrop-blur-sm px-2 py-0.5 rounded-full">
+          {covers.length} kitap
+        </span>
+      </div>
+      <span className="sr-only">{name}</span>
+    </div>
+  );
+}
+
 function PackageEditModal({
   pkg,
   onClose,
@@ -402,11 +449,12 @@ function PackageEditModal({
   const [desc, setDesc] = useState(pkg.description || '');
   const [classLevel, setClassLevel] = useState(pkg.class_level || '');
   const [priceTl, setPriceTl] = useState(pkg.price_kurus > 0 ? String(pkg.price_kurus / 100) : '');
-  const [items, setItems] = useState<{ id: string; title: string }[]>(
+  const [items, setItems] = useState<{ id: string; title: string; cover?: string | null }[]>(
     initialItems
       .map((it) => ({
         id: String(it.book_id || it.commerce_books?.id || ''),
         title: it.commerce_books?.title || 'Kitap',
+        cover: it.commerce_books?.cover_image_url || null,
       }))
       .filter((it) => it.id)
   );
@@ -433,7 +481,7 @@ function PackageEditModal({
     const id = offer.commerce_books?.id;
     const title = offer.commerce_books?.title;
     if (!id) return;
-    setItems((prev) => (prev.some((x) => x.id === id) ? prev : [...prev, { id, title: title || 'Kitap' }]));
+    setItems((prev) => (prev.some((x) => x.id === id) ? prev : [...prev, { id, title: title || 'Kitap', cover: offer.commerce_books?.cover_image_url || null }]));
     setSearch('');
     setHits([]);
   };
@@ -488,6 +536,13 @@ function PackageEditModal({
         <div className="flex justify-between items-center mb-3">
           <h3 className="font-semibold text-gray-800">Sınıf paketini düzelt</h3>
           <button type="button" onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+        <div className="rounded-xl overflow-hidden mb-3 border border-gray-100">
+          <PackageCoverStrip
+            compact
+            name={name}
+            items={items.map((it) => ({ commerce_books: { id: it.id, title: it.title, cover_image_url: it.cover } }))}
+          />
         </div>
         <div className="space-y-3">
           <div>
@@ -607,12 +662,8 @@ function PaketlerTab({ classLevel, staffRole }: { classLevel?: string; staffRole
           const items = packageItemsOf(pkg);
           return (
             <div key={pkg.id} className="bg-white border border-gray-200 rounded-2xl overflow-hidden hover:shadow-md transition-shadow">
-              <div className="relative aspect-[2/1] bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center">
-                {pkg.cover_image_url ? (
-                  <img src={pkg.cover_image_url} alt={pkg.name} className="w-full h-full object-contain" />
-                ) : (
-                  <BookOpen className="w-16 h-16 text-indigo-300" />
-                )}
+              <div className="relative">
+                <PackageCoverStrip items={items} name={pkg.name} />
                 {pkg.compare_at_price_kurus && pkg.compare_at_price_kurus > pkg.price_kurus && (
                   <span className="absolute top-2 left-2 bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
                     %{Math.round((1 - pkg.price_kurus / pkg.compare_at_price_kurus) * 100)} İndirim
@@ -636,14 +687,18 @@ function PaketlerTab({ classLevel, staffRole }: { classLevel?: string; staffRole
                 {pkg.description && <div className="text-sm text-gray-500 mt-1 line-clamp-2">{pkg.description}</div>}
                 {items.length > 0 && (
                   <div className="mt-3 space-y-1">
-                    {items.slice(0, 4).map((item, i) => (
+                    {items.slice(0, 6).map((item, i) => (
                       <div key={i} className="flex items-center gap-1.5 text-xs text-gray-600">
-                        <CheckCircle2 className="w-3 h-3 text-green-500 flex-shrink-0" />
+                        {item.commerce_books?.cover_image_url ? (
+                          <img src={item.commerce_books.cover_image_url} alt="" className="w-5 h-7 object-cover rounded-sm flex-shrink-0" />
+                        ) : (
+                          <CheckCircle2 className="w-3 h-3 text-green-500 flex-shrink-0" />
+                        )}
                         <span className="truncate">{item.commerce_books?.title ?? '—'}</span>
                         {!item.is_required && <span className="text-gray-400">(opsiyonel)</span>}
                       </div>
                     ))}
-                    {items.length > 4 && <div className="text-xs text-gray-400">+{items.length - 4} kitap daha</div>}
+                    {items.length > 6 && <div className="text-xs text-gray-400">+{items.length - 6} kitap daha</div>}
                   </div>
                 )}
                 <div className="mt-4 flex items-center justify-between">
