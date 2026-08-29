@@ -793,7 +793,7 @@ export function collectOpenOnlineProgramExams(
 /**
  * Sınava gir yedeği: boş/ince roster + açık pencere + öğrenci kademesi.
  * GetOgrenciSinavIds.sinavId analiz geçmişidir — yeni tanımlanan online deneme orada yok.
- * 5–6–7 / 7.sınıf 8-F’ye gitmez. İnce roster overlay’de GetOgrenciBySinavId ile doğrulanır.
+ * Yeni deneme Edesis’te Processing olabilir. 5–6–7 / 7.sınıf 8-F’ye gitmez.
  */
 export function collectStudentTakeableOpenCatalogExams(
   catalogRows = [],
@@ -803,10 +803,8 @@ export function collectStudentTakeableOpenCatalogExams(
   const out = [];
   for (const ex of catalogRows || []) {
     const status = catalogResultStatus(ex);
-    const sc = catalogExamStudentCount(ex);
-    const none = /^none$/i.test(status);
-    const readyThin = /^ready$/i.test(status) && sc <= THIN_ONLINE_ROSTER_MAX;
-    if (!none && !readyThin) continue;
+    const statusOk = /^(none|ready|processing|pending)$/i.test(status);
+    if (!statusOk) continue;
     if (!catalogExamOpenTakeableCandidate(ex, { programKeys, gradeName })) continue;
     const id = pickEdesisCatalogExamId(ex);
     if (!id || excluded.has(String(id))) continue;
