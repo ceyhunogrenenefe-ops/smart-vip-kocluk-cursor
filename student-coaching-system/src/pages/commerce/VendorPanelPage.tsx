@@ -21,6 +21,7 @@ import {
   ShoppingBag,
   Store,
   Tag,
+  Trash2,
   Truck,
   Wallet,
   X,
@@ -31,6 +32,7 @@ import {
   cvAcceptOrder,
   cvCreateBook,
   cvCreateOffer,
+  cvDeleteOrder,
   cvGetStats,
   cvListBooks,
   cvListOffers,
@@ -40,6 +42,7 @@ import {
   cvShipOrder,
   cvSubmitOffer,
   cvUpdateOffer,
+  cvUpdateOrder,
   cvUpdateBook,
   type VendorStats,
 } from '../../lib/commerceVendorApi';
@@ -858,17 +861,32 @@ function Tekliflerim() {
 }
 
 // ── Siparişlerim ───────────────────────────────────────────────────────
+type VendorOrderRow = CommerceVendorOrder & {
+  commerce_orders?: {
+    id?: string;
+    order_number?: string;
+    customer_name?: string | null;
+    customer_email?: string | null;
+    customer_phone?: string | null;
+    notes?: string | null;
+    status?: string;
+    payment_status?: string;
+  };
+  commerce_order_items?: { title_snapshot: string; quantity: number; unit_price_kurus: number }[];
+};
+
 function Siparislerim() {
-  const [orders, setOrders] = useState<CommerceVendorOrder[]>([]);
+  const [orders, setOrders] = useState<VendorOrderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState('');
   const [shipModal, setShipModal] = useState<string | null>(null);
+  const [editing, setEditing] = useState<VendorOrderRow | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const r = await cvListOrders({ status: filterStatus || undefined });
-      setOrders(r.vendor_orders);
+      setOrders((r.vendor_orders || []) as VendorOrderRow[]);
     } catch (e: unknown) { toast.error((e as Error).message); }
     finally { setLoading(false); }
   }, [filterStatus]);
@@ -886,6 +904,17 @@ function Siparislerim() {
     try {
       await cvMarkPreparing(id);
       toast.success('Sipariş hazırlanıyor olarak işaretlendi');
+      load();
+    } catch (e: unknown) { toast.error((e as Error).message); }
+  };
+
+  const handleDelete = async (vo: VendorOrderRow) => {
+    const no = vo.commerce_orders?.order_number || vo.id;
+    if (!window.confirm(`“${no}” siparişini silmek istiyor musunuz? Bu işlem geri alınamaz.`)) return;
+    try {
+      await cvDeleteOrder(vo.id);
+      toast.success('Sipariş silindi');
+      if (editing?.id === vo.id) setEditing(null);
       load();
     } catch (e: unknown) { toast.error((e as Error).message); }
   };
@@ -911,8 +940,8 @@ function Siparislerim() {
       </div>
       <div className="space-y-3">
         {orders.map((vo) => {
-          const order = (vo as unknown as { commerce_orders?: { order_number?: string; customer_name?: string; customer_phone?: string } }).commerce_orders;
-          const items = (vo as unknown as { commerce_order_items?: { title_snapshot: string; quantity: number; unit_price_kurus: number }[] }).commerce_order_items ?? [];
+          const order = vo.commerce_orders;
+          const items = vo.commerce_order_items ?? [];
           return (
             <div key={vo.id} className="border border-gray-200 rounded-xl p-4 bg-white">
               <div className="flex justify-between items-start mb-3">
@@ -966,6 +995,20 @@ function Siparislerim() {
                     <Truck className="w-3.5 h-3.5" /> Kargoya Ver
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => setEditing(vo)}
+                  className="flex items-center gap-1 text-xs border border-gray-200 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50"
+                >
+                  <Pencil className="w-3.5 h-3.5" /> Düzenle
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDelete(vo)}
+                  className="flex items-center gap-1 text-xs border border-red-200 text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Sil
+                </button>
               </div>
             </div>
           );
@@ -985,6 +1028,132 @@ function Siparislerim() {
           onSuccess={() => { setShipModal(null); load(); }}
         />
       )}
+      {editing && (
+        <VendorOrderEditModal
+          vo={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); }}
+          onDeleted={() => { setEditing(null); load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function VendorOrderEditModal({
+  vo,
+  onClose,
+  onSaved,
+  onDeleted,
+}: {
+  vo: VendorOrderRow;
+  onClose: () => void;
+  onSaved: () => void;
+  onDeleted: () => void;
+}) {
+  const parent = vo.commerce_orders;
+  const [form, setForm] = useState({
+    customer_name: parent?.customer_name || '',
+    customer_email: parent?.customer_email || '',
+    customer_phone: parent?.customer_phone || '',
+    notes: parent?.notes || '',
+    vendor_notes: vo.vendor_notes || '',
+    status: vo.status,
+    order_status: parent?.status || '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await cvUpdateOrder(vo.id, {
+        customer_name: form.customer_name.trim() || null,
+        customer_email: form.customer_email.trim() || null,
+        customer_phone: form.customer_phone.trim() || null,
+        notes: form.notes.trim() || null,
+        vendor_notes: form.vendor_notes.trim() || null,
+        status: form.status,
+        order_status: form.order_status || undefined,
+      });
+      toast.success('Sipariş güncellendi');
+      onSaved();
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    const no = parent?.order_number || vo.id;
+    if (!window.confirm(`“${no}” siparişini silmek istiyor musunuz?`)) return;
+    setDeleting(true);
+    try {
+      await cvDeleteOrder(vo.id);
+      toast.success('Sipariş silindi');
+      onDeleted();
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl w-full max-w-lg p-5 shadow-xl max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-3">
+          <h3 className="font-semibold">Siparişi düzenle · {parent?.order_number || ''}</h3>
+          <button type="button" onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs text-gray-500">Müşteri adı</label>
+            <input className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-gray-500">E-posta</label>
+              <input className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={form.customer_email} onChange={(e) => setForm({ ...form, customer_email: e.target.value })} />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500">Telefon</label>
+              <input className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={form.customer_phone} onChange={(e) => setForm({ ...form, customer_phone: e.target.value })} />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500">Kitapçı durumu</label>
+            <select className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as CommerceVendorOrder['status'] })}>
+              <option value="pending">Yeni</option>
+              <option value="confirmed">Onaylandı</option>
+              <option value="preparing">Hazırlanıyor</option>
+              <option value="shipped">Kargoda</option>
+              <option value="delivered">Teslim edildi</option>
+              <option value="cancelled">İptal</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500">Sipariş notu</label>
+            <textarea className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm h-20" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500">Kitapçı notu</label>
+            <textarea className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm h-16" value={form.vendor_notes} onChange={(e) => setForm({ ...form, vendor_notes: e.target.value })} />
+          </div>
+        </div>
+        <div className="flex justify-between mt-5">
+          <button type="button" onClick={remove} disabled={deleting} className="text-sm text-red-600 hover:underline disabled:opacity-50">
+            {deleting ? 'Siliniyor…' : 'Siparişi sil'}
+          </button>
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className="text-sm text-gray-500 px-3 py-1.5">Vazgeç</button>
+            <button type="button" onClick={save} disabled={saving} className="text-sm bg-indigo-600 text-white px-4 py-1.5 rounded-lg disabled:opacity-50">
+              {saving ? 'Kaydediliyor…' : 'Kaydet'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
