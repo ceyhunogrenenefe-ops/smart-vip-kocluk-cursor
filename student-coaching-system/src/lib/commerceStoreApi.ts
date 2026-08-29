@@ -47,6 +47,7 @@ export type CatalogListParams = {
 };
 
 export type OfferWithBook = CommerceVendorOffer & {
+  unpriced?: boolean;
   commerce_books: Pick<CommerceBook, 'id' | 'slug' | 'title' | 'author' | 'publisher' | 'subject' | 'class_levels' | 'exam_types' | 'cover_image_url' | 'page_count' | 'metadata'>;
   commerce_vendors: { id: string; name: string };
 };
@@ -176,3 +177,28 @@ export const csCheckoutPrepare = (coupon_code?: string | null, student_id?: stri
 // "Bu kitap bende var"
 export const csMarkOwned = (book_id: string, vendor_offer_id?: string, student_id?: string) =>
   post<{ ok: true; assignment_id: string; already_existed: boolean }>('assignment.own', { book_id, vendor_offer_id, student_id });
+
+export type StaffRosterStudent = { id: string; name: string | null; class_level: string | null; class_id: string | null };
+export type StaffRosterClass = { id: string; name: string | null; class_level: string | null };
+
+export const csStaffRoster = () =>
+  post<{ classes: StaffRosterClass[]; students: StaffRosterStudent[]; can_manage: boolean }>('staff.roster');
+
+export const csStaffAssign = (params: {
+  book_ids: string[];
+  student_ids?: string[];
+  class_id?: string;
+  class_level?: string;
+  assignment_type?: 'required' | 'recommended' | 'optional';
+  notes?: string;
+}) =>
+  post<{ created: number; updated: number; student_count: number; book_count: number; catalog_recommended?: boolean }>('staff.assign', params);
+
+export const csStaffCreatePackage = (params: {
+  name: string;
+  book_ids: string[];
+  class_level?: string;
+  description?: string;
+  price_kurus?: number;
+}) =>
+  post<{ package: CommerceBookPackage; item_count: number }>('staff.package_create', params);

@@ -8,6 +8,8 @@ import {
   BookOpen,
   CheckCircle2,
   ChevronRight,
+  LayoutGrid,
+  List,
   Loader2,
   Package,
   Search,
@@ -17,6 +19,7 @@ import {
   Star,
   Tag,
   Truck,
+  Users,
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -28,13 +31,17 @@ import {
   csListBrowse,
   csListCatalog,
   csListPackages,
-  type CartItem,
+  csStaffAssign,
+  csStaffCreatePackage,
+  csStaffRoster,
   type CatalogListParams,
+  type StaffRosterClass,
+  type StaffRosterStudent,
   type OfferWithBook,
   type StoreBrowseCategoryWithBooks,
   type StoreCollectionBook,
 } from '../../lib/commerceStoreApi';
-import type { CommerceBookPackage, CommerceSettings, CommerceStudentBookAssignment, CommerceVendorOffer, StoreBrowseClass } from '../../types/commerce.types';
+import type { CommerceBookPackage, CommerceSettings, CommerceStudentBookAssignment, StoreBrowseClass } from '../../types/commerce.types';
 import { formatCommerceTry } from '../../types/commerce.types';
 import { useAuth } from '../../context/AuthContext';
 
@@ -94,13 +101,29 @@ function CartButton({ offerId, stock, onAdded }: { offerId: string; stock: numbe
   );
 }
 
-function BookCard({ offer, onCartChange }: { offer: OfferWithBook; onCartChange?: () => void }) {
+function BookCard({
+  offer,
+  onCartChange,
+  canBuy = true,
+  staffSelect = false,
+  selected = false,
+  onToggleSelect,
+}: {
+  offer: OfferWithBook;
+  onCartChange?: () => void;
+  canBuy?: boolean;
+  staffSelect?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (bookId: string) => void;
+}) {
   const navigate = useNavigate();
   const book = offer.commerce_books;
   if (!book) return null;
   return (
     <div
-      className="bg-white rounded-2xl border border-gray-200 overflow-hidden hover:shadow-md transition-shadow cursor-pointer"
+      className={`bg-white rounded-2xl border overflow-hidden hover:shadow-md transition-shadow cursor-pointer ${
+        selected ? 'border-indigo-500 ring-2 ring-indigo-200' : 'border-gray-200'
+      }`}
       onClick={() => navigate(`/kitap-magazasi/${book.slug}`)}
     >
       <div className="relative">
@@ -122,6 +145,19 @@ function BookCard({ offer, onCartChange }: { offer: OfferWithBook; onCartChange?
             Yeni
           </span>
         )}
+        {staffSelect && (
+          <label
+            className="absolute bottom-2 left-2 bg-white/95 border border-indigo-200 rounded-lg px-2 py-1 flex items-center gap-1 text-[11px] font-medium text-indigo-700 shadow-sm"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={() => onToggleSelect?.(book.id)}
+            />
+            Seç
+          </label>
+        )}
       </div>
       <div className="p-3">
         <div className="font-semibold text-sm leading-tight line-clamp-2 min-h-[2.5rem]">{book.title}</div>
@@ -132,19 +168,29 @@ function BookCard({ offer, onCartChange }: { offer: OfferWithBook; onCartChange?
         )}
         <div className="mt-2 flex items-center justify-between">
           <div>
-            <span className="text-base font-bold text-indigo-700">{formatCommerceTry(offer.price_kurus)}</span>
-            {offer.compare_at_price_kurus && offer.compare_at_price_kurus > offer.price_kurus && (
-              <span className="ml-1.5 text-xs text-gray-400 line-through">{formatCommerceTry(offer.compare_at_price_kurus)}</span>
+            {offer.unpriced || offer.price_kurus <= 0 ? (
+              <span className="text-xs font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">Fiyat yakında</span>
+            ) : (
+              <>
+                <span className="text-base font-bold text-indigo-700">{formatCommerceTry(offer.price_kurus)}</span>
+                {offer.compare_at_price_kurus && offer.compare_at_price_kurus > offer.price_kurus && (
+                  <span className="ml-1.5 text-xs text-gray-400 line-through">{formatCommerceTry(offer.compare_at_price_kurus)}</span>
+                )}
+              </>
             )}
           </div>
-          <div className="flex items-center gap-1 text-xs text-gray-400">
-            <Truck className="w-3 h-3" />
-            {offer.shipping_days}g
+          {!offer.unpriced && offer.price_kurus > 0 && (
+            <div className="flex items-center gap-1 text-xs text-gray-400">
+              <Truck className="w-3 h-3" />
+              {offer.shipping_days}g
+            </div>
+          )}
+        </div>
+        {canBuy && !offer.unpriced && offer.price_kurus > 0 && (
+          <div className="mt-2" onClick={(e) => e.stopPropagation()}>
+            <CartButton offerId={offer.id} stock={offer.stock_quantity} onAdded={onCartChange} />
           </div>
-        </div>
-        <div className="mt-2" onClick={(e) => e.stopPropagation()}>
-          <CartButton offerId={offer.id} stock={offer.stock_quantity} onAdded={onCartChange} />
-        </div>
+        )}
       </div>
     </div>
   );
@@ -380,19 +426,27 @@ function PaketlerTab({ classLevel }: { classLevel?: string }) {
               )}
               <div className="mt-4 flex items-center justify-between">
                 <div>
-                  <span className="text-xl font-bold text-indigo-700">{formatCommerceTry(pkg.price_kurus)}</span>
-                  {pkg.compare_at_price_kurus && pkg.compare_at_price_kurus > pkg.price_kurus && (
-                    <span className="ml-2 text-sm text-gray-400 line-through">{formatCommerceTry(pkg.compare_at_price_kurus)}</span>
+                  {pkg.price_kurus > 0 ? (
+                    <>
+                      <span className="text-xl font-bold text-indigo-700">{formatCommerceTry(pkg.price_kurus)}</span>
+                      {pkg.compare_at_price_kurus && pkg.compare_at_price_kurus > pkg.price_kurus && (
+                        <span className="ml-2 text-sm text-gray-400 line-through">{formatCommerceTry(pkg.compare_at_price_kurus)}</span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-xs font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">Fiyat yakında</span>
                   )}
                 </div>
-                <button
-                  onClick={() => handleAddPackage(pkg.id)}
-                  disabled={addingId === pkg.id}
-                  className="flex items-center gap-1.5 bg-indigo-600 text-white text-sm px-4 py-2 rounded-xl hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  {addingId === pkg.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShoppingCart className="w-4 h-4" />}
-                  Paketi Al
-                </button>
+                {pkg.price_kurus > 0 && (
+                  <button
+                    onClick={() => handleAddPackage(pkg.id)}
+                    disabled={addingId === pkg.id}
+                    className="flex items-center gap-1.5 bg-indigo-600 text-white text-sm px-4 py-2 rounded-xl hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    {addingId === pkg.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShoppingCart className="w-4 h-4" />}
+                    Paketi Al
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -470,6 +524,213 @@ function AtanmisTab() {
   );
 }
 
+type StaffAction = 'recommend' | 'assign' | 'package';
+
+function StaffActionModal({
+  action,
+  bookIds,
+  bookTitles,
+  onClose,
+  onDone,
+}: {
+  action: StaffAction;
+  bookIds: string[];
+  bookTitles: string[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [rosterClasses, setRosterClasses] = useState<StaffRosterClass[]>([]);
+  const [rosterStudents, setRosterStudents] = useState<StaffRosterStudent[]>([]);
+  const [loadingRoster, setLoadingRoster] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [classId, setClassId] = useState('');
+  const [classLevel, setClassLevel] = useState('');
+  const [studentIds, setStudentIds] = useState<string[]>([]);
+  const [studentQuery, setStudentQuery] = useState('');
+  const [assignmentType, setAssignmentType] = useState<'recommended' | 'required' | 'optional'>('recommended');
+  const [notes, setNotes] = useState('');
+  const [pkgName, setPkgName] = useState('');
+  const [pkgDesc, setPkgDesc] = useState('');
+  const [pkgPriceTl, setPkgPriceTl] = useState('');
+
+  useEffect(() => {
+    csStaffRoster()
+      .then((r) => {
+        setRosterClasses(r.classes ?? []);
+        setRosterStudents(r.students ?? []);
+      })
+      .catch((e: Error) => toast.error(e.message))
+      .finally(() => setLoadingRoster(false));
+  }, []);
+
+  const filteredStudents = useMemo(() => {
+    const q = studentQuery.trim().toLocaleLowerCase('tr');
+    return rosterStudents.filter((s) => {
+      if (classId && s.class_id !== classId) return false;
+      if (classLevel && !studentMatchesClass(s.class_level, classLevel)) return false;
+      if (!q) return true;
+      return String(s.name || '').toLocaleLowerCase('tr').includes(q);
+    });
+  }, [rosterStudents, classId, classLevel, studentQuery]);
+
+  const toggleStudent = (id: string) => {
+    setStudentIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const submit = async () => {
+    setSaving(true);
+    try {
+      if (action === 'package') {
+        const name = pkgName.trim();
+        if (!name) { toast.error('Paket adı gerekli'); return; }
+        const priceTl = pkgPriceTl.trim();
+        const price_kurus = priceTl ? Math.round(parseFloat(priceTl.replace(',', '.')) * 100) : 0;
+        if (priceTl && (!Number.isFinite(price_kurus) || price_kurus < 0)) {
+          toast.error('Geçerli bir fiyat yazın veya boş bırakın');
+          return;
+        }
+        await csStaffCreatePackage({
+          name,
+          book_ids: bookIds,
+          class_level: classLevel || undefined,
+          description: pkgDesc.trim() || undefined,
+          price_kurus: price_kurus || undefined,
+        });
+        toast.success(price_kurus > 0 ? 'Sınıf paketi oluşturuldu' : 'Paket oluşturuldu — fiyat girilmediği için “Fiyat yakında” görünür');
+      } else if (action === 'recommend' && !classId && !classLevel && studentIds.length === 0) {
+        await csStaffAssign({
+          book_ids: bookIds,
+          assignment_type: 'recommended',
+          notes: notes.trim() || undefined,
+        });
+        toast.success('Kitap öğretmen önerilerine eklendi');
+      } else {
+        if (!classId && !classLevel && studentIds.length === 0) {
+          toast.error('Sınıf, kademe veya öğrenci seçin');
+          return;
+        }
+        const r = await csStaffAssign({
+          book_ids: bookIds,
+          student_ids: studentIds.length ? studentIds : undefined,
+          class_id: classId || undefined,
+          class_level: !classId && classLevel ? classLevel : undefined,
+          assignment_type: action === 'recommend' ? 'recommended' : assignmentType,
+          notes: notes.trim() || undefined,
+        });
+        toast.success(`${r.student_count} öğrenciye ${r.book_count} kitap atandı`);
+      }
+      onDone();
+      onClose();
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const title = action === 'package' ? 'Sınıf paketi oluştur' : action === 'recommend' ? 'Kitap öner' : 'Sınıfa / kişiye ata';
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-end md:items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-5 shadow-xl">
+        <div className="flex justify-between items-center mb-3">
+          <h3 className="font-semibold text-gray-800">{title}</h3>
+          <button type="button" onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+        <div className="text-xs text-gray-500 mb-3">
+          {bookTitles.slice(0, 4).join(' · ')}
+          {bookTitles.length > 4 ? ` +${bookTitles.length - 4}` : ''}
+        </div>
+        {loadingRoster ? (
+          <div className="flex justify-center py-8"><Loader2 className="animate-spin w-6 h-6 text-gray-400" /></div>
+        ) : (
+          <div className="space-y-3">
+            {action === 'package' && (
+              <>
+                <div>
+                  <label className="text-xs font-medium text-gray-500 mb-1 block">Paket adı</label>
+                  <input className="border rounded-lg px-3 py-2 text-sm w-full" value={pkgName} onChange={(e) => setPkgName(e.target.value)} placeholder="Örn. 8-F LGS seti" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-500 mb-1 block">Açıklama (opsiyonel)</label>
+                  <textarea className="border rounded-lg px-3 py-2 text-sm w-full" rows={2} value={pkgDesc} onChange={(e) => setPkgDesc(e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-500 mb-1 block">Paket fiyatı (₺) — boş = Fiyat yakında</label>
+                  <input className="border rounded-lg px-3 py-2 text-sm w-full" inputMode="decimal" value={pkgPriceTl} onChange={(e) => setPkgPriceTl(e.target.value)} placeholder="Uydurma — yalnızca gerçek fiyat" />
+                </div>
+              </>
+            )}
+            {(action === 'assign' || action === 'package' || action === 'recommend') && (
+              <>
+                <div>
+                  <label className="text-xs font-medium text-gray-500 mb-1 block">Sınıf (şube)</label>
+                  <select className="border rounded-lg px-3 py-2 text-sm w-full" value={classId} onChange={(e) => setClassId(e.target.value)}>
+                    <option value="">Şube seçme</option>
+                    {rosterClasses.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name || c.id}{c.class_level ? ` · ${c.class_level}` : ''}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-500 mb-1 block">Kademe</label>
+                  <select className="border rounded-lg px-3 py-2 text-sm w-full" value={classLevel} onChange={(e) => setClassLevel(e.target.value)}>
+                    <option value="">Tüm kademeler</option>
+                    {['5', '6', '7', '8', 'LGS', '9', '10', '11', '12', 'TYT', 'AYT'].map((k) => (
+                      <option key={k} value={k}>{k}</option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
+            {action !== 'package' && (
+              <>
+                {action === 'assign' && (
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 mb-1 block">Atama tipi</label>
+                    <select className="border rounded-lg px-3 py-2 text-sm w-full" value={assignmentType} onChange={(e) => setAssignmentType(e.target.value as typeof assignmentType)}>
+                      <option value="recommended">Önerilen (alsın diye)</option>
+                      <option value="required">Zorunlu</option>
+                      <option value="optional">Opsiyonel</option>
+                    </select>
+                  </div>
+                )}
+                <div>
+                  <label className="text-xs font-medium text-gray-500 mb-1 block">Kişiye ata (opsiyonel)</label>
+                  <input className="border rounded-lg px-3 py-2 text-sm w-full mb-2" placeholder="Öğrenci ara" value={studentQuery} onChange={(e) => setStudentQuery(e.target.value)} />
+                  <div className="max-h-40 overflow-y-auto border rounded-lg divide-y">
+                    {filteredStudents.slice(0, 80).map((s) => (
+                      <label key={s.id} className="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50">
+                        <input type="checkbox" checked={studentIds.includes(s.id)} onChange={() => toggleStudent(s.id)} />
+                        <span className="truncate">{s.name || s.id}</span>
+                        {s.class_level && <span className="text-xs text-gray-400 ml-auto">{s.class_level}</span>}
+                      </label>
+                    ))}
+                    {filteredStudents.length === 0 && <div className="px-3 py-2 text-xs text-gray-400">Öğrenci yok</div>}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-500 mb-1 block">Not (opsiyonel)</label>
+                  <input className="border rounded-lg px-3 py-2 text-sm w-full" value={notes} onChange={(e) => setNotes(e.target.value)} />
+                </div>
+                {action === 'recommend' && !classId && !classLevel && studentIds.length === 0 && (
+                  <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2">Hedef seçilmezse kitap tüm mağazada “Öğretmen önerisi” olarak görünür.</p>
+                )}
+              </>
+            )}
+          </div>
+        )}
+        <div className="flex gap-2 mt-5">
+          <button type="button" onClick={onClose} className="flex-1 border border-gray-300 text-gray-600 text-sm py-2 rounded-lg">Vazgeç</button>
+          <button type="button" onClick={submit} disabled={saving} className="flex-1 bg-indigo-600 text-white text-sm py-2 rounded-lg disabled:opacity-50">
+            {saving ? 'Kaydediliyor…' : 'Kaydet'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BrowseBox({
   title,
   subtitle,
@@ -531,8 +792,12 @@ export default function KitapMagazasiPage() {
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { effectiveUser, linkedStudent } = useAuth();
-  const lgs8 = isLgs8ClassLevel(linkedStudent?.classLevel);
-  const searching = Boolean(search.trim()) || Boolean(filters.subject) || Boolean(filters.price_min) || Boolean(filters.price_max);
+  const role = String(effectiveUser?.role || '');
+  const staffRole = ['super_admin', 'admin', 'coach', 'teacher'].includes(role);
+  const canBuy = ['student', 'super_admin', 'admin'].includes(role);
+  const [viewMode, setViewMode] = useState<'list' | 'categories'>('list');
+  const [selectedBookIds, setSelectedBookIds] = useState<string[]>([]);
+  const [staffAction, setStaffAction] = useState<StaffAction | null>(null);
 
   useEffect(() => {
     csGetSettings().then((r) => setSettings(r.settings)).catch(() => null);
@@ -567,23 +832,22 @@ export default function KitapMagazasiPage() {
       const r = await csListCatalog({
         ...params,
         teacher_recommended: isRecommended || params.teacher_recommended,
-        class_level: lgs8 ? (params.class_level || '8') : params.class_level,
-        limit: 48,
+        limit: 96,
       });
       setOffers(r.offers ?? []);
     } catch (e: unknown) { toast.error((e as Error).message); }
     finally { setLoading(false); }
-  }, [tab, lgs8]);
+  }, [tab]);
 
   useEffect(() => {
-    const needList = tab === 'onerilen' || (tab === 'tum-kitaplar' && searching);
+    const needList = tab === 'onerilen' || (tab === 'tum-kitaplar' && viewMode === 'list');
     if (!needList) return;
     if (searchTimer.current) clearTimeout(searchTimer.current);
     searchTimer.current = setTimeout(() => {
       loadCatalog({ ...filters, search: search || undefined });
     }, 350);
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
-  }, [tab, search, filters, loadCatalog, searching]);
+  }, [tab, search, filters, loadCatalog, viewMode]);
 
   const activeFilterCount = Object.values(filters).filter(Boolean).length;
   const activeClass = classes.find((c) => c.key === activeClassKey) ?? null;
@@ -724,10 +988,33 @@ export default function KitapMagazasiPage() {
     }
     return (
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-        {offers.map((o) => <BookCard key={o.id} offer={o} onCartChange={refreshCartCount} />)}
+        {offers.map((o) => (
+          <BookCard
+            key={o.id}
+            offer={o}
+            onCartChange={refreshCartCount}
+            canBuy={canBuy}
+            staffSelect={staffRole && (tab === 'tum-kitaplar' || tab === 'onerilen')}
+            selected={selectedBookIds.includes(o.commerce_books.id)}
+            onToggleSelect={(id) => setSelectedBookIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])}
+          />
+        ))}
       </div>
     );
   };
+
+  const selectedTitles = offers
+    .filter((o) => selectedBookIds.includes(o.commerce_books.id))
+    .map((o) => o.commerce_books.title);
+
+  const classChips = classes.length
+    ? classes
+    : [
+        { key: '5', label: '5' }, { key: '6', label: '6' }, { key: '7', label: '7' },
+        { key: '8', label: '8' }, { key: 'LGS', label: 'LGS' }, { key: '9', label: '9' },
+        { key: '10', label: '10' }, { key: '11', label: '11' }, { key: '12', label: '12' },
+        { key: 'TYT', label: 'TYT' }, { key: 'AYT', label: 'AYT' },
+      ];
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto">
@@ -743,15 +1030,17 @@ export default function KitapMagazasiPage() {
             )}
           </div>
         </div>
-        <button
-          onClick={() => navigate('/sepet')}
-          className="relative p-2.5 bg-indigo-50 text-indigo-700 rounded-xl hover:bg-indigo-100"
-        >
-          <ShoppingCart className="w-5 h-5" />
-          {cartCount > 0 && (
-            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center leading-none">{cartCount}</span>
-          )}
-        </button>
+        {canBuy && (
+          <button
+            onClick={() => navigate('/sepet')}
+            className="relative p-2.5 bg-indigo-50 text-indigo-700 rounded-xl hover:bg-indigo-100"
+          >
+            <ShoppingCart className="w-5 h-5" />
+            {cartCount > 0 && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center leading-none">{cartCount}</span>
+            )}
+          </button>
+        )}
       </div>
 
       <div className="flex gap-1 overflow-x-auto pb-1 mb-4 border-b border-gray-200">
@@ -769,24 +1058,125 @@ export default function KitapMagazasiPage() {
       </div>
 
       {showCatalog && (
-        <div className="flex gap-2 mb-5">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              className="pl-9 pr-3 py-2 border rounded-xl text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-400"
-              placeholder="Kitap, yazar veya yayınevi ara..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+        <div className="mb-5 space-y-3">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                className="pl-9 pr-3 py-2 border rounded-xl text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                placeholder="Kitap, yazar veya yayınevi ara..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <button
+              onClick={() => setShowFilter(true)}
+              className={`flex items-center gap-1.5 px-3 py-2 border rounded-xl text-sm ${activeFilterCount > 0 ? 'bg-indigo-600 text-white border-indigo-600' : 'text-gray-600 hover:bg-gray-50'}`}
+            >
+              <SlidersHorizontal className="w-4 h-4" />
+              Daha fazla
+              {activeFilterCount > 0 && <span className="bg-white text-indigo-700 text-xs rounded-full w-4 h-4 flex items-center justify-center">{activeFilterCount}</span>}
+            </button>
           </div>
-          <button
-            onClick={() => setShowFilter(true)}
-            className={`flex items-center gap-1.5 px-3 py-2 border rounded-xl text-sm ${activeFilterCount > 0 ? 'bg-indigo-600 text-white border-indigo-600' : 'text-gray-600 hover:bg-gray-50'}`}
-          >
-            <SlidersHorizontal className="w-4 h-4" />
-            Filtrele
-            {activeFilterCount > 0 && <span className="bg-white text-indigo-700 text-xs rounded-full w-4 h-4 flex items-center justify-center">{activeFilterCount}</span>}
-          </button>
+          <div className="flex gap-1.5 overflow-x-auto pb-1">
+            <button
+              type="button"
+              onClick={() => { setFilters({ ...filters, class_level: undefined }); setActiveClassKey(null); setActiveCategoryKey(null); }}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap ${
+                !filters.class_level ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              Tüm sınıflar
+            </button>
+            {classChips.map((cl) => (
+              <button
+                key={cl.key}
+                type="button"
+                onClick={() => {
+                  setFilters({ ...filters, class_level: cl.key });
+                  setActiveClassKey(cl.key);
+                  setActiveCategoryKey(null);
+                }}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap ${
+                  filters.class_level === cl.key ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {cl.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <select
+              className="border rounded-xl px-3 py-2 text-sm bg-white"
+              value={filters.subject ?? ''}
+              onChange={(e) => setFilters({ ...filters, subject: e.target.value || undefined })}
+            >
+              <option value="">Tüm dersler</option>
+              {SUBJECTS.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <select
+              className="border rounded-xl px-3 py-2 text-sm bg-white"
+              value={filters.sort ?? 'newest'}
+              onChange={(e) => setFilters({ ...filters, sort: e.target.value as CatalogListParams['sort'] })}
+            >
+              <option value="newest">Yeniden eskiye</option>
+              <option value="price_asc">Fiyat: düşük → yüksek</option>
+              <option value="price_desc">Fiyat: yüksek → düşük</option>
+            </select>
+            {tab === 'tum-kitaplar' && (
+              <div className="flex rounded-xl border overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('list')}
+                  className={`flex items-center gap-1 px-3 py-2 text-xs font-medium ${viewMode === 'list' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600'}`}
+                >
+                  <List className="w-3.5 h-3.5" /> Liste
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('categories')}
+                  className={`flex items-center gap-1 px-3 py-2 text-xs font-medium ${viewMode === 'categories' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600'}`}
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" /> Kategoriler
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {staffRole && (tab === 'tum-kitaplar' || tab === 'onerilen' || tab === 'paketler') && (
+        <div className="mb-4 rounded-2xl border border-indigo-100 bg-indigo-50/70 px-3 py-3 flex flex-wrap items-center gap-2">
+          <Users className="w-4 h-4 text-indigo-700" />
+          <span className="text-xs text-indigo-800 font-medium">
+            {selectedBookIds.length ? `${selectedBookIds.length} kitap seçili` : 'Kitap seç → öner, ata veya paket yap'}
+          </span>
+          <div className="flex flex-wrap gap-1.5 ml-auto">
+            <button
+              type="button"
+              disabled={selectedBookIds.length !== 1}
+              onClick={() => setStaffAction('recommend')}
+              className="text-xs px-3 py-1.5 rounded-lg bg-yellow-400 text-yellow-950 font-medium disabled:opacity-40"
+            >
+              Tek kitap öner
+            </button>
+            <button
+              type="button"
+              disabled={selectedBookIds.length === 0}
+              onClick={() => setStaffAction('assign')}
+              className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium disabled:opacity-40"
+            >
+              Sınıfa / kişiye ata
+            </button>
+            <button
+              type="button"
+              disabled={selectedBookIds.length === 0}
+              onClick={() => setStaffAction('package')}
+              className="text-xs px-3 py-1.5 rounded-lg bg-white border border-indigo-200 text-indigo-800 font-medium disabled:opacity-40"
+            >
+              Sınıf paketi oluştur
+            </button>
+          </div>
         </div>
       )}
 
@@ -813,10 +1203,10 @@ export default function KitapMagazasiPage() {
       )}
 
       {tab === 'paketler' ? (
-        <PaketlerTab classLevel={lgs8 ? '8' : undefined} />
+        <PaketlerTab classLevel={filters.class_level} />
       ) : tab === 'atanmis' ? (
         <AtanmisTab />
-      ) : tab === 'onerilen' || (tab === 'tum-kitaplar' && searching) ? (
+      ) : tab === 'onerilen' || (tab === 'tum-kitaplar' && viewMode === 'list') ? (
         renderSearchOrRecommended()
       ) : (
         renderBrowse()
@@ -824,6 +1214,15 @@ export default function KitapMagazasiPage() {
 
       {showFilter && (
         <FilterPanel filters={filters} onChange={setFilters} onClose={() => setShowFilter(false)} settings={settings} />
+      )}
+      {staffAction && (
+        <StaffActionModal
+          action={staffAction}
+          bookIds={selectedBookIds}
+          bookTitles={selectedTitles}
+          onClose={() => setStaffAction(null)}
+          onDone={() => { setSelectedBookIds([]); if (tab === 'onerilen' || viewMode === 'list') loadCatalog({ ...filters, search: search || undefined }); }}
+        />
       )}
     </div>
   );

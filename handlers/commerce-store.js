@@ -12,6 +12,10 @@
  *  catalog.browse        — sınıf → kategori → kitap (süper admin store_browse)
  *  catalog.assigned      — öğrenciye atanmış kitaplar
  *  catalog.settings      — genel mağaza ayarları (kargo eşiği vs)
+ *  staff.roster          — sınıf/öğrenci listesi (öğretmen/koç/admin)
+ *  staff.assign          — sınıfa veya kişiye kitap öner/ata
+ *  staff.package_create  — sınıf paketi oluştur
+ *  deployMarker: kitap-store-original-2026-08-29
  *  cart.get              — mevcut sepeti getir
  *  cart.add              — sepete ürün ekle
  *  cart.update           — adet güncelle
@@ -26,10 +30,19 @@
  *  order.paid            — ödeme callback webhook (site)
  *  assignment.own        — "Bu kitap bende var" (purchase yapmadan atama)
  *
- *  deployMarker: kitap-store-visible-2026-08-28b
  */
 
 import { requireAuth } from '../api/_lib/auth.js';
+import { actorRoleSet } from '../api/_lib/actor-roles.js';
+import { buildCatalogListRows, filterCatalogListRows } from '../api/_lib/commerce-store-catalog.js';
+import {
+  assignmentSourceFromRoles,
+  buildAssignmentInserts,
+  normalizeAssignmentType,
+  slugifyPackageName,
+  staffCanManageStore,
+  uniqueIds
+} from '../api/_lib/commerce-store-staff.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import {
   assertWebhookSecret,
@@ -142,78 +155,73 @@ async function handleCatalog(op, body, actor) {
       ok: true,
       settings,
       store_browse,
-      deployMarker: 'kitap-store-visible-2026-08-28b',
+      deployMarker: 'kitap-store-original-2026-08-29',
     };
   }
 
   if (op === 'catalog.list') {
-    const limit = Math.min(sanitizeInt(body.limit, 24), 100);
+    const limit = Math.min(sanitizeInt(body.limit, 48), 200);
     const offset = sanitizeInt(body.offset, 0);
-    const search = body.search ? String(body.search).trim() : '';
-
-    let q = supabaseAdmin
-      .from('commerce_vendor_offers')
+    const { data: books, error } = await supabaseAdmin
+      .from('commerce_books')
       .select(`
-        id, book_id, vendor_id, price_kurus, compare_at_price_kurus, stock_quantity, shipping_days,
-        is_featured, is_bestseller, is_new_arrival, teacher_recommended, required_for_classes, created_at
-      `, { count: 'exact' })
-      .eq('status', 'approved')
+        id, slug, title, author, publisher, subject, class_levels, exam_types,
+        cover_image_url, page_count, metadata, is_catalog_active, created_at, deleted_at
+      `)
+      .eq('is_catalog_active', true)
       .is('deleted_at', null)
-      .gt('stock_quantity', 0);
-
-    if (body.teacher_recommended) q = q.eq('teacher_recommended', true);
-    if (body.is_featured) q = q.eq('is_featured', true);
-    if (body.is_bestseller) q = q.eq('is_bestseller', true);
-    if (body.is_new_arrival) q = q.eq('is_new_arrival', true);
-    if (body.price_min) q = q.gte('price_kurus', sanitizeInt(body.price_min));
-    if (body.price_max) q = q.lte('price_kurus', sanitizeInt(body.price_max));
-
-    const sort = body.sort ?? 'newest';
-    if (sort === 'price_asc') q = q.order('price_kurus', { ascending: true });
-    else if (sort === 'price_desc') q = q.order('price_kurus', { ascending: false });
-    else q = q.order('created_at', { ascending: false });
-
-    // Filtreler kitap tablosunda — önce geniş çek, sonra uygulama katmanında süz
-    // class_level SQL contains('8') LGS-only kitapları düşürür; 8 ≈ LGS JS'te eşlenir.
-    const fetchLimit = search || body.subject || body.publisher || body.class_level || body.series ? 500 : limit;
-    const fetchOffset = search || body.subject || body.publisher || body.class_level || body.series ? 0 : offset;
-    q = q.range(fetchOffset, fetchOffset + fetchLimit - 1);
-
-    const { data: rawOffers, error, count } = await q;
+      .order('created_at', { ascending: false })
+      .range(0, 499);
     if (error) throw error;
-
-    const bookMap = await fetchBooksByIds((rawOffers ?? []).map((o) => o.book_id));
-    const vendorMap = await fetchVendorsByIds((rawOffers ?? []).map((o) => o.vendor_id));
-
-    let offers = mergeOfferRows(rawOffers, bookMap, vendorMap);
-
-    if (body.subject) {
-      offers = offers.filter((o) => o.commerce_books.subject === body.subject);
+    const bookIds = (books ?? []).map((b) => b.id);
+    let rawOffers = [];
+    if (bookIds.length) {
+      const { data: offerRows, error: offerErr } = await supabaseAdmin
+        .from('commerce_vendor_offers')
+        .select(`
+          id, book_id, vendor_id, price_kurus, compare_at_price_kurus, stock_quantity, shipping_days,
+          is_featured, is_bestseller, is_new_arrival, teacher_recommended, required_for_classes,
+          status, deleted_at
+        `)
+        .in('book_id', bookIds)
+        .is('deleted_at', null);
+      if (offerErr) throw offerErr;
+      rawOffers = offerRows ?? [];
     }
-    if (body.publisher) {
-      offers = offers.filter((o) => o.commerce_books.publisher === body.publisher);
+    const vendorMap = await fetchVendorsByIds(rawOffers.map((o) => o.vendor_id));
+    const offersByBook = new Map();
+    for (const offer of rawOffers) {
+      const list = offersByBook.get(offer.book_id) || [];
+      list.push({
+        ...offer,
+        commerce_vendors: vendorMap.get(offer.vendor_id) || { id: offer.vendor_id, name: 'Satıcı' }
+      });
+      offersByBook.set(offer.book_id, list);
     }
-    if (body.series) {
-      offers = offers.filter((o) => canonicalBookSeries(o.commerce_books) === String(body.series));
-    }
-    if (body.class_level) {
-      offers = offers.filter((o) =>
-        classKeyMatchesLevels(body.class_level, o.commerce_books?.class_levels)
-      );
-    }
-    if (search) {
-      offers = offers.filter((o) => bookMatchesSearch(o.commerce_books, search));
-    }
-
-    const total = search || body.subject || body.publisher || body.class_level || body.series
-      ? offers.length
-      : (count ?? offers.length);
-
-    if (search || body.subject || body.publisher || body.class_level || body.series) {
-      offers = offers.slice(offset, offset + limit);
-    }
-
-    return { ok: true, offers, total };
+    const decorated = (books ?? []).map((b) => ({
+      ...b,
+      commerce_vendor_offers: offersByBook.get(b.id) || []
+    }));
+    const filtered = filterCatalogListRows(buildCatalogListRows(decorated), {
+      search: body.search,
+      subject: body.subject,
+      publisher: body.publisher,
+      class_level: body.class_level,
+      series: body.series,
+      teacher_recommended: body.teacher_recommended,
+      is_featured: body.is_featured,
+      is_bestseller: body.is_bestseller,
+      is_new_arrival: body.is_new_arrival,
+      price_min: body.price_min,
+      price_max: body.price_max,
+      sort: body.sort
+    });
+    return {
+      ok: true,
+      offers: filtered.slice(offset, offset + limit),
+      total: filtered.length,
+      deployMarker: 'kitap-store-original-2026-08-29'
+    };
   }
 
   if (op === 'catalog.get') {
@@ -320,7 +328,7 @@ async function handleCatalog(op, body, actor) {
 
   if (op === 'catalog.browse') {
     const browse = await listStoreBrowse();
-    return { ok: true, ...browse, deployMarker: 'kitap-store-visible-2026-08-28b' };
+    return { ok: true, ...browse, deployMarker: 'kitap-store-original-2026-08-29' };
   }
 
   if (op === 'catalog.assigned') {
@@ -1131,6 +1139,239 @@ async function handleCheckout(op, body, req) {
   throw new Error(`Bilinmeyen operasyon: ${op}`);
 }
 
+async function requireStoreStaff(actor) {
+  if (!actor?.sub || actor.sub === 'anonymous') throw new Error('Giriş gerekli');
+  const roleSet = await actorRoleSet(actor);
+  if (!staffCanManageStore(roleSet)) throw new Error('Yetki yok');
+  return roleSet;
+}
+
+async function resolveAssignableStudentIds(actor, roleSet, body) {
+  const explicit = uniqueIds(body.student_ids || (body.student_id ? [body.student_id] : []));
+  if (explicit.length) return explicit;
+  const classId = String(body.class_id || '').trim();
+  const classLevel = String(body.class_level || '').trim();
+  const institutionId = actor.institution_id || body.institution_id || null;
+  const ids = new Set();
+
+  if (classId) {
+    const { data: cs } = await supabaseAdmin
+      .from('class_students')
+      .select('student_id')
+      .eq('class_id', classId);
+    for (const row of cs || []) if (row.student_id) ids.add(String(row.student_id));
+  }
+
+  if (classLevel && !classId) {
+    let q = supabaseAdmin.from('students').select('id, class_level').limit(800);
+    if (institutionId) q = q.eq('institution_id', institutionId);
+    if (roleSet.has('coach') && actor.coach_id && !roleSet.has('admin') && !roleSet.has('super_admin')) {
+      q = q.eq('coach_id', actor.coach_id);
+    }
+    const { data: rows } = await q;
+    for (const row of rows || []) {
+      if (classKeyMatchesLevels(classLevel, [row.class_level])) ids.add(String(row.id));
+    }
+  }
+
+  return [...ids];
+}
+
+async function handleStaff(op, body, actor) {
+  const roleSet = await requireStoreStaff(actor);
+  const source = assignmentSourceFromRoles(roleSet);
+  const institutionId = actor.institution_id || body.institution_id || null;
+
+  if (op === 'staff.roster') {
+    let classQuery = supabaseAdmin.from('classes').select('id, name, class_level').order('name', { ascending: true }).limit(200);
+    if (institutionId && !roleSet.has('super_admin')) classQuery = classQuery.eq('institution_id', institutionId);
+    const { data: classes } = await classQuery;
+
+    let studentQuery = supabaseAdmin
+      .from('students')
+      .select('id, name, class_level, coach_id, institution_id')
+      .limit(500);
+    if (institutionId && !roleSet.has('super_admin')) studentQuery = studentQuery.eq('institution_id', institutionId);
+    if (roleSet.has('coach') && actor.coach_id && !roleSet.has('admin') && !roleSet.has('super_admin')) {
+      studentQuery = studentQuery.eq('coach_id', actor.coach_id);
+    }
+    const { data: students, error: stErr } = await studentQuery;
+    if (stErr) throw stErr;
+    const studentIds = (students || []).map((s) => s.id);
+    const classByStudent = new Map();
+    if (studentIds.length) {
+      const { data: links } = await supabaseAdmin
+        .from('class_students')
+        .select('student_id, class_id')
+        .in('student_id', studentIds)
+        .limit(2000);
+      for (const row of links || []) {
+        if (row.student_id && !classByStudent.has(row.student_id)) {
+          classByStudent.set(row.student_id, row.class_id || null);
+        }
+      }
+    }
+    return {
+      ok: true,
+      classes: classes || [],
+      students: (students || []).map((s) => ({
+        id: s.id,
+        name: s.name,
+        class_level: s.class_level,
+        class_id: classByStudent.get(s.id) || null
+      })),
+      can_manage: true
+    };
+  }
+
+  if (op === 'staff.assign') {
+    const bookIds = uniqueIds(body.book_ids || (body.book_id ? [body.book_id] : []));
+    if (!bookIds.length) throw new Error('book_id gerekli');
+    const assignmentType = normalizeAssignmentType(body.assignment_type || (body.recommend_only ? 'recommended' : 'required'));
+    const studentIds = await resolveAssignableStudentIds(actor, roleSet, body);
+    if (!studentIds.length && assignmentType === 'recommended') {
+      await supabaseAdmin
+        .from('commerce_vendor_offers')
+        .update({ teacher_recommended: true })
+        .in('book_id', bookIds)
+        .eq('status', 'approved')
+        .is('deleted_at', null);
+      return {
+        ok: true,
+        created: 0,
+        updated: 0,
+        student_count: 0,
+        book_count: bookIds.length,
+        catalog_recommended: true
+      };
+    }
+    if (!studentIds.length) throw new Error('öğrenci bulunamadı — sınıf veya kişi seçin');
+    let inst = institutionId;
+    if (!inst) {
+      const { data: st } = await supabaseAdmin
+        .from('students')
+        .select('institution_id')
+        .eq('id', studentIds[0])
+        .maybeSingle();
+      inst = st?.institution_id || null;
+    }
+    if (!inst) throw new Error('institution_id gerekli');
+    const { data: offers } = await supabaseAdmin
+      .from('commerce_vendor_offers')
+      .select('id, book_id, price_kurus, stock_quantity, status')
+      .in('book_id', bookIds)
+      .eq('status', 'approved')
+      .is('deleted_at', null);
+    const offerByBook = {};
+    for (const o of offers || []) {
+      if (Number(o.price_kurus) > 0 && Number(o.stock_quantity) > 0 && !offerByBook[o.book_id]) {
+        offerByBook[o.book_id] = o.id;
+      }
+    }
+    const rows = buildAssignmentInserts({
+      institutionId: inst,
+      studentIds,
+      bookIds,
+      offerByBook,
+      assignmentType,
+      source,
+      assignedBy: actor.sub,
+      notes: body.notes
+    });
+    let created = 0;
+    let updated = 0;
+    for (const row of rows) {
+      const { data: existing } = await supabaseAdmin
+        .from('commerce_student_book_assignments')
+        .select('id')
+        .eq('student_id', row.student_id)
+        .eq('book_id', row.book_id)
+        .is('deleted_at', null)
+        .maybeSingle();
+      if (existing) {
+        await supabaseAdmin
+          .from('commerce_student_book_assignments')
+          .update({
+            assignment_type: row.assignment_type,
+            source: row.source,
+            status: 'assigned',
+            vendor_offer_id: row.vendor_offer_id,
+            notes: row.notes,
+            assigned_by: row.assigned_by,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existing.id);
+        updated += 1;
+      } else {
+        const { error } = await supabaseAdmin.from('commerce_student_book_assignments').insert(row);
+        if (error) throw error;
+        created += 1;
+      }
+    }
+    if (assignmentType === 'recommended' && bookIds.length === 1) {
+      await supabaseAdmin
+        .from('commerce_vendor_offers')
+        .update({ teacher_recommended: true })
+        .eq('book_id', bookIds[0])
+        .eq('status', 'approved')
+        .is('deleted_at', null);
+    }
+    return { ok: true, created, updated, student_count: studentIds.length, book_count: bookIds.length };
+  }
+
+  if (op === 'staff.package_create') {
+    const name = String(body.name || '').trim();
+    if (!name) throw new Error('name gerekli');
+    const bookIds = uniqueIds(body.book_ids || []);
+    if (!bookIds.length) throw new Error('pakete en az bir kitap ekleyin');
+    const priceKurus = sanitizeInt(body.price_kurus, 0);
+    const slugBase = slugifyPackageName(name) || `paket-${Date.now()}`;
+    const slug = `${slugBase}-${String(Date.now()).slice(-6)}`;
+    const { data: pkg, error } = await supabaseAdmin
+      .from('commerce_book_packages')
+      .insert({
+        name,
+        slug,
+        description: String(body.description || '').trim() || null,
+        class_level: String(body.class_level || '').trim() || null,
+        program: String(body.program || '').trim() || null,
+        price_kurus: priceKurus,
+        compare_at_price_kurus: body.compare_at_price_kurus != null ? sanitizeInt(body.compare_at_price_kurus) : null,
+        is_active: true,
+        institution_id: institutionId,
+        created_by: actor.sub,
+        updated_by: actor.sub
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    const { data: offers } = await supabaseAdmin
+      .from('commerce_vendor_offers')
+      .select('id, book_id, price_kurus, stock_quantity, status')
+      .in('book_id', bookIds)
+      .eq('status', 'approved')
+      .is('deleted_at', null);
+    const offerByBook = {};
+    for (const o of offers || []) {
+      if (Number(o.price_kurus) > 0 && !offerByBook[o.book_id]) offerByBook[o.book_id] = o.id;
+    }
+    const { error: itemErr } = await supabaseAdmin.from('commerce_book_package_items').insert(
+      bookIds.map((book_id, idx) => ({
+        package_id: pkg.id,
+        book_id,
+        vendor_offer_id: offerByBook[book_id] || null,
+        quantity: 1,
+        is_required: true,
+        sort_order: idx
+      }))
+    );
+    if (itemErr) throw itemErr;
+    return { ok: true, package: pkg, item_count: bookIds.length };
+  }
+
+  throw new Error(`Bilinmeyen operasyon: ${op}`);
+}
+
 // ─────────────────────────────────────────────
 // "Bu kitap bende var" — satın almadan atama
 // ─────────────────────────────────────────────
@@ -1217,6 +1458,8 @@ export default async function handler(req, res) {
       result = await handleCheckout(op, body, req);
     } else if (prefix === 'assignment') {
       result = await handleAssignment(op, body, actor);
+    } else if (prefix === 'staff') {
+      result = await handleStaff(op, body, actor);
     } else {
       return err(res, 400, `Bilinmeyen operasyon: ${op}`);
     }
@@ -1225,7 +1468,7 @@ export default async function handler(req, res) {
   } catch (e) {
     console.error('[commerce-store]', e?.message || e, e?.details || '');
     const msg = e?.message || 'sunucu_hatası';
-    if (/Yetkisiz|giriş gerekli|Geçersiz|süresi dolmuş|bulunamadı|yeterli stok|Sepet boş|yapılandırılmamış|Veli|e-posta|telefon|karakter|PayTR|Garanti|token|ödeme|Sipariş|kupon|Kupon|indirim/i.test(msg)) {
+    if (/Yetkisiz|Yetki yok|giriş gerekli|öğrenci bulunamadı|book_id|pakete|name gerekli|Geçersiz|süresi dolmuş|bulunamadı|yeterli stok|Sepet boş|yapılandırılmamış|Veli|e-posta|telefon|karakter|PayTR|Garanti|token|ödeme|Sipariş|kupon|Kupon|indirim/i.test(msg)) {
       const status = /Yetkisiz|giriş gerekli/i.test(msg) ? 401 : 400;
       return err(res, status, msg);
     }
