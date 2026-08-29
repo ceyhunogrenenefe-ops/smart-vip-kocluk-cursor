@@ -59,3 +59,25 @@ export function vendorStatusTimestamps(status, nowIso) {
   if (status === 'delivered') patch.delivered_at = nowIso;
   return patch;
 }
+
+/** commerce_orders ilişkisi nesne veya dizi olabilir; düz parent satırı da kabul eder. */
+export function parentOrderFromVendorRow(row) {
+  if (!row || typeof row !== 'object') return null;
+  const raw = row.commerce_orders;
+  if (raw) return Array.isArray(raw) ? raw[0] || null : raw;
+  if (row.payment_status != null) return row;
+  return null;
+}
+
+/** Satıcı kanalı: yalnızca kart / IBAN ile ödemesi alınan siparişler. */
+export function isPaidParentOrder(rowOrOrder) {
+  const order = parentOrderFromVendorRow(rowOrOrder);
+  if (!order) return false;
+  const pay = String(order.payment_status || '').trim().toLowerCase();
+  const st = String(order.status || '').trim().toLowerCase();
+  return pay === 'paid' || st === 'paid';
+}
+
+export function filterPaidVendorOrders(rows) {
+  return (Array.isArray(rows) ? rows : []).filter((row) => isPaidParentOrder(row));
+}
