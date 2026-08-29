@@ -3,7 +3,8 @@
  * Seri kutusu eşleşmesi görünürlük kapısı değildir.
  */
 
-import { canonicalBookSeries, classKeyMatchesLevels } from './commerce-store-browse.js';
+import { classKeyMatchesLevels } from './commerce-store-browse.js';
+import { isVipEgitimComponentBook, storeKindOfBook } from './commerce-store-kinds.js';
 
 export function pickBestApprovedOffer(offers = []) {
   const list = Array.isArray(offers) ? offers : [];
@@ -56,6 +57,7 @@ export function buildCatalogListRows(books = []) {
   for (const book of books || []) {
     if (!book || book.deleted_at) continue;
     if (book.is_catalog_active === false) continue;
+    if (isVipEgitimComponentBook(book)) continue;
     const row = catalogOfferFromBook(book, pickBestApprovedOffer(book.commerce_vendor_offers));
     if (row) out.push(row);
   }
@@ -92,7 +94,7 @@ export function filterCatalogListRows(rows = [], params = {}) {
     list = list.filter((o) => classKeyMatchesLevels(classLevel, o.commerce_books?.class_levels));
   }
   if (series) {
-    list = list.filter((o) => canonicalBookSeries(o.commerce_books) === series);
+    list = list.filter((o) => storeKindOfBook(o.commerce_books) === series);
   }
   if (params.teacher_recommended) list = list.filter((o) => o.teacher_recommended);
   if (params.is_featured) list = list.filter((o) => o.is_featured);

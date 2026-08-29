@@ -15,7 +15,7 @@
  *  staff.roster          — sınıf/öğrenci listesi (öğretmen/koç/admin)
  *  staff.assign          — sınıfa veya kişiye kitap öner/ata
  *  staff.package_create  — sınıf paketi oluştur
- *  deployMarker: kitap-store-original-2026-08-29
+ *  deployMarker: kitap-store-kinds-2026-08-29
  *  cart.get              — mevcut sepeti getir
  *  cart.add              — sepete ürün ekle
  *  cart.update           — adet güncelle
@@ -155,7 +155,7 @@ async function handleCatalog(op, body, actor) {
       ok: true,
       settings,
       store_browse,
-      deployMarker: 'kitap-store-original-2026-08-29',
+      deployMarker: 'kitap-store-kinds-2026-08-29',
     };
   }
 
@@ -220,7 +220,7 @@ async function handleCatalog(op, body, actor) {
       ok: true,
       offers: filtered.slice(offset, offset + limit),
       total: filtered.length,
-      deployMarker: 'kitap-store-original-2026-08-29'
+      deployMarker: 'kitap-store-kinds-2026-08-29'
     };
   }
 
@@ -328,7 +328,7 @@ async function handleCatalog(op, body, actor) {
 
   if (op === 'catalog.browse') {
     const browse = await listStoreBrowse();
-    return { ok: true, ...browse, deployMarker: 'kitap-store-original-2026-08-29' };
+    return { ok: true, ...browse, deployMarker: 'kitap-store-kinds-2026-08-29' };
   }
 
   if (op === 'catalog.assigned') {

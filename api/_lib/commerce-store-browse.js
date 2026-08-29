@@ -1,10 +1,17 @@
 /**
- * Öğrenci kitap mağazası — sınıf → kategori → kitap gezinmesi.
- * Süper admin `commerce_settings.meta.store_browse` ile tanımlar.
- * Kayıt yoksa LGS-8 VIP / Paraf / Deneme varsayılanı kullanılır.
+ * Öğrenci kitap mağazası — sınıf → Eğitim Setleri / Soru Bankaları / Denemeler.
  */
 
-import { LGS8_COLLECTIONS, LGS8_DENEME_SERIES, LGS8_DENEME_SET_ISBN, LGS8_DENEME_SET_SLUG, slugifyTr } from './commerce-lgs8-catalog.js';
+import { slugifyTr } from './commerce-lgs8-catalog.js';
+import {
+  STORE_CATEGORY_KINDS,
+  defaultKindCategories,
+  isLegacyPublisherCategory,
+  isVipEgitimComponentBook,
+  storeKindOfBook,
+} from './commerce-store-kinds.js';
+
+const STANDARD_KIND_KEYS = new Set(STORE_CATEGORY_KINDS.map((k) => k.key));
 
 export const STORE_BROWSE_MAX_CLASSES = 40;
 export const STORE_BROWSE_MAX_CATEGORIES = 80;
@@ -23,22 +30,18 @@ export const DEFAULT_STORE_CLASSES = [
   { key: 'AYT', label: 'AYT', sort: 15, active: true },
 ];
 
-export function defaultStoreCategories() {
-  return LGS8_COLLECTIONS.map((col, idx) => ({
-    key: col.key,
-    label: col.label,
-    class_keys: ['8', 'LGS'],
-    series: col.key,
-    description: col.description || '',
-    sort: idx + 1,
-    active: true,
-  }));
+export function defaultStoreCategories(classKeys) {
+  const keys = Array.isArray(classKeys) && classKeys.length
+    ? classKeys
+    : DEFAULT_STORE_CLASSES.map((c) => c.key);
+  return defaultKindCategories(keys);
 }
 
 export function defaultStoreBrowse() {
+  const classes = DEFAULT_STORE_CLASSES.map((c) => ({ ...c }));
   return {
-    classes: DEFAULT_STORE_CLASSES.map((c) => ({ ...c })),
-    categories: defaultStoreCategories(),
+    classes,
+    categories: defaultStoreCategories(classes.map((c) => c.key)),
   };
 }
 
@@ -101,55 +104,32 @@ export function categoryBelongsToClass(category, classKey) {
   return false;
 }
 
-function digitsIsbn(value) {
-  return String(value ?? '').replace(/[^0-9Xx]/g, '');
-}
-
 /** Deneme Kulübü kaydı yanlışlıkla VIP serisine yazılmış olsa bile Denemeler kutusuna düşer. */
 export function canonicalBookSeries(book) {
-  const stored = String(book?.metadata?.series ?? '').trim();
-  const isbn = digitsIsbn(book?.isbn);
-  const slug = String(book?.slug ?? '').toLowerCase();
-  const title = String(book?.title ?? '').toLocaleLowerCase('tr');
-  const denemeIsbn = digitsIsbn(LGS8_DENEME_SET_ISBN);
-  const looksDeneme =
-    (denemeIsbn && isbn === denemeIsbn) ||
-    slug === LGS8_DENEME_SET_SLUG ||
-    slug.includes('deneme-kulubu') ||
-    slug.includes('deneme-klubu') ||
-    title.includes('deneme kulübü') ||
-    title.includes('deneme kulubu');
-  if (looksDeneme) return LGS8_DENEME_SERIES;
-  if (stored) return stored;
-  const levels = Array.isArray(book?.class_levels) ? book.class_levels : [];
-  const lgsPack =
-    levels.some((lv) => isLgsStoreClassKey(lv)) ||
-    title.includes('lgs') ||
-    slug.includes('lgs');
-  if (
-    lgsPack &&
-    (title.includes('deneme') || title.includes('soru bank') || title.includes('branş') || title.includes('brans'))
-  ) {
-    return LGS8_DENEME_SERIES;
-  }
-  return stored;
+  return storeKindOfBook(book);
 }
 
-/** Serisi boşsa başlıktan/sınıftan doldur; kayıtlı seriyi ezme. */
+/** Kayıtlı eski yayıncı serisini yeni kutu türüne çevirir. */
 export function withInferredSeriesMetadata(book) {
   const metadata = { ...(book?.metadata && typeof book.metadata === 'object' ? book.metadata : {}) };
-  if (String(metadata.series ?? '').trim()) return metadata;
-  const inferred = canonicalBookSeries({ ...book, metadata });
-  if (inferred) metadata.series = inferred;
+  const inferred = storeKindOfBook({ ...book, metadata });
+  if (inferred) {
+    metadata.series = inferred;
+    metadata.store_kind = inferred;
+  }
   return metadata;
 }
 
 export function bookMatchesCategory(book, category) {
   if (!book || !category) return false;
+  if (isVipEgitimComponentBook(book)) return false;
   const series = String(category.series || category.key || '').trim();
   if (!series) return false;
-  const bookSeries = canonicalBookSeries(book);
-  return Boolean(bookSeries) && bookSeries === series;
+  const bookSeries = storeKindOfBook(book);
+  if (!bookSeries || bookSeries !== series) return false;
+  const keys = Array.isArray(category.class_keys) ? category.class_keys : [];
+  if (!keys.length) return true;
+  return keys.some((k) => classKeyMatchesLevels(k, book.class_levels));
 }
 
 /** Serisiz kitapları her eşleşen sınıfta Diğer kutusuna koy (ilk sınıf yutmasın). */
@@ -227,19 +207,34 @@ export function normalizeStoreBrowse(input) {
   }
   if (!classes.length) classes.push(...fallback.classes.map((c) => ({ ...c })));
 
+  if (!classes.some((c) => c.key === '8')) {
+    const lgs = classes.find((c) => c.key === 'LGS');
+    classes.push({
+      key: '8',
+      label: '8. Sınıf',
+      sort: lgs ? Number(lgs.sort) - 0.5 : 8,
+      active: true,
+    });
+  }
+
   const classKeySet = new Set(classes.map((c) => c.key));
   const catSource = Array.isArray(src.categories) && src.categories.length
     ? src.categories
     : (hasCustom ? [] : fallback.categories);
   const seenCat = new Set();
-  const categories = [];
-  for (let i = 0; i < catSource.length && categories.length < STORE_BROWSE_MAX_CATEGORIES; i += 1) {
+  const extras = [];
+  for (let i = 0; i < catSource.length && extras.length < STORE_BROWSE_MAX_CATEGORIES; i += 1) {
     const item = normalizeCategory(catSource[i], i, classKeySet);
     const uniq = item.key.toLocaleLowerCase('tr');
     if (seenCat.has(uniq)) continue;
     seenCat.add(uniq);
-    categories.push(item);
+    if (isLegacyPublisherCategory(item) || STANDARD_KIND_KEYS.has(item.key) || STANDARD_KIND_KEYS.has(item.series)) {
+      continue;
+    }
+    extras.push(item);
   }
+
+  const categories = [...defaultKindCategories([...classKeySet]), ...extras];
 
   classes.sort((a, b) => a.sort - b.sort || a.label.localeCompare(b.label, 'tr'));
   categories.sort((a, b) => a.sort - b.sort || a.label.localeCompare(b.label, 'tr'));
@@ -304,29 +299,30 @@ export async function listStoreBrowse() {
     .eq('is_catalog_active', true);
   if (error) throw error;
 
-  const decoratedBooks = (books || []).map(decorateBook);
+  const decoratedBooks = (books || [])
+    .map(decorateBook)
+    .filter((b) => !isVipEgitimComponentBook(b));
 
-  const seriesCategories = nav.categories
-    .filter((c) => c.active)
-    .map((cat) => {
+  const classes = nav.classes.filter((c) => c.active);
+  const categories = [];
+  for (const cl of classes) {
+    STORE_CATEGORY_KINDS.forEach((kind, idx) => {
       const matched = decoratedBooks
-        .filter((b) => bookMatchesCategory(b, cat))
+        .filter((b) => storeKindOfBook(b) === kind.key && classKeyMatchesLevels(cl.key, b.class_levels))
         .sort((a, b) => (a.metadata?.sort_order || 0) - (b.metadata?.sort_order || 0));
-      return {
-        key: cat.key,
-        label: cat.label,
-        class_keys: cat.class_keys,
-        series: cat.series,
-        description: cat.description,
-        sort: cat.sort,
+      categories.push({
+        key: `${cl.key}-${kind.key}`,
+        label: kind.label,
+        class_keys: [cl.key],
+        series: kind.key,
+        description: kind.description,
+        sort: idx + 1,
         book_count: matched.length,
         priced_count: matched.filter((b) => b.buyable).length,
         books: matched,
-      };
+      });
     });
-
-  const classes = nav.classes.filter((c) => c.active);
-  const categories = attachUnmatchedStoreCategories(classes, seriesCategories, decoratedBooks);
+  }
 
   const classRows = classes.map((cl) => {
     const cats = categories.filter((cat) => categoryBelongsToClass(cat, cl.key));
@@ -340,5 +336,5 @@ export async function listStoreBrowse() {
     };
   });
 
-  return { classes: classRows, categories };
+  return { classes: classRows, categories, deployMarker: 'kitap-store-kinds-2026-08-29' };
 }
