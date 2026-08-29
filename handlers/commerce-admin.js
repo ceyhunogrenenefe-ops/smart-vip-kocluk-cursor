@@ -27,7 +27,7 @@ import { actorRoleSet, roleSetHasSuperAdmin, roleSetHasAdmin } from '../api/_lib
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { bulkUpsertBooks, ensureYankiVendor, seedLgs8DenemeKulubu, seedLgs8ParafIqSet, seedLgs8VipCatalog, upsertYankiOfferForExistingBook } from '../api/_lib/commerce-lgs8-seed.js';
 import { attachOfferRelations, attachOfferRelationsList } from '../api/_lib/commerce-utils.js';
-import { defaultStoreBrowse, normalizeStoreBrowse, canonicalBookSeries, withInferredSeriesMetadata } from '../api/_lib/commerce-store-browse.js';
+import { defaultStoreBrowse, normalizeStoreBrowse, withInferredSeriesMetadata } from '../api/_lib/commerce-store-browse.js';
 
 function err(res, status, message) {
   return res.status(status).json({ error: message });
@@ -471,16 +471,16 @@ async function handleBooks(op, body, actor) {
     if (body.series !== undefined) metadata.series = sanitizeText(body.series);
     if (body.series_label !== undefined) metadata.series_label = sanitizeText(body.series_label);
     if (fascicle) metadata.fascicle_count = fascicle;
-    if (!metadata.series) {
-      const inferred = canonicalBookSeries({
-        title,
-        isbn: sanitizeIsbn(body.isbn),
-        slug: body.slug,
-        class_levels: body.class_levels,
-        metadata,
-      });
-      if (inferred) metadata.series = inferred;
-    }
+    const inferredMeta = withInferredSeriesMetadata({
+      title,
+      isbn: sanitizeIsbn(body.isbn),
+      slug: body.slug,
+      class_levels: body.class_levels,
+      metadata,
+    });
+    if (inferredMeta.series) metadata.series = inferredMeta.series;
+    if (inferredMeta.store_kind) metadata.store_kind = inferredMeta.store_kind;
+    if (inferredMeta.series_label) metadata.series_label = inferredMeta.series_label;
     const bookBody = {
       ...body,
       title,
