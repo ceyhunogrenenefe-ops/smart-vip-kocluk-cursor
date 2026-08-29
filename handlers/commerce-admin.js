@@ -12,6 +12,7 @@
  *  packages.list | packages.get | packages.create | packages.update | packages.delete | packages.items.set
  *  vendors.ensure_yanki
  *  orders.list | orders.get | orders.update | orders.update_status | orders.delete
+ *  deployMarker: kitap-iban-dekont-siparis-2026-08-29
  *  vendor_orders.list | vendor_orders.update_status
  *  shipments.list | shipments.get | shipments.create | shipments.update
  *  payouts.list | payouts.get | payouts.create | payouts.approve | payouts.mark_paid
@@ -26,6 +27,7 @@ import { actorRoleSet, roleSetHasSuperAdmin, roleSetHasAdmin } from '../api/_lib
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { bulkUpsertBooks, ensureYankiVendor, seedLgs8DenemeKulubu, seedLgs8ParafIqSet, seedLgs8VipCatalog, seedLgs8VipSet, upsertYankiOfferForExistingBook } from '../api/_lib/commerce-lgs8-seed.js';
 import { defaultStoreBrowse, normalizeStoreBrowse, withInferredSeriesMetadata } from '../api/_lib/commerce-store-browse.js';
+import { decorateOrderWithIbanReceipt } from '../api/_lib/commerce-iban.js';
 
 function err(res, status, message) {
   return res.status(status).json({ error: message });
@@ -736,7 +738,7 @@ async function handleOrders(op, body) {
   if (op === 'orders.list') {
     let q = supabaseAdmin
       .from('commerce_orders')
-      .select('*, commerce_order_items(id, title_snapshot, quantity, unit_price_kurus, vendor_id)')
+      .select('*, commerce_order_items(id, title_snapshot, quantity, unit_price_kurus, vendor_id), commerce_payments(id, provider, status, raw_response, paid_at)')
       .order('created_at', { ascending: false });
     if (body.status) q = q.eq('status', body.status);
     if (body.student_id) q = q.eq('student_id', body.student_id);
@@ -746,7 +748,7 @@ async function handleOrders(op, body) {
     q = q.range(offset, offset + limit - 1);
     const { data, error } = await q;
     if (error) throw error;
-    return { ok: true, orders: data };
+    return { ok: true, orders: (data || []).map(decorateOrderWithIbanReceipt), deployMarker: 'kitap-iban-dekont-siparis-2026-08-29' };
   }
 
   if (op === 'orders.get') {
@@ -764,7 +766,7 @@ async function handleOrders(op, body) {
       .eq('id', id)
       .single();
     if (error) throw error;
-    return { ok: true, order: data };
+    return { ok: true, order: decorateOrderWithIbanReceipt(data) };
   }
 
   if (op === 'orders.update') {
