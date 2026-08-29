@@ -12,7 +12,8 @@
  *  packages.list | packages.get | packages.create | packages.update | packages.delete | packages.items.set
  *  vendors.ensure_yanki
  *  orders.list | orders.get | orders.update | orders.update_status | orders.delete
- *  deployMarker: kitap-iban-dekont-siparis-2026-08-29
+ *  orders.sync_whatsapp_template
+ *  deployMarker: kitapci-siparis-odenen-2026-08-29
  *  vendor_orders.list | vendor_orders.update_status
  *  shipments.list | shipments.get | shipments.create | shipments.update
  *  payouts.list | payouts.get | payouts.create | payouts.approve | payouts.mark_paid
@@ -30,6 +31,7 @@ import { bulkUpsertBooks, ensureYankiVendor, seedLgs8DenemeKulubu, seedLgs8Paraf
 import { attachOfferRelations, attachOfferRelationsList } from '../api/_lib/commerce-utils.js';
 import { defaultStoreBrowse, normalizeStoreBrowse, withInferredSeriesMetadata } from '../api/_lib/commerce-store-browse.js';
 import { decorateOrderWithIbanReceipt } from '../api/_lib/commerce-iban.js';
+import { activateBookOrderMetaTemplate } from '../api/_lib/book-order-meta-send.js';
 
 function err(res, status, message) {
   return res.status(status).json({ error: message });
@@ -754,6 +756,21 @@ async function handleOffers(op, body, actor) {
 // Siparişler (Süper Admin okuma + durum güncelleme)
 // ─────────────────────────────────────────────
 async function handleOrders(op, body) {
+  if (op === 'orders.sync_whatsapp_template') {
+    const activated = await activateBookOrderMetaTemplate();
+    return {
+      ok: true,
+      deployMarker: 'kitapci-siparis-odenen-2026-08-29',
+      template: {
+        name: activated.meta_template_name,
+        language: activated.meta_template_language,
+        is_active: activated.template?.is_active !== false,
+        channel: activated.channel,
+        meta_configured: Boolean(activated.meta_configured),
+      },
+    };
+  }
+
   if (op === 'orders.list') {
     let q = supabaseAdmin
       .from('commerce_orders')

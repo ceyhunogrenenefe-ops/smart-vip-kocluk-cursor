@@ -13,7 +13,7 @@
  *  shipments.create | shipments.update
  *  payouts.list
  *  stats.overview
- *  deployMarker: kitapci-siparis-edit-2026-08-29
+ *  deployMarker: kitapci-siparis-odenen-2026-08-29
  */
 
 import { requireAuth } from '../api/_lib/auth.js';
@@ -21,7 +21,11 @@ import { actorRoleSet, roleSetHasSuperAdmin } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { attachOfferRelations, attachOfferRelationsList } from '../api/_lib/commerce-utils.js';
 import { withInferredSeriesMetadata } from '../api/_lib/commerce-store-browse.js';
-import { buildVendorOwnedOrderPatch, vendorStatusTimestamps } from '../api/_lib/commerce-vendor-orders.js';
+import {
+  buildVendorOwnedOrderPatch,
+  isPaidParentOrder,
+  vendorStatusTimestamps,
+} from '../api/_lib/commerce-vendor-orders.js';
 
 function err(res, status, message) {
   return res.status(status).json({ error: message });
@@ -34,6 +38,47 @@ function sanitizeText(v) {
 function sanitizeInt(v) {
   const n = parseInt(String(v ?? ''), 10);
   return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+const VENDOR_ORDERS_PAID_ONLY = true;
+const VENDOR_PAID_MARKER = 'kitapci-siparis-odenen-2026-08-29';
+
+async function paidOrderIdSetForVendor(vendorId) {
+  const { data: vos, error } = await supabaseAdmin
+    .from('commerce_vendor_orders')
+    .select('order_id')
+    .eq('vendor_id', vendorId);
+  if (error) throw error;
+  const ids = [...new Set((vos || []).map((r) => r.order_id).filter(Boolean))];
+  if (!ids.length) return new Set();
+  const { data: paid, error: pErr } = await supabaseAdmin
+    .from('commerce_orders')
+    .select('id')
+    .in('id', ids)
+    .eq('payment_status', 'paid');
+  if (pErr) throw pErr;
+  return new Set((paid || []).map((r) => r.id));
+}
+
+async function loadOwnedPaidVendorOrder(id, vendorId, selectCols) {
+  const { data: vo } = await supabaseAdmin
+    .from('commerce_vendor_orders')
+    .select(selectCols)
+    .eq('id', id)
+    .eq('vendor_id', vendorId)
+    .maybeSingle();
+  if (!vo) return { error: 'Sipariş bulunamadı', status: 400 };
+  const parentId = vo.order_id || vo.commerce_orders?.id;
+  if (vo.commerce_orders && isPaidParentOrder(vo)) return { vo };
+  const { data: parent } = await supabaseAdmin
+    .from('commerce_orders')
+    .select('id, payment_status, status')
+    .eq('id', parentId)
+    .maybeSingle();
+  if (!isPaidParentOrder(parent)) {
+    return { error: 'Ödenmemiş sipariş satıcı panelinde görünmez', status: 404 };
+  }
+  return { vo, parent };
 }
 
 /** Satıcının bu isteği yapma yetkisi var mı? vendor_id'yi döner veya hata fırlatır */
@@ -307,8 +352,17 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, offer: data });
     }
 
-    // ── Siparişler (satıcının kendi siparişleri) ──
+    // ── Siparişler (yalnızca ödemesi alınan) ──
     if (op === 'orders.list') {
+      const paidIds = await paidOrderIdSetForVendor(vendorId);
+      if (!paidIds.size) {
+        return res.status(200).json({
+          ok: true,
+          vendor_orders: [],
+          paid_only: VENDOR_ORDERS_PAID_ONLY,
+          deployMarker: VENDOR_PAID_MARKER,
+        });
+      }
       let q = supabaseAdmin
         .from('commerce_vendor_orders')
         .select(`
@@ -318,36 +372,43 @@ export default async function handler(req, res) {
           commerce_shipments(*)
         `)
         .eq('vendor_id', vendorId)
+        .in('order_id', [...paidIds])
         .order('created_at', { ascending: false });
       if (body.status) q = q.eq('status', body.status);
       const limit = Math.min(parseInt(body.limit ?? 50, 10), 200);
       q = q.limit(limit);
       const { data, error } = await q;
       if (error) throw error;
-      return res.status(200).json({ ok: true, vendor_orders: data, deployMarker: 'kitapci-siparis-edit-2026-08-29' });
+      return res.status(200).json({
+        ok: true,
+        vendor_orders: data,
+        paid_only: VENDOR_ORDERS_PAID_ONLY,
+        deployMarker: VENDOR_PAID_MARKER,
+      });
     }
 
     if (op === 'orders.get') {
       const { id } = body;
       if (!id) return err(res, 400, 'id gerekli');
-      const { data, error } = await supabaseAdmin
-        .from('commerce_vendor_orders')
-        .select(`
+      const loaded = await loadOwnedPaidVendorOrder(
+        id,
+        vendorId,
+        `
           *,
           commerce_orders(*, commerce_order_addresses(*)),
           commerce_order_items(*),
           commerce_shipments(*)
-        `)
-        .eq('id', id)
-        .eq('vendor_id', vendorId)
-        .single();
-      if (error) throw error;
-      return res.status(200).json({ ok: true, vendor_order: data });
+        `
+      );
+      if (loaded.error) return err(res, loaded.status, loaded.error);
+      return res.status(200).json({ ok: true, vendor_order: loaded.vo, paid_only: VENDOR_ORDERS_PAID_ONLY });
     }
 
     if (op === 'orders.accept') {
       const { id } = body;
       if (!id) return err(res, 400, 'id gerekli');
+      const loaded = await loadOwnedPaidVendorOrder(id, vendorId, 'id, order_id, vendor_id, status');
+      if (loaded.error) return err(res, loaded.status, loaded.error);
       const { data, error } = await supabaseAdmin
         .from('commerce_vendor_orders')
         .update({ status: 'confirmed', accepted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
@@ -362,6 +423,8 @@ export default async function handler(req, res) {
     if (op === 'orders.preparing') {
       const { id } = body;
       if (!id) return err(res, 400, 'id gerekli');
+      const loaded = await loadOwnedPaidVendorOrder(id, vendorId, 'id, order_id, vendor_id, status');
+      if (loaded.error) return err(res, loaded.status, loaded.error);
       const { data, error } = await supabaseAdmin
         .from('commerce_vendor_orders')
         .update({ status: 'preparing', prepared_at: new Date().toISOString(), updated_at: new Date().toISOString() })
@@ -376,13 +439,8 @@ export default async function handler(req, res) {
     if (op === 'orders.ship') {
       const { id, carrier, tracking_number, tracking_url, invoice_number } = body;
       if (!id) return err(res, 400, 'id gerekli');
-      const { data: vo } = await supabaseAdmin
-        .from('commerce_vendor_orders')
-        .select('id, vendor_id')
-        .eq('id', id)
-        .eq('vendor_id', vendorId)
-        .single();
-      if (!vo) return err(res, 403, 'Sipariş bulunamadı');
+      const loaded = await loadOwnedPaidVendorOrder(id, vendorId, 'id, order_id, vendor_id');
+      if (loaded.error) return err(res, loaded.status, loaded.error);
       const now = new Date().toISOString();
       const [shipResult] = await Promise.all([
         supabaseAdmin.from('commerce_shipments').insert({
@@ -403,13 +461,9 @@ export default async function handler(req, res) {
     if (op === 'orders.update') {
       const { id } = body;
       if (!id) return err(res, 400, 'id gerekli');
-      const { data: vo } = await supabaseAdmin
-        .from('commerce_vendor_orders')
-        .select('id, order_id, vendor_id, status')
-        .eq('id', id)
-        .eq('vendor_id', vendorId)
-        .maybeSingle();
-      if (!vo) return err(res, 400, 'Sipariş bulunamadı');
+      const loaded = await loadOwnedPaidVendorOrder(id, vendorId, 'id, order_id, vendor_id, status');
+      if (loaded.error) return err(res, loaded.status, loaded.error);
+      const vo = loaded.vo;
       let parent;
       let vendor;
       try {
@@ -454,13 +508,9 @@ export default async function handler(req, res) {
     if (op === 'orders.delete') {
       const { id } = body;
       if (!id) return err(res, 400, 'id gerekli');
-      const { data: vo } = await supabaseAdmin
-        .from('commerce_vendor_orders')
-        .select('id, order_id, vendor_id')
-        .eq('id', id)
-        .eq('vendor_id', vendorId)
-        .maybeSingle();
-      if (!vo) return err(res, 400, 'Sipariş bulunamadı');
+      const loaded = await loadOwnedPaidVendorOrder(id, vendorId, 'id, order_id, vendor_id');
+      if (loaded.error) return err(res, loaded.status, loaded.error);
+      const vo = loaded.vo;
       const orderId = vo.order_id;
       const { count } = await supabaseAdmin
         .from('commerce_vendor_orders')
@@ -493,10 +543,15 @@ export default async function handler(req, res) {
     // ── Genel bakış istatistikleri ────────────
     if (op === 'stats.overview') {
       const [ordersRes, offersRes, pendingPayoutRes] = await Promise.all([
-        supabaseAdmin
-          .from('commerce_vendor_orders')
-          .select('status, vendor_net_kurus')
-          .eq('vendor_id', vendorId),
+        (async () => {
+          const paidIds = await paidOrderIdSetForVendor(vendorId);
+          if (!paidIds.size) return { data: [], error: null };
+          return supabaseAdmin
+            .from('commerce_vendor_orders')
+            .select('status, vendor_net_kurus')
+            .eq('vendor_id', vendorId)
+            .in('order_id', [...paidIds]);
+        })(),
         supabaseAdmin
           .from('commerce_vendor_offers')
           .select('status, stock_quantity, low_stock_threshold')
@@ -513,6 +568,8 @@ export default async function handler(req, res) {
       const pendingPayouts = pendingPayoutRes.data ?? [];
       return res.status(200).json({
         ok: true,
+        paid_only: VENDOR_ORDERS_PAID_ONLY,
+        deployMarker: VENDOR_PAID_MARKER,
         stats: {
           total_orders: orders.length,
           pending_orders: orders.filter((o) => o.status === 'pending').length,

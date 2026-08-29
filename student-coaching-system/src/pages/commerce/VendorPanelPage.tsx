@@ -924,7 +924,10 @@ function Siparislerim() {
   return (
     <div>
       <div className="flex justify-between items-center mb-4 gap-3">
-        <h2 className="text-lg font-semibold">Siparişlerim</h2>
+        <div>
+          <h2 className="text-lg font-semibold">Siparişlerim</h2>
+          <p className="text-xs text-gray-500 mt-0.5">Yalnızca kart veya IBAN ile ödemesi alınan siparişler listelenir.</p>
+        </div>
         <select
           className="border rounded-lg text-sm px-2 py-1.5"
           value={filterStatus}
