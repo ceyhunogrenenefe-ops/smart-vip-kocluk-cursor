@@ -868,8 +868,8 @@ export function filterEdesisExamsForStudentProgram(items, programKeys, opts = {}
 const OPEN_CATALOG_WINDOW_DAYS = 21;
 /** Turu-online probe: Safiye’de 21g PARAF/YANIT (d=24–31) kesiliyordu; 45g = tanımlı açık LGS seti. */
 export const TURU_ONLINE_WINDOW_DAYS = 45;
-/** Roster 1–3: Edesis Online’da hâlâ girilebilir (test/ince atama). 24 kişilik PARAF MOR 1 Safiye’de yok. */
-export const THIN_ONLINE_ROSTER_MAX = 3;
+/** Roster 1–8: küçük grup ataması. 24 kişilik PARAF MOR 1 Safiye’de yok — probe edilmez. */
+export const THIN_ONLINE_ROSTER_MAX = 8;
 
 export function isOpenEdesisCatalogExam(exam) {
   const status = String(exam?.resultStatus || exam?.status || 'None').trim();
@@ -1020,7 +1020,7 @@ export function catalogExamStudentCount(exam) {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** İnce roster: başkasının 24 kişilik denemesini değil, 1–3 kişilik açık online’ı geçir. */
+/** İnce roster: başkasının 24 kişilik denemesini değil, küçük grup açık online’ı geçir. */
 export function isThinOnlineRosterExam(exam, rosterLength = null) {
   if (rosterLength != null && Number.isFinite(Number(rosterLength))) {
     const n = Number(rosterLength);
@@ -1032,7 +1032,7 @@ export function isThinOnlineRosterExam(exam, rosterLength = null) {
 
 /**
  * HTTP probe olmadan kesin aday — yalnız boş roster.
- * İnce roster (1–3) GetOgrenciBySinavId ile doğrulanır; burada herkese dökülmez.
+ * İnce roster (1–8) GetOgrenciBySinavId ile doğrulanır; burada herkese dökülmez.
  */
 export function catalogExamTakeableWithoutRosterProbe(exam, { programKeys, gradeName } = {}) {
   if (!catalogExamOpenTakeableCandidate(exam, { programKeys, gradeName })) return false;
@@ -1515,6 +1515,19 @@ export function examRosterIncludesStudent(rosterIds, edesisStudentId) {
   const want = normEdesisId(edesisStudentId);
   if (!want || !Array.isArray(rosterIds)) return false;
   return rosterIds.some((id) => normEdesisId(id) === want || String(id).trim() === want);
+}
+
+/**
+ * GetOgrenciBySinavId sonrası Sınava gir kararı.
+ * Boş bilinen roster = kademe uyumlu kurumda açık deneme (GetSinavForView studentCount ezmesin).
+ * Liste doluysa yalnız bu öğrenci varsa göster. Probe yoksa dökme.
+ */
+export function shouldOfferOpenCatalogExamAfterRoster(exam, { roster, edesisStudentId } = {}) {
+  if (!exam) return false;
+  const rosterKnown = Array.isArray(roster);
+  if (examRosterIncludesStudent(rosterKnown ? roster : [], edesisStudentId)) return true;
+  if (!rosterKnown) return false;
+  return roster.length === 0;
 }
 
 /** GetOgrenciSinavIds çıktısını katalog satırlarına eşle (ogrenciIds alanı olmasa da) */
@@ -2464,17 +2477,14 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
       if (!examCompatibleWithStudentGrade(merged, gradeName, { allowLgsNeighbor: false })) continue;
       const gradeMatch = edesisExamGradeIdMatchesStudent(merged, studentGradeId);
       if (gradeMatch === false) continue;
-      const rosterRaw = rosters[j];
-      const rosterKnown = Array.isArray(rosterRaw);
-      const roster = rosterKnown ? rosterRaw : [];
-      const onRoster = examRosterIncludesStudent(roster, edesisStudentId);
-      if (onRoster) {
-        openWithWindow.push(merged);
+      if (
+        !shouldOfferOpenCatalogExamAfterRoster(merged, {
+          roster: rosters[j],
+          edesisStudentId
+        })
+      ) {
         continue;
       }
-      const catalogCount = catalogExamStudentCount(merged);
-      // İnce roster / probe yok / başkasının listesi → herkese dökme
-      if (catalogCount > 0 || roster.length > 0 || !rosterKnown) continue;
       openWithWindow.push(merged);
     }
   }
