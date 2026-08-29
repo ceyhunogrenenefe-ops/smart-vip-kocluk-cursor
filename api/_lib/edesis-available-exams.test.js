@@ -1288,7 +1288,7 @@ describe('requireExplicitAssignment never dumps catalog', () => {
         id: 1580678,
         name: 'PARAF MİS LGS-2 İNTERAKTİF',
         examType: 'LGS',
-        resultStatus: 'Ready',
+        resultStatus: 'Processing',
         examDate: '2026-08-29',
         studentCount: 0
       },
