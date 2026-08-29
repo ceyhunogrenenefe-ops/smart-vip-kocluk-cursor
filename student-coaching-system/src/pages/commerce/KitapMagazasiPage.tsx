@@ -681,7 +681,7 @@ function StaffActionModal({
                   <label className="text-xs font-medium text-gray-500 mb-1 block">Kademe</label>
                   <select className="border rounded-lg px-3 py-2 text-sm w-full" value={classLevel} onChange={(e) => setClassLevel(e.target.value)}>
                     <option value="">Tüm kademeler</option>
-                    {['5', '6', '7', '8', 'LGS', '9', '10', '11', '12', 'TYT', 'AYT'].map((k) => (
+                    {['5', '6', '7', 'LGS', '9', '10', '11', '12', 'YKS'].map((k) => (
                       <option key={k} value={k}>{k}</option>
                     ))}
                   </select>
@@ -1018,9 +1018,9 @@ export default function KitapMagazasiPage() {
     ? classes
     : [
         { key: '5', label: '5' }, { key: '6', label: '6' }, { key: '7', label: '7' },
-        { key: '8', label: '8' }, { key: 'LGS', label: 'LGS' }, { key: '9', label: '9' },
+        { key: 'LGS', label: 'LGS' }, { key: '9', label: '9' },
         { key: '10', label: '10' }, { key: '11', label: '11' }, { key: '12', label: '12' },
-        { key: 'TYT', label: 'TYT' }, { key: 'AYT', label: 'AYT' },
+        { key: 'YKS', label: 'YKS' },
       ];
 
   return (

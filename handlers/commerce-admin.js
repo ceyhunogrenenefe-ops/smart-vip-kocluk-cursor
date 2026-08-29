@@ -25,7 +25,7 @@ import { randomUUID } from 'crypto';
 import { requireAuth } from '../api/_lib/auth.js';
 import { actorRoleSet, roleSetHasSuperAdmin, roleSetHasAdmin } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
-import { bulkUpsertBooks, ensureYankiVendor, seedLgs8DenemeKulubu, seedLgs8ParafIqSet, seedLgs8VipCatalog, upsertYankiOfferForExistingBook } from '../api/_lib/commerce-lgs8-seed.js';
+import { bulkUpsertBooks, ensureYankiVendor, seedLgs8DenemeKulubu, seedLgs8ParafIqSet, seedLgs8VipCatalog, seedLgs8VipSet, upsertYankiOfferForExistingBook } from '../api/_lib/commerce-lgs8-seed.js';
 import { attachOfferRelations, attachOfferRelationsList } from '../api/_lib/commerce-utils.js';
 import { defaultStoreBrowse, normalizeStoreBrowse, withInferredSeriesMetadata } from '../api/_lib/commerce-store-browse.js';
 
@@ -588,6 +588,24 @@ async function handleBooks(op, body, actor) {
       actor_user_id: actor.sub,
       vendor_id: out.vendor.id,
       new_value: { book_count: out.books.length },
+    });
+    return { ok: true, ...out };
+  }
+
+  if (op === 'books.seed_lgs8_vip_set') {
+    const out = await seedLgs8VipSet({
+      actorSub: actor.sub,
+      price_kurus: sanitizeInt(body.price_kurus) || 0,
+      stock_quantity: sanitizeInt(body.stock_quantity) || 100,
+      contact_phone: sanitizeText(body.contact_phone),
+    });
+    await logAudit({
+      entity_type: 'commerce_book',
+      entity_id: out.book.id,
+      action: 'seed_lgs8_vip_set',
+      actor_user_id: actor.sub,
+      vendor_id: out.vendor.id,
+      new_value: { isbn: out.book.isbn, status: out.book.status },
     });
     return { ok: true, ...out };
   }
