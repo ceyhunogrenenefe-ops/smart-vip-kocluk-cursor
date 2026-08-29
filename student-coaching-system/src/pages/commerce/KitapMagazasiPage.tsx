@@ -800,7 +800,7 @@ export default function KitapMagazasiPage() {
   const role = String(effectiveUser?.role || '');
   const staffRole = ['super_admin', 'admin', 'coach', 'teacher'].includes(role);
   const canBuy = ['student', 'super_admin', 'admin'].includes(role);
-  const [viewMode, setViewMode] = useState<'list' | 'categories'>('categories');
+  const [viewMode, setViewMode] = useState<'list' | 'categories'>('list');
   const [selectedBookIds, setSelectedBookIds] = useState<string[]>([]);
   const [staffAction, setStaffAction] = useState<StaffAction | null>(null);
 
@@ -1103,7 +1103,6 @@ export default function KitapMagazasiPage() {
                   setFilters({ ...filters, class_level: cl.key });
                   setActiveClassKey(cl.key);
                   setActiveCategoryKey(null);
-                  setViewMode('categories');
                 }}
                 className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap ${
                   filters.class_level === cl.key ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
