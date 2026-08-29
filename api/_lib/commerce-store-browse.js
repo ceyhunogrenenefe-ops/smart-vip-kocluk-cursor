@@ -20,14 +20,12 @@ export const DEFAULT_STORE_CLASSES = [
   { key: '5', label: '5. Sınıf', sort: 5, active: true },
   { key: '6', label: '6. Sınıf', sort: 6, active: true },
   { key: '7', label: '7. Sınıf', sort: 7, active: true },
-  { key: '8', label: '8. Sınıf', sort: 8, active: true },
-  { key: 'LGS', label: 'LGS', sort: 9, active: true },
-  { key: '9', label: '9. Sınıf', sort: 10, active: true },
-  { key: '10', label: '10. Sınıf', sort: 11, active: true },
-  { key: '11', label: '11. Sınıf', sort: 12, active: true },
-  { key: '12', label: '12. Sınıf', sort: 13, active: true },
-  { key: 'TYT', label: 'TYT', sort: 14, active: true },
-  { key: 'AYT', label: 'AYT', sort: 15, active: true },
+  { key: 'LGS', label: 'LGS', sort: 8, active: true },
+  { key: '9', label: '9. Sınıf', sort: 9, active: true },
+  { key: '10', label: '10. Sınıf', sort: 10, active: true },
+  { key: '11', label: '11. Sınıf', sort: 11, active: true },
+  { key: '12', label: '12. Sınıf', sort: 12, active: true },
+  { key: 'YKS', label: 'YKS', sort: 13, active: true },
 ];
 
 export function defaultStoreCategories(classKeys) {
@@ -80,12 +78,18 @@ export function classKeysEqual(a, b) {
   return false;
 }
 
-/** 8. sınıf ve LGS mağazada aynı aile. */
+/** 8. sınıf kitapları LGS kutusunda. */
 export function isLgsStoreClassKey(value) {
   const s = String(value ?? '').trim().toLocaleUpperCase('tr');
   if (!s) return false;
   if (s === 'LGS' || s.startsWith('8.') || s.startsWith('8 ')) return true;
   return /^\d+$/.test(s) && parseInt(s, 10) === 8;
+}
+
+/** TYT / AYT kitapları YKS kutusunda. */
+export function isYksStoreClassKey(value) {
+  const s = String(value ?? '').trim().toLocaleUpperCase('tr');
+  return s === 'YKS' || s === 'TYT' || s === 'AYT';
 }
 
 export function classKeyMatchesLevels(classKey, classLevels) {
@@ -94,6 +98,7 @@ export function classKeyMatchesLevels(classKey, classLevels) {
   const levels = Array.isArray(classLevels) ? classLevels : [];
   if (levels.some((lv) => classKeysEqual(key, lv))) return true;
   if (isLgsStoreClassKey(key) && levels.some((lv) => isLgsStoreClassKey(lv))) return true;
+  if (isYksStoreClassKey(key) && levels.some((lv) => isYksStoreClassKey(lv))) return true;
   return false;
 }
 
@@ -101,6 +106,7 @@ export function categoryBelongsToClass(category, classKey) {
   const keys = Array.isArray(category?.class_keys) ? category.class_keys : [];
   if (keys.some((k) => classKeysEqual(k, classKey))) return true;
   if (isLgsStoreClassKey(classKey) && keys.some((k) => isLgsStoreClassKey(k))) return true;
+  if (isYksStoreClassKey(classKey) && keys.some((k) => isYksStoreClassKey(k))) return true;
   return false;
 }
 
@@ -207,15 +213,23 @@ export function normalizeStoreBrowse(input) {
   }
   if (!classes.length) classes.push(...fallback.classes.map((c) => ({ ...c })));
 
-  if (!classes.some((c) => c.key === '8')) {
-    const lgs = classes.find((c) => c.key === 'LGS');
-    classes.push({
-      key: '8',
-      label: '8. Sınıf',
-      sort: lgs ? Number(lgs.sort) - 0.5 : 8,
-      active: true,
-    });
+  const folded = [];
+  const foldedSeen = new Set();
+  for (const item of classes) {
+    if (item.key === '8' || item.key === 'TYT' || item.key === 'AYT') continue;
+    const uniq = item.key.toLocaleLowerCase('tr');
+    if (foldedSeen.has(uniq)) continue;
+    foldedSeen.add(uniq);
+    folded.push(item);
   }
+  if (!folded.some((c) => c.key === 'LGS')) {
+    folded.push({ key: 'LGS', label: 'LGS', sort: 8, active: true });
+  }
+  if (!folded.some((c) => c.key === 'YKS')) {
+    folded.push({ key: 'YKS', label: 'YKS', sort: 13, active: true });
+  }
+  classes.length = 0;
+  classes.push(...folded);
 
   const classKeySet = new Set(classes.map((c) => c.key));
   const catSource = Array.isArray(src.categories) && src.categories.length
@@ -336,5 +350,5 @@ export async function listStoreBrowse() {
     };
   });
 
-  return { classes: classRows, categories, deployMarker: 'kitap-store-kinds-2026-08-29' };
+  return { classes: classRows, categories, deployMarker: 'kitap-store-lgs-yks-2026-08-29' };
 }

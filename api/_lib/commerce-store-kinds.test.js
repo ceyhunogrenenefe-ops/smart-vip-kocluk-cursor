@@ -33,5 +33,9 @@ describe('commerce-store-kinds', () => {
       title: '5.SINIF VİP YAYINLARI EĞİTİM SETİ 5 LI',
       slug: '5sinif-vip-yayinlari-eitim-seti-5-li-1788012241806',
     })).toBe(false);
+    expect(isVipEgitimComponentBook({
+      title: '8.SINIF VİP YAYINLARI EĞİTİM SETİ 6 LI',
+      slug: 'vip-lgs-8-kitap-seti',
+    })).toBe(false);
   });
 });
