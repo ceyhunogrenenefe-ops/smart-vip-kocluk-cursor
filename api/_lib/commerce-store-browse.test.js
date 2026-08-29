@@ -20,6 +20,8 @@ describe('commerce-store-browse', () => {
     expect(nav.classes.some((c) => c.key === 'YKS')).toBe(true);
     expect(nav.classes.some((c) => c.key === '12')).toBe(true);
     expect(nav.classes.some((c) => c.key === 'TYT' || c.key === 'AYT')).toBe(false);
+    const keys = nav.classes.map((c) => c.key);
+    expect(keys.indexOf('YKS')).toBeGreaterThan(keys.indexOf('12'));
     expect(nav.categories.map((c) => c.key)).toEqual([
       'egitim-setleri',
       'soru-bankalari',
@@ -54,7 +56,10 @@ describe('commerce-store-browse', () => {
         class_keys: ['LGS'],
       }],
     });
-    expect(nav.classes.map((c) => c.key).sort()).toEqual(['12', 'LGS', 'YKS']);
+    expect(nav.classes.map((c) => c.key)).toEqual(['LGS', '12', 'YKS']);
+    expect(nav.classes.find((c) => c.key === 'YKS').sort).toBeGreaterThan(
+      nav.classes.find((c) => c.key === '12').sort
+    );
     expect(nav.categories.map((c) => c.key)).toEqual([
       'egitim-setleri',
       'soru-bankalari',
@@ -71,6 +76,20 @@ describe('commerce-store-browse', () => {
       categories: [],
     });
     expect(nav.classes.map((c) => c.key).sort()).toEqual(['LGS', 'YKS']);
+  });
+
+  it('places YKS after 12 even when saved sorts collide', () => {
+    const nav = normalizeStoreBrowse({
+      classes: [
+        { key: '10', label: '10. Sınıf', sort: 13 },
+        { key: 'YKS', label: 'YKS', sort: 13 },
+        { key: '11', label: '11. Sınıf', sort: 14 },
+        { key: '12', label: '12. Sınıf', sort: 15 },
+        { key: 'LGS', label: 'LGS', sort: 11 },
+      ],
+      categories: [],
+    });
+    expect(nav.classes.map((c) => c.key)).toEqual(['LGS', '10', '11', '12', 'YKS']);
   });
 
   it('treats 8 as LGS and TYT/AYT as YKS', () => {
@@ -100,6 +119,10 @@ describe('commerce-store-browse', () => {
       class_levels: ['TYT'],
       metadata: {},
     })).toBe('');
+    expect(bookMatchesCategory(
+      { title: 'ÜçDörtBeş Yayınları Sıfırdan Başla Start Matematik', class_levels: ['TYT'], metadata: {} },
+      { series: 'soru-bankalari', class_keys: ['YKS'] }
+    )).toBe(true);
     expect(withInferredSeriesMetadata({
       title: 'LGS ULTİ 6 LI BRANŞ DENEMELERİ',
       class_levels: ['LGS'],
