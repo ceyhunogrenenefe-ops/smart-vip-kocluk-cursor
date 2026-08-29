@@ -15,14 +15,17 @@ import {
 describe('commerce-store-browse', () => {
   it('defaults give every class Eğitim Setleri / Soru Bankaları / Denemeler', () => {
     const nav = defaultStoreBrowse();
-    expect(nav.classes.some((c) => c.key === '8' && c.label === '8. Sınıf')).toBe(true);
+    expect(nav.classes.some((c) => c.key === '8')).toBe(false);
     expect(nav.classes.some((c) => c.key === 'LGS')).toBe(true);
+    expect(nav.classes.some((c) => c.key === 'YKS')).toBe(true);
+    expect(nav.classes.some((c) => c.key === '12')).toBe(true);
+    expect(nav.classes.some((c) => c.key === 'TYT' || c.key === 'AYT')).toBe(false);
     expect(nav.categories.map((c) => c.key)).toEqual([
       'egitim-setleri',
       'soru-bankalari',
       'denemeler',
     ]);
-    expect(nav.categories.every((c) => c.class_keys.includes('8') && c.class_keys.includes('5'))).toBe(true);
+    expect(nav.categories.every((c) => c.class_keys.includes('LGS') && c.class_keys.includes('YKS'))).toBe(true);
   });
 
   it('empty input falls back to defaults', () => {
@@ -35,9 +38,15 @@ describe('commerce-store-browse', () => {
     ]);
   });
 
-  it('upgrades old publisher categories and inserts 8. Sınıf', () => {
+  it('folds 8 into LGS and TYT/AYT into YKS', () => {
     const nav = normalizeStoreBrowse({
-      classes: [{ key: 'LGS', label: 'LGS', sort: 9 }],
+      classes: [
+        { key: '8', label: '8. Sınıf', sort: 8 },
+        { key: 'LGS', label: 'LGS', sort: 9 },
+        { key: '12', label: '12. Sınıf', sort: 12 },
+        { key: 'TYT', label: 'TYT', sort: 14 },
+        { key: 'AYT', label: 'AYT', sort: 15 },
+      ],
       categories: [{
         key: 'vip-lgs-8-egitim',
         label: 'VIP',
@@ -45,7 +54,7 @@ describe('commerce-store-browse', () => {
         class_keys: ['LGS'],
       }],
     });
-    expect(nav.classes.map((c) => c.key).sort()).toEqual(['8', 'LGS']);
+    expect(nav.classes.map((c) => c.key).sort()).toEqual(['12', 'LGS', 'YKS']);
     expect(nav.categories.map((c) => c.key)).toEqual([
       'egitim-setleri',
       'soru-bankalari',
@@ -53,7 +62,7 @@ describe('commerce-store-browse', () => {
     ]);
   });
 
-  it('preserves LGS / numeric class keys', () => {
+  it('preserves LGS and drops standalone 8', () => {
     const nav = normalizeStoreBrowse({
       classes: [
         { key: 'LGS', label: 'LGS', sort: 1 },
@@ -61,16 +70,18 @@ describe('commerce-store-browse', () => {
       ],
       categories: [],
     });
-    expect(nav.classes.map((c) => c.key).sort()).toEqual(['8', 'LGS']);
+    expect(nav.classes.map((c) => c.key).sort()).toEqual(['LGS', 'YKS']);
   });
 
-  it('treats 8 and LGS as the same store family', () => {
+  it('treats 8 as LGS and TYT/AYT as YKS', () => {
     expect(classKeyMatchesLevels('8', ['LGS'])).toBe(true);
     expect(classKeyMatchesLevels('LGS', ['8'])).toBe(true);
+    expect(classKeyMatchesLevels('YKS', ['TYT'])).toBe(true);
+    expect(classKeyMatchesLevels('YKS', ['AYT'])).toBe(true);
+    expect(classKeyMatchesLevels('12', ['TYT'])).toBe(false);
     expect(classKeyMatchesLevels('TYT', ['LGS'])).toBe(false);
     expect(categoryBelongsToClass({ class_keys: ['LGS'] }, '8')).toBe(true);
-    expect(categoryBelongsToClass({ class_keys: ['8'] }, 'LGS')).toBe(true);
-    expect(categoryBelongsToClass({ class_keys: ['TYT'] }, 'LGS')).toBe(false);
+    expect(categoryBelongsToClass({ class_keys: ['YKS'] }, 'TYT')).toBe(true);
   });
 
   it('maps books into the three kinds', () => {
@@ -130,7 +141,7 @@ describe('commerce-store-browse', () => {
       ],
       categories: [],
     });
-    expect(pub.classes.map((c) => c.key)).toEqual(['8']);
+    expect(pub.classes.map((c) => c.key).sort()).toEqual(['LGS', 'YKS']);
     expect(pub.categories.map((c) => c.key)).toEqual([
       'egitim-setleri',
       'soru-bankalari',

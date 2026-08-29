@@ -219,6 +219,42 @@ export const VIP_LGS8_PACKAGE = {
   book_isbns: VIP_LGS8_BOOKS.map((b) => b.isbn),
 };
 
+const VIP_LGS8_SET_CONTENTS = VIP_LGS8_BOOKS.map((b) => b.title);
+
+/** Tek vitrin ürünü: 6 derslik VIP LGS eğitim seti. Branşlar ayrı satılmaz. */
+export const VIP_LGS8_SET = {
+  isbn: VIP_LGS8_SET_ISBN,
+  slug: VIP_LGS8_SET_SLUG,
+  title: '8.SINIF VİP YAYINLARI EĞİTİM SETİ 6 LI',
+  subtitle: '6 ders · VAV videolu fasikül seti · LGS',
+  author: 'VIP Yayınları',
+  publisher: 'VIP Yayınları',
+  subject: 'LGS Set',
+  class_levels: [...LGS8_CLASS_LEVELS],
+  exam_types: ['LGS'],
+  description: [
+    VIP_LGS8_PACKAGE.description,
+    '',
+    'Set içeriği (6 ders):',
+    ...VIP_LGS8_SET_CONTENTS.map((t, i) => `${i + 1}. ${t}`),
+  ].join('\n').trim(),
+  cover_image_url: VIP_LGS8_COVER_PATH,
+  is_catalog_active: true,
+  metadata: {
+    series: 'egitim-setleri',
+    store_kind: 'egitim-setleri',
+    series_label: 'Eğitim Setleri',
+    collection: 'egitim-seti',
+    is_set: true,
+    book_count: 6,
+    set_contents: VIP_LGS8_SET_CONTENTS,
+    grade: '8',
+    exam: 'LGS',
+    publisher_group: 'VIP Yayınları',
+    sort_order: 1,
+  },
+};
+
 export const PARAF_LGS8_IQ_SET_CONTENTS = [
   'Paraf 8. Sınıf IQ Türkçe Soru Kütüphanesi',
   'Paraf 8. Sınıf IQ Matematik Soru Kütüphanesi',
