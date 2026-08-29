@@ -18,7 +18,7 @@
  *  staff.package_update  — paket adı / kademe / fiyat
  *  staff.package_delete  — paketi sil (soft)
  *  staff.package_items_set — paket kitaplarını değiştir
- *  deployMarker: kitap-package-edit-2026-08-29
+ *  deployMarker: kitap-package-covers-2026-08-29
  *  cart.get              — mevcut sepeti getir
  *  cart.add              — sepete ürün ekle
  *  cart.update           — adet güncelle
@@ -113,7 +113,7 @@ async function handleCatalog(op, body, actor) {
       ok: true,
       settings,
       store_browse,
-      deployMarker: 'kitap-package-edit-2026-08-29',
+      deployMarker: 'kitap-package-covers-2026-08-29',
     };
   }
 
@@ -178,7 +178,7 @@ async function handleCatalog(op, body, actor) {
       ok: true,
       offers: filtered.slice(offset, offset + limit),
       total: filtered.length,
-      deployMarker: 'kitap-package-edit-2026-08-29'
+      deployMarker: 'kitap-package-covers-2026-08-29'
     };
   }
 
@@ -237,7 +237,7 @@ async function handleCatalog(op, body, actor) {
 
   if (op === 'catalog.browse') {
     const browse = await listStoreBrowse();
-    return { ok: true, ...browse, deployMarker: 'kitap-package-edit-2026-08-29' };
+    return { ok: true, ...browse, deployMarker: 'kitap-package-covers-2026-08-29' };
   }
 
   if (op === 'catalog.assigned') {
