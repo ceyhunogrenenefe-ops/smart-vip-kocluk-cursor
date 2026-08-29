@@ -55,3 +55,48 @@ export function parseIbanReceipt({ file_base64, mime_type } = {}) {
   const ext = mime === 'application/pdf' ? 'pdf' : mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
   return { buffer, mime: mime === 'image/jpg' ? 'image/jpeg' : mime, ext };
 }
+
+function paymentRaw(payment) {
+  const raw = payment?.raw_response;
+  return raw && typeof raw === 'object' ? raw : {};
+}
+
+/** Sipariş listesi / detay — velinin yüklediği dekontu personel görsün. */
+export function receiptFromPayments(payments = []) {
+  const list = Array.isArray(payments) ? payments : [];
+  for (const p of list) {
+    const raw = paymentRaw(p);
+    const url = String(raw.receipt_url || '').trim();
+    if (url) {
+      return {
+        receipt_url: url,
+        payment_method: String(p.provider || raw.method || 'iban').toLowerCase(),
+        holder: raw.holder ? String(raw.holder) : null,
+        iban: raw.iban ? normalizeIban(raw.iban) : null,
+      };
+    }
+  }
+  const ibanPay = list.find((p) => String(p.provider || '').toLowerCase() === 'iban');
+  if (ibanPay) {
+    const raw = paymentRaw(ibanPay);
+    return {
+      receipt_url: null,
+      payment_method: 'iban',
+      holder: raw.holder ? String(raw.holder) : null,
+      iban: raw.iban ? normalizeIban(raw.iban) : null,
+    };
+  }
+  const first = list[0];
+  return {
+    receipt_url: null,
+    payment_method: first?.provider ? String(first.provider).toLowerCase() : null,
+    holder: null,
+    iban: null,
+  };
+}
+
+export function decorateOrderWithIbanReceipt(order) {
+  if (!order || typeof order !== 'object') return order;
+  const extra = receiptFromPayments(order.commerce_payments);
+  return { ...order, ...extra };
+}
