@@ -1503,11 +1503,23 @@ function KitaplarTab() {
 // ──────────────────────────────────────────────────────────────────────
 // Siparişler sekmesi
 // ──────────────────────────────────────────────────────────────────────
+function paymentMethodLabel(method?: string | null) {
+  const m = String(method || '').toLowerCase();
+  if (m === 'iban') return 'IBAN';
+  if (m === 'paytr' || m === 'garanti') return 'Kart';
+  return method || '—';
+}
+
+function isReceiptPdf(url: string) {
+  return /\.pdf(\?|#|$)/i.test(url);
+}
+
 function SiparislerTab() {
   const [orders, setOrders] = useState<CommerceOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState('');
   const [editing, setEditing] = useState<CommerceOrder | null>(null);
+  const [viewingReceipt, setViewingReceipt] = useState<CommerceOrder | null>(null);
   const [form, setForm] = useState({ customer_name: '', customer_email: '', customer_phone: '', notes: '', status: '' });
   const [saving, setSaving] = useState(false);
 
@@ -1585,6 +1597,8 @@ function SiparislerTab() {
                 <th className="px-4 py-3 font-medium">Sipariş No</th>
                 <th className="px-4 py-3 font-medium">Müşteri</th>
                 <th className="px-4 py-3 font-medium">Toplam</th>
+                <th className="px-4 py-3 font-medium">Ödeme</th>
+                <th className="px-4 py-3 font-medium">Dekont</th>
                 <th className="px-4 py-3 font-medium">Durum</th>
                 <th className="px-4 py-3 font-medium">Tarih</th>
                 <th className="px-4 py-3 font-medium">İşlem</th>
@@ -1596,6 +1610,20 @@ function SiparislerTab() {
                   <td className="px-4 py-3 font-mono text-xs font-medium">{o.order_number}</td>
                   <td className="px-4 py-3">{o.customer_name ?? '—'}</td>
                   <td className="px-4 py-3 font-medium">{formatCommerceTry(o.total_kurus)}</td>
+                  <td className="px-4 py-3 text-xs font-medium">{paymentMethodLabel(o.payment_method)}</td>
+                  <td className="px-4 py-3">
+                    {o.receipt_url ? (
+                      <button
+                        type="button"
+                        onClick={() => setViewingReceipt(o)}
+                        className="inline-flex items-center gap-1 text-emerald-700 hover:text-emerald-900 text-xs font-semibold"
+                      >
+                        <Eye className="w-3.5 h-3.5" /> Gör
+                      </button>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3"><StatusBadge status={o.status} /></td>
                   <td className="px-4 py-3 text-gray-500">{new Date(o.created_at).toLocaleDateString('tr-TR')}</td>
                   <td className="px-4 py-3">
@@ -1611,7 +1639,7 @@ function SiparislerTab() {
                 </tr>
               ))}
               {orders.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Sipariş bulunamadı</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">Sipariş bulunamadı</td></tr>
               )}
             </tbody>
           </table>
@@ -1652,6 +1680,22 @@ function SiparislerTab() {
                 <label className="text-xs text-gray-500">Not</label>
                 <textarea className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm h-20" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
               </div>
+              {editing.receipt_url && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3">
+                  <div className="text-xs font-semibold text-emerald-800 mb-2">
+                    Veli dekontu · {paymentMethodLabel(editing.payment_method)}
+                  </div>
+                  {isReceiptPdf(editing.receipt_url) ? (
+                    <a href={editing.receipt_url} target="_blank" rel="noreferrer" className="text-sm text-emerald-800 underline">
+                      PDF dekontu aç
+                    </a>
+                  ) : (
+                    <a href={editing.receipt_url} target="_blank" rel="noreferrer">
+                      <img src={editing.receipt_url} alt="Havale dekontu" className="max-h-56 rounded-lg border border-emerald-100 object-contain bg-white" />
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
             <div className="px-6 py-3 border-t flex justify-between">
               <button onClick={() => handleDelete(editing)} className="text-sm text-red-600 hover:underline">Sil</button>
@@ -1661,6 +1705,32 @@ function SiparislerTab() {
                   {saving ? 'Kaydediliyor…' : 'Kaydet'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {viewingReceipt?.receipt_url && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => setViewingReceipt(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b">
+              <h3 className="font-semibold text-sm">Dekont · {viewingReceipt.order_number}</h3>
+              <button type="button" onClick={() => setViewingReceipt(null)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+            <div className="p-4">
+              {isReceiptPdf(viewingReceipt.receipt_url) ? (
+                <iframe title="Dekont PDF" src={viewingReceipt.receipt_url} className="w-full h-[70vh] rounded-lg border" />
+              ) : (
+                <img src={viewingReceipt.receipt_url} alt="Havale dekontu" className="max-h-[70vh] w-full object-contain rounded-lg bg-slate-50" />
+              )}
+              <a
+                href={viewingReceipt.receipt_url}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-3 inline-block text-sm text-indigo-700 hover:underline"
+              >
+                Yeni sekmede aç
+              </a>
             </div>
           </div>
         </div>

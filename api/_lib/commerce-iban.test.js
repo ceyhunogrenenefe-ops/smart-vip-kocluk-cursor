@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   COMMERCE_IBAN_ACCOUNT,
+  decorateOrderWithIbanReceipt,
   formatIbanDisplay,
   normalizeIban,
   parseIbanReceipt,
+  receiptFromPayments,
   resolveIbanAccount,
 } from './commerce-iban.js';
 
@@ -33,5 +35,21 @@ describe('commerce-iban', () => {
     const tiny = parseIbanReceipt({ file_base64: Buffer.from('hi').toString('base64'), mime_type: 'image/jpeg' });
     expect(tiny.ext).toBe('jpg');
     expect(tiny.buffer.byteLength).toBe(2);
+  });
+
+  it('exposes dekont URL from payment raw_response for staff orders', () => {
+    const extra = receiptFromPayments([
+      { provider: 'paytr', raw_response: {} },
+      { provider: 'iban', raw_response: { receipt_url: 'https://cdn.example/dekont.jpg', holder: 'Songül Öğrenenefe', iban: 'TR870003200000000066792070' } },
+    ]);
+    expect(extra.receipt_url).toBe('https://cdn.example/dekont.jpg');
+    expect(extra.payment_method).toBe('iban');
+    const decorated = decorateOrderWithIbanReceipt({
+      id: 'o1',
+      notes: 'IBAN havale',
+      commerce_payments: [{ provider: 'iban', raw_response: { receipt_url: 'https://cdn.example/d.pdf' } }],
+    });
+    expect(decorated.receipt_url).toBe('https://cdn.example/d.pdf');
+    expect(decorated.payment_method).toBe('iban');
   });
 });
