@@ -188,7 +188,7 @@ export default function MagazaMenuTab() {
             Mağaza menüsü
           </h2>
           <p className="text-sm text-gray-500 mt-1">
-            Öğrenci önce <strong>Sınıflar</strong> kutularını görür. Sınıfa tıklayınca burada tanımladığınız kategoriler açılır; kategoriye tıklayınca o seriye bağlı kitaplar listelenir.
+            Öğrenci önce <strong>Sınıflar</strong> kutularını görür. Her sınıfta aynı üç kutu açılır: <strong>Eğitim Setleri</strong>, <strong>Soru Bankaları</strong>, <strong>Denemeler</strong>. Kitabı düzenlerken bu kategorilerden biri seçilir.
           </p>
         </div>
         <button
@@ -267,7 +267,7 @@ export default function MagazaMenuTab() {
       <section className="bg-white border border-gray-200 rounded-2xl p-4 md:p-5">
         <h3 className="font-semibold text-gray-800 mb-1">Kitap kategorileri</h3>
         <p className="text-xs text-gray-500 mb-4">
-          Seri anahtarı, kitap kaydındaki <span className="font-mono">metadata.series</span> ile aynı olmalı (ör. <span className="font-mono">vip-lgs-8-egitim</span>).
+          Standart üç kutu her sınıfta otomatik durur. Kitap düzenle → kategori: Eğitim Setleri / Soru Bankaları / Denemeler.
         </p>
         <div className="space-y-3">
           {sortedCats.map((cat, idx) => (
@@ -330,8 +330,8 @@ export default function MagazaMenuTab() {
         <div className="mt-4 border-t border-gray-100 pt-4 space-y-2">
           <div className="text-sm font-medium text-gray-700">Yeni kategori</div>
           <div className="grid sm:grid-cols-2 gap-2">
-            <input className="border rounded-xl px-3 py-2 text-sm" placeholder="Görünen ad — örn. VIP Eğitim Seti" value={newCat.label} onChange={(e) => setNewCat({ ...newCat, label: e.target.value })} />
-            <input className="border rounded-xl px-3 py-2 text-sm font-mono" placeholder="Seri anahtarı — örn. vip-lgs-8-egitim" value={newCat.series} onChange={(e) => setNewCat({ ...newCat, series: e.target.value })} />
+            <input className="border rounded-xl px-3 py-2 text-sm" placeholder="Görünen ad — örn. Eğitim Setleri" value={newCat.label} onChange={(e) => setNewCat({ ...newCat, label: e.target.value })} />
+            <input className="border rounded-xl px-3 py-2 text-sm font-mono" placeholder="Anahtar — örn. egitim-setleri" value={newCat.series} onChange={(e) => setNewCat({ ...newCat, series: e.target.value })} />
           </div>
           <input className="border rounded-xl px-3 py-2 text-sm w-full" placeholder="Açıklama (opsiyonel)" value={newCat.description} onChange={(e) => setNewCat({ ...newCat, description: e.target.value })} />
           <div className="flex flex-wrap gap-1.5">

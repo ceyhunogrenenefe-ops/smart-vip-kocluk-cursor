@@ -50,6 +50,23 @@ describe('commerce-store-catalog', () => {
     expect(filtered).toHaveLength(1);
   });
 
+  it('hides VIP 8th-grade set component books from the flat list', () => {
+    const rows = buildCatalogListRows([
+      { ...book, commerce_vendor_offers: [] },
+      {
+        id: 'vip-fen',
+        title: 'VIP Yayınları 8. Sınıf LGS Fen Bilimleri Eğitim Seti',
+        slug: 'vip-yayinlari-8-sinif-lgs-fen-bilimleri-egitim-seti',
+        isbn: '978-625-12345-1-7',
+        is_catalog_active: true,
+        class_levels: ['8', 'LGS'],
+        metadata: { series: 'vip-lgs-8-egitim' },
+        commerce_vendor_offers: [],
+      },
+    ]);
+    expect(rows.map((r) => r.commerce_books.id)).toEqual(['b1']);
+  });
+
   it('does not apply a default class filter — all books stay visible', () => {
     const tyt = catalogOfferFromBook({
       ...book,

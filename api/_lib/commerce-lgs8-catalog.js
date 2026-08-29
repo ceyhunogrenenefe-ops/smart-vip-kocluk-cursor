@@ -99,7 +99,7 @@ function book({
     exam_types: ['LGS'],
     description: `${description}${featureBlock(features)}`.trim(),
     cover_image_url: VIP_LGS8_COVER_PATH,
-    is_catalog_active: true,
+    is_catalog_active: false,
     metadata: {
       series: VIP_LGS8_SERIES,
       series_label: 'VIP Eğitim Seti',
