@@ -9,6 +9,7 @@ import {
   PARAF_LGS8_IQ_SET,
   VIP_LGS8_BOOKS,
   VIP_LGS8_PACKAGE,
+  VIP_LGS8_SET,
   YANKI_VENDOR_SLUG,
   normalizeBulkBookInput,
   offerStatusForPrice,
@@ -522,6 +523,10 @@ async function seedYankiSingleProduct(product, { actorSub, price_kurus = 0, stoc
     },
     offer: out.offer,
   };
+}
+
+export async function seedLgs8VipSet(opts = {}) {
+  return seedYankiSingleProduct(VIP_LGS8_SET, opts);
 }
 
 export async function seedLgs8ParafIqSet(opts = {}) {

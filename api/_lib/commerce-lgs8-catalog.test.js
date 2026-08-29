@@ -11,6 +11,7 @@ import {
   PARAF_LGS8_SERIES,
   VIP_LGS8_BOOKS,
   VIP_LGS8_PACKAGE,
+  VIP_LGS8_SET,
   YANKI_VENDOR_SLUG,
   isLgs8ClassLevel,
   normalizeBulkBookInput,
@@ -30,6 +31,10 @@ describe('commerce-lgs8-catalog', () => {
     ]);
     expect(VIP_LGS8_BOOKS.every((b) => b.class_levels.includes('8') && b.class_levels.includes('LGS'))).toBe(true);
     expect(VIP_LGS8_PACKAGE.book_isbns).toHaveLength(6);
+    expect(VIP_LGS8_SET.metadata.is_set).toBe(true);
+    expect(VIP_LGS8_SET.metadata.book_count).toBe(6);
+    expect(VIP_LGS8_SET.metadata.store_kind).toBe('egitim-setleri');
+    expect(VIP_LGS8_SET.is_catalog_active).toBe(true);
   });
 
   it('slugifies Turkish titles without timestamps', () => {
