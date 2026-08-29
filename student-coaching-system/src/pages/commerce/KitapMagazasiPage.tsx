@@ -857,7 +857,9 @@ export default function KitapMagazasiPage() {
   const activeFilterCount = Object.values(filters).filter(Boolean).length;
   const activeClass = classes.find((c) => c.key === activeClassKey) ?? null;
   const classCategories = useMemo(
-    () => (activeClassKey ? categories.filter((c) => categoryBelongsToClass(c, activeClassKey)) : []),
+    () => (activeClassKey
+      ? categories.filter((c) => (c.class_keys ?? []).length === 1 && c.class_keys[0] === activeClassKey)
+      : []),
     [categories, activeClassKey]
   );
   const activeCategory = classCategories.find((c) => c.key === activeCategoryKey) ?? null;

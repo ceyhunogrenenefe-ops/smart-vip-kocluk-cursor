@@ -325,7 +325,7 @@ export async function listStoreBrowse() {
   }
 
   const classRows = classes.map((cl) => {
-    const cats = categories.filter((cat) => categoryBelongsToClass(cat, cl.key));
+    const cats = categories.filter((cat) => Array.isArray(cat.class_keys) && cat.class_keys.length === 1 && cat.class_keys[0] === cl.key);
     const bookIds = new Set(cats.flatMap((cat) => cat.books.map((b) => b.id)));
     return {
       key: cl.key,
