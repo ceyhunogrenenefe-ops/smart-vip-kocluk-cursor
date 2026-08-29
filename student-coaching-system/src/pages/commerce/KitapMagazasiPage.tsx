@@ -227,6 +227,27 @@ function classKeysEqual(a: string, b: string) {
   return false;
 }
 
+function kurusToTlInput(kurus: number) {
+  if (!(Number(kurus) > 0)) return '';
+  const tl = Number(kurus) / 100;
+  return Number.isInteger(tl) ? String(tl) : String(Math.round(tl * 100) / 100);
+}
+
+function sumSelectedBookPrices(offers: OfferWithBook[], bookIds: string[]) {
+  const want = new Set(bookIds);
+  const best = new Map<string, number>();
+  for (const o of offers) {
+    const id = o.commerce_books?.id;
+    const price = Number(o.price_kurus) || 0;
+    if (!id || !want.has(id) || price <= 0 || o.unpriced) continue;
+    const prev = best.get(id);
+    if (prev == null || price < prev) best.set(id, price);
+  }
+  let total = 0;
+  for (const p of best.values()) total += p;
+  return { total, pricedCount: best.size };
+}
+
 function classLevelLabel(value: string | null | undefined) {
   const s = String(value ?? '').trim();
   if (!s) return '';
@@ -809,12 +830,14 @@ function StaffActionModal({
   action,
   bookIds,
   bookTitles,
+  offers,
   onClose,
   onDone,
 }: {
   action: StaffAction;
   bookIds: string[];
   bookTitles: string[];
+  offers: OfferWithBook[];
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -830,7 +853,13 @@ function StaffActionModal({
   const [notes, setNotes] = useState('');
   const [pkgName, setPkgName] = useState('');
   const [pkgDesc, setPkgDesc] = useState('');
-  const [pkgPriceTl, setPkgPriceTl] = useState('');
+  const autoPrice = useMemo(() => sumSelectedBookPrices(offers, bookIds), [offers, bookIds]);
+  const [pkgPriceTl, setPkgPriceTl] = useState(() => kurusToTlInput(autoPrice.total));
+  const [priceTouched, setPriceTouched] = useState(false);
+
+  useEffect(() => {
+    if (!priceTouched) setPkgPriceTl(kurusToTlInput(autoPrice.total));
+  }, [autoPrice.total, priceTouched]);
 
   useEffect(() => {
     csStaffRoster()
@@ -863,19 +892,22 @@ function StaffActionModal({
         const name = pkgName.trim();
         if (!name) { toast.error('Paket adı gerekli'); return; }
         const priceTl = pkgPriceTl.trim();
-        const price_kurus = priceTl ? Math.round(parseFloat(priceTl.replace(',', '.')) * 100) : 0;
-        if (priceTl && (!Number.isFinite(price_kurus) || price_kurus < 0)) {
+        const typed = priceTl ? Math.round(parseFloat(priceTl.replace(',', '.')) * 100) : 0;
+        if (priceTl && (!Number.isFinite(typed) || typed < 0)) {
           toast.error('Geçerli bir fiyat yazın veya boş bırakın');
           return;
         }
-        await csStaffCreatePackage({
+        const r = await csStaffCreatePackage({
           name,
           book_ids: bookIds,
           class_level: classLevel || undefined,
           description: pkgDesc.trim() || undefined,
-          price_kurus: price_kurus || undefined,
+          price_kurus: priceTouched ? typed : undefined,
         });
-        toast.success(price_kurus > 0 ? 'Sınıf paketi oluşturuldu' : 'Paket oluşturuldu — fiyat girilmediği için “Fiyat yakında” görünür');
+        const saved = Number(r.package?.price_kurus) || 0;
+        toast.success(saved > 0
+          ? `Sınıf paketi oluşturuldu — ${formatCommerceTry(saved)}`
+          : 'Paket oluşturuldu — seçilen kitaplarda fiyat olmadığı için “Fiyat yakında”');
       } else if (action === 'recommend' && !classId && !classLevel && studentIds.length === 0) {
         await csStaffAssign({
           book_ids: bookIds,
@@ -935,8 +967,26 @@ function StaffActionModal({
                   <textarea className="border rounded-lg px-3 py-2 text-sm w-full" rows={2} value={pkgDesc} onChange={(e) => setPkgDesc(e.target.value)} />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-gray-500 mb-1 block">Paket fiyatı (₺) — boş = Fiyat yakında</label>
-                  <input className="border rounded-lg px-3 py-2 text-sm w-full" inputMode="decimal" value={pkgPriceTl} onChange={(e) => setPkgPriceTl(e.target.value)} placeholder="Uydurma — yalnızca gerçek fiyat" />
+                  <label className="text-xs font-medium text-gray-500 mb-1 block">Paket fiyatı (₺) — kitap fiyatları otomatik toplanır</label>
+                  <input
+                    className="border rounded-lg px-3 py-2 text-sm w-full"
+                    inputMode="decimal"
+                    value={pkgPriceTl}
+                    onChange={(e) => { setPriceTouched(true); setPkgPriceTl(e.target.value); }}
+                    placeholder="Otomatik toplam"
+                  />
+                  {autoPrice.total > 0 && (
+                    <p className="text-xs text-indigo-700 mt-1">
+                      Otomatik toplam: <b>{formatCommerceTry(autoPrice.total)}</b>
+                      {autoPrice.pricedCount < bookIds.length
+                        ? ` · ${autoPrice.pricedCount}/${bookIds.length} kitapta fiyat var, diğerleri toplama girmedi`
+                        : ` · ${autoPrice.pricedCount} kitap`}
+                      {priceTouched ? ' — elle değiştirildi' : ''}
+                    </p>
+                  )}
+                  {autoPrice.total === 0 && (
+                    <p className="text-xs text-amber-700 mt-1">Seçilen kitaplarda onaylı fiyat yok — “Fiyat yakında” kalır</p>
+                  )}
                 </div>
               </>
             )}
@@ -1527,6 +1577,7 @@ export default function KitapMagazasiPage() {
           action={staffAction}
           bookIds={selectedBookIds}
           bookTitles={selectedTitles}
+          offers={offers}
           onClose={() => setStaffAction(null)}
           onDone={() => { setSelectedBookIds([]); if (tab === 'onerilen' || viewMode === 'list') loadCatalog({ ...filters, search: search || undefined }); }}
         />

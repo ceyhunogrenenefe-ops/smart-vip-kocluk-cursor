@@ -3,6 +3,8 @@ import {
   assignmentSourceFromRoles,
   buildAssignmentInserts,
   buildPackageUpdatePatch,
+  resolvePackagePriceKurus,
+  sumUniqueBookOfferPrices,
   normalizeAssignmentType,
   slugifyPackageName,
   staffCanManageStore,
@@ -53,5 +55,21 @@ describe('commerce-store-staff', () => {
     expect(patch.class_level).toBe('5');
     expect(patch.price_kurus).toBe(0);
     expect(patch.updated_by).toBe('u1');
+  });
+
+  it('sums one priced offer per book and skips unpriced', () => {
+    expect(sumUniqueBookOfferPrices([
+      { book_id: 'a', price_kurus: 10000, status: 'approved' },
+      { book_id: 'a', price_kurus: 8000, status: 'approved' },
+      { book_id: 'b', price_kurus: 25000, status: 'approved' },
+      { book_id: 'c', price_kurus: 0, status: 'approved' },
+      { book_id: 'd', price_kurus: 5000, status: 'draft' },
+    ])).toBe(33000);
+    expect(resolvePackagePriceKurus(0, [
+      { book_id: 'a', price_kurus: 12000, status: 'approved' },
+    ])).toBe(12000);
+    expect(resolvePackagePriceKurus(9900, [
+      { book_id: 'a', price_kurus: 12000, status: 'approved' },
+    ])).toBe(9900);
   });
 });
