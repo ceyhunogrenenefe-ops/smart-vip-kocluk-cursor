@@ -421,22 +421,30 @@ export interface CommerceCouponUsage {
   created_at: string;
 }
 
+export interface CommerceIbanPayment {
+  enabled: boolean;
+  holder: string;
+  iban: string;
+  note: string;
+}
+
 export interface CommerceSettings {
-  id: string;
-  institution_id: string | null;
+  id?: string;
+  institution_id?: string | null;
   commerce_mode: CommerceMode;
-  default_commission_rate: number;
+  default_commission_rate?: number;
   free_shipping_threshold_kurus: number;
   default_shipping_kurus: number;
-  order_number_prefix: string;
-  public_store_enabled: boolean;
+  order_number_prefix?: string;
+  public_store_enabled?: boolean;
   student_store_enabled: boolean;
-  payment_sandbox: boolean;
-  abandoned_cart_hours: number;
-  meta: Record<string, unknown>;
-  updated_by: string | null;
-  created_at: string;
-  updated_at: string;
+  payment_sandbox?: boolean;
+  abandoned_cart_hours?: number;
+  iban_payment?: CommerceIbanPayment;
+  meta?: Record<string, unknown>;
+  updated_by?: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 /** Süper admin mağaza menüsü: sınıf kutuları */
