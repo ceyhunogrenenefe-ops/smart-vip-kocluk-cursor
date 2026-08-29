@@ -18,7 +18,7 @@
  *  staff.package_update  — paket adı / kademe / fiyat
  *  staff.package_delete  — paketi sil (soft)
  *  staff.package_items_set — paket kitaplarını değiştir
- *  deployMarker: kitap-package-autosum-2026-08-29
+ *  deployMarker: kitap-iban-odeme-2026-08-29
  *  cart.get              — mevcut sepeti getir
  *  cart.add              — sepete ürün ekle
  *  cart.update           — adet güncelle
@@ -26,6 +26,7 @@
  *  cart.clear            — sepeti boşalt
  *  cart.apply_coupon     — kupon uygula
  *  cart.checkout_prepare — pending sipariş + odeme/kitap token
+ *  cart.checkout_iban    — IBAN havale + dekont; ödemeyi tamamla
  *  checkout.resolve      — token ile sipariş özeti (site)
  *  checkout.update_customer — veli/adres (site, token)
  *  checkout.apply_coupon — ödeme sayfasında kupon (token, giriş yok)
@@ -44,6 +45,7 @@ import {
   buildPackageUpdatePatch,
   normalizeAssignmentType,
   resolvePackagePriceKurus,
+  sumUniqueBookOfferPrices,
   slugifyPackageName,
   staffCanManageStore,
   uniqueIds
@@ -65,6 +67,11 @@ import {
 } from '../api/_lib/commerce-checkout-op.js';
 import { startCommerceProviderPayment } from '../api/_lib/commerce-checkout-pay.js';
 import { COMMERCE_DEFAULT_SETTINGS } from '../api/_lib/commerce-constants.js';
+import {
+  formatIbanDisplay,
+  parseIbanReceipt,
+  resolveIbanAccount,
+} from '../api/_lib/commerce-iban.js';
 import { listLgs8Collections } from '../api/_lib/commerce-lgs8-seed.js';
 import { canonicalBookSeries, classKeyMatchesLevels, listStoreBrowse, publicStoreBrowseNav } from '../api/_lib/commerce-store-browse.js';
 import { notifyVendorWhatsAppForPaidOrder } from '../api/_lib/commerce-vendor-order-notify.js';
@@ -148,19 +155,19 @@ async function handleCatalog(op, body, actor) {
       .maybeSingle();
     if (error) throw error;
     const store_browse = publicStoreBrowseNav(data?.meta?.store_browse);
-    const settings = data
-      ? {
-          free_shipping_threshold_kurus: data.free_shipping_threshold_kurus,
-          default_shipping_kurus: data.default_shipping_kurus,
-          commerce_mode: data.commerce_mode,
-          student_store_enabled: data.student_store_enabled,
-        }
-      : data;
+    const iban_payment = resolveIbanAccount(data);
+    const settings = {
+      free_shipping_threshold_kurus: data?.free_shipping_threshold_kurus ?? COMMERCE_DEFAULT_SETTINGS.free_shipping_threshold_kurus,
+      default_shipping_kurus: data?.default_shipping_kurus ?? COMMERCE_DEFAULT_SETTINGS.default_shipping_kurus,
+      commerce_mode: data?.commerce_mode ?? COMMERCE_DEFAULT_SETTINGS.commerce_mode,
+      student_store_enabled: data?.student_store_enabled ?? COMMERCE_DEFAULT_SETTINGS.student_store_enabled,
+      iban_payment,
+    };
     return {
       ok: true,
       settings,
       store_browse,
-      deployMarker: 'kitap-package-autosum-2026-08-29',
+      deployMarker: 'kitap-iban-odeme-2026-08-29',
     };
   }
 
@@ -636,6 +643,10 @@ async function handleCart(op, body, actor) {
     return prepareCheckout(body, actor);
   }
 
+  if (op === 'cart.checkout_iban') {
+    return checkoutIban(body, actor);
+  }
+
   throw new Error(`Bilinmeyen operasyon: ${op}`);
 }
 
@@ -662,7 +673,7 @@ async function nextOrderNumber(prefix) {
   return `${p}-${year}-${seq}`;
 }
 
-async function prepareCheckout(body, actor) {
+async function prepareCheckout(body, actor, opts = {}) {
   if (!actor?.sub || actor.sub === 'anonymous') throw new Error('Ödeme için giriş gerekli');
   const userId = actor.sub;
   const cartId = await getOrCreateCart(userId);
@@ -794,6 +805,7 @@ async function prepareCheckout(body, actor) {
       coupon_id: couponId,
       coupon_code: couponCode,
       payment_status: 'pending',
+      ...(opts.orderPatch || {}),
     })
     .select('id, order_number, total_kurus, subtotal_kurus, shipping_kurus, discount_kurus')
     .single();
@@ -845,14 +857,29 @@ async function prepareCheckout(body, actor) {
   if (itemsErr) throw itemsErr;
 
   const paymentRef = paymentRefFromOrderId(order.id);
+  const provider = String(opts.provider || 'paytr').toLowerCase();
   await supabaseAdmin.from('commerce_payments').insert({
     order_id: order.id,
-    provider: 'paytr',
+    provider,
     provider_order_id: paymentRef,
     amount_kurus: total,
     status: 'pending',
     idempotency_key: `prep-${order.id}`,
   });
+
+  if (opts.skipRedirect) {
+    return {
+      ok: true,
+      payment_ref: paymentRef,
+      order_id: order.id,
+      order_number: order.order_number,
+      total_kurus: order.total_kurus,
+      subtotal_kurus: order.subtotal_kurus,
+      shipping_kurus: order.shipping_kurus,
+      discount_kurus: order.discount_kurus,
+      user_id: userId,
+    };
+  }
 
   const token = signCheckoutToken({
     orderId: order.id,
@@ -876,6 +903,162 @@ async function prepareCheckout(body, actor) {
     shipping_kurus: order.shipping_kurus,
     discount_kurus: order.discount_kurus,
     checkout_url: `${checkoutBase.replace(/\/$/, '')}?token=${encodeURIComponent(token)}`,
+  };
+}
+
+async function uploadIbanReceipt(orderId, receipt) {
+  const path = `receipts/${orderId}/dekont-${Date.now()}.${receipt.ext}`;
+  const { error: upErr } = await supabaseAdmin.storage
+    .from('commerce-vendor-assets')
+    .upload(path, receipt.buffer, { contentType: receipt.mime, upsert: true, cacheControl: '31536000' });
+  if (upErr) throw new Error(`Dekont yüklenemedi: ${upErr.message}`);
+  const { data: pub } = supabaseAdmin.storage.from('commerce-vendor-assets').getPublicUrl(path);
+  const url = pub?.publicUrl;
+  if (!url) throw new Error('Dekont adresi alınamadı');
+  return { url, path };
+}
+
+async function fulfillPaidOrder(order, { provider = 'paytr', ref = null, raw = null } = {}) {
+  if (order.payment_status === 'paid') {
+    return { ok: true, already_paid: true, order_id: order.id, order_number: order.order_number };
+  }
+  const now = new Date().toISOString();
+  const patch = {
+    status: 'paid',
+    payment_status: 'paid',
+    paid_at: now,
+    updated_at: now,
+  };
+  if (provider === 'garanti') patch.garanti_order_id = ref;
+  if (raw?.order_notes) patch.notes = raw.order_notes;
+
+  const { error: upErr } = await supabaseAdmin.from('commerce_orders').update(patch).eq('id', order.id);
+  if (upErr) throw upErr;
+
+  await supabaseAdmin
+    .from('commerce_payments')
+    .update({
+      status: 'paid',
+      provider,
+      provider_order_id: ref || null,
+      paid_at: now,
+      updated_at: now,
+      raw_response: raw || null,
+    })
+    .eq('order_id', order.id);
+
+  const { data: orderItems } = await supabaseAdmin
+    .from('commerce_order_items')
+    .select('vendor_offer_id, quantity')
+    .eq('order_id', order.id);
+  for (const it of orderItems || []) {
+    if (!it.vendor_offer_id) continue;
+    const { data: offer } = await supabaseAdmin
+      .from('commerce_vendor_offers')
+      .select('stock_quantity')
+      .eq('id', it.vendor_offer_id)
+      .maybeSingle();
+    if (!offer) continue;
+    const next = Math.max(0, (offer.stock_quantity || 0) - it.quantity);
+    await supabaseAdmin
+      .from('commerce_vendor_offers')
+      .update({ stock_quantity: next, updated_at: now })
+      .eq('id', it.vendor_offer_id);
+  }
+
+  if (order.user_id) {
+    const { data: cart } = await supabaseAdmin
+      .from('commerce_carts')
+      .select('id')
+      .eq('user_id', order.user_id)
+      .maybeSingle();
+    if (cart?.id) await supabaseAdmin.from('commerce_cart_items').delete().eq('cart_id', cart.id);
+  }
+
+  await supabaseAdmin
+    .from('commerce_vendor_orders')
+    .update({ status: 'confirmed', updated_at: now })
+    .eq('order_id', order.id)
+    .eq('status', 'pending');
+
+  let vendor_whatsapp = null;
+  try {
+    vendor_whatsapp = await notifyVendorWhatsAppForPaidOrder(order.id);
+  } catch (e) {
+    console.warn('[commerce-store] vendor whatsapp failed', e?.message || e);
+    vendor_whatsapp = { ok: false, error: e?.message || 'whatsapp_failed' };
+  }
+
+  return { ok: true, order_id: order.id, order_number: order.order_number, vendor_whatsapp };
+}
+
+async function checkoutIban(body, actor) {
+  const settings = await loadCommerceSettings();
+  const account = resolveIbanAccount(settings);
+  if (!account.enabled) throw new Error('IBAN ile ödeme şu an kapalı');
+  const receipt = parseIbanReceipt(body);
+
+  const { data: userRow } = await supabaseAdmin
+    .from('users')
+    .select('name, email')
+    .eq('id', actor.sub)
+    .maybeSingle();
+
+  const notes = `IBAN havale · ${account.holder} · ${formatIbanDisplay(account.iban)} · dekont yüklendi`;
+  const prepared = await prepareCheckout(body, actor, {
+    provider: 'iban',
+    skipRedirect: true,
+    orderPatch: {
+      customer_name: String(body.customer_name || userRow?.name || '').trim() || null,
+      customer_email: String(body.customer_email || userRow?.email || '').trim() || null,
+      customer_phone: String(body.customer_phone || '').trim() || null,
+      notes,
+    },
+  });
+
+  let uploaded;
+  try {
+    uploaded = await uploadIbanReceipt(prepared.order_id, receipt);
+  } catch (e) {
+    const now = new Date().toISOString();
+    await supabaseAdmin
+      .from('commerce_orders')
+      .update({ status: 'cancelled', payment_status: 'failed', cancelled_at: now, updated_at: now })
+      .eq('id', prepared.order_id);
+    throw e;
+  }
+
+  const paid = await fulfillPaidOrder(
+    {
+      id: prepared.order_id,
+      user_id: prepared.user_id,
+      payment_status: 'pending',
+      order_number: prepared.order_number,
+    },
+    {
+      provider: 'iban',
+      ref: prepared.payment_ref,
+      raw: {
+        method: 'iban',
+        holder: account.holder,
+        iban: account.iban,
+        note: account.note,
+        receipt_url: uploaded.url,
+        receipt_path: uploaded.path,
+        order_notes: notes,
+      },
+    }
+  );
+
+  return {
+    ok: true,
+    payment_method: 'iban',
+    order_id: prepared.order_id,
+    order_number: prepared.order_number,
+    total_kurus: prepared.total_kurus,
+    receipt_url: uploaded.url,
+    iban_payment: account,
+    already_paid: paid.already_paid || false,
   };
 }
 
@@ -1060,85 +1243,16 @@ async function handleCheckout(op, body, req) {
       .single();
     if (error || !order) throw new Error('Sipariş bulunamadı');
 
-    if (order.payment_status === 'paid') {
-      return { ok: true, already_paid: true, order_id: order.id, order_number: order.order_number };
-    }
-
     const amount = Number(body.amount_kurus);
     if (Number.isFinite(amount) && amount > 0 && amount !== order.total_kurus) {
       console.warn('[commerce-store] order.paid amount mismatch', amount, order.total_kurus);
     }
 
-    const provider = String(body.provider || 'paytr').toLowerCase();
-    const now = new Date().toISOString();
-    const patch = {
-      status: 'paid',
-      payment_status: 'paid',
-      paid_at: now,
-      updated_at: now,
-    };
-    if (provider === 'garanti') patch.garanti_order_id = ref;
-
-    const { error: upErr } = await supabaseAdmin.from('commerce_orders').update(patch).eq('id', order.id);
-    if (upErr) throw upErr;
-
-    await supabaseAdmin
-      .from('commerce_payments')
-      .update({
-        status: 'paid',
-        provider,
-        provider_order_id: ref || null,
-        paid_at: now,
-        updated_at: now,
-        raw_response: body.raw || null,
-      })
-      .eq('order_id', order.id);
-
-    // Stok düş
-    const { data: orderItems } = await supabaseAdmin
-      .from('commerce_order_items')
-      .select('vendor_offer_id, quantity')
-      .eq('order_id', order.id);
-    for (const it of orderItems || []) {
-      if (!it.vendor_offer_id) continue;
-      const { data: offer } = await supabaseAdmin
-        .from('commerce_vendor_offers')
-        .select('stock_quantity')
-        .eq('id', it.vendor_offer_id)
-        .maybeSingle();
-      if (!offer) continue;
-      const next = Math.max(0, (offer.stock_quantity || 0) - it.quantity);
-      await supabaseAdmin
-        .from('commerce_vendor_offers')
-        .update({ stock_quantity: next, updated_at: now })
-        .eq('id', it.vendor_offer_id);
-    }
-
-    // Sepeti temizle
-    if (order.user_id) {
-      const { data: cart } = await supabaseAdmin
-        .from('commerce_carts')
-        .select('id')
-        .eq('user_id', order.user_id)
-        .maybeSingle();
-      if (cart?.id) await supabaseAdmin.from('commerce_cart_items').delete().eq('cart_id', cart.id);
-    }
-
-    await supabaseAdmin
-      .from('commerce_vendor_orders')
-      .update({ status: 'confirmed', updated_at: now })
-      .eq('order_id', order.id)
-      .eq('status', 'pending');
-
-    let vendor_whatsapp = null;
-    try {
-      vendor_whatsapp = await notifyVendorWhatsAppForPaidOrder(order.id);
-    } catch (e) {
-      console.warn('[commerce-store] vendor whatsapp failed', e?.message || e);
-      vendor_whatsapp = { ok: false, error: e?.message || 'whatsapp_failed' };
-    }
-
-    return { ok: true, order_id: order.id, order_number: order.order_number, vendor_whatsapp };
+    return fulfillPaidOrder(order, {
+      provider: String(body.provider || 'paytr').toLowerCase(),
+      ref,
+      raw: body.raw || null,
+    });
   }
 
   throw new Error(`Bilinmeyen operasyon: ${op}`);
@@ -1459,7 +1573,16 @@ async function handleStaff(op, body, actor) {
       }))
     );
     if (itemErr) throw itemErr;
-    return { ok: true, item_count: bookIds.length };
+    const summed = sumUniqueBookOfferPrices(offers);
+    let price_kurus = null;
+    if (body.auto_sum === true && summed > 0) {
+      await supabaseAdmin
+        .from('commerce_book_packages')
+        .update({ price_kurus: summed, updated_at: new Date().toISOString(), updated_by: actor.sub })
+        .eq('id', id);
+      price_kurus = summed;
+    }
+    return { ok: true, item_count: bookIds.length, price_kurus, auto_summed: body.auto_sum === true };
   }
 
   throw new Error(`Bilinmeyen operasyon: ${op}`);
@@ -1561,7 +1684,7 @@ export default async function handler(req, res) {
   } catch (e) {
     console.error('[commerce-store]', e?.message || e, e?.details || '');
     const msg = e?.message || 'sunucu_hatası';
-    if (/Yetkisiz|Yetki yok|giriş gerekli|öğrenci bulunamadı|book_id|pakete|paket id|name gerekli|Geçersiz|süresi dolmuş|bulunamadı|yeterli stok|Sepet boş|yapılandırılmamış|Veli|e-posta|telefon|karakter|PayTR|Garanti|token|ödeme|Sipariş|kupon|Kupon|indirim/i.test(msg)) {
+    if (/Yetkisiz|Yetki yok|giriş gerekli|öğrenci bulunamadı|book_id|pakete|paket id|name gerekli|Geçersiz|süresi dolmuş|bulunamadı|yeterli stok|Sepet boş|yapılandırılmamış|Veli|e-posta|telefon|karakter|PayTR|Garanti|token|ödeme|Sipariş|kupon|Kupon|indirim|Dekont|IBAN|havale/i.test(msg)) {
       const status = /Yetkisiz|giriş gerekli/i.test(msg) ? 401 : 400;
       return err(res, status, msg);
     }
