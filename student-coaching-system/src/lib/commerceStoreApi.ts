@@ -166,7 +166,7 @@ export const csStaffCreatePackage = (params: {
   description?: string;
   price_kurus?: number;
 }) =>
-  post<{ package: CommerceBookPackage; item_count: number }>('staff.package_create', params);
+  post<{ package: CommerceBookPackage; item_count: number; price_kurus?: number; auto_summed?: boolean }>('staff.package_create', params);
 
 export const csStaffUpdatePackage = (params: {
   id: string;

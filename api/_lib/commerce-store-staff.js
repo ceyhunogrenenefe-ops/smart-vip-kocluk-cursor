@@ -92,6 +92,29 @@ export function sanitizePackagePriceKurus(value) {
   return Math.round(n);
 }
 
+/** Kitap başına en ucuz onaylı fiyat; fiyatsız kitaplar toplama girmez. */
+export function sumUniqueBookOfferPrices(offers = []) {
+  const best = new Map();
+  for (const o of offers || []) {
+    const bookId = String(o?.book_id || '').trim();
+    const price = Number(o?.price_kurus) || 0;
+    if (!bookId || price <= 0) continue;
+    const status = String(o?.status || 'approved').toLowerCase();
+    if (status !== 'approved') continue;
+    const prev = best.get(bookId);
+    if (prev == null || price < prev) best.set(bookId, price);
+  }
+  let total = 0;
+  for (const p of best.values()) total += p;
+  return total;
+}
+
+export function resolvePackagePriceKurus(requested, offers) {
+  const asked = sanitizePackagePriceKurus(requested);
+  if (asked > 0) return asked;
+  return sumUniqueBookOfferPrices(offers);
+}
+
 /** Personel paket güncelleme — boş fiyat “Fiyat yakında”. */
 export function buildPackageUpdatePatch(body, actorSub) {
   const patch = { updated_by: actorSub || null, updated_at: new Date().toISOString() };
