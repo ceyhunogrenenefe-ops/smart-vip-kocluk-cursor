@@ -9,9 +9,11 @@
  *  books.list | books.create | books.update
  *  offers.list | offers.get | offers.create | offers.update | offers.submit
  *  orders.list | orders.get | orders.accept | orders.preparing | orders.ship
+ *  orders.update | orders.delete
  *  shipments.create | shipments.update
  *  payouts.list
  *  stats.overview
+ *  deployMarker: kitapci-siparis-edit-2026-08-29
  */
 
 import { requireAuth } from '../api/_lib/auth.js';
@@ -19,6 +21,7 @@ import { actorRoleSet, roleSetHasSuperAdmin } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { attachOfferRelations, attachOfferRelationsList } from '../api/_lib/commerce-utils.js';
 import { withInferredSeriesMetadata } from '../api/_lib/commerce-store-browse.js';
+import { buildVendorOwnedOrderPatch, vendorStatusTimestamps } from '../api/_lib/commerce-vendor-orders.js';
 
 function err(res, status, message) {
   return res.status(status).json({ error: message });
@@ -310,7 +313,7 @@ export default async function handler(req, res) {
         .from('commerce_vendor_orders')
         .select(`
           *,
-          commerce_orders(id, order_number, customer_name, customer_phone, created_at, status),
+          commerce_orders(id, order_number, customer_name, customer_email, customer_phone, notes, created_at, status, payment_status),
           commerce_order_items(id, title_snapshot, quantity, unit_price_kurus),
           commerce_shipments(*)
         `)
@@ -321,7 +324,7 @@ export default async function handler(req, res) {
       q = q.limit(limit);
       const { data, error } = await q;
       if (error) throw error;
-      return res.status(200).json({ ok: true, vendor_orders: data });
+      return res.status(200).json({ ok: true, vendor_orders: data, deployMarker: 'kitapci-siparis-edit-2026-08-29' });
     }
 
     if (op === 'orders.get') {
@@ -395,6 +398,85 @@ export default async function handler(req, res) {
       ]);
       if (shipResult.error) throw shipResult.error;
       return res.status(200).json({ ok: true, shipment: shipResult.data });
+    }
+
+    if (op === 'orders.update') {
+      const { id } = body;
+      if (!id) return err(res, 400, 'id gerekli');
+      const { data: vo } = await supabaseAdmin
+        .from('commerce_vendor_orders')
+        .select('id, order_id, vendor_id, status')
+        .eq('id', id)
+        .eq('vendor_id', vendorId)
+        .maybeSingle();
+      if (!vo) return err(res, 400, 'Sipariş bulunamadı');
+      let parent;
+      let vendor;
+      try {
+        ({ parent, vendor } = buildVendorOwnedOrderPatch(body));
+      } catch (e) {
+        return err(res, 400, e.message);
+      }
+      const now = new Date().toISOString();
+      if (Object.keys(parent).length) {
+        const { error: pErr } = await supabaseAdmin
+          .from('commerce_orders')
+          .update({ ...parent, updated_at: now })
+          .eq('id', vo.order_id);
+        if (pErr) throw pErr;
+      }
+      if (Object.keys(vendor).length) {
+        const voPatch = {
+          ...vendor,
+          ...(vendor.status ? vendorStatusTimestamps(vendor.status, now) : {}),
+          updated_at: now,
+        };
+        const { error: vErr } = await supabaseAdmin
+          .from('commerce_vendor_orders')
+          .update(voPatch)
+          .eq('id', id)
+          .eq('vendor_id', vendorId);
+        if (vErr) throw vErr;
+      }
+      const { data: refreshed, error: gErr } = await supabaseAdmin
+        .from('commerce_vendor_orders')
+        .select(`
+          *,
+          commerce_orders(id, order_number, customer_name, customer_email, customer_phone, notes, created_at, status, payment_status),
+          commerce_order_items(id, title_snapshot, quantity, unit_price_kurus)
+        `)
+        .eq('id', id)
+        .single();
+      if (gErr) throw gErr;
+      return res.status(200).json({ ok: true, vendor_order: refreshed });
+    }
+
+    if (op === 'orders.delete') {
+      const { id } = body;
+      if (!id) return err(res, 400, 'id gerekli');
+      const { data: vo } = await supabaseAdmin
+        .from('commerce_vendor_orders')
+        .select('id, order_id, vendor_id')
+        .eq('id', id)
+        .eq('vendor_id', vendorId)
+        .maybeSingle();
+      if (!vo) return err(res, 400, 'Sipariş bulunamadı');
+      const orderId = vo.order_id;
+      const { count } = await supabaseAdmin
+        .from('commerce_vendor_orders')
+        .select('id', { count: 'exact', head: true })
+        .eq('order_id', orderId);
+      await supabaseAdmin.from('commerce_shipments').delete().eq('vendor_order_id', vo.id);
+      await supabaseAdmin.from('commerce_order_items').delete().eq('vendor_order_id', vo.id);
+      await supabaseAdmin.from('commerce_vendor_orders').delete().eq('id', vo.id).eq('vendor_id', vendorId);
+      if ((count || 0) <= 1) {
+        await supabaseAdmin.from('commerce_order_items').delete().eq('order_id', orderId);
+        await supabaseAdmin.from('commerce_order_addresses').delete().eq('order_id', orderId);
+        await supabaseAdmin.from('commerce_payments').delete().eq('order_id', orderId);
+        const { error: delErr } = await supabaseAdmin.from('commerce_orders').delete().eq('id', orderId);
+        if (delErr) throw delErr;
+      }
+      return res.status(200).json({ ok: true, deleted: true, order_id: orderId });
     }
 
     // ── Hakedişler (salt okuma) ───────────────
