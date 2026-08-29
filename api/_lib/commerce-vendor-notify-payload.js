@@ -7,13 +7,24 @@ import { formatCommerceTry } from './commerce-utils.js';
 export function vendorNotifyPhone(vendor) {
   if (!vendor || typeof vendor !== 'object') return null;
   const meta = vendor.meta && typeof vendor.meta === 'object' ? vendor.meta : {};
-  return (
+  const fromVendor =
     normalizePhoneToE164(vendor.contact_phone) ||
     normalizePhoneToE164(meta.whatsapp_phone) ||
-    normalizePhoneToE164(meta.yanki_whatsapp) ||
-    normalizePhoneToE164(process.env.COMMERCE_YANKI_WHATSAPP) ||
-    null
-  );
+    normalizePhoneToE164(meta.yanki_whatsapp);
+  if (fromVendor) return fromVendor;
+  const slug = String(vendor.slug || '').trim();
+  if (slug === 'yanki-kitapevi' || meta.use_yanki_whatsapp_env) {
+    return normalizePhoneToE164(process.env.COMMERCE_YANKI_WHATSAPP) || null;
+  }
+  return null;
+}
+
+export function vendorNotifyPaymentLabel(paymentMethod) {
+  const m = String(paymentMethod || '').trim().toLowerCase();
+  if (m === 'iban') return 'Ödeme: IBAN havale (ödendi)';
+  if (m === 'garanti') return 'Ödeme: Kredi kartı — Garanti (ödendi)';
+  if (m === 'paytr') return 'Ödeme: Kredi kartı — PayTR (ödendi)';
+  return 'Ödeme: Kredi kartı (ödendi)';
 }
 
 export function buildVendorOrderNotifyPayload({
@@ -36,7 +47,7 @@ export function buildVendorOrderNotifyPayload({
   const notes = [
     order?.order_number ? `Sipariş ${order.order_number}` : '',
     order?.total_kurus != null ? `Tutar ${formatCommerceTry(order.total_kurus)}` : '',
-    'Ödeme: Kredi kartı (ödendi)',
+    vendorNotifyPaymentLabel(order?.payment_method),
     vendor?.name ? `Satıcı: ${vendor.name}` : '',
     order?.notes || '',
   ]

@@ -983,7 +983,7 @@ async function fulfillPaidOrder(order, { provider = 'paytr', ref = null, raw = n
 
   let vendor_whatsapp = null;
   try {
-    vendor_whatsapp = await notifyVendorWhatsAppForPaidOrder(order.id);
+    vendor_whatsapp = await notifyVendorWhatsAppForPaidOrder(order.id, { paymentMethod: provider });
   } catch (e) {
     console.warn('[commerce-store] vendor whatsapp failed', e?.message || e);
     vendor_whatsapp = { ok: false, error: e?.message || 'whatsapp_failed' };
