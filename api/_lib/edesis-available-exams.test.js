@@ -1105,6 +1105,35 @@ describe('parseEdesisOgrenciSinavAssignmentResponse / grade compatibility', () =
     );
   });
 
+  it('does not hide LGS empty-roster exam when publisher gradeId differs from student gradeId', () => {
+    const exam = {
+      id: '1580678',
+      name: 'PARAF MİS LGS-2 İNTERAKTİF',
+      examType: 'LGS',
+      resultStatus: 'None',
+      examDate: '2026-08-29',
+      studentCount: 0,
+      gradeId: '999',
+      startDate: '2026-08-29T10:30:00',
+      endDate: '2026-09-14T13:50:00'
+    };
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [exam],
+      assignedCatalogRows: [exam],
+      resultRows: [],
+      edesisStudentId: '2086573',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      gradeName: '8',
+      studentGradeId: '8',
+      now: new Date('2026-08-29T08:45:00Z'),
+      requireExplicitAssignment: true
+    });
+    assert.deepEqual(
+      items.filter((x) => x.canTake).map((x) => x.examId),
+      ['1580678']
+    );
+  });
+
   it('reads grade from examType when title has no sınıf', () => {
     assert.equal(
       examCompatibleWithStudentGrade({ name: 'Origami', examType: '9 SINIF ORİGAMİ 125' }, '8'),
