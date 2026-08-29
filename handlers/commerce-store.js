@@ -18,7 +18,7 @@
  *  staff.package_update  — paket adı / kademe / fiyat
  *  staff.package_delete  — paketi sil (soft)
  *  staff.package_items_set — paket kitaplarını değiştir
- *  deployMarker: kitap-package-covers-2026-08-29
+ *  deployMarker: kitap-package-autosum-2026-08-29
  *  cart.get              — mevcut sepeti getir
  *  cart.add              — sepete ürün ekle
  *  cart.update           — adet güncelle
@@ -43,6 +43,7 @@ import {
   buildAssignmentInserts,
   buildPackageUpdatePatch,
   normalizeAssignmentType,
+  resolvePackagePriceKurus,
   slugifyPackageName,
   staffCanManageStore,
   uniqueIds
@@ -159,7 +160,7 @@ async function handleCatalog(op, body, actor) {
       ok: true,
       settings,
       store_browse,
-      deployMarker: 'kitap-package-covers-2026-08-29',
+      deployMarker: 'kitap-package-autosum-2026-08-29',
     };
   }
 
@@ -224,7 +225,7 @@ async function handleCatalog(op, body, actor) {
       ok: true,
       offers: filtered.slice(offset, offset + limit),
       total: filtered.length,
-      deployMarker: 'kitap-package-covers-2026-08-29'
+      deployMarker: 'kitap-package-autosum-2026-08-29'
     };
   }
 
@@ -332,7 +333,7 @@ async function handleCatalog(op, body, actor) {
 
   if (op === 'catalog.browse') {
     const browse = await listStoreBrowse();
-    return { ok: true, ...browse, deployMarker: 'kitap-package-covers-2026-08-29' };
+    return { ok: true, ...browse, deployMarker: 'kitap-package-autosum-2026-08-29' };
   }
 
   if (op === 'catalog.assigned') {
@@ -1328,7 +1329,13 @@ async function handleStaff(op, body, actor) {
     if (!name) throw new Error('name gerekli');
     const bookIds = uniqueIds(body.book_ids || []);
     if (!bookIds.length) throw new Error('pakete en az bir kitap ekleyin');
-    const priceKurus = sanitizeInt(body.price_kurus, 0);
+    const { data: offers } = await supabaseAdmin
+      .from('commerce_vendor_offers')
+      .select('id, book_id, price_kurus, stock_quantity, status')
+      .in('book_id', bookIds)
+      .eq('status', 'approved')
+      .is('deleted_at', null);
+    const priceKurus = resolvePackagePriceKurus(body.price_kurus, offers);
     const slugBase = slugifyPackageName(name) || `paket-${Date.now()}`;
     const slug = `${slugBase}-${String(Date.now()).slice(-6)}`;
     const { data: pkg, error } = await supabaseAdmin
@@ -1349,12 +1356,6 @@ async function handleStaff(op, body, actor) {
       .select()
       .single();
     if (error) throw error;
-    const { data: offers } = await supabaseAdmin
-      .from('commerce_vendor_offers')
-      .select('id, book_id, price_kurus, stock_quantity, status')
-      .in('book_id', bookIds)
-      .eq('status', 'approved')
-      .is('deleted_at', null);
     const offerByBook = {};
     for (const o of offers || []) {
       if (Number(o.price_kurus) > 0 && !offerByBook[o.book_id]) offerByBook[o.book_id] = o.id;
@@ -1370,7 +1371,7 @@ async function handleStaff(op, body, actor) {
       }))
     );
     if (itemErr) throw itemErr;
-    return { ok: true, package: pkg, item_count: bookIds.length };
+    return { ok: true, package: pkg, item_count: bookIds.length, price_kurus: priceKurus, auto_summed: !(Number(body.price_kurus) > 0) };
   }
 
   if (op === 'staff.package_update') {
