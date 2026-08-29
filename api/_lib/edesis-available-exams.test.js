@@ -2021,6 +2021,16 @@ describe('edesisExamTakeWindowOpen', () => {
     );
   });
 
+  it('treats naive GetSinavForView clock as Istanbul, not UTC', () => {
+    const exam = {
+      id: 1580678,
+      startDate: '2026-08-29T10:30:00',
+      endDate: '2026-09-14T13:50:00'
+    };
+    assert.equal(edesisExamTakeWindowOpen(exam, new Date('2026-08-29T08:00:00Z')), true);
+    assert.equal(edesisExamTakeWindowOpen(exam, new Date('2026-08-29T07:00:00Z')), false);
+  });
+
   it('does not hide when only examDate exists (that is not the take window)', () => {
     assert.equal(
       edesisExamTakeWindowOpen({ id: 1559901, examDate: '2026-08-14', sinavTarihi: '2026-08-14' }, now),
