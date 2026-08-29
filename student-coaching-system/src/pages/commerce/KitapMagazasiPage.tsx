@@ -518,15 +518,23 @@ function PackageEditModal({
     }
     setSaving(true);
     try {
-      await csStaffUpdatePackage({
+      const patch: Parameters<typeof csStaffUpdatePackage>[0] = {
         id: pkg.id,
         name: name.trim(),
         description: desc.trim() || null,
         class_level: classLevel || null,
-        price_kurus,
+      };
+      if (priceTlTrim) patch.price_kurus = price_kurus;
+      await csStaffUpdatePackage(patch);
+      const itemsRes = await csStaffSetPackageItems({
+        package_id: pkg.id,
+        book_ids: items.map((it) => it.id),
+        auto_sum: !priceTlTrim,
       });
-      await csStaffSetPackageItems({ package_id: pkg.id, book_ids: items.map((it) => it.id) });
-      toast.success('Paket güncellendi');
+      const summed = Number(itemsRes.price_kurus) || 0;
+      toast.success(summed > 0 && !priceTlTrim
+        ? `Paket güncellendi — ${formatCommerceTry(summed)}`
+        : 'Paket güncellendi');
       onSaved();
       onClose();
     } catch (e: unknown) {
@@ -584,8 +592,8 @@ function PackageEditModal({
             </select>
           </div>
           <div>
-            <label className="text-xs font-medium text-gray-500 mb-1 block">Paket fiyatı (₺) — boş = Fiyat yakında</label>
-            <input className="border rounded-lg px-3 py-2 text-sm w-full" inputMode="decimal" value={priceTl} onChange={(e) => setPriceTl(e.target.value)} placeholder="Yalnızca gerçek fiyat" />
+            <label className="text-xs font-medium text-gray-500 mb-1 block">Paket fiyatı (₺) — boş = kitapları otomatik topla</label>
+            <input className="border rounded-lg px-3 py-2 text-sm w-full" inputMode="decimal" value={priceTl} onChange={(e) => setPriceTl(e.target.value)} placeholder="Otomatik toplam" />
           </div>
           <div>
             <label className="text-xs font-medium text-gray-500 mb-1 block">Kitaplar ({items.length})</label>
