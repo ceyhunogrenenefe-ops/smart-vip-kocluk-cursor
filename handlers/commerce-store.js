@@ -15,7 +15,10 @@
  *  staff.roster          — sınıf/öğrenci listesi (öğretmen/koç/admin)
  *  staff.assign          — sınıfa veya kişiye kitap öner/ata
  *  staff.package_create  — sınıf paketi oluştur
- *  deployMarker: kitap-store-lgs-yks-2026-08-29
+ *  staff.package_update  — paket adı / kademe / fiyat
+ *  staff.package_delete  — paketi sil (soft)
+ *  staff.package_items_set — paket kitaplarını değiştir
+ *  deployMarker: kitap-package-edit-2026-08-29
  *  cart.get              — mevcut sepeti getir
  *  cart.add              — sepete ürün ekle
  *  cart.update           — adet güncelle
@@ -38,6 +41,7 @@ import { buildCatalogListRows, filterCatalogListRows } from '../api/_lib/commerc
 import {
   assignmentSourceFromRoles,
   buildAssignmentInserts,
+  buildPackageUpdatePatch,
   normalizeAssignmentType,
   slugifyPackageName,
   staffCanManageStore,
@@ -109,7 +113,7 @@ async function handleCatalog(op, body, actor) {
       ok: true,
       settings,
       store_browse,
-      deployMarker: 'kitap-store-lgs-yks-2026-08-29',
+      deployMarker: 'kitap-package-edit-2026-08-29',
     };
   }
 
@@ -174,7 +178,7 @@ async function handleCatalog(op, body, actor) {
       ok: true,
       offers: filtered.slice(offset, offset + limit),
       total: filtered.length,
-      deployMarker: 'kitap-store-lgs-yks-2026-08-29'
+      deployMarker: 'kitap-package-edit-2026-08-29'
     };
   }
 
@@ -210,7 +214,7 @@ async function handleCatalog(op, body, actor) {
         id, name, slug, description, class_level, program,
         price_kurus, compare_at_price_kurus, cover_image_url, sort_order,
         commerce_book_package_items(
-          id, quantity, is_required, sort_order,
+          id, book_id, quantity, is_required, sort_order,
           commerce_books(id, title, cover_image_url, author),
           commerce_vendor_offers(id, price_kurus, stock_quantity, status)
         )
@@ -219,11 +223,11 @@ async function handleCatalog(op, body, actor) {
       .is('deleted_at', null)
       .order('sort_order', { ascending: true });
     if (error) throw error;
+    let packages = data ?? [];
     if (body.class_level) {
-      const filtered = (data ?? []).filter((p) => !p.class_level || p.class_level === body.class_level);
-      return { ok: true, packages: filtered };
+      packages = packages.filter((p) => !p.class_level || classKeyMatchesLevels(body.class_level, [p.class_level]));
     }
-    return { ok: true, packages: data };
+    return { ok: true, packages };
   }
 
   if (op === 'catalog.collections') {
@@ -233,7 +237,7 @@ async function handleCatalog(op, body, actor) {
 
   if (op === 'catalog.browse') {
     const browse = await listStoreBrowse();
-    return { ok: true, ...browse, deployMarker: 'kitap-store-lgs-yks-2026-08-29' };
+    return { ok: true, ...browse, deployMarker: 'kitap-package-edit-2026-08-29' };
   }
 
   if (op === 'catalog.assigned') {
@@ -1218,6 +1222,94 @@ async function handleStaff(op, body, actor) {
     return { ok: true, package: pkg, item_count: bookIds.length };
   }
 
+  if (op === 'staff.package_update') {
+    const id = String(body.id || body.package_id || '').trim();
+    if (!id) throw new Error('paket id gerekli');
+    const { data: existing, error: findErr } = await supabaseAdmin
+      .from('commerce_book_packages')
+      .select('id, institution_id')
+      .eq('id', id)
+      .is('deleted_at', null)
+      .maybeSingle();
+    if (findErr) throw findErr;
+    if (!existing) throw new Error('paket bulunamadı');
+    if (institutionId && existing.institution_id && existing.institution_id !== institutionId && !roleSet.has('super_admin')) {
+      throw new Error('Yetki yok');
+    }
+    const patch = buildPackageUpdatePatch(body, actor.sub);
+    const { data: pkg, error } = await supabaseAdmin
+      .from('commerce_book_packages')
+      .update(patch)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return { ok: true, package: pkg };
+  }
+
+  if (op === 'staff.package_delete') {
+    const id = String(body.id || body.package_id || '').trim();
+    if (!id) throw new Error('paket id gerekli');
+    const { data: existing, error: findErr } = await supabaseAdmin
+      .from('commerce_book_packages')
+      .select('id, institution_id')
+      .eq('id', id)
+      .is('deleted_at', null)
+      .maybeSingle();
+    if (findErr) throw findErr;
+    if (!existing) throw new Error('paket bulunamadı');
+    if (institutionId && existing.institution_id && existing.institution_id !== institutionId && !roleSet.has('super_admin')) {
+      throw new Error('Yetki yok');
+    }
+    const { error } = await supabaseAdmin
+      .from('commerce_book_packages')
+      .update({ deleted_at: new Date().toISOString(), updated_by: actor.sub, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) throw error;
+    return { ok: true };
+  }
+
+  if (op === 'staff.package_items_set') {
+    const id = String(body.package_id || body.id || '').trim();
+    if (!id) throw new Error('paket id gerekli');
+    const bookIds = uniqueIds(body.book_ids || []);
+    if (!bookIds.length) throw new Error('pakete en az bir kitap ekleyin');
+    const { data: existing, error: findErr } = await supabaseAdmin
+      .from('commerce_book_packages')
+      .select('id, institution_id')
+      .eq('id', id)
+      .is('deleted_at', null)
+      .maybeSingle();
+    if (findErr) throw findErr;
+    if (!existing) throw new Error('paket bulunamadı');
+    if (institutionId && existing.institution_id && existing.institution_id !== institutionId && !roleSet.has('super_admin')) {
+      throw new Error('Yetki yok');
+    }
+    const { data: offers } = await supabaseAdmin
+      .from('commerce_vendor_offers')
+      .select('id, book_id, price_kurus, stock_quantity, status')
+      .in('book_id', bookIds)
+      .eq('status', 'approved')
+      .is('deleted_at', null);
+    const offerByBook = {};
+    for (const o of offers || []) {
+      if (Number(o.price_kurus) > 0 && !offerByBook[o.book_id]) offerByBook[o.book_id] = o.id;
+    }
+    await supabaseAdmin.from('commerce_book_package_items').delete().eq('package_id', id);
+    const { error: itemErr } = await supabaseAdmin.from('commerce_book_package_items').insert(
+      bookIds.map((book_id, idx) => ({
+        package_id: id,
+        book_id,
+        vendor_offer_id: offerByBook[book_id] || null,
+        quantity: 1,
+        is_required: true,
+        sort_order: idx
+      }))
+    );
+    if (itemErr) throw itemErr;
+    return { ok: true, item_count: bookIds.length };
+  }
+
   throw new Error(`Bilinmeyen operasyon: ${op}`);
 }
 
@@ -1315,7 +1407,7 @@ export default async function handler(req, res) {
   } catch (e) {
     console.error('[commerce-store]', e?.message || e);
     const msg = e?.message || 'sunucu_hatası';
-    if (/Yetkisiz|Yetki yok|giriş gerekli|öğrenci bulunamadı|book_id|pakete|name gerekli|Geçersiz|süresi dolmuş|bulunamadı|yeterli stok|Sepet boş|yapılandırılmamış|Veli|e-posta|telefon|karakter|PayTR|Garanti|token|ödeme|Sipariş|kupon|Kupon|indirim/i.test(msg)) {
+    if (/Yetkisiz|Yetki yok|giriş gerekli|öğrenci bulunamadı|book_id|pakete|paket id|name gerekli|Geçersiz|süresi dolmuş|bulunamadı|yeterli stok|Sepet boş|yapılandırılmamış|Veli|e-posta|telefon|karakter|PayTR|Garanti|token|ödeme|Sipariş|kupon|Kupon|indirim/i.test(msg)) {
       const status = /Yetkisiz|giriş gerekli/i.test(msg) ? 401 : 400;
       return err(res, status, msg);
     }
