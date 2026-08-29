@@ -356,5 +356,5 @@ export async function listStoreBrowse() {
     };
   });
 
-  return { classes: classRows, categories, deployMarker: 'kitap-store-lgs-yks-2026-08-29' };
+  return { classes: classRows, categories, deployMarker: 'kitap-package-edit-2026-08-29' };
 }
