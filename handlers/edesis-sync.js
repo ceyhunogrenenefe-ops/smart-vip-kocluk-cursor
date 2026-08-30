@@ -82,7 +82,7 @@ import { enrollPlatformStudentsBatch, EDESIS_AUTO_ENROLL_MARKER, EDESIS_AUTO_ENR
 
 const STAFF = new Set(['super_admin', 'admin', 'coach']);
 const EDESIS_PDF_DURATION_MARKER = 'edesis-pdf-duration-2026-08-27';
-const EDESIS_ASSIGNED_ONLY_MARKER = 'edesis-open-takeable-2026-08-30';
+const EDESIS_ASSIGNED_ONLY_MARKER = 'edesis-open-eligible-2026-08-30';
 /** Aynı Hobby instance’ta üst üste op=sync 504 üretmesin */
 let syncInFlight = null;
 /** Öğrencinin kendi Edesis sonuç / karne / sınava giriş ops */

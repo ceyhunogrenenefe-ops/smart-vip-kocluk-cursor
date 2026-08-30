@@ -56,6 +56,7 @@ import {
   examResultRowsAssignStudent,
   examRosterIncludesStudent,
   shouldOfferOpenCatalogExamAfterRoster,
+  isStudentEligibleOpenCatalogExam,
   trustEdesisStudentCatalogList,
   looksLikePersonalExamList,
   resolveEdesisFileUrl,
@@ -1100,8 +1101,47 @@ describe('parseEdesisOgrenciSinavAssignmentResponse / grade compatibility', () =
       shouldOfferOpenCatalogExamAfterRoster(exam, { roster: ['2086573'], edesisStudentId: '2086573' }),
       true
     );
+    // Probe yok: yalnız katalog boş kadroya güven
     assert.equal(
       shouldOfferOpenCatalogExamAfterRoster(exam, { roster: null, edesisStudentId: '2086573' }),
+      false
+    );
+    assert.equal(
+      shouldOfferOpenCatalogExamAfterRoster(
+        { ...exam, studentCount: 0 },
+        { roster: null, edesisStudentId: '2086573' }
+      ),
+      true
+    );
+  });
+
+  it('thin open online stays eligible when classmates already started (no ogrenciIds lock)', () => {
+    const exam = {
+      id: '1580678',
+      name: 'PARAF MİS LGS-2',
+      examType: 'LGS',
+      resultStatus: 'Ready',
+      studentCount: 4
+    };
+    assert.equal(
+      isStudentEligibleOpenCatalogExam(exam, {
+        roster: ['111', '222', '333', '444'],
+        edesisStudentId: '2086573'
+      }),
+      true
+    );
+    assert.equal(
+      isStudentEligibleOpenCatalogExam(
+        { ...exam, studentIds: [111, 222] },
+        { roster: ['111', '222'], edesisStudentId: '2086573' }
+      ),
+      false
+    );
+    assert.equal(
+      isStudentEligibleOpenCatalogExam(
+        { ...exam, studentCount: 26 },
+        { roster: ['111'], edesisStudentId: '2086573' }
+      ),
       false
     );
   });
