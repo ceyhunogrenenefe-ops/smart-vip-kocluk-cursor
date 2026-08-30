@@ -5,6 +5,8 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import { normalizePhoneToE164 } from './phone-whatsapp.js';
 import { metaWhatsAppConfigured, parseMetaSendError } from './meta-whatsapp.js';
+import { fetchMetaTemplatesFromPhoneWaba, isMetaTemplateSendableStatus } from './meta-templates-sync.js';
+import { buildMetaTemplateCreatePayload, createOrReuseMetaMessageTemplate } from './meta-template-create.js';
 import { sendWhatsAppUsingTemplateRow } from './whatsapp-outbound.js';
 import { renderMessageTemplate } from './template-engine.js';
 import {
@@ -18,12 +20,31 @@ import {
 
 export const BOOK_ORDER_TEMPLATE_TYPE = 'kitap_siparis_bildirim';
 
+/** Onaya gönderilen yeni satıcı şablonu (tutar/IBAN yok). */
+export const BOOK_ORDER_SELLER_META_NAME = 'satici_siparis';
+
 export const BOOK_ORDER_META_NAME =
-  String(process.env.BOOK_ORDER_META_TEMPLATE_NAME || 'kitap_siparisi1').trim() || 'kitap_siparisi1';
+  String(process.env.BOOK_ORDER_META_TEMPLATE_NAME || BOOK_ORDER_SELLER_META_NAME).trim() ||
+  BOOK_ORDER_SELLER_META_NAME;
+
+export const BOOK_ORDER_LEGACY_META_NAME = 'kitap_siparisi1';
 
 export const BOOK_ORDER_META_LANGUAGE = 'tr';
 
-/** Meta şablon gövdesindeki sıra */
+/** Yeni satıcı şablonu — ücret/tutar yok */
+export const BOOK_ORDER_SELLER_BINDINGS = [
+  'veli_ad_soyad',
+  'ogrenci_ad_soyad',
+  'sinif',
+  'kitap_seti',
+  'telefon',
+  'adres',
+  'ilce',
+  'il',
+  'siparis_notu'
+];
+
+/** Eski kitap_siparisi1 (10 named param) */
 export const BOOK_ORDER_META_BINDINGS = [
   'veli_ad_soyad',
   'ogrenci_ad_soyad',
@@ -80,19 +101,49 @@ function isParamMismatch(errOrMsg) {
   return code === 132018 || code === 100 || msg.includes('132018') || msg.includes('parameter');
 }
 
-export function buildBookOrderTemplateRow() {
+export function buildBookOrderTemplateRow(opts = {}) {
+  const metaName = String(opts.metaName || BOOK_ORDER_SELLER_META_NAME).trim() || BOOK_ORDER_SELLER_META_NAME;
+  const legacy = metaName === BOOK_ORDER_LEGACY_META_NAME;
+  const bindings = legacy ? BOOK_ORDER_META_BINDINGS : BOOK_ORDER_SELLER_BINDINGS;
   return {
     type: BOOK_ORDER_TEMPLATE_TYPE,
-    name: 'Satıcı sipariş bildirimi (kitap_siparisi1)',
+    name: legacy ? 'kitap_siparisi1 (Meta)' : 'Satıcı sipariş bildirimi (satici_siparis)',
     content: BOOK_ORDER_TEMPLATE_CONTENT,
-    variables: BOOK_ORDER_META_BINDINGS,
-    twilio_variable_bindings: BOOK_ORDER_META_BINDINGS,
-    meta_template_name: BOOK_ORDER_META_NAME,
+    variables: bindings,
+    twilio_variable_bindings: bindings,
+    meta_template_name: metaName,
     meta_template_language: BOOK_ORDER_META_LANGUAGE,
     meta_named_body_parameters: true,
     channel: 'whatsapp',
     is_active: true,
-    whatsapp_template_status: 'APPROVED'
+    whatsapp_template_status: String(opts.status || 'PENDING').toUpperCase()
+  };
+}
+
+export async function submitSellerOrderMetaTemplate() {
+  const payload = buildMetaTemplateCreatePayload({
+    name: BOOK_ORDER_SELLER_META_NAME,
+    language: BOOK_ORDER_META_LANGUAGE,
+    category: 'UTILITY',
+    bodyText: BOOK_ORDER_TEMPLATE_CONTENT
+  });
+  return createOrReuseMetaMessageTemplate(payload);
+}
+
+export async function resolveBookOrderMetaSendTarget() {
+  const live = await fetchMetaTemplatesFromPhoneWaba(BOOK_ORDER_SELLER_META_NAME);
+  const approved = (live.matches || []).find((m) => isMetaTemplateSendableStatus(m.status));
+  if (approved) {
+    return {
+      name: BOOK_ORDER_SELLER_META_NAME,
+      language: approved.language || BOOK_ORDER_META_LANGUAGE,
+      bindings: BOOK_ORDER_SELLER_BINDINGS
+    };
+  }
+  return {
+    name: BOOK_ORDER_LEGACY_META_NAME,
+    language: BOOK_ORDER_META_LANGUAGE,
+    bindings: BOOK_ORDER_META_BINDINGS
   };
 }
 
@@ -185,9 +236,9 @@ export async function sendBookOrderViaGateway(phone, order, gatewaySessionId) {
   });
 }
 
-export async function upsertBookOrderTemplateDefaults() {
+export async function upsertBookOrderTemplateDefaults(opts = {}) {
   const now = new Date().toISOString();
-  const row = { ...buildBookOrderTemplateRow(), updated_at: now };
+  const row = { ...buildBookOrderTemplateRow(opts), updated_at: now };
   const { data, error } = await supabaseAdmin
     .from('message_templates')
     .upsert(row, { onConflict: 'type' })
@@ -198,24 +249,35 @@ export async function upsertBookOrderTemplateDefaults() {
 }
 
 export async function activateBookOrderMetaTemplate(opts = {}) {
-  const template = await upsertBookOrderTemplateDefaults();
+  let submitted = null;
+  try {
+    submitted = await submitSellerOrderMetaTemplate();
+  } catch (e) {
+    submitted = { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+  const status = submitted?.ok ? submitted.status : 'PENDING';
+  const template = await upsertBookOrderTemplateDefaults({
+    metaName: BOOK_ORDER_SELLER_META_NAME,
+    status
+  });
   const plan = bookOrderSendPlan(opts);
   const gateway = getGatewaySendEnvStatus();
   const sendVia = plan.tryGateway ? 'gateway' : plan.tryMeta ? 'meta_cloud_api' : 'none';
   return {
-    ok: true,
+    ok: Boolean(submitted?.ok || plan.metaReady),
     template,
-    sync_warning: null,
+    submitted,
+    sync_warning: submitted?.ok ? null : submitted?.error || null,
     meta_configured: plan.metaReady,
     channel: sendVia,
     send_via: sendVia,
     send_plan: plan,
     gateway,
     gateway_session_id: bookOrderGatewaySessionId() || null,
-    meta_template_name: BOOK_ORDER_META_NAME,
+    meta_template_name: BOOK_ORDER_SELLER_META_NAME,
     meta_template_language: BOOK_ORDER_META_LANGUAGE,
     meta_named_body_parameters: true,
-    bindings: BOOK_ORDER_META_BINDINGS
+    bindings: BOOK_ORDER_SELLER_BINDINGS
   };
 }
 
@@ -300,7 +362,14 @@ export async function sendBookOrderMetaWhatsApp(phone, order) {
   await upsertBookOrderTemplateDefaults().catch(() => {});
 
   const vars = buildBookOrderTemplateVars(order);
-  const namedRow = buildBookOrderTemplateRow();
+  const target = await resolveBookOrderMetaSendTarget();
+  const namedRow = {
+    ...buildBookOrderTemplateRow({ metaName: target.name, status: 'APPROVED' }),
+    meta_template_name: target.name,
+    meta_template_language: target.language,
+    variables: target.bindings,
+    twilio_variable_bindings: target.bindings
+  };
 
   let sent = await sendWhatsAppUsingTemplateRow({
     phone: e164,
