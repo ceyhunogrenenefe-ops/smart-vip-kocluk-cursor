@@ -2124,6 +2124,98 @@ describe('edesisExamTakeWindowOpen', () => {
     assert.equal(merged[0].endDate, '2026-08-20');
     assert.equal(edesisExamTakeWindowOpen(merged[0], now), false);
   });
+
+  it('does not append unassigned overlay exams onto the assigned list', () => {
+    const assigned = [
+      { id: 1559901, name: 'Atanan', resultStatus: 'None', studentIds: [2086573] }
+    ];
+    const overlay = [
+      { id: 1559901, startDate: '2026-08-10', endDate: '2026-09-30', resultStatus: 'None' },
+      {
+        id: 1580678,
+        name: 'PARAF MİS açık katalog',
+        resultStatus: 'None',
+        studentCount: 0,
+        startDate: '2026-08-29',
+        endDate: '2026-09-14'
+      }
+    ];
+    const merged = overlayCatalogExamsWithTakeWindows(assigned, overlay);
+    assert.deepEqual(
+      merged.map((r) => pickEdesisCatalogExamId(r)),
+      ['1559901']
+    );
+    assert.equal(merged[0].endDate, '2026-09-30');
+  });
+
+  it('empty-roster open catalog is not takeable unless assigned to the student', () => {
+    const open = {
+      id: '1580678',
+      name: 'PARAF MİS LGS-2',
+      examType: 'LGS',
+      resultStatus: 'None',
+      examDate: '2026-08-29',
+      studentCount: 0,
+      startDate: '2026-08-29T10:30:00',
+      endDate: '2026-09-14T13:50:00'
+    };
+    const assigned = {
+      id: '1559901',
+      name: 'VİP atanmış',
+      examType: 'LGS',
+      resultStatus: 'None',
+      examDate: '2026-08-28',
+      studentIds: [2086573],
+      startDate: '2026-08-20T00:00:00',
+      endDate: '2026-09-30T23:59:59'
+    };
+    const merged = overlayCatalogExamsWithTakeWindows([assigned], [assigned, open]);
+    assert.deepEqual(
+      merged.map((r) => pickEdesisCatalogExamId(r)),
+      ['1559901']
+    );
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [assigned, open],
+      assignedCatalogRows: merged,
+      resultRows: [],
+      edesisStudentId: '2086573',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      gradeName: '8',
+      now: new Date('2026-08-29T08:45:00Z'),
+      requireExplicitAssignment: true
+    });
+    assert.deepEqual(
+      items.filter((x) => x.canTake).map((x) => x.examId),
+      ['1559901']
+    );
+  });
+
+  it('assigned exam with a current take window stays takeable', () => {
+    const assigned = {
+      id: '1579103',
+      name: 'LİMİT LGS-1',
+      examType: 'LGS',
+      resultStatus: 'None',
+      examDate: '2026-08-25',
+      studentIds: [2086573],
+      startDate: '2026-08-20T00:00:00',
+      endDate: '2026-09-30T23:59:59'
+    };
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [assigned],
+      assignedCatalogRows: [assigned],
+      resultRows: [],
+      edesisStudentId: '2086573',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      gradeName: '8',
+      now,
+      requireExplicitAssignment: true
+    });
+    assert.deepEqual(
+      items.filter((x) => x.canTake).map((x) => x.examId),
+      ['1579103']
+    );
+  });
 });
 
 describe('edesisResultHiddenFromStudent', () => {
