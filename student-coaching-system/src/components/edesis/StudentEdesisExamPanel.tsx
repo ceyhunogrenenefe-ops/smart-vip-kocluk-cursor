@@ -87,6 +87,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
   const [loading, setLoading] = useState(true);
   const [exams, setExams] = useState<EdesisStudentResultsExam[]>([]);
   const [available, setAvailable] = useState<EdesisAvailableExam[]>([]);
+  const [expired, setExpired] = useState<EdesisAvailableExam[]>([]);
   const [edesisStudentId, setEdesisStudentId] = useState('');
   const [hint, setHint] = useState<string | null>(null);
   const [karneBusyKey, setKarneBusyKey] = useState<string | null>(null);
@@ -124,16 +125,25 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
     if (!studentId) {
       setLoading(false);
       setHint('Öğrenci kartınız bulunamadı. Çıkış yapıp tekrar giriş yapın.');
+      setAvailable([]);
+      setExpired([]);
+      setExams([]);
+      setActiveExam(null);
       return { exams: [] as EdesisStudentResultsExam[], available: [] as EdesisAvailableExam[] };
     }
     setLoading(true);
     setHint(null);
+    setAvailable([]);
+    setExpired([]);
+    setExams([]);
+    setActiveExam(null);
     let nextExams: EdesisStudentResultsExam[] = [];
     let nextAvailable: EdesisAvailableExam[] = [];
     try {
       const catalog = await fetchEdesisAvailableExams({ studentId });
       nextAvailable = catalog.items || [];
       setAvailable(nextAvailable);
+      setExpired(Array.isArray(catalog.expired) ? catalog.expired : []);
       if (catalog.edesisStudentId) setEdesisStudentId(catalog.edesisStudentId);
       if (Array.isArray(catalog.taken)) {
         nextExams = catalog.taken;
@@ -145,6 +155,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
     } catch (e) {
       setExams([]);
       setAvailable([]);
+      setExpired([]);
       const msg = e instanceof Error ? e.message : 'Sınav listesi alınamadı';
       setHint(msg);
       toast.error(msg);
@@ -663,10 +674,27 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
                 Girilecek deneme kalmadı. Girdiğiniz sınavlar Sonuçlarım ve Analizlerim sekmelerinde.
               </p>
             ) : null}
-            {!available.length && !hint ? (
+            {!available.length && !expired.length && !hint ? (
               <p className="rounded-3xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-600 xl:col-span-2">
                 Edesis’te size atanmış açık deneme yok. Koçunuz Edesis’te denemeyi size tanımladıktan sonra burada görünür.
               </p>
+            ) : null}
+            {expired.length ? (
+              <div className="xl:col-span-2 space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Süresi dolmuş tanımlı denemeler</p>
+                {expired.map((exam) => (
+                  <div
+                    key={`expired-${exam.examId}`}
+                    className="rounded-3xl border border-slate-200 bg-slate-50/90 p-5 text-sm text-slate-600"
+                  >
+                    <div className="font-semibold text-slate-800">{exam.name}</div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {exam.examDate ? new Date(exam.examDate).toLocaleDateString('tr-TR') : '—'}
+                      {' · giriş penceresi kapandı — Sonuçlarım / Analizlerim’de durur'}
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : null}
           </div>
       ) : view === 'analysis' ? (

@@ -480,6 +480,7 @@ export type EdesisAvailableExam = {
   hasStudentResult: boolean;
   studentNet: number | null;
   canTake: boolean;
+  listStatus?: 'takeable' | 'expired' | 'completed' | 'blocked';
   remainingSeconds?: number;
   bookletPdfs?: EdesisBookletPdf[];
 };
@@ -589,6 +590,8 @@ export async function fetchEdesisAvailableExams(params: {
   edesisStudentId: string;
   count: number;
   items: EdesisAvailableExam[];
+  expired?: EdesisAvailableExam[];
+  expiredCount?: number;
   taken?: EdesisStudentResultsExam[];
   takenCount?: number;
   scope?: string;
