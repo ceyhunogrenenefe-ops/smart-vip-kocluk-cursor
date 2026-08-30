@@ -632,6 +632,25 @@ export type EdesisStudentDossier = {
   assignmentMeta?: Record<string, unknown>;
 };
 
+/** v1.5 §7.6 — GET /exams/{id}/results/lessons|subjects?studentId= */
+export async function fetchEdesisExamBreakdown(params: {
+  examId: string;
+  kind: 'lessons' | 'subjects';
+  studentId?: string;
+  edesisStudentId?: string;
+}): Promise<{ ok: boolean; examId: string; edesisStudentId?: string | null; count: number; items: Record<string, unknown>[] }> {
+  const qs = new URLSearchParams({
+    op: params.kind === 'subjects' ? 'exam-results-subjects' : 'exam-results-lessons',
+    examId: params.examId
+  });
+  if (params.studentId) qs.set('studentId', params.studentId);
+  if (params.edesisStudentId) qs.set('edesisStudentId', params.edesisStudentId);
+  const res = await apiFetch(`/api/edesis-sync?${qs.toString()}`);
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || j.hint || j.message || res.statusText);
+  return j;
+}
+
 export async function fetchEdesisStudentDossier(params: {
   studentId?: string;
   edesisStudentId?: string;

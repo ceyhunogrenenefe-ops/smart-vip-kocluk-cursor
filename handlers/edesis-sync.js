@@ -96,7 +96,9 @@ const STUDENT_ALLOWED_OPS = new Set([
   'exam-booklet-pdf',
   'available-exams',
   'submit-exam',
-  'ingest-status'
+  'ingest-status',
+  'exam-results-lessons',
+  'exam-results-subjects'
 ]);
 
 function actorIsStudent(actor, tags) {
@@ -1760,19 +1762,41 @@ export default async function handler(req, res) {
     }
 
     if (op === 'exam-results-lessons' || op === 'exam-results-subjects') {
-      if (!isStaff) return res.status(403).json({ error: 'forbidden' });
       const examId = String(req.query?.examId || req.body?.examId || '').trim();
       if (!examId) return res.status(400).json({ error: 'examId_required' });
       const cfg = getEdesisConfig();
       if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
-      const studentId = String(req.query?.edesisStudentId || req.query?.studentId || req.body?.edesisStudentId || '').trim();
+      let edesisStudentId = String(
+        req.query?.edesisStudentId || req.body?.edesisStudentId || ''
+      ).trim();
+      const platformStudentId = String(req.query?.studentId || req.body?.studentId || '').trim();
+      if (!edesisStudentId && platformStudentId) {
+        const resolved = await resolveEdesisIdForPlatformStudent(platformStudentId, actor, tags);
+        edesisStudentId = resolved.edesisStudentId || '';
+      }
+      if (isStudent && !isStaff) {
+        if (!edesisStudentId) {
+          return res.status(400).json({
+            error: 'edesis_student_id_missing',
+            hint: 'Kırılım için Edesis öğrenci eşlemesi gerekli'
+          });
+        }
+      }
       const fetchFn = op === 'exam-results-lessons' ? fetchEdesisExamResultsLessons : fetchEdesisExamResultsSubjects;
-      const result = await fetchFn(examId, { studentId: studentId || undefined }, cfg);
+      const result = await fetchFn(
+        examId,
+        { studentId: edesisStudentId || undefined },
+        cfg
+      );
+      const rows = (result.rows || []).filter((row) =>
+        !edesisStudentId || resultRowBelongsToStudent(row, edesisStudentId)
+      );
       return res.status(200).json({
         ok: true,
         examId,
-        count: result.totalCount,
-        items: result.rows || []
+        edesisStudentId: edesisStudentId || null,
+        count: rows.length,
+        items: rows
       });
     }
 
