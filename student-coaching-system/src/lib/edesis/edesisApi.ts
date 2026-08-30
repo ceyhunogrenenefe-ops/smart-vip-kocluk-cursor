@@ -491,7 +491,10 @@ export type EdesisIngestJob = {
   message?: string | null;
 };
 
-export async function fetchEdesisExamStructure(examId: string): Promise<{
+export async function fetchEdesisExamStructure(
+  examId: string,
+  opts?: { studentId?: string }
+): Promise<{
   ok: boolean;
   examId: string;
   count: number;
@@ -509,6 +512,7 @@ export async function fetchEdesisExamStructure(examId: string): Promise<{
   examType?: string;
 }> {
   const qs = new URLSearchParams({ op: 'exam-structure', examId });
+  if (opts?.studentId) qs.set('studentId', opts.studentId);
   const res = await apiFetch(`/api/edesis-sync?${qs.toString()}`);
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j.error || j.message || j.hint || res.statusText);
