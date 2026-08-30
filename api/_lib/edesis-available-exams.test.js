@@ -1945,13 +1945,24 @@ describe('listEdesisBookletCodes', () => {
     assert.deepEqual(codes, ['A']);
   });
 
-  it('falls back to A-D when nothing is known', () => {
-    assert.deepEqual(listEdesisBookletCodes({ rows: [], booklets: [], answerKeyBookletCodes: [] }), [
-      'A',
-      'B',
-      'C',
-      'D'
-    ]);
+  it('falls back to A only when nothing is known — does not invent B-C-D', () => {
+    assert.deepEqual(listEdesisBookletCodes({ rows: [], booklets: [], answerKeyBookletCodes: [] }), ['A']);
+  });
+
+  it('allows B from /structure rows even when answer-key dump omitted B', () => {
+    const structure = {
+      rows: [
+        { kitapcikTuru: 'A', lessonId: 1, dersGrupId: 1, questionCount: 10 },
+        { kitapcikTuru: 'B', lessonId: 1, dersGrupId: 1, questionCount: 10 }
+      ],
+      booklets: [
+        { kitapcikTuru: 'A', lessons: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 1, questionCount: 10 }] },
+        { kitapcikTuru: 'B', lessons: [{ kitapcikTuru: 'B', lessonId: 1, dersGrupId: 1, questionCount: 10 }] }
+      ],
+      answerKeyBookletCodes: ['A']
+    };
+    assert.deepEqual(listEdesisBookletCodes(structure), ['A', 'B']);
+    assert.equal(kitapcikAllowedForExam(structure, 'B').ok, true);
   });
 });
 

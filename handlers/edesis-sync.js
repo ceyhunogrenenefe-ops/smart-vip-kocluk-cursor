@@ -1595,6 +1595,37 @@ export default async function handler(req, res) {
       if (!examId) return res.status(400).json({ error: 'examId_required' });
       const cfg = getEdesisConfig();
       if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
+      if (isStudent && !isStaff) {
+        let edesisStudentId = String(
+          req.query?.edesisStudentId || req.body?.edesisStudentId || studentSelf?.edesis_ogrenci_id || ''
+        ).trim();
+        const platformStudentId = String(req.query?.studentId || req.body?.studentId || studentSelf?.id || '').trim();
+        if (!edesisStudentId && platformStudentId) {
+          const resolved = await resolveEdesisIdForPlatformStudent(platformStudentId, actor, tags);
+          edesisStudentId = resolved.edesisStudentId || '';
+        }
+        if (!edesisStudentId) {
+          return res.status(400).json({
+            error: 'edesis_student_id_missing',
+            hint: 'Sınav yapısı için Edesis öğrenci eşlemesi gerekli'
+          });
+        }
+        const loaded = await loadAvailableEdesisExamsForStudent({
+          edesisStudentId,
+          platformStudentId,
+          actor,
+          studentHint: studentSelf,
+          cfg
+        });
+        const assignedIdSet = new Set((loaded.meta?.assignedExamIds || []).map((id) => String(id)));
+        const takeableIdSet = new Set((loaded.items || []).map((ex) => String(ex.examId)));
+        if (!assignedIdSet.has(examId) && !takeableIdSet.has(examId)) {
+          return res.status(403).json({
+            error: 'exam_not_assigned',
+            hint: 'Bu deneme size tanımlanmamış'
+          });
+        }
+      }
       const structure = await fetchEdesisExamStructure(examId, cfg);
       if (structure.error && !structure.rows?.length) {
         return res.status(structure.httpStatus && structure.httpStatus >= 400 ? structure.httpStatus : 502).json({
@@ -1688,7 +1719,9 @@ export default async function handler(req, res) {
         return res.status(200).json({
           ok: false,
           error: 'booklet_pdf_missing',
-          hint: 'Bu sınav için kitapçık PDF’si Edesis’te bulunamadı',
+          hint: kitapcikTuru
+            ? `${String(kitapcikTuru).toUpperCase()} kitapçığı PDF’si Edesis’te bulunamadı — optiği yine doldurabilirsiniz`
+            : 'Bu sınav için kitapçık PDF’si Edesis’te bulunamadı',
           files,
           denemeId: pdf.denemeId || null,
           attempts: Array.isArray(pdf.attempts) ? pdf.attempts.slice(0, 25) : []
@@ -1698,7 +1731,9 @@ export default async function handler(req, res) {
         return res.status(404).json({
           ok: false,
           error: 'booklet_pdf_missing',
-          hint: 'Bu sınav için kitapçık PDF’si Edesis’te bulunamadı',
+          hint: kitapcikTuru
+            ? `${String(kitapcikTuru).toUpperCase()} kitapçığı PDF’si Edesis’te bulunamadı — optiği yine doldurabilirsiniz`
+            : 'Bu sınav için kitapçık PDF’si Edesis’te bulunamadı',
           files,
           denemeId: pdf.denemeId || null,
           attempts: Array.isArray(pdf.attempts) ? pdf.attempts.slice(0, 25) : []
@@ -2117,8 +2152,8 @@ export default async function handler(req, res) {
           results: [
             {
               ogrenciId: Number(edesisStudentId),
-              kitapcikTuru,
-              ...(kitapcikTuruSay ? { kitapcikTuruSay } : {}),
+              kitapcikTuru: kitapcikNorm,
+              ...(kitapcikTuruSay ? { kitapcikTuruSay: normalizeKitapcikCode(kitapcikTuruSay) || kitapcikTuruSay } : {}),
               dersCevaplari
             }
           ]

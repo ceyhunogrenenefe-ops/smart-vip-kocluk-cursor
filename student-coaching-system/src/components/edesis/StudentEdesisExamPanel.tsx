@@ -249,7 +249,11 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             /* sonraki dosya */
           }
         }
-        setPdfError('Bu sınav için kitapçık PDF’si bulunamadı');
+        setPdfError(
+          kitapcik
+            ? `${String(kitapcik).toUpperCase()} kitapçığı PDF’si Edesis’te bulunamadı — optiği yine doldurabilirsiniz`
+            : 'Bu sınav için kitapçık PDF’si bulunamadı — optiği yine doldurabilirsiniz'
+        );
       } catch (e) {
         if (cancelled) return;
         const retries = candidateUrls([...bookletPdfs, ...(activeExam.bookletPdfs || [])]);
@@ -294,7 +298,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
     }
     setStructureBusy(true);
     try {
-      const r = await fetchEdesisExamStructure(exam.examId);
+      const r = await fetchEdesisExamStructure(exam.examId, { studentId });
       const books = r.booklets || [];
       const sharedLessons = books[0]?.lessons || r.items || [];
       if (!sharedLessons.length) {
@@ -310,14 +314,26 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
           )].sort();
         const fromApi = letters(r.availableBookletCodes);
         const fromKeys = letters(r.answerKeyBookletCodes);
-        const merged = [...new Set([...fromApi, ...fromKeys])].sort();
+        const fromBooks = letters(books.map((b) => b.kitapcikTuru));
+        const fromItems = letters((r.items || []).map((row) => row.kitapcikTuru));
+        const merged = [...new Set([...fromApi, ...fromKeys, ...fromBooks, ...fromItems])].sort();
         if (merged.length) return merged;
-        return ['A', 'B', 'C', 'D'];
+        return ['A'];
       })();
-      const booksForUi = uniqueCodes.map((code) => ({
-        kitapcikTuru: code,
-        lessons: sharedLessons
-      }));
+      const booksForUi = uniqueCodes.map((code) => {
+        const hit = books.find(
+          (b) => String(b.kitapcikTuru || '').trim().toUpperCase() === code
+        );
+        const own = (hit?.lessons || []).length
+          ? hit!.lessons
+          : (r.items || []).filter(
+              (row) => String(row.kitapcikTuru || '').trim().toUpperCase() === code
+            );
+        return {
+          kitapcikTuru: code,
+          lessons: own.length ? own : sharedLessons
+        };
+      });
       const nameType = `${exam.name || ''} ${exam.examType || ''} ${r.examTitle || ''} ${r.examType || ''}`;
       const family =
         r.examFamily && r.examFamily !== 'generic'
@@ -517,7 +533,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             bookletMode={bookletMode}
             choiceCount={choiceCount}
             remainingSeconds={remainingSeconds}
-            storageKey={`edesis-optic:${studentId}:${activeExam.examId}`}
+            storageKey={`edesis-optic:${studentId}:${activeExam.examId}:${kitapcik || 'A'}`}
             busy={submitBusy}
             submitLabel="Bitir"
             pdfUrl={pdfUrl}

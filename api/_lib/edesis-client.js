@@ -3094,7 +3094,8 @@ export function listEdesisBookletCodes(structure) {
     codes.add(c);
   }
   if (codes.size) return [...codes].sort();
-  return ['A', 'B', 'C', 'D'];
+  // Hardcoded A–D B’yi uydurup ingest 422 / “kitapçık bulunamadı” üretmesin
+  return ['A'];
 }
 
 /** Denemede var, bu sınav oturumunun structure/ingest’inde yok */
@@ -3112,7 +3113,14 @@ export function kitapcikAllowedForExam(structure, kitapcikTuru) {
   const want = normalizeKitapcikCode(kitapcikTuru);
   const available = listEdesisBookletCodes(structure);
   if (!want) return { ok: false, available };
-  return { ok: available.includes(want), available };
+  if (available.includes(want)) return { ok: true, available };
+  const matched = pickEdesisBookletLessons(structure, want);
+  const hasOwnRows = (structure?.rows || []).some((r) => kitapcikCodesMatch(r.kitapcikTuru, want));
+  const hasOwnBook = (structure?.booklets || []).some((b) => kitapcikCodesMatch(b.kitapcikTuru, want));
+  if ((hasOwnRows || hasOwnBook) && matched.length) {
+    return { ok: true, available: [...new Set([...available, want])].sort() };
+  }
+  return { ok: false, available };
 }
 
 function extractBookletCodesFromBookletsEndpoint(json) {
@@ -4851,10 +4859,10 @@ function normalizeIngestLessonAnswer(item) {
 
 function normalizeIngestResultRow(row) {
   const out = {
-    kitapcikTuru: String(row?.kitapcikTuru || '').trim(),
+    kitapcikTuru: normalizeKitapcikCode(row?.kitapcikTuru) || String(row?.kitapcikTuru || '').trim().toUpperCase(),
     dersCevaplari: Array.isArray(row?.dersCevaplari) ? row.dersCevaplari.map(normalizeIngestLessonAnswer) : []
   };
-  const kitapcikTuruSay = String(row?.kitapcikTuruSay || '').trim();
+  const kitapcikTuruSay = normalizeKitapcikCode(row?.kitapcikTuruSay) || String(row?.kitapcikTuruSay || '').trim().toUpperCase();
   if (kitapcikTuruSay) out.kitapcikTuruSay = kitapcikTuruSay;
   const ogrenciId = toEdesisInt(row?.ogrenciId ?? row?.studentId);
   const okulNumarasi = toEdesisInt(row?.okulNumarasi);
