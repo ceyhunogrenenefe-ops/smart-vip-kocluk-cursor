@@ -13,7 +13,7 @@
  *  vendors.ensure_yanki
  *  orders.list | orders.get | orders.update | orders.update_status | orders.delete
  *  orders.sync_whatsapp_template
- *  deployMarker: kitapci-wa-satici-sablon-2026-08-30
+ *  deployMarker: meta-template-submit-2026-08-30
  *  vendor_orders.list | vendor_orders.update_status
  *  shipments.list | shipments.get | shipments.create | shipments.update
  *  payouts.list | payouts.get | payouts.create | payouts.approve | payouts.mark_paid
@@ -741,14 +741,17 @@ async function handleOrders(op, body) {
     const activated = await activateBookOrderMetaTemplate();
     return {
       ok: true,
-      deployMarker: 'kitapci-wa-satici-sablon-2026-08-30',
+      deployMarker: 'meta-template-submit-2026-08-30',
       template: {
         name: activated.meta_template_name,
         language: activated.meta_template_language,
         is_active: activated.template?.is_active !== false,
         channel: activated.channel,
         meta_configured: Boolean(activated.meta_configured),
+        status: activated.submitted?.status || activated.template?.whatsapp_template_status || null,
       },
+      submitted: activated.submitted || null,
+      sync_warning: activated.sync_warning || null,
     };
   }
 
