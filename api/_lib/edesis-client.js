@@ -1518,14 +1518,39 @@ export function examRosterIncludesStudent(rosterIds, edesisStudentId) {
 /**
  * GetOgrenciBySinavId sonrası Sınava gir kararı.
  * Boş bilinen roster = kademe uyumlu kurumda açık deneme (GetSinavForView studentCount ezmesin).
- * Liste doluysa yalnız bu öğrenci varsa göster. Probe yoksa dökme.
+ * Liste doluysa yalnız bu öğrenci varsa göster.
+ * Probe yoksa (null): katalog studentCount===0 ise açık kabul et.
  */
 export function shouldOfferOpenCatalogExamAfterRoster(exam, { roster, edesisStudentId } = {}) {
   if (!exam) return false;
   const rosterKnown = Array.isArray(roster);
   if (examRosterIncludesStudent(rosterKnown ? roster : [], edesisStudentId)) return true;
-  if (!rosterKnown) return false;
+  if (!rosterKnown) return catalogExamStudentCount(exam) === 0;
   return roster.length === 0;
+}
+
+/**
+ * Açık online deneme uygunluğu (Sınava gir yedeği).
+ * - ogrenciIds başka öğrenciye kilitliyse hayır
+ * - öğrenci roster’da veya boş roster → evet
+ * - ogrenciIds yok + ince kadro (≤8) → evet (başkaları başlamış açık online)
+ * Fat Ready (24+) collect aşamasında elenir.
+ */
+export function isStudentEligibleOpenCatalogExam(
+  exam,
+  { roster, edesisStudentId = '', classroomId = '' } = {}
+) {
+  if (!exam) return false;
+  const scope = {
+    edesisStudentId,
+    classroomId,
+    requireStudentIdMatch: true
+  };
+  const assigned = catalogExamAssignedToStudent(exam, scope);
+  if (assigned === false) return false;
+  if (assigned === true) return true;
+  if (shouldOfferOpenCatalogExamAfterRoster(exam, { roster, edesisStudentId })) return true;
+  return catalogExamStudentCount(exam) <= THIN_ONLINE_ROSTER_MAX;
 }
 
 /** GetOgrenciSinavIds çıktısını katalog satırlarına eşle (ogrenciIds alanı olmasa da) */
@@ -2505,13 +2530,21 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
       const { startRaw, endRaw } = pickEdesisExamTakeWindow(merged);
       // Penceresiz Ready = eski kurum sonucu; yeni online None/Processing veya tarihli pencere.
       if (!startRaw && !endRaw) {
-        if (!/^(none|processing|pending)$/i.test(catalogResultStatus(merged))) continue;
-        if (!isRecentByExamDate(merged, nowOpen, 21)) continue;
+        const st = catalogResultStatus(merged);
+        if (/^(none|processing|pending)$/i.test(st)) {
+          if (!isRecentByExamDate(merged, nowOpen, 21)) continue;
+        } else if (/^ready$/i.test(st)) {
+          // GetSinavForView penceresi gelmezse: yeni Ready ince online (≤14g)
+          if (!isRecentByExamDate(merged, nowOpen, 14)) continue;
+        } else {
+          continue;
+        }
       }
       if (
-        !shouldOfferOpenCatalogExamAfterRoster(merged, {
+        !isStudentEligibleOpenCatalogExam(merged, {
           roster: rosters[j],
-          edesisStudentId
+          edesisStudentId,
+          classroomId
         })
       ) {
         continue;
