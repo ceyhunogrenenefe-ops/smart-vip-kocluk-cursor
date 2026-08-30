@@ -9,7 +9,8 @@ import {
   Info,
   Loader2,
   Radio,
-  Eye
+  Eye,
+  Send
 } from 'lucide-react';
 
 export interface MessageTemplateRow {
@@ -142,7 +143,8 @@ const TYPE_LABELS: Record<string, string> = {
   class_camera_off_notice: 'Yoklama — kamerası kapalı öğrenci (veli)',
   meeting_reminder: 'Görüşme hatırlatma (Meta: toplant_hatrlatma)',
   meeting_notification: 'Toplantı hatırlatma — Meta: toplant_hatrlatma (cron ~10 dk)',
-  class_lesson_reminder_legacy: 'Grup dersi hatırlatma'
+  class_lesson_reminder_legacy: 'Grup dersi hatırlatma',
+  kitap_siparis_bildirim: 'Satıcı kitap siparişi (Meta onaya gönderilir)'
 };
 
 export default function MessageTemplates() {
@@ -153,6 +155,7 @@ export default function MessageTemplates() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
+  const [submittingSeller, setSubmittingSeller] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, DraftRow>>({});
   const [logs, setLogs] = useState<MessageLogRow[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -302,6 +305,69 @@ export default function MessageTemplates() {
     }
   };
 
+  const submitToMeta = async (t: MessageTemplateRow) => {
+    setSyncingId(t.id);
+    setError(null);
+    try {
+      const res = await apiFetch('/api/message-templates', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'submit_meta_template', id: t.id })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(typeof j.error === 'string' ? j.error : 'Meta onaya gönderilemedi');
+        return;
+      }
+      const s = j.submitted as { status?: string; created?: boolean; reused?: boolean; name?: string } | undefined;
+      setSuccess(
+        [
+          s?.created ? 'Meta’ya eklendi ve onaya gönderildi' : s?.reused ? 'WABA’da zaten var' : 'Meta şablon işlendi',
+          s?.name ? `ad: ${s.name}` : '',
+          s?.status ? `durum: ${s.status}` : ''
+        ]
+          .filter(Boolean)
+          .join(' · ')
+      );
+      await load();
+      setTimeout(() => setSuccess(null), 8000);
+    } catch {
+      setError('Meta gönderim ağ hatası');
+    } finally {
+      setSyncingId(null);
+    }
+  };
+
+  const submitSellerTemplate = async () => {
+    setSubmittingSeller(true);
+    setError(null);
+    try {
+      const res = await apiFetch('/api/message-templates', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'submit_seller_order_template' })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(typeof j.error === 'string' ? j.error : 'Satıcı şablonu Meta’ya gönderilemedi');
+        return;
+      }
+      const s = j.submitted as { status?: string; created?: boolean; reused?: boolean; name?: string } | undefined;
+      setSuccess(
+        [
+          s?.created ? 'satici_siparis onaya gönderildi' : 'satici_siparis WABA’da mevcut',
+          s?.status ? `durum: ${s.status}` : ''
+        ]
+          .filter(Boolean)
+          .join(' · ')
+      );
+      await load();
+      setTimeout(() => setSuccess(null), 8000);
+    } catch {
+      setError('Satıcı şablonu ağ hatası');
+    } finally {
+      setSubmittingSeller(false);
+    }
+  };
+
   const syncAll = async () => {
     setSyncingAll(true);
     setError(null);
@@ -405,6 +471,15 @@ export default function MessageTemplates() {
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
+              onClick={() => void submitSellerTemplate()}
+              disabled={submittingSeller || loading}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white text-emerald-800 text-sm font-medium hover:bg-emerald-50 disabled:opacity-50"
+            >
+              {submittingSeller ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              Satıcı şablonunu onaya gönder
+            </button>
+            <button
+              type="button"
               onClick={() => void syncAll()}
               disabled={syncingAll || loading}
               className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/25 hover:bg-white/35 text-white text-sm font-medium disabled:opacity-50"
@@ -492,6 +567,14 @@ export default function MessageTemplates() {
                       className="px-2 py-1 rounded border border-teal-200 text-teal-800 hover:bg-teal-50 disabled:opacity-40"
                     >
                       {syncingId === t.id ? '…' : 'Durumu çek'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!String(t.content || '').trim() || syncingId === t.id}
+                      onClick={() => void submitToMeta(t)}
+                      className="px-2 py-1 rounded border border-emerald-300 text-emerald-800 hover:bg-emerald-50 disabled:opacity-40"
+                    >
+                      {syncingId === t.id ? '…' : 'Onaya gönder'}
                     </button>
                   </div>
                 </div>
