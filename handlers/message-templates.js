@@ -4,6 +4,8 @@ import { fetchAllMetaMessageTemplates, findMetaTemplateStatus, findMetaTemplates
 import { loadMetaWhatsAppSecretsFromDb } from '../api/_lib/meta-whatsapp.js';
 import { syncMessageTemplateRowFromPhoneWaba } from '../api/_lib/meta-template-import.js';
 import { buildTemplatePreview } from '../api/_lib/whatsapp-outbound.js';
+import { buildMetaTemplateCreatePayload, createOrReuseMetaMessageTemplate } from '../api/_lib/meta-template-create.js';
+import { submitSellerOrderMetaTemplate } from '../api/_lib/book-order-meta-send.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -272,6 +274,60 @@ export default async function handler(req, res) {
         template_count: diag.template_count,
         similar_names: diag.similar_names,
         hint
+      });
+    }
+
+    if (action === 'submit_seller_order_template') {
+      const submitted = await submitSellerOrderMetaTemplate();
+      return res.status(submitted.ok ? 200 : 400).json({
+        ok: submitted.ok,
+        deployMarker: 'meta-template-submit-2026-08-30',
+        submitted,
+        error: submitted.ok ? null : submitted.error,
+      });
+    }
+
+    if (action === 'submit_meta_template') {
+      const id = typeof body.id === 'string' ? body.id.trim() : '';
+      if (!id) return res.status(400).json({ error: 'id_required' });
+      const { data: row, error: oneErr } = await supabaseAdmin
+        .from('message_templates')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+      if (oneErr) return res.status(500).json({ error: oneErr.message });
+      if (!row) return res.status(404).json({ error: 'template_not_found' });
+      let payload;
+      try {
+        payload = buildMetaTemplateCreatePayload({
+          name: row.meta_template_name || row.type || row.name,
+          language: row.meta_template_language || 'tr',
+          category: 'UTILITY',
+          bodyText: row.content,
+        });
+      } catch (e) {
+        return res.status(400).json({ ok: false, error: e.message });
+      }
+      const submitted = await createOrReuseMetaMessageTemplate(payload);
+      if (submitted.ok) {
+        await supabaseAdmin
+          .from('message_templates')
+          .update({
+            meta_template_name: submitted.name,
+            meta_template_language: submitted.language || row.meta_template_language || 'tr',
+            meta_named_body_parameters: true,
+            whatsapp_template_status: submitted.status,
+            whatsapp_template_synced_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', row.id);
+      }
+      return res.status(submitted.ok ? 200 : 400).json({
+        ok: submitted.ok,
+        deployMarker: 'meta-template-submit-2026-08-30',
+        template_id: row.id,
+        submitted,
+        error: submitted.ok ? null : submitted.error,
       });
     }
 
