@@ -183,29 +183,37 @@ function ExamTimer({ remainingSeconds }: { remainingSeconds?: number | null }) {
 function KitapcikCircles({
   value,
   onChange,
-  codes
+  codes,
+  studio = false
 }: {
   value: string;
   onChange?: (code: string) => void;
   codes: string[];
+  studio?: boolean;
 }) {
   return (
-    <div className="flex items-center gap-1">
-      {codes.map((code) => (
-        <button
-          key={code}
-          type="button"
-          onClick={() => onChange?.(code)}
-          className={`h-8 w-8 rounded-full border text-sm font-bold ${
-            value === code
-              ? 'border-slate-800 bg-slate-800 text-white'
-              : 'border-slate-300 bg-slate-100 text-slate-500 hover:border-slate-500'
-          }`}
-          aria-label={`Kitapçık ${code}`}
-        >
-          {code}
-        </button>
-      ))}
+    <div className="flex items-center gap-1.5">
+      {codes.map((code) => {
+        const on = value === code;
+        return (
+          <button
+            key={code}
+            type="button"
+            onClick={() => onChange?.(code)}
+            aria-pressed={on}
+            className={`h-9 w-9 rounded-full border-2 text-sm font-bold shadow-sm ${
+              on
+                ? 'border-blue-700 bg-blue-600 text-white ring-2 ring-blue-300 ring-offset-2 ring-offset-slate-900'
+                : studio
+                  ? 'border-white bg-white text-slate-900 hover:border-blue-200 hover:bg-blue-50'
+                  : 'border-slate-500 bg-white text-slate-800 hover:border-blue-500 hover:bg-blue-50'
+            }`}
+            aria-label={`Kitapçık ${code}`}
+          >
+            {code}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -284,11 +292,28 @@ export default function EdesisOpticalSheet({
       .filter((c) => KITAPCIK_ORDER.includes(c));
     const unique = [...new Set(fromBooklets)];
     if (unique.length) return unique.sort();
-    return ['A', 'B', 'C', 'D'];
+    return ['A'];
   }, [availableBookletCodes, booklets]);
+  const kitapcikValueEarly = (() => {
+    const raw = String(kitapcik || '').trim().toUpperCase();
+    const codes = bookletCodes;
+    return codes.includes(raw) ? raw : codes[0] || 'A';
+  })();
+  const activeBookletLessons = useMemo(() => {
+    const want = kitapcikValueEarly;
+    const hit = (booklets || []).find(
+      (b) => String(b.kitapcikTuru || '').trim().toUpperCase() === want
+    );
+    if (hit?.lessons?.length) return hit.lessons;
+    const fromRows = (lessons || []).filter(
+      (row) => String(row.kitapcikTuru || '').trim().toUpperCase() === want
+    );
+    if (fromRows.length) return fromRows;
+    return lessons;
+  }, [booklets, lessons, kitapcikValueEarly]);
   const orderedLessons = useMemo(
-    () => sortOpticalLessonsByFamily(lessons, family === 'tyt' ? 'yks' : family),
-    [family, lessons]
+    () => sortOpticalLessonsByFamily(activeBookletLessons, family === 'tyt' ? 'yks' : family),
+    [family, activeBookletLessons]
   );
   const [answers, setAnswers] = useState<Record<string, string>>(() => readSaved(storageKey));
   const [savedFlash, setSavedFlash] = useState(false);
@@ -400,7 +425,7 @@ export default function EdesisOpticalSheet({
 
   const opticalAside = (
     <aside
-      className={`edesis-optic-aside flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-b border-slate-200 bg-white md:border-b-0 md:border-l ${
+      className={`edesis-optic-aside flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-b border-slate-300 bg-slate-50 md:border-b-0 md:border-l ${
         pdfWide && !studio ? 'hidden' : studio ? '' : 'w-full md:w-[22rem] md:min-w-[22rem] md:shrink-0'
       }`}
     >
@@ -413,14 +438,14 @@ export default function EdesisOpticalSheet({
               key={key}
               type="button"
               onClick={() => setActiveLessonKey(key)}
-              className={`rounded-md border px-1.5 py-1.5 text-left text-[10px] font-extrabold leading-tight tracking-wide ${
+              className={`rounded-md border-2 px-1.5 py-1.5 text-left text-[10px] font-extrabold leading-tight tracking-wide ${
                 on
-                  ? 'border-orange-500 bg-orange-50 text-orange-600'
-                  : 'border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+                  ? 'border-blue-700 bg-blue-600 text-white'
+                  : 'border-slate-400 bg-white text-slate-800 hover:border-blue-500 hover:bg-blue-50'
               }`}
             >
               {lessonTabLabel(lesson, tabPrefix)}
-              <span className="ml-1 font-semibold text-slate-400">
+              <span className={`ml-1 font-semibold ${on ? 'text-blue-100' : 'text-slate-600'}`}>
                 {marked}/{lesson.questionCount}
               </span>
             </button>
@@ -430,29 +455,30 @@ export default function EdesisOpticalSheet({
 
       {activeFilled ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="sticky top-0 border-b border-orange-100 bg-orange-50 px-3 py-2">
-            <div className="text-sm font-extrabold uppercase tracking-wide text-orange-600">
+          <div className="sticky top-0 border-b border-slate-300 bg-slate-800 px-3 py-2">
+            <div className="text-sm font-extrabold uppercase tracking-wide text-slate-100">
               {lessonTabLabel(activeFilled.lesson, tabPrefix)}
             </div>
-            <div className="text-xs font-semibold text-orange-800/80">{heading}</div>
+            <div className="text-xs font-semibold text-slate-200">{heading}</div>
           </div>
           <ol className="space-y-1 px-2 py-2">
             {Array.from({ length: activeFilled.lesson.questionCount }, (_, i) => {
               const selected =
                 activeFilled.cevaplar[i] && activeFilled.cevaplar[i] !== ' ' ? activeFilled.cevaplar[i] : '';
               return (
-                <li key={i} className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-slate-50">
-                  <span className="w-5 shrink-0 text-right text-xs font-bold text-slate-600">{i + 1}</span>
+                <li key={i} className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-slate-100">
+                  <span className="w-6 shrink-0 text-right text-xs font-extrabold text-slate-900">{i + 1}</span>
                   <div className="flex flex-wrap gap-0.5">
                     {choices.map((ch) => (
                       <button
                         key={ch}
                         type="button"
                         onClick={() => setChoice(activeFilled.lesson, i, ch)}
-                        className={`h-7 w-7 rounded-full border text-[11px] font-bold ${
+                        aria-pressed={selected === ch}
+                        className={`h-8 w-8 rounded-full border-2 text-[12px] font-bold ${
                           selected === ch
-                            ? 'border-emerald-600 bg-emerald-600 text-white'
-                            : 'border-orange-400 bg-white text-orange-500 hover:border-orange-600'
+                            ? 'border-emerald-800 bg-emerald-600 text-white ring-2 ring-emerald-300'
+                            : 'border-slate-500 bg-white text-slate-900 hover:border-blue-600 hover:bg-blue-50'
                         }`}
                         aria-label={`Soru ${i + 1} ${ch}`}
                       >
@@ -498,11 +524,12 @@ export default function EdesisOpticalSheet({
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className={`text-xs font-semibold ${studio ? 'text-slate-300' : 'text-slate-600'}`}>Sözel:</span>
-              <KitapcikCircles value={kitapcikValue} onChange={onKitapcikChange} codes={bookletCodes} />
+              <KitapcikCircles studio={studio} value={kitapcikValue} onChange={onKitapcikChange} codes={bookletCodes} />
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
               <span className={`text-xs font-semibold ${studio ? 'text-slate-300' : 'text-slate-600'}`}>Sayısal:</span>
               <KitapcikCircles
+                studio={studio}
                 value={sayisalValue}
                 onChange={onKitapcikSayisalChange}
                 codes={bookletCodes}
@@ -514,7 +541,7 @@ export default function EdesisOpticalSheet({
             <span className={`text-xs font-semibold ${studio ? 'text-slate-300' : 'text-slate-600'}`}>
               Kitapçık Türü:
             </span>
-            <KitapcikCircles value={kitapcikValue} onChange={onKitapcikChange} codes={bookletCodes} />
+            <KitapcikCircles studio={studio} value={kitapcikValue} onChange={onKitapcikChange} codes={bookletCodes} />
           </div>
         )}
         <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -528,7 +555,7 @@ export default function EdesisOpticalSheet({
           </button>
           <button
             type="button"
-            disabled={busy || !lessons.length}
+            disabled={busy || !orderedLessons.length}
             onClick={handleSubmit}
             className="inline-flex items-center gap-1.5 rounded-lg bg-rose-500 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
           >
