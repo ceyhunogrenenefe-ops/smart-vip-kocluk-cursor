@@ -2056,27 +2056,22 @@ export function mergeEdesisCatalogExamsById(...groups) {
   return [...map.values()];
 }
 
-/** GetSinavForView startDate/endDate mevcut atama satırının üzerine yazılsın. */
+/** GetSinavForView startDate/endDate yalnızca mevcut atama satırının üzerine yazılsın; yeni id eklenmez. */
 export function overlayCatalogExamsWithTakeWindows(assigned = [], windowedRows = []) {
   const byId = new Map();
   for (const ex of windowedRows || []) {
     const id = pickEdesisCatalogExamId(ex);
     if (id) byId.set(String(id), ex);
   }
-  const seen = new Set();
   const out = [];
   for (const ex of assigned || []) {
     const id = pickEdesisCatalogExamId(ex);
     const overlay = id ? byId.get(String(id)) : null;
     if (overlay) {
       out.push(mergeEdesisFilledObject(ex, overlay));
-      seen.add(String(id));
     } else {
       out.push(ex);
     }
-  }
-  for (const [id, ex] of byId) {
-    if (!seen.has(id)) out.push(ex);
   }
   return out;
 }
@@ -2460,46 +2455,8 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     assigned = overlayAssignedCatalogWithRaporViews(assigned, raporWithCatalog);
   }
 
-  const openCatalog = collectStudentTakeableOpenCatalogExams(catalogRows, {
-    programKeys,
-    gradeName,
-    now: new Date()
-  });
-  const openWithWindow = [];
-  for (let i = 0; i < openCatalog.length; i += 6) {
-    const batch = openCatalog.slice(i, i + 6);
-    const details = await Promise.all(
-      batch.map((ex) => fetchEdesisExamCatalogRowDetail(pickEdesisCatalogExamId(ex), cfgOverride))
-    );
-    const rosters = await Promise.all(
-      batch.map((ex) => fetchEdesisExamRosterStudentIds(pickEdesisCatalogExamId(ex), cfgOverride).catch(() => null))
-    );
-    for (let j = 0; j < batch.length; j += 1) {
-      const id = pickEdesisCatalogExamId(batch[j]);
-      const detail = details[j];
-      const merged = detail
-        ? mergeEdesisFilledObject(batch[j], mergeEdesisExamViewBody(detail, id) || detail)
-        : batch[j];
-      if (!edesisExamTakeWindowOpen(merged)) continue;
-      if (!examCompatibleWithStudentGrade(merged, gradeName, { allowLgsNeighbor: false })) continue;
-      // gradeId Edesis’te aynı kademenin farklı id’si olabiliyor (kitap denemesi vs şube);
-      // isim/tür filtresi yeterli. gradeId false-negative PARAF MİS’i gizliyordu.
-      if (
-        !shouldOfferOpenCatalogExamAfterRoster(merged, {
-          roster: rosters[j],
-          edesisStudentId
-        })
-      ) {
-        continue;
-      }
-      openWithWindow.push(merged);
-    }
-  }
-  if (openWithWindow.length) {
-    // İlk kazanan merge tarihleri düşürürdü: rapor/atama satırında startDate yok,
-    // GetSinavForView’de bitiş geçmiş olsa bile deneme Sınava gir’de kalırdı.
-    assigned = overlayCatalogExamsWithTakeWindows(assigned, openWithWindow);
-  }
+  // Açık/yayınlanmamış kurum kataloğu Sınava gir listesine eklenmez.
+  // Tarih penceresi yalnızca yukarıda toplanan atama id’lerine basılır.
 
   const missingWindowIds = [];
   const missingById = new Map();
@@ -2546,15 +2503,13 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
         .filter(Boolean)
         .slice(0, 40)
     },
-    openCatalogCount: openWithWindow.length,
-    openCatalogExamIds: openWithWindow.map((ex) => pickEdesisCatalogExamId(ex)).filter(Boolean).slice(0, 20),
+    openCatalogCount: 0,
+    openCatalogExamIds: [],
     probeSkipped: true,
-    probeSkipReason: openWithWindow.length
-      ? 'assigned_ids_and_open_none_catalog'
-      : raporAssigned.length
-        ? 'assigned_ids_and_classroom_rapor'
-        : 'assigned_ids_only',
-    probeCandidateCount: openCatalog.length
+    probeSkipReason: raporAssigned.length
+      ? 'assigned_ids_and_classroom_rapor'
+      : 'assigned_ids_only',
+    probeCandidateCount: 0
   };
 }
 
@@ -2570,8 +2525,10 @@ export function shouldOfferUntakenCatalogExam(exam, scope = {}, now = new Date()
   if (assigned === false) return false;
 
   if (scope.requireExplicitAssignment) {
+    // assignedCatalogOnly = satır zaten öğrenci atama listesinde (ogrenciIds / GetOgrenciSinavIds / rapor).
+    // assigned === false (başka öğrenciye tanımlı) yukarıda elendi.
     if (assigned === true || scope.assignedCatalogOnly) {
-      // Sınava gir: atanmış + açık. Ready ama yıllarca eski analiz kalıntısını gösterme.
+      // Sınava gir: atanmış + açık pencere. Ready ama yıllarca eski analiz kalıntısını gösterme.
       if (/^none$/i.test(catalogResultStatus(exam))) return true;
       const win = Number(scope.assignedTakeableWindowDays) || 120;
       if (!isRecentOpenCatalogExam(exam, now, win)) return false;
