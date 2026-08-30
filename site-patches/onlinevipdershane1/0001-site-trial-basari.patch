@@ -1,0 +1,1146 @@
+From 6dab670e98d4a9bb1058e12ef406ad1a70c4de85 Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Sun, 30 Aug 2026 13:29:21 +0000
+Subject: [PATCH] =?UTF-8?q?feat(site):=20h=C4=B1zl=C4=B1=20analiz=20popup,?=
+ =?UTF-8?q?=20sticky=20=C3=BCcretsiz=20deneme,=20mobil=20Ba=C5=9Far=C4=B1l?=
+ =?UTF-8?q?ar=C4=B1m=C4=B1z?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Analiz popup: 45sn → 18sn, scroll eşiği %60 → %40
+- Sol altta sticky ÜCRETSİZ DENEME (3 gün / WhatsApp deneme dersi)
+- Program ve anasayfa mobilde Başarılarımız chip (menü açmadan)
+- Canlıda olan wa-float / assessment asset’lerini repoya aldık
+---
+ assets/assessment-cta.js        | 118 ++++++++++++++++++++++++++++++++
+ assets/assessment.css           |  42 ++++++++++++
+ assets/callback-ui.js           |  88 ++++++++++++++++++++++++
+ assets/program-nav.css          |  27 ++++++++
+ assets/program-nav.js           |  12 ++++
+ assets/trial-float.css          | 109 +++++++++++++++++++++++++++++
+ assets/trial-float.js           |  40 +++++++++++
+ assets/wa-float.css             |  96 ++++++++++++++++++++++++++
+ assets/wa-float.js              |  37 ++++++++++
+ basarilarimiz.html              |   3 +
+ blog.html                       |   3 +
+ iletisim.html                   |   3 +
+ index.html                      |  14 +++-
+ kadromuz.html                   |   3 +
+ kariyer.html                    |   3 +
+ kayit.html                      |   3 +
+ ogretmenler.html                |   3 +
+ ozel-ders.html                  |   3 +
+ premium-paketler.html           |   3 +
+ programlar/gece-etutu.html      |   3 +
+ programlar/ilkokul.html         |   3 +
+ programlar/index.html           |   3 +
+ programlar/kamp-56.html         |   3 +
+ programlar/kamp-9-hazirlik.html |   3 +
+ programlar/kamp-910.html        |   3 +
+ programlar/kamp-lgs.html        |   3 +
+ programlar/kamp-maarif-tyt.html |   3 +
+ programlar/kamp-tyt.html        |   3 +
+ programlar/kamplar.html         |   3 +
+ programlar/kitap.html           |   3 +
+ programlar/lgs.html             |   3 +
+ programlar/lise.html            |   3 +
+ programlar/ortaokul.html        |   3 +
+ programlar/start.html           |   3 +
+ programlar/yazili.html          |   3 +
+ programlar/yks.html             |   3 +
+ sepet.html                      |   3 +
+ videolar.html                   |   3 +
+ 38 files changed, 666 insertions(+), 1 deletion(-)
+ create mode 100644 assets/assessment-cta.js
+ create mode 100644 assets/assessment.css
+ create mode 100644 assets/callback-ui.js
+ create mode 100644 assets/trial-float.css
+ create mode 100644 assets/trial-float.js
+ create mode 100644 assets/wa-float.css
+ create mode 100644 assets/wa-float.js
+
+diff --git a/assets/assessment-cta.js b/assets/assessment-cta.js
+new file mode 100644
+index 0000000..46e54dd
+--- /dev/null
++++ b/assets/assessment-cta.js
+@@ -0,0 +1,118 @@
++(function () {
++  var path = location.pathname.replace(/\\/g, '/');
++  if (/ucretsiz-ogrenci-analizi|analiz-sonucu|seviye-testi/.test(path)) return;
++  var href = path.indexOf('/programlar/') !== -1 ? '../ucretsiz-ogrenci-analizi.html' : '/ucretsiz-ogrenci-analizi.html';
++  try {
++    var q = new URLSearchParams(location.search);
++    if (q.get('utm_source')) {
++      sessionStorage.setItem('ovd_utm', JSON.stringify({
++        source: q.get('utm_source') || '',
++        medium: q.get('utm_medium') || '',
++        campaign: q.get('utm_campaign') || '',
++        content: q.get('utm_content') || '',
++      }));
++    }
++  } catch (e) {}
++  var POP_KEY = 'ovd_assess_popup_at';
++  var started = Date.now();
++  var shown = false;
++
++  function cssHref() {
++    return path.indexOf('/programlar/') !== -1 ? '../assets/assessment.css' : '/assets/assessment.css';
++  }
++
++  function loadCss() {
++    if (document.getElementById('ovd-assess-css')) return;
++    var l = document.createElement('link');
++    l.id = 'ovd-assess-css';
++    l.rel = 'stylesheet';
++    l.href = cssHref();
++    document.head.appendChild(l);
++  }
++
++  function track(event) {
++    if (window.OVD_ASSESS && OVD_ASSESS.track) return OVD_ASSESS.track(event);
++    if (typeof gtag === 'function') gtag('event', event, { event_category: 'assessment' });
++    fetch('/api/assessment', {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ op: 'event', event: event, page: location.pathname, device: innerWidth < 720 ? 'mobile' : 'desktop' }),
++      keepalive: true,
++    }).catch(function () {});
++  }
++
++  function canPopup() {
++    try {
++      var prev = Number(localStorage.getItem(POP_KEY) || 0);
++      return Date.now() - prev > 7 * 24 * 60 * 60 * 1000;
++    } catch (e) {
++      return true;
++    }
++  }
++
++  function markPopup() {
++    try { localStorage.setItem(POP_KEY, String(Date.now())); } catch (e) {}
++  }
++
++  function sticky() {
++    if (innerWidth >= 720) return;
++    loadCss();
++    document.body.classList.add('has-assess-sticky');
++    var bar = document.createElement('div');
++    bar.className = 'assess-sticky show';
++    bar.innerHTML = '<a href="' + href + '">Ücretsiz Analizi Başlat</a>';
++    document.body.appendChild(bar);
++  }
++
++  function popup() {
++    if (shown) return;
++    if (!canPopup()) return;
++    if (document.getElementById('welcomeModal')) return;
++    shown = true;
++    loadCss();
++    var wrap = document.createElement('div');
++    wrap.className = 'assess-popup';
++    wrap.setAttribute('role', 'dialog');
++    wrap.innerHTML =
++      '<div class="assess-popup-card">' +
++      '<h3>Eksikleri Tahmin Etmeyin, Birlikte Belirleyelim</h3>' +
++      '<p class="assess-lead">Öğrencinizin sınıfını ve mevcut durumunu öğrenelim; size özel akademik yol haritasını ücretsiz hazırlayalım.</p>' +
++      '<a class="assess-cta" style="display:block;text-align:center;text-decoration:none;margin-bottom:8px" href="' + href + '">Ücretsiz Analizi Başlat</a>' +
++      '<button type="button" class="assess-back" style="width:100%">Şimdi değil</button>' +
++      '</div>';
++    document.body.appendChild(wrap);
++    function close() {
++      wrap.classList.remove('open');
++    }
++    wrap.querySelector('.assess-back').addEventListener('click', close);
++    wrap.addEventListener('click', function (e) { if (e.target === wrap) close(); });
++    wrap.classList.add('open');
++    markPopup();
++    track('assessment_popup_view');
++  }
++
++  function onScrollMid() {
++    if (window.__ovdAssessMid) return;
++    var y = window.scrollY || document.documentElement.scrollTop;
++    var h = document.documentElement.scrollHeight - innerHeight;
++    // Masaüstünde daha erken: sayfanın ~%40’ına inince
++    if (h > 0 && y / h >= 0.4) {
++      window.__ovdAssessMid = true;
++      popup();
++    }
++  }
++
++  document.addEventListener('DOMContentLoaded', function () {
++    track('assessment_offer_view');
++    sticky();
++    // Masaüstü popup: 45sn → 18sn (daha erken teklif)
++    var POPUP_DELAY_MS = 18000;
++    setTimeout(function () {
++      if (Date.now() - started >= POPUP_DELAY_MS) popup();
++    }, POPUP_DELAY_MS);
++    document.addEventListener('scroll', onScrollMid, { passive: true });
++    document.addEventListener('mouseout', function (e) {
++      if (!e.relatedTarget && e.clientY < 8 && innerWidth >= 720) popup();
++    });
++  });
++})();
+diff --git a/assets/assessment.css b/assets/assessment.css
+new file mode 100644
+index 0000000..f19bf25
+--- /dev/null
++++ b/assets/assessment.css
+@@ -0,0 +1,42 @@
++.assess-wrap{max-width:720px;margin:0 auto;padding:28px 5% 96px}
++.assess-progress{height:8px;background:#eef2fb;border-radius:99px;overflow:hidden;margin:12px 0 8px}
++.assess-progress span{display:block;height:100%;background:linear-gradient(90deg,#1a3fad,#e8232a);width:0;transition:width .25s}
++.assess-meta{display:flex;justify-content:space-between;font-size:12px;font-weight:700;color:#6e6e73;margin-bottom:18px}
++.assess-card{background:#fff;border:1px solid #e5e5e7;border-radius:18px;padding:24px;box-shadow:0 10px 32px rgba(26,63,173,.06)}
++.assess-card h1,.assess-card h2{font-family:'Bricolage Grotesque',sans-serif;font-size:clamp(22px,4vw,30px);line-height:1.2;margin:0 0 10px}
++.assess-lead{color:#6e6e73;font-size:15px;margin:0 0 20px;line-height:1.6}
++.assess-opts{display:grid;gap:10px}
++.assess-opt{display:flex;align-items:center;gap:10px;border:2px solid #e5e5e7;border-radius:12px;padding:12px 14px;cursor:pointer;font-weight:700;font-size:14px;background:#fff}
++.assess-opt:hover,.assess-opt:focus-within{border-color:#1a3fad}
++.assess-opt input{accent-color:#1a3fad}
++.assess-opt.is-on{border-color:#1a3fad;background:#f4f7ff}
++.assess-field{margin-bottom:14px}
++.assess-field label{display:block;font-size:13px;font-weight:800;margin-bottom:6px}
++.assess-field input,.assess-field select,.assess-field textarea{width:100%;padding:12px 14px;border:1.5px solid #e5e5e7;border-radius:10px;font:inherit}
++.assess-field input:focus,.assess-field select:focus{outline:none;border-color:#1a3fad;box-shadow:0 0 0 3px rgba(26,63,173,.12)}
++.assess-nav{display:flex;gap:10px;margin-top:22px}
++.assess-nav button,.assess-cta{flex:1;border:none;border-radius:12px;padding:13px 16px;font:inherit;font-weight:800;cursor:pointer}
++.assess-back{background:#f5f5f7;color:#1a1f36}
++.assess-next,.assess-cta{background:#e8232a;color:#fff}
++.assess-next:disabled{opacity:.5;cursor:not-allowed}
++.assess-err{display:none;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;padding:10px 12px;border-radius:10px;font-size:13px;margin-bottom:12px}
++.assess-note{font-size:12px;color:#6e6e73;margin-top:10px}
++.assess-hp{position:absolute;left:-9999px;opacity:0;height:0}
++.score-grid{display:grid;gap:12px;margin:18px 0}
++.score-row{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;font-size:13px;font-weight:700}
++.score-bar{height:10px;background:#eef2fb;border-radius:99px;overflow:hidden;grid-column:1/-1}
++.score-bar>i{display:block;height:100%;background:#1a3fad}
++.radar-svg{width:100%;max-width:280px;margin:8px auto;display:block}
++.assess-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
++.assess-actions a{flex:1;min-width:200px;text-align:center;text-decoration:none;padding:13px 16px;border-radius:12px;font-weight:800}
++.btn-navy{background:#1a3fad;color:#fff}
++.btn-ghost{background:#fff;border:1.5px solid #e5e5e7;color:#1a1f36}
++.assess-sticky{position:fixed;left:0;right:0;bottom:0;z-index:350;display:none;padding:10px 16px calc(10px + env(safe-area-inset-bottom));background:rgba(255,255,255,.96);border-top:1px solid #e5e5e7}
++.assess-sticky a{display:block;text-align:center;background:#e8232a;color:#fff;padding:13px;border-radius:12px;font-weight:800;text-decoration:none}
++.assess-popup{position:fixed;inset:0;z-index:500;background:rgba(10,20,50,.45);display:none;align-items:flex-end;justify-content:center;padding:16px}
++.assess-popup.open{display:flex}
++.assess-popup-card{background:#fff;border-radius:18px;padding:22px;max-width:420px;width:100%;box-shadow:0 16px 48px rgba(0,0,0,.2)}
++.assess-popup-card h3{font-family:'Bricolage Grotesque',sans-serif;font-size:22px;margin:0 0 8px}
++@media(min-width:720px){.assess-popup{align-items:center}.assess-sticky{display:none!important}}
++@media(max-width:719px){body.has-assess-sticky{padding-bottom:76px} .assess-sticky.show{display:block} body.has-assess-sticky .ovd-wa-float{bottom:86px}}
++@media print{.nav,.trust-strip,.assess-actions,.assess-sticky,.ovd-wa-float,.checkout-footer{display:none!important} .assess-card{box-shadow:none;border:none}}
+diff --git a/assets/callback-ui.js b/assets/callback-ui.js
+new file mode 100644
+index 0000000..b06c03b
+--- /dev/null
++++ b/assets/callback-ui.js
+@@ -0,0 +1,88 @@
++(function () {
++  function isTrMobile(raw) {
++    var d = String(raw || '').replace(/\D/g, '');
++    if (d.indexOf('00') === 0) d = d.slice(2);
++    if (d.indexOf('90') === 0 && d.length >= 12) d = d.slice(2);
++    if (d.charAt(0) === '0') d = d.slice(1);
++    if (d.length === 11 && d.indexOf('95') === 0) d = d.slice(1);
++    return /^5\d{9}$/.test(d);
++  }
++  function openModal() {
++    var m = document.getElementById('ovdCallback');
++    if (!m) return;
++    m.classList.add('open');
++    m.setAttribute('aria-hidden', 'false');
++    var first = m.querySelector('input');
++    if (first) first.focus();
++  }
++  function closeModal() {
++    var m = document.getElementById('ovdCallback');
++    if (!m) return;
++    m.classList.remove('open');
++    m.setAttribute('aria-hidden', 'true');
++  }
++  document.addEventListener('click', function (e) {
++    var btn = e.target.closest('[data-open-callback]');
++    if (btn) {
++      e.preventDefault();
++      openModal();
++    }
++    if (e.target.id === 'ovdCallback') closeModal();
++    if (e.target.closest('[data-close-callback]')) {
++      e.preventDefault();
++      closeModal();
++    }
++  });
++  document.addEventListener('keydown', function (e) {
++    if (e.key === 'Escape') closeModal();
++  });
++  document.addEventListener('submit', function (e) {
++    var form = e.target.closest('#ovdCallbackForm');
++    if (!form) return;
++    e.preventDefault();
++    var err = form.querySelector('[data-cb-err]');
++    var btn = form.querySelector('[type=submit]');
++    err.style.display = 'none';
++    var payload = {
++      ad_soyad: (form.querySelector('[name=ad_soyad]').value || '').trim(),
++      telefon: (form.querySelector('[name=telefon]').value || '').trim(),
++      sinif: form.querySelector('[name=sinif]').value || '',
++      program: 'Sizi Arayalım',
++      not: 'Ana sayfa — sizi arayalım',
++    };
++    if (!payload.ad_soyad) {
++      err.textContent = 'Ad soyad yazın.';
++      err.style.display = 'block';
++      return;
++    }
++    if (!isTrMobile(payload.telefon)) {
++      err.textContent = 'Geçerli cep telefonu girin.';
++      err.style.display = 'block';
++      return;
++    }
++    btn.disabled = true;
++    btn.textContent = 'Gönderiliyor…';
++    fetch('/api/iletisim', {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify(payload),
++    })
++      .then(function (r) {
++        return r.json().then(function (j) {
++          return { ok: r.ok, j: j };
++        });
++      })
++      .then(function (x) {
++        if (!x.ok) throw new Error(x.j.error || 'Gönderilemedi');
++        if (typeof gtag === 'function') gtag('event', 'callback_submit', { event_category: 'lead' });
++        form.innerHTML =
++          '<p style="margin:0;font-weight:800;color:#1a3fad;">Talebiniz alındı.</p><p style="margin:8px 0 0;color:#6e6e73;">Kısa süre içinde sizi arayacağız. Dilerseniz hemen 0850 303 40 14’ü de arayabilirsiniz.</p>';
++      })
++      .catch(function (ex) {
++        err.textContent = ex.message || 'Bir hata oluştu.';
++        err.style.display = 'block';
++        btn.disabled = false;
++        btn.textContent = 'Beni arayın';
++      });
++  });
++})();
+diff --git a/assets/program-nav.css b/assets/program-nav.css
+index 44840e9..e21079e 100644
+--- a/assets/program-nav.css
++++ b/assets/program-nav.css
+@@ -38,6 +38,24 @@ body.prog-lander-page {
+   flex-shrink: 0;
+ }
+ 
++/* Masaüstünde menüde zaten var — chip gizle */
++.prog-basari-chip {
++  display: none;
++  align-items: center;
++  justify-content: center;
++  padding: 8px 12px;
++  border-radius: 10px;
++  font-size: 12px;
++  font-weight: 800;
++  text-decoration: none;
++  white-space: nowrap;
++  color: #1a3fad;
++  background: #eef3ff;
++  border: 1.5px solid #c7d7ff;
++  font-family: inherit;
++  line-height: 1.2;
++}
++
+ .prog-site-footer {
+   position: relative;
+   z-index: 1;
+@@ -51,6 +69,10 @@ body.prog-lander-page {
+ }
+ 
+ @media (max-width: 960px) {
++  .prog-basari-chip {
++    display: inline-flex;
++  }
++
+   .prog-nav-toggle {
+     display: inline-flex;
+     order: 2;
+@@ -174,6 +196,11 @@ body.prog-lander-page {
+ }
+ 
+ @media (max-width: 480px) {
++  .prog-basari-chip {
++    padding: 8px 8px;
++    font-size: 11px;
++  }
++
+   .prog-nav-actions a[href*="login"],
+   .prog-nav-actions a[href*="kayit"] {
+     padding: 8px 10px !important;
+diff --git a/assets/program-nav.js b/assets/program-nav.js
+index 711dfe6..20fad3c 100644
+--- a/assets/program-nav.js
++++ b/assets/program-nav.js
+@@ -33,6 +33,18 @@
+     actions.classList.add('prog-nav-actions');
+   }
+ 
++  // Mobilde menü kapalıyken Başarılarımız görünmüyordu — sticky chip ile her zaman göster
++  if (actions && !document.getElementById('progBasariBtn')) {
++    var inProgramlar = (location.pathname || '').indexOf('/programlar/') !== -1;
++    var basari = document.createElement('a');
++    basari.id = 'progBasariBtn';
++    basari.className = 'prog-basari-chip';
++    basari.href = inProgramlar ? '../basarilarimiz.html' : '/basarilarimiz.html';
++    basari.textContent = '🏆 Başarılarımız';
++    basari.setAttribute('aria-label', 'Başarılarımız');
++    actions.insertBefore(basari, actions.firstChild);
++  }
++
+   if (!document.getElementById('progNavToggle')) {
+     var toggle = document.createElement('button');
+     toggle.type = 'button';
+diff --git a/assets/trial-float.css b/assets/trial-float.css
+new file mode 100644
+index 0000000..36a6ad4
+--- /dev/null
++++ b/assets/trial-float.css
+@@ -0,0 +1,109 @@
++.ovd-trial-float {
++  position: fixed;
++  left: 18px;
++  bottom: 20px;
++  z-index: 400;
++  display: flex;
++  align-items: center;
++  gap: 10px;
++  flex-direction: row-reverse;
++  text-decoration: none;
++  font-family: Nunito, system-ui, sans-serif;
++}
++.ovd-trial-float-label {
++  background: #fff;
++  color: #9b1c1f;
++  border: 1px solid #fecaca;
++  border-radius: 14px;
++  padding: 8px 12px;
++  box-shadow: 0 8px 24px rgba(232, 35, 42, 0.18);
++  line-height: 1.15;
++  white-space: nowrap;
++}
++.ovd-trial-float-label strong {
++  display: block;
++  font-size: 12px;
++  font-weight: 900;
++  letter-spacing: 0.02em;
++}
++.ovd-trial-float-label span {
++  display: block;
++  font-size: 11px;
++  font-weight: 700;
++  color: #e8232a;
++  margin-top: 2px;
++}
++.ovd-trial-float-btn {
++  position: relative;
++  width: 60px;
++  height: 60px;
++  border-radius: 50%;
++  background: linear-gradient(145deg, #ff3b42 0%, #e8232a 55%, #c41b22 100%);
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  box-shadow: 0 8px 22px rgba(232, 35, 42, 0.45);
++  flex-shrink: 0;
++  transition: transform 0.2s ease, filter 0.2s ease;
++}
++.ovd-trial-float-btn svg {
++  width: 28px;
++  height: 28px;
++  display: block;
++}
++.ovd-trial-float-btn::before,
++.ovd-trial-float-btn::after {
++  content: '';
++  position: absolute;
++  inset: 0;
++  border-radius: 50%;
++  border: 2px solid rgba(232, 35, 42, 0.7);
++  animation: ovd-trial-pulse 2.2s ease-out infinite;
++  pointer-events: none;
++}
++.ovd-trial-float-btn::after {
++  animation-delay: 1.1s;
++}
++.ovd-trial-float:hover .ovd-trial-float-btn {
++  transform: scale(1.06);
++  filter: brightness(1.05);
++}
++.ovd-trial-float:hover .ovd-trial-float-label {
++  transform: translateX(2px);
++}
++@keyframes ovd-trial-pulse {
++  0% { transform: scale(1); opacity: 0.65; }
++  100% { transform: scale(1.55); opacity: 0; }
++}
++@media (max-width: 520px) {
++  .ovd-trial-float {
++    left: 12px;
++    bottom: 14px;
++  }
++  .ovd-trial-float-label {
++    padding: 7px 10px;
++  }
++  .ovd-trial-float-label strong {
++    font-size: 11px;
++  }
++  .ovd-trial-float-label span {
++    font-size: 10px;
++  }
++  .ovd-trial-float-btn {
++    width: 54px;
++    height: 54px;
++  }
++  .ovd-trial-float-btn svg {
++    width: 24px;
++    height: 24px;
++  }
++}
++/* Mobil analiz sticky bar varken deneme butonunu yukarı al */
++@media (max-width: 719px) {
++  body.has-assess-sticky .ovd-trial-float {
++    bottom: 86px;
++  }
++}
++@media print {
++  .ovd-trial-float { display: none !important; }
++}
+diff --git a/assets/trial-float.js b/assets/trial-float.js
+new file mode 100644
+index 0000000..029efb7
+--- /dev/null
++++ b/assets/trial-float.js
+@@ -0,0 +1,40 @@
++(function () {
++  if (document.getElementById('ovd-trial-float')) return;
++  var path = (location.pathname || '').replace(/\\/g, '/');
++  // Kayıt / ödeme / analiz formlarında sticky deneme gösterme
++  if (/kayit|odeme|ucretsiz-ogrenci-analizi|analiz-sonucu|seviye-testi/.test(path)) return;
++
++  var waText =
++    'Merhaba, Online VIP Dershane ücretsiz deneme dersine katılmak istiyorum. 3 gün ücretsiz deneme hakkında bilgi alabilir miyim?';
++  var href = 'https://wa.me/908503034014?text=' + encodeURIComponent(waText);
++
++  var css = document.createElement('link');
++  css.rel = 'stylesheet';
++  css.href = (function () {
++    var scripts = document.getElementsByTagName('script');
++    var src = '';
++    for (var i = scripts.length - 1; i >= 0; i--) {
++      if (scripts[i].src && /trial-float\.js/.test(scripts[i].src)) {
++        src = scripts[i].src;
++        break;
++      }
++    }
++    return src ? src.replace(/trial-float\.js.*$/, 'trial-float.css') : '/assets/trial-float.css';
++  })();
++  document.head.appendChild(css);
++
++  var a = document.createElement('a');
++  a.id = 'ovd-trial-float';
++  a.className = 'ovd-trial-float';
++  a.href = href;
++  a.target = '_blank';
++  a.rel = 'noopener';
++  a.setAttribute('aria-label', 'Ücretsiz deneme dersine katılın');
++  a.innerHTML =
++    '<span class="ovd-trial-float-label"><strong>ÜCRETSİZ DENEME</strong><span>3 gün ücretsiz deneyin</span></span>' +
++    '<span class="ovd-trial-float-btn" aria-hidden="true">' +
++    '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">' +
++    '<path d="M12 3l2.2 4.6 5 .7-3.6 3.5.9 5.1L12 14.8 7.5 16.9l.9-5.1L4.8 8.3l5-.7L12 3z" fill="#fff"/>' +
++    '</svg></span>';
++  document.body.appendChild(a);
++})();
+diff --git a/assets/wa-float.css b/assets/wa-float.css
+new file mode 100644
+index 0000000..bc0d523
+--- /dev/null
++++ b/assets/wa-float.css
+@@ -0,0 +1,96 @@
++.ovd-wa-float {
++  position: fixed;
++  right: 18px;
++  bottom: 20px;
++  z-index: 400;
++  display: flex;
++  align-items: center;
++  gap: 10px;
++  text-decoration: none;
++  font-family: Nunito, system-ui, sans-serif;
++}
++.ovd-wa-float-label {
++  background: #fff;
++  color: #075e54;
++  border: 1px solid #d1fae5;
++  border-radius: 14px;
++  padding: 8px 12px;
++  box-shadow: 0 8px 24px rgba(7, 94, 84, 0.16);
++  line-height: 1.15;
++  white-space: nowrap;
++}
++.ovd-wa-float-label strong {
++  display: block;
++  font-size: 13px;
++  font-weight: 800;
++  letter-spacing: -0.01em;
++}
++.ovd-wa-float-label span {
++  display: block;
++  font-size: 11px;
++  font-weight: 700;
++  color: #128c7e;
++  margin-top: 2px;
++}
++.ovd-wa-float-btn {
++  position: relative;
++  width: 60px;
++  height: 60px;
++  border-radius: 50%;
++  background: #25d366;
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  box-shadow: 0 8px 22px rgba(37, 211, 102, 0.45);
++  flex-shrink: 0;
++  transition: transform 0.2s ease, background 0.2s ease;
++}
++.ovd-wa-float-btn svg {
++  width: 32px;
++  height: 32px;
++  display: block;
++}
++.ovd-wa-float-btn::before,
++.ovd-wa-float-btn::after {
++  content: '';
++  position: absolute;
++  inset: 0;
++  border-radius: 50%;
++  border: 2px solid #25d366;
++  animation: ovd-wa-pulse 2.2s ease-out infinite;
++  pointer-events: none;
++}
++.ovd-wa-float-btn::after {
++  animation-delay: 1.1s;
++}
++.ovd-wa-float:hover .ovd-wa-float-btn {
++  transform: scale(1.06);
++  background: #1ebe57;
++}
++.ovd-wa-float:hover .ovd-wa-float-label {
++  transform: translateX(-2px);
++}
++@keyframes ovd-wa-pulse {
++  0% { transform: scale(1); opacity: 0.65; }
++  100% { transform: scale(1.55); opacity: 0; }
++}
++@media (max-width: 520px) {
++  .ovd-wa-float {
++    right: 12px;
++    bottom: 14px;
++  }
++  .ovd-wa-float-label {
++    padding: 7px 10px;
++  }
++  .ovd-wa-float-label strong {
++    font-size: 12px;
++  }
++  .ovd-wa-float-btn {
++    width: 54px;
++    height: 54px;
++  }
++  .ovd-wa-float-btn svg {
++    width: 28px;
++    height: 28px;
++  }
++}
+diff --git a/assets/wa-float.js b/assets/wa-float.js
+new file mode 100644
+index 0000000..7168f0f
+--- /dev/null
++++ b/assets/wa-float.js
+@@ -0,0 +1,37 @@
++(function () {
++  if (document.getElementById('ovd-wa-float')) return;
++
++  var href =
++    'https://wa.me/908503034014?text=' +
++    encodeURIComponent('Merhaba, Online VIP Dershane hakkında bilgi almak istiyorum.');
++
++  var css = document.createElement('link');
++  css.rel = 'stylesheet';
++  css.href = (function () {
++    var scripts = document.getElementsByTagName('script');
++    var src = '';
++    for (var i = scripts.length - 1; i >= 0; i--) {
++      if (scripts[i].src && /wa-float\.js/.test(scripts[i].src)) {
++        src = scripts[i].src;
++        break;
++      }
++    }
++    return src ? src.replace(/wa-float\.js.*$/, 'wa-float.css') : '/assets/wa-float.css';
++  })();
++  document.head.appendChild(css);
++
++  var a = document.createElement('a');
++  a.id = 'ovd-wa-float';
++  a.className = 'ovd-wa-float';
++  a.href = href;
++  a.target = '_blank';
++  a.rel = 'noopener';
++  a.setAttribute('aria-label', 'WhatsApp Bize Ulaşın');
++  a.innerHTML =
++    '<span class="ovd-wa-float-label"><strong>WhatsApp</strong><span>Bize Ulaşın</span></span>' +
++    '<span class="ovd-wa-float-btn" aria-hidden="true">' +
++    '<svg viewBox="0 0 24 24" fill="#fff" xmlns="http://www.w3.org/2000/svg">' +
++    '<path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.435 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>' +
++    '</svg></span>';
++  document.body.appendChild(a);
++})();
+diff --git a/basarilarimiz.html b/basarilarimiz.html
+index 80eded4..831e6b6 100644
+--- a/basarilarimiz.html
++++ b/basarilarimiz.html
+@@ -567,5 +567,8 @@ document.body.appendChild(waf);
+ 
+   <script src="assets/welcome-modal.js"></script>
+ <script src="assets/perf-analytics.js" defer></script>
++<script src="assets/wa-float.js" defer></script>
++<script src="assets/trial-float.js" defer></script>
++<script src="assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+\ No newline at end of file
+diff --git a/blog.html b/blog.html
+index 87d20ec..0181465 100644
+--- a/blog.html
++++ b/blog.html
+@@ -1047,5 +1047,8 @@ document.body.appendChild(waf);
+ 
+   <script src="assets/welcome-modal.js"></script>
+ <script src="assets/perf-analytics.js" defer></script>
++<script src="assets/wa-float.js" defer></script>
++<script src="assets/trial-float.js" defer></script>
++<script src="assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+\ No newline at end of file
+diff --git a/iletisim.html b/iletisim.html
+index 363004b..a175d78 100644
+--- a/iletisim.html
++++ b/iletisim.html
+@@ -655,5 +655,8 @@ document.body.appendChild(waf);
+ 
+   <script src="assets/welcome-modal.js"></script>
+ <script src="assets/perf-analytics.js" defer></script>
++<script src="assets/wa-float.js" defer></script>
++<script src="assets/trial-float.js" defer></script>
++<script src="assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+\ No newline at end of file
+diff --git a/index.html b/index.html
+index 358e1ae..c5917c0 100644
+--- a/index.html
++++ b/index.html
+@@ -243,6 +243,12 @@ button{font-family:'Nunito',sans-serif;cursor:pointer;}
+ }
+ 
+ /* ── RESPONSIVE */
++.nav-basari-chip{
++  display:none;align-items:center;justify-content:center;
++  padding:8px 12px;border-radius:10px;font-size:12px;font-weight:800;
++  text-decoration:none;white-space:nowrap;color:#1a3fad;background:#eef3ff;
++  border:1.5px solid #c7d7ff;line-height:1.2;
++}
+ @media(max-width:960px){
+   .nav-links{display:none;}
+   .nav-links.open{
+@@ -254,11 +260,13 @@ button{font-family:'Nunito',sans-serif;cursor:pointer;}
+   }
+   .nav-links.open a{padding:10px 14px;width:100%;}
+   .nav-hamburger{display:block;}
++  .nav-basari-chip{display:inline-flex;}
+   .footer-top{grid-template-columns:1fr 1fr;}
+ }
+ @media(max-width:600px){
+   .footer-top{grid-template-columns:1fr;}
+   .btn-login{padding:7px 10px;font-size:11px;}
++  .nav-basari-chip{padding:7px 8px;font-size:11px;}
+ }
+ 
+ 
+@@ -859,6 +867,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+     </div>
+     </div>
+     <div class="nav-right">
++      <a href="/basarilarimiz.html" class="nav-basari-chip" aria-label="Başarılarımız">🏆 Başarılarımız</a>
+       <a href="https://www.dersonlinevipkocluk.com/login" target="_blank" class="btn-login">🔐 Sisteme Giriş</a>
+       <a href="kayit.html" class="btn-cta" style="background:#e8232a;">Kayıt Ol</a>
+     </div>
+@@ -1565,7 +1574,10 @@ document.addEventListener('click',function(e){
+ <script src="assets/products.js" defer></script>
+ <script src="assets/cart.js" defer></script>
+ <script src="assets/welcome-modal.js" defer></script>
+-
++<script src="assets/wa-float.js" defer></script>
++<script src="assets/trial-float.js" defer></script>
++<script src="assets/assessment-cta.js" defer></script>
++<script src="assets/callback-ui.js?v=20260830a" defer></script>
+ <script src="assets/perf-analytics.js" defer></script>
+ </body>
+ </html>
+diff --git a/kadromuz.html b/kadromuz.html
+index b24884e..c5c2320 100644
+--- a/kadromuz.html
++++ b/kadromuz.html
+@@ -107,5 +107,8 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+ <script src="assets/cart.js"></script>
+   <script src="assets/welcome-modal.js"></script>
+ <script src="assets/perf-analytics.js" defer></script>
++<script src="assets/wa-float.js" defer></script>
++<script src="assets/trial-float.js" defer></script>
++<script src="assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+diff --git a/kariyer.html b/kariyer.html
+index 25c0f91..4c9aa52 100644
+--- a/kariyer.html
++++ b/kariyer.html
+@@ -717,5 +717,8 @@ document.body.appendChild(waf);
+ 
+   <script src="assets/welcome-modal.js"></script>
+ <script src="assets/perf-analytics.js" defer></script>
++<script src="assets/wa-float.js" defer></script>
++<script src="assets/trial-float.js" defer></script>
++<script src="assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+\ No newline at end of file
+diff --git a/kayit.html b/kayit.html
+index 0ae3dcb..5bc383c 100644
+--- a/kayit.html
++++ b/kayit.html
+@@ -155,5 +155,8 @@ if(form){
+ </script>
+   <script src="assets/welcome-modal.js"></script>
+ <script src="assets/perf-analytics.js" defer></script>
++<script src="assets/wa-float.js" defer></script>
++<script src="assets/trial-float.js" defer></script>
++<script src="assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+\ No newline at end of file
+diff --git a/ogretmenler.html b/ogretmenler.html
+index f49504f..05ffdef 100644
+--- a/ogretmenler.html
++++ b/ogretmenler.html
+@@ -9,5 +9,8 @@
+ </head>
+ <body>
+ <p><a href="/ozel-ders.html#ogretmenler">Özel ders öğretmenleri sayfasına git</a></p>
++<script src="assets/wa-float.js" defer></script>
++<script src="assets/trial-float.js" defer></script>
++<script src="assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+diff --git a/ozel-ders.html b/ozel-ders.html
+index c5efa33..8a2c1bb 100644
+--- a/ozel-ders.html
++++ b/ozel-ders.html
+@@ -632,5 +632,8 @@ document.getElementById('y').textContent=new Date().getFullYear();
+   OVD_PREMIUM_TEACHERS_UI.init();
+ </script>
+ <script src="assets/perf-analytics.js" defer></script>
++<script src="assets/wa-float.js" defer></script>
++<script src="assets/trial-float.js" defer></script>
++<script src="assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+diff --git a/premium-paketler.html b/premium-paketler.html
+index 3e9ebbe..6bac5fc 100644
+--- a/premium-paketler.html
++++ b/premium-paketler.html
+@@ -75,5 +75,8 @@ tailwind.config={theme:{extend:{colors:{navy:{DEFAULT:'#1a3fad',2:'#0f2a7a',3:'#
+ })();
+ </script>
+ <script src="assets/perf-analytics.js" defer></script>
++<script src="assets/wa-float.js" defer></script>
++<script src="assets/trial-float.js" defer></script>
++<script src="assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+diff --git a/programlar/gece-etutu.html b/programlar/gece-etutu.html
+index eb59408..add6374 100644
+--- a/programlar/gece-etutu.html
++++ b/programlar/gece-etutu.html
+@@ -1448,5 +1448,8 @@ document.addEventListener('keydown', function(e) {
+ </script>
+   <script src="../assets/welcome-modal.js"></script>
+ <script src="../assets/perf-analytics.js" defer></script>
++<script src="../assets/wa-float.js" defer></script>
++<script src="../assets/trial-float.js" defer></script>
++<script src="../assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+\ No newline at end of file
+diff --git a/programlar/ilkokul.html b/programlar/ilkokul.html
+index 4e3748e..4e45e67 100644
+--- a/programlar/ilkokul.html
++++ b/programlar/ilkokul.html
+@@ -282,5 +282,8 @@ function showToast(){
+ <script src="../assets/cart.js"></script>
+   <script src="../assets/welcome-modal.js"></script>
+ <script src="../assets/perf-analytics.js" defer></script>
++<script src="../assets/wa-float.js" defer></script>
++<script src="../assets/trial-float.js" defer></script>
++<script src="../assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+\ No newline at end of file
+diff --git a/programlar/index.html b/programlar/index.html
+index ca1ade8..1ec5f7c 100644
+--- a/programlar/index.html
++++ b/programlar/index.html
+@@ -745,5 +745,8 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+ 
+   <script src="../assets/welcome-modal.js"></script>
+ <script src="../assets/perf-analytics.js" defer></script>
++<script src="../assets/wa-float.js" defer></script>
++<script src="../assets/trial-float.js" defer></script>
++<script src="../assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+diff --git a/programlar/kamp-56.html b/programlar/kamp-56.html
+index 827baea..b8191f4 100644
+--- a/programlar/kamp-56.html
++++ b/programlar/kamp-56.html
+@@ -131,5 +131,8 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape')closeCampVid
+ <script src="../assets/camp-detail.js"></script>
+ <script src="../assets/kamp-56-intro-modal.js"></script>
+ <script src="../assets/perf-analytics.js" defer></script>
++<script src="../assets/wa-float.js" defer></script>
++<script src="../assets/trial-float.js" defer></script>
++<script src="../assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+\ No newline at end of file
+diff --git a/programlar/kamp-9-hazirlik.html b/programlar/kamp-9-hazirlik.html
+index 28fab3d..c7e5e2e 100644
+--- a/programlar/kamp-9-hazirlik.html
++++ b/programlar/kamp-9-hazirlik.html
+@@ -110,5 +110,8 @@ function showToast(){
+ <script src="../assets/camps-data.js"></script>
+ <script src="../assets/camp-detail.js"></script>
+ <script src="../assets/perf-analytics.js" defer></script>
++<script src="../assets/wa-float.js" defer></script>
++<script src="../assets/trial-float.js" defer></script>
++<script src="../assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+diff --git a/programlar/kamp-910.html b/programlar/kamp-910.html
+index 938c62c..47d4b72 100644
+--- a/programlar/kamp-910.html
++++ b/programlar/kamp-910.html
+@@ -131,5 +131,8 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape')closeCampVid
+ <script src="../assets/camp-detail.js"></script>
+ <script src="../assets/kamp-910-intro-modal.js"></script>
+ <script src="../assets/perf-analytics.js" defer></script>
++<script src="../assets/wa-float.js" defer></script>
++<script src="../assets/trial-float.js" defer></script>
++<script src="../assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+\ No newline at end of file
+diff --git a/programlar/kamp-lgs.html b/programlar/kamp-lgs.html
+index 83b922e..596527d 100644
+--- a/programlar/kamp-lgs.html
++++ b/programlar/kamp-lgs.html
+@@ -136,5 +136,8 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape')closeCampVid
+ <script src="../assets/camp-detail.js"></script>
+ <script src="../assets/kamp-intro-modal.js"></script>
+ <script src="../assets/perf-analytics.js" defer></script>
++<script src="../assets/wa-float.js" defer></script>
++<script src="../assets/trial-float.js" defer></script>
++<script src="../assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+diff --git a/programlar/kamp-maarif-tyt.html b/programlar/kamp-maarif-tyt.html
+index 2f85a43..04ee1d4 100644
+--- a/programlar/kamp-maarif-tyt.html
++++ b/programlar/kamp-maarif-tyt.html
+@@ -94,5 +94,8 @@ function showToast(){
+ <script src="../assets/camps-data.js"></script>
+ <script src="../assets/camp-detail.js"></script>
+ <script src="../assets/perf-analytics.js" defer></script>
++<script src="../assets/wa-float.js" defer></script>
++<script src="../assets/trial-float.js" defer></script>
++<script src="../assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+\ No newline at end of file
+diff --git a/programlar/kamp-tyt.html b/programlar/kamp-tyt.html
+index a063c30..46b73e2 100644
+--- a/programlar/kamp-tyt.html
++++ b/programlar/kamp-tyt.html
+@@ -131,5 +131,8 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape')closeCampVid
+ <script src="../assets/camp-detail.js"></script>
+ <script src="../assets/kamp-tyt-intro-modal.js"></script>
+ <script src="../assets/perf-analytics.js" defer></script>
++<script src="../assets/wa-float.js" defer></script>
++<script src="../assets/trial-float.js" defer></script>
++<script src="../assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+\ No newline at end of file
+diff --git a/programlar/kamplar.html b/programlar/kamplar.html
+index 0f41982..7703a11 100644
+--- a/programlar/kamplar.html
++++ b/programlar/kamplar.html
+@@ -261,5 +261,8 @@ function showToast(){
+ <script src="../assets/camps-data.js"></script>
+ <script src="../assets/camp-hub.js"></script>
+ <script src="../assets/perf-analytics.js" defer></script>
++<script src="../assets/wa-float.js" defer></script>
++<script src="../assets/trial-float.js" defer></script>
++<script src="../assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+\ No newline at end of file
+diff --git a/programlar/kitap.html b/programlar/kitap.html
+index e893cba..86a3739 100644
+--- a/programlar/kitap.html
++++ b/programlar/kitap.html
+@@ -1492,5 +1492,8 @@ function showToast(){
+ <script src="../assets/cart.js"></script>
+   <script src="../assets/welcome-modal.js"></script>
+ <script src="../assets/perf-analytics.js" defer></script>
++<script src="../assets/wa-float.js" defer></script>
++<script src="../assets/trial-float.js" defer></script>
++<script src="../assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+\ No newline at end of file
+diff --git a/programlar/lgs.html b/programlar/lgs.html
+index d4193c6..12228cf 100644
+--- a/programlar/lgs.html
++++ b/programlar/lgs.html
+@@ -282,5 +282,8 @@ function showToast(){
+ <script src="../assets/cart.js"></script>
+   <script src="../assets/welcome-modal.js"></script>
+ <script src="../assets/perf-analytics.js" defer></script>
++<script src="../assets/wa-float.js" defer></script>
++<script src="../assets/trial-float.js" defer></script>
++<script src="../assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+\ No newline at end of file
+diff --git a/programlar/lise.html b/programlar/lise.html
+index 3035fbd..bfcae66 100644
+--- a/programlar/lise.html
++++ b/programlar/lise.html
+@@ -282,5 +282,8 @@ function showToast(){
+ <script src="../assets/cart.js"></script>
+   <script src="../assets/welcome-modal.js"></script>
+ <script src="../assets/perf-analytics.js" defer></script>
++<script src="../assets/wa-float.js" defer></script>
++<script src="../assets/trial-float.js" defer></script>
++<script src="../assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+\ No newline at end of file
+diff --git a/programlar/ortaokul.html b/programlar/ortaokul.html
+index 892fc52..be5da15 100644
+--- a/programlar/ortaokul.html
++++ b/programlar/ortaokul.html
+@@ -282,5 +282,8 @@ function showToast(){
+ <script src="../assets/cart.js"></script>
+   <script src="../assets/welcome-modal.js"></script>
+ <script src="../assets/perf-analytics.js" defer></script>
++<script src="../assets/wa-float.js" defer></script>
++<script src="../assets/trial-float.js" defer></script>
++<script src="../assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+\ No newline at end of file
+diff --git a/programlar/start.html b/programlar/start.html
+index 790d239..20688bc 100644
+--- a/programlar/start.html
++++ b/programlar/start.html
+@@ -282,5 +282,8 @@ function showToast(){
+ <script src="../assets/cart.js"></script>
+   <script src="../assets/welcome-modal.js"></script>
+ <script src="../assets/perf-analytics.js" defer></script>
++<script src="../assets/wa-float.js" defer></script>
++<script src="../assets/trial-float.js" defer></script>
++<script src="../assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+\ No newline at end of file
+diff --git a/programlar/yazili.html b/programlar/yazili.html
+index dcd02ea..4359de0 100644
+--- a/programlar/yazili.html
++++ b/programlar/yazili.html
+@@ -319,5 +319,8 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape')closeCampVid
+ <script src="../assets/cart.js"></script>
+ <script src="../assets/yazili-intro-modal.js"></script>
+ <script src="../assets/perf-analytics.js" defer></script>
++<script src="../assets/wa-float.js" defer></script>
++<script src="../assets/trial-float.js" defer></script>
++<script src="../assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+\ No newline at end of file
+diff --git a/programlar/yks.html b/programlar/yks.html
+index a6eb7ff..a8feca0 100644
+--- a/programlar/yks.html
++++ b/programlar/yks.html
+@@ -282,5 +282,8 @@ function showToast(){
+ <script src="../assets/cart.js"></script>
+   <script src="../assets/welcome-modal.js"></script>
+ <script src="../assets/perf-analytics.js" defer></script>
++<script src="../assets/wa-float.js" defer></script>
++<script src="../assets/trial-float.js" defer></script>
++<script src="../assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+\ No newline at end of file
+diff --git a/sepet.html b/sepet.html
+index d7bb8ba..08758c0 100644
+--- a/sepet.html
++++ b/sepet.html
+@@ -64,5 +64,8 @@
+ </script>
+ <script src="assets/welcome-modal.js"></script>
+ <script src="assets/perf-analytics.js" defer></script>
++<script src="assets/wa-float.js" defer></script>
++<script src="assets/trial-float.js" defer></script>
++<script src="assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+diff --git a/videolar.html b/videolar.html
+index 47c6cf4..96eca18 100644
+--- a/videolar.html
++++ b/videolar.html
+@@ -272,5 +272,8 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+ </script>
+   <script src="assets/welcome-modal.js"></script>
+ <script src="assets/perf-analytics.js" defer></script>
++<script src="assets/wa-float.js" defer></script>
++<script src="assets/trial-float.js" defer></script>
++<script src="assets/assessment-cta.js" defer></script>
+ </body>
+ </html>
+-- 
+2.43.0
+

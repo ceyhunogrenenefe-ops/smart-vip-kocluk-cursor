@@ -1,0 +1,109 @@
+.ovd-trial-float {
+  position: fixed;
+  left: 18px;
+  bottom: 20px;
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-direction: row-reverse;
+  text-decoration: none;
+  font-family: Nunito, system-ui, sans-serif;
+}
+.ovd-trial-float-label {
+  background: #fff;
+  color: #9b1c1f;
+  border: 1px solid #fecaca;
+  border-radius: 14px;
+  padding: 8px 12px;
+  box-shadow: 0 8px 24px rgba(232, 35, 42, 0.18);
+  line-height: 1.15;
+  white-space: nowrap;
+}
+.ovd-trial-float-label strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+.ovd-trial-float-label span {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: #e8232a;
+  margin-top: 2px;
+}
+.ovd-trial-float-btn {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #ff3b42 0%, #e8232a 55%, #c41b22 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 22px rgba(232, 35, 42, 0.45);
+  flex-shrink: 0;
+  transition: transform 0.2s ease, filter 0.2s ease;
+}
+.ovd-trial-float-btn svg {
+  width: 28px;
+  height: 28px;
+  display: block;
+}
+.ovd-trial-float-btn::before,
+.ovd-trial-float-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(232, 35, 42, 0.7);
+  animation: ovd-trial-pulse 2.2s ease-out infinite;
+  pointer-events: none;
+}
+.ovd-trial-float-btn::after {
+  animation-delay: 1.1s;
+}
+.ovd-trial-float:hover .ovd-trial-float-btn {
+  transform: scale(1.06);
+  filter: brightness(1.05);
+}
+.ovd-trial-float:hover .ovd-trial-float-label {
+  transform: translateX(2px);
+}
+@keyframes ovd-trial-pulse {
+  0% { transform: scale(1); opacity: 0.65; }
+  100% { transform: scale(1.55); opacity: 0; }
+}
+@media (max-width: 520px) {
+  .ovd-trial-float {
+    left: 12px;
+    bottom: 14px;
+  }
+  .ovd-trial-float-label {
+    padding: 7px 10px;
+  }
+  .ovd-trial-float-label strong {
+    font-size: 11px;
+  }
+  .ovd-trial-float-label span {
+    font-size: 10px;
+  }
+  .ovd-trial-float-btn {
+    width: 54px;
+    height: 54px;
+  }
+  .ovd-trial-float-btn svg {
+    width: 24px;
+    height: 24px;
+  }
+}
+/* Mobil analiz sticky bar varken deneme butonunu yukarı al */
+@media (max-width: 719px) {
+  body.has-assess-sticky .ovd-trial-float {
+    bottom: 86px;
+  }
+}
+@media print {
+  .ovd-trial-float { display: none !important; }
+}
