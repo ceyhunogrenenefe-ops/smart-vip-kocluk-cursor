@@ -29,6 +29,7 @@ import {
   pickEdesisExamTakeWindow,
   edesisExamTakeWindowOpen,
   overlayCatalogExamsWithTakeWindows,
+  mergeAssignedWithOpenTakeableExams,
   edesisResultHiddenFromStudent,
   pickExamDurationSeconds,
   pickEdesisResultExamId,
@@ -2148,17 +2149,7 @@ describe('edesisExamTakeWindowOpen', () => {
     assert.equal(merged[0].endDate, '2026-09-30');
   });
 
-  it('empty-roster open catalog is not takeable unless assigned to the student', () => {
-    const open = {
-      id: '1580678',
-      name: 'PARAF MİS LGS-2',
-      examType: 'LGS',
-      resultStatus: 'None',
-      examDate: '2026-08-29',
-      studentCount: 0,
-      startDate: '2026-08-29T10:30:00',
-      endDate: '2026-09-14T13:50:00'
-    };
+  it('mergeAssignedWithOpenTakeableExams adds only validated open denemes', () => {
     const assigned = {
       id: '1559901',
       name: 'VİP atanmış',
@@ -2169,13 +2160,36 @@ describe('edesisExamTakeWindowOpen', () => {
       startDate: '2026-08-20T00:00:00',
       endDate: '2026-09-30T23:59:59'
     };
-    const merged = overlayCatalogExamsWithTakeWindows([assigned], [assigned, open]);
+    const open = {
+      id: '1580678',
+      name: 'PARAF MİS LGS-2',
+      examType: 'LGS',
+      resultStatus: 'Processing',
+      examDate: '2026-08-29',
+      studentCount: 0,
+      startDate: '2026-08-29T10:30:00',
+      endDate: '2026-09-14T13:50:00'
+    };
+    const fat = {
+      id: '1561040',
+      name: 'PARAF MOR 1',
+      examType: 'LGS',
+      resultStatus: 'Ready',
+      examDate: '2026-08-15',
+      studentCount: 26
+    };
+    // overlay alone must not append; merge openTakeable does (validated path)
     assert.deepEqual(
-      merged.map((r) => pickEdesisCatalogExamId(r)),
+      overlayCatalogExamsWithTakeWindows([assigned], [open]).map((r) => pickEdesisCatalogExamId(r)),
       ['1559901']
     );
+    const merged = mergeAssignedWithOpenTakeableExams([assigned], [open]);
+    assert.deepEqual(
+      merged.map((r) => pickEdesisCatalogExamId(r)).sort(),
+      ['1559901', '1580678']
+    );
     const items = buildStudentAvailableEdesisExamItems({
-      catalogRows: [assigned, open],
+      catalogRows: [assigned, open, fat],
       assignedCatalogRows: merged,
       resultRows: [],
       edesisStudentId: '2086573',
@@ -2185,8 +2199,35 @@ describe('edesisExamTakeWindowOpen', () => {
       requireExplicitAssignment: true
     });
     assert.deepEqual(
+      items.filter((x) => x.canTake).map((x) => x.examId).sort(),
+      ['1559901', '1580678']
+    );
+  });
+
+  it('raw open catalog row is not takeable until open-takeable merge includes it', () => {
+    const open = {
+      id: '1580678',
+      name: 'PARAF MİS LGS-2',
+      examType: 'LGS',
+      resultStatus: 'None',
+      examDate: '2026-08-29',
+      studentCount: 0,
+      startDate: '2026-08-29T10:30:00',
+      endDate: '2026-09-14T13:50:00'
+    };
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [open],
+      assignedCatalogRows: [],
+      resultRows: [],
+      edesisStudentId: '2086573',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      gradeName: '8',
+      now: new Date('2026-08-29T08:45:00Z'),
+      requireExplicitAssignment: true
+    });
+    assert.deepEqual(
       items.filter((x) => x.canTake).map((x) => x.examId),
-      ['1559901']
+      []
     );
   });
 

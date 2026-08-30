@@ -2076,6 +2076,28 @@ export function overlayCatalogExamsWithTakeWindows(assigned = [], windowedRows =
   return out;
 }
 
+/**
+ * Atama listesi + doğrulanmış açık katalog (yeni online deneme).
+ * GetOgrenciSinavIds analiz geçmişidir; yeni deneme orada yok — openTakeable şart.
+ * overlay tarih basar; openTakeable id’leri listeye eklenir (ham katalog dökülmez).
+ */
+export function mergeAssignedWithOpenTakeableExams(assigned = [], openTakeable = []) {
+  const out = overlayCatalogExamsWithTakeWindows(assigned, openTakeable);
+  const seen = new Set(
+    out
+      .map((ex) => pickEdesisCatalogExamId(ex))
+      .filter(Boolean)
+      .map(String)
+  );
+  for (const ex of openTakeable || []) {
+    const id = pickEdesisCatalogExamId(ex);
+    if (!id || seen.has(String(id))) continue;
+    seen.add(String(id));
+    out.push(ex);
+  }
+  return out;
+}
+
 /** Katalog satırlarında ogrenciIds / studentIds ile doğrudan atanmış denemeler */
 export function collectExplicitlyAssignedCatalogRows(catalogRows, scope = {}) {
   const out = [];
@@ -2455,8 +2477,51 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     assigned = overlayAssignedCatalogWithRaporViews(assigned, raporWithCatalog);
   }
 
-  // Açık/yayınlanmamış kurum kataloğu Sınava gir listesine eklenmez.
-  // Tarih penceresi yalnızca yukarıda toplanan atama id’lerine basılır.
+  // Yeni online deneme GetOgrenciSinavIds’te yok. Boş/ince roster + kademe + program +
+  // GetSinavForView penceresi ile Sınava gir’e alınır (kurum geneli dump değil).
+  const openCatalog = collectStudentTakeableOpenCatalogExams(catalogRows, {
+    programKeys,
+    gradeName,
+    now: new Date()
+  });
+  const openWithWindow = [];
+  const nowOpen = new Date();
+  for (let i = 0; i < openCatalog.length; i += 6) {
+    const batch = openCatalog.slice(i, i + 6);
+    const details = await Promise.all(
+      batch.map((ex) => fetchEdesisExamCatalogRowDetail(pickEdesisCatalogExamId(ex), cfgOverride))
+    );
+    const rosters = await Promise.all(
+      batch.map((ex) => fetchEdesisExamRosterStudentIds(pickEdesisCatalogExamId(ex), cfgOverride).catch(() => null))
+    );
+    for (let j = 0; j < batch.length; j += 1) {
+      const id = pickEdesisCatalogExamId(batch[j]);
+      const detail = details[j];
+      const merged = detail
+        ? mergeEdesisFilledObject(batch[j], mergeEdesisExamViewBody(detail, id) || detail)
+        : batch[j];
+      if (!edesisExamTakeWindowOpen(merged, nowOpen)) continue;
+      if (!examCompatibleWithStudentGrade(merged, gradeName, { allowLgsNeighbor: false })) continue;
+      const { startRaw, endRaw } = pickEdesisExamTakeWindow(merged);
+      // Penceresiz Ready = eski kurum sonucu; yeni online None/Processing veya tarihli pencere.
+      if (!startRaw && !endRaw) {
+        if (!/^(none|processing|pending)$/i.test(catalogResultStatus(merged))) continue;
+        if (!isRecentByExamDate(merged, nowOpen, 21)) continue;
+      }
+      if (
+        !shouldOfferOpenCatalogExamAfterRoster(merged, {
+          roster: rosters[j],
+          edesisStudentId
+        })
+      ) {
+        continue;
+      }
+      openWithWindow.push(merged);
+    }
+  }
+  if (openWithWindow.length) {
+    assigned = mergeAssignedWithOpenTakeableExams(assigned, openWithWindow);
+  }
 
   const missingWindowIds = [];
   const missingById = new Map();
@@ -2503,13 +2568,15 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
         .filter(Boolean)
         .slice(0, 40)
     },
-    openCatalogCount: 0,
-    openCatalogExamIds: [],
+    openCatalogCount: openWithWindow.length,
+    openCatalogExamIds: openWithWindow.map((ex) => pickEdesisCatalogExamId(ex)).filter(Boolean).slice(0, 20),
     probeSkipped: true,
-    probeSkipReason: raporAssigned.length
-      ? 'assigned_ids_and_classroom_rapor'
-      : 'assigned_ids_only',
-    probeCandidateCount: 0
+    probeSkipReason: openWithWindow.length
+      ? 'assigned_ids_and_open_none_catalog'
+      : raporAssigned.length
+        ? 'assigned_ids_and_classroom_rapor'
+        : 'assigned_ids_only',
+    probeCandidateCount: openCatalog.length
   };
 }
 
