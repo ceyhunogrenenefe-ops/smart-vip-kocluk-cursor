@@ -47,10 +47,9 @@ Vercel otomatik deploy eder. Env sonradan eklendiyse Redeploy.
 
 `/odeme.html` üzerinde iki seçenek görünür:
 
-<<<<<<< HEAD
 1. **PayTR** (varsayılan)
 2. **Garanti BBVA**
-=======
+
 Supabase (koçluk): `commerce_checkout_handoffs` tablosu gerekli (token için).
 
 ---
@@ -58,4 +57,3 @@ Supabase (koçluk): `commerce_checkout_handoffs` tablosu gerekli (token için).
 ## Site UX paketi (analiz popup / ücretsiz deneme / Başarılarımız)
 
 Bkz. [APPLY-SITE-UX.md](./APPLY-SITE-UX.md) — `0001-site-trial-basari.patch` ile `onlinevipdershane1` reposuna uygulanır.
->>>>>>> 9d70790 (feat(site-patches): hızlı analiz popup, sticky ücretsiz deneme, mobil Başarılarımız)
