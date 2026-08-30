@@ -57,6 +57,7 @@ import {
   examRosterIncludesStudent,
   shouldOfferOpenCatalogExamAfterRoster,
   isStudentEligibleOpenCatalogExam,
+  partitionAssignedCatalogByTakeWindow,
   trustEdesisStudentCatalogList,
   looksLikePersonalExamList,
   resolveEdesisFileUrl,
@@ -1087,11 +1088,11 @@ describe('parseEdesisOgrenciSinavAssignmentResponse / grade compatibility', () =
     assert.equal(edesisExamGradeIdMatchesStudent({ name: 'LGS' }, '8'), null);
   });
 
-  it('empty known roster stays takeable even if GetSinavForView studentCount is nonzero', () => {
+  it('empty or foreign roster is not takeable — only this student on GetOgrenciBySinavId', () => {
     const exam = { id: '1580678', name: 'PARAF MİS LGS-2', studentCount: 12 };
     assert.equal(
       shouldOfferOpenCatalogExamAfterRoster(exam, { roster: [], edesisStudentId: '2086573' }),
-      true
+      false
     );
     assert.equal(
       shouldOfferOpenCatalogExamAfterRoster(exam, { roster: ['999'], edesisStudentId: '2086573' }),
@@ -1101,7 +1102,6 @@ describe('parseEdesisOgrenciSinavAssignmentResponse / grade compatibility', () =
       shouldOfferOpenCatalogExamAfterRoster(exam, { roster: ['2086573'], edesisStudentId: '2086573' }),
       true
     );
-    // Probe yok: yalnız katalog boş kadroya güven
     assert.equal(
       shouldOfferOpenCatalogExamAfterRoster(exam, { roster: null, edesisStudentId: '2086573' }),
       false
@@ -1111,11 +1111,11 @@ describe('parseEdesisOgrenciSinavAssignmentResponse / grade compatibility', () =
         { ...exam, studentCount: 0 },
         { roster: null, edesisStudentId: '2086573' }
       ),
-      true
+      false
     );
   });
 
-  it('thin open online stays eligible when classmates already started (no ogrenciIds lock)', () => {
+  it('thin open online does not leak to classmates who are not on the roster', () => {
     const exam = {
       id: '1580678',
       name: 'PARAF MİS LGS-2',
@@ -1126,6 +1126,13 @@ describe('parseEdesisOgrenciSinavAssignmentResponse / grade compatibility', () =
     assert.equal(
       isStudentEligibleOpenCatalogExam(exam, {
         roster: ['111', '222', '333', '444'],
+        edesisStudentId: '2086573'
+      }),
+      false
+    );
+    assert.equal(
+      isStudentEligibleOpenCatalogExam(exam, {
+        roster: ['111', '2086573'],
         edesisStudentId: '2086573'
       }),
       true
@@ -1139,10 +1146,95 @@ describe('parseEdesisOgrenciSinavAssignmentResponse / grade compatibility', () =
     );
     assert.equal(
       isStudentEligibleOpenCatalogExam(
+        { ...exam, studentIds: [2086573] },
+        { roster: ['111'], edesisStudentId: '2086573' }
+      ),
+      true
+    );
+    assert.equal(
+      isStudentEligibleOpenCatalogExam(
         { ...exam, studentCount: 26 },
         { roster: ['111'], edesisStudentId: '2086573' }
       ),
       false
+    );
+  });
+
+  it('does not cross-show student A assignment to student B', () => {
+    const examA = {
+      id: '1580001',
+      name: 'A öğrencisine kilitli',
+      examType: 'LGS',
+      resultStatus: 'None',
+      studentIds: [2086573],
+      studentCount: 1
+    };
+    assert.equal(
+      isStudentEligibleOpenCatalogExam(examA, {
+        roster: ['2086573'],
+        edesisStudentId: '7909547'
+      }),
+      false
+    );
+    assert.equal(
+      catalogExamAssignedToStudent(examA, { edesisStudentId: '7909547', requireStudentIdMatch: true }),
+      false
+    );
+    assert.equal(
+      catalogExamAssignedToStudent(examA, { edesisStudentId: '2086573', requireStudentIdMatch: true }),
+      true
+    );
+  });
+
+  it('partitions expired assigned exams instead of dropping them', () => {
+    const now = new Date('2026-08-30T12:00:00+03:00');
+    const open = {
+      id: '1580100',
+      name: 'Açık pencere',
+      startDate: '2026-08-20T10:00:00',
+      endDate: '2026-09-10T18:00:00'
+    };
+    const closed = {
+      id: '1580101',
+      name: 'Süresi dolmuş',
+      startDate: '2026-08-01T10:00:00',
+      endDate: '2026-08-15T18:00:00'
+    };
+    const part = partitionAssignedCatalogByTakeWindow([open, closed], now);
+    assert.deepEqual(
+      part.takeable.map((ex) => pickEdesisCatalogExamId(ex)),
+      ['1580100']
+    );
+    assert.deepEqual(
+      part.expired.map((ex) => pickEdesisCatalogExamId(ex)),
+      ['1580101']
+    );
+  });
+
+  it('keeps old assigned Ready exam on Sınava gir when window is still open', () => {
+    const exam = {
+      id: '1500001',
+      name: 'Eski atanmış Ready',
+      examType: 'LGS',
+      resultStatus: 'Ready',
+      examDate: '2025-12-01',
+      studentIds: [2086573],
+      startDate: '2025-12-01T10:00:00',
+      endDate: '2026-12-31T18:00:00'
+    };
+    const items = buildStudentAvailableEdesisExamItems({
+      catalogRows: [exam],
+      assignedCatalogRows: [exam],
+      resultRows: [],
+      edesisStudentId: '2086573',
+      programKeys: inferEdesisExamProgramKeys({ classLevel: '8' }),
+      gradeName: '8',
+      now: new Date('2026-08-30T12:00:00Z'),
+      requireExplicitAssignment: true
+    });
+    assert.deepEqual(
+      items.filter((x) => x.canTake).map((x) => x.examId),
+      ['1500001']
     );
   });
 
