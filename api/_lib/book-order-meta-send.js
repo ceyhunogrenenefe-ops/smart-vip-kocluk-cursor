@@ -37,17 +37,16 @@ export const BOOK_ORDER_META_BINDINGS = [
   'siparis_notu'
 ];
 
-const BOOK_ORDER_TEMPLATE_CONTENT = `📚 YENİ KİTAP SİPARİŞİ
-Veli Ad Soyad:
+/** Sabit şablon — satıcıya giden sipariş (tutar / IBAN yok). Meta named param sırası aynı kalır. */
+export const BOOK_ORDER_TEMPLATE_CONTENT = `📚 SATICI SİPARİŞİ
+Veli:
 {{veli_ad_soyad}}
-Öğrenci Ad Soyad:
+Öğrenci:
 {{ogrenci_ad_soyad}}
 Sınıf:
 {{sinif}}
-📦 Gönderilecek Kitap Seti:
+Kitaplar:
 {{kitap_seti}}
-Ücret Durumu:
-{{ucret_durumu}}
 Telefon:
 {{telefon}}
 Adres:
@@ -56,15 +55,11 @@ Adres:
 {{ilce}}
 İl:
 {{il}}
-Sipariş Notu:
+Not:
 {{siparis_notu}}
 ────────────────────────
-Online VIP Dershane tarafından oluşturulan kitap siparişidir.
-Kargo işlemi tamamlandıktan sonra aşağıdaki bilgilerin paylaşılması rica olunur:
-🚚 Kargo Firması:
-🚚 Takip Numarası:
-Teşekkür ederiz.
-Online VIP Dershane`;
+Online VIP Dershane — kitap siparişi.
+Kargo sonrası firma ve takip no paylaşın.`;
 
 function sanitizeParam(v) {
   const s = String(v ?? '')
@@ -88,7 +83,7 @@ function isParamMismatch(errOrMsg) {
 export function buildBookOrderTemplateRow() {
   return {
     type: BOOK_ORDER_TEMPLATE_TYPE,
-    name: 'kitap_siparisi1 (Meta)',
+    name: 'Satıcı sipariş bildirimi (kitap_siparisi1)',
     content: BOOK_ORDER_TEMPLATE_CONTENT,
     variables: BOOK_ORDER_META_BINDINGS,
     twilio_variable_bindings: BOOK_ORDER_META_BINDINGS,
