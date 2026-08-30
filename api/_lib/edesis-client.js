@@ -596,7 +596,7 @@ function isEdesisHtml404(r) {
 function defaultDateRangeQuery() {
   const end = new Date();
   const start = new Date(end);
-  start.setFullYear(start.getFullYear() - 2);
+  start.setFullYear(start.getFullYear() - 4);
   const fmt = (d) => d.toISOString().slice(0, 10);
   return { StartDate: fmt(start), EndDate: fmt(end) };
 }
@@ -791,9 +791,9 @@ export function collectOpenOnlineProgramExams(
 }
 
 /**
- * Sınava gir yedeği: boş/ince roster + açık pencere + öğrenci kademesi.
- * GetOgrenciSinavIds.sinavId analiz geçmişidir — yeni tanımlanan online deneme orada yok.
- * Yeni deneme Edesis’te Processing olabilir. 5–6–7 / 7.sınıf 8-F’ye gitmez.
+ * Sınava gir aday tarama: kademe + program + ince/boş roster + açık pencere.
+ * Listeye ekleme isStudentEligibleOpenCatalogExam ile roster/ogrenciIds şartına bağlıdır.
+ * GetOgrenciSinavIds.sinavId analiz geçmişidir — yeni online deneme orada yok.
  */
 export function collectStudentTakeableOpenCatalogExams(
   catalogRows = [],
@@ -1516,25 +1516,19 @@ export function examRosterIncludesStudent(rosterIds, edesisStudentId) {
 }
 
 /**
- * GetOgrenciBySinavId sonrası Sınava gir kararı.
- * Boş bilinen roster = kademe uyumlu kurumda açık deneme (GetSinavForView studentCount ezmesin).
- * Liste doluysa yalnız bu öğrenci varsa göster.
- * Probe yoksa (null): katalog studentCount===0 ise açık kabul et.
+ * GetOgrenciBySinavId sonrası Sınava gir kararı — fail-closed.
+ * Öğrenci roster’da yoksa (boş liste, başka id’ler, probe yok) gösterme.
+ * Boş roster / ince kadro artık kurum geneli açık deneme sayılmaz.
  */
 export function shouldOfferOpenCatalogExamAfterRoster(exam, { roster, edesisStudentId } = {}) {
   if (!exam) return false;
-  const rosterKnown = Array.isArray(roster);
-  if (examRosterIncludesStudent(rosterKnown ? roster : [], edesisStudentId)) return true;
-  if (!rosterKnown) return catalogExamStudentCount(exam) === 0;
-  return roster.length === 0;
+  return examRosterIncludesStudent(Array.isArray(roster) ? roster : [], edesisStudentId);
 }
 
 /**
  * Açık online deneme uygunluğu (Sınava gir yedeği).
- * - ogrenciIds başka öğrenciye kilitliyse hayır
- * - öğrenci roster’da veya boş roster → evet
- * - ogrenciIds yok + ince kadro (≤8) → evet (başkaları başlamış açık online)
- * Fat Ready (24+) collect aşamasında elenir.
+ * Yalnızca bu öğrenciye kilitli atama (ogrenciIds) veya GetOgrenciBySinavId roster üyeliği.
+ * İnce kadro / boş roster / classmates-started yolu çapraz gösterim yapıyordu — kapalı.
  */
 export function isStudentEligibleOpenCatalogExam(
   exam,
@@ -1549,8 +1543,18 @@ export function isStudentEligibleOpenCatalogExam(
   const assigned = catalogExamAssignedToStudent(exam, scope);
   if (assigned === false) return false;
   if (assigned === true) return true;
-  if (shouldOfferOpenCatalogExamAfterRoster(exam, { roster, edesisStudentId })) return true;
-  return catalogExamStudentCount(exam) <= THIN_ONLINE_ROSTER_MAX;
+  return shouldOfferOpenCatalogExamAfterRoster(exam, { roster, edesisStudentId });
+}
+
+/** Atanmış satırları açık pencere (Sınava gir) / süresi dolmuş (kategori) diye ayır. */
+export function partitionAssignedCatalogByTakeWindow(assigned = [], now = new Date()) {
+  const takeable = [];
+  const expired = [];
+  for (const ex of assigned || []) {
+    if (edesisExamTakeWindowOpen(ex, now)) takeable.push(ex);
+    else expired.push(ex);
+  }
+  return { takeable, expired };
 }
 
 /** GetOgrenciSinavIds çıktısını katalog satırlarına eşle (ogrenciIds alanı olmasa da) */
@@ -1680,7 +1684,7 @@ function looksLikePersonalStudentRaporList(rows) {
   return withId > 0 && withId >= Math.min(n, 1);
 }
 
-async function fetchEdesisStudentRaporPages(localCfg, sid, donemId, stdIdsKey, { maxPages = 2 } = {}) {
+async function fetchEdesisStudentRaporPages(localCfg, sid, donemId, stdIdsKey, { maxPages = 8 } = {}) {
   const pageSize = 250;
   const collected = [];
   let last = { rows: [], httpStatus: null, path: null, error: null, count: 0, totalCount: 0 };
@@ -2584,10 +2588,12 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     }
     if (overlayRows.length) assigned = overlayCatalogExamsWithTakeWindows(assigned, overlayRows);
   }
-  assigned = assigned.filter((ex) => edesisExamTakeWindowOpen(ex));
+  const partitioned = partitionAssignedCatalogByTakeWindow(assigned);
+  assigned = partitioned.takeable;
 
   return {
     rows: assigned,
+    expiredRows: partitioned.expired,
     adminAssignment: adminDetail,
     studentRapor: {
       httpStatus: studentRapor?.httpStatus ?? null,
@@ -2628,8 +2634,10 @@ export function shouldOfferUntakenCatalogExam(exam, scope = {}, now = new Date()
     // assignedCatalogOnly = satır zaten öğrenci atama listesinde (ogrenciIds / GetOgrenciSinavIds / rapor).
     // assigned === false (başka öğrenciye tanımlı) yukarıda elendi.
     if (assigned === true || scope.assignedCatalogOnly) {
-      // Sınava gir: atanmış + açık pencere. Ready ama yıllarca eski analiz kalıntısını gösterme.
       if (/^none$/i.test(catalogResultStatus(exam))) return true;
+      const { startRaw, endRaw } = pickEdesisExamTakeWindow(exam);
+      // GetSinavForView penceresi varsa yaşa bakma — atanmış deneme kaybolmasın.
+      if (startRaw || endRaw) return true;
       const win = Number(scope.assignedTakeableWindowDays) || 120;
       if (!isRecentOpenCatalogExam(exam, now, win)) return false;
       return true;
@@ -3323,7 +3331,8 @@ export function formatEdesisAvailableExamItem(examId, catalog, resultRow, meta =
     resultStatus: String((catalog && catalog.resultStatus) || (submitted ? 'Ready' : 'None')),
     hasStudentResult: submitted,
     studentNet: submitted ? draft?.totalNet ?? null : null,
-    canTake: Boolean(examId) && !submitted,
+    canTake: Boolean(examId) && !submitted && meta.listStatus !== 'expired',
+    listStatus: submitted ? 'completed' : meta.listStatus || (Boolean(examId) && !submitted ? 'takeable' : 'blocked'),
     remainingSeconds: pickExamDurationSeconds(catalog) || 0,
     bookletPdfs: catalog ? collectEdesisBookletFiles(catalog) : []
   };

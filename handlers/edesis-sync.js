@@ -27,6 +27,7 @@ import {
   fetchEdesisStudentResults,
   inferEdesisExamProgramKeys,
   buildStudentAvailableEdesisExamItems,
+  examCompatibleWithStudentGrade,
   pickEdesisCatalogExamId,
   pickEdesisResultExamId,
   collectOpenOnlineProgramExams,
@@ -82,7 +83,7 @@ import { enrollPlatformStudentsBatch, EDESIS_AUTO_ENROLL_MARKER, EDESIS_AUTO_ENR
 
 const STAFF = new Set(['super_admin', 'admin', 'coach']);
 const EDESIS_PDF_DURATION_MARKER = 'edesis-pdf-duration-2026-08-27';
-const EDESIS_ASSIGNED_ONLY_MARKER = 'edesis-open-eligible-2026-08-30';
+const EDESIS_ASSIGNED_ONLY_MARKER = 'edesis-student-isolate-2026-08-30';
 /** Aynı Hobby instance’ta üst üste op=sync 504 üretmesin */
 let syncInFlight = null;
 /** Öğrencinin kendi Edesis sonuç / karne / sınava giriş ops */
@@ -182,11 +183,10 @@ async function resolveStudentEdesisScope({ edesisStudentId, platformStudentId, s
 }
 
 /**
- * Öğrenci Sınava gir — bu öğrenciye tanımlı / girilebilir denemeler.
- * Kaynak: ogrenciIds + GetOgrenciSinavIds + rapor sınıf ataması +
- * yeni online (boş/ince roster, kademe, program, GetSinavForView penceresi).
- * GetOgrenciSinavIds analiz geçmişidir; yeni deneme açık katalog yolundan gelir.
- * Tarihi geçmiş / başka öğrenciye kilitli roster / fat Ready kurum listesi eklenmez.
+ * Öğrenci Sınava gir — yalnız bu öğrenciye tanımlı / roster’da olan denemeler.
+ * Kaynak: ogrenciIds + GetOgrenciSinavIds + rapor ataması +
+ * açık katalog (GetOgrenciBySinavId’de bu öğrenci varsa).
+ * Boş/ince roster kurum geneline yayılmaz. Süresi dolmuş atama kaybolmaz (expired).
  */
 async function loadAvailableEdesisExamsForStudent({
   edesisStudentId,
@@ -255,6 +255,22 @@ async function loadAvailableEdesisExamsForStudent({
   const resultExamIds = (studentResults.rows || [])
     .map((row) => pickEdesisResultExamId(row))
     .filter(Boolean);
+  const takenIdSet = new Set([...resultExamIds, ...takeableIds].map(String));
+  const expiredRows = Array.isArray(assignedResolved?.expiredRows) ? assignedResolved.expiredRows : [];
+  const expired = expiredRows
+    .map((ex) => {
+      const examId = pickEdesisCatalogExamId(ex);
+      if (!examId || takenIdSet.has(String(examId))) return null;
+      if (!examCompatibleWithStudentGrade(ex, scope.gradeName || '', { allowLgsNeighbor: false })) {
+        return null;
+      }
+      return formatEdesisAvailableExamItem(examId, ex, null, {
+        studentId: platformStudentId || `edesis-${edesisStudentId}`,
+        institutionId: actor?.institution_id || null,
+        listStatus: 'expired'
+      });
+    })
+    .filter(Boolean);
   const openOnlineRows = collectOpenOnlineProgramExams(fullRows, {
     programKeys: scope.programKeys,
     gradeName: scope.gradeName || '',
@@ -269,6 +285,7 @@ async function loadAvailableEdesisExamsForStudent({
   const abpAuth = adminAssignment?.abpAuth || getEdesisAbpAuthStatus();
   return {
     items,
+    expired,
     resultRows: studentResults.rows || [],
     openOnline,
     scope,
@@ -297,6 +314,8 @@ async function loadAvailableEdesisExamsForStudent({
       studentRapor: assignedResolved?.studentRapor || null,
       openCatalogCount: assignedResolved?.openCatalogCount ?? 0,
       openCatalogExamIds: assignedResolved?.openCatalogExamIds || [],
+      expiredCount: expired.length,
+      expiredExamIds: expired.map((x) => x.examId).slice(0, 40),
       openOnlineCount: openOnline.length,
       totalMs: Date.now() - t0
     }
@@ -1751,9 +1770,12 @@ export default async function handler(req, res) {
         cfg
       });
       const items = loaded.items || [];
+      const expired = loaded.expired || [];
       const meta = loaded.meta || {};
       const taken = mapHubResultExams(
-        loaded.resultRows || [],
+        (loaded.resultRows || []).filter(
+          (row) => resultRowBelongsToStudent(row, edesisStudentId)
+        ),
         platformStudentId || null,
         edesisStudentId,
         actor?.institution_id || null
@@ -1765,6 +1787,8 @@ export default async function handler(req, res) {
         edesisStudentId,
         count: items.length,
         items,
+        expired,
+        expiredCount: expired.length,
         taken,
         takenCount: taken.length,
         scope: meta.assignmentMode || 'assigned',
