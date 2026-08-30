@@ -39,3 +39,9 @@ Sepet → Ödemeye Geç → otomatik:
 `https://onlinevipdershane.com/odeme.html?source=coaching&token=...&tutar=...`
 
 Supabase (koçluk): `commerce_checkout_handoffs` tablosu gerekli (token için).
+
+---
+
+## Site UX paketi (analiz popup / ücretsiz deneme / Başarılarımız)
+
+Bkz. [APPLY-SITE-UX.md](./APPLY-SITE-UX.md) — `0001-site-trial-basari.patch` ile `onlinevipdershane1` reposuna uygulanır.

@@ -1,0 +1,209 @@
+/* Program lander — mobile nav + footer fixes */
+body.prog-lander-page {
+  overflow-x: hidden;
+}
+
+.prog-site-nav {
+  position: sticky;
+  top: 0;
+  z-index: 200;
+}
+
+.prog-site-nav > div {
+  position: relative;
+}
+
+.prog-nav-toggle {
+  display: none;
+  margin-left: auto;
+  width: 42px;
+  height: 42px;
+  border: 1.5px solid #e5e5e7;
+  border-radius: 10px;
+  background: #fff;
+  color: #1a3fad;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+}
+
+.prog-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Masaüstünde menüde zaten var — chip gizle */
+.prog-basari-chip {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+  white-space: nowrap;
+  color: #1a3fad;
+  background: #eef3ff;
+  border: 1.5px solid #c7d7ff;
+  font-family: inherit;
+  line-height: 1.2;
+}
+
+.prog-site-footer {
+  position: relative;
+  z-index: 1;
+  clear: both;
+}
+
+.prog-body,
+.prog-hero {
+  position: relative;
+  z-index: 1;
+}
+
+@media (max-width: 960px) {
+  .prog-basari-chip {
+    display: inline-flex;
+  }
+
+  .prog-nav-toggle {
+    display: inline-flex;
+    order: 2;
+    margin-left: auto;
+  }
+
+  .prog-site-nav > div {
+    flex-wrap: wrap;
+    height: auto !important;
+    min-height: 68px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    align-items: center;
+  }
+
+  .prog-site-nav > div > a:first-child {
+    order: 1;
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .prog-nav-actions {
+    order: 3;
+  }
+
+  .prog-site-nav > div > a:first-child img {
+    height: 44px;
+    max-width: min(180px, 50vw);
+  }
+
+  #navLinks {
+    display: none !important;
+    order: 10;
+    width: 100%;
+    flex: 1 1 100%;
+    flex-direction: column;
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+    gap: 4px !important;
+    padding: 12px 0 4px;
+    margin: 0;
+    border-top: 1px solid #e5e5e7;
+  }
+
+  #navLinks.prog-nav-open {
+    display: flex !important;
+  }
+
+  #navLinks > a {
+    width: 100%;
+    white-space: normal !important;
+  }
+
+  #pdWrap {
+    width: 100%;
+    display: block !important;
+  }
+
+  #pdBtn {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  #pdMenu {
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-height: min(60vh, 420px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    margin-top: 6px;
+    box-shadow: none !important;
+    border: 1px solid #e5e5e7 !important;
+    z-index: 1 !important;
+  }
+
+  .prog-site-footer > div:first-child {
+    grid-template-columns: 1fr !important;
+    gap: 28px !important;
+  }
+
+  .prog-hero {
+    padding-top: 32px;
+    padding-bottom: 32px;
+  }
+
+  .prog-hero-in {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 24px !important;
+  }
+
+  .prog-hero-poster {
+    order: -1;
+    max-width: 280px;
+    width: 100%;
+    margin: 0 auto;
+  }
+
+  .prog-hero-copy {
+    order: 0;
+  }
+
+  .price-box {
+    order: 1;
+    max-width: 100%;
+    width: 100%;
+    margin: 0;
+  }
+
+  .prog-grid {
+    grid-template-columns: 1fr !important;
+    gap: 28px !important;
+  }
+
+  .sidebar-box {
+    position: static !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .prog-basari-chip {
+    padding: 8px 8px;
+    font-size: 11px;
+  }
+
+  .prog-nav-actions a[href*="login"],
+  .prog-nav-actions a[href*="kayit"] {
+    padding: 8px 10px !important;
+    font-size: 11px !important;
+  }
+}
