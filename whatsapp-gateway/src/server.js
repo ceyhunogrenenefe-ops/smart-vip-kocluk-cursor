@@ -121,7 +121,7 @@ const RECIPIENT_JID_TTL_MS = Math.min(
   24 * 3600_000,
   Math.max(60_000, Number(process.env.WA_RECIPIENT_JID_TTL_MS) || 6 * 3600_000)
 );
-const GATEWAY_FIX_MARKER = 'wa-auto-pending-fix-2026-08-27';
+const GATEWAY_FIX_MARKER = 'wa-qr-start-wait-2026-08-31';
 
 app.use(
   cors({
@@ -387,6 +387,14 @@ const sessions = new Map();
 
 /** Aynı coach için eşzamanlı setupSession çağrılarını birleştir. */
 const setupInFlight = new Map();
+/** stopSession her çağrıda artar; eski in-flight soket oturumu ezmesin. */
+const sessionEpoch = new Map();
+
+function bumpSessionEpoch(coachId) {
+  const n = (sessionEpoch.get(coachId) || 0) + 1;
+  sessionEpoch.set(coachId, n);
+  return n;
+}
 /** Aynı coach için gönderimleri sırala (reconnect yarışını önler). */
 const sendInFlight = new Map();
 /** Son gönderim bitiş zamanı — SEND_PACE_MS aralığı. */
@@ -728,6 +736,19 @@ async function sendTextWithDeliveryCheck(
   return result;
 }
 
+async function waitForQrOrConnected(coachId, session, timeoutMs = 20000) {
+  const deadline = Date.now() + Math.max(3000, timeoutMs);
+  let cur = session;
+  while (Date.now() < deadline) {
+    cur = sessions.get(coachId) || cur;
+    if (cur?.qr) return cur;
+    if (cur?.status === 'connected') return cur;
+    if (cur?.status === 'logged_out' && cur?.lastError) return cur;
+    await sleep(250);
+  }
+  return sessions.get(coachId) || cur;
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -912,6 +933,7 @@ async function stopSession(coachId, opts = {}) {
   const id = String(coachId || '').trim();
   if (!id) return;
 
+  bumpSessionEpoch(id);
   setupInFlight.delete(id);
 
   const session = sessions.get(id);
@@ -1023,11 +1045,24 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
   if (!coachId) throw new Error('coachId is required');
 
   if (setupInFlight.has(coachId)) {
-    return setupInFlight.get(coachId);
+    if (allowDiskAuth) return setupInFlight.get(coachId);
+    try {
+      await setupInFlight.get(coachId);
+    } catch {
+      /* eski restore bitsin; QR için temiz start */
+    }
   }
+
+  const epoch = sessionEpoch.get(coachId) || 0;
 
   const work = (async () => {
     await stopStuckSessionIfNeeded(coachId);
+    if ((sessionEpoch.get(coachId) || 0) !== epoch) {
+      return (
+        sessions.get(coachId) ||
+        parkSessionWaitingForQr(coachId, 'Oturum yenileniyor — tekrar «QR / Oturum başlat» basın.')
+      );
+    }
 
     let meta = await readSessionMeta(coachId);
     meta = await maybeClearTransientRestoreBlock(coachId, meta);
@@ -1037,21 +1072,19 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
         await clearCoachAuth(coachId);
       }
     }
-    if (!allowDiskAuth && !hasAuthOnDisk) {
-      const parked = sessions.get(coachId);
-      if (parked && (parked.status === 'logged_out' || parked.status === 'qr_ready') && !parked.sock) {
-        return parked;
-      }
-    }
     if (isRestoreBlocked(meta) && !(await hasGatewayAuthOnDisk(coachId))) {
-      return parkSessionWaitingForQr(
-        coachId,
-        'Önceki oturum hatalı — «Oturumu sıfırla ve QR al» ile temiz başlayın.'
-      );
+      if (allowDiskAuth) {
+        return parkSessionWaitingForQr(
+          coachId,
+          'Önceki oturum hatalı — «Oturumu sıfırla ve QR al» ile temiz başlayın.'
+        );
+      }
+      await clearSessionMeta(coachId);
+      meta = {};
     }
 
     const existing = sessions.get(coachId);
-    if (existing?.sock && existing.status === 'connected') return existing;
+    if (allowDiskAuth && existing?.sock && existing.status === 'connected') return existing;
     if (
       existing &&
       !existing.sock &&
@@ -1080,6 +1113,9 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
     await fs.mkdir(authDir, { recursive: true });
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const { version } = await fetchLatestBaileysVersion();
+    if ((sessionEpoch.get(coachId) || 0) !== epoch) {
+      return sessions.get(coachId) || parkSessionWaitingForQr(coachId);
+    }
 
     /** @type {SessionState} */
     const sessionState = {
@@ -1522,7 +1558,8 @@ app.post('/sessions/:coachId/start', requireGatewayAuth, requireCoachScope, asyn
     }
 
     const session = await setupSession(coachId, { allowDiskAuth: !hasBadAuth });
-    res.json(sessionPayload(coachId, session, { purged: hasBadAuth }));
+    const waited = await waitForQrOrConnected(coachId, session, hasBadAuth ? 22000 : 18000);
+    res.json(sessionPayload(coachId, waited, { purged: hasBadAuth }));
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message || 'session_start_failed' });
   }
@@ -1610,7 +1647,8 @@ app.post('/sessions/:coachId/reset', requireGatewayAuth, requireCoachScope, asyn
     await stopSession(coachId, { clearAuth: true });
     await clearSessionMeta(coachId);
     const fresh = await setupSession(coachId, { allowDiskAuth: false });
-    res.json(sessionPayload(coachId, fresh, { reset: true }));
+    const waited = await waitForQrOrConnected(coachId, fresh, 22000);
+    res.json(sessionPayload(coachId, waited, { reset: true }));
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message || 'session_reset_failed' });
   }
