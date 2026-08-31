@@ -34,6 +34,10 @@ fi
 grep -q '^PORT=' "$GATEWAY_DIR/.env" || echo 'PORT=4010' >> "$GATEWAY_DIR/.env"
 grep -q '^SILENCE_SIGNAL_SESSION_LOGS=' "$GATEWAY_DIR/.env" || echo 'SILENCE_SIGNAL_SESSION_LOGS=1' >> "$GATEWAY_DIR/.env"
 
+if [ -f "$GATEWAY_DIR/src/server.js" ] && ! grep -q 'wa-qr-start-wait' "$GATEWAY_DIR/src/server.js"; then
+  echo "UYARI: $GATEWAY_DIR/src/server.js eski — QR pin marker yok. Eski zip ile ezmeyin." >&2
+fi
+
 cd "$GATEWAY_DIR"
 pm2 delete whatsapp-gateway >/dev/null 2>&1 || true
 pm2 start ecosystem.config.cjs

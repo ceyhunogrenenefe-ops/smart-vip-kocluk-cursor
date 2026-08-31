@@ -88,11 +88,29 @@ export default async function handler(req, res) {
   };
 
   try {
-    let r = await fetchOnce();
+    let r;
+    try {
+      r = await fetchOnce();
+    } catch (firstErr) {
+      // Ölü Korea IP / ağ düşmesi: Phoenix’e bir kez daha dene (pin kaçsa bile 502 olmasın).
+      if (!/89\.252\.179\.128|phoenixdms\.com/i.test(target)) {
+        const phoenixTarget = `http://89.252.179.128:4010/${pathPart}${qs}`;
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          r = await fetch(phoenixTarget, { ...init, signal: controller.signal });
+        } finally {
+          clearTimeout(tid);
+        }
+      } else {
+        throw firstErr;
+      }
+    }
     const canRetry =
       method === 'GET' ||
       method === 'HEAD' ||
       isStatusRoute ||
+      isStartRoute ||
       (isSendRoute && (r.status === 409 || r.status === 502 || r.status === 504));
     if (canRetry && (r.status === 409 || r.status === 502 || r.status === 504)) {
       await new Promise((resolve) => setTimeout(resolve, isSendRoute ? 900 : 200));
