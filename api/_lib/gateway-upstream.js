@@ -1,43 +1,75 @@
 /**
- * VPS WhatsApp gateway taban adresi — http:// ve :4010 eksikse tamamlar.
- * Eski Windows/Korea IP otomatik Phoenix VPS’e alınır (2026-08-27).
+ * VPS WhatsApp gateway taban adresi.
+ * Üretim her zaman Phoenix (89.252.179.128:4010). Eski Windows/Korea IP
+ * (27.102.132.134) ölü — env yanlış kalsa bile oraya gidilmez.
  */
-const PHOENIX_GATEWAY = 'http://89.252.179.128:4010';
-const LEGACY_GATEWAY_HOSTS = new Set(['27.102.132.134', '27.102.134.199']);
+export const PHOENIX_GATEWAY = 'http://89.252.179.128:4010';
+export const PHOENIX_HOST = '89.252.179.128';
+export const GATEWAY_UPSTREAM_PIN = 'phoenix-89.252.179.128:4010';
 
-function remapLegacyGatewayHost(raw) {
-  try {
-    const u = new URL(raw);
-    if (LEGACY_GATEWAY_HOSTS.has(u.hostname)) return PHOENIX_GATEWAY;
-  } catch {
-    /* ignore */
-  }
-  return raw;
+const LEGACY_HOST_RE = /27\.102\.(132\.134|134\.199)/;
+
+function stripQuotes(s) {
+  return String(s || '')
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '')
+    .replace(/\/$/, '');
 }
 
+function allowNonPhoenix() {
+  return String(process.env.WHATSAPP_GATEWAY_ALLOW_NON_PHOENIX || '').trim() === '1';
+}
+
+function isLocalDevHost(hostname) {
+  const h = String(hostname || '').toLowerCase();
+  return h === 'localhost' || h === '127.0.0.1' || h === '::1';
+}
+
+function isPhoenixHost(hostname) {
+  const h = String(hostname || '').toLowerCase();
+  return h === PHOENIX_HOST || h === 'app.phoenixdms.com' || h.endsWith('.phoenixdms.com');
+}
+
+/**
+ * Env ne olursa olsun (eski Korea/Windows IP, tırnak, şema yok) Phoenix’e pinler.
+ * Yerel geliştirme: localhost. Kaçış: WHATSAPP_GATEWAY_ALLOW_NON_PHOENIX=1
+ */
 export function resolveGatewayUpstream() {
-  let raw = String(process.env.WHATSAPP_GATEWAY_UPSTREAM || '').trim().replace(/\/$/, '');
+  let raw = stripQuotes(process.env.WHATSAPP_GATEWAY_UPSTREAM || '');
   if (!raw) {
-    const alt = String(process.env.WHATSAPP_GATEWAY_URL || '').trim().replace(/\/$/, '');
+    const alt = stripQuotes(process.env.WHATSAPP_GATEWAY_URL || '');
     if (alt && /^https?:\/\//i.test(alt) && !/vercel\.app/i.test(alt)) raw = alt;
   }
-  if (!raw) raw = PHOENIX_GATEWAY;
+  if (!raw) return PHOENIX_GATEWAY;
 
-  if (!/^https?:\/\//i.test(raw)) {
-    raw = `http://${raw}`;
-  }
-  raw = remapLegacyGatewayHost(raw);
+  if (!/^https?:\/\//i.test(raw)) raw = `http://${raw}`;
+  if (LEGACY_HOST_RE.test(raw)) return PHOENIX_GATEWAY;
 
   try {
     const u = new URL(raw);
-    if (!u.port) {
-      const def = u.protocol === 'https:' ? '443' : '4010';
-      return `${u.protocol}//${u.hostname}:${def}`;
+    if (isPhoenixHost(u.hostname)) {
+      const port = u.port || (u.protocol === 'https:' ? '443' : '4010');
+      return `${u.protocol}//${u.hostname}:${port}`;
     }
-    return `${u.protocol}//${u.hostname}:${u.port}`;
+    if (isLocalDevHost(u.hostname)) {
+      const port = u.port || '4010';
+      return `${u.protocol}//${u.hostname}:${port}`;
+    }
   } catch {
-    return '';
+    /* pin below */
   }
+
+  if (allowNonPhoenix()) {
+    try {
+      const u = new URL(raw);
+      const port = u.port || (u.protocol === 'https:' ? '443' : '4010');
+      return `${u.protocol}//${u.hostname}:${port}`;
+    } catch {
+      return PHOENIX_GATEWAY;
+    }
+  }
+
+  return PHOENIX_GATEWAY;
 }
 
 /** VPS /health — JWT gerekmez; kısa süre önbellek (status spam önlenir). */
@@ -51,9 +83,9 @@ export async function probeGatewayHealth() {
   }
   const upstream = resolveGatewayUpstream();
   if (!upstream) {
-    return { ok: false, error: 'upstream_missing', upstream: null };
+    return { ok: false, error: 'upstream_missing', upstream: null, pin: GATEWAY_UPSTREAM_PIN };
   }
-  const timeoutMs = Math.min(5000, Math.max(2000, Number(process.env.WA_GATEWAY_HEALTH_TIMEOUT_MS) || 3500));
+  const timeoutMs = Math.min(8000, Math.max(2000, Number(process.env.WA_GATEWAY_HEALTH_TIMEOUT_MS) || 5000));
   const controller = new AbortController();
   const tid = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -64,6 +96,7 @@ export async function probeGatewayHealth() {
       ok: res.ok && data?.ok !== false,
       status: res.status,
       upstream: upstream.replace(/^https?:\/\//, ''),
+      pin: GATEWAY_UPSTREAM_PIN,
       service: data?.service || null,
       sessions: Number(data?.sessions) || 0,
       connected: Number(data?.connected) || 0,
@@ -84,6 +117,7 @@ export async function probeGatewayHealth() {
     const out = {
       ok: false,
       upstream: upstream.replace(/^https?:\/\//, ''),
+      pin: GATEWAY_UPSTREAM_PIN,
       error: aborted ? 'gateway_upstream_timeout' : e instanceof Error ? e.message : 'fetch_failed'
     };
     healthCache = { at: Date.now(), data: out };
