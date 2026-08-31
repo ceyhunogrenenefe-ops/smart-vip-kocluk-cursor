@@ -70,9 +70,12 @@ export default async function handler(req, res) {
 
   const isSendRoute = /\/send(?:-document)?\/?$/i.test(pathPart);
   const isStatusRoute = /\/status\/?$/i.test(pathPart);
+  const isStartRoute = /\/(start|reset)\/?$/i.test(pathPart);
   const timeoutMs = isSendRoute
     ? Math.min(115000, Math.max(25000, Number(process.env.WA_GATEWAY_SEND_TIMEOUT_MS) || 110000))
-    : Math.min(45000, Math.max(10000, Number(process.env.WA_GATEWAY_STATUS_TIMEOUT_MS) || 30000));
+    : isStartRoute
+      ? Math.min(110000, Math.max(40000, Number(process.env.WA_GATEWAY_START_TIMEOUT_MS) || 55000))
+      : Math.min(45000, Math.max(10000, Number(process.env.WA_GATEWAY_STATUS_TIMEOUT_MS) || 30000));
 
   const fetchOnce = async () => {
     const controller = new AbortController();
