@@ -113,7 +113,8 @@ function bulkTemplateUsesExamVars(template: string) {
 }
 
 interface CoachWaPrefsPayload {
-  coach_id: string;
+  coach_id: string | null;
+  hint?: string;
   prefs: {
     daily_report_enabled: boolean;
     daily_report_scope: string;
@@ -391,6 +392,7 @@ export default function CoachWhatsAppSettings() {
         return;
       }
       setWaPrefs(payload);
+      if (!payload.coach_id && payload.hint) setWaPrefsMsg(payload.hint);
     } catch {
       setWaPrefs(null);
       setWaPrefsMsg('WhatsApp ayarları yüklenemedi.');
@@ -408,8 +410,17 @@ export default function CoachWhatsAppSettings() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ daily_report_enabled: enabled, daily_report_scope: enabled ? 'all' : 'none' })
       });
-      const j = (await res.json().catch(() => ({}))) as { error?: string; prefs?: CoachWaPrefsPayload['prefs'] };
+      const j = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        skipped?: boolean;
+        hint?: string;
+        prefs?: CoachWaPrefsPayload['prefs'];
+      };
       if (!res.ok) throw new Error(j?.error || res.statusText);
+      if (j.skipped) {
+        setWaPrefsMsg(j.hint || 'Günlük rapor kaydı atlandı — koç profili yok.');
+        return;
+      }
       setWaPrefsMsg(enabled ? 'Günlük rapor hatırlatması açıldı.' : 'Günlük rapor hatırlatması kapatıldı.');
       void loadWaPrefs();
     } catch (e) {
@@ -1701,8 +1712,8 @@ export default function CoachWhatsAppSettings() {
               <label className="flex cursor-pointer items-center gap-3 text-sm font-medium text-slate-800">
                 <input
                   type="checkbox"
-                  checked={waPrefs?.prefs?.daily_report_enabled !== false}
-                  disabled={waPrefsSaving || !hasServerJwt}
+                  checked={Boolean(waPrefs?.prefs?.daily_report_enabled)}
+                  disabled={waPrefsSaving || !hasServerJwt || !waPrefs?.coach_id}
                   onChange={(e) => void saveDailyReportPref(e.target.checked)}
                   className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
                 />

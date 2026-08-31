@@ -18,7 +18,7 @@
  *  staff.package_update  — paket adı / kademe / fiyat
  *  staff.package_delete  — paketi sil (soft)
  *  staff.package_items_set — paket kitaplarını değiştir
- *  deployMarker: kitap-iban-odeme-2026-08-29
+ *  deployMarker: kitap-assigned-staff-200-2026-08-31
  *  cart.get              — mevcut sepeti getir
  *  cart.add              — sepete ürün ekle
  *  cart.update           — adet güncelle
@@ -73,6 +73,7 @@ import {
   resolveIbanAccount,
 } from '../api/_lib/commerce-iban.js';
 import { listLgs8Collections } from '../api/_lib/commerce-lgs8-seed.js';
+import { assignedCatalogIfNoStudent, commerceStoreHttpStatus } from '../api/_lib/commerce-store-http.js';
 import { classKeyMatchesLevels, listStoreBrowse, publicStoreBrowseNav } from '../api/_lib/commerce-store-browse.js';
 import { notifyVendorWhatsAppForPaidOrder } from '../api/_lib/commerce-vendor-order-notify.js';
 import { computeCouponDiscount } from '../api/_lib/commerce-coupon-discount.js';
@@ -121,7 +122,7 @@ async function handleCatalog(op, body, actor) {
       ok: true,
       settings,
       store_browse,
-      deployMarker: 'kitap-iban-odeme-2026-08-29',
+      deployMarker: 'kitap-assigned-staff-200-2026-08-31',
     };
   }
 
@@ -245,13 +246,14 @@ async function handleCatalog(op, body, actor) {
 
   if (op === 'catalog.browse') {
     const browse = await listStoreBrowse();
-    return { ok: true, ...browse, deployMarker: 'kitap-package-autosum-2026-08-29' };
+    return { ok: true, ...browse, deployMarker: 'kitap-assigned-staff-200-2026-08-31' };
   }
 
   if (op === 'catalog.assigned') {
     if (!actor?.sub || actor.sub === 'anonymous') throw new Error('Giriş gerekli');
     const studentId = actor.student_id ?? body.student_id;
-    if (!studentId) throw new Error('student_id gerekli');
+    const empty = assignedCatalogIfNoStudent(studentId);
+    if (empty) return empty;
     const { data, error } = await supabaseAdmin
       .from('commerce_student_book_assignments')
       .select(`
@@ -1531,10 +1533,7 @@ export default async function handler(req, res) {
   } catch (e) {
     console.error('[commerce-store]', e?.message || e);
     const msg = e?.message || 'sunucu_hatası';
-    if (/Yetkisiz|Yetki yok|giriş gerekli|öğrenci bulunamadı|book_id|pakete|paket id|name gerekli|Geçersiz|süresi dolmuş|bulunamadı|yeterli stok|Sepet boş|yapılandırılmamış|Veli|e-posta|telefon|karakter|PayTR|Garanti|token|ödeme|Sipariş|kupon|Kupon|indirim|Dekont|IBAN|havale/i.test(msg)) {
-      const status = /Yetkisiz|giriş gerekli/i.test(msg) ? 401 : 400;
-      return err(res, status, msg);
-    }
-    return err(res, 500, msg);
+    const status = commerceStoreHttpStatus(msg);
+    return err(res, status, msg);
   }
 }
