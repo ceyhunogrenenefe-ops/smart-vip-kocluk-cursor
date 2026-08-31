@@ -115,6 +115,7 @@ export default async function handler(req, res) {
       upstream_reachable: gatewayHealth.ok === true,
       upstream_error: gatewayHealth.error || null,
       upstream_host: gatewayHealth.upstream || gatewayEnv.upstream_suffix || null,
+      upstream_pin: gatewayHealth.pin || 'phoenix-89.252.179.128:4010',
       env_session_id_suffix: maskId(envSessionId),
       connected_live_count: connectedLive.length,
       connected_live_suffixes: connectedLive.map(maskId),

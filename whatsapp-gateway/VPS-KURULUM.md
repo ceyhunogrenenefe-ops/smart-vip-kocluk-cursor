@@ -14,9 +14,13 @@ Bu rehber, `whatsapp-gateway` servisini sıfırdan bir Ubuntu/Debian VPS üzerin
 - Nginx: `whatsapp-gateway/deploy/nginx-phoenixdms.conf`
 - Ajan SSH: `whatsapp-gateway/deploy/vps-ssh.sh` (ed25519 anahtar, şifre yok)
 
-Canlı panel hâlâ eski upstream (`27.102.132.134:4010`) kullanıyorsa Vercel `WHATSAPP_GATEWAY_UPSTREAM` yeni URL’ye çevrilmeden QR oturumları kopmaz. Taşıma bitince:
+Canlı panel **yalnızca Phoenix** kullanır (`http://89.252.179.128:4010`).
+Vercel `WHATSAPP_GATEWAY_UPSTREAM` hâlâ eski Korea IP (`27.102.132.134`) olsa bile kod Phoenix’e pinler.
+Kaçış yok (Windows IP’ye dönüş yok) — `WHATSAPP_GATEWAY_ALLOW_NON_PHOENIX=1` olmadıkça.
 
 `WHATSAPP_GATEWAY_UPSTREAM=https://app.phoenixdms.com`
+# veya
+`WHATSAPP_GATEWAY_UPSTREAM=http://89.252.179.128:4010`
 
 Log (ajan onarımı): `GET /admin/logs` + header `x-gateway-key`.
 
