@@ -46,6 +46,21 @@ export function shippingIsComplete(ship) {
   }
 }
 
+/**
+ * Kart: teslimat /odeme/kitap sayfasında istenir (burada opsiyonel).
+ * IBAN: sepetten dekontla biter, adres burada zorunlu.
+ */
+export function resolveCheckoutShipping(body, { required = false, requireEmail = true } = {}) {
+  const ship = parseShippingFromBody(body);
+  if (required) return assertShippingComplete(ship, { requireEmail });
+  return shippingIsComplete(ship) ? ship : null;
+}
+
+export function checkoutRequiresShipping(opts = {}) {
+  if (opts.requireShipping === true) return true;
+  return String(opts.provider || '').toLowerCase() === 'iban';
+}
+
 export function shippingInsertRow(orderId, ship) {
   return {
     order_id: orderId,

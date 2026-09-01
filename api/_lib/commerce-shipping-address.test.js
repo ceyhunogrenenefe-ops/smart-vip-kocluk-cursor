@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   assertShippingComplete,
+  checkoutRequiresShipping,
   formatShippingOneLine,
   itemsForVendor,
   parseShippingFromBody,
+  resolveCheckoutShipping,
   shippingInsertRow,
   shippingIsComplete
 } from './commerce-shipping-address.js';
@@ -52,6 +54,33 @@ describe('assertShippingComplete', () => {
     expect(row.order_id).toBe('ord-1');
     expect(row.address_type).toBe('shipping');
     expect(row.country).toBe('TR');
+  });
+});
+
+describe('resolveCheckoutShipping', () => {
+  it('lets card prepare continue without a street address', () => {
+    expect(checkoutRequiresShipping({ provider: 'paytr' })).toBe(false);
+    expect(resolveCheckoutShipping({ customer_name: 'Ayşe Yılmaz' }, { required: false })).toBeNull();
+  });
+
+  it('requires street + city for IBAN checkout', () => {
+    expect(checkoutRequiresShipping({ provider: 'iban' })).toBe(true);
+    expect(() =>
+      resolveCheckoutShipping(
+        { customer_name: 'Ayşe Yılmaz', customer_phone: '05551234567', customer_email: 'a@b.com' },
+        { required: true }
+      )
+    ).toThrow(/Teslimat adresi/);
+    const ship = resolveCheckoutShipping(
+      {
+        customer_name: 'Ayşe Yılmaz',
+        customer_phone: '05551234567',
+        customer_email: 'a@b.com',
+        address: { address_line1: 'Bağdat Cad. 10', city: 'İstanbul' }
+      },
+      { required: true }
+    );
+    expect(ship.city).toBe('İstanbul');
   });
 });
 
