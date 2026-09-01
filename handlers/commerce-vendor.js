@@ -13,7 +13,7 @@
  *  shipments.create | shipments.update
  *  payouts.list
  *  stats.overview
- *  deployMarker: kitapci-siparis-odenen-2026-08-29
+ *  deployMarker: kitap-set-icerik-satici-2026-09-01
  */
 
 import { requireAuth } from '../api/_lib/auth.js';
@@ -25,6 +25,26 @@ import {
   isPaidParentOrder,
   vendorStatusTimestamps,
 } from '../api/_lib/commerce-vendor-orders.js';
+import { attachPackageContents, loadPackageContentsByIds } from '../api/_lib/commerce-package-contents.js';
+
+async function decorateVendorOrdersWithPackageContents(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const pkgIds = [];
+  for (const vo of list) {
+    for (const it of vo.commerce_order_items || []) {
+      if (it.package_id) pkgIds.push(it.package_id);
+    }
+  }
+  const { contentsByPackageId, namesByPackageId } = await loadPackageContentsByIds(supabaseAdmin, pkgIds);
+  for (const vo of list) {
+    vo.commerce_order_items = attachPackageContents(
+      vo.commerce_order_items || [],
+      contentsByPackageId,
+      namesByPackageId
+    );
+  }
+  return list;
+}
 
 function err(res, status, message) {
   return res.status(status).json({ error: message });
@@ -40,7 +60,7 @@ function sanitizeInt(v) {
 }
 
 const VENDOR_ORDERS_PAID_ONLY = true;
-const VENDOR_PAID_MARKER = 'kitap-kargo-adres-satici-2026-09-01';
+const VENDOR_PAID_MARKER = 'kitap-set-icerik-satici-2026-09-01';
 
 async function paidOrderIdSetForVendor(vendorId) {
   const { data: vos, error } = await supabaseAdmin
@@ -358,7 +378,7 @@ export default async function handler(req, res) {
             id, order_number, customer_name, customer_email, customer_phone, notes, created_at, status, payment_status,
             commerce_order_addresses(*)
           ),
-          commerce_order_items(id, title_snapshot, isbn_snapshot, quantity, unit_price_kurus),
+          commerce_order_items(id, title_snapshot, isbn_snapshot, quantity, unit_price_kurus, package_id, book_id),
           commerce_shipments(*)
         `)
         .eq('vendor_id', vendorId)
@@ -369,9 +389,10 @@ export default async function handler(req, res) {
       q = q.limit(limit);
       const { data, error } = await q;
       if (error) throw error;
+      const vendor_orders = await decorateVendorOrdersWithPackageContents(data || []);
       return res.status(200).json({
         ok: true,
-        vendor_orders: data,
+        vendor_orders,
         paid_only: VENDOR_ORDERS_PAID_ONLY,
         deployMarker: VENDOR_PAID_MARKER,
       });
@@ -391,7 +412,8 @@ export default async function handler(req, res) {
         `
       );
       if (loaded.error) return err(res, loaded.status, loaded.error);
-      return res.status(200).json({ ok: true, vendor_order: loaded.vo, paid_only: VENDOR_ORDERS_PAID_ONLY });
+      const [decorated] = await decorateVendorOrdersWithPackageContents([loaded.vo]);
+      return res.status(200).json({ ok: true, vendor_order: decorated, paid_only: VENDOR_ORDERS_PAID_ONLY });
     }
 
     if (op === 'orders.accept') {

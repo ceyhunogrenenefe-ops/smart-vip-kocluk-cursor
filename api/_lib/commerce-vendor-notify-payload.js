@@ -4,6 +4,7 @@
  */
 import { normalizePhoneToE164 } from './phone-whatsapp.js';
 import { formatShippingOneLine, itemsForVendor } from './commerce-shipping-address.js';
+import { formatSellerItemLabel } from './commerce-package-contents.js';
 
 export function vendorNotifyPhone(vendor) {
   if (!vendor || typeof vendor !== 'object') return null;
@@ -46,15 +47,7 @@ export function buildVendorOrderNotifyPayload({
   vendor = null,
 } = {}) {
   const scoped = itemsForVendor(items, vendor?.id);
-  const lines = (scoped || [])
-    .map((it) => {
-      const qty = Math.max(1, Number(it.quantity) || 1);
-      const title = String(it.title_snapshot || it.title || 'Kitap').trim();
-      const isbn = String(it.isbn_snapshot || it.isbn || '').trim();
-      const label = isbn ? `${title} [${isbn}]` : title;
-      return qty > 1 ? `${label} × ${qty}` : label;
-    })
-    .filter(Boolean);
+  const lines = (scoped || []).map((it) => formatSellerItemLabel(it)).filter(Boolean);
   const kitap_seti = lines.length ? lines.join(' | ') : 'Kitap siparişi';
   const addr = address || {};
   const studentName = student?.name || order?.student_name || '';
