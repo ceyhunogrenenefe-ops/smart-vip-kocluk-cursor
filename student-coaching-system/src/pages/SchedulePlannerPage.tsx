@@ -22,6 +22,17 @@ import { apiFetch } from '../lib/session';
 import { resolveInstitutionIdForActor } from '../lib/activeInstitutionScope';
 import { mergeClassSlotsIntoPlanner, type PlannerState as FullPlannerState } from '../lib/classSlotsToPlanner';
 import { PLANNER_CURRICULUM_PRESETS, PLANNER_POOL_SUBJECTS } from '../lib/plannerTopicPool';
+import {
+  NEW_TERM_END,
+  NEW_TERM_KEY,
+  NEW_TERM_PERIODS,
+  NEW_TERM_PLAN_NAME,
+  NEW_TERM_PLAN_TITLE,
+  NEW_TERM_PLANNER_PATH,
+  NEW_TERM_START,
+  blankNewTermPlannerState,
+  pickNewTermPlan,
+} from '../lib/newTermSchedulePlanner';
 
 type PlannerTeacher = { id: string; name: string; email?: string; branches?: string[] };
 type PlannerStudent = { id: string; name: string; class_level?: string | number | null; email?: string; school?: string; class_ids?: string[] };
@@ -84,7 +95,8 @@ function formatYmd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function defaultDateRange(): { from: string; to: string } {
+function defaultDateRange(isNewTerm = false): { from: string; to: string } {
+  if (isNewTerm) return { from: NEW_TERM_START, to: NEW_TERM_END };
   const today = new Date();
   const from = formatYmd(today);
   const end = new Date(today);
@@ -176,9 +188,10 @@ function postPlannerMessage<T>(
   });
 }
 
-export default function SchedulePlannerPage() {
+export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'default' | 'new-term' }) {
   const { effectiveUser } = useAuth();
   const { activeInstitutionId, institution, institutions } = useApp();
+  const isNewTerm = mode === 'new-term';
   const roleTags = userRoleTags(effectiveUser);
   const isSuper = effectiveUser?.role === 'super_admin' || roleTags.includes('super_admin');
   const isAdmin = effectiveUser?.role === 'admin' || roleTags.includes('admin');
@@ -230,6 +243,8 @@ export default function SchedulePlannerPage() {
   const planLoadGenRef = useRef(0);
   const planBootstrappedRef = useRef(false);
   const [apiHint, setApiHint] = useState('');
+  const [plansReady, setPlansReady] = useState(false);
+  const iframeSrc = isNewTerm ? `${IFRAME_SRC}?term=${encodeURIComponent(NEW_TERM_KEY)}` : IFRAME_SRC;
 
   const rememberSharedPlan = useCallback(
     (planId: string) => {
@@ -246,7 +261,12 @@ export default function SchedulePlannerPage() {
   );
 
   const pushPlannerContext = useCallback(
-    async (opts?: { serverPlanActive?: boolean; autoSyncClasses?: boolean; nameOverride?: string }) => {
+    async (opts?: {
+      serverPlanActive?: boolean;
+      autoSyncClasses?: boolean;
+      nameOverride?: string;
+      freshBlank?: boolean;
+    }) => {
       if (!iframeReady || !institutionId) return;
       try {
         await postPlannerMessage(iframeRef.current, 'SET_CONTEXT', {
@@ -263,14 +283,22 @@ export default function SchedulePlannerPage() {
           curriculumPresets: PLANNER_CURRICULUM_PRESETS,
           autoSyncClasses: opts?.autoSyncClasses ?? true,
           serverPlanActive: opts?.serverPlanActive ?? planBootstrappedRef.current,
-          planName: String(opts?.nameOverride ?? planName).trim()
+          planName: String(opts?.nameOverride ?? planName).trim(),
+          ...(isNewTerm
+            ? {
+                storageKeySuffix: NEW_TERM_KEY,
+                term: { start: NEW_TERM_START, end: NEW_TERM_END },
+                periods: NEW_TERM_PERIODS.map((p) => ({ label: p.label, time: p.time })),
+                freshBlank: opts?.freshBlank === true
+              }
+            : {})
         });
         setLoadError('');
       } catch {
         setLoadError('Planlayıcı bağlantısı kurulamadı. Sayfayı yenileyin.');
       }
     },
-    [iframeReady, institutionId, classes, systemTeachers, systemStudents, planName]
+    [iframeReady, institutionId, classes, systemTeachers, systemStudents, planName, isNewTerm]
   );
 
   const loadPlannerResources = useCallback(async (): Promise<ClassRow[]> => {
@@ -330,6 +358,7 @@ export default function SchedulePlannerPage() {
     const j = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(j.error || 'plan_list_failed');
     setPlans(Array.isArray(j.data) ? j.data : []);
+    setPlansReady(true);
     if (j.hint) {
       setApiHint(String(j.hint));
       toast.message(j.hint);
@@ -355,6 +384,7 @@ export default function SchedulePlannerPage() {
     setSelectedPlanId('');
     setPlanName('');
     setPlans([]);
+    setPlansReady(false);
     setClasses([]);
     setPlannerGroups([]);
     setExportResult(null);
@@ -376,6 +406,7 @@ export default function SchedulePlannerPage() {
   }, [institutionId, loadPlans, loadClasses]);
 
   useEffect(() => {
+    if (isNewTerm) return;
     if (!iframeReady || !institutionId) return;
     if (planBootstrappedRef.current) {
       void pushPlannerContext({ serverPlanActive: true, autoSyncClasses: true });
@@ -383,7 +414,7 @@ export default function SchedulePlannerPage() {
     }
     if (plans.length > 0 && (isAdmin || isSuper) && !planTouchedRef.current) return;
     void pushPlannerContext({ serverPlanActive: false, autoSyncClasses: true });
-  }, [iframeReady, institutionId, plans.length, isAdmin, isSuper, pushPlannerContext, classes, planName]);
+  }, [iframeReady, institutionId, plans.length, isAdmin, isSuper, pushPlannerContext, classes, planName, isNewTerm]);
 
   const refreshPlannerGroups = useCallback(async () => {
     if (!iframeReady) return;
@@ -453,6 +484,7 @@ export default function SchedulePlannerPage() {
   ]);
 
   useEffect(() => {
+    if (isNewTerm) return;
     if (!iframeReady || !institutionId || !(isAdmin || isSuper)) return;
     if (planTouchedRef.current) return;
     if (!plans.length) return;
@@ -494,7 +526,69 @@ export default function SchedulePlannerPage() {
         toast.error(`Kayıtlı plan yüklenemedi: ${msg}`);
       }
     })();
-  }, [iframeReady, institutionId, plans, isAdmin, isSuper, applyServerPlanToIframe, rememberSharedPlan]);
+  }, [iframeReady, institutionId, plans, isAdmin, isSuper, applyServerPlanToIframe, rememberSharedPlan, isNewTerm]);
+
+  useEffect(() => {
+    if (!isNewTerm || !iframeReady || !institutionId || !(isAdmin || isSuper) || !plansReady) return;
+    if (planTouchedRef.current) return;
+    const marker = `newterm:${institutionId}:${plans.map((p) => `${p.id}:${p.updated_at || ''}`).join(',')}`;
+    if (autoPlanLoadedFor.current === marker) return;
+    autoPlanLoadedFor.current = marker;
+
+    const existing = pickNewTermPlan(plans);
+    const gen = ++planLoadGenRef.current;
+    void (async () => {
+      try {
+        if (planTouchedRef.current || gen !== planLoadGenRef.current) return;
+        if (existing?.id) {
+          const res = await apiFetch(`/api/class-schedule-plans?id=${encodeURIComponent(existing.id)}`);
+          const j = await res.json().catch(() => ({}));
+          if (!res.ok || !j.data?.planner_json) throw new Error(j.error || 'plan_load_failed');
+          if (planTouchedRef.current || gen !== planLoadGenRef.current) return;
+          await pushPlannerContext({
+            serverPlanActive: false,
+            autoSyncClasses: true,
+            nameOverride: String(j.data.name || NEW_TERM_PLAN_NAME)
+          });
+          if (planTouchedRef.current || gen !== planLoadGenRef.current) return;
+          await applyServerPlanToIframe(j.data.planner_json, String(j.data.name || NEW_TERM_PLAN_NAME));
+          setSelectedPlanId(existing.id);
+          setPlanName(String(j.data.name || NEW_TERM_PLAN_NAME));
+          rememberSharedPlan(existing.id);
+          toast.success('2026-2027 dönem taslağı yüklendi.');
+          return;
+        }
+        await postPlannerMessage(iframeRef.current, 'SET_STATE', blankNewTermPlannerState());
+        planBootstrappedRef.current = true;
+        await pushPlannerContext({
+          serverPlanActive: true,
+          autoSyncClasses: true,
+          nameOverride: NEW_TERM_PLAN_NAME,
+          freshBlank: true
+        });
+        await refreshPlannerGroups();
+        setSelectedPlanId('');
+        setPlanName(NEW_TERM_PLAN_NAME);
+        toast.message('Yeni dönem boş program açıldı. Dersleri yerleştirip Kaydet deyin.');
+      } catch (e) {
+        const msg = String((e as Error).message || e);
+        setLoadError(`Yeni dönem programı açılamadı: ${msg}`);
+        toast.error(`Yeni dönem programı açılamadı: ${msg}`);
+      }
+    })();
+  }, [
+    isNewTerm,
+    iframeReady,
+    institutionId,
+    plans,
+    plansReady,
+    isAdmin,
+    isSuper,
+    applyServerPlanToIframe,
+    rememberSharedPlan,
+    pushPlannerContext,
+    refreshPlannerGroups
+  ]);
 
   useEffect(() => {
     if (iframeReady) refreshPlannerGroups();
@@ -509,7 +603,9 @@ export default function SchedulePlannerPage() {
       toast.error('Kurum seçili değil.');
       return;
     }
-    const name = planName.trim() || `Ders programı ${new Date().toLocaleDateString('tr-TR')}`;
+    const name =
+      planName.trim() ||
+      (isNewTerm ? NEW_TERM_PLAN_NAME : `Ders programı ${new Date().toLocaleDateString('tr-TR')}`);
     setBusy('save');
     try {
       const planner_json = await getPlannerState();
@@ -593,6 +689,32 @@ export default function SchedulePlannerPage() {
     }
   };
 
+  const handleStartBlankNewTerm = async () => {
+    if (!iframeReady) return;
+    if (!confirm('Yeni dönem grid’i boşalsın mı? Yaz programı gelmez; sınıflar boş saatlerle durur.')) return;
+    planTouchedRef.current = true;
+    planLoadGenRef.current += 1;
+    setBusy('blank');
+    try {
+      await postPlannerMessage(iframeRef.current, 'SET_STATE', blankNewTermPlannerState());
+      planBootstrappedRef.current = true;
+      await pushPlannerContext({
+        serverPlanActive: true,
+        autoSyncClasses: true,
+        nameOverride: NEW_TERM_PLAN_NAME,
+        freshBlank: true
+      });
+      await refreshPlannerGroups();
+      setSelectedPlanId('');
+      setPlanName(NEW_TERM_PLAN_NAME);
+      toast.success('Boş 2026-2027 programı açıldı.');
+    } catch (e) {
+      toast.error(String((e as Error).message || e));
+    } finally {
+      setBusy('');
+    }
+  };
+
   const openExport = async () => {
     setExportOpen(true);
     setExportResult(null);
@@ -603,11 +725,11 @@ export default function SchedulePlannerPage() {
     try {
       const state = await getPlannerState();
       const termRange = termDatesFromPlanner(state);
-      const fallback = defaultDateRange();
+      const fallback = defaultDateRange(isNewTerm);
       setExportDateFrom(termRange?.from || fallback.from);
       setExportDateTo(termRange?.to || fallback.to);
     } catch {
-      const fallback = defaultDateRange();
+      const fallback = defaultDateRange(isNewTerm);
       setExportDateFrom(fallback.from);
       setExportDateTo(fallback.to);
     }
@@ -817,9 +939,11 @@ export default function SchedulePlannerPage() {
         <div className="flex items-center gap-2 text-slate-800 dark:text-slate-100">
           <CalendarDays className="h-5 w-5 text-indigo-600" />
           <div>
-            <h1 className="text-base font-semibold">Ders Program Planlayıcısı</h1>
+            <h1 className="text-base font-semibold">{isNewTerm ? NEW_TERM_PLAN_TITLE : 'Ders Program Planlayıcısı'}</h1>
             <p className="text-xs text-slate-500">
-              Kurumdaki tüm sınıflar «Tüm Sınıflar» sekmesinde birlikte görünür. Plan adını yazıp Kaydet ile ortak taslağı güncelleyin.
+              {isNewTerm
+                ? '2026-2027 akademik yıl (1 Eylül 2026 – 19 Haziran 2027). Yaz programı yüklenmez; sınıflar boş gelir, dersleri buradan yerleştirin.'
+                : 'Kurumdaki tüm sınıflar «Tüm Sınıflar» sekmesinde birlikte görünür. Plan adını yazıp Kaydet ile ortak taslağı güncelleyin.'}
             </p>
           </div>
         </div>
@@ -831,7 +955,7 @@ export default function SchedulePlannerPage() {
               type="text"
               value={planName}
               onChange={(e) => setPlanName(e.target.value)}
-              placeholder="örn. 2025 Yaz Dönemi"
+              placeholder={isNewTerm ? NEW_TERM_PLAN_NAME : 'örn. 2025 Yaz Dönemi'}
               aria-label="Plan adı"
               className="min-w-[12rem] rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
             />
@@ -905,6 +1029,32 @@ export default function SchedulePlannerPage() {
             <ArrowRightLeft className="h-4 w-4" />
             Canlı Grup Dersi
           </Link>
+          {isNewTerm ? (
+            <>
+              <Link
+                to="/schedule-planner"
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Eski / yaz taslağı
+              </Link>
+              <button
+                type="button"
+                onClick={() => void handleStartBlankNewTerm()}
+                disabled={!!busy || !iframeReady}
+                className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+              >
+                Sıfırdan başlat
+              </button>
+            </>
+          ) : (
+            <Link
+              to={NEW_TERM_PLANNER_PATH}
+              className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-800 hover:bg-indigo-100"
+            >
+              Yeni dönem programı
+            </Link>
+          )}
+          {isNewTerm ? null : (
           <button
             type="button"
             onClick={() => void reloadSharedPlan()}
@@ -914,6 +1064,7 @@ export default function SchedulePlannerPage() {
           >
             {busy === 'reload' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           </button>
+          )}
         </div>
       </div>
 
@@ -1048,7 +1199,7 @@ export default function SchedulePlannerPage() {
       <iframe
         key={institutionId || 'default'}
         ref={iframeRef}
-        src={IFRAME_SRC}
+        src={iframeSrc}
         title="Ders programı planlayıcı"
         className="min-h-0 flex-1 w-full rounded-xl border border-slate-200 bg-white dark:border-slate-700"
       />

@@ -145,6 +145,7 @@ const PANEL_PATHS = new Set([
 
 const LESSON_PATHS = new Set([
   '/class-live-lessons',
+  '/ders-saatleri-yeni-donem',
   '/schedule-planner',
   '/canli-ozel-ders',
   '/live-lessons',
@@ -245,6 +246,7 @@ const SETTINGS_ORDER = ['/settings', '/webhooks'] as const;
 
 const LESSON_LABELS: Record<string, string> = {
   '/class-live-lessons': 'Canlı Grup Dersleri',
+  '/ders-saatleri-yeni-donem': 'Ders Saatleri Yeni Dönem',
   '/schedule-planner': 'Ders Programı Planlayıcı',
   '/canli-ozel-ders': 'Canlı Özel Ders',
   '/live-lessons': 'Canlı Özel Dersler',
@@ -305,6 +307,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       ...privateLiveNavForRoles(['super_admin']),
       { path: '/private-lesson-assignments', icon: UserCheck, label: 'Özel ders atamaları' },
       { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
+      { path: '/ders-saatleri-yeni-donem', icon: CalendarDays, label: 'Ders Saatleri Yeni Dönem' },
       { path: '/schedule-planner', icon: CalendarDays, label: 'Ders Programı Planlayıcı' },
       { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
       { path: '/edu-panel', icon: Presentation, label: EDU_HOMEWORK_ANIMATIONS_LABEL },
@@ -365,6 +368,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     ...privateLiveNavForRoles(['admin']),
     { path: '/private-lesson-assignments', icon: UserCheck, label: 'Özel ders atamaları' },
     { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
+    { path: '/ders-saatleri-yeni-donem', icon: CalendarDays, label: 'Ders Saatleri Yeni Dönem' },
     { path: '/schedule-planner', icon: CalendarDays, label: 'Ders Programı Planlayıcı' },
     { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
     { path: '/edu-panel', icon: Presentation, label: EDU_HOMEWORK_ANIMATIONS_LABEL },

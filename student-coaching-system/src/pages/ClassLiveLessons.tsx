@@ -1657,12 +1657,20 @@ export default function ClassLiveLessons() {
             </p>
           </div>
           {canOpenSchedulePlanner && !isStudentView ? (
-            <Link
-              to="/schedule-planner"
-              className="shrink-0 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-800 hover:bg-indigo-100"
-            >
-              Ders programı planlayıcı
-            </Link>
+            <div className="flex flex-wrap gap-2 shrink-0">
+              <Link
+                to="/ders-saatleri-yeni-donem"
+                className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-800 hover:bg-indigo-100"
+              >
+                Ders saatleri yeni dönem programı
+              </Link>
+              <Link
+                to="/schedule-planner"
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Ders programı planlayıcı
+              </Link>
+            </div>
           ) : null}
         </div>
       </div>

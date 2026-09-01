@@ -638,6 +638,14 @@ function App() {
               </ProtectedRoute>
             } />
 
+            <Route path="/ders-saatleri-yeni-donem" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/ders-saatleri-yeni-donem')}>
+                <Layout>
+                  <SchedulePlannerPage mode="new-term" />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
             <Route path="/attendance-report" element={
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/attendance-report')}>
                 <Layout>
