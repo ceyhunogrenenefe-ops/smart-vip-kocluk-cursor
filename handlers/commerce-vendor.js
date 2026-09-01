@@ -40,7 +40,7 @@ function sanitizeInt(v) {
 }
 
 const VENDOR_ORDERS_PAID_ONLY = true;
-const VENDOR_PAID_MARKER = 'kitapci-siparis-odenen-2026-08-29';
+const VENDOR_PAID_MARKER = 'kitap-kargo-adres-satici-2026-09-01';
 
 async function paidOrderIdSetForVendor(vendorId) {
   const { data: vos, error } = await supabaseAdmin
@@ -354,8 +354,11 @@ export default async function handler(req, res) {
         .from('commerce_vendor_orders')
         .select(`
           *,
-          commerce_orders(id, order_number, customer_name, customer_email, customer_phone, notes, created_at, status, payment_status),
-          commerce_order_items(id, title_snapshot, quantity, unit_price_kurus),
+          commerce_orders(
+            id, order_number, customer_name, customer_email, customer_phone, notes, created_at, status, payment_status,
+            commerce_order_addresses(*)
+          ),
+          commerce_order_items(id, title_snapshot, isbn_snapshot, quantity, unit_price_kurus),
           commerce_shipments(*)
         `)
         .eq('vendor_id', vendorId)

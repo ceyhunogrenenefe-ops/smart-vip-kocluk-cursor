@@ -51,13 +51,28 @@ describe('commerce-vendor-order-notify', () => {
     expect(payload.sinif).toBe('8');
     expect(payload.kitap_seti).toContain('Fen Bilimleri');
     expect(payload.kitap_seti).toContain('× 2');
-    expect(payload.adres).toBe('Bağdat Cad. 10');
+    expect(payload.kitap_seti).toContain('VIP Matematik');
+    expect(payload.adres).toContain('Bağdat Cad. 10');
+    expect(payload.adres).toContain('İstanbul');
     expect(payload.il).toBe('İstanbul');
     expect(payload.siparis_notu).toContain('Kapı şifresi 12');
     expect(payload.siparis_notu).not.toMatch(/IBAN/i);
     expect(payload.siparis_notu).not.toMatch(/Tutar/i);
     expect(payload.siparis_notu).not.toMatch(/1\.250|1250/i);
     expect(JSON.stringify(payload)).not.toMatch(/TR87/i);
+  });
+
+  it('scopes book lines to the seller receiving the WhatsApp', () => {
+    const payload = buildVendorOrderNotifyPayload({
+      order: { customer_name: 'Ayşe', order_number: 'VIP-1' },
+      items: [
+        { vendor_id: 'v1', title_snapshot: 'Fen', quantity: 1 },
+        { vendor_id: 'v2', title_snapshot: 'Mat', quantity: 1 },
+      ],
+      vendor: { id: 'v1' },
+    });
+    expect(payload.kitap_seti).toBe('Fen');
+    expect(payload.kitap_seti).not.toContain('Mat');
   });
 
   it('does not put checkout IBAN notes into the address field', () => {

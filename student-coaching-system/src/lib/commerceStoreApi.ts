@@ -133,10 +133,15 @@ export type CheckoutPrepareResponse = {
   checkout_url: string;
 };
 
-export const csCheckoutPrepare = (coupon_code?: string | null, student_id?: string | null) =>
+export const csCheckoutPrepare = (
+  coupon_code?: string | null,
+  student_id?: string | null,
+  shipping?: Record<string, unknown>
+) =>
   post<CheckoutPrepareResponse>('cart.checkout_prepare', {
     ...(coupon_code ? { coupon_code } : {}),
     ...(student_id ? { student_id } : {}),
+    ...(shipping || {}),
   });
 
 export type CheckoutIbanResponse = {
@@ -154,12 +159,30 @@ export const csCheckoutIban = (params: {
   mime_type: string;
   coupon_code?: string | null;
   student_id?: string | null;
+  customer_name?: string;
+  customer_email?: string;
+  customer_phone?: string;
+  notes?: string;
+  address?: {
+    full_name?: string;
+    phone?: string;
+    address_line1: string;
+    address_line2?: string;
+    district?: string;
+    city: string;
+    postal_code?: string;
+  };
 }) =>
   post<CheckoutIbanResponse>('cart.checkout_iban', {
     file_base64: params.file_base64,
     mime_type: params.mime_type,
     ...(params.coupon_code ? { coupon_code: params.coupon_code } : {}),
     ...(params.student_id ? { student_id: params.student_id } : {}),
+    ...(params.customer_name ? { customer_name: params.customer_name } : {}),
+    ...(params.customer_email ? { customer_email: params.customer_email } : {}),
+    ...(params.customer_phone ? { customer_phone: params.customer_phone } : {}),
+    ...(params.notes ? { notes: params.notes } : {}),
+    ...(params.address ? { address: params.address } : {}),
   });
 
 // "Bu kitap bende var"

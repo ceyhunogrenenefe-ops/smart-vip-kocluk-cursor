@@ -12,6 +12,7 @@ import {
   CreditCard,
   Landmark,
   Loader2,
+  MapPin,
   Minus,
   Plus,
   ShoppingCart,
@@ -72,6 +73,26 @@ export default function SepetPage() {
   const [payMethod, setPayMethod] = useState<'card' | 'iban'>('card');
   const [ibanReceipt, setIbanReceipt] = useState<File | null>(null);
   const [ibanDone, setIbanDone] = useState<{ order_number: string; total_kurus: number; receipt_url: string } | null>(null);
+  const [ship, setShip] = useState({
+    name: '',
+    phone: '',
+    email: '',
+    line1: '',
+    line2: '',
+    district: '',
+    city: '',
+    notes: '',
+  });
+
+  useEffect(() => {
+    if (!effectiveUser) return;
+    setShip((prev) => ({
+      ...prev,
+      name: prev.name || String(effectiveUser.name || ''),
+      email: prev.email || String(effectiveUser.email || ''),
+      phone: prev.phone || String(effectiveUser.phone || ''),
+    }));
+  }, [effectiveUser]);
 
   useEffect(() => {
     if (!effectiveUser) return;
@@ -128,12 +149,49 @@ export default function SepetPage() {
     finally { setUpdatingId(null); }
   };
 
-  /** Pending sipariş + imzalı token → onlinevipdershane.com ödeme */
+  const shippingPayload = () => ({
+    customer_name: ship.name.trim(),
+    customer_phone: ship.phone.trim(),
+    customer_email: ship.email.trim(),
+    notes: ship.notes.trim(),
+    address: {
+      full_name: ship.name.trim(),
+      phone: ship.phone.trim(),
+      address_line1: ship.line1.trim(),
+      address_line2: ship.line2.trim() || undefined,
+      district: ship.district.trim() || undefined,
+      city: ship.city.trim(),
+    },
+  });
+
+  const assertShipReady = () => {
+    if (ship.name.trim().length < 3) {
+      toast.error('Kargo için veli adı soyadı girin');
+      return false;
+    }
+    if (ship.phone.replace(/\D/g, '').length < 10) {
+      toast.error('Kargo için geçerli telefon girin');
+      return false;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ship.email.trim())) {
+      toast.error('Kargo için geçerli e-posta girin');
+      return false;
+    }
+    if (!ship.line1.trim() || !ship.city.trim()) {
+      toast.error('Kitap kargosu için teslimat adresi ve il girin');
+      return false;
+    }
+    return true;
+  };
+
+  /** Pending sipariş + teslimat adresi → satıcıya düşer; kart için site ödeme */
   const handleCheckout = async () => {
+    if (items.some((i) => i.out_of_stock) || items.length === 0) return;
+    if (!assertShipReady()) return;
     setCheckoutLoading(true);
     try {
       const studentId = (effectiveUser as { student_id?: string })?.student_id ?? null;
-      const prepared = await csCheckoutPrepare(coupon?.code ?? null, studentId);
+      const prepared = await csCheckoutPrepare(coupon?.code ?? null, studentId, shippingPayload());
       window.location.href = prepared.checkout_url;
     } catch (e: unknown) {
       toast.error((e as Error).message || 'Ödeme başlatılamadı');
@@ -151,6 +209,7 @@ export default function SepetPage() {
   };
 
   const handleIbanPay = async () => {
+    if (!assertShipReady()) return;
     if (!ibanReceipt) {
       toast.error('Havale dekontunu ekleyin');
       return;
@@ -164,6 +223,7 @@ export default function SepetPage() {
         mime_type: ibanReceipt.type || 'image/jpeg',
         coupon_code: coupon?.code ?? null,
         student_id: studentId,
+        ...shippingPayload(),
       });
       setItems([]);
       setCoupon(null);
@@ -402,6 +462,66 @@ export default function SepetPage() {
                 <p className="text-xs text-yellow-700">Bazı ürünlerde stok/fiyat değişikliği var. Lütfen kontrol edin.</p>
               </div>
             )}
+
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/70 p-3 space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-900">
+                <MapPin className="w-3.5 h-3.5" /> Teslimat adresi (kargo)
+              </div>
+              <p className="text-[11px] text-amber-800">
+                Kitapçı bu adrese gönderir. Sipariş ayrıntısı ödeme sonrası otomatik satıcıya düşer.
+              </p>
+              <input
+                className="w-full border border-amber-200 rounded-lg px-2.5 py-1.5 text-sm"
+                placeholder="Veli adı soyadı *"
+                value={ship.name}
+                onChange={(e) => setShip({ ...ship, name: e.target.value })}
+                autoComplete="name"
+              />
+              <input
+                className="w-full border border-amber-200 rounded-lg px-2.5 py-1.5 text-sm"
+                placeholder="Telefon *"
+                value={ship.phone}
+                onChange={(e) => setShip({ ...ship, phone: e.target.value })}
+                autoComplete="tel"
+              />
+              <input
+                className="w-full border border-amber-200 rounded-lg px-2.5 py-1.5 text-sm"
+                placeholder="E-posta *"
+                type="email"
+                value={ship.email}
+                onChange={(e) => setShip({ ...ship, email: e.target.value })}
+                autoComplete="email"
+              />
+              <input
+                className="w-full border border-amber-200 rounded-lg px-2.5 py-1.5 text-sm"
+                placeholder="Mahalle, cadde, kapı no *"
+                value={ship.line1}
+                onChange={(e) => setShip({ ...ship, line1: e.target.value })}
+                autoComplete="street-address"
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  className="w-full border border-amber-200 rounded-lg px-2.5 py-1.5 text-sm"
+                  placeholder="İlçe"
+                  value={ship.district}
+                  onChange={(e) => setShip({ ...ship, district: e.target.value })}
+                />
+                <input
+                  className="w-full border border-amber-200 rounded-lg px-2.5 py-1.5 text-sm"
+                  placeholder="İl *"
+                  value={ship.city}
+                  onChange={(e) => setShip({ ...ship, city: e.target.value })}
+                  autoComplete="address-level1"
+                />
+              </div>
+              <textarea
+                className="w-full border border-amber-200 rounded-lg px-2.5 py-1.5 text-sm"
+                rows={2}
+                placeholder="Kapı kodu, öğrenci adı (isteğe bağlı)"
+                value={ship.notes}
+                onChange={(e) => setShip({ ...ship, notes: e.target.value })}
+              />
+            </div>
 
             {ibanEnabled && (
               <div className="mt-4 grid grid-cols-2 gap-2">
