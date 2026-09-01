@@ -18,7 +18,7 @@
  *  staff.package_update  — paket adı / kademe / fiyat
  *  staff.package_delete  — paketi sil (soft)
  *  staff.package_items_set — paket kitaplarını değiştir
- *  deployMarker: kitap-assigned-staff-200-2026-08-31
+ *  deployMarker: kitap-kargo-adres-satici-2026-09-01
  *  cart.get              — mevcut sepeti getir
  *  cart.add              — sepete ürün ekle
  *  cart.update           — adet güncelle
@@ -74,6 +74,12 @@ import {
 } from '../api/_lib/commerce-iban.js';
 import { listLgs8Collections } from '../api/_lib/commerce-lgs8-seed.js';
 import { assignedCatalogIfNoStudent, commerceStoreHttpStatus } from '../api/_lib/commerce-store-http.js';
+import {
+  assertShippingComplete,
+  parseShippingFromBody,
+  shippingInsertRow,
+  shippingIsComplete
+} from '../api/_lib/commerce-shipping-address.js';
 import { canonicalBookSeries, classKeyMatchesLevels, listStoreBrowse, publicStoreBrowseNav } from '../api/_lib/commerce-store-browse.js';
 import { notifyVendorWhatsAppForPaidOrder } from '../api/_lib/commerce-vendor-order-notify.js';
 import { computeCouponDiscount } from '../api/_lib/commerce-coupon-discount.js';
@@ -168,7 +174,7 @@ async function handleCatalog(op, body, actor) {
       ok: true,
       settings,
       store_browse,
-      deployMarker: 'kitap-assigned-staff-200-2026-08-31',
+      deployMarker: 'kitap-kargo-adres-satici-2026-09-01',
     };
   }
 
@@ -341,7 +347,7 @@ async function handleCatalog(op, body, actor) {
 
   if (op === 'catalog.browse') {
     const browse = await listStoreBrowse();
-    return { ok: true, ...browse, deployMarker: 'kitap-assigned-staff-200-2026-08-31' };
+    return { ok: true, ...browse, deployMarker: 'kitap-kargo-adres-satici-2026-09-01' };
   }
 
   if (op === 'catalog.assigned') {
@@ -675,6 +681,22 @@ async function nextOrderNumber(prefix) {
   return `${p}-${year}-${seq}`;
 }
 
+async function upsertShippingAddress(orderId, ship) {
+  await supabaseAdmin.from('commerce_order_addresses').delete().eq('order_id', orderId).eq('address_type', 'shipping');
+  const { error } = await supabaseAdmin.from('commerce_order_addresses').insert(shippingInsertRow(orderId, ship));
+  if (error) throw error;
+}
+
+async function loadShippingAddress(orderId) {
+  const { data } = await supabaseAdmin
+    .from('commerce_order_addresses')
+    .select('*')
+    .eq('order_id', orderId)
+    .eq('address_type', 'shipping')
+    .maybeSingle();
+  return data || null;
+}
+
 async function prepareCheckout(body, actor, opts = {}) {
   if (!actor?.sub || actor.sub === 'anonymous') throw new Error('Ödeme için giriş gerekli');
   const userId = actor.sub;
@@ -684,6 +706,7 @@ async function prepareCheckout(body, actor, opts = {}) {
 
   const settings = await loadCommerceSettings();
   if (settings.student_store_enabled === false) throw new Error('Kitap mağazası şu an kapalı');
+  const ship = assertShippingComplete(parseShippingFromBody(body), { requireEmail: true });
 
   const lines = [];
   for (const item of items) {
@@ -808,10 +831,15 @@ async function prepareCheckout(body, actor, opts = {}) {
       coupon_code: couponCode,
       payment_status: 'pending',
       ...(opts.orderPatch || {}),
+      customer_name: ship.full_name,
+      customer_email: ship.email,
+      customer_phone: ship.phone,
+      notes: (opts.orderPatch && opts.orderPatch.notes) || ship.notes || null,
     })
     .select('id, order_number, total_kurus, subtotal_kurus, shipping_kurus, discount_kurus')
     .single();
   if (orderErr) throw orderErr;
+  await upsertShippingAddress(order.id, ship);
 
   const byVendor = new Map();
   for (const line of lines) {
@@ -1000,20 +1028,14 @@ async function checkoutIban(body, actor) {
   if (!account.enabled) throw new Error('IBAN ile ödeme şu an kapalı');
   const receipt = parseIbanReceipt(body);
 
-  const { data: userRow } = await supabaseAdmin
-    .from('users')
-    .select('name, email')
-    .eq('id', actor.sub)
-    .maybeSingle();
-
-  const notes = `IBAN havale · ${account.holder} · ${formatIbanDisplay(account.iban)} · dekont yüklendi`;
+  const shipPreview = parseShippingFromBody(body);
+  const notes = shipPreview.notes
+    ? `IBAN havale · ${account.holder} · ${formatIbanDisplay(account.iban)} · dekont yüklendi · ${shipPreview.notes}`
+    : `IBAN havale · ${account.holder} · ${formatIbanDisplay(account.iban)} · dekont yüklendi`;
   const prepared = await prepareCheckout(body, actor, {
     provider: 'iban',
     skipRedirect: true,
     orderPatch: {
-      customer_name: String(body.customer_name || userRow?.name || '').trim() || null,
-      customer_email: String(body.customer_email || userRow?.email || '').trim() || null,
-      customer_phone: String(body.customer_phone || '').trim() || null,
       notes,
     },
   });
@@ -1102,10 +1124,10 @@ function orderPublic(order, extra = {}) {
 
 async function applyCheckoutCustomer(body, orderId) {
   const fields = customerFieldsFromCheckoutBody(body);
-  const c = body.customer && typeof body.customer === 'object' ? body.customer : {};
-  const name = fields.name || String(c.parentName || '').trim();
-  const email = fields.email;
-  const phone = fields.phone;
+  const ship = parseShippingFromBody(body);
+  const name = ship.full_name || fields.name;
+  const email = ship.email || fields.email;
+  const phone = ship.phone || fields.phone;
   if (!name || name.length < 3) throw new Error('Veli adı soyadı en az 3 karakter olmalıdır.');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Geçerli e-posta girin');
   if (phone.replace(/\D/g, '').length < 10) throw new Error('Geçerli telefon girin');
@@ -1116,7 +1138,7 @@ async function applyCheckoutCustomer(body, orderId) {
       customer_name: name,
       customer_email: email,
       customer_phone: phone,
-      notes: fields.notes || null,
+      notes: fields.notes || ship.notes || null,
       payment_status: 'processing',
       updated_at: new Date().toISOString(),
     })
@@ -1124,26 +1146,14 @@ async function applyCheckoutCustomer(body, orderId) {
     .eq('status', 'pending_payment');
   if (error) throw error;
 
-  const addr = body.address || {};
-  const line1 = String(addr.address_line1 || addr.line1 || '').trim();
-  const city = String(addr.city || '').trim();
-  if (line1 && city) {
-    await supabaseAdmin.from('commerce_order_addresses').delete().eq('order_id', orderId).eq('address_type', 'shipping');
-    await supabaseAdmin.from('commerce_order_addresses').insert({
-      order_id: orderId,
-      address_type: 'shipping',
-      full_name: name,
-      phone,
-      address_line1: line1,
-      address_line2: String(addr.address_line2 || addr.line2 || '').trim() || null,
-      district: String(addr.district || '').trim() || null,
-      city,
-      postal_code: String(addr.postal_code || '').trim() || null,
-      country: 'TR',
-    });
+  if (shippingIsComplete(ship)) {
+    await upsertShippingAddress(orderId, { ...ship, full_name: name, phone });
+  } else {
+    const existing = await loadShippingAddress(orderId);
+    if (!existing) throw new Error('Teslimat adresi gerekli');
   }
 
-  return { name, email, phone, notes: fields.notes };
+  return { name, email, phone, notes: fields.notes || ship.notes };
 }
 
 async function handleCheckout(op, body, req) {

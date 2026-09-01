@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Image,
   Loader2,
+  MapPin,
   Package,
   Pencil,
   Plus,
@@ -871,9 +872,32 @@ type VendorOrderRow = CommerceVendorOrder & {
     notes?: string | null;
     status?: string;
     payment_status?: string;
+    commerce_order_addresses?: Array<{
+      address_type?: string;
+      full_name?: string | null;
+      phone?: string | null;
+      address_line1?: string | null;
+      address_line2?: string | null;
+      district?: string | null;
+      city?: string | null;
+      postal_code?: string | null;
+    }>;
   };
-  commerce_order_items?: { title_snapshot: string; quantity: number; unit_price_kurus: number }[];
+  commerce_order_items?: { title_snapshot: string; isbn_snapshot?: string | null; quantity: number; unit_price_kurus: number }[];
 };
+
+function shippingFromVendorOrder(order: VendorOrderRow['commerce_orders']) {
+  const raw = order?.commerce_order_addresses;
+  const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  return list.find((a) => a.address_type === 'shipping') || list[0] || null;
+}
+
+function formatVendorShipping(addr: NonNullable<ReturnType<typeof shippingFromVendorOrder>>) {
+  return [addr.address_line1, addr.address_line2, addr.district, addr.city, addr.postal_code]
+    .map((p) => String(p || '').trim())
+    .filter(Boolean)
+    .join(', ');
+}
 
 function Siparislerim() {
   const [orders, setOrders] = useState<VendorOrderRow[]>([]);
@@ -945,13 +969,17 @@ function Siparislerim() {
         {orders.map((vo) => {
           const order = vo.commerce_orders;
           const items = vo.commerce_order_items ?? [];
+          const addr = shippingFromVendorOrder(order);
           return (
             <div key={vo.id} className="border border-gray-200 rounded-xl p-4 bg-white">
               <div className="flex justify-between items-start mb-3">
                 <div>
                   <div className="font-mono text-xs font-bold text-gray-700">{order?.order_number}</div>
-                  <div className="text-sm font-medium mt-0.5">{order?.customer_name ?? '—'}</div>
-                  {order?.customer_phone && <div className="text-xs text-gray-400">{order.customer_phone}</div>}
+                  <div className="text-sm font-medium mt-0.5">{order?.customer_name ?? addr?.full_name ?? '—'}</div>
+                  {(order?.customer_phone || addr?.phone) && (
+                    <div className="text-xs text-gray-400">{order?.customer_phone || addr?.phone}</div>
+                  )}
+                  {order?.customer_email && <div className="text-xs text-gray-400">{order.customer_email}</div>}
                 </div>
                 <div className="text-right">
                   <div className={`text-xs px-2 py-0.5 rounded-full font-medium ${
@@ -972,12 +1000,32 @@ function Siparislerim() {
                 </div>
               </div>
               <div className="border-t border-gray-100 pt-2 space-y-1">
+                <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Kitaplar</div>
                 {items.map((item, i) => (
-                  <div key={i} className="flex justify-between text-sm">
-                    <span className="truncate text-gray-700">{item.title_snapshot} ×{item.quantity}</span>
-                    <span className="text-gray-500">{formatCommerceTry(item.unit_price_kurus * item.quantity)}</span>
+                  <div key={i} className="flex justify-between text-sm gap-2">
+                    <span className="truncate text-gray-700">
+                      {item.title_snapshot} ×{item.quantity}
+                      {item.isbn_snapshot ? <span className="text-xs text-gray-400"> · {item.isbn_snapshot}</span> : null}
+                    </span>
+                    <span className="text-gray-500 flex-shrink-0">{formatCommerceTry(item.unit_price_kurus * item.quantity)}</span>
                   </div>
                 ))}
+                {items.length === 0 && <p className="text-xs text-gray-400">Kitap kalemi yok</p>}
+              </div>
+              <div className="mt-3 rounded-lg bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-950">
+                <div className="flex items-center gap-1 font-semibold mb-0.5">
+                  <MapPin className="w-3.5 h-3.5" /> Teslimat
+                </div>
+                {addr ? (
+                  <>
+                    <p>{addr.full_name || order?.customer_name}</p>
+                    <p>{formatVendorShipping(addr) || 'Adres satırı yok'}</p>
+                    {(addr.phone || order?.customer_phone) && <p>{addr.phone || order?.customer_phone}</p>}
+                  </>
+                ) : (
+                  <p className="text-amber-800">Teslimat adresi henüz düşmedi — veli kargo formunu doldurmalı.</p>
+                )}
+                {order?.notes ? <p className="mt-1 text-gray-600">Not: {order.notes}</p> : null}
               </div>
               <div className="mt-3 flex gap-2 flex-wrap">
                 {vo.status === 'pending' && (

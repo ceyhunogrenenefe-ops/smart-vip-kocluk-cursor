@@ -3,6 +3,7 @@
  * Tutar ve IBAN satıcı mesajına yazılmaz.
  */
 import { normalizePhoneToE164 } from './phone-whatsapp.js';
+import { formatShippingOneLine, itemsForVendor } from './commerce-shipping-address.js';
 
 export function vendorNotifyPhone(vendor) {
   if (!vendor || typeof vendor !== 'object') return null;
@@ -42,18 +43,22 @@ export function buildVendorOrderNotifyPayload({
   items = [],
   address = null,
   student = null,
+  vendor = null,
 } = {}) {
-  const lines = (items || [])
+  const scoped = itemsForVendor(items, vendor?.id);
+  const lines = (scoped || [])
     .map((it) => {
       const qty = Math.max(1, Number(it.quantity) || 1);
       const title = String(it.title_snapshot || it.title || 'Kitap').trim();
-      return qty > 1 ? `${title} × ${qty}` : title;
+      const isbn = String(it.isbn_snapshot || it.isbn || '').trim();
+      const label = isbn ? `${title} [${isbn}]` : title;
+      return qty > 1 ? `${label} × ${qty}` : label;
     })
     .filter(Boolean);
   const kitap_seti = lines.length ? lines.join(' | ') : 'Kitap siparişi';
   const addr = address || {};
   const studentName = student?.name || order?.student_name || '';
-  const street = [addr.address_line1, addr.address_line2].filter(Boolean).join(' ').trim();
+  const street = formatShippingOneLine(addr) || [addr.address_line1, addr.address_line2].filter(Boolean).join(' ').trim();
   const note = sellerFacingNote(order?.notes);
   const siparis_notu = note || (order?.order_number ? `Sipariş ${order.order_number}` : '-');
 
