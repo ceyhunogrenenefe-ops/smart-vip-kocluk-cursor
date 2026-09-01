@@ -75,6 +75,24 @@ describe('commerce-vendor-order-notify', () => {
     expect(payload.kitap_seti).not.toContain('Mat');
   });
 
+  it('expands set contents so the seller sees every book', () => {
+    const payload = buildVendorOrderNotifyPayload({
+      order: { order_number: 'VIP-9', customer_name: 'Ayşe' },
+      items: [{
+        title_snapshot: 'VIP Fen Seti',
+        package_name: 'VIP Fen Seti',
+        quantity: 1,
+        package_contents: [
+          { title: 'Hücre', isbn: '9781', quantity: 1 },
+          { title: 'Kuvvet', isbn: '9782', quantity: 1 },
+        ],
+      }],
+    });
+    expect(payload.kitap_seti).toContain('VIP Fen Seti →');
+    expect(payload.kitap_seti).toContain('Hücre [9781]');
+    expect(payload.kitap_seti).toContain('Kuvvet [9782]');
+  });
+
   it('does not put checkout IBAN notes into the address field', () => {
     const payload = buildVendorOrderNotifyPayload({
       order: {
