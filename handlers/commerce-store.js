@@ -18,7 +18,7 @@
  *  staff.package_update  — paket adı / kademe / fiyat
  *  staff.package_delete  — paketi sil (soft)
  *  staff.package_items_set — paket kitaplarını değiştir
- *  deployMarker: kitap-set-icerik-satici-2026-09-01
+ *  deployMarker: kitap-iban-teslimat-2026-09-01
  *  cart.get              — mevcut sepeti getir
  *  cart.add              — sepete ürün ekle
  *  cart.update           — adet güncelle
@@ -79,8 +79,9 @@ import {
   snapshotPackageTitle
 } from '../api/_lib/commerce-package-contents.js';
 import {
-  assertShippingComplete,
+  checkoutRequiresShipping,
   parseShippingFromBody,
+  resolveCheckoutShipping,
   shippingInsertRow,
   shippingIsComplete
 } from '../api/_lib/commerce-shipping-address.js';
@@ -132,7 +133,7 @@ async function handleCatalog(op, body, actor) {
       ok: true,
       settings,
       store_browse,
-      deployMarker: 'kitap-set-icerik-satici-2026-09-01',
+      deployMarker: 'kitap-iban-teslimat-2026-09-01',
     };
   }
 
@@ -256,7 +257,7 @@ async function handleCatalog(op, body, actor) {
 
   if (op === 'catalog.browse') {
     const browse = await listStoreBrowse();
-    return { ok: true, ...browse, deployMarker: 'kitap-set-icerik-satici-2026-09-01' };
+    return { ok: true, ...browse, deployMarker: 'kitap-iban-teslimat-2026-09-01' };
   }
 
   if (op === 'catalog.assigned') {
@@ -559,7 +560,11 @@ async function prepareCheckout(body, actor, opts = {}) {
 
   const settings = await loadCommerceSettings();
   if (settings.student_store_enabled === false) throw new Error('Kitap mağazası şu an kapalı');
-  const ship = assertShippingComplete(parseShippingFromBody(body), { requireEmail: true });
+  // Kart: teslimat /odeme/kitap'ta. IBAN: sepetten biter, adres zorunlu.
+  const ship = resolveCheckoutShipping(body, {
+    required: checkoutRequiresShipping(opts),
+    requireEmail: true
+  });
 
   const lines = [];
   for (const item of items) {
@@ -702,15 +707,15 @@ async function prepareCheckout(body, actor, opts = {}) {
       coupon_code: couponCode,
       payment_status: 'pending',
       ...(opts.orderPatch || {}),
-      customer_name: ship.full_name,
-      customer_email: ship.email,
-      customer_phone: ship.phone,
-      notes: (opts.orderPatch && opts.orderPatch.notes) || ship.notes || null,
+      customer_name: ship?.full_name || null,
+      customer_email: ship?.email || null,
+      customer_phone: ship?.phone || null,
+      notes: (opts.orderPatch && opts.orderPatch.notes) || ship?.notes || null,
     })
     .select('id, order_number, total_kurus, subtotal_kurus, shipping_kurus, discount_kurus')
     .single();
   if (orderErr) throw orderErr;
-  await upsertShippingAddress(order.id, ship);
+  if (ship) await upsertShippingAddress(order.id, ship);
 
   const byVendor = new Map();
   for (const line of lines) {
@@ -899,12 +904,13 @@ async function checkoutIban(body, actor) {
   if (!account.enabled) throw new Error('IBAN ile ödeme şu an kapalı');
   const receipt = parseIbanReceipt(body);
 
-  const shipPreview = parseShippingFromBody(body);
+  const shipPreview = resolveCheckoutShipping(body, { required: true, requireEmail: true });
   const notes = shipPreview.notes
     ? `IBAN havale · ${account.holder} · ${formatIbanDisplay(account.iban)} · dekont yüklendi · ${shipPreview.notes}`
     : `IBAN havale · ${account.holder} · ${formatIbanDisplay(account.iban)} · dekont yüklendi`;
   const prepared = await prepareCheckout(body, actor, {
     provider: 'iban',
+    requireShipping: true,
     skipRedirect: true,
     orderPatch: {
       notes,
