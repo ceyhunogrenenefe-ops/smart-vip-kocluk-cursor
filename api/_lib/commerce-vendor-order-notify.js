@@ -90,7 +90,7 @@ export async function notifyVendorWhatsAppForPaidOrder(orderId, opts = {}) {
   const [{ data: items }, { data: addresses }, vendors] = await Promise.all([
     supabaseAdmin
       .from('commerce_order_items')
-      .select('title_snapshot, quantity, isbn_snapshot')
+      .select('title_snapshot, quantity, isbn_snapshot, vendor_id, vendor_order_id')
       .eq('order_id', id),
     supabaseAdmin
       .from('commerce_order_addresses')
