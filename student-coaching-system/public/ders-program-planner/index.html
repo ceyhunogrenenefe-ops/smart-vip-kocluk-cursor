@@ -422,7 +422,29 @@
 
 <script>
 /* ---------------- storage (localStorage + in-memory fallback) ---------------- */
-const KEY_DEFAULT='yazDonemiSistemi.v1';
+function termSuffixFromQuery(){
+  try{
+    const t=new URLSearchParams(location.search).get('term')||'';
+    if(/^\d{4}-\d{4}$/.test(t)) return t;
+  }catch(e){}
+  return '';
+}
+function academicTermOpts(suffix){
+  if(suffix!=='2026-2027') return {};
+  return {
+    term:{start:'2026-09-01', end:'2027-06-19'},
+    periods:[
+      {label:'1. Ders', time:'17:00–17:40'},
+      {label:'2. Ders', time:'17:50–18:30'},
+      {label:'3. Ders', time:'18:40–19:20'},
+      {label:'4. Ders', time:'19:30–20:10'},
+      {label:'5. Ders', time:'20:20–21:00'},
+      {label:'6. Ders', time:'21:10–21:50'},
+    ]
+  };
+}
+const BOOT_TERM=termSuffixFromQuery();
+const KEY_DEFAULT=BOOT_TERM ? ('yazDonemiSistemi.term.'+BOOT_TERM+'.v1') : 'yazDonemiSistemi.v1';
 let storageKey=KEY_DEFAULT;
 let MEM=null;
 let explicitPlanLoaded=false;
@@ -451,7 +473,8 @@ function applyInstitutionStorage(institutionId, opts){
   opts=opts||{};
   const id=String(institutionId||'').trim();
   if(!id) return false;
-  const next='yazDonemiSistemi.'+id+'.v1';
+  const suffix=String(opts.suffix||termSuffixFromQuery()||'').trim();
+  const next='yazDonemiSistemi.'+id+(suffix?'.'+suffix:'')+'.v1';
   if(next===storageKey) return false;
   // Kurum değişince ASLA önceki kurumun takvimini taşıma — karışmayı önler
   storageKey=next;
@@ -463,7 +486,7 @@ function applyInstitutionStorage(institutionId, opts){
     migrateState();
     activeGroupId=state.groups[0]?state.groups[0].id:null;
   }else{
-    state=defaultState(true);
+    state=defaultState(true, Object.assign({}, academicTermOpts(suffix), opts.term?{term:opts.term}:{}, opts.periods?{periods:opts.periods}:{}));
     migrateState();
     activeGroupId=null;
   }
@@ -474,8 +497,11 @@ const uid=()=>'id'+Date.now().toString(36)+Math.random().toString(36).slice(2,6)
 
 /* ---------------- default data ---------------- */
 const COLORS=['#2E4C8C','#0E8A6B','#B4541E','#7A3FA0','#C0392B','#1E7FA8'];
-function defaultState(emptyGroups){
-  const PERIODS=()=>[
+function defaultState(emptyGroups, opts){
+  opts=opts||{};
+  const PERIODS=()=> (Array.isArray(opts.periods)&&opts.periods.length)
+    ? opts.periods.map(p=>({label:p.label, time:p.time}))
+    : [
     {label:'1. Ders', time:'10:30–11:15'},
     {label:'2. Ders', time:'11:30–12:15'},
     {label:'3. Ders', time:'13:30–14:15'},
@@ -485,7 +511,7 @@ function defaultState(emptyGroups){
   ];
   const mk=(name,color)=>({id:uid(), name, advisor:'', color, students:[], schedule:{}, periods:PERIODS(), locked:false, classId:null, classLevel:null, branch:null, curriculum:[]});
   return {
-    term:{start:'2026-07-01', end:'2026-08-23'},
+    term: opts.term || {start:'2026-07-01', end:'2026-08-23'},
     days:['Pazartesi','Salı','Çarşamba','Perşembe','Cuma','Cumartesi'],
     periods:PERIODS(),
     groups: emptyGroups ? [] : [
@@ -497,7 +523,9 @@ function defaultState(emptyGroups){
     ],
   };
 }
-let state=window.parent!==window ? defaultState(true) : (loadState() || defaultState());
+let state=window.parent!==window
+  ? defaultState(true, academicTermOpts(BOOT_TERM))
+  : (loadState() || defaultState());
 /* migration: her sınıfa kendi ders saatleri */
 if(!state.periods||!state.periods.length) state.periods=defaultState().periods;
 state.groups.forEach(g=>{ if(!Array.isArray(g.periods)||!g.periods.length){ g.periods=(state.periods||[]).map(p=>({label:p.label,time:p.time})); } });
@@ -2656,8 +2684,24 @@ window.addEventListener('message', (ev)=>{
   else if(msg.type==='SET_CONTEXT'){
     const p=msg.payload||{};
     const autoSync=!!p.autoSyncClasses;
-    // Kurum değişiminde preserve yok — her kurum kendi localStorage anahtarı
-    const instChanged=!!(p.institutionId&&applyInstitutionStorage(p.institutionId, {}));
+    const suffix=String(p.storageKeySuffix||termSuffixFromQuery()||'').trim();
+    const termOpts=Object.assign({}, academicTermOpts(suffix), p.term?{term:p.term}:{}, Array.isArray(p.periods)&&p.periods.length?{periods:p.periods}:{});
+    const instChanged=!!(p.institutionId&&applyInstitutionStorage(p.institutionId, Object.assign({suffix}, termOpts)));
+    if(p.freshBlank){
+      const keep={
+        systemClasses:state.systemClasses,
+        teachers:state.teachers,
+        systemStudents:state.systemStudents,
+        poolSubjects:state.poolSubjects,
+        curriculumPresets:state.curriculumPresets
+      };
+      state=defaultState(true, termOpts);
+      Object.assign(state, keep);
+      migrateState();
+      activeGroupId=null;
+      explicitPlanLoaded=false;
+      undoStack=[];
+    }
     if(Array.isArray(p.classes)) state.systemClasses=p.classes;
     if(Array.isArray(p.teachers)) mergeTeachersFromSystem(p.teachers);
     if(Array.isArray(p.students)) state.systemStudents=p.students;

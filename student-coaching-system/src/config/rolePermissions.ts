@@ -68,6 +68,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/teacher-solution-appointments': ['teacher', 'super_admin', 'admin'],
   '/class-live-lessons': ['super_admin', 'admin', 'coach', 'teacher'],
   '/schedule-planner': ['super_admin', 'admin'],
+  '/ders-saatleri-yeni-donem': ['super_admin', 'admin'],
   '/class-schedule': ['student'],
   '/veli-onay': ['super_admin', 'admin', 'coach'],
   '/tahsilat-muhasebe': ['super_admin', 'admin'],
