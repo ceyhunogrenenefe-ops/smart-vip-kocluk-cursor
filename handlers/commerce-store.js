@@ -18,7 +18,7 @@
  *  staff.package_update  — paket adı / kademe / fiyat
  *  staff.package_delete  — paketi sil (soft)
  *  staff.package_items_set — paket kitaplarını değiştir
- *  deployMarker: kitap-kargo-adres-satici-2026-09-01
+ *  deployMarker: kitap-set-icerik-satici-2026-09-01
  *  cart.get              — mevcut sepeti getir
  *  cart.add              — sepete ürün ekle
  *  cart.update           — adet güncelle
@@ -75,6 +75,10 @@ import {
 import { listLgs8Collections } from '../api/_lib/commerce-lgs8-seed.js';
 import { assignedCatalogIfNoStudent, commerceStoreHttpStatus } from '../api/_lib/commerce-store-http.js';
 import {
+  packageContentsFromRows,
+  snapshotPackageTitle
+} from '../api/_lib/commerce-package-contents.js';
+import {
   assertShippingComplete,
   parseShippingFromBody,
   shippingInsertRow,
@@ -128,7 +132,7 @@ async function handleCatalog(op, body, actor) {
       ok: true,
       settings,
       store_browse,
-      deployMarker: 'kitap-kargo-adres-satici-2026-09-01',
+      deployMarker: 'kitap-set-icerik-satici-2026-09-01',
     };
   }
 
@@ -252,7 +256,7 @@ async function handleCatalog(op, body, actor) {
 
   if (op === 'catalog.browse') {
     const browse = await listStoreBrowse();
-    return { ok: true, ...browse, deployMarker: 'kitap-kargo-adres-satici-2026-09-01' };
+    return { ok: true, ...browse, deployMarker: 'kitap-set-icerik-satici-2026-09-01' };
   }
 
   if (op === 'catalog.assigned') {
@@ -597,7 +601,8 @@ async function prepareCheckout(body, actor, opts = {}) {
         .select(`
           id, name, price_kurus, is_active,
           commerce_book_package_items(
-            quantity, commerce_books(id, title, isbn),
+            quantity, sort_order, book_id, vendor_offer_id,
+            commerce_books(id, title, isbn, author),
             commerce_vendor_offers(id, vendor_id, price_kurus, stock_quantity, status, commerce_vendors(commission_rate))
           )
         `)
@@ -605,23 +610,40 @@ async function prepareCheckout(body, actor, opts = {}) {
         .single();
       if (error || !pkg || !pkg.is_active) throw new Error(`"${item.title_snapshot || 'Paket'}" artık mevcut değil`);
       const pkgItems = pkg.commerce_book_package_items || [];
-      const first = pkgItems.find((pi) => pi.commerce_vendor_offers?.status === 'approved') || pkgItems[0];
-      if (!first?.commerce_books?.id) throw new Error('Paket içeriği eksik');
-      const offer = first.commerce_vendor_offers;
-      if (offer && (offer.status !== 'approved' || offer.stock_quantity < 1)) {
-        throw new Error(`"${pkg.name}" paketi için stok yetersiz`);
+      const cartQty = Math.max(1, Number(item.quantity) || 1);
+      const contents = packageContentsFromRows(pkgItems, cartQty);
+      if (!contents.length) throw new Error('Paket içeriği eksik');
+      const first = pkgItems.find((pi) => {
+        const off = Array.isArray(pi.commerce_vendor_offers) ? pi.commerce_vendor_offers[0] : pi.commerce_vendor_offers;
+        return off?.status === 'approved';
+      }) || pkgItems[0];
+      if (!first?.commerce_books?.id && !first?.book_id) throw new Error('Paket içeriği eksik');
+      for (const pi of pkgItems) {
+        const off = Array.isArray(pi.commerce_vendor_offers) ? pi.commerce_vendor_offers[0] : pi.commerce_vendor_offers;
+        const need = Math.max(1, Number(pi.quantity) || 1) * cartQty;
+        const bookTitle = pi.commerce_books?.title || 'kitap';
+        if (off && off.status !== 'approved') {
+          throw new Error(`"${pkg.name}" paketinde "${bookTitle}" satışta değil`);
+        }
+        if (off && Number(off.stock_quantity) < need) {
+          throw new Error(`"${pkg.name}" paketinde stok yetersiz: ${bookTitle}`);
+        }
       }
+      const offer = Array.isArray(first.commerce_vendor_offers)
+        ? first.commerce_vendor_offers[0]
+        : first.commerce_vendor_offers;
+      const firstBook = Array.isArray(first.commerce_books) ? first.commerce_books[0] : first.commerce_books;
       lines.push({
-        vendor_offer_id: offer?.id || null,
-        book_id: first.commerce_books.id,
+        vendor_offer_id: offer?.id || first.vendor_offer_id || null,
+        book_id: firstBook?.id || first.book_id,
         package_id: pkg.id,
         vendor_id: offer?.vendor_id,
-        title_snapshot: pkg.name,
-        isbn_snapshot: first.commerce_books.isbn || null,
-        quantity: 1,
+        title_snapshot: snapshotPackageTitle(pkg.name, contents),
+        isbn_snapshot: contents.map((c) => c.isbn).filter(Boolean).join(', ') || firstBook?.isbn || null,
+        quantity: cartQty,
         unit_price_kurus: pkg.price_kurus,
         compare_at_price_kurus: null,
-        line_total_kurus: pkg.price_kurus,
+        line_total_kurus: pkg.price_kurus * cartQty,
         commission_rate: Number(offer?.commerce_vendors?.commission_rate ?? settings.default_commission_rate),
       });
       if (!lines[lines.length - 1].vendor_id) throw new Error('Paket satıcı bilgisi eksik');

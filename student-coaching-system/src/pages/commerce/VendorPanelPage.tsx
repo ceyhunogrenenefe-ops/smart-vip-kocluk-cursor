@@ -867,7 +867,20 @@ type VendorOrderRow = CommerceVendorOrder & {
       postal_code?: string | null;
     }>;
   };
-  commerce_order_items?: { title_snapshot: string; isbn_snapshot?: string | null; quantity: number; unit_price_kurus: number }[];
+  commerce_order_items?: {
+    title_snapshot: string;
+    isbn_snapshot?: string | null;
+    quantity: number;
+    unit_price_kurus: number;
+    package_id?: string | null;
+    package_name?: string | null;
+    package_contents?: Array<{
+      title: string;
+      isbn?: string | null;
+      author?: string | null;
+      quantity: number;
+    }> | null;
+  }[];
 };
 
 function shippingFromVendorOrder(order: VendorOrderRow['commerce_orders']) {
@@ -983,17 +996,43 @@ function Siparislerim() {
                   <div className="text-sm font-bold mt-1">{formatCommerceTry(vo.vendor_net_kurus)}</div>
                 </div>
               </div>
-              <div className="border-t border-gray-100 pt-2 space-y-1">
-                <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Kitaplar</div>
-                {items.map((item, i) => (
-                  <div key={i} className="flex justify-between text-sm gap-2">
-                    <span className="truncate text-gray-700">
-                      {item.title_snapshot} ×{item.quantity}
-                      {item.isbn_snapshot ? <span className="text-xs text-gray-400"> · {item.isbn_snapshot}</span> : null}
-                    </span>
-                    <span className="text-gray-500 flex-shrink-0">{formatCommerceTry(item.unit_price_kurus * item.quantity)}</span>
-                  </div>
-                ))}
+              <div className="border-t border-gray-100 pt-2 space-y-2">
+                <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Gönderilecek kitaplar</div>
+                {items.map((item, i) => {
+                  const contents = item.package_contents || [];
+                  const setName = item.package_name
+                    || String(item.title_snapshot || '').replace(/\s*\(\d+\s*kitap\)\s*:[\s\S]*$/i, '').trim()
+                    || item.title_snapshot;
+                  if (contents.length) {
+                    return (
+                      <div key={i} className="rounded-lg border border-indigo-100 bg-indigo-50/50 px-3 py-2">
+                        <div className="flex justify-between gap-2 text-sm font-semibold text-indigo-900">
+                          <span>Set: {setName}{item.quantity > 1 ? ` ×${item.quantity}` : ''}</span>
+                          <span className="text-gray-500 font-medium flex-shrink-0">{formatCommerceTry(item.unit_price_kurus * item.quantity)}</span>
+                        </div>
+                        <ol className="mt-1.5 space-y-1 list-decimal list-inside">
+                          {contents.map((c, j) => (
+                            <li key={j} className="text-sm text-gray-800">
+                              <span className="font-medium">{c.title}</span>
+                              {c.quantity > 1 ? <span className="text-gray-600"> ×{c.quantity}</span> : null}
+                              {c.isbn ? <span className="block pl-5 text-xs text-gray-500 font-mono">ISBN {c.isbn}</span> : null}
+                              {c.author ? <span className="block pl-5 text-xs text-gray-500">{c.author}</span> : null}
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={i} className="flex justify-between text-sm gap-2">
+                      <span className="text-gray-700">
+                        {item.title_snapshot} ×{item.quantity}
+                        {item.isbn_snapshot ? <span className="block text-xs text-gray-400 font-mono">ISBN {item.isbn_snapshot}</span> : null}
+                      </span>
+                      <span className="text-gray-500 flex-shrink-0">{formatCommerceTry(item.unit_price_kurus * item.quantity)}</span>
+                    </div>
+                  );
+                })}
                 {items.length === 0 && <p className="text-xs text-gray-400">Kitap kalemi yok</p>}
               </div>
               <div className="mt-3 rounded-lg bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-950">

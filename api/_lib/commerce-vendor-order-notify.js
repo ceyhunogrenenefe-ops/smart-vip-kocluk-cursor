@@ -9,6 +9,7 @@ import {
   buildVendorOrderNotifyPayload,
   vendorNotifyPhone,
 } from './commerce-vendor-notify-payload.js';
+import { attachPackageContents, loadPackageContentsByIds } from './commerce-package-contents.js';
 
 export { buildVendorOrderNotifyPayload, vendorNotifyPhone };
 
@@ -90,7 +91,7 @@ export async function notifyVendorWhatsAppForPaidOrder(orderId, opts = {}) {
   const [{ data: items }, { data: addresses }, vendors] = await Promise.all([
     supabaseAdmin
       .from('commerce_order_items')
-      .select('title_snapshot, quantity, isbn_snapshot, vendor_id, vendor_order_id')
+      .select('title_snapshot, quantity, isbn_snapshot, vendor_id, vendor_order_id, package_id, book_id')
       .eq('order_id', id),
     supabaseAdmin
       .from('commerce_order_addresses')
@@ -120,6 +121,12 @@ export async function notifyVendorWhatsAppForPaidOrder(orderId, opts = {}) {
     };
   }
 
+  const { contentsByPackageId, namesByPackageId } = await loadPackageContentsByIds(
+    supabaseAdmin,
+    (items || []).map((it) => it.package_id)
+  );
+  const sellerItems = attachPackageContents(items || [], contentsByPackageId, namesByPackageId);
+
   const results = [];
   for (const vendor of vendors) {
     const phone = await resolveVendorPhone(vendor);
@@ -137,7 +144,7 @@ export async function notifyVendorWhatsAppForPaidOrder(orderId, opts = {}) {
 
     const payload = buildVendorOrderNotifyPayload({
       order,
-      items: items || [],
+      items: sellerItems,
       address: addresses,
       student,
       vendor,
