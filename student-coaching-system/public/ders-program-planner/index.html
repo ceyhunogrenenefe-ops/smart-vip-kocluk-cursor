@@ -2559,6 +2559,10 @@ document.addEventListener('change',e=>{
 });
 /* Enter to add student; live modal conflict check */
 document.addEventListener('keydown',e=>{
+  if(e.key==='Enter' && e.target.dataset && e.target.dataset.act==='rename-group'){
+    e.target.blur();
+    return;
+  }
   if(e.key==='Enter' && e.target.dataset && e.target.dataset.act==='student-input'){
     const card=e.target.closest('[data-gid]'); addStudent(card.dataset.gid, e.target.value); e.target.value='';
   }
