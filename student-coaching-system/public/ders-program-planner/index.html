@@ -126,6 +126,7 @@
   .cell:hover{background:var(--primary-soft)}
   .cell:focus-visible{outline:2px solid var(--primary); outline-offset:-2px}
   .cell .subj{font-weight:600; font-size:13.5px; color:var(--ink); display:block}
+  .cell .slot-time{font-size:11.5px; color:var(--brand-navy); font-weight:600; display:block; margin-top:3px; font-variant-numeric:tabular-nums; letter-spacing:.01em}
   .cell .tch{font-size:12.5px; color:var(--muted); display:flex; align-items:center; gap:4px; margin-top:2px}
   .cell .plus{color:var(--faint); font-size:20px; font-weight:400}
   .cell.conflict{background:var(--danger-soft)}
@@ -167,6 +168,7 @@
   table.master .gcol .master-gname:focus{outline:none; border-color:var(--primary); background:#fff}
   table.master .mcell:hover{background:var(--primary-soft)}
   table.master .mcell .abbr{font-weight:700; color:var(--ink); display:block}
+  table.master .mcell .slot-time{font-size:9px; color:var(--brand-navy); font-weight:700; display:block; margin-top:2px; font-variant-numeric:tabular-nums}
   table.master .mcell .mini{font-size:9px; color:var(--muted); display:block; margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:64px}
   table.master .mcell.conflict{background:var(--danger-soft)}
   table.master .mcell.conflict .abbr{color:var(--danger)}
@@ -251,6 +253,7 @@
   .png-sheet .pcol .pl{font-weight:600; color:var(--brand-navy)}
   .png-sheet .pcol .pt{color:#5C6B86; font-size:12px}
   .png-sheet .subj{font-weight:600; display:block; color:var(--brand-navy)}
+  .png-sheet .slot-time{font-weight:600; display:block; color:#1F478F; font-size:12px; margin-top:2px}
   .png-sheet .tch{color:#444; font-size:12px; display:block; margin-top:3px}
   .png-sheet .cellh{height:54px}
 
@@ -273,6 +276,7 @@
     table.print-tt .pcol .pt{color:#5C6B86; font-size:11px}
     table.print-tt .pcell{height:46px}
     table.print-tt .subj{font-weight:600; display:block; color:#1F478F}
+    table.print-tt .slot-time{font-weight:600; display:block; color:#1F478F; font-size:11px; margin-top:2px}
     table.print-tt .tch{color:#444; font-size:11px; display:block; margin-top:2px}
     .print-page{page-break-after:always}
     .print-page:last-child{page-break-after:auto}
@@ -1537,6 +1541,26 @@ function parseRange(t){
 }
 function rangesOverlap(a,b){ return a[0]<b[1] && b[0]<a[1]; }
 
+function formatPeriodTimeShort(p){
+  if(!p) return '';
+  const t=String(p.time||'').trim();
+  if(!t) return '';
+  const start=t.split(/[–\-—]/)[0].trim();
+  const m=start.match(/(\d{1,2}:\d{2})/);
+  return m ? m[1] : start;
+}
+function periodForGroupSlot(g, di, key, fallbackPeriod){
+  const {pi}=slotIndicesFromKey(key);
+  const per=periodsForDay(g, di);
+  if(Number.isFinite(pi) && per[pi]) return per[pi];
+  return fallbackPeriod||null;
+}
+function cellSlotTimeHTML(p){
+  const short=formatPeriodTimeShort(p);
+  if(!short) return '';
+  return `<span class="slot-time">${esc(short)}</span>`;
+}
+
 /* ---------------- helpers ---------------- */
 const $=s=>document.querySelector(s);
 const esc=s=>(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -1802,7 +1826,7 @@ function renderMaster(){
           ? ' · ORTAK DERS: '+sharedPartners.map(x=>x.gname+(x.when?(' '+x.when):'')).join(', ')
           : '');
       const inner=has
-        ? `<span class="abbr">${esc(subjectAbbr(cell.subject))}${slotLocked?' 🔒':''}${conf?' ⚠':''}${shared?' ⊕':''}</span><span class="mini">${esc(cell.teacher||'')}</span>`
+        ? `<span class="abbr">${esc(subjectAbbr(cell.subject))}${slotLocked?' 🔒':''}${conf?' ⚠':''}${shared?' ⊕':''}</span>${cellSlotTimeHTML(periodForGroupSlot(g, di, dataKey, p))}<span class="mini">${esc(cell.teacher||'')}</span>`
         : (slotLocked?'🔒':'·');
       const cls=[conf?'conflict':'', shared?'shared-lesson':'', has?'has-lesson':'empty', slotLocked?'locked-slot':'', g.locked?'group-locked':'', readonly?'readonly-slot':''].filter(Boolean).join(' ');
       const dataKey=key||groupKeyForMasterSlot(g,di,pi)||(di+'_'+pi);
@@ -1912,7 +1936,7 @@ function renderProgram(){
           const slotLocked=isSlotLocked(g.id, di, pi);
           const readonly=g.locked||!canEditGroup(g.id);
           const inner=v&&(v.subject||v.teacher)
-            ? `<span class="subj">${esc(v.subject||'—')}</span><span class="tch">${conf?'⚠ ':''}${shared?'⊕ ':''}${esc(v.teacher||'')}</span>${conf&&partners.length?`<span class="conf-with">${formatConflictPartners(partners)}</span>`:''}${shared&&sharedPartners.length?`<span class="shared-with">Ortak: ${formatSharedPartners(sharedPartners)}</span>`:''}`
+            ? `<span class="subj">${esc(v.subject||'—')}</span>${cellSlotTimeHTML(p)}<span class="tch">${conf?'⚠ ':''}${shared?'⊕ ':''}${esc(v.teacher||'')}</span>${conf&&partners.length?`<span class="conf-with">${formatConflictPartners(partners)}</span>`:''}${shared&&sharedPartners.length?`<span class="shared-with">Ortak: ${formatSharedPartners(sharedPartners)}</span>`:''}`
             : (slotLocked?'<span class="plus">🔒</span>':`<span class="plus">+</span><span class="tch" style="opacity:.55">${esc(p.time||p.label||'')}</span>`);
           const confLabel=conf&&partners.length
             ? ` · çakışma: ${partners.map(p=>p.gname+(p.when?(' '+p.when):'')).join(', ')}`
@@ -2709,14 +2733,17 @@ document.addEventListener('drop',e=>{
 
 /* ---------------- print sheet (logo + class name + timetable only) ---------------- */
 function timetableForPrint(g){
-  const per=g.periods||state.periods||[];
-  const rows=per.map((p,pi)=>`<tr>
-    <td class="pcol"><div class="pl">${esc(p.label)}</div><div class="pt">${esc(p.time||'')}</div></td>
+  const maxP=maxPeriodsAcrossDays(g);
+  const rows=Array.from({length:maxP},(_,pi)=>`<tr>
+    <td class="pcol"><div class="pl">${pi+1}. Ders</div><div class="pt tiny">güne göre</div></td>
     ${state.days.map((d,di)=>{
+      const per=periodsForDay(g, di);
+      const p=per[pi];
+      if(!p) return `<td class="pcell">—</td>`;
       const v=g.schedule[di+'_'+pi];
       const inner=(v&&(v.subject||v.teacher))
-        ? `<span class="subj">${esc(v.subject||'')}</span>${v.teacher?`<span class="tch">${esc(v.teacher)}</span>`:''}`
-        : '';
+        ? `<span class="subj">${esc(v.subject||'')}</span>${cellSlotTimeHTML(p)}${v.teacher?`<span class="tch">${esc(v.teacher)}</span>`:''}`
+        : `<span class="tch" style="opacity:.7">${esc(p.time||p.label||'')}</span>`;
       return `<td class="pcell">${inner}</td>`;
     }).join('')}
   </tr>`).join('');
@@ -2745,12 +2772,19 @@ async function exportPNG(){
   const g=group(activeGroupId); if(!g) return;
   if(!window.html2canvas){ alert('PNG aracı yüklenemedi (internet bağlantısı gerekiyor).'); return; }
   const logo=document.querySelector('.logo'); const logoSrc=logo?logo.getAttribute('src'):'';
-  const per=g.periods||state.periods||[];
-  const rows=per.map((p,pi)=>`<tr>
-    <td class="pcol"><div class="pl">${esc(p.label)}</div><div class="pt">${esc(p.time||'')}</div></td>
-    ${state.days.map((d,di)=>{ const v=g.schedule[di+'_'+pi];
-      const inner=(v&&(v.subject||v.teacher))?`<span class="subj">${esc(v.subject||'')}</span>${v.teacher?`<span class="tch">${esc(v.teacher)}</span>`:''}`:'';
-      return `<td class="cellh">${inner}</td>`; }).join('')}
+  const maxP=maxPeriodsAcrossDays(g);
+  const rows=Array.from({length:maxP},(_,pi)=>`<tr>
+    <td class="pcol"><div class="pl">${pi+1}. Ders</div><div class="pt tiny">güne göre</div></td>
+    ${state.days.map((d,di)=>{
+      const dayPer=periodsForDay(g, di);
+      const p=dayPer[pi];
+      if(!p) return `<td class="cellh">—</td>`;
+      const v=g.schedule[di+'_'+pi];
+      const inner=(v&&(v.subject||v.teacher))
+        ? `<span class="subj">${esc(v.subject||'')}</span>${cellSlotTimeHTML(p)}${v.teacher?`<span class="tch">${esc(v.teacher)}</span>`:''}`
+        : `<span class="tch" style="opacity:.7">${esc(p.time||p.label||'')}</span>`;
+      return `<td class="cellh">${inner}</td>`;
+    }).join('')}
   </tr>`).join('');
   const stage=document.createElement('div'); stage.className='png-stage';
   stage.innerHTML=`<div class="png-sheet">
