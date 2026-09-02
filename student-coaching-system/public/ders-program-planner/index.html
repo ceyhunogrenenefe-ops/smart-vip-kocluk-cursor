@@ -119,7 +119,10 @@
   table.tt .pcol{background:var(--surface-2); padding:10px; width:108px; text-align:left}
   table.tt .pcol .pl{font-weight:600; font-size:13px}
   table.tt .pcol .pt{font-size:11.5px; color:var(--muted); font-variant-numeric:tabular-nums}
-  .cell{display:block; width:100%; min-height:62px; border:none; background:transparent; text-align:left; padding:9px 10px; cursor:pointer; font-family:inherit}
+  .cell{display:block; width:100%; min-height:62px; border:none; background:transparent; text-align:left; padding:9px 10px; cursor:grab; font-family:inherit; user-select:none; -webkit-user-drag:element}
+  .cell.empty{cursor:pointer}
+  .cell.readonly-slot, .cell.locked-slot{cursor:not-allowed; -webkit-user-drag:none}
+  .cell:active{cursor:grabbing}
   .cell:hover{background:var(--primary-soft)}
   .cell:focus-visible{outline:2px solid var(--primary); outline-offset:-2px}
   .cell .subj{font-weight:600; font-size:13.5px; color:var(--ink); display:block}
@@ -155,7 +158,13 @@
   table.master thead tr.row2 th{top:28px; font-size:10px; color:var(--muted); font-weight:500; padding:4px 2px}
   table.master .gcol{position:sticky; left:0; z-index:3; background:var(--surface-2); min-width:140px; max-width:180px; text-align:left; padding:6px 10px; font-weight:600; font-size:12px; border-right:2px solid var(--line-strong)}
   table.master tbody .gcol{background:var(--surface); z-index:1}
-  table.master .mcell{display:block; width:100%; min-width:52px; min-height:36px; border:none; background:transparent; cursor:pointer; padding:4px 3px; font-family:inherit; font-size:10px; line-height:1.25}
+  table.master .mcell{display:block; width:100%; min-width:52px; min-height:36px; border:none; background:transparent; cursor:grab; padding:4px 3px; font-family:inherit; font-size:10px; line-height:1.25; user-select:none; -webkit-user-drag:element}
+  table.master .mcell:active{cursor:grabbing}
+  table.master .mcell.empty{cursor:pointer}
+  table.master .mcell.readonly-slot, table.master .mcell.locked-slot{cursor:not-allowed; -webkit-user-drag:none}
+  table.master .gcol .master-gname{width:calc(100% - 18px); max-width:140px; font:inherit; font-weight:600; font-size:12px; border:1px solid transparent; border-radius:6px; padding:2px 4px; background:transparent; color:var(--ink)}
+  table.master .gcol .master-gname:hover{border-color:var(--line-strong); background:var(--surface-2)}
+  table.master .gcol .master-gname:focus{outline:none; border-color:var(--primary); background:#fff}
   table.master .mcell:hover{background:var(--primary-soft)}
   table.master .mcell .abbr{font-weight:700; color:var(--ink); display:block}
   table.master .mcell .mini{font-size:9px; color:var(--muted); display:block; margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:64px}
@@ -544,6 +553,7 @@ function migrateState(){
   if(!state.systemStudents) state.systemStudents=[];
   if(!state.poolSubjects) state.poolSubjects=[];
   if(!state.curriculumPresets) state.curriculumPresets={};
+  if(!state.periodsByDay||typeof state.periodsByDay!=='object') state.periodsByDay={};
   if(state.editGroupIds===undefined) state.editGroupIds=null;
   if(state.autoConsecutive===undefined) state.autoConsecutive=true;
   state.groups.forEach(g=>{
@@ -552,6 +562,7 @@ function migrateState(){
     if(g.classLevel===undefined) g.classLevel=null;
     if(g.branch===undefined) g.branch=null;
     if(!Array.isArray(g.curriculum)) g.curriculum=[];
+    if(!g.periodsByDay||typeof g.periodsByDay!=='object') g.periodsByDay={};
     if(!Array.isArray(g.periods)||!g.periods.length) g.periods=(state.periods||[]).map(p=>({label:p.label,time:p.time}));
     (g.students||[]).forEach(s=>{ if(s.systemId===undefined) s.systemId=null; });
   });
@@ -964,12 +975,77 @@ function applyPeriodTemplateToGroups(templateKey, groupIds){
     const g=group(gid);
     if(!g||g.locked) return;
     g.periods=tpl.map(p=>({label:p.label, time:p.time}));
+    g.periodsByDay={};
     const max=g.periods.length;
     const ns={};
     Object.entries(g.schedule||{}).forEach(([k,v])=>{ const [di,pi]=k.split('_').map(Number); if(pi<max) ns[k]=v; });
     g.schedule=ns;
   });
   saveState(); render();
+}
+function clonePeriodList(list){
+  return (Array.isArray(list)?list:[]).map(p=>({label:String(p.label||''), time:String(p.time||'')}));
+}
+function periodsForDay(g, di){
+  const dk=String(di);
+  if(g&&g.periodsByDay&&Array.isArray(g.periodsByDay[dk])&&g.periodsByDay[dk].length) return g.periodsByDay[dk];
+  if(state.periodsByDay&&Array.isArray(state.periodsByDay[dk])&&state.periodsByDay[dk].length) return state.periodsByDay[dk];
+  if(g&&Array.isArray(g.periods)&&g.periods.length) return g.periods;
+  return state.periods||[];
+}
+function masterPeriodsForDay(di){
+  const dk=String(di);
+  if(state.periodsByDay&&Array.isArray(state.periodsByDay[dk])&&state.periodsByDay[dk].length) return state.periodsByDay[dk];
+  return masterPeriods();
+}
+function maxPeriodsAcrossDays(g){
+  let m=0;
+  (state.days||[]).forEach((_,di)=>{ m=Math.max(m, periodsForDay(g, di).length); });
+  return Math.max(m, 1);
+}
+function weekdayDayIndices(){
+  return (state.days||[]).map((d,i)=>({d:String(d||''), i}))
+    .filter(x=>!/cumartesi|pazar|sat|sun/i.test(x.d))
+    .map(x=>x.i);
+}
+function weekendDayIndices(){
+  return (state.days||[]).map((d,i)=>({d:String(d||''), i}))
+    .filter(x=>/cumartesi|pazar|sat|sun/i.test(x.d))
+    .map(x=>x.i);
+}
+function applyPeriodTemplateToDays(templateKey, dayIndices){
+  const tpl=templateKey==='evening' ? state.eveningPeriods : state.periods;
+  if(!tpl||!tpl.length){ alert('Önce şablon saatlerini tanımlayın (Ayarlar).'); return; }
+  const days=(dayIndices||[]).filter((di)=>Number.isFinite(di));
+  if(!days.length){ alert('Uygulanacak gün bulunamadı.'); return; }
+  if(!state.periodsByDay||typeof state.periodsByDay!=='object') state.periodsByDay={};
+  pushUndo();
+  days.forEach((di)=>{ state.periodsByDay[String(di)]=clonePeriodList(tpl); });
+  const maxByDay={};
+  days.forEach((di)=>{ maxByDay[di]=state.periodsByDay[String(di)].length; });
+  state.groups.forEach((g)=>{
+    if(g.locked) return;
+    if(!g.periodsByDay||typeof g.periodsByDay!=='object') g.periodsByDay={};
+    days.forEach((di)=>{ g.periodsByDay[String(di)]=clonePeriodList(tpl); });
+    const ns={};
+    Object.entries(g.schedule||{}).forEach(([k,v])=>{
+      const [di,pi]=k.split('_').map(Number);
+      const max=maxByDay[di];
+      if(max==null||pi<max) ns[k]=v;
+    });
+    g.schedule=ns;
+  });
+  saveState(); render();
+}
+function renameGroup(gid, nextName){
+  const g=group(gid);
+  if(!g) return false;
+  const name=String(nextName||'').trim();
+  if(!name||name===g.name) return false;
+  g.name=name;
+  saveState();
+  notifyParentPlanEdit();
+  return true;
 }
 function toggleSlotLock(gid, di, pi){
   const gk=`${gid}|${di}_${pi}`;
@@ -1356,11 +1432,11 @@ function subjectAbbr(subject){
   return u.replace(/[^A-ZÇĞİÖŞÜa-zçğıöşü0-9]/g,'').slice(0,4).toLocaleUpperCase('tr-TR')||u.slice(0,4);
 }
 function masterPeriods(){ return state.periods&&state.periods.length ? state.periods : (state.groups[0]?.periods||[]); }
-/** Master ızgarasındaki gün/saat → grubun schedule anahtarı (sınıfa özel ders saatlerine göre eşleşir). */
+/** Master ızgarasındaki gün/saat → grubun schedule anahtarı (güne özel ders saatlerine göre). */
 function groupKeyForMasterSlot(g, di, masterPi){
   const directKey=di+'_'+masterPi;
-  const mPer=masterPeriods()[masterPi];
-  const gPer=g.periods||state.periods||[];
+  const mPer=masterPeriodsForDay(di)[masterPi];
+  const gPer=periodsForDay(g, di);
   if(!mPer) return directKey;
   const mRange=parseRange(mPer.time);
 
@@ -1392,9 +1468,9 @@ function lessonAtMasterSlot(g, di, masterPi){
   const cell=(g.schedule||{})[key]||null;
   if(cellHasLesson(cell)) return {key, cell};
 
-  const mPer=masterPeriods()[masterPi];
+  const mPer=masterPeriodsForDay(di)[masterPi];
   const mRange=parseRange(mPer?.time);
-  const gPer=g.periods||state.periods||[];
+  const gPer=periodsForDay(g, di);
   const usedPi=slotIndicesFromKey(key).pi;
   for(let pi=0; pi<gPer.length; pi++){
     if(pi===usedPi) continue;
@@ -1504,10 +1580,10 @@ function cellsAreSharedPartners(A,B){
 function conflictData(){
   const items=[];
   state.groups.forEach(g=>{
-    const per=g.periods||state.periods||[];
     Object.entries(g.schedule).forEach(([k,v])=>{
       if(!v||!v.teacher) return;
       const [di,pi]=k.split('_').map(Number);
+      const per=periodsForDay(g, di);
       const p=per[pi]; if(!p) return;
       items.push({gid:g.id, gname:g.name, key:k, di, tn:norm(v.teacher), td:v.teacher.trim(),
                   subject:String(v.subject||'').trim(),
@@ -1683,7 +1759,6 @@ function renderGruplar(){
 
 /* ---------------- render: master (all classes) ---------------- */
 function renderMaster(){
-  const per=masterPeriods();
   const {conflictCells, conflictMap, conflicts, sharedCells, sharedMap}=conflictData();
   if(!state.groups.length){
     const sysCount=(state.systemClasses||[]).length;
@@ -1694,19 +1769,25 @@ function renderMaster(){
     return;
   }
   const dayHeaders=state.days.map((d,di)=>{
+    const per=masterPeriodsForDay(di);
     const cls=di>0?' day-sep':'';
-    return `<th colspan="${per.length}" class="${cls.trim()}">${esc(d)}</th>`;
+    return `<th colspan="${Math.max(per.length,1)}" class="${cls.trim()}">${esc(d)}</th>`;
   }).join('');
   const periodHeaders=state.days.map((d,di)=>{
+    const per=masterPeriodsForDay(di);
+    if(!per.length) return `<th class="${di>0?'day-sep':''}">—</th>`;
     return per.map((p,pi)=>{
-      const cls=(di>0&&pi===0?' day-sep':'')+(pi===0?'':'');
+      const cls=(di>0&&pi===0?' day-sep':'');
       const t=String(p.time||'').split('–')[0]||String(pi+1);
       return `<th class="${cls.trim()}" title="${esc(p.label+' '+p.time)}">${esc(t)}</th>`;
     }).join('');
   }).join('');
   const sortedGroups=[...state.groups].sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'tr'));
   const rows=sortedGroups.map(g=>{
-    const cells=state.days.map((d,di)=> per.map((p,pi)=>{
+    const cells=state.days.map((d,di)=>{
+      const per=masterPeriodsForDay(di);
+      if(!per.length) return `<td class="${di>0?'day-sep':''}"><div class="mcell empty">·</div></td>`;
+      return per.map((p,pi)=>{
       const {key, cell}=lessonAtMasterSlot(g, di, pi);
       const conf=cell&&cell.teacher&&key&&conflictCells.has(g.id+'|'+key);
       const shared=cell&&cell.teacher&&key&&sharedCells.has(g.id+'|'+key);
@@ -1726,10 +1807,11 @@ function renderMaster(){
       const cls=[conf?'conflict':'', shared?'shared-lesson':'', has?'has-lesson':'empty', slotLocked?'locked-slot':'', g.locked?'group-locked':'', readonly?'readonly-slot':''].filter(Boolean).join(' ');
       const dataKey=key||groupKeyForMasterSlot(g,di,pi)||(di+'_'+pi);
       const dragAttr=has&&!slotLocked&&!readonly?' draggable="true"':'';
-      return `<td${pi===0&&di>0?' class="day-sep"':''}><button type="button" class="mcell ${cls}" data-act="edit-master-cell" data-gid="${g.id}" data-key="${dataKey}" data-di="${di}" data-pi="${pi}"${dragAttr} title="${esc(g.name+' · '+d+' · '+(p.label||'')+' '+(p.time||'')+(slotLocked?' · Kilitli':'')+confHint)}">${inner}</button></td>`;
-    }).join('')).join('');
+      return `<td${pi===0&&di>0?' class="day-sep"':''}><div role="button" tabindex="0" class="mcell ${cls}" data-act="edit-master-cell" data-gid="${g.id}" data-key="${dataKey}" data-di="${di}" data-pi="${pi}"${dragAttr} title="${esc(g.name+' · '+d+' · '+(p.label||'')+' '+(p.time||'')+(slotLocked?' · Kilitli':'')+confHint+(has?' · Sürükleyerek taşıyın':''))}">${inner}</div></td>`;
+    }).join('');
+    }).join('');
     return `<tr>
-      <td class="gcol"><span class="d" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${g.color};margin-right:6px;vertical-align:middle"></span>${esc(g.name)}${g.locked?' 🔒':''}</td>
+      <td class="gcol"><span class="d" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${g.color};margin-right:4px;vertical-align:middle"></span><input class="master-gname" data-act="rename-group" data-gid="${g.id}" value="${esc(g.name)}" aria-label="Sınıf adı" title="Sınıf adını düzenle">${g.locked?' 🔒':''}</td>
       ${cells}
     </tr>`;
   }).join('');
@@ -1738,7 +1820,7 @@ function renderMaster(){
   const missingSys=Math.max(0, sysCount-sortedGroups.length);
   $('#view').innerHTML=`
     <div class="master-tools">
-      <div class="tiny">Tüm sınıflar (${sortedGroups.length}${sysCount?` / ${sysCount} kurum sınıfı`:''}): dolu hücreyi sürükleyin; başka sınıf satırına bırakarak taşıyın. <b>Shift+tık</b> saat kilidi. Çakışan hücreler <span style="color:var(--danger);font-weight:600">kırmızı</span>, ortak dersler <span style="color:var(--shared);font-weight:600">mavi</span>.</div>
+      <div class="tiny">Tüm sınıflar (${sortedGroups.length}${sysCount?` / ${sysCount} kurum sınıfı`:''}): <b>sınıf adını</b> soldan düzenleyin; dolu hücreyi <b>sürükleyip</b> başka hücreye bırakın. Gün saatleri Ayarlar’dan ayrı ayarlanır. <b>Shift+tık</b> saat kilidi.</div>
       ${missingSys?`<div class="conf-banner bad" style="margin:0 0 10px;padding:10px 12px;font-size:13px">${missingSys} kurum sınıfı planda yok — sayfayı yenileyin veya «Tümünü ekle» kullanın.</div>`:''}
       ${conflictCount?`<div class="conf-banner bad" style="margin:0 0 10px;padding:10px 12px"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.7 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>${conflictCount} öğretmen çakışması — «Çakışmalar» sekmesinde ayrıntılı liste.</div>`:''}
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -1767,20 +1849,27 @@ function renderMaster(){
 
 /* ---------------- render: timetable ---------------- */
 function periodEditorHTML(g){
+  const dayBlocks=(state.days||[]).map((d,di)=>{
+    const per=periodsForDay(g, di);
+    return `<div style="margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line)">
+      <div class="scount" style="margin-bottom:6px">${esc(d)}</div>
+      <div class="chip-list">
+      ${per.map((p,i)=>`<div class="chip-row">
+        <input class="inp" data-act="gdper-label" data-di="${di}" data-i="${i}" value="${esc(p.label)}" placeholder="Ad" style="max-width:120px">
+        <input class="inp t" data-act="gdper-time" data-di="${di}" data-i="${i}" value="${esc(p.time||'')}" placeholder="09:00–09:45">
+        <button class="btn sm danger" data-act="gdper-del" data-di="${di}" data-i="${i}" aria-label="Saati sil">×</button>
+      </div>`).join('')||'<div class="tiny">Bu gün için saat yok.</div>'}
+      </div>
+      <button class="btn sm" data-act="gdper-add" data-di="${di}" style="margin-top:6px">Bu güne saat ekle</button>
+    </div>`;
+  }).join('');
   return `<div class="card" style="padding:14px 16px;margin-bottom:14px;border-color:var(--brand-navy)">
-    <div class="scount" style="margin-bottom:8px;color:var(--brand-navy)">${esc(g.name)} · DERS SAATLERİ</div>
-    <div class="chip-list">
-    ${(g.periods||[]).map((p,i)=>`<div class="chip-row">
-      <input class="inp" data-act="gper-label" data-i="${i}" value="${esc(p.label)}" placeholder="Ad" style="max-width:120px">
-      <input class="inp t" data-act="gper-time" data-i="${i}" value="${esc(p.time||'')}" placeholder="09:00–09:45">
-      <button class="btn sm danger" data-act="gper-del" data-i="${i}" aria-label="Saati sil">×</button>
-    </div>`).join('')}
-    </div>
+    <div class="scount" style="margin-bottom:8px;color:var(--brand-navy)">${esc(g.name)} · GÜN GÜN DERS SAATLERİ</div>
+    <p class="tiny" style="margin-top:0">Hafta içi sabah / akşam ve hafta sonu sabah gibi farklı saatleri buradan veya Ayarlar’dan tanımlayın.</p>
+    ${dayBlocks}
     <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-      <button class="btn sm" data-act="gper-add">Ders saati ekle</button>
       ${state.groups.length>1?`<button class="btn sm" data-act="gper-copy">Başka sınıftan kopyala</button>`:''}
     </div>
-    <p class="tiny" style="margin:10px 0 0">Saat biçimi "09:00–09:45" şeklinde olmalı; çakışma kontrolü bu saatlere göre yapılır.</p>
   </div>`;
 }
 function formatConflictPartners(partners){
@@ -1804,13 +1893,16 @@ function renderProgram(){
   const pills=state.groups.map(x=>`<button class="gpill ${x.id===activeGroupId?'active':''}" data-act="pick-group" data-gid="${x.id}"><span class="d" style="background:${x.color}"></span>${esc(x.name)}</button>`).join('');
   let table='';
   if(g){
-    const per=g.periods||state.periods||[];
+    const maxP=maxPeriodsAcrossDays(g);
     table=`<div class="tt-wrap"><table class="tt">
       <thead><tr><th class="pcol">Saat</th>${state.days.map(d=>`<th>${esc(d)}</th>`).join('')}</tr></thead>
       <tbody>
-      ${per.map((p,pi)=>`<tr>
-        <td class="pcol"><div class="pl">${esc(p.label)}</div><div class="pt">${esc(p.time||'')}</div></td>
+      ${Array.from({length:maxP},(_,pi)=>`<tr>
+        <td class="pcol"><div class="pl">${pi+1}. Ders</div><div class="pt tiny">günlere göre değişebilir</div></td>
         ${state.days.map((d,di)=>{
+          const per=periodsForDay(g, di);
+          const p=per[pi];
+          if(!p) return `<td><div class="cell empty readonly-slot" title="Bu günde ${pi+1}. dilim yok">—</div></td>`;
           const key=di+'_'+pi; const v=g.schedule[key];
           const conf=v&&v.teacher&&conflictCells.has(g.id+'|'+key);
           const shared=v&&v.teacher&&sharedCells.has(g.id+'|'+key);
@@ -1820,14 +1912,14 @@ function renderProgram(){
           const slotLocked=isSlotLocked(g.id, di, pi);
           const readonly=g.locked||!canEditGroup(g.id);
           const inner=v&&(v.subject||v.teacher)
-            ? `<span class="subj">${esc(v.subject||'—')}</span><span class="tch">${conf?'<svg class="icon" style="width:13px;height:13px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.7 3.86a2 2 0 0 0-3.42 0z"/></svg>':''}${shared?'<span style="color:var(--shared);font-weight:700">⊕</span>':''}${esc(v.teacher||'')}</span>${conf&&partners.length?`<span class="conf-with">${formatConflictPartners(partners)}</span>`:''}${shared&&sharedPartners.length?`<span class="shared-with">Ortak: ${formatSharedPartners(sharedPartners)}</span>`:''}`
-            : (slotLocked?'<span class="plus">🔒</span>':'<span class="plus">+</span>');
+            ? `<span class="subj">${esc(v.subject||'—')}</span><span class="tch">${conf?'⚠ ':''}${shared?'⊕ ':''}${esc(v.teacher||'')}</span>${conf&&partners.length?`<span class="conf-with">${formatConflictPartners(partners)}</span>`:''}${shared&&sharedPartners.length?`<span class="shared-with">Ortak: ${formatSharedPartners(sharedPartners)}</span>`:''}`
+            : (slotLocked?'<span class="plus">🔒</span>':`<span class="plus">+</span><span class="tch" style="opacity:.55">${esc(p.time||p.label||'')}</span>`);
           const confLabel=conf&&partners.length
             ? ` · çakışma: ${partners.map(p=>p.gname+(p.when?(' '+p.when):'')).join(', ')}`
             : (shared&&sharedPartners.length
               ? ` · ortak ders: ${sharedPartners.map(p=>p.gname+(p.when?(' '+p.when):'')).join(', ')}`
               : '');
-          return `<td><button type="button" class="cell ${conf?'conflict':''} ${shared?'shared-lesson':''} ${hasLesson?'has-lesson':''} ${slotLocked?'locked-slot':''} ${readonly?'readonly-slot':''}" data-act="edit-cell" data-gid="${g.id}" data-key="${key}" data-di="${di}" data-pi="${pi}" ${hasLesson&&!slotLocked&&!readonly?'draggable="true"':''} aria-label="${esc(d)} ${esc(p.label)} ders ata${confLabel}">${inner}</button></td>`;
+          return `<td><div role="button" tabindex="0" class="cell ${conf?'conflict':''} ${shared?'shared-lesson':''} ${hasLesson?'has-lesson':''} ${slotLocked?'locked-slot':''} ${readonly?'readonly-slot':''}" data-act="edit-cell" data-gid="${g.id}" data-key="${key}" data-di="${di}" data-pi="${pi}" ${hasLesson&&!slotLocked&&!readonly?'draggable="true"':''} aria-label="${esc(d)} ${esc(p.label)} ders ata${confLabel}" title="${esc(p.label+' '+(p.time||''))}">${inner}</div></td>`;
         }).join('')}
       </tr>`).join('')}
       </tbody></table></div>`;
@@ -1838,12 +1930,17 @@ function renderProgram(){
     <div class="prog-head">
       <div class="gpills">${pills}</div>
     </div>
+    ${g?`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+      <label class="tiny" style="display:flex;align-items:center;gap:6px">Sınıf adı
+        <input class="inp" data-act="rename-group" data-gid="${g.id}" value="${esc(g.name)}" style="min-width:220px;min-height:36px" aria-label="Sınıf adı">
+      </label>
+    </div>`:''}
     <div class="prog-tools" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px">
-      <div class="tiny">Dolu hücreyi sürükleyip başka hücreye bırakarak dersleri yer değiştirin. Çakışan hücreler <span style="color:var(--danger);font-weight:600">kırmızı</span>, ortak dersler <span style="color:var(--shared);font-weight:600">mavi</span>.</div>
+      <div class="tiny">Dolu hücreyi sürükleyip başka hücreye bırakarak dersleri yer değiştirin. Gün saatleri farklı olabilir.</div>
       ${g?`<div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn sm" id="undoBtn" data-act="undo" disabled title="Ctrl+Z"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h10a5 5 0 0 1 5 5v2"/><path d="M3 10l4-4M3 10l4 4"/></svg>Geri al</button>
-        <button class="btn sm" data-act="export-png"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m3 16 5-5 4 4 3-3 6 6"/><circle cx="8.5" cy="8.5" r="1.5"/></svg>PNG indir</button>
-        <button class="btn sm" data-act="toggle-periods">${showPeriods?'Ders saatlerini gizle':'Bu sınıfın ders saatlerini düzenle'}</button>
+        <button class="btn sm" id="undoBtn" data-act="undo" disabled title="Ctrl+Z">Geri al</button>
+        <button class="btn sm" data-act="export-png">PNG indir</button>
+        <button class="btn sm" data-act="toggle-periods">${showPeriods?'Ders saatlerini gizle':'Gün gün ders saatlerini düzenle'}</button>
       </div>`:''}
     </div>
     ${g&&showPeriods?periodEditorHTML(g):''}
@@ -1931,6 +2028,30 @@ function renderAyarlar(){
           <button class="btn sm" data-act="eve-add">Saat ekle</button>
           <button class="btn sm primary" data-act="apply-evening">Kilitli olmayan sınıflara uygula</button>
         </div>
+      </div>
+
+      <div class="card" style="padding:16px;grid-column:1/-1">
+        <div class="section-title" style="margin-top:0">Günlere göre ders saatleri</div>
+        <p class="tiny" style="margin-top:0">Hafta içi sabah / hafta içi akşam / hafta sonu sabah gibi farklı programlar için her güne ayrı saat tanımlayın. Boş bırakılan günler üstteki varsayılan (sabah) şablonunu kullanır.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <button class="btn sm primary" data-act="apply-weekday-morning">Hafta içine sabah uygula</button>
+          <button class="btn sm primary" data-act="apply-weekday-evening">Hafta içine akşam uygula</button>
+          <button class="btn sm primary" data-act="apply-weekend-morning">Hafta sonuna sabah uygula</button>
+        </div>
+        ${(state.days||[]).map((d,di)=>{
+          const per=masterPeriodsForDay(di);
+          return `<div style="margin-bottom:14px;padding:12px;border:1px solid var(--line);border-radius:10px">
+            <div class="scount" style="margin-bottom:8px">${esc(d)}</div>
+            <div class="chip-list">
+            ${per.map((p,i)=>`<div class="chip-row">
+              <input class="inp" data-act="dper-label" data-di="${di}" data-i="${i}" value="${esc(p.label)}" style="max-width:120px">
+              <input class="inp t" data-act="dper-time" data-di="${di}" data-i="${i}" value="${esc(p.time||'')}">
+              <button class="btn sm danger" data-act="dper-del" data-di="${di}" data-i="${i}">×</button>
+            </div>`).join('')||'<div class="tiny">Bu gün için özel saat yok (varsayılan sabah şablonu).</div>'}
+            </div>
+            <button class="btn sm" data-act="dper-add" data-di="${di}" style="margin-top:8px">Bu güne saat ekle</button>
+          </div>`;
+        }).join('')}
       </div>
 
       <div class="card" style="padding:16px">
@@ -2206,6 +2327,9 @@ document.addEventListener('click',e=>{
     case 'auto-fill': autoFillSchedules(); break;
     case 'apply-morning': if(confirm('Kilitli olmayan tüm sınıflara sabah/gündüz saatleri uygulansın mı?')) applyPeriodTemplateToGroups('morning'); break;
     case 'apply-evening': if(confirm('Kilitli olmayan tüm sınıflara akşam saatleri uygulansın mı?')) applyPeriodTemplateToGroups('evening'); break;
+    case 'apply-weekday-morning': if(confirm('Hafta içi günlere sabah saatleri yazılsın mı?')) applyPeriodTemplateToDays('morning', weekdayDayIndices()); break;
+    case 'apply-weekday-evening': if(confirm('Hafta içi günlere akşam saatleri yazılsın mı?')) applyPeriodTemplateToDays('evening', weekdayDayIndices()); break;
+    case 'apply-weekend-morning': if(confirm('Hafta sonu günlere sabah saatleri yazılsın mı?')) applyPeriodTemplateToDays('morning', weekendDayIndices()); break;
     case 'tpl-add': state.periods=state.periods||[]; state.periods.push({label:(state.periods.length+1)+'. Ders',time:''}); saveState(); render(); break;
     case 'tpl-del':{ const i=parseInt(a.dataset.i); state.periods.splice(i,1); saveState(); render(); break; }
     case 'eve-add': state.eveningPeriods=state.eveningPeriods||[]; state.eveningPeriods.push({label:(state.eveningPeriods.length+1)+'. Ders',time:''}); saveState(); render(); break;
@@ -2236,6 +2360,7 @@ document.addEventListener('click',e=>{
     case 'bulk-import':{ $('#bulkImportFile').click(); break; }
     case 'edit-master-cell':{
       if(suppressCellClick) break;
+      if(e.target.closest('input,textarea,select,label')) break;
       const mgid=a.dataset.gid;
       const mdi=Number(a.dataset.di), mpi=Number(a.dataset.pi);
       const mg=group(mgid);
@@ -2264,6 +2389,64 @@ document.addEventListener('click',e=>{
     case 'gper-add':{ const g=group(activeGroupId); g.periods=g.periods||[]; g.periods.push({label:(g.periods.length+1)+'. Ders',time:''}); saveState(); render(); break; }
     case 'gper-del':{ const g=group(activeGroupId); pruneGroupPeriod(g, parseInt(a.dataset.i)); break; }
     case 'gper-copy':{ copyPeriodsFromAnother(); break; }
+    case 'dper-add':{
+      if(!state.periodsByDay||typeof state.periodsByDay!=='object') state.periodsByDay={};
+      const di=String(a.dataset.di);
+      const cur=clonePeriodList(masterPeriodsForDay(+di));
+      cur.push({label:(cur.length+1)+'. Ders', time:''});
+      state.periodsByDay[di]=cur;
+      saveState(); render();
+      break;
+    }
+    case 'dper-del':{
+      if(!state.periodsByDay||typeof state.periodsByDay!=='object') state.periodsByDay={};
+      const di=+a.dataset.di, i=+a.dataset.i;
+      const cur=clonePeriodList(masterPeriodsForDay(di));
+      cur.splice(i,1);
+      state.periodsByDay[String(di)]=cur;
+      state.groups.forEach((g)=>{
+        const ns={};
+        Object.entries(g.schedule||{}).forEach(([k,v])=>{
+          let [dd,pi]=k.split('_').map(Number);
+          if(dd!==di){ ns[k]=v; return; }
+          if(pi===i) return;
+          if(pi>i) pi--;
+          ns[dd+'_'+pi]=v;
+        });
+        g.schedule=ns;
+      });
+      saveState(); render();
+      break;
+    }
+    case 'gdper-add':{
+      const g=group(activeGroupId); if(!g) break;
+      if(!g.periodsByDay||typeof g.periodsByDay!=='object') g.periodsByDay={};
+      const di=String(a.dataset.di);
+      const cur=clonePeriodList(periodsForDay(g, +di));
+      cur.push({label:(cur.length+1)+'. Ders', time:''});
+      g.periodsByDay[di]=cur;
+      saveState(); render();
+      break;
+    }
+    case 'gdper-del':{
+      const g=group(activeGroupId); if(!g) break;
+      if(!g.periodsByDay||typeof g.periodsByDay!=='object') g.periodsByDay={};
+      const di=+a.dataset.di, i=+a.dataset.i;
+      const cur=clonePeriodList(periodsForDay(g, di));
+      cur.splice(i,1);
+      g.periodsByDay[String(di)]=cur;
+      const ns={};
+      Object.entries(g.schedule||{}).forEach(([k,v])=>{
+        let [dd,pi]=k.split('_').map(Number);
+        if(dd!==di){ ns[k]=v; return; }
+        if(pi===i) return;
+        if(pi>i) pi--;
+        ns[dd+'_'+pi]=v;
+      });
+      g.schedule=ns;
+      saveState(); render();
+      break;
+    }
     case 'export': exportJSON(); break;
     case 'import-trigger': $('#importFile').click(); break;
     case 'print': buildPrintSheet(); setTimeout(()=>window.print(),60); break;
@@ -2303,8 +2486,11 @@ function copyPeriodsFromAnother(){
   if(isNaN(idx)||idx<0||idx>=others.length) return;
   if(Object.keys(g.schedule).length && !confirm('Bu sınıfın mevcut ders saatleri değişecek (atanmış dersler etkilenebilir). Devam edilsin mi?')) return;
   g.periods=others[idx].periods.map(p=>({label:p.label,time:p.time}));
+  g.periodsByDay=others[idx].periodsByDay
+    ? JSON.parse(JSON.stringify(others[idx].periodsByDay))
+    : {};
   // drop schedule entries pointing to periods that no longer exist
-  const max=g.periods.length;
+  const max=Math.max(g.periods.length, ...Object.values(g.periodsByDay||{}).map(p=>Array.isArray(p)?p.length:0), 0);
   const ns={};
   Object.entries(g.schedule).forEach(([k,v])=>{ const [di,pi]=k.split('_').map(Number); if(pi<max) ns[k]=v; });
   g.schedule=ns;
@@ -2315,12 +2501,48 @@ function copyPeriodsFromAnother(){
 document.addEventListener('change',e=>{
   const a=e.target;
   const card=a.closest('[data-gid]'); const gid=card?card.dataset.gid:null;
-  if(a.dataset.field && gid){ const g=group(gid); g[a.dataset.field]=a.value; saveState(); if(a.dataset.field==='name'){renderTabs(); if(tab==='program') render();} return; }
+  if(a.dataset.act==='rename-group'){
+    const id=a.dataset.gid||gid;
+    if(renameGroup(id, a.value)){
+      if(tab==='master') renderTabs();
+      else render();
+    }
+    return;
+  }
+  if(a.dataset.field && gid){
+    const g=group(gid);
+    if(a.dataset.field==='name'){
+      renameGroup(gid, a.value);
+      renderTabs();
+      if(tab==='program') render();
+      return;
+    }
+    g[a.dataset.field]=a.value; saveState(); return;
+  }
   if(a.dataset.act==='term-start'){ state.term.start=a.value; saveState(); renderTerm(); }
   if(a.dataset.act==='term-end'){ state.term.end=a.value; saveState(); renderTerm(); }
   if(a.dataset.act==='day-edit'){ state.days[+a.dataset.i]=a.value; saveState(); }
   if(a.dataset.act==='gper-label'){ const g=group(activeGroupId); g.periods[+a.dataset.i].label=a.value; saveState(); }
   if(a.dataset.act==='gper-time'){ const g=group(activeGroupId); g.periods[+a.dataset.i].time=a.value; saveState(); }
+  if(a.dataset.act==='dper-label'||a.dataset.act==='dper-time'){
+    if(!state.periodsByDay||typeof state.periodsByDay!=='object') state.periodsByDay={};
+    const di=String(a.dataset.di), i=+a.dataset.i;
+    const cur=clonePeriodList(masterPeriodsForDay(+di));
+    if(!cur[i]) cur[i]={label:'', time:''};
+    if(a.dataset.act==='dper-label') cur[i].label=a.value; else cur[i].time=a.value;
+    state.periodsByDay[di]=cur;
+    saveState();
+  }
+  if(a.dataset.act==='gdper-label'||a.dataset.act==='gdper-time'){
+    const g=group(activeGroupId); if(!g) return;
+    if(!g.periodsByDay||typeof g.periodsByDay!=='object') g.periodsByDay={};
+    const di=String(a.dataset.di), i=+a.dataset.i;
+    const cur=clonePeriodList(periodsForDay(g, +di));
+    if(!cur[i]) cur[i]={label:'', time:''};
+    if(a.dataset.act==='gdper-label') cur[i].label=a.value; else cur[i].time=a.value;
+    g.periodsByDay[di]=cur;
+    saveState();
+  }
   if(a.dataset.act==='tpl-label'){ state.periods[+a.dataset.i].label=a.value; saveState(); }
   if(a.dataset.act==='tpl-time'){ state.periods[+a.dataset.i].time=a.value; saveState(); }
   if(a.dataset.act==='eve-label'){ state.eveningPeriods[+a.dataset.i].label=a.value; saveState(); }
@@ -2421,13 +2643,15 @@ document.addEventListener('input',e=>{
 /* drag & drop: ders hücreleri (tek sınıf + tüm sınıflar) */
 document.addEventListener('dragstart',e=>{
   if(tab!=='program' && tab!=='master') return;
+  if(e.target.closest('input,textarea,select')) return;
   const cell=e.target.closest('.cell.has-lesson, .mcell.has-lesson');
   if(!cell) return;
+  if(cell.classList.contains('readonly-slot')||cell.classList.contains('locked-slot')) return;
   const gid=cell.dataset.gid||activeGroupId;
   if(!gid) return;
   dragLesson={groupId:gid, key:cell.dataset.key};
   e.dataTransfer.effectAllowed='move';
-  try{ e.dataTransfer.setData('text/plain', cell.dataset.key); }catch(err){}
+  try{ e.dataTransfer.setData('text/plain', cell.dataset.key||'lesson'); }catch(err){}
   cell.classList.add('dragging');
 });
 document.addEventListener('dragend',e=>{
@@ -2436,7 +2660,7 @@ document.addEventListener('dragend',e=>{
   document.querySelectorAll('.cell.drag-over, .mcell.drag-over').forEach(c=>c.classList.remove('drag-over'));
   if(dragLesson){
     suppressCellClick=true;
-    setTimeout(()=>{ suppressCellClick=false; }, 0);
+    setTimeout(()=>{ suppressCellClick=false; }, 50);
   }
   dragLesson=null;
 });
@@ -2444,6 +2668,7 @@ document.addEventListener('dragover',e=>{
   if((tab!=='program' && tab!=='master')||!dragLesson) return;
   const cell=e.target.closest('.cell, .mcell');
   if(!cell) return;
+  if(cell.classList.contains('readonly-slot')||cell.classList.contains('locked-slot')) return;
   e.preventDefault();
   e.dataTransfer.dropEffect='move';
   document.querySelectorAll('.cell.drag-over, .mcell.drag-over').forEach(c=>{ if(c!==cell) c.classList.remove('drag-over'); });
@@ -2469,8 +2694,13 @@ document.addEventListener('drop',e=>{
   if(toG.locked||!canEditGroup(toGid)){ dragLesson=null; return; }
   if(isSlotLockedForKey(dragLesson.groupId, dragLesson.key)){ dragLesson=null; return; }
   if(isSlotLockedForKey(toGid, toKey)){ dragLesson=null; return; }
-  if(applyLessonTransfer(dragLesson.groupId, dragLesson.key, toGid, toKey)) render();
+  const moved=applyLessonTransfer(dragLesson.groupId, dragLesson.key, toGid, toKey);
   dragLesson=null;
+  if(moved){
+    suppressCellClick=true;
+    setTimeout(()=>{ suppressCellClick=false; }, 50);
+    render();
+  }
 });
 
 /* ---------------- print sheet (logo + class name + timetable only) ---------------- */

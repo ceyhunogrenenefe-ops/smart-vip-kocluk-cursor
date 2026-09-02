@@ -8,6 +8,7 @@ import {
   updateOneOptionalModerator
 } from './supabase-optional-moderator.js';
 import { isSolutionLessonSubject } from './solution-appointments-core.js';
+import { periodsForPlannerDay } from './class-schedule-plan-periods.js';
 
 function normTr(s) {
   return String(s || '')
@@ -79,7 +80,6 @@ function inferSharedBucketKey(teacherName, di, subject, timeStr) {
 export function indexPlannerSharedLessons(plannerJson) {
   const pj = plannerJson && typeof plannerJson === 'object' ? plannerJson : {};
   const groups = Array.isArray(pj.groups) ? pj.groups : [];
-  const defaultPeriods = Array.isArray(pj.periods) ? pj.periods : [];
   /** @type {Map<string, { groupIds: Set<string>, classIds: Set<string> }>} */
   const clusters = new Map();
   /** @type {Map<string, string>} */
@@ -87,7 +87,6 @@ export function indexPlannerSharedLessons(plannerJson) {
 
   for (const g of groups) {
     const schedule = g.schedule && typeof g.schedule === 'object' ? g.schedule : {};
-    const periods = Array.isArray(g.periods) ? g.periods : defaultPeriods;
     const groupId = String(g.id || '');
     for (const [key, cell] of Object.entries(schedule)) {
       if (!cell || typeof cell !== 'object' || !String(cell.teacher || '').trim()) continue;
@@ -95,6 +94,7 @@ export function indexPlannerSharedLessons(plannerJson) {
       const di = Number(diStr);
       const pi = Number(piStr);
       if (!Number.isFinite(di) || !Number.isFinite(pi)) continue;
+      const periods = periodsForPlannerDay(g, pj, di);
       const period = periods[pi] || {};
       const teacherName = String(cell.teacher || '').trim();
       const subject = String(cell.subject || '').trim();
@@ -392,7 +392,6 @@ export async function exportPlannerGroupToClass({
   }
 
   const days = Array.isArray(pj.days) ? pj.days : [];
-  const periods = Array.isArray(group.periods) ? group.periods : Array.isArray(pj.periods) ? pj.periods : [];
   const schedule = group.schedule && typeof group.schedule === 'object' ? group.schedule : {};
   const institutionId = String(classRow.institution_id || '').trim();
   const teachers = await loadTeachersForClassExport(institutionId, classId);
@@ -419,6 +418,7 @@ export async function exportPlannerGroupToClass({
     const pi = Number(piStr);
     if (!Number.isFinite(di) || !Number.isFinite(pi)) continue;
 
+    const periods = periodsForPlannerDay(group, pj, di);
     const period = periods[pi];
     const dayLabel = days[di] || String(di);
     const subject = resolvePlannerCellSubject(cell, period, teacherName, dayLabel);
