@@ -1,6 +1,6 @@
 /**
  * kitap_siparisleri (Sipariş formu) → Yankı Kitapevi commerce_vendor_orders aktarımı.
- * deployMarker: kitap-form-yanki-import-2026-09-02
+ * deployMarker: kitap-form-yanki-import-fix-2026-09-02
  */
 import { supabaseAdmin } from './supabase-admin.js';
 import { ensureYankiVendor, findLinkedYankiKitapci } from './commerce-lgs8-seed.js';
@@ -68,16 +68,17 @@ async function nextFormOrderNumber() {
 }
 
 async function loadExistingImportIds(formIds) {
-  const ids = [...new Set((formIds || []).map(String).filter(Boolean))];
+  const want = new Set((formIds || []).map(String).filter(Boolean));
   const found = new Set();
-  if (!ids.length) return found;
-  const { data } = await supabaseAdmin
+  if (!want.size) return found;
+  const { data, error } = await supabaseAdmin
     .from('commerce_orders')
-    .select('id, notes')
-    .or(ids.map((id) => `notes.ilike.%${FORM_IMPORT_MARKER}${id}%`).join(','));
+    .select('notes')
+    .ilike('notes', `%${FORM_IMPORT_MARKER}%`);
+  if (error) throw error;
   for (const row of data || []) {
     const fid = formImportNoteId(row.notes);
-    if (fid) found.add(fid);
+    if (fid && want.has(fid)) found.add(fid);
   }
   return found;
 }
@@ -133,7 +134,8 @@ async function ensureFormImportBook(vendorId, actorSub) {
         approved_at: new Date().toISOString(),
         approved_by: actorSub || null,
         submitted_at: new Date().toISOString(),
-        submitted_by: actorSub || null,
+        created_by: actorSub || null,
+        updated_by: actorSub || null,
       })
       .select('id')
       .single();
@@ -303,9 +305,18 @@ export async function importKitapFormOrdersToYanki(opts = {}) {
   const limit = Math.min(Math.max(parseInt(opts.limit ?? 500, 10) || 500, 1), 1000);
   const actorSub = opts.actorSub || null;
 
-  const { vendor } = await ensureYankiVendor({ actorSub });
-  const kitapci = await findLinkedYankiKitapci(vendor.institution_id);
-  const { bookId, offerId } = await ensureFormImportBook(vendor.id, actorSub);
+  let vendor;
+  let kitapci;
+  let bookId;
+  let offerId;
+  try {
+    ({ vendor } = await ensureYankiVendor({ actorSub }));
+    kitapci = await findLinkedYankiKitapci(vendor.institution_id);
+    ({ bookId, offerId } = await ensureFormImportBook(vendor.id, actorSub));
+  } catch (e) {
+    const msg = e?.message || String(e);
+    throw new Error(`Import hazırlığı başarısız: ${msg}`);
+  }
 
   let q = supabaseAdmin
     .from('kitap_siparisleri')
@@ -348,7 +359,7 @@ export async function importKitapFormOrdersToYanki(opts = {}) {
 
   const results = {
     ok: true,
-    deployMarker: 'kitap-form-yanki-import-2026-09-02',
+    deployMarker: 'kitap-form-yanki-import-fix-2026-09-02',
     since,
     dry_run: dryRun,
     vendor: { id: vendor.id, name: vendor.name, slug: vendor.slug },
