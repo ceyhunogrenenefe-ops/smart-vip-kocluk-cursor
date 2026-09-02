@@ -181,6 +181,7 @@ export type KitapFormImportResult = {
   since: string;
   dry_run: boolean;
   vendor: { id: string; name: string; slug: string };
+  repair?: { repaired: number; skipped_ok: number; failed: number; errors: Array<{ order_id: string; form_id: string; error: string }> } | null;
   scanned: number;
   skipped_already_imported: number;
   imported: number;
@@ -189,7 +190,7 @@ export type KitapFormImportResult = {
   errors: Array<{ form_id: string; ogrenci?: string; error: string }>;
 };
 
-export const caImportKitapFormOrders = (params?: { since?: string; dry_run?: boolean; limit?: number }) =>
+export const caImportKitapFormOrders = (params?: { since?: string; dry_run?: boolean; limit?: number; repair?: boolean }) =>
   post<KitapFormImportResult>('orders.import_kitap_form', params ?? {});
 
 export const caUpdateVendorOrderStatus = (id: string, status: string) =>

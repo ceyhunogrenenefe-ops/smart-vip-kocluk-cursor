@@ -1186,7 +1186,7 @@ function KitaplarTab() {
   const handleImportFormOrders = async () => {
     if (
       !window.confirm(
-        '26.08.2026 tarihinden itibaren sipariş formundaki tüm kayıtlar Yankı Kitapevi → Siparişlerim listesine aktarılacak. Daha önce aktarılanlar atlanır. Devam edilsin mi?'
+        '26.08.2026 tarihinden itibaren sipariş formundaki kayıtlar Yankı Kitapevi → Siparişlerim listesine aktarılır. Daha önce aktarılmış ama kitap listesi bozuk olan siparişler otomatik onarılır. Devam edilsin mi?'
       )
     ) {
       return;
@@ -1194,11 +1194,12 @@ function KitaplarTab() {
     setSeeding(true);
     try {
       if (yankiPhone.trim()) await caEnsureYankiVendor({ contact_phone: yankiPhone.trim() });
-      const r = await caImportKitapFormOrders({ since: '2026-08-26T00:00:00+03:00' });
+      const r = await caImportKitapFormOrders({ since: '2026-08-26T00:00:00+03:00', repair: true });
+      const repaired = r.repair?.repaired ?? 0;
       if (r.failed > 0) {
-        toast.error(`${r.imported} aktarıldı, ${r.failed} hata, ${r.skipped_already_imported} zaten vardı`);
+        toast.error(`${r.imported} aktarıldı, ${repaired} onarıldı, ${r.failed} hata, ${r.skipped_already_imported} zaten vardı`);
       } else {
-        toast.success(`${r.imported} sipariş Yankı paneline aktarıldı (${r.skipped_already_imported} zaten vardı)`);
+        toast.success(`${r.imported} yeni aktarım, ${repaired} onarım (${r.skipped_already_imported} zaten tamamdı)`);
       }
     } catch (e: unknown) { toast.error((e as Error).message); }
     finally { setSeeding(false); }
