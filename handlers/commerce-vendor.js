@@ -13,7 +13,7 @@
  *  shipments.create | shipments.update
  *  payouts.list
  *  stats.overview
- *  deployMarker: kitap-set-icerik-satici-2026-09-01
+ *  deployMarker: vendor-orders-filter-2026-09-02
  */
 
 import { requireAuth } from '../api/_lib/auth.js';
@@ -27,21 +27,81 @@ import {
 } from '../api/_lib/commerce-vendor-orders.js';
 import { attachPackageContents, loadPackageContentsByIds } from '../api/_lib/commerce-package-contents.js';
 
+function formatSinifLabel(level) {
+  const raw = String(level || '').trim();
+  if (!raw) return '';
+  if (/^\d+$/.test(raw)) return `${raw}. Sınıf`;
+  return raw;
+}
+
+function inferSinifFromText(...parts) {
+  const hay = parts.map((p) => String(p || '')).join(' ');
+  const m = hay.match(/\b([5-8]|9|1[0-2])\s*\.?\s*s[iı]n[iı]f\b/i)
+    || hay.match(/\b(LGS|TYT|AYT|YKS|YÖS|YOS)\b/i)
+    || hay.match(/\b([5-8]|9|1[0-2])\b/);
+  if (!m) return '';
+  return formatSinifLabel(m[1]);
+}
+
 async function decorateVendorOrdersWithPackageContents(rows) {
   const list = Array.isArray(rows) ? rows : [];
   const pkgIds = [];
+  const studentIds = [];
   for (const vo of list) {
+    const sid = vo.commerce_orders?.student_id;
+    if (sid) studentIds.push(String(sid));
     for (const it of vo.commerce_order_items || []) {
       if (it.package_id) pkgIds.push(it.package_id);
     }
   }
-  const { contentsByPackageId, namesByPackageId } = await loadPackageContentsByIds(supabaseAdmin, pkgIds);
+  const [{ contentsByPackageId, namesByPackageId, classLevelByPackageId }, studentsRes] = await Promise.all([
+    loadPackageContentsByIds(supabaseAdmin, pkgIds),
+    studentIds.length
+      ? supabaseAdmin.from('students').select('id, class_level, name').in('id', [...new Set(studentIds)])
+      : Promise.resolve({ data: [] }),
+  ]);
+  const classByStudent = new Map(
+    (studentsRes.data || [])
+      .map((s) => [String(s.id), formatSinifLabel(s.class_level)])
+      .filter(([, level]) => Boolean(level))
+  );
+  const nameByStudent = new Map(
+    (studentsRes.data || [])
+      .map((s) => [String(s.id), String(s.name || '').trim()])
+      .filter(([, name]) => Boolean(name))
+  );
+
   for (const vo of list) {
     vo.commerce_order_items = attachPackageContents(
       vo.commerce_order_items || [],
       contentsByPackageId,
       namesByPackageId
     );
+    const parent = vo.commerce_orders || {};
+    const sid = parent.student_id ? String(parent.student_id) : '';
+    let sinif = (sid && classByStudent.get(sid)) || '';
+    if (!sinif) {
+      for (const it of vo.commerce_order_items || []) {
+        const pid = it.package_id;
+        const level = pid
+          ? (classLevelByPackageId?.get(pid) || classLevelByPackageId?.get(String(pid)) || '')
+          : '';
+        if (level) {
+          sinif = formatSinifLabel(level);
+          break;
+        }
+      }
+    }
+    if (!sinif) {
+      const titles = (vo.commerce_order_items || [])
+        .map((it) => [it.package_name, it.title_snapshot].filter(Boolean).join(' '))
+        .join(' ');
+      sinif = inferSinifFromText(parent.notes, titles);
+    }
+    vo.sinif = sinif || '';
+    if (sid && nameByStudent.get(sid)) {
+      parent.student_name = nameByStudent.get(sid);
+    }
   }
   return list;
 }
@@ -60,7 +120,7 @@ function sanitizeInt(v) {
 }
 
 const VENDOR_ORDERS_PAID_ONLY = true;
-const VENDOR_PAID_MARKER = 'kitap-set-icerik-satici-2026-09-01';
+const VENDOR_PAID_MARKER = 'vendor-orders-filter-2026-09-02';
 
 async function paidOrderIdSetForVendor(vendorId) {
   const { data: vos, error } = await supabaseAdmin
@@ -375,7 +435,7 @@ export default async function handler(req, res) {
         .select(`
           *,
           commerce_orders(
-            id, order_number, customer_name, customer_email, customer_phone, notes, created_at, status, payment_status,
+            id, order_number, student_id, customer_name, customer_email, customer_phone, notes, created_at, status, payment_status,
             commerce_order_addresses(*)
           ),
           commerce_order_items(id, title_snapshot, isbn_snapshot, quantity, unit_price_kurus, package_id, book_id),
@@ -384,8 +444,10 @@ export default async function handler(req, res) {
         .eq('vendor_id', vendorId)
         .in('order_id', [...paidIds])
         .order('created_at', { ascending: false });
-      if (body.status) q = q.eq('status', body.status);
-      const limit = Math.min(parseInt(body.limit ?? 50, 10), 200);
+      if (body.status === 'yeni') q = q.eq('status', 'pending');
+      else if (body.status === 'eski') q = q.in('status', ['confirmed', 'preparing', 'shipped', 'delivered']);
+      else if (body.status) q = q.eq('status', body.status);
+      const limit = Math.min(parseInt(body.limit ?? 200, 10), 200);
       q = q.limit(limit);
       const { data, error } = await q;
       if (error) throw error;
