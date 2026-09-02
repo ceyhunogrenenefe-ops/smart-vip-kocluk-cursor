@@ -13,7 +13,8 @@
  *  vendors.ensure_yanki
  *  orders.list | orders.get | orders.update | orders.update_status | orders.delete
  *  orders.sync_whatsapp_template
- *  deployMarker: meta-template-submit-2026-08-30
+ *  orders.import_kitap_form
+ *  deployMarker: kitap-form-yanki-import-2026-09-02
  *  vendor_orders.list | vendor_orders.update_status
  *  shipments.list | shipments.get | shipments.create | shipments.update
  *  payouts.list | payouts.get | payouts.create | payouts.approve | payouts.mark_paid
@@ -30,6 +31,7 @@ import { bulkUpsertBooks, ensureYankiVendor, seedLgs8DenemeKulubu, seedLgs8Paraf
 import { defaultStoreBrowse, normalizeStoreBrowse, withInferredSeriesMetadata } from '../api/_lib/commerce-store-browse.js';
 import { decorateOrderWithIbanReceipt } from '../api/_lib/commerce-iban.js';
 import { activateBookOrderMetaTemplate } from '../api/_lib/book-order-meta-send.js';
+import { importKitapFormOrdersToYanki, DEFAULT_SINCE } from '../api/_lib/commerce-kitap-form-import.js';
 
 function err(res, status, message) {
   return res.status(status).json({ error: message });
@@ -736,7 +738,20 @@ async function handleOffers(op, body, actor) {
 // ─────────────────────────────────────────────
 // Siparişler (Süper Admin okuma + durum güncelleme)
 // ─────────────────────────────────────────────
-async function handleOrders(op, body) {
+async function handleOrders(op, body, actor) {
+  if (op === 'orders.import_kitap_form') {
+    const since = sanitizeText(body.since) || DEFAULT_SINCE;
+    const dryRun = body.dry_run === true || body.dryRun === true;
+    const limit = Math.min(parseInt(body.limit ?? 500, 10), 1000);
+    const out = await importKitapFormOrdersToYanki({
+      since,
+      dryRun,
+      limit,
+      actorSub: actor?.sub || null,
+    });
+    return out;
+  }
+
   if (op === 'orders.sync_whatsapp_template') {
     const activated = await activateBookOrderMetaTemplate();
     return {
@@ -1302,7 +1317,7 @@ export default async function handler(req, res) {
     } else if (prefix === 'offers') {
       result = await handleOffers(op, body, actor);
     } else if (prefix === 'orders' || op === 'vendor_orders.update_status') {
-      result = await handleOrders(op, body);
+      result = await handleOrders(op, body, actor);
     } else if (prefix === 'shipments') {
       result = await handleShipments(op, body);
     } else if (prefix === 'payouts') {
