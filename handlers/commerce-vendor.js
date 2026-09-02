@@ -27,6 +27,7 @@ import {
   vendorStatusTimestamps,
 } from '../api/_lib/commerce-vendor-orders.js';
 import { attachPackageContents, loadPackageContentsByIds } from '../api/_lib/commerce-package-contents.js';
+import { attachFormImportPackageContents } from '../api/_lib/commerce-kitap-form-import.js';
 
 function formatSinifLabel(level) {
   const raw = String(level || '').trim();
@@ -73,10 +74,13 @@ async function decorateVendorOrdersWithPackageContents(rows) {
   );
 
   for (const vo of list) {
-    vo.commerce_order_items = attachPackageContents(
-      vo.commerce_order_items || [],
-      contentsByPackageId,
-      namesByPackageId
+    vo.commerce_order_items = attachFormImportPackageContents(
+      attachPackageContents(
+        vo.commerce_order_items || [],
+        contentsByPackageId,
+        namesByPackageId
+      ),
+      vo.commerce_orders?.notes
     );
     const parent = vo.commerce_orders || {};
     const sid = parent.student_id ? String(parent.student_id) : '';

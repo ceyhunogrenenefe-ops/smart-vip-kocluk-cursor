@@ -762,11 +762,13 @@ async function handleOrders(op, body, actor) {
     const since = sanitizeText(body.since) || DEFAULT_SINCE;
     const dryRun = body.dry_run === true || body.dryRun === true;
     const limit = Math.min(parseInt(body.limit ?? 500, 10), 1000);
+    const repair = body.repair !== false;
     const out = await importKitapFormOrdersToYanki({
       since,
       dryRun,
       limit,
       actorSub: actor?.sub || null,
+      repair,
     });
     return out;
   }
