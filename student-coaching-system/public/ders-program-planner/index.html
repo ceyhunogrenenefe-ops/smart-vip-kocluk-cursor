@@ -1825,11 +1825,11 @@ function renderMaster(){
         : (shared&&sharedPartners.length
           ? ' · ORTAK DERS: '+sharedPartners.map(x=>x.gname+(x.when?(' '+x.when):'')).join(', ')
           : '');
+      const dataKey=key||groupKeyForMasterSlot(g,di,pi)||(di+'_'+pi);
       const inner=has
         ? `<span class="abbr">${esc(subjectAbbr(cell.subject))}${slotLocked?' 🔒':''}${conf?' ⚠':''}${shared?' ⊕':''}</span>${cellSlotTimeHTML(periodForGroupSlot(g, di, dataKey, p))}<span class="mini">${esc(cell.teacher||'')}</span>`
         : (slotLocked?'🔒':'·');
       const cls=[conf?'conflict':'', shared?'shared-lesson':'', has?'has-lesson':'empty', slotLocked?'locked-slot':'', g.locked?'group-locked':'', readonly?'readonly-slot':''].filter(Boolean).join(' ');
-      const dataKey=key||groupKeyForMasterSlot(g,di,pi)||(di+'_'+pi);
       const dragAttr=has&&!slotLocked&&!readonly?' draggable="true"':'';
       return `<td${pi===0&&di>0?' class="day-sep"':''}><div role="button" tabindex="0" class="mcell ${cls}" data-act="edit-master-cell" data-gid="${g.id}" data-key="${dataKey}" data-di="${di}" data-pi="${pi}"${dragAttr} title="${esc(g.name+' · '+d+' · '+(p.label||'')+' '+(p.time||'')+(slotLocked?' · Kilitli':'')+confHint+(has?' · Sürükleyerek taşıyın':''))}">${inner}</div></td>`;
     }).join('');
