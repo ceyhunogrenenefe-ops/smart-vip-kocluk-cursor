@@ -174,6 +174,24 @@ export const caUpdateOrder = (
   }
 ) => post<{ order: CommerceOrder }>('orders.update', { id, ...fields });
 export const caDeleteOrder = (id: string) => post<{ deleted: boolean; order_number?: string }>('orders.delete', { id });
+
+export type KitapFormImportResult = {
+  ok: boolean;
+  deployMarker?: string;
+  since: string;
+  dry_run: boolean;
+  vendor: { id: string; name: string; slug: string };
+  scanned: number;
+  skipped_already_imported: number;
+  imported: number;
+  failed: number;
+  items: Array<Record<string, unknown>>;
+  errors: Array<{ form_id: string; ogrenci?: string; error: string }>;
+};
+
+export const caImportKitapFormOrders = (params?: { since?: string; dry_run?: boolean; limit?: number }) =>
+  post<KitapFormImportResult>('orders.import_kitap_form', params ?? {});
+
 export const caUpdateVendorOrderStatus = (id: string, status: string) =>
   post<{ vendor_order: CommerceVendorOrder }>('vendor_orders.update_status', { id, status });
 
