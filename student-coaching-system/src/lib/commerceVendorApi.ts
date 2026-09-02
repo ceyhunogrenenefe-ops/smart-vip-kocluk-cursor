@@ -49,7 +49,7 @@ export const cvSubmitOffer = (id: string, vendor_id?: string) =>
 
 // Siparişler
 export const cvListOrders = (params?: { status?: string; limit?: number; vendor_id?: string }) =>
-  post<{ vendor_orders: CommerceVendorOrder[] }>('orders.list', params ?? {});
+  post<{ vendor_orders: CommerceVendorOrder[]; deployMarker?: string }>('orders.list', params ?? {});
 export const cvGetOrder = (id: string, vendor_id?: string) =>
   post<{ vendor_order: CommerceVendorOrder }>('orders.get', { id, ...(vendor_id ? { vendor_id } : {}) });
 export const cvAcceptOrder = (id: string, vendor_id?: string) =>

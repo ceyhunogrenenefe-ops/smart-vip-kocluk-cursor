@@ -2,10 +2,12 @@
  * Satıcı (vendor_admin) paneli
  * Sekmeler: Genel Bakış | Kitaplarım | Tekliflerim | Siparişlerim | Hakedişlerim
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle,
+  ArrowDownAZ,
+  ArrowUpAZ,
   BookOpen,
   Camera,
   CheckCircle2,
@@ -863,15 +865,19 @@ function Tekliflerim() {
 
 // ── Siparişlerim ───────────────────────────────────────────────────────
 type VendorOrderRow = CommerceVendorOrder & {
+  sinif?: string | null;
   commerce_orders?: {
     id?: string;
     order_number?: string;
+    student_id?: string | null;
+    student_name?: string | null;
     customer_name?: string | null;
     customer_email?: string | null;
     customer_phone?: string | null;
     notes?: string | null;
     status?: string;
     payment_status?: string;
+    created_at?: string;
     commerce_order_addresses?: Array<{
       address_type?: string;
       full_name?: string | null;
@@ -912,22 +918,108 @@ function formatVendorShipping(addr: NonNullable<ReturnType<typeof shippingFromVe
     .join(', ');
 }
 
+function vendorSinifSortKey(val: string) {
+  const m = String(val || '').match(/^(\d+)/);
+  return m ? Number(m[1]) : 999;
+}
+
+function vendorOrderDisplayName(vo: VendorOrderRow) {
+  const order = vo.commerce_orders;
+  const addr = shippingFromVendorOrder(order);
+  return String(
+    order?.student_name
+    || order?.customer_name
+    || addr?.full_name
+    || ''
+  ).trim();
+}
+
+function vendorOrderSearchHaystack(vo: VendorOrderRow) {
+  const order = vo.commerce_orders;
+  const addr = shippingFromVendorOrder(order);
+  const items = vo.commerce_order_items || [];
+  return [
+    order?.order_number,
+    order?.student_name,
+    order?.customer_name,
+    order?.customer_email,
+    order?.customer_phone,
+    order?.notes,
+    vo.sinif,
+    vo.vendor_notes,
+    addr?.full_name,
+    addr?.phone,
+    addr?.address_line1,
+    addr?.address_line2,
+    addr?.district,
+    addr?.city,
+    ...items.flatMap((it) => [
+      it.title_snapshot,
+      it.package_name,
+      it.isbn_snapshot,
+      ...(it.package_contents || []).flatMap((c) => [c.title, c.isbn, c.author]),
+    ]),
+  ]
+    .map((v) => String(v || '').trim())
+    .filter(Boolean)
+    .join(' ')
+    .toLocaleLowerCase('tr-TR');
+}
+
 function Siparislerim() {
   const [orders, setOrders] = useState<VendorOrderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState('');
+  const [sinifFilter, setSinifFilter] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [nameSort, setNameSort] = useState<'asc' | 'desc'>('asc');
   const [shipModal, setShipModal] = useState<string | null>(null);
   const [editing, setEditing] = useState<VendorOrderRow | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await cvListOrders({ status: filterStatus || undefined });
+      const r = await cvListOrders({ status: filterStatus || undefined, limit: 200 });
       setOrders((r.vendor_orders || []) as VendorOrderRow[]);
     } catch (e: unknown) { toast.error((e as Error).message); }
     finally { setLoading(false); }
   }, [filterStatus]);
   useEffect(() => { load(); }, [load]);
+
+  const sinifOptions = useMemo(() => {
+    const set = new Set<string>();
+    orders.forEach((o) => {
+      const s = String(o.sinif || '').trim();
+      if (s) set.add(s);
+    });
+    return Array.from(set).sort(
+      (a, b) => vendorSinifSortKey(a) - vendorSinifSortKey(b) || a.localeCompare(b, 'tr')
+    );
+  }, [orders]);
+
+  const filteredOrders = useMemo(() => {
+    const q = searchQuery.trim().toLocaleLowerCase('tr-TR');
+    let list = orders;
+
+    if (sinifFilter) {
+      list = list.filter((o) => String(o.sinif || '').trim() === sinifFilter);
+    }
+
+    if (q) {
+      list = list.filter((o) => vendorOrderSearchHaystack(o).includes(q));
+    }
+
+    return [...list].sort((a, b) => {
+      const cmp = vendorOrderDisplayName(a).localeCompare(
+        vendorOrderDisplayName(b),
+        'tr',
+        { sensitivity: 'base' }
+      );
+      return nameSort === 'asc' ? cmp : -cmp;
+    });
+  }, [orders, sinifFilter, searchQuery, nameSort]);
+
+  const filtersActive = Boolean(sinifFilter || searchQuery.trim());
 
   const handleAccept = async (id: string) => {
     try {
@@ -960,35 +1052,94 @@ function Siparislerim() {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-4 gap-3">
-        <div>
-          <h2 className="text-lg font-semibold">Siparişlerim</h2>
-          <p className="text-xs text-gray-500 mt-0.5">Yalnızca kart veya IBAN ile ödemesi alınan siparişler listelenir.</p>
-        </div>
-        <select
-          className="border rounded-lg text-sm px-2 py-1.5"
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-        >
-          <option value="">Tüm durumlar</option>
-          <option value="pending">Yeni</option>
-          <option value="confirmed">Onaylandı</option>
-          <option value="preparing">Hazırlanıyor</option>
-          <option value="shipped">Kargoya Verildi</option>
-          <option value="delivered">Teslim Edildi</option>
-        </select>
+      <div className="mb-4">
+        <h2 className="text-lg font-semibold">Siparişlerim</h2>
+        <p className="text-xs text-gray-500 mt-0.5">Yalnızca kart veya IBAN ile ödemesi alınan siparişler listelenir.</p>
       </div>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm mb-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block text-xs font-medium text-slate-600 sm:col-span-2">
+              Öğrenci / veli ara
+              <div className="relative mt-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Ad, veli, telefon, kitap seti…"
+                  className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm"
+                />
+              </div>
+            </label>
+            <label className="block text-xs font-medium text-slate-600">
+              Sınıf
+              <select
+                value={sinifFilter}
+                onChange={(e) => setSinifFilter(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm bg-slate-50"
+              >
+                <option value="">Tüm sınıflar</option>
+                {sinifOptions.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </label>
+            <div className="flex flex-col justify-end">
+              <span className="text-xs font-medium text-slate-600">Öğrenci adına göre sırala</span>
+              <button
+                type="button"
+                onClick={() => setNameSort((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
+                className="mt-1 inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-900 hover:bg-indigo-100"
+              >
+                {nameSort === 'asc' ? <ArrowDownAZ className="h-4 w-4" /> : <ArrowUpAZ className="h-4 w-4" />}
+                {nameSort === 'asc' ? 'A → Z' : 'Z → A'}
+              </button>
+            </div>
+            <label className="block text-xs font-medium text-slate-600 sm:col-span-2">
+              Sipariş durumu
+              <select
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+              >
+                <option value="">Tüm durumlar</option>
+                <option value="yeni">Yeni</option>
+                <option value="eski">Eski</option>
+                <option value="confirmed">Onaylandı</option>
+                <option value="preparing">Hazırlanıyor</option>
+                <option value="shipped">Kargoya Verildi</option>
+                <option value="delivered">Teslim Edildi</option>
+              </select>
+            </label>
+          </div>
+          <p className="mt-3 text-xs text-slate-500">
+            {filteredOrders.length} sipariş listeleniyor
+            {filtersActive && filteredOrders.length !== orders.length ? ` (toplam ${orders.length})` : ''}
+          </p>
+        </section>
+
       <div className="space-y-3">
-        {orders.map((vo) => {
+        {filteredOrders.map((vo, index) => {
           const order = vo.commerce_orders;
           const items = vo.commerce_order_items ?? [];
           const addr = shippingFromVendorOrder(order);
+          const displayName = vendorOrderDisplayName(vo) || '—';
           return (
             <div key={vo.id} className="border border-gray-200 rounded-xl p-4 bg-white">
               <div className="flex justify-between items-start mb-3">
                 <div>
-                  <div className="font-mono text-xs font-bold text-gray-700">{order?.order_number}</div>
-                  <div className="text-sm font-medium mt-0.5">{order?.customer_name ?? addr?.full_name ?? '—'}</div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="inline-flex items-center justify-center min-w-[1.75rem] h-7 px-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold tabular-nums">
+                      #{index + 1}
+                    </span>
+                    <div className="font-mono text-xs font-bold text-gray-700">{order?.order_number}</div>
+                    {vo.sinif ? (
+                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium">
+                        {vo.sinif}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="text-sm font-medium mt-0.5">{displayName}</div>
                   {(order?.customer_phone || addr?.phone) && (
                     <div className="text-xs text-gray-400">{order?.customer_phone || addr?.phone}</div>
                   )}
@@ -1103,10 +1254,26 @@ function Siparislerim() {
             </div>
           );
         })}
-        {orders.length === 0 && (
+        {filteredOrders.length === 0 && (
           <div className="text-center py-12 text-gray-400">
             <ShoppingBag className="w-10 h-10 mx-auto mb-2 opacity-40" />
-            <p className="text-sm">Sipariş bulunamadı</p>
+            <p className="text-sm">
+              {orders.length === 0
+                ? 'Sipariş bulunamadı'
+                : 'Arama veya filtreye uygun sipariş bulunamadı'}
+            </p>
+            {filtersActive ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setSinifFilter('');
+                }}
+                className="mt-3 text-sm font-semibold text-indigo-700 hover:underline"
+              >
+                Filtreleri temizle
+              </button>
+            ) : null}
           </div>
         )}
       </div>

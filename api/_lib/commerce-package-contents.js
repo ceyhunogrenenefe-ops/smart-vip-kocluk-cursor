@@ -105,17 +105,26 @@ export function attachPackageContents(items, contentsByPackageId, namesByPackage
 
 export async function loadPackageContentsByIds(admin, packageIds) {
   const ids = [...new Set((packageIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
-  const empty = { contentsByPackageId: new Map(), namesByPackageId: new Map() };
+  const empty = {
+    contentsByPackageId: new Map(),
+    namesByPackageId: new Map(),
+    classLevelByPackageId: new Map(),
+  };
   if (!ids.length || !admin) return empty;
   const [{ data: items }, { data: pkgs }] = await Promise.all([
     admin
       .from('commerce_book_package_items')
       .select('package_id, quantity, sort_order, book_id, commerce_books(id, title, isbn, author)')
       .in('package_id', ids),
-    admin.from('commerce_book_packages').select('id, name').in('id', ids)
+    admin.from('commerce_book_packages').select('id, name, class_level').in('id', ids)
   ]);
   return {
     contentsByPackageId: groupPackageContentsByPackageId(items),
-    namesByPackageId: new Map((pkgs || []).map((p) => [p.id, p.name]))
+    namesByPackageId: new Map((pkgs || []).map((p) => [p.id, p.name])),
+    classLevelByPackageId: new Map(
+      (pkgs || [])
+        .map((p) => [p.id, String(p.class_level || '').trim()])
+        .filter(([, level]) => Boolean(level))
+    ),
   };
 }
