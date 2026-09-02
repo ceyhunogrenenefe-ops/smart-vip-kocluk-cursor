@@ -305,9 +305,18 @@ export async function importKitapFormOrdersToYanki(opts = {}) {
   const limit = Math.min(Math.max(parseInt(opts.limit ?? 500, 10) || 500, 1), 1000);
   const actorSub = opts.actorSub || null;
 
-  const { vendor } = await ensureYankiVendor({ actorSub });
-  const kitapci = await findLinkedYankiKitapci(vendor.institution_id);
-  const { bookId, offerId } = await ensureFormImportBook(vendor.id, actorSub);
+  let vendor;
+  let kitapci;
+  let bookId;
+  let offerId;
+  try {
+    ({ vendor } = await ensureYankiVendor({ actorSub }));
+    kitapci = await findLinkedYankiKitapci(vendor.institution_id);
+    ({ bookId, offerId } = await ensureFormImportBook(vendor.id, actorSub));
+  } catch (e) {
+    const msg = e?.message || String(e);
+    throw new Error(`Import hazırlığı başarısız: ${msg}`);
+  }
 
   let q = supabaseAdmin
     .from('kitap_siparisleri')
