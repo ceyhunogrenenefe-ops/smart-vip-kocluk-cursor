@@ -66,6 +66,7 @@ import {
   caSeedLgs8Vip,
   caBulkUpsertBooks,
   caEnsureYankiVendor,
+  caImportKitapFormOrders,
   caSyncVendorOrderTemplate,
   caToggleVendorActive,
   caUpdateCoupon,
@@ -1182,6 +1183,27 @@ function KitaplarTab() {
     finally { setSeeding(false); }
   };
 
+  const handleImportFormOrders = async () => {
+    if (
+      !window.confirm(
+        '26.08.2026 tarihinden itibaren sipariş formundaki tüm kayıtlar Yankı Kitapevi → Siparişlerim listesine aktarılacak. Daha önce aktarılanlar atlanır. Devam edilsin mi?'
+      )
+    ) {
+      return;
+    }
+    setSeeding(true);
+    try {
+      if (yankiPhone.trim()) await caEnsureYankiVendor({ contact_phone: yankiPhone.trim() });
+      const r = await caImportKitapFormOrders({ since: '2026-08-26T00:00:00+03:00' });
+      if (r.failed > 0) {
+        toast.error(`${r.imported} aktarıldı, ${r.failed} hata, ${r.skipped_already_imported} zaten vardı`);
+      } else {
+        toast.success(`${r.imported} sipariş Yankı paneline aktarıldı (${r.skipped_already_imported} zaten vardı)`);
+      }
+    } catch (e: unknown) { toast.error((e as Error).message); }
+    finally { setSeeding(false); }
+  };
+
   const handlePublishPrices = async () => {
     const rows = (seedResult ?? []).filter((b) => b.isbn);
     if (!rows.length) { toast.error('Önce VIP setini yükleyin'); return; }
@@ -1315,6 +1337,14 @@ function KitaplarTab() {
             >
               {seeding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
               WhatsApp şablonunu aktif et
+            </button>
+            <button
+              onClick={handleImportFormOrders}
+              disabled={seeding}
+              className="flex items-center gap-1.5 bg-amber-700 text-white text-sm px-4 py-2 rounded-lg hover:bg-amber-800 disabled:opacity-50"
+            >
+              {seeding ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardList className="w-4 h-4" />}
+              Form siparişlerini Yankı’ya aktar
             </button>
           </div>
 
