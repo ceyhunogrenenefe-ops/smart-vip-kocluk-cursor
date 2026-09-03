@@ -67,7 +67,6 @@ import {
   caBulkUpsertBooks,
   caEnsureYankiVendor,
   caImportKitapFormOrders,
-  caPushPaidToYanki,
   caSyncVendorOrderTemplate,
   caToggleVendorActive,
   caUpdateCoupon,
@@ -864,7 +863,10 @@ function primaryOffer(book: CatalogBook | null | undefined): CommerceVendorOffer
   return offers.find((o) => o.status === 'approved') ?? offers[0] ?? null;
 }
 
-const BOOK_SUBJECTS = ['Matematik', 'Türkçe', 'Fen Bilimleri', 'Sosyal Bilgiler', 'İngilizce', 'Din Kültürü', 'İnkılap Tarihi', 'Diğer'];
+const BOOK_SUBJECTS = [
+  'Matematik', 'Türkçe', 'Fen Bilimleri', 'Sosyal Bilgiler', 'İngilizce',
+  'Fizik', 'Kimya', 'Biyoloji', 'Tarih', 'Coğrafya', 'Din Kültürü', 'İnkılap Tarihi', 'Diğer',
+];
 const BOOK_CLASS_LEVELS = ['5', '6', '7', 'LGS', '9', '10', '11', '12', 'YKS', 'TYT', 'AYT'];
 const BOOK_SERIES = [
   { value: '', label: 'Kategori seçin' },
@@ -987,8 +989,8 @@ function BookEditorModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-2xl p-6 shadow-xl max-h-[92vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl w-full max-w-2xl p-6 shadow-xl my-6 max-h-[92vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold">{isEdit ? 'Kitabı düzenle' : 'Yeni kitap'}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600" type="button">
@@ -1016,12 +1018,18 @@ function BookEditorModal({
             <label className="text-xs text-gray-500">Ders</label>
             <select className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={subject} onChange={(e) => setSubject(e.target.value)}>
               <option value="">Seçin</option>
+              {subject && !BOOK_SUBJECTS.includes(subject) ? (
+                <option value={subject}>{subject}</option>
+              ) : null}
               {BOOK_SUBJECTS.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
           <div>
             <label className="text-xs text-gray-500">Kategori (sınıf kutusunda)</label>
             <select className="mt-0.5 w-full border rounded-lg px-3 py-2 text-sm" value={series} onChange={(e) => setSeries(e.target.value)}>
+              {series && !BOOK_SERIES.some((s) => s.value === series) ? (
+                <option value={series}>{series}</option>
+              ) : null}
               {BOOK_SERIES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
           </div>
@@ -1578,8 +1586,6 @@ function SiparislerTab() {
   const [viewingReceipt, setViewingReceipt] = useState<CommerceOrder | null>(null);
   const [form, setForm] = useState({ customer_name: '', customer_email: '', customer_phone: '', notes: '', status: '' });
   const [saving, setSaving] = useState(false);
-  const [pushName, setPushName] = useState('Muhammed Talha Çevik');
-  const [pushing, setPushing] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1590,41 +1596,6 @@ function SiparislerTab() {
     finally { setLoading(false); }
   }, [filterStatus]);
   useEffect(() => { load(); }, [load]);
-
-  const handlePushToYanki = async () => {
-    const q = pushName.trim();
-    if (!q) {
-      toast.error('Öğrenci / veli adı girin');
-      return;
-    }
-    if (
-      !window.confirm(
-        `"${q}" için IBAN/ödenmiş siparişler Yankı Siparişlerim'e itilecek (eksik satıcı kaydı oluşturulur, payment_status düzeltilir). Devam?`
-      )
-    ) {
-      return;
-    }
-    setPushing(true);
-    try {
-      const r = await caPushPaidToYanki({ query: q });
-      const pushed = r.commerce?.pushed ?? 0;
-      const failed = r.commerce?.failed ?? 0;
-      const formRepaired = Number((r.form as { repaired?: number } | null)?.repaired || 0);
-      const formImported = Number((r.form as { imported?: number } | null)?.imported || 0);
-      if (pushed + formImported + formRepaired === 0 && failed === 0) {
-        toast.error(`Eşleşen ödenmiş sipariş bulunamadı: ${q}`);
-      } else if (failed > 0) {
-        toast.error(`${pushed} mağaza + ${formImported} form aktarıldı, ${formRepaired} onarım, ${failed} hata`);
-      } else {
-        toast.success(`${pushed} mağaza siparişi Yankı'ya itildi · form: ${formImported} aktarım / ${formRepaired} onarım`);
-      }
-      await load();
-    } catch (e: unknown) {
-      toast.error((e as Error).message);
-    } finally {
-      setPushing(false);
-    }
-  };
 
   const openEdit = (o: CommerceOrder) => {
     setEditing(o);
@@ -1667,35 +1638,18 @@ function SiparislerTab() {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-4 gap-3 flex-wrap">
+      <div className="flex justify-between items-center mb-4 gap-3">
         <h2 className="text-lg font-semibold">Mağaza siparişleri</h2>
-        <div className="flex items-center gap-2 flex-wrap">
-          <input
-            className="border rounded-lg text-sm px-2 py-1.5 min-w-[220px] focus:outline-none"
-            placeholder="Öğrenci / veli adı"
-            value={pushName}
-            onChange={(e) => setPushName(e.target.value)}
-          />
-          <button
-            type="button"
-            onClick={handlePushToYanki}
-            disabled={pushing}
-            className="flex items-center gap-1.5 bg-amber-700 text-white text-sm px-3 py-1.5 rounded-lg hover:bg-amber-800 disabled:opacity-50"
-          >
-            {pushing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-            Yankı’ya it
-          </button>
-          <select
-            className="border rounded-lg text-sm px-2 py-1.5 focus:outline-none"
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-          >
-            <option value="">Tüm durumlar</option>
-            {Object.entries(COMMERCE_ORDER_STATUS_LABELS).map(([v, l]) => (
-              <option key={v} value={v}>{l}</option>
-            ))}
-          </select>
-        </div>
+        <select
+          className="border rounded-lg text-sm px-2 py-1.5 focus:outline-none"
+          value={filterStatus}
+          onChange={(e) => setFilterStatus(e.target.value)}
+        >
+          <option value="">Tüm durumlar</option>
+          {Object.entries(COMMERCE_ORDER_STATUS_LABELS).map(([v, l]) => (
+            <option key={v} value={v}>{l}</option>
+          ))}
+        </select>
       </div>
       {loading ? (
         <div className="flex justify-center p-10"><Loader2 className="animate-spin w-6 h-6 text-gray-400" /></div>

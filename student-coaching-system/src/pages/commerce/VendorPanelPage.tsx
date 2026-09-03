@@ -493,6 +493,9 @@ function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
                         value={newBook.subject}
                         onChange={(e) => setNewBook({ ...newBook, subject: e.target.value })}>
                         <option value="">Seçin</option>
+                        {newBook.subject && !SUBJECTS.includes(newBook.subject) ? (
+                          <option value={newBook.subject}>{newBook.subject}</option>
+                        ) : null}
                         {SUBJECTS.map((s) => <option key={s} value={s}>{s}</option>)}
                       </select>
                     </div>
