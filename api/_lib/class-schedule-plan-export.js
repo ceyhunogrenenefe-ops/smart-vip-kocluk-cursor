@@ -246,6 +246,18 @@ export function matchTeacherId(teacherName, teachers, teacherMap = {}) {
   return partial ? String(partial.id) : null;
 }
 
+/** ETÜT / Deneme / Deneme Analizi — öğretmen zorunlu değil. */
+export function isTeacherOptionalSubject(subject) {
+  const s = String(subject || '')
+    .trim()
+    .toLocaleUpperCase('tr-TR');
+  if (!s) return false;
+  if (s === 'ETÜT' || s.includes('ETUT') || s.includes('ETÜT')) return true;
+  if (s.includes('DENEME ANALİZ') || s.includes('DENEME ANALIZ')) return true;
+  if (s.includes('DENEME')) return true;
+  return false;
+}
+
 function sameSubjectFamily(a, b) {
   const aa = String(a || '').trim().toLocaleUpperCase('tr-TR');
   const bb = String(b || '').trim().toLocaleUpperCase('tr-TR');
@@ -253,6 +265,13 @@ function sameSubjectFamily(a, b) {
   if (aa === bb) return true;
   if ((aa.includes('ETÜT') || aa.includes('ETUT')) && (bb.includes('ETÜT') || bb.includes('ETUT'))) return true;
   if ((aa.includes('DİN') || aa.includes('DIN')) && (bb.includes('DİN') || bb.includes('DIN'))) return true;
+  if (
+    (aa.includes('DENEME ANALİZ') || aa.includes('DENEME ANALIZ')) &&
+    (bb.includes('DENEME ANALİZ') || bb.includes('DENEME ANALIZ'))
+  ) {
+    return true;
+  }
+  if (aa.includes('DENEME') && bb.includes('DENEME')) return true;
   if (aa.includes('FEN') && bb.includes('FEN')) return true;
   if (aa.includes('İNGİLİZ') && bb.includes('İNGİLİZ')) return true;
   if (aa.includes('İNKILAP') && bb.includes('İNKILAP')) return true;
@@ -262,6 +281,8 @@ function sameSubjectFamily(a, b) {
 export function inferTeacherIdForSubject(subject, subjectTeacherHints = new Map(), classTeacherIds = []) {
   const sub = String(subject || '').trim();
   if (!sub) return null;
+  // Bu derslerde öğretmen bağlamaya gerek yok — zorla atama yapma
+  if (isTeacherOptionalSubject(sub)) return null;
   for (const [hintSubject, teacherId] of subjectTeacherHints.entries()) {
     if (sameSubjectFamily(sub, hintSubject) && teacherId) return String(teacherId);
   }
@@ -494,9 +515,15 @@ export async function exportPlannerGroupToClass({
       continue;
     }
 
-    const teacherId = matchTeacherId(teacherName, teachers, teacherMap)
-      || (!teacherName ? inferTeacherIdForSubject(subject, subjectTeacherHints, classTeacherIds) : null);
-    if (!teacherId) {
+    const teacherOptional = isTeacherOptionalSubject(subject);
+    let teacherId = matchTeacherId(teacherName, teachers, teacherMap);
+    if (!teacherId && !teacherName && !teacherOptional) {
+      teacherId = inferTeacherIdForSubject(subject, subjectTeacherHints, classTeacherIds);
+    }
+    // ETÜT / Deneme / Deneme Analizi: öğretmen bağlama zorunlu değil
+    if (teacherOptional) {
+      teacherId = teacherId || null;
+    } else if (!teacherId) {
       skipped.push({
         reason: 'teacher_not_matched',
         subject,
@@ -543,15 +570,32 @@ export async function exportPlannerGroupToClass({
       continue;
     }
 
-    const { data: sameTeacherSlots, error: cErr } = await selectWithOptionalColumns(
-      'class_weekly_slots',
-      'id,start_time,end_time,class_id,meeting_link',
-      ['bbb_meeting_id', 'bbb_attendee_pw', 'meeting_link_moderator'],
-      (q) => q.eq('teacher_id', teacherId).eq('day_of_week', dayOfWeek)
-    );
-    if (cErr) {
-      errors.push(cErr.message);
-      continue;
+    let sameTeacherSlots = [];
+    if (teacherId) {
+      const { data: slotsForTeacher, error: cErr } = await selectWithOptionalColumns(
+        'class_weekly_slots',
+        'id,start_time,end_time,class_id,meeting_link',
+        ['bbb_meeting_id', 'bbb_attendee_pw', 'meeting_link_moderator'],
+        (q) => q.eq('teacher_id', teacherId).eq('day_of_week', dayOfWeek)
+      );
+      if (cErr) {
+        errors.push(cErr.message);
+        continue;
+      }
+      sameTeacherSlots = slotsForTeacher || [];
+    } else {
+      // Öğretmensiz hücre: aynı sınıf + gün + saat çakışmasına bak
+      const { data: sameClassSlots, error: cErr } = await selectWithOptionalColumns(
+        'class_weekly_slots',
+        'id,start_time,end_time,class_id,meeting_link',
+        ['bbb_meeting_id', 'bbb_attendee_pw', 'meeting_link_moderator'],
+        (q) => q.eq('class_id', classId).eq('day_of_week', dayOfWeek)
+      );
+      if (cErr) {
+        errors.push(cErr.message);
+        continue;
+      }
+      sameTeacherSlots = sameClassSlots || [];
     }
     const sameClassDup = (sameTeacherSlots || []).find(
       (x) =>
@@ -572,13 +616,14 @@ export async function exportPlannerGroupToClass({
       continue;
     }
 
-    const crossConflicts = isSolutionLessonSubject(subject)
-      ? []
-      : (sameTeacherSlots || []).filter(
-          (x) =>
-            String(x.class_id) !== String(classId) &&
-            timeOverlap(timeParsed.start, timeParsed.end, x.start_time, x.end_time)
-        );
+    const crossConflicts =
+      !teacherId || isSolutionLessonSubject(subject) || teacherOptional
+        ? []
+        : (sameTeacherSlots || []).filter(
+            (x) =>
+              String(x.class_id) !== String(classId) &&
+              timeOverlap(timeParsed.start, timeParsed.end, x.start_time, x.end_time)
+          );
     const sharedPartnerIds = sharedIndex.partnerClassIds(groupId, key, classId);
     const sharedPartnerSlots = crossConflicts.filter((x) => sharedPartnerIds.has(String(x.class_id)));
     if (sharedPartnerSlots.length) {
@@ -638,7 +683,7 @@ export async function exportPlannerGroupToClass({
       start_time: timeParsed.start,
       end_time: timeParsed.end,
       subject,
-      teacher_id: teacherId,
+      teacher_id: teacherId || null,
       ...meetingFields,
       homework: null
     });
@@ -647,7 +692,12 @@ export async function exportPlannerGroupToClass({
       continue;
     }
     if (teacherId && classId) await ensureClassTeacherLink(classId, teacherId);
-    created.push({ subject, teacher: teacherName, day: days[di], time: period?.time });
+    created.push({
+      subject,
+      teacher: teacherName || (teacherOptional ? '(öğretmen yok)' : ''),
+      day: days[di],
+      time: period?.time
+    });
   }
 
   return {
