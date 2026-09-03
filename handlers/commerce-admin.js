@@ -13,8 +13,8 @@
  *  vendors.ensure_yanki
  *  orders.list | orders.get | orders.update | orders.update_status | orders.delete
  *  orders.sync_whatsapp_template
- *  orders.import_kitap_form
- *  deployMarker: kitap-form-yanki-import-2026-09-02
+ *  orders.import_kitap_form | orders.push_to_yanki
+ *  deployMarker: kitap-iban-yanki-push-2026-09-03
  *  vendor_orders.list | vendor_orders.update_status
  *  shipments.list | shipments.get | shipments.create | shipments.update
  *  payouts.list | payouts.get | payouts.create | payouts.approve | payouts.mark_paid
@@ -32,6 +32,7 @@ import { defaultStoreBrowse, normalizeStoreBrowse, withInferredSeriesMetadata } 
 import { decorateOrderWithIbanReceipt } from '../api/_lib/commerce-iban.js';
 import { activateBookOrderMetaTemplate } from '../api/_lib/book-order-meta-send.js';
 import { importKitapFormOrdersToYanki, DEFAULT_SINCE } from '../api/_lib/commerce-kitap-form-import.js';
+import { pushPaidOrdersToYanki } from '../api/_lib/commerce-push-paid-to-vendor.js';
 
 function err(res, status, message) {
   return res.status(status).json({ error: message });
@@ -754,6 +755,22 @@ async function handleOrders(op, body, actor) {
     return out;
   }
 
+  if (op === 'orders.push_to_yanki') {
+    const query = sanitizeText(body.query) || sanitizeText(body.name) || null;
+    const orderId = sanitizeText(body.order_id) || sanitizeText(body.orderId) || null;
+    if (!query && !orderId) throw new Error('query (ad soyad) veya order_id gerekli');
+    const dryRun = body.dry_run === true || body.dryRun === true;
+    const out = await pushPaidOrdersToYanki({
+      query,
+      orderId,
+      since: sanitizeText(body.since) || DEFAULT_SINCE,
+      dryRun,
+      forcePending: body.force_pending !== false,
+      actorSub: actor?.sub || null,
+    });
+    return out;
+  }
+
   if (op === 'orders.sync_whatsapp_template') {
     const activated = await activateBookOrderMetaTemplate();
     return {
@@ -814,6 +831,10 @@ async function handleOrders(op, body, actor) {
     if (body.customer_email !== undefined) patch.customer_email = sanitizeText(body.customer_email);
     if (body.customer_phone !== undefined) patch.customer_phone = sanitizeText(body.customer_phone);
     if (body.notes !== undefined) patch.notes = sanitizeText(body.notes);
+    if (body.payment_status !== undefined) {
+      const ps = sanitizeText(body.payment_status);
+      if (ps) patch.payment_status = ps;
+    }
     if (body.status) {
       const VALID = [
         'pending_payment',
@@ -829,6 +850,11 @@ async function handleOrders(op, body, actor) {
       ];
       if (!VALID.includes(body.status)) throw new Error('Geçersiz durum');
       patch.status = body.status;
+      // Admin «ödendi» derse satıcı paneli payment_status=paid bekler
+      if (body.status === 'paid' && body.payment_status === undefined) {
+        patch.payment_status = 'paid';
+        patch.paid_at = patch.paid_at || new Date().toISOString();
+      }
     }
     const { data, error } = await supabaseAdmin
       .from('commerce_orders')
@@ -837,6 +863,17 @@ async function handleOrders(op, body, actor) {
       .select()
       .single();
     if (error) throw error;
+
+    if (String(data.payment_status || '').toLowerCase() === 'paid' || String(data.status || '').toLowerCase() === 'paid') {
+      try {
+        const { vendor } = await ensureYankiVendor({ actorSub: actor?.sub || null });
+        const { ensureVendorOrderForPaidOrder } = await import('../api/_lib/commerce-push-paid-to-vendor.js');
+        await ensureVendorOrderForPaidOrder(id, { vendorId: vendor.id, preferPending: true });
+      } catch (e) {
+        console.warn('[commerce-admin] ensure vendor order after update failed', e?.message || e);
+      }
+    }
+
     return { ok: true, order: data };
   }
 

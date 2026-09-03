@@ -13,7 +13,7 @@
  *  shipments.create | shipments.update
  *  payouts.list
  *  stats.overview
- *  deployMarker: vendor-orders-filter-2026-09-02
+ *  deployMarker: kitap-iban-yanki-push-2026-09-03
  */
 
 import { requireAuth } from '../api/_lib/auth.js';
@@ -124,7 +124,7 @@ function sanitizeInt(v) {
 }
 
 const VENDOR_ORDERS_PAID_ONLY = true;
-const VENDOR_PAID_MARKER = 'vendor-orders-filter-2026-09-02';
+const VENDOR_PAID_MARKER = 'kitap-iban-yanki-push-2026-09-03';
 
 async function paidOrderIdSetForVendor(vendorId) {
   const { data: vos, error } = await supabaseAdmin
@@ -134,13 +134,16 @@ async function paidOrderIdSetForVendor(vendorId) {
   if (error) throw error;
   const ids = [...new Set((vos || []).map((r) => r.order_id).filter(Boolean))];
   if (!ids.length) return new Set();
-  const { data: paid, error: pErr } = await supabaseAdmin
+  const { data: parents, error: pErr } = await supabaseAdmin
     .from('commerce_orders')
-    .select('id')
-    .in('id', ids)
-    .eq('payment_status', 'paid');
+    .select('id, payment_status, status')
+    .in('id', ids);
   if (pErr) throw pErr;
-  return new Set((paid || []).map((r) => r.id));
+  return new Set(
+    (parents || [])
+      .filter((o) => isPaidParentOrder(o))
+      .map((r) => r.id)
+  );
 }
 
 async function loadOwnedPaidVendorOrder(id, vendorId, selectCols) {
@@ -448,8 +451,8 @@ export default async function handler(req, res) {
         .eq('vendor_id', vendorId)
         .in('order_id', [...paidIds])
         .order('created_at', { ascending: false });
-      if (body.status === 'yeni') q = q.eq('status', 'pending');
-      else if (body.status === 'eski') q = q.in('status', ['confirmed', 'preparing', 'shipped', 'delivered']);
+      if (body.status === 'yeni') q = q.in('status', ['pending', 'confirmed']);
+      else if (body.status === 'eski') q = q.in('status', ['preparing', 'shipped', 'delivered']);
       else if (body.status) q = q.eq('status', body.status);
       const limit = Math.min(parseInt(body.limit ?? 200, 10), 200);
       q = q.limit(limit);

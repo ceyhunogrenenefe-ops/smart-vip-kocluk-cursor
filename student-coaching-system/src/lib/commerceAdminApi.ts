@@ -193,6 +193,23 @@ export type KitapFormImportResult = {
 export const caImportKitapFormOrders = (params?: { since?: string; dry_run?: boolean; limit?: number; repair?: boolean }) =>
   post<KitapFormImportResult>('orders.import_kitap_form', params ?? {});
 
+export type PushToYankiResult = {
+  ok: boolean;
+  deployMarker?: string;
+  query?: string | null;
+  vendor: { id: string; name: string; slug: string };
+  commerce: {
+    scanned: number;
+    pushed: number;
+    failed: number;
+    items: Array<Record<string, unknown>>;
+  };
+  form?: Record<string, unknown> | null;
+};
+
+export const caPushPaidToYanki = (params: { query?: string; order_id?: string; dry_run?: boolean; since?: string }) =>
+  post<PushToYankiResult>('orders.push_to_yanki', params);
+
 export const caUpdateVendorOrderStatus = (id: string, status: string) =>
   post<{ vendor_order: CommerceVendorOrder }>('vendor_orders.update_status', { id, status });
 
