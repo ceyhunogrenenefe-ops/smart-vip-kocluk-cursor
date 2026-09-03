@@ -883,9 +883,11 @@ async function fulfillPaidOrder(order, { provider = 'paytr', ref = null, raw = n
 
   await supabaseAdmin
     .from('commerce_vendor_orders')
-    .update({ status: 'confirmed', updated_at: now })
+    .update({ updated_at: now })
     .eq('order_id', order.id)
     .eq('status', 'pending');
+  // Satıcı «Yeni» listesinde görsün diye VO'yu confirmed'a çekmiyoruz.
+  // Kabul = satıcı Accept.
 
   let vendor_whatsapp = null;
   try {
