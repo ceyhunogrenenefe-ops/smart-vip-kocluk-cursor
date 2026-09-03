@@ -1087,8 +1087,8 @@ function Siparislerim() {
                 onChange={(e) => setFilterStatus(e.target.value)}
               >
                 <option value="">Tüm durumlar</option>
-                <option value="yeni">Yeni</option>
-                <option value="eski">Eski</option>
+                <option value="yeni">Yeni (bekleyen + onaylı)</option>
+                <option value="eski">Eski (kargo/teslim)</option>
                 <option value="confirmed">Onaylandı</option>
                 <option value="preparing">Hazırlanıyor</option>
                 <option value="shipped">Kargoya Verildi</option>
