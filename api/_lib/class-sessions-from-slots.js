@@ -61,6 +61,7 @@ function slotCoveredBySessions(slot, sessionsOnDay, opts = {}) {
   const ignoreCancelled = opts.ignoreCancelled !== false;
   const slotKey = sessionKey(slot.class_id, slot.teacher_id, slot.start_time);
   const slotTeacher = String(slot.teacher_id || '').trim();
+  const slotSubject = normSubjectKey(slot.subject);
 
   for (const s of sessionsOnDay || []) {
     if (String(s.class_id || '') !== String(slot.class_id || '')) continue;
@@ -77,6 +78,16 @@ function slotCoveredBySessions(slot, sessionsOnDay, opts = {}) {
       sessTeacher &&
       slotTeacher &&
       sessTeacher === slotTeacher &&
+      timeRangesOverlap(slot.start_time, slot.end_time, s.start_time, s.end_time)
+    ) {
+      return true;
+    }
+    // Öğretmensiz ETÜT/Deneme: aynı ders + çakışan saat → tekrar oluşturma
+    if (
+      !sessTeacher &&
+      !slotTeacher &&
+      slotSubject &&
+      normSubjectKey(s.subject) === slotSubject &&
       timeRangesOverlap(slot.start_time, slot.end_time, s.start_time, s.end_time)
     ) {
       return true;
