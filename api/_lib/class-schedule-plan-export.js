@@ -246,6 +246,58 @@ export function matchTeacherId(teacherName, teachers, teacherMap = {}) {
   return partial ? String(partial.id) : null;
 }
 
+function sameSubjectFamily(a, b) {
+  const aa = String(a || '').trim().toLocaleUpperCase('tr-TR');
+  const bb = String(b || '').trim().toLocaleUpperCase('tr-TR');
+  if (!aa || !bb) return false;
+  if (aa === bb) return true;
+  if ((aa.includes('ETÜT') || aa.includes('ETUT')) && (bb.includes('ETÜT') || bb.includes('ETUT'))) return true;
+  if ((aa.includes('DİN') || aa.includes('DIN')) && (bb.includes('DİN') || bb.includes('DIN'))) return true;
+  if (aa.includes('FEN') && bb.includes('FEN')) return true;
+  if (aa.includes('İNGİLİZ') && bb.includes('İNGİLİZ')) return true;
+  if (aa.includes('İNKILAP') && bb.includes('İNKILAP')) return true;
+  return false;
+}
+
+export function inferTeacherIdForSubject(subject, subjectTeacherHints = new Map(), classTeacherIds = []) {
+  const sub = String(subject || '').trim();
+  if (!sub) return null;
+  for (const [hintSubject, teacherId] of subjectTeacherHints.entries()) {
+    if (sameSubjectFamily(sub, hintSubject) && teacherId) return String(teacherId);
+  }
+  return classTeacherIds[0] ? String(classTeacherIds[0]) : null;
+}
+
+async function loadClassTeacherHints(classId) {
+  const cid = String(classId || '').trim();
+  const out = { classTeacherIds: [], subjectTeacherHints: new Map() };
+  if (!cid) return out;
+  const [{ data: links }, { data: slots }] = await Promise.all([
+    supabaseAdmin.from('class_teachers').select('teacher_id').eq('class_id', cid),
+    supabaseAdmin
+      .from('class_weekly_slots')
+      .select('teacher_id,subject,day_of_week,start_time')
+      .eq('class_id', cid),
+  ]);
+  out.classTeacherIds = [...new Set((links || []).map((r) => String(r.teacher_id || '').trim()).filter(Boolean))];
+  const counts = new Map();
+  for (const row of slots || []) {
+    const sub = String(row.subject || '').trim();
+    const tid = String(row.teacher_id || '').trim();
+    if (!sub || !tid) continue;
+    const key = `${sub}|${tid}`;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const best = new Map();
+  for (const [key, count] of counts.entries()) {
+    const [sub, tid] = key.split('|');
+    const prev = best.get(sub);
+    if (!prev || count > prev.count) best.set(sub, { teacherId: tid, count });
+  }
+  out.subjectTeacherHints = new Map([...best.entries()].map(([sub, meta]) => [sub, meta.teacherId]));
+  return out;
+}
+
 export const SKIP_REASON_LABELS = {
   subject_missing: 'Ders adı eksik',
   day_invalid: 'Geçersiz gün',
@@ -396,6 +448,7 @@ export async function exportPlannerGroupToClass({
   const institutionId = String(classRow.institution_id || '').trim();
   const teachers = await loadTeachersForClassExport(institutionId, classId);
   const sharedIndex = indexPlannerSharedLessons(plannerJson);
+  const { classTeacherIds, subjectTeacherHints } = await loadClassTeacherHints(classId);
 
   if (replaceExisting) {
     const { error: delErr } = await supabaseAdmin.from('class_weekly_slots').delete().eq('class_id', classId);
@@ -441,7 +494,8 @@ export async function exportPlannerGroupToClass({
       continue;
     }
 
-    const teacherId = matchTeacherId(teacherName, teachers, teacherMap);
+    const teacherId = matchTeacherId(teacherName, teachers, teacherMap)
+      || (!teacherName ? inferTeacherIdForSubject(subject, subjectTeacherHints, classTeacherIds) : null);
     if (!teacherId) {
       skipped.push({
         reason: 'teacher_not_matched',
