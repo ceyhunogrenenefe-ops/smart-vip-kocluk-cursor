@@ -211,13 +211,14 @@ function timeOverlap(aStart, aEnd, bStart, bEnd) {
   return A1 < B2 && A2 > B1;
 }
 
-/** Etüt / Din: birden fazla sınıf aynı öğretmen + aynı saatte (ortak Zoom/oda). */
+/** Etüt / Deneme / Din: birden fazla sınıf aynı saatte (ortak Zoom/oda); öğretmen zorunlu değil. */
 function isSharedMultiClassSubject(subject) {
   const s = String(subject || '')
     .trim()
     .toLocaleUpperCase('tr-TR');
   if (!s) return false;
   if (s === 'ETÜT' || s.includes('ETUT') || s.includes('ETÜT')) return true;
+  if (s.includes('DENEME')) return true;
   if (s.includes('DİN')) return true;
   return false;
 }
@@ -262,6 +263,7 @@ async function teacherTimeConflictOnDate({
   subject = '',
   sameClassId = null
 }) {
+  if (!String(teacherId || '').trim()) return { ok: true };
   if (isSolutionLessonSubject(subject)) return { ok: true };
   if (isSharedMultiClassSubject(subject)) return { ok: true };
   const ex = new Set(excludeSessionIds.map(String));
