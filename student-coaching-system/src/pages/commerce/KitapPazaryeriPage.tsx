@@ -67,6 +67,7 @@ import {
   caBulkUpsertBooks,
   caEnsureYankiVendor,
   caImportKitapFormOrders,
+  caPushPaidToYanki,
   caSyncVendorOrderTemplate,
   caToggleVendorActive,
   caUpdateCoupon,
@@ -1577,6 +1578,8 @@ function SiparislerTab() {
   const [viewingReceipt, setViewingReceipt] = useState<CommerceOrder | null>(null);
   const [form, setForm] = useState({ customer_name: '', customer_email: '', customer_phone: '', notes: '', status: '' });
   const [saving, setSaving] = useState(false);
+  const [pushName, setPushName] = useState('Muhammed Talha Çevik');
+  const [pushing, setPushing] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1587,6 +1590,41 @@ function SiparislerTab() {
     finally { setLoading(false); }
   }, [filterStatus]);
   useEffect(() => { load(); }, [load]);
+
+  const handlePushToYanki = async () => {
+    const q = pushName.trim();
+    if (!q) {
+      toast.error('Öğrenci / veli adı girin');
+      return;
+    }
+    if (
+      !window.confirm(
+        `"${q}" için IBAN/ödenmiş siparişler Yankı Siparişlerim'e itilecek (eksik satıcı kaydı oluşturulur, payment_status düzeltilir). Devam?`
+      )
+    ) {
+      return;
+    }
+    setPushing(true);
+    try {
+      const r = await caPushPaidToYanki({ query: q });
+      const pushed = r.commerce?.pushed ?? 0;
+      const failed = r.commerce?.failed ?? 0;
+      const formRepaired = Number((r.form as { repaired?: number } | null)?.repaired || 0);
+      const formImported = Number((r.form as { imported?: number } | null)?.imported || 0);
+      if (pushed + formImported + formRepaired === 0 && failed === 0) {
+        toast.error(`Eşleşen ödenmiş sipariş bulunamadı: ${q}`);
+      } else if (failed > 0) {
+        toast.error(`${pushed} mağaza + ${formImported} form aktarıldı, ${formRepaired} onarım, ${failed} hata`);
+      } else {
+        toast.success(`${pushed} mağaza siparişi Yankı'ya itildi · form: ${formImported} aktarım / ${formRepaired} onarım`);
+      }
+      await load();
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
+    } finally {
+      setPushing(false);
+    }
+  };
 
   const openEdit = (o: CommerceOrder) => {
     setEditing(o);
@@ -1629,18 +1667,35 @@ function SiparislerTab() {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-4 gap-3">
+      <div className="flex justify-between items-center mb-4 gap-3 flex-wrap">
         <h2 className="text-lg font-semibold">Mağaza siparişleri</h2>
-        <select
-          className="border rounded-lg text-sm px-2 py-1.5 focus:outline-none"
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-        >
-          <option value="">Tüm durumlar</option>
-          {Object.entries(COMMERCE_ORDER_STATUS_LABELS).map(([v, l]) => (
-            <option key={v} value={v}>{l}</option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            className="border rounded-lg text-sm px-2 py-1.5 min-w-[220px] focus:outline-none"
+            placeholder="Öğrenci / veli adı"
+            value={pushName}
+            onChange={(e) => setPushName(e.target.value)}
+          />
+          <button
+            type="button"
+            onClick={handlePushToYanki}
+            disabled={pushing}
+            className="flex items-center gap-1.5 bg-amber-700 text-white text-sm px-3 py-1.5 rounded-lg hover:bg-amber-800 disabled:opacity-50"
+          >
+            {pushing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            Yankı’ya it
+          </button>
+          <select
+            className="border rounded-lg text-sm px-2 py-1.5 focus:outline-none"
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+          >
+            <option value="">Tüm durumlar</option>
+            {Object.entries(COMMERCE_ORDER_STATUS_LABELS).map(([v, l]) => (
+              <option key={v} value={v}>{l}</option>
+            ))}
+          </select>
+        </div>
       </div>
       {loading ? (
         <div className="flex justify-center p-10"><Loader2 className="animate-spin w-6 h-6 text-gray-400" /></div>
