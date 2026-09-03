@@ -100,7 +100,7 @@ interface ExamResult {
 
 type ExamType = ExamResult['examType'];
 
-const EXAM_TYPE_OPTIONS: ExamType[] = ['3', '4', '5', '6', '7', 'LGS', 'YOS', 'TYT', 'YKS-EA', 'YKS-SAY'];
+const EXAM_TYPE_OPTIONS: ExamType[] = ['3', '4', '5', '6', '7', 'LGS', 'YOS', 'TYT', 'YKS-EA', 'YKS-SAY', 'AYT'];
 
 const SUBJECT_TEMPLATES: Record<ExamType, string[]> = {
   '3': ['Türkçe', 'Matematik', 'Hayat Bilgisi', 'İngilizce', 'Fen Bilimleri'],
@@ -613,6 +613,16 @@ export default function ExamTracking() {
         return { ...r, [key]: value };
       })
     );
+    if (key === 'examType') {
+      setPdfStudentMap((prev) => {
+        const selected = prev[index];
+        if (!selected) return prev;
+        if (isStudentCompatibleWithExam(selected, value as ExamType)) return prev;
+        const next = { ...prev };
+        delete next[index];
+        return next;
+      });
+    }
   };
 
   const updatePdfSubject = (resultIndex: number, subjectIndex: number, key: 'name' | 'questions' | 'correct' | 'wrong' | 'blank', value: string) => {
@@ -1422,11 +1432,21 @@ export default function ExamTracking() {
                     className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                   >
                     <option value="">Seçin</option>
-                    {students
-                      .filter((s) => !newExam.examType || isStudentCompatibleWithExam(s.id, newExam.examType as ExamType))
-                      .map(s => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
+                    {(() => {
+                      const examType = (newExam.examType || 'TYT') as ExamType;
+                      const compatible = students.filter((s) => isStudentCompatibleWithExam(s.id, examType));
+                      const selected = newExam.studentId
+                        ? students.find((s) => s.id === newExam.studentId)
+                        : null;
+                      const rows = [...compatible];
+                      if (selected && !rows.some((s) => s.id === selected.id)) {
+                        rows.unshift(selected);
+                      }
+                      const list = rows.length ? rows : students;
+                      return list.map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ));
+                    })()}
                   </select>
                 </div>
                 <div>
@@ -1435,9 +1455,14 @@ export default function ExamTracking() {
                     value={newExam.examType}
                     onChange={(e) => {
                       const nextType = e.target.value as ExamType;
+                      const keepStudent =
+                        newExam.studentId && isStudentCompatibleWithExam(newExam.studentId, nextType)
+                          ? newExam.studentId
+                          : '';
                       setNewExam({
                         ...newExam,
                         examType: nextType,
+                        studentId: keepStudent,
                         subjects: buildTemplateSubjects(nextType)
                       });
                     }}
@@ -1875,11 +1900,21 @@ export default function ExamTracking() {
                             className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                           >
                             <option value="">Öğrenci Seçin...</option>
-                            {students
-                              .filter((s) => isStudentCompatibleWithExam(s.id, (result.examType || 'TYT') as ExamType))
-                              .map(s => (
+                            {(() => {
+                              const examType = (result.examType || 'TYT') as ExamType;
+                              const compatible = students.filter((s) => isStudentCompatibleWithExam(s.id, examType));
+                              const selectedId = pdfStudentMap[index] || '';
+                              const selected = selectedId ? students.find((s) => s.id === selectedId) : null;
+                              const rows = [...compatible];
+                              if (selected && !rows.some((s) => s.id === selected.id)) {
+                                rows.unshift(selected);
+                              }
+                              // Filtre boşsa tüm öğrencileri göster — select kilitlenmesin
+                              const list = rows.length ? rows : students;
+                              return list.map((s) => (
                                 <option key={s.id} value={s.id}>{s.name}</option>
-                              ))}
+                              ));
+                            })()}
                           </select>
                         </div>
 
