@@ -42,6 +42,10 @@ function sessionKey(classId, teacherId, startTime) {
   return `${String(classId || '')}|${String(teacherId || '')}|${normalizeTimeHms(startTime)}`;
 }
 
+function classStartKey(classId, startTime) {
+  return `${String(classId || '')}|${normalizeTimeHms(startTime)}`;
+}
+
 function normSubjectKey(subject) {
   return String(subject || '')
     .trim()
@@ -56,11 +60,16 @@ function timeRangesOverlap(startA, endA, startB, endB) {
   return a0 < b1 && b0 < a1;
 }
 
-/** Şablondan oturum açma: aynı gün/sınıf için aktif (iptal edilmemiş) oturum varsa tekrar oluşturma. */
+/**
+ * Şablondan oturum açma: aynı gün/sınıf için aktif (iptal edilmemiş) oturum varsa tekrar oluşturma.
+ * Öğretmen değişince (Etüt/Din gibi) eski oturum hâlâ aynı periyodu kaplar — yeniden üretme.
+ */
 function slotCoveredBySessions(slot, sessionsOnDay, opts = {}) {
   const ignoreCancelled = opts.ignoreCancelled !== false;
   const slotKey = sessionKey(slot.class_id, slot.teacher_id, slot.start_time);
+  const slotClassStart = classStartKey(slot.class_id, slot.start_time);
   const slotTeacher = String(slot.teacher_id || '').trim();
+  const slotSubject = normSubjectKey(slot.subject);
 
   for (const s of sessionsOnDay || []) {
     if (String(s.class_id || '') !== String(slot.class_id || '')) continue;
@@ -70,6 +79,9 @@ function slotCoveredBySessions(slot, sessionsOnDay, opts = {}) {
     const sessKey = sessionKey(s.class_id, s.teacher_id, s.start_time);
     if (sessKey === slotKey) return true;
 
+    // Aynı sınıf + aynı başlangıç saati → periyot zaten var (öğretmen farklı olsa bile).
+    if (classStartKey(s.class_id, s.start_time) === slotClassStart) return true;
+
     const sessTeacher = String(s.teacher_id || '').trim();
     // Aynı öğretmen + çakışan saat → kapalı. Aynı ders/öğretmen farklı saatte engellemez
     // (ör. sabah tamamlanan İngilizce, akşam İngilizce slotunu kilitlemesin).
@@ -77,6 +89,15 @@ function slotCoveredBySessions(slot, sessionsOnDay, opts = {}) {
       sessTeacher &&
       slotTeacher &&
       sessTeacher === slotTeacher &&
+      timeRangesOverlap(slot.start_time, slot.end_time, s.start_time, s.end_time)
+    ) {
+      return true;
+    }
+
+    // Aynı branş + çakışan saat (öğretmen değişmiş eski oturum) → kapalı.
+    if (
+      slotSubject &&
+      normSubjectKey(s.subject) === slotSubject &&
       timeRangesOverlap(slot.start_time, slot.end_time, s.start_time, s.end_time)
     ) {
       return true;
