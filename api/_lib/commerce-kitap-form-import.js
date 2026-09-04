@@ -491,7 +491,15 @@ async function importOneFormOrder(formRow, ctx) {
 }
 
 /**
- * @param {{ since?: string, dryRun?: boolean, limit?: number, actorSub?: string, repair?: boolean }} opts
+ * @param {{
+ *   since?: string,
+ *   dryRun?: boolean,
+ *   limit?: number,
+ *   actorSub?: string,
+ *   repair?: boolean,
+ *   formIds?: string[],
+ *   vendorId?: string,
+ * }} opts
  */
 export async function importKitapFormOrdersToYanki(opts = {}) {
   const since = String(opts.since || DEFAULT_SINCE).trim();
@@ -499,14 +507,37 @@ export async function importKitapFormOrdersToYanki(opts = {}) {
   const limit = Math.min(Math.max(parseInt(opts.limit ?? 500, 10) || 500, 1), 1000);
   const actorSub = opts.actorSub || null;
   const repairExisting = opts.repair !== false;
+  const formIds = Array.isArray(opts.formIds)
+    ? opts.formIds.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
+  const vendorIdOverride = String(opts.vendorId || opts.vendor_id || '').trim();
 
   let vendor;
   let kitapci;
   let bookId;
   let offerId;
   try {
-    ({ vendor } = await ensureYankiVendor({ actorSub }));
-    kitapci = await findLinkedYankiKitapci(vendor.institution_id);
+    if (vendorIdOverride) {
+      const { data: v, error: vErr } = await supabaseAdmin
+        .from('commerce_vendors')
+        .select('*')
+        .eq('id', vendorIdOverride)
+        .maybeSingle();
+      if (vErr) throw vErr;
+      if (!v) throw new Error('Satıcı bulunamadı');
+      vendor = v;
+    } else {
+      ({ vendor } = await ensureYankiVendor({ actorSub }));
+    }
+    kitapci = vendor.linked_kitapci_id
+      ? (
+          await supabaseAdmin
+            .from('kitapcilar')
+            .select('id, name, phone')
+            .eq('id', vendor.linked_kitapci_id)
+            .maybeSingle()
+        ).data
+      : await findLinkedYankiKitapci(vendor.institution_id);
     ({ bookId, offerId } = await ensureFormImportBook(vendor.id, actorSub));
   } catch (e) {
     const msg = e?.message || String(e);
@@ -524,20 +555,31 @@ export async function importKitapFormOrdersToYanki(opts = {}) {
   };
 
   let repairResult = null;
-  if (repairExisting && !dryRun) {
+  if (repairExisting && !dryRun && !formIds.length) {
     repairResult = await repairKitapFormImports(ctxBase);
   }
 
-  let q = supabaseAdmin
-    .from('kitap_siparisleri')
-    .select('*')
-    .gte('created_at', since)
-    .neq('status', 'cancelled')
-    .order('created_at', { ascending: true })
-    .limit(limit);
-  const { data: rows, error } = await q;
-  if (error) throw error;
-  const formRows = rows || [];
+  let formRows = [];
+  if (formIds.length) {
+    const { data: rows, error } = await supabaseAdmin
+      .from('kitap_siparisleri')
+      .select('*')
+      .in('id', formIds)
+      .neq('status', 'cancelled');
+    if (error) throw error;
+    formRows = rows || [];
+  } else {
+    let q = supabaseAdmin
+      .from('kitap_siparisleri')
+      .select('*')
+      .gte('created_at', since)
+      .neq('status', 'cancelled')
+      .order('created_at', { ascending: true })
+      .limit(limit);
+    const { data: rows, error } = await q;
+    if (error) throw error;
+    formRows = rows || [];
+  }
 
   const setIdSet = new Set();
   for (const row of formRows) {

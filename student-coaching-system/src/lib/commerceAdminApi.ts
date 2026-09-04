@@ -210,6 +210,27 @@ export type PushToYankiResult = {
 export const caPushPaidToYanki = (params: { query?: string; order_id?: string; dry_run?: boolean; since?: string }) =>
   post<PushToYankiResult>('orders.push_to_yanki', params);
 
+export type AssignVendorResult = {
+  ok: boolean;
+  deployMarker?: string;
+  order_id: string;
+  order_number?: string;
+  customer_name?: string | null;
+  vendor: { id: string; name: string; slug?: string };
+  vendor_order_id?: string;
+  item_count?: number;
+  whatsapp?: { ok?: boolean; reason?: string; error?: string } | null;
+  actions?: string[];
+};
+
+export const caAssignOrderToVendor = (params: {
+  order_id?: string;
+  form_order_id?: string;
+  vendor_id?: string;
+  kitapci_id?: string;
+  notify_wa?: boolean;
+}) => post<AssignVendorResult>('orders.assign_vendor', params);
+
 export const caUpdateVendorOrderStatus = (id: string, status: string) =>
   post<{ vendor_order: CommerceVendorOrder }>('vendor_orders.update_status', { id, status });
 

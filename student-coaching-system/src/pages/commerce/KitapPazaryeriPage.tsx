@@ -67,6 +67,7 @@ import {
   caBulkUpsertBooks,
   caEnsureYankiVendor,
   caImportKitapFormOrders,
+  caAssignOrderToVendor,
   caSyncVendorOrderTemplate,
   caToggleVendorActive,
   caUpdateCoupon,
@@ -1574,30 +1575,60 @@ function paymentMethodLabel(method?: string | null) {
   return method || '—';
 }
 
+function vendorsDefaultId(list: Array<{ id: string; name?: string; slug?: string | null; is_active?: boolean | null }>) {
+  const active = list.filter((v) => v.is_active !== false);
+  const yanki = active.find((v) => /yank/i.test(String(v.name || '')) || String(v.slug || '') === 'yanki-kitapevi');
+  return yanki?.id || active[0]?.id || '';
+}
+
 function isReceiptPdf(url: string) {
   return /\.pdf(\?|#|$)/i.test(url);
 }
 
 function SiparislerTab() {
-  const [orders, setOrders] = useState<CommerceOrder[]>([]);
+  type OrderAdminRow = CommerceOrder & {
+    commerce_vendor_orders?: Array<{
+      id: string;
+      vendor_id: string;
+      status: string;
+      commerce_vendors?: { id: string; name: string } | null;
+    }>;
+  };
+  const [orders, setOrders] = useState<OrderAdminRow[]>([]);
+  const [vendors, setVendors] = useState<CommerceVendor[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState('');
-  const [editing, setEditing] = useState<CommerceOrder | null>(null);
-  const [viewingReceipt, setViewingReceipt] = useState<CommerceOrder | null>(null);
+  const [editing, setEditing] = useState<OrderAdminRow | null>(null);
+  const [viewingReceipt, setViewingReceipt] = useState<OrderAdminRow | null>(null);
   const [form, setForm] = useState({ customer_name: '', customer_email: '', customer_phone: '', notes: '', status: '' });
   const [saving, setSaving] = useState(false);
+  const [assignVendor, setAssignVendor] = useState<Record<string, string>>({});
+  const [busyAssign, setBusyAssign] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await caListOrders({ status: filterStatus || undefined, limit: 100 });
-      setOrders(r.orders);
+      const [r, v] = await Promise.all([
+        caListOrders({ status: filterStatus || undefined, limit: 100 }),
+        caListVendors(),
+      ]);
+      setOrders((r.orders || []) as OrderAdminRow[]);
+      setVendors((v.vendors || []).filter((x) => x.is_active !== false));
+      setAssignVendor((prev) => {
+        const next = { ...prev };
+        for (const o of r.orders || []) {
+          if (!next[o.id] && vendorsDefaultId(v.vendors || [])) {
+            next[o.id] = vendorsDefaultId(v.vendors || []);
+          }
+        }
+        return next;
+      });
     } catch (e: unknown) { toast.error((e as Error).message); }
     finally { setLoading(false); }
   }, [filterStatus]);
   useEffect(() => { load(); }, [load]);
 
-  const openEdit = (o: CommerceOrder) => {
+  const openEdit = (o: OrderAdminRow) => {
     setEditing(o);
     setForm({
       customer_name: o.customer_name || '',
@@ -1626,7 +1657,7 @@ function SiparislerTab() {
     finally { setSaving(false); }
   };
 
-  const handleDelete = async (o: CommerceOrder) => {
+  const handleDelete = async (o: OrderAdminRow) => {
     if (!confirm(`${o.order_number} siparişini silmek istediğinize emin misiniz?`)) return;
     try {
       await caDeleteOrder(o.id);
@@ -1636,10 +1667,38 @@ function SiparislerTab() {
     } catch (e: unknown) { toast.error((e as Error).message); }
   };
 
+  const handleAssign = async (o: OrderAdminRow) => {
+    const vendorId = assignVendor[o.id] || vendorsDefaultId(vendors);
+    if (!vendorId) {
+      toast.error('Satıcı / kitapçı seçin');
+      return;
+    }
+    setBusyAssign(o.id);
+    try {
+      const r = await caAssignOrderToVendor({ order_id: o.id, vendor_id: vendorId, notify_wa: true });
+      const waOk = r.whatsapp?.ok;
+      toast.success(
+        waOk
+          ? `${r.vendor.name} paneline aktarıldı · WhatsApp gönderildi`
+          : `${r.vendor.name} paneline aktarıldı${r.whatsapp?.reason ? ` · WA: ${r.whatsapp.reason}` : ''}`
+      );
+      load();
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusyAssign(null);
+    }
+  };
+
   return (
     <div>
-      <div className="flex justify-between items-center mb-4 gap-3">
-        <h2 className="text-lg font-semibold">Mağaza siparişleri</h2>
+      <div className="flex justify-between items-center mb-4 gap-3 flex-wrap">
+        <div>
+          <h2 className="text-lg font-semibold">Mağaza siparişleri</h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Satıcı panelinde görünmeyen siparişler için satıcı seçip <strong>Aktar</strong> deyin — panel + WhatsApp bildirimi gider.
+          </p>
+        </div>
         <select
           className="border rounded-lg text-sm px-2 py-1.5 focus:outline-none"
           value={filterStatus}
@@ -1664,12 +1723,20 @@ function SiparislerTab() {
                 <th className="px-4 py-3 font-medium">Ödeme</th>
                 <th className="px-4 py-3 font-medium">Dekont</th>
                 <th className="px-4 py-3 font-medium">Durum</th>
+                <th className="px-4 py-3 font-medium">Satıcı paneli</th>
                 <th className="px-4 py-3 font-medium">Tarih</th>
                 <th className="px-4 py-3 font-medium">İşlem</th>
               </tr>
             </thead>
             <tbody>
-              {orders.map((o) => (
+              {orders.map((o) => {
+                const vos = o.commerce_vendor_orders || o.vendor_orders || [];
+                const hasVo = vos.length > 0;
+                const voNames = vos
+                  .map((v) => ('commerce_vendors' in v ? v.commerce_vendors?.name : null) || (v as { vendor_id?: string }).vendor_id)
+                  .filter(Boolean)
+                  .join(', ');
+                return (
                 <tr key={o.id} className="border-t border-gray-100 hover:bg-gray-50">
                   <td className="px-4 py-3 font-mono text-xs font-medium">{o.order_number}</td>
                   <td className="px-4 py-3">{o.customer_name ?? '—'}</td>
@@ -1689,6 +1756,33 @@ function SiparislerTab() {
                     )}
                   </td>
                   <td className="px-4 py-3"><StatusBadge status={o.status} /></td>
+                  <td className="px-4 py-3 text-xs">
+                    {hasVo ? (
+                      <span className="text-emerald-700 font-medium">{voNames || 'Aktarıldı'}</span>
+                    ) : (
+                      <span className="text-amber-700 font-medium">Panelde yok</span>
+                    )}
+                    <div className="mt-1 flex flex-col gap-1 max-w-[200px]">
+                      <select
+                        className="border rounded px-1.5 py-1 text-[11px] bg-white"
+                        value={assignVendor[o.id] || ''}
+                        onChange={(e) => setAssignVendor((prev) => ({ ...prev, [o.id]: e.target.value }))}
+                      >
+                        <option value="">Satıcı seç…</option>
+                        {vendors.map((v) => (
+                          <option key={v.id} value={v.id}>{v.name}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        disabled={busyAssign === o.id || !(assignVendor[o.id] || vendorsDefaultId(vendors))}
+                        onClick={() => void handleAssign(o)}
+                        className="text-left text-[11px] font-semibold text-indigo-700 hover:underline disabled:text-slate-400"
+                      >
+                        {busyAssign === o.id ? 'Aktarılıyor…' : hasVo ? 'Yeniden aktar / WA' : 'Aktar'}
+                      </button>
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-gray-500">{new Date(o.created_at).toLocaleDateString('tr-TR')}</td>
                   <td className="px-4 py-3">
                     <div className="flex gap-2">
@@ -1701,9 +1795,10 @@ function SiparislerTab() {
                     </div>
                   </td>
                 </tr>
-              ))}
+              );
+              })}
               {orders.length === 0 && (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">Sipariş bulunamadı</td></tr>
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">Sipariş bulunamadı</td></tr>
               )}
             </tbody>
           </table>
