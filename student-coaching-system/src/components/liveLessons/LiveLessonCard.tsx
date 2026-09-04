@@ -169,7 +169,7 @@ export default function LiveLessonCard({
               disabled={joinInactive}
               title={
                 lesson.status === 'scheduled' && !joinWindowOpen
-                  ? 'Ders saatinden 15 dk önce aktif olur'
+                  ? 'Ders saatinden 2 saat önce aktif olur'
                   : undefined
               }
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -179,7 +179,7 @@ export default function LiveLessonCard({
             </button>
             {lesson.status === 'scheduled' && !joinWindowOpen ? (
               <span className="text-[10px] text-slate-500 text-right max-w-[200px]">
-                Saatinden 15 dk önce açılır
+                Saatinden 2 saat önce açılır
               </span>
             ) : null}
           </div>

@@ -34,11 +34,11 @@ export function isOngoing(lesson: TeacherLesson, nowMs: number = Date.now()): bo
   return nowMs >= start && nowMs <= end;
 }
 
-/** Derse katılım / dersi başlat: başlangıçtan 15 dk önce → bitişten 30 dk sonra */
+/** Derse katılım / dersi başlat: başlangıçtan 2 saat önce → bitişten 30 dk sonra */
 export function isPrivateLessonJoinWindowOpen(
   lesson: Pick<TeacherLesson, 'date' | 'start_time' | 'end_time' | 'status'>,
   nowMs: number = Date.now(),
-  openMinutesBefore = 15,
+  openMinutesBefore = 120,
   closeMinutesAfter = 30
 ): boolean {
   if (lesson.status !== 'scheduled') return false;
