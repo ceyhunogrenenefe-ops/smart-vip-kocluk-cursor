@@ -38,6 +38,7 @@ import WhatsAppGatewaySessionPanel from '../components/whatsapp/WhatsAppGatewayS
 import { PageCollapsibleSection } from '../components/ui/PageCollapsibleSection';
 import { userHasAnyRole } from '../config/rolePermissions';
 import { exportBookOrdersToExcel } from '../lib/bookOrdersExport';
+import { caAssignOrderToVendor } from '../lib/commerceAdminApi';
 import { PLATFORM_BOOK_ORDER_INSTITUTION_ID } from '../lib/bookOrderConstants';
 
 function statusLabel(status: string) {
@@ -863,6 +864,36 @@ export default function BookOrdersPage({ embedded = false }: { embedded?: boolea
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Gönderilemedi');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const transferToVendorPanel = async (id: string) => {
+    const kitapciId = pickBooksellerId(id);
+    if (!kitapciId && activeBooksellers.length > 1) {
+      toast.error('Aktarmak için önce kitapçı seçin');
+      return;
+    }
+    if (!activeBooksellers.length) {
+      toast.error('Aktif kitapçı yok');
+      return;
+    }
+    setBusy(`xfer-${id}`);
+    try {
+      const r = await caAssignOrderToVendor({
+        form_order_id: id,
+        kitapci_id: kitapciId || activeBooksellers[0]?.id,
+        notify_wa: true,
+      });
+      toast.success(
+        r.whatsapp?.ok
+          ? `${r.vendor.name} paneline aktarıldı · WhatsApp gönderildi`
+          : `${r.vendor.name} paneline aktarıldı`
+      );
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Aktarım başarısız');
     } finally {
       setBusy(null);
     }
@@ -1882,6 +1913,17 @@ export default function BookOrdersPage({ embedded = false }: { embedded?: boolea
                             className="text-left text-[11px] text-indigo-700 hover:underline disabled:text-slate-400"
                           >
                             WhatsApp tekrar
+                          </button>
+                        ) : null}
+                        {canApproveBookOrders ? (
+                          <button
+                            type="button"
+                            disabled={busy === `xfer-${o.id}` || !activeBooksellers.length}
+                            onClick={() => void transferToVendorPanel(o.id)}
+                            className="text-left text-[11px] font-semibold text-emerald-800 hover:underline disabled:text-slate-400"
+                            title="Seçili kitapçının satıcı paneline (Siparişlerim) aktarır ve WhatsApp bildirir"
+                          >
+                            {busy === `xfer-${o.id}` ? 'Aktarılıyor…' : 'Satıcı paneline aktar'}
                           </button>
                         ) : null}
                         {canApproveBookOrders ? (
