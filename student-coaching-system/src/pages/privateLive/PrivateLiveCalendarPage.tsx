@@ -1,10 +1,10 @@
 import React from 'react';
+import { Navigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { userRoleTags } from '../../config/rolePermissions';
 import LiveLessons from '../LiveLessons';
-import StudentLiveLessonsPanel from '../../components/liveLessons/StudentLiveLessonsPanel';
 
-/** Takvim odaklı görünüm — öğrenci için özel ders listesi + Katıl; personel için haftalık grid. */
+/** Personel takvim grid'i. Öğrenci takvimi Özet sayfasının altında — eski /takvim linki Özet'e yönlenir. */
 export default function PrivateLiveCalendarPage() {
   const { effectiveUser } = useAuth();
   const tags = userRoleTags(effectiveUser);
@@ -13,15 +13,7 @@ export default function PrivateLiveCalendarPage() {
     !tags.some((t) => ['super_admin', 'admin', 'coach', 'teacher'].includes(t));
 
   if (isStudent) {
-    return (
-      <div className="space-y-3">
-        <div className="rounded-xl border border-sky-100 bg-sky-50/90 px-4 py-3 text-sm text-sky-950">
-          Planlı özel dersleriniz burada listelenir. <strong>Derse Katıl</strong> ders saatinden 2 saat
-          önce aktif olur (BBB / Zoom / Meet).
-        </div>
-        <StudentLiveLessonsPanel />
-      </div>
-    );
+    return <Navigate to="/canli-ozel-ders" replace />;
   }
 
   return (
